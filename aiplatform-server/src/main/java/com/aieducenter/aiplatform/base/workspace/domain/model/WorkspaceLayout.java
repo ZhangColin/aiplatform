@@ -22,7 +22,7 @@ import java.util.List;
  *
  * <p>约定取「根与约定」不建文件面网关（#12）：本表只是常量的正本，通路仍是各自
  * 引擎原生物理面。条目一律工作区锚定形（相对根），容器绝对形态经 {@link #absolute}
- * 派生；物理落位断言见 DockerEnvironmentBackendTest。跨上下文消费（chatagent /
+ * 派生；物理落位断言见 DockerEnvironmentBackendTest。跨上下文消费（agentscope /
  * business.project）直连本 domain 常量是显式例外——纯常量契约不值得上应用层网关。</p>
  */
 public final class WorkspaceLayout {

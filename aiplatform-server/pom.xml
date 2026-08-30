@@ -137,8 +137,8 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- 对话智能体内核（ADR-0002：BA 等对话角色走 AgentScope HarnessAgent，
-             与编码引擎 base.agentengine 双轨分立，接线在 #45） -->
+        <!-- 智能体内核（base.agentscope 薄包：AgentScope HarnessAgent 单栈，
+             BA 与编码智能体差异只在资产与工具集） -->
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-harness</artifactId>

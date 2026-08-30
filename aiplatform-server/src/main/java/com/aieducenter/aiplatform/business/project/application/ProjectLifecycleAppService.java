@@ -13,7 +13,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
-import com.aieducenter.aiplatform.base.chatagent.application.ChatAgentAppService;
+import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
@@ -48,7 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectLifecycleAppService {
 
     /** 智能体栈单栈常量（多引擎概念已出局；列随 Flyway squash（#18）处置）。 */
-    private static final String ENGINE = ChatAgentAppService.ENGINE;
+    private static final String ENGINE = AgentscopeAgentClient.ENGINE;
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final BaInterviewAppService baInterviewAppService;
@@ -117,10 +117,10 @@ public class ProjectLifecycleAppService {
             run = baInterviewAppService.runInterviewTurn(project.getId(), prompt);
         } catch (RuntimeException e) {
             log.warn("项目 {} 自动 BA 起跑失败（项目已成立，不回滚）", project.getId(), e);
-            return new ProjectCreatedResponse(queryAppService.detail(project.getId()), null, false);
+            return new ProjectCreatedResponse(queryAppService.detail(project.getId()), null);
         }
         return new ProjectCreatedResponse(queryAppService.detail(project.getId()),
-                run.runId(), run.accepted());
+                run.runId());
     }
 
     /**

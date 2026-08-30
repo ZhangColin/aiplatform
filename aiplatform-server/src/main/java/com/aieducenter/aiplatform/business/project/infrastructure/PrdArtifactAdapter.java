@@ -6,10 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
-import com.cartisan.core.stereotype.Adapter;
-import com.cartisan.core.stereotype.PortType;
 
-import com.aieducenter.aiplatform.base.chatagent.domain.port.PrdArtifactPort;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -18,17 +15,15 @@ import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * PRD 产物业务契约真实现（base.chatagent 的 savePrd 工具效果半边）：路径正本 =
- * {@link ProjectArtifacts#PRD}（PRD 读端点同源）；落盘成功回调 = 按工作区寻址
- * 项目置「PRD 已产出」状态位（成果区长出判据）+ 发 document-updated（前端失效
- * 为主消费）。端口在消费方（base.chatagent），实现归事实持有方（business.project）。
+ * PRD 产物登记（savePrd 工具的业务效果半边）：路径正本 = {@link ProjectArtifacts#PRD}
+ * （PRD 读端点同源）；落盘成功回调 = 按工作区寻址项目置「PRD 已产出」状态位
+ * （成果区长出判据）+ 发 document-updated（前端失效为主消费）。
  *
  * <p>SSE 事务提交后发射（编排层发射制，ADR-0001）：置位短事务先行，事件随后；
  * 置位失败抛出——工具回失败结果，模型可再次保存重试（写文件幂等覆盖）。</p>
  */
 @Component
-@Adapter(PortType.CLIENT)
-public class PrdArtifactAdapter implements PrdArtifactPort {
+public class PrdArtifactAdapter {
 
     private final ProjectRepository projectRepository;
     private final PlatformNotificationAppService notificationAppService;
@@ -42,12 +37,10 @@ public class PrdArtifactAdapter implements PrdArtifactPort {
         this.transactionTemplate = transactionTemplate;
     }
 
-    @Override
     public String workspacePath() {
         return ProjectArtifacts.PRD;
     }
 
-    @Override
     public void onWritten(String workspaceId) {
         String projectId = transactionTemplate.execute(tx -> {
             Project project = projectRepository.findByWorkspaceId(Long.parseLong(workspaceId))

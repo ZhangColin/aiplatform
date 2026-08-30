@@ -23,18 +23,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.aieducenter.aiplatform.base.agentengine.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.agentengine.application.AgentWaitAppService;
-import com.aieducenter.aiplatform.base.agentengine.application.dto.command.WaitSettleCommand;
-import com.aieducenter.aiplatform.base.agentengine.domain.model.AgentEventTypes;
-import com.aieducenter.aiplatform.base.agentengine.infrastructure.WorkspaceHandleClient;
-import com.aieducenter.aiplatform.base.chatagent.infrastructure.ChatAgentWorkspaceClient;
+import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
-import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -42,13 +37,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * BA 访谈循环真模型冒烟（DEEPSEEK_API_KEY 未设或 docker daemon 不在整类跳过）：
- * 编排全真链（真模型 + 真 dev 容器 + 真 PG 落库/settle 续跑），仅 SSE 发射边
- * （无订阅者的广播口）与工作区句柄解析两处 mock 收口观测。
+ * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
+ * （无订阅者的广播口）一处 mock 收口观测。
  *
  * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
- * 经 PG JSON 落库往返）→ 答复 settle 续跑 → 催促收敛（BA 停止提问）→ savePrd
- * 产出 PRD（工作区文件 + 状态位 + document-updated，修订再执行三更新）→
- * 同会话上下文延续；计量落 UsageEvent（engine=agentscope，dims.role=BA）。</p>
+ * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
+ * （BA 停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
+ * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（engine=agentscope，
+ * dims.role=BA）。</p>
  */
 @SpringBootTest
 class BaInterviewSmokeTest {
@@ -57,9 +53,6 @@ class BaInterviewSmokeTest {
 
     @Autowired
     private BaInterviewAppService appService;
-
-    @Autowired
-    private AgentWaitAppService waitAppService;
 
     @Autowired
     private ProjectQueryAppService queryAppService;
@@ -84,14 +77,6 @@ class BaInterviewSmokeTest {
     /** 通知通道发射边收口（document-updated 观测；BA 访谈链路无其余通知方）。 */
     @MockitoBean
     private PlatformNotificationAppService notificationAppService;
-
-    /** 工作区句柄解析收口 → 指向真实 dev 容器（docker exec 文件面为真）。 */
-    @MockitoBean
-    private ChatAgentWorkspaceClient chatWorkspaceClient;
-
-    /** settle 链的引擎侧句柄解析（同容器）。 */
-    @MockitoBean
-    private WorkspaceHandleClient engineWorkspaceHandleClient;
 
     private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Notify> notifies = new ConcurrentLinkedQueue<>();
@@ -122,8 +107,6 @@ class BaInterviewSmokeTest {
     @AfterEach
     void tearDown() {
         if (sessionId != null) {
-            jdbcTemplate.update("DELETE FROM agt_pending_waits WHERE session_id = ?", sessionId);
-            jdbcTemplate.update("DELETE FROM agt_agent_sessions WHERE session_id = ?", sessionId);
             jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", sessionId);
             jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", sessionId);
         }
@@ -148,9 +131,6 @@ class BaInterviewSmokeTest {
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
-        WorkspaceHandle handle = workspaceLifecycleAppService.handleOf(workspaceId);
-        whenHandle(chatWorkspaceClient, handle);
-        whenHandle(engineWorkspaceHandleClient, handle);
         doAnswer(invocation -> {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
@@ -164,32 +144,32 @@ class BaInterviewSmokeTest {
         projectId = project.getId();
         sessionId = BaInterviewAppService.SESSION_PREFIX + projectId;
 
-        // 1) 一句话开场 → BA 至少一轮实质提问（QUESTION 等待点，前端问答卡形状经 PG 往返）
+        // 1) 一句话开场 → BA 至少一轮实质提问（QUESTION，前端问答卡形状经 JSON 往返）
         BaInterviewAppService.InterviewRun first = appService.runInterviewTurn(projectId,
                 "做一个企业官网");
-        String question1 = awaitQuestionWaitOf(first.runId());
+        Frame question1 = awaitQuestionWaitOf(first.runId());
         Map<String, Object> body1 = waitBody(question1);
         assertThat(framesOf(AgentEventTypes.ROLE_ASSIGNED)).isNotEmpty();
         Map<String, Object> asked = firstQuestionOf(body1);
         assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
         assertThat(asked).containsEntry("multiple", false).containsEntry("custom", true);
 
-        // 2) 答复 settle → 续跑 → 第二轮提问（答复循环 ≥2 轮：settle 续跑在同一 run 上
-        // 再挂起，新等待点新 waitId；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
+        // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
+        // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
         settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
-        String question2 = awaitNextQuestionWaitOf(first.runId(), question1);
+        Frame question2 = awaitNextQuestionWaitOf(first.runId(), engineRefOf(question1));
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
         // 3) 催促收敛：模型可能多问一轮（催促遵从非确定）——每见新问即以催促文本
-        // 答复再催（上限 4 轮必收敛）；无在悬问时开新轮注入催促
-        List<String> seenWaits = new ArrayList<>(List.of(question1, question2));
+        // 答复再催（上限 4 轮必收敛，收口即 task-finish 无新挂起）；无在悬问时开新轮注入催促
+        List<String> seenRefs = new ArrayList<>(
+                List.of(engineRefOf(question1), engineRefOf(question2)));
         for (int i = 0; i < 4; i++) {
-            String urge = urgeConverge(seenWaits);
+            String urge = urgeConverge(seenRefs);
             if ("finished".equals(urge)) {
                 break;
             }
         }
-        awaitNoPendingQuestions();
 
         // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
         //    （PRD 读端点直读工作区文件——编码智能体同视图）
@@ -229,18 +209,19 @@ class BaInterviewSmokeTest {
 
     // ---------- 内部 ----------
 
-    /** 催促收敛一轮：在悬问以催促文本答复续跑；无在悬问开新轮。返回是否已收口。 */
-    private String urgeConverge(List<String> seenWaits) {
-        String pending = solePendingQuestion();
+    /** 催促收敛一轮：在悬问（帧序最新未见答的 wait-raised）以催促文本答复续跑；
+     *  无在悬问开新轮。返回是否已收口。 */
+    private String urgeConverge(List<String> seenRefs) {
+        Frame pending = solePendingQuestion(seenRefs);
         String urgeText = "不要再继续提问了，现在就结束访谈，直接产出 PRD";
         if (pending != null) {
-            seenWaits.add(pending);
+            seenRefs.add(engineRefOf(pending));
             settle(pending, urgeText);
-            return awaitResumeOutcome(allRunIds(), seenWaits);
+            return awaitResumeOutcome(allRunIds(), seenRefs);
         }
         BaInterviewAppService.InterviewRun urged = appService.runInterviewTurn(projectId,
                 urgeText);
-        return awaitResumeOutcome(allRunIds(), seenWaits);
+        return awaitResumeOutcome(allRunIds(), seenRefs);
     }
 
     private Set<String> allRunIds() {
@@ -276,29 +257,20 @@ class BaInterviewSmokeTest {
                 LocalDateTime.class, projectId);
     }
 
-    /** 有界等待会话在悬问答归零（催促收敛的收尾：settle 落库与终态联动有竞态窗）。 */
-    private void awaitNoPendingQuestions() {
-        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
-        while (System.nanoTime() < deadline) {
-            if (pendingQuestionCount() == 0) {
-                return;
-            }
-            sleepQuietly();
-        }
-        assertThat(pendingQuestionCount()).as("催促后不应再挂起新问题").isZero();
-    }
-
-    /** 等待该 run 的 QUESTION 挂起（流帧捕获 → waitId → 落库行）。 */
-    private String awaitQuestionWaitOf(String runId) {
+    /** 等待该 run 的 QUESTION 挂起帧（问答卡呈现源）。 */
+    private Frame awaitQuestionWaitOf(String runId) {
         Frame wait = awaitFrame(runId, AgentEventTypes.WAIT_RAISED);
-        Object waitId = wait.payload().get(AgentEventTypes.WAIT_ID_FIELD);
-        assertThat(waitId).as("wait-raised 补发应带 waitId").isNotNull();
         assertThat(wait.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-        return waitId.toString();
+        return wait;
     }
 
-    /** 等待该 run 的下一个 QUESTION（settle 续跑同 run 再挂起——按排除已见 waitId 区分）。 */
-    private String awaitNextQuestionWaitOf(String runId, String excludeWaitId) {
+    /** 挂起帧的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
+    private static String engineRefOf(Frame wait) {
+        return String.valueOf(wait.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
+    }
+
+    /** 等待该 run 的下一个 QUESTION（续跑同 run 再挂起——按排除已见 engineRef 区分）。 */
+    private Frame awaitNextQuestionWaitOf(String runId, String excludeRef) {
         long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
         while (System.nanoTime() < deadline) {
             for (Frame frame : frames) {
@@ -306,16 +278,15 @@ class BaInterviewSmokeTest {
                         || !AgentEventTypes.WAIT_RAISED.equals(frame.type())) {
                     continue;
                 }
-                Object waitId = frame.payload().get(AgentEventTypes.WAIT_ID_FIELD);
-                if (waitId != null && !excludeWaitId.equals(waitId.toString())) {
+                if (!excludeRef.equals(engineRefOf(frame))) {
                     assertThat(frame.payload())
                             .containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-                    return waitId.toString();
+                    return frame;
                 }
             }
             sleepQuietly();
         }
-        throw new AssertionError("settle 续跑未再挂起提问（run=" + runId + "）——访谈在第二轮前收敛");
+        throw new AssertionError("答复续跑未再挂起提问（run=" + runId + "）——访谈在第二轮前收敛");
     }
 
     /** 等待该 run 收口（task-finish；error 视为失败）。 */
@@ -325,9 +296,9 @@ class BaInterviewSmokeTest {
                 .isEqualTo(AgentEventTypes.TASK_FINISH);
     }
 
-    /** 续跑出结果（跨候选 run 锚集）：再挂起（返回新 waitId，排除已见）或收口
+    /** 续跑出结果（跨候选 run 锚集）：再挂起（返回新 engineRef，排除已见）或收口
      *  （"finished"；error 直接失败）。 */
-    private String awaitResumeOutcome(Set<String> runIds, List<String> seenWaitIds) {
+    private String awaitResumeOutcome(Set<String> runIds, List<String> seenRefs) {
         long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
         while (System.nanoTime() < deadline) {
             for (Frame frame : frames) {
@@ -341,9 +312,9 @@ class BaInterviewSmokeTest {
                     return "finished";
                 }
                 if (AgentEventTypes.WAIT_RAISED.equals(frame.type())) {
-                    Object waitId = frame.payload().get(AgentEventTypes.WAIT_ID_FIELD);
-                    if (waitId != null && !seenWaitIds.contains(waitId.toString())) {
-                        return waitId.toString();
+                    String ref = engineRefOf(frame);
+                    if (!seenRefs.contains(ref)) {
+                        return ref;
                     }
                 }
             }
@@ -352,19 +323,16 @@ class BaInterviewSmokeTest {
         throw new AssertionError("续跑无结果超时（runs=" + runIds + "）");
     }
 
-    private int pendingQuestionCount() {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM agt_pending_waits WHERE session_id = ? AND status = 1"
-                        + " AND kind = 1", Integer.class, sessionId);
-        return count == null ? 0 : count;
-    }
-
-    /** 会话当前唯一在悬问答的 waitId（无在悬或多条异常形态返回 null）。 */
-    private String solePendingQuestion() {
-        List<String> waits = jdbcTemplate.queryForList(
-                "SELECT wait_id FROM agt_pending_waits WHERE session_id = ? AND status = 1"
-                        + " AND kind = 1", String.class, sessionId);
-        return waits.size() == 1 ? waits.get(0) : null;
+    /** 会话当前在悬问答的挂起帧（未答的最后一个 wait-raised；无在悬返回 null）。 */
+    private Frame solePendingQuestion(List<String> seenRefs) {
+        Frame pending = null;
+        for (Frame frame : frames) {
+            if (AgentEventTypes.WAIT_RAISED.equals(frame.type())
+                    && !seenRefs.contains(engineRefOf(frame))) {
+                pending = frame;
+            }
+        }
+        return pending;
     }
 
     private Frame awaitFrame(String runId, String... types) {
@@ -399,34 +367,18 @@ class BaInterviewSmokeTest {
         return frames.stream().filter(f -> type.equals(f.type())).toList();
     }
 
-    private void settle(String waitId, String answer) {
-        waitAppService.settle(workspaceId, waitId,
-                new WaitSettleCommand(WaitSettleCommand.TYPE_ANSWER, List.of(List.of(answer)),
-                        null, null));
+    /** 答复挂起问（问答作答通道的编排入口调用——同 #19 端点的服务端路径）。 */
+    @SuppressWarnings("unchecked")
+    private void settle(Frame wait, String answer) {
+        Map<String, Object> body = waitBody(wait);
+        List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) body.get("toolCalls");
+        assertThat(toolCalls).as("挂起帧 data 应带待确认工具清单").isNotEmpty();
+        appService.answerQuestion(projectId, wait.runId(), engineRefOf(wait), toolCalls, answer);
     }
 
-    private static void whenHandle(ChatAgentWorkspaceClient client, WorkspaceHandle handle) {
-        org.mockito.Mockito.when(client.handleOf(handle.workspaceId().id() + ""))
-                .thenReturn(handle);
-    }
-
-    private static void whenHandle(WorkspaceHandleClient client, WorkspaceHandle handle) {
-        org.mockito.Mockito.when(client.handleOf(handle.workspaceId().id() + ""))
-                .thenReturn(handle);
-    }
-
-    /** 等待点 body（PG 落库行——JSON 往返后的前端问答卡载荷；jsonb 经 jdbc 呈 PGobject/串）。 */
-    private Map<String, Object> waitBody(String waitId) {
-        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-        while (System.nanoTime() < deadline) {
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT body FROM agt_pending_waits WHERE wait_id = ?", waitId);
-            if (!rows.isEmpty() && rows.get(0).get("body") != null) {
-                return parseBody(rows.get(0).get("body"));
-            }
-            sleepQuietly();
-        }
-        throw new AssertionError("等待点 body 读不到：" + waitId);
+    /** 挂起帧载荷（wait-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
+    private Map<String, Object> waitBody(Frame wait) {
+        return parseBody(wait.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
     }
 
     @SuppressWarnings("unchecked")

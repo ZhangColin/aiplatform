@@ -16,7 +16,7 @@ import com.aieducenter.aiplatform.base.metering.domain.port.UsageQueryPort;
 /**
  * 计量端口进程内适配器（平台内起步，A1 §2.1）：sink 与 query 两端口同落
  * {@link MeteringAppService}——迁出独立计量服务时按端口各自换 REST 适配器
- * （上报/查询可分步迁），调用方（agentengine / 业务编排）不动（端口即边界）。
+ * （上报/查询可分步迁），调用方（agentscope / 业务编排）不动（端口即边界）。
  */
 @Component
 @Adapter(PortType.CLIENT)

@@ -29,7 +29,7 @@ public interface EnvironmentBackend {
 
     /**
      * dev 容器内引擎接入点（opencode serve）监听的容器端口（镜像与后端约定的单一
-     * 事实；片2 agentengine 消费——宿主映射 hostPort 在工作区句柄上）。
+     * 事实；agentscope 内核消费——宿主映射 hostPort 在工作区句柄上）。
      */
     int DEV_ENGINE_CONTAINER_PORT = 4096;
 

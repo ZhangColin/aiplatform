@@ -9,11 +9,11 @@ import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.aieducenter.aiplatform.base.agentengine.application.AgentRunContext;
-import com.aieducenter.aiplatform.base.chatagent.application.ChatAgentAppService;
-import com.aieducenter.aiplatform.base.chatagent.domain.model.ChatAgentCommand;
-import com.aieducenter.aiplatform.base.chatagent.domain.model.ChatAgentReply;
-import com.aieducenter.aiplatform.base.chatagent.domain.model.UsageContext;
+import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
+import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.UsageContext;
+import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -21,16 +21,16 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 项目取名服务（#39，grilling 定案「异步取名」）：创建即落占位名
- * {@link Project#PLACEHOLDER_NAME}，创建后经对话智能体基座的一次静默轻调用
- * （AgentScope，{@link ChatAgentAppService#converseSilently}——无 SSE 帧、无等待点）
- * 据 requirement 生成项目名并落位；落库即发 {@code project-renamed}（#52 触达补口：
+ * 项目取名服务（grilling 定案「异步取名」）：创建即落占位名
+ * {@link Project#PLACEHOLDER_NAME}，创建后经智能体内核的一次静默轻调用
+ * （AgentScope，空 sink——无 SSE 帧）据 requirement 生成项目名并落位；
+ * 落库即发 {@code project-renamed}（#52 触达补口：
  * 前端失效 projects 域重拉，停留中的页面上名字静默浮现，ChatGPT 式——守卫不覆写
- * 与失败保占位均不发）。⚠️ 红线：禁止字符串截取派生——净化不过关/引擎失败/超时
- * 一律保占位（经改名端点 #43 可改），绝无「requirement 前 N 字符」兜底。
+ * 与失败保占位均不发）。⚠️ 红线：禁止字符串截取派生——净化不过关/内核失败/超时
+ * 一律保占位（经改名端点可改），绝无「requirement 前 N 字符」兜底。
  *
  * <p>时机与线程：创建响应不等取名（REST 即时返回）；本服务自持单线程执行器
- * fire-and-forget——不占 chatagent 续跑闸（BA 开场问答卡不被取名排队拖慢），串行
+ * fire-and-forget——不占 BA 会话执行器（开场问答卡不被取名排队拖慢），串行
  * 又是必要的：全部取名共用同一缓存 HarnessAgent 实例（工厂按 prompt/工作区键
  * 复用），单线程保证同一 agent 上不并发 streamEvents（并发安全性上游未背书）。
  * 落位守卫：只顶替仍是占位名的项目（取名在飞时用户已改名则不覆写）；项目已删
@@ -58,7 +58,7 @@ public class ProjectNamingAppService implements DisposableBean {
     /** 净化时剥的包裹字符（成对引号/加粗星号/结尾标点——模型偶发包裹，结构性清理）。 */
     private static final String WRAPPERS = "「」『』“”‘’\"'`*。．.！!？?~～";
 
-    private final ChatAgentAppService chatAgentAppService;
+    private final AgentscopeAgentClient agentClient;
     private final ProjectRepository projectRepository;
     private final PlatformNotificationAppService notificationAppService;
     /** 提交通道（生产=虚拟线程池；测试=直通同步）。 */
@@ -67,10 +67,10 @@ public class ProjectNamingAppService implements DisposableBean {
     private final ExecutorService ownedExecutor;
 
     @Autowired
-    public ProjectNamingAppService(ChatAgentAppService chatAgentAppService,
+    public ProjectNamingAppService(AgentscopeAgentClient agentClient,
             ProjectRepository projectRepository,
             PlatformNotificationAppService notificationAppService) {
-        this.chatAgentAppService = chatAgentAppService;
+        this.agentClient = agentClient;
         this.projectRepository = projectRepository;
         this.notificationAppService = notificationAppService;
         this.ownedExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -82,10 +82,10 @@ public class ProjectNamingAppService implements DisposableBean {
     }
 
     /** 测试便利构造（直通道，无生命周期）。 */
-    ProjectNamingAppService(ChatAgentAppService chatAgentAppService,
+    ProjectNamingAppService(AgentscopeAgentClient agentClient,
             ProjectRepository projectRepository,
             PlatformNotificationAppService notificationAppService, Executor executor) {
-        this.chatAgentAppService = chatAgentAppService;
+        this.agentClient = agentClient;
         this.projectRepository = projectRepository;
         this.notificationAppService = notificationAppService;
         this.executor = executor;
@@ -141,8 +141,8 @@ public class ProjectNamingAppService implements DisposableBean {
 
     /** 静默轻调用取名：naming-{projectId} 一次性会话、本地工作区、缺省 flash 档模型。 */
     private String converseForName(Long projectId, String requirement) {
-        ChatAgentCommand command = new ChatAgentCommand(
-                AgentRunContext.newRunId(),
+        AgentCommand command = new AgentCommand(
+                AgentStreamAppService.newRunId(),
                 requirement,
                 NAMING_SYSTEM_PROMPT,
                 null, // 模型取适配器缺省（对话轨道 flash 档，快且省）
@@ -152,7 +152,8 @@ public class ProjectNamingAppService implements DisposableBean {
                         Map.of(ProjectQueryAppService.DIM_ROLE, NAMING_ROLE_DIM)),
                 null, // 本地兜底工作区：取名不读写项目 dev 工作区
                 Map.of());
-        ChatAgentReply reply = chatAgentAppService.converseSilently(command);
+        AgentReply reply = agentClient.converse(command, event -> {
+        });
         return sanitize(reply.text());
     }
 

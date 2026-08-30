@@ -123,7 +123,7 @@ public class WorkspaceLifecycleAppService {
     }
 
     /**
-     * 取工作区运行时句柄（环境能力面的操作锚点；片2 agentengine 等底座消费方的
+     * 取工作区运行时句柄（环境能力面的操作锚点；agentscope 内核等底座消费方的
      * 跨上下文出口——{@link WorkspaceHandle} 是 base 内部值对象，非对外 REST 契约）。
      * 不存在即 WSP_001（404）。
      */

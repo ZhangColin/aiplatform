@@ -13,7 +13,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
-import com.aieducenter.aiplatform.base.chatagent.domain.port.PrdArtifactPort;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -40,7 +39,7 @@ import static org.mockito.Mockito.verify;
 class PrdArtifactAdapterTest {
 
     @Autowired
-    private PrdArtifactPort prdArtifactPort;
+    private PrdArtifactAdapter prdArtifacts;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -60,14 +59,14 @@ class PrdArtifactAdapterTest {
     @Test
     void given_contract_when_workspacePath_then_main_chain_artifact() {
         // 路径正本与 PRD 读端点同源（单一事实，勿散落字面量）
-        assertThat(prdArtifactPort.workspacePath()).isEqualTo(ProjectArtifacts.PRD);
+        assertThat(prdArtifacts.workspacePath()).isEqualTo(ProjectArtifacts.PRD);
     }
 
     @Test
     void given_prd_written_when_onWritten_then_status_bit_set_and_document_updated_published() {
         Long projectId = persistedProject(8601L).getId();
 
-        prdArtifactPort.onWritten("8601");
+        prdArtifacts.onWritten("8601");
 
         // 状态位（G1 门谓词输入）：置位落库
         assertThat(bitOf(projectId)).isNotNull();
@@ -82,9 +81,9 @@ class PrdArtifactAdapterTest {
     void given_prd_written_twice_when_revision_then_bit_refreshed_and_event_republished() {
         Project project = persistedProject(8602L);
 
-        prdArtifactPort.onWritten("8602");
+        prdArtifacts.onWritten("8602");
         LocalDateTime first = bitOf(project.getId());
-        prdArtifactPort.onWritten("8602");
+        prdArtifacts.onWritten("8602");
 
         // 修订再执行：三更新——位刷新（时间戳只前进）+ 事件每执行必发
         assertThat(bitOf(project.getId())).isAfterOrEqualTo(first);
@@ -94,7 +93,7 @@ class PrdArtifactAdapterTest {
 
     @Test
     void given_unknown_workspace_when_onWritten_then_prj_001_no_event() {
-        assertThatThrownBy(() -> prdArtifactPort.onWritten("999999"))
+        assertThatThrownBy(() -> prdArtifacts.onWritten("999999"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
 

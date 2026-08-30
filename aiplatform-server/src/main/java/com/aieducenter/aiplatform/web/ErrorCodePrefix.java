@@ -12,17 +12,11 @@ public enum ErrorCodePrefix {
     /** base.workspace：环境 / 工作区（wsp_） */
     WSP("WSP_", "base.workspace"),
 
-    /** base.agentengine：智能体引擎（agt_） */
-    AGT("AGT_", "base.agentengine"),
-
     /** base.knowledge：知识库（knw_） */
     KNW("KNW_", "base.knowledge"),
 
     /** base.metering：计量（met_） */
     METER("METER_", "base.metering"),
-
-    /** base.chatagent：对话智能体（chat_，#44 引入、REST 面归 #45） */
-    CHAT("CHAT_", "base.chatagent"),
 
     /** business.project：项目（prj_） */
     PRJ("PRJ_", "business.project"),

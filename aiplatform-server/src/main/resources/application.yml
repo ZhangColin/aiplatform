@@ -42,17 +42,14 @@ cartisan:
 app:
   embedding:
     url: http://127.0.0.1:9091
-  # base.agentengine：等待点权限拒绝上限（同 run 内 deny 累计达限在 settle 结果回报）
-  agent:
-    wait-deny-cap: 3
-  # #44/#45 · base.chatagent：对话智能体内核（ADR-0002 AgentScope HarnessAgent）默认值。
+  # base.agentscope：智能体内核（AgentScope HarnessAgent）默认值。
   # API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry 自行读取）；
   # workspace 是本地兜底工作区（命令未带 workspaceId 时用，留空 = AgentScope 默认）——
-  # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面，#45）。
-  chatagent:
-    agent-name: chat-agent
+  # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面）。
+  agentscope:
+    agent-name: platform-agent
     default-model: deepseek:deepseek-v4-flash
-    default-system-prompt: 你是平台对话智能体。
+    default-system-prompt: 你是平台智能体。
     timeout: 2m
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。

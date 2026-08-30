@@ -28,7 +28,7 @@ public class SpringDocConfig {
         return new OpenAPI().info(new Info()
                 .title("AI 开发平台后端 API")
                 .description("swagger 即唯一契约（ADR-0001）：成功判定 = HTTP 2xx，"
-                        + "分页 1 基（默认 size=20），错误码前缀见各 BC 注册（WSP_/AGT_/KNW_/PRJ_/…）。"
+                        + "分页 1 基（默认 size=20），错误码前缀见各 BC 注册（WSP_/KNW_/PRJ_/…）。"
                         + "SSE 双通道事件名册：docs/spec/SSE事件清单.md。")
                 .version("1.0.0-SNAPSHOT"));
     }
@@ -38,11 +38,6 @@ public class SpringDocConfig {
     @Bean
     public GroupedOpenApi workspaceGroup() {
         return bcGroup("workspace", "工作区与环境（base.workspace）", "base.workspace");
-    }
-
-    @Bean
-    public GroupedOpenApi agentEngineGroup() {
-        return bcGroup("agentengine", "智能体引擎（base.agentengine）", "base.agentengine");
     }
 
     @Bean

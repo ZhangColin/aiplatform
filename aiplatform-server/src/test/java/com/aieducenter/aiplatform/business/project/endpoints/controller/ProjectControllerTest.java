@@ -85,7 +85,7 @@ class ProjectControllerTest {
     void given_valid_command_when_create_then_wrapped_with_ba_run() throws Exception {
         when(appService.create(any())).thenReturn(
                 new ProjectCreatedResponse(detailOf("100", ProjectStatus.IN_PROGRESS, false),
-                        "run-1", true));
+                        "run-1"));
 
         // 一句话创建：请求体只传 requirement（name/type/engine 从契约面消失）
         performAsUser(post("/api/projects")
@@ -97,8 +97,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.project.type").value(1)) // BaseEnum → Integer code
                 .andExpect(jsonPath("$.data.project.status").value(1)) // IN_PROGRESS → code
                 .andExpect(jsonPath("$.data.project.statusName").value("进行中"))
-                .andExpect(jsonPath("$.data.runId").value("run-1"))
-                .andExpect(jsonPath("$.data.accepted").value(true));
+                .andExpect(jsonPath("$.data.runId").value("run-1"));
+
         verify(appService).create(argThat(cmd -> "做一个官网".equals(cmd.requirement())));
     }
 

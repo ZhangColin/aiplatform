@@ -9,12 +9,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.cartisan.core.exception.DomainException;
-
-import com.aieducenter.aiplatform.base.chatagent.application.ChatAgentAppService;
-import com.aieducenter.aiplatform.base.chatagent.domain.model.ChatAgentCommand;
-import com.aieducenter.aiplatform.base.chatagent.domain.model.ChatAgentReply;
-import com.aieducenter.aiplatform.base.chatagent.domain.error.ChatAgentMessage;
+import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
+import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -31,15 +28,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link ProjectNamingAppService}（#39）：创建后异步 LLM 取名——naming-{projectId}
- * 静默轻调用（无 SSE/无等待点）→ 净化（剥包裹引号/取首行/上限校验，红线 = 不以
+ * {@link ProjectNamingAppService}：创建后异步 LLM 取名——naming-{projectId}
+ * 静默轻调用（空 sink，无 SSE）→ 净化（剥包裹引号/取首行/上限校验，红线 = 不以
  * requirement 截取兜底）→ 仅占位名时覆写；取名失败/超时保占位不炸创建路径。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectNamingAppServiceTest {
 
     @Mock
-    private ChatAgentAppService chatAgentAppService;
+    private AgentscopeAgentClient agentClient;
 
     @Mock
     private ProjectRepository projectRepository;
@@ -51,8 +48,8 @@ class ProjectNamingAppServiceTest {
     void given_wrapped_reply_when_name_async_then_sanitized_name_renames_placeholder() {
         Project project = placeholderProject();
         when(projectRepository.findById(42L)).thenReturn(Optional.of(project));
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "\n「品牌官网」\n"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "\n「品牌官网」\n"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(42L, "做一个高端家具品牌官网，带产品册和预约");
@@ -67,15 +64,15 @@ class ProjectNamingAppServiceTest {
         // 轻调用形态：naming-{projectId} 会话、本地工作区（不碰项目 dev 工作区）、
         // 计量归属 projectId + role=NAMING 用途标记、requirement 原文为 prompt
         when(projectRepository.findById(43L)).thenReturn(Optional.of(placeholderProject()));
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "商城小程序"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "商城小程序"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(43L, "做个商城小程序");
 
-        ArgumentCaptor<ChatAgentCommand> command =
-                ArgumentCaptor.forClass(ChatAgentCommand.class);
-        verify(chatAgentAppService).converseSilently(command.capture());
+        ArgumentCaptor<AgentCommand> command =
+                ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().sessionId()).isEqualTo("naming-43");
         assertThat(command.getValue().prompt()).isEqualTo("做个商城小程序");
         assertThat(command.getValue().systemPrompt()).isNotBlank(); // 取名协议（只输出名称）
@@ -90,8 +87,8 @@ class ProjectNamingAppServiceTest {
     void given_blank_or_oversized_reply_when_name_async_then_placeholder_kept() {
         // 净化不过关（空/超 DB 上限）→ 保占位；不以 requirement 截取兜底（红线）
         Project project = placeholderProject();
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "  \n「」  "));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "  \n「」  "));
         ProjectNamingAppService service = service();
 
         service.nameAsync(44L, "做一个官网");
@@ -99,8 +96,8 @@ class ProjectNamingAppServiceTest {
         verify(projectRepository, never()).save(any());
         assertThat(project.getName()).isEqualTo(Project.PLACEHOLDER_NAME);
 
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n2", "字".repeat(101)));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n2", "字".repeat(101)));
         service.nameAsync(44L, "做一个官网");
         verify(projectRepository, never()).save(any());
         assertThat(project.getName()).isEqualTo(Project.PLACEHOLDER_NAME);
@@ -113,15 +110,15 @@ class ProjectNamingAppServiceTest {
 
         service.nameAsync(48L, " ");
 
-        verifyNoInteractions(chatAgentAppService);
+        verifyNoInteractions(agentClient);
         verify(projectRepository, never()).save(any());
     }
 
     @Test
     void given_converse_failure_when_name_async_then_swallowed_and_placeholder_kept() {
         // 引擎不可用/超时：取名失败保占位，不炸调用方（创建不受影响）
-        when(chatAgentAppService.converseSilently(any()))
-                .thenThrow(new DomainException(ChatAgentMessage.CONVERSE_FAILED, "模型超时"));
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("模型超时"));
         ProjectNamingAppService service = service();
 
         assertThatCode(() -> service.nameAsync(45L, "做一个官网"))
@@ -136,8 +133,8 @@ class ProjectNamingAppServiceTest {
         Project project = placeholderProject();
         project.rename("我起的名字");
         when(projectRepository.findById(46L)).thenReturn(Optional.of(project));
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "LLM 的名字"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "LLM 的名字"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(46L, "做一个官网");
@@ -149,8 +146,8 @@ class ProjectNamingAppServiceTest {
     @Test
     void given_project_deleted_when_name_completes_then_noop() {
         when(projectRepository.findById(47L)).thenReturn(Optional.empty());
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "名字"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "名字"));
         ProjectNamingAppService service = service();
 
         assertThatCode(() -> service.nameAsync(47L, "做一个官网"))
@@ -166,8 +163,8 @@ class ProjectNamingAppServiceTest {
         // projectName）：前端失效 projects 域重拉，停留中的页面上名字静默浮现
         Project project = placeholderProject();
         when(projectRepository.findById(49L)).thenReturn(Optional.of(project));
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "「品牌官网」"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "「品牌官网」"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(49L, "做一个高端家具品牌官网");
@@ -185,8 +182,8 @@ class ProjectNamingAppServiceTest {
         Project project = placeholderProject();
         project.rename("我起的名字");
         when(projectRepository.findById(50L)).thenReturn(Optional.of(project));
-        when(chatAgentAppService.converseSilently(any()))
-                .thenReturn(new ChatAgentReply("run-n", "LLM 的名字"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "LLM 的名字"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(50L, "做一个官网");
@@ -197,8 +194,8 @@ class ProjectNamingAppServiceTest {
     @Test
     void given_converse_failure_when_name_fails_then_no_event() {
         // 取名失败保占位（红线）→ 不发事件（失败静默是既有设计，无「取名挂了」误报）
-        when(chatAgentAppService.converseSilently(any()))
-                .thenThrow(new DomainException(ChatAgentMessage.CONVERSE_FAILED, "缺 API key"));
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("缺 API key"));
         ProjectNamingAppService service = service();
 
         service.nameAsync(51L, "做一个官网");
@@ -210,7 +207,7 @@ class ProjectNamingAppServiceTest {
 
     /** 直通执行器：nameAsync 提交即同步执行（异步语义在编排测试覆盖）。 */
     private ProjectNamingAppService service() {
-        return new ProjectNamingAppService(chatAgentAppService, projectRepository,
+        return new ProjectNamingAppService(agentClient, projectRepository,
                 notificationAppService, Runnable::run);
     }
 

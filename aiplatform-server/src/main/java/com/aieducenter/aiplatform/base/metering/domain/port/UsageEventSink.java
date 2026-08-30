@@ -7,7 +7,7 @@ import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 
 /**
  * 用量上报端口（CLIENT 直调，非应用事件——上报要幂等/重试语义，ADR-0001
- * 「计量走直调上报」）。埋点方（agentengine 适配器 / 业务编排）构造
+ * 「计量走直调上报」）。埋点方（agentscope 内核 / 业务编排）构造
  * {@link UsageEvent} 直调本端口；{@code eventId} 幂等：重复上报不重复计入
  * （first-write-wins），调用方可安全重试。
  *

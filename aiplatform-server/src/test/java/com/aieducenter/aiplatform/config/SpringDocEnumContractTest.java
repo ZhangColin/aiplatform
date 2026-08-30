@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SpringDocEnumContractTest {
 
     private static final List<String> GROUPS = List.of(
-            "workspace", "agentengine", "eventhub", "knowledge", "metering",
+            "workspace", "eventhub", "knowledge", "metering",
             "project", "identity");
 
     private static final String BASE_PACKAGE = "com.aieducenter.aiplatform";

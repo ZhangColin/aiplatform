@@ -17,7 +17,7 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
-import com.aieducenter.aiplatform.base.chatagent.application.ChatAgentAppService;
+import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -94,10 +94,10 @@ class ProjectLifecycleAppServiceTest {
         ProjectCreatedResponse response = appService.create(
                 new CreateProjectCommand("做一个官网"));
 
-        assertThat(response.project().engine()).isEqualTo(ChatAgentAppService.ENGINE);
+        assertThat(response.project().engine()).isEqualTo(AgentscopeAgentClient.ENGINE);
         assertThat(projectRepository.findById(Long.parseLong(response.project().id())))
                 .hasValueSatisfying(project -> assertThat(project.getEngine())
-                        .isEqualTo(ChatAgentAppService.ENGINE));
+                        .isEqualTo(AgentscopeAgentClient.ENGINE));
     }
 
     @Test
@@ -137,7 +137,6 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.project().workspaceId()).isEqualTo("9100");
         assertThat(response.project().status()).isEqualTo(ProjectStatus.IN_PROGRESS);
         assertThat(response.runId()).isEqualTo("run-1"); // 自动 BA 运行标识随响应返回
-        assertThat(response.accepted()).isTrue();
 
         // SSE（副作用落定后）：workspace-created
         ArgumentCaptor<Map<String, Object>> created =
@@ -149,7 +148,7 @@ class ProjectLifecycleAppServiceTest {
                 .containsEntry("projectName", Project.PLACEHOLDER_NAME)
                 .containsEntry("container", "aiplatform-dev-100")
                 .containsEntry("projectType", "WEBSITE")
-                .containsEntry("engine", ChatAgentAppService.ENGINE);
+                .containsEntry("engine", AgentscopeAgentClient.ENGINE);
 
         // 异步取名：requirement 为取名输入，触发即返（不等结果）
         verify(namingService).nameAsync(projectId, "做一个官网");
@@ -174,7 +173,7 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
-    void given_auto_ba_failure_when_create_then_project_kept_and_not_accepted() {
+    void given_auto_ba_failure_when_create_then_project_kept_and_run_id_absent() {
         stubWorkspace("9102", "aiplatform-dev-102");
         when(baInterviewAppService.runInterviewTurn(any(), any()))
                 .thenThrow(new RuntimeException("对话智能体不可用"));
@@ -182,8 +181,7 @@ class ProjectLifecycleAppServiceTest {
         ProjectCreatedResponse response = appService.create(
                 new CreateProjectCommand(null));
 
-        // BA 起跑失败不回滚建项目（项目已成立）
-        assertThat(response.accepted()).isFalse();
+        // BA 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
         assertThat(response.runId()).isNull();
         assertThat(projectRepository.count()).isEqualTo(1);
     }
@@ -345,7 +343,7 @@ class ProjectLifecycleAppServiceTest {
     /** BA 访谈编排桩：接受即回 runId（编排细节见 BaInterviewAppServiceTest）。 */
     private void stubInterviewAccepted(String runId) {
         when(baInterviewAppService.runInterviewTurn(any(), any()))
-                .thenReturn(new BaInterviewAppService.InterviewRun(runId, true));
+                .thenReturn(new BaInterviewAppService.InterviewRun(runId));
     }
 
     private void stubWorkspace(String workspaceId, String containerName) {

@@ -110,8 +110,8 @@ public class WorkspaceLifecycleAppService {
     }
 
     /**
-     * 置备失败工作区清单（workbench「待办可见」投影源，#63）：status=FAILED 的记录
-     * 投影（workspaceId + 失败原因 + 失败时刻）。归档/删除的归属映射归 workbench 投影层。
+     * 置备失败工作区清单（#63）：status=FAILED 的记录
+     * 投影（workspaceId + 失败原因 + 失败时刻）。
      */
     public List<ProvisionFailedWorkspaceResponse> listProvisionFailed() {
         return workspaceRepository.findByStatus(ProvisioningStatus.FAILED).stream()

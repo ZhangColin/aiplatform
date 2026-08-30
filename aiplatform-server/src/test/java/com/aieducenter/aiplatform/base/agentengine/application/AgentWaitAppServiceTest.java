@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,14 +24,11 @@ import com.aieducenter.aiplatform.base.agentengine.domain.aggregate.AgentSession
 import com.aieducenter.aiplatform.base.agentengine.domain.aggregate.AgentWait;
 import com.aieducenter.aiplatform.base.agentengine.domain.error.AgentEngineMessage;
 
-import com.aieducenter.aiplatform.base.agentengine.domain.model.AgentEvent;
-import com.aieducenter.aiplatform.base.agentengine.domain.model.AgentTaskCommand;
-import com.aieducenter.aiplatform.base.agentengine.domain.model.RunResult;
 import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitKind;
 import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitOutcome;
 import com.aieducenter.aiplatform.base.agentengine.domain.model.WaitSettlement;
 import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitStatus;
-import com.aieducenter.aiplatform.base.agentengine.domain.port.CodingAgentAdapter;
+import com.aieducenter.aiplatform.base.agentengine.domain.port.WaitResponder;
 import com.aieducenter.aiplatform.base.agentengine.domain.repository.AgentSessionRepository;
 import com.aieducenter.aiplatform.base.agentengine.domain.repository.AgentWaitRepository;
 import com.aieducenter.aiplatform.base.agentengine.infrastructure.WorkspaceHandleClient;
@@ -50,9 +46,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 等待点用例（票 #21 验收主面）：raise 幂等与稳定 waitId、跨会话聚合、settle 三型
- * （校验链 404/409、引擎先送达后落库、deny cap 平台终止）、run 终态联动 EXPIRED、
- * 复用会话残留清理 CANCELLED。
+ * 等待点用例：raise 幂等与稳定 waitId、settle 两型（校验链 404/409、引擎先送达
+ * 后落库、deny cap 判定回报）、run 终态联动 EXPIRED。
  */
 @ExtendWith(MockitoExtension.class)
 class AgentWaitAppServiceTest {
@@ -67,13 +62,13 @@ class AgentWaitAppServiceTest {
     private AgentSessionRepository sessionRepository;
 
     private final FakeWorkspaceHandleClient handleClient = new FakeWorkspaceHandleClient();
-    private final RecordingAdapter adapter = new RecordingAdapter();
+    private final RecordingResponder responder = new RecordingResponder();
     private AgentWaitAppService appService;
 
     @BeforeEach
     void setUp() {
         appService = new AgentWaitAppService(waitRepository, sessionRepository,
-                new WaitResponderDirectory(List.of(adapter), List.of()), handleClient, 3,
+                new WaitResponderDirectory(List.of(responder)), handleClient, 3,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -116,8 +111,8 @@ class AgentWaitAppServiceTest {
 
     @Test
     void given_terminal_row_of_same_ref_when_raise_then_new_pending_row_registered() {
-        // 引擎侧挂起在终态联动/复用清理后仍活着（超时误伤、清理后引擎重检到）：
-        // 终态行不挡路——登记新 PENDING 行（demo 病「重启后看得见答不了」对策）
+        // 引擎侧挂起在终态联动后仍活着（超时误伤后引擎重检到）：终态行不挡路——
+        // 登记新 PENDING 行（「重启后看得见答不了」对策）
         AgentWait expired = AgentWait.raise(WORKSPACE_ID, "ses_1", "run-1",
                 WaitKind.QUESTION, "que_1", null, null, NOW);
         expired.expire(NOW);
@@ -159,39 +154,6 @@ class AgentWaitAppServiceTest {
     // ---------- 聚合查询 ----------
 
     @Test
-    void given_waits_across_sessions_when_pendingWaits_then_workspace_pending_only() {
-        AgentWait a = AgentWait.raise(WORKSPACE_ID, "ses_1", "run-1", WaitKind.QUESTION,
-                "que_1", null, null, NOW);
-        AgentWait b = AgentWait.raise(WORKSPACE_ID, "ses_2", "run-2", WaitKind.PERMISSION,
-                "per_2", null, null, NOW);
-        when(waitRepository.findByWorkspaceIdAndStatusOrderByRaisedAtDesc(
-                WORKSPACE_ID, WaitStatus.PENDING)).thenReturn(List.of(b, a));
-
-        List<WaitPointResponse> pending = appService.pendingWaits(WORKSPACE);
-
-        assertThat(pending).extracting(WaitPointResponse::sessionId)
-                .containsExactly("ses_2", "ses_1"); // 跨会话聚合（新者在前）
-    }
-
-    @Test
-    void given_pending_waits_across_workspaces_when_listPendingWaits_then_all_newest_first() {
-        // 工作台 AGENT_WAIT 投影源（A2 §4/§5）：跨项目全量 PENDING，新者在前
-        AgentWait fresh = AgentWait.raise(4243L, "ses_9", "run-9", WaitKind.PERMISSION,
-                "per_9", null, null, NOW);
-        AgentWait older = AgentWait.raise(4242L, "ses_1", "run-1", WaitKind.QUESTION,
-                "que_1", null, null, NOW);
-        when(waitRepository.findByStatusOrderByRaisedAtDesc(WaitStatus.PENDING))
-                .thenReturn(List.of(fresh, older));
-
-        List<WaitPointResponse> pending = appService.listPendingWaits();
-
-        assertThat(pending).extracting(WaitPointResponse::workspaceId)
-                .containsExactly("4243", "4242"); // 跨项目（工作区不滤）
-        assertThat(pending).extracting(WaitPointResponse::status)
-                .containsOnly(WaitStatus.PENDING);
-    }
-
-    @Test
     void given_wait_id_when_wait_then_addressable_globally() {
         when(waitRepository.findById("wait_x")).thenReturn(Optional.of(
                 AgentWait.raise(4242L, "ses_1", "run-1", WaitKind.QUESTION, "que_1",
@@ -208,14 +170,14 @@ class AgentWaitAppServiceTest {
         AgentWait wait = raisedQuestion();
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
         when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
+                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "agentscope",
                         "ses_1", "run-1")));
 
         appService.settle(WORKSPACE, new WaitSettlement.Answer(wait.getWaitId(),
                 List.of(List.of("Vue3"))));
 
         // 引擎派发键 = engineRef（que_*），答案原样
-        assertThat(adapter.repliedQuestions).containsExactly(
+        assertThat(responder.repliedQuestions).containsExactly(
                 new ReplyRecord("ses_1", "que_1", List.of(List.of("Vue3"))));
         // 落库关闭：引擎送达成功才 SETTLED（answer 语义）
         assertThat(wait.getStatus()).isEqualTo(WaitStatus.SETTLED);
@@ -228,7 +190,7 @@ class AgentWaitAppServiceTest {
         when(waitRepository.findById("wait_none")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> appService.settle(WORKSPACE,
-                new WaitSettlement.Deferred("wait_none", "转任务")))
+                new WaitSettlement.Answer("wait_none", List.of(List.of("A")))))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(AgentEngineMessage.WAIT_NOT_FOUND.message());
     }
@@ -257,7 +219,7 @@ class AgentWaitAppServiceTest {
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(AgentEngineMessage.WAIT_CONFLICT.message());
         // 未达引擎：会话不可续跑时不派发
-        assertThat(adapter.repliedQuestions).isEmpty();
+        assertThat(responder.repliedQuestions).isEmpty();
     }
 
     @Test
@@ -266,7 +228,7 @@ class AgentWaitAppServiceTest {
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
 
         assertThatThrownBy(() -> appService.settle(Long.toString(9999L),
-                new WaitSettlement.Deferred(wait.getWaitId(), null)))
+                new WaitSettlement.Answer(wait.getWaitId(), List.of(List.of("A")))))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(AgentEngineMessage.WAIT_CONFLICT.message());
     }
@@ -276,9 +238,9 @@ class AgentWaitAppServiceTest {
         AgentWait wait = raisedQuestion();
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
         when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
+                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "agentscope",
                         "ses_1", "run-1")));
-        adapter.failReplies = true;
+        responder.failReplies = true;
 
         assertThatThrownBy(() -> appService.settle(WORKSPACE,
                 new WaitSettlement.Answer(wait.getWaitId(), List.of(List.of("A")))))
@@ -293,20 +255,19 @@ class AgentWaitAppServiceTest {
     // ---------- settle：权限与 deny cap ----------
 
     @Test
-    void given_permission_approve_when_settle_then_approved_without_abort() {
+    void given_permission_approve_when_settle_then_approved() {
         AgentWait wait = raisedPermission();
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
         when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
+                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "agentscope",
                         "ses_1", "run-1")));
 
         appService.settle(WORKSPACE, new WaitSettlement.PermissionDecision(
                 wait.getWaitId(), true));
 
-        assertThat(adapter.repliedPermissions).containsExactly(
+        assertThat(responder.repliedPermissions).containsExactly(
                 new PermissionRecord("ses_1", "per_1", true));
         assertThat(wait.getSettleOutcome()).isEqualTo(WaitOutcome.APPROVED);
-        assertThat(adapter.aborts).isEmpty();
     }
 
     @Test
@@ -316,20 +277,19 @@ class AgentWaitAppServiceTest {
 
     @Test
     void given_denies_reach_cap_when_settle_deny_then_termination_signalled_to_caller() {
-        // 票 #38：settle 只判不定——denyCapped=true 回报（含终止派发键 engine），
-        // abort/收口/帧归调用方接续 AgentTaskAppService.terminateRun（该处已测）
+        // settle 只判不定——denyCapped=true 回报（含派发键 engine），接续动作归调用方
         assertDenyCapping(3, 3, true);
     }
 
     private void assertDenyCapping(long totalDenies, int cap, boolean expectCapped) {
         AgentWaitAppService service = new AgentWaitAppService(waitRepository,
                 sessionRepository,
-                new WaitResponderDirectory(List.of(adapter), List.of()), handleClient,
+                new WaitResponderDirectory(List.of(responder)), handleClient,
                 cap, Clock.fixed(NOW, ZoneOffset.UTC));
         AgentWait wait = raisedPermission();
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
         when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
+                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "agentscope",
                         "ses_1", "run-1")));
         // 计数语义：本行 deny 已落库后的同 run deny 总数（含本行）
         when(waitRepository.countByRunIdAndStatusAndSettleOutcome(
@@ -341,46 +301,24 @@ class AgentWaitAppServiceTest {
 
         assertThat(wait.getSettleOutcome()).isEqualTo(WaitOutcome.DENIED);
         assertThat(result.settled().waitId()).isEqualTo(wait.getWaitId());
-        assertThat(result.engine()).isEqualTo("opencode"); // 终止派发键随结果回报
+        assertThat(result.engine()).isEqualTo("agentscope"); // 派发键随结果回报
         assertThat(result.denyCapped()).isEqualTo(expectCapped);
-        // 判定在底座、终止在调用方：settle 自身不 abort、不收口同 run 剩余等待点
-        assertThat(adapter.aborts).isEmpty();
     }
 
-    // ---------- settle：Deferred ----------
-
-    @Test
-    void given_deferred_when_settle_then_closed_without_engine_interaction() {
-        AgentWait wait = raisedQuestion();
-        when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
-        when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
-                        "ses_1", "run-1")));
-
-        appService.settle(WORKSPACE, new WaitSettlement.Deferred(wait.getWaitId(),
-                "转测试任务"));
-
-        assertThat(wait.getStatus()).isEqualTo(WaitStatus.SETTLED);
-        assertThat(wait.getSettleOutcome()).isEqualTo(WaitOutcome.DEFERRED);
-        // 纯平台侧关闭：不派发引擎（口子③：续跑是任务完成后的新消息）
-        assertThat(adapter.repliedQuestions).isEmpty();
-        assertThat(adapter.repliedPermissions).isEmpty();
-    }
-
-    // ---------- settle：REST 命令形态 ----------
+    // ---------- settle：命令形态 ----------
 
     @Test
     void given_settle_command_when_settle_then_mapped_to_typed_settlement() {
         AgentWait wait = raisedPermission();
         when(waitRepository.findById(wait.getWaitId())).thenReturn(Optional.of(wait));
         when(sessionRepository.findBySessionId("ses_1"))
-                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "opencode",
+                .thenReturn(Optional.of(AgentSession.open(WORKSPACE_ID, "agentscope",
                         "ses_1", "run-1")));
 
         appService.settle(WORKSPACE, wait.getWaitId(),
                 new WaitSettleCommand(WaitSettleCommand.TYPE_PERMISSION, null, false, null));
 
-        assertThat(adapter.repliedPermissions).containsExactly(
+        assertThat(responder.repliedPermissions).containsExactly(
                 new PermissionRecord("ses_1", "per_1", false));
         assertThat(wait.getSettleOutcome()).isEqualTo(WaitOutcome.DENIED);
     }
@@ -398,9 +336,14 @@ class AgentWaitAppServiceTest {
                 .isInstanceOf(com.cartisan.core.exception.ApplicationException.class)
                 .hasMessageContaining(
                         com.cartisan.core.exception.BaseCodeMessage.BAD_REQUEST.message());
+        assertThatThrownBy(() -> appService.settle(WORKSPACE, "wait_x",
+                new WaitSettleCommand("deferred", null, null, "转任务")))
+                .isInstanceOf(com.cartisan.core.exception.ApplicationException.class)
+                .hasMessageContaining(
+                        com.cartisan.core.exception.BaseCodeMessage.BAD_REQUEST.message());
     }
 
-    // ---------- 终态联动与复用清理 ----------
+    // ---------- 终态联动 ----------
 
     @Test
     void given_run_terminal_when_expireRun_then_pending_waits_expired() {
@@ -430,48 +373,17 @@ class AgentWaitAppServiceTest {
     }
 
     @Test
-    void given_pending_when_expireRunReturning_then_closed_rows_reported() {
-        // 票 #38：cancelRun / deny cap 终止共用收口口——收口行回报（wait-settled 帧发射用）
-        AgentWait wait = raisedQuestion();
-        when(waitRepository.findByRunIdAndStatus("run-1", WaitStatus.PENDING))
-                .thenReturn(List.of(wait));
-        when(waitRepository.transitionIfStatus(wait.getWaitId(), WaitStatus.PENDING,
-                WaitStatus.EXPIRED, NOW)).thenReturn(1);
-
-        List<WaitPointResponse> closed = appService.expireRunReturning("run-1");
-
-        assertThat(closed).hasSize(1);
-        assertThat(closed.get(0).waitId()).isEqualTo(wait.getWaitId());
-        assertThat(wait.getStatus()).isEqualTo(WaitStatus.EXPIRED);
-    }
-
-    @Test
-    void given_guard_missed_row_when_expireRun_then_skipped_and_not_reported() {
-        // 票 #37：联动快照后行已被 settle 迁出（守卫 UPDATE 命中 0）——静默跳过、
-        // 不计入收口回报（wait-settled 帧不发给已被答复的行）
+    void given_guard_missed_row_when_expireRun_then_skipped() {
+        // 联动快照后行已被 settle 迁出（守卫 UPDATE 命中 0）——静默跳过（后写不得胜出）
         AgentWait wait = raisedQuestion();
         when(waitRepository.findByRunIdAndStatus("run-1", WaitStatus.PENDING))
                 .thenReturn(List.of(wait));
         when(waitRepository.transitionIfStatus(wait.getWaitId(), WaitStatus.PENDING,
                 WaitStatus.EXPIRED, NOW)).thenReturn(0);
 
-        assertThat(appService.expireRunReturning("run-1")).isEmpty();
+        assertThat(appService.expireRun("run-1")).isZero();
         assertThat(wait.getStatus()).isEqualTo(WaitStatus.PENDING); // 内存实体不动
         verify(waitRepository, never()).save(any());
-    }
-
-    @Test
-    void given_session_reuse_when_cancelSessionWaits_then_pending_cancelled() {
-        AgentWait wait = raisedQuestion();
-        when(waitRepository.findBySessionIdAndStatus("ses_1", WaitStatus.PENDING))
-                .thenReturn(List.of(wait));
-        when(waitRepository.transitionIfStatus(wait.getWaitId(), WaitStatus.PENDING,
-                WaitStatus.CANCELLED, NOW)).thenReturn(1);
-
-        int cancelled = appService.cancelSessionWaits("ses_1");
-
-        assertThat(cancelled).isEqualTo(1);
-        assertThat(wait.getStatus()).isEqualTo(WaitStatus.CANCELLED);
     }
 
     // ---------- 替身与工具 ----------
@@ -503,49 +415,16 @@ class AgentWaitAppServiceTest {
     private record PermissionRecord(String sessionId, String permissionId, boolean approve) {
     }
 
-    /** 引擎替身：记录答复/终止派发，可注入失败。 */
-    private static class RecordingAdapter implements CodingAgentAdapter {
+    /** 答复通道替身：记录答复派发，可注入失败。 */
+    private static class RecordingResponder implements WaitResponder {
 
         final List<ReplyRecord> repliedQuestions = new CopyOnWriteArrayList<>();
         final List<PermissionRecord> repliedPermissions = new CopyOnWriteArrayList<>();
-        final List<String> aborts = new CopyOnWriteArrayList<>();
         volatile boolean failReplies;
 
         @Override
         public String engine() {
-            return "opencode";
-        }
-
-        @Override
-        public String label() {
-            return "Stub";
-        }
-
-        @Override
-        public String note() {
-            return "测试替身";
-        }
-
-        @Override
-        public boolean supportsQuestions() {
-            return true;
-        }
-
-        @Override
-        public boolean supportsPermissions() {
-            return true;
-        }
-
-        @Override
-        public RunResult runTask(WorkspaceHandle handle, AgentTaskCommand command,
-                                 Consumer<AgentEvent> sink) {
-            return new RunResult(command.runId(), "ses_1", true);
-        }
-
-        @Override
-        public List<Map<String, Object>> pendingQuestions(WorkspaceHandle handle,
-                                                          String sessionId) {
-            return List.of();
+            return "agentscope";
         }
 
         @Override
@@ -568,13 +447,7 @@ class AgentWaitAppServiceTest {
 
         @Override
         public boolean abort(WorkspaceHandle handle, String sessionId) {
-            aborts.add(sessionId);
-            return true;
-        }
-
-        @Override
-        public boolean health(WorkspaceHandle handle) {
-            return true;
+            return false; // deny cap 终止接续归调用方，本替身不涉
         }
     }
 }

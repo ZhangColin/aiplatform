@@ -75,16 +75,11 @@ class AgentWaitTest {
     }
 
     @Test
-    void given_pending_wait_when_expire_or_cancel_then_terminal_without_outcome() {
+    void given_pending_wait_when_expire_then_terminal_without_outcome() {
         AgentWait expired = raiseQuestion();
         expired.expire(SETTLED_AT);
         assertThat(expired.getStatus()).isEqualTo(WaitStatus.EXPIRED);
         assertThat(expired.getSettleOutcome()).isNull();
-
-        AgentWait cancelled = raiseQuestion();
-        cancelled.cancel(SETTLED_AT);
-        assertThat(cancelled.getStatus()).isEqualTo(WaitStatus.CANCELLED);
-        assertThat(cancelled.getSettleOutcome()).isNull();
     }
 
     @Test
@@ -92,12 +87,10 @@ class AgentWaitTest {
         AgentWait wait = raiseQuestion();
         wait.settle(WaitOutcome.ANSWERED, SETTLED_AT);
 
-        assertThatThrownBy(() -> wait.settle(WaitOutcome.DEFERRED, SETTLED_AT))
+        assertThatThrownBy(() -> wait.settle(WaitOutcome.DENIED, SETTLED_AT))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(AgentEngineMessage.WAIT_CONFLICT.message());
         assertThatThrownBy(() -> wait.expire(SETTLED_AT))
-                .isInstanceOf(DomainException.class);
-        assertThatThrownBy(() -> wait.cancel(SETTLED_AT))
                 .isInstanceOf(DomainException.class);
     }
 

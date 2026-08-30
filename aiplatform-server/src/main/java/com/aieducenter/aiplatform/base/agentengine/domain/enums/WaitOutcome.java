@@ -14,9 +14,9 @@ public enum WaitOutcome implements BaseEnum<WaitOutcome> {
 
     APPROVED(2, "已批准"),
 
-    DENIED(3, "已拒绝"),
+    DENIED(3, "已拒绝");
 
-    DEFERRED(4, "已转任务");
+    // code 4 曾是「已转任务」（等待点转任务关闭型），随任务系统删除注销，码位不复用
 
     private final Integer code;
     private final String name;

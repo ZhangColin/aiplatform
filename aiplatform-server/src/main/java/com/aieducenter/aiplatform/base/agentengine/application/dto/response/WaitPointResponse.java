@@ -9,7 +9,7 @@ import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitOutcome;
 import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitStatus;
 
 /**
- * 等待点响应（A1 §1.1 WaitPoint 形）：waitId 为业务层引用键（转任务/回填），
+ * 等待点响应（WaitPoint 形）：waitId 为业务层引用键，
  * body 是引擎载荷原样（底座不解释，前端按 kind 自行取用）。枚举字段以
  * Integer code 序列化（BaseEnum 约定），xxxName 补显示名（枚举为 null 时同 null）。
  */

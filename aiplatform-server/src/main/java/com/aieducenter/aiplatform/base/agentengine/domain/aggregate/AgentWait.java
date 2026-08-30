@@ -29,7 +29,7 @@ import com.aieducenter.aiplatform.base.agentengine.domain.enums.WaitStatus;
  * 挂起等人反馈的底座实体——问答（QUESTION）与权限（PERMISSION）统一承载。
  *
  * <p>{@code waitId} 是平台生成的稳定标识（TSID 十进制字符串，主键即引用键）：
- * 跨重启存活，业务层以 waitId 不透明引用（口子③转任务的回填键），底座不解释。
+ * 跨重启存活，业务层以 waitId 不透明引用，底座不解释。
  * 中性寻址：按 workspaceId 聚合，无 projectId。{@code body} 为引擎载荷原样
  * （jsonb 透传存储）；{@code engineRef} 是引擎侧请求/权限 id——settle 时答复
  * 派发的寻址键。raise 幂等 = 同 (session_id, engine_ref) 至多一行 PENDING
@@ -126,7 +126,7 @@ public class AgentWait extends Auditable implements AggregateRoot<AgentWait, Str
     }
 
     /**
-     * 人已答复关闭（answer/approve/deny/deferred 四果之一）。非 PENDING 即非法跳变。
+     * 人已答复关闭（answer/approve/deny 之一）。非 PENDING 即非法跳变。
      */
     public void settle(WaitOutcome outcome, Instant settledAt) {
         requirePending();

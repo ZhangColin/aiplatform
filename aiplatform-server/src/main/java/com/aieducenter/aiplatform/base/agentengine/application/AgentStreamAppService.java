@@ -27,7 +27,7 @@ import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub
  *   <li>订阅过滤：{@code ?projectId=} / {@code ?runId=} / {@code ?workspaceId=}
  *       （与 payload 字段同名，可叠用 AND；缺省全量，任务进度页「看某个运行才挂」
  *       即 ?runId=）——对重放帧同样生效，不泄漏别的项目/运行的帧</li>
- *   <li>发射制：runTask 的 sink 桥（{@link AgentTaskAppService}）在适配器回调线程透传</li>
+ *   <li>发射制：对话智能体的流桥（chatagent 的 sink）在内核回调线程透传</li>
  * </ul>
  *
  * <p>事件 type 名册见 docs/spec/SSE事件清单.md（代码侧引用 {@code AgentEventTypes}

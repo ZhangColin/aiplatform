@@ -2,12 +2,8 @@ package com.aieducenter.aiplatform.base.agentengine.application;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,21 +33,18 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 等待点用例（片2b，A1 §1 口子①统一模型）：问答/权限两类挂起的登记、跨会话聚合、
- * 三型答复（Answer 选项 label / PermissionDecision / Deferred 转任务关闭）。
+ * 等待点用例：问答/权限两类挂起的登记与答复。对话智能体（agentscope）的
+ * ask_user / 权限确认经流桥登记（{@link #raiseFromEvent}），答复经 settle 派发到
+ * 答复通道续跑。
  *
- * <p>CC 避雷清单落点（A1 §1.3）：settle 前校验 status=PENDING 且会话可续跑，否则
- * AGT_007（409，陈旧批准非法跳变防护）；同 run 内 permission deny 计数 ≥ deny cap
- * （可配 {@code app.agent.wait-deny-cap}，默认 3）→ 平台终止——<b>判定</b>在
- * {@link SettleResult} 回报，<b>终止执行</b>归调用方经
- * {@link AgentTaskAppService#terminateRun}（票 #38 与 cancelRun 共用：abort + 收口 +
- * 平台终态帧），防拒绝后换形式重试的审批循环；run 终态联动（{@link #expireRun}）与
- * 复用会话残留清理（{@link #cancelSessionWaits}）由任务下发的流桥接线
- * （{@link AgentTaskAppService}）。</p>
+ * <p>避雷落点：settle 前校验 status=PENDING 且会话可续跑，否则 AGT_007（409，
+ * 陈旧批准非法跳变防护）；同 run 内 permission deny 计数 ≥ deny cap（可配
+ * {@code app.agent.wait-deny-cap}，默认 3）在 {@link SettleResult} 回报；run 终态
+ * 联动（{@link #expireRun}）由对话流桥接线。</p>
  *
  * <p>答复顺序：先引擎后落库——引擎交互失败抛 AGT_004 且等待点保持 PENDING
- * （可重试）；落库只记成功送达引擎的答复。Deferred 例外（转任务 = 纯平台侧关闭，
- * 不派发引擎）。引擎交互不进事务（秒到分钟级），落库靠仓储单行事务。</p>
+ * （可重试）；落库只记成功送达引擎的答复。引擎交互不进事务（秒到分钟级），
+ * 落库靠仓储单行事务。</p>
  */
 @Service
 @Slf4j
@@ -91,7 +84,7 @@ public class AgentWaitAppService {
      * 登记等待点（发现通道检出即调用）：同 (sessionId, engineRef) 已有 <b>PENDING</b>
      * 行则幂等返回（发现通道重复上报/轮询重叠的收敛点）；终态行不挡路——引擎侧
      * 挂起若真还活着（如超时联动误伤后新 run 重检到），登记为新 PENDING 行（新
-     * waitId/新 run——「重启后看得见答不了」的 demo 病对策）。并发同挂起双登记由
+     * waitId/新 run——「重启后看得见答不了」的对策）。并发同挂起双登记由
      * PENDING 部分唯一索引兜底。
      */
     public WaitPointResponse raise(long workspaceId, String sessionId, String runId,
@@ -114,7 +107,7 @@ public class AgentWaitAppService {
 
     /**
      * 从 wait-raised 流事件载荷登记（sink 桥接的入口）：payload 契约键见
-     * {@link AgentEventTypes} WAIT_* 常量（适配器已归一，引擎差异不外露）。
+     * {@link AgentEventTypes} WAIT_* 常量。
      */
     public WaitPointResponse raiseFromEvent(long workspaceId, Map<String, Object> payload) {
         return raise(workspaceId,
@@ -127,19 +120,7 @@ public class AgentWaitAppService {
     }
 
     /**
-     * 工作区待处理等待点（跨会话聚合，新者在前）。工作区不存在由 workspace 侧抛
-     * WSP_001（404）。纯表读：发现通道（适配器 watcher）负责登记，本口不做引擎轮询。
-     */
-    @Transactional(readOnly = true)
-    public List<WaitPointResponse> pendingWaits(String workspaceId) {
-        return waitRepository
-                .findByWorkspaceIdAndStatusOrderByRaisedAtDesc(
-                        resolveWorkspaceId(workspaceId), WaitStatus.PENDING)
-                .stream().map(WaitPointResponse::from).toList();
-    }
-
-    /**
-     * 单查等待点（waitId 全局寻址——业务层回填引用的读面，不限工作区）。
+     * 单查等待点（waitId 全局寻址）。
      */
     @Transactional(readOnly = true)
     public Optional<WaitPointResponse> wait(String waitId) {
@@ -147,29 +128,7 @@ public class AgentWaitAppService {
     }
 
     /**
-     * 有待处理等待点的工作区 id 集（跨项目待办查询面，A2 §60：工作台 GATE/
-     * WAIT 派生与项目列表 pending 过滤共用；纯表读一次取全量，量小不分页）。
-     */
-    @Transactional(readOnly = true)
-    public Set<Long> pendingWorkspaceIds() {
-        return waitRepository.findByStatusOrderByRaisedAtDesc(WaitStatus.PENDING).stream()
-                .map(AgentWait::getWorkspaceId)
-                .collect(Collectors.toSet());
-    }
-
-    /**
-     * 跨项目全部待处理等待点（工作台 AGENT_WAIT 待办投影源，A2 §4/§5）：一次取
-     * 全量、新者在前，量小不分页。纯表读——本口不做引擎轮询、不解释 body；
-     * 待办的 title 等呈现归 workbench 投影层。
-     */
-    @Transactional(readOnly = true)
-    public List<WaitPointResponse> listPendingWaits() {
-        return waitRepository.findByStatusOrderByRaisedAtDesc(WaitStatus.PENDING)
-                .stream().map(WaitPointResponse::from).toList();
-    }
-
-    /**
-     * 答复等待点（REST 命令形态）：按 type 映射三型后走 {@link #settle(String, WaitSettlement)}。
+     * 答复等待点（命令形态）：按 type 映射两型后走 {@link #settle(String, WaitSettlement)}。
      * 型内必填缺失抛 ApplicationException（BaseCodeMessage.BAD_REQUEST，全局异常
      * 处理的 400 面——IllegalArgumentException 无映射会落 500）。
      */
@@ -189,20 +148,16 @@ public class AgentWaitAppService {
                 }
                 yield new WaitSettlement.PermissionDecision(waitId, command.approve());
             }
-            case WaitSettleCommand.TYPE_DEFERRED -> new WaitSettlement.Deferred(
-                    waitId, command.note());
             default -> throw new ApplicationException(BaseCodeMessage.BAD_REQUEST,
-                    "type 取值必须是 answer / permission / deferred: " + command.type());
+                    "type 取值必须是 answer / permission: " + command.type());
         });
     }
 
     /**
-     * 答复等待点：三型封闭（Answer/PermissionDecision/Deferred）。校验链——
-     * 存在（AGT_006 404）→ PENDING（AGT_007 409）→ 会话可续跑（409）→ 引擎送达
-     * （失败 AGT_004 且保持 PENDING 可重试）→ 落库关闭。deny 达 cap 的<b>判定</b>在
-     * 结果上回报（{@link SettleResult#denyCapped()}）——终止执行（abort + 收口 +
-     * 平台终态帧）归调用方经 {@link AgentTaskAppService#terminateRun} 走与 cancelRun
-     * 共用的路径，保证帧序 wait-settled 先于 task-finish（票 #38）。
+     * 答复等待点：两型封闭（Answer/PermissionDecision）。校验链——存在（AGT_006
+     * 404）→ PENDING（AGT_007 409）→ 会话可续跑（409）→ 引擎送达（失败 AGT_004
+     * 且保持 PENDING 可重试）→ 落库关闭。deny 达 cap 的<b>判定</b>在结果上回报
+     * （{@link SettleResult#denyCapped()}）——接续动作归调用方。
      */
     public SettleResult settle(String workspaceId, WaitSettlement settlement) {
         AgentWait wait = requireSettleable(workspaceId, settlement.waitId());
@@ -221,13 +176,6 @@ public class AgentWaitAppService {
                 wait.settle(decision.approve() ? WaitOutcome.APPROVED : WaitOutcome.DENIED,
                         now);
             }
-            case WaitSettlement.Deferred deferred -> {
-                // 转任务关闭（口子③）：不派发引擎——续跑是业务层建任务后的新消息，
-                // 不是问答答复（demo replyQuestions 装不下任务结果，A1 §3.1）
-                log.info("[agentengine] 等待点转任务关闭 waitId={} note={}",
-                        wait.getWaitId(), deferred.note());
-                wait.settle(WaitOutcome.DEFERRED, now);
-            }
         }
         waitRepository.save(wait);
 
@@ -238,42 +186,20 @@ public class AgentWaitAppService {
 
     /**
      * run 终态联动（finish/error/timeout/cancel）：其 PENDING 等待点全部 EXPIRED
-     * （「工具超时/崩溃留 ASKING 死状态」对策）。守卫迁移（票 #37）：与 settle 落库
-     * 交错时行已被迁出即跳过——返回<b>实际联动行数</b>（0 = 无事发生）。
+     * （「工具超时/崩溃留 ASKING 死状态」对策）。守卫迁移：与 settle 落库交错时
+     * 行已被迁出即跳过——返回<b>实际联动行数</b>（0 = 无事发生）。
      */
     @Transactional
     public int expireRun(String runId) {
-        return expireRunReturning(runId).size();
-    }
-
-    /**
-     * run 终止联动收口并回报收口行（票 #38：cancelRun / deny cap 平台终止共用）——
-     * PENDING 守卫迁移 EXPIRED 后返回<b>实际迁移行</b>投影（wait-settled 帧发射用，
-     * 已被 settle 的行不混入）。空表 = 无事发生。
-     */
-    @Transactional
-    public List<WaitPointResponse> expireRunReturning(String runId) {
         return closeAll(waitRepository.findByRunIdAndStatus(runId, WaitStatus.PENDING),
-                WaitStatus.EXPIRED, "run 终止联动").stream().map(WaitPointResponse::from)
-                .toList();
-    }
-
-    /**
-     * 复用会话下发前的残留清理（「有则先清理再跑」）：会话名下 PENDING 全部
-     * CANCELLED。守卫迁移（票 #37）：返回<b>实际清理行数</b>（被别途迁出的行跳过）。
-     */
-    @Transactional
-    public int cancelSessionWaits(String sessionId) {
-        return closeAll(waitRepository.findBySessionIdAndStatus(sessionId, WaitStatus.PENDING),
-                WaitStatus.CANCELLED, "复用会话清理").size();
+                WaitStatus.EXPIRED, "run 终态联动").size();
     }
 
     // ---------- 内部 ----------
 
     /**
-     * deny cap 判定（A1 §1.3 审批循环对策）：同 run 内 deny 累计 ≥ 阈值。只判不定——
-     * 终止执行（abort + 收口 + 平台终态帧）经 {@link AgentTaskAppService#terminateRun}
-     * 归调用方（票 #38 与 cancelRun 统一路径）。
+     * deny cap 判定（审批循环对策）：同 run 内 deny 累计 ≥ 阈值。只判不定——
+     * 终止接续归调用方。
      */
     private boolean denyCapReached(String runId) {
         long denies = waitRepository.countByRunIdAndStatusAndSettleOutcome(
@@ -281,7 +207,7 @@ public class AgentWaitAppService {
         if (denies < denyCap) {
             return false;
         }
-        log.warn("[agentengine] run {} 内权限拒绝累计 {} 次达上限（deny cap={}），平台终止运行",
+        log.warn("[agentengine] run {} 内权限拒绝累计 {} 次达上限（deny cap={}）",
                 runId, denies, denyCap);
         return true;
     }
@@ -329,7 +255,7 @@ public class AgentWaitAppService {
         return session;
     }
 
-    /** AGT_007（409）：陈旧答复/不可续跑（A1 §1.3「陈旧批准非法跳变」防护）。 */
+    /** AGT_007（409）：陈旧答复/不可续跑（「陈旧批准非法跳变」防护）。 */
     private static ApplicationException waitConflict() {
         return new ApplicationException(AgentEngineMessage.WAIT_CONFLICT);
     }
@@ -344,27 +270,22 @@ public class AgentWaitAppService {
     }
 
     /**
-     * 守卫迁移快照行（票 #37 竞态根治）：候选来自联动前的 PENDING 快照，逐行经
+     * 守卫迁移快照行（竞态根治）：候选来自联动前的 PENDING 快照，逐行经
      * {@link AgentWaitRepository#transitionIfStatus}（守卫在 SQL WHERE 上——
      * 「只能从 PENDING 迁出一次」由库层强制，不再依赖内存态判断）。命中 0 =
      * 行已被 settle 等别途迁出，静默跳过——后写不得胜出。命中行在内存实体上呈现
-     * 终态（{@link AgentWait#expire}/{@link AgentWait#cancel} 行为方法保留，供
-     * 返回投影呈现；持久化已由守卫 UPDATE 完成，不经实体 save）。
+     * 终态（持久化已由守卫 UPDATE 完成，不经实体 save）。
      */
-    private List<AgentWait> closeAll(List<AgentWait> snapshot, WaitStatus target,
-                                     String cause) {
+    private java.util.List<AgentWait> closeAll(java.util.List<AgentWait> snapshot,
+                                               WaitStatus target, String cause) {
         Instant now = clock.instant();
-        List<AgentWait> migrated = new ArrayList<>(snapshot.size());
+        java.util.List<AgentWait> migrated = new java.util.ArrayList<>(snapshot.size());
         for (AgentWait wait : snapshot) {
             if (waitRepository.transitionIfStatus(wait.getWaitId(), WaitStatus.PENDING,
                     target, now) == 0) {
                 continue;
             }
-            if (target == WaitStatus.EXPIRED) {
-                wait.expire(now);
-            } else {
-                wait.cancel(now);
-            }
+            wait.expire(now);
             migrated.add(wait);
         }
         if (!migrated.isEmpty()) {

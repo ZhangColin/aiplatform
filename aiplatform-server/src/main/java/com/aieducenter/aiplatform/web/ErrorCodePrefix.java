@@ -3,8 +3,7 @@ package com.aieducenter.aiplatform.web;
 /**
  * 错误码前缀注册表（ADR-0001：错误码格式 {@code {CONTEXT}_{NNN}}）。
  *
- * <p>一个 BC 一个前缀，新 BC 建立即在此注册（eventhub / process / workbench 无
- * REST 错误面，不设前缀）。通用 HTTP 错误复用 {@link com.cartisan.core.exception.BaseCodeMessage}，
+ * <p>一个 BC 一个前缀，新 BC 建立即在此注册（无 REST 错误面的 BC 不设前缀）。通用 HTTP 错误复用 {@link com.cartisan.core.exception.BaseCodeMessage}，
  * 不进本表。各 BC 错误枚举（{@code XxxMessage implements CodeMessage}）的 code
  * 必须以本表登记的前缀开头。</p>
  */

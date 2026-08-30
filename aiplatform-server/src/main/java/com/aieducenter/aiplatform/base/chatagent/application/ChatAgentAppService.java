@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
  * （{@link AgentStreamAppService}，runId 锚定）发射，前端零新增协议。converse 同步
  * 阻塞至本轮结束（挂起轮在 wait-raised 后软终点返回——见 client 挂起语义）。
  *
- * <p><b>流桥拦截（#48，对齐 AgentTaskAppService.streamSink 语义）</b>：命令带
+ * <p><b>流桥拦截（#48）</b>：命令带
  * workspaceId 时——{@code wait-raised} 落库成平台等待点（raiseFromEvent，幂等），
  * 落库成功补 waitId 再发 SSE（挂起 REST 可查、SSE 可见）；run 终态
  * （task-finish/error，超时也是 error 表达）联动其 PENDING 等待点 → EXPIRED。

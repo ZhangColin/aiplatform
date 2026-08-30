@@ -42,7 +42,7 @@ import static org.mockito.Mockito.mock;
  * {@link AgentWaitRepository}，在联动路径的 SELECT 返回快照之后、写库之前，用
  * 独立连接（JdbcTemplate 自持事务并提交）把目标行改为 SETTLED/DENIED——即
  * 「settle 写者已在另一事务提交」的最小交错形态。被测的是生产代码路径
- * {@link AgentWaitAppService#expireRun}/{@link #cancelSessionWaits} 本身。</p>
+ * {@link AgentWaitAppService#expireRun} 本身。</p>
  */
 @SpringBootTest
 class AgentWaitSettleExpireRaceTest {
@@ -85,21 +85,6 @@ class AgentWaitSettleExpireRaceTest {
         assertThat(row.getSettleOutcome()).isEqualTo(WaitOutcome.DENIED);
         assertThat(waitRepository.countByRunIdAndStatusAndSettleOutcome(
                 "run_race1", WaitStatus.SETTLED, WaitOutcome.DENIED)).isEqualTo(1);
-    }
-
-    @Test
-    void given_settle_committed_after_cleanup_snapshot_when_cancel_session_then_row_keeps_settled() {
-        AgentWait pending = raisePending("ses_race2", "run_race2", "per_race2");
-        // 对称交错：复用会话清理的 SELECT 快照后，settle 写者先提交
-        AgentWaitAppService raced = appServiceInterleavingAfterSnapshot(
-                "findBySessionIdAndStatus", () -> settleAsDeniedCommitted(pending.getWaitId()));
-
-        int cancelled = raced.cancelSessionWaits("ses_race2");
-
-        assertThat(cancelled).isZero();
-        AgentWait row = waitRepository.findById(pending.getWaitId()).orElseThrow();
-        assertThat(row.getStatus()).isEqualTo(WaitStatus.SETTLED);
-        assertThat(row.getSettleOutcome()).isEqualTo(WaitOutcome.DENIED);
     }
 
     @Test
@@ -188,7 +173,7 @@ class AgentWaitSettleExpireRaceTest {
 
     private AgentWaitAppService newAgentWaitAppService(AgentWaitRepository repository) {
         return new AgentWaitAppService(repository, sessionRepository,
-                new WaitResponderDirectory(List.of(), List.of()),
+                new WaitResponderDirectory(List.of()),
                 mock(WorkspaceHandleClient.class), 3, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

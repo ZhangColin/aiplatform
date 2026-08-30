@@ -97,7 +97,7 @@ public final class AgentEventTypes {
     /** 等待点稳定标识（wait-raised 补发 / wait-settled payload 用）。 */
     public static final String WAIT_ID_FIELD = "waitId";
 
-    /** 等待点关闭结果（answered / approved / denied / deferred / cancelled）。 */
+    /** 等待点关闭结果（answered / approved / denied / cancelled）。 */
     public static final String WAIT_OUTCOME_FIELD = "outcome";
 
     /** 通用寻址键：引擎会话标识（平台帧 payload；与 wait-raised 契约键同值单源）。 */

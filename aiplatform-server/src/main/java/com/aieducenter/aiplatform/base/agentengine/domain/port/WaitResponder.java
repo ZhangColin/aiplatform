@@ -8,19 +8,16 @@ import com.cartisan.core.stereotype.PortType;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 
 /**
- * 等待点答复通道（片2b 窄面，#48 抽出）：能承接 {@code settle} 派发的引擎侧组件——
- * {@link CodingAgentAdapter} 全量实现本面（编码引擎路径行为不变），对话智能体等
- * 非编码内核（ADR-0002 双轨分野）实现本面即可接入同一等待点协议（settle 即续跑、
- * deny cap 终止），不必也不得进编码引擎能力矩阵（registry / Project.engine 词汇）。
+ * 等待点答复通道（窄面）：能承接 {@code settle} 派发的智能体内核侧组件（当前
+ * 唯一实现 = 对话智能体 agentscope）——settle 即续跑、deny cap 判定回报。
  *
  * <p>寻址：按 {@link #engine()} 名（与 agt_agent_sessions.engine 同值）经
- * {@code WaitResponderDirectory} 索引——等待点模型引擎无关，答复派发只认会话自述的
- * 引擎名。</p>
+ * {@code WaitResponderDirectory} 索引——答复派发只认会话自述的引擎名。</p>
  */
 @Port(PortType.CLIENT)
 public interface WaitResponder {
 
-    /** 引擎名（与 CodingAgentAdapter.engine 同值约定：注册键 / UsageEvent.engine）。 */
+    /** 引擎名（UsageEvent.engine 同值约定）。 */
     String engine();
 
     /** 回答问题：answers 按问题顺序，每项 = 该问题选中的标签列表（custom 输入也作为标签）。 */

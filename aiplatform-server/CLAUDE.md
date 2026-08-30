@@ -1,6 +1,6 @@
 # aiplatform-server
 
-AI 开发平台后端（Phase A）：`base` 底座（环境/智能体适配/事件/知识/流程引擎）+ `business` 业务层双分区，单 module，基于 cartisan-boot 框架。领域词汇以根级 [CONTEXT.md](../CONTEXT.md) 为正本。
+AI 开发平台后端：`base` 底座（工作区/对话智能体/事件/知识/计量 + agentengine 等待点·会话·agent 流设施）+ `business` 业务层（project/identity）双分区，单 module，基于 cartisan-boot 框架。领域词汇以根级 [CONTEXT.md](../CONTEXT.md) 为正本。
 
 ## 核心文档
 

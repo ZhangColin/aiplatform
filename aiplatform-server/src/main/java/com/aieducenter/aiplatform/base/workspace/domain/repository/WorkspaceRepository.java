@@ -13,6 +13,6 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus
  */
 public interface WorkspaceRepository extends BaseRepository<Workspace, Long> {
 
-    /** 按置备状态查（workbench 置备失败待办投影源：failed 态清单）。 */
+    /** 按置备状态查（置备失败清单：failed 态清单）。 */
     List<Workspace> findByStatus(ProvisioningStatus status);
 }

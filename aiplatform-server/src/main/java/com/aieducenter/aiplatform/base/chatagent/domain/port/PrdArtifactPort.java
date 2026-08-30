@@ -8,7 +8,7 @@ import com.cartisan.core.stereotype.PortType;
  * 判定需求明确后经它落 PRD 到项目工作区），产物语义归业务——落盘路径的正本与
  * 落盘成功后的业务效果（置项目级「PRD 已产出」状态位 + 发 document-updated
  * 事件）经本端口取用/回调。端口在消费方（base.chatagent），实现归事实持有方
- * business.project（照 OpenBugQueryPort 的跨上下文先例）。
+ * business.project。
  */
 @Port(PortType.CLIENT)
 public interface PrdArtifactPort {

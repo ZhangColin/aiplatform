@@ -1,5 +1,7 @@
 # Spec · v1 平台完整落地：Agent 工作台 + 对话建项目 + HITL 接线 + 门拍板 + 测试收尾
 
+> ⚠️ **已废弃（superseded，2026-08-31）**：本 spec 与 `tickets/` 全目录是业务重定义（[平台业务重定义 map](https://github.com/ZhangColin/aiplatform/issues/1)）**之前**的历史归档。文中概念已被大量推翻：门（G1/G2）、HITL 转任务、任务外包循环、Bug 派发、三门户/dev 门户、验收交付、深链等待点、六步旅程等全部出局——以根级 [CONTEXT.md](../../../CONTEXT.md) 的 _Avoid_ 词条与 [docs/adr/](../../../adr/) 为准；现行实施正本 = [实施切分与垂直切片规划 #11](https://github.com/ZhangColin/aiplatform/issues/11)。片 0 验收「旧词条全库 grep 零残留」对本目录豁免（`docs/reference/` 为只读历史，不参与施工）。
+
 > 产地：wayfinder [**#25**（v1 平台功能完整落地）](https://github.com/ZhangColin/aiplatform-web/issues/25) + phase-b 三路盘点（`docs/research/phase-b-01/02/03`）。
 > 上源：[#2](https://github.com/ZhangColin/aiplatform-web/issues/2) T1–T7 决议全部有效不重开；spec 0001–0004 为既有形态契约；原型 `prototype/t4-workbench`、`prototype/t5-user-portal` 为正式版地板；deepseek-harness demo（`App.vue`）与 CC 为交互基准。
 > **单一红线：正式版 ≥ 原型。** phase-b 盘点证实「决策与原型都已就位，但主链在用户视角只剩列表 + 详情页」——本 spec 把 Agent 运行时链路与门拍板从「死代码 / 零接线」接到真实数据。

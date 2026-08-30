@@ -1,6 +1,7 @@
 # 对话智能体内核选型 AgentScope Java，与编码引擎双轨分野
 
-> 状态：已接受（2026-08-25 · [#40 grilling](https://github.com/ZhangColin/aiplatform-server/issues/40) 落定，基座票 [#44](https://github.com/ZhangColin/aiplatform-server/issues/44)/[#45](https://github.com/ZhangColin/aiplatform-server/issues/45)）
+> 状态：**已被取代（superseded，2026-08-31）**——「双轨分野」由平台统一 AgentScope 单栈决议作废（[新领域模型与 CONTEXT.md 重写 #7](https://github.com/ZhangColin/aiplatform/issues/7)、[后端裁剪与重组方案 #8](https://github.com/ZhangColin/aiplatform/issues/8)），本文仅作历史记录；现行权威 = 根级 [CONTEXT.md](../../../CONTEXT.md) 与 [docs/adr/](../../../docs/adr/)（尤其 [ADR 0003 · v1 简化保扩展点](../../../docs/adr/0003-v1-simplify-keep-extension-points.md)）。
+> 原状态：已接受（2026-08-25 · [#40 grilling](https://github.com/ZhangColin/aiplatform-server/issues/40) 落定，基座票 [#44](https://github.com/ZhangColin/aiplatform-server/issues/44)/[#45](https://github.com/ZhangColin/aiplatform-server/issues/45)）
 
 BA 访谈（多轮提问 → 判定明确 → 产出 PRD）这类**对话型智能体**不跑在编码引擎（OpenCode/dsh）上；平台智能体内核选 [AgentScope Java 2.0](https://github.com/agentscope-ai/agentscope-java)。本 ADR 记选型理由、双轨分野与 PRD 落位三项决策，实施细节以各票 brief 为正本。
 

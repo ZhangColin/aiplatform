@@ -1,0 +1,91 @@
+server:
+  port: 8888
+
+spring:
+  application:
+    name: aiplatform-server
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  flyway:
+    enabled: true
+    table: aiplatform-server_flyway_schema_history
+    baseline-on-migrate: true
+    baseline-version: "0"
+    locations: classpath:db/migration
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+  # 分页统一 1 基（ADR-0001：请求/响应均 1 基，默认 size=20）
+  data:
+    web:
+      pageable:
+        one-indexed-parameters: true
+        default-page-size: 20
+
+# 机机调用签名（cartisan-openapi；与用户会话无关，ADR-0001）；
+# 默认枚举 Controller 关闭（扫描包默认 com.cartisan/com.example，用不到，避免契约噪音）
+cartisan:
+  web:
+    enum-controller:
+      enabled: false
+  openapi:
+    self:
+      app-id: ${OPENAPI_APP_ID:}
+      app-secret: ${OPENAPI_APP_SECRET:}
+    apikey-service-url: https://openapi.aieducenter.com/api/v1/api-keys/by-appId
+
+# 片3 · base.knowledge：本机 fastembed embedding 服务（512 维），
+# 启动方式见 docs/guide/本机依赖启动.md（scripts/embedding_server.py）
+app:
+  embedding:
+    url: http://127.0.0.1:9091
+  # A5 · 知识沉淀：runTask 注入检索的 topK（demo 3，素材增类后上调；A5 §3 可配）
+  knowledge:
+    top-k: 5
+  # 片2a · base.agentengine：模型默认值（A1 §2.3 AgentModelConfig，任务入参缺省时兜底）
+  # 与任务超时；API Key 不在此（只经环境注入引擎进程，见 AgentApiKeyResolver）。
+  agent:
+    model:
+      provider: deepseek
+      id: deepseek-v4-pro
+    timeout-minutes: 30
+  # #44/#45 · base.chatagent：对话智能体内核（ADR-0002 AgentScope HarnessAgent）默认值。
+  # API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry 自行读取）；
+  # workspace 是本地兜底工作区（命令未带 workspaceId 时用，留空 = AgentScope 默认）——
+  # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面，#45）。
+  chatagent:
+    agent-name: chat-agent
+    default-model: deepseek:deepseek-v4-flash
+    default-system-prompt: 你是平台对话智能体。
+    timeout: 2m
+  # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
+  # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
+  workspace:
+    provision-max-attempts: 3
+
+# A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
+# 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本机依赖启动.md。
+# 全程 localhost、禁混 127.0.0.1（cookie 按域隔离不带端口，A2 §2 表 8）。
+sso:
+  issuer: ${SSO_ISSUER:http://identity.localhost:10001}
+  client-id: ${SSO_CLIENT_ID:}
+  client-secret: ${SSO_CLIENT_SECRET:}
+  redirect-uri: ${SSO_REDIRECT_URI:http://localhost:3333/auth/callback}
+  scope: ${SSO_SCOPE:openid profile email}
+  app-base-url: ${SSO_APP_BASE_URL:http://localhost:3333}
+  # local 走 http://localhost：Safari/Firefox 不豁免 Secure-over-http，拒存 Secure cookie
+  # （A2 §2 表 8-②）；生产 https 必须 true（application-prod.yml 已翻）
+  cookie-secure: ${SSO_COOKIE_SECURE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: never

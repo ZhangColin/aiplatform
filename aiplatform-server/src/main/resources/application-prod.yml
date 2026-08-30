@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+spring.jpa.show-sql: false
+logging.level.root: INFO
+
+# 生产 https：cookie 必须 Secure（A2 §2 表 8-②）；issuer/redirect-uri 随环境注册
+sso:
+  cookie-secure: true

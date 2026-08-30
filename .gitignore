@@ -1,0 +1,17 @@
+# 构建产物与依赖
+node_modules/
+.next/
+target/
+*.tsbuildinfo
+# IDE / 系统杂物
+.idea/
+.vscode/
+.agentscope/
+.DS_Store
+.debug-ba/
+# 环境与本地凭据（example 保留跟踪）
+.env
+.env.*
+!.env.*.example
+# 本地 agent 配置
+.claude/settings.local.json

@@ -13,8 +13,8 @@
 
 本仓库由两个原本独立的仓库（`aiplatform-server`、`aiplatform-web`）合并而来，合并原因正是并行开发导致业务理解漂移。领域按 **单一上下文** 处理：
 
-- 业务术语（项目/期/门/任务/HITL……）前后端共享。在根级 `CONTEXT.md` 中只定义一次；只有真正单侧专属的术语才标注 前端侧 / 后端侧。
-- `aiplatform-server/CONTEXT.md` 与 `aiplatform-web/CONTEXT.md` 为**历史遗留，仅供参考**。任何冲突以根级为准。
+- 业务术语（项目/系统/迭代/订单/问答……）前后端共享。在根级 `CONTEXT.md` 中只定义一次；只有真正单侧专属的术语才标注 前端侧 / 后端侧。
+- 两个子项目的旧 `CONTEXT.md` 已删除（2026-08-30，#7）；历史版本见 git。
 - `aiplatform-server/docs/adr/` 与 `aiplatform-web/docs/adr/` 保留作历史可读。**新 ADR 一律写入根级 `docs/adr/`。**
 
 ## 使用词汇表的语言

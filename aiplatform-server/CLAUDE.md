@@ -1,10 +1,10 @@
 # aiplatform-server
 
-AI 开发平台后端（Phase A）：`base` 底座（环境/智能体适配/事件/知识/流程引擎）+ `business` 业务层双分区，单 module，基于 cartisan-boot 框架。领域词汇以 [CONTEXT.md](CONTEXT.md) 为正本。
+AI 开发平台后端（Phase A）：`base` 底座（环境/智能体适配/事件/知识/流程引擎）+ `business` 业务层双分区，单 module，基于 cartisan-boot 框架。领域词汇以根级 [CONTEXT.md](../CONTEXT.md) 为正本。
 
 ## 核心文档
 
-- [CONTEXT.md](CONTEXT.md) — 领域词汇表（写代码/文档/讨论的统一语言）
+- [根级 CONTEXT.md](../CONTEXT.md) — 领域词汇表（写代码/文档/讨论的统一语言）
 - [B0 · 底座重写切片蓝图](docs/spec/B0-底座切片蓝图.md) — 包结构定稿、六片切片与验收口径
 - [SSE 事件清单](docs/spec/SSE事件清单.md) — SSE 双通道信封与事件名册（对接正本，[ADR-0001](docs/adr/0001-swagger-contract-and-sse-channels.md) 定稿：swagger 唯一契约、API 约定、鉴权 BFF 形态）
 - [cartisan-boot 使用手册](docs/guide/cartisan-boot-使用手册.md) — 框架能力清单、API 文档和使用示例

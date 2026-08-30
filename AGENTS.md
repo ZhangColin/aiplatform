@@ -10,4 +10,4 @@ Issue 跟踪在 GitHub Issues（`ZhangColin/aiplatform`），通过 `gh` CLI 操
 
 ### Domain docs
 
-Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威；子项目旧文档仅作历史参考。见 `docs/agents/domain.md`。
+Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威（子项目旧词汇表已删除，历史见 git）。见 `docs/agents/domain.md`。

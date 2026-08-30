@@ -19,8 +19,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 
 /**
  * 中间件资源（Workspace 聚合成员，{@code wsp_resources}）：一工作区一 pg 一 redis，
- * 随聚合创建与级联删除。internalUrl 为容器网络内连接串（含凭据），
- * 即 {@code /workspace/.env} 注入的原文——落库是为了重启接回后连接信息可查。
+ * 随聚合创建与级联删除——单容器 all-in-one（ADR 0001）后两者都在工作区容器内、
+ * 无独立容器与宿主端口。internalUrl 为容器内回环连接串，即 {@code /workspace/.env}
+ * 注入的原文——落库是为了重启接回后连接信息可查。
  */
 @Entity
 @Table(name = "wsp_resources", uniqueConstraints = {

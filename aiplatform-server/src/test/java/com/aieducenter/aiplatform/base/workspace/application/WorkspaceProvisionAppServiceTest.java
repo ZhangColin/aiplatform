@@ -73,16 +73,16 @@ class WorkspaceProvisionAppServiceTest {
         Workspace pending = Workspace.registerPending(id, EnvKind.DEV);
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(pending));
         when(environmentBackend.createWorkspace(id, EnvKind.DEV))
-                .thenThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_ADDRESS_POOL_EXHAUSTED));
+                .thenThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED));
 
         provisioner().provision(id, EnvKind.DEV);
 
         ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
         verify(workspaceRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(ProvisioningStatus.FAILED);
-        // 失败落归一化失败原因（WSP_008 自诊断，工作台可见）
+        // 失败落归一化失败原因（错误码 + 文案，工作台可见）
         assertThat(saved.getValue().getProvisionError())
-                .startsWith(WorkspaceMessage.ENVIRONMENT_ADDRESS_POOL_EXHAUSTED.code());
+                .startsWith(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.code());
         // 失败不回填端口/资源（保持置备中占位，端口 0、清单空）
         assertThat(saved.getValue().getHostPort()).isZero();
         assertThat(saved.getValue().getResources()).isEmpty();
@@ -250,10 +250,11 @@ class WorkspaceProvisionAppServiceTest {
     private WorkspaceProvision devProvision(WorkspaceId id) {
         WorkspaceHandle handle = WorkspaceHandle.dev(id,
                 "ws-" + id.value() + "-dev", "net-" + id.value(), 20000, 20001);
+        // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
         return new WorkspaceProvision(handle, List.of(
-                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "pg-" + id.value(), 35432,
-                        "postgresql://pg"),
-                new ProvisionedResource(MiddlewareKind.REDIS, "rd-" + id.value(), 36379,
-                        "redis://rd")));
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, handle.containerName(), 0,
+                        "postgresql://ws" + id.value() + "@localhost:5432/ws" + id.value()),
+                new ProvisionedResource(MiddlewareKind.REDIS, handle.containerName(), 0,
+                        "redis://localhost:6379")));
     }
 }

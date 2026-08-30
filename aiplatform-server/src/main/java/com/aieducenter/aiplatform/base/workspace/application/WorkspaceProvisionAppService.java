@@ -35,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
  * 工作区后台置备器（#58/#61 异步化核心）：创建即返回（记录 PROVISIONING 落库），
  * docker 置备转后台并行——有界队列 + 固定线程池驱动 {@link EnvironmentBackend}，
  * 成功经 {@code complete} 回填端口 + 资源转 READY，失败级联回滚（#57 口径，后端内部
- * 已回滚物理资源）+ 自诊断（WSP_008 等，后端归一化）后转 FAILED（带失败原因，#63）。
+ * 已回滚物理资源）+ 自诊断（归一化错误码，后端归一化）后转 FAILED（带失败原因，#63）。
  *
  * <p>失败重试（#63）：单条置备最多尝试 {@code maxAttempts} 次（可配
  * {@code app.workspace.provision-max-attempts}，默认 3——即 2 次自动重试），达上限转
@@ -50,7 +50,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>重启自愈与置备期收口（#64）：重启后 {@link #recoverPendingProvisions()} 对遗留
  * PROVISIONING 续置备（幂等预清，失败由既有重试→markFailed 收敛）；置备中销毁经
  * {@link #cancel(WorkspaceId)} 取消在途任务并等待其自清理，配合销毁方级联回收不留
- * 孤儿容器/网络/卷。</p>
+ * 孤儿容器/卷。</p>
  *
  * <p>事务：单条置备任务的落库收口（complete / markFailed）走仓储 {@code save} 的
  * 自动提交短事务——只读 {@code findById} 拿 detached 记录 → 状态机迁移 → {@code save}

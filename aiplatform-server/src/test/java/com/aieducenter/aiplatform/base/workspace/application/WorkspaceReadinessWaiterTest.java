@@ -121,7 +121,7 @@ class WorkspaceReadinessWaiterTest {
     }
 
     private Workspace failed(WorkspaceId id) {
-        return pending(id).markFailed("WSP_008：docker 网络地址池已耗尽");
+        return pending(id).markFailed("WSP_002：环境后端操作失败");
     }
 
     private WorkspaceProvision devProvision(WorkspaceId id) {

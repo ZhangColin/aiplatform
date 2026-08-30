@@ -21,8 +21,6 @@ public enum WorkspaceMessage implements CodeMessage {
 
     ENVIRONMENT_KIND_NOT_SUPPORTED(400, "WSP_007", "暂不支持的环境类型（Phase A 仅 DEV）"),
 
-    ENVIRONMENT_ADDRESS_POOL_EXHAUSTED(500, "WSP_008", "docker 网络地址池已耗尽，请回收孤儿网络/容器/卷后重试"),
-
     WORKSPACE_STATE_INVALID(400, "WSP_009", "工作区置备状态不合法"),
 
     WORKSPACE_PROVISION_FAILED(500, "WSP_010", "环境置备失败，需要环境的能力暂不可用"),

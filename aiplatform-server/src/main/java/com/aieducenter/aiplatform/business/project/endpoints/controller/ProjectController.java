@@ -61,7 +61,7 @@ public class ProjectController {
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。"
-                    + "dev 工作区 + 专属 pg/redis 就绪。"
+                    + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动 BA 运行 runId（挂 /api/agent-events?runId= 的锚）。"
                     + "SSE：workspace-created → agent 流事件")
     public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
@@ -159,7 +159,7 @@ public class ProjectController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除项目（真删级联）",
-            description = "容器/网络/卷级联清理 + wsp_*/prj_* 库记录删除；SSE workspace-destroyed")
+            description = "容器/卷级联清理 + wsp_*/prj_* 库记录删除；SSE workspace-destroyed")
     public ApiResponse<Void> delete(@PathVariable String id) {
         appService.delete(parseId(id));
         return ApiResponse.ok();

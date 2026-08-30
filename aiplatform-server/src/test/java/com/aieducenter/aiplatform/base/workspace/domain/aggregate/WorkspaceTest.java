@@ -182,16 +182,16 @@ class WorkspaceTest {
     void given_pending_workspace_when_mark_failed_then_failed_with_reason() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
 
-        workspace.markFailed("WSP_008：docker 网络地址池已耗尽");
+        workspace.markFailed("WSP_002：环境后端操作失败");
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.FAILED);
-        assertThat(workspace.getProvisionError()).isEqualTo("WSP_008：docker 网络地址池已耗尽");
+        assertThat(workspace.getProvisionError()).isEqualTo("WSP_002：环境后端操作失败");
     }
 
     @Test
     void given_failed_workspace_when_complete_then_rejected() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽");
+                .markFailed("WSP_002：环境后端操作失败");
 
         assertThatThrownBy(() -> workspace.complete(WorkspaceProvision.of(
                 WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001))))
@@ -204,7 +204,7 @@ class WorkspaceTest {
         workspace.complete(WorkspaceProvision.of(
                 WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
 
-        assertThatThrownBy(() -> workspace.markFailed("WSP_008：docker 网络地址池已耗尽"))
+        assertThatThrownBy(() -> workspace.markFailed("WSP_002：环境后端操作失败"))
                 .isInstanceOf(DomainException.class);
     }
 
@@ -213,7 +213,7 @@ class WorkspaceTest {
     @Test
     void given_failed_workspace_when_retry_then_back_to_provisioning_and_error_cleared() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽");
+                .markFailed("WSP_002：环境后端操作失败");
 
         workspace.retry();
 
@@ -226,7 +226,7 @@ class WorkspaceTest {
     @Test
     void given_retried_workspace_when_complete_then_ready() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽").retry();
+                .markFailed("WSP_002：环境后端操作失败").retry();
 
         workspace.complete(WorkspaceProvision.of(
                 WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));

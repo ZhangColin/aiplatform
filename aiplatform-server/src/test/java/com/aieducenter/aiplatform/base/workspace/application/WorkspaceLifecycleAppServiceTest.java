@@ -223,7 +223,7 @@ class WorkspaceLifecycleAppServiceTest {
     @Test
     void given_failed_workspace_when_exec_then_provision_failed_not_reaching_backend() {
         workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("107"), EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽"));
+                .markFailed("WSP_002：环境后端操作失败"));
 
         assertThatThrownBy(() -> appService.exec("107", new WorkspaceExecCommand("ls")))
                 .isInstanceOf(ApplicationException.class)
@@ -234,18 +234,18 @@ class WorkspaceLifecycleAppServiceTest {
     @Test
     void given_failed_workspace_when_get_then_provision_error_exposed() {
         workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("108"), EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽"));
+                .markFailed("WSP_002：环境后端操作失败"));
 
         WorkspaceResponse response = appService.get("108");
 
         assertThat(response.status()).isEqualTo(ProvisioningStatus.FAILED);
-        assertThat(response.provisionError()).isEqualTo("WSP_008：docker 网络地址池已耗尽");
+        assertThat(response.provisionError()).isEqualTo("WSP_002：环境后端操作失败");
     }
 
     @Test
     void given_failed_workspace_when_retry_then_provisioning_and_reprovisioned() {
         workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("109"), EnvKind.DEV)
-                .markFailed("WSP_008：docker 网络地址池已耗尽"));
+                .markFailed("WSP_002：环境后端操作失败"));
 
         WorkspaceResponse response = appService.retry("109");
 
@@ -420,8 +420,11 @@ class WorkspaceLifecycleAppServiceTest {
     private WorkspaceProvision devProvision(String workspaceId) {
         WorkspaceHandle handle = WorkspaceHandle.dev(WorkspaceId.of(workspaceId),
                 "ws-100-dev", "net-100", 20000, 20001);
+        // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
         return new WorkspaceProvision(handle, List.of(
-                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "pg-100", 35432, "postgresql://pg"),
-                new ProvisionedResource(MiddlewareKind.REDIS, "rd-100", 36379, "redis://rd")));
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "ws-100-dev", 0,
+                        "postgresql://ws100@localhost:5432/ws100"),
+                new ProvisionedResource(MiddlewareKind.REDIS, "ws-100-dev", 0,
+                        "redis://localhost:6379")));
     }
 }

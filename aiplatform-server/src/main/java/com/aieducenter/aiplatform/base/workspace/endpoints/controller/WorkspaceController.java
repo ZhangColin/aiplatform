@@ -40,10 +40,10 @@ public class WorkspaceController {
 
     @PostMapping
     @Operation(summary = "创建工作区", description = """
-            记录落库（provisioning 态）即返回：dev 容器 + 专属 network + 独立 pg/redis 转后台
-            置备（成功回填端口 + 资源转 ready，失败转 failed）。kind 缺省 1（DEV）；Phase A 仅
-            支持 DEV，其余 kind 返回 WSP_007。资源 url 即 .env 注入的容器网络内连接串（含凭据），
-            置备完成前清单为空、端口为 0。""")
+            记录落库（provisioning 态）即返回：单容器沙箱（all-in-one：应用与 pg/redis 同容器，
+            /workspace 唯一持久卷）转后台置备（成功回填端口 + 资源转 ready，失败转
+            failed）。kind 缺省 1（DEV）；Phase A 仅支持 DEV，其余 kind 返回 WSP_007。资源 url
+            即 .env 注入的容器内回环连接串，置备完成前清单为空、端口为 0。""")
     public ApiResponse<WorkspaceResponse> create(
             @RequestBody(required = false) CreateWorkspaceCommand command) {
         return ApiResponse.ok(
@@ -75,7 +75,7 @@ public class WorkspaceController {
     }
 
     @DeleteMapping("/{workspaceId}")
-    @Operation(summary = "销毁工作区", description = "级联清理：容器（dev/pg/redis）→ network → 卷 → 库记录。")
+    @Operation(summary = "销毁工作区", description = "级联清理：容器 → 卷（pg 数据与引擎会话都在卷内）→ 库记录。")
     public ApiResponse<Void> destroy(
             @Parameter(description = "工作区 id") @PathVariable String workspaceId) {
         appService.destroy(workspaceId);

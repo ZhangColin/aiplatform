@@ -35,12 +35,12 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * ——成功回填端口+资源→ {@code READY}；——失败级联回滚→ {@code FAILED}（带失败原因）。
  * {@code FAILED} 不可直接回 {@code READY}——需 {@link #retry()} 先回到
  * {@code PROVISIONING}（重试清空失败原因）再经 {@link #complete(WorkspaceProvision)}。
- * 注册 = 环境后端把真实副作用（容器/网络/中间件）落定后，将句柄与资源清单记录入库；
+ * 注册 = 环境后端把真实副作用（容器/中间件）落定后，将句柄与资源清单记录入库；
  * 销毁 = 级联清理物理资源后删除记录。生命周期与记录同生共死，不软删除
  * （Auditable 只取审计字段）。重启接回 = {@link #toHandle()} 从记录重建运行时句柄
  * （{@code PROVISIONING} 期端口为 0）。</p>
  *
- * <p>ID 显式赋值（workspaceId 先于副作用存在——容器/网络命名要用它），
+ * <p>ID 显式赋值（workspaceId 先于副作用存在——容器/库命名要用它），
  * 主键即 {@link WorkspaceId} 的数值形（TSID）。containerName / networkName 按
  * {@link WorkspaceNaming} 确定性派生（与 docker 后端同源）。</p>
  */

@@ -16,8 +16,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * 不塞业务语义。后端可替换：本地 Docker（Docker CLI 子进程）→ 上云 TKE/远端
  * （B0 蓝图 §3 演化路径，配置切换适配器，接口不动）。
  *
- * <p>本片实现四条：createWorkspace（含项目专属 network + pg/redis 中间件供给与
- * {@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→网络→卷级联清理）/
+ * <p>本片实现四条：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
+ * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→卷级联清理）/
  * exec（容器内跑命令取结果）/ exposePort（预览 URL）。snapshot+restore、
  * attachResource 按需随各自切片扩。</p>
  */
@@ -34,13 +34,13 @@ public interface EnvironmentBackend {
     int DEV_ENGINE_CONTAINER_PORT = 4096;
 
     /**
-     * 创建工作区并落定全部真实副作用（容器/网络/中间件/.env），返回句柄与资源清单。
-     * 幂等倾向：对同名残留先清理再建。
+     * 创建工作区并落定全部真实副作用（容器/中间件/.env），返回句柄与资源清单。
+     * 幂等倾向：对同名残留容器先清理再建（卷保留，重建即自愈、数据不丢）。
      */
     WorkspaceProvision createWorkspace(WorkspaceId workspaceId, EnvKind kind);
 
     /**
-     * 销毁工作区：级联清理容器 → 网络 → 数据卷（尽力而为，失败不抛——记录清理由调用方负责）。
+     * 销毁工作区：级联清理容器 → 数据卷（尽力而为，失败不抛——记录清理由调用方负责）。
      */
     void destroyWorkspace(WorkspaceHandle handle);
 

@@ -92,7 +92,7 @@ public class ProjectLifecycleAppService {
                     Project.PLACEHOLDER_NAME, null, ENGINE,
                     Long.parseLong(workspace.workspaceId()), RequestContext.getUserId())));
         } catch (RuntimeException e) {
-            // 落库失败：回收已落定的工作区，不留与记录脱节的容器/网络/卷（照片1b 兜底）
+            // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）
             log.error("项目记录入库失败，回收工作区 {}", workspace.workspaceId(), e);
             destroyWorkspaceQuietly(workspace.workspaceId());
             throw e;
@@ -161,7 +161,7 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 删除项目（真删级联）：工作区物理销毁（容器/网络/卷，尽力而为）→ prj_* 行
+     * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
      * 删除（历史子表随 FK 级联）→ knw_chunks 级联清理（尽力而为）→
      * SSE workspace-destroyed。
      */

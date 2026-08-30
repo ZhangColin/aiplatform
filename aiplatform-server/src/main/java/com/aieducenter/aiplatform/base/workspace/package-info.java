@@ -3,8 +3,9 @@
  *
  * <h3>职责</h3>
  * <ul>
- *   <li>环境抽象（EnvironmentBackend 端口）+ Docker CLI 后端</li>
- *   <li>中间件资源供给（network / pg / redis 随环境，.env 注入）</li>
+ *   <li>环境抽象（EnvironmentBackend 端口）+ Docker CLI 后端（单容器 all-in-one 沙箱）</li>
+ *   <li>工作区布局常量表（WorkspaceLayout：五条约定，ADR 0001）+ 中间件资源
+ *       （pg/redis 容器内供给，.env 唯一注入通道）</li>
  *   <li>工作区落库（wsp_workspaces / wsp_resources，服务重启后接回）</li>
  *   <li>生命周期应用事件发布端（WorkspaceCreated / WorkspaceDestroyed / PreviewReady，
  *       PUBLISHER 端口 AFTER_COMMIT，A1 §4）</li>
@@ -17,7 +18,7 @@
  * <h3>包结构</h3>
  * <ul>
  *   <li>domain - 领域层：聚合根（Workspace）、实体（MiddlewareResource）、值对象
- *       （WorkspaceId/WorkspaceHandle/ExecResult/ProvisionedResource/WorkspaceProvision）、
+ *       （WorkspaceId/WorkspaceHandle/WorkspaceLayout/ExecResult/ProvisionedResource/WorkspaceProvision）、
  *       枚举（EnvKind/MiddlewareKind）、端口（EnvironmentBackend）、错误、仓储接口</li>
  *   <li>application - 应用层：WorkspaceLifecycleAppService、生命周期应用事件、DTO</li>
  *   <li>infrastructure - 基础设施层：docker/（Docker CLI 适配器）</li>

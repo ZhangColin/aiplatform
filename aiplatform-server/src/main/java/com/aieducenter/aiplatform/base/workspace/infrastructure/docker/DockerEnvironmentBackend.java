@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -27,6 +26,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
@@ -37,32 +37,27 @@ import lombok.extern.slf4j.Slf4j;
  * 本地 Docker 后端（B0 蓝图 §2 片1：docker CLI 子进程 / ProcessBuilder，弱化实现
  * 起步——上云换 TKE 适配器，端口不动，B0 蓝图 §3）。
  *
- * <p>一个工作区 = 一个 dev 容器（镜像 aiplatform/dev：node + coding agent 运行时 +
- * 静态预览服务器）+ 一个专属 docker network + 独立 pg/redis 容器；连接串写入
- * {@code /workspace/.env}（agent 从环境读）。宿主机映射随机端口（本地工具直连用）。
- * 容器/网络命名消费确定性命名（{@link WorkspaceNaming}，与记录同源派生），销毁级联
- * 因此可从句柄独立完成。Phase A 仅实现 DEV 供给；TEST/PROD（打包产物形态）随后续切片落位。</p>
+ * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node +
+ * coding agent 运行时 + pg/redis 中间件 + 静态预览服务器同容器）。{@code /workspace}
+ * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
+ * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}、引擎会话数据经 XDG_DATA_HOME 重定向
+ * {@code .platform}），容器无状态、销毁重建不丢数据。连接串写入
+ * {@code /workspace/.env}（agent 从环境读，容器内回环形态）。容器命名消费确定性命名
+ * （{@link WorkspaceNaming}，与记录同源派生），销毁级联因此可从句柄独立完成。
+ * Phase A 仅实现 DEV 供给；TEST/PROD（打包产物形态）随后续切片落位。</p>
  */
 @Component
 @Adapter(PortType.CLIENT)
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    private static final String DEV_IMAGE = "aiplatform/dev:0.4";
-
-    /** 与平台数据面同源镜像（docker-compose.dev.yml，本机已拉取）。 */
-    private static final String PG_IMAGE = "pgvector/pgvector:pg16";
-    private static final String REDIS_IMAGE = "redis:7";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.5";
 
     private static final int PORT_MIN = 20000;
     private static final int PORT_MAX = 45000;
     private static final int PORT_ATTEMPTS = 10;
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration PREVIEW_READY_TIMEOUT = Duration.ofSeconds(10);
-
-    /** docker daemon 地址池耗尽 stderr 特征（#57）：旧版「fully subnetted」/ 新版「non-overlapping ipv4 address pool」。 */
-    private static final String ADDRESS_POOL_SUBNETTED = "fully subnetted";
-    private static final String ADDRESS_POOL_IPV4_EXHAUSTED = "non-overlapping ipv4 address pool";
 
     private final SecureRandom random = new SecureRandom();
     private final HttpClient http = HttpClient.newBuilder()
@@ -75,38 +70,34 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_KIND_NOT_SUPPORTED);
         }
         String containerName = WorkspaceNaming.containerName(workspaceId, EnvKind.DEV);
-        // 幂等预清：移除同名残留（只删不建，无需回滚）
+        // 幂等预清：移除同名残留容器（卷保留——重建即自愈，卷内数据原样续用）
         runSilently("docker", "rm", "-f", containerName);
         try {
             runSilently("docker", "volume", "create", volumeOf(containerName));
             ensureDevImage();
             int[] ports = startDevContainer(workspaceId, containerName);
-            List<ProvisionedResource> resources = provisionResources(workspaceId, containerName);
+            List<ProvisionedResource> resources = settleMiddleware(workspaceId, containerName);
             return WorkspaceProvision.of(
                     WorkspaceHandle.dev(workspaceId, containerName, WorkspaceNaming.networkName(workspaceId),
                             ports[0], ports[1]),
                     resources.toArray(new ProvisionedResource[0]));
         } catch (RuntimeException e) {
-            // 置备中途失败：已落定的容器/网络/卷无人回收即泄漏（#57），按命名约定级联回滚
+            // 置备中途失败：已落定的容器/卷无人回收即泄漏（#57），按命名约定级联回滚
             log.error("[workspace] {} 置备失败，级联回滚已落定资源", workspaceId.value(), e);
-            cascadeCleanup(containerName, workspaceId);
+            cascadeCleanup(containerName);
             throw e;
         }
     }
 
     @Override
     public void destroyWorkspace(WorkspaceHandle handle) {
-        cascadeCleanup(handle.containerName(), handle.workspaceId());
+        cascadeCleanup(handle.containerName());
     }
 
-    /** 级联清理：容器（dev + pg/redis，按命名约定派生）→ 网络 → 卷；全部尽力而为。 */
-    private void cascadeCleanup(String containerName, WorkspaceId workspaceId) {
+    /** 级联清理：容器 → 卷（pg 数据与引擎会话都在卷内，随卷走）；全部尽力而为。 */
+    private void cascadeCleanup(String containerName) {
         runSilently("docker", "rm", "-f", containerName);
-        runSilently("docker", "rm", "-f", pgContainer(workspaceId));
-        runSilently("docker", "rm", "-f", redisContainer(workspaceId));
-        runSilently("docker", "network", "rm", WorkspaceNaming.networkName(workspaceId));
         runSilently("docker", "volume", "rm", volumeOf(containerName));
-        runSilently("docker", "volume", "rm", volumeOf(pgContainer(workspaceId)));
     }
 
     @Override
@@ -118,8 +109,10 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     public byte[] packSource(WorkspaceHandle handle) {
         // 容器内 tar 流式写 stdout（GNU tar，dev 镜像 bookworm 基座自带）：
         // 相对路径归档（解包得到 ./index.html 而非 /workspace/index.html）；
-        // .env 是平台生成的连接串机密、node_modules 可重建——都不进包
-        String command = "tar czf - --exclude=./.env --exclude=./node_modules -C /workspace .";
+        // .env 是平台生成的连接串机密、node_modules 可重建、data/ 与 .platform/
+        // 是数据与平台产物而非源码——都不进包
+        String command = "tar czf - --exclude=./.env --exclude=./node_modules"
+                + " --exclude=./data --exclude=./.platform -C /workspace .";
         try {
             Process p = new ProcessBuilder("docker", "exec", handle.containerName(),
                     "sh", "-c", command).start();
@@ -164,58 +157,39 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     // ---------- dev 环境内部 ----------
 
     /**
-     * 项目专属中间件供给（每工作区一个 network + pg + redis），连接串写入
-     * /workspace/.env。返回资源清单（入库 wsp_resources）。
+     * 落定单容器中间件（ADR 0001 all-in-one）：pg/redis 由容器入口脚本在容器内起
+     * （PGDATA 落 {@code data/pg} 进卷、redis 回环纯缓存），本方法只做就绪等待 +
+     * {@code .env} 注入 + 资源清单（入库 wsp_resources）。连接串无凭据——pg 为
+     * trust 认证且只监听容器内回环、无对外端口，客户端只有同容器进程。容器销毁
+     * 重建后同一入口脚本对既有卷幂等自愈，数据不丢。
      */
-    private List<ProvisionedResource> provisionResources(WorkspaceId workspaceId, String containerName) {
-        // 幂等：先清可能的同名残留
-        runSilently("docker", "rm", "-f", pgContainer(workspaceId));
-        runSilently("docker", "rm", "-f", redisContainer(workspaceId));
-        runSilently("docker", "network", "rm", WorkspaceNaming.networkName(workspaceId));
+    private List<ProvisionedResource> settleMiddleware(WorkspaceId workspaceId, String containerName) {
+        String dbName = WorkspaceNaming.databaseName(workspaceId);
+        waitForReady(() -> execIn(containerName, "pg_isready -h localhost -U postgres"),
+                "容器内 PostgreSQL " + containerName);
+        waitForReady(() -> execIn(containerName, "redis-cli -h localhost ping"),
+                "容器内 Redis " + containerName);
 
-        String network = WorkspaceNaming.networkName(workspaceId);
-        String pgName = pgContainer(workspaceId);
-        String redisName = redisContainer(workspaceId);
-        int pgPort = randomPort();
-        int redisPort = randomPort();
-        String dbName = "ws" + workspaceId.value();
-        String pgPassword = randomSecret();
-
-        run("docker", "network", "create", network);
-        run("docker", "run", "-d", "--name", pgName, "--network", network,
-                "-e", "POSTGRES_USER=" + dbName,
-                "-e", "POSTGRES_PASSWORD=" + pgPassword,
-                "-e", "POSTGRES_DB=" + dbName,
-                "-p", pgPort + ":5432",
-                "-v", volumeOf(pgName) + ":/var/lib/postgresql/data",
-                PG_IMAGE);
-        run("docker", "run", "-d", "--name", redisName, "--network", network,
-                "-p", redisPort + ":6379",
-                REDIS_IMAGE);
-        // 主环境容器接入中间件网络（容器内 host = 资源容器名）
-        run("docker", "network", "connect", network, containerName);
-
-        String databaseUrl = "postgresql://" + dbName + ":" + pgPassword
-                + "@" + pgName + ":5432/" + dbName;
-        String redisUrl = "redis://" + redisName + ":6379";
+        String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
+        String redisUrl = "redis://localhost:6379";
         writeEnvFile(containerName, "DATABASE_URL=" + databaseUrl + "\nREDIS_URL=" + redisUrl + "\n");
 
-        waitForReady(() -> runCapture("docker", "exec", pgName, "pg_isready", "-U", dbName),
-                "PostgreSQL " + pgName);
-        waitForReady(() -> runCapture("docker", "exec", redisName, "redis-cli", "ping"),
-                "Redis " + redisName);
-
-        log.info("[workspace] {} 中间件就绪：{}（PG 宿主端口 {}，Redis 宿主端口 {}）",
-                workspaceId.value(), network, pgPort, redisPort);
+        log.info("[workspace] {} 单容器中间件就绪：{}（pg/redis 容器内回环，数据落卷）",
+                workspaceId.value(), containerName);
         return List.of(
-                new ProvisionedResource(MiddlewareKind.POSTGRESQL, pgName, pgPort, databaseUrl),
-                new ProvisionedResource(MiddlewareKind.REDIS, redisName, redisPort, redisUrl));
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, containerName, 0, databaseUrl),
+                new ProvisionedResource(MiddlewareKind.REDIS, containerName, 0, redisUrl));
     }
 
-    /** 连接串写入 /workspace/.env（内容为平台生成的 URL，无用户可控片段）。 */
+    /** 容器内 shell 执行（就绪探针等容器内短命令）。 */
+    private ExecResult execIn(String containerName, String command) {
+        return runCapture("docker", "exec", containerName, "sh", "-c", command);
+    }
+
+    /** 连接串写入 /workspace/.env（布局约定三：唯一注入通道；内容为平台生成的 URL，无用户可控片段）。 */
     private void writeEnvFile(String containerName, String env) {
         run("docker", "exec", containerName, "sh", "-c",
-                "printf '%s' '" + env + "' > /workspace/.env");
+                "printf '%s' '" + env + "' > " + WorkspaceLayout.absolute(WorkspaceLayout.ENV_FILE));
     }
 
     private int[] startDevContainer(WorkspaceId workspaceId, String containerName) {
@@ -228,8 +202,12 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             ExecResult r = runCapture("docker", "run", "-d", "--name", containerName,
                     "-p", hostPort + ":" + EnvironmentBackend.DEV_ENGINE_CONTAINER_PORT,
                     "-p", previewPort + ":" + EnvironmentBackend.DEV_PREVIEW_CONTAINER_PORT,
-                    "-v", volumeOf(containerName) + ":/workspace",
-                    "-w", "/workspace",
+                    "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
+                    "-w", WorkspaceLayout.ROOT,
+                    // 两处归位修复（ADR 0001）：pg 数据进卷、引擎会话数据重定向 .platform
+                    "-e", "PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR),
+                    "-e", "XDG_DATA_HOME=" + WorkspaceLayout.absolute(WorkspaceLayout.XDG_DATA_HOME),
+                    "-e", "WORKSPACE_DB=" + WorkspaceNaming.databaseName(workspaceId),
                     DEV_IMAGE, "sleep", "infinity");
             if (r.exitCode() == 0) {
                 return new int[]{hostPort, previewPort};
@@ -290,6 +268,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         try {
             Path dir = Files.createTempDirectory("aiplatform-ws-image");
             copyResource("docker/workspace/dev-image.Dockerfile", dir.resolve("Dockerfile"));
+            copyResource("docker/workspace/init-workspace.sh", dir.resolve("init-workspace.sh"));
             copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
             run("docker", "build", "-t", DEV_IMAGE, dir.toString());
         } catch (ApplicationException e) {
@@ -310,16 +289,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     // ---------- 命名约定（销毁级联与幂等重建的根基） ----------
-    // container/network 名消费 {@link WorkspaceNaming}（与记录同源）；pg/redis/卷名
-    // 是后端内部子资源命名（不入库），仅销毁级联用。
-
-    private String pgContainer(WorkspaceId workspaceId) {
-        return "pg-" + workspaceId.value();
-    }
-
-    private String redisContainer(WorkspaceId workspaceId) {
-        return "rd-" + workspaceId.value();
-    }
+    // container 名消费 {@link WorkspaceNaming}（与记录同源）；卷名是后端内部子资源
+    // 命名（不入库），仅销毁级联用。
 
     private String volumeOf(String containerName) {
         return "vol-" + containerName;
@@ -331,35 +302,12 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         return PORT_MIN + random.nextInt(PORT_MAX - PORT_MIN);
     }
 
-    private String randomSecret() {
-        return Long.toUnsignedString(random.nextLong(), 36)
-                + Long.toUnsignedString(random.nextLong(), 36);
-    }
-
     private void run(String... cmd) {
         ExecResult r = runCapture(cmd);
         if (r.exitCode() != 0) {
-            fail(String.join(" ", cmd), r);
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "命令失败: " + String.join(" ", cmd) + "\n" + r.stderr());
         }
-    }
-
-    /** 命令失败归一化：地址池耗尽类 stderr 映射为可自诊断的 WSP_008，其余回落通用 500。 */
-    private void fail(String command, ExecResult result) {
-        if (isAddressPoolExhausted(result.stderr())) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_ADDRESS_POOL_EXHAUSTED);
-        }
-        throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                "命令失败: " + command + "\n" + result.stderr());
-    }
-
-    /** docker 默认地址池耗尽（net-* 累积）识别：症状与根因不再隔着通用 500（#57）。 */
-    private boolean isAddressPoolExhausted(String stderr) {
-        if (stderr == null || stderr.isBlank()) {
-            return false;
-        }
-        String lower = stderr.toLowerCase(Locale.ROOT);
-        return lower.contains(ADDRESS_POOL_SUBNETTED)
-                || lower.contains(ADDRESS_POOL_IPV4_EXHAUSTED);
     }
 
     private void runSilently(String... cmd) {

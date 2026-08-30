@@ -20,6 +20,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
@@ -45,9 +46,9 @@ public class ProjectQueryAppService {
 
     /**
      * PRD 在 dev 容器内的绝对路径（事实锚定——PRD = 工作区文件，编码智能体同视图
-     * 直读，写入即进源码包）。
+     * 直读，写入即进源码包；由布局常量表派生，根不散落字面量）。
      */
-    private static final String PRD_CONTAINER_PATH = "/workspace/" + ProjectArtifacts.PRD;
+    private static final String PRD_CONTAINER_PATH = WorkspaceLayout.absolute(ProjectArtifacts.PRD);
 
     /**
      * 一次 exec 取齐 mtime + 正文：{@code stat -c %Y} 首行 epoch 秒、{@code cat}

@@ -2,6 +2,8 @@ package com.aieducenter.aiplatform.base.chatagent.domain.model;
 
 import java.nio.file.Path;
 
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+
 /**
  * 对话智能体的工作区锚定（#45，ADR-0002 概念对口「Workspace/Sandbox ↔ dev 工作区」）：
  * HarnessAgent 的文件面落点，两形态——
@@ -41,8 +43,8 @@ public sealed interface ChatAgentWorkspace {
             }
         }
 
-        /** 容器内工作区根（dev 供给口径：-v vol:/workspace -w /workspace）。 */
-        public static final String CONTAINER_ROOT = "/workspace";
+        /** 容器内工作区根（正本 = 工作区布局常量表，dev 供给口径：-v vol:根 -w 根）。 */
+        public static final String CONTAINER_ROOT = WorkspaceLayout.ROOT;
 
         @Override
         public String identity() {

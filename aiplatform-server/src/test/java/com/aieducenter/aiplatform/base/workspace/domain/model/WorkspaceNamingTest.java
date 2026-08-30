@@ -26,4 +26,10 @@ class WorkspaceNamingTest {
     void given_workspace_id_when_network_name_then_deterministic() {
         assertThat(WorkspaceNaming.networkName(WorkspaceId.of("42"))).isEqualTo("net-42");
     }
+
+    @Test
+    void given_workspace_id_when_database_name_then_deterministic() {
+        // 容器内应用库名（角色与库同名）：连接串与镜像自愈脚本（WORKSPACE_DB）共用
+        assertThat(WorkspaceNaming.databaseName(WorkspaceId.of("42"))).isEqualTo("ws42");
+    }
 }

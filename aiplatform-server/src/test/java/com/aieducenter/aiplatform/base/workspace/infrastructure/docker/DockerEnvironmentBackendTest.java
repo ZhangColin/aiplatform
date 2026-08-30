@@ -19,6 +19,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.cartisan.core.exception.ApplicationException;
 
@@ -31,12 +32,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Docker 后端真实验收（B0 §5：副作用以真实状态为准，不以事件自述）——
- * 本机 docker daemon 在则跑全链：建工作区 → 容器/网络/资源就绪 + .env 注入 →
- * exec → exposePort → 销毁级联。daemon 不在则跳过（CI 无 docker 时不红）。
+ * 本机 docker daemon 在则跑全链：单容器沙箱（应用与 pg/redis 同容器）→ 布局落位 +
+ * .env 注入 → exec → exposePort → 销毁级联；容器销毁重建数据不丢（ADR 0001）。
+ * daemon 不在则跳过（CI 无 docker 时不红）。
  */
 class DockerEnvironmentBackendTest {
 
-    private static final int PROBE_TIMEOUT_SECONDS = 240;
+    private static final int PROBE_TIMEOUT_SECONDS = 360;
 
     private final DockerEnvironmentBackend backend = new DockerEnvironmentBackend();
 
@@ -52,37 +54,79 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_dev_workspace_when_create_then_containers_network_env_ready() {
+    void given_dev_workspace_when_create_then_single_container_with_layout_and_middleware_ready() {
         requireDockerDaemon();
         WorkspaceId workspaceId = WorkspaceId.generate();
 
         provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
 
         WorkspaceHandle handle = provision.handle();
+        String id = workspaceId.value();
         assertThat(handle.kind()).isEqualTo(EnvKind.DEV);
-        assertThat(handle.containerName()).isEqualTo("ws-" + workspaceId.value() + "-dev");
-        // dev 容器、pg、redis 真实存活（副作用以真实状态为准）
-        List.of("ws-" + workspaceId.value() + "-dev",
-                "pg-" + workspaceId.value(), "rd-" + workspaceId.value())
-                .forEach(container ->
-                        assertThat(docker("inspect", "-f", "{{.State.Running}}", container)
-                                .stdout().trim()).isEqualTo("true"));
-        // 资源清单与容器网络内连接串
+        assertThat(handle.containerName()).isEqualTo("ws-" + id + "-dev");
+        // 单容器 all-in-one（ADR 0001）：dev 容器真实存活，pg/redis 容器与专属网络从未存在
+        assertThat(docker("inspect", "-f", "{{.State.Running}}", handle.containerName())
+                .stdout().trim()).isEqualTo("true");
+        List.of("pg-" + id, "rd-" + id, "net-" + id).forEach(name ->
+                assertThat(docker("inspect", name).exitCode()).as("不应存在 %s", name).isNotZero());
+
+        // 布局定盘（WorkspaceLayout 常量表）物理落位：docs / data/pg / .platform 四目录
+        WorkspaceLayout.SKELETON_DIRS.forEach(dir ->
+                assertThat(execIn(handle, "test -d " + WorkspaceLayout.absolute(dir)).exitCode())
+                        .as("布局目录 %s 应存在", dir).isZero());
+        assertThat(execIn(handle, "test -f " + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR)
+                + "/PG_VERSION").exitCode()).as("PGDATA 应落卷内 data/pg").isZero();
+
+        // 两处归位修复经容器环境可见：PGDATA 进卷、引擎会话数据 XDG 重定向 .platform
+        String containerEnv = docker("inspect", "-f",
+                "{{range .Config.Env}}{{println .}}{{end}}", handle.containerName()).stdout();
+        assertThat(containerEnv).contains("PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR));
+        assertThat(containerEnv).contains("XDG_DATA_HOME=" + WorkspaceLayout.absolute(WorkspaceLayout.XDG_DATA_HOME));
+
+        // 中间件真实可服务（容器内回环，就绪等待生效非事件自述）：pg 建表可写、redis 应答
+        String dbName = "ws" + id;
+        assertThat(execIn(handle, "psql -h localhost -U " + dbName + " -d " + dbName
+                + " -c 'CREATE TABLE probe(id int); INSERT INTO probe VALUES (1)'").exitCode())
+                .as("应用库 %s 应已由自愈入口建出且可写", dbName).isZero();
+        assertThat(execIn(handle, "psql -h localhost -U " + dbName + " -d " + dbName
+                + " -tAc 'SELECT id FROM probe'").stdout().trim()).isEqualTo("1");
+        assertThat(execIn(handle, "redis-cli -h localhost ping").stdout().trim()).isEqualTo("PONG");
+
+        // 资源清单与 .env 注入（容器内回环连接串，agent 读的就是它）
         assertThat(provision.resources()).extracting(ProvisionedResource::kind)
                 .containsExactlyInAnyOrder(MiddlewareKind.POSTGRESQL, MiddlewareKind.REDIS);
-        ProvisionedResource pg = provision.resources().stream()
-                .filter(r -> r.kind() == MiddlewareKind.POSTGRESQL).findFirst().orElseThrow();
-        assertThat(pg.internalUrl()).startsWith("postgresql://ws" + workspaceId.value() + ":");
-        assertThat(pg.internalUrl()).contains("@pg-" + workspaceId.value() + ":5432/ws" + workspaceId.value());
-        // .env 已写入连接串（agent 读的就是它）
-        ExecResult envFile = backend.exec(handle, "cat /workspace/.env");
+        provision.resources().forEach(resource -> {
+            assertThat(resource.containerName()).isEqualTo(handle.containerName());
+            assertThat(resource.hostPort()).isZero();
+        });
+        ExecResult envFile = execIn(handle, "cat /workspace/.env");
         assertThat(envFile.exitCode()).isZero();
-        assertThat(envFile.stdout()).contains("DATABASE_URL=" + pg.internalUrl());
-        assertThat(envFile.stdout()).contains("REDIS_URL=redis://rd-" + workspaceId.value() + ":6379");
-        // 中间件真实可服务（就绪等待生效，非事件自述）
-        assertThat(docker("exec", "pg-" + workspaceId.value(), "pg_isready").exitCode()).isZero();
-        assertThat(docker("exec", "rd-" + workspaceId.value(), "redis-cli", "ping").stdout().trim())
-                .isEqualTo("PONG");
+        assertThat(envFile.stdout()).contains("DATABASE_URL=postgresql://" + dbName + "@localhost:5432/" + dbName);
+        assertThat(envFile.stdout()).contains("REDIS_URL=redis://localhost:6379");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_created_workspace_when_container_destroyed_and_rebuilt_then_data_survives() {
+        requireDockerDaemon();
+        WorkspaceId workspaceId = WorkspaceId.generate();
+        provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
+        String dbName = "ws" + workspaceId.value();
+
+        // 卷内落两类持久物：文件（PRD 形态）与 pg 数据
+        backend.exec(provision.handle(), "mkdir -p /workspace/docs && echo '需求正文' > /workspace/docs/PRD.md");
+        backend.exec(provision.handle(), "psql -h localhost -U " + dbName + " -d " + dbName
+                + " -c 'CREATE TABLE survive(id int); INSERT INTO survive VALUES (7)'");
+
+        // 销毁容器（卷保留）→ 原地重建：置备幂等预清只删容器，入口脚本对既有卷自愈
+        docker("rm", "-f", provision.handle().containerName());
+        WorkspaceProvision rebuilt = backend.createWorkspace(workspaceId, EnvKind.DEV);
+
+        assertThat(execIn(rebuilt.handle(), "cat /workspace/docs/PRD.md").stdout().trim())
+                .as("重建后文件不丢").isEqualTo("需求正文");
+        assertThat(execIn(rebuilt.handle(), "psql -h localhost -U " + dbName + " -d " + dbName
+                + " -tAc 'SELECT id FROM survive'").stdout().trim())
+                .as("重建后 pg 数据不丢（PGDATA 在卷内）").isEqualTo("7");
     }
 
     @Test
@@ -118,14 +162,16 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_workspace_with_source_when_pack_source_then_real_tarball_without_secrets() throws Exception {
+    void given_workspace_with_source_when_pack_source_then_real_tarball_without_secrets_or_data() throws Exception {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
-        // 工作区摆上源码事实 + 平台机密（.env）+ 可重建重物（node_modules）
+        // 工作区摆上源码事实 + 平台机密（.env）+ 可重建重物（node_modules）+ 数据与平台产物
         backend.exec(provision.handle(),
                 "echo '<html>demo</html>' > /workspace/index.html"
                         + " && mkdir -p /workspace/node_modules/leftpad"
-                        + " && echo junk > /workspace/node_modules/leftpad/index.js");
+                        + " && echo junk > /workspace/node_modules/leftpad/index.js"
+                        + " && echo pgdata > /workspace/data/pg/base.fakedb"
+                        + " && echo session > /workspace/.platform/sessions/opencode.db");
 
         byte[] tarball = backend.packSource(provision.handle());
 
@@ -133,7 +179,7 @@ class DockerEnvironmentBackendTest {
         assertThat(tarball.length).isGreaterThan(2);
         assertThat(tarball[0]).isEqualTo((byte) 0x1f);
         assertThat(tarball[1]).isEqualTo((byte) 0x8b);
-        // 宿主侧解包清单（真实状态为准）：源码在、机密与重物不在
+        // 宿主侧解包清单（真实状态为准）：源码在、机密/重物/数据/平台产物不在
         Path tar = Files.createTempFile("aiplatform-source", ".tar.gz");
         String listing;
         try {
@@ -145,6 +191,8 @@ class DockerEnvironmentBackendTest {
         assertThat(listing).contains("index.html");
         assertThat(listing).doesNotContain(".env");
         assertThat(listing).doesNotContain("node_modules");
+        assertThat(listing).doesNotContain("data");
+        assertThat(listing).doesNotContain(".platform");
     }
 
     @Test
@@ -164,38 +212,22 @@ class DockerEnvironmentBackendTest {
         backend.destroyWorkspace(provision.handle());
         provision = null; // 已清理，tearDown 不再兜底
 
-        // inspect/network inspect 失败（非 0 退出码）= 已不存在
+        // inspect/volume inspect 失败（非 0 退出码）= 已不存在
         assertResourcesGone(workspaceId);
     }
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_network_create_fails_when_create_then_provisioned_resources_rolled_back() {
+    void given_env_write_fails_when_create_then_provisioned_resources_rolled_back() {
         requireDockerDaemon();
         WorkspaceId workspaceId = WorkspaceId.generate();
-        DockerEnvironmentBackend failing = new FailingNetworkCreateBackend("simulated failure");
+        DockerEnvironmentBackend failing = new FailingEnvWriteBackend();
 
         assertThatThrownBy(() -> failing.createWorkspace(workspaceId, EnvKind.DEV))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining("环境后端操作失败");
 
-        // 置备中途失败已级联回滚：dev 容器/网络/卷无残留（#57 泄漏1验收）
-        assertResourcesGone(workspaceId);
-    }
-
-    @Test
-    @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_address_pool_exhausted_when_create_then_self_diagnosable_error_and_rolled_back() {
-        requireDockerDaemon();
-        WorkspaceId workspaceId = WorkspaceId.generate();
-        DockerEnvironmentBackend failing = new FailingNetworkCreateBackend(
-                "Error response from daemon: failed to allocate gateway: "
-                        + "all predefined address pools have been fully subnetted");
-
-        assertThatThrownBy(() -> failing.createWorkspace(workspaceId, EnvKind.DEV))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining("地址池已耗尽");
-
+        // 置备中途失败已级联回滚：dev 容器/卷无残留（#57 泄漏验收）
         assertResourcesGone(workspaceId);
     }
 
@@ -224,6 +256,11 @@ class DockerEnvironmentBackendTest {
         }
     }
 
+    /** 容器内 shell 执行（与后端 execIn 同形，断言用）。 */
+    private static ExecResult execIn(WorkspaceHandle handle, String command) {
+        return docker("exec", handle.containerName(), "sh", "-c", command);
+    }
+
     private static boolean dockerAvailable() {
         return docker("version", "--format", "{{.Server.Version}}").ok();
     }
@@ -233,36 +270,26 @@ class DockerEnvironmentBackendTest {
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实链路");
     }
 
-    /** 断言按命名约定派生的容器/网络/卷均已不存在（inspect 非 0 = 已清）。 */
+    /** 断言按命名约定派生的容器/卷均已不存在（inspect 非 0 = 已清）。 */
     private static void assertResourcesGone(WorkspaceId workspaceId) {
         String id = workspaceId.value();
-        List.of("ws-" + id + "-dev", "pg-" + id, "rd-" + id, "net-" + id,
-                "vol-ws-" + id + "-dev", "vol-pg-" + id)
-                .forEach(name -> {
-                    if (name.startsWith("net-")) {
-                        assertThat(docker("network", "inspect", name).exitCode()).isNotZero();
-                    } else if (name.startsWith("vol-")) {
-                        assertThat(docker("volume", "inspect", name).exitCode()).isNotZero();
-                    } else {
-                        assertThat(docker("inspect", name).exitCode()).isNotZero();
-                    }
-                });
+        List.of("ws-" + id + "-dev", "vol-ws-" + id + "-dev").forEach(name -> {
+            if (name.startsWith("vol-")) {
+                assertThat(docker("volume", "inspect", name).exitCode()).isNotZero();
+            } else {
+                assertThat(docker("inspect", name).exitCode()).isNotZero();
+            }
+        });
     }
 
-    /** 注入 network create 失败的后端（覆写 runCapture 单条命令失败，余命令走真实 docker）。 */
-    private static class FailingNetworkCreateBackend extends DockerEnvironmentBackend {
-
-        private final String stderr;
-
-        FailingNetworkCreateBackend(String stderr) {
-            this.stderr = stderr;
-        }
+    /** 注入 .env 写入失败的后端（覆写 runCapture 单条命令失败，余命令走真实 docker）。 */
+    private static class FailingEnvWriteBackend extends DockerEnvironmentBackend {
 
         @Override
         protected ExecResult runCapture(String... cmd) {
-            if (cmd.length >= 3 && "docker".equals(cmd[0])
-                    && "network".equals(cmd[1]) && "create".equals(cmd[2])) {
-                return new ExecResult("", stderr, 1);
+            if (cmd.length >= 6 && "docker".equals(cmd[0]) && "exec".equals(cmd[1])
+                    && cmd[cmd.length - 1].endsWith(WorkspaceLayout.absolute(WorkspaceLayout.ENV_FILE))) {
+                return new ExecResult("", "simulated failure", 1);
             }
             return super.runCapture(cmd);
         }

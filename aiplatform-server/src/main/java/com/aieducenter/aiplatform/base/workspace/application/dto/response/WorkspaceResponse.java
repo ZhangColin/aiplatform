@@ -13,7 +13,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus
  * {@code status} 暴露置备状态（#58/#61）：创建返回时记录已就绪、容器后台置备中
  * （PROVISIONING、端口 0、资源清单空），置备完成后回填端口 + 资源转 READY。
  * {@code provisionError} 暴露置备失败原因（#63）：failed 态为归一化错误码 + 文案，
- * 其余态为 null——工作台可见、需要环境时阻塞的失败依据（状态以查询为准，ADR-0001）。
+ * 其余态为 null——失败态可见、需要环境时阻塞的失败依据（状态以查询为准）。
  */
 public record WorkspaceResponse(
         String workspaceId,

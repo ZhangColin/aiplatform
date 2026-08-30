@@ -2,6 +2,8 @@ package com.aieducenter.aiplatform.base.agentengine.application;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -157,7 +159,7 @@ public class AgentWaitAppService {
      * 答复等待点：两型封闭（Answer/PermissionDecision）。校验链——存在（AGT_006
      * 404）→ PENDING（AGT_007 409）→ 会话可续跑（409）→ 引擎送达（失败 AGT_004
      * 且保持 PENDING 可重试）→ 落库关闭。deny 达 cap 的<b>判定</b>在结果上回报
-     * （{@link SettleResult#denyCapped()}）——接续动作归调用方。
+     * （{@link SettleResult#denyCapped()}）——接续动作随问答卡通道（#19）接回。
      */
     public SettleResult settle(String workspaceId, WaitSettlement settlement) {
         AgentWait wait = requireSettleable(workspaceId, settlement.waitId());
@@ -276,10 +278,10 @@ public class AgentWaitAppService {
      * 行已被 settle 等别途迁出，静默跳过——后写不得胜出。命中行在内存实体上呈现
      * 终态（持久化已由守卫 UPDATE 完成，不经实体 save）。
      */
-    private java.util.List<AgentWait> closeAll(java.util.List<AgentWait> snapshot,
-                                               WaitStatus target, String cause) {
+    private List<AgentWait> closeAll(List<AgentWait> snapshot, WaitStatus target,
+                                     String cause) {
         Instant now = clock.instant();
-        java.util.List<AgentWait> migrated = new java.util.ArrayList<>(snapshot.size());
+        List<AgentWait> migrated = new ArrayList<>(snapshot.size());
         for (AgentWait wait : snapshot) {
             if (waitRepository.transitionIfStatus(wait.getWaitId(), WaitStatus.PENDING,
                     target, now) == 0) {

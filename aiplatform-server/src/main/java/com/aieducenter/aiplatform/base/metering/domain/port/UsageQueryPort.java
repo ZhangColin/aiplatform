@@ -9,7 +9,7 @@ import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 
 /**
  * 用量查询端口（CLIENT 直调）：按 subject 聚合（总量 + 平台成本 + 未配价标注 +
- * 分模型/分维度——按期聚合 = 业务层过滤 dims.iterationId 桶，A6 §3 透传缝）。
+ * 分模型/分维度（特定维度的桶过滤归业务读侧）。
  * 业务层端点（{@code GET /api/projects/{id}/usage}）经本端口消费。
  *
  * <p>迁出独立计量服务时本端口换 REST 适配器，签名不动（A1 §2.1）。</p>

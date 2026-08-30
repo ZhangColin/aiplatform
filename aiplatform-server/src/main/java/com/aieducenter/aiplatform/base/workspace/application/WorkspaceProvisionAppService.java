@@ -41,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
  * {@code app.workspace.provision-max-attempts}，默认 3——即 2 次自动重试），达上限转
  * FAILED 待手动重试（{@link WorkspaceLifecycleAppService#retry}）。失败原因取异常
  * 归一化错误码 + 文案（ApplicationException 取 {@code code} + 格式化文案，其余取
- * {@code message}），落 {@code provision_error} 供工作台可见。</p>
+ * {@code message}），落 {@code provision_error} 供失败呈现。</p>
  *
  * <p>线程模型：固定大小线程池（并发创建多项目各自独立置备、互不串行阻塞）+ 有界
  * 队列（防无限排队拖垮内存）。队列满时拒绝提交并直接标 failed——不静默悬置在
@@ -232,7 +232,7 @@ public class WorkspaceProvisionAppService implements DisposableBean {
     }
 
     /**
-     * 归一化失败原因（落 provision_error，工作台可见）：ApplicationException 取错误码 +
+     * 归一化失败原因（落 provision_error，失败呈现用）：ApplicationException 取错误码 +
      * 文案，其余取 message；截断到 {@code provision_error} 列宽（500），防长 stderr 撑爆
      * 失败态落库。
      */

@@ -7,7 +7,7 @@ import jakarta.persistence.Converter;
 /**
  * 工作区置备状态（CONTEXT.md「置备状态」）：环境的生命周期状态。
  * provisioning（置备中）→ ready（就绪）/ failed（失败）。对话与环境就绪解耦——
- * 状态只用于管理环境可用性，不暴露给对话 UI；失败在工作台可见、需要环境的能力时阻塞。
+ * 状态只用于管理环境可用性，不暴露给对话 UI；失败态可见、需要环境的能力时阻塞。
  */
 public enum ProvisioningStatus implements BaseEnum<ProvisioningStatus> {
 

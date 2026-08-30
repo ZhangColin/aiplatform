@@ -71,10 +71,10 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private LocalDateTime archivedAt;
 
     /**
-     * 「PRD 已产出」状态位（#41）：PRD 事实源是工作区 {@code docs/PRD.md}，本位只记
-     * 「BA 已写出过」这一门禁事实——NULL = 未产出；写入方是 BA 的 savePrd（#49，
-     * 写文件成功即置位），G1 门谓词查本位不查文件系统。时间戳随每次写出刷新
-     * （产出/更新共用，v1 无版本链）。
+     * 「PRD 已产出」状态位：PRD 事实源是工作区 {@code docs/PRD.md}，本位只记
+     * 「BA 已写出过」这一事实（成果区长出判据）——NULL = 未产出；写入方是 BA 的
+     * savePrd（写文件成功即置位）。时间戳随每次写出刷新（产出/更新共用，
+     * v1 无版本链）。
      */
     @Column(name = "prd_produced_at")
     private LocalDateTime prdProducedAt;
@@ -101,7 +101,7 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * 建项目（编排在工作区副作用落定后调用，一事务与第 1 期同建）。
+     * 建项目（编排在工作区副作用落定后调用，短事务落库）。
      */
     public static Project create(String name, ProjectType type, String engine,
                                  Long workspaceId, Long ownerAccountId) {
@@ -132,9 +132,8 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     /**
-     * 归档（A3 §4：单向终点——「收起来不再活跃」的真实动作，区别于开发中/已交付
-     * 的派生投影）。重复归档拒绝（409 PRJ_013）；归档不迁移期、不清工作区
-     * （工具项目级常开，期后修复照常）。
+     * 归档（单向终点——「收起来不再活跃」的真实动作）。重复归档拒绝
+     * （409 PRJ_013）；归档不清工作区。
      */
     public void archive() {
         if (archivedAt != null) {

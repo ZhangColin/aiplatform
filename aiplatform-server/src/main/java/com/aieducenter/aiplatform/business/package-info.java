@@ -3,6 +3,6 @@
  *
  * <p>区内每个包是一个限界上下文（project / identity，远期 billing / asset / order），
  * 各带自己的 package-info 与 {@code @BoundedContext}；
- * 只经端口消费 base 分区能力。词汇见 CONTEXT.md「业务层」。</p>
+ * 只经端口消费 base 分区能力。词汇见根级 CONTEXT.md。</p>
  */
 package com.aieducenter.aiplatform.business;

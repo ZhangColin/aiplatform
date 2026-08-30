@@ -22,10 +22,10 @@ import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub
  * <ul>
  *   <li>关联字段 {@code runId}：agent 流事件 payload 必带（适配器回调透传时已盖上）、
  *       streamId 同值（事件 id 取 {@code {runId}:{seq}}，补发留缝的 ID 格式）；
- *       {@code workspaceId} 为片2a 底座任务端点直发事件的关联字段，{@code projectId}
+ *       {@code workspaceId} 为底座直发事件的关联字段，{@code projectId}
  *       自片5 业务编排桥接注入（均为透传字段，过滤位同名先留）</li>
  *   <li>订阅过滤：{@code ?projectId=} / {@code ?runId=} / {@code ?workspaceId=}
- *       （与 payload 字段同名，可叠用 AND；缺省全量，任务进度页「看某个运行才挂」
+ *       （与 payload 字段同名，可叠用 AND；缺省全量，「看某个运行才挂」
  *       即 ?runId=）——对重放帧同样生效，不泄漏别的项目/运行的帧</li>
  *   <li>发射制：对话智能体的流桥（chatagent 的 sink）在内核回调线程透传</li>
  * </ul>
@@ -42,7 +42,7 @@ public class AgentStreamAppService {
     /** 必带关联字段（事件 id 的 streamId 同值）。 */
     public static final String RUN_FIELD = "runId";
 
-    /** 片2a 底座任务端点直发事件的关联字段（重启/调试寻址；projectId 片5 注入后并存）。 */
+    /** 底座直发事件的关联字段（重启/调试寻址；projectId 业务编排注入后并存）。 */
     public static final String WORKSPACE_FIELD = "workspaceId";
 
     /** 业务编排桥接（片5）注入的透传关联字段（底座直发事件不带，过滤位先留）。 */

@@ -64,7 +64,7 @@ public class SpringDocConfig {
 
     @Bean
     public GroupedOpenApi projectGroup() {
-        return bcGroup("project", "项目主链（business.project）", "business.project");
+        return bcGroup("project", "项目（business.project）", "business.project");
     }
 
     @Bean

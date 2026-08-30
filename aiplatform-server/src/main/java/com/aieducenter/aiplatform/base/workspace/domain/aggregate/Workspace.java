@@ -167,7 +167,7 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
 
     /**
      * 置备失败回滚（PROVISIONING → FAILED）：记录标记失败态并落失败原因（归一化错误码
-     * + 文案，工作台可见、需要环境时阻塞的依据），物理资源回收归调用方（#57 级联回滚
+     * + 文案，失败呈现与阻塞依据），物理资源回收归调用方（#57 级联回滚
      * 口径）。仅 PROVISIONING 可转 FAILED。
      */
     public Workspace markFailed(String reason) {

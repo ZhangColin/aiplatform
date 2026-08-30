@@ -57,9 +57,8 @@ class AgentWaitPersistenceTest {
         assertThat(status).isEqualTo(WaitStatus.PENDING.getCode());
         assertThat(waitRepository.findById(wait.getWaitId())).isPresent();
 
-        // 跨会话聚合面：PENDING 按工作区命中
-        assertThat(waitRepository
-                .findByWorkspaceIdAndStatusOrderByRaisedAtDesc(WORKSPACE_ID, WaitStatus.PENDING))
+        // 会话面：PENDING 命中（raise 幂等寻址同口径）
+        assertThat(waitRepository.findBySessionIdAndStatus("ses_w1", WaitStatus.PENDING))
                 .extracting(AgentWait::getWaitId)
                 .containsExactly(wait.getWaitId());
     }
@@ -73,9 +72,8 @@ class AgentWaitPersistenceTest {
         wait.settle(WaitOutcome.DENIED, RAISED_AT.plusSeconds(60));
         waitRepository.save(wait);
 
-        // 聚合面不再命中 PENDING；deny 计数命中（deny cap 的读侧）
-        assertThat(waitRepository
-                .findByWorkspaceIdAndStatusOrderByRaisedAtDesc(WORKSPACE_ID, WaitStatus.PENDING))
+        // 会话面不再命中 PENDING；deny 计数命中（deny cap 的读侧）
+        assertThat(waitRepository.findBySessionIdAndStatus("ses_w1", WaitStatus.PENDING))
                 .isEmpty();
         assertThat(waitRepository.countByRunIdAndStatusAndSettleOutcome(
                 "run-2", WaitStatus.SETTLED, WaitOutcome.DENIED)).isEqualTo(1);
@@ -109,9 +107,8 @@ class AgentWaitPersistenceTest {
         assertThat(waitRepository.findById(reopened.getWaitId())).isPresent();
         assertThat(waitRepository.findBySessionIdAndEngineRefAndStatus(
                 "ses_w2", "que_hist", WaitStatus.PENDING)).isPresent();
-        // 聚合面：再登记行可见（答得了），终态行不干扰
-        assertThat(waitRepository
-                .findByWorkspaceIdAndStatusOrderByRaisedAtDesc(WORKSPACE_ID, WaitStatus.PENDING))
+        // 会话面：再登记行可见（答得了），终态行不干扰
+        assertThat(waitRepository.findBySessionIdAndStatus("ses_w2", WaitStatus.PENDING))
                 .extracting(AgentWait::getWaitId)
                 .contains(reopened.getWaitId());
     }

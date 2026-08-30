@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.Currency;
 import java.util.LinkedHashMap;
@@ -151,7 +152,7 @@ public class ProjectQueryAppService {
         try {
             long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
             return new PrdResponse(projectId.toString(),
-                    result.stdout().substring(newline + 1), java.time.Instant.ofEpochSecond(mtimeSeconds));
+                    result.stdout().substring(newline + 1), Instant.ofEpochSecond(mtimeSeconds));
         } catch (RuntimeException e) {
             // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,

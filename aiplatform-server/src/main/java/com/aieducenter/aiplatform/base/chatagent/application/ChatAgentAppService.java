@@ -3,7 +3,6 @@ package com.aieducenter.aiplatform.base.chatagent.application;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 
 import org.springframework.stereotype.Service;
 
@@ -83,7 +82,7 @@ public class ChatAgentAppService {
     }
 
     /**
-     * 异步跑一轮对话（#40 BA 访谈编排入口）：提交 {@link ChatAgentResumeGate} 串行
+     * 异步跑一轮对话（BA 访谈编排入口）：提交 {@link ChatAgentResumeGate} 串行
      * 执行后即返回（REST 快返回，过程帧经流桥进 SSE；失败经 error 帧表达，异常由
      * 闸吞掉记日志）。与 settle 续跑共闸——单会话一次一轮（新轮与续跑并发会互踩
      * 同一 (userId, sessionId) 状态槽位）；提交前先复活闸（新 run 承接会话即复活，
@@ -92,24 +91,8 @@ public class ChatAgentAppService {
      * 归调用方口径）。
      */
     public boolean converseAsync(ChatAgentCommand command) {
-        return converseAsync(command, null);
-    }
-
-    /**
-     * 带轮闸的异步轮（#40 访谈化解路由的执行时复核）：排到的执行时刻先过
-     * {@code turnGuard}——false 表示本轮已被更新的事实取代（如前序续跑刚挂起新
-     * 提问、调用方已把本轮文本按答复 settle），跳过对话。提交时与执行时之间会话
-     * 状态可能前移（串行闸只保证不并发，不保证快照不老），在悬提问化解这类
-     * 「执行一刻才知道能不能开轮」的编排靠本缝兜竞态窗口。
-     */
-    public boolean converseAsync(ChatAgentCommand command,
-            Predicate<ChatAgentCommand> turnGuard) {
         resumeGate.reopen(command.sessionId());
-        boolean submitted = resumeGate.submit(command.sessionId(), () -> {
-            if (turnGuard == null || turnGuard.test(command)) {
-                converse(command);
-            }
-        });
+        boolean submitted = resumeGate.submit(command.sessionId(), () -> converse(command));
         if (!submitted) {
             log.warn("[chatagent] 异步轮提交被拒（session={}，复活后与关闸竞态），丢弃本轮",
                     command.sessionId());

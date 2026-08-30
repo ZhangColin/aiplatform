@@ -42,9 +42,6 @@ cartisan:
 app:
   embedding:
     url: http://127.0.0.1:9091
-  # A5 · 知识沉淀：runTask 注入检索的 topK（demo 3，素材增类后上调；A5 §3 可配）
-  knowledge:
-    top-k: 5
   # base.agentengine：等待点权限拒绝上限（同 run 内 deny 累计达限在 settle 结果回报）
   agent:
     wait-deny-cap: 3

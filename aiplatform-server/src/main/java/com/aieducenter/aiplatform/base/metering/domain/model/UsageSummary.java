@@ -18,8 +18,8 @@ import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
  * 无加价/售价），<b>按币种分桶不折算</b>（键 = ISO 4217 币种）；{@code unpriced}
  * = 有 token 用量但事件时点无生效单价行的 (provider, model, 档位) 集合——其分量
  * 不进 cost（<b>不伪装 0</b>），前端据此示「未配价」，查询不阻断。分维度 =
- * 事件 dims 内每个 (key, value) 各自聚合（role=DEV / stage=BA / iterationId=7
- * 各成一桶，无维度的事件不参与；按期聚合 = 业务层过滤 iterationId 桶，A6 §3
+ * 事件 dims 内每个 (key, value) 各自聚合（如 role=BA、role=NAMING 各成一桶），
+ * 无维度的事件不参与；特定维度的桶过滤归业务读侧
  * dims 透传缝）。subject 无任何事件时返回全零 total、空 cost 与空列表，不是错误。</p>
  */
 public record UsageSummary(
@@ -48,7 +48,7 @@ public record UsageSummary(
     }
 
     /**
-     * 分维度聚合项（dimKey = role/stage/iterationId 等，dimValue = 该维度的取值）。
+     * 分维度聚合项（dimKey/dimValue = 业务侧透传的维度键值）。
      */
     public record DimUsage(String dimKey, String dimValue, TokenUsage tokens) {
     }

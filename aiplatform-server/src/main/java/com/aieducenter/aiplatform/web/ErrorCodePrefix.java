@@ -24,7 +24,7 @@ public enum ErrorCodePrefix {
     /** base.chatagent：对话智能体（chat_，#44 引入、REST 面归 #45） */
     CHAT("CHAT_", "base.chatagent"),
 
-    /** business.project：项目主链（prj_） */
+    /** business.project：项目（prj_） */
     PRJ("PRJ_", "business.project"),
 
     /** business.identity：账号认证（idn_） */

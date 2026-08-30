@@ -162,7 +162,7 @@ public class ProjectLifecycleAppService {
 
     /**
      * 删除项目（真删级联）：工作区物理销毁（容器/网络/卷，尽力而为）→ prj_* 行
-     * 删除（期/确认/需求池随 FK 级联）→ knw_chunks 级联清理（尽力而为）→
+     * 删除（历史子表随 FK 级联）→ knw_chunks 级联清理（尽力而为）→
      * SSE workspace-destroyed。
      */
     public void delete(Long projectId) {

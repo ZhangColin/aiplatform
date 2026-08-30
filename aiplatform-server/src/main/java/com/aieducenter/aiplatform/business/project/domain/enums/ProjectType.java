@@ -5,7 +5,7 @@ import com.cartisan.data.jpa.converter.BaseEnumConverter;
 import jakarta.persistence.Converter;
 
 /**
- * 项目类型（业务分类字段，A3：模板概念退役——类型不再决定阶段序列，主链唯一）。
+ * 项目类型（业务分类字段；v1 单模板服务端缺省，分类仅作展示）。
  */
 public enum ProjectType implements BaseEnum<ProjectType> {
 

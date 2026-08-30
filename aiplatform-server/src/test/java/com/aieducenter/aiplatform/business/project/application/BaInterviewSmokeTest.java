@@ -2,18 +2,15 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -21,7 +18,6 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,7 +26,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.aieducenter.aiplatform.base.agentengine.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.agentengine.application.AgentWaitAppService;
 import com.aieducenter.aiplatform.base.agentengine.application.dto.command.WaitSettleCommand;
-import com.aieducenter.aiplatform.base.agentengine.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.agentengine.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.agentengine.infrastructure.WorkspaceHandleClient;
 import com.aieducenter.aiplatform.base.chatagent.infrastructure.ChatAgentWorkspaceClient;
@@ -41,31 +36,19 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.Worksp
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectAgentTaskResponse;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
-import com.aieducenter.aiplatform.business.project.domain.aggregate.Iteration;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
-import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
-import com.aieducenter.aiplatform.business.project.domain.repository.IterationRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * #40 BA 访谈循环真模型冒烟（#49 补 PRD 产出链，#50 补 G1 驳回回流收口，#46 补
- * G2 驳回回流——Demo 意见修正 run + 可选联动 BA 修订 PRD；DEEPSEEK_API_KEY 未设
- * 或 docker daemon 不在整类跳过）：编排全真链（真模型 + 真 dev 容器 + 真 PG
- * 落库/settle 续跑），仅 SSE 发射边（无订阅者的广播口）与工作区句柄解析两处 mock
- * 收口观测（另：引擎侧任务下发——G1 自动 Demo 与 #46 修正 run——mock 收口，
- * 真模型链不进编码引擎）。
+ * BA 访谈循环真模型冒烟（DEEPSEEK_API_KEY 未设或 docker daemon 不在整类跳过）：
+ * 编排全真链（真模型 + 真 dev 容器 + 真 PG 落库/settle 续跑），仅 SSE 发射边
+ * （无订阅者的广播口）与工作区句柄解析两处 mock 收口观测。
  *
  * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
- * 经 PG JSON 落库往返）→ 答卡 settle 续跑 → 催促收敛（自由补充通道，BA 停止提问）
- * → savePrd 产出 PRD（工作区文件 + 状态位 + document-updated + G1 门就绪翻真，
- * 修订再执行三更新）→ 同会话上下文延续；#50 驳回回流：G1 驳回 → 门操作内自动起
- * BA 续轮（意见注入）→ PRD 修订（savePrd 再执行）→ 门重新就绪 → 再确认通过推进
- * DEMO；#46 G2 驳回回流：Demo 驳回（带需求变更标记）→ 修正 run 自动发起（意见进
- * prompt，mock 收口）+ BA 真回流修订 PRD（savePrd 再执行）→ G2 门重新就绪 →
- * 再确认通过推进 DEV；计量落 UsageEvent（engine=agentscope，dims.role=BA）。</p>
+ * 经 PG JSON 落库往返）→ 答复 settle 续跑 → 催促收敛（BA 停止提问）→ savePrd
+ * 产出 PRD（工作区文件 + 状态位 + document-updated，修订再执行三更新）→
+ * 同会话上下文延续；计量落 UsageEvent（engine=agentscope，dims.role=BA）。</p>
  */
 @SpringBootTest
 class BaInterviewSmokeTest {
@@ -82,21 +65,15 @@ class BaInterviewSmokeTest {
     private ProjectQueryAppService queryAppService;
 
     @Autowired
-    private ProjectGateAppService gateAppService;
-
-    @Autowired
     private ProjectKnowledgeAppService knowledgeAppService;
 
     @Autowired
     private ProjectRepository projectRepository;
 
     @Autowired
-    private IterationRepository iterationRepository;
-
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    /** 工作区走真实建链（容器 + wsp_workspaces 行——PRD 读端点/ARTIFACT 摄取按记录寻址）。 */
+    /** 工作区走真实建链（容器 + wsp_workspaces 行——PRD 读端点按记录寻址）。 */
     @Autowired
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
@@ -104,7 +81,7 @@ class BaInterviewSmokeTest {
     @MockitoBean
     private AgentStreamAppService streamAppService;
 
-    /** 通知通道发射边收口（#49 document-updated 观测；BA 访谈链路无其余通知方）。 */
+    /** 通知通道发射边收口（document-updated 观测；BA 访谈链路无其余通知方）。 */
     @MockitoBean
     private PlatformNotificationAppService notificationAppService;
 
@@ -115,10 +92,6 @@ class BaInterviewSmokeTest {
     /** settle 链的引擎侧句柄解析（同容器）。 */
     @MockitoBean
     private WorkspaceHandleClient engineWorkspaceHandleClient;
-
-    /** G1 通过自动 Demo 的引擎下发收口（#50 再确认步：真模型链不进编码引擎）。 */
-    @MockitoBean
-    private ProjectAgentTaskAppService agentTaskAppService;
 
     private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Notify> notifies = new ConcurrentLinkedQueue<>();
@@ -155,11 +128,7 @@ class BaInterviewSmokeTest {
             jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", sessionId);
         }
         if (projectId != null) {
-            // 门决策 FEEDBACK/ARTIFACT 摄取的级联清理（尽力而为，同项目删除口径）
             knowledgeAppService.purgeByProject(projectId);
-            jdbcTemplate.update("DELETE FROM prj_confirmations WHERE iteration_id IN "
-                    + "(SELECT id FROM prj_iterations WHERE project_id = ?)", projectId);
-            jdbcTemplate.update("DELETE FROM prj_iterations WHERE project_id = ?", projectId);
             jdbcTemplate.update("DELETE FROM prj_projects WHERE id = ?", projectId);
         }
         if (workspaceId != null) {
@@ -173,15 +142,15 @@ class BaInterviewSmokeTest {
 
     @Test
     @Timeout(700)
-    void given_one_liner_when_interview_then_reject_reflow_loop_until_gate_approved() {
-        // 真实 dev 容器 + 工作区记录 + 项目/期落库（编排面全真——PRD 读端点与
-        // ARTIFACT 摄取按 wsp_workspaces 行寻址，照实走 docker exec）
+    void given_one_liner_when_interview_then_question_loop_until_prd_produced() {
+        // 真实 dev 容器 + 工作区记录 + 项目落库（编排面全真——PRD 读端点按
+        // wsp_workspaces 行寻址，照实走 docker exec）
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
         WorkspaceHandle handle = workspaceLifecycleAppService.handleOf(workspaceId);
-        when(chatWorkspaceClient.handleOf(workspaceId)).thenReturn(handle);
-        when(engineWorkspaceHandleClient.handleOf(workspaceId)).thenReturn(handle);
+        whenHandle(chatWorkspaceClient, handle);
+        whenHandle(engineWorkspaceHandleClient, handle);
         doAnswer(invocation -> {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
@@ -190,162 +159,98 @@ class BaInterviewSmokeTest {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(notificationAppService).publish(any(), any());
-        Project project = projectRepository.save(Project.create("冒烟官网", null, "opencode",
+        Project project = projectRepository.save(Project.create("冒烟官网", null, "agentscope",
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
-        iterationRepository.save(Iteration.open(projectId, Iteration.FIRST_SEQ,
-                ProjectMainChain.firstStage()));
         sessionId = BaInterviewAppService.SESSION_PREFIX + projectId;
 
         // 1) 一句话开场 → BA 至少一轮实质提问（QUESTION 等待点，前端问答卡形状经 PG 往返）
-        ProjectAgentTaskResponse first = appService.runInterviewTurn(projectId, "做一个企业官网");
+        BaInterviewAppService.InterviewRun first = appService.runInterviewTurn(projectId,
+                "做一个企业官网");
         String question1 = awaitQuestionWaitOf(first.runId());
         Map<String, Object> body1 = waitBody(question1);
         assertThat(framesOf(AgentEventTypes.ROLE_ASSIGNED)).isNotEmpty();
         Map<String, Object> asked = firstQuestionOf(body1);
         assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
         assertThat(asked).containsEntry("multiple", false).containsEntry("custom", true);
-        // PRD 产出前 G1 门不 ready（#49 谓词：计数已达标——首问即计数，缺口在 PRD）
-        assertThat(queryAppService.detail(projectId).gate().ready()).isFalse();
 
-        // 2) 答卡 settle → 续跑 → 第二轮提问（答复循环 ≥2 轮：settle 续跑在同一 run 上
+        // 2) 答复 settle → 续跑 → 第二轮提问（答复循环 ≥2 轮：settle 续跑在同一 run 上
         // 再挂起，新等待点新 waitId；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
         settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
         String question2 = awaitNextQuestionWaitOf(first.runId(), question1);
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
-        // 3) 催促收敛（自由补充通道）：模型可能多问一轮（催促遵从非确定），复刻
-        // 真实用户反复催促——每见新问即以催促文本作答再催（上限 4 轮必收敛）；
-        // 在悬时化解锚回原 run，已收口则催促开新轮（响应 runId 即锚）
+        // 3) 催促收敛：模型可能多问一轮（催促遵从非确定）——每见新问即以催促文本
+        // 答复再催（上限 4 轮必收敛）；无在悬问时开新轮注入催促
         List<String> seenWaits = new ArrayList<>(List.of(question1, question2));
         for (int i = 0; i < 4; i++) {
-            ProjectAgentTaskResponse urged = appService.runInterviewTurn(projectId,
-                    "不要再继续提问了，现在就结束访谈，直接产出 PRD");
-            // 双锚等待：新轮路径帧在催促 run；化解/竞态折入路径帧续在原 run（响应
-            // 的 runId 在折入时是死锚——见 BaInterviewAppService javadoc 竞态口径）
-            String next = awaitResumeOutcome(Set.of(first.runId(), urged.runId()),
-                    seenWaits);
-            if ("finished".equals(next)) {
+            String urge = urgeConverge(seenWaits);
+            if ("finished".equals(urge)) {
                 break;
             }
-            seenWaits.add(next); // 又问了一轮——继续催
         }
-        awaitNoPendingQuestions(); // settle/终态联动（expireRun）收尾窗口
+        awaitNoPendingQuestions();
 
-        // 4) 判定明确/催促收敛 → savePrd（#49）：工作区文件 + 状态位 + document-updated
-        // + G1 门就绪翻真（PRD 读端点直读工作区文件——编码智能体同视图）
+        // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
+        //    （PRD 读端点直读工作区文件——编码智能体同视图）
         awaitPrdProduced(1);
         assertThat(prdBitOf(projectId)).isNotNull();
         PrdResponse prd = queryAppService.prd(projectId);
         assertThat(prd.content()).as("PRD 正文（真模型产出）").isNotBlank();
         assertThat(prd.updatedAt()).isNotNull();
-        assertThat(queryAppService.detail(projectId).gate().ready()).isTrue();
 
         // 5) PRD 修订（savePrd 再次执行）：三更新——文件/状态位/事件
         LocalDateTime firstBit = prdBitOf(projectId);
-        ProjectAgentTaskResponse revision = appService.runInterviewTurn(projectId,
+        BaInterviewAppService.InterviewRun revision = appService.runInterviewTurn(projectId,
                 "需求有更新：官网要增加一个博客板块，请修订并重新保存 PRD");
         awaitRunEnd(revision.runId());
         awaitPrdProduced(2);
         assertThat(prdBitOf(projectId)).isAfterOrEqualTo(firstBit);
         assertThat(queryAppService.prd(projectId).content()).isNotBlank();
 
-        // 6) #50 驳回回流：G1 驳回 → 门操作内自动起 BA 续轮（意见注入 prompt 续
-        // 会话）→ BA 按意见修订 PRD（savePrd 再执行）→ 门重新就绪。意见可澄清：
-        // BA 先挂 QUESTION 续访谈也合法——见新问即以强化意见作答（上限 3 轮）
-        LocalDateTime secondBit = prdBitOf(projectId);
-        Set<String> knownRuns = new HashSet<>();
-        frames.forEach(f -> knownRuns.add(f.runId()));
-        gateAppService.reject(projectId,
-                "需求有调整：去掉刚新增的博客板块，只保留中英双语官网本体，"
-                        + "并补充关键约束——页面需适配移动端浏览", false);
-        // 驳回留痕/SSE 口径零回归：stage-changed(rejected + reason) 照发、停留 BA 段
-        assertThat(notifies.stream()
-                .anyMatch(n -> ProjectEventTypes.STAGE_CHANGED.equals(n.type())
-                        && Boolean.TRUE.equals(n.payload().get("rejected"))
-                        && String.valueOf(n.payload().get("reason")).contains("移动端")))
-                .as("驳回 SSE（rejected + reason）").isTrue();
-        assertThat(queryAppService.detail(projectId).stage())
-                .isEqualTo(ProjectMainChain.STAGE_BA);
-        // 回流续轮的锚：新开轮（role-assigned 新 runId——reject 内同步发射）或
-        // 折入在悬问答（续跑帧在原 run）
-        String reflowRun = frames.stream()
-                .filter(f -> AgentEventTypes.ROLE_ASSIGNED.equals(f.type())
-                        && !knownRuns.contains(f.runId()))
-                .map(Frame::runId).findFirst().orElse(revision.runId());
-        List<String> reflowSeen = new ArrayList<>();
-        for (int i = 0; i < 3; i++) {
-            String next = awaitResumeOutcome(Set.of(reflowRun), reflowSeen);
-            if ("finished".equals(next)) {
-                break;
-            }
-            reflowSeen.add(next);
-            settle(next, "没有需要补充的：按驳回意见直接修订并重新保存 PRD，不要再提问");
-        }
-        awaitPrdProduced(3);
-        assertThat(prdBitOf(projectId)).isAfterOrEqualTo(secondBit);
-        assertThat(queryAppService.detail(projectId).gate().ready())
-                .as("PRD 修订后门重新就绪").isTrue();
+        // 6) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
+        BaInterviewAppService.InterviewRun recall = appService.runInterviewTurn(projectId,
+                "回顾访谈：我把目标用户答成了什么？只回答「海外企业客户」相关的答案要点，不要再提问");
+        awaitRunEnd(recall.runId());
+        assertThat(textOf(recall.runId())).contains("海外");
 
-        // 7) 再确认通过：G1 approve → 推进 DEMO + 自动 Demo 起跑（引擎侧 mock 收口）
-        ProjectDetailResponse approved = gateAppService.approve(projectId);
-        assertThat(approved.stage()).isEqualTo(ProjectMainChain.STAGE_DEMO);
-        verify(agentTaskAppService).dispatchTask(eq(projectId), any());
-        Integer decisions = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_confirmations c JOIN prj_iterations i"
-                        + " ON c.iteration_id = i.id WHERE i.project_id = ?",
-                Integer.class, projectId);
-        assertThat(decisions).as("驳回与通过两笔留痕").isEqualTo(2);
-
-        // 8) #46 G2 驳回回流（带「涉及需求变更」标记）：Demo 驳回 → 修正 run 自动
-        // 发起（意见进 prompt——引擎侧 mock 收口）+ BA 真回流续轮（意见进 BA 上下文
-        // 触发 PRD 修订）→ savePrd 再执行（document-updated 可观测）→ G2 门重新就绪
-        LocalDateTime thirdBit = prdBitOf(projectId);
-        Set<String> runsBeforeG2 = new HashSet<>();
-        frames.forEach(f -> runsBeforeG2.add(f.runId()));
-        gateAppService.reject(projectId,
-                "首页按新定位重做：目标用户聚焦开发者受众，去掉面向大众的营销板块，"
-                        + "突出快速上手与文档入口——涉及需求层面的目标用户调整", true);
-        // 驳回留痕/SSE 口径零回归：停留 DEMO 段
-        assertThat(queryAppService.detail(projectId).stage())
-                .isEqualTo(ProjectMainChain.STAGE_DEMO);
-        // DEMO 修正 run：意见可追溯进 prompt（真模型链不进编码引擎——mock 收口）
-        ArgumentCaptor<String> correction = ArgumentCaptor.forClass(String.class);
-        verify(agentTaskAppService).dispatchDemoCorrectionRun(eq(projectId),
-                correction.capture());
-        assertThat(correction.getValue()).contains("目标用户聚焦开发者受众");
-        // BA 回流续轮（真模型）：无在悬问答 → 开新轮（role-assigned 新 runId 同步发射）
-        String baReflowRun = frames.stream()
-                .filter(f -> AgentEventTypes.ROLE_ASSIGNED.equals(f.type())
-                        && !runsBeforeG2.contains(f.runId()))
-                .map(Frame::runId).findFirst().orElseThrow();
-        List<String> g2Seen = new ArrayList<>();
-        for (int i = 0; i < 3; i++) {
-            String next = awaitResumeOutcome(Set.of(baReflowRun), g2Seen);
-            if ("finished".equals(next)) {
-                break;
-            }
-            g2Seen.add(next);
-            settle(next, "没有需要澄清的：按驳回意见修订 PRD 并重新保存，不要再提问");
-        }
-        awaitPrdProduced(4);
-        assertThat(prdBitOf(projectId)).isAfterOrEqualTo(thirdBit);
-        assertThat(queryAppService.prd(projectId).content()).contains("开发者");
-        assertThat(queryAppService.detail(projectId).gate().ready())
-                .as("BA 修订 PRD 后 G2 门重新就绪").isTrue();
-
-        // 9) G2 再确认通过 → 推进开发段（需求方侧段落收口，G2 通过现状保持）
-        ProjectDetailResponse demoApproved = gateAppService.approve(projectId);
-        assertThat(demoApproved.stage()).isEqualTo(ProjectMainChain.STAGE_DEV);
-        Integer allDecisions = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_confirmations c JOIN prj_iterations i"
-                        + " ON c.iteration_id = i.id WHERE i.project_id = ?",
-                Integer.class, projectId);
-        assertThat(allDecisions).as("G1/G2 各驳回+通过四笔留痕").isEqualTo(4);
+        // 7) 计量：BA 对话用量落 UsageEvent（engine=agentscope、role=BA、归属项目）
+        Integer usageRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM met_usage_events WHERE session_id = ?", Integer.class,
+                sessionId);
+        assertThat(usageRows).isPositive();
+        Map<String, Object> usage = jdbcTemplate.queryForMap(
+                "SELECT engine, subject, dims FROM met_usage_events"
+                        + " WHERE session_id = ? LIMIT 1", sessionId);
+        assertThat(usage.get("engine")).isEqualTo("agentscope");
+        assertThat(String.valueOf(usage.get("subject"))).isEqualTo(projectId.toString());
+        assertThat(String.valueOf(usage.get("dims"))).contains("BA");
     }
 
-    /** 有界等待 document-updated 触达 ≥ n 次（#49：savePrd 每次执行必发；工具在
-     *  run 收口前执行，收敛轮结束即可等，留界兜底层间延迟）。 */
+    // ---------- 内部 ----------
+
+    /** 催促收敛一轮：在悬问以催促文本答复续跑；无在悬问开新轮。返回是否已收口。 */
+    private String urgeConverge(List<String> seenWaits) {
+        String pending = solePendingQuestion();
+        String urgeText = "不要再继续提问了，现在就结束访谈，直接产出 PRD";
+        if (pending != null) {
+            seenWaits.add(pending);
+            settle(pending, urgeText);
+            return awaitResumeOutcome(allRunIds(), seenWaits);
+        }
+        BaInterviewAppService.InterviewRun urged = appService.runInterviewTurn(projectId,
+                urgeText);
+        return awaitResumeOutcome(allRunIds(), seenWaits);
+    }
+
+    private Set<String> allRunIds() {
+        Set<String> runs = new HashSet<>();
+        frames.forEach(f -> runs.add(f.runId()));
+        return runs;
+    }
+
+    /** 有界等待 document-updated 触达 ≥ n 次（savePrd 每次执行必发；工具在 run
+     *  收口前执行，收敛轮结束即可等，留界兜底层间延迟）。 */
     private void awaitPrdProduced(int atLeast) {
         long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
         while (System.nanoTime() < deadline) {
@@ -381,27 +286,7 @@ class BaInterviewSmokeTest {
             sleepQuietly();
         }
         assertThat(pendingQuestionCount()).as("催促后不应再挂起新问题").isZero();
-
-        // 4) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
-        ProjectAgentTaskResponse recall = appService.runInterviewTurn(projectId,
-                "回顾访谈：我把目标用户答成了什么？只回答「海外企业客户」相关的答案要点，不要再提问");
-        awaitRunEnd(recall.runId());
-        assertThat(textOf(recall.runId())).contains("海外");
-
-        // 5) 计量：BA 对话用量落 UsageEvent（engine=agentscope、role=BA、归属项目）
-        Integer usageRows = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM met_usage_events WHERE session_id = ?", Integer.class,
-                sessionId);
-        assertThat(usageRows).isPositive();
-        Map<String, Object> usage = jdbcTemplate.queryForMap(
-                "SELECT engine, subject, dims FROM met_usage_events"
-                        + " WHERE session_id = ? LIMIT 1", sessionId);
-        assertThat(usage.get("engine")).isEqualTo("agentscope");
-        assertThat(String.valueOf(usage.get("subject"))).isEqualTo(projectId.toString());
-        assertThat(String.valueOf(usage.get("dims"))).contains("BA");
     }
-
-    // ---------- 内部 ----------
 
     /** 等待该 run 的 QUESTION 挂起（流帧捕获 → waitId → 落库行）。 */
     private String awaitQuestionWaitOf(String runId) {
@@ -441,8 +326,7 @@ class BaInterviewSmokeTest {
     }
 
     /** 续跑出结果（跨候选 run 锚集）：再挂起（返回新 waitId，排除已见）或收口
-     * （"finished"；error 直接失败）。折入路径的帧在原 run、新轮路径在催促 run——
-     * 锚集并收两者。 */
+     *  （"finished"；error 直接失败）。 */
     private String awaitResumeOutcome(Set<String> runIds, List<String> seenWaitIds) {
         long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
         while (System.nanoTime() < deadline) {
@@ -473,6 +357,14 @@ class BaInterviewSmokeTest {
                 "SELECT COUNT(*) FROM agt_pending_waits WHERE session_id = ? AND status = 1"
                         + " AND kind = 1", Integer.class, sessionId);
         return count == null ? 0 : count;
+    }
+
+    /** 会话当前唯一在悬问答的 waitId（无在悬或多条异常形态返回 null）。 */
+    private String solePendingQuestion() {
+        List<String> waits = jdbcTemplate.queryForList(
+                "SELECT wait_id FROM agt_pending_waits WHERE session_id = ? AND status = 1"
+                        + " AND kind = 1", String.class, sessionId);
+        return waits.size() == 1 ? waits.get(0) : null;
     }
 
     private Frame awaitFrame(String runId, String... types) {
@@ -511,6 +403,16 @@ class BaInterviewSmokeTest {
         waitAppService.settle(workspaceId, waitId,
                 new WaitSettleCommand(WaitSettleCommand.TYPE_ANSWER, List.of(List.of(answer)),
                         null, null));
+    }
+
+    private static void whenHandle(ChatAgentWorkspaceClient client, WorkspaceHandle handle) {
+        org.mockito.Mockito.when(client.handleOf(handle.workspaceId().id() + ""))
+                .thenReturn(handle);
+    }
+
+    private static void whenHandle(WorkspaceHandleClient client, WorkspaceHandle handle) {
+        org.mockito.Mockito.when(client.handleOf(handle.workspaceId().id() + ""))
+                .thenReturn(handle);
     }
 
     /** 等待点 body（PG 落库行——JSON 往返后的前端问答卡载荷；jsonb 经 jdbc 呈 PGobject/串）。 */

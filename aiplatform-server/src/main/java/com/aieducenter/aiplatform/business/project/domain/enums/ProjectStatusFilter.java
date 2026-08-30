@@ -3,16 +3,16 @@ package com.aieducenter.aiplatform.business.project.domain.enums;
 import com.cartisan.core.domain.BaseEnum;
 
 /**
- * 项目列表状态过滤桶（A2 §63 + A3 §4，#34 收敛为 BaseEnum）：跨枚举的派生
- * 谓词，非 {@link ProjectStatus} 的直接值域——pending = 未归档 ∧ 存在 dev
- * 待办（期门就绪 ∨ 工作区待处理等待点），无对应落库状态。REST query param
- * 以 Integer code 传递（框架 converter 按 code 绑定），不合法取值 400 PRJ_014。
+ * 项目列表状态过滤桶：跨枚举的派生谓词，非 {@link ProjectStatus} 的直接值域。
+ * REST query param 以 Integer code 传递（框架 converter 按 code 绑定），不合法
+ * 取值 400 PRJ_014。
  */
 public enum ProjectStatusFilter implements BaseEnum<ProjectStatusFilter> {
 
-    ACTIVE(1, "开发中"),
+    ACTIVE(1, "进行中"),
 
-    PENDING(2, "存在待办"),
+    // code 2 曾是「存在待办」（期门就绪 ∨ 等待点待处理的派生，随门/等待点待办
+    // 概念删除注销），码位不复用；交易环（#21）起四态过滤重建
 
     ARCHIVED(3, "已归档");
 

@@ -14,16 +14,14 @@ import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotification
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * PRD 产物业务契约真实现（#49，base.chatagent 的 savePrd 工具效果半边）：路径
- * 正本 = 主链产物 {@link ProjectMainChain#PRD_ARTIFACT}（PRD 读端点同源）；
- * 落盘成功回调 = 按工作区寻址项目置「PRD 已产出」状态位（G1 门谓词输入）+
- * 发 document-updated（#41 契约，前端失效为主消费）。端口在消费方
- * （base.chatagent），实现归事实持有方（business.project，照 OpenBugQueryPort
- * 跨上下文先例）。
+ * PRD 产物业务契约真实现（base.chatagent 的 savePrd 工具效果半边）：路径正本 =
+ * {@link ProjectArtifacts#PRD}（PRD 读端点同源）；落盘成功回调 = 按工作区寻址
+ * 项目置「PRD 已产出」状态位（成果区长出判据）+ 发 document-updated（前端失效
+ * 为主消费）。端口在消费方（base.chatagent），实现归事实持有方（business.project）。
  *
  * <p>SSE 事务提交后发射（编排层发射制，ADR-0001）：置位短事务先行，事件随后；
  * 置位失败抛出——工具回失败结果，模型可再次保存重试（写文件幂等覆盖）。</p>
@@ -46,7 +44,7 @@ public class PrdArtifactAdapter implements PrdArtifactPort {
 
     @Override
     public String workspacePath() {
-        return ProjectMainChain.PRD_ARTIFACT;
+        return ProjectArtifacts.PRD;
     }
 
     @Override

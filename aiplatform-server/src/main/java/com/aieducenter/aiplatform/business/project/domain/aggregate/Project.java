@@ -19,13 +19,14 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 项目聚合根（{@code prj_projects}）：用户的长期实体——业务字段 + dev 工作区引用
- * + 归属账号 + 归档终点（A3 §4）。
+ * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
+ * dev 工作区引用 + 归属账号 + 归档终点。归档是单向终点动作（archived_at 落定）；
+ * 「进行中/已归档」即其全部派生态。一个项目 = 一个 dev 环境（workspaceId 软引用
+ * wsp 表，级联清理由编排负责）。删除真删级联，无软删除——继承 Auditable 只取
+ * 审计字段。
  *
- * <p>状态机主体在期（{@code prj_iterations}），项目自身无阶段字段；「开发中/
- * 已交付」是有无 OPEN 期的派生投影，归档是单向终点动作（archived_at 落定，
- * 端点归片5c）。Phase A 一个项目 = 一个 dev 环境（workspaceId 软引用 wsp 表，
- * 级联清理由编排负责）。删除真删级联，无软删除——继承 Auditable 只取审计字段。</p>
+ * <p>engine 列为多引擎时代的遗留（NOT NULL 列，取值 = 单栈常量），随 Flyway
+ * squash（#18）处置。</p>
  */
 @Entity
 @Table(name = "prj_projects")

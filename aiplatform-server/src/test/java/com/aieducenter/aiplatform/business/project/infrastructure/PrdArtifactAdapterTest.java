@@ -18,7 +18,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotification
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,9 +31,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
- * {@link PrdArtifactAdapter}（#49 savePrd 效果半边）：路径正本 = 主链产物常量；
- * 落盘回调 = 置「PRD 已产出」状态位（事务）+ 发 document-updated（提交后发射，
- * payload 按 #41 契约）；修订再执行只前进（时间戳刷新、事件每执行必发）；工作区
+ * {@link PrdArtifactAdapter}（savePrd 效果半边）：路径正本 = 产物常量；
+ * 落盘回调 = 置「PRD 已产出」状态位（事务，成果区长出判据）+ 发 document-updated
+ * （提交后发射）；修订再执行只前进（时间戳刷新、事件每执行必发）；工作区
  * 无项目 → PRJ_001 不发事件。
  */
 @SpringBootTest
@@ -60,7 +60,7 @@ class PrdArtifactAdapterTest {
     @Test
     void given_contract_when_workspacePath_then_main_chain_artifact() {
         // 路径正本与 PRD 读端点同源（单一事实，勿散落字面量）
-        assertThat(prdArtifactPort.workspacePath()).isEqualTo(ProjectMainChain.PRD_ARTIFACT);
+        assertThat(prdArtifactPort.workspacePath()).isEqualTo(ProjectArtifacts.PRD);
     }
 
     @Test

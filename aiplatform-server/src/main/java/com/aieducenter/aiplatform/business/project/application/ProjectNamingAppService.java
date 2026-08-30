@@ -149,7 +149,7 @@ public class ProjectNamingAppService implements DisposableBean {
                 SESSION_PREFIX + projectId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),
-                        Map.of(ProjectAgentTaskAppService.DIM_ROLE, NAMING_ROLE_DIM)),
+                        Map.of(ProjectQueryAppService.DIM_ROLE, NAMING_ROLE_DIM)),
                 null, // 本地兜底工作区：取名不读写项目 dev 工作区
                 Map.of());
         ChatAgentReply reply = chatAgentAppService.converseSilently(command);

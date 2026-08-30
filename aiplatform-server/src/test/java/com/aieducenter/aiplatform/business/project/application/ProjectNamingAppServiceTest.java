@@ -82,7 +82,7 @@ class ProjectNamingAppServiceTest {
         assertThat(command.getValue().workspaceId()).isNull();
         assertThat(command.getValue().usageContext().subject()).isEqualTo("43");
         assertThat(command.getValue().usageContext().dims())
-                .containsEntry(ProjectAgentTaskAppService.DIM_ROLE, "NAMING");
+                .containsEntry(ProjectQueryAppService.DIM_ROLE, "NAMING");
         assertThat(command.getValue().runId()).isNotBlank();
     }
 

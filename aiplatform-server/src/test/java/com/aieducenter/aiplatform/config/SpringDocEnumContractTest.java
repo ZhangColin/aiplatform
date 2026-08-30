@@ -70,10 +70,10 @@ class SpringDocEnumContractTest {
 
     @Test
     void given_representative_groups_when_read_schemas_then_enum_fields_are_integer() throws Exception {
-        // project：ProjectResponse.status（#34 由 String 投影收敛为 BaseEnum）
+        // project：ProjectResponse.status（由 String 投影收敛为 BaseEnum）
         JsonNode project = fetchGroup("project");
         assertThat(enumFieldType(project, "ProjectResponse", "status")).isEqualTo("integer");
-        assertThat(enumFieldType(project, "ProjectAgentTaskResponse", "role")).isEqualTo("integer");
+        assertThat(enumFieldType(project, "ProjectResponse", "type")).isEqualTo("integer");
         // workspace：既有枚举字段同样 integer
         assertThat(enumFieldType(fetchGroup("workspace"), "CreateWorkspaceCommand", "kind"))
                 .isEqualTo("integer");

@@ -5,15 +5,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 角色卡 preset（六角色代码配置不落库，B0 §1 拆解：底座无角色概念，preset 是入参源）。
+ * 角色卡 preset（代码配置不落库；v1 资产里只有 BA 一个入口智能体——编码智能体
+ * 资产随生成环落位）。
  */
 class RolePresetTest {
 
     @Test
-    void given_presets_when_inspect_then_six_roles_fully_configured() {
-        assertThat(RolePreset.values()).hasSize(6);
+    void given_presets_when_inspect_then_ba_fully_configured() {
         assertThat(RolePreset.values()).extracting(Enum::name)
-                .containsExactlyInAnyOrder("BA", "DEV", "DELIVERY", "ARCH", "TEST", "DEMO");
+                .containsExactly("BA");
 
         for (RolePreset role : RolePreset.values()) {
             assertThat(role.getName()).isNotBlank();
@@ -23,18 +23,17 @@ class RolePresetTest {
     }
 
     @Test
-    void given_model_tier_when_inspect_then_dev_prothers_flash() {
-        // demo 结论照收：文档类角色 flash（走链路优先），开发工程师 pro（吃推理）
-        assertThat(RolePreset.DEV.modelId()).isEqualTo("deepseek-v4-pro");
+    void given_model_tier_when_inspect_then_ba_flash() {
+        // 文档类角色 flash（走链路优先）
         assertThat(RolePreset.BA.modelId()).isEqualTo("deepseek-v4-flash");
-        assertThat(RolePreset.DEMO.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(RolePreset.BA.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
     }
 
     @Test
     void given_name_when_by_name_then_resolved_or_empty() {
-        assertThat(RolePreset.byName("DEV")).contains(RolePreset.DEV);
-        assertThat(RolePreset.byName(" dev ")).contains(RolePreset.DEV);
-        assertThat(RolePreset.byName("CODEX")).isEmpty();
+        assertThat(RolePreset.byName("BA")).contains(RolePreset.BA);
+        assertThat(RolePreset.byName(" ba ")).contains(RolePreset.BA);
+        assertThat(RolePreset.byName("DEV")).isEmpty(); // 编码角色 preset 已随任务下发退场
         assertThat(RolePreset.byName(null)).isEmpty();
         assertThat(RolePreset.byName("")).isEmpty();
     }

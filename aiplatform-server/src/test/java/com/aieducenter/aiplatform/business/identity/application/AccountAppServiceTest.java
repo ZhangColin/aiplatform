@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.identity.application;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,8 +16,7 @@ import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRep
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 账号查询（A4 §6 指派下拉源 + task BC 消费面）：全量清单（建档顺序）、
- * 存在性、批量显示名（不存在的 id 不入 Map）。
+ * 账号查询：全量清单（建档顺序、字符串 id）。
  */
 @SpringBootTest
 class AccountAppServiceTest {
@@ -30,8 +30,10 @@ class AccountAppServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
     @AfterEach
-    void tearDown() {
+    void cleanAccounts() {
+        // 测试库跨运行留存：前后各清一次，隔离历史残留行（本地持久 PG）
         jdbcTemplate.update("DELETE FROM idn_accounts");
     }
 
@@ -47,26 +49,6 @@ class AccountAppServiceTest {
                 .containsExactly(first.toString(), second.toString()); // 建档顺序稳定
         assertThat(accounts).extracting(AccountResponse::displayName)
                 .containsExactly("开发甲", "测试乙");
-    }
-
-    @Test
-    void given_accounts_when_exists_then_by_id_only() {
-        Long existing = persistedAccount("sub-1", "开发甲");
-
-        assertThat(appService.exists(existing)).isTrue();
-        assertThat(appService.exists(-1L)).isFalse();
-        assertThat(appService.exists(null)).isFalse(); // task BC 指派校验的入参形态
-    }
-
-    @Test
-    void given_accounts_when_names_by_ids_then_missing_skipped() {
-        Long existing = persistedAccount("sub-1", "开发甲");
-
-        assertThat(appService.namesByIds(List.of(existing, -1L)))
-                .containsEntry(existing, "开发甲")
-                .hasSize(1); // 不存在的 id 不入 Map
-        assertThat(appService.namesByIds(null)).isEmpty();
-        assertThat(appService.namesByIds(List.of())).isEmpty();
     }
 
     private Long persistedAccount(String externalId, String displayName) {

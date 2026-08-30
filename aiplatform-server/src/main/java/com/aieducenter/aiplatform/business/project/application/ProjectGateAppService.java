@@ -21,7 +21,6 @@ import com.aieducenter.aiplatform.business.project.domain.enums.IterationStatus;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
-import com.aieducenter.aiplatform.business.project.domain.port.OpenBugQueryPort;
 import com.aieducenter.aiplatform.business.project.domain.repository.ConfirmationRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.IterationRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -56,7 +55,6 @@ public class ProjectGateAppService {
     private final IterationRepository iterationRepository;
     private final ConfirmationRepository confirmationRepository;
     private final StageAdvanceService stageAdvanceService;
-    private final OpenBugQueryPort openBugQueryPort;
     private final ProjectAgentTaskAppService agentTaskAppService;
     private final BaInterviewAppService baInterviewAppService;
     private final ProjectQueryAppService queryAppService;
@@ -68,7 +66,6 @@ public class ProjectGateAppService {
                                  IterationRepository iterationRepository,
                                  ConfirmationRepository confirmationRepository,
                                  StageAdvanceService stageAdvanceService,
-                                 OpenBugQueryPort openBugQueryPort,
                                  ProjectAgentTaskAppService agentTaskAppService,
                                  BaInterviewAppService baInterviewAppService,
                                  ProjectQueryAppService queryAppService,
@@ -79,7 +76,6 @@ public class ProjectGateAppService {
         this.iterationRepository = iterationRepository;
         this.confirmationRepository = confirmationRepository;
         this.stageAdvanceService = stageAdvanceService;
-        this.openBugQueryPort = openBugQueryPort;
         this.agentTaskAppService = agentTaskAppService;
         this.baInterviewAppService = baInterviewAppService;
         this.queryAppService = queryAppService;
@@ -105,7 +101,7 @@ public class ProjectGateAppService {
 
         // 引擎计数门禁先行（内存裁决）；业务谓词后查（A3 §2.4 编排半边，与 gateView
         // 就绪同口径）：需求确认（G1）= PRD 已产出（查项目状态位不查文件系统，#49——
-        // 计数门禁并行保留）；开发完成确认（G3，actor=开发平台）= 无未关闭 Bug。
+        // 计数门禁并行保留）。
         AdvanceResult result = stageAdvanceService.advance(ProjectMainChain.definition(),
                 iteration.getStage(), iteration.getStageTaskCount());
         if (result instanceof AdvanceResult.GateBlocked) {
@@ -114,10 +110,6 @@ public class ProjectGateAppService {
         if (ProjectMainChain.STAGE_BA.equals(current.name())
                 && project.getPrdProducedAt() == null) {
             throw new ApplicationException(ProjectMessage.GATE_PRD_NOT_PRODUCED);
-        }
-        if (ProjectMainChain.GATE_ACTOR_PLATFORM.equals(current.exitGate().actor())
-                && openBugQueryPort.hasOpenBugs(projectId)) {
-            throw new ApplicationException(ProjectMessage.GATE_OPEN_BUGS);
         }
         StageEntry next = ((AdvanceResult.Advanced) result).to();
         ConfirmationKind kind = confirmationKindOf(current);

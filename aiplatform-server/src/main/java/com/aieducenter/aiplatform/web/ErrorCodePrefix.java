@@ -29,10 +29,7 @@ public enum ErrorCodePrefix {
     PRJ("PRJ_", "business.project"),
 
     /** business.identity：账号认证（idn_） */
-    IDN("IDN_", "business.identity"),
-
-    /** business.task：任务系统（tsk_，A4 落码） */
-    TASK("TASK_", "business.task");
+    IDN("IDN_", "business.identity");
 
     private final String prefix;
     private final String boundedContext;

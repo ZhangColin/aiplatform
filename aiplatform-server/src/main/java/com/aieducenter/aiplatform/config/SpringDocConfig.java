@@ -72,16 +72,6 @@ public class SpringDocConfig {
         return bcGroup("identity", "账号认证（business.identity）", "business.identity");
     }
 
-    @Bean
-    public GroupedOpenApi workbenchGroup() {
-        return bcGroup("workbench", "工作台（business.workbench）", "business.workbench");
-    }
-
-    @Bean
-    public GroupedOpenApi taskGroup() {
-        return bcGroup("task", "任务系统（business.task）", "business.task");
-    }
-
     private GroupedOpenApi bcGroup(String group, String displayName, String bcPackage) {
         return GroupedOpenApi.builder()
                 .group(group)

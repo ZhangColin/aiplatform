@@ -167,7 +167,7 @@ public class BaInterviewAppService {
     /** 答复型 settle 命令（自由补充文本即答复）。 */
     private static ProjectWaitSettleCommand answerSettlement(String prompt) {
         return new ProjectWaitSettleCommand(WaitSettleCommand.TYPE_ANSWER,
-                List.of(List.of(prompt)), null, null, null);
+                List.of(List.of(prompt)), null, null);
     }
 
     // ---------- 内部 ----------

@@ -33,7 +33,6 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
-import com.aieducenter.aiplatform.business.project.domain.port.OpenBugQueryPort;
 import com.aieducenter.aiplatform.business.project.domain.repository.IterationRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -52,8 +51,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * 门操作与收口（片5b 验收：门禁 409 / 驳回停留留痕 / G1 自动 Demo / G4 收口）：
- * approve = 引擎计数 ∧ 业务谓词（G3 经 {@link OpenBugQueryPort} 缝，#26 提供实现）
- * → 留痕 + 期迁移/收口 → SSE stage-changed；reject 一律停留带 reason。
+ * approve = 引擎计数 ∧ 业务谓词 → 留痕 + 期迁移/收口 → SSE stage-changed；
+ * reject 一律停留带 reason。
  * 主链推进语义（计数门禁/终态收口）归 base.process StageAdvanceServiceTest。
  */
 @SpringBootTest
@@ -76,10 +75,6 @@ class ProjectGateAppServiceTest {
 
     @MockitoBean
     private PlatformNotificationAppService notificationAppService;
-
-    /** G3 业务谓词端口（#26 起真实现查 tsk_bugs；此处 mock 以便验证调用与翻态场景）。 */
-    @MockitoBean
-    private OpenBugQueryPort openBugQueryPort;
 
     /** 知识端口 mock（A5 摄取挂钩验证；真实入库链路见 KnowledgeAppServiceTest）。 */
     @MockitoBean
@@ -197,30 +192,14 @@ class ProjectGateAppServiceTest {
     }
 
     @Test
-    void given_open_bugs_when_approve_test_gate_then_prj_008_stays() {
+    void given_test_gate_when_approve_then_advance_acceptance() {
         Long projectId = persistedProjectWithIteration(ProjectMainChain.STAGE_TEST, 1);
-        when(openBugQueryPort.hasOpenBugs(projectId)).thenReturn(true);
-
-        assertThatThrownBy(() -> appService.approve(projectId))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.GATE_OPEN_BUGS.message());
-
-        // 业务谓词不满足：停留测试段、无留痕（拍板未成立）
-        assertThat(openIteration(projectId).getStage()).isEqualTo(ProjectMainChain.STAGE_TEST);
-        assertThat(confirmationCount()).isZero();
-    }
-
-    @Test
-    void given_no_open_bugs_when_approve_test_gate_then_advance_acceptance() {
-        Long projectId = persistedProjectWithIteration(ProjectMainChain.STAGE_TEST, 1);
-        when(openBugQueryPort.hasOpenBugs(projectId)).thenReturn(false);
 
         ProjectDetailResponse response = appService.approve(projectId);
 
         assertThat(response.stage()).isEqualTo(ProjectMainChain.STAGE_ACCEPTANCE);
         // G3 过门留痕（kind=开发完成确认）
         assertThat(soleConfirmationRow().get("kind")).isEqualTo(3);
-        verify(openBugQueryPort).hasOpenBugs(projectId);
     }
 
     @Test

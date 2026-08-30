@@ -2,15 +2,11 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -29,9 +25,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
-import com.aieducenter.aiplatform.business.project.application.dto.response.GateReadyResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectBriefResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
@@ -43,7 +37,6 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectMainChain;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
-import com.aieducenter.aiplatform.business.project.domain.port.OpenBugQueryPort;
 import com.aieducenter.aiplatform.business.project.domain.repository.IterationRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -51,10 +44,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 项目读侧用例（片5c，A3 §5 / A1 §2.5 / A6 §3）：详情（期位置 + 主链定义数据 +
  * 门就绪 + 派生状态）、列表（状态过滤 ACTIVE/PENDING/ARCHIVED/缺省 all，#34 收敛为
  * Integer code）、用量（总量 + 平台成本 + 分模型 + 分角色 + 按期）+ PRD 读（#41，
- * 直读工作区文件事实源）+ workbench 查询端口（门就绪清单 / workspaceId 寻址，A2 §5）。
- * 写侧（生命周期/门操作/需求池）各自成服务，读拼装集中一处——门就绪的裁决
- * （计数 ∧ 业务谓词）与列表 pending 派生（期门就绪 ∨ 工作区待处理等待点，A2 §63）
- * 同源，避免两处口径漂移。
+ * 直读工作区文件事实源）。写侧（生命周期/门操作/需求池）各自成服务，读拼装集中
+ * 一处——门就绪的裁决（计数 ∧ 业务谓词）与列表 pending 派生（期门就绪 ∨ 工作区
+ * 待处理等待点，A2 §63）同源，避免两处口径漂移。
  */
 @Service
 public class ProjectQueryAppService {
@@ -83,7 +75,6 @@ public class ProjectQueryAppService {
     private final ProjectRepository projectRepository;
     private final IterationRepository iterationRepository;
     private final StageAdvanceService stageAdvanceService;
-    private final OpenBugQueryPort openBugQueryPort;
     private final AgentWaitAppService agentWaitAppService;
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -91,14 +82,12 @@ public class ProjectQueryAppService {
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   IterationRepository iterationRepository,
                                   StageAdvanceService stageAdvanceService,
-                                  OpenBugQueryPort openBugQueryPort,
                                   AgentWaitAppService agentWaitAppService,
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService) {
         this.projectRepository = projectRepository;
         this.iterationRepository = iterationRepository;
         this.stageAdvanceService = stageAdvanceService;
-        this.openBugQueryPort = openBugQueryPort;
         this.agentWaitAppService = agentWaitAppService;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -241,112 +230,7 @@ public class ProjectQueryAppService {
         }
     }
 
-    // ---------- workbench 查询端口（A2 §5） ----------
-
-    /**
-     * 门就绪项目清单（workbench GATE_PENDING 待办投影源）：期 OPEN ∧ 当前阶段
-     * 有门 ∧ 门禁满足（{@link #detail} 的 gate 视图同一裁决口径，两处不漂移）。
-     * 归档项目不在列（单向终点，在办视角排除）；创建时间倒序。
-     */
-    public List<GateReadyResponse> listGateReady() {
-        Map<Long, List<Iteration>> iterationsByProject = iterationsByProject();
-        return projectsNewestFirst().stream()
-                .filter(project -> project.getArchivedAt() == null)
-                .map(project -> gateReadyOf(project, Iteration
-                        .currentOf(iterationsByProject.get(project.getId())).orElse(null)))
-                .filter(Objects::nonNull)
-                .toList();
-    }
-
-    /**
-     * workspaceId → projectId 寻址（workbench AGENT_WAIT 待办投影：等待点挂工作区，
-     * 待办以项目寻址）。无对应项目的工作区（非 dev 环境 / 项目已删的残留等待点）
-     * 不在返回——其待办无处导航，投影层自会跳过。
-     */
-    public Map<Long, String> projectIdByWorkspaceId(Collection<Long> workspaceIds) {
-        if (workspaceIds == null || workspaceIds.isEmpty()) {
-            return Map.of();
-        }
-        return projectRepository.findByWorkspaceIdIn(workspaceIds).stream()
-                .collect(Collectors.toMap(Project::getWorkspaceId,
-                        project -> project.getId().toString()));
-    }
-
-    /**
-     * 项目简报批查（task BC opc 任务卡片的最小项目上下文，A4 §7）：项目名 +
-     * 预览地址（工作区记录的 previewPort 派生——示意级预览 URL 形如
-     * {@code http://localhost:{port}/}，与 EnvironmentBackend.exposePort 同式，
-     * 此处零副作用只读派生）。不存在的项目（已删残留）不在 Map。
-     */
-    public Map<Long, ProjectBriefResponse> projectBriefs(Collection<Long> projectIds) {
-        if (projectIds == null || projectIds.isEmpty()) {
-            return Map.of();
-        }
-        return projectRepository.findAllById(projectIds).stream()
-                .collect(Collectors.toMap(Project::getId, this::briefOf));
-    }
-
-    /**
-     * 项目归属账号（task BC 详情的 opc/dev 谓词半边：assignee ∨ owner，
-     * A4 §7）。项目不存在返回 null。
-     */
-    public Long ownerAccountIdOf(Long projectId) {
-        return projectRepository.findById(projectId)
-                .map(Project::getOwnerAccountId)
-                .orElse(null);
-    }
-
-    /**
-     * 项目存在性把关（task BC 读侧入口共用，PRJ_001 同码）。
-     *
-     * @throws ApplicationException PRJ_001 项目不存在
-     */
-    public void requireProject(Long projectId) {
-        loadProject(projectId);
-    }
-
-    /**
-     * projectId 字符串寻址解析 + 存在性把关（task BC 的项目路径端点收口——跨
-     * 上下文经应用层，端点层工具不外借；非数值/非正数同 PRJ_001，404 语义）。
-     *
-     * @throws ApplicationException PRJ_001 项目不存在
-     */
-    public Long requireProjectId(String projectId) {
-        try {
-            long parsed = Long.parseLong(projectId);
-            if (parsed > 0) {
-                return loadProject(parsed).getId();
-            }
-        } catch (NumberFormatException ignored) {
-            // 非数值 → 落到下方统一 404
-        }
-        throw new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND);
-    }
-
-    // ---------- 全量读装载（列表与门就绪清单共用前奏） ----------
-
-    /** 简报拼装：项目名 + 预览地址（previewPort 派生，零副作用）；工作区记录
-     * 已亡的残留项目预览地址置 null（卡片仍可导航，不因读简报炸列表）。 */
-    private ProjectBriefResponse briefOf(Project project) {
-        return new ProjectBriefResponse(project.getId().toString(), project.getName(),
-                previewUrlOf(project.getWorkspaceId()));
-    }
-
-    /** 预览地址派生（与 EnvironmentBackend.exposePort 同式，零副作用）；工作区
-     * 记录已亡（WSP_001）置 null，其余异常照抛。 */
-    private String previewUrlOf(Long workspaceId) {
-        try {
-            int previewPort = workspaceLifecycleAppService
-                    .get(Long.toString(workspaceId)).previewPort();
-            return "http://localhost:" + previewPort + "/";
-        } catch (ApplicationException e) {
-            if (!WorkspaceMessage.WORKSPACE_NOT_FOUND.code()
-                    .equals(e.getCodeMessage().code())) {
-                throw e;
-            }
-            return null;
-        }
-    }
+    // ---------- 全局读装载（列表共用前奏） ----------
 
     /** 期按项目分组（查询收口：每项目只取当前期候选——OPEN ∪ 无 OPEN 时 max-seq
      * 闭期，currentOf 选取语义与全量等价；列表/门就绪清单一次装载共用）。 */
@@ -365,8 +249,7 @@ public class ProjectQueryAppService {
     /**
      * 当前阶段门就绪（A3 §5：计数门禁 ∧ 业务谓词）：无 OPEN 期 / 终态 / 无门段
      * 返回 null（无按钮可点亮）；G1（需求梳理段）另 ∧ 「PRD 已产出」（查项目
-     * 状态位不查文件系统，#49——PRD 产出前门不 ready）；G3（actor=开发平台）
-     * 另 ∧ 无未关闭 Bug。
+     * 状态位不查文件系统，#49——PRD 产出前门不 ready）。
      */
     private ProjectDetailResponse.GateView gateView(Project project, Iteration iteration) {
         if (iteration == null || iteration.getStatus() != IterationStatus.OPEN) {
@@ -382,23 +265,7 @@ public class ProjectQueryAppService {
         if (ready && ProjectMainChain.STAGE_BA.equals(iteration.getStage())) {
             ready = project.getPrdProducedAt() != null;
         }
-        if (ready && ProjectMainChain.GATE_ACTOR_PLATFORM.equals(gate.actor())) {
-            ready = !openBugQueryPort.hasOpenBugs(project.getId());
-        }
         return new ProjectDetailResponse.GateView(gate.actor(), ready);
-    }
-
-    /** 门就绪待办条目（未就绪 / 无门 / 已收口 → null）：title 素材（阶段标签）与时刻在此取齐。 */
-    private GateReadyResponse gateReadyOf(Project project, Iteration iteration) {
-        ProjectDetailResponse.GateView gate = gateView(project, iteration);
-        if (gate == null || !gate.ready()) {
-            return null;
-        }
-        StageEntry stage = ProjectMainChain.definition().find(iteration.getStage()).orElseThrow();
-        LocalDateTime since = iteration.getUpdatedAt() != null
-                ? iteration.getUpdatedAt() : iteration.getCreatedAt();
-        return new GateReadyResponse(project.getId().toString(), stage.label(), gate.actor(),
-                since.atZone(ZoneId.systemDefault()).toInstant());
     }
 
     // ---------- 列表过滤 ----------

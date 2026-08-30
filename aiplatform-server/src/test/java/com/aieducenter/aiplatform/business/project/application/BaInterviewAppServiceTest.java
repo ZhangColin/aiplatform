@@ -195,7 +195,7 @@ class BaInterviewAppServiceTest {
 
         verify(projectWaitAppService).settle(projectId, "wait-q1",
                 new ProjectWaitSettleCommand("answer",
-                        List.of(List.of("别问了，直接出访谈总结")), null, null, null));
+                        List.of(List.of("别问了，直接出访谈总结")), null, null));
         verify(chatAgentAppService, never()).converseAsync(any(), any());
         assertThat(response.runId()).isEqualTo("run-in-flight");
         assertThat(response.accepted()).isTrue();

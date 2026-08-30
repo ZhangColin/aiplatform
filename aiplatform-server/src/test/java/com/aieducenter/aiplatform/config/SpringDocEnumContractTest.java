@@ -35,7 +35,7 @@ class SpringDocEnumContractTest {
 
     private static final List<String> GROUPS = List.of(
             "workspace", "agentengine", "eventhub", "knowledge", "metering",
-            "project", "identity", "workbench", "task");
+            "project", "identity");
 
     private static final String BASE_PACKAGE = "com.aieducenter.aiplatform";
 
@@ -74,10 +74,8 @@ class SpringDocEnumContractTest {
         JsonNode project = fetchGroup("project");
         assertThat(enumFieldType(project, "ProjectResponse", "status")).isEqualTo("integer");
         assertThat(enumFieldType(project, "ProjectAgentTaskResponse", "role")).isEqualTo("integer");
-        // workspace / task：既有枚举字段同样 integer
+        // workspace：既有枚举字段同样 integer
         assertThat(enumFieldType(fetchGroup("workspace"), "CreateWorkspaceCommand", "kind"))
-                .isEqualTo("integer");
-        assertThat(enumFieldType(fetchGroup("task"), "TaskResponse", "status"))
                 .isEqualTo("integer");
     }
 

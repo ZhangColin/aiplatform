@@ -31,13 +31,14 @@ class ErrorCodePrefixTest {
     }
 
     @Test
-    void given_adr_registry_when_compare_then_eight_prefixes_registered() {
-        // ADR-0001 前缀注册表：WSP_/AGT_/KNW_/PRJ_ + METER_/IDN_/TASK_ + CHAT_（#44 新增 BC）
+    void given_adr_registry_when_compare_then_seven_prefixes_registered() {
+        // ADR-0001 前缀注册表：WSP_/AGT_/KNW_/PRJ_ + METER_/IDN_ + CHAT_（#44 新增 BC；
+        // TASK_ 随任务系统删除注销）
         List<String> prefixes = Arrays.stream(ErrorCodePrefix.values())
                 .map(ErrorCodePrefix::prefix)
                 .toList();
 
         assertThat(prefixes).containsExactlyInAnyOrder(
-                "WSP_", "AGT_", "KNW_", "PRJ_", "METER_", "IDN_", "TASK_", "CHAT_");
+                "WSP_", "AGT_", "KNW_", "PRJ_", "METER_", "IDN_", "CHAT_");
     }
 }

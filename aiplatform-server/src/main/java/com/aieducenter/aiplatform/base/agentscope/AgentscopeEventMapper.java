@@ -151,7 +151,7 @@ final class AgentscopeEventMapper {
     /**
      * 提问载荷投影（ask_user input → 前端问答卡形状）：header 缺省中性兜底；
      * options 字符串列表 → {label} 对象列表（无选项纯开放题也保留——custom=true
-     * 恒可自由输入）。
+     * 恒可自由输入）；multiple 从工具入参投影（多选勾选提交，缺省 false 单选点即答）。
      */
     private static List<Map<String, Object>> questionPayloads(List<ToolUseBlock> questions) {
         return questions.stream().map(tc -> {
@@ -159,7 +159,7 @@ final class AgentscopeEventMapper {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("header", textOrDefault(input.get("header"), "提问"));
             payload.put("question", textOrDefault(input.get("question"), ""));
-            payload.put("multiple", false);
+            payload.put("multiple", Boolean.TRUE.equals(input.get("multiple")));
             payload.put("custom", true);
             payload.put("options", optionPayloads(input.get("options")));
             return payload;

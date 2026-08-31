@@ -47,6 +47,9 @@ public class AskUserTool extends ToolBase {
                                         "type", "array",
                                         "items", Map.of("type", "string"),
                                         "description", "候选选项（无可不填，用户可自由输入）"),
+                                "multiple", Map.of(
+                                        "type", "boolean",
+                                        "description", "是否允许多选（组合式回答）；缺省 false 单选"),
                                 // 答复键：续跑注入（问答答复通道把用户答复写进 input）
                                 // ——模型调用时不传
                                 "answer", Map.of(

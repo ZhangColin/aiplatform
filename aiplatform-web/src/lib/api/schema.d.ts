@@ -134,6 +134,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/questions/{qid}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 问答卡作答（ask_user 挂起续跑）
+         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；项目不存在 404 PRJ_001
+         */
+        post: operations["answerQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 指令区发言（BA 访谈后续轮）
+         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001
+         */
+        post: operations["postMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/archive": {
         parameters: {
             query?: never;
@@ -540,6 +580,8 @@ export interface components {
             archived?: boolean;
             /** Format: date-time */
             createdAt?: string;
+            /** Format: date-time */
+            prdProducedAt?: string;
         };
         RenameProjectCommand: {
             /** @description 新项目名（空白拒绝 PRJ_005，长度上限 100 与建项目同口径） */
@@ -552,6 +594,40 @@ export interface components {
             data?: components["schemas"]["ProjectDetailResponse"];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
+        };
+        AnswerQuestionCommand: {
+            runId: string;
+            toolCalls: components["schemas"]["ToolCall"][];
+            answer: string;
+        };
+        ToolCall: {
+            id?: string;
+            name?: string;
+            input?: {
+                [key: string]: Record<string, never>;
+            };
+        };
+        ApiResponseVoid: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: Record<string, never>;
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PostMessageCommand: {
+            content: string;
+        };
+        ApiResponseInterviewTurnResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["InterviewTurnResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        InterviewTurnResponse: {
+            runId?: string;
         };
         ApiResponseListProjectResponse: {
             /** Format: int32 */
@@ -681,14 +757,6 @@ export interface components {
             code?: number;
             message?: string;
             data?: components["schemas"]["AccountResponse"][];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        ApiResponseVoid: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: Record<string, never>;
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
@@ -863,6 +931,59 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectDetailResponse"];
+                };
+            };
+        };
+    };
+    answerQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                qid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerQuestionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    postMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseInterviewTurnResponse"];
                 };
             };
         };

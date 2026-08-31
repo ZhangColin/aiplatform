@@ -3,8 +3,14 @@ package com.aieducenter.aiplatform.business.project.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,6 +34,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -36,7 +44,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 /**
  * BA 访谈编排：对话命令的会话寻址（projectId → ba-{projectId} 稳定绑定，每轮
  * 都续此会话）、计量归属（role=BA 维度）、role-assigned 帧序（engine=agentscope）、
- * 问答答复续跑（挂起帧载荷 + 答复 → resume 从项目侧事实重建恢复私货）。
+ * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起帧
+ * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）。
  */
 @SpringBootTest
 class BaInterviewAppServiceTest {
@@ -60,6 +69,9 @@ class BaInterviewAppServiceTest {
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
+
+    @MockitoBean
+    private KnowledgePort knowledgePort;
 
     @AfterEach
     void tearDown() {
@@ -94,6 +106,91 @@ class BaInterviewAppServiceTest {
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).containsEntry("role", "BA");
+        // 后续轮不重注知识：systemPrompt 即角色卡原文
+        assertThat(value.systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
+    }
+
+    @Test
+    void given_knowledge_hits_when_start_interview_then_injected_at_prompt_tail() {
+        // 会话建立轮（建项目自动开场）：query = 初始需求原文，命中块接 system prompt 尾部
+        Long projectId = persistedProject("9710");
+        givenSessionExecutorRunsInline();
+        when(knowledgePort.retrieve(eq("给宠物医院做预约系统"), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                        "核心场景：主人在线选医生预约。")));
+
+        appService.startInterview(projectId, "给宠物医院做预约系统");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().systemPrompt())
+                .startsWith(RolePreset.BA.systemPrompt())
+                .endsWith("核心场景：主人在线选医生预约。")
+                .contains("【平台知识库·相似历史需求】");
+    }
+
+    @Test
+    void given_established_session_when_later_turns_then_same_tail_reused_no_re_retrieval() {
+        // 一次切入一次注入的持续面：会话建立后，后续轮（发言）与续跑（作答）的
+        // system prompt 复用同一注入块（agent 工厂按 prompt 缓存 → 同 agent 实例），
+        // 知识检索只发生一次（迭代不重注）
+        Long projectId = persistedProject("9713");
+        givenSessionExecutorRunsInline();
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                        "核心场景：主人在线选医生预约。")));
+
+        appService.startInterview(projectId, "给宠物医院做预约系统");
+        appService.runInterviewTurn(projectId, "主要是海外客户");
+        appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "企业客户");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        String expected = RolePreset.BA.systemPrompt() + "\n\n【平台知识库·相似历史需求】"
+                + "以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考"
+                + "（非用户的确认信息，不构成对当前需求的约束）："
+                + "\n\n〔宠物医院预约平台〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
+        assertThat(command.getAllValues()).extracting(AgentCommand::systemPrompt)
+                .containsExactly(expected, expected);
+        assertThat(resume.getValue().systemPrompt()).isEqualTo(expected);
+        verify(knowledgePort, times(1)).retrieve(anyString(), anyInt()); // 只检索一次
+    }
+
+    @Test
+    void given_retrieval_failure_when_start_interview_then_interview_still_starts() {
+        // 检索失败降级为空注入：访谈照常开始（systemPrompt = 角色卡原文），不阻断对话
+        Long projectId = persistedProject("9711");
+        givenSessionExecutorRunsInline();
+        doThrow(new RuntimeException("embedding 不可用"))
+                .when(knowledgePort).retrieve(anyString(), anyInt());
+
+        appService.startInterview(projectId, "做一个官网");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
+    }
+
+    @Test
+    void given_archived_project_when_turn_or_answer_then_prj_013() {
+        // 归档即指令区关闭（只读终态）：发言与作答一并拒绝
+        Long projectId = persistedArchivedProject("9712");
+
+        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "再聊聊"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        assertThatThrownBy(() -> appService.startInterview(projectId, "做一个官网"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        assertThatThrownBy(() -> appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "有"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        verify(agentClient, never()).converse(any(), any());
+        verify(agentClient, never()).resume(any(), any());
     }
 
     @Test
@@ -179,5 +276,12 @@ class BaInterviewAppServiceTest {
         Project project = projectRepository.save(Project.create("访谈项目", null,
                 Long.parseLong(workspaceId), OWNER));
         return project.getId();
+    }
+
+    private Long persistedArchivedProject(String workspaceId) {
+        Project project = Project.create("归档访谈项目", null,
+                Long.parseLong(workspaceId), OWNER);
+        project.archive();
+        return projectRepository.save(project).getId();
     }
 }

@@ -10,6 +10,8 @@ export type ProjectDetail = {
   statusName?: string;
   archived?: boolean;
   createdAt?: string;
+  /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，指令区占满全宽）。 */
+  prdProducedAt?: string | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */
@@ -20,5 +22,6 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     statusName: raw.statusName,
     archived: raw.archived,
     createdAt: raw.createdAt,
+    prdProducedAt: raw.prdProducedAt,
   };
 }

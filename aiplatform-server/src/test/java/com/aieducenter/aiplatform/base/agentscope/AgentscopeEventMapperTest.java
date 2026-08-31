@@ -263,6 +263,32 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
+        void ask_user_multiple_flag_projects_to_question() {
+            // #19 多选问答：multiple 从 ask_user 入参投影（问答卡多选勾选提交），
+            // 缺省 false（单选点即答）
+            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-16", java.util.List.of(
+                    toolCall("tc-m", "ask_user", Map.of(
+                            "header", "核心功能",
+                            "question", "先做哪些能力?",
+                            "multiple", true,
+                            "options", java.util.List.of("预约", "提醒", "会员")))));
+
+            AgentEvent frame = mapper.waitRaised(event);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) frame.payload()
+                    .get(AgentEventTypes.WAIT_DATA_FIELD);
+            assertThat(data.get("questions")).isEqualTo(java.util.List.of(Map.of(
+                    "header", "核心功能",
+                    "question", "先做哪些能力?",
+                    "multiple", true,
+                    "custom", true,
+                    "options", java.util.List.of(
+                            Map.of("label", "预约"), Map.of("label", "提醒"),
+                            Map.of("label", "会员")))));
+        }
+
+        @Test
         void confirm_event_yields_no_passthrough_frame() {
             // 挂起不是过程帧：wait-raised 由调用方显式发射，map() 不重复产帧
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(

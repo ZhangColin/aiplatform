@@ -104,12 +104,13 @@ public class ProjectLifecycleAppService {
         // 异步 LLM 取名（占位名先落，取名后台完成落位；空 requirement 不取名）
         namingService.nameAsync(project.getId(), command.requirement());
 
-        // 前缀段自动：建项目即开始 BA 访谈（初始描述即开场输入）
+        // 前缀段自动：建项目即开始 BA 访谈（初始描述即开场输入；会话建立轮做
+        // 知识命中注入——query = 初始需求原文）
         String prompt = command.requirement() == null || command.requirement().isBlank()
                 ? RolePreset.DEFAULT_KICKOFF_PROMPT : command.requirement();
         BaInterviewAppService.InterviewRun run;
         try {
-            run = baInterviewAppService.runInterviewTurn(project.getId(), prompt);
+            run = baInterviewAppService.startInterview(project.getId(), prompt);
         } catch (RuntimeException e) {
             log.warn("项目 {} 自动 BA 起跑失败（项目已成立，不回滚）", project.getId(), e);
             return new ProjectCreatedResponse(queryAppService.detail(project.getId()), null);

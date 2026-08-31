@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,15 +10,17 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useCreateProject } from "@/hooks/use-create-project";
 import { errorText } from "@/lib/api/api-error";
+import { isSubmitEnter } from "@/lib/chat/enter";
 import { buildCreateProjectCommand } from "@/lib/projects/create";
 
 /**
- * 一句话建项目表单（spec 0002 §3.1，issue #51 收为纯一句话）：渐变光晕卡式
- * 大输入 + 方角 primary 发送钮置输入区下方右对齐（无分隔线，输入区底直角 +
- * 按钮行底圆角无缝接合成一体、按钮右下留距如浮起），仅此一个输入框——项目名
- * 由后端 LLM 取、模板单链默认、引擎后台统一定，不出现用户不懂的概念。文本框
- * 自动增高：3 行起步、最高 8 行后内部滚动。提交 POST /api/projects → 成功后
- * onCreated(projectId) 交给调用侧导航（首页 → /projects/[id] 直进项目页）。
+ * 一句话建项目表单（spec 0002 §3.1，issue #51 收为纯一句话，#19 回车即建）：
+ * 渐变光晕卡式大输入 + 方角 primary 发送钮置输入区下方右对齐（无分隔线，输入区
+ * 底直角 + 按钮行底圆角无缝接合成一体、按钮右下留距如浮起），仅此一个输入框
+ * ——项目名由后端 LLM 取、模板单链默认、引擎后台统一定，不出现用户不懂的概念。
+ * Enter 即建项目直跳项目页（Shift+Enter 换行，输入法组词不触发）。文本框自动
+ * 增高：3 行起步、最高 8 行后内部滚动。提交 POST /api/projects → 成功后
+ * onCreated(projectId) 交给调用侧导航（首页 → /projects/[id] 直进项目页开聊）。
  */
 
 export function CreateProjectForm({
@@ -46,8 +48,7 @@ export function CreateProjectForm({
 
   const canSubmit = requirement.trim().length > 0 && !createProject.isPending;
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submit() {
     if (!canSubmit) return;
     const command = buildCreateProjectCommand({ requirement });
     createProject.mutate(command, {
@@ -61,6 +62,18 @@ export function CreateProjectForm({
       },
       onError: (error) => toast.error(errorText(error, "创建失败，请稍后重试")),
     });
+  }
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    submit();
+  }
+
+  // 回车即建项目（Shift+Enter 换行；输入法组词的 Enter 是选字不是提交）
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!isSubmitEnter(event)) return;
+    event.preventDefault();
+    submit();
   }
 
   return (
@@ -77,7 +90,8 @@ export function CreateProjectForm({
             id={requirementId}
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
-            placeholder="描述你想做的东西，例如：给宠物医院做个在线预约的网站"
+            onKeyDown={onKeyDown}
+            placeholder="用一句话描述你想要的系统，例如：给宠物医院做个在线预约系统"
             rows={3}
             className="field-sizing-fixed min-h-20 max-h-52 resize-none overflow-y-auto rounded-b-none border-0 bg-transparent px-2 py-2 text-base shadow-none ring-0 focus-visible:ring-0"
           />

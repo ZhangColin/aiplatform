@@ -24,10 +24,14 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import com.cartisan.web.response.ApiResponse;
 
+import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.RenameProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -38,22 +42,25 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 归档 / 改名 / 详情 / 列表 /
- * 用量 / PRD 读 → 源码包下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言 / 问答卡作答 →
+ * 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 → 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
     private final ProjectQueryAppService queryAppService;
+    private final BaInterviewAppService baInterviewAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
-                             ProjectQueryAppService queryAppService) {
+                             ProjectQueryAppService queryAppService,
+                             BaInterviewAppService baInterviewAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
+        this.baInterviewAppService = baInterviewAppService;
     }
 
     @PostMapping
@@ -85,6 +92,33 @@ public class ProjectController {
     public ResponseEntity<ApiResponse<Void>> handleStatusMismatch() {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(ProjectMessage.PROJECT_FILTER_UNKNOWN));
+    }
+
+    @PostMapping("/{id}/messages")
+    @Operation(summary = "指令区发言（BA 访谈后续轮）",
+            description = "content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化"
+                    + "（催促收敛、PRD 修订意见同从此进）。异步提交即返回，runId = 本轮 BA 运行"
+                    + "标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。"
+                    + "空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001")
+    public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
+            @Valid @RequestBody PostMessageCommand command) {
+        return ApiResponse.ok(new InterviewTurnResponse(
+                baInterviewAppService.runInterviewTurn(parseId(id), command.content()).runId()));
+    }
+
+    @PostMapping("/{id}/questions/{qid}/answer")
+    @Operation(summary = "问答卡作答（ask_user 挂起续跑）",
+            description = "qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与"
+                    + "待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本"
+                    + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
+                    + "上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
+                    + "空白答复 400；已归档 409 PRJ_013；项目不存在 404 PRJ_001")
+    public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,
+            @Valid @RequestBody AnswerQuestionCommand command) {
+        baInterviewAppService.answerQuestion(parseId(id), command.runId(), qid,
+                command.toolCalls().stream().map(AnswerQuestionCommand.ToolCall::toMap).toList(),
+                command.answer());
+        return ApiResponse.ok();
     }
 
     @GetMapping("/{id}")

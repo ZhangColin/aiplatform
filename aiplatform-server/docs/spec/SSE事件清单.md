@@ -59,7 +59,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `tool` | 引擎透传 | … + `data` | 工具调用 |
 | `step-start` / `step-finish` | 引擎透传 | … + `data` | 步骤边界 |
 
-> **智能体事件桥**：AgentScope HarnessAgent 的事件经单点映射表（base.agentscope 的 `AgentscopeEventMapper`）转本表帧型，走同一通道同一信封——`engine=agentscope`，帧序 `task-start → session-created（会话首见）→ 过程帧 → task-finish/error`。`text`/`reasoning` 帧为增量（`data.delta`，前端按序拼接）；`tool` 帧 `data` 为 `{toolCallId, toolName, phase: start|end}`，`step-*` 对应模型调用边界。挂起（`RequireUserConfirmEvent`，含 ask_user 提问）→ `wait-raised`（`kind` 按待确认工具判：`ask_user` = QUESTION，其余 = PERMISSION；QUESTION 的 `data.questions` 为前端问答卡投影：`[{header, question, multiple(恒 false), custom(恒 true), options[{label}]}]`，`summary` 取问题文本）；挂起轮不发 `task-finish`（软终点，等答复续跑后收口），答复续跑归业务编排（问答作答通道，需求环落位 REST 面）——从项目侧事实重建恢复私货 + 挂起帧 `data.toolCalls` 重建 ConfirmResult；会话状态落 PostgreSQL（`cat_agent_state` 承载全部智能体会话），平台重启后按会话标识恢复续跑。
+> **智能体事件桥**：AgentScope HarnessAgent 的事件经单点映射表（base.agentscope 的 `AgentscopeEventMapper`）转本表帧型，走同一通道同一信封——`engine=agentscope`，帧序 `task-start → session-created（会话首见）→ 过程帧 → task-finish/error`。`text`/`reasoning` 帧为增量（`data.delta`，前端按序拼接）；`tool` 帧 `data` 为 `{toolCallId, toolName, phase: start|end}`，`step-*` 对应模型调用边界。挂起（`RequireUserConfirmEvent`，含 ask_user 提问）→ `wait-raised`（`kind` 按待确认工具判：`ask_user` = QUESTION，其余 = PERMISSION；QUESTION 的 `data.questions` 为前端问答卡投影：`[{header, question, multiple(ask_user 入参投影，缺省 false), custom(恒 true), options[{label}]}]`，`summary` 取问题文本）；挂起轮不发 `task-finish`（软终点，等答复续跑后收口），答复续跑归业务编排（问答作答通道，需求环落位 REST 面）——从项目侧事实重建恢复私货 + 挂起帧 `data.toolCalls` 重建 ConfirmResult；会话状态落 PostgreSQL（`cat_agent_state` 承载全部智能体会话），平台重启后按会话标识恢复续跑。
 
 > 字段表为初版，随片 2 / 片 5 spec 细化；信封与名册的任何变更即改本文。
 

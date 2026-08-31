@@ -12,12 +12,14 @@ import { errorText } from "@/lib/api/api-error";
 import { useAgentStreamChannel } from "@/lib/sse/agent-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 
+import { CommandArea } from "./command-area";
 import { PanelPlaceholder } from "./panel-placeholder";
 import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
 
 /**
- * 项目页装配（issue #17 单门户两槽位壳）：左指令区（常开对话区，指令区对话随
- * 需求环落位）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出）。本组件是
+ * 项目页装配（issue #17 单门户两槽位壳 + #19 需求环①）：左指令区（常开对话区，
+ * BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出）。闲聊期
+ * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。本组件是
  * agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount 即断」）；断流
  * 超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目
  * 建立即自动跑 BA，进行中亮灯。
@@ -65,6 +67,9 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
     );
   }
 
+  // 闲聊期（尚无产物）：指令区占满全宽；PRD 产出后长出成果区（右槽 + 双页签）
+  const chatOnly = !detail?.prdProducedAt;
+
   return (
     <WorkbenchShell
       header={
@@ -77,17 +82,15 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
         )
       }
       running={<WorkbenchRunStatus projectId={projectId} />}
-      left={
-        <PanelPlaceholder title="指令区">
-          指令区对话随需求环落位；建成项目后 BA 的提问与回复都在这里
-        </PanelPlaceholder>
-      }
+      left={<CommandArea projectId={projectId} disabled={detail?.archived ?? false} />}
       outputs={
-        <PanelPlaceholder title="成果区">
-          PRD 产出后这里长出文件、系统与项目信息
-        </PanelPlaceholder>
+        chatOnly ? undefined : (
+          <PanelPlaceholder title="成果区">
+            PRD 已产出，文件 / 系统 / 项目三模式随后续切片长出
+          </PanelPlaceholder>
+        )
       }
-      mobileTabs={["指令区", "成果区"]}
+      mobileTabs={chatOnly ? ["指令区"] : ["指令区", "成果区"]}
     />
   );
 }

@@ -2,6 +2,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
+import { useChatStore } from "@/lib/store/chat";
 import { queryKeys } from "@/lib/api/keys";
 
 import { dispatchAgentEvent, dispatchNotificationEvent } from "./bridge";
@@ -190,5 +191,101 @@ describe("bridge · agent 流 → streams store", () => {
     expect(run.segments).toEqual([
       { kind: "passthrough", id: "run1:3", type: "part-updated", data: { x: 1 } },
     ]);
+  });
+});
+
+describe("bridge · agent 流 → chat store（指令区对话面，#19）", () => {
+  beforeEach(() => {
+    useAgentStreamsStore.setState({ runs: {}, order: [] });
+    useChatStore.setState({ chats: {} });
+  });
+
+  function agentEvent(type: string, payload: Record<string, unknown>, id = "run1:1"): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts: "" }) };
+  }
+
+  it("role-assigned(BA) → task-start 落用户气泡；text(data.delta) 累积 BA 气泡", () => {
+    dispatchAgentEvent(
+      agentEvent(
+        "role-assigned",
+        { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
+        "run1:1",
+      ),
+    );
+    dispatchAgentEvent(
+      agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1" }, "run1:2"),
+    );
+    dispatchAgentEvent(
+      agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "ba-p1", data: { delta: "初步理解" } }, "run1:3"),
+    );
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages.map((m) => [m.kind, m.kind === "question" ? m.question : m.text])).toEqual([
+      ["user", "做个官网"],
+      ["ba", "初步理解"],
+    ]);
+  });
+
+  it("wait-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {
+    dispatchAgentEvent(
+      agentEvent(
+        "wait-raised",
+        {
+          projectId: "p1",
+          runId: "run1",
+          sessionId: "ba-p1",
+          kind: "QUESTION",
+          summary: "面向谁?",
+          engineRef: "reply-7",
+          data: {
+            type: "question",
+            toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
+            questions: [{ header: "目标用户", question: "面向谁?", multiple: false, custom: true, options: [{ label: "企业客户" }] }],
+          },
+        },
+        "run1:5",
+      ),
+    );
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toHaveLength(1);
+    expect(chat?.messages[0]).toMatchObject({
+      kind: "question",
+      runId: "run1",
+      engineRef: "reply-7",
+      options: ["企业客户"],
+    });
+  });
+
+  it("PERMISSION 挂起不成卡；非 BA 会话的 text 不进对话", () => {
+    dispatchAgentEvent(
+      agentEvent(
+        "wait-raised",
+        { projectId: "p1", runId: "run1", sessionId: "s1", kind: "PERMISSION", summary: "write_file", engineRef: "reply-1", data: {} },
+        "run1:3",
+      ),
+    );
+    dispatchAgentEvent(
+      agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", data: { delta: "写代码" } }, "run1:4"),
+    );
+
+    expect(useChatStore.getState().chats["p1"]).toBeUndefined();
+  });
+
+  it("error / task-finish（BA 会话）→ 收轮 + 中断提示", () => {
+    dispatchAgentEvent(
+      agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" }, "run1:1"),
+    );
+    dispatchAgentEvent(agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "需求" }, "run1:2"));
+    dispatchAgentEvent(
+      agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:3"),
+    );
+    dispatchAgentEvent(
+      agentEvent("task-finish", { projectId: "p1", runId: "run1", sessionId: "ba-p1", finish: "end" }, "run1:4"),
+    );
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
+    expect(chat?.turnActive).toBe(false);
   });
 });

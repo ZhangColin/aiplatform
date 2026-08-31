@@ -137,7 +137,7 @@ class ProjectLifecycleAppServiceTest {
         verify(namingService).nameAsync(projectId, "做一个官网");
 
         // 前缀段自动：BA 访谈开场（初始描述即首条对话输入）
-        verify(baInterviewAppService).runInterviewTurn(projectId, "做一个官网");
+        verify(baInterviewAppService).startInterview(projectId, "做一个官网");
     }
 
     @Test
@@ -151,14 +151,14 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
         // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
         //（blank 不发起轻调用，见 ProjectNamingAppServiceTest）
-        verify(baInterviewAppService).runInterviewTurn(
+        verify(baInterviewAppService).startInterview(
                 Long.parseLong(response.project().id()), RolePreset.DEFAULT_KICKOFF_PROMPT);
     }
 
     @Test
     void given_auto_ba_failure_when_create_then_project_kept_and_run_id_absent() {
         stubWorkspace("9102", "aiplatform-dev-102");
-        when(baInterviewAppService.runInterviewTurn(any(), any()))
+        when(baInterviewAppService.startInterview(any(), any()))
                 .thenThrow(new RuntimeException("对话智能体不可用"));
 
         ProjectCreatedResponse response = appService.create(
@@ -325,7 +325,7 @@ class ProjectLifecycleAppServiceTest {
 
     /** BA 访谈编排桩：接受即回 runId（编排细节见 BaInterviewAppServiceTest）。 */
     private void stubInterviewAccepted(String runId) {
-        when(baInterviewAppService.runInterviewTurn(any(), any()))
+        when(baInterviewAppService.startInterview(any(), any()))
                 .thenReturn(new BaInterviewAppService.InterviewRun(runId));
     }
 

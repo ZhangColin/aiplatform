@@ -93,4 +93,16 @@ describe("WorkbenchShell", () => {
     expect(html).toContain("指令区");
     expect(html).toContain("成果区");
   });
+
+  it("闲聊期（outputs 缺省）：单槽满宽、无 resizable / 页签（#19 尚无产物指令区占满全宽）", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider>
+        <WorkbenchShell header={<span>项目甲</span>} running={null} left={<span>指令区</span>} mobileTabs={["指令区"]} />
+      </SidebarProvider>,
+    );
+
+    expect(html).not.toContain('data-slot="resizable-panel-group"');
+    expect(html).not.toContain('data-slot="tabs-trigger"');
+    expect(html).toContain("指令区");
+  });
 });

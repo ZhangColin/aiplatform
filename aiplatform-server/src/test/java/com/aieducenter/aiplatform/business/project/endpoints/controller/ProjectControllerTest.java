@@ -27,6 +27,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
+import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -44,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -73,6 +75,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private ProjectQueryAppService queryAppService;
+
+    @MockitoBean
+    private BaInterviewAppService baInterviewAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -215,7 +220,7 @@ class ProjectControllerTest {
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0)));
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -335,13 +340,153 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
     }
 
+    // ---------- 指令区发言 / 问答卡作答（#19 需求环①） ----------
+
+    @Test
+    void given_message_when_post_then_run_id_returned() throws Exception {
+        when(baInterviewAppService.runInterviewTurn(100L, "目标用户主要是海外客户"))
+                .thenReturn(new BaInterviewAppService.InterviewRun("run-9"));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"目标用户主要是海外客户\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-9"));
+    }
+
+    @Test
+    void given_blank_or_oversized_message_when_post_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\" \"}"))
+                .andExpect(status().isBadRequest());
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
+                .andExpect(status().isBadRequest());
+        verify(baInterviewAppService, never()).runInterviewTurn(any(), any());
+    }
+
+    @Test
+    void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
+        // 归档即指令区关闭（只读终态）
+        when(baInterviewAppService.runInterviewTurn(100L, "再改改"))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"再改改\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
+    }
+
+    @Test
+    void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
+        when(baInterviewAppService.runInterviewTurn(404L, "你好"))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(post("/api/projects/404/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"你好\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_question_answer_when_answer_then_ok_and_facts_passed() throws Exception {
+        // qid（路径）= 挂起帧 engineRef；请求体回传 runId + data.toolCalls 原样 + 答复
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9",
+                                 "toolCalls":[{"id":"tc-1","name":"ask_user",
+                                               "input":{"question":"目标用户是谁？"}}],
+                                 "answer":"海外企业客户"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(baInterviewAppService).answerQuestion(100L, "run-9", "reply-7",
+                List.of(Map.of("id", "tc-1", "name", "ask_user",
+                        "input", Map.of("question", "目标用户是谁？"))),
+                "海外企业客户");
+    }
+
+    @Test
+    void given_blank_answer_when_answer_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":" "}
+                                """))
+                .andExpect(status().isBadRequest());
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[],"answer":"有"}
+                                """))
+                .andExpect(status().isBadRequest());
+        verify(baInterviewAppService, never()).answerQuestion(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void given_archived_or_unknown_project_when_answer_then_mapped() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .when(baInterviewAppService).answerQuestion(eq(100L), any(), any(), any(), any());
+
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":"企业客户"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
+
+        doThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND))
+                .when(baInterviewAppService).answerQuestion(eq(404L), any(), any(), any(), any());
+        performAsUser(post("/api/projects/404/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":"企业客户"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_prd_produced_when_detail_then_prd_produced_at_returned() throws Exception {
+        // 成果区长出判据透出：闲聊期 null（指令区占满全宽），产出后有时点
+        when(queryAppService.detail(100L)).thenReturn(
+                detailOf("100", ProjectStatus.IN_PROGRESS, false,
+                        LocalDateTime.of(2026, 8, 31, 9, 0)));
+
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.prdProducedAt").value("2026-08-31T09:00:00"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(jsonPath("$.data.prdProducedAt").value((Object) null));
+    }
+
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt 缺省闲聊期）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
+        return detailOf(id, status, archived, null);
+    }
+
+    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
+            LocalDateTime prdProducedAt) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0));
+                LocalDateTime.of(2026, 8, 22, 10, 0), prdProducedAt);
     }
 
     /**

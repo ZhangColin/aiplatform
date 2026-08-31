@@ -16,8 +16,9 @@ import { isRunInFlight, useRunElapsed } from "./run-elapsed";
 
 /**
  * 工作台框架（issue #17 单门户壳）：顶栏 + resizable 双槽（左指令区 / 右成果区）
- * + <lg 双页签退化。槽位内容全由场景层注入——成果区内部再分主区域 / 可收展侧栏
- * （直播，生成环落位）时由槽内容自管嵌套，壳不预设。
+ * + <lg 双页签退化。outputs 缺省 = 闲聊期单槽（指令区占满全宽，成果区未长——
+ * 判据 = PRD 产出，issue #19）。槽位内容全由场景层注入——成果区内部再分主区域 /
+ * 可收展侧栏（直播，生成环落位）时由槽内容自管嵌套，壳不预设。
  */
 export type WorkbenchShellProps = {
   /** 顶栏内容：项目名等。 */
@@ -26,10 +27,10 @@ export type WorkbenchShellProps = {
   running: React.ReactNode;
   /** 左：指令区。 */
   left: React.ReactNode;
-  /** 右：成果区。 */
-  outputs: React.ReactNode;
-  /** <lg 双页签：指令区 / 成果区。 */
-  mobileTabs: [string, string];
+  /** 右：成果区（缺省 = 闲聊期，指令区占满全宽）。 */
+  outputs?: React.ReactNode;
+  /** <lg 页签（双槽 = 两枚；闲聊期单槽 = 单枚）。 */
+  mobileTabs: [string] | [string, string];
   leftDefaultSize?: number;
   rightDefaultSize?: number;
   leftMinSize?: number;
@@ -54,31 +55,38 @@ export function WorkbenchShell({
         <div className="ml-auto flex shrink-0 items-center gap-1">{running}</div>
       </header>
 
-      {/* resizable 双槽（lg+）；窄屏退化为双页签（<1024px） */}
-      <div className="hidden min-h-0 flex-1 lg:block">
-        <ResizablePanelGroup orientation="horizontal" className="h-full">
-          <ResizablePanel defaultSize={leftDefaultSize} minSize={leftMinSize} collapsible>
-            <div className="h-full border-r">{left}</div>
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel defaultSize={rightDefaultSize} minSize={rightMinSize}>
-            {outputs}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
+      {outputs === undefined ? (
+        // 闲聊期（尚无产物）：指令区占满全宽
+        <div className="min-h-0 flex-1">{left}</div>
+      ) : (
+        <>
+          {/* resizable 双槽（lg+）；窄屏退化为双页签（<1024px） */}
+          <div className="hidden min-h-0 flex-1 lg:block">
+            <ResizablePanelGroup orientation="horizontal" className="h-full">
+              <ResizablePanel defaultSize={leftDefaultSize} minSize={leftMinSize} collapsible>
+                <div className="h-full border-r">{left}</div>
+              </ResizablePanel>
+              <ResizableHandle />
+              <ResizablePanel defaultSize={rightDefaultSize} minSize={rightMinSize}>
+                {outputs}
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </div>
 
-      <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col lg:hidden">
-        <TabsList className="m-2 grid grid-cols-2">
-          <TabsTrigger value="chat">{mobileTabs[0]}</TabsTrigger>
-          <TabsTrigger value="outputs">{mobileTabs[1]}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="chat" className="min-h-0 flex-1">
-          {left}
-        </TabsContent>
-        <TabsContent value="outputs" className="min-h-0 flex-1">
-          {outputs}
-        </TabsContent>
-      </Tabs>
+          <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col lg:hidden">
+            <TabsList className="m-2 grid grid-cols-2">
+              <TabsTrigger value="chat">{mobileTabs[0]}</TabsTrigger>
+              <TabsTrigger value="outputs">{mobileTabs[1]}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="chat" className="min-h-0 flex-1">
+              {left}
+            </TabsContent>
+            <TabsContent value="outputs" className="min-h-0 flex-1">
+              {outputs}
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
     </SidebarInset>
   );
 }

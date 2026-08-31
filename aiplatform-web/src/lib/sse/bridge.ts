@@ -1,7 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 
+import { parseQuestion } from "@/lib/chat/qa";
 import { queryKeys } from "@/lib/api/keys";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
+import { useChatStore } from "@/lib/store/chat";
 
 import type { SseEvent } from "./connection";
 import {
@@ -15,7 +17,8 @@ import {
 /**
  * 事件 → 状态桥（ADR 0003）：
  * - 通知通道 = 声明式失效注册表，事件 type → 失效 key 前缀列表，粗粒度、不写业务 switch；
- * - agent 通道 = 事件 → agent-streams store 分发（本文件是 store 唯一写入方）。
+ * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）分发
+ *   （本文件是两 store 唯一写入方）。
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
@@ -51,11 +54,12 @@ const PASSTHROUGH_SEGMENT_KINDS: Record<string, "text" | "reasoning" | "patch" |
   tool: "tool",
 };
 
-/** agent 流事件 → streams store（分段 id = SSE 完整事件 id，React key 白拿）。 */
+/** agent 流事件 → streams store + chat store（分段 id = SSE 完整事件 id，React key 白拿）。 */
 export function dispatchAgentEvent(event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
   if (!envelope) return;
   const store = useAgentStreamsStore.getState();
+  const chat = useChatStore.getState();
 
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
@@ -69,6 +73,7 @@ export function dispatchAgentEvent(event: SseEvent): void {
           model: payload.model,
           engine: payload.engine,
         });
+        chat.ingestTaskStart(payload.projectId, payload.runId, payload.prompt);
         return;
       }
       case "session-created": {
@@ -85,6 +90,7 @@ export function dispatchAgentEvent(event: SseEvent): void {
           roleLabel: payload.roleLabel,
           engine: payload.engine,
         });
+        if (payload.role === "BA") chat.noteBaRun(payload.projectId, payload.runId);
         return;
       }
       case "wait-raised": {
@@ -95,6 +101,8 @@ export function dispatchAgentEvent(event: SseEvent): void {
           waitKind: payload.kind,
           summary: payload.summary,
         });
+        const question = parseQuestion(event.id, payload);
+        if (question) chat.raiseQuestion(payload.projectId, payload.sessionId, question);
         return;
       }
       case "error": {
@@ -104,6 +112,7 @@ export function dispatchAgentEvent(event: SseEvent): void {
           id: event.id,
           message: payload.message,
         });
+        chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
         return;
       }
       case "task-finish": {
@@ -113,6 +122,7 @@ export function dispatchAgentEvent(event: SseEvent): void {
           id: event.id,
           finish: payload.finish,
         });
+        chat.finishTurn(payload.projectId, payload.sessionId);
         return;
       }
     }
@@ -133,6 +143,11 @@ export function dispatchAgentEvent(event: SseEvent): void {
   const kind = PASSTHROUGH_SEGMENT_KINDS[passthrough.type];
   if (kind) {
     store.appendSegment(payload, { kind, id: event.id, data: payload.data });
+    // 指令区对话面只收 BA 的文本增量（思考/补丁/工具帧不进对话）
+    if (kind === "text") {
+      const delta = asRecord(payload.data)?.delta;
+      chat.appendBaDelta(payload.projectId, payload.sessionId, delta, event.id);
+    }
   } else {
     // 引擎透传未知名型：data 原样入段，呈现层兜底
     store.appendSegment(payload, {
@@ -142,4 +157,10 @@ export function dispatchAgentEvent(event: SseEvent): void {
       data: payload.data,
     });
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
 }

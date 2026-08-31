@@ -52,24 +52,45 @@ public class BaInterviewAppService {
     private final AgentscopeAgentClient agentClient;
     private final AgentStreamAppService streamAppService;
     private final AgentSessionExecutor sessionExecutor;
+    private final ProjectKnowledgeAppService knowledgeAppService;
 
     public BaInterviewAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentStreamAppService streamAppService,
-            AgentSessionExecutor sessionExecutor) {
+            AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.streamAppService = streamAppService;
         this.sessionExecutor = sessionExecutor;
+        this.knowledgeAppService = knowledgeAppService;
     }
 
     /**
-     * 跑一轮 BA 访谈（开场或后续输入共用——prompt 即用户侧输入）：会话执行器异步
-     * 提交即返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达不炸调用方）。
+     * BA 会话建立轮（建项目自动开场专用）：绑定 {@code ba-{projectId}} 之时做
+     * 知识命中注入——query = 初始需求原文，命中块落会话缓存并接 system prompt
+     * 尾部（知识是背景非指令）；检索失败降级为空注入，访谈照常开始（#5 决议①）。
+     * 一次切入一次注入：后续轮（{@link #runInterviewTurn}）与问答续跑
+     * （{@link #answerQuestion}）复用同一注入块，不重检索不重追加。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
+    public InterviewRun startInterview(Long projectId, String requirement) {
+        knowledgeAppService.establishSessionInjection(projectId, requirement);
+        return turn(projectId, requirement);
+    }
+
+    /**
+     * 跑一轮 BA 访谈（指令区发言，prompt 即用户侧输入）：会话执行器异步提交即
+     * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达不炸调用方）。
+     * system prompt = 角色卡 + 会话注入块（未建立/空注入/重启后 = 裸角色卡）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）
+     */
     public InterviewRun runInterviewTurn(Long projectId, String prompt) {
-        Project project = requireProject(projectId);
+        return turn(projectId, prompt);
+    }
+
+    private InterviewRun turn(Long projectId, String prompt) {
+        Project project = requireInterviewableProject(projectId);
         RolePreset role = RolePreset.BA;
         String sessionId = SESSION_PREFIX + projectId;
         Map<String, Object> correlation = correlationOf(projectId);
@@ -79,7 +100,7 @@ public class BaInterviewAppService {
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
-                role.systemPrompt(),
+                role.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 role.chatModelString(),
                 sessionId,
                 project.getOwnerAccountId() != null
@@ -97,11 +118,11 @@ public class BaInterviewAppService {
      * ConfirmResult 批复续跑（续跑续在同一 run 上收口，帧序含答复后的下一问或
      * 收口）。恢复私货（角色卡/owner/工作区/计量）从项目侧事实重建，不信前端。
      *
-     * @throws ApplicationException PRJ_001 项目不存在
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）
      */
     public void answerQuestion(Long projectId, String runId, String replyId,
             List<Map<String, Object>> pendingToolCalls, String answerText) {
-        Project project = requireProject(projectId);
+        Project project = requireInterviewableProject(projectId);
         RolePreset role = RolePreset.BA;
         String sessionId = SESSION_PREFIX + projectId;
         Map<String, Object> correlation = correlationOf(projectId);
@@ -113,7 +134,7 @@ public class BaInterviewAppService {
                         ? project.getOwnerAccountId().toString() : null,
                 Long.toString(project.getWorkspaceId()),
                 role.chatModelString(),
-                role.systemPrompt(),
+                role.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 replyId,
                 pendingToolCalls.stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
@@ -174,5 +195,14 @@ public class BaInterviewAppService {
     private Project requireProject(Long projectId) {
         return projectRepository.findById(projectId)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+    }
+
+    /** 访谈态守卫：归档即指令区关闭（只读终态），新发言与作答一并拒绝。 */
+    private Project requireInterviewableProject(Long projectId) {
+        Project project = requireProject(projectId);
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        return project;
     }
 }

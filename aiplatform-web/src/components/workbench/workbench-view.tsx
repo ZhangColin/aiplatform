@@ -12,8 +12,10 @@ import { errorText } from "@/lib/api/api-error";
 import { useAgentStreamChannel } from "@/lib/sse/agent-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 import { coderStatusOf, useGenerationStore } from "@/lib/store/generation";
+import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 
 import { CommandArea } from "./command-area";
+import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea } from "./outputs-area";
 import { StartGenerationCard, StartSystemButton } from "./start-generation";
 import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
@@ -26,7 +28,8 @@ import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
  *
  * <p>生成环（#22）：「开始做系统」eligibility 单点在此判定（PRD 已产出 && 未生成 &&
  * 不在生成中——纯动作无门，待定项未清也可点）；对话流内卡片与文件模式操作条同一
- * 动作；编码 run 起跑自动切系统模式（用户手动切换优先至下一自动事件）。本组件是
+ * 动作；编码 run 起跑自动切系统模式（用户手动切换优先至下一自动事件）。「确认下单」
+ * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。本组件是
  * agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount 即断」）；断流
  * 超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目
  * 建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起生成跳成果区。</p>
@@ -101,6 +104,13 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
   const generationEligible =
     !!detail?.prdProducedAt && !detail?.generatedAt && !generating;
 
+  // 「确认下单」可见性（单点，#26）：随首次生成完成常驻、零迭代可点；未终结
+  // 订单事实归交易环①（#28）接出，本缝先视为无
+  const showConfirmOrder = confirmOrderVisible({
+    generatedAt: detail?.generatedAt,
+    archived: detail?.archived,
+  });
+
   return (
     <WorkbenchShell
       header={
@@ -124,6 +134,14 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
               eligible={generationEligible}
               onGenerated={handleGenerated}
             />
+          }
+          confirmOrder={
+            showConfirmOrder ? (
+              <ConfirmOrderButton
+                // 下单动作本体归交易环①（#28）：此处占位提示，接出时换正式 mutation
+                onConfirm={() => toast.info("确认下单即将开放")}
+              />
+            ) : null
           }
         />
       }

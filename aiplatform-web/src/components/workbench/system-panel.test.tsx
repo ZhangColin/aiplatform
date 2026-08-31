@@ -89,6 +89,51 @@ describe("SystemPanel · 系统模式主区域（#22 生成环①）", () => {
     expect(html).toContain("http://localhost:42659");
   });
 
+  // ---------- 修正期间（#26 迭代环①：系统保持可见 + 轻提示） ----------
+
+  it("修正中（ready 后编码 run 再起）：预览保持可见 + 顶部轻提示，不闪断", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "running",
+    });
+
+    expect(html).toContain("<iframe"); // 系统保持可见（不是空白浏览器窗）
+    expect(html).toContain("正在按您的意见修改系统");
+    expect(html).toContain("完成后自动刷新");
+  });
+
+  it("修正重试中：轻提示播帧内话术（「遇到问题，正在重试」），预览仍可见", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "retrying",
+    });
+
+    expect(html).toContain("<iframe");
+    expect(html).toContain("遇到问题，正在重试");
+    expect(html).not.toContain("正在按您的意见修改系统");
+  });
+
+  it("修正完成（run 收口）：轻提示消失，预览照常", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "finished",
+    });
+
+    expect(html).toContain("<iframe");
+    expect(html).not.toContain("正在按您的意见修改系统");
+  });
+
+  it("修正超限终态（error 且已 ready）：轻提示转失败 + 再提意见重试口径，预览仍可见", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "error",
+    });
+
+    expect(html).toContain("<iframe");
+    expect(html).toContain("修正遇到了问题");
+    expect(html).toContain("再提一次意见重试");
+  });
+
   it("预览重挂 key：run 收口纪元变化即换 key（同 URL 也强制重建 iframe）", () => {
     // epoch → key 的推导是纯函数（SSR 读不到 setState 后的 store 快照，纪元流
     // 归 bridge.test 断言）；同纪元同 key、新收口新 key

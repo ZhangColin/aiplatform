@@ -78,6 +78,33 @@ class RolePresetTest {
         assertThat(PROMPT).contains("多问");
     }
 
+    // ---------- BA systemPrompt 契约（#26 迭代环①：意见判定分流与排队合并） ----------
+
+    @Test
+    void given_iteration_protocol_when_inspect_then_judgment_routed_without_markers() {
+        // 判定内化 BA：统一受理、无需用户标注意见类型、无需逐条批准
+        assertThat(PROMPT).contains("统一受理");
+        assertThat(PROMPT).contains("不需要用户标注意见类型");
+        assertThat(PROMPT).contains("无需逐条征求批准");
+        // 分流两路：实现问题直接派修正 / 需求变更先改 PRD 再派
+        assertThat(PROMPT).contains("实现问题");
+        assertThat(PROMPT).contains("需求变更");
+        assertThat(PROMPT).contains("先按第 7 条修订 PRD");
+        assertThat(PROMPT).contains("startFixRun");
+        // 判定出口 = 平台派发工具（savePrd → startFixRun 两步走）
+        assertThat(PROMPT).contains("savePrd");
+    }
+
+    @Test
+    void given_iteration_protocol_when_inspect_then_queue_merge_and_convergence_urge() {
+        // run 进行中的新意见：受理不丢弃、下一轮合并处理（告知用户）
+        assertThat(PROMPT).contains("排入下一轮合并处理");
+        assertThat(PROMPT).contains("下一轮修正一并处理");
+        // 迭代无次数上限 + 意见发散时催促收敛
+        assertThat(PROMPT).contains("迭代轮数没有上限");
+        assertThat(PROMPT).contains("催促收敛");
+    }
+
     // ---------- CODER systemPrompt 契约（#22 生成环①） ----------
 
     private static final String CODER_PROMPT = RolePreset.CODER.systemPrompt();
@@ -90,6 +117,14 @@ class RolePresetTest {
         assertThat(CODER_PROMPT).contains("TypeScript");
         assertThat(CODER_PROMPT).contains("DATABASE_URL");
         assertThat(CODER_PROMPT).contains("AGENTS.md");
+    }
+
+    @Test
+    void given_coder_protocol_when_inspect_then_generation_and_fix_same_mechanism() {
+        // 生成与修正同机制（#26）：修正任务来自任务说明，动手前重读 PRD（可能已修订）
+        assertThat(CODER_PROMPT).contains("生成与修正同一套机制");
+        assertThat(CODER_PROMPT).contains("修正任务");
+        assertThat(CODER_PROMPT).contains("重读");
     }
 
     @Test

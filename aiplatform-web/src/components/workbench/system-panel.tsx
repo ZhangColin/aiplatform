@@ -17,12 +17,14 @@ import { StartSystemButton } from "./start-generation";
 const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
 
 /**
- * 系统模式主区域（#22 片2-1）：恒为预览的容器。生成待期 = 空白浏览器窗 + 一句
- * 提示（无进度剧场）；run 完成信号（generation store 预览纪元）驱动预览自动
- * 重挂 iframe——url+epoch 为 key，替掉手动「点击刷新」；重试待期播帧内话术
- * （「遇到问题，正在重试」）；超限终态给重新发起入口（人工兜底）。ready 判据 =
- * generatedAt（REST 事实，跨会话）或本会话收口信号（即时性）；收口后的详情
- * 重拉（generated_at）归 bridge 失效，本组件只消费。
+ * 系统模式主区域（#22 片2-1 + #26 迭代环①）：恒为预览的容器。生成待期 = 空白
+ * 浏览器窗 + 一句提示（无进度剧场）；run 完成信号（generation store 预览纪元）
+ * 驱动预览自动重挂 iframe——url+epoch 为 key，替掉手动「点击刷新」（生成与修正
+ * run 同机制）；重试待期播帧内话术（「遇到问题，正在重试」）；超限终态给重新
+ * 发起入口（人工兜底）。ready 判据 = generatedAt（REST 事实，跨会话）或本会话
+ * 收口信号（即时性）；收口后的详情重拉（generated_at）归 bridge 失效，本组件
+ * 只消费。修正期间（ready 后编码 run 再起）系统保持可见，只在预览上方盖一条
+ * 轻提示——中间态不闪断。
  */
 export function SystemPanel({
   projectId,
@@ -44,6 +46,17 @@ export function SystemPanel({
   const preview = useProjectPreview(projectId, ready);
 
   const url = preview.data?.url;
+  // 修正期间轻提示（系统已 ready 后编码 run 又起）：进行中/重试播话术；超限终态
+  // 给失败提示（兜底口径 = 用户再提一次意见重试）——预览全程保持可见，中间态不闪断
+  const fixNotice = !ready
+    ? undefined
+    : coderStatus === "running"
+      ? { failed: false, text: "正在按您的意见修改系统，完成后自动刷新" }
+      : coderStatus === "retrying"
+        ? { failed: false, text: retryMessage ?? FALLBACK_RETRY_MESSAGE }
+        : coderStatus === "error"
+          ? { failed: true, text: "修正遇到了问题，可以再提一次意见重试" }
+          : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col p-4">
@@ -61,7 +74,23 @@ export function SystemPanel({
         </div>
 
         {/* 内容区 */}
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
+          {fixNotice ? (
+            <div
+              className={`absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 border-b px-3 py-1.5 text-xs backdrop-blur ${
+                fixNotice.failed
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-background/95 text-muted-foreground"
+              }`}
+            >
+              {fixNotice.failed ? (
+                <TriangleAlert className="size-3.5" />
+              ) : (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              )}
+              {fixNotice.text}
+            </div>
+          ) : null}
           {ready ? (
             url ? (
               // key 含预览纪元：run 完成信号驱动重挂（同 URL 也强制重建 iframe）

@@ -18,18 +18,21 @@ import { QuestionCard } from "./question-card";
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
- * 指令区（issue #19 需求环① + #20 修订回路）：项目页左侧全程常开的对话区，
- * 无标题——BA 开场回应、每轮一问、用户的意见与答复都在此流动。发送路由：
- * 有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
+ * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环①）：项目页左侧全程
+ * 常开的对话区，无标题——BA 开场回应、每轮一问、用户的意见与答复都在此流动；
+ * 首次生成后意见即迭代入口（判定与派发归 BA + startFixRun，指令区形态不变）。
+ * 发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
  * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store
  * （SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出
- * 「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区。
+ * 「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区；「确认下单」
+ * 随首次生成完成常驻输入条上方（#26，装配层判定可见性后注入）。
  */
 export function CommandArea({
   projectId,
   disabled,
   onSeePrd,
   generationCard,
+  confirmOrder,
 }: {
   projectId: string;
   disabled?: boolean;
@@ -37,6 +40,8 @@ export function CommandArea({
   onSeePrd?: () => void;
   /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
   generationCard?: ReactNode;
+  /** 输入条上方常驻槽（「确认下单」，#26）——装配层判定可见性后注入。 */
+  confirmOrder?: ReactNode;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -158,6 +163,7 @@ export function CommandArea({
             </Button>
           </div>
         ) : null}
+        {!disabled && confirmOrder ? confirmOrder : null}
         <div className="flex items-end gap-2">
           <Textarea
             ref={inputRef}

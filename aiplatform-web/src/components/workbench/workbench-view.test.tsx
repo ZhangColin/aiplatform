@@ -102,4 +102,29 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
 
     expect(html).not.toContain("开始做系统");
   });
+
+  // ---------- 「确认下单」按钮装配（#26 迭代环①：随首次生成完成常驻输入条上方） ----------
+
+  it("已生成（零迭代）：输入条上方出「确认下单」（可见性规则细节归纯逻辑测试）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).toContain("确认下单");
+  });
+
+  it("未生成 / 已归档：不出「确认下单」", () => {
+    seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
+    expect(renderToStaticMarkup(<WorkbenchView projectId="p1" />)).not.toContain("确认下单");
+
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+      archived: true,
+    });
+    expect(renderToStaticMarkup(<WorkbenchView projectId="p1" />)).not.toContain("确认下单");
+  });
 });

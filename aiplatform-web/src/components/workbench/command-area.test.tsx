@@ -118,4 +118,22 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     seed.notices = { seen: { p1: true }, pending: {} };
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain("去看看");
   });
+
+  it("「确认下单」槽（#26）：注入即渲染于输入条上方；归档（disabled）不渲染", () => {
+    seedChat([{ kind: "user", id: "u1", text: "这个系统不错" }]);
+
+    const injected = renderToStaticMarkup(
+      <CommandArea projectId="p1" confirmOrder={<button type="button">确认下单</button>} />,
+    );
+    expect(injected).toContain("确认下单");
+
+    const archived = renderToStaticMarkup(
+      <CommandArea
+        projectId="p1"
+        disabled
+        confirmOrder={<button type="button">确认下单</button>}
+      />,
+    );
+    expect(archived).not.toContain("确认下单");
+  });
 });

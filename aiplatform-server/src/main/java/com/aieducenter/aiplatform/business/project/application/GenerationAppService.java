@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.application;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -8,10 +7,8 @@ import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
 
-import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
@@ -21,7 +18,6 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
-import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -58,9 +54,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class GenerationAppService {
 
-    /** 编码会话标识派生前缀（projectId → coder-{projectId}，稳定绑定勿动）。 */
-    public static final String SESSION_PREFIX = "coder-";
-
     /** 生成任务 prompt（首试下发）：读 PRD 自主实现 + 收口判据（8081 可访问）。 */
     static final String GENERATE_TASK_PROMPT =
             "开始做系统：请完整阅读工作区 docs/PRD.md（需求正本，「功能清单」是实现的"
@@ -94,29 +87,21 @@ public class GenerationAppService {
             """;
 
     private final ProjectRepository projectRepository;
-    private final AgentscopeAgentClient agentClient;
-    private final AgentStreamBridge streamBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final ProjectKnowledgeAppService knowledgeAppService;
-    private final GenerationProperties properties;
+    private final CoderRunAttempts coderRunAttempts;
 
     /** 生成在途项目集（含已提交未起跑——排队中）：重复触发守卫的进程内事实。 */
     private final Set<Long> generationsInFlight = ConcurrentHashMap.newKeySet();
 
     public GenerationAppService(ProjectRepository projectRepository,
-            AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            ProjectKnowledgeAppService knowledgeAppService,
-            GenerationProperties properties) {
+            CoderRunAttempts coderRunAttempts) {
         this.projectRepository = projectRepository;
-        this.agentClient = agentClient;
-        this.streamBridge = streamBridge;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.knowledgeAppService = knowledgeAppService;
-        this.properties = properties;
+        this.coderRunAttempts = coderRunAttempts;
     }
 
     /**
@@ -140,14 +125,10 @@ public class GenerationAppService {
             throw e;
         }
 
-        String sessionId = SESSION_PREFIX + projectId;
         String firstRunId = AgentStreamAppService.newRunId();
-        String workspaceId = Long.toString(project.getWorkspaceId());
-        String userId = project.getOwnerAccountId() != null
-                ? project.getOwnerAccountId().toString() : null;
-        sessionExecutor.submit(sessionId, () -> {
+        sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
             try {
-                runAttemptsWithRetry(projectId, workspaceId, userId, firstRunId);
+                runAttemptsWithRetry(project, firstRunId);
             }
             finally {
                 generationsInFlight.remove(projectId);
@@ -163,47 +144,14 @@ public class GenerationAppService {
     // ---------- 内部 ----------
 
     /**
-     * 尝试环（异步轨道内）：每次尝试新 runId + role-assigned 前置；成功即
-     * markGenerated 收场；失败有余量则发 task-retrying 后续试，超限转终态
-     * （末次 error 帧即终态表达，用户重新发起兜底）。知识命中前置注入只进首试
-     * prompt（一次下发一次注入，重试续同会话不重复块）。
+     * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
+     * GENERATE_TASK_PROMPT、重试换轨 RETRY_TASK_PROMPT；成功即 markGenerated
+     * 收场（首次生成时点单向落位）。
      */
-    private void runAttemptsWithRetry(Long projectId, String workspaceId, String userId,
-            String firstRunId) {
-        String knowledgePrefix = knowledgeAppService.dispatchInjection(GENERATE_TASK_PROMPT);
-        int maxAttempts = properties.getMaxAttempts();
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            String runId = attempt == 1 ? firstRunId : AgentStreamAppService.newRunId();
-            streamBridge.emitRoleAssigned(projectId, runId, RolePreset.CODER);
-            AgentCommand command = new AgentCommand(
-                    runId,
-                    attempt == 1 ? knowledgePrefix + GENERATE_TASK_PROMPT : RETRY_TASK_PROMPT,
-                    RolePreset.CODER.systemPrompt(),
-                    RolePreset.CODER.chatModelString(),
-                    SESSION_PREFIX + projectId,
-                    userId,
-                    new UsageContext(Long.toString(projectId),
-                            UsageDims.of(projectId, UsageDims.kindOf(RolePreset.CODER),
-                                    SESSION_PREFIX + projectId)),
-                    workspaceId,
-                    Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString()),
-                    properties.getTimeout(),
-                    /* live= */ true);
-            try {
-                agentClient.converse(command, streamBridge.sink(projectId));
-                markGenerated(projectId);
-                return;
-            }
-            catch (RuntimeException e) {
-                log.warn("[generate] 项目 {} 第 {}/{} 次生成尝试失败（runId={}）：{}",
-                        projectId, attempt, maxAttempts, runId, e.toString());
-                if (attempt < maxAttempts) {
-                    streamBridge.emitTaskRetrying(projectId, runId, attempt + 1);
-                }
-            }
-        }
-        log.error("[generate] 项目 {} 生成重试超限（{} 次），转终态失败——用户重新发起兜底",
-                projectId, maxAttempts);
+    private void runAttemptsWithRetry(Project project, String firstRunId) {
+        coderRunAttempts.run(project, firstRunId,
+                new CoderRunAttempts.Prompts(GENERATE_TASK_PROMPT, RETRY_TASK_PROMPT),
+                () -> markGenerated(project.getId()), "generate");
     }
 
     /** 首次生成时点落位：重载置位（单向），失败记日志不炸异步轨道（run 已成功）。 */

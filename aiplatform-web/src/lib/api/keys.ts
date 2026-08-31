@@ -20,8 +20,8 @@ export const queryKeys = {
     all: ["projects"] as const,
     /** 详情。 */
     detail: (id: string) => ["projects", id] as const,
-    /** 列表（过滤参数进 key；status 缺省 = all）。 */
-    list: (status?: number) => ["projects", "list", status ?? "all"] as const,
+    /** 列表（全量一份；四态过滤/归档折叠在消费端本地分区——#21）。 */
+    list: () => ["projects", "list"] as const,
   },
   /**
    * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件

@@ -186,7 +186,7 @@ public class ProjectQueryAppService {
         ProjectResponse base = toResponse(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 base.workspaceId(), base.status(), base.statusName(),
-                base.archived(), base.createdAt(), project.getPrdProducedAt());
+                base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt());
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）。 */
@@ -202,7 +202,8 @@ public class ProjectQueryAppService {
                 status,
                 status.getName(),
                 archived,
-                project.getCreatedAt());
+                project.getCreatedAt(),
+                project.getUpdatedAt());
     }
 
     private Project loadProject(Long projectId) {

@@ -581,6 +581,8 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
             prdProducedAt?: string;
         };
         RenameProjectCommand: {
@@ -650,6 +652,8 @@ export interface components {
             archived?: boolean;
             /** Format: date-time */
             createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
         };
         ApiResponseProjectUsageResponse: {
             /** Format: int32 */

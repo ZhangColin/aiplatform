@@ -15,7 +15,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,13 +25,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArchiveProject } from "@/hooks/use-projects";
 import { errorText } from "@/lib/api/api-error";
-import type { ProjectSummary } from "@/lib/projects/list";
+import { projectStage, stageLabel, type ProjectSummary } from "@/lib/projects/list";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 /**
- * 项目列表卡（issue #17 清场后骨架）：项目名 + 状态 + 创建时间，归档走下拉菜单
- * + 二次确认。已归档卡灰态、无菜单；卡片内的订单状态呈现随交易环落位。
+ * 项目列表卡（issue #21）：项目名 + 四态 + 创建/更新时间（无动态摘要行），
+ * 归档走下拉菜单 + 二次确认。已归档卡灰态、无菜单。
  */
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   const router = useRouter();
@@ -59,11 +58,6 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       <CardHeader className="gap-1.5">
         <CardTitle className="flex items-center gap-2 text-base">
           <span className="truncate">{project.name || "未命名项目"}</span>
-          {archived && (
-            <Badge variant="outline" className="ml-auto shrink-0 text-muted-foreground">
-              已归档
-            </Badge>
-          )}
           {!archived && (
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -91,11 +85,9 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="truncate text-sm text-muted-foreground">
-          {project.statusName || "进行中"}
+          {stageLabel(projectStage(project))}
         </p>
-        <p className="text-xs text-muted-foreground/70">
-          创建于 {formatRelativeTime(project.createdAt) || "未知时间"}
-        </p>
+        <p className="text-xs text-muted-foreground/70">{timeLine(project)}</p>
       </CardContent>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -116,4 +108,16 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       </AlertDialog>
     </Card>
   );
+}
+
+/** 时间行：创建于 X；更新晚于创建时追加「更新于 Y」（未真更新过不刷屏）。 */
+function timeLine({ createdAt, updatedAt }: Pick<ProjectSummary, "createdAt" | "updatedAt">) {
+  const created = formatRelativeTime(createdAt) || "未知时间";
+  const updated = formatRelativeTime(updatedAt);
+  const later =
+    updated !== "" &&
+    createdAt !== undefined &&
+    updatedAt !== undefined &&
+    Date.parse(updatedAt) > Date.parse(createdAt);
+  return later ? `创建于 ${created} · 更新于 ${updated}` : `创建于 ${created}`;
 }

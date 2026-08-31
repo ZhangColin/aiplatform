@@ -17,6 +17,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param statusName  派生状态名
  * @param archived    是否已归档（单向终点）
  * @param createdAt   创建时间
+ * @param updatedAt   更新时间（列表卡「更新于」与首页「最近项目」排序的事实源）
  */
 public record ProjectResponse(
         String id,
@@ -27,6 +28,7 @@ public record ProjectResponse(
         ProjectStatus status,
         String statusName,
         Boolean archived,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        LocalDateTime updatedAt
 ) {
 }

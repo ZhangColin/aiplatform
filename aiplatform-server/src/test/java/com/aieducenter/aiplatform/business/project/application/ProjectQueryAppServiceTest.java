@@ -88,6 +88,7 @@ class ProjectQueryAppServiceTest {
         assertThat(response.status()).isEqualTo(ProjectStatus.IN_PROGRESS);
         assertThat(response.archived()).isFalse();
         assertThat(response.createdAt()).isNotNull();
+        assertThat(response.updatedAt()).isNotNull(); // 审计列随建置位（列表卡「更新于」事实源）
     }
 
     @Test

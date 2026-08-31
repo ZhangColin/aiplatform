@@ -130,7 +130,7 @@ class OrderAppServiceTest {
         when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
                 Long.toString(PROJECT_ID), "订单缝测试", ProjectType.WEBSITE, "官网", "9100",
                 status, status.getName(), status == ProjectStatus.ARCHIVED,
-                LocalDateTime.of(2026, 8, 31, 10, 0), null));
+                LocalDateTime.of(2026, 8, 31, 10, 0), null, null));
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), PRD, Instant.parse("2026-08-31T02:00:00Z")));
     }

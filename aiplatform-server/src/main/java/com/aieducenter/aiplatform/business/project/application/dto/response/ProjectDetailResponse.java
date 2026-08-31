@@ -17,6 +17,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param statusName     派生状态名
  * @param archived       是否已归档（单向终点）
  * @param createdAt      创建时间
+ * @param updatedAt      更新时间（审计列）
  * @param prdProducedAt  PRD 产出时点（成果区长出判据；NULL = 闲聊期——指令区占满
  *                       全宽、成果区未长）
  */
@@ -30,6 +31,7 @@ public record ProjectDetailResponse(
         String statusName,
         Boolean archived,
         LocalDateTime createdAt,
+        LocalDateTime updatedAt,
         LocalDateTime prdProducedAt
 ) {
 }

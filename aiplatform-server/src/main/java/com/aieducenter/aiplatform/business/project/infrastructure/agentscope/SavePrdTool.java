@@ -49,9 +49,10 @@ public class SavePrdTool extends ToolBase {
                 .name(NAME)
                 .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。判定需求已明确"
                         + "（四方面信息齐备或用户催促收敛）时调用：content 传完整 PRD "
-                        + "markdown 全文（含需求背景、目标用户、核心场景、范围边界、"
-                        + "关键约束、待定项）。每次调用覆盖旧版；成功后向用户简短总结，"
-                        + "不再提问。")
+                        + "markdown 全文，固定七章节依序为需求背景、目标用户、核心场景、"
+                        + "范围边界、关键约束、功能清单、待定项（功能清单编号列出页面与"
+                        + "功能点、每点附验收要点）。每次调用覆盖旧版；成功后向用户简短"
+                        + "总结（修订时给修订摘要），不再提问。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(

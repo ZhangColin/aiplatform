@@ -1,9 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -17,24 +15,21 @@ import { formatElapsed } from "@/lib/utils/time";
 import { isRunInFlight, useRunElapsed } from "./run-elapsed";
 
 /**
- * 工作台框架（通用层，spec 0001 §3「D 融合壳」）——同构参考 prototype/shared/
- * shell.tsx 的 WorkbenchFrame：顶栏 + resizable 三栏（左 Agent 区 / 中主面板 /
- * 右呼出面板）+ 右栏显式开关 + <lg 三页签退化。栏宽 / 面板内容 / 顶栏文案全部
- * 由场景层插槽决定，本组件只给结构与右栏开关状态。
+ * 工作台框架（issue #17 单门户壳）：顶栏 + resizable 双槽（左指令区 / 右成果区）
+ * + <lg 双页签退化。槽位内容全由场景层注入——成果区内部再分主区域 / 可收展侧栏
+ * （直播，生成环落位）时由槽内容自管嵌套，壳不预设。
  */
 export type WorkbenchShellProps = {
-  /** 顶栏内容：项目名 / 阶段徽章 / 面包屑（收起归品牌行，issue #50，无 Trigger）。 */
+  /** 顶栏内容：项目名等。 */
   header: React.ReactNode;
-  /** 顶栏运行状态（ml-auto 处）：LIVE 脉冲 + 计时（进行中才渲染，#59）。 */
+  /** 顶栏运行状态（ml-auto 处）：LIVE 脉冲 + 计时（进行中才渲染）。 */
   running: React.ReactNode;
-  /** 左：Agent 区。 */
+  /** 左：指令区。 */
   left: React.ReactNode;
-  /** 中：主面板；按钮 api 供主面板工具条放右栏开关（spec 0001 §3 开关在工具条上）。 */
-  center: (api: { rightOpen: boolean; toggleRight: () => void }) => React.ReactNode;
-  /** 右：呼出面板内容。 */
-  right: React.ReactNode;
-  /** <lg 三页签：label ×3（对话 / 工作区 / 右栏名）。 */
-  mobileTabs: [string, string, string];
+  /** 右：成果区。 */
+  outputs: React.ReactNode;
+  /** <lg 双页签：指令区 / 成果区。 */
+  mobileTabs: [string, string];
   leftDefaultSize?: number;
   rightDefaultSize?: number;
   leftMinSize?: number;
@@ -45,17 +40,13 @@ export function WorkbenchShell({
   header,
   running,
   left,
-  center,
-  right,
+  outputs,
   mobileTabs,
   leftDefaultSize = 380,
-  rightDefaultSize = 320,
+  rightDefaultSize = 480,
   leftMinSize = 260,
-  rightMinSize = 220,
+  rightMinSize = 320,
 }: WorkbenchShellProps) {
-  const [rightOpen, setRightOpen] = React.useState(true);
-  const toggleRight = React.useCallback(() => setRightOpen((v) => !v), []);
-
   return (
     <SidebarInset className="h-svh min-h-0 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -63,83 +54,40 @@ export function WorkbenchShell({
         <div className="ml-auto flex shrink-0 items-center gap-1">{running}</div>
       </header>
 
-      {/* resizable 三栏（lg+）；窄屏退化为三页签（spec 0001 §3 <1024px） */}
+      {/* resizable 双槽（lg+）；窄屏退化为双页签（<1024px） */}
       <div className="hidden min-h-0 flex-1 lg:block">
         <ResizablePanelGroup orientation="horizontal" className="h-full">
           <ResizablePanel defaultSize={leftDefaultSize} minSize={leftMinSize} collapsible>
             <div className="h-full border-r">{left}</div>
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel minSize={320}>
-            {center({ rightOpen, toggleRight })}
+          <ResizablePanel defaultSize={rightDefaultSize} minSize={rightMinSize}>
+            {outputs}
           </ResizablePanel>
-          {rightOpen && (
-            <>
-              <ResizableHandle />
-              <ResizablePanel
-                defaultSize={rightDefaultSize}
-                minSize={rightMinSize}
-                collapsible
-              >
-                <div className="h-full border-l">{right}</div>
-              </ResizablePanel>
-            </>
-          )}
         </ResizablePanelGroup>
       </div>
 
       <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col lg:hidden">
-        <TabsList className="m-2 grid grid-cols-3">
+        <TabsList className="m-2 grid grid-cols-2">
           <TabsTrigger value="chat">{mobileTabs[0]}</TabsTrigger>
-          <TabsTrigger value="ws">{mobileTabs[1]}</TabsTrigger>
-          <TabsTrigger value="right">{mobileTabs[2]}</TabsTrigger>
+          <TabsTrigger value="outputs">{mobileTabs[1]}</TabsTrigger>
         </TabsList>
         <TabsContent value="chat" className="min-h-0 flex-1">
           {left}
         </TabsContent>
-        <TabsContent value="ws" className="min-h-0 flex-1">
-          {center({ rightOpen: false, toggleRight: () => {} })}
-        </TabsContent>
-        <TabsContent value="right" className="min-h-0 flex-1">
-          {right}
+        <TabsContent value="outputs" className="min-h-0 flex-1">
+          {outputs}
         </TabsContent>
       </Tabs>
     </SidebarInset>
   );
 }
 
-/** 右栏显式开关钮（各门户主面板工具条共用；spec 0001 §3 显式图标开关）。 */
-export function RightPanelToggle({
-  open,
-  onClick,
-  label = "面板",
-  className,
-}: {
-  open: boolean;
-  onClick: () => void;
-  label?: string;
-  className?: string;
-}) {
-  return (
-    <Button
-      size="xs"
-      variant="ghost"
-      aria-label={open ? `收起${label}` : `展开${label}`}
-      onClick={onClick}
-      className={className}
-    >
-      {open ? <PanelRightClose className="size-3.5" /> : <PanelRightOpen className="size-3.5" />}
-    </Button>
-  );
-}
-
 /**
- * 顶栏运行状态（spec 0001 §3「关了浏览器也在跑」的锚点，#59 真绑定·本会话口径）：
- * 直读 streams store 当前项目最近 run（latestProjectRun，与聊天区运行条同一读口）。
- * 进行中（running / waiting）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归
- * useRunElapsed 局部）；无 run / 已终态（finished / error）整块不渲染——信号保守
- * 但不撒谎。终止占位按钮已随占位 toast 下架，终止交互等后端终止端点
- * （aiplatform-server#38）就绪另票回归。
+ * 顶栏运行状态（「关了浏览器也在跑」的锚点，LIVE 真绑定·本会话口径）：
+ * 直读 streams store 当前项目最近 run（latestProjectRun）。进行中（running /
+ * waiting）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归 useRunElapsed
+ * 局部）；无 run / 已终态（finished / error）整块不渲染——信号保守但不撒谎。
  */
 export function WorkbenchRunStatus({ projectId }: { projectId: string }) {
   const run = useAgentStreamsStore((s) => latestProjectRun(s, projectId));

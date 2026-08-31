@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 /**
  * agent 流过程层 store（ADR 0003）：按 runId 键控、run 内分段数组。
- * SSE handler（bridge）唯一写入方；Agent Feed 组件只读。
+ * SSE handler（bridge）唯一写入方；呈现组件只读。
  * 驱逐：**只由 startRun 触发**——按项目留最近 1 个 run + 总量软上限 10，
  * 够回看刚才那次运行、内存有界；迟到/乱序事件补建 stub 不驱逐（否则旧 run
  * 重放会把项目当前 run 反转掉）。
@@ -17,18 +17,9 @@ export type AgentStreamSegment =
       id: string;
       role: string;
       roleLabel: string;
-      stage: string;
       engine: string;
     }
-  | {
-      kind: "knowledge";
-      id: string;
-      items: Array<{ kind: string; projectName: string; title: string; snippet?: string }>;
-    }
-  | { kind: "wait"; id: string; waitId: string; waitKind: string; summary: string }
-  | { kind: "wait-settled"; id: string; waitId: string; outcome: string }
-  /** 用户侧 HITL 答复（右泡）：本地用户输入写入，非 SSE 事件——答案即用户的一句话选择。 */
-  | { kind: "user"; id: string; text: string }
+  | { kind: "wait"; id: string; waitKind: string; summary: string }
   | { kind: "text"; id: string; data: unknown }
   | { kind: "reasoning"; id: string; data: unknown }
   | { kind: "patch"; id: string; data: unknown }
@@ -36,7 +27,7 @@ export type AgentStreamSegment =
   | { kind: "step"; id: string; phase: "start" | "finish"; data: unknown }
   | { kind: "error"; id: string; message: string }
   | { kind: "finish"; id: string; finish: string }
-  /** 引擎透传的未知名型：原样保留，Feed 兜底呈现。 */
+  /** 引擎透传的未知名型：原样保留，呈现层兜底。 */
   | { kind: "passthrough"; id: string; type: string; data: unknown };
 
 export type AgentRun = {
@@ -47,7 +38,7 @@ export type AgentRun = {
   model?: string;
   engine?: string;
   sessionId?: string;
-  /** 运行起始时间戳（ms，issue #40 运行条计时锚）。建 run 时落；断线补建的 stub 近似 now。 */
+  /** 运行起始时间戳（ms，顶栏计时锚）。建 run 时落；断线补建的 stub 近似 now。 */
   startedAt?: number;
   status: AgentRunStatus;
   segments: AgentStreamSegment[];
@@ -70,23 +61,13 @@ export type AgentStreamsState = {
   startRun: (input: StartRunInput) => void;
   /** run 不存在时按事件携带的 projectId 补建 stub（断线缺口修复），不触发驱逐。 */
   appendSegment: (target: RunTarget, segment: AgentStreamSegment) => void;
-  /** 追加一条用户答复（右泡）：HITL 答复的本地写入（非 SSE 事件，桥不写）——
-   *  问答即对话，选项只是少打字，答案应作为用户消息留在流里。 */
-  appendUserSegment: (target: RunTarget, text: string) => void;
   markSession: (target: RunTarget, sessionId: string) => void;
 };
 
-/** 总量软上限（issue #16：总量 10 软上限）。 */
+/** 总量软上限。 */
 const MAX_RUNS = 10;
 
 type SetFn = (partial: Partial<AgentStreamsState>) => void;
-
-/** 用户答复段 id 生成（进程内递增，会话内存态下唯一即够；SSE 段 id 走事件 id）。 */
-let userSegmentSeq = 0;
-function userSegmentId(): string {
-  userSegmentSeq += 1;
-  return `user-${userSegmentSeq}`;
-}
 
 /** 建新 run。evict = true（仅 startRun）时先清同项目旧 run，再压总量软上限。 */
 function ensureRun(set: SetFn, input: StartRunInput, evict: boolean): void {
@@ -160,11 +141,6 @@ export const useAgentStreamsStore = create<AgentStreamsState>((set) => ({
       status: nextRunStatus(run.status, segment),
       segments: [...run.segments, segment],
     })),
-  appendUserSegment: (target, text) =>
-    withRun(set, target, (run) => ({
-      ...run,
-      segments: [...run.segments, { kind: "user", id: userSegmentId(), text }],
-    })),
   markSession: (target, sessionId) =>
     withRun(set, target, (run) =>
       run.sessionId === sessionId ? run : { ...run, sessionId },
@@ -172,9 +148,9 @@ export const useAgentStreamsStore = create<AgentStreamsState>((set) => ({
 }));
 
 /**
- * 直播视图读口（#23）：该项目插入序最近的一个 run（order 尾部倒查）。
- * 驱逐已保证同项目至多 1 个 task-start 建的真 run；断线缺口补建的 stub
- * 在 order 尾部时即最新可见 run（「回来重连后续播」的呈现对象）。
+ * 最近 run 读口（顶栏 LIVE / 后续直播视图共用）：该项目插入序最近的一个 run
+ * （order 尾部倒查）。驱逐已保证同项目至多 1 个 task-start 建的真 run；断线
+ * 缺口补建的 stub 在 order 尾部时即最新可见 run。
  */
 export function latestProjectRun(
   state: Pick<AgentStreamsState, "runs" | "order">,
@@ -187,7 +163,7 @@ export function latestProjectRun(
   return undefined;
 }
 
-/** 终态/等待分段推导 run 状态（T4 原型 RunStatus 契约：running/waiting/finished/error）。 */
+/** 终态/等待分段推导 run 状态：wait（问答挂起）= waiting，等用户 ≠ 终态。 */
 function nextRunStatus(
   current: AgentRunStatus,
   segment: AgentStreamSegment,
@@ -195,8 +171,6 @@ function nextRunStatus(
   switch (segment.kind) {
     case "wait":
       return "waiting";
-    case "wait-settled":
-      return "running";
     case "error":
       return "error";
     case "finish":

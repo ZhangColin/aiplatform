@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import { PortalContent } from "@/components/layout/portal-sidebar";
 import { Button } from "@/components/ui/button";
@@ -18,30 +18,18 @@ import {
 import { ProjectCard } from "./project-card";
 
 /**
- * 项目列表页（spec 0002 §3.2，issue #20）：Segmented 四态过滤（全部/进行中/
- * 待处理/已归档）+ 卡片网格 + 归档操作。「全部」不传 status + 本地过滤已归档。
+ * 项目列表页（issue #17 单门户三路由之一）：Segmented 过滤（全部 / 进行中 /
+ * 已归档；订单四态过滤随交易环重组）+ 卡片网格 + 归档操作。「全部」不传
+ * status + 本地过滤已归档。
  */
 
 const EMPTY_COPY: Record<ProjectListFilterKey, string> = {
   all: "还没有项目，先去聊一个想做的吧",
   active: "没有进行中的项目",
-  pending: "现在没有需要你处理的事",
   archived: "还没有归档的项目",
 };
 
-/** 页头文案可场景化覆写（spec 0002 §2：列表页是通用页面能力，按场景菜单取用）。 */
-export type ProjectListViewProps = {
-  title?: string;
-  description?: string;
-  /** 页头右侧动作（如 dev 场景「新建项目」入口，spec 0002 §2 同形态建项目）。 */
-  headerAction?: ReactNode;
-};
-
-export function ProjectListView({
-  title = "我的项目",
-  description = "每个项目从聊需求到交付共六步，需要你拍板时会明确告诉你",
-  headerAction,
-}: ProjectListViewProps) {
+export function ProjectListView() {
   const [filter, setFilter] = useState<ProjectListFilterKey>("all");
   const list = useProjectList(filter);
   const items = visibleProjects(list.data ?? [], filter);
@@ -49,13 +37,12 @@ export function ProjectListView({
   return (
     <PortalContent>
       <div className="mx-auto max-w-5xl p-6">
-        {/* 非工作台页页头（spec 0001 §2）：标题 + 说明（收起归品牌行，issue #50） */}
+        {/* 非工作台页页头：标题 + 说明（收起归品牌行） */}
         <header className="mb-5 flex items-center gap-2">
           <div>
-            <h1 className="text-lg font-semibold">{title}</h1>
-            <p className="text-xs text-muted-foreground">{description}</p>
+            <h1 className="text-lg font-semibold">我的项目</h1>
+            <p className="text-xs text-muted-foreground">每个项目承载一次定制需求的全程</p>
           </div>
-          {headerAction && <div className="ml-auto">{headerAction}</div>}
         </header>
 
         <ToggleGroup
@@ -107,7 +94,7 @@ export function ProjectListView({
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((project) => (
-              <ProjectCard key={project.id} project={project} filter={filter} />
+              <ProjectCard key={project.id} project={project} />
             ))}
           </div>
         )}

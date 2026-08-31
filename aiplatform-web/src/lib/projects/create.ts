@@ -9,7 +9,7 @@ import type { components } from "@/lib/api/schema";
 
 export type CreateProjectCommand = components["schemas"]["CreateProjectCommand"];
 
-/** 建项目响应（POST /api/projects → {project, runId, accepted}）。 */
+/** 建项目响应（POST /api/projects → {project, runId}）。 */
 export type ProjectCreatedResponse = components["schemas"]["ProjectCreatedResponse"];
 
 export type CreateProjectInput = {

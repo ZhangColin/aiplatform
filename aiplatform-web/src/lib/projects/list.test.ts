@@ -9,18 +9,12 @@ import {
   type ProjectSummary,
 } from "./list";
 
-describe("项目列表过滤（issue #20 四态）", () => {
-  it("四态 → status 参数映射：全部不传，进行中 1 / 待处理 2 / 已归档 3；顺序即呈现序", () => {
+describe("项目列表过滤（issue #17 清场后三态；订单四态随交易环重组）", () => {
+  it("三态 → status 参数映射：全部不传，进行中 1 / 已归档 3；顺序即呈现序", () => {
     expect(FILTER_STATUS.all).toBeUndefined();
     expect(FILTER_STATUS.active).toBe(1);
-    expect(FILTER_STATUS.pending).toBe(2);
     expect(FILTER_STATUS.archived).toBe(3);
-    expect(PROJECT_LIST_FILTERS.map((f) => f.key)).toEqual([
-      "all",
-      "active",
-      "pending",
-      "archived",
-    ]);
+    expect(PROJECT_LIST_FILTERS.map((f) => f.key)).toEqual(["all", "active", "archived"]);
   });
 
   it("「全部」本地过滤已归档（防御后端 all 语义）；其余视图原样透传（服务端已按 status 过滤）", () => {
@@ -31,7 +25,6 @@ describe("项目列表过滤（issue #20 四态）", () => {
     ];
     expect(visibleProjects(items, "all").map((p) => p.id)).toEqual(["1", "3"]);
     expect(visibleProjects(items, "active")).toHaveLength(3);
-    expect(visibleProjects(items, "pending")).toHaveLength(3);
     expect(visibleProjects(items, "archived")).toHaveLength(3);
   });
 
@@ -39,17 +32,15 @@ describe("项目列表过滤（issue #20 四态）", () => {
     expect(normalizeProjectSummary({ id: "p1" })).toMatchObject({
       id: "p1",
       name: "",
-      stage: "",
-      stageLabel: "",
       archived: false,
     });
     expect(
-      normalizeProjectSummary({ id: "p2", name: "宠物医院官网", statusName: "开发中" }),
-    ).toMatchObject({ id: "p2", name: "宠物医院官网", statusName: "开发中" });
+      normalizeProjectSummary({ id: "p2", name: "宠物医院官网", statusName: "进行中" }),
+    ).toMatchObject({ id: "p2", name: "宠物医院官网", statusName: "进行中" });
   });
 });
 
-describe("最近项目（issue #39 落地页：createdAt 倒序取前 N）", () => {
+describe("最近项目（首页：createdAt 倒序取前 N）", () => {
   it("按 createdAt 倒序取前 4；缺 createdAt 沉底不抛", () => {
     const items = [
       { id: "old", createdAt: "2026-08-01T00:00:00Z" },
@@ -74,5 +65,5 @@ describe("最近项目（issue #39 落地页：createdAt 倒序取前 N）", () 
 });
 
 function summary(overrides: Partial<ProjectSummary>): ProjectSummary {
-  return { id: "x", name: "x", stage: "", stageLabel: "", archived: false, ...overrides };
+  return { id: "x", name: "x", archived: false, ...overrides };
 }

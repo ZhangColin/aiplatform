@@ -11,14 +11,14 @@ describe("parseSseEnvelope", () => {
   it("解析正本示例信封：type / payload / ts", () => {
     // 期望值来自后端 docs/spec/SSE事件清单.md 信封示例（独立真相源）
     const raw = JSON.stringify({
-      type: "stage-changed",
-      payload: { projectId: "a1b2c3d4", stage: "DEV", stageLabel: "开发", approved: true },
+      type: "document-updated",
+      payload: { projectId: "a1b2c3d4", documentType: "PRD" },
       ts: "2026-08-19T02:15:33.123Z",
     });
 
     expect(parseSseEnvelope(raw)).toEqual({
-      type: "stage-changed",
-      payload: { projectId: "a1b2c3d4", stage: "DEV", stageLabel: "开发", approved: true },
+      type: "document-updated",
+      payload: { projectId: "a1b2c3d4", documentType: "PRD" },
       ts: "2026-08-19T02:15:33.123Z",
     });
   });
@@ -54,26 +54,30 @@ describe("asNotificationEvent", () => {
     });
   });
 
-  it("通知通道是封闭集合：名册外 type 返回 null", () => {
+  it("通知通道是封闭集合：名册外 type（含已删事件 stage-changed）返回 null", () => {
     const env = parseSseEnvelope(
       JSON.stringify({ type: "future-event", payload: { projectId: "p1" }, ts: "" }),
     );
     expect(asNotificationEvent(env!)).toBeNull();
+    const deleted = parseSseEnvelope(
+      JSON.stringify({ type: "stage-changed", payload: { projectId: "p1" }, ts: "" }),
+    );
+    expect(asNotificationEvent(deleted!)).toBeNull();
   });
 
-  it("document-updated 按正本收窄（payload {projectId, documentType}，#54）", () => {
-    // 期望值来自正本「通道一」document-updated 示例行（aiplatform-server #41）
+  it("project-renamed 按正本收窄（payload {projectId, projectName}）", () => {
+    // 期望值来自正本「通道一」project-renamed 示例行（aiplatform-server #52）
     const env = parseSseEnvelope(
       JSON.stringify({
-        type: "document-updated",
-        payload: { projectId: "a1b2c3d4", documentType: "PRD" },
+        type: "project-renamed",
+        payload: { projectId: "a1b2c3d4", projectName: "品牌官网" },
         ts: "2026-08-26T02:15:33.123Z",
       }),
     );
 
     expect(asNotificationEvent(env!)).toMatchObject({
-      type: "document-updated",
-      payload: { projectId: "a1b2c3d4", documentType: "PRD" },
+      type: "project-renamed",
+      payload: { projectId: "a1b2c3d4", projectName: "品牌官网" },
     });
   });
 });
@@ -94,35 +98,20 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("knowledge-retrieved 按正本字段收窄：items = [{kind, projectName, title, snippet?}]（A5 #23 核对）", () => {
-    // 期望值来自正本「通道二」knowledge-retrieved 行 + aiplatform-server #28 契约示例
+  it("wait-raised 按正本收窄（payload {projectId, runId, kind, summary}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「通道二」wait-raised 行
     const env = parseSseEnvelope(
       JSON.stringify({
-        type: "knowledge-retrieved",
-        payload: {
-          projectId: "1",
-          runId: "run-xxx",
-          items: [
-            { kind: "QA", projectName: "电商官网一期", title: "用哪个前端框架?", snippet: "问：…\n答：React" },
-            { kind: "ARTIFACT", projectName: "官网 demo", title: "PRD.md" },
-          ],
-        },
+        type: "wait-raised",
+        payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", kind: "QUESTION", summary: "选哪个配色" },
         ts: "",
       }),
     );
 
     expect(asPlatformAgentEvent(env!)).toMatchObject({
-      type: "knowledge-retrieved",
-      payload: {
-        projectId: "1",
-        runId: "run-xxx",
-        items: [
-          { kind: "QA", projectName: "电商官网一期", title: "用哪个前端框架?" },
-          { kind: "ARTIFACT", projectName: "官网 demo", title: "PRD.md" },
-        ],
-      },
+      type: "wait-raised",
+      payload: { projectId: "a1b2c3d4", runId: "r1", kind: "QUESTION", summary: "选哪个配色" },
     });
-    // 平台 type 不落入透传口
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 

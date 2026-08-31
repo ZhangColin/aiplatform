@@ -19,13 +19,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-/** 平台 title（issue #49，spec 0002 §2 修订）：首页无前缀，内页「页面 · AI 开发平台」。 */
+/** 平台 title：首页无前缀，内页「页面 · AI 开发平台」。 */
 export const metadata: Metadata = {
   title: {
     default: "AI 开发平台",
     template: "%s · AI 开发平台",
   },
-  description: "从一句话需求到交付验收的 AI 开发平台",
+  description: "从一句话需求到可操作系统的定制交易平台",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

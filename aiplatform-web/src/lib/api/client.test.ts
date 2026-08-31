@@ -80,14 +80,14 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
     const fetchMock = stubFetch().mockImplementation(always({ data: [] }));
 
     await Promise.all([
-      api.get("/todos", { query: { view: "dev" } }),
-      api.get("/todos", { query: { view: "dev" } }),
-      api.get("/todos", { query: { view: "all" } }),
+      api.get("/projects", { query: { status: 1 } }),
+      api.get("/projects", { query: { status: 1 } }),
+      api.get("/projects", { query: { status: 3 } }),
     ]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("view=dev");
-    expect(String(fetchMock.mock.calls[1][0])).toContain("view=all");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("status=1");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("status=3");
   });
 
   it("落定即清：上一轮完成后同参 GET 重新发起（只去重并发，不做结果缓存）", async () => {

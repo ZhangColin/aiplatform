@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { UserPortalShell } from "./portal-shell";
+import { PortalShell } from "./portal-shell";
 
 // active 态推导与本测试无关（首页高亮与否不改变菜单结构）
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
@@ -24,9 +24,9 @@ function navAnchors(html: string): { href: string; label: string }[] {
   );
 }
 
-describe("UserPortalShell（需求端菜单，spec 0002 §2 修订 issue #49）", () => {
+describe("PortalShell（单门户菜单，issue #17）", () => {
   it("菜单仅「首页」「我的项目」两项，href 正确——项目直列与平台组各项不出现", () => {
-    const html = renderToStaticMarkup(<UserPortalShell>x</UserPortalShell>);
+    const html = renderToStaticMarkup(<PortalShell>x</PortalShell>);
     const items = navAnchors(html);
     expect(items).toEqual([
       { href: "/", label: "首页" },

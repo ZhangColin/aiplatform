@@ -18,8 +18,7 @@ import { buildCreateProjectCommand } from "@/lib/projects/create";
  * 按钮行底圆角无缝接合成一体、按钮右下留距如浮起），仅此一个输入框——项目名
  * 由后端 LLM 取、模板单链默认、引擎后台统一定，不出现用户不懂的概念。文本框
  * 自动增高：3 行起步、最高 8 行后内部滚动。提交 POST /api/projects → 成功后
- * onCreated(projectId) 交给调用侧导航——需求端 /projects/[id]、开发平台
- * /dev/projects/[id]，同一形态两处入口。
+ * onCreated(projectId) 交给调用侧导航（首页 → /projects/[id] 直进项目页）。
  */
 
 export function CreateProjectForm({

@@ -40,17 +40,17 @@ describe("agent-streams store", () => {
   });
 
   it("task-start 晚于首帧（role-assigned 补建 stub）→ 补 prompt/model 元数据、不清已收分段", () => {
-    // 正本帧序 role-assigned → task-start（#40 创建即开场）：首帧补建 stub 后
-    // task-start 必须把 prompt 补进去（用户右泡来源），否则用户的一句话描述永不出现。
+    // 正本帧序 role-assigned → task-start（创建即开场）：首帧补建 stub 后
+    // task-start 必须把 prompt 补进去，否则用户的一句话描述永不出现。
     state().appendSegment(
       { runId: "r1", projectId: "p1" },
-      { kind: "role", id: "r1:1", role: "BA", roleLabel: "顾问", stage: "PRD", engine: "agentscope" },
+      { kind: "role", id: "r1:1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
     );
     state().startRun({ runId: "r1", projectId: "p1", prompt: "做个官网", model: "deepseek-v3" });
 
     expect(state().runs["r1"]).toMatchObject({ prompt: "做个官网", model: "deepseek-v3" });
     expect(state().runs["r1"].segments).toEqual([
-      { kind: "role", id: "r1:1", role: "BA", roleLabel: "顾问", stage: "PRD", engine: "agentscope" },
+      { kind: "role", id: "r1:1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("agent-streams store", () => {
     // 新 run 首帧先到（补建 stub r2），task-start 随后——旧 run r1 仍应被驱逐
     state().appendSegment(
       { runId: "r2", projectId: "p1" },
-      { kind: "role", id: "r2:1", role: "BA", roleLabel: "顾问", stage: "PRD", engine: "agentscope" },
+      { kind: "role", id: "r2:1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
     );
     state().startRun({ runId: "r2", projectId: "p1", prompt: "新任务" });
 
@@ -88,13 +88,11 @@ describe("agent-streams store", () => {
     expect(state().runs["r9"]).toMatchObject({ runId: "r9", projectId: "p9", status: "running" });
   });
 
-  it("分段推导 run 状态：wait→waiting、wait-settled→running、error→error、finish→finished", () => {
+  it("分段推导 run 状态：wait→waiting、error→error、finish→finished", () => {
     state().startRun({ runId: "r1", projectId: "p1" });
-    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "wait", id: "a", waitId: "w1", waitKind: "QUESTION", summary: "字段清单？" });
+    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "wait", id: "a", waitKind: "QUESTION", summary: "字段清单？" });
     expect(state().runs["r1"].status).toBe("waiting");
-    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "wait-settled", id: "b", waitId: "w1", outcome: "answered" });
-    expect(state().runs["r1"].status).toBe("running");
-    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "finish", id: "c", finish: "completed" });
+    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "finish", id: "c", finish: "end" });
     expect(state().runs["r1"].status).toBe("finished");
   });
 
@@ -105,16 +103,6 @@ describe("agent-streams store", () => {
 
     expect(state().runs["r1"].sessionId).toBe("s-1");
     expect(state().runs["r2"]).toMatchObject({ runId: "r2", sessionId: "s-2" });
-  });
-
-  it("appendUserSegment 追加用户答复段（右泡）；不改变 run 状态", () => {
-    state().startRun({ runId: "r1", projectId: "p1" });
-    state().appendUserSegment({ runId: "r1", projectId: "p1" }, "短信验证码");
-
-    const segment = state().runs["r1"].segments[0];
-    expect(segment).toMatchObject({ kind: "user", text: "短信验证码" });
-    expect(segment.id).toMatch(/^user-\d+$/);
-    expect(state().runs["r1"].status).toBe("running");
   });
 
   it("驱逐只由 startRun 触发：迟到事件补建 stub 不得清掉该项目当前 run", () => {

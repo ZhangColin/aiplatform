@@ -1,6 +1,6 @@
 import { CreateProjectHero } from "@/components/user-portal/create-project-hero";
 
-/** 需求端落地页 = 一句话 hero（spec 0002 §3.1，issue #39）。 */
+/** 首页 = 一句话 hero（issue #17 单门户三路由之一）。 */
 export default function HomePage() {
   return <CreateProjectHero />;
 }

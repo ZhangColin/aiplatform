@@ -44,34 +44,25 @@ export type NotificationEvent =
         engine: string;
       };
     }
-  | {
-      type: "stage-changed";
-      payload: {
-        projectId: string;
-        stage: string;
-        stageLabel: string;
-        approved?: boolean;
-        rejected?: boolean;
-        /** 驳回时携带。 */
-        reason?: string;
-      };
-    }
   | { type: "preview-ready"; payload: { projectId: string; url: string } }
   | { type: "workspace-destroyed"; payload: { projectId: string } }
-  | { type: "task-updated"; payload: { projectId: string; taskId: string; status: string } }
   | {
-      /** 工作区文档产物写出/修订落定（#54）；v1 唯一写入方 = BA 的 savePrd。 */
+      /** 工作区文档产物写出/修订落定；v1 唯一写入方 = BA 的 savePrd。 */
       type: "document-updated";
       payload: { projectId: string; documentType: string };
+    }
+  | {
+      /** 异步取名落库成功顶替占位名后发射；失败保占位不发。 */
+      type: "project-renamed";
+      payload: { projectId: string; projectName: string };
     };
 
 const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
   "workspace-created",
-  "stage-changed",
   "preview-ready",
   "workspace-destroyed",
-  "task-updated",
   "document-updated",
+  "project-renamed",
 ] satisfies Array<NotificationEvent["type"]>);
 
 /** 通道一为封闭集合：名册外 type → null（桥按 miss 忽略）。 */
@@ -99,35 +90,33 @@ export type PlatformAgentEvent =
     }
   | {
       type: "role-assigned";
-      payload: AgentPayload & { role: string; roleLabel: string; stage: string; engine: string };
-    }
-  | {
-      type: "knowledge-retrieved";
-      payload: AgentPayload & {
-        items: Array<{ kind: string; projectName: string; title: string; snippet?: string }>;
-      };
+      payload: AgentPayload & { role: string; roleLabel: string; engine: string };
     }
   | { type: "session-created"; payload: AgentPayload & { sessionId: string; engine?: string } }
   | { type: "error"; payload: AgentPayload & { message: string } }
   | { type: "task-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
   | {
+      /**
+       * 智能体挂起（ask_user 提问等）：答复续跑归业务编排（问答作答通道，需求环）。
+       * `engineRef` = 引擎侧请求/权限 id（续跑批复的锚）；`data` = 引擎载荷原样
+       * （QUESTION 时含前端问答卡投影 `data.questions`），问答卡切片消费。
+       */
       type: "wait-raised";
-      payload: AgentPayload & { waitId: string; kind: string; summary: string };
-    }
-  | {
-      type: "wait-settled";
-      payload: AgentPayload & { waitId: string; outcome: string };
+      payload: AgentPayload & {
+        kind: string;
+        summary: string;
+        engineRef?: string;
+        data?: unknown;
+      };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "task-start",
   "role-assigned",
-  "knowledge-retrieved",
   "session-created",
   "error",
   "task-finish",
   "wait-raised",
-  "wait-settled",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

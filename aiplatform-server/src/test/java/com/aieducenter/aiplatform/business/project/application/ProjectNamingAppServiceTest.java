@@ -212,6 +212,6 @@ class ProjectNamingAppServiceTest {
     }
 
     private Project placeholderProject() {
-        return Project.create(Project.PLACEHOLDER_NAME, null, "opencode", 900L, null);
+        return Project.create(Project.PLACEHOLDER_NAME, null, 900L, null);
     }
 }

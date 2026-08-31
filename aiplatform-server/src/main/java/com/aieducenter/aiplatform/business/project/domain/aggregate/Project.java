@@ -24,9 +24,6 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
  * 「进行中/已归档」即其全部派生态。一个项目 = 一个 dev 环境（workspaceId 软引用
  * wsp 表，级联清理由编排负责）。删除真删级联，无软删除——继承 Auditable 只取
  * 审计字段。
- *
- * <p>engine 列为多引擎时代的遗留（NOT NULL 列，取值 = 单栈常量），随 Flyway
- * squash（#18）处置。</p>
  */
 @Entity
 @Table(name = "prj_projects")
@@ -56,9 +53,6 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "type", nullable = false, updatable = false)
     private ProjectType type;
 
-    @Column(name = "engine", nullable = false, updatable = false, length = 20)
-    private String engine;
-
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
 
@@ -79,23 +73,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "prd_produced_at")
     private LocalDateTime prdProducedAt;
 
+    /**
+     * 首次生成时点：单向置位（{@link #markGenerated} 只在首次落值，后续生成/迭代
+     * 不刷新）——「确认下单」可见性与项目列表「进行中」推导口径的锚点。生成编排
+     * 落位归生成环（#22），本聚合只保证置位语义。
+     */
+    @Column(name = "generated_at")
+    private LocalDateTime generatedAt;
+
     protected Project() {
     }
 
-    private Project(String name, ProjectType type, String engine, Long workspaceId,
-                    Long ownerAccountId) {
+    private Project(String name, ProjectType type, Long workspaceId, Long ownerAccountId) {
         if (name == null || name.isBlank()) {
             throw new DomainException(ProjectMessage.PROJECT_NAME_BLANK);
-        }
-        if (engine == null || engine.isBlank()) {
-            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
         }
         if (workspaceId == null) {
             throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
         }
         this.name = name;
         this.type = ProjectType.orDefault(type);
-        this.engine = engine;
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
     }
@@ -103,9 +100,9 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     /**
      * 建项目（编排在工作区副作用落定后调用，短事务落库）。
      */
-    public static Project create(String name, ProjectType type, String engine,
+    public static Project create(String name, ProjectType type,
                                  Long workspaceId, Long ownerAccountId) {
-        return new Project(name, type, engine, workspaceId, ownerAccountId);
+        return new Project(name, type, workspaceId, ownerAccountId);
     }
 
     /**
@@ -148,6 +145,16 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      */
     public void markPrdProduced() {
         this.prdProducedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 首次生成置位：幂等单向——首次落值后不再刷新（与 {@link #markPrdProduced}
+     * 的「随写刷新」相对：生成时点只认第一次，迭代不重置）。
+     */
+    public void markGenerated() {
+        if (generatedAt == null) {
+            this.generatedAt = LocalDateTime.now();
+        }
     }
 
     @PrePersist

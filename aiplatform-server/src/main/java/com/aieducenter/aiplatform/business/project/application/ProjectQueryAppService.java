@@ -185,7 +185,7 @@ public class ProjectQueryAppService {
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
-                base.engine(), base.workspaceId(), base.status(), base.statusName(),
+                base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt());
     }
 
@@ -198,7 +198,6 @@ public class ProjectQueryAppService {
                 project.getName(),
                 project.getType(),
                 project.getType().getName(),
-                project.getEngine(),
                 project.getWorkspaceId().toString(),
                 status,
                 status.getName(),

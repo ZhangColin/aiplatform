@@ -88,7 +88,7 @@ class MeteringAppServiceTest {
     @Test
     void given_incomplete_event_when_report_then_rejected_nothing_recorded() {
         assertThatThrownBy(() -> usageEventSink.report(new UsageEvent(null, T1, PROJ_1,
-                null, null, "deepseek", "deepseek-v4-pro", "opencode", null,
+                null, null, "deepseek", "deepseek-v4-pro", null,
                 new TokenUsage(1, 1, 0, 0, 0))))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining("用量事件字段不完整");
@@ -200,6 +200,6 @@ class MeteringAppServiceTest {
     private UsageEvent event(String eventId, String subject, Instant ts, String provider,
                              String model, Map<String, String> dims, TokenUsage tokens) {
         return new UsageEvent(eventId, ts, subject, "run-1", "session-1",
-                provider, model, "opencode", dims, tokens);
+                provider, model, dims, tokens);
     }
 }

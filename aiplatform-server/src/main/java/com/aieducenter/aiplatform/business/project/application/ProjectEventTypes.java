@@ -45,9 +45,6 @@ public final class ProjectEventTypes {
     /** 项目类型（枚举名）。 */
     public static final String PROJECT_TYPE_FIELD = "projectType";
 
-    /** 智能体栈名（单栈常量）。 */
-    public static final String ENGINE_FIELD = "engine";
-
     /** 预览 URL（preview-ready）。 */
     public static final String URL_FIELD = "url";
 

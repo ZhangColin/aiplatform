@@ -57,9 +57,6 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     @Column(name = "model", nullable = false, updatable = false, length = 100)
     private String model;
 
-    @Column(name = "engine", nullable = false, updatable = false, length = 50)
-    private String engine;
-
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "dims", columnDefinition = "jsonb", updatable = false)
     private Map<String, String> dims;
@@ -90,7 +87,6 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
         this.sessionId = event.sessionId();
         this.provider = event.provider();
         this.model = event.model();
-        this.engine = event.engine();
         this.dims = normalizeDims(event.dims());
         TokenUsage tokens = event.tokens();
         this.input = tokens.input();
@@ -101,12 +97,12 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     }
 
     /**
-     * 从协议事件落成存储行（必填校验：eventId/ts/subject/provider/model/engine/tokens）。
+     * 从协议事件落成存储行（必填校验：eventId/ts/subject/provider/model/tokens）。
      */
     public static UsageEventEntry of(UsageEvent event) {
         if (event == null || isBlank(event.eventId()) || event.ts() == null
                 || isBlank(event.subject()) || isBlank(event.provider())
-                || isBlank(event.model()) || isBlank(event.engine()) || event.tokens() == null) {
+                || isBlank(event.model()) || event.tokens() == null) {
             throw new DomainException(MeteringMessage.USAGE_EVENT_FIELDS_INCOMPLETE);
         }
         return new UsageEventEntry(event);

@@ -115,9 +115,9 @@ class ProjectQueryAppServiceTest {
     @Test
     void given_no_filter_when_list_then_desc_order_with_derived_status() {
         projectRepository.save(Project
-                .create("老项目", ProjectType.WEBSITE, "agentscope", 1L, null));
+                .create("老项目", ProjectType.WEBSITE, 1L, null));
         projectRepository.save(Project
-                .create("新项目", ProjectType.ECOMMERCE, "agentscope", 2L, null));
+                .create("新项目", ProjectType.ECOMMERCE, 2L, null));
 
         List<ProjectResponse> list = appService.list(null);
 
@@ -287,6 +287,6 @@ class ProjectQueryAppServiceTest {
 
     private Project persistedProject(long workspaceId, String name) {
         return projectRepository.save(Project
-                .create(name, ProjectType.WEBSITE, "agentscope", workspaceId, null));
+                .create(name, ProjectType.WEBSITE, workspaceId, null));
     }
 }

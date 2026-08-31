@@ -12,7 +12,6 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param name        项目名
  * @param type        项目类型（code）
  * @param typeName    项目类型名
- * @param engine      智能体栈名（单栈常量）
  * @param workspaceId dev 工作区标识
  * @param status      派生项目状态（code）：IN_PROGRESS / ARCHIVED（归档优先）
  * @param statusName  派生状态名
@@ -24,7 +23,6 @@ public record ProjectDetailResponse(
         String name,
         ProjectType type,
         String typeName,
-        String engine,
         String workspaceId,
         ProjectStatus status,
         String statusName,

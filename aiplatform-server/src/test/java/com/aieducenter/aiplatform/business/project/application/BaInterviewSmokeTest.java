@@ -43,8 +43,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
  * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
  * （BA 停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
- * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（engine=agentscope，
- * dims.role=BA）。</p>
+ * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.role=BA）。</p>
  */
 @SpringBootTest
 class BaInterviewSmokeTest {
@@ -139,7 +138,7 @@ class BaInterviewSmokeTest {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(notificationAppService).publish(any(), any());
-        Project project = projectRepository.save(Project.create("冒烟官网", null, "agentscope",
+        Project project = projectRepository.save(Project.create("冒烟官网", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
         sessionId = BaInterviewAppService.SESSION_PREFIX + projectId;
@@ -194,15 +193,14 @@ class BaInterviewSmokeTest {
         awaitRunEnd(recall.runId());
         assertThat(textOf(recall.runId())).contains("海外");
 
-        // 7) 计量：BA 对话用量落 UsageEvent（engine=agentscope、role=BA、归属项目）
+        // 7) 计量：BA 对话用量落 UsageEvent（dims.role=BA、归属项目）
         Integer usageRows = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM met_usage_events WHERE session_id = ?", Integer.class,
                 sessionId);
         assertThat(usageRows).isPositive();
         Map<String, Object> usage = jdbcTemplate.queryForMap(
-                "SELECT engine, subject, dims FROM met_usage_events"
+                "SELECT subject, dims FROM met_usage_events"
                         + " WHERE session_id = ? LIMIT 1", sessionId);
-        assertThat(usage.get("engine")).isEqualTo("agentscope");
         assertThat(String.valueOf(usage.get("subject"))).isEqualTo(projectId.toString());
         assertThat(String.valueOf(usage.get("dims"))).contains("BA");
     }

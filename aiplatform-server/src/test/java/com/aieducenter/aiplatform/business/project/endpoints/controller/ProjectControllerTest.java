@@ -114,7 +114,7 @@ class ProjectControllerTest {
     @Test
     void given_projects_when_list_then_wrapped_array() throws Exception {
         when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
-                ProjectType.WEBSITE, "官网", "agentscope", "900",
+                ProjectType.WEBSITE, "官网", "900",
                 ProjectStatus.IN_PROGRESS, "进行中", false, null)));
 
         performAsUser(get("/api/projects"))
@@ -214,7 +214,7 @@ class ProjectControllerTest {
         // 动作端点风格同 archive；响应与详情端点同构（前端 invalidate 后刷新列表/顶栏）
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
-                        "agentscope", "900", ProjectStatus.IN_PROGRESS, "进行中", false,
+                        "900", ProjectStatus.IN_PROGRESS, "进行中", false,
                         LocalDateTime.of(2026, 8, 22, 10, 0)));
 
         performAsUser(post("/api/projects/100/rename")
@@ -340,7 +340,7 @@ class ProjectControllerTest {
     /** 详情夹具（列表字段全量的最小可用形态）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
-                "agentscope", "900", status, status.getName(), archived,
+                "900", status, status.getName(), archived,
                 LocalDateTime.of(2026, 8, 22, 10, 0));
     }
 

@@ -13,7 +13,6 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
-import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
@@ -46,9 +45,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class ProjectLifecycleAppService {
-
-    /** 智能体栈单栈常量（多引擎概念已出局；列随 Flyway squash（#18）处置）。 */
-    private static final String ENGINE = AgentscopeAgentClient.ENGINE;
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final BaInterviewAppService baInterviewAppService;
@@ -89,7 +85,7 @@ public class ProjectLifecycleAppService {
         Project project;
         try {
             project = transactionTemplate.execute(status -> projectRepository.save(Project.create(
-                    Project.PLACEHOLDER_NAME, null, ENGINE,
+                    Project.PLACEHOLDER_NAME, null,
                     Long.parseLong(workspace.workspaceId()), RequestContext.getUserId())));
         } catch (RuntimeException e) {
             // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）
@@ -103,8 +99,7 @@ public class ProjectLifecycleAppService {
                 ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
                 ProjectEventTypes.PROJECT_NAME_FIELD, project.getName(),
                 ProjectEventTypes.CONTAINER_FIELD, workspace.containerName(),
-                ProjectEventTypes.PROJECT_TYPE_FIELD, project.getType().name(),
-                ProjectEventTypes.ENGINE_FIELD, project.getEngine()));
+                ProjectEventTypes.PROJECT_TYPE_FIELD, project.getType().name()));
 
         // 异步 LLM 取名（占位名先落，取名后台完成落位；空 requirement 不取名）
         namingService.nameAsync(project.getId(), command.requirement());

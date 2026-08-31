@@ -367,11 +367,9 @@ export interface paths {
          *
          *     | type | payload 字段 |
          *     |---|---|
-         *     | workspace-created | projectId, projectName, container, projectType, engine |
-         *     | stage-changed | projectId, stage, stageLabel, approved?, rejected?, reason? |
+         *     | workspace-created | projectId, projectName, container, projectType |
          *     | preview-ready | projectId, url |
          *     | workspace-destroyed | projectId |
-         *     | task-updated | projectId, taskId, status |
          *     | document-updated | projectId, documentType |
          *     | project-renamed | projectId, projectName |
          *
@@ -535,7 +533,6 @@ export interface components {
             /** @description 1=官网, 2=电商 */
             type?: number;
             typeName?: string;
-            engine?: string;
             workspaceId?: string;
             /** @description 1=进行中, 3=已归档 */
             status?: number;
@@ -570,7 +567,6 @@ export interface components {
             /** @description 1=官网, 2=电商 */
             type?: number;
             typeName?: string;
-            engine?: string;
             workspaceId?: string;
             /** @description 1=进行中, 3=已归档 */
             status?: number;

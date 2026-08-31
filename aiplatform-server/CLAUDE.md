@@ -1,6 +1,6 @@
 # aiplatform-server
 
-AI 开发平台后端：`base` 底座（workspace/eventhub/knowledge/metering 四 BC + agentscope 薄 infra 包——平台不建智能体层）+ `business` 业务层（project/identity）双分区，单 module，基于 cartisan-boot 框架。领域词汇以根级 [CONTEXT.md](../CONTEXT.md) 为正本。
+AI 开发平台后端：`base` 底座（workspace/eventhub/knowledge/metering 四 BC + agentscope 薄 infra 包——平台不建智能体层）+ `business` 业务层（project/identity/order）双分区，单 module，基于 cartisan-boot 框架。领域词汇以根级 [CONTEXT.md](../CONTEXT.md) 为正本。
 
 ## 核心文档
 

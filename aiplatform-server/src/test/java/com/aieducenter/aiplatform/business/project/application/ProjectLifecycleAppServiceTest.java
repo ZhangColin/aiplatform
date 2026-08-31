@@ -17,7 +17,6 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
-import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -86,21 +85,6 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
-    void given_create_when_engine_field_then_single_stack_constant() {
-        // 单栈常量固化进项目记录（多引擎概念已出局，列随 Flyway squash 处置）
-        stubWorkspace("9102", "aiplatform-dev-102");
-        stubInterviewAccepted("run-1");
-
-        ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand("做一个官网"));
-
-        assertThat(response.project().engine()).isEqualTo(AgentscopeAgentClient.ENGINE);
-        assertThat(projectRepository.findById(Long.parseLong(response.project().id())))
-                .hasValueSatisfying(project -> assertThat(project.getEngine())
-                        .isEqualTo(AgentscopeAgentClient.ENGINE));
-    }
-
-    @Test
     void given_request_context_when_create_then_owner_account_id_filled() throws Exception {
         // 归属列：创建时填 RequestContext.userId（=accountId），v1 读路径不过滤
         stubWorkspace("9101", "aiplatform-dev-101");
@@ -127,7 +111,7 @@ class ProjectLifecycleAppServiceTest {
         // 工作区副作用先行：dev 工作区
         verify(workspaceLifecycleAppService).create(new CreateWorkspaceCommand(EnvKind.DEV));
 
-        // 一事务 Project：创建即落占位名（响应不等取名），类型/引擎服务端定
+        // 一事务 Project：创建即落占位名（响应不等取名），类型服务端定
         Long projectId = Long.parseLong(response.project().id());
         assertThat(projectRepository.findById(projectId)).isPresent();
         assertThat(response.project().name()).isEqualTo(Project.PLACEHOLDER_NAME);
@@ -147,8 +131,7 @@ class ProjectLifecycleAppServiceTest {
                 .containsEntry("projectId", projectId.toString())
                 .containsEntry("projectName", Project.PLACEHOLDER_NAME)
                 .containsEntry("container", "aiplatform-dev-100")
-                .containsEntry("projectType", "WEBSITE")
-                .containsEntry("engine", AgentscopeAgentClient.ENGINE);
+                .containsEntry("projectType", "WEBSITE");
 
         // 异步取名：requirement 为取名输入，触发即返（不等结果）
         verify(namingService).nameAsync(projectId, "做一个官网");
@@ -355,7 +338,7 @@ class ProjectLifecycleAppServiceTest {
     private Long persistedProject(String workspaceId) {
         Project project =
                 projectRepository.save(Project
-                        .create("删除对象", ProjectType.WEBSITE, "agentscope",
+                        .create("删除对象", ProjectType.WEBSITE,
                                 Long.parseLong(workspaceId), null));
         return project.getId();
     }

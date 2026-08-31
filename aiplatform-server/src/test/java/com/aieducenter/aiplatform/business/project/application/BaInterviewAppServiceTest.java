@@ -176,7 +176,7 @@ class BaInterviewAppServiceTest {
     // ---------- 测试数据 ----------
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null, "agentscope",
+        Project project = projectRepository.save(Project.create("访谈项目", null,
                 Long.parseLong(workspaceId), OWNER));
         return project.getId();
     }

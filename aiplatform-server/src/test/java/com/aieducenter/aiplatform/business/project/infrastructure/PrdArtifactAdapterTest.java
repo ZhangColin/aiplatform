@@ -110,7 +110,7 @@ class PrdArtifactAdapterTest {
     }
 
     private Project persistedProject(long workspaceId) {
-        return projectRepository.save(Project.create("PRD 产物适配器测试", null, "opencode",
+        return projectRepository.save(Project.create("PRD 产物适配器测试", null,
                 workspaceId, null));
     }
 

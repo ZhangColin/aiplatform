@@ -52,11 +52,9 @@ public class EventsController {
 
             | type | payload 字段 |
             |---|---|
-            | workspace-created | projectId, projectName, container, projectType, engine |
-            | stage-changed | projectId, stage, stageLabel, approved?, rejected?, reason? |
+            | workspace-created | projectId, projectName, container, projectType |
             | preview-ready | projectId, url |
             | workspace-destroyed | projectId |
-            | task-updated | projectId, taskId, status |
             | document-updated | projectId, documentType |
             | project-renamed | projectId, projectName |
 

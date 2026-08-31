@@ -28,7 +28,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * 真实对话冒烟（#44 验收 + #45 流桥）：平台进程内 HarnessAgent 走 DeepSeek 真模型
  * 跑通一轮对话——流帧可观测（task-start → session-created → text 增量连续 →
  * task-finish，runId 锚定、增量拼接 = 汇聚文本），该轮产生恰一条 UsageEvent 落库
- * （subject/dims 归属、engine=agentscope）。
+ * （subject/dims 归属）。
  *
  * <p>DEEPSEEK_API_KEY 未设置时整类跳过（Assumption，不失败）：流式/计量/幂等键
  * 行为在 {@code AgentscopeAgentClientTest}（mock 事件流）已覆盖，本类只验
@@ -97,11 +97,10 @@ class AgentscopeConverseSmokeTest {
         assertThat(reply.text()).isNotBlank();
 
         Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT subject, provider, engine, input, output "
+                "SELECT subject, provider, input, output "
                         + "FROM met_usage_events WHERE event_id = ?", "chat-usage-" + runId);
         assertThat(row.get("subject")).isEqualTo("smoke-prj");
         assertThat(row.get("provider")).isEqualTo("deepseek");
-        assertThat(row.get("engine")).isEqualTo("agentscope");
         assertThat((Long) row.get("input")).isPositive();
         assertThat((Long) row.get("output")).isPositive();
         assertThat(jdbcTemplate.queryForObject(

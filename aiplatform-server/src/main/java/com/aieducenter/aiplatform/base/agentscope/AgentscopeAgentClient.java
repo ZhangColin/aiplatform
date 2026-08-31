@@ -52,7 +52,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 @Component
 public class AgentscopeAgentClient {
 
-    /** 智能体栈单栈自述名（UsageEvent.engine / role-assigned 帧的引擎值正本）。 */
+    /** 智能体栈单栈自述名（agent 流帧的引擎值正本——计量不记引擎）。 */
     public static final String ENGINE = "agentscope";
 
     /**
@@ -306,7 +306,6 @@ public class AgentscopeAgentClient {
                 sessionId,
                 modelRef.provider(),
                 modelRef.modelId(),
-                ENGINE,
                 usageContext.dims(),
                 total));
     }

@@ -184,6 +184,6 @@ class MeteringCostAggregationTest {
 
     private void report(String eventId, Instant ts, String model, TokenUsage tokens) {
         usageEventSink.report(new UsageEvent(eventId, ts, SUBJ, "run-1", "session-1",
-                PROVIDER, model, "opencode", Map.of(), tokens));
+                PROVIDER, model, Map.of(), tokens));
     }
 }

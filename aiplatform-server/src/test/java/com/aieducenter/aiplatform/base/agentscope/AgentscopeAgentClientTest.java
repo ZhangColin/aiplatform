@@ -228,7 +228,6 @@ class AgentscopeAgentClientTest {
         assertThat(event.sessionId()).isEqualTo("s-1");
         assertThat(event.provider()).isEqualTo("deepseek");
         assertThat(event.model()).isEqualTo("deepseek-chat");
-        assertThat(event.engine()).isEqualTo("agentscope");
         assertThat(event.dims()).containsEntry("role", "BA");
         assertThat(event.tokens().input()).isEqualTo(140);
         assertThat(event.tokens().output()).isEqualTo(50);

@@ -8,11 +8,11 @@ import java.util.Map;
  *
  * <p>调用方（业务编排）完成采集与分块——「哪个阶段产出什么、按什么粒度切」是业务
  * 知识（B0 蓝图 §1）；底座只按 {@code (kind, sourceRef)} 幂等落库。kind 对底座
- * 不透明（v1 五类：ARTIFACT/QA/FEEDBACK/TEST_REPORT/BUG，A5 §1），meta 透传存储
- * （stage/severity 等，底座不解释）。</p>
+ * 不透明（业务侧只用 PRD 类——成交项目 PRD 沉淀；旧五类中的 QA/FEEDBACK/
+ * TEST_REPORT/BUG 随旧主链出局），meta 透传存储（底座不解释）。</p>
  *
- * @param kind        素材类别（幂等键之一）
- * @param sourceRef   素材来源标识（幂等键之一，A5 §1 五类各自的 ref 形态）
+ * @param kind        素材类别（幂等键之一；v1 业务口径仅 PRD）
+ * @param sourceRef   素材来源标识（幂等键之一）
  * @param projectId   归属项目 id（级联清理入口）
  * @param projectName 来源项目名（命中条目展示）
  * @param title       素材标题（命中条目展示）

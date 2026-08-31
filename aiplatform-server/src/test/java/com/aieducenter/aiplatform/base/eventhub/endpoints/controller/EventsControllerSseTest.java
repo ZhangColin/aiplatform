@@ -132,8 +132,8 @@ class EventsControllerSseTest {
         Instant.parse(ts); // ISO-8601 可解析（非法即抛）
 
         // 同流第二事件：seq 单调递增
-        appService.publish("stage-changed",
-                Map.of("projectId", "p-wire", "stage", "DEV", "stageLabel", "开发"));
+        appService.publish("project-renamed",
+                Map.of("projectId", "p-wire", "projectName", "新名字"));
         assertThat(client.nextNonCommentLine()).isEqualTo("id:p-wire:2");
     }
 
@@ -141,7 +141,7 @@ class EventsControllerSseTest {
     void given_project_filter_when_publish_other_project_then_only_matching_received() throws Exception {
         SseClient client = connect("?projectId=p-filter");
 
-        appService.publish("stage-changed", Map.of("projectId", "p-other", "stage", "DEV"));
+        appService.publish("project-renamed", Map.of("projectId", "p-other", "projectName", "别家名字"));
         appService.publish("preview-ready",
                 Map.of("projectId", "p-filter", "url", "http://localhost:30080"));
 

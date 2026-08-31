@@ -62,14 +62,12 @@ class OrderAppServiceTest {
     void given_first_place_when_place_then_pending_quote_row_with_frozen_snapshot() {
         stubProject(ProjectStatus.IN_PROGRESS);
 
-        Order order = appService.place(PROJECT_ID);
+        Long orderId = appService.place(PROJECT_ID);
 
-        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING_QUOTE);
-        assertThat(order.getId()).isNotNull(); // TSID 落位
         // 下单事实以库内行为为准：待报价起步、快照冻结、金额未落、created_at 即下单时间
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT status, prd_snapshot, amount, created_at FROM ord_orders WHERE id = ?",
-                order.getId());
+                orderId);
         assertThat(row.get("status")).isEqualTo(1);
         assertThat(row.get("prd_snapshot")).isEqualTo(PRD);
         assertThat(row.get("amount")).isNull();
@@ -105,13 +103,13 @@ class OrderAppServiceTest {
     void given_terminal_order_when_place_again_then_new_order_allowed() {
         // 终态（已取消/已归档）不占未终结名额：取消后再下 = 新单新快照
         stubProject(ProjectStatus.IN_PROGRESS);
-        Order first = appService.place(PROJECT_ID);
+        Long first = appService.place(PROJECT_ID);
         jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
-                OrderStatus.CANCELLED.getCode(), first.getId());
+                OrderStatus.CANCELLED.getCode(), first);
 
-        Order second = appService.place(PROJECT_ID);
+        Long second = appService.place(PROJECT_ID);
 
-        assertThat(second.getStatus()).isEqualTo(OrderStatus.PENDING_QUOTE);
+        assertThat(second).isNotEqualTo(first);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ord_orders WHERE project_id = ?", Integer.class, PROJECT_ID))
                 .isEqualTo(2);

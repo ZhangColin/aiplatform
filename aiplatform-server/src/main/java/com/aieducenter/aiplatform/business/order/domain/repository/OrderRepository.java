@@ -15,15 +15,14 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
 
     /**
      * 项目名下的未终结订单（「同项目至多一个未终结订单」的应用预检面）。
-     * 谓词与库侧部分唯一索引（uk_ord_orders_active）同口径：非终态各一行满足
-     * 唯一索引，本查询即 0/1 行。
+     * 谓词 = {@link OrderStatus#TERMINAL} 取反，与库侧部分唯一索引
+     * （uk_ord_orders_active）同口径：非终态至多一行，本查询即 0/1 行。
      */
     default Optional<Order> findActiveByProject(Long projectId) {
-        List<Order> active = findByProjectIdAndStatusNotIn(projectId,
-                List.of(OrderStatus.ARCHIVED, OrderStatus.CANCELLED));
-        return active.stream().findFirst();
+        return findByProjectIdAndStatusNotIn(projectId, OrderStatus.TERMINAL)
+                .stream().findFirst();
     }
 
-    /** 项目名下非指定状态的订单（未终结 = 不在终态清单，见 {@link #findActiveByProject}）。 */
+    /** 项目名下不在给定状态清单的订单。 */
     List<Order> findByProjectIdAndStatusNotIn(Long projectId, List<OrderStatus> statuses);
 }

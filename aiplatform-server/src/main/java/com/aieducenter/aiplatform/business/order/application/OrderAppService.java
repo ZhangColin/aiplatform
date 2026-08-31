@@ -10,8 +10,6 @@ import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -30,6 +28,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class OrderAppService {
 
+    /** 未终结订单唯一索引名（约束撞错的判别键，与 V1__baseline.sql 对齐）。 */
+    private static final String ACTIVE_ORDER_INDEX = "uk_ord_orders_active";
+
     private final OrderRepository orderRepository;
     private final ProjectQueryAppService projectQueryAppService;
 
@@ -42,13 +43,13 @@ public class OrderAppService {
     /**
      * 确认下单：读当前 PRD → 冻结快照入单（待报价）。
      *
+     * @return 订单标识（TSID；订单视图归片4 端点）
      * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
      *                              （项目上下文原样透传）；ORD_004 项目已归档；
      *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）
      */
-    public Order place(Long projectId) {
-        ProjectDetailResponse project = projectQueryAppService.detail(projectId);
-        if (project.status() == ProjectStatus.ARCHIVED) {
+    public Long place(Long projectId) {
+        if (projectQueryAppService.detail(projectId).archived()) {
             throw new ApplicationException(OrderMessage.ORDER_PROJECT_ARCHIVED);
         }
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
@@ -57,11 +58,23 @@ public class OrderAppService {
         Order order = Order.place(projectId, RequestContext.getUserId(),
                 projectQueryAppService.prd(projectId).content());
         try {
-            return orderRepository.save(order);
+            return orderRepository.save(order).getId();
         } catch (DataIntegrityViolationException e) {
-            // 并发下单撞部分唯一索引（预检漏过）：后到者拒绝，同口径翻译
-            log.info("项目 {} 并发下单撞未终结订单唯一索引，拒绝", projectId);
-            throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
+            // 并发下单撞部分唯一索引（预检漏过）：后到者拒绝，同口径翻译；
+            // 非本索引的完整性违例不冒名，原样上抛
+            if (violatesActiveOrderIndex(e)) {
+                log.info("项目 {} 并发下单撞未终结订单唯一索引，拒绝", projectId);
+                throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
+            }
+            throw e;
         }
+    }
+
+    private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {
+        return mentions(e.getMessage()) || mentions(e.getMostSpecificCause().getMessage());
+    }
+
+    private static boolean mentions(String message) {
+        return message != null && message.contains(ACTIVE_ORDER_INDEX);
     }
 }

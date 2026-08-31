@@ -63,7 +63,7 @@ class PlatformNotificationAppServiceTest {
 
         appService.publish("workspace-created",
                 Map.of("projectId", "a1b2c3d4", "projectName", "官网 demo"));
-        appService.publish("stage-changed", Map.of("projectId", "a1b2c3d4", "stage", "DEV"));
+        appService.publish("project-renamed", Map.of("projectId", "a1b2c3d4", "projectName", "新名字"));
 
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)
@@ -75,8 +75,8 @@ class PlatformNotificationAppServiceTest {
         // 缺省全量（ADR-0001 寻址：开发平台视角）
         SseEmitter subscriber = appService.subscribe(null);
 
-        appService.publish("stage-changed", Map.of("projectId", "p1", "stage", "BA"));
-        appService.publish("stage-changed", Map.of("projectId", "p2", "stage", "DEV"));
+        appService.publish("project-renamed", Map.of("projectId", "p1", "projectName", "名字一"));
+        appService.publish("project-renamed", Map.of("projectId", "p2", "projectName", "名字二"));
 
         assertThat(sender.eventFramesOf(subscriber)).hasSize(2);
     }
@@ -85,8 +85,8 @@ class PlatformNotificationAppServiceTest {
     void given_subscribe_with_project_id_when_publish_other_project_then_filtered_out() {
         SseEmitter subscriber = appService.subscribe("p1");
 
-        appService.publish("stage-changed", Map.of("projectId", "p2", "stage", "DEV"));
-        appService.publish("stage-changed", Map.of("projectId", "p1", "stage", "BA"));
+        appService.publish("project-renamed", Map.of("projectId", "p2", "projectName", "名字二"));
+        appService.publish("project-renamed", Map.of("projectId", "p1", "projectName", "名字一"));
 
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)

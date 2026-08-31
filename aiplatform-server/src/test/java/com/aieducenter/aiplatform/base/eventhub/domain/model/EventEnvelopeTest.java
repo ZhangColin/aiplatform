@@ -69,7 +69,7 @@ class EventEnvelopeTest {
         Map<String, Object> payload = MapUtil.newHashMap();
         payload.put("projectId", "a1b2c3d4");
 
-        EventEnvelope envelope = new EventEnvelope("stage-changed", payload, TS);
+        EventEnvelope envelope = new EventEnvelope("project-renamed", payload, TS);
 
         payload.put("projectId", "tampered");
         assertThat(envelope.payload()).containsEntry("projectId", "a1b2c3d4");

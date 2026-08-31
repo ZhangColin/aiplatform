@@ -1,7 +1,7 @@
 -- ========================================================================
 -- 片0-3 · 平台库基线一次成型（#18，squash 自 V1–V17——dev 数据可弃、无生产库）
--- 全新库单迁移直建终态 10 张表：底座 7（wsp_ 2 / knw_ 1 / met_ 2 / cat_ 1 /
--- idn_ 1）+ 业务 3（prj_ 1 / ord_ 2）。旧主链 8 表（prj_iterations /
+-- 全新库单迁移直建终态 10 张表：底座 6（wsp_ 2 / knw_ 1 / met_ 2 / cat_ 1）
+-- + 业务 4（prj_ 1 / ord_ 2 / idn_ 1）。旧主链 8 表（prj_iterations /
 -- prj_confirmations / prj_demand_pool_entries / tsk_tasks / tsk_bugs /
 -- agt_engine_config / agt_pending_waits / agt_agent_sessions）随概念出局不
 -- 重建；多引擎遗留列（prj_projects.engine / met_usage_events.engine）不复活。

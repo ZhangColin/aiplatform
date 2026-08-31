@@ -106,13 +106,13 @@ class SseChannelHubTest {
         SseEmitter subscriber = hub.subscribe(NOTIFICATION,
                 payload -> "p1".equals(payload.get("projectId")));
 
-        hub.broadcast(NOTIFICATION, "p2", "stage-changed",
-                Map.of("projectId", "p2", "stage", "DEV"));
+        hub.broadcast(NOTIFICATION, "p2", "project-renamed",
+                Map.of("projectId", "p2", "projectName", "名字二"));
 
         assertThat(sender.framesOf(subscriber).size()).isEqualTo(1); // 只有初始 ping
 
-        hub.broadcast(NOTIFICATION, "p1", "stage-changed",
-                Map.of("projectId", "p1", "stage", "BA"));
+        hub.broadcast(NOTIFICATION, "p1", "project-renamed",
+                Map.of("projectId", "p1", "projectName", "名字一"));
 
         assertThat(sender.framesOf(subscriber)).hasSize(2); // 过滤命中才收到
     }
@@ -123,10 +123,10 @@ class SseChannelHubTest {
         SseEmitter emitter = hub.subscribe(NOTIFICATION, payload -> true);
         sender.framesOf(emitter).clear();
 
-        hub.broadcast(NOTIFICATION, "p1", "stage-changed", Map.of("projectId", "p1"));
-        hub.broadcast(NOTIFICATION, "p1", "stage-changed", Map.of("projectId", "p1"));
-        hub.broadcast(NOTIFICATION, "p2", "stage-changed", Map.of("projectId", "p2"));
-        hub.broadcast(NOTIFICATION, "p1", "stage-changed", Map.of("projectId", "p1"));
+        hub.broadcast(NOTIFICATION, "p1", "preview-ready", Map.of("projectId", "p1"));
+        hub.broadcast(NOTIFICATION, "p1", "preview-ready", Map.of("projectId", "p1"));
+        hub.broadcast(NOTIFICATION, "p2", "preview-ready", Map.of("projectId", "p2"));
+        hub.broadcast(NOTIFICATION, "p1", "preview-ready", Map.of("projectId", "p1"));
 
         assertThat(sender.framesOf(emitter))
                 .extracting(SseServerEvent::id)

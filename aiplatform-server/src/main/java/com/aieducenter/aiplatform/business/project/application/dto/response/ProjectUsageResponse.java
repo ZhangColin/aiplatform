@@ -10,19 +10,19 @@ import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 
 /**
- * 项目用量响应：总量 + 平台成本 + 分模型 + 分角色聚合。
+ * 项目用量响应：总量 + 平台成本 + 分模型 + 分智能体聚合。
  *
  * <p><b>平台成本口径</b>（零商业概念）：{@code cost} = token 用量 × 事件时点生效
  * 单价的机械乘法，按币种分桶不折算（键 = ISO 4217 币种码），无加价/售价；
  * {@code unpriced} = 有 token 用量但事件时点无生效单价的 (provider, model, 档位)——
  * 其分量不进 cost（不伪装 0），前端据此示「未配价」。</p>
  *
- * @param projectId 项目标识（subject）
- * @param total     总量（五档分列）
- * @param cost      平台成本（币种分桶；全未配价/无事件时为空 Map）
- * @param unpriced  未配价标注（cost 不含这些分量）
- * @param byModel   分模型聚合（provider + model 为单价表匹配键）
- * @param byRole    分角色聚合（dims.role 维度；角色为稳定键 + 展示名）
+ * @param projectId   项目标识（subject）
+ * @param total       总量（五档分列）
+ * @param cost        平台成本（币种分桶；全未配价/无事件时为空 Map）
+ * @param unpriced    未配价标注（cost 不含这些分量）
+ * @param byModel     分模型聚合（provider + model 为单价表匹配键）
+ * @param byAgentKind 分智能体聚合（dims.agentKind 维度；智能体种类为稳定键 + 展示名）
  */
 public record ProjectUsageResponse(
         String projectId,
@@ -30,7 +30,7 @@ public record ProjectUsageResponse(
         Map<String, BigDecimal> cost,
         List<UnpricedUsage> unpriced,
         List<ModelUsage> byModel,
-        List<RoleUsage> byRole
+        List<AgentKindUsage> byAgentKind
 ) {
 
     public ProjectUsageResponse {
@@ -39,7 +39,7 @@ public record ProjectUsageResponse(
                 : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
         unpriced = unpriced == null ? List.of() : List.copyOf(unpriced);
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
-        byRole = byRole == null ? List.of() : List.copyOf(byRole);
+        byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
     }
 
     /**
@@ -49,10 +49,10 @@ public record ProjectUsageResponse(
     }
 
     /**
-     * 分角色聚合项（role = RolePreset 稳定键或 FIX/RESUME 用途标记，roleLabel =
-     * 展示名；非 preset 的用途标记 roleLabel 为 null）。
+     * 分智能体聚合项（agentKind = 稳定键 ba/coder/naming，agentKindLabel = 展示名；
+     * 非主链角色的用途标记（如 naming）agentKindLabel 为 null）。
      */
-    public record RoleUsage(String role, String roleLabel, TokenUsage tokens) {
+    public record AgentKindUsage(String agentKind, String agentKindLabel, TokenUsage tokens) {
     }
 
     /**

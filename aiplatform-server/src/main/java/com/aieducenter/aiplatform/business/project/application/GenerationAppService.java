@@ -21,6 +21,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,11 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>编码 run 开直播</b>（#23 生成环②）：命令带 {@code live}——过程帧外并产
  * 直播帧（智能体自述逐段 + 工具动作人话行 + 步骤），前端直播侧栏消费；BA 对话
  * 不开（对话不流式不留痕）。</p>
+ *
+ * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
+ * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
+ * 指令）；检索失败降级空注入、run 照旧下发。一次下发一次注入——重试续同 coder
+ * 会话（注入块已在会话历史），不重检索不重注入。</p>
  *
  * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
  * （幂等覆写，内容平台所有）——编码智能体经 harness 工作区上下文自读；
@@ -92,6 +98,7 @@ public class GenerationAppService {
     private final AgentStreamBridge streamBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final ProjectKnowledgeAppService knowledgeAppService;
     private final GenerationProperties properties;
 
     /** 生成在途项目集（含已提交未起跑——排队中）：重复触发守卫的进程内事实。 */
@@ -101,12 +108,14 @@ public class GenerationAppService {
             AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            ProjectKnowledgeAppService knowledgeAppService,
             GenerationProperties properties) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.streamBridge = streamBridge;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
     }
 
@@ -156,23 +165,26 @@ public class GenerationAppService {
     /**
      * 尝试环（异步轨道内）：每次尝试新 runId + role-assigned 前置；成功即
      * markGenerated 收场；失败有余量则发 task-retrying 后续试，超限转终态
-     * （末次 error 帧即终态表达，用户重新发起兜底）。
+     * （末次 error 帧即终态表达，用户重新发起兜底）。知识命中前置注入只进首试
+     * prompt（一次下发一次注入，重试续同会话不重复块）。
      */
     private void runAttemptsWithRetry(Long projectId, String workspaceId, String userId,
             String firstRunId) {
+        String knowledgePrefix = knowledgeAppService.dispatchInjection(GENERATE_TASK_PROMPT);
         int maxAttempts = properties.getMaxAttempts();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             String runId = attempt == 1 ? firstRunId : AgentStreamAppService.newRunId();
             streamBridge.emitRoleAssigned(projectId, runId, RolePreset.CODER);
             AgentCommand command = new AgentCommand(
                     runId,
-                    attempt == 1 ? GENERATE_TASK_PROMPT : RETRY_TASK_PROMPT,
+                    attempt == 1 ? knowledgePrefix + GENERATE_TASK_PROMPT : RETRY_TASK_PROMPT,
                     RolePreset.CODER.systemPrompt(),
                     RolePreset.CODER.chatModelString(),
                     SESSION_PREFIX + projectId,
                     userId,
                     new UsageContext(Long.toString(projectId),
-                            Map.of(ProjectQueryAppService.DIM_ROLE, RolePreset.CODER.name())),
+                            UsageDims.of(projectId, UsageDims.kindOf(RolePreset.CODER),
+                                    SESSION_PREFIX + projectId)),
                     workspaceId,
                     Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),

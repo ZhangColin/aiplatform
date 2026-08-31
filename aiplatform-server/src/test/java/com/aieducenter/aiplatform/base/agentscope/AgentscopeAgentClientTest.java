@@ -288,7 +288,7 @@ class AgentscopeAgentClientTest {
                 new ModelCallEndEvent("r-1", new ChatUsage(60, 10, 0, 0.2)));
 
         client.converse(command("deepseek:deepseek-chat",
-                        new UsageContext("prj-1", Map.of("role", "BA"))),
+                        new UsageContext("prj-1", Map.of("agentKind", "ba"))),
                 event -> {
                 });
 
@@ -301,7 +301,7 @@ class AgentscopeAgentClientTest {
         assertThat(event.sessionId()).isEqualTo("s-1");
         assertThat(event.provider()).isEqualTo("deepseek");
         assertThat(event.model()).isEqualTo("deepseek-chat");
-        assertThat(event.dims()).containsEntry("role", "BA");
+        assertThat(event.dims()).containsEntry("agentKind", "ba");
         assertThat(event.tokens().input()).isEqualTo(140);
         assertThat(event.tokens().output()).isEqualTo(50);
         assertThat(event.tokens().cacheRead()).isEqualTo(20);

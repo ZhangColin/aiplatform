@@ -316,7 +316,8 @@ class ProjectControllerTest {
                         TokenKind.INPUT, TokenKind.INPUT.getName())),
                 List.of(new ProjectUsageResponse.ModelUsage("deepseek", "deepseek-v4-pro",
                         tokens)),
-                List.of(new ProjectUsageResponse.RoleUsage("BA", "需求分析师", tokens))));
+                List.of(new ProjectUsageResponse.AgentKindUsage("coder", "编码智能体",
+                        tokens))));
 
         performAsUser(get("/api/projects/100/usage"))
                 .andExpect(status().isOk())
@@ -328,8 +329,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.unpriced[0].tokenKind").value(1))
                 .andExpect(jsonPath("$.data.unpriced[0].tokenKindName").value("输入"))
                 .andExpect(jsonPath("$.data.byModel[0].model").value("deepseek-v4-pro"))
-                .andExpect(jsonPath("$.data.byRole[0].role").value("BA"))
-                .andExpect(jsonPath("$.data.byRole[0].roleLabel").value("需求分析师"));
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("coder"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindLabel").value("编码智能体"));
     }
 
     @Test

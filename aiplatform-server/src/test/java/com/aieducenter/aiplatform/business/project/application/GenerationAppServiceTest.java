@@ -3,11 +3,14 @@ package com.aieducenter.aiplatform.business.project.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -35,6 +38,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
@@ -42,15 +47,18 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 生成编排（#22 验收）：编码命令全要素（coder-{projectId} 会话稳定绑定、CODER
- * 角色卡与长任务超时、owner 寻址、计量 role=CODER、项目工作区、流关联）、工作区
- * 布局资产就位先于首试下发（AGENTS.md 平台约定幂等覆写）、成功收口落
- * generated_at、失败自动重试（task-retrying 帧 + 话术 + 重试 prompt 换轨）、
- * 超限转终态（generated_at 不落、在途守卫释放可重新发起）、守卫组
- * （不存在 / 已归档 / 已生成 / 在途重复触发）。
+ * 生成编排（#22 验收 + #24 知识命中前置注入）：编码命令全要素（coder-{projectId}
+ * 会话稳定绑定、CODER 角色卡与长任务超时、owner 寻址、计量 dims（projectId +
+ * agentKind=coder + sessionId）、项目工作区、流关联）、工作区布局资产就位先于
+ * 首试下发（AGENTS.md 平台约定幂等覆写）、知识命中前置注入首试任务 prompt
+ * （query = 任务 prompt；检索失败降级空注入不阻断）、重试不重注入（续同会话，
+ * 注入块已在会话历史）、成功收口落 generated_at、失败自动重试（task-retrying 帧
+ * + 话术 + 重试 prompt 换轨）、超限转终态（generated_at 不落、在途守卫释放可
+ * 重新发起）、守卫组（不存在 / 已归档 / 已生成 / 在途重复触发）。
  */
 @SpringBootTest
 class GenerationAppServiceTest {
@@ -81,6 +89,17 @@ class GenerationAppServiceTest {
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
+    @MockitoBean
+    private KnowledgePort knowledgePort;
+
+    /** 两命中的检索桩（下发前置注入 happy path）。 */
+    private void givenKnowledgeHits() {
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                        "核心场景：主人在线选医生预约。"),
+                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。")));
+    }
+
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -107,7 +126,8 @@ class GenerationAppServiceTest {
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
         // 编码命令全要素：coder 会话稳定绑定 + owner 寻址 + CODER 角色卡（平台技术
-        // 约定）+ 长任务超时 + 计量 role=CODER + 项目工作区 + 流关联
+        // 约定）+ 长任务超时 + 计量 dims（#24：projectId + agentKind=coder +
+        // sessionId）+ 项目工作区 + 流关联
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         AgentCommand value = command.getValue();
@@ -121,10 +141,47 @@ class GenerationAppServiceTest {
         assertThat(value.timeout()).isEqualTo(properties.getTimeout());
         assertThat(value.workspaceId()).isEqualTo("9800");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
-        assertThat(value.usageContext().dims()).containsEntry("role", "CODER");
+        assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
+                UsageDims.kindOf(RolePreset.CODER), "coder-" + projectId));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         // 编码 run 开直播（#23）：过程帧外并产直播帧；BA 对话命令不带（对话不流式）
         assertThat(value.live()).isTrue();
+    }
+
+    @Test
+    void given_knowledge_hits_when_generate_then_prefix_injected_before_task_prompt() {
+        // 知识命中前置注入（#24）：query = 首试任务 prompt，命中块拼在任务 prompt 前
+        Long projectId = persistedProject("9810");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenKnowledgeHits();
+
+        appService.startGeneration(projectId);
+
+        verify(knowledgePort).retrieve(eq(GenerationAppService.GENERATE_TASK_PROMPT), eq(5));
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .startsWith("【平台知识库·相似历史需求】")
+                .contains("宠物医院预约平台").contains("非用户的确认信息")
+                .endsWith("————\n\n" + GenerationAppService.GENERATE_TASK_PROMPT);
+    }
+
+    @Test
+    void given_retrieval_failure_when_generate_then_degraded_plain_prompt_run_proceeds() {
+        // 检索失败降级空注入：任务 prompt 原样下发，run 不被知识面阻断
+        Long projectId = persistedProject("9811");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        doThrow(new RuntimeException("pgvector 抖动")).when(knowledgePort)
+                .retrieve(anyString(), anyInt());
+
+        appService.startGeneration(projectId);
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .isEqualTo(GenerationAppService.GENERATE_TASK_PROMPT);
     }
 
     @Test
@@ -163,6 +220,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9803");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenKnowledgeHits(); // 首试带前置注入，重试不重注入（注入块已在会话历史）
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("首次尝试中断"))
                 .thenReturn(new AgentReply("run-2", "系统已生成"));
@@ -174,10 +232,13 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         List<AgentCommand> attempts = command.getAllValues();
         assertThat(attempts.get(0).runId()).isEqualTo(run.runId());
-        assertThat(attempts.get(0).prompt()).isEqualTo(GenerationAppService.GENERATE_TASK_PROMPT);
+        assertThat(attempts.get(0).prompt())
+                .endsWith("————\n\n" + GenerationAppService.GENERATE_TASK_PROMPT);
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId());
         assertThat(attempts.get(1).prompt()).isEqualTo(GenerationAppService.RETRY_TASK_PROMPT);
         assertThat(attempts.get(1).sessionId()).isEqualTo("coder-" + projectId);
+        // 一次下发一次注入：重试续同会话不重检索
+        verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
 
         // 重试帧：锚定失败的那次尝试、携带下一尝试序号与话术（SSE事件清单 task-retrying 行）
         verify(streamAppService).publish(eq(AgentEventTypes.TASK_RETRYING), argThat(payload ->

@@ -31,18 +31,16 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +
- * 平台成本 + 分模型 + 分角色）+ PRD 读（直读工作区文件事实源）。写侧（生命周期/
+ * 平台成本 + 分模型 + 分智能体）+ PRD 读（直读工作区文件事实源）。写侧（生命周期/
  * 归档/改名）归 {@link ProjectLifecycleAppService}，读拼装集中一处。
  */
 @Service
 public class ProjectQueryAppService {
-
-    /** 计量角色维度键（写侧 BA/取名组装对齐引用——单点定义防漂移）。 */
-    public static final String DIM_ROLE = "role";
 
     /**
      * PRD 在 dev 容器内的绝对路径（事实锚定——PRD = 工作区文件，编码智能体同视图
@@ -93,7 +91,8 @@ public class ProjectQueryAppService {
 
     /**
      * 项目用量：经计量查询端口按 subject=projectId 聚合——总量 + 平台成本
-     * （币种分桶 + 未配价标注）+ 分模型 + 分角色（dims.role 过滤）。
+     * （币种分桶 + 未配价标注）+ 分模型 + 分智能体（dims.agentKind 过滤，写侧
+     * {@link UsageDims} 同键）。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
@@ -112,14 +111,14 @@ public class ProjectQueryAppService {
                 .map(model -> new ProjectUsageResponse.ModelUsage(
                         model.provider(), model.model(), model.tokens()))
                 .toList();
-        List<ProjectUsageResponse.RoleUsage> byRole = summary.byDims().stream()
-                .filter(dim -> DIM_ROLE.equals(dim.dimKey()))
-                .map(dim -> new ProjectUsageResponse.RoleUsage(dim.dimValue(),
+        List<ProjectUsageResponse.AgentKindUsage> byAgentKind = summary.byDims().stream()
+                .filter(dim -> UsageDims.KEY_AGENT_KIND.equals(dim.dimKey()))
+                .map(dim -> new ProjectUsageResponse.AgentKindUsage(dim.dimValue(),
                         RolePreset.byName(dim.dimValue()).map(RolePreset::getName).orElse(null),
                         dim.tokens()))
                 .toList();
         return new ProjectUsageResponse(Long.toString(projectId), summary.total(), cost,
-                unpriced, byModel, byRole);
+                unpriced, byModel, byAgentKind);
     }
 
     /**

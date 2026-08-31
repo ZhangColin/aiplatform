@@ -172,11 +172,11 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/usage")
-    @Operation(summary = "项目用量（总量 + 平台成本 + 分模型 + 分角色）",
+    @Operation(summary = "项目用量（总量 + 平台成本 + 分模型 + 分智能体）",
             description = "经计量查询端口按 subject=projectId 聚合。"
                     + "cost 为平台成本口径（token × 事件时点生效单价的机械乘法，币种分桶不折算，"
                     + "无加价/售价）；unpriced 标注有用量但未配单价的档位（其分量不含于 cost，不伪装 0）；"
-                    + "byRole 按 dims.role 聚合")
+                    + "byAgentKind 按 dims.agentKind 聚合")
     public ApiResponse<ProjectUsageResponse> usage(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.usage(parseId(id)));
     }

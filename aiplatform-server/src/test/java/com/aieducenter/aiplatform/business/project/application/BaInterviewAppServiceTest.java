@@ -39,6 +39,7 @@ import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -105,7 +106,8 @@ class BaInterviewAppServiceTest {
         assertThat(value.workspaceId()).isEqualTo("9700");
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
-        assertThat(value.usageContext().dims()).containsEntry("role", "BA");
+        assertThat(value.usageContext().dims()).isEqualTo(
+                UsageDims.of(projectId, UsageDims.kindOf(RolePreset.BA), "ba-" + projectId));
         // 后续轮不重注知识：systemPrompt 即角色卡原文
         assertThat(value.systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
     }
@@ -260,7 +262,8 @@ class BaInterviewAppServiceTest {
         assertThat(value.confirmResults()).hasSize(1);
         assertThat(value.confirmResults().get(0).getToolCall().getInput())
                 .containsEntry("answer", "海外企业客户");
-        assertThat(value.usageContext().dims()).containsEntry("role", "BA");
+        assertThat(value.usageContext().dims()).isEqualTo(
+                UsageDims.of(projectId, UsageDims.kindOf(RolePreset.BA), "ba-" + projectId));
     }
 
     @Test

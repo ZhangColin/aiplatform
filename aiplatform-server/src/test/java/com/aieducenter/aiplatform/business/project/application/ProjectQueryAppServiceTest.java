@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -158,7 +159,7 @@ class ProjectQueryAppServiceTest {
     // ---------- usage ----------
 
     @Test
-    void given_usage_events_when_usage_then_total_cost_unpriced_by_model_by_role() {
+    void given_usage_events_when_usage_then_total_cost_unpriced_by_model_by_agent_kind() {
         Long projectId = persistedProject(8201L, "用量项目").getId();
         TokenUsage tokens = new TokenUsage(100, 200, 30, 0, 0);
         when(meteringAppService.bySubject(eq(projectId.toString()), any(), any()))
@@ -169,10 +170,12 @@ class ProjectQueryAppServiceTest {
                                 TokenKind.INPUT)),
                         List.of(new UsageSummary.ModelUsage("deepseek", "deepseek-v4-pro",
                                 tokens)),
-                        List.of(new UsageSummary.DimUsage("role", "BA", tokens),
-                                new UsageSummary.DimUsage("role", "NAMING", tokens),
-                                new UsageSummary.DimUsage("role", "DEV",
-                                        new TokenUsage(1, 2, 0, 0, 0)))));
+                        List.of(new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "ba", tokens),
+                                new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "naming", tokens),
+                                new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "coder",
+                                        new TokenUsage(1, 2, 0, 0, 0)),
+                                new UsageSummary.DimUsage(UsageDims.KEY_SESSION_ID,
+                                        "ba-" + projectId, tokens))));
 
         ProjectUsageResponse response = appService.usage(projectId);
 
@@ -188,11 +191,14 @@ class ProjectQueryAppServiceTest {
                         TokenKind.INPUT, "输入"));
         assertThat(response.byModel()).hasSize(1); // 分模型
         assertThat(response.byModel().get(0).model()).isEqualTo("deepseek-v4-pro");
-        // 分角色 = dims.role 维度（preset 带展示名，用途标记 roleLabel 为 null）
-        assertThat(response.byRole()).extracting(ProjectUsageResponse.RoleUsage::role)
-                .containsExactly("BA", "NAMING", "DEV");
-        assertThat(response.byRole()).extracting(ProjectUsageResponse.RoleUsage::roleLabel)
-                .containsExactly("需求分析师", null, null);
+        // 分智能体 = dims.agentKind 维度（主链角色带展示名，辅助标记/naming label 为
+        // null）；sessionId 等其他维度键不进该桶
+        assertThat(response.byAgentKind())
+                .extracting(ProjectUsageResponse.AgentKindUsage::agentKind)
+                .containsExactly("ba", "naming", "coder");
+        assertThat(response.byAgentKind())
+                .extracting(ProjectUsageResponse.AgentKindUsage::agentKindLabel)
+                .containsExactly("需求分析师", null, "编码智能体");
     }
 
     @Test
@@ -208,7 +214,7 @@ class ProjectQueryAppServiceTest {
         assertThat(response.cost()).isEmpty();
         assertThat(response.unpriced()).isEmpty();
         assertThat(response.byModel()).isEmpty();
-        assertThat(response.byRole()).isEmpty();
+        assertThat(response.byAgentKind()).isEmpty();
     }
 
     @Test

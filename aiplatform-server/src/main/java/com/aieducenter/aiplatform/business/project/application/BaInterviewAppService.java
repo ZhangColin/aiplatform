@@ -16,6 +16,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppServic
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -27,8 +28,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * <p><b>会话寻址（projectId → BA 会话的稳定绑定）</b>：sessionId =
  * {@code ba-{projectId}} 无表派生、userId = 项目 owner（状态槽位
  * (userId, sessionId) 跨轮一致，谁触发都不劈叉上下文；cat_agent_state 承载，
- * 平台重启后同标识恢复）。计量（role=BA 维度）与智能体资产（ask_user /
- * savePrd 工具集）同归 BA 编排。</p>
+ * 平台重启后同标识恢复）。计量（dims 终态口径 {@link UsageDims}，agentKind=ba）
+ * 与智能体资产（ask_user / savePrd 工具集）同归 BA 编排。</p>
  *
  * <p><b>流桥</b>：过程帧经 {@link AgentStreamAppService}（eventhub 唯一 SSE 管道）
  * 发射，关联字段（projectId）逐帧注入——底座不解释、透传。发射失败护栏：单帧发射
@@ -97,7 +98,7 @@ public class BaInterviewAppService {
                 sessionId,
                 project.getOwnerAccountId() != null
                         ? project.getOwnerAccountId().toString() : null,
-                usageContextOf(projectId, role),
+                usageContextOf(projectId, role, sessionId),
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId));
         sessionExecutor.submit(sessionId,
@@ -133,7 +134,7 @@ public class BaInterviewAppService {
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
                         .toList(),
                 answerText,
-                usageContextOf(projectId, role));
+                usageContextOf(projectId, role, sessionId));
         sessionExecutor.submit(sessionId,
                 () -> agentClient.resume(resume, streamBridge.sink(projectId)));
     }
@@ -148,9 +149,10 @@ public class BaInterviewAppService {
         return Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString());
     }
 
-    private static UsageContext usageContextOf(Long projectId, RolePreset role) {
+    private static UsageContext usageContextOf(Long projectId, RolePreset role,
+            String sessionId) {
         return new UsageContext(Long.toString(projectId),
-                Map.of(ProjectQueryAppService.DIM_ROLE, role.name()));
+                UsageDims.of(projectId, UsageDims.kindOf(role), sessionId));
     }
 
     private Project requireProject(Long projectId) {

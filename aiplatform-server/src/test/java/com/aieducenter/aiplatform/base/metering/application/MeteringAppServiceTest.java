@@ -54,7 +54,7 @@ class MeteringAppServiceTest {
     @Test
     void given_first_report_when_report_then_row_recorded_with_dims_passthrough() {
         usageEventSink.report(event("evt-1", PROJ_1, T1, "deepseek", "deepseek-v4-pro",
-                Map.of("role", "DEV", "stage", "DEV"), new TokenUsage(100, 50, 20, 0, 0)));
+                agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(100, 50, 20, 0, 0)));
 
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM met_usage_events WHERE event_id = 'evt-1'", Integer.class))
@@ -67,14 +67,14 @@ class MeteringAppServiceTest {
                 "SELECT cache_read FROM met_usage_events WHERE event_id = 'evt-1'", Long.class))
                 .isEqualTo(20L);
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT dims->>'role' FROM met_usage_events WHERE event_id = 'evt-1'", String.class))
-                .isEqualTo("DEV");
+                "SELECT dims->>'agentKind' FROM met_usage_events WHERE event_id = 'evt-1'",
+                String.class)).isEqualTo("coder");
     }
 
     @Test
     void given_same_event_id_when_report_twice_then_counted_once_no_error() {
         UsageEvent event = event("evt-dup", PROJ_1, T1, "deepseek", "deepseek-v4-pro",
-                Map.of("role", "DEV"), new TokenUsage(100, 50, 0, 0, 0));
+                agentDims(PROJ_1, "ba", "ba-1"), new TokenUsage(100, 50, 0, 0, 0));
 
         usageEventSink.report(event);
         usageEventSink.report(event);   // 幂等：静默吸收，不抛错
@@ -114,12 +114,14 @@ class MeteringAppServiceTest {
                         new TokenUsage(10, 5, 0, 0, 0)),
                 new UsageSummary.ModelUsage("deepseek", "deepseek-v4-pro",
                         new TokenUsage(1100, 50, 20, 0, 0)));
-        // 分维度：事件内每个 (key, value) 各成一桶
+        // 分维度（终态 dims 口径 projectId + agentKind + sessionId）：事件内每个
+        // (key, value) 各成一桶，键值序稳定
         assertThat(summary.byDims()).containsExactly(
-                new UsageSummary.DimUsage("role", "BA", new TokenUsage(10, 5, 0, 0, 0)),
-                new UsageSummary.DimUsage("role", "DEV", new TokenUsage(1101, 52, 23, 4, 5)),
-                new UsageSummary.DimUsage("stage", "BA", new TokenUsage(10, 5, 0, 0, 0)),
-                new UsageSummary.DimUsage("stage", "DEV", new TokenUsage(1101, 52, 23, 4, 5)));
+                new UsageSummary.DimUsage("agentKind", "ba", new TokenUsage(10, 5, 0, 0, 0)),
+                new UsageSummary.DimUsage("agentKind", "coder", new TokenUsage(1101, 52, 23, 4, 5)),
+                new UsageSummary.DimUsage("projectId", PROJ_1, new TokenUsage(1111, 57, 23, 4, 5)),
+                new UsageSummary.DimUsage("sessionId", "ba-1", new TokenUsage(10, 5, 0, 0, 0)),
+                new UsageSummary.DimUsage("sessionId", "coder-1", new TokenUsage(1101, 52, 23, 4, 5)));
     }
 
     @Test
@@ -180,21 +182,27 @@ class MeteringAppServiceTest {
     // ---------- fixture ----------
 
     private void seed() {
-        // A：deepseek pro（DEV/DEV 两维）
+        // A：deepseek pro，编码 run（终态 dims 三键）
         usageEventSink.report(event("evt-a", PROJ_1, T1, "deepseek", "deepseek-v4-pro",
-                Map.of("role", "DEV", "stage", "DEV"), new TokenUsage(100, 50, 20, 0, 0)));
-        // B：deepseek flash（BA/BA 两维）
+                agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(100, 50, 20, 0, 0)));
+        // B：deepseek flash，BA 会话
         usageEventSink.report(event("evt-b", PROJ_1, T2, "deepseek", "deepseek-v4-flash",
-                Map.of("role", "BA", "stage", "BA"), new TokenUsage(10, 5, 0, 0, 0)));
-        // C：anthropic（DEV/DEV 两维，五档全非零）
+                agentDims(PROJ_1, "ba", "ba-1"), new TokenUsage(10, 5, 0, 0, 0)));
+        // C：anthropic，编码 run（五档全非零）
         usageEventSink.report(event("evt-c", PROJ_1, T3, "anthropic", "claude-fable-5",
-                Map.of("role", "DEV", "stage", "DEV"), new TokenUsage(1, 2, 3, 4, 5)));
-        // D：他 subject（隔离面）
+                agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(1, 2, 3, 4, 5)));
+        // D：他 subject（隔离面，取名辅助调用）
         usageEventSink.report(event("evt-d", PROJ_2, T1, "deepseek", "deepseek-v4-pro",
-                Map.of("role", "DEV"), new TokenUsage(9999, 0, 0, 0, 0)));
+                agentDims(PROJ_2, "naming", "naming-2"), new TokenUsage(9999, 0, 0, 0, 0)));
         // E：窗口外候选（T4，半开区间验收用）
         usageEventSink.report(event("evt-e", PROJ_1, T4, "deepseek", "deepseek-v4-pro",
-                Map.of("role", "DEV", "stage", "DEV"), new TokenUsage(1000, 0, 0, 0, 0)));
+                agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(1000, 0, 0, 0, 0)));
+    }
+
+    /** 终态 dims 夹具（与业务侧 UsageDims 同口径，底座测试自持字面量）。 */
+    private static Map<String, String> agentDims(String projectId, String agentKind,
+            String sessionId) {
+        return Map.of("projectId", projectId, "agentKind", agentKind, "sessionId", sessionId);
     }
 
     private UsageEvent event(String eventId, String subject, Instant ts, String provider,

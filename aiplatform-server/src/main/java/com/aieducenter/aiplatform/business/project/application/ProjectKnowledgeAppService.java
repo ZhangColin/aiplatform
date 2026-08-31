@@ -17,7 +17,7 @@ import lombok.extern.slf4j.Slf4j;
  * 知识沉淀编排（业务侧缝）：入库/检索/清理的存储语义归 base.knowledge
  * （{@link KnowledgePort}），「什么时机沉淀什么素材」是业务知识，在此落定。
  * v1 的沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；命中注入在需求环
- * （BA 会话建立，本服务）与生成环（生成下发，#22 接线）。
+ * （BA 会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。
  *
  * <p><b>降级契约</b>：摄取/清理/命中检索一律失败不炸——记日志跳过、降级为空
  * 注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索空列表）。</p>
@@ -73,30 +73,66 @@ public class ProjectKnowledgeAppService {
     }
 
     private String composeSessionInjection(String requirement) {
-        if (requirement == null || requirement.isBlank()) {
-            return "";
-        }
-        String query = requirement.length() > MAX_QUERY_CHARS
-                ? requirement.substring(0, MAX_QUERY_CHARS) : requirement;
-        List<KnowledgeHit> hits;
-        try {
-            hits = knowledgePort.retrieve(query, hitTopK);
-        } catch (RuntimeException e) {
-            log.warn("[knowledge] BA 会话建立检索失败（降级为空注入）：{}", e.toString());
-            return "";
-        }
+        List<KnowledgeHit> hits = retrieveDegraded(requirement, "BA 会话建立");
         if (hits.isEmpty()) {
             return "";
         }
-        log.info("[knowledge] BA 会话建立注入命中 {} 条（query 长度 {}）", hits.size(), query.length());
+        log.info("[knowledge] BA 会话建立注入命中 {} 条", hits.size());
         StringBuilder block = new StringBuilder("\n\n【平台知识库·相似历史需求】")
                 .append("以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考")
                 .append("（非用户的确认信息，不构成对当前需求的约束）：");
+        appendHits(block, hits);
+        return block.toString();
+    }
+
+    // ---------- 知识命中（生成/修正下发前置注入，#24） ----------
+
+    /**
+     * 生成/修正过程下发的知识命中前置注入（一次下发一次注入）：query = 任务
+     * prompt 截 2000 字，命中拼为「背景资料」前置块返回——自带收尾分隔，调用方
+     * 直接 {@code prefix + 任务 prompt}（知识是背景非指令，限定语与 BA 尾注同款）。
+     * 空命中 / 检索失败 / 空任务 prompt = 空注入降级（空串），run 照旧下发不阻断。
+     */
+    public String dispatchInjection(String taskPrompt) {
+        List<KnowledgeHit> hits = retrieveDegraded(taskPrompt, "生成下发");
+        if (hits.isEmpty()) {
+            return "";
+        }
+        log.info("[knowledge] 生成下发前置注入命中 {} 条", hits.size());
+        StringBuilder block = new StringBuilder("【平台知识库·相似历史需求】")
+                .append("以下是平台沉淀的历史成交需求片段，实现当前需求时可作背景参考")
+                .append("（非用户的确认信息，不构成对当前需求的约束）：");
+        appendHits(block, hits);
+        block.append("\n\n————\n\n");
+        return block.toString();
+    }
+
+    // ---------- 拼装私有件 ----------
+
+    /**
+     * 语义检索（降级为空）：query 超长截 {@link #MAX_QUERY_CHARS}、空 query 不触
+     * 检索、检索失败记日志返回空列表——两种注入（尾注/前置）共用同一降级契约。
+     */
+    private List<KnowledgeHit> retrieveDegraded(String rawQuery, String what) {
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return List.of();
+        }
+        String query = rawQuery.length() > MAX_QUERY_CHARS
+                ? rawQuery.substring(0, MAX_QUERY_CHARS) : rawQuery;
+        try {
+            return knowledgePort.retrieve(query, hitTopK);
+        } catch (RuntimeException e) {
+            log.warn("[knowledge] {}检索失败（降级为空注入）：{}", what, e.toString());
+            return List.of();
+        }
+    }
+
+    /** 命中逐条拼进块（表头与收尾由调用方定调）：〔来源项目〕标题 + 片段。 */
+    private static void appendHits(StringBuilder block, List<KnowledgeHit> hits) {
         for (KnowledgeHit hit : hits) {
             block.append("\n\n〔").append(hit.sourceProjectName()).append("〕")
                     .append(hit.title()).append('\n').append(hit.chunk());
         }
-        return block.toString();
     }
 
     // ---------- 级联清理 ----------

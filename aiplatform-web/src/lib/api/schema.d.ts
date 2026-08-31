@@ -185,7 +185,7 @@ export interface paths {
         put?: never;
         /**
          * 开始做系统（触发首次生成）
-         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；项目不存在 404 PRJ_001
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -316,8 +316,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目用量（总量 + 平台成本 + 分模型 + 分角色）
-         * @description 经计量查询端口按 subject=projectId 聚合。cost 为平台成本口径（token × 事件时点生效单价的机械乘法，币种分桶不折算，无加价/售价）；unpriced 标注有用量但未配单价的档位（其分量不含于 cost，不伪装 0）；byRole 按 dims.role 聚合
+         * 项目用量（总量 + 平台成本 + 分模型 + 分智能体）
+         * @description 经计量查询端口按 subject=projectId 聚合。cost 为平台成本口径（token × 事件时点生效单价的机械乘法，币种分桶不折算，无加价/售价）；unpriced 标注有用量但未配单价的档位（其分量不含于 cost，不伪装 0）；byAgentKind 按 dims.agentKind 聚合
          */
         get: operations["usage"];
         put?: never;
@@ -688,6 +688,11 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        AgentKindUsage: {
+            agentKind?: string;
+            agentKindLabel?: string;
+            tokens?: components["schemas"]["TokenUsage"];
+        };
         ApiResponseProjectUsageResponse: {
             /** Format: int32 */
             code?: number;
@@ -709,12 +714,7 @@ export interface components {
             };
             unpriced?: components["schemas"]["UnpricedUsage"][];
             byModel?: components["schemas"]["ModelUsage"][];
-            byRole?: components["schemas"]["RoleUsage"][];
-        };
-        RoleUsage: {
-            role?: string;
-            roleLabel?: string;
-            tokens?: components["schemas"]["TokenUsage"];
+            byAgentKind?: components["schemas"]["AgentKindUsage"][];
         };
         TokenUsage: {
             /** Format: int64 */

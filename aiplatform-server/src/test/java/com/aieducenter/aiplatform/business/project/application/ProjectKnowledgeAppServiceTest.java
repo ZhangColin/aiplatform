@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -92,7 +93,7 @@ class ProjectKnowledgeAppServiceTest {
         // 会话缓存：后续轮复用同一块（一次切入一次注入），且不再触检索
         assertThat(appService.sessionTailOf(9500L)).isEqualTo(block);
         assertThat(appService.sessionTailOf(9501L)).isEmpty(); // 别的项目不串台
-        verify(knowledgePort, org.mockito.Mockito.times(1)).retrieve(anyString(), anyInt());
+        verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
     }
 
     @Test
@@ -124,6 +125,56 @@ class ProjectKnowledgeAppServiceTest {
         appService.establishSessionInjection(9504L, longRequirement);
 
         verify(knowledgePort).retrieve(eq("需".repeat(2000)), anyInt()); // 截 2000 字符
+    }
+
+    // ---------- 知识命中（生成/修正下发前置注入，#24） ----------
+
+    @Test
+    void given_hits_when_dispatch_injection_then_prefix_block_composed() {
+        // 命中拼装：背景块置任务 prompt 前（前置注入）——含来源项目名、标题、片段，
+        // 自带收尾分隔，调用方直接 prefix + taskPrompt
+        when(knowledgePort.retrieve(eq("做一个宠物医院预约系统"), eq(5))).thenReturn(List.of(
+                new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
+                        "核心场景：主人在线选医生预约。"),
+                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理",
+                        "范围边界：不含库存。")));
+
+        String prefix = appService.dispatchInjection("做一个宠物医院预约系统");
+
+        assertThat(prefix).startsWith("【平台知识库·相似历史需求】");
+        assertThat(prefix).contains("宠物医院预约平台").contains("PRD·宠物医院预约")
+                .contains("核心场景：主人在线选医生预约。");
+        assertThat(prefix).contains("连锁诊所系统").contains("不含库存");
+        // 知识是背景非指令：块自带「非用户的确认信息」限定语
+        assertThat(prefix).contains("非用户的确认信息");
+        // 前置块自带收尾分隔（接任务 prompt）
+        assertThat(prefix).endsWith("————\n\n");
+    }
+
+    @Test
+    void given_no_hit_or_failure_or_blank_prompt_when_dispatch_then_empty_prefix() {
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        assertThat(appService.dispatchInjection("全新任务")).isEmpty(); // 空命中 = 空注入
+
+        // 检索失败降级为空注入：run 照旧下发，不阻断主链
+        doThrow(new RuntimeException("pgvector 抖动"))
+                .when(knowledgePort).retrieve(anyString(), anyInt());
+        assertThat(appService.dispatchInjection("做一个官网")).isEmpty();
+
+        // 空任务 prompt 不触检索（只有前两例触检索）
+        assertThat(appService.dispatchInjection(" ")).isEmpty();
+        assertThat(appService.dispatchInjection(null)).isEmpty();
+        verify(knowledgePort, times(2)).retrieve(anyString(), anyInt());
+    }
+
+    @Test
+    void given_oversized_task_prompt_when_dispatch_then_query_truncated() {
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of());
+        String longPrompt = "任".repeat(6000);
+
+        appService.dispatchInjection(longPrompt);
+
+        verify(knowledgePort).retrieve(eq("任".repeat(2000)), eq(5)); // query 截 2000 字符
     }
 
     @Test

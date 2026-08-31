@@ -39,7 +39,7 @@ class AgentCommandTest {
 
     @Test
     void given_full_command_when_construct_then_fields_kept() {
-        UsageContext usage = new UsageContext("prj-1", Map.of("role", "BA"));
+        UsageContext usage = new UsageContext("prj-1", Map.of("agentKind", "ba"));
 
         AgentCommand command = new AgentCommand(
                 "run-1", "你好", "你是 BA", "deepseek:deepseek-v4-flash",
@@ -74,11 +74,11 @@ class AgentCommandTest {
 
     @Test
     void given_mutable_dims_when_construct_usage_context_then_defensively_copied() {
-        Map<String, String> dims = new HashMap<>(Map.of("role", "BA"));
+        Map<String, String> dims = new HashMap<>(Map.of("agentKind", "ba"));
         UsageContext usage = new UsageContext("prj-1", dims);
 
-        dims.put("role", "tampered");
+        dims.put("agentKind", "tampered");
 
-        assertThat(usage.dims()).containsEntry("role", "BA");
+        assertThat(usage.dims()).containsEntry("agentKind", "ba");
     }
 }

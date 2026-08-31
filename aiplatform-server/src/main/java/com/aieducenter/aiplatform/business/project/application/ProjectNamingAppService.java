@@ -16,6 +16,7 @@ import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -34,8 +35,9 @@ import lombok.extern.slf4j.Slf4j;
  * 又是必要的：全部取名共用同一缓存 HarnessAgent 实例（工厂按 prompt/工作区键
  * 复用），单线程保证同一 agent 上不并发 streamEvents（并发安全性上游未背书）。
  * 落位守卫：只顶替仍是占位名的项目（取名在飞时用户已改名则不覆写）；项目已删
- * 静默跳过。计量：subject=projectId + role=NAMING 用途标记（非 RolePreset，byRole
- * 展示名空，前端落「—」桶）。命名质量迭代（提示词调优）票外另行。</p>
+ * 静默跳过。计量：subject=projectId + dims 终态口径（{@link UsageDims}，
+ * agentKind=naming 用途标记——非主链角色，byAgentKind 展示名空，前端落「—」桶）。
+ * 命名质量迭代（提示词调优）票外另行。</p>
  */
 @Service
 @Slf4j
@@ -43,9 +45,6 @@ public class ProjectNamingAppService implements DisposableBean {
 
     /** 取名会话标识派生前缀（projectId → naming-{projectId}，一次性会话）。 */
     public static final String SESSION_PREFIX = "naming-";
-
-    /** 取名用量的 role 维度用途标记（与 FIX/RESUME 同型：非 RolePreset 的标记桶）。 */
-    public static final String NAMING_ROLE_DIM = "NAMING";
 
     /**
      * 取名协议（只输出名称本身；调优票外——能用即可）：4-12 字中文项目名，
@@ -149,7 +148,8 @@ public class ProjectNamingAppService implements DisposableBean {
                 SESSION_PREFIX + projectId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),
-                        Map.of(ProjectQueryAppService.DIM_ROLE, NAMING_ROLE_DIM)),
+                        UsageDims.of(projectId, UsageDims.AGENT_KIND_NAMING,
+                                SESSION_PREFIX + projectId)),
                 null, // 本地兜底工作区：取名不读写项目 dev 工作区
                 Map.of());
         AgentReply reply = agentClient.converse(command, event -> {

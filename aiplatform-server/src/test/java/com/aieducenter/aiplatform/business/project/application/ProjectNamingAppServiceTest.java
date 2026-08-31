@@ -14,6 +14,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,8 +79,8 @@ class ProjectNamingAppServiceTest {
         assertThat(command.getValue().systemPrompt()).isNotBlank(); // 取名协议（只输出名称）
         assertThat(command.getValue().workspaceId()).isNull();
         assertThat(command.getValue().usageContext().subject()).isEqualTo("43");
-        assertThat(command.getValue().usageContext().dims())
-                .containsEntry(ProjectQueryAppService.DIM_ROLE, "NAMING");
+        assertThat(command.getValue().usageContext().dims()).isEqualTo(
+                UsageDims.of(43L, UsageDims.AGENT_KIND_NAMING, "naming-43"));
         assertThat(command.getValue().runId()).isNotBlank();
     }
 

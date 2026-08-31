@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePrd } from "@/hooks/use-prd";
-import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 /**
@@ -23,7 +23,7 @@ import { formatRelativeTime } from "@/lib/utils/time";
  */
 export function PrdPanel({ projectId }: { projectId: string }) {
   const prd = usePrd(projectId);
-  const hasUpdate = usePrdNoticesStore((s) => s.pending[projectId] !== undefined);
+  const hasUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   const markSeen = usePrdNoticesStore((s) => s.markSeen);
 
   useEffect(() => {

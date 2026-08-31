@@ -125,13 +125,13 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
   });
 
   it("点击「去看看」：认领（pending 清）+ 跳转回调，胶囊即逝", () => {
-    usePrdNoticesStore.setState({ seen: { p1: true }, pending: { p1: Date.now() } });
+    usePrdNoticesStore.setState({ seen: { p1: true }, pending: { p1: true } });
     render(<CommandArea projectId="p1" onSeePrd={seePrd} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /需求文档有更新 · 去看看/ }));
+    fireEvent.click(screen.getByRole("button", { name: /PRD 有更新 · 去看看/ }));
 
     expect(usePrdNoticesStore.getState().pending.p1).toBeUndefined();
     expect(seePrd).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /需求文档有更新/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /PRD 有更新/ })).toBeNull();
   });
 });

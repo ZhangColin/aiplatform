@@ -40,7 +40,9 @@ const NOTIFICATION_INVALIDATIONS = {
 /**
  * 载荷展示白名单（ADR 0003 修订例外，#20 修订回路）：仅这些事件把 **REST 重查
  * 拿不到的载荷** 写入轻量 store 页内呈现；其余事件一律只失效。桥仍是 store
- * 唯一事件写入方；正确性以 REST 重查为准。
+ * 唯一事件写入方；正确性以 REST 重查为准。注册表按 type 键派发，写入方内的
+ * 判别守卫仅为编译期收窄（键即类型，不会走错分支——关联联合的调用点无法
+ * 类型化到键，守卫不是运行时逻辑）。
  */
 const NOTIFICATION_PAYLOAD_WRITERS: Partial<
   Record<NotificationEvent["type"], (event: NotificationEvent) => void>

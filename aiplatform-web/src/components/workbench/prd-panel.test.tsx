@@ -55,7 +55,7 @@ describe("PrdPanel · PRD 文件呈现（#20）", () => {
   });
 
   it("有未认领修订：「已更新」标记；无修订不标", () => {
-    seed.notices = { seen: { p1: true }, pending: { p1: 1 } };
+    seed.notices = { seen: { p1: true }, pending: { p1: true } };
     const { container } = render(<PrdPanel projectId="p1" />);
     expect(container.textContent).toContain("已更新");
 

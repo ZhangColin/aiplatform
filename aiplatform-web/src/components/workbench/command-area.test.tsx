@@ -107,17 +107,15 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     expect(archived).toContain("disabled");
   });
 
-  it("PRD 修订未认领：输入条上方出「需求文档有更新 · 去看看」胶囊；认领后不渲染", () => {
+  it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {
     seedChat([{ kind: "ba", id: "b1", text: "已按你的意见修订。" }]);
-    seed.notices = { seen: { p1: true }, pending: { p1: 1 } };
+    seed.notices = { seen: { p1: true }, pending: { p1: true } };
 
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain(
-      "需求文档有更新 · 去看看",
+      "PRD 有更新 · 去看看",
     );
 
     seed.notices = { seen: { p1: true }, pending: {} };
-    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain(
-      "需求文档有更新",
-    );
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain("去看看");
   });
 });

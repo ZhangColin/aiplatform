@@ -11,7 +11,7 @@ import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
-import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import { QuestionCard } from "./question-card";
 
@@ -23,7 +23,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * 有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
  * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store
  * （SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出
- * 「需求文档有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区。
+ * 「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区。
  */
 export function CommandArea({
   projectId,
@@ -38,7 +38,7 @@ export function CommandArea({
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
-  const hasPrdUpdate = usePrdNoticesStore((s) => s.pending[projectId] !== undefined);
+  const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
@@ -138,7 +138,7 @@ export function CommandArea({
       </div>
 
       <div className="shrink-0 border-t p-3">
-        {hasPrdUpdate ? (
+        {prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
               variant="outline"
@@ -150,7 +150,7 @@ export function CommandArea({
               }}
             >
               <FileText className="size-3.5" />
-              需求文档有更新 · 去看看
+              PRD 有更新 · 去看看
             </Button>
           </div>
         ) : null}

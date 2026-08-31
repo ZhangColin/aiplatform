@@ -5,6 +5,7 @@ import type { ChatState, ChatMessage } from "@/lib/store/chat";
 import type { PrdNoticesState } from "@/lib/store/prd-notices";
 
 import { CommandArea } from "./command-area";
+import { lockRowOf } from "@/lib/orders/lock";
 
 // 直读种子状态渲染（zustand v5 server snapshot 限制同 workbench-shell.test）；
 // store 本体行为由 chat.test 覆盖。发送口 mock 掉——路由判定归纯逻辑测试。
@@ -102,7 +103,9 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
       "本轮回复中断：模型调用失败",
     );
 
-    const archived = renderToStaticMarkup(<CommandArea projectId="p1" disabled />);
+    const archived = renderToStaticMarkup(
+      <CommandArea projectId="p1" lock={lockRowOf({ archived: true })} />,
+    );
     expect(archived).toContain("项目已归档，指令区已关闭");
     expect(archived).toContain("disabled");
   });
@@ -119,6 +122,23 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain("去看看");
   });
 
+  it("订单锁定（#28）：待报价行——输入禁用、锁定提示与占位都指向「取消订单」", () => {
+    seedChat([{ kind: "user", id: "u1", text: "这个系统不错" }]);
+
+    const locked = renderToStaticMarkup(
+      <CommandArea
+        projectId="p1"
+        lock={lockRowOf({ activeOrder: { id: "o1", status: 1, statusName: "待报价" } })}
+        confirmOrder={<button type="button">确认下单</button>}
+      />,
+    );
+    expect(locked).toContain("订单处理中——如需继续修改，请取消订单");
+    expect(locked).toContain("disabled");
+    // 锁定期间「确认下单」与 PRD 胶囊一并退场（订单已存在/迭代已冻结）
+    expect(locked).not.toContain("确认下单</button>");
+    expect(locked).not.toContain("去看看");
+  });
+
   it("「确认下单」槽（#26）：注入即渲染于输入条上方；归档（disabled）不渲染", () => {
     seedChat([{ kind: "user", id: "u1", text: "这个系统不错" }]);
 
@@ -130,7 +150,7 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     const archived = renderToStaticMarkup(
       <CommandArea
         projectId="p1"
-        disabled
+        lock={lockRowOf({ archived: true })}
         confirmOrder={<button type="button">确认下单</button>}
       />,
     );

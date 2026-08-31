@@ -19,6 +19,8 @@ import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea } from "./outputs-area";
 import { StartGenerationCard, StartSystemButton } from "./start-generation";
 import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
+import { usePlaceOrder } from "@/hooks/use-order";
+import { lockRowOf } from "@/lib/orders/lock";
 
 /**
  * 项目页装配（issue #17 单门户两槽位壳 + #19/#20 需求环 + #22 生成环①）：左指令区
@@ -29,15 +31,19 @@ import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
  * <p>生成环（#22）：「开始做系统」eligibility 单点在此判定（PRD 已产出 && 未生成 &&
  * 不在生成中——纯动作无门，待定项未清也可点）；对话流内卡片与文件模式操作条同一
  * 动作；编码 run 起跑自动切系统模式（用户手动切换优先至下一自动事件）。「确认下单」
- * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。本组件是
- * agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount 即断」）；断流
- * 超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目
- * 建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起生成跳成果区。</p>
+ * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
+ * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂输入条按钮、锁定式
+ * 矩阵行在此判定（lockRowOf 单点）注入指令区与订单卡、下单成功自动切项目模式看
+ * 订单卡。本组件是 agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount
+ * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真
+ * 绑定：项目建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起
+ * 生成/下单跳成果区。</p>
  */
 export function WorkbenchView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
   const [mobileTab, setMobileTab] = useState("chat");
   const [outputsTab, setOutputsTab] = useState("files");
+  const placeOrder = usePlaceOrder(projectId);
 
   useAgentStreamChannel(projectId);
   const agentStatus = useSseStatus("agent");
@@ -55,6 +61,12 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
   /** 发起生成成功即看系统模式（空白浏览器窗 + 一句提示；mobile 跳成果区）。 */
   function handleGenerated() {
     setOutputsTab("system");
+    setMobileTab("outputs");
+  }
+
+  /** 下单成功即看项目模式的订单卡（等待文案 + 取消入口；mobile 跳成果区）。 */
+  function handleOrdered() {
+    setOutputsTab("project");
     setMobileTab("outputs");
   }
 
@@ -104,12 +116,16 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
   const generationEligible =
     !!detail?.prdProducedAt && !detail?.generatedAt && !generating;
 
-  // 「确认下单」可见性（单点，#26）：随首次生成完成常驻、零迭代可点；未终结
-  // 订单事实归交易环①（#28）接出，本缝先视为无
+  // 「确认下单」可见性（单点，#26 规则 + #28 订单事实接出）：随首次生成完成
+  // 常驻、零迭代可点；仅无未终结订单时显示
   const showConfirmOrder = confirmOrderVisible({
     generatedAt: detail?.generatedAt,
     archived: detail?.archived,
+    activeOrderId: detail?.activeOrder?.id ?? null,
   });
+
+  // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——指令区禁用+提示、成果区只读
+  const lock = lockRowOf({ archived: detail?.archived, activeOrder: detail?.activeOrder });
 
   return (
     <WorkbenchShell
@@ -126,7 +142,7 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
       left={
         <CommandArea
           projectId={projectId}
-          disabled={detail?.archived ?? false}
+          lock={lock}
           onSeePrd={() => setMobileTab("outputs")}
           generationCard={
             <StartGenerationCard
@@ -138,8 +154,7 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
           confirmOrder={
             showConfirmOrder ? (
               <ConfirmOrderButton
-                // 下单动作本体归交易环①（#28）：此处占位提示，接出时换正式 mutation
-                onConfirm={() => toast.info("确认下单即将开放")}
+                onConfirm={() => placeOrder.mutate(undefined, { onSuccess: handleOrdered })}
               />
             ) : null
           }
@@ -151,6 +166,7 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
             projectId={projectId}
             generatedAt={detail?.generatedAt}
             coderStatus={coderStatus}
+            activeOrderId={detail?.activeOrder?.id ?? null}
             tab={outputsTab}
             onTabChange={setOutputsTab}
             onGenerated={handleGenerated}

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
@@ -14,9 +15,10 @@ import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppSe
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 订单用例（#18 落下单缝，报价/改价/取消/支付归片4）：确认下单 = 冻结下单时
- * PRD 全文快照入单，待报价起步。项目事实（存在性/归档态/PRD 正文）经
- * {@code business.project} 应用层软引用——跨 BC 无 FK，同一口径。
+ * 订单写用例（#18 落下单缝；#28 交易环①接出详情/取消，报价/改价/支付随后续
+ * 切片）：确认下单 = 冻结下单时 PRD 全文快照入单，待报价起步。项目事实
+ * （存在性/归档态/PRD 正文）经 {@code business.project} 应用层软引用——
+ * 跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
@@ -41,14 +43,15 @@ public class OrderAppService {
     }
 
     /**
-     * 确认下单：读当前 PRD → 冻结快照入单（待报价）。
+     * 确认下单：读当前 PRD → 冻结快照入单（待报价）。下单即冻结迭代——指令区
+     * 停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。
      *
-     * @return 订单标识（TSID；订单视图归片4 端点）
+     * @return 订单（待报价起步，快照已冻结）
      * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
      *                              （项目上下文原样透传）；ORD_004 项目已归档；
      *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）
      */
-    public Long place(Long projectId) {
+    public OrderResponse place(Long projectId) {
         if (projectQueryAppService.detail(projectId).archived()) {
             throw new ApplicationException(OrderMessage.ORDER_PROJECT_ARCHIVED);
         }
@@ -58,7 +61,7 @@ public class OrderAppService {
         Order order = Order.place(projectId, RequestContext.getUserId(),
                 projectQueryAppService.prd(projectId).content());
         try {
-            return orderRepository.save(order).getId();
+            return OrderResponse.of(orderRepository.save(order));
         } catch (DataIntegrityViolationException e) {
             // 并发下单撞部分唯一索引（预检漏过）：后到者拒绝，同口径翻译；
             // 非本索引的完整性违例不冒名，原样上抛
@@ -70,11 +73,38 @@ public class OrderAppService {
         }
     }
 
+    /**
+     * 订单详情（用户面）。
+     *
+     * @throws ApplicationException ORD_001 订单不存在
+     */
+    public OrderResponse detail(Long orderId) {
+        return OrderResponse.of(requireOrder(orderId));
+    }
+
+    /**
+     * 取消订单（未支付态取消即解冻回迭代）：自待报价/已报价可达，已支付与
+     * 已终结拒绝（聚合守卫 ORD_005）。事务取舍同 {@link #place}——单行状态
+     * 更新由仓储自带事务保证，刻意不加 {@code @Transactional}。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_005 已支付或已终结
+     */
+    public OrderResponse cancel(Long orderId) {
+        Order order = requireOrder(orderId);
+        order.cancel();
+        return OrderResponse.of(orderRepository.save(order));
+    }
+
     private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {
         return mentions(e.getMessage()) || mentions(e.getMostSpecificCause().getMessage());
     }
 
     private static boolean mentions(String message) {
         return message != null && message.contains(ACTIVE_ORDER_INDEX);
+    }
+
+    private Order requireOrder(Long orderId) {
+        return orderRepository.findById(orderId)
+                .orElseThrow(() -> new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
     }
 }

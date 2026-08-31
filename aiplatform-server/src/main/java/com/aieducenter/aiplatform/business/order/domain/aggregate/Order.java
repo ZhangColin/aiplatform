@@ -24,10 +24,10 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
  * 金额单位分（Long）、v1 恒 CNY，随报价落值。projectId 跨上下文软引用
  * （prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户查）。
  *
- * <p>状态机（五态单向）与报价/改价/支付/归档动作归片4 用例落位；本聚合先立
- * 下单事实与终态判定（{@link OrderStatus#isTerminal}——「同项目至多一个未终结
- * 订单」的应用预检与库侧部分唯一索引共用该口径）。同项目并发下单的最终防线
- * = 库侧唯一索引，聚合不做跨行查重。</p>
+ * <p>状态机（五态单向）：{@link #cancel} 已落位（未支付态取消即回迭代），
+ * 报价/改价/支付/归档动作随后续切片落位；终态判定（{@link OrderStatus#isTerminal}
+ * ——「同项目至多一个未终结订单」的应用预检与库侧部分唯一索引共用该口径）。
+ * 同项目并发下单的最终防线 = 库侧唯一索引，聚合不做跨行查重。</p>
  */
 @Entity
 @Table(name = "ord_orders")
@@ -105,6 +105,19 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 是否终态（已归档/已取消）——未终结订单唯一性的判定口径。 */
     public boolean isTerminal() {
         return status.isTerminal();
+    }
+
+    /**
+     * 取消（未支付态的显式动作，取消即解冻回迭代）：自任何未支付态（待报价/
+     * 已报价）可达；已支付（支付成功即联动归档，#30）与已终结（已归档/已取消）
+     * 拒绝。取消后同项目可再下新单（重新购买 = 新单新快照）。
+     */
+    public void cancel() {
+        if (!status.isUnpaid()) {
+            throw new DomainException(OrderMessage.ORDER_CANCEL_NOT_ALLOWED);
+        }
+        this.status = OrderStatus.CANCELLED;
+        this.cancelledAt = LocalDateTime.now();
     }
 
     /**

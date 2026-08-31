@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
 
+import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
@@ -18,6 +19,8 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param archived    是否已归档（单向终点）
  * @param createdAt   创建时间
  * @param updatedAt   更新时间（列表卡「更新于」与首页「最近项目」排序的事实源）
+ * @param activeOrder 未终结订单摘要（#28：无 = null——锁定式矩阵与列表
+ *                   「待报价/待支付」态的推导输入；跨 BC 软引用）
  */
 public record ProjectResponse(
         String id,
@@ -29,6 +32,7 @@ public record ProjectResponse(
         String statusName,
         Boolean archived,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        OrderBriefResponse activeOrder
 ) {
 }

@@ -1,9 +1,11 @@
 import type { components } from "@/lib/api/schema";
 
+import { ORDER_STATUS } from "@/lib/orders/lock";
+
 /**
- * 项目列表四态视图（issue #21）：全量拉取 + 本地分区（v1 不分页，过滤/折叠
- * 消化规模）。四态是用户面口径，与后端两态派生状态（status/statusName）分属
- * 两层——本文件是四态唯一推导点。
+ * 项目列表四态视图（issue #21 骨架 + #28 订单态接线）：全量拉取 + 本地分区
+ * （v1 不分页，过滤/折叠消化规模）。四态是用户面口径，与后端两态派生状态
+ * （status/statusName）分属两层——本文件是四态唯一推导点。
  */
 
 /** swagger ProjectResponse 原始形状（字段全可缺）。 */
@@ -16,6 +18,8 @@ export type ProjectSummary = {
   archived: boolean;
   createdAt?: string;
   updatedAt?: string;
+  /** 未终结订单状态（#28：缺省 = 无订单；待报价/待支付态的推导输入）。 */
+  activeOrderStatus?: number;
 };
 
 export function normalizeProjectSummary(raw: ProjectResponse): ProjectSummary {
@@ -25,6 +29,7 @@ export function normalizeProjectSummary(raw: ProjectResponse): ProjectSummary {
     archived: raw.archived === true,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
+    activeOrderStatus: raw.activeOrder?.status ?? undefined,
   };
 }
 
@@ -48,20 +53,22 @@ export const PROJECT_STAGES: ReadonlyArray<{ key: ProjectStageKey; label: string
 ).map((key) => ({ key, label: STAGE_LABELS[key] }));
 
 /**
- * 四态推导口径：已归档优先；进行中 = 无未终结订单且未归档。待报价/待支付 =
- * 项目挂着未终结订单（待报价/已报价）——订单态接线归交易环（#28），本片列表
- * 无订单事实、两态不可达（过滤位为空壳）。
+ * 四态推导口径（#28 订单态接线）：已归档优先；未终结订单在 → 待报价（1）/
+ * 待支付（2=已报价）；否则进行中。订单状态缺省/未知按进行中兜底（与详情
+ * 嵌入的防御归一同口径）。
  */
-export function projectStage(project: Pick<ProjectSummary, "archived">): ProjectStageKey {
-  return project.archived ? "archived" : "in_progress";
+export function projectStage(project: Pick<ProjectSummary, "archived" | "activeOrderStatus">): ProjectStageKey {
+  if (project.archived) return "archived";
+  if (project.activeOrderStatus === ORDER_STATUS.pendingQuote) return "awaiting_quote";
+  if (project.activeOrderStatus === ORDER_STATUS.quoted) return "awaiting_payment";
+  return "in_progress";
 }
 
 /** 列表页分区：主网格 = 选中态项目；历史归档折叠分组 = 已归档项目（选中态已
  * 是归档时主网格即全量，分组不重复出）。 */
-export function projectListSections<T extends Pick<ProjectSummary, "archived">>(
-  items: T[],
-  stage: ProjectStageKey,
-): { main: T[]; archivedGroup: T[] } {
+export function projectListSections<
+  T extends Pick<ProjectSummary, "archived" | "activeOrderStatus">,
+>(items: T[], stage: ProjectStageKey): { main: T[]; archivedGroup: T[] } {
   return {
     main: items.filter((p) => projectStage(p) === stage),
     archivedGroup:

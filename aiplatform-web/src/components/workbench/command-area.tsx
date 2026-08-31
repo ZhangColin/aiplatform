@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, SendHorizontal, TriangleAlert } from "lucide-react";
+import { FileText, Lock, SendHorizontal, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import { isSubmitEnter } from "@/lib/chat/enter";
+import type { LockRow } from "@/lib/orders/lock";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 
@@ -18,24 +19,27 @@ import { QuestionCard } from "./question-card";
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
- * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环①）：项目页左侧全程
- * 常开的对话区，无标题——BA 开场回应、每轮一问、用户的意见与答复都在此流动；
- * 首次生成后意见即迭代入口（判定与派发归 BA + startFixRun，指令区形态不变）。
- * 发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
- * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store
- * （SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出
- * 「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区；「确认下单」
- * 随首次生成完成常驻输入条上方（#26，装配层判定可见性后注入）。
+ * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定）：
+ * 项目页左侧全程常开的对话区，无标题——BA 开场回应、每轮一问、用户的意见与
+ * 答复都在此流动；首次生成后意见即迭代入口（判定与派发归 BA + startFixRun，
+ * 指令区形态不变）。发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选
+ * 合并），否则即新发言。问题到达自动聚焦输入框（不错过在等你的问题）。对话史 =
+ * chat store（SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方
+ * 出「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区；「确认下单」
+ * 随首次生成完成常驻输入条上方（#26，装配层判定可见性后注入）。输入可用性吃
+ * 锁定式矩阵（#28）：locked（订单处理中）禁用输入并出锁定提示，closed（归档
+ * 终态）关闭——矩阵行由装配层判定后注入。
  */
 export function CommandArea({
   projectId,
-  disabled,
+  lock,
   onSeePrd,
   generationCard,
   confirmOrder,
 }: {
   projectId: string;
-  disabled?: boolean;
+  /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
+  lock?: LockRow;
   /** 「去看看」跳转回调（mobile 切成果区页签等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
@@ -58,6 +62,9 @@ export function CommandArea({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const chatInput = lock?.chatInput ?? "open";
+  const disabled = chatInput !== "open";
+
   const pendingId = pending?.id;
   if (pendingId !== undefined && selectionFor !== pendingId) {
     setSelectionFor(pendingId);
@@ -66,8 +73,8 @@ export function CommandArea({
 
   // 问题到达：聚焦输入框（自由输入作答入口，不错过在等你的问题）
   useEffect(() => {
-    if (pendingId) inputRef.current?.focus();
-  }, [pendingId]);
+    if (pendingId && !disabled) inputRef.current?.focus();
+  }, [pendingId, disabled]);
 
   // 新内容自动滚底（消息流增长或打字指示出现）
   useEffect(() => {
@@ -76,8 +83,9 @@ export function CommandArea({
   }, [messages, turnActive]);
 
   const sending = postMessage.isPending || answerQuestion.isPending;
+  // 禁用态的锁定提示由输入条上方的横幅承载（具体缘由），占位只留一句短话不重复
   const placeholder = disabled
-    ? "项目已归档，指令区已关闭"
+    ? "指令区已锁定"
     : pending
       ? "回答上面的问题，回车发送（可与已勾选合并）"
       : "和需求分析师聊聊你的想法…";
@@ -164,6 +172,12 @@ export function CommandArea({
           </div>
         ) : null}
         {!disabled && confirmOrder ? confirmOrder : null}
+        {disabled && lock?.chatHint ? (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <Lock className="size-3.5 shrink-0" />
+            {lock.chatHint}
+          </div>
+        ) : null}
         <div className="flex items-end gap-2">
           <Textarea
             ref={inputRef}

@@ -39,6 +39,8 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
+import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
@@ -126,13 +128,22 @@ class ProjectControllerTest {
     void given_projects_when_list_then_wrapped_array() throws Exception {
         when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
                 ProjectType.WEBSITE, "官网", "900",
-                ProjectStatus.IN_PROGRESS, "进行中", false, null, null)));
+                ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null),
+                new ProjectResponse("101", "已下单官网",
+                        ProjectType.WEBSITE, "官网", "901",
+                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null,
+                        new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"))));
 
         performAsUser(get("/api/projects"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].id").value("100"))
                 .andExpect(jsonPath("$.data[0].status").value(1)) // IN_PROGRESS → code
-                .andExpect(jsonPath("$.data[0].statusName").value("进行中"));
+                .andExpect(jsonPath("$.data[0].statusName").value("进行中"))
+                .andExpect(jsonPath("$.data[0].activeOrder").isEmpty()) // 无订单 → null
+                // #28：未终结订单嵌入（四态列表「待报价」的推导输入）
+                .andExpect(jsonPath("$.data[1].activeOrder.id").value("900"))
+                .andExpect(jsonPath("$.data[1].activeOrder.status").value(1))
+                .andExpect(jsonPath("$.data[1].activeOrder.statusName").value("待报价"));
     }
 
     @Test
@@ -263,7 +274,7 @@ class ProjectControllerTest {
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null));
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null, null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -606,7 +617,7 @@ class ProjectControllerTest {
             LocalDateTime prdProducedAt) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null);
+                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null, null);
     }
 
     /**

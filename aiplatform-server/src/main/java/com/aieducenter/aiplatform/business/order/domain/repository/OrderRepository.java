@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.order.domain.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,4 +26,7 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
 
     /** 项目名下不在给定状态清单的订单。 */
     List<Order> findByProjectIdAndStatusNotIn(Long projectId, List<OrderStatus> statuses);
+
+    /** 一批项目名下不在给定状态清单的订单（项目列表嵌入未终结订单事实的批量面）。 */
+    List<Order> findByProjectIdInAndStatusNotIn(Collection<Long> projectIds, List<OrderStatus> statuses);
 }

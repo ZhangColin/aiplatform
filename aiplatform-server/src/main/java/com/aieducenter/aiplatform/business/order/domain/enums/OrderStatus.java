@@ -53,6 +53,11 @@ public enum OrderStatus implements BaseEnum<OrderStatus> {
         return TERMINAL.contains(this);
     }
 
+    /** 是否未支付（待报价/已报价）——「取消自任何未支付态可达」的判定口径单点。 */
+    public boolean isUnpaid() {
+        return this == PENDING_QUOTE || this == QUOTED;
+    }
+
     /**
      * JPA Converter（框架自动应用）。
      */

@@ -21,6 +21,9 @@ public enum ErrorCodePrefix {
     /** business.project：项目（prj_） */
     PRJ("PRJ_", "business.project"),
 
+    /** business.order：订单（ord_，#28 用户面 REST 错误面起走线） */
+    ORD("ORD_", "business.order"),
+
     /** business.identity：账号认证（idn_） */
     IDN("IDN_", "business.identity");
 

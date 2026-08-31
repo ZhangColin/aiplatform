@@ -13,7 +13,11 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_ALREADY_ACTIVE(409, "ORD_003", "该项目已有未终结订单（取消或完成后再下单）"),
 
-    ORDER_PROJECT_ARCHIVED(409, "ORD_004", "项目已归档，无法下单（新需求请新建项目）");
+    ORDER_PROJECT_ARCHIVED(409, "ORD_004", "项目已归档，无法下单（新需求请新建项目）"),
+
+    ORDER_CANCEL_NOT_ALLOWED(409, "ORD_005", "订单已支付或已终结，无法取消"),
+
+    ORDER_FROZEN(409, "ORD_006", "订单处理中——如需继续修改，请取消订单");
 
     private final int httpStatus;
     private final String code;

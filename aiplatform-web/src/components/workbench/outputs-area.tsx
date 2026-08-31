@@ -1,29 +1,30 @@
 "use client";
 
-import { PackageCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { FilesPanel } from "./files-panel";
 import { LiveRail } from "./live-panel";
-import { PanelPlaceholder } from "./panel-placeholder";
+import { OrderPanel } from "./order-panel";
 import { SystemPanel } from "./system-panel";
 import type { CoderRunStatus } from "@/lib/store/generation";
 
 /**
- * 成果区（#20 长出 / #22 系统模式长出 / #23 直播侧栏 / #27 文件树）：文件 /
- * 系统 / 项目三模式 + 右侧可收展直播栏（跨模式常驻——直播是 run 的面，不是某个
- * 模式的面；run 结束即逝归 LiveRail 自管）。文件模式 = FilesPanel（交付文件树
- * + 点看内容，PRD 是缺省一篇；操作条可挂「开始做系统」）；系统模式 =
- * SystemPanel（空白浏览器窗 → run 完成自动挂预览）；项目模式随交易环（订单卡）
- * 落位。tab 受控归装配层（WorkbenchView）：编码 run 起跑自动切系统模式，用户
+ * 成果区（#20 长出 / #22 系统模式长出 / #23 直播侧栏 / #27 文件树 / #28 订单卡）：
+ * 文件 / 系统 / 项目三模式 + 右侧可收展直播栏（跨模式常驻——直播是 run 的面，
+ * 不是某个模式的面；run 结束即逝归 LiveRail 自管）。文件模式 = FilesPanel
+ * （交付文件树 + 点看内容，PRD 是缺省一篇；操作条可挂「开始做系统」）；系统
+ * 模式 = SystemPanel（空白浏览器窗 → run 完成自动挂预览）；项目模式 =
+ * OrderPanel（订单当前态卡，无订单 = 引导占位）。tab 受控归装配层
+ * （WorkbenchView）：编码 run 起跑自动切系统模式、下单自动切项目模式，用户
  * 手动切换优先至下一自动事件。
  */
 export function OutputsArea({
   projectId,
   generatedAt,
   coderStatus,
+  activeOrderId,
   tab,
   onTabChange,
   generationAction,
@@ -34,6 +35,8 @@ export function OutputsArea({
   generatedAt?: string | null;
   /** 本会话编码 run 状态（undefined = 未见）。 */
   coderStatus?: CoderRunStatus;
+  /** 未终结订单标识（订单卡进出判据；null = 无订单 → 引导占位）。 */
+  activeOrderId?: string | null;
   /** 受控 tab（装配层持有，自动切换与手动切换同一入口）。 */
   tab: string;
   onTabChange: (value: string) => void;
@@ -63,9 +66,7 @@ export function OutputsArea({
           />
         </TabsContent>
         <TabsContent value="project" className="min-h-0 flex-1 border-t">
-          <PanelPlaceholder icon={<PackageCheck />} title="项目">
-            项目与订单的信息会在这里呈现
-          </PanelPlaceholder>
+          <OrderPanel orderId={activeOrderId} />
         </TabsContent>
       </Tabs>
       <LiveRail projectId={projectId} />

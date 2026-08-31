@@ -29,6 +29,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -75,7 +76,61 @@ class ProjectQueryAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_projects");
+    }
+
+    // ---------- #28 交易环①：详情/列表嵌入未终结订单事实 ----------
+
+    @Test
+    void given_active_order_when_detail_then_active_order_embedded() {
+        Long projectId = persistedProject(8110L, "下单项目").getId();
+        insertOrder(9110L, projectId, 1);
+
+        ProjectDetailResponse response = appService.detail(projectId);
+
+        assertThat(response.activeOrder()).isNotNull();
+        assertThat(response.activeOrder().id()).isEqualTo("9110");
+        assertThat(response.activeOrder().status()).isEqualTo(OrderStatus.PENDING_QUOTE);
+        assertThat(response.activeOrder().statusName()).isEqualTo("待报价");
+    }
+
+    @Test
+    void given_no_active_order_when_detail_then_active_order_null() {
+        Long projectId = persistedProject(8111L, "未下单项目").getId();
+
+        assertThat(appService.detail(projectId).activeOrder()).isNull();
+    }
+
+    @Test
+    void given_cancelled_order_only_when_detail_then_active_order_null() {
+        // 终态订单不占嵌入位：取消即解冻，项目回迭代态
+        Long projectId = persistedProject(8112L, "已取消项目").getId();
+        insertOrder(9112L, projectId, 5);
+
+        assertThat(appService.detail(projectId).activeOrder()).isNull();
+    }
+
+    @Test
+    void given_projects_with_and_without_orders_when_list_then_embedded_per_project() {
+        Long ordered = persistedProject(8113L, "下单项目").getId();
+        persistedProject(8114L, "未下单项目");
+        insertOrder(9113L, ordered, 2);
+
+        List<ProjectResponse> list = appService.list(null);
+
+        ProjectResponse withOrder = list.stream()
+                .filter(item -> item.id().equals(Long.toString(ordered))).findFirst().orElseThrow();
+        assertThat(withOrder.activeOrder().status()).isEqualTo(OrderStatus.QUOTED);
+        assertThat(list.stream().filter(item -> item.activeOrder() != null)).hasSize(1);
+    }
+
+    /** 直插订单行（跨 BC 库事实，绕开 place 的项目读面依赖）。 */
+    private void insertOrder(long orderId, Long projectId, int status) {
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                orderId, projectId, status);
     }
 
     // ---------- 详情 ----------

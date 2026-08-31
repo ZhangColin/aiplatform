@@ -43,6 +43,16 @@ vi.mock("@/hooks/use-generate", () => ({
   useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
+// 订单数据口（#28）：下单动作 stub；订单详情按用例播种（OrderPanel 消费）
+const orderSeed = vi.hoisted(() => ({
+  order: undefined as Record<string, unknown> | undefined,
+}));
+vi.mock("@/hooks/use-order", () => ({
+  usePlaceOrder: () => ({ isPending: false, mutate: vi.fn() }),
+  useOrder: () => ({ data: orderSeed.order, isPending: orderSeed.order === undefined }),
+  useCancelOrder: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 vi.mock("@/lib/sse/agent-channel", () => ({
   useAgentStreamChannel: () => {},
 }));
@@ -121,6 +131,36 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
     const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
 
     expect(html).toContain("确认下单");
+  });
+
+  // ---------- 订单锁定装配（#28 交易环①：下单即冻结——锁定式矩阵待报价行） ----------
+
+  it("挂着待报价订单：指令区禁用出锁定提示、「确认下单」退场（锁定式矩阵接线）", () => {
+    // 订单卡内容归 order-panel.test（SSR 只渲染激活 tab，项目模式非缺省）
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+      activeOrder: { id: "o1", status: 1, statusName: "待报价" },
+    });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).toContain("订单处理中——如需继续修改，请取消订单");
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("确认下单");
+  });
+
+  it("无订单（迭代态）：指令区可输入、无锁定提示", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).toContain("和需求分析师聊聊你的想法");
+    expect(html).not.toContain("订单处理中");
+    expect(html).toContain("确认下单"); // 迭代态常驻入口
   });
 
   it("未生成 / 已归档：不出「确认下单」", () => {

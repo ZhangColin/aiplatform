@@ -11,7 +11,7 @@ import {
   type ProjectSummary,
 } from "./list";
 
-describe("四态（issue #21：全量拉取 + 本地分区，订单态接线前两活态为空壳）", () => {
+describe("四态（#21 骨架 + #28 订单态接线：全量拉取 + 本地分区）", () => {
   it("过滤位呈现序 = 进行中/待报价/待支付/已归档，标签齐备", () => {
     expect(PROJECT_STAGES).toEqual([
       { key: "in_progress", label: "进行中" },
@@ -70,12 +70,29 @@ describe("列表分区（主网格 = 选中态；历史归档默认折叠分组�
     expect(sections.archivedGroup).toEqual([]);
   });
 
-  it("待报价/待支付：主网格恒空（空壳过滤位），归档分组照常沉底", () => {
-    for (const stage of ["awaiting_quote", "awaiting_payment"] as const) {
-      const sections = projectListSections(items, stage);
-      expect(sections.main).toEqual([]);
-      expect(sections.archivedGroup.map((p) => p.id)).toEqual(["done1", "done2"]);
-    }
+  it("待报价/待支付（#28 订单态接线）：未终结订单态各归各位，归档分组照常沉底", () => {
+    const withQuote = summary({ id: "q1", activeOrderStatus: 1 });
+    const withQuoted = summary({ id: "pay1", activeOrderStatus: 2 });
+    const all = [...items, withQuote, withQuoted];
+
+    expect(projectListSections(all, "awaiting_quote").main.map((p) => p.id)).toEqual(["q1"]);
+    expect(projectListSections(all, "awaiting_payment").main.map((p) => p.id)).toEqual(["pay1"]);
+    expect(projectListSections(all, "awaiting_quote").archivedGroup.map((p) => p.id))
+      .toEqual(["done1", "done2"]);
+  });
+
+  it("订单状态未知/已取消级缺省：按进行中兜底，不误入订单态", () => {
+    expect(projectStage(summary({ activeOrderStatus: undefined }))).toBe("in_progress");
+    expect(projectStage(summary({ activeOrderStatus: 3 }))).toBe("in_progress"); // 已支付不占列表态（支付即归档）
+    expect(projectStage(summary({ archived: true, activeOrderStatus: 1 }))).toBe("archived");
+  });
+
+  it("normalizeProjectSummary：activeOrder 嵌入归一为状态 code（无订单 undefined）", () => {
+    expect(
+      normalizeProjectSummary({ id: "1", name: "n", archived: false, activeOrder: { id: "o1", status: 1, statusName: "待报价" } }),
+    ).toMatchObject({ id: "1", activeOrderStatus: 1 });
+    expect(normalizeProjectSummary({ id: "2", name: "n", archived: false }).activeOrderStatus)
+      .toBeUndefined();
   });
 });
 

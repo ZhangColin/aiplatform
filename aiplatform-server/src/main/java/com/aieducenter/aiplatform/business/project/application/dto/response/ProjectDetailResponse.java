@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
 
+import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
@@ -22,6 +23,8 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  *                       全宽、成果区未长）
  * @param generatedAt    首次生成时点（run 成功收口单向置位；NULL = 未生成过——
  *                       「开始做系统」可发起、「确认下单」不可见的推导口径）
+ * @param activeOrder    未终结订单摘要（#28：无 = null——锁定式矩阵的推导输入，
+ *                      订单存在即冻结迭代；跨 BC 软引用）
  */
 public record ProjectDetailResponse(
         String id,
@@ -35,6 +38,7 @@ public record ProjectDetailResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         LocalDateTime prdProducedAt,
-        LocalDateTime generatedAt
+        LocalDateTime generatedAt,
+        OrderBriefResponse activeOrder
 ) {
 }

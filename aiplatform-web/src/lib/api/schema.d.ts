@@ -114,6 +114,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认下单（冻结 PRD 快照入单）
+         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步。下单即冻结迭代——指令区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004
+         */
+        post: operations["place"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/rename": {
         parameters: {
             query?: never;
@@ -145,7 +165,7 @@ export interface paths {
         put?: never;
         /**
          * 问答卡作答（ask_user 挂起续跑）
-         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；项目不存在 404 PRJ_001
+         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
         delete?: never;
@@ -165,7 +185,7 @@ export interface paths {
         put?: never;
         /**
          * 指令区发言（BA 访谈后续轮）
-         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 判定后经 startFixRun 派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001
+         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 判定后经 startFixRun 派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -208,6 +228,26 @@ export interface paths {
          * @description 落 archived_at：归档是真实动作，重复归档 409 PRJ_013。归档不清工作区
          */
         post: operations["archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消订单（未支付态，取消即解冻回迭代）
+         * @description 自待报价/已报价可达：取消后项目回迭代态（指令区恢复受理意见），同项目可再下新单（新单重新冻结下单时快照）。已支付或已终结 409 ORD_005；订单不存在 404 ORD_001
+         */
+        post: operations["cancel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -428,6 +468,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单详情（用户面）
+         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 下单/取消时点；金额与价目留痕随报价切片（#29）增补。订单不存在 404 ORD_001
+         */
+        get: operations["detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me": {
         parameters: {
             query?: never;
@@ -623,6 +683,12 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        OrderBriefResponse: {
+            id?: string;
+            /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
+            status?: number;
+            statusName?: string;
+        };
         ProjectCreatedResponse: {
             project?: components["schemas"]["ProjectDetailResponse"];
             runId?: string;
@@ -646,6 +712,26 @@ export interface components {
             prdProducedAt?: string;
             /** Format: date-time */
             generatedAt?: string;
+            activeOrder?: components["schemas"]["OrderBriefResponse"];
+        };
+        ApiResponseOrderResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["OrderResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        OrderResponse: {
+            id?: string;
+            projectId?: string;
+            /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            cancelledAt?: string;
         };
         RenameProjectCommand: {
             /** @description 新项目名（空白拒绝 PRJ_005，长度上限 100 与建项目同口径） */
@@ -727,6 +813,7 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
+            activeOrder?: components["schemas"]["OrderBriefResponse"];
         };
         AgentKindUsage: {
             agentKind?: string;
@@ -1015,6 +1102,28 @@ export interface operations {
             };
         };
     };
+    place: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
     rename: {
         parameters: {
             query?: never;
@@ -1134,6 +1243,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectDetailResponse"];
+                };
+            };
+        };
+    };
+    cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
         };
@@ -1402,6 +1533,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectFileContentResponse"];
+                };
+            };
+        };
+    };
+    detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
         };

@@ -13,6 +13,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -47,15 +48,18 @@ public class BaInterviewAppService {
     private final AgentStreamBridge streamBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
+    private final OrderQueryAppService orderQueryAppService;
 
     public BaInterviewAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
-            AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService) {
+            AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
+            OrderQueryAppService orderQueryAppService) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.streamBridge = streamBridge;
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
+        this.orderQueryAppService = orderQueryAppService;
     }
 
     /**
@@ -77,7 +81,8 @@ public class BaInterviewAppService {
      * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达不炸调用方）。
      * system prompt = 角色卡 + 会话注入块（未建立/空注入/重启后 = 裸角色卡）。
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
+ *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）
      */
     public InterviewRun runInterviewTurn(Long projectId, String prompt) {
         return turn(projectId, prompt);
@@ -112,7 +117,8 @@ public class BaInterviewAppService {
      * ConfirmResult 批复续跑（续跑续在同一 run 上收口，帧序含答复后的下一问或
      * 收口）。恢复私货（角色卡/owner/工作区/计量）从项目侧事实重建，不信前端。
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
+ *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）
      */
     public void answerQuestion(Long projectId, String runId, String replyId,
             List<Map<String, Object>> pendingToolCalls, String answerText) {
@@ -160,12 +166,14 @@ public class BaInterviewAppService {
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
     }
 
-    /** 访谈态守卫：归档即指令区关闭（只读终态），新发言与作答一并拒绝。 */
+    /** 访谈态守卫：归档即指令区关闭（只读终态）；未终结订单在即冻结迭代
+     * （下单后的意见不再受理，取消订单即解冻回迭代态）——新发言与作答一并拒绝。 */
     private Project requireInterviewableProject(Long projectId) {
         Project project = requireProject(projectId);
         if (project.getArchivedAt() != null) {
             throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
         }
+        orderQueryAppService.requireNoActiveOrder(projectId);
         return project;
     }
 }

@@ -39,4 +39,13 @@ export const queryKeys = {
     /** 当前版 PRD（markdown + updatedAt；未产出 404 PRJ_015 在 hook 归一为 null）。 */
     prd: (id: string) => ["documents", "prd", id] as const,
   },
+  /**
+   * 订单域（#28 交易环①）：订单卡按 id 拉详情；下单/取消动作连带失效
+   * projects 域（详情的 activeOrder 嵌入是锁定式矩阵的推导输入）。
+   */
+  orders: {
+    all: ["orders"] as const,
+    /** 订单详情（状态 + 时间戳组；金额/留痕随 #29 增补）。 */
+    detail: (id: string) => ["orders", "detail", id] as const,
+  },
 } as const;

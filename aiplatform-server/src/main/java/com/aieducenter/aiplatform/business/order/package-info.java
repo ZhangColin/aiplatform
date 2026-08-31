@@ -20,8 +20,10 @@
  * <h3>包结构</h3>
  * <ul>
  *   <li>domain：Order 聚合、OrderStatus 枚举、仓储接口、错误码</li>
- *   <li>application：OrderAppService（下单缝；报价/改价/取消/支付归片4）</li>
- *   <li>endpoints：用户面与后台面 REST（片4 落位）</li>
+ *   <li>application：OrderAppService（下单/详情/取消）+ OrderQueryAppService
+ *       （未终结订单读面——项目详情/列表嵌入与冻结守卫的供给方；报价/改价/支付
+ *       随后续切片）</li>
+ *   <li>endpoints：用户面 REST（下单/订单详情/取消）；后台面归报价切片（#29）</li>
  * </ul>
  *
  * @since 0.1.0

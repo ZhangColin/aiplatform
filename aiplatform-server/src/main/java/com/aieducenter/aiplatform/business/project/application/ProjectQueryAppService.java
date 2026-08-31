@@ -17,6 +17,8 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageQueryPort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
+import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -62,13 +64,16 @@ public class ProjectQueryAppService {
     private final ProjectRepository projectRepository;
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final OrderQueryAppService orderQueryAppService;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   UsageQueryPort usageQueryPort,
-                                  WorkspaceLifecycleAppService workspaceLifecycleAppService) {
+                                  WorkspaceLifecycleAppService workspaceLifecycleAppService,
+                                  OrderQueryAppService orderQueryAppService) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.orderQueryAppService = orderQueryAppService;
     }
 
     /**
@@ -86,9 +91,12 @@ public class ProjectQueryAppService {
      * 400 PRJ_014，本层只收合法枚举。
      */
     public List<ProjectResponse> list(ProjectStatusFilter status) {
-        return projectsNewestFirst().stream()
+        List<Project> projects = projectsNewestFirst();
+        Map<Long, OrderBriefResponse> activeOrders =
+                orderQueryAppService.activeOrdersOf(projects.stream().map(Project::getId).toList());
+        return projects.stream()
                 .filter(project -> matches(project, status))
-                .map(this::toResponse)
+                .map(project -> toResponse(project, activeOrders.get(project.getId())))
                 .toList();
     }
 
@@ -245,17 +253,19 @@ public class ProjectQueryAppService {
 
     // ---------- 响应拼装 ----------
 
-    /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点。 */
+    /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
+     * + 未终结订单摘要（锁定式矩阵推导输入）。 */
     private ProjectDetailResponse toDetail(Project project) {
-        ProjectResponse base = toResponse(project);
+        ProjectResponse base = toResponse(project,
+                orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
-                project.getGeneratedAt());
+                project.getGeneratedAt(), base.activeOrder());
     }
 
-    /** 列表项拼装：派生项目状态（归档 > 进行中）。 */
-    private ProjectResponse toResponse(Project project) {
+    /** 列表项拼装：派生项目状态（归档 > 进行中）+ 未终结订单摘要。 */
+    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder) {
         boolean archived = project.getArchivedAt() != null;
         ProjectStatus status = archived ? ProjectStatus.ARCHIVED : ProjectStatus.IN_PROGRESS;
         return new ProjectResponse(
@@ -268,7 +278,8 @@ public class ProjectQueryAppService {
                 status.getName(),
                 archived,
                 project.getCreatedAt(),
-                project.getUpdatedAt());
+                project.getUpdatedAt(),
+                activeOrder);
     }
 
     private Project loadProject(Long projectId) {

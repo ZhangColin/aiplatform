@@ -109,7 +109,8 @@ public class ProjectController {
                     + "BA 判定后经 startFixRun 派修正 run，判定内化无需标注类型）。"
                     + "异步提交即返回，runId = 本轮 BA 运行"
                     + "标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。"
-                    + "空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001")
+                    + "空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006"
+                    + "（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001")
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
@@ -122,7 +123,8 @@ public class ProjectController {
                     + "待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
                     + "上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
-                    + "空白答复 400；已归档 409 PRJ_013；项目不存在 404 PRJ_001")
+                    + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
+                    + "项目不存在 404 PRJ_001")
     public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,
             @Valid @RequestBody AnswerQuestionCommand command) {
         baInterviewAppService.answerQuestion(parseId(id), command.runId(), qid,

@@ -36,6 +36,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppServic
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -76,6 +77,7 @@ class BaInterviewAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -193,6 +195,41 @@ class BaInterviewAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
         verify(agentClient, never()).converse(any(), any());
         verify(agentClient, never()).resume(any(), any());
+    }
+
+    @Test
+    void given_active_order_when_turn_or_answer_then_ord_006_frozen() {
+        // 下单即冻结迭代：未终结订单在即，指令区新发言与作答一并拒收（取消即解冻）
+        Long projectId = persistedProject("9713");
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9913L, projectId);
+
+        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "再改一个地方"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
+        assertThatThrownBy(() -> appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "有"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
+        verify(agentClient, never()).converse(any(), any());
+        verify(agentClient, never()).resume(any(), any());
+    }
+
+    @Test
+    void given_cancelled_order_when_turn_then_unfrozen() {
+        // 取消即解冻：终态订单不再拦发言，迭代继续
+        Long projectId = persistedProject("9714");
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 5, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9914L, projectId);
+        givenSessionExecutorRunsInline();
+
+        appService.runInterviewTurn(projectId, "继续改");
+
+        verify(agentClient).converse(any(), any());
     }
 
     @Test

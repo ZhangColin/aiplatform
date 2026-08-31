@@ -31,6 +31,12 @@ export type WorkbenchShellProps = {
   outputs?: React.ReactNode;
   /** <lg 页签（双槽 = 两枚；闲聊期单槽 = 单枚）。 */
   mobileTabs: [string] | [string, string];
+  /**
+   * <lg 页签受控值 + 切换回调（可选）：不传 = 非受控缺省指令区；场景层需要
+   * 程序化切页签时传（#20「去看看」胶囊 → 成果区页）。
+   */
+  mobileTab?: string;
+  onMobileTabChange?: (value: string) => void;
   leftDefaultSize?: number;
   rightDefaultSize?: number;
   leftMinSize?: number;
@@ -43,6 +49,8 @@ export function WorkbenchShell({
   left,
   outputs,
   mobileTabs,
+  mobileTab,
+  onMobileTabChange,
   leftDefaultSize = 380,
   rightDefaultSize = 480,
   leftMinSize = 260,
@@ -73,7 +81,12 @@ export function WorkbenchShell({
             </ResizablePanelGroup>
           </div>
 
-          <Tabs defaultValue="chat" className="flex min-h-0 flex-1 flex-col lg:hidden">
+          <Tabs
+            {...(mobileTab !== undefined
+              ? { value: mobileTab, onValueChange: onMobileTabChange }
+              : { defaultValue: "chat" })}
+            className="flex min-h-0 flex-1 flex-col lg:hidden"
+          >
             <TabsList className="m-2 grid grid-cols-2">
               <TabsTrigger value="chat">{mobileTabs[0]}</TabsTrigger>
               <TabsTrigger value="outputs">{mobileTabs[1]}</TabsTrigger>

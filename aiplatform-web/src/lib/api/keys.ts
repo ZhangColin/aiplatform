@@ -23,4 +23,14 @@ export const queryKeys = {
     /** 列表（过滤参数进 key；status 缺省 = all）。 */
     list: (status?: number) => ["projects", "list", status ?? "all"] as const,
   },
+  /**
+   * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件
+   * 模式消费）；v1 唯一成员 = PRD。事件连带失效 projects 域（详情的
+   * prdProducedAt 是成果区长出判据，PRD 写出瞬间一并重拉）。
+   */
+  documents: {
+    all: ["documents"] as const,
+    /** 当前版 PRD（markdown + updatedAt；未产出 404 PRJ_015 在 hook 归一为 null）。 */
+    prd: (id: string) => ["documents", "prd", id] as const,
+  },
 } as const;

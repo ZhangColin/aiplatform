@@ -2,19 +2,32 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChatState, ChatMessage } from "@/lib/store/chat";
+import type { PrdNoticesState } from "@/lib/store/prd-notices";
 
 import { CommandArea } from "./command-area";
 
 // 直读种子状态渲染（zustand v5 server snapshot 限制同 workbench-shell.test）；
 // store 本体行为由 chat.test 覆盖。发送口 mock 掉——路由判定归纯逻辑测试。
-const seed = vi.hoisted(() => ({ state: { chats: {} } as Pick<ChatState, "chats"> }));
+const seed = vi.hoisted(() => ({
+  chats: { chats: {} } as Pick<ChatState, "chats">,
+  notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
+}));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store/chat")>();
   return {
     ...actual,
     useChatStore: <T,>(selector: (state: Pick<ChatState, "chats">) => T): T =>
-      selector(seed.state),
+      selector(seed.chats),
+  };
+});
+
+vi.mock("@/lib/store/prd-notices", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store/prd-notices")>();
+  return {
+    ...actual,
+    usePrdNoticesStore: <T,>(selector: (state: Pick<PrdNoticesState, "seen" | "pending">) => T): T =>
+      selector(seed.notices),
   };
 });
 
@@ -40,7 +53,7 @@ function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>>
 }
 
 function seedChat(messages: ChatMessage[], turnActive = false) {
-  seed.state = {
+  seed.chats = {
     chats: { p1: { messages, baRunIds: [], ingestedRunIds: [], seenEventIds: [], turnActive } },
   };
 }
@@ -92,5 +105,19 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     const archived = renderToStaticMarkup(<CommandArea projectId="p1" disabled />);
     expect(archived).toContain("项目已归档，指令区已关闭");
     expect(archived).toContain("disabled");
+  });
+
+  it("PRD 修订未认领：输入条上方出「需求文档有更新 · 去看看」胶囊；认领后不渲染", () => {
+    seedChat([{ kind: "ba", id: "b1", text: "已按你的意见修订。" }]);
+    seed.notices = { seen: { p1: true }, pending: { p1: 1 } };
+
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain(
+      "需求文档有更新 · 去看看",
+    );
+
+    seed.notices = { seen: { p1: true }, pending: {} };
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain(
+      "需求文档有更新",
+    );
   });
 });

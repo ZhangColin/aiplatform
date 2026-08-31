@@ -4,6 +4,7 @@ import { parseQuestion } from "@/lib/chat/qa";
 import { queryKeys } from "@/lib/api/keys";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
+import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import type { SseEvent } from "./connection";
 import {
@@ -16,25 +17,42 @@ import {
 
 /**
  * 事件 → 状态桥（ADR 0003）：
- * - 通知通道 = 声明式失效注册表，事件 type → 失效 key 前缀列表，粗粒度、不写业务 switch；
- * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）分发
- *   （本文件是两 store 唯一写入方）。
+ * - 通知通道 = 声明式失效注册表 + 载荷展示白名单（REST 重查拿不到的载荷写轻量
+ *   store，本文件是 store 唯一事件写入方）；
+ * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）分发。
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
 /**
  * 通知事件 → 粗粒度失效前缀。键类型锁死为名册穷尽：正本新增 type 而
  * events.ts / 此处漏登，typecheck 即红（对接 issue 时同步维护）。
- * 载荷展示例外（ADR 0003 修订：REST 重查拿不到的载荷写轻量 store）的注册
- * 机制已随清场删除——消费它的切片（如 PRD 更新提示）落位时随用随登。
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
   "preview-ready": [queryKeys.projects.all],
   "workspace-destroyed": [queryKeys.projects.all],
-  "document-updated": [queryKeys.projects.all],
+  // PRD 内容与更新时间在 documents 域；projects 详情的 prdProducedAt 是成果区
+  // 长出判据，写出瞬间一并重拉
+  "document-updated": [queryKeys.documents.all, queryKeys.projects.all],
   "project-renamed": [queryKeys.projects.all],
 } as const satisfies Record<NotificationEvent["type"], readonly (readonly unknown[])[]>;
+
+/**
+ * 载荷展示白名单（ADR 0003 修订例外，#20 修订回路）：仅这些事件把 **REST 重查
+ * 拿不到的载荷** 写入轻量 store 页内呈现；其余事件一律只失效。桥仍是 store
+ * 唯一事件写入方；正确性以 REST 重查为准。
+ */
+const NOTIFICATION_PAYLOAD_WRITERS: Partial<
+  Record<NotificationEvent["type"], (event: NotificationEvent) => void>
+> = {
+  // 「这次写入是不是修订」重查拿不到（prd_produced_at 首产/修订同刷新）——
+  // 按到达序在 store 里分岔（首产登记 seen、此后置 pending 出胶囊）
+  "document-updated": (event) => {
+    if (event.type !== "document-updated") return;
+    if (event.payload.documentType !== "PRD") return;
+    usePrdNoticesStore.getState().notePrdWritten(event.payload.projectId);
+  },
+};
 
 export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
@@ -44,6 +62,7 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
   for (const queryKey of NOTIFICATION_INVALIDATIONS[notification.type]) {
     void queryClient.invalidateQueries({ queryKey });
   }
+  NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification);
 }
 
 /** 已知引擎透传名型 → 直入分段 kind（名册「通道二」引擎透传行；未知名型走 passthrough 段）。 */

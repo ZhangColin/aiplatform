@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,19 +13,21 @@ import { useAgentStreamChannel } from "@/lib/sse/agent-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 
 import { CommandArea } from "./command-area";
-import { PanelPlaceholder } from "./panel-placeholder";
+import { OutputsArea } from "./outputs-area";
 import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
 
 /**
- * 项目页装配（issue #17 单门户两槽位壳 + #19 需求环①）：左指令区（常开对话区，
- * BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出）。闲聊期
+ * 项目页装配（issue #17 单门户两槽位壳 + #19/#20 需求环）：左指令区（常开
+ * 对话区，BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出
+ * ——判据 = prdProducedAt，document-updated 失效重拉即时切换）。闲聊期
  * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。本组件是
  * agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount 即断」）；断流
  * 超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目
- * 建立即自动跑 BA，进行中亮灯。
+ * 建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊跳成果区页。
  */
 export function WorkbenchView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
+  const [mobileTab, setMobileTab] = useState("chat");
 
   useAgentStreamChannel(projectId);
   const agentStatus = useSseStatus("agent");
@@ -82,15 +84,17 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
         )
       }
       running={<WorkbenchRunStatus projectId={projectId} />}
-      left={<CommandArea projectId={projectId} disabled={detail?.archived ?? false} />}
-      outputs={
-        chatOnly ? undefined : (
-          <PanelPlaceholder title="成果区">
-            PRD 已产出，文件 / 系统 / 项目三模式随后续切片长出
-          </PanelPlaceholder>
-        )
+      left={
+        <CommandArea
+          projectId={projectId}
+          disabled={detail?.archived ?? false}
+          onSeePrd={() => setMobileTab("outputs")}
+        />
       }
+      outputs={chatOnly ? undefined : <OutputsArea projectId={projectId} />}
       mobileTabs={chatOnly ? ["指令区"] : ["指令区", "成果区"]}
+      mobileTab={chatOnly ? undefined : mobileTab}
+      onMobileTabChange={setMobileTab}
     />
   );
 }

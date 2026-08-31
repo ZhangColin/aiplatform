@@ -1,6 +1,6 @@
 "use client";
 
-import { SendHorizontal, TriangleAlert } from "lucide-react";
+import { FileText, SendHorizontal, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -11,21 +11,34 @@ import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
+import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import { QuestionCard } from "./question-card";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
- * 指令区（issue #19 需求环①）：项目页左侧全程常开的对话区，无标题——BA 开场
- * 回应、每轮一问、用户的意见与答复都在此流动。发送路由：有待答问题时 Enter 即
- * 当前问题的答复（可与已勾选合并），否则即新发言。问题到达自动聚焦输入框
- * （不错过在等你的问题）。对话史 = chat store（SSE 桥喂，重放可重建近期轮）。
+ * 指令区（issue #19 需求环① + #20 修订回路）：项目页左侧全程常开的对话区，
+ * 无标题——BA 开场回应、每轮一问、用户的意见与答复都在此流动。发送路由：
+ * 有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
+ * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store
+ * （SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出
+ * 「需求文档有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区。
  */
-export function CommandArea({ projectId, disabled }: { projectId: string; disabled?: boolean }) {
+export function CommandArea({
+  projectId,
+  disabled,
+  onSeePrd,
+}: {
+  projectId: string;
+  disabled?: boolean;
+  /** 「去看看」跳转回调（mobile 切成果区页签等），认领（ack）在本组件内。 */
+  onSeePrd?: () => void;
+}) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
+  const hasPrdUpdate = usePrdNoticesStore((s) => s.pending[projectId] !== undefined);
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
@@ -125,6 +138,22 @@ export function CommandArea({ projectId, disabled }: { projectId: string; disabl
       </div>
 
       <div className="shrink-0 border-t p-3">
+        {hasPrdUpdate ? (
+          <div className="mb-2 flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-full text-xs"
+              onClick={() => {
+                usePrdNoticesStore.getState().acknowledge(projectId);
+                onSeePrd?.();
+              }}
+            >
+              <FileText className="size-3.5" />
+              需求文档有更新 · 去看看
+            </Button>
+          </div>
+        ) : null}
         <div className="flex items-end gap-2">
           <Textarea
             ref={inputRef}

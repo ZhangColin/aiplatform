@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
+import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { queryKeys } from "@/lib/api/keys";
 
 import { dispatchAgentEvent, dispatchNotificationEvent } from "./bridge";
@@ -79,6 +80,54 @@ describe("bridge · 通知 → invalidate（issue #17 清场后名册：全部�
 
     await new Promise((r) => setTimeout(r, 20));
     expect(projects.fetchCount()).toBe(1);
+  });
+
+  it("document-updated → documents 域（PRD 重拉）也失效", async () => {
+    const documents = observeActiveQuery(queryClient, queryKeys.documents.all);
+    teardowns.push(documents.unsubscribe);
+    await documents.waitForSettled();
+
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("document-updated", { projectId: "p1", documentType: "PRD" }),
+    );
+
+    await vi.waitFor(() => expect(documents.fetchCount()).toBe(2));
+  });
+});
+
+describe("bridge · document-updated 载荷展示例外（#20 修订回路）", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+    usePrdNoticesStore.setState({ seen: {}, pending: {} });
+  });
+
+  afterEach(() => queryClient.clear());
+
+  it("首次写入（PRD）→ 登记 seen 不出胶囊；再写入 → 置 pending（修订）", () => {
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("document-updated", { projectId: "p1", documentType: "PRD" }),
+    );
+    expect(usePrdNoticesStore.getState().seen.p1).toBe(true);
+    expect(usePrdNoticesStore.getState().pending.p1).toBeUndefined();
+
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("document-updated", { projectId: "p1", documentType: "PRD" }),
+    );
+    expect(usePrdNoticesStore.getState().pending.p1).toBeDefined();
+  });
+
+  it("非 PRD 文档类型：不写 store（守卫，v1 名册外不惊动）", () => {
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("document-updated", { projectId: "p1", documentType: "SOMETHING_ELSE" }),
+    );
+
+    expect(usePrdNoticesStore.getState().seen.p1).toBeUndefined();
   });
 });
 

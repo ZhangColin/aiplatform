@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import type { ChatState, ChatMessage } from "@/lib/store/chat";
 
 import { CommandArea } from "./command-area";
@@ -10,12 +11,14 @@ import { CommandArea } from "./command-area";
  * 指令区发送路由的状态机（#19 验收口径）：有待答问题时 Enter = 当前问题的答复
  * （POST questions/{qid}/answer，可与已勾选合并）；无待答问题时 Enter = 新发言
  * （POST messages）；空输入不触发。SSR 断言不挂事件，此文件是本仓「客户端交互
- * 逐文件 happy-dom」例外（vitest.config 注）。
+ * 逐文件 happy-dom」例外（vitest.config 注）。#20 增：修订胶囊点击 = 认领
+ * （prd-notices 真实 store）+ 跳转回调。
  */
 
 const seed = vi.hoisted(() => ({ state: { chats: {} } as Pick<ChatState, "chats"> }));
 const postMutate = vi.hoisted(() => vi.fn());
 const answerMutate = vi.hoisted(() => vi.fn());
+const seePrd = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store/chat")>();
@@ -111,5 +114,24 @@ describe("CommandArea · Enter 发送路由（#19 状态机）", () => {
     fireEvent.change(inputOf(), { target: { value: "   " } }); // 空白输入
     fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
     expect(postMutate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
+  beforeEach(() => {
+    usePrdNoticesStore.setState({ seen: {}, pending: {} });
+    seed.state = { chats: {} };
+    seePrd.mockClear();
+  });
+
+  it("点击「去看看」：认领（pending 清）+ 跳转回调，胶囊即逝", () => {
+    usePrdNoticesStore.setState({ seen: { p1: true }, pending: { p1: Date.now() } });
+    render(<CommandArea projectId="p1" onSeePrd={seePrd} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /需求文档有更新 · 去看看/ }));
+
+    expect(usePrdNoticesStore.getState().pending.p1).toBeUndefined();
+    expect(seePrd).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /需求文档有更新/ })).toBeNull();
   });
 });

@@ -55,6 +55,12 @@ app:
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   workspace:
     provision-max-attempts: 3
+  # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
+  # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
+  # 用户重新发起兜底（#22 重试次数/超时值实施期定）。
+  generation:
+    max-attempts: 3
+    timeout: 30m
 
 # A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
 # 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本机依赖启动.md。

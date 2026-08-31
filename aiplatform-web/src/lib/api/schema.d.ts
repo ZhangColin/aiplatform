@@ -174,6 +174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 开始做系统（触发首次生成）
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；项目不存在 404 PRJ_001
+         */
+        post: operations["generate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/archive": {
         parameters: {
             query?: never;
@@ -584,6 +604,8 @@ export interface components {
             updatedAt?: string;
             /** Format: date-time */
             prdProducedAt?: string;
+            /** Format: date-time */
+            generatedAt?: string;
         };
         RenameProjectCommand: {
             /** @description 新项目名（空白拒绝 PRJ_005，长度上限 100 与建项目同口径） */
@@ -629,6 +651,17 @@ export interface components {
             errors?: components["schemas"]["FieldError"][];
         };
         InterviewTurnResponse: {
+            runId?: string;
+        };
+        ApiResponseGenerationStartResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["GenerationStartResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        GenerationStartResponse: {
             runId?: string;
         };
         ApiResponseListProjectResponse: {
@@ -988,6 +1021,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseInterviewTurnResponse"];
+                };
+            };
+        };
+    };
+    generate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGenerationStartResponse"];
                 };
             };
         };

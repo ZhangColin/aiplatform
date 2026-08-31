@@ -29,7 +29,7 @@ export function useAgentStreamChannel(projectId: string) {
         channel: "agent",
         url: `/api/agent-events?projectId=${encodeURIComponent(projectId)}`,
         dedupe: true,
-        onEvent: (event) => dispatchAgentEvent(event),
+        onEvent: (event) => dispatchAgentEvent(queryClient, event),
         onReconnect: () => {
           void queryClient.invalidateQueries();
         },

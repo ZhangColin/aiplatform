@@ -53,6 +53,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `error` | 平台 | `projectId` `runId` `message` | 运行失败 |
 | `task-finish` | 平台 | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等） |
 | `wait-raised` | 平台 | `projectId` `runId` `sessionId` `kind` `summary` `engineRef` `data` | 智能体挂起（kind=QUESTION=向用户提问 / PERMISSION=工具确认）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
+| `task-retrying` | 平台 | `projectId` `runId` `attempt` `message` | 编码 run 自动重试（生成编排层发射，[#22](https://github.com/ZhangColin/aiplatform/issues/22) 新增）：一次尝试失败后、下一尝试下发前——`runId` 锚定失败的那次尝试（帧序 `error → task-retrying → 下一尝试 task-start`）；`message` 为用户侧话术「遇到问题，正在重试」；超限后不再发，末次 `error` 即终态（用户重新发起兜底） |
 | `text` | 引擎透传 | … + `data` | 最终文本 |
 | `reasoning` | 引擎透传 | … + `data` | 思考增量 |
 | `patch` | 引擎透传 | … + `data`（`path` `diff` `edits`） | 代码补丁 |

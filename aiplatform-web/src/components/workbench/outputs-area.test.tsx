@@ -1,11 +1,12 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { OutputsArea } from "./outputs-area";
 
-// 成果区（#20）：文件 / 系统 / 项目三模式框架——文件模式 = PRD 文件呈现
-// （本片唯一实装），系统 / 项目为后续切片占位。PRD 读口 mock 掉，正文断言
-// 归 prd-panel.test。
+// 成果区（#20 长出 / #22 系统模式长出）：文件 / 系统 / 项目三模式——文件模式 =
+// PRD 文件呈现（可挂「开始做系统」操作条），系统模式 = SystemPanel（断言归
+// system-panel.test）。PRD 读口 mock 掉，正文断言归 prd-panel.test。
 vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => ({
     data: { content: "# 需求背景\n宠物医院预约系统。", updatedAt: "2026-08-31T08:00:00Z" },
@@ -13,9 +14,21 @@ vi.mock("@/hooks/use-prd", () => ({
   }),
 }));
 
-describe("OutputsArea · 成果区三模式（#20 文件模式实装）", () => {
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
+}));
+
+function renderArea(tab = "files") {
+  return renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <OutputsArea projectId="p1" tab={tab} onTabChange={() => {}} onGenerated={() => {}} />
+    </QueryClientProvider>,
+  );
+}
+
+describe("OutputsArea · 成果区三模式（#20 文件模式 / #22 系统模式）", () => {
   it("三模式页签就位：文件 / 系统 / 项目", () => {
-    const html = renderToStaticMarkup(<OutputsArea projectId="p1" />);
+    const html = renderArea();
 
     expect(html).toContain('data-slot="tabs-trigger"');
     expect(html).toContain("文件");
@@ -24,9 +37,18 @@ describe("OutputsArea · 成果区三模式（#20 文件模式实装）", () => 
   });
 
   it("文件模式为默认：PRD 正文直出（docs/PRD.md 呈现）", () => {
-    const html = renderToStaticMarkup(<OutputsArea projectId="p1" />);
+    const html = renderArea();
 
     expect(html).toContain("docs/PRD.md");
     expect(html).toContain("宠物医院预约系统。");
+  });
+
+  it("系统模式（tab 受控）：空白浏览器窗 + 未生成提示（无进度剧场）", () => {
+    const html = renderArea("system");
+
+    // 浏览器窗栏（占位地址）与一句提示；iframe 未挂（未生成）
+    expect(html).toContain("你的系统");
+    expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
+    expect(html).not.toContain("<iframe");
   });
 });

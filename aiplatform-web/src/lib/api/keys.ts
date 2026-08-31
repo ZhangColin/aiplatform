@@ -22,6 +22,8 @@ export const queryKeys = {
     detail: (id: string) => ["projects", id] as const,
     /** 列表（全量一份；四态过滤/归档折叠在消费端本地分区——#21）。 */
     list: () => ["projects", "list"] as const,
+    /** 系统预览地址（生成收口后启用；run 完成信号 invalidate + iframe 重挂——#22）。 */
+    preview: (id: string) => ["projects", "preview", id] as const,
   },
   /**
    * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件

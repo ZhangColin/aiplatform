@@ -25,12 +25,14 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.RenameProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
@@ -42,25 +44,29 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言 / 问答卡作答 →
- * 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 → 源码包下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言 / 问答卡作答 /
+ * 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 → 源码包下载 →
+ * 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
     private final ProjectQueryAppService queryAppService;
     private final BaInterviewAppService baInterviewAppService;
+    private final GenerationAppService generationAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
-                             BaInterviewAppService baInterviewAppService) {
+                             BaInterviewAppService baInterviewAppService,
+                             GenerationAppService generationAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.baInterviewAppService = baInterviewAppService;
+        this.generationAppService = generationAppService;
     }
 
     @PostMapping
@@ -119,6 +125,25 @@ public class ProjectController {
                 command.toolCalls().stream().map(AnswerQuestionCommand.ToolCall::toMap).toList(),
                 command.answer());
         return ApiResponse.ok();
+    }
+
+    @PostMapping("/{id}/generate")
+    @Operation(summary = "开始做系统（触发首次生成）",
+            description = "纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区"
+                    + "布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体"
+                    + "（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统"
+                    + "并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识"
+                    + "（挂 /api/agent-events?runId= 的锚），过程帧经 SSE"
+                    + "（role-assigned role=CODER）。失败自动重试有限次"
+                    + "（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying"
+                    + "（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。"
+                    + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
+                    + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
+                    + "PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，"
+                    + "本守卫拦直连调用）；项目不存在 404 PRJ_001")
+    public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
+        return ApiResponse.ok(new GenerationStartResponse(
+                generationAppService.startGeneration(parseId(id)).runId()));
     }
 
     @GetMapping("/{id}")

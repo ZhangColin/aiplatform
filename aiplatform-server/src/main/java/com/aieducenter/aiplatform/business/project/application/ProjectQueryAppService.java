@@ -181,12 +181,13 @@ public class ProjectQueryAppService {
 
     // ---------- 响应拼装 ----------
 
-    /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）。 */
+    /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 base.workspaceId(), base.status(), base.statusName(),
-                base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt());
+                base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
+                project.getGeneratedAt());
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）。 */

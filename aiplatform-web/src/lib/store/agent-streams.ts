@@ -20,6 +20,13 @@ export type AgentStreamSegment =
       engine: string;
     }
   | { kind: "wait"; id: string; waitKind: string; summary: string }
+  | {
+      /** 生成自动重试（task-retrying）：锚定的尝试失败后同一场生成仍在途。 */
+      kind: "retrying";
+      id: string;
+      attempt: number;
+      message: string;
+    }
   | { kind: "text"; id: string; data: unknown }
   | { kind: "reasoning"; id: string; data: unknown }
   | { kind: "patch"; id: string; data: unknown }
@@ -163,7 +170,8 @@ export function latestProjectRun(
   return undefined;
 }
 
-/** 终态/等待分段推导 run 状态：wait（问答挂起）= waiting，等用户 ≠ 终态。 */
+/** 终态/等待分段推导 run 状态：wait（问答挂起）= waiting，等用户 ≠ 终态；
+ * retrying 把失败尝试的 error 拉回 running（同一场生成仍在途，下一尝试即 task-start）。 */
 function nextRunStatus(
   current: AgentRunStatus,
   segment: AgentStreamSegment,
@@ -171,6 +179,8 @@ function nextRunStatus(
   switch (segment.kind) {
     case "wait":
       return "waiting";
+    case "retrying":
+      return "running";
     case "error":
       return "error";
     case "finish":

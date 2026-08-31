@@ -30,6 +30,19 @@ public final class AgentEventTypes {
      */
     public static final String WAIT_RAISED = "wait-raised";
 
+    /**
+     * 编码 run 自动重试（生成编排层发射）：一次尝试失败后、下一尝试下发前发射
+     * ——runId 锚定<b>失败的那次尝试</b>（帧序 error → task-retrying → 下一尝试
+     * task-start），用户侧话术「遇到问题，正在重试」由本帧承载。
+     */
+    public static final String TASK_RETRYING = "task-retrying";
+
+    /** 重试话术键（用户侧文案，发射方给定）。 */
+    public static final String RETRY_MESSAGE_FIELD = "message";
+
+    /** 即将下发的尝试序号（1 起，首试为 1）。 */
+    public static final String RETRY_ATTEMPT_FIELD = "attempt";
+
     // ---------- payload 关联键（全通道唯一真值；wait-raised 契约键为同值别名） ----------
 
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */

@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,7 +110,7 @@ public class AgentscopeAgentClient {
         }
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
-                sink);
+                command.timeout(), sink);
         if (result.error() != null) {
             throw new IllegalStateException("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
@@ -147,7 +148,7 @@ public class AgentscopeAgentClient {
 
         runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + resume.replyId(),
-                resume.usageContext(), sink);
+                resume.usageContext(), null, sink);
     }
 
     /**
@@ -216,10 +217,12 @@ public class AgentscopeAgentClient {
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐帧映射发射，挂起
      * （RequireUserConfirm）发 wait-raised 后流终止且不发 task-finish；正常收口发
-     * task-finish；异常发 error 帧。用量无论成败如实上报（幂等键由调用方给）。
+     * task-finish；异常发 error 帧。用量无论成败如实上报（幂等键由调用方给）；
+     * 超时取逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
-            String usageIdempotencyKey, UsageContext usageContext, Consumer<AgentEvent> sink) {
+            String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
+            Consumer<AgentEvent> sink) {
         StringBuilder text = new StringBuilder();
         AtomicReference<TokenUsage> usage = new AtomicReference<>(TokenUsage.ZERO);
         AtomicReference<String> finish = new AtomicReference<>();
@@ -229,7 +232,7 @@ public class AgentscopeAgentClient {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, sink, text, usage, finish,
                             suspension))
-                    .blockLast(properties.getTimeout());
+                    .blockLast(timeout != null ? timeout : properties.getTimeout());
             if (suspension.get() == null) {
                 sink.accept(AgentscopeEventMapper.taskFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));

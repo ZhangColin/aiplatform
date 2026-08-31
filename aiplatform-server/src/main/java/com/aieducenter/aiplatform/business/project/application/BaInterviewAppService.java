@@ -1,9 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
 
 import org.springframework.stereotype.Service;
 
@@ -15,14 +13,10 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
-import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
-
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * BA 访谈编排：BA 是平台进程内对话智能体（AgentScope HarnessAgent，经
@@ -42,7 +36,6 @@ import lombok.extern.slf4j.Slf4j;
  * error 帧 + 异常表达（会话执行器吞掉记日志，REST 快返回）。</p>
  */
 @Service
-@Slf4j
 public class BaInterviewAppService {
 
     /** BA 会话标识派生前缀（projectId → ba-{projectId}，稳定绑定勿动）。 */
@@ -50,16 +43,16 @@ public class BaInterviewAppService {
 
     private final ProjectRepository projectRepository;
     private final AgentscopeAgentClient agentClient;
-    private final AgentStreamAppService streamAppService;
+    private final AgentStreamBridge streamBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
 
     public BaInterviewAppService(ProjectRepository projectRepository,
-            AgentscopeAgentClient agentClient, AgentStreamAppService streamAppService,
+            AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
-        this.streamAppService = streamAppService;
+        this.streamBridge = streamBridge;
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
     }
@@ -93,10 +86,9 @@ public class BaInterviewAppService {
         Project project = requireInterviewableProject(projectId);
         RolePreset role = RolePreset.BA;
         String sessionId = SESSION_PREFIX + projectId;
-        Map<String, Object> correlation = correlationOf(projectId);
 
         String runId = AgentStreamAppService.newRunId();
-        emitRoleAssigned(projectId, runId, role);
+        streamBridge.emitRoleAssigned(projectId, runId, role);
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
@@ -107,8 +99,9 @@ public class BaInterviewAppService {
                         ? project.getOwnerAccountId().toString() : null,
                 usageContextOf(projectId, role),
                 Long.toString(project.getWorkspaceId()),
-                correlation);
-        sessionExecutor.submit(sessionId, () -> agentClient.converse(command, sink(correlation)));
+                correlationOf(projectId));
+        sessionExecutor.submit(sessionId,
+                () -> agentClient.converse(command, streamBridge.sink(projectId)));
         return new InterviewRun(runId);
     }
 
@@ -141,7 +134,8 @@ public class BaInterviewAppService {
                         .toList(),
                 answerText,
                 usageContextOf(projectId, role));
-        sessionExecutor.submit(sessionId, () -> agentClient.resume(resume, sink(correlation)));
+        sessionExecutor.submit(sessionId,
+                () -> agentClient.resume(resume, streamBridge.sink(projectId)));
     }
 
     /** 一轮访谈的运行标识（前端挂智能体流 ?runId= 的锚）。 */
@@ -150,28 +144,6 @@ public class BaInterviewAppService {
 
     // ---------- 内部 ----------
 
-    /** 流桥 sink：关联字段逐帧注入后经智能体流通道发射（发射失败只记日志不断流）。 */
-    private Consumer<AgentEvent> sink(Map<String, Object> correlation) {
-        return event -> {
-            try {
-                streamAppService.publish(event.type(), withCorrelation(event.payload(), correlation));
-            }
-            catch (RuntimeException e) {
-                log.warn("[ba] 流帧发射失败（{}）：{}", event.type(), e.getMessage());
-            }
-        };
-    }
-
-    /** role-assigned 发射（run 提交前——帧序 role-assigned → task-start → …）。 */
-    private void emitRoleAssigned(Long projectId, String runId, RolePreset role) {
-        streamAppService.publish(AgentEventTypes.ROLE_ASSIGNED, Map.of(
-                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
-                AgentStreamAppService.RUN_FIELD, runId,
-                AgentEventTypes.ROLE_FIELD, role.name(),
-                AgentEventTypes.ROLE_LABEL_FIELD, role.getName(),
-                AgentEventTypes.ROLE_ENGINE_FIELD, AgentscopeAgentClient.ENGINE));
-    }
-
     private static Map<String, Object> correlationOf(Long projectId) {
         return Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString());
     }
@@ -179,17 +151,6 @@ public class BaInterviewAppService {
     private static UsageContext usageContextOf(Long projectId, RolePreset role) {
         return new UsageContext(Long.toString(projectId),
                 Map.of(ProjectQueryAppService.DIM_ROLE, role.name()));
-    }
-
-    /** 关联字段注入（透传不解释；帧序在前——寻址字段不覆盖帧本体字段）。 */
-    private static Map<String, Object> withCorrelation(Map<String, Object> payload,
-                                                       Map<String, Object> correlation) {
-        if (correlation == null || correlation.isEmpty()) {
-            return new LinkedHashMap<>(payload);
-        }
-        Map<String, Object> addressed = new LinkedHashMap<>(correlation);
-        addressed.putAll(payload);
-        return addressed;
     }
 
     private Project requireProject(Long projectId) {

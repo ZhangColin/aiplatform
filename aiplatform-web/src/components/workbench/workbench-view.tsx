@@ -11,26 +11,50 @@ import { useProject } from "@/hooks/use-project";
 import { errorText } from "@/lib/api/api-error";
 import { useAgentStreamChannel } from "@/lib/sse/agent-channel";
 import { useSseStatus } from "@/lib/sse/provider";
+import { coderStatusOf, useGenerationStore } from "@/lib/store/generation";
 
 import { CommandArea } from "./command-area";
 import { OutputsArea } from "./outputs-area";
+import { StartGenerationCard, StartSystemButton } from "./start-generation";
 import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
 
 /**
- * 项目页装配（issue #17 单门户两槽位壳 + #19/#20 需求环）：左指令区（常开
- * 对话区，BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出
+ * 项目页装配（issue #17 单门户两槽位壳 + #19/#20 需求环 + #22 生成环①）：左指令区
+ * （常开对话区，BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出
  * ——判据 = prdProducedAt，document-updated 失效重拉即时切换）。闲聊期
- * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。本组件是
+ * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。
+ *
+ * <p>生成环（#22）：「开始做系统」eligibility 单点在此判定（PRD 已产出 && 未生成 &&
+ * 不在生成中——纯动作无门，待定项未清也可点）；对话流内卡片与文件模式操作条同一
+ * 动作；编码 run 起跑自动切系统模式（用户手动切换优先至下一自动事件）。本组件是
  * agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount 即断」）；断流
  * 超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目
- * 建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊跳成果区页。
+ * 建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起生成跳成果区。</p>
  */
 export function WorkbenchView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
   const [mobileTab, setMobileTab] = useState("chat");
+  const [outputsTab, setOutputsTab] = useState("files");
 
   useAgentStreamChannel(projectId);
   const agentStatus = useSseStatus("agent");
+  const coderStatus = useGenerationStore((s) => coderStatusOf(s, projectId));
+
+  // 编码 run 起跑（含生成中回页/重连）自动切系统模式——渲染期派生态调整
+  //（同 command-area 勾选重置先例，不用 effect）；用户手动切换保留至下一自动事件
+  const generating = coderStatus === "running" || coderStatus === "retrying";
+  const [seenGenerating, setSeenGenerating] = useState(generating);
+  if (generating !== seenGenerating) {
+    setSeenGenerating(generating);
+    if (generating) setOutputsTab("system");
+  }
+
+  /** 发起生成成功即看系统模式（空白浏览器窗 + 一句提示；mobile 跳成果区）。 */
+  function handleGenerated() {
+    setOutputsTab("system");
+    setMobileTab("outputs");
+  }
+
   // 「断线」语义 = 连上过再掉线：通道从未连上（probe 慢 / 后端挂起时的初始
   // offline）不武装计时，免得对刚进页面的用户误报「已断开」。
   const wasConnected = useRef(false);
@@ -72,6 +96,11 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
   // 闲聊期（尚无产物）：指令区占满全宽；PRD 产出后长出成果区（右槽 + 双页签）
   const chatOnly = !detail?.prdProducedAt;
 
+  // 「开始做系统」eligibility（单点）：PRD 已产出 && 未生成过 && 不在生成中
+  //（超限终态 error 时按钮回来 = 人工兜底重新发起）
+  const generationEligible =
+    !!detail?.prdProducedAt && !detail?.generatedAt && !generating;
+
   return (
     <WorkbenchShell
       header={
@@ -89,9 +118,32 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
           projectId={projectId}
           disabled={detail?.archived ?? false}
           onSeePrd={() => setMobileTab("outputs")}
+          generationCard={
+            <StartGenerationCard
+              projectId={projectId}
+              eligible={generationEligible}
+              onGenerated={handleGenerated}
+            />
+          }
         />
       }
-      outputs={chatOnly ? undefined : <OutputsArea projectId={projectId} />}
+      outputs={
+        chatOnly ? undefined : (
+          <OutputsArea
+            projectId={projectId}
+            generatedAt={detail?.generatedAt}
+            coderStatus={coderStatus}
+            tab={outputsTab}
+            onTabChange={setOutputsTab}
+            onGenerated={handleGenerated}
+            generationAction={
+              generationEligible ? (
+                <StartSystemButton projectId={projectId} onGenerated={handleGenerated} />
+              ) : null
+            }
+          />
+        )
+      }
       mobileTabs={chatOnly ? ["指令区"] : ["指令区", "成果区"]}
       mobileTab={chatOnly ? undefined : mobileTab}
       onMobileTabChange={setMobileTab}

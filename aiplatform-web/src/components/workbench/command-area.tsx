@@ -29,11 +29,14 @@ export function CommandArea({
   projectId,
   disabled,
   onSeePrd,
+  generationCard,
 }: {
   projectId: string;
   disabled?: boolean;
   /** 「去看看」跳转回调（mobile 切成果区页签等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
+  /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
+  generationCard?: ReactNode;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -125,6 +128,7 @@ export function CommandArea({
             ) : null}
           </MessageRow>
         ))}
+        {!disabled && generationCard ? generationCard : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

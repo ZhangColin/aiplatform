@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -21,7 +21,14 @@ import { formatRelativeTime } from "@/lib/utils/time";
  * 首产事件也能落 seen，后续修订才该出胶囊）。未产出（404 PRJ_015 归一
  * null）呈引导占位——成果区长出判据是 prdProducedAt，这里是防御位。
  */
-export function PrdPanel({ projectId }: { projectId: string }) {
+export function PrdPanel({
+  projectId,
+  actions,
+}: {
+  projectId: string;
+  /** 头部操作条（「开始做系统」等动作槽，#22 文件模式入口）。 */
+  actions?: ReactNode;
+}) {
   const prd = usePrd(projectId);
   const hasUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   const markSeen = usePrdNoticesStore((s) => s.markSeen);
@@ -47,6 +54,7 @@ export function PrdPanel({ projectId }: { projectId: string }) {
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <h2 className="text-base font-semibold">docs/PRD.md</h2>
               {hasUpdate ? <Badge variant="secondary">已更新</Badge> : null}
+              {actions ? <div className="ml-auto">{actions}</div> : null}
             </div>
             <p className="text-xs text-muted-foreground">
               {prd.data

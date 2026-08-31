@@ -1,33 +1,60 @@
 "use client";
 
-import { Monitor, PackageCheck } from "lucide-react";
+import { PackageCheck } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { PanelPlaceholder } from "./panel-placeholder";
 import { PrdPanel } from "./prd-panel";
+import { SystemPanel } from "./system-panel";
+import type { CoderRunStatus } from "@/lib/store/generation";
 
 /**
- * 成果区（#20 长出）：项目界面的产物呈现区，文件 / 系统 / 项目三模式。本片
- * （需求环②）实装文件模式 = PRD 文件呈现（BA 产出/修订即此可见）；系统模式
- * 随生成环（开始做系统后呈现可操作的系统）、项目模式随交易环（订单卡）落位。
- * 模式自动切换（run 开始 → 系统模式）随对应切片接线，当前缺省停在文件模式。
+ * 成果区（#20 长出 / #22 系统模式长出）：文件 / 系统 / 项目三模式。文件模式 =
+ * PRD 文件呈现（操作条可挂「开始做系统」）；系统模式 = SystemPanel（空白浏览器
+ * 窗 → run 完成自动挂预览）；项目模式随交易环（订单卡）落位。tab 受控归装配层
+ * （WorkbenchView）：编码 run 起跑自动切系统模式，用户手动切换优先至下一自动事件。
  */
-export function OutputsArea({ projectId }: { projectId: string }) {
+export function OutputsArea({
+  projectId,
+  generatedAt,
+  coderStatus,
+  tab,
+  onTabChange,
+  generationAction,
+  onGenerated,
+}: {
+  projectId: string;
+  /** 首次生成时点（REST 事实；null = 未生成过）。 */
+  generatedAt?: string | null;
+  /** 本会话编码 run 状态（undefined = 未见）。 */
+  coderStatus?: CoderRunStatus;
+  /** 受控 tab（装配层持有，自动切换与手动切换同一入口）。 */
+  tab: string;
+  onTabChange: (value: string) => void;
+  /** 文件模式操作条动作（「开始做系统」，不 eligible 时为 null）。 */
+  generationAction?: ReactNode;
+  /** 发起生成成功回调（透传 SystemPanel 的重新发起；完整版归装配层）。 */
+  onGenerated: () => void;
+}) {
   return (
-    <Tabs defaultValue="files" className="flex h-full min-h-0 flex-col">
+    <Tabs value={tab} onValueChange={onTabChange} className="flex h-full min-h-0 flex-col">
       <TabsList className="m-2 grid grid-cols-3">
         <TabsTrigger value="files">文件</TabsTrigger>
         <TabsTrigger value="system">系统</TabsTrigger>
         <TabsTrigger value="project">项目</TabsTrigger>
       </TabsList>
       <TabsContent value="files" className="min-h-0 flex-1 border-t">
-        <PrdPanel projectId={projectId} />
+        <PrdPanel projectId={projectId} actions={generationAction} />
       </TabsContent>
       <TabsContent value="system" className="min-h-0 flex-1 border-t">
-        <PanelPlaceholder icon={<Monitor />} title="系统">
-          开始做系统后，这里会出现可以操作的你的系统
-        </PanelPlaceholder>
+        <SystemPanel
+          projectId={projectId}
+          generatedAt={generatedAt}
+          coderStatus={coderStatus}
+          onGenerated={onGenerated}
+        />
       </TabsContent>
       <TabsContent value="project" className="min-h-0 flex-1 border-t">
         <PanelPlaceholder icon={<PackageCheck />} title="项目">

@@ -32,6 +32,10 @@ vi.mock("@/hooks/use-prd", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-generate", () => ({
+  useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 vi.mock("@/lib/sse/agent-channel", () => ({
   useAgentStreamChannel: () => {},
 }));
@@ -68,5 +72,34 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).toContain("项目");
     expect(html).toContain("docs/PRD.md");
     expect(html).toContain("给宠物医院做预约管理系统。");
+  });
+
+  it("PRD 已产出且未生成（#22）：对话流卡片 + 文件模式操作条双入口「开始做系统」", () => {
+    seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).toContain("需求整理好了，可以开始做系统");
+    // 紧凑入口挂在文件模式操作条（PRD 头部）
+    expect((html.match(/开始做系统/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("闲聊期（PRD 未产出）：不出现「开始做系统」入口（无事可做）", () => {
+    seed.detail = detail({ prdProducedAt: null });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).not.toContain("开始做系统");
+  });
+
+  it("已生成（generatedAt 落定）：入口退场——调整走指令区意见（迭代环）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+
+    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+
+    expect(html).not.toContain("开始做系统");
   });
 });

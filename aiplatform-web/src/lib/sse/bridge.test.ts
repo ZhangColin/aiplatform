@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
+import { useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { queryKeys } from "@/lib/api/keys";
 
 import { dispatchAgentEvent, dispatchNotificationEvent } from "./bridge";
 import type { SseEvent } from "./connection";
+
+const agentQc = new QueryClient();
 
 function notificationEvent(type: string, payload: Record<string, unknown>): SseEvent {
   return { id: `p1:${Math.random()}`, data: JSON.stringify({ type, payload, ts: "" }) };
@@ -141,10 +144,10 @@ describe("bridge · agent 流 → streams store", () => {
   }
 
   it("task-start 建 run；text 透传入段（data 原样，id = SSE 事件 id）", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "实现表单", model: "m1" }),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("text", { projectId: "p1", runId: "run1", data: { text: "最终文本" } }, "run1:2"),
     );
 
@@ -156,14 +159,14 @@ describe("bridge · agent 流 → streams store", () => {
   it("role-assigned 先于 task-start（正本帧序）→ task-start 补 prompt 不丢 role 段", () => {
     // 创建即开场（正本帧序 role-assigned → task-start）：首帧补建 stub 后
     // task-start 必须把 prompt 补进去——否则用户的一句话描述永不出现。
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "role-assigned",
         { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
         "run1:1",
       ),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1" }, "run1:2"),
     );
 
@@ -177,7 +180,7 @@ describe("bridge · agent 流 → streams store", () => {
   it("error 帧无 task-start 前置 → 补建 stub run + error 段（起跑即死也可见）", () => {
     // 真机事故口径：BA 起跑即死只发一帧 error（用户可能连上后才到）——run 必须被
     // 补建，错误才不是死寂。message 原样入段，由消费端负责用户口径。
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "error",
         {
@@ -201,8 +204,8 @@ describe("bridge · agent 流 → streams store", () => {
   });
 
   it("wait-raised → waiting + wait 段；task-finish → finished + 终态段", () => {
-    dispatchAgentEvent(agentEvent("task-start", { projectId: "p1", runId: "run1" }));
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, agentEvent("task-start", { projectId: "p1", runId: "run1" }));
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "wait-raised",
         { projectId: "p1", runId: "run1", kind: "QUESTION", summary: "选哪个配色" },
@@ -211,7 +214,7 @@ describe("bridge · agent 流 → streams store", () => {
     );
     expect(useAgentStreamsStore.getState().runs["run1"].status).toBe("waiting");
 
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("task-finish", { projectId: "p1", runId: "run1", sessionId: "s1", finish: "end" }, "run1:9"),
     );
     const run = useAgentStreamsStore.getState().runs["run1"];
@@ -223,18 +226,18 @@ describe("bridge · agent 流 → streams store", () => {
   });
 
   it("session-created → markSession（会话标识挂 run）", () => {
-    dispatchAgentEvent(agentEvent("task-start", { projectId: "p1", runId: "run1" }));
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, agentEvent("task-start", { projectId: "p1", runId: "run1" }));
+    dispatchAgentEvent(agentQc, 
       agentEvent("session-created", { projectId: "p1", runId: "run1", sessionId: "s1" }, "run1:2"),
     );
     expect(useAgentStreamsStore.getState().runs["run1"].sessionId).toBe("s1");
   });
 
   it("未知透传 type → passthrough 段（开放集合不丢事件）；坏数据静默忽略", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("part-updated", { projectId: "p1", runId: "run1", data: { x: 1 } }, "run1:3"),
     );
-    expect(() => dispatchAgentEvent({ id: "y", data: "not json" })).not.toThrow();
+    expect(() => dispatchAgentEvent(agentQc, { id: "y", data: "not json" })).not.toThrow();
 
     const run = useAgentStreamsStore.getState().runs["run1"];
     expect(run.segments).toEqual([
@@ -254,17 +257,17 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
   }
 
   it("role-assigned(BA) → task-start 落用户气泡；text(data.delta) 累积 BA 气泡", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "role-assigned",
         { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
         "run1:1",
       ),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1" }, "run1:2"),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "ba-p1", data: { delta: "初步理解" } }, "run1:3"),
     );
 
@@ -276,7 +279,7 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
   });
 
   it("wait-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "wait-raised",
         {
@@ -307,14 +310,14 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
   });
 
   it("PERMISSION 挂起不成卡；非 BA 会话的 text 不进对话", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent(
         "wait-raised",
         { projectId: "p1", runId: "run1", sessionId: "s1", kind: "PERMISSION", summary: "write_file", engineRef: "reply-1", data: {} },
         "run1:3",
       ),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", data: { delta: "写代码" } }, "run1:4"),
     );
 
@@ -322,19 +325,141 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
   });
 
   it("error / task-finish（BA 会话）→ 收轮 + 中断提示", () => {
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" }, "run1:1"),
     );
-    dispatchAgentEvent(agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "需求" }, "run1:2"));
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "需求" }, "run1:2"));
+    dispatchAgentEvent(agentQc, 
       agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:3"),
     );
-    dispatchAgentEvent(
+    dispatchAgentEvent(agentQc, 
       agentEvent("task-finish", { projectId: "p1", runId: "run1", sessionId: "ba-p1", finish: "end" }, "run1:4"),
     );
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
     expect(chat?.turnActive).toBe(false);
+  });
+});
+
+describe("bridge · agent 流 → generation store（生成面，#22）", () => {
+  beforeEach(() => {
+    useAgentStreamsStore.setState({ runs: {}, order: [] });
+    useChatStore.setState({ chats: {} });
+    useGenerationStore.setState({ generations: {} });
+  });
+
+  function agentEvent(type: string, payload: Record<string, unknown>, id = "run1:1"): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts: "" }) };
+  }
+
+  it("编码 run 全帧序：登记 → running → error → retrying → 重试收口 → 预览纪元 +1", () => {
+    dispatchAgentEvent(agentQc, 
+      agentEvent(
+        "role-assigned",
+        { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" },
+        "run1:1",
+      ),
+    );
+    dispatchAgentEvent(agentQc, agentEvent("task-start", { projectId: "p1", runId: "run1", prompt: "开始做系统" }, "run1:2"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+
+    // 尝试失败（error）→ 自动重试帧（话术承载）→ 状态回 retrying（同一场生成在途）
+    dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "中断" }, "run1:8"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+    dispatchAgentEvent(agentQc, 
+      agentEvent("task-retrying", { projectId: "p1", runId: "run1", attempt: 2, message: "遇到问题，正在重试" }, "run1:9"),
+    );
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("retrying");
+    // 话术正本随帧下发（UI 呈现取帧内 message，不在前端再写一份）
+    expect(useGenerationStore.getState().generations["p1"]?.retryMessage).toBe("遇到问题，正在重试");
+    // 顶栏 LIVE 判定锚：retrying 把 run 状态拉回 in-flight
+    expect(useAgentStreamsStore.getState().runs["run1"].status).toBe("running");
+
+    // 重试尝试（新 runId，同样登记）收口 → finished + 预览纪元 +1（重挂信号）
+    dispatchAgentEvent(agentQc, 
+      agentEvent("role-assigned", { projectId: "p1", runId: "run2", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" }, "run2:1"),
+    );
+    dispatchAgentEvent(agentQc, agentEvent("task-start", { projectId: "p1", runId: "run2", prompt: "继续完成" }, "run2:2"));
+    dispatchAgentEvent(agentQc, agentEvent("task-finish", { projectId: "p1", runId: "run2", sessionId: "coder-p1", finish: "end" }, "run2:9"));
+
+    const generation = useGenerationStore.getState().generations["p1"];
+    expect(generation?.coderStatus).toBe("finished");
+    expect(generation?.previewEpoch).toBe(1);
+
+    // 编码帧不进对话面（指令区只收 BA）
+    expect(useChatStore.getState().chats["p1"]).toBeUndefined();
+  });
+
+  it("task-finish 重放（同事件 id）不重复计预览纪元", () => {
+    dispatchAgentEvent(agentQc, 
+      agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" }, "run1:1"),
+    );
+    const finish = agentEvent("task-finish", { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" }, "run1:9");
+    dispatchAgentEvent(agentQc, finish);
+    dispatchAgentEvent(agentQc, finish); // 重放（通道带缓冲热流，重挂载重收近期帧）
+
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+  });
+
+  it("BA 帧与未登记 run 的帧不进生成面", () => {
+    dispatchAgentEvent(agentQc, 
+      agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" }, "run1:1"),
+    );
+    dispatchAgentEvent(agentQc, agentEvent("task-finish", { projectId: "p1", runId: "run1", sessionId: "ba-p1", finish: "end" }, "run1:9"));
+    // 未登记（无 role-assigned CODER 前置）的 run 帧：判定锚缺失，不惊动生成面
+    dispatchAgentEvent(agentQc, agentEvent("task-finish", { projectId: "p1", runId: "runX", sessionId: "coder-p1", finish: "end" }, "runX:9"));
+
+    expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
+  });
+});
+
+describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥）", () => {
+  it("coder task-finish → projects 域 active query 重拉（generated_at 详情事实）", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setDefaultOptions({ queries: { retry: false } });
+    const projects = observeActiveQuery(queryClient, queryKeys.projects.all);
+    await projects.waitForSettled();
+
+    dispatchAgentEvent(
+      queryClient,
+      {
+        id: "run1:9",
+        data: JSON.stringify({
+          type: "task-finish",
+          payload: { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" },
+          ts: "",
+        }),
+      },
+    );
+    // 未登记的 run（无 role-assigned CODER 前置）：不失效
+    expect(projects.fetchCount()).toBe(1);
+
+    dispatchAgentEvent(
+      queryClient,
+      {
+        id: "run1:0",
+        data: JSON.stringify({
+          type: "role-assigned",
+          payload: { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" },
+          ts: "",
+        }),
+      },
+    );
+    dispatchAgentEvent(
+      queryClient,
+      {
+        id: "run1:9",
+        data: JSON.stringify({
+          type: "task-finish",
+          payload: { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" },
+          ts: "",
+        }),
+      },
+    );
+
+    await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
+    projects.unsubscribe();
+    queryClient.clear();
   });
 });

@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
+import java.time.Duration;
 import java.util.Map;
 
 import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
@@ -12,7 +13,9 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * {@code usageContext} 可空——为空则本轮不上报用量（底座不发明归属）；
  * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目 dev 工作区
  * （智能体读写项目文件，BA 写 docs/PRD.md 的基础）；{@code streamCorrelation}
- * 可空——流关联字段（如 projectId，底座不解释，逐帧注入智能体流 payload）。</p>
+ * 可空——流关联字段（如 projectId，底座不解释，逐帧注入智能体流 payload）；
+ * {@code timeout} 可空——本轮对话超时，为空取内核配置默认（对话轮 2 分钟量级，
+ * 编码轮长任务另行指定）。</p>
  */
 public record AgentCommand(
         String runId,
@@ -23,7 +26,16 @@ public record AgentCommand(
         String userId,
         UsageContext usageContext,
         String workspaceId,
-        Map<String, Object> streamCorrelation) {
+        Map<String, Object> streamCorrelation,
+        Duration timeout) {
+
+    /** 无逐轮超时的兼容形（取内核配置默认）：短对话调用面（BA / 取名）不变。 */
+    public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
+            String sessionId, String userId, UsageContext usageContext,
+            String workspaceId, Map<String, Object> streamCorrelation) {
+        this(runId, prompt, systemPrompt, modelString, sessionId, userId,
+                usageContext, workspaceId, streamCorrelation, null);
+    }
 
     public AgentCommand {
         if (runId == null || runId.isBlank() || prompt == null || prompt.isBlank()

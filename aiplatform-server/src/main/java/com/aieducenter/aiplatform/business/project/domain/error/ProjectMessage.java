@@ -24,7 +24,13 @@ public enum ProjectMessage implements CodeMessage {
     PROJECT_FILTER_UNKNOWN(400, "PRJ_014", "无效的项目列表状态过滤参数"),
 
     /** PRD 读端点的「未产出」口径（工作区无 docs/PRD.md）——区别于项目不存在的 PRJ_001。 */
-    PRD_NOT_PRODUCED(404, "PRJ_015", "PRD 尚未产出");
+    PRD_NOT_PRODUCED(404, "PRJ_015", "PRD 尚未产出"),
+
+    /** 「开始做系统」重复发起守卫：已生成（调整走指令区意见）或生成在途。 */
+    GENERATION_ALREADY_REQUESTED(409, "PRJ_017", "系统已生成或正在生成中，请勿重复发起"),
+
+    /** 「开始做系统」前置事实守卫：PRD 从未产出（待定项未清不设门，无 PRD 除外）。 */
+    GENERATION_PRD_NOT_PRODUCED(409, "PRJ_018", "PRD 尚未产出，先和需求分析师聊出 PRD 再开始做系统");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

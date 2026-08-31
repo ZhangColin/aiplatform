@@ -28,6 +28,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -78,6 +79,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private BaInterviewAppService baInterviewAppService;
+
+    @MockitoBean
+    private GenerationAppService generationAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -215,12 +219,49 @@ class ProjectControllerTest {
     }
 
     @Test
+    void given_project_when_generate_then_run_id_returned() throws Exception {
+        // 「开始做系统」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        when(generationAppService.startGeneration(100L)).thenReturn(
+                new GenerationAppService.GenerationRun("run-gen-1"));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-gen-1"));
+        verify(generationAppService).startGeneration(100L);
+    }
+
+    @Test
+    void given_generated_or_in_flight_project_when_generate_then_prj_017_as_409() throws Exception {
+        // 重复发起守卫（已生成或生成在途）——调整入口是指令区意见，不是再生成
+        when(generationAppService.startGeneration(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("系统已生成或正在生成中，请勿重复发起"));
+    }
+
+    @Test
+    void given_prd_never_produced_when_generate_then_prj_018_as_409() throws Exception {
+        // 前置事实守卫：PRD 从未产出（前端入口以 PRD 产出为呈现条件，拦直连调用）
+        when(generationAppService.startGeneration(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.GENERATION_PRD_NOT_PRODUCED));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先和需求分析师聊出 PRD 再开始做系统"));
+    }
+
+    @Test
     void given_valid_name_when_rename_then_detail_returned() throws Exception {
         // 动作端点风格同 archive；响应与详情端点同构（前端 invalidate 后刷新列表/顶栏）
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null));
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -477,7 +518,7 @@ class ProjectControllerTest {
 
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt 缺省闲聊期）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
         return detailOf(id, status, archived, null);
     }
@@ -486,7 +527,7 @@ class ProjectControllerTest {
             LocalDateTime prdProducedAt) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt);
+                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null);
     }
 
     /**

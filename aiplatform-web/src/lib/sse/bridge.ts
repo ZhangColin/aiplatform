@@ -4,6 +4,7 @@ import { parseQuestion } from "@/lib/chat/qa";
 import { queryKeys } from "@/lib/api/keys";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
+import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import type { SseEvent } from "./connection";
@@ -19,7 +20,9 @@ import {
  * 事件 → 状态桥（ADR 0003）：
  * - 通知通道 = 声明式失效注册表 + 载荷展示白名单（REST 重查拿不到的载荷写轻量
  *   store，本文件是 store 唯一事件写入方）；
- * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）分发。
+ * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）
+ *   + generation store（生成面）分发；编码 run 收口的失效也在此（generated_at
+ *   落库后详情重拉，正确性走 REST）。
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
@@ -75,12 +78,13 @@ const PASSTHROUGH_SEGMENT_KINDS: Record<string, "text" | "reasoning" | "patch" |
   tool: "tool",
 };
 
-/** agent 流事件 → streams store + chat store（分段 id = SSE 完整事件 id，React key 白拿）。 */
-export function dispatchAgentEvent(event: SseEvent): void {
+/** agent 流事件 → streams store + chat store + generation store（分段 id = SSE 完整事件 id，React key 白拿）。 */
+export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
   if (!envelope) return;
   const store = useAgentStreamsStore.getState();
   const chat = useChatStore.getState();
+  const generation = useGenerationStore.getState();
 
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
@@ -95,6 +99,9 @@ export function dispatchAgentEvent(event: SseEvent): void {
           engine: payload.engine,
         });
         chat.ingestTaskStart(payload.projectId, payload.runId, payload.prompt);
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          generation.noteCoderTaskStart(payload.projectId);
+        }
         return;
       }
       case "session-created": {
@@ -112,6 +119,9 @@ export function dispatchAgentEvent(event: SseEvent): void {
           engine: payload.engine,
         });
         if (payload.role === "BA") chat.noteBaRun(payload.projectId, payload.runId);
+        if (payload.role === "CODER") {
+          generation.noteCoderRun(payload.projectId, payload.runId);
+        }
         return;
       }
       case "wait-raised": {
@@ -134,6 +144,22 @@ export function dispatchAgentEvent(event: SseEvent): void {
           message: payload.message,
         });
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          generation.noteCoderError(payload.projectId);
+        }
+        return;
+      }
+      case "task-retrying": {
+        const { payload } = platform;
+        store.appendSegment(payload, {
+          kind: "retrying",
+          id: event.id,
+          attempt: payload.attempt,
+          message: payload.message,
+        });
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          generation.noteCoderRetrying(payload.projectId, payload.message);
+        }
         return;
       }
       case "task-finish": {
@@ -144,6 +170,12 @@ export function dispatchAgentEvent(event: SseEvent): void {
           finish: payload.finish,
         });
         chat.finishTurn(payload.projectId, payload.sessionId);
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          generation.noteCoderFinish(payload.projectId, event.id);
+          // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
+          // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+        }
         return;
       }
     }

@@ -12,6 +12,8 @@ export type ProjectDetail = {
   createdAt?: string;
   /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，指令区占满全宽）。 */
   prdProducedAt?: string | null;
+  /** 首次生成时点（run 成功收口单向置位；缺省 = 未生成过——「开始做系统」可发起）。 */
+  generatedAt?: string | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */
@@ -23,5 +25,6 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     archived: raw.archived,
     createdAt: raw.createdAt,
     prdProducedAt: raw.prdProducedAt,
+    generatedAt: raw.generatedAt,
   };
 }

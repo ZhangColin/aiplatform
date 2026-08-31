@@ -108,6 +108,15 @@ export type PlatformAgentEvent =
         engineRef?: string;
         data?: unknown;
       };
+    }
+  | {
+      /**
+       * 编码 run 自动重试（生成编排层发射，#22）：`runId` 锚定失败的那次尝试
+       * （帧序 error → task-retrying → 下一尝试 task-start）；`message` 为用户侧
+       * 话术「遇到问题，正在重试」；超限后不再发（末次 error 即终态）。
+       */
+      type: "task-retrying";
+      payload: AgentPayload & { attempt: number; message: string };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -117,6 +126,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "error",
   "task-finish",
   "wait-raised",
+  "task-retrying",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

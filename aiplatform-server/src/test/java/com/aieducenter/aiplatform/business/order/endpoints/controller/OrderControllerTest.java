@@ -164,6 +164,7 @@ class OrderControllerTest {
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
+                null, null, null, null, java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt);
     }
 

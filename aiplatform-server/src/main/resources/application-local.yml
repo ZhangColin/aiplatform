@@ -10,4 +10,10 @@ spring:
       host: localhost
       port: 6380
 
+# #29 后台机机面：入站验签凭据走本机 app-registry（8088，启动与 seed 见
+# docs/guide/本机依赖启动.md；apiKey = appCode，admin-console 为 seed 预置应用）
+cartisan:
+  openapi:
+    apikey-service-url: http://localhost:8088/api/app-registry/api-keys/{apiKey}
+
 spring.jpa.show-sql: true

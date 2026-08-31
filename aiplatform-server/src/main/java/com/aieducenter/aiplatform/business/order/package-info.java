@@ -19,11 +19,14 @@
  *
  * <h3>包结构</h3>
  * <ul>
- *   <li>domain：Order 聚合、OrderStatus 枚举、仓储接口、错误码</li>
- *   <li>application：OrderAppService（下单/详情/取消）+ OrderQueryAppService
- *       （未终结订单读面——项目详情/列表嵌入与冻结守卫的供给方；报价/改价/支付
- *       随后续切片）</li>
- *   <li>endpoints：用户面 REST（下单/订单详情/取消）；后台面归报价切片（#29）</li>
+ *   <li>domain：Order 聚合（价目留痕随单）、OrderPriceEntry 实体、OrderStatus
+ *       枚举、仓储接口、错误码</li>
+ *   <li>application：OrderAppService（下单/详情/取消/报价与改价）+
+ *       OrderQueryAppService（未终结订单读面——项目详情/列表嵌入与冻结守卫的
+ *       供给方）+ BackofficeOrderAppService（后台三读端点：清单/详情/源码包；
+ *       跨 BC 项目名/用户昵称/打包经 project、identity 应用层软引用）</li>
+ *   <li>endpoints：用户面 REST（下单/订单详情/取消）；后台机机面
+ *       {@code /api/backoffice/*}（cartisan-openapi 五头 HMAC 签名闸，#29）</li>
  * </ul>
  *
  * @since 0.1.0

@@ -36,7 +36,8 @@ import static org.mockito.Mockito.when;
  * 应用预检双保险）：跨 BC 项目事实（详情/PRD 读）mock 收口，订单链路（应用服务 →
  * 聚合 → 落库 → 唯一索引）全真，以库内真实行为为准。#28 交易环①接出取消
  * 状态机（未支付态可达/已支付与终态拒绝）、快照冻结（PRD 后续修订不回写）、
- * 详情与取消后再下新单（新单新快照）；报价/改价/支付的用例随后续切片。
+ * 详情与取消后再下新单（新单新快照）；#29 交易环②接出报价/改价（append-only
+ * 价目留痕、现值取最新行、quotedAt 不刷新）；支付的用例随后续切片。
  */
 @SpringBootTest
 class OrderAppServiceTest {
@@ -230,6 +231,119 @@ class OrderAppServiceTest {
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
         assertThatThrownBy(() -> appService.cancel(900999L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
+    }
+
+    // ---------- #29 交易环②：报价 / append-only 改价留痕 ----------
+
+    @Test
+    void given_pending_quote_order_when_submit_quote_then_quoted_with_first_entry() {
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+
+        OrderResponse quoted = appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价：含三个页面");
+
+        assertThat(quoted.status()).isEqualTo(OrderStatus.QUOTED);
+        assertThat(quoted.amount()).isEqualTo(128000L);
+        assertThat(quoted.currency()).isEqualTo(Order.CURRENCY_CNY);
+        assertThat(quoted.note()).isEqualTo("首版报价：含三个页面");
+        assertThat(quoted.quotedAt()).isNotNull();
+        assertThat(quoted.priceEntries()).hasSize(1);
+        // 库内事实：订单现值 + 价目行各就各位
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, amount, currency, quoted_at FROM ord_orders WHERE id = ?",
+                Long.parseLong(orderId));
+        assertThat(row.get("status")).isEqualTo(OrderStatus.QUOTED.getCode());
+        assertThat(row.get("amount")).isEqualTo(128000L);
+        assertThat(row.get("currency")).isEqualTo(Order.CURRENCY_CNY);
+        assertThat(row.get("quoted_at")).isNotNull();
+        Map<String, Object> entry = jdbcTemplate.queryForMap(
+                "SELECT amount, currency, note FROM ord_price_entries WHERE order_id = ?",
+                Long.parseLong(orderId));
+        assertThat(entry.get("amount")).isEqualTo(128000L);
+        assertThat(entry.get("note")).isEqualTo("首版报价：含三个页面");
+    }
+
+    @Test
+    void given_quoted_order_when_submit_quote_again_then_reprice_appends_entry_only() {
+        // 改价 = append-only：旧价目行原样保留、新行追加、订单现值取最新行、
+        // quotedAt 不刷新（改价时点留痕在价目行）
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价");
+        LocalDateTime quotedAt = appService.detail(Long.parseLong(orderId)).quotedAt();
+
+        OrderResponse repriced = appService.submitQuote(Long.parseLong(orderId), 99000L, "调整：去掉导入功能");
+
+        assertThat(repriced.status()).isEqualTo(OrderStatus.QUOTED); // 改价不换状态
+        assertThat(repriced.amount()).isEqualTo(99000L);
+        assertThat(repriced.note()).isEqualTo("调整：去掉导入功能");
+        assertThat(repriced.quotedAt()).isEqualTo(quotedAt);
+        // 历史新 → 旧：首条即最新改价，末条即首次报价
+        assertThat(repriced.priceEntries()).hasSize(2);
+        assertThat(repriced.priceEntries().get(0).amount()).isEqualTo(99000L);
+        assertThat(repriced.priceEntries().get(1).amount()).isEqualTo(128000L);
+        // 库内事实：两行都在、旧行未被改写、订单现值 = 最新行
+        List<Map<String, Object>> entries = jdbcTemplate.queryForList(
+                "SELECT amount, note FROM ord_price_entries WHERE order_id = ? ORDER BY id",
+                Long.parseLong(orderId));
+        assertThat(entries).hasSize(2);
+        assertThat(entries.get(0)).containsEntry("amount", 128000L)
+                .containsEntry("note", "首版报价"); // 旧行原样
+        assertThat(entries.get(1)).containsEntry("amount", 99000L)
+                .containsEntry("note", "调整：去掉导入功能");
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT amount, quoted_at FROM ord_orders WHERE id = ?", Long.parseLong(orderId)))
+                .containsEntry("amount", 99000L);
+        assertThat(appService.detail(Long.parseLong(orderId)).quotedAt()).isEqualTo(quotedAt);
+    }
+
+    @Test
+    void given_paid_or_terminal_order_when_submit_quote_then_rejected_without_entry() {
+        // 报价/改价限未支付态：已支付与终态拒绝，且不留半条价目行；逐态钉死
+        for (OrderStatus status : List.of(OrderStatus.PAID, OrderStatus.ARCHIVED, OrderStatus.CANCELLED)) {
+            stubProject(ProjectStatus.IN_PROGRESS);
+            String orderId = appService.place(PROJECT_ID).id();
+            jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
+                    status.getCode(), Long.parseLong(orderId));
+
+            assertThatThrownBy(() -> appService.submitQuote(Long.parseLong(orderId), 1000L, "迟到的报价"))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_QUOTE_NOT_ALLOWED.message());
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM ord_price_entries WHERE order_id = ?", Integer.class,
+                    Long.parseLong(orderId))).isZero();
+            jdbcTemplate.update("DELETE FROM ord_orders"); // 清场再验下一态
+        }
+    }
+
+    @Test
+    void given_invalid_amount_or_overlong_note_when_submit_quote_then_rejected() {
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+        long id = Long.parseLong(orderId);
+
+        assertThatThrownBy(() -> appService.submitQuote(id, 0L, "零元"))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_QUOTE_AMOUNT_INVALID.message());
+        assertThatThrownBy(() -> appService.submitQuote(id, -5L, "负数"))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_QUOTE_AMOUNT_INVALID.message());
+        assertThatThrownBy(() -> appService.submitQuote(id, 1000L, "长".repeat(Order.QUOTE_NOTE_MAX_LENGTH + 1)))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_QUOTE_NOTE_TOO_LONG.message());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ord_price_entries WHERE order_id = ?", Integer.class, id)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ord_orders WHERE id = ?", Integer.class, id))
+                .isEqualTo(OrderStatus.PENDING_QUOTE.getCode()); // 守卫先于状态变更，订单不动
+    }
+
+    @Test
+    void given_missing_order_when_submit_quote_then_not_found() {
+        assertThatThrownBy(() -> appService.submitQuote(900999L, 1000L, "无此单"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
     }

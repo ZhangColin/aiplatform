@@ -125,7 +125,7 @@ export interface paths {
         put?: never;
         /**
          * 确认下单（冻结 PRD 快照入单）
-         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步。下单即冻结迭代——指令区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004
+         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步。下单即冻结迭代——指令区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004
          */
         post: operations["place"];
         delete?: never;
@@ -248,6 +248,32 @@ export interface paths {
          * @description 自待报价/已报价可达：取消后项目回迭代态（指令区恢复受理意见），同项目可再下新单（新单重新冻结下单时快照）。已支付或已终结 409 ORD_005；订单不存在 404 ORD_001
          */
         post: operations["cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 提交报价（已报价态重复提交 = 改价）
+         * @description 待报价态首次提交 = 报价（→已报价）；已报价态重复提交 = 改价（状态不变，append-only 价目行留痕、订单现值取最新行，改价历史用户面可见）。限未支付态：已支付/已终结 409 ORD_007；金额非正 400 ORD_008；备注超长 400 ORD_009。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 409 ORD_007 — 订单已支付或已终结，无法报价或改价
+         *     - 400 ORD_008 — 报价金额无效（须为正整数，单位分）
+         *     - 400 ORD_009 — 报价备注超长（至多 1000 字）
+         */
+        post: operations["quote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -477,7 +503,7 @@ export interface paths {
         };
         /**
          * 订单详情（用户面）
-         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 下单/取消时点；金额与价目留痕随报价切片（#29）增补。订单不存在 404 ORD_001
+         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点。订单不存在 404 ORD_001
          */
         get: operations["detail"];
         put?: never;
@@ -536,6 +562,76 @@ export interface paths {
          *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。
          */
         get: operations["subscribe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单清单（按状态过滤，分页）
+         * @description 报价工作清单：新单在前（TSID 倒序）。page 1 基（缺省 1）、size 缺省 20（上界 100）；status 可选（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消），缺省拉全量。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 ORD_010 — 无效的订单状态过滤参数
+         */
+        get: operations["orders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单详情（后台面）
+         * @description 报价依据全量：状态、金额+最新备注、PRD 快照正文（下单冻结）、项目名、下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         */
+        get: operations["detail_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}/source-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单源码包（tar.gz 二进制流）
+         * @description 交付取件：经项目工作区实时打包（排除 node_modules/.env/data/.platform），不占订单快照。需要机机签名；订单不存在 404 ORD_001；打包失败 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["sourcePackage_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -728,10 +824,26 @@ export interface components {
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
             statusName?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            note?: string;
+            /** Format: date-time */
+            quotedAt?: string;
+            priceEntries?: components["schemas"]["PriceEntryResponse"][];
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
             cancelledAt?: string;
+        };
+        PriceEntryResponse: {
+            id?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            note?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         RenameProjectCommand: {
             /** @description 新项目名（空白拒绝 PRJ_005，长度上限 100 与建项目同口径） */
@@ -789,6 +901,11 @@ export interface components {
         };
         GenerationStartResponse: {
             runId?: string;
+        };
+        SubmitQuoteCommand: {
+            /** Format: int64 */
+            amount?: number;
+            note?: string;
         };
         ApiResponseListProjectResponse: {
             /** Format: int32 */
@@ -940,6 +1057,70 @@ export interface components {
         SseEmitter: {
             /** Format: int64 */
             timeout?: number;
+        };
+        ApiResponsePageResponseBackofficeOrderSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeOrderSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeOrderSummaryResponse: {
+            id?: string;
+            projectId?: string;
+            projectName?: string;
+            /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
+            status?: number;
+            statusName?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            quotedAt?: string;
+        };
+        PageResponseBackofficeOrderSummaryResponse: {
+            items?: components["schemas"]["BackofficeOrderSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeOrderDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeOrderDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeOrderDetailResponse: {
+            id?: string;
+            projectId?: string;
+            projectName?: string;
+            ownerDisplayName?: string;
+            /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
+            status?: number;
+            statusName?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            note?: string;
+            prdSnapshot?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            quotedAt?: string;
+            /** Format: date-time */
+            paidAt?: string;
+            /** Format: date-time */
+            archivedAt?: string;
+            /** Format: date-time */
+            cancelledAt?: string;
         };
         AccountResponse: {
             accountId?: string;
@@ -1257,6 +1438,32 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    quote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitQuoteCommand"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1598,6 +1805,74 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": components["schemas"]["SseEmitter"];
+                };
+            };
+        };
+    };
+    orders: {
+        parameters: {
+            query?: {
+                status?: number;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeOrderSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeOrderDetailResponse"];
+                };
+            };
+        };
+    };
+    sourcePackage_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
         };

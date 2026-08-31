@@ -5,21 +5,34 @@ import { api } from "@/lib/api/client";
 import { queryKeys } from "@/lib/api/keys";
 import { errorText } from "@/lib/api/api-error";
 import { normalizeOrder, type OrderResponse } from "@/lib/orders/detail";
+import { ORDER_STATUS } from "@/lib/orders/lock";
 
 /**
- * 订单数据层（#28 交易环①）：详情查询 + 下单/取消两动作。下单与取消都改变
- * 「项目挂着未终结订单」这一事实（详情 activeOrder 嵌入 = 锁定式矩阵推导输入），
- * 成功即失效整项目域——指令区锁定/解锁、订单卡进出、列表四态分区随重拉自愈；
- * 订单域自身也失效（旧订单详情不再被引用）。
+ * 订单数据层（#28 交易环① + #29 交易环②）：详情查询 + 下单/取消两动作。下单与
+ * 取消都改变「项目挂着未终结订单」这一事实（详情 activeOrder 嵌入 = 锁定式矩阵
+ * 推导输入），成功即失效整项目域——指令区锁定/解锁、订单卡进出、列表四态分区
+ * 随重拉自愈；订单域自身也失效（旧订单详情不再被引用）。
  */
 
-/** 订单详情（订单卡消费；金额与价目留痕随 #29 增补）。 */
+/** 报价等待期的详情轮询间隔（v1 无推送——spec：订单状态经详情拉取）。 */
+const AWAITING_REFETCH_MS = 10_000;
+
+/**
+ * 订单详情（订单卡消费）：待报价/已报价态挂着轮询（后台报/改价后订单卡与改价
+ * 历史实时可见），离开未支付态即停。
+ */
 export function useOrder(orderId: string | null | undefined) {
   return useQuery({
     queryKey: queryKeys.orders.detail(orderId ?? ""),
     queryFn: ({ signal }) =>
       api.get<OrderResponse>(`/orders/${orderId}`, { signal }).then(normalizeOrder),
     enabled: orderId != null && orderId !== "",
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === ORDER_STATUS.pendingQuote || status === ORDER_STATUS.quoted
+        ? AWAITING_REFETCH_MS
+        : false;
+    },
   });
 }
 

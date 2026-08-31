@@ -45,7 +45,7 @@ export const queryKeys = {
    */
   orders: {
     all: ["orders"] as const,
-    /** 订单详情（状态 + 时间戳组；金额/留痕随 #29 增补）。 */
+    /** 订单详情（状态 + 时间戳组 + 报价面：金额/备注/改价历史，#29）。 */
     detail: (id: string) => ["orders", "detail", id] as const,
   },
 } as const;

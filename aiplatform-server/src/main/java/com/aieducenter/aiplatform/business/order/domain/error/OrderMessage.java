@@ -17,7 +17,15 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_CANCEL_NOT_ALLOWED(409, "ORD_005", "订单已支付或已终结，无法取消"),
 
-    ORDER_FROZEN(409, "ORD_006", "订单处理中——如需继续修改，请取消订单");
+    ORDER_FROZEN(409, "ORD_006", "订单处理中——如需继续修改，请取消订单"),
+
+    ORDER_QUOTE_NOT_ALLOWED(409, "ORD_007", "订单已支付或已终结，无法报价或改价"),
+
+    ORDER_QUOTE_AMOUNT_INVALID(400, "ORD_008", "报价金额无效（须为正整数，单位分）"),
+
+    ORDER_QUOTE_NOTE_TOO_LONG(400, "ORD_009", "报价备注超长（至多 1000 字）"),
+
+    ORDER_STATUS_FILTER_UNKNOWN(400, "ORD_010", "无效的订单状态过滤参数");
 
     private final int httpStatus;
     private final String code;

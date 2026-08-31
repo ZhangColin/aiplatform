@@ -16,7 +16,10 @@ import com.aieducenter.aiplatform.business.identity.endpoints.interceptor.ApiAut
  *
  * <p>A2 起全 {@code /api/**} 拦截（含 SSE 双通道），无会话 401；白名单路径
  * （/auth/**、/v3/api-docs/**、/swagger-ui/**、actuator）不在 /api 下，天然放行。
- * 拦截器无状态直接 new（窄测试上下文扫本包时无需 identity BC 的 bean）。</p>
+ * {@code /api/backoffice/**}（#29 后台机机面）排除会话拦截——鉴权由
+ * cartisan-openapi 五头 HMAC 签名闸接管（控制器类级 {@code @RequireSignature}，
+ * 无签名/错签 401）。拦截器无状态直接 new（窄测试上下文扫本包时无需
+ * identity BC 的 bean）。</p>
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -29,6 +32,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new ApiAuthInterceptor())
-                .addPathPatterns("/api/**");
+                .addPathPatterns("/api/**")
+                .excludePathPatterns("/api/backoffice/**");
     }
 }

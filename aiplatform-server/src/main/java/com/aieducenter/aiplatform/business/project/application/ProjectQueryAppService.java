@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.Currency;
 import java.util.LinkedHashMap;
@@ -83,6 +84,18 @@ public class ProjectQueryAppService {
      */
     public ProjectDetailResponse detail(Long projectId) {
         return toDetail(loadProject(projectId));
+    }
+
+    /**
+     * 一批项目 → 项目名（跨 BC 查名面：order 上下文后台订单视图嵌入用）：缺档
+     * 项目不在映射中，调用方容缺呈现（软引用无 FK，历史行缺档是合法状态）。
+     */
+    public Map<Long, String> namesOf(Collection<Long> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            return Map.of();
+        }
+        return projectRepository.findAllById(projectIds).stream()
+                .collect(Collectors.toMap(Project::getId, Project::getName, (left, right) -> left));
     }
 
     /**

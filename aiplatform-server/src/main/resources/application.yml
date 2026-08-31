@@ -32,10 +32,15 @@ cartisan:
     enum-controller:
       enabled: false
   openapi:
+    # self = 出站调用自己的凭证（v1 无出站调用，壳留位）；键名对齐
+    # CartisanOpenapiProperties.Self（api-key/api-secret）
     self:
-      app-id: ${OPENAPI_APP_ID:}
-      app-secret: ${OPENAPI_APP_SECRET:}
+      api-key: ${OPENAPI_APP_ID:}
+      api-secret: ${OPENAPI_APP_SECRET:}
+    # 入站验签的凭据源（app-registry）——prod 走网关域名（路由即鉴权边界）；
+    # local 覆盖为本机 app-registry bootstrap 端点（见 application-local.yml）
     apikey-service-url: https://openapi.aieducenter.com/api/v1/api-keys/by-appId
+
 
 # 片3 · base.knowledge：本机 fastembed embedding 服务（512 维），
 # 启动方式见 docs/guide/本机依赖启动.md（scripts/embedding_server.py）

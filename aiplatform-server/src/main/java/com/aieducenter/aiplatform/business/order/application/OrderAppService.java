@@ -95,6 +95,21 @@ public class OrderAppService {
         return OrderResponse.of(orderRepository.save(order));
     }
 
+    /**
+     * 提交报价（#29 后台动作，机机面经 BackofficeOrderController 进入）：待报价态
+     * 首次调用 = 报价，已报价态重复调用 = 改价——聚合内一次事务同时落价目行
+     * （append-only）与订单现值。事务取舍同 {@link #cancel}：单聚合保存（级联
+     * 追加价目行）由仓储自带事务保证。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_008 金额无效；
+     *                              ORD_009 备注超长；ORD_007 已支付或已终结
+     */
+    public OrderResponse submitQuote(Long orderId, Long amount, String note) {
+        Order order = requireOrder(orderId);
+        order.quote(amount, note);
+        return OrderResponse.of(orderRepository.save(order));
+    }
+
     private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {
         return mentions(e.getMessage()) || mentions(e.getMostSpecificCause().getMessage());
     }
@@ -104,7 +119,8 @@ public class OrderAppService {
     }
 
     private Order requireOrder(Long orderId) {
-        return orderRepository.findById(orderId)
+        // 带价目历史：detail/cancel/submitQuote 的响应拼装要读价目集合，取齐再出会话
+        return orderRepository.findWithHistory(orderId)
                 .orElseThrow(() -> new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
     }
 }

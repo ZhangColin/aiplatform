@@ -25,6 +25,8 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -33,6 +35,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -41,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -288,6 +292,117 @@ class ProjectQueryAppServiceTest {
         assertThat(projectRepository.findById(
                 persistedProject(8405L, "未置位项目").getId()).orElseThrow()
                 .getPrdProducedAt()).isNull(); // 未置位项目仍为 NULL
+    }
+
+    // ---------- 文件树与文件内容（交付文件只读浏览，#27） ----------
+
+    @Test
+    void given_workspace_files_when_files_then_sorted_entries() {
+        Long projectId = persistedProject(8601L, "文件树项目").getId();
+        when(workspaceLifecycleAppService.exec(eq("8601"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("340\tsrc/index.ts\n12\tdocs/PRD.md\n7\tAGENTS.md\n",
+                        "", 0));
+
+        ProjectFilesResponse response = appService.files(projectId);
+
+        assertThat(response.projectId()).isEqualTo(projectId.toString());
+        // 命令 = 规则单点的列表命令（源头剪枝非交付物），输出解析排序后出端点
+        verify(workspaceLifecycleAppService).exec(eq("8601"),
+                eq(new WorkspaceExecCommand(ProjectFiles.listCommand())));
+        assertThat(response.files()).containsExactly(
+                new ProjectFilesResponse.FileEntry("AGENTS.md", 7),
+                new ProjectFilesResponse.FileEntry("docs/PRD.md", 12),
+                new ProjectFilesResponse.FileEntry("src/index.ts", 340));
+    }
+
+    @Test
+    void given_dead_container_when_files_then_wsp_002_environment_fault() {
+        Long projectId = persistedProject(8602L, "文件树项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "docker: No such container", 125));
+
+        assertThatThrownBy(() -> appService.files(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+    }
+
+    @Test
+    void given_missing_project_when_files_then_prj_001() {
+        assertThatThrownBy(() -> appService.files(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+    }
+
+    @Test
+    void given_text_file_when_file_content_then_body_returned() {
+        Long projectId = persistedProject(8603L, "文件项目").getId();
+        when(workspaceLifecycleAppService.exec(eq("8603"), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("18\nexport const a = 1;\n", "", 0));
+
+        ProjectFileContentResponse response = appService.fileContent(projectId, "src/app.ts");
+
+        // 命令 = 规则单点的内容命令（大小守卫在容器侧、单引号转义），首行大小剥除
+        verify(workspaceLifecycleAppService).exec(eq("8603"),
+                eq(new WorkspaceExecCommand(ProjectFiles.contentCommand("src/app.ts"))));
+        assertThat(response.path()).isEqualTo("src/app.ts");
+        assertThat(response.content()).isEqualTo("export const a = 1;\n");
+    }
+
+    @Test
+    void given_missing_file_when_file_content_then_prj_021() {
+        Long projectId = persistedProject(8604L, "文件项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "", 1));
+
+        assertThatThrownBy(() -> appService.fileContent(projectId, "src/gone.ts"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FILE_NOT_FOUND.message());
+    }
+
+    @Test
+    void given_oversized_file_when_file_content_then_prj_022() {
+        Long projectId = persistedProject(8605L, "文件项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("", "", 2));
+
+        // 超限在容器侧 cat 前拦截（退出码 2），巨文件不进内存
+        assertThatThrownBy(() -> appService.fileContent(projectId, "big.log"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FILE_TOO_LARGE.message());
+    }
+
+    @Test
+    void given_binary_file_when_file_content_then_prj_023() {
+        Long projectId = persistedProject(8606L, "文件项目").getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("4\nab\0d", "", 0));
+
+        // 正文含 NUL = 非文本（无扩展名面，二进制可靠信号）
+        assertThatThrownBy(() -> appService.fileContent(projectId, "logo.png"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FILE_NOT_TEXTUAL.message());
+    }
+
+    @Test
+    void given_non_viewable_paths_when_file_content_then_prj_020_without_touching_workspace() {
+        Long projectId = persistedProject(8607L, "文件项目").getId();
+
+        // 根级非交付物 / 机密 / 逃逸 / 空白一律在判定层拒绝，工作区不被触达
+        // （嵌套同名目录如 src/data/x 是交付物，可浏览——归 ProjectFilesTest）
+        for (String path : new String[]{"data/pg/base.sql", ".platform/sessions/x",
+                "node_modules/r/index.js", ".env", "../escape", "/abs", "  ", null}) {
+            assertThatThrownBy(() -> appService.fileContent(projectId, path))
+                    .isInstanceOf(ApplicationException.class)
+                    .hasMessageContaining(ProjectMessage.FILE_PATH_INVALID.message());
+        }
+        verify(workspaceLifecycleAppService, never()).exec(any(), any(WorkspaceExecCommand.class));
+    }
+
+    @Test
+    void given_missing_project_when_file_content_then_prj_001() {
+        assertThatThrownBy(() -> appService.fileContent(-1L, "docs/PRD.md"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
     // ---------- 测试数据 ----------

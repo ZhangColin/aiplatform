@@ -73,6 +73,14 @@ public final class WorkspaceLayout {
     public static final List<String> SKELETON_DIRS = List.of(
             DOCS_DIR, PG_DATA_DIR, SKILLS_DIR, RULES_DIR, SESSIONS_DIR, LOGS_DIR);
 
+    /**
+     * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物
+     * （{@link #PLATFORM_DIR}）与可重建依赖（node_modules）不是交付物——源码包
+     * 打包与平台文件树只读端点共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。
+     */
+    public static final List<String> NON_DELIVERABLE_DIRS = List.of(
+            "node_modules", DATA_DIR, PLATFORM_DIR);
+
     private WorkspaceLayout() {
     }
 

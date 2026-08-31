@@ -4,9 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OutputsArea } from "./outputs-area";
 
-// 成果区（#20 长出 / #22 系统模式长出）：文件 / 系统 / 项目三模式——文件模式 =
-// PRD 文件呈现（可挂「开始做系统」操作条），系统模式 = SystemPanel（断言归
-// system-panel.test）。PRD 读口 mock 掉，正文断言归 prd-panel.test。
+// 成果区（#20 长出 / #22 系统模式长出 / #27 文件树）：文件 / 系统 / 项目三模式
+// ——文件模式 = FilesPanel 文件树（缺省选中 PRD；断言归 files-panel.test），
+// 系统模式 = SystemPanel（断言归 system-panel.test）。数据口 mock 掉。
+vi.mock("@/hooks/use-project-files", () => ({
+  useProjectFiles: () => ({
+    data: [
+      { path: "AGENTS.md", size: 7 },
+      { path: "docs/PRD.md", size: 12 },
+    ],
+    isPending: false,
+  }),
+}));
+
 vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => ({
     data: { content: "# 需求背景\n宠物医院预约系统。", updatedAt: "2026-08-31T08:00:00Z" },

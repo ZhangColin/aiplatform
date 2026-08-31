@@ -32,6 +32,13 @@ vi.mock("@/hooks/use-prd", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-project-files", () => ({
+  useProjectFiles: () => ({
+    data: [{ path: "AGENTS.md", size: 7 }, { path: "docs/PRD.md", size: 12 }],
+    isPending: false,
+  }),
+}));
+
 vi.mock("@/hooks/use-generate", () => ({
   useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
 }));

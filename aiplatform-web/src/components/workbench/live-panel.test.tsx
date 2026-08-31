@@ -10,7 +10,7 @@ import { LiveRail } from "./live-panel";
 
 // 直播侧栏（#23 验收口径）：编码 run 进行中呈现段（自述气泡 / 动作行 / 步骤分隔），
 // 重试中播帧内话术；run 结束（含终态 error）收起即逝——!inFlight 不渲染、无历史
-// 回看。client render（zustand v5 server snapshot 限制同 prd-panel.test）：状态
+// 回看。client render（zustand v5 server snapshot 限制同 files-panel.test）：状态
 // 经真实 store setState 驱动，可覆盖渲染期派生态转换（起跑自动展开 / 收口自动收起）
 // 与手动收展。
 

@@ -37,6 +37,8 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Inte
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
@@ -45,13 +47,13 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言 / 问答卡作答 /
- * 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 → 源码包下载 →
- * 预览 → 删除真删级联。
+ * 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读
+ * 浏览 → 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -193,6 +195,28 @@ public class ProjectController {
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.prd(parseId(id)));
+    }
+
+    @GetMapping("/{id}/files")
+    @Operation(summary = "项目文件树（交付文件只读浏览）",
+            description = "交付文件视图 = 项目 dev 工作区剔除非交付物（data/、.platform/、"
+                    + "node_modules/ 与 .env——与源码包同口径）后的文件清单：[{path, size}]，"
+                    + "path 为工作区相对路径、按路径稳定排序，只列文件（目录由前端按路径段合成）。"
+                    + "直读工作区实时状态——生成/修正 run 完成后即反映最新文件长出。"
+                    + "项目不存在 404 PRJ_001")
+    public ApiResponse<ProjectFilesResponse> files(@PathVariable String id) {
+        return ApiResponse.ok(queryAppService.files(parseId(id)));
+    }
+
+    @GetMapping("/{id}/files/content")
+    @Operation(summary = "文本文件内容（文件模式点看）",
+            description = "path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小："
+                    + "非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；"
+                    + "文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）"
+                    + "400 PRJ_022；非文本（正文含 NUL）400 PRJ_023。项目不存在 404 PRJ_001")
+    public ApiResponse<ProjectFileContentResponse> fileContent(@PathVariable String id,
+            @RequestParam String path) {
+        return ApiResponse.ok(queryAppService.fileContent(parseId(id), path));
     }
 
     @GetMapping("/{id}/source-package")

@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
 
@@ -109,10 +111,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     public byte[] packSource(WorkspaceHandle handle) {
         // 容器内 tar 流式写 stdout（GNU tar，dev 镜像 bookworm 基座自带）：
         // 相对路径归档（解包得到 ./index.html 而非 /workspace/index.html）；
-        // .env 是平台生成的连接串机密、node_modules 可重建、data/ 与 .platform/
-        // 是数据与平台产物而非源码——都不进包
-        String command = "tar czf - --exclude=./.env --exclude=./node_modules"
-                + " --exclude=./data --exclude=./.platform -C /workspace .";
+        // 排除清单单一事实 = WorkspaceLayout（机密 .env + 非交付目录名单，
+        // 与平台文件树只读端点同源——#27）
+        String excludes = Stream.concat(Stream.of(WorkspaceLayout.ENV_FILE),
+                        WorkspaceLayout.NON_DELIVERABLE_DIRS.stream())
+                .map(name -> "--exclude=./" + name)
+                .collect(Collectors.joining(" "));
+        String command = "tar czf - " + excludes + " -C " + WorkspaceLayout.ROOT + " .";
         try {
             Process p = new ProcessBuilder("docker", "exec", handle.containerName(),
                     "sh", "-c", command).start();

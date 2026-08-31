@@ -24,6 +24,10 @@ export const queryKeys = {
     list: () => ["projects", "list"] as const,
     /** 系统预览地址（生成收口后启用；run 完成信号 invalidate + iframe 重挂——#22）。 */
     preview: (id: string) => ["projects", "preview", id] as const,
+    /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
+    files: (id: string) => ["projects", "files", id] as const,
+    /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */
+    fileContent: (id: string, path: string) => ["projects", "file-content", id, path] as const,
   },
   /**
    * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件

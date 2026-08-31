@@ -34,6 +34,8 @@ import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppSe
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
@@ -380,6 +382,82 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------
+
+    @Test
+    void given_workspace_files_when_get_files_then_sorted_entries_returned() throws Exception {
+        when(queryAppService.files(100L)).thenReturn(new ProjectFilesResponse("100",
+                List.of(new ProjectFilesResponse.FileEntry("AGENTS.md", 7),
+                        new ProjectFilesResponse.FileEntry("docs/PRD.md", 12))));
+
+        performAsUser(get("/api/projects/100/files"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.files[0].path").value("AGENTS.md"))
+                .andExpect(jsonPath("$.data.files[0].size").value(7))
+                .andExpect(jsonPath("$.data.files[1].path").value("docs/PRD.md"))
+                .andExpect(jsonPath("$.data.files[1].size").value(12));
+    }
+
+    @Test
+    void given_unknown_project_when_get_files_then_prj_001_as_404() throws Exception {
+        when(queryAppService.files(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(get("/api/projects/404/files"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_text_file_when_get_content_then_path_and_body_returned() throws Exception {
+        when(queryAppService.fileContent(100L, "src/app.ts"))
+                .thenReturn(new ProjectFileContentResponse("src/app.ts", "export const a = 1;\n"));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "src/app.ts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.path").value("src/app.ts"))
+                .andExpect(jsonPath("$.data.content").value("export const a = 1;\n"));
+        verify(queryAppService).fileContent(100L, "src/app.ts");
+    }
+
+    @Test
+    void given_missing_file_when_get_content_then_prj_021_as_404() throws Exception {
+        when(queryAppService.fileContent(100L, "src/gone.ts"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "src/gone.ts"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("文件不存在"));
+    }
+
+    @Test
+    void given_non_viewable_path_when_get_content_then_prj_020_as_400() throws Exception {
+        // 非交付物/机密/逃逸路径在判定层拒绝：400 PRJ_020（工作区不被触达）
+        when(queryAppService.fileContent(100L, "data/pg/base.sql"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_PATH_INVALID));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "data/pg/base.sql"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不在可浏览范围"));
+    }
+
+    @Test
+    void given_oversized_or_binary_file_when_get_content_then_prj_022_023_as_400() throws Exception {
+        // 超大小上限（容器侧拦截不读取）与非文本：同 400 口径、错误码可分辨
+        when(queryAppService.fileContent(100L, "big.log"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_TOO_LARGE));
+        performAsUser(get("/api/projects/100/files/content").param("path", "big.log"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("文件太大，暂不支持在线查看"));
+
+        when(queryAppService.fileContent(100L, "logo.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_TEXTUAL));
+        performAsUser(get("/api/projects/100/files/content").param("path", "logo.png"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不是文本文件，暂不支持在线查看"));
     }
 
     // ---------- 指令区发言 / 问答卡作答（#19 需求环①） ----------

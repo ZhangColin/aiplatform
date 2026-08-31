@@ -165,7 +165,7 @@ export interface paths {
         put?: never;
         /**
          * 指令区发言（BA 访谈后续轮）
-         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001
+         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 判定后经 startFixRun 派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -380,6 +380,46 @@ export interface paths {
          * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，BA 的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目文件树（交付文件只读浏览）
+         * @description 交付文件视图 = 项目 dev 工作区剔除非交付物（data/、.platform/、node_modules/ 与 .env——与源码包同口径）后的文件清单：[{path, size}]，path 为工作区相对路径、按路径稳定排序，只列文件（目录由前端按路径段合成）。直读工作区实时状态——生成/修正 run 完成后即反映最新文件长出。项目不存在 404 PRJ_001
+         */
+        get: operations["files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 文本文件内容（文件模式点看）
+         * @description path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小：非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 NUL）400 PRJ_023。项目不存在 404 PRJ_001
+         */
+        get: operations["fileContent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -759,6 +799,35 @@ export interface components {
             content?: string;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        ApiResponseProjectFilesResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ProjectFilesResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        FileEntry: {
+            path?: string;
+            /** Format: int64 */
+            size?: number;
+        };
+        ProjectFilesResponse: {
+            projectId?: string;
+            files?: components["schemas"]["FileEntry"][];
+        };
+        ApiResponseProjectFileContentResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ProjectFileContentResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        ProjectFileContentResponse: {
+            path?: string;
+            content?: string;
         };
         ApiResponseMeResponse: {
             /** Format: int32 */
@@ -1287,6 +1356,52 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponsePrdResponse"];
+                };
+            };
+        };
+    };
+    files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectFilesResponse"];
+                };
+            };
+        };
+    };
+    fileContent: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectFileContentResponse"];
                 };
             };
         };

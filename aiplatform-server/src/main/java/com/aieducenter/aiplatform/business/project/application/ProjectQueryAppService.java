@@ -23,6 +23,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -30,6 +32,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -158,6 +161,68 @@ public class ProjectQueryAppService {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "PRD 读取结果畸形: " + result.stdout());
         }
+    }
+
+    /**
+     * 项目文件树（#27 文件模式）：一次 exec 列交付文件（find 源头剪枝非交付物，
+     * 与源码包同口径），解析为按路径稳定排序的条目——随生成/修正后的工作区
+     * 实时长出，无版本化。事务注解取舍同 {@link #prd}（exec 不进事务）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_002 环境故障
+     */
+    public ProjectFilesResponse files(Long projectId) {
+        Project project = loadProject(projectId);
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(ProjectFiles.listCommand()));
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "文件树读取失败: " + result.stderr());
+        }
+        List<ProjectFilesResponse.FileEntry> entries = ProjectFiles.parseEntries(result.stdout()).stream()
+                .map(entry -> new ProjectFilesResponse.FileEntry(entry.path(), entry.size()))
+                .toList();
+        return new ProjectFilesResponse(projectId.toString(), entries);
+    }
+
+    /**
+     * 文本文件内容（#27 文件模式「点看」）：{@code path} 为工作区相对路径，先过
+     * 可浏览判定（非交付物/逃逸/空白一律 400，不触工作区），再一次 exec 读取
+     * （大小上限在容器侧 cat 前拦截）。退出码语义：1 = 不存在、2 = 超限、
+     * 0 = 首行字节大小 + 余文正文；正文含 NUL 判非文本（无扩展名面，二进制可靠
+     * 信号）。事务注解取舍同 {@link #prd}。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_020 路径不可浏览；
+     *                              PRJ_021 文件不存在；PRJ_022 超大小上限；
+     *                              PRJ_023 非文本；WSP_002 环境故障
+     */
+    public ProjectFileContentResponse fileContent(Long projectId, String path) {
+        Project project = loadProject(projectId);
+        if (!ProjectFiles.isViewable(path)) {
+            throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
+        }
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(ProjectFiles.contentCommand(path)));
+        if (result.exitCode() == 1) {
+            throw new ApplicationException(ProjectMessage.FILE_NOT_FOUND);
+        }
+        if (result.exitCode() == 2) {
+            throw new ApplicationException(ProjectMessage.FILE_TOO_LARGE);
+        }
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "文件读取失败: " + result.stderr());
+        }
+        int newline = result.stdout().indexOf('\n');
+        if (newline < 0) {
+            // 大小首行缺失：printf 恒带换行，stat 成功时不可达，防御性如实暴露
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "文件读取结果畸形: " + result.stdout());
+        }
+        String content = result.stdout().substring(newline + 1);
+        if (content.indexOf('\0') >= 0) {
+            throw new ApplicationException(ProjectMessage.FILE_NOT_TEXTUAL);
+        }
+        return new ProjectFileContentResponse(path, content);
     }
 
     // ---------- 装载与过滤 ----------

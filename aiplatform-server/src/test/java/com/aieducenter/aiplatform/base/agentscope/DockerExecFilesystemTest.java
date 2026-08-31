@@ -32,12 +32,22 @@ class DockerExecFilesystemTest {
 
         final List<String> commands = new ArrayList<>();
         final List<byte[]> stdins = new ArrayList<>();
+        final List<Integer> timeouts = new ArrayList<>();
         Function<String, ExecOutput> responder = c -> new ExecOutput(1, new byte[0], "no script");
 
         @Override
         public ExecOutput run(String command, byte[] stdin) {
             commands.add(command);
             stdins.add(stdin);
+            return responder.apply(command);
+        }
+
+        @Override
+        public ExecOutput run(String command, byte[] stdin, int timeoutSeconds) {
+            // 2 参通道不经此（超时缺省断言只看 shell 面），双通道各自录制
+            commands.add(command);
+            stdins.add(stdin);
+            timeouts.add(timeoutSeconds);
             return responder.apply(command);
         }
 
@@ -301,5 +311,39 @@ class DockerExecFilesystemTest {
         fs.write(RuntimeContext.empty(), "/docs/it's.md", "内容");
 
         assertThat(exec.ran("cat > '/workspace/docs/it'\\''s.md'")).isTrue();
+    }
+
+    // ---------- shell 执行面（sandbox 接口，编码智能体命令通道） ----------
+
+    @Test
+    void given_shell_command_when_executed_then_passthrough_with_merged_streams() {
+        exec.responder = c -> new ExecOutput(3, "已安装 3 个包".getBytes(StandardCharsets.UTF_8), "npm warn");
+
+        var resp = fs.execute(RuntimeContext.empty(), "cd 'src' && npm install", 60);
+
+        assertThat(exec.commands).containsExactly("cd 'src' && npm install");
+        assertThat(resp.exitCode()).isEqualTo(3);
+        assertThat(resp.output()).isEqualTo("已安装 3 个包\nnpm warn");
+        assertThat(resp.truncated()).isFalse();
+    }
+
+    @Test
+    void given_shell_timeout_when_executed_then_seconds_flow_to_seam_and_default_applies() {
+        exec.responder = c -> ok("");
+
+        fs.execute(RuntimeContext.empty(), "npm install", 300);
+        fs.execute(RuntimeContext.empty(), "ls", null);
+
+        assertThat(exec.timeouts).containsExactly(300, 120);
+    }
+
+    @Test
+    void given_oversized_shell_output_when_executed_then_truncated() {
+        exec.responder = c -> ok("x".repeat(150_000));
+
+        var resp = fs.execute(RuntimeContext.empty(), "cat big.log", 10);
+
+        assertThat(resp.output()).hasSize(100_000);
+        assertThat(resp.truncated()).isTrue();
     }
 }

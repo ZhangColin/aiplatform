@@ -51,6 +51,9 @@ app:
     default-model: deepseek:deepseek-v4-flash
     default-system-prompt: 你是平台智能体。
     timeout: 2m
+    # 单 turn 迭代上限：内核缺省 10 会把编码 turn 掐断成 exceed_max_iters 假完成
+    # （依据与取值见 AgentscopeProperties#maxIters 注释——单点事实在此不重述）。
+    max-iters: 300
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   workspace:

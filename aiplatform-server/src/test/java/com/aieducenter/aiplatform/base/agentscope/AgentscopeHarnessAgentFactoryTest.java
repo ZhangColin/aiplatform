@@ -131,7 +131,8 @@ class AgentscopeHarnessAgentFactoryTest {
         assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentStateStore stateStore = new InMemoryAgentStateStore();
-        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS);
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                stateStore, TOOLKITS, new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null));

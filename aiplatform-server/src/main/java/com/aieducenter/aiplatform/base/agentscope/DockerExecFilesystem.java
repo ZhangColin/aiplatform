@@ -4,6 +4,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.harness.agent.filesystem.AbstractFilesystem;
 import io.agentscope.harness.agent.filesystem.model.EditResult;
+import io.agentscope.harness.agent.filesystem.model.ExecuteResponse;
 import io.agentscope.harness.agent.filesystem.model.FileData;
 import io.agentscope.harness.agent.filesystem.model.FileDownloadResponse;
 import io.agentscope.harness.agent.filesystem.model.FileInfo;
@@ -14,11 +15,11 @@ import io.agentscope.harness.agent.filesystem.model.GrepResult;
 import io.agentscope.harness.agent.filesystem.model.LsResult;
 import io.agentscope.harness.agent.filesystem.model.ReadResult;
 import io.agentscope.harness.agent.filesystem.model.WriteResult;
+import io.agentscope.harness.agent.filesystem.sandbox.AbstractSandboxFilesystem;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.PathMatcher;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -31,9 +32,13 @@ import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 项目 dev 工作区文件面：{@link AbstractFilesystem} 的 docker exec 实现——全部
- * 文件操作落在既有 dev 容器的 {@code /workspace}（Docker 常开口径），写入即进源码包
- * （平台文件树只读端点同视图），不新建容器、不改容器拓扑。
+ * 项目沙箱工作区文件面 + 命令面：{@link AbstractSandboxFilesystem} 的 docker exec
+ * 实现——全部文件操作与 shell 执行落在既有沙箱容器的 {@code /workspace}（Docker
+ * 常开口径），写入即进源码包（平台文件树只读端点同视图），不新建容器、不改容器拓扑。
+ *
+ * <p><b>sandbox 接口是编码智能体的命脉</b>：HarnessAgent 只在 AbstractFilesystem
+ * 实现为 {@link AbstractSandboxFilesystem} 时注册 ShellExecuteTool——只实现文件面
+ * 会让编码智能体没有命令执行工具（装依赖/起服务/收口自检全部无从谈起）。</p>
  *
  * <p>语义对齐 AgentScope 本地文件系统：路径为工作区锚定形（{@code /docs/PRD.md}，
  * 根 = 容器工作区根；{@code ..} 阻断）；ls 缺失目录回空、write 对既有文件拒绝、
@@ -41,24 +46,37 @@ import lombok.extern.slf4j.Slf4j;
  * 匹配（{@code **} 跨目录，不带零段特例）；grep 结果按 {@code 路径:行:文本} 解析，
  * 文件名含冒号会错位（Phase A 项目工作区可接受）。</p>
  *
- * <p>{@link ExecCommand} 是执行缝（单测注入替身）；每条命令带超时保护，容器不在
- * （docker exec 非零退出）即以 fail 结果如实暴露，不抛出。</p>
+ * <p>{@link ExecCommand} 是执行缝（单测注入替身）；每条命令带超时保护（文件面短
+ * 命令 30s、shell 面按调用方秒数），容器不在（docker exec 非零退出）即以 fail
+ * 结果如实暴露，不抛出。</p>
  */
 @Slf4j
-public final class DockerExecFilesystem implements AbstractFilesystem {
+public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
 
-    private static final Duration EXEC_TIMEOUT = Duration.ofSeconds(30);
+    /** 文件面短命令缺省超时（秒；shell 面按调用方秒数，缺省另见 SHELL_DEFAULT）。 */
+    private static final int FILE_EXEC_TIMEOUT_SECONDS = 30;
     /** read 分页缺省与 LocalFilesystem 同口径（AbstractFilesystem 契约注释）。 */
     private static final int READ_DEFAULT_LINES = 2000;
+    /** shell 执行缺省超时（秒）：调用方未带 timeout 时的兜底（编码长命令）。 */
+    private static final int SHELL_DEFAULT_TIMEOUT_SECONDS = 120;
+    /** shell 输出上限（字符）：超出截断置 truncated（防超长输出打爆模型上下文）。 */
+    private static final int SHELL_OUTPUT_LIMIT = 100_000;
 
     private final ExecCommand exec;
+    private final String id;
 
     public DockerExecFilesystem(String containerName) {
-        this(new DockerExecCommand(containerName, AgentWorkspace.ProjectDev.CONTAINER_ROOT));
+        this(new DockerExecCommand(containerName, AgentWorkspace.ProjectDev.CONTAINER_ROOT),
+                "docker-exec:" + containerName);
     }
 
     DockerExecFilesystem(ExecCommand exec) {
+        this(exec, "docker-exec");
+    }
+
+    private DockerExecFilesystem(ExecCommand exec, String id) {
         this.exec = exec;
+        this.id = id;
     }
 
     /**
@@ -68,6 +86,14 @@ public final class DockerExecFilesystem implements AbstractFilesystem {
     public interface ExecCommand {
 
         ExecOutput run(String command, byte[] stdin);
+
+        /**
+         * 超时感知通道（shell 执行用，秒）：替身缺省回落 2 参形，真实实现
+         * {@link DockerExecCommand} 按值限时（编码长命令远超文件面 30s 缺省）。
+         */
+        default ExecOutput run(String command, byte[] stdin, int timeoutSeconds) {
+            return run(command, stdin);
+        }
     }
 
     /** 一次 exec 的结果（stdout 字节保真，文本/二进制由调用方解释）。 */
@@ -329,6 +355,35 @@ public final class DockerExecFilesystem implements AbstractFilesystem {
                 && exec.run("test -e " + sh(containerPath), null).ok();
     }
 
+    @Override
+    public String id() {
+        return id;
+    }
+
+    /**
+     * shell 命令执行（ShellExecuteTool 通道）：命令由 harness 侧拼好（可含
+     * {@code cd <相对workdir> && …}，docker exec -w 已锚定工作区根），原样执行、
+     * 不再包一层引号；stdout/stderr 合并输出（harness 以 Exit code + 全文回给模型），
+     * 超限截断置 truncated。退出码如实透传——失败表达归模型侧，不在此改写。
+     */
+    @Override
+    public ExecuteResponse execute(RuntimeContext runtimeContext, String command,
+            Integer timeoutSeconds) {
+        int timeout = timeoutSeconds != null && timeoutSeconds > 0
+                ? timeoutSeconds : SHELL_DEFAULT_TIMEOUT_SECONDS;
+        ExecOutput out = exec.run(command, null, timeout);
+        String stdout = new String(out.stdout(), StandardCharsets.UTF_8);
+        String output = out.stderr() == null || out.stderr().isBlank()
+                ? stdout
+                : stdout + (stdout.isBlank() ? "" : "\n") + out.stderr();
+        boolean truncated = false;
+        if (output.length() > SHELL_OUTPUT_LIMIT) {
+            output = output.substring(0, SHELL_OUTPUT_LIMIT);
+            truncated = true;
+        }
+        return new ExecuteResponse(output, out.exitCode(), truncated);
+    }
+
     // ---------- 内部 ----------
 
     /** 覆盖写（write 的 create-only 语义之外的内通道：edit 回写 / upload）。 */
@@ -446,6 +501,11 @@ public final class DockerExecFilesystem implements AbstractFilesystem {
 
         @Override
         public ExecOutput run(String command, byte[] stdin) {
+            return run(command, stdin, FILE_EXEC_TIMEOUT_SECONDS);
+        }
+
+        @Override
+        public ExecOutput run(String command, byte[] stdin, int timeoutSeconds) {
             String[] cmd = new String[prefix.length + 1];
             System.arraycopy(prefix, 0, cmd, 0, prefix.length);
             cmd[prefix.length] = command;
@@ -470,7 +530,7 @@ public final class DockerExecFilesystem implements AbstractFilesystem {
                     });
                 }
                 byte[] stdout = p.getInputStream().readAllBytes();
-                if (!p.waitFor(EXEC_TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
+                if (!p.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                     p.destroyForcibly();
                     return new ExecOutput(124, new byte[0], "docker exec 超时");
                 }

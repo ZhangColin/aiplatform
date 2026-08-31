@@ -45,9 +45,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
-            AgentToolkitSupplier toolkitSupplier) {
+            AgentToolkitSupplier toolkitSupplier, AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace) ->
-                buildAgent(stateStore, toolkitSupplier, name, sysPrompt, modelString, workspace));
+                buildAgent(stateStore, toolkitSupplier, name, sysPrompt, modelString, workspace,
+                        properties.getMaxIters()));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -81,13 +82,16 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, String name,
-            String sysPrompt, String modelString, AgentWorkspace workspace) {
+            String sysPrompt, String modelString, AgentWorkspace workspace, Integer maxIters) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
                 .model(modelString)
                 .stateStore(stateStore)
                 .toolkit(toolkitSupplier.toolkitFor(workspace));
+        if (maxIters != null) {
+            builder.maxIters(maxIters);
+        }
         switch (workspace) {
             case AgentWorkspace.Local local -> {
                 if (local.root() != null) {

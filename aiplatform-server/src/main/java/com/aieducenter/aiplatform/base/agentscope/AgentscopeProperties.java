@@ -30,6 +30,15 @@ public class AgentscopeProperties {
     /** 单轮对话超时 */
     private Duration timeout = Duration.ofMinutes(2);
 
+    /**
+     * 单 turn 迭代上限（ReAct 模型调用次数）。null = 不覆盖框架缺省——HarnessAgent
+     * 内核缺省 10：对话轮够用（BA 每轮以 ask_user 挂起收尾，远到不了 10），编码
+     * turn 远不够（#25 活体对照实测：一次中等 PRD 的系统生成单 turn 需约 160 次迭代，
+     * 10 次即被掐断成 exceed_max_iters「假完成」）。取值给足余量（实测需求 ×2 弱），
+     * 失控保护以墙钟为主界（app.generation.timeout），本上限只作次级护栏。
+     */
+    private Integer maxIters;
+
     public String getAgentName() {
         return agentName;
     }
@@ -68,5 +77,13 @@ public class AgentscopeProperties {
 
     public void setTimeout(Duration timeout) {
         this.timeout = timeout;
+    }
+
+    public Integer getMaxIters() {
+        return maxIters;
+    }
+
+    public void setMaxIters(Integer maxIters) {
+        this.maxIters = maxIters;
     }
 }

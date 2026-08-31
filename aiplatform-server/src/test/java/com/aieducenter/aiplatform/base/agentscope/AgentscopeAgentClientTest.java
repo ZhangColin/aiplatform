@@ -19,8 +19,12 @@ import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.ExceedMaxItersEvent;
 import io.agentscope.core.event.ModelCallEndEvent;
+import io.agentscope.core.event.ModelCallStartEvent;
 import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallDeltaEvent;
+import io.agentscope.core.event.ToolCallEndEvent;
+import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatUsage;
@@ -92,6 +96,12 @@ class AgentscopeAgentClientTest {
                 usage, null, Map.of());
     }
 
+    /** 直播形命令（编码 run 姿态）：同要素 + live 开关。 */
+    private AgentCommand liveCommand() {
+        return new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
+                null, null, Map.of(), null, true);
+    }
+
     private void givenFirstSeen(boolean firstSeen) {
         when(stateStore.exists(any(), any())).thenReturn(!firstSeen);
     }
@@ -133,6 +143,69 @@ class AgentscopeAgentClientTest {
         // 回复文本 = 增量拼接
         assertThat(reply.runId()).isEqualTo("run-1");
         assertThat(reply.text()).isEqualTo("你好呀");
+    }
+
+    @Test
+    void given_live_command_when_converse_then_live_frames_stream_and_tail_flushed_before_finish() {
+        givenFirstSeen(true);
+        givenStream(
+                new ModelCallStartEvent("r-1"),
+                new TextBlockDeltaEvent("r-1", "b-1", "正在准备演示数据。"),
+                new ToolCallStartEvent("r-1", "tc-1", "write_file"),
+                new ToolCallDeltaEvent("r-1", "tc-1", "write_file",
+                        "{\"path\":\"src/pages/订单管理.tsx\"}"),
+                new ToolCallEndEvent("r-1", "tc-1", "write_file"),
+                new TextBlockDeltaEvent("r-1", "b-2", "马上就好"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(liveCommand(), frames::add);
+
+        // 直播帧与透传帧同一 sink 同一流：live-step / live-text（句读成段）/
+        // live-action（写文件人话行）/ live-text（run 收尾尾段），尾段先于 task-finish
+        assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
+                AgentEventTypes.LIVE_STEP, AgentEventTypes.LIVE_TEXT,
+                AgentEventTypes.LIVE_ACTION, AgentEventTypes.LIVE_TEXT,
+                AgentEventTypes.TASK_FINISH);
+        AgentEvent tailFrame = frames.stream()
+                .filter(f -> f.type().equals(AgentEventTypes.LIVE_TEXT)
+                        && "马上就好".equals(f.payload().get("text")))
+                .findFirst().orElseThrow();
+        assertThat(frames.indexOf(tailFrame)).isLessThan(frames.stream().map(AgentEvent::type)
+                .toList().indexOf(AgentEventTypes.TASK_FINISH));
+        assertThat(frames.stream().filter(f -> f.type().equals(AgentEventTypes.LIVE_ACTION))
+                .findFirst().orElseThrow().payload())
+                .containsEntry("action", "正在编写【订单管理】");
+    }
+
+    @Test
+    void given_live_command_when_stream_fails_then_tail_flushed_before_error_frame() {
+        givenFirstSeen(true);
+        when(factory.obtain(any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "中断前的自述"))
+                        .concatWith(Flux.error(new IllegalStateException("断流"))));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        assertThatThrownBy(() -> client.converse(liveCommand(), frames::add));
+
+        assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
+                AgentEventTypes.LIVE_TEXT, AgentEventTypes.ERROR);
+    }
+
+    @Test
+    void given_plain_command_when_converse_then_no_live_frames() {
+        // BA 对话不开直播（对话不流式不留痕）：同一事件流无 live-* 帧
+        givenFirstSeen(true);
+        givenStream(
+                new ModelCallStartEvent("r-1"),
+                new TextBlockDeltaEvent("r-1", "b-1", "访谈自述。"),
+                new ToolCallEndEvent("r-1", "tc-1", "command"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(command(null, null), frames::add);
+
+        assertThat(frames.stream().map(AgentEvent::type))
+                .noneMatch(type -> type.startsWith("live-"));
     }
 
     @Test

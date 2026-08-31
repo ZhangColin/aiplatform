@@ -5,6 +5,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
+import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import type { SseEvent } from "./connection";
@@ -85,6 +86,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const store = useAgentStreamsStore.getState();
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
+  const live = useLiveStore.getState();
 
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
@@ -176,6 +178,35 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
+        return;
+      }
+      // 直播帧（#23）：只进直播面 store（直播侧栏唯一消费面——前端不耦合引擎
+      // 事件格式；帧仅编码 run 发射，无需角色过滤）
+      case "live-text": {
+        const { payload } = platform;
+        live.noteLiveSegment(payload.projectId, payload.runId, {
+          kind: "text",
+          id: event.id,
+          text: payload.text,
+        });
+        return;
+      }
+      case "live-action": {
+        const { payload } = platform;
+        live.noteLiveSegment(payload.projectId, payload.runId, {
+          kind: "action",
+          id: event.id,
+          action: payload.action,
+        });
+        return;
+      }
+      case "live-step": {
+        const { payload } = platform;
+        live.noteLiveSegment(payload.projectId, payload.runId, {
+          kind: "step",
+          id: event.id,
+          step: payload.step,
+        });
         return;
       }
     }

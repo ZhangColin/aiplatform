@@ -18,6 +18,12 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
 }));
 
+// 直播侧栏装配哨兵（#23）：OutputsArea 布局挂 LiveRail（跨模式常驻）；其内部
+// 呈现与生命周期归 live-panel.test（client render 覆盖）
+vi.mock("./live-panel", () => ({
+  LiveRail: () => <div data-testid="live-rail-stub" />,
+}));
+
 function renderArea(tab = "files") {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
@@ -50,5 +56,11 @@ describe("OutputsArea · 成果区三模式（#20 文件模式 / #22 系统模�
     expect(html).toContain("你的系统");
     expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
     expect(html).not.toContain("<iframe");
+  });
+
+  it("直播侧栏挂进成果区布局（跨模式常驻，#23）", () => {
+    const html = renderArea();
+
+    expect(html).toContain('data-testid="live-rail-stub"');
   });
 });

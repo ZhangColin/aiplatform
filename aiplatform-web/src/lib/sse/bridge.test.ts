@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
 import { useGenerationStore } from "@/lib/store/generation";
+import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { queryKeys } from "@/lib/api/keys";
 
@@ -411,6 +412,49 @@ describe("bridge · agent 流 → generation store（生成面，#22）", () => 
     dispatchAgentEvent(agentQc, agentEvent("task-finish", { projectId: "p1", runId: "runX", sessionId: "coder-p1", finish: "end" }, "runX:9"));
 
     expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
+  });
+});
+
+describe("bridge · agent 流 → live store（直播面，#23）", () => {
+  beforeEach(() => {
+    useLiveStore.setState({ lives: {} });
+  });
+
+  function agentEvent(type: string, payload: Record<string, unknown>, id: string): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts: "" }) };
+  }
+
+  it("live-* 帧按 run 落直播段；engine 透传帧不进直播面（不耦合引擎格式）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "live-step",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
+      "run1:2",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "live-text",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", text: "正在准备演示数据。" },
+      "run1:3",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "live-action",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", action: "正在编写【订单管理】" },
+      "run1:4",
+    ));
+    // 引擎透传帧同流到达：直播面不收（text 增量是引擎格式，直播段已由服务端成型）
+    dispatchAgentEvent(agentQc, agentEvent(
+      "text",
+      { projectId: "p1", runId: "run1", data: { delta: "raw", blockId: "b1" } },
+      "run1:5",
+    ));
+
+    expect(useLiveStore.getState().lives["p1"]).toEqual({
+      runId: "run1",
+      segments: [
+        { kind: "step", id: "run1:2", step: 1 },
+        { kind: "text", id: "run1:3", text: "正在准备演示数据。" },
+        { kind: "action", id: "run1:4", action: "正在编写【订单管理】" },
+      ],
+    });
   });
 });
 

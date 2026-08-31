@@ -34,6 +34,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
+ * <p><b>编码 run 开直播</b>（#23 生成环②）：命令带 {@code live}——过程帧外并产
+ * 直播帧（智能体自述逐段 + 工具动作人话行 + 步骤），前端直播侧栏消费；BA 对话
+ * 不开（对话不流式不留痕）。</p>
+ *
  * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
  * （幂等覆写，内容平台所有）——编码智能体经 harness 工作区上下文自读；
  * PRD（docs/PRD.md）由 BA 先前写出，同样是智能体自读，平台不搬运。</p>
@@ -171,7 +175,8 @@ public class GenerationAppService {
                             Map.of(ProjectQueryAppService.DIM_ROLE, RolePreset.CODER.name())),
                     workspaceId,
                     Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString()),
-                    properties.getTimeout());
+                    properties.getTimeout(),
+                    /* live= */ true);
             try {
                 agentClient.converse(command, streamBridge.sink(projectId));
                 markGenerated(projectId);

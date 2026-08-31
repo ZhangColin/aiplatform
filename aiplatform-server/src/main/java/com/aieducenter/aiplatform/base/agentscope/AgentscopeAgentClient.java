@@ -33,7 +33,9 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * ——AgentScope 事件经 {@link AgentscopeEventMapper}（映射表单点）转平台智能体流帧
  * 逐个回调 sink（task-start/session-created 开场、text/reasoning/tool/step-* 过程、
  * task-finish/error 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂
- * 构建/工作区解析——同样经 error 帧表达，异步轨道起跑失败不零帧死寂）；模型调用
+ * 构建/工作区解析——同样经 error 帧表达，异步轨道起跑失败不零帧死寂）；命令开
+ * {@code live}（编码 run 姿态，#23）时同一事件流另经 {@link AgentscopeLiveMapper}
+ * 逐段产直播帧（live-text/live-action/live-step，收口帧前出尾段）；模型调用
  * 事件（ReAct 每迭代一条 ModelCallEnd）五桶累积，对话结束（含失败轮，已耗 token
  * 如实计量）按命令的 usageContext 上报恰一条 UsageEvent（幂等键
  * agent-usage-{runId}[-{replyId}]，engine=agentscope；归属为空不发明、零用量不报）。
@@ -129,7 +131,7 @@ public class AgentscopeAgentClient {
         PreparedTurn prepared;
         try {
             prepared = prepareFor(resume.runId(), resume.sessionId(), resume.userId(),
-                    resume.modelString(), resume.systemPrompt(), resume.workspaceId());
+                    resume.modelString(), resume.systemPrompt(), resume.workspaceId(), false);
         }
         catch (RuntimeException e) {
             // 同口径补口（resume 跑在异步轨道，异常被吞只记日志）：前段失败必须先发
@@ -176,9 +178,9 @@ public class AgentscopeAgentClient {
     private record TurnResult(String text, Throwable error) {
     }
 
-    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 映射表）。 */
+    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 映射表 + 可选直播映射表）。 */
     private record PreparedTurn(ModelRef modelRef, HarnessAgent agent, RuntimeContext ctx,
-            AgentscopeEventMapper mapper) {
+            AgentscopeEventMapper mapper, AgentscopeLiveMapper live) {
     }
 
     /**
@@ -187,7 +189,8 @@ public class AgentscopeAgentClient {
      */
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared = prepareFor(command.runId(), command.sessionId(), command.userId(),
-                command.modelString(), command.systemPrompt(), command.workspaceId());
+                command.modelString(), command.systemPrompt(), command.workspaceId(),
+                command.live());
         sink.accept(AgentscopeEventMapper.taskStart(command.runId(), command.prompt(),
                 prepared.modelRef().toModelString(), ENGINE));
         if (firstSeen(command.userId(), command.sessionId())) {
@@ -199,10 +202,11 @@ public class AgentscopeAgentClient {
 
     /**
      * 前段公共体（converse 首轮与 resume 续跑共用）：模型解析（配置兜底）→ 工作区
-     * 解析 → agent 工厂构建 → 会话上下文与映射表组装。
+     * 解析 → agent 工厂构建 → 会话上下文与映射表组装；{@code live} 开则另挂直播
+     * 映射表（编码 run 姿态，#23——续跑面暂无直播形态，恒关）。
      */
     private PreparedTurn prepareFor(String runId, String sessionId, String userId,
-            String modelString, String systemPrompt, String workspaceId) {
+            String modelString, String systemPrompt, String workspaceId, boolean live) {
         ModelRef modelRef = ModelRef.parse(modelString != null
                 ? modelString : properties.getDefaultModel());
         String sysPrompt = systemPrompt != null
@@ -211,7 +215,8 @@ public class AgentscopeAgentClient {
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
                 modelRef.toModelString(), workspace);
         return new PreparedTurn(modelRef, agent, runtimeContext(sessionId, userId),
-                new AgentscopeEventMapper(runId, sessionId, ENGINE));
+                new AgentscopeEventMapper(runId, sessionId, ENGINE),
+                live ? new AgentscopeLiveMapper(runId, sessionId, ENGINE) : null);
     }
 
     /**
@@ -230,9 +235,11 @@ public class AgentscopeAgentClient {
         AgentscopeEventMapper mapper = prepared.mapper();
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
-                    .doOnNext(event -> handleEvent(event, mapper, sink, text, usage, finish,
-                            suspension))
+                    .doOnNext(event -> handleEvent(event, mapper, prepared.live(), sink, text,
+                            usage, finish, suspension))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
+            // 直播尾段先出（收口/挂起帧前），挂起轮同理——解说不因流形态丢尾
+            flushLive(prepared.live(), sink);
             if (suspension.get() == null) {
                 sink.accept(AgentscopeEventMapper.taskFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
@@ -240,6 +247,7 @@ public class AgentscopeAgentClient {
             return new TurnResult(text.toString(), null);
         }
         catch (Exception e) {
+            flushLive(prepared.live(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             return new TurnResult(text.toString(), e);
         }
@@ -274,8 +282,8 @@ public class AgentscopeAgentClient {
     }
 
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
-            AgentscopeEventMapper mapper, Consumer<AgentEvent> sink, StringBuilder text,
-            AtomicReference<TokenUsage> usage, AtomicReference<String> finish,
+            AgentscopeEventMapper mapper, AgentscopeLiveMapper live, Consumer<AgentEvent> sink,
+            StringBuilder text, AtomicReference<TokenUsage> usage, AtomicReference<String> finish,
             AtomicReference<RequireUserConfirmEvent> suspension) {
         if (event instanceof TextBlockDeltaEvent delta) {
             text.append(delta.getDelta());
@@ -293,6 +301,17 @@ public class AgentscopeAgentClient {
         AgentEvent frame = mapper.map(event);
         if (frame != null) {
             sink.accept(frame);
+        }
+        // 直播帧（live 开才有）：同一 sink 同一流逐段产出（#23）
+        if (live != null) {
+            live.map(event).forEach(sink);
+        }
+    }
+
+    /** 直播收尾：余段出帧（无直播/已空则 no-op，幂等）。 */
+    private static void flushLive(AgentscopeLiveMapper live, Consumer<AgentEvent> sink) {
+        if (live != null) {
+            live.flush().forEach(sink);
         }
     }
 

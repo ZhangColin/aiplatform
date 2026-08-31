@@ -54,6 +54,9 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `task-finish` | 平台 | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等） |
 | `wait-raised` | 平台 | `projectId` `runId` `sessionId` `kind` `summary` `engineRef` `data` | 智能体挂起（kind=QUESTION=向用户提问 / PERMISSION=工具确认）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
 | `task-retrying` | 平台 | `projectId` `runId` `attempt` `message` | 编码 run 自动重试（生成编排层发射，[#22](https://github.com/ZhangColin/aiplatform/issues/22) 新增）：一次尝试失败后、下一尝试下发前——`runId` 锚定失败的那次尝试（帧序 `error → task-retrying → 下一尝试 task-start`）；`message` 为用户侧话术「遇到问题，正在重试」；超限后不再发，末次 `error` 即终态（用户重新发起兜底） |
+| `live-text` | 平台 | `projectId` `runId` `sessionId` `engine` `text` | 直播·智能体自述解说段（[#23](https://github.com/ZhangColin/aiplatform/issues/23) 新增，编码 run 专属）：`text` 为**完整段非增量**——服务端逐段成型（句读 / 文本块变 / 步骤与动作边界 / 长度上限切段），run 收口帧前出尾段 |
+| `live-action` | 平台 | `projectId` `runId` `sessionId` `engine` `action` | 直播·动作摘要行：工具动作 → 人话模板（`write_file`/`edit_file` → 「正在编写【文件名】」、`command` → 「正在运行命令」）；读类工具与思考、diff 不播 |
+| `live-step` | 平台 | `projectId` `runId` `sessionId` `engine` `step` | 直播·步骤段：`step` 为 run 内序号（1 起，模型调用边界），前端呈现为段间「第 N 步」分隔 |
 | `text` | 引擎透传 | … + `data` | 最终文本 |
 | `reasoning` | 引擎透传 | … + `data` | 思考增量 |
 | `patch` | 引擎透传 | … + `data`（`path` `diff` `edits`） | 代码补丁 |
@@ -61,6 +64,8 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `step-start` / `step-finish` | 引擎透传 | … + `data` | 步骤边界 |
 
 > **智能体事件桥**：AgentScope HarnessAgent 的事件经单点映射表（base.agentscope 的 `AgentscopeEventMapper`）转本表帧型，走同一通道同一信封——`engine=agentscope`，帧序 `task-start → session-created（会话首见）→ 过程帧 → task-finish/error`。`text`/`reasoning` 帧为增量（`data.delta`，前端按序拼接）；`tool` 帧 `data` 为 `{toolCallId, toolName, phase: start|end}`，`step-*` 对应模型调用边界。挂起（`RequireUserConfirmEvent`，含 ask_user 提问）→ `wait-raised`（`kind` 按待确认工具判：`ask_user` = QUESTION，其余 = PERMISSION；QUESTION 的 `data.questions` 为前端问答卡投影：`[{header, question, multiple(ask_user 入参投影，缺省 false), custom(恒 true), options[{label}]}]`，`summary` 取问题文本）；挂起轮不发 `task-finish`（软终点，等答复续跑后收口），答复续跑归业务编排（问答作答通道，需求环落位 REST 面）——从项目侧事实重建恢复私货 + 挂起帧 `data.toolCalls` 重建 ConfirmResult；会话状态落 PostgreSQL（`cat_agent_state` 承载全部智能体会话），平台重启后按会话标识恢复续跑。
+
+> **直播帧生产与消费口径**（[#23](https://github.com/ZhangColin/aiplatform/issues/23)）：`live-*` 三型是平台直播词汇表（成果区右侧栏面向客户的解说广播），由 base.agentscope 的 `AgentscopeLiveMapper`（直播映射表单点，`AgentCommand.live` 开关——仅编码 run 生成/修正打开）从同一 AgentScope 事件流逐段产出；前端直播侧栏**只消费 `live-*` + run 生命周期平台事件**，不耦合引擎透传事件格式。解说生产 = 智能体自述为主（CODER 角色卡过程解说条款）+ 工具动作人话模板兜底；思考与 diff 不播。直播随 run 生命周期呈现：run 开始侧栏自动展开、结束自动收起，收起即逝、无历史回看；刷新页面按 `?projectId=` 新连接补缓冲帧续看进行中 run（replay 只补当前 run 断线期间的帧——直播帧与过程帧同一缓冲同一口径）。
 
 > 字段表为初版，随片 2 / 片 5 spec 细化；信封与名册的任何变更即改本文。
 

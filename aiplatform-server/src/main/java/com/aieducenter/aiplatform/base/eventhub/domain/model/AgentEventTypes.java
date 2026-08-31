@@ -88,6 +88,28 @@ public final class AgentEventTypes {
     /** task-finish 的结煞语键（end / exceed_max_iters 等）。 */
     public static final String FINISH_FIELD = "finish";
 
+    // ---------- 直播词汇（#23 生成环②；编码 run 的客户面解说广播） ----------
+    // 前端直播侧栏只消费本组帧（+ run 生命周期平台事件），不耦合引擎透传事件格式；
+    // 帧由 base.agentscope 的直播 mapper 逐段生产（SSE事件清单·通道二直播行）。
+
+    /** 直播·智能体自述解说段（服务端逐段成型——句读/块变/边界切分，一段一帧完整文本）。 */
+    public static final String LIVE_TEXT = "live-text";
+
+    /** 直播·动作摘要行（工具动作 → 人话模板，如「正在编写【订单管理】」）。 */
+    public static final String LIVE_ACTION = "live-action";
+
+    /** 直播·步骤段（run 内步骤序号，1 起）。 */
+    public static final String LIVE_STEP = "live-step";
+
+    /** live-text 的段文本键（完整段，非增量）。 */
+    public static final String LIVE_TEXT_FIELD = "text";
+
+    /** live-action 的人话动作键。 */
+    public static final String LIVE_ACTION_FIELD = "action";
+
+    /** live-step 的步骤序号键（1 起）。 */
+    public static final String LIVE_STEP_FIELD = "step";
+
     private AgentEventTypes() {
     }
 }

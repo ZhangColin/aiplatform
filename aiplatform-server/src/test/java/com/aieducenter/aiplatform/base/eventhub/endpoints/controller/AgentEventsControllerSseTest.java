@@ -174,6 +174,56 @@ class AgentEventsControllerSseTest {
         assertThat(client.nextNonCommentLine(1500)).isNull();
     }
 
+    /**
+     * 直播断线补帧（#23 生成环②）：编码 run 进行中用户刷新页面——直播帧在零订阅
+     * 期间发射进缓冲，工作台就绪后以新连接（无 Last-Event-ID）按 ?projectId=
+     * 订阅，当前 run 的直播帧按原序原 id 补达（续看进行中 run）；别项目帧不泄漏。
+     */
+    @Test
+    void given_live_frames_before_connect_when_subscribe_by_project_then_replayed_in_order()
+            throws Exception {
+        // 零订阅窗口内的当前 run 帧（直播段 + 夹在其间的过程帧真实形态）
+        appService.publish("live-step", Map.of(
+                "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
+                "engine", "agentscope", "step", 1));
+        appService.publish("live-text", Map.of(
+                "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
+                "engine", "agentscope", "text", "正在准备演示数据。"));
+        appService.publish("live-action", Map.of(
+                "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
+                "engine", "agentscope", "action", "正在编写【订单管理】"));
+        appService.publish("live-text", Map.of(
+                "projectId", "24", "runId", "run-other", "sessionId", "coder-24",
+                "engine", "agentscope", "text", "别家项目的帧"));
+
+        SseClient client = connect("?projectId=23");
+
+        // 补帧按发射序、id 取 runId 流（直播帧与过程帧同一 id 空间）；别项目被过滤
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:1");
+        JsonNode stepFrame = nextFrameEnvelope(client);
+        assertThat(stepFrame.get("type").asText()).isEqualTo("live-step");
+        assertThat(stepFrame.get("payload").get("step").asInt()).isEqualTo(1);
+
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:2");
+        JsonNode narration = nextFrameEnvelope(client);
+        assertThat(narration.get("type").asText()).isEqualTo("live-text");
+        assertThat(narration.get("payload").get("text").asText()).isEqualTo("正在准备演示数据。");
+
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:3");
+        JsonNode action = nextFrameEnvelope(client);
+        assertThat(action.get("type").asText()).isEqualTo("live-action");
+        assertThat(action.get("payload").get("action").asText()).isEqualTo("正在编写【订单管理】");
+
+        // run-other（项目 24）不泄漏：随后无帧
+        assertThat(client.nextNonCommentLine(1500)).isNull();
+    }
+
+    /** 已读过 id 行后读完整帧（event 行 + data 行）并解析信封。 */
+    private JsonNode nextFrameEnvelope(SseClient client) throws Exception {
+        assertThat(client.nextNonCommentLine()).isEqualTo("event:event");
+        return objectMapper.readTree(client.nextNonCommentLine().substring("data:".length()));
+    }
+
     /** 空串头视同无值（新连接）：空 Last-Event-ID 无信息量——按新连接补发，不吞错误卡。 */
     @Test
     void given_frames_before_connect_when_subscribe_with_blank_last_event_id_then_replayed()

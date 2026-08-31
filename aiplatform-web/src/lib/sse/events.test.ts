@@ -115,6 +115,27 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it.each([
+    {
+      type: "live-text",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", text: "正在准备演示数据。" },
+    },
+    {
+      type: "live-action",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", action: "正在编写【订单管理】" },
+    },
+    {
+      type: "live-step",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", step: 2 },
+    },
+  ] as const)("直播帧 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
+    // 期望值来自正本「通道二」live-* 行（#23：编码 run 专属直播词汇）
+    const env = parseSseEnvelope(JSON.stringify({ ...frame, ts: "" }));
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject(frame);
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it("引擎透传事件：data 为引擎 part 原样，字符串 type 照收", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

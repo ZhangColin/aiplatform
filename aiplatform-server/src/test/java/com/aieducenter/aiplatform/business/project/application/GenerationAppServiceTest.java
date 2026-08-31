@@ -123,6 +123,8 @@ class GenerationAppServiceTest {
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).containsEntry("role", "CODER");
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
+        // 编码 run 开直播（#23）：过程帧外并产直播帧；BA 对话命令不带（对话不流式）
+        assertThat(value.live()).isTrue();
     }
 
     @Test

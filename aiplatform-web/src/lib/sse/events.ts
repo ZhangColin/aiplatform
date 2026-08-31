@@ -117,6 +117,21 @@ export type PlatformAgentEvent =
        */
       type: "task-retrying";
       payload: AgentPayload & { attempt: number; message: string };
+    }
+  | {
+      /** 直播·智能体自述解说段（#23，编码 run 专属）：`text` 为完整段非增量（服务端逐段成型）。 */
+      type: "live-text";
+      payload: AgentPayload & { text: string };
+    }
+  | {
+      /** 直播·动作摘要行（#23）：工具动作 → 人话（如「正在编写【订单管理】」）。 */
+      type: "live-action";
+      payload: AgentPayload & { action: string };
+    }
+  | {
+      /** 直播·步骤段（#23）：run 内步骤序号（1 起），呈现为「第 N 步」分隔。 */
+      type: "live-step";
+      payload: AgentPayload & { step: number };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -127,6 +142,9 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "task-finish",
   "wait-raised",
   "task-retrying",
+  "live-text",
+  "live-action",
+  "live-step",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import { parseQuestion } from "@/lib/chat/qa";
 import { queryKeys } from "@/lib/api/keys";
@@ -7,6 +8,7 @@ import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { orderStatusToastText } from "@/lib/orders/status";
 
 import type { SseEvent } from "./connection";
 import {
@@ -20,7 +22,8 @@ import {
 /**
  * 事件 → 状态桥（ADR 0003）：
  * - 通知通道 = 声明式失效注册表 + 载荷展示白名单（REST 重查拿不到的载荷写轻量
- *   store，本文件是 store 唯一事件写入方）；
+ *   store 或即时呈现——本文件是 store 唯一事件写入方；订单态变化 toast 是即时
+ *   呈现例外，#30）；
  * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）
  *   + generation store（生成面）分发；编码 run 收口的失效也在此（generated_at
  *   落库后详情重拉，正确性走 REST）。
@@ -39,6 +42,9 @@ const NOTIFICATION_INVALIDATIONS = {
   // 长出判据，写出瞬间一并重拉
   "document-updated": [queryKeys.documents.all, queryKeys.projects.all],
   "project-renamed": [queryKeys.projects.all],
+  // 订单态变化：订单卡详情（状态/金额/改价历史）+ 项目域（activeOrder/archived
+  // 嵌入——锁定式矩阵与归档终态的推导输入）一并重拉
+  "order-status-changed": [queryKeys.projects.all, queryKeys.orders.all],
 } as const satisfies Record<NotificationEvent["type"], readonly (readonly unknown[])[]>;
 
 /**
@@ -57,6 +63,23 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
     if (event.type !== "document-updated") return;
     if (event.payload.documentType !== "PRD") return;
     usePrdNoticesStore.getState().notePrdWritten(event.payload.projectId);
+  },
+  // 订单态变化 toast（spec：点击直达项目页）：状态文案归纯函数单点
+  // （lib/orders/status），导航用整页跳（桥在 React 外，无 router 上下文——
+  // 同 401 出口先例 window.location.href；点击时才跳，停留中的页面不被动导航）
+  "order-status-changed": (event) => {
+    if (event.type !== "order-status-changed") return;
+    const { projectId } = event.payload;
+    toast(orderStatusToastText(event.payload.status, event.payload.statusName), {
+      action: {
+        label: "查看项目",
+        onClick: () => {
+          // 桥在 React 外（无 router 上下文）：整页跳同 401 出口先例，点击才跳
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.href = `/projects/${projectId}`;
+        },
+      },
+    });
   },
 };
 

@@ -274,7 +274,7 @@ class ProjectControllerTest {
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null, null));
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null, null, null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -617,7 +617,7 @@ class ProjectControllerTest {
             LocalDateTime prdProducedAt) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null, null);
+                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null, null, null);
     }
 
     /**

@@ -51,6 +51,15 @@ public class OrderQueryAppService {
     }
 
     /**
+     * 项目最近一张订单（任意状态，#30）：归档终态项目页的「完整记录」嵌入面——
+     * 支付归档后订单转终态、activeOrder 归空，项目详情改挂本嵌入供订单卡取单。
+     */
+    public Optional<OrderBriefResponse> latestOrderOf(Long projectId) {
+        return orderRepository.findFirstByProjectIdOrderByCreatedAtDescIdDesc(projectId)
+                .map(OrderBriefResponse::of);
+    }
+
+    /**
      * 一批项目 → 未终结订单摘要（项目列表批量嵌入；每项目至多一张，空批入空映射）。
      */
     public Map<Long, OrderBriefResponse> activeOrdersOf(Collection<Long> projectIds) {

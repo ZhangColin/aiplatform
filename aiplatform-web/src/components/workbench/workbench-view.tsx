@@ -112,9 +112,9 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
   const chatOnly = !detail?.prdProducedAt;
 
   // 「开始做系统」eligibility（单点）：PRD 已产出 && 未生成过 && 不在生成中
-  //（超限终态 error 时按钮回来 = 人工兜底重新发起）
+  //（超限终态 error 时按钮回来 = 人工兜底重新发起）；归档终态全只读不再发起
   const generationEligible =
-    !!detail?.prdProducedAt && !detail?.generatedAt && !generating;
+    !!detail?.prdProducedAt && !detail?.generatedAt && !generating && !detail?.archived;
 
   // 「确认下单」可见性（单点，#26 规则 + #28 订单事实接出）：随首次生成完成
   // 常驻、零迭代可点；仅无未终结订单时显示
@@ -126,6 +126,11 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
 
   // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——指令区禁用+提示、成果区只读
   const lock = lockRowOf({ archived: detail?.archived, activeOrder: detail?.activeOrder });
+
+  // 订单卡挂的单（#30）：未终结单优先；归档终态挂最近单出完整记录（支付归档后
+  // activeOrder 归空，不挂最近单会掉回「还没有订单」占位）
+  const orderCardId =
+    detail?.activeOrder?.id ?? (detail?.archived ? (detail?.latestOrder?.id ?? null) : null);
 
   return (
     <WorkbenchShell
@@ -166,7 +171,8 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
             projectId={projectId}
             generatedAt={detail?.generatedAt}
             coderStatus={coderStatus}
-            activeOrderId={detail?.activeOrder?.id ?? null}
+            orderCardId={orderCardId}
+            projectArchived={!!detail?.archived}
             tab={outputsTab}
             onTabChange={setOutputsTab}
             onGenerated={handleGenerated}

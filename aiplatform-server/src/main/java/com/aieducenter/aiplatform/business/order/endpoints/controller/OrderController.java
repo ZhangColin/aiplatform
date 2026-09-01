@@ -14,15 +14,15 @@ import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 
 /**
- * 订单 REST 面（#28 交易环①用户面）：确认下单（纯按钮零输入——读当前 PRD
- * 冻结快照入单）/ 订单详情 / 取消。后台机机面（清单/详情/源码包/报价改价）
- * 归 {@link BackofficeOrderController}（#29，/api/backoffice/*，五头 HMAC）。
- * 路由横跨 /api/projects 与 /api/orders 两前缀
+ * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付）：确认下单（纯按钮零输入
+ * ——读当前 PRD 冻结快照入单）/ 订单详情 / 取消 / mock 支付。后台机机面（清单/
+ * 详情/源码包/报价改价）归 {@link BackofficeOrderController}（#29，
+ * /api/backoffice/*，五头 HMAC）。路由横跨 /api/projects 与 /api/orders 两前缀
  * （spec API 面定盘），故不设类级 {@code @RequestMapping}、逐方法写全路径。
  */
 @RestController
 @Validated
-@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消")
+@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付")
 public class OrderController {
 
     private final OrderAppService appService;
@@ -45,10 +45,24 @@ public class OrderController {
     @GetMapping("/api/orders/{id}")
     @Operation(summary = "订单详情（用户面）",
             description = "状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）"
-                    + "+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点。"
+                    + "+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点"
+                    + "+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。"
                     + "订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(OrderIds.parseOrder(id)));
+    }
+
+    @PostMapping("/api/orders/{id}/payment")
+    @Operation(summary = "mock 支付（确认后同步成功，订单与项目一并归档）",
+            description = "v1 平台内模拟支付，只走成功路径（真实渠道接入归 PaymentPort 切换边界，"
+                    + "#32）。支付成功在一个事务内完成：订单 已支付→已归档（paidAt/archivedAt/"
+                    + "paymentNo 落值）+ 项目归档（ADR-0002）；提交后知识沉淀（取归档时最新 PRD "
+                    + "入知识库，失败降级不影响支付）+ 订单态变化 SSE 通知。归档后界面转只读终态"
+                    + "（指令区关闭、源码包可取、完整记录含改价历史）。仅已报价（=待支付）态可支付；"
+                    + "非待支付 409 ORD_011；订单不存在 404 ORD_001；项目已被手动归档 409 PRJ_013"
+                    + "（事务回滚，订单留待支付态）")
+    public ApiResponse<OrderResponse> pay(@PathVariable String id) {
+        return ApiResponse.ok(appService.pay(OrderIds.parseOrder(id)));
     }
 
     @PostMapping("/api/orders/{id}/cancel")

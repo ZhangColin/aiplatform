@@ -55,6 +55,19 @@ export type NotificationEvent =
       /** 异步取名落库成功顶替占位名后发射；失败保占位不发。 */
       type: "project-renamed";
       payload: { projectId: string; projectName: string };
+    }
+  | {
+      /**
+       * 订单状态变化（#30）：下单（status=1）/首次报价（2）/取消（5）/支付完成
+       * 归档（4）各发一次，改价不发；消费 = toast（点击直达项目页）+ 失效重查。
+       */
+      type: "order-status-changed";
+      payload: {
+        projectId: string;
+        orderId: string;
+        status: number;
+        statusName: string;
+      };
     };
 
 const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
@@ -63,6 +76,7 @@ const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
   "workspace-destroyed",
   "document-updated",
   "project-renamed",
+  "order-status-changed",
 ] satisfies Array<NotificationEvent["type"]>);
 
 /** 通道一为封闭集合：名册外 type → null（桥按 miss 忽略）。 */

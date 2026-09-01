@@ -25,6 +25,9 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  *                       「开始做系统」可发起、「确认下单」不可见的推导口径）
  * @param activeOrder    未终结订单摘要（#28：无 = null——锁定式矩阵的推导输入，
  *                      订单存在即冻结迭代；跨 BC 软引用）
+ * @param latestOrder    最近一张订单摘要（任意状态，#30：归档终态项目页的
+ *                      「完整记录」取单面——支付归档后 activeOrder 归空、
+ *                      订单卡改挂本嵌入；从未下单 = null）
  */
 public record ProjectDetailResponse(
         String id,
@@ -39,6 +42,7 @@ public record ProjectDetailResponse(
         LocalDateTime updatedAt,
         LocalDateTime prdProducedAt,
         LocalDateTime generatedAt,
-        OrderBriefResponse activeOrder
+        OrderBriefResponse activeOrder,
+        OrderBriefResponse latestOrder
 ) {
 }

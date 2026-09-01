@@ -111,6 +111,41 @@ class ProjectQueryAppServiceTest {
         assertThat(appService.detail(projectId).activeOrder()).isNull();
     }
 
+    // ---------- #30 交易环③：详情嵌入最近订单（归档终态「完整记录」取单面） ----------
+
+    @Test
+    void given_archived_order_when_detail_then_latest_order_embedded_and_active_null() {
+        // 支付归档后：activeOrder 归空（终态）、latestOrder 挂已归档单供订单卡取单
+        Long projectId = persistedProject(8115L, "已成交项目").getId();
+        insertOrder(9115L, projectId, 4);
+
+        ProjectDetailResponse response = appService.detail(projectId);
+
+        assertThat(response.activeOrder()).isNull();
+        assertThat(response.latestOrder()).isNotNull();
+        assertThat(response.latestOrder().id()).isEqualTo("9115");
+        assertThat(response.latestOrder().status()).isEqualTo(OrderStatus.ARCHIVED);
+        assertThat(response.latestOrder().statusName()).isEqualTo("已归档");
+    }
+
+    @Test
+    void given_replaced_orders_when_detail_then_latest_order_takes_newest() {
+        // 取消再下新单：latestOrder = 最新一张（createdAt 倒序），不问状态
+        Long projectId = persistedProject(8116L, "复购项目").getId();
+        insertOrder(9116L, projectId, 5);
+        insertOrder(9216L, projectId, 2);
+
+        assertThat(appService.detail(projectId).latestOrder().id()).isEqualTo("9216");
+        assertThat(appService.detail(projectId).latestOrder().status()).isEqualTo(OrderStatus.QUOTED);
+    }
+
+    @Test
+    void given_never_ordered_project_when_detail_then_latest_order_null() {
+        Long projectId = persistedProject(8117L, "未下单项目").getId();
+
+        assertThat(appService.detail(projectId).latestOrder()).isNull();
+    }
+
     @Test
     void given_projects_with_and_without_orders_when_list_then_embedded_per_project() {
         Long ordered = persistedProject(8113L, "下单项目").getId();

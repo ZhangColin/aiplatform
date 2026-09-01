@@ -33,8 +33,9 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
  * 金额单位分（Long）、v1 恒 CNY，随报价落值。projectId 跨上下文软引用
  * （prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户查）。
  *
- * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代）与 {@link #quote}
- * （报价/改价，已报价态重复调用 = 改价）已落位，支付/归档随后续切片；终态判定
+ * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代）、{@link #quote}
+ * （报价/改价，已报价态重复调用 = 改价）与 {@link #archiveOnPayment}（支付成功
+ * 一跳归档——订单与项目归档、知识沉淀同事务联动归应用层，#30）；终态判定
  * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用预检与
  * 库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一索引，
  * 聚合不做跨行查重。改价留痕在 {@link OrderPriceEntry}（append-only，
@@ -175,6 +176,35 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         this.amount = amount;
         this.currency = CURRENCY_CNY;
         this.priceEntries.add(OrderPriceEntry.record(amount, CURRENCY_CNY, note));
+    }
+
+    /**
+     * 待支付（已报价）守卫（#30 交易环③）：支付端口调用前的状态预检面——非待
+     * 支付态不触支付（ORD_011）。
+     */
+    public void requirePayable() {
+        if (status != OrderStatus.QUOTED) {
+            throw new DomainException(OrderMessage.ORDER_PAY_NOT_ALLOWED);
+        }
+    }
+
+    /**
+     * 支付成功归档（#30）：已报价（=待支付）一跳至已归档，同时落 {@code paidAt}
+     * （与 {@code archivedAt} 同拍——「已支付」为事务内瞬态不外显：v1 mock 同步
+     * 成功，真实接入的中间态经 PaymentPort 吸收不进状态机）与支付流水号。
+     * 归档联动（项目归档 + 知识沉淀）归应用层同事务编排。
+     *
+     * @param paymentNo 支付流水号（mock 平台内生成；真实接入为渠道单号）
+     */
+    public void archiveOnPayment(String paymentNo) {
+        requirePayable();
+        if (paymentNo == null || paymentNo.isBlank()) {
+            throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
+        }
+        this.status = OrderStatus.ARCHIVED;
+        this.paidAt = LocalDateTime.now();
+        this.archivedAt = paidAt;
+        this.paymentNo = paymentNo;
     }
 
     /**

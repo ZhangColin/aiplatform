@@ -37,7 +37,8 @@ import static org.mockito.Mockito.when;
  * 聚合 → 落库 → 唯一索引）全真，以库内真实行为为准。#28 交易环①接出取消
  * 状态机（未支付态可达/已支付与终态拒绝）、快照冻结（PRD 后续修订不回写）、
  * 详情与取消后再下新单（新单新快照）；#29 交易环②接出报价/改价（append-only
- * 价目留痕、现值取最新行、quotedAt 不刷新）；支付的用例随后续切片。
+ * 价目留痕、现值取最新行、quotedAt 不刷新）；#30 支付归档一事务归
+ * {@link OrderPaymentArchiveTest}。
  */
 @SpringBootTest
 class OrderAppServiceTest {
@@ -356,7 +357,7 @@ class OrderAppServiceTest {
         when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
                 Long.toString(PROJECT_ID), "订单缝测试", ProjectType.WEBSITE, "官网", "9100",
                 status, status.getName(), status == ProjectStatus.ARCHIVED,
-                LocalDateTime.of(2026, 8, 31, 10, 0), null, null, null, null));
+                LocalDateTime.of(2026, 8, 31, 10, 0), null, null, null, null, null));
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z")));
     }

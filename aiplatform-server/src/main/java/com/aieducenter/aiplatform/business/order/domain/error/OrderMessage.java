@@ -25,7 +25,9 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_QUOTE_NOTE_TOO_LONG(400, "ORD_009", "报价备注超长（至多 1000 字）"),
 
-    ORDER_STATUS_FILTER_UNKNOWN(400, "ORD_010", "无效的订单状态过滤参数");
+    ORDER_STATUS_FILTER_UNKNOWN(400, "ORD_010", "无效的订单状态过滤参数"),
+
+    ORDER_PAY_NOT_ALLOWED(409, "ORD_011", "订单非待支付状态，无法支付");
 
     private final int httpStatus;
     private final String code;

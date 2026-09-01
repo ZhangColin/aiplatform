@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,12 @@ public class ProjectKnowledgeAppService {
     /** 命中检索 query 上限（bge-small-zh 512 维模型，超长截断）。 */
     static final int MAX_QUERY_CHARS = 2000;
 
+    /** 沉淀素材类别（幂等键之一；v1 唯一业务口径 = 成交项目 PRD）。 */
+    static final String KIND_PRD = "PRD";
+
+    /** 沉淀条目标题（命中条目展示：〔项目名〕标题 + 片段）。 */
+    static final String TITLE_PRD = "PRD";
+
     /**
      * BA 会话已注入的知识块（projectId → 注入块）：会话建立时检索一次落此
      * （一次切入一次注入），后续轮/续跑复用同一块——不重检索不重追加（agent
@@ -41,11 +48,14 @@ public class ProjectKnowledgeAppService {
     private final Map<Long, String> establishedSessionTails = new ConcurrentHashMap<>();
 
     private final KnowledgePort knowledgePort;
+    private final ProjectQueryAppService projectQueryAppService;
     private final int hitTopK;
 
     public ProjectKnowledgeAppService(KnowledgePort knowledgePort,
+            ProjectQueryAppService projectQueryAppService,
             @Value("${app.knowledge.top-k:5}") int hitTopK) {
         this.knowledgePort = knowledgePort;
+        this.projectQueryAppService = projectQueryAppService;
         this.hitTopK = hitTopK;
     }
 
@@ -132,6 +142,32 @@ public class ProjectKnowledgeAppService {
         for (KnowledgeHit hit : hits) {
             block.append("\n\n〔").append(hit.sourceProjectName()).append("〕")
                     .append(hit.title()).append('\n').append(hit.chunk());
+        }
+    }
+
+    // ---------- 知识沉淀（订单归档触发，#30 唯一沉淀触发点） ----------
+
+    /**
+     * 成交 PRD 沉淀（#30）：取归档时最新版 PRD（直读工作区事实源，与下单快照
+     * 各自独立——沉淀的是归档时点的最新内容）段落分块入库；幂等键 =
+     * {@code (PRD, projectId)} 删后插——同项目再成交自然覆盖旧块。失败降级记
+     * 日志不炸（丢失容忍，A5 §1）：支付已在归档事务内成功，沉淀不允许把它拖回滚。
+     */
+    public void sinkPrd(Long projectId) {
+        try {
+            String prd = projectQueryAppService.prd(projectId).content();
+            List<String> chunks = chunkByParagraph(prd);
+            if (chunks.isEmpty()) {
+                log.info("[knowledge] 项目 {} 成交 PRD 为空，沉淀跳过", projectId);
+                return;
+            }
+            knowledgePort.index(new KnowledgeSpec(KIND_PRD, projectId.toString(),
+                    projectId.toString(), projectQueryAppService.detail(projectId).name(),
+                    TITLE_PRD, chunks, null));
+            log.info("[knowledge] 项目 {} 成交 PRD 沉淀入库（{} 块）", projectId, chunks.size());
+        } catch (RuntimeException e) {
+            log.warn("[knowledge] 项目 {} 成交 PRD 沉淀失败（降级跳过，丢失容忍）：{}",
+                    projectId, e.toString());
         }
     }
 

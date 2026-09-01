@@ -20,7 +20,9 @@ export type OrderPriceEntry = {
 
 /**
  * 消费口径的订单详情（缺省字段防御归一）：状态面与时间戳组（#28）+ 金额面
- * （#29：总价/币种/后台备注/报价时点/改价历史——待报价态金额缺省、历史为空）。
+ * （#29：总价/币种/后台备注/报价时点/改价历史——待报价态金额缺省、历史为空）
+ * + 支付/归档时点（#30：已支付为事务内瞬态，paidAt 与 archivedAt 同拍——
+ * 归档终态「完整记录」的一环）。
  */
 export type OrderDetail = {
   id: string;
@@ -40,6 +42,10 @@ export type OrderDetail = {
   priceEntries: OrderPriceEntry[];
   createdAt?: string;
   cancelledAt?: string | null;
+  /** 支付成功时点（未支付缺省；与 archivedAt 同拍）。 */
+  paidAt?: string;
+  /** 归档时点（未归档缺省）。 */
+  archivedAt?: string;
 };
 
 /** Long 字段线上实为字符串（Jackson Long→String），容错折数。 */
@@ -75,5 +81,7 @@ export function normalizeOrder(raw: OrderResponse): OrderDetail {
     priceEntries: (raw.priceEntries ?? []).map(normalizeEntry),
     createdAt: raw.createdAt,
     cancelledAt: raw.cancelledAt ?? null,
+    paidAt: raw.paidAt ?? undefined,
+    archivedAt: raw.archivedAt ?? undefined,
   };
 }

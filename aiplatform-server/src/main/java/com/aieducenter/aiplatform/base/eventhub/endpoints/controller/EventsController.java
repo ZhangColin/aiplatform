@@ -57,6 +57,7 @@ public class EventsController {
             | workspace-destroyed | projectId |
             | document-updated | projectId, documentType |
             | project-renamed | projectId, projectName |
+            | order-status-changed | projectId, orderId, status, statusName |
 
             名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。""")
     public SseEmitter subscribe(

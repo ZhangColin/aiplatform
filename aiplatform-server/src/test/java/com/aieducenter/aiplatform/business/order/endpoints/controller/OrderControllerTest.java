@@ -31,9 +31,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 订单用户面 REST 契约（#28 交易环①）：ApiResponse 信封、BaseEnum → Integer code
- * 双向、下单/详情/取消三端点形状与错误码（PRJ_001/PRJ_015 透传、ORD_003 唯一
- * 未终结单、ORD_001 不存在、ORD_005 已支付不可取消）。
+ * 订单用户面 REST 契约（#28 交易环① + #30 交易环③支付）：ApiResponse 信封、
+ * BaseEnum → Integer code 双向、下单/详情/取消/支付四端点形状与错误码
+ * （PRJ_001/PRJ_015 透传、ORD_003 唯一未终结单、ORD_001 不存在、ORD_005 已支付
+ * 不可取消、ORD_011 非待支付不可支付；支付成功信封含 paidAt/archivedAt 同拍）。
  */
 @WebMvcTest(OrderController.class)
 @Import({OrderControllerTest.ExceptionAdviceConfig.class,
@@ -160,12 +161,65 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.message").value("订单不存在"));
     }
 
+    // ---------- #30 交易环③：mock 支付 ----------
+
+    @Test
+    void given_quoted_order_when_post_payment_then_archived_envelope() throws Exception {
+        LocalDateTime paidAt = LocalDateTime.of(2026, 9, 1, 11, 0);
+        OrderResponse paid = new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
+                128000L, "CNY", "首版报价", LocalDateTime.of(2026, 9, 1, 10, 0),
+                java.util.List.of(), LocalDateTime.of(2026, 9, 1, 9, 0), null,
+                paidAt, paidAt);
+        when(appService.pay(900L)).thenReturn(paid);
+
+        performAsUser(post("/api/orders/900/payment"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.status").value(4)) // ARCHIVED → Integer code
+                .andExpect(jsonPath("$.data.statusName").value("已归档"))
+                // 已支付为事务内瞬态：paidAt 与 archivedAt 同拍（归档终态「完整记录」）
+                .andExpect(jsonPath("$.data.paidAt").value("2026-09-01T11:00:00"))
+                .andExpect(jsonPath("$.data.archivedAt").value("2026-09-01T11:00:00"));
+
+        verify(appService).pay(900L);
+    }
+
+    @Test
+    void given_not_quoted_order_when_post_payment_then_409_ord011() throws Exception {
+        // 聚合守卫抛 DomainException（应用层不换装）——按真实异常类型验全局处理器映射
+        when(appService.pay(900L)).thenThrow(
+                new DomainException(OrderMessage.ORDER_PAY_NOT_ALLOWED));
+
+        performAsUser(post("/api/orders/900/payment"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message")
+                        .value(OrderMessage.ORDER_PAY_NOT_ALLOWED.message()));
+    }
+
+    @Test
+    void given_missing_order_when_post_payment_then_404_ord001() throws Exception {
+        when(appService.pay(900L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
+
+        performAsUser(post("/api/orders/900/payment"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("订单不存在"));
+    }
+
+    @Test
+    void given_malformed_order_id_when_post_payment_then_404_ord001() throws Exception {
+        performAsUser(post("/api/orders/abc/payment"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("订单不存在"));
+    }
+
     // ---------- 夹具 ----------
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
                 null, null, null, null, java.util.List.of(),
-                LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt);
+                LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt, null, null);
     }
 
     /** MVC 切片不含 cartisan-web autoconfig，手动注册其全局异常处理器。 */

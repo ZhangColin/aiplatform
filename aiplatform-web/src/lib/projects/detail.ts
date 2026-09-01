@@ -18,6 +18,8 @@ export type ProjectDetail = {
   generatedAt?: string | null;
   /** 未终结订单事实（#28：订单存在即冻结迭代——锁定式矩阵与「确认下单」可见性的输入）。 */
   activeOrder?: ActiveOrderFact | null;
+  /** 最近一张订单事实（#30：归档终态订单卡挂它出完整记录；从未下单 = null）。 */
+  latestOrder?: ActiveOrderFact | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */
@@ -31,12 +33,13 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     prdProducedAt: raw.prdProducedAt,
     generatedAt: raw.generatedAt,
     activeOrder: normalizeActiveOrder(raw.activeOrder),
+    latestOrder: normalizeActiveOrder(raw.latestOrder),
   };
 }
 
-/** 嵌入的未终结订单摘要 → 消费口径（无 id 视为无订单——矩阵按进行中兜底）。 */
+/** 嵌入的订单摘要（activeOrder/latestOrder 同构）→ 消费口径（无 id 视为无单）。 */
 function normalizeActiveOrder(
-  raw: ProjectDetailResponse["activeOrder"],
+  raw: ProjectDetailResponse["activeOrder"] | ProjectDetailResponse["latestOrder"],
 ): ActiveOrderFact | null {
   if (!raw || raw.id == null) return null;
   return {

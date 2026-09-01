@@ -327,7 +327,7 @@ class BackofficeOrderControllerTest {
                                 LocalDateTime.of(2026, 9, 1, 11, 0)),
                         new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                                 LocalDateTime.of(2026, 9, 1, 10, 0))),
-                LocalDateTime.of(2026, 9, 1, 9, 0), null);
+                LocalDateTime.of(2026, 9, 1, 9, 0), null, null, null);
     }
 
     /** MVC 切片不含 cartisan-web autoconfig，手动注册其全局异常处理器。 */

@@ -267,14 +267,16 @@ public class ProjectQueryAppService {
     // ---------- 响应拼装 ----------
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
-     * + 未终结订单摘要（锁定式矩阵推导输入）。 */
+     * + 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单摘要（归档终态
+     * 「完整记录」取单面，#30）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
-                project.getGeneratedAt(), base.activeOrder());
+                project.getGeneratedAt(), base.activeOrder(),
+                orderQueryAppService.latestOrderOf(project.getId()).orElse(null));
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）+ 未终结订单摘要。 */

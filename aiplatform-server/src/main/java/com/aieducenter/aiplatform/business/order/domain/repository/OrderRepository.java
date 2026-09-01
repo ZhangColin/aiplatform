@@ -35,6 +35,13 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
     /** 一批项目名下不在给定状态清单的订单（项目列表嵌入未终结订单事实的批量面）。 */
     List<Order> findByProjectIdInAndStatusNotIn(Collection<Long> projectIds, List<OrderStatus> statuses);
 
+    /**
+     * 项目名下最近一张订单（任意状态；#30 归档终态「完整记录」的嵌入面——
+     * 支付归档后订单转终态，activeOrder 归空、项目页改挂本嵌入取订单卡）。
+     * createdAt 同拍按 id 破平（TSID 时间有序）。
+     */
+    Optional<Order> findFirstByProjectIdOrderByCreatedAtDescIdDesc(Long projectId);
+
     /** 后台按状态分页拉单（报价工作清单；排序由调用面定死——新单在前）。 */
     Page<Order> findByStatus(OrderStatus status, Pageable pageable);
 

@@ -37,8 +37,8 @@ import static org.mockito.Mockito.when;
  * 聚合 → 落库 → 唯一索引）全真，以库内真实行为为准。#28 交易环①接出取消
  * 状态机（未支付态可达/已支付与终态拒绝）、快照冻结（PRD 后续修订不回写）、
  * 详情与取消后再下新单（新单新快照）；#29 交易环②接出报价/改价（append-only
- * 价目留痕、现值取最新行、quotedAt 不刷新）；#30 支付归档一事务归
- * {@link OrderPaymentArchiveTest}。
+ * 价目留痕、现值取最新行、quotedAt 不刷新）；#37/#39 支付原子化（支付/归档拆
+ * 两事务、归档失败留已支付）归 {@link OrderPaymentArchiveTest}。
  */
 @SpringBootTest
 class OrderAppServiceTest {

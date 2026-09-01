@@ -7,7 +7,7 @@ import type { PrdNoticesState } from "@/lib/store/prd-notices";
 import { CommandArea } from "./command-area";
 import { lockRowOf } from "@/lib/orders/lock";
 
-// 直读种子状态渲染（zustand v5 server snapshot 限制同 workbench-shell.test）；
+// 直读种子状态渲染（zustand v5 server snapshot 限制同 project-page-shell.test）；
 // store 本体行为由 chat.test 覆盖。发送口 mock 掉——路由判定归纯逻辑测试。
 const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,

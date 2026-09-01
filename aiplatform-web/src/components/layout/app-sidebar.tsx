@@ -25,13 +25,13 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * 主 Layout 的通用层实现（issue #17 单门户清场）：sidebar 框架（品牌位 + 分组
+ * 主 Layout 的通用层实现（issue #17 前端清场）：sidebar 框架（品牌位 + 分组
  * 菜单 + footer）归通用层，菜单内容（groups）归场景层配置。active 态由路由推导，
  * href 项渲染为 Link。收起交互归品牌行：展开态品牌行 = 品牌 + 右侧收起按钮；
  * 收起态 = 图标条，点 Logo 或空白处展开。
  */
 
-export type PortalNavItem = {
+export type AppNavItem = {
   key: string;
   label: string;
   icon?: ReactNode;
@@ -39,20 +39,20 @@ export type PortalNavItem = {
 };
 
 /** 场景菜单分组：label 可省（首页 + 我的项目两项无分组标签）。 */
-export type PortalNavGroup = { label?: string; items: PortalNavItem[] };
+export type AppNavGroup = { label?: string; items: AppNavItem[] };
 
-export type PortalSidebarProps = {
-  groups: PortalNavGroup[];
+export type AppSidebarProps = {
+  groups: AppNavGroup[];
 };
 
 /**
  * active 态 = 全部菜单项 href 的最长前缀匹配（pathname 命中多条前缀时只有最长者
  * 高亮——落地页 /projects 与详情 /projects/{id} 不双亮）。
  */
-function useActiveKey(groups: PortalSidebarProps["groups"]) {
+function useActiveKey(groups: AppSidebarProps["groups"]) {
   const pathname = usePathname();
   const items = groups.flatMap((group) => group.items);
-  let best: PortalNavItem | null = null;
+  let best: AppNavItem | null = null;
   for (const item of items) {
     const matched = pathname === item.href || pathname.startsWith(`${item.href}/`);
     if (matched && (best === null || item.href.length > best.href.length)) {
@@ -62,7 +62,7 @@ function useActiveKey(groups: PortalSidebarProps["groups"]) {
   return best?.key ?? null;
 }
 
-export function PortalSidebar({ groups }: PortalSidebarProps) {
+export function AppSidebar({ groups }: AppSidebarProps) {
   const activeKey = useActiveKey(groups);
   // 收起态判定补 !isMobile：mobile 走 Sheet 始终按展开态渲染，图标条语义只在
   // 桌面 collapsible="icon" 生效。
@@ -164,7 +164,7 @@ function BrandName({ className }: { className?: string }) {
   return <span className={cn("text-sm font-semibold", className)}>AI 开发平台</span>;
 }
 
-function SidebarNavItem({ item, active }: { item: PortalNavItem; active: boolean }) {
+function SidebarNavItem({ item, active }: { item: AppNavItem; active: boolean }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton isActive={active} tooltip={item.label} render={<Link href={item.href} />}>
@@ -175,8 +175,8 @@ function SidebarNavItem({ item, active }: { item: PortalNavItem; active: boolean
   );
 }
 
-/** 非工作台页同壳：页头（标题 + 说明）由各页自带，收起/展开归品牌行。 */
-export function PortalContent({ children }: { children: ReactNode }) {
+/** 非项目页同壳：页头（标题 + 说明）由各页自带，收起/展开归品牌行。 */
+export function AppSidebarContent({ children }: { children: ReactNode }) {
   return (
     <SidebarInset className="h-svh min-h-0 flex-col">
       <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>

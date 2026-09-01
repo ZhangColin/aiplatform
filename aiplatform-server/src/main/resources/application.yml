@@ -93,3 +93,9 @@ management:
   endpoint:
     health:
       show-details: never
+  health:
+    # 平台自身不用 Redis（会话内存态，见 docs/guide/本机依赖启动.md）——redis starter
+    # 是 cartisan-web 带入的传递依赖（其自动配置类签名引用 Redis 类型，排除即炸），
+    # 连接不存在时 Redis health indicator 会把 /actuator/health 恒拉成 DOWN，关之。
+    redis:
+      enabled: false

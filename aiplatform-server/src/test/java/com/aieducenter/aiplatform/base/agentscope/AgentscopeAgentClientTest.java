@@ -479,9 +479,10 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_answered_tool_call_shape_when_rebuild_then_answer_injected_and_asking_state() {
-        // 问答续跑批复重建：答复注入 input.answer + ASKING 同形 + content 回填
-        // （重放参数校验只认 content 原文）
+    void given_answered_tool_call_shape_when_rebuild_then_answer_in_metadata_input_untouched() {
+        // 问答续跑批复重建（#34 口径）：input 原样不重写（answer 不进模型可见面），
+        // 答复走 block metadata + ASKING 同形 + content 回填（重放参数校验只认
+        // content 原文）
         ConfirmResult result = AgentscopeAgentClient.answeredToolCall(
                 Map.of("id", "tc-1", "name", "ask_user",
                         "input", Map.of("question", "选哪个方案？")),
@@ -489,8 +490,12 @@ class AgentscopeAgentClientTest {
 
         assertThat(result.isConfirmed()).isTrue();
         assertThat(result.getToolCall().getName()).isEqualTo("ask_user");
-        assertThat(result.getToolCall().getInput()).containsEntry("answer", "甲号方案");
-        assertThat(result.getToolCall().getContent()).contains("甲号方案");
+        assertThat(result.getToolCall().getInput())
+                .containsEntry("question", "选哪个方案？")
+                .doesNotContainKey("answer");
+        assertThat(result.getToolCall().getContent()).doesNotContain("甲号方案");
+        assertThat(result.getToolCall().getMetadata())
+                .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "甲号方案");
         assertThat(result.getToolCall().getState()).isEqualTo(io.agentscope.core.message.ToolCallState.ASKING);
     }
 

@@ -10,8 +10,8 @@ import { probeSessionAlive, SseConnection } from "./connection";
 
 /**
  * 通知通道（`/api/events`）的 root 级挂载点（ADR 0003）：登录后单例常开、
- * 缺省全量不过滤，切门户不断线；每标签页天然各持一条。agent 流通道不在此挂——
- * 工作台 mount 建连、unmount 即断，首个挂载方 = 项目工作台页（agent-channel.tsx，#23）。
+ * 缺省全量不过滤，切站点不断线；每标签页天然各持一条。agent 流通道不在此挂——
+ * 项目页 mount 建连、unmount 即断，首个挂载方 = 项目页（agent-channel.tsx，#23）。
  */
 export function SseProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -52,7 +52,7 @@ export function useSseStatus(channel: SseChannel): SseStatus {
 /**
  * 门控轮询兜底（issue #16）：活页面 query 挂到 `refetchInterval`——
  * 对应通道 ≠ connected 才给 15s，连接健康时不空转。列表类看通知通道、
- * 工作台看 agent 通道：
+ * 项目页看 agent 通道：
  *
  * ```ts
  * useQuery({ queryKey: queryKeys.projects.all, refetchInterval: useSseFallbackPolling("notification") })

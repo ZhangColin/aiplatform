@@ -3,7 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-import { PortalContent } from "@/components/layout/portal-sidebar";
+import { AppSidebarContent } from "@/components/layout/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -44,9 +44,9 @@ export function ProjectListView() {
   const { main, archivedGroup } = projectListSections(list.data ?? [], stage);
 
   return (
-    <PortalContent>
+    <AppSidebarContent>
       <div className="mx-auto max-w-5xl p-6">
-        {/* 非工作台页页头：标题 + 说明（收起归品牌行） */}
+        {/* 非项目页页头：标题 + 说明（收起归品牌行） */}
         <header className="mb-5 flex items-center gap-2">
           <div>
             <h1 className="text-lg font-semibold">我的项目</h1>
@@ -97,7 +97,7 @@ export function ProjectListView() {
 
         {archivedGroup.length > 0 && <ArchivedGroup projects={archivedGroup} />}
       </div>
-    </PortalContent>
+    </AppSidebarContent>
   );
 }
 

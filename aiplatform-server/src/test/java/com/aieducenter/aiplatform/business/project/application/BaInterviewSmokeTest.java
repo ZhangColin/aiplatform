@@ -151,7 +151,9 @@ class BaInterviewSmokeTest {
         assertThat(framesOf(AgentEventTypes.ROLE_ASSIGNED)).isNotEmpty();
         Map<String, Object> asked = firstQuestionOf(body1);
         assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
-        assertThat(asked).containsEntry("multiple", false).containsEntry("custom", true);
+        // 问答卡形状齐备即可——单选/多选由模型按问题性质定，不锁死（曾断 multiple=false
+        // 被模型正当的多选题打爆）
+        assertThat(asked).containsKeys("header", "multiple", "custom", "options");
 
         // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
         // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
@@ -159,16 +161,27 @@ class BaInterviewSmokeTest {
         Frame question2 = awaitNextQuestionWaitOf(first.runId(), engineRefOf(question1));
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
-        // 3) 催促收敛：模型可能多问一轮（催促遵从非确定）——每见新问即以催促文本
-        // 答复再催（上限 4 轮必收敛，收口即 task-finish 无新挂起）；无在悬问时开新轮注入催促
+        // 3) 催促收敛：第二问答复后续跑要么再挂新问（逐问以催促文本答复再催）、要么
+        // 收口（task-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
+        // 出结果（新挂起/收口/异常）前开新轮会与内核挂起态相撞（ASKING 未批复即
+        // 报错），而 awaitResumeOutcome 本就阻塞到出结果，回退是死重兼竞态源
         List<String> seenRefs = new ArrayList<>(
                 List.of(engineRefOf(question1), engineRefOf(question2)));
-        for (int i = 0; i < 4; i++) {
-            String urge = urgeConverge(seenRefs);
-            if ("finished".equals(urge)) {
-                break;
-            }
+        String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+        for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
+            Frame pending = waitFrameByRef(outcome);
+            seenRefs.add(outcome);
+            settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
+            outcome = awaitResumeOutcome(allRunIds(), seenRefs);
         }
+        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获帧序：%s）",
+                frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
+                .isEqualTo("finished");
+
+        // #34 回归守卫：多轮答复续跑后，会话状态任何 tool_use 的 input 不得含
+        // answer 键——答复经 block metadata（模型不可见；input 持久化且模型可见，
+        // 带 answer 会教模型「ask_user 可自带答案」自答后续提问）
+        assertNoAnswerKeyInToolUseInputs();
 
         // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
         //    （PRD 读端点直读工作区文件——编码智能体同视图）
@@ -207,21 +220,6 @@ class BaInterviewSmokeTest {
 
     // ---------- 内部 ----------
 
-    /** 催促收敛一轮：在悬问（帧序最新未见答的 wait-raised）以催促文本答复续跑；
-     *  无在悬问开新轮。返回是否已收口。 */
-    private String urgeConverge(List<String> seenRefs) {
-        Frame pending = solePendingQuestion(seenRefs);
-        String urgeText = "不要再继续提问了，现在就结束访谈，直接产出 PRD";
-        if (pending != null) {
-            seenRefs.add(engineRefOf(pending));
-            settle(pending, urgeText);
-            return awaitResumeOutcome(allRunIds(), seenRefs);
-        }
-        BaInterviewAppService.InterviewRun urged = appService.runInterviewTurn(projectId,
-                urgeText);
-        return awaitResumeOutcome(allRunIds(), seenRefs);
-    }
-
     private Set<String> allRunIds() {
         Set<String> runs = new HashSet<>();
         frames.forEach(f -> runs.add(f.runId()));
@@ -255,6 +253,33 @@ class BaInterviewSmokeTest {
                 LocalDateTime.class, projectId);
     }
 
+    /** BA 会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */
+    private String sessionStateJson() {
+        return jdbcTemplate.queryForObject(
+                "SELECT state_data FROM cat_agent_state WHERE session_id = ?",
+                String.class, sessionId);
+    }
+
+    /** #34 守卫判读：遍历会话状态 tool_use 块，input 含 answer 键即违规（答复正道 =
+     *  block metadata，模型不可见）。 */
+    private void assertNoAnswerKeyInToolUseInputs() {
+        List<String> offenders = new ArrayList<>();
+        try {
+            for (var msg : new ObjectMapper().readTree(sessionStateJson()).path("context")) {
+                for (var block : msg.path("content")) {
+                    if ("tool_use".equals(block.path("type").asText())
+                            && block.path("input").has("answer")) {
+                        offenders.add(block.path("id").asText());
+                    }
+                }
+            }
+        }
+        catch (java.io.IOException e) {
+            throw new AssertionError("会话状态解析失败", e);
+        }
+        assertThat(offenders).as("#34：tool_use input 不应含 answer 键（违规件 id）").isEmpty();
+    }
+
     /** 等待该 run 的 QUESTION 挂起帧（问答卡呈现源）。 */
     private Frame awaitQuestionWaitOf(String runId) {
         Frame wait = awaitFrame(runId, AgentEventTypes.WAIT_RAISED);
@@ -265,6 +290,12 @@ class BaInterviewSmokeTest {
     /** 挂起帧的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
     private static String engineRefOf(Frame wait) {
         return String.valueOf(wait.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
+    }
+
+    /** 帧的 engineRef（非挂起帧为空串——帧序诊断用）。 */
+    private static String engineRefOrEmpty(Frame frame) {
+        Object ref = frame.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD);
+        return ref != null ? String.valueOf(ref) : "";
     }
 
     /** 等待该 run 的下一个 QUESTION（续跑同 run 再挂起——按排除已见 engineRef 区分）。 */
@@ -287,6 +318,15 @@ class BaInterviewSmokeTest {
         throw new AssertionError("答复续跑未再挂起提问（run=" + runId + "）——访谈在第二轮前收敛");
     }
 
+    /** 按 engineRef 取挂起帧（催促循环锚定 awaitResumeOutcome 返回的新挂起）。 */
+    private Frame waitFrameByRef(String engineRef) {
+        return frames.stream()
+                .filter(f -> AgentEventTypes.WAIT_RAISED.equals(f.type())
+                        && engineRef.equals(engineRefOf(f)))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("engineRef 无对应挂起帧: " + engineRef));
+    }
+
     /** 等待该 run 收口（task-finish；error 视为失败）。 */
     private void awaitRunEnd(String runId) {
         Frame end = awaitFrame(runId, AgentEventTypes.TASK_FINISH, AgentEventTypes.ERROR);
@@ -304,7 +344,10 @@ class BaInterviewSmokeTest {
                     continue;
                 }
                 if (AgentEventTypes.ERROR.equals(frame.type())) {
-                    throw new AssertionError("run 异常收口：" + frame.payload());
+                    throw new AssertionError("run 异常收口：" + frame.payload()
+                            + "；已捕获帧序：" + frames.stream()
+                                    .map(f -> f.type() + "@" + engineRefOrEmpty(f))
+                                    .toList());
                 }
                 if (AgentEventTypes.TASK_FINISH.equals(frame.type())) {
                     return "finished";
@@ -318,19 +361,8 @@ class BaInterviewSmokeTest {
             }
             sleepQuietly();
         }
-        throw new AssertionError("续跑无结果超时（runs=" + runIds + "）");
-    }
-
-    /** 会话当前在悬问答的挂起帧（未答的最后一个 wait-raised；无在悬返回 null）。 */
-    private Frame solePendingQuestion(List<String> seenRefs) {
-        Frame pending = null;
-        for (Frame frame : frames) {
-            if (AgentEventTypes.WAIT_RAISED.equals(frame.type())
-                    && !seenRefs.contains(engineRefOf(frame))) {
-                pending = frame;
-            }
-        }
-        return pending;
+        throw new AssertionError("续跑无结果超时（runs=" + runIds + "）；已捕获帧序："
+                + frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList());
     }
 
     private Frame awaitFrame(String runId, String... types) {
@@ -387,7 +419,7 @@ class BaInterviewSmokeTest {
             }
             return new ObjectMapper().readValue(String.valueOf(raw), Map.class);
         } catch (java.io.IOException e) {
-            throw new AssertionError("等待点 body 解析失败: " + raw, e);
+            throw new AssertionError("挂起帧 body 解析失败: " + raw, e);
         }
     }
 

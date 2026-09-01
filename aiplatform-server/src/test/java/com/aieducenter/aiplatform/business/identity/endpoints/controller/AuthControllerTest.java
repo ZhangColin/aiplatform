@@ -48,11 +48,11 @@ class AuthControllerTest {
 
     @Test
     void given_login_request_when_login_then_txn_cookie_set_and_302_to_authorize() throws Exception {
-        when(appService.beginLogin("/workbench")).thenReturn(
+        when(appService.beginLogin("/projects")).thenReturn(
                 new LoginRedirect("http://identity.localhost:10001/authorize?state=st",
                         cookie(AuthCookies.TXN_COOKIE_NAME, "st:nc:%2F", 600)));
 
-        mockMvc.perform(get("/auth/login").queryParam("returnTo", "/workbench"))
+        mockMvc.perform(get("/auth/login").queryParam("returnTo", "/projects"))
                 .andExpect(status().isFound())
                 .andExpect(redirectedUrl("http://identity.localhost:10001/authorize?state=st"))
                 .andExpect(result -> assertThat(
@@ -70,13 +70,13 @@ class AuthControllerTest {
     void given_completed_login_when_callback_then_session_cookie_set_and_txn_cleared()
             throws Exception {
         when(appService.completeLogin(any(), any(), any())).thenReturn(
-                new LoginCompletion(APP_BASE + "/workbench",
+                new LoginCompletion(APP_BASE + "/projects",
                         cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-9", -1),
                         cookie(AuthCookies.TXN_COOKIE_NAME, "", 0)));
 
         mockMvc.perform(get("/auth/callback").queryParam("code", "c").queryParam("state", "st"))
                 .andExpect(status().isFound())
-                .andExpect(redirectedUrl(APP_BASE + "/workbench"))
+                .andExpect(redirectedUrl(APP_BASE + "/projects"))
                 .andExpect(this::assertSessionCookiePlanted)
                 .andExpect(this::assertTxnCookieCleared);
     }

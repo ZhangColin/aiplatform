@@ -17,7 +17,7 @@ import type { CoderRunStatus } from "@/lib/store/generation";
  * 文件模式 = FilesPanel（交付文件树 + 点看内容，PRD 是缺省一篇；操作条可挂
  * 「开始做系统」）；系统模式 = SystemPanel（空白浏览器窗 → run 完成自动挂
  * 预览）；项目模式 = OrderPanel（订单当前态卡，无订单 = 引导占位；归档终态
- * 挂最近订单出完整记录）。tab 受控归装配层（WorkbenchView）：编码 run 起跑
+ * 挂最近订单出完整记录）。tab 受控归装配层（ProjectPageView）：编码 run 起跑
  * 自动切系统模式、下单自动切项目模式，用户手动切换优先至下一自动事件。
  */
 export function OutputsArea({

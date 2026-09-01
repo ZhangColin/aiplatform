@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ProjectDetail } from "@/lib/projects/detail";
 
-import { WorkbenchView } from "./workbench-view";
+import { ProjectPageView } from "./project-page-view";
 
 // 项目页装配的双态切换（#20 验收口径）：闲聊期（prdProducedAt 未落）指令区
 // 占满全宽、成果区不渲染；PRD 产出后成果区长出（三模式 + PRD 正文）、指令区
@@ -66,11 +66,11 @@ function detail(overrides: Partial<ProjectDetail> = {}): ProjectDetail {
   return { id: "p1", name: "宠物医院预约系统", ...overrides };
 }
 
-describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
+describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
   it("闲聊期（prdProducedAt 未落）：指令区占满全宽、无成果区页签与三模式", () => {
     seed.detail = detail({ prdProducedAt: null });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).not.toContain('data-slot="resizable-panel-group"');
     expect(html).not.toContain("docs/PRD.md");
@@ -80,7 +80,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
   it("PRD 产出（prdProducedAt 落定）：双槽长出——三模式页签 + PRD 正文", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z" });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain('data-slot="resizable-panel-group"');
     expect(html.match(/data-slot="resizable-panel"/g)).toHaveLength(2);
@@ -94,7 +94,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
   it("PRD 已产出且未生成（#22）：对话流卡片 + 文件模式操作条双入口「开始做系统」", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain("需求整理好了，可以开始做系统");
     // 紧凑入口挂在文件模式操作条（PRD 头部）
@@ -104,7 +104,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
   it("闲聊期（PRD 未产出）：不出现「开始做系统」入口（无事可做）", () => {
     seed.detail = detail({ prdProducedAt: null });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).not.toContain("开始做系统");
   });
@@ -115,7 +115,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
       generatedAt: "2026-08-31T09:00:00Z",
     });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).not.toContain("开始做系统");
   });
@@ -128,7 +128,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
       generatedAt: "2026-08-31T09:00:00Z",
     });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain("确认下单");
   });
@@ -143,7 +143,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
       activeOrder: { id: "o1", status: 1, statusName: "待报价" },
     });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain("订单处理中——如需继续修改，请取消订单");
     expect(html).toContain("disabled");
@@ -156,7 +156,7 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
       generatedAt: "2026-08-31T09:00:00Z",
     });
 
-    const html = renderToStaticMarkup(<WorkbenchView projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain("和需求分析师聊聊你的想法");
     expect(html).not.toContain("订单处理中");
@@ -165,13 +165,13 @@ describe("WorkbenchView · 闲聊态 ↔ 成果区长出（#20）", () => {
 
   it("未生成 / 已归档：不出「确认下单」", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
-    expect(renderToStaticMarkup(<WorkbenchView projectId="p1" />)).not.toContain("确认下单");
+    expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />)).not.toContain("确认下单");
 
     seed.detail = detail({
       prdProducedAt: "2026-08-31T08:00:00Z",
       generatedAt: "2026-08-31T09:00:00Z",
       archived: true,
     });
-    expect(renderToStaticMarkup(<WorkbenchView projectId="p1" />)).not.toContain("确认下单");
+    expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />)).not.toContain("确认下单");
   });
 });

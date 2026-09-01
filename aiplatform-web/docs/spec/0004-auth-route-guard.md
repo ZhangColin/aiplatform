@@ -21,8 +21,8 @@ BFF 四端点照 A2 §2/§9，前端**同源姿态**，不感知 token：
 ## 2. 登录链路与回跳契约（returnTo）
 
 ```
-未登录访问 /workbench/p123
-  → middleware 302 /auth/login?returnTo=%2Fworkbench%2Fp123   （§4）
+未登录访问 /projects/p123
+  → middleware 302 /auth/login?returnTo=%2Fprojects%2Fp123   （§4）
   → identity 登录页（identity.localhost:10002）授权
   → 302 localhost:3333/auth/callback?code&state（代理到 8888）
   → 后端验签换 token、upsert 账号、Set-Cookie aiplatform_session
@@ -30,9 +30,9 @@ BFF 四端点照 A2 §2/§9，前端**同源姿态**，不感知 token：
 ```
 
 - **携带**：`returnTo = encodeURIComponent(pathname + search)`，仅同源相对路径。
-- **两个入口共用**：middleware 首跳 与 §3 的 401 过期跳——同一机制，否则会话过期时深在工作台仍丢位置。
+- **两个入口共用**：middleware 首跳 与 §3 的 401 过期跳——同一机制，否则会话过期时深在项目页仍丢位置。
 - **校验与兜底在后端**（开放重定向防线）：只接受单个 `/` 开头的相对路径，拒绝 `//`、`/\`、绝对 URL；非法落 `/`。往返存活方式（`oauth_txn` 承载 or 塞 state）是后端实现自由。
-- **登录后兜底落点** = 门户首页（暂定 `/`，具体随工程初始化 #1 路由方案）。
+- **登录后兜底落点** = 首页（暂定 `/`，具体随工程初始化 #1 路由方案）。
 - **注销落点不变**：`post_logout_redirect_uri` 维持 `http://localhost:3333/`，不做「已退出」公开页——落 `/` 后 middleware 302 到 identity 登录页属预期行为；若实测 id_token hint 未杀掉 identity 会话（注销后免密弹回）再议。
 
 ## 3. 会话保持与 401 全局出口
@@ -51,7 +51,7 @@ ADR 0002 已定「401 跳 BFF 登录」，本 spec 定细则——**一个出口
 - `src/proxy.ts`：非白名单路径无 `aiplatform_session` cookie → 302 `/auth/login?returnTo=<enc>`；有 cookie → 放行。
 - **只验存在性，不验真**：不透明 sessionId 前端无法验证；cookie 在而后端会话已死 → 页面渲染 → 首个 `/api` 401 → §3 出口兜底（接受一次空壳闪现，换零延迟零额外请求）。
 - **白名单**（matcher 排除）：`/auth/*`（代理路径，拦了死循环）、`/api/*`、`_next/*` 与静态资源、`favicon.ico`、`/prototype/*`（UX 原型，prod 本就渲染 null）。
-- **三门户无差别**：v1 守卫只验登录态，不区分门户/角色；将来角色过滤走场景菜单配置（spec 0003 §1），不动守卫。
+- **守卫只验登录态，不区分页面/角色**：将来角色过滤走场景菜单配置，不动守卫。
 
 ## 5. useMe 契约
 

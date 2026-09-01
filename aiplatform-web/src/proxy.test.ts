@@ -82,7 +82,7 @@ describe("proxy · 会话判定", () => {
     );
   });
 
-  it("returnTo 携带 search（深在工作台过期不丢位置，spec 0004 §2）", () => {
+  it("returnTo 携带 search（深在项目页过期不丢位置，spec 0004 §2）", () => {
     const res = proxy(request("/projects/p123?tab=logs&x=1"));
 
     expect(res.headers.get("location")).toBe(

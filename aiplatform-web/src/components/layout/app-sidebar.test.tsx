@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider } from "@/components/ui/sidebar";
 
-import { PortalSidebar } from "./portal-sidebar";
+import { AppSidebar } from "./app-sidebar";
 
 // active 态推导与本测试无关
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects" }));
@@ -33,13 +33,13 @@ function assertNoNestedButton(html: string) {
   }
 }
 
-describe("PortalSidebar（issue #17 单门户）", () => {
+describe("AppSidebar（issue #17 前端清场）", () => {
   it("footer 不出现 button 嵌套（hydration 回归：UserMenu/ModeToggle 均为触发按钮）", () => {
     const html = renderSidebar(true);
     assertNoNestedButton(html);
   });
 
-  it("展开态品牌行 = 品牌 + 收起按钮，无门户切换 dropdown（门户下拉已删）", () => {
+  it("展开态品牌行 = 品牌 + 收起按钮，无站点切换 dropdown（站点下拉已删）", () => {
     const html = renderSidebar(true);
     expect(html).not.toContain('data-slot="dropdown-menu-trigger"');
     expect(html).not.toContain('aria-haspopup="menu"');
@@ -68,7 +68,7 @@ describe("PortalSidebar（issue #17 单门户）", () => {
 function renderSidebar(open: boolean) {
   return renderToStaticMarkup(
     <SidebarProvider open={open}>
-      <PortalSidebar
+      <AppSidebar
         groups={[
           {
             items: [

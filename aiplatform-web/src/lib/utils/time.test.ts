@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatElapsed } from "./time";
 
-describe("formatElapsed（工作台 LIVE 计时 mm:ss）", () => {
+describe("formatElapsed（项目页 LIVE 计时 mm:ss）", () => {
   it("不足 1 小时渲染 mm:ss，秒位补零", () => {
     expect(formatElapsed(0)).toBe("00:00");
     expect(formatElapsed(5)).toBe("00:05");

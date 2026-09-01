@@ -8,7 +8,7 @@ import { probeSessionAlive, SseConnection } from "./connection";
 
 /**
  * agent 流通道（`/api/agent-events?projectId=`）的首个挂载方（ADR 0003 连接拓扑，
- * issue #23）：工作台 mount 建连、unmount 即断；`dispatchAgentEvent` 接为 message
+ * issue #23）：项目页 mount 建连、unmount 即断；`dispatchAgentEvent` 接为 message
  * handler（streams store 分发 + agent 侧失效注册表）。
  *
  * 形态同构通知通道 provider：会话守卫（未登录不建连）+ probe-cancelled 幂等——

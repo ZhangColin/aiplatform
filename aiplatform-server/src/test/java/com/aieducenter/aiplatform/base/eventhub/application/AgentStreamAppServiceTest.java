@@ -123,7 +123,7 @@ class AgentStreamAppServiceTest {
 
     /**
      * 事故回归（#53 真机时序，#52 同路径）：建项目后 BA 起跑即死——error 帧（带
-     * projectId 关联）在零订阅时发出，彼时浏览器还在导航/首编译；工作台就绪后按
+     * projectId 关联）在零订阅时发出，彼时浏览器还在导航/首编译；项目页就绪后按
      * projectId 建立订阅，帧必须到达（重放非重发，id 即原事件 id）。重放同样过
      * 订阅谓词——别的项目的帧不泄漏。
      */
@@ -138,10 +138,10 @@ class AgentStreamAppServiceTest {
                 AgentStreamAppService.RUN_FIELD, "run-10",
                 "message", "别的项目的帧"));
 
-        SseEmitter workbench = appService.subscribe("7", null, true);
+        SseEmitter subscription = appService.subscribe("7", null, true);
 
-        assertThat(sender.eventFramesOf(workbench)).hasSize(1);
-        SseServerEvent frame = sender.eventFramesOf(workbench).get(0);
+        assertThat(sender.eventFramesOf(subscription)).hasSize(1);
+        SseServerEvent frame = sender.eventFramesOf(subscription).get(0);
         assertThat(frame.id()).isEqualTo("run-9:1");   // 重放帧与实时帧同一 id 口径
         EventEnvelope envelope = (EventEnvelope) frame.data();
         assertThat(envelope.type()).isEqualTo(AgentEventTypes.ERROR);

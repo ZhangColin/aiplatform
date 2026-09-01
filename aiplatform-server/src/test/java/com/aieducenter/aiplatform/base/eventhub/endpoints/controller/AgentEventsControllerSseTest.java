@@ -143,7 +143,7 @@ class AgentEventsControllerSseTest {
 
     /**
      * 事故回归上线形态（#53/#56）：建项目后 BA 起跑即死，error 帧（带 projectId）
-     * 发于零订阅——彼时浏览器还在导航/首编译；工作台就绪后以新连接（无
+     * 发于零订阅——彼时浏览器还在导航/首编译；项目页就绪后以新连接（无
      * Last-Event-ID）按 ?projectId= 订阅，补发帧必须到达（原事件 id，非重发）。
      */
     @Test
@@ -176,7 +176,7 @@ class AgentEventsControllerSseTest {
 
     /**
      * 直播断线补帧（#23 生成环②）：编码 run 进行中用户刷新页面——直播帧在零订阅
-     * 期间发射进缓冲，工作台就绪后以新连接（无 Last-Event-ID）按 ?projectId=
+     * 期间发射进缓冲，项目页就绪后以新连接（无 Last-Event-ID）按 ?projectId=
      * 订阅，当前 run 的直播帧按原序原 id 补达（续看进行中 run）；别项目帧不泄漏。
      */
     @Test

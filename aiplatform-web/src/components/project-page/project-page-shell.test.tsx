@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import type { AgentRun, AgentStreamsState } from "@/lib/store/agent-streams";
 
-import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
+import { ProjectPageRunStatus, ProjectPageShell } from "./project-page-shell";
 
 // 顶栏运行状态（LIVE 真绑定）直读 streams store（最近 run 读口
 // latestProjectRun）。zustand v5 在 react-dom/server 下 server snapshot
@@ -29,7 +29,7 @@ function seedRun(run: AgentRun) {
   seed.state = { runs: { [run.runId]: run }, order: [run.runId] };
 }
 
-describe("WorkbenchRunStatus · LIVE 真绑定", () => {
+describe("ProjectPageRunStatus · LIVE 真绑定", () => {
   beforeEach(() => {
     // 计时锚断言需确定性时钟（锚 run.startedAt，非挂载起跳）
     vi.useFakeTimers();
@@ -39,13 +39,13 @@ describe("WorkbenchRunStatus · LIVE 真绑定", () => {
   afterEach(() => vi.useRealTimers());
 
   it("无 run：整块不渲染（不再常驻装饰）", () => {
-    const html = renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />);
     expect(html).not.toContain("LIVE");
   });
 
   it("run 进行中：LIVE 脉冲 + 计时锚 run.startedAt（65s 前起跑非从 0）", () => {
     seedRun(runOf("running"));
-    const html = renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />);
     expect(html).toContain("LIVE");
     expect(html).toContain("01:05");
     expect(html).not.toContain("00:00");
@@ -53,32 +53,32 @@ describe("WorkbenchRunStatus · LIVE 真绑定", () => {
 
   it("waiting 也是进行中：等用户 ≠ 终态", () => {
     seedRun(runOf("waiting", Date.now() - 5_000));
-    const html = renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />);
+    const html = renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />);
     expect(html).toContain("LIVE");
   });
 
   it("终态（finished / error）：整块不渲染", () => {
     seedRun(runOf("finished"));
-    expect(renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />)).not.toContain("LIVE");
+    expect(renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />)).not.toContain("LIVE");
     seedRun(runOf("error"));
-    expect(renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />)).not.toContain("LIVE");
+    expect(renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />)).not.toContain("LIVE");
   });
 
   it("别的项目的 run 不串台：按 projectId 键控", () => {
     seedRun({ ...runOf("running"), projectId: "p2" });
-    expect(renderToStaticMarkup(<WorkbenchRunStatus projectId="p1" />)).not.toContain("LIVE");
+    expect(renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />)).not.toContain("LIVE");
   });
 });
 
-// 工作台壳（issue #17 单门户两槽位）：resizable 双槽（指令区 / 成果区）、
+// 项目页壳（issue #17 单站两槽位）：resizable 双槽（指令区 / 成果区）、
 // <lg 双页签退化、顶栏运行状态插槽。只断言结构，栏宽 / 槽位内容归场景插槽。
-describe("WorkbenchShell", () => {
+describe("ProjectPageShell", () => {
   it("双槽框架就位：<lg 双页签、两槽内容都在", () => {
     const html = renderToStaticMarkup(
       <SidebarProvider>
-        <WorkbenchShell
+        <ProjectPageShell
           header={<span>项目甲</span>}
-          running={<WorkbenchRunStatus projectId="p1" />}
+          running={<ProjectPageRunStatus projectId="p1" />}
           left={<span>指令区</span>}
           outputs={<span>成果区</span>}
           mobileTabs={["指令区", "成果区"]}
@@ -97,7 +97,7 @@ describe("WorkbenchShell", () => {
   it("闲聊期（outputs 缺省）：单槽满宽、无 resizable / 页签（#19 尚无产物指令区占满全宽）", () => {
     const html = renderToStaticMarkup(
       <SidebarProvider>
-        <WorkbenchShell header={<span>项目甲</span>} running={null} left={<span>指令区</span>} mobileTabs={["指令区"]} />
+        <ProjectPageShell header={<span>项目甲</span>} running={null} left={<span>指令区</span>} mobileTabs={["指令区"]} />
       </SidebarProvider>,
     );
 

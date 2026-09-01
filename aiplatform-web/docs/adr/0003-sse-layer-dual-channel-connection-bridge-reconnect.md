@@ -1,12 +1,14 @@
 # SSE 消费层：双通道连接拓扑 + 事件→失效桥 + 断线对齐
 
+> **修订（片5-3 · [票 #33](https://github.com/ZhangColin/aiplatform/issues/33) 终检，2026-09-01）**：本 ADR 叙述中的 Phase-A 面——todos 失效域（`AGENT_EVENT_INVALIDATIONS`）、`stage-changed` 载荷白名单、「直播」tab、agent-streams 分段 store——已随平台重定义删除（#14/#17 清场）；「工作台」为旧壳称谓，现行词条 = 项目页（指令区 + 成果区），agent 流通道随**项目页**建连、直播为成果区右侧栏解说广播。仍有效的决策：双通道连接拓扑（通知 root 常开、agent 流随项目页建连）、「失效为主 + REST 重查兜底」分工、原生 EventSource 重连不自制退避。后端 agent 流已升级为**热缓冲回放**（新连接先收近期帧再进实时流，见 server SSE 事件清单）——「后端未承诺补发」一句按此读。
+
 后端已定稿双通道（aiplatform-server ADR-0001：`GET /api/events` 平台通知 ∥ `GET /api/agent-events` agent 流，信封 `{type, payload, ts}`，15s `:ping` 注释行心跳，重连 = EventSource 自动重连 + REST 重拉对齐），本仓库状态分工已定（ADR 0002：SSE 事件只做 invalidate，流式状态归 Zustand）。本 ADR 定前端消费层三件事：**连接拓扑**（通知通道 root 级登录后单例常开、agent 流通道随工作台建连）；**事件→状态桥**（声明式失效注册表 + runId 键控 streams store）；**断线对齐**（原生重连 + 广谱 invalidate + 15s 门控轮询兜底 + agent 流 Set 去重）。决议过程见 wayfinder 票 #5。
 
 ## 连接拓扑
 
 - **平台通知 `/api/events`：root layout 挂 provider，登录后单例一条，缺省全量不过滤**。切门户不断线（后端「门户布局级常开」取的是常开语义，不强制每门户一条）；未登录不建连；每标签页天然各持一条，不做跨标签页聚合。A2 后加 `userId` 过滤 = 改连接 URL 参数，连接管理层不动。
 - **agent 流 `/api/agent-events`：工作台 mount 建连（`?projectId=` 过滤）、unmount 即断**。用户中途离开、运行还在继续：streams 按 runId 留存，回来重连后续播，中间缺口 Phase A **不做交代**——事件只让 UI 活、正确性走 REST，终态以后端重查为准；后端将来开补发时前端增量承接（见 Consequences 的缝）。
-  - **修订（#23 落码，2026-08-22）——首个挂载方落地**：项目工作台页（`workbench-view.tsx`）经 `agent-channel.tsx` 的 `useAgentStreamChannel(projectId)` 建连，probe 会话守卫 + StrictMode 幂等形态同构通知 provider；呈现 = 主面板「直播」tab（知识命中区块 + 连接状态小指示 + 断流 10s toast），spec 0001 §4.2 的最小落码，全量舞台时间线归后续对接 issue。
+  - **修订（#23 落码，2026-08-22）——首个挂载方落地**：项目页（`project-page-view.tsx`）经 `agent-channel.tsx` 的 `useAgentStreamChannel(projectId)` 建连，probe 会话守卫 + StrictMode 幂等形态同构通知 provider；呈现 = 主面板「直播」tab（知识命中区块 + 连接状态小指示 + 断流 10s toast），全量舞台时间线归后续对接 issue。
 
 ## 事件→状态桥
 

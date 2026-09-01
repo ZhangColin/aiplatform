@@ -1,7 +1,7 @@
 import type { components } from "@/lib/api/schema";
 
 /**
- * 一句话建项目（issue #39 起，#51 收为纯一句话，spec 0002 §3.1 / #48）：
+ * 一句话建项目（issue #39 起，#51 收为纯一句话 / #48）：
  * CreateProjectCommand 载荷构造的纯逻辑层。创建只有一句话——项目名由后端
  * LLM 取（aiplatform-server#39 已落地，name 从契约移除）、模板单链默认、引擎
  * 后台统一定，载荷不含 name / type / engine。

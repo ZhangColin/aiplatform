@@ -79,7 +79,7 @@ class WorkspaceProvisionAppServiceTest {
         ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
         verify(workspaceRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(ProvisioningStatus.FAILED);
-        // 失败落归一化失败原因（错误码 + 文案，工作台可见）
+        // 失败落归一化失败原因（错误码 + 文案，项目页可见）
         assertThat(saved.getValue().getProvisionError())
                 .startsWith(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.code());
         // 失败不回填端口/资源（保持置备中占位，端口 0、清单空）

@@ -9,7 +9,7 @@ import { useGenerate } from "@/hooks/use-generate";
 /**
  * 开始做系统（#22）：同一动作的两个呈现形态——对话流内卡片（解释性入口）
  * 与紧凑按钮（文件模式操作条 / 系统模式失败重发）。纯动作无门：待定项未清也可
- * 点；eligibility（PRD 已产出 && 未生成 && 不在生成中）归装配层（WorkbenchView）
+ * 点；eligibility（PRD 已产出 && 未生成 && 不在生成中）归装配层（ProjectPageView）
  * 单点判定，本组件只管动作与进行中态。发起成功即回调 onGenerated（场景层切
  * 成果区系统模式，mobile 跳成果区页签）。
  */

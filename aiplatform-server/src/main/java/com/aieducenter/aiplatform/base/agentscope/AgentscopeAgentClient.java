@@ -64,6 +64,13 @@ public class AgentscopeAgentClient {
      */
     public static final String ASK_USER_TOOL_NAME = "ask_user";
 
+    /**
+     * 问答答复的注入通道：挂起批复重写 block 的 metadata 键（#34 口径——答复不进
+     * 工具 input：input 持久化进会话、模型可见，会教模型「ask_user 可自带答案」
+     * 自答后续提问；metadata 不序列化给模型，仅工具执行体经 ToolCallParam 读取）。
+     */
+    public static final String ANSWER_METADATA_KEY = "answer";
+
     private static final String USAGE_EVENT_PREFIX = "agent-usage-";
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -155,21 +162,23 @@ public class AgentscopeAgentClient {
 
     /**
      * 提问类挂起的续跑批复：待确认工具（挂起帧 data.toolCalls 元素形状 {id,name,input}）
-     * + 用户答复 → ConfirmResult（答复注入工具 input 的 answer 键——提问工具执行即读
-     * 它作为工具结果回给模型）。重建为 ASKING 态与会话状态同形（确认应用按此替换，
-     * 否则原 ASKING 残留卡后续轮）；content 回填 input 的 JSON 串——重放的参数校验
-     * （ToolValidator.validateInput）只认 content 原文不认 input map，null 会让重放炸
-     * 「argument is null」错误结果给模型（模型见错换 id 重问/自述提问系统失败）。
+     * + 用户答复 → ConfirmResult（input 原样不重写；答复注入重写 block 的 metadata
+     * {@link #ANSWER_METADATA_KEY}——模型不可见通道，提问工具执行即读它作为工具
+     * 结果回给模型。答复进 input 会持久化进会话教模型自答，#34）。重建为 ASKING 态
+     * 与会话状态同形（确认应用按此替换并置 ALLOWED，否则原 ASKING 残留卡后续轮）；
+     * content 回填 input 的 JSON 串——重放的参数校验（ToolValidator.validateInput）
+     * 只认 content 原文不认 input map，null 会让重放炸「argument is null」错误结果给
+     * 模型（模型见错换 id 重问/自述提问系统失败）。
      */
     public static ConfirmResult answeredToolCall(Map<String, Object> toolCall, String answerText) {
         Map<String, Object> input = new LinkedHashMap<>();
         if (toolCall.get("input") instanceof Map<?, ?> inputMap) {
             inputMap.forEach((key, value) -> input.put(String.valueOf(key), value));
         }
-        input.put("answer", answerText);
         return new ConfirmResult(true, new ToolUseBlock(
                 String.valueOf(toolCall.get("id")), String.valueOf(toolCall.get("name")),
-                input, toJson(input), null, ToolCallState.ASKING));
+                input, toJson(input), Map.of(ANSWER_METADATA_KEY, answerText),
+                ToolCallState.ASKING));
     }
 
     // ---------- 内部 ----------

@@ -15,12 +15,12 @@ import { formatElapsed } from "@/lib/utils/time";
 import { isRunInFlight, useRunElapsed } from "./run-elapsed";
 
 /**
- * 工作台框架（issue #17 单门户壳）：顶栏 + resizable 双槽（左指令区 / 右成果区）
+ * 项目页框架（issue #17 单站壳）：顶栏 + resizable 双槽（左指令区 / 右成果区）
  * + <lg 双页签退化。outputs 缺省 = 闲聊期单槽（指令区占满全宽，成果区未长——
  * 判据 = PRD 产出，issue #19）。槽位内容全由场景层注入——成果区内部再分主区域 /
  * 可收展侧栏（直播，生成环落位）时由槽内容自管嵌套，壳不预设。
  */
-export type WorkbenchShellProps = {
+export type ProjectPageShellProps = {
   /** 顶栏内容：项目名等。 */
   header: React.ReactNode;
   /** 顶栏运行状态（ml-auto 处）：LIVE 脉冲 + 计时（进行中才渲染）。 */
@@ -43,7 +43,7 @@ export type WorkbenchShellProps = {
   rightMinSize?: number;
 };
 
-export function WorkbenchShell({
+export function ProjectPageShell({
   header,
   running,
   left,
@@ -55,7 +55,7 @@ export function WorkbenchShell({
   rightDefaultSize = 480,
   leftMinSize = 260,
   rightMinSize = 320,
-}: WorkbenchShellProps) {
+}: ProjectPageShellProps) {
   return (
     <SidebarInset className="h-svh min-h-0 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -110,7 +110,7 @@ export function WorkbenchShell({
  * waiting）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归 useRunElapsed
  * 局部）；无 run / 已终态（finished / error）整块不渲染——信号保守但不撒谎。
  */
-export function WorkbenchRunStatus({ projectId }: { projectId: string }) {
+export function ProjectPageRunStatus({ projectId }: { projectId: string }) {
   const run = useAgentStreamsStore((s) => latestProjectRun(s, projectId));
   const inFlight = isRunInFlight(run);
   const elapsed = useRunElapsed(inFlight ? run : undefined);

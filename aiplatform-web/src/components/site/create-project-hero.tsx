@@ -19,7 +19,7 @@ import { formatRelativeTime } from "@/lib/utils/time";
 import { CreateProjectForm } from "./create-project-form";
 
 /**
- * 首页 = 一句话 hero（issue #17 单门户三路由之一）：整页居中 hero（标题 + 建
+ * 首页 = 一句话 hero（issue #17 单站三路由之一）：整页居中 hero（标题 + 建
  * 项目表单）+ 下方「最近的项目」4 条 + 「查看全部」→ 项目列表页。提交建项目 →
  * 直进该项目页（项目页挂 agent 流，建即自动跑 BA 需求梳理）。区块为将来独立
  * 纯入口页预留（#9：首页可能不放项目列表）。

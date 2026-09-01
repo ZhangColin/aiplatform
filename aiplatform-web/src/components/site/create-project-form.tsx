@@ -14,7 +14,7 @@ import { isSubmitEnter } from "@/lib/chat/enter";
 import { buildCreateProjectCommand } from "@/lib/projects/create";
 
 /**
- * 一句话建项目表单（spec 0002 §3.1，issue #51 收为纯一句话，#19 回车即建）：
+ * 一句话建项目表单（issue #51 收为纯一句话，#19 回车即建）：
  * 渐变光晕卡式大输入 + 方角 primary 发送钮置输入区下方右对齐（无分隔线，输入区
  * 底直角 + 按钮行底圆角无缝接合成一体、按钮右下留距如浮起），仅此一个输入框
  * ——项目名由后端 LLM 取、模板单链默认、引擎后台统一定，不出现用户不懂的概念。
@@ -79,7 +79,7 @@ export function CreateProjectForm({
   return (
     <form onSubmit={onSubmit} className={className}>
       <div className="group relative">
-        {/* 渐变光晕：focus 加深（spec 0002 §3.1） */}
+        {/* 渐变光晕：focus 加深 */}
         <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-primary to-accent opacity-30 blur transition duration-500 group-focus-within:opacity-60" />
         <div className="relative rounded-xl border bg-card p-2 transition-all focus-within:ring-2 focus-within:ring-primary">
           <Label htmlFor={requirementId} className="sr-only">

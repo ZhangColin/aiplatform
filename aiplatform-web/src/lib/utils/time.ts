@@ -10,7 +10,7 @@ export function formatRelativeTime(iso: string | undefined): string {
 }
 
 /**
- * 运行秒数 → mm:ss（工作台顶栏 LIVE 计时口径）；满 1 小时退化为 h:mm:ss
+ * 运行秒数 → mm:ss（项目页顶栏 LIVE 计时口径）；满 1 小时退化为 h:mm:ss
  * （小时位不补零）。负值归零兜底（计时器重置/时钟漂移不溢出）。
  */
 export function formatElapsed(totalSeconds: number): string {

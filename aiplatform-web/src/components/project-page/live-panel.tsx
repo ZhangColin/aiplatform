@@ -167,7 +167,7 @@ function LiveLine({ segment }: { segment: LiveSegment }) {
   return <p className="rounded-lg bg-muted px-2.5 py-1.5 text-xs leading-relaxed">{segment.text}</p>;
 }
 
-/** LIVE 脉冲点（进行中标识，顶栏 WorkbenchRunStatus 同款形态）。 */
+/** LIVE 脉冲点（进行中标识，顶栏 ProjectPageRunStatus 同款形态）。 */
 function LiveDot() {
   return (
     <span className="relative flex size-2 shrink-0">

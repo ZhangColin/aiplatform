@@ -18,12 +18,12 @@ import { CommandArea } from "./command-area";
 import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea } from "./outputs-area";
 import { StartGenerationCard, StartSystemButton } from "./start-generation";
-import { WorkbenchRunStatus, WorkbenchShell } from "./workbench-shell";
+import { ProjectPageRunStatus, ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
 
 /**
- * 项目页装配（issue #17 单门户两槽位壳 + #19/#20 需求环 + #22 生成环①）：左指令区
+ * 项目页装配（issue #17 单站两槽位壳 + #19/#20 需求环 + #22 生成环①）：左指令区
  * （常开对话区，BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出
  * ——判据 = prdProducedAt，document-updated 失效重拉即时切换）。闲聊期
  * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。
@@ -34,12 +34,12 @@ import { lockRowOf } from "@/lib/orders/lock";
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
  * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂输入条按钮、锁定式
  * 矩阵行在此判定（lockRowOf 单点）注入指令区与订单卡、下单成功自动切项目模式看
- * 订单卡。本组件是 agent 流通道首个挂载方（ADR 0003「工作台 mount 建连、unmount
+ * 订单卡。本组件是 agent 流通道首个挂载方（ADR 0003「项目页 mount 建连、unmount
  * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真
  * 绑定：项目建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起
  * 生成/下单跳成果区。</p>
  */
-export function WorkbenchView({ projectId }: { projectId: string }) {
+export function ProjectPageView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
   const [mobileTab, setMobileTab] = useState("chat");
   const [outputsTab, setOutputsTab] = useState("files");
@@ -133,7 +133,7 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
     detail?.activeOrder?.id ?? (detail?.archived ? (detail?.latestOrder?.id ?? null) : null);
 
   return (
-    <WorkbenchShell
+    <ProjectPageShell
       header={
         isPending ? (
           <Skeleton className="h-5 w-32" />
@@ -143,7 +143,7 @@ export function WorkbenchView({ projectId }: { projectId: string }) {
           </span>
         )
       }
-      running={<WorkbenchRunStatus projectId={projectId} />}
+      running={<ProjectPageRunStatus projectId={projectId} />}
       left={
         <CommandArea
           projectId={projectId}

@@ -79,13 +79,13 @@ class AuthAppServiceTest {
         when(oidcClient.authorizeUrl(anyString(), anyString()))
                 .thenReturn("http://identity.localhost:10001/authorize?state=st&nonce=nc");
 
-        LoginRedirect redirect = appService.beginLogin("/workbench?x=1");
+        LoginRedirect redirect = appService.beginLogin("/projects?x=1");
 
         assertThat(redirect.authorizeUrl())
                 .isEqualTo("http://identity.localhost:10001/authorize?state=st&nonce=nc");
         OauthTransaction parsed = OauthTransaction.parse(redirect.txnCookie().getValue())
                 .orElseThrow();
-        assertThat(parsed.returnTo()).isEqualTo("/workbench?x=1");
+        assertThat(parsed.returnTo()).isEqualTo("/projects?x=1");
         assertThat(redirect.txnCookie().isHttpOnly()).isTrue();
         assertThat(redirect.txnCookie().getMaxAge().toSeconds())
                 .isEqualTo(600);
@@ -103,14 +103,14 @@ class AuthAppServiceTest {
 
     @Test
     void given_valid_callback_when_complete_then_account_created_session_built_and_return_to() {
-        OauthTransaction txn = OauthTransaction.issue("/workbench");
+        OauthTransaction txn = OauthTransaction.issue("/projects");
         stubExchangeAndVerify(txn.nonce(), claims("张三"));
 
         LoginCompletion completion = appService.completeLogin("code-1", txn.state(),
                 txn.cookieValue());
 
         assertThat(completion.sessionCookie()).isNotNull();
-        assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/workbench");
+        assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/projects");
 
         Account account = accountRepository.findByExternalId(sub).orElseThrow();
         assertThat(account.getDisplayName()).isEqualTo("张三");

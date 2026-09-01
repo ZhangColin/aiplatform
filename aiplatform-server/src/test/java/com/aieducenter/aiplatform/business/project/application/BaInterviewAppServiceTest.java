@@ -297,8 +297,12 @@ class BaInterviewAppServiceTest {
         assertThat(value.replyId()).isEqualTo("reply-9");
         assertThat(value.resumeText()).isEqualTo("海外企业客户");
         assertThat(value.confirmResults()).hasSize(1);
+        // #34：答复走 block metadata（模型不可见通道），不进 input——input 只留原问题
         assertThat(value.confirmResults().get(0).getToolCall().getInput())
-                .containsEntry("answer", "海外企业客户");
+                .containsEntry("question", "目标用户是谁？")
+                .doesNotContainKey("answer");
+        assertThat(value.confirmResults().get(0).getToolCall().getMetadata())
+                .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "海外企业客户");
         assertThat(value.usageContext().dims()).isEqualTo(
                 UsageDims.of(projectId, UsageDims.kindOf(RolePreset.BA), "ba-" + projectId));
     }

@@ -1,12 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { PortalShell } from "./portal-shell";
+import { SiteShell } from "./site-shell";
 
 // active 态推导与本测试无关（首页高亮与否不改变菜单结构）
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
-// 同 portal-sidebar.test.tsx：桩掉 footer 触发按钮，避免拉入 query client / theme provider
+// 同 app-sidebar.test.tsx：桩掉 footer 触发按钮，避免拉入 query client / theme provider
 vi.mock("@/components/user-menu", () => ({
   UserMenu: () => <button data-testid="user-menu">用户</button>,
 }));
@@ -24,9 +24,9 @@ function navAnchors(html: string): { href: string; label: string }[] {
   );
 }
 
-describe("PortalShell（单门户菜单，issue #17）", () => {
+describe("SiteShell（站点菜单，issue #17）", () => {
   it("菜单仅「首页」「我的项目」两项，href 正确——项目直列与平台组各项不出现", () => {
-    const html = renderToStaticMarkup(<PortalShell>x</PortalShell>);
+    const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
     const items = navAnchors(html);
     expect(items).toEqual([
       { href: "/", label: "首页" },

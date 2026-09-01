@@ -5,7 +5,7 @@ import { buildLoginRedirectUrl } from "@/lib/auth/login-redirect";
 /** BFF 会话 cookie（A2：不透明 sessionId，HttpOnly + SameSite=Lax）。 */
 const SESSION_COOKIE = "aiplatform_session";
 
-/** 被删旧门户路由前缀（issue #17 前端清场）：书签 / 外链 302 回 /，不带 returnTo。 */
+/** 被删旧路由前缀（issue #17 前端清场）：书签 / 外链 302 回 /，不带 returnTo。 */
 const DELETED_ROUTE_PREFIXES = ["/dev", "/opc", "/admin", "/prototype"];
 
 /** 前缀命中 = 前缀本身或其子路径（等值/加斜杠判定，/developer 不误伤）。 */

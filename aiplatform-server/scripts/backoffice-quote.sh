@@ -141,17 +141,18 @@ cmd_quote() {
 
 cmd_package() {
   require_order_id "$1" package
-  local out="${2:-/tmp/$1-source.tar.gz}"
+  # orderId 与输出路径先落 local——下方 set -- 复用位置参数装 curl 头，$1 会被清掉
+  local oid="$1" out="${2:-/tmp/$1-source.tar.gz}"
   local headers line
-  headers=$(sign_headers "$BACKOFFICE_API_SECRET" "/api/backoffice/orders/$1/source-package" "")
+  headers=$(sign_headers "$BACKOFFICE_API_SECRET" "/api/backoffice/orders/$oid/source-package" "")
 
   set --
   while IFS= read -r line; do
     [[ -n "$line" ]] && set -- "$@" -H "$line"
   done <<< "$headers"
 
-  curl -sS "$@" -o "$out" -w "HTTP %{http_code} → $out（%{size_download} 字节）\n" \
-    "$BACKEND/api/backoffice/orders/$1/source-package"
+  curl -sS "$@" -o "$out" -w "HTTP %{http_code} → ${out}（%{size_download} 字节）\n" \
+    "$BACKEND/api/backoffice/orders/$oid/source-package"
 }
 
 cmd_reject_demo() {

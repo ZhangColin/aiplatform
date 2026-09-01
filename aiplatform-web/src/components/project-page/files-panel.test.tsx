@@ -9,7 +9,7 @@ import { FilesPanel } from "./files-panel";
 // 文件树浏览（#27 文件模式）：左侧树（目录缩进展开、文件随 run 长出）+ 右侧
 // 内容（PRD 走 markdown 修订回路、其余文本点看）。PRD 呈现与 markSeen 兜底
 // 口径自 #20 PrdPanel 平移。数据口全 mock；zustand 直读种子状态渲染（v5 server
-// snapshot 限制同 workbench-shell.test）。
+// snapshot 限制同 project-page-shell.test）。
 const seed = vi.hoisted(() => ({
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   files: {

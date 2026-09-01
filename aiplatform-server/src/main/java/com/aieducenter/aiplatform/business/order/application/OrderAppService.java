@@ -24,19 +24,20 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#30 交易环③
- * mock 支付——支付成功一事务订单归档 + 项目归档，提交后知识沉淀 + 订单态变化
- * 通知）：确认下单 = 冻结下单时 PRD 全文快照入单，待报价起步。项目事实
- * （存在性/归档态/PRD 正文）经 {@code business.project} 应用层软引用——
- * 跨 BC 无 FK，同一口径。
+ * mock 支付——#37/#39 支付原子化：支付原子（落已支付）与归档（订单 + 项目）拆
+ * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发）：确认下单 = 冻结
+ * 下单时 PRD 全文快照入单，待报价起步。项目事实（存在性/归档态/PRD 正文）经
+ * {@code business.project} 应用层软引用——跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
  * place/cancel/submitQuote 刻意不加 {@code @Transactional}：单行插入由仓储自带
  * 事务保证；约束撞错的吸收（catch 后翻译）要求 save 的事务已独立结束，不处在
  * 外层事务中（同 MeteringAppService.report 形制）。唯 {@link #pay} 用
- * {@link TransactionTemplate} 收短事务——订单归档与项目归档必须同进同退
- * （ADR-0002），知识沉淀与 SSE 在事务提交后（#5 决议：「支付成功归档动作之后」；
- * 沉淀降级不炸——embedding 不可用不允许回滚已成功的支付）。</p>
+ * {@link TransactionTemplate} 收两个短事务——①支付原子独立落「已支付」；②归档
+ * 独立事务，失败留「已支付」不抹支付事实（#37/#39）；知识沉淀与 SSE 在事务提交
+ * 后（#5 决议：「支付成功归档动作之后」；沉淀降级不炸——embedding 不可用不允许
+ * 回滚已成功的支付）。</p>
  */
 @Service
 @Slf4j
@@ -148,31 +149,54 @@ public class OrderAppService {
     }
 
     /**
-     * mock 支付（#30 交易环③）：已报价（=待支付）态同步只走成功路径。一个事务内
-     * 完成订单 已支付→已归档（{@link Order#archiveOnPayment}，瞬态不外显）+
-     * 项目归档（{@link ProjectLifecycleAppService#archive}，跨 BC 唯一交叉写，
-     * ADR-0002）——任一失败整体回滚（订单留待支付态，用户可再支付或取消）。
-     * 事务提交后：知识沉淀（取归档时最新版 PRD 入库，唯一沉淀触发点；内部降级
-     * 不炸，丢失容忍）+ 订单态变化通知（副作用真实落定后发射，ADR-0001）。
+     * mock 支付（#37/#39 支付原子化）：已报价（=待支付）态同步只走成功路径，支付
+     * 成功即订单落「已支付」真实中间态。拆两个事务——①支付原子（{@link Order#pay}
+     * + save，独立短事务，落 paidAt/paymentNo）；②归档（{@link Order#archive} +
+     * save + {@link ProjectLifecycleAppService#archive} 项目归档，独立事务）——
+     * 归档失败 catch 留「已支付」不抹支付事实（补偿归后续批次）。通知两发：
+     * 支付落定发「已支付」、归档落定发「已归档」，归档失败只发前者；通知以库内
+     * 真值为准（归档事务回滚不还原内存对象，失败路径不得误发「已归档」）。知识
+     * 沉淀在归档后 best-effort（取归档时最新版 PRD 入库，唯一沉淀触发点；内部
+     * 降级不炸，丢失容忍）。
      *
-     * @return 订单（已归档终态：paidAt/archivedAt/paymentNo 已落）
+     * @return 订单（归档成功 = 已归档终态；归档失败 = 已支付中间态，paidAt/
+     *         paymentNo 已落、archivedAt 未落）
      * @throws ApplicationException ORD_001 订单不存在；ORD_011 非待支付状态
-     *                              （聚合守卫，含已支付/已归档/已取消）；PRJ_013
-     *                              项目已归档（联动归档撞重复归档守卫，事务回滚）
+     *                              （聚合守卫，含已支付/已归档/已取消）
      */
     public OrderResponse pay(Long orderId) {
         Order order = requireOrder(orderId);
         order.requirePayable(); // 非待支付不触支付端口（ORD_011）
         String paymentNo = paymentPort.pay(order.getId(), order.getAmount(), order.getCurrency());
         Long projectId = order.getProjectId();
+
+        // ① 支付原子（独立短事务）：已支付真实落库——支付成功即原子事实
         transactionTemplate.executeWithoutResult(status -> {
-            order.archiveOnPayment(paymentNo);
+            order.pay(paymentNo);
             orderRepository.save(order);
-            projectLifecycleAppService.archive(projectId);
         });
-        projectKnowledgeAppService.sinkPrd(projectId);
-        publishStatusChanged(order);
-        return OrderResponse.of(order);
+        publishStatusChanged(order); // 支付落定发「已支付」
+
+        // ② 归档（独立事务）：失败留已支付、日志留痕，不抹支付事实（补偿归后续批次）
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                order.archive();
+                orderRepository.save(order);
+                projectLifecycleAppService.archive(projectId);
+            });
+        } catch (RuntimeException e) {
+            log.warn("订单 {} 支付成功但归档失败（留已支付，补偿归后续批次）：{}",
+                    orderId, e.getMessage());
+        }
+
+        // 通知以库内真值为准（归档事务回滚不还原内存对象）：重读库定真——已归档才
+        // 发「已归档」并触发沉淀
+        Order persisted = requireOrder(orderId);
+        if (persisted.getStatus() == OrderStatus.ARCHIVED) {
+            publishStatusChanged(persisted); // 归档落定发「已归档」
+            projectKnowledgeAppService.sinkPrd(projectId);
+        }
+        return OrderResponse.of(persisted);
     }
 
     private void publishStatusChanged(Order order) {

@@ -34,8 +34,9 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
  * （prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户查）。
  *
  * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代）、{@link #quote}
- * （报价/改价，已报价态重复调用 = 改价）与 {@link #archiveOnPayment}（支付成功
- * 一跳归档——订单与项目归档、知识沉淀同事务联动归应用层，#30）；终态判定
+ * （报价/改价，已报价态重复调用 = 改价）、{@link #pay}（待支付 → 已支付，落
+ * {@code paidAt}/{@code paymentNo}）与 {@link #archive}（已支付 → 已归档，落
+ * {@code archivedAt}——归档为支付后的独立步骤，编排归应用层，#37/#39）；终态判定
  * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用预检与
  * 库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一索引，
  * 聚合不做跨行查重。改价留痕在 {@link OrderPriceEntry}（append-only，
@@ -87,7 +88,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     @Column(name = "paid_at")
     private LocalDateTime paidAt;
 
-    /** 归档时点（支付成功一事务内联动项目归档）。 */
+    /** 归档时点（支付后独立归档步骤落定）。 */
     @Column(name = "archived_at")
     private LocalDateTime archivedAt;
 
@@ -138,7 +139,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
 
     /**
      * 取消（未支付态的显式动作，取消即解冻回迭代）：自任何未支付态（待报价/
-     * 已报价）可达；已支付（支付成功即联动归档，#30）与已终结（已归档/已取消）
+     * 已报价）可达；已支付（真实中间态，支付后归档前）与已终结（已归档/已取消）
      * 拒绝。取消后同项目可再下新单（重新购买 = 新单新快照）。
      */
     public void cancel() {
@@ -179,7 +180,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
-     * 待支付（已报价）守卫（#30 交易环③）：支付端口调用前的状态预检面——非待
+     * 待支付（已报价）守卫（#37/#39）：支付端口调用前的状态预检面——非待
      * 支付态不触支付（ORD_011）。
      */
     public void requirePayable() {
@@ -189,22 +190,32 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
-     * 支付成功归档（#30）：已报价（=待支付）一跳至已归档，同时落 {@code paidAt}
-     * （与 {@code archivedAt} 同拍——「已支付」为事务内瞬态不外显：v1 mock 同步
-     * 成功，真实接入的中间态经 PaymentPort 吸收不进状态机）与支付流水号。
-     * 归档联动（项目归档 + 知识沉淀）归应用层同事务编排。
+     * 支付成功（#37/#39 支付原子化的领域事实）：已报价（=待支付）→ 已支付，落
+     * {@code paidAt} 与支付流水号。「已支付」为真实落库中间态（非事务内瞬态）——
+     * 支付成功即原子事实，后续归档是独立步骤，归档失败不抹支付事实。
      *
      * @param paymentNo 支付流水号（mock 平台内生成；真实接入为渠道单号）
      */
-    public void archiveOnPayment(String paymentNo) {
+    public void pay(String paymentNo) {
         requirePayable();
         if (paymentNo == null || paymentNo.isBlank()) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
-        this.status = OrderStatus.ARCHIVED;
+        this.status = OrderStatus.PAID;
         this.paidAt = LocalDateTime.now();
-        this.archivedAt = paidAt;
         this.paymentNo = paymentNo;
+    }
+
+    /**
+     * 归档（#37/#39 支付后的独立步骤）：已支付 → 已归档，落 {@code archivedAt}。
+     * 仅已支付态可达——归档是支付成功后的独立动作，非已支付态拒绝（ORD_012）。
+     */
+    public void archive() {
+        if (status != OrderStatus.PAID) {
+            throw new DomainException(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED);
+        }
+        this.status = OrderStatus.ARCHIVED;
+        this.archivedAt = LocalDateTime.now();
     }
 
     /**

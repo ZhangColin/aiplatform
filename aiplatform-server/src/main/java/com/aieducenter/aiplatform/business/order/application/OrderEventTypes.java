@@ -9,8 +9,9 @@ package com.aieducenter.aiplatform.business.order.application;
 public final class OrderEventTypes {
 
     /**
-     * 订单状态已变化：下单（待报价）/首次报价（已报价）/取消/支付完成归档各发
-     * 一次——改价不换状态不发。payload 带 orderId + status（Integer code）。
+     * 订单状态已变化：下单（待报价）/首次报价（已报价）/取消/支付完成（已支付）/
+     * 归档（已归档）各发一次——改价不换状态不发（#37/#39：支付与归档分两发，
+     * 归档失败只发「已支付」）。payload 带 orderId + status（Integer code）。
      */
     public static final String ORDER_STATUS_CHANGED = "order-status-changed";
 
@@ -22,7 +23,7 @@ public final class OrderEventTypes {
     /** 订单标识（TSID 十进制字符串）。 */
     public static final String ORDER_ID_FIELD = "orderId";
 
-    /** 订单状态（OrderStatus 的 Integer code：1=待报价 2=已报价 4=已归档 5=已取消）。 */
+    /** 订单状态（OrderStatus 的 Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）。 */
     public static final String STATUS_FIELD = "status";
 
     /** 状态名（用户面文案兜底）。 */

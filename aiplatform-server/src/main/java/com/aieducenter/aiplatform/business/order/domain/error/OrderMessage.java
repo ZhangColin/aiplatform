@@ -27,7 +27,9 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_STATUS_FILTER_UNKNOWN(400, "ORD_010", "无效的订单状态过滤参数"),
 
-    ORDER_PAY_NOT_ALLOWED(409, "ORD_011", "订单非待支付状态，无法支付");
+    ORDER_PAY_NOT_ALLOWED(409, "ORD_011", "订单非待支付状态，无法支付"),
+
+    ORDER_ARCHIVE_NOT_ALLOWED(409, "ORD_012", "订单非已支付状态，无法归档");
 
     private final int httpStatus;
     private final String code;

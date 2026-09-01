@@ -176,7 +176,7 @@ class OrderAppServiceTest {
 
     @Test
     void given_paid_or_terminal_order_when_cancel_then_rejected() {
-        // 已支付（支付成功即联动归档）与终态不可取消；逐态钉死
+        // 已支付（真实中间态，归档是支付后的独立步骤）与终态不可取消；逐态钉死
         for (OrderStatus status : List.of(OrderStatus.PAID, OrderStatus.ARCHIVED, OrderStatus.CANCELLED)) {
             stubProject(ProjectStatus.IN_PROGRESS);
             String orderId = appService.place(PROJECT_ID).id();
@@ -189,7 +189,7 @@ class OrderAppServiceTest {
             assertThat(jdbcTemplate.queryForObject(
                     "SELECT status FROM ord_orders WHERE id = ?", Integer.class,
                     Long.parseLong(orderId))).isEqualTo(status.getCode()); // 状态不被破坏
-            // 已支付仍占未终结名额（支付成功才联动归档），清场后再验下一态
+            // 已支付仍占未终结名额（非终态，未终结唯一索引覆盖），清场后再验下一态
             jdbcTemplate.update("DELETE FROM ord_orders");
         }
     }

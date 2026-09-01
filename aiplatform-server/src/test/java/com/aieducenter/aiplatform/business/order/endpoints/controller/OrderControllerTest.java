@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 订单用户面 REST 契约（#28 交易环① + #30 交易环③支付）：ApiResponse 信封、
  * BaseEnum → Integer code 双向、下单/详情/取消/支付四端点形状与错误码
  * （PRJ_001/PRJ_015 透传、ORD_003 唯一未终结单、ORD_001 不存在、ORD_005 已支付
- * 不可取消、ORD_011 非待支付不可支付；支付成功信封含 paidAt/archivedAt 同拍）。
+ * 不可取消、ORD_011 非待支付不可支付；支付成功信封含 paidAt/archivedAt 分步时间点组）。
  */
 @WebMvcTest(OrderController.class)
 @Import({OrderControllerTest.ExceptionAdviceConfig.class,
@@ -166,10 +166,11 @@ class OrderControllerTest {
     @Test
     void given_quoted_order_when_post_payment_then_archived_envelope() throws Exception {
         LocalDateTime paidAt = LocalDateTime.of(2026, 9, 1, 11, 0);
+        LocalDateTime archivedAt = LocalDateTime.of(2026, 9, 1, 11, 0, 1);
         OrderResponse paid = new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
                 128000L, "CNY", "首版报价", LocalDateTime.of(2026, 9, 1, 10, 0),
                 java.util.List.of(), LocalDateTime.of(2026, 9, 1, 9, 0), null,
-                paidAt, paidAt);
+                paidAt, archivedAt);
         when(appService.pay(900L)).thenReturn(paid);
 
         performAsUser(post("/api/orders/900/payment"))
@@ -177,9 +178,9 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.status").value(4)) // ARCHIVED → Integer code
                 .andExpect(jsonPath("$.data.statusName").value("已归档"))
-                // 已支付为事务内瞬态：paidAt 与 archivedAt 同拍（归档终态「完整记录」）
+                // 归档终态时间点组：paidAt 先落、archivedAt 后落（支付与归档分两步）
                 .andExpect(jsonPath("$.data.paidAt").value("2026-09-01T11:00:00"))
-                .andExpect(jsonPath("$.data.archivedAt").value("2026-09-01T11:00:00"));
+                .andExpect(jsonPath("$.data.archivedAt").value("2026-09-01T11:00:01"));
 
         verify(appService).pay(900L);
     }

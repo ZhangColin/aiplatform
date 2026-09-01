@@ -41,12 +41,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 支付归档一事务集成测试（#30 交易环③验收）：跨 BC 写面（项目归档、平台通知）
- * mock 收口，订单链路 + 知识沉淀（分块 → 真库 knw_chunks）全真——embedding 端口
- * mock 供给向量（本机 fastembed 不属测试依赖）。钉死三面：①支付成功一事务
- * （订单 已支付→已归档 + 项目归档联动 + 提交后知识沉淀入库 + 订单态变化通知）；
- * ②失败回滚面（项目归档失败 → 订单整体回滚留待支付态、沉淀与通知不出）；
- * ③知识沉淀降级面（embedding 故障 → 支付照常成功、沉淀跳过不回滚）。
+ * 支付/归档原子化集成测试（#37/#39 支付原子化验收）：跨 BC 写面（项目归档、平台
+ * 通知）mock 收口，订单链路 + 知识沉淀（分块 → 真库 knw_chunks）全真——embedding
+ * 端口 mock 供给向量（本机 fastembed 不属测试依赖）。钉死三面：①成功面（支付
+ * 原子落「已支付」→ 归档独立步骤落「已归档」，paidAt/paymentNo 先落、
+ * archivedAt 后落，通知序 待报价/已报价/已支付/已归档）；②归档失败面（项目归档
+ * 抛 PRJ_013 → 订单留「已支付」、payment_no 已落、项目未归档、无「已归档」通知
+ * ——「归档失败 ≠ 未支付」）；③知识沉淀降级面（embedding 故障 → 支付/归档照常、
+ * 沉淀跳过不回滚）。
  */
 @SpringBootTest
 class OrderPaymentArchiveTest {
@@ -75,7 +77,7 @@ class OrderPaymentArchiveTest {
     @MockitoBean
     private ProjectQueryAppService projectQueryAppService;
 
-    /** 跨 BC 唯一写交叉：项目归档联动（事务编排的回滚面挂点）。 */
+    /** 跨 BC 唯一写交叉：项目归档联动（归档事务的失败面挂点）。 */
     @MockitoBean
     private ProjectLifecycleAppService projectLifecycleAppService;
 
@@ -107,23 +109,25 @@ class OrderPaymentArchiveTest {
     }
 
     @Test
-    void given_quoted_order_when_pay_then_archive_project_and_sink_prd_in_one_action() {
+    void given_quoted_order_when_pay_then_paid_and_archived_and_sink_prd() {
         stubEmbeddingOk();
         String orderId = quotedOrder();
 
         OrderResponse paid = appService.pay(Long.parseLong(orderId));
 
-        // 订单事实（库内为准）：一跳已归档、paidAt 与 archivedAt 同拍、mock 流水号落值
+        // 订单事实（库内为准）：先已支付、后归档——paidAt 先落、archivedAt 后落、
+        // mock 流水号落值（分两步，非一跳）
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT status, paid_at, archived_at, payment_no FROM ord_orders WHERE id = ?",
                 Long.parseLong(orderId));
         assertThat(row.get("status")).isEqualTo(OrderStatus.ARCHIVED.getCode());
         assertThat(row.get("paid_at")).isNotNull();
-        assertThat(row.get("archived_at")).isEqualTo(row.get("paid_at"));
+        assertThat(row.get("archived_at")).isNotNull();
         assertThat((String) row.get("payment_no")).startsWith("MOCK-");
         assertThat(paid.status()).isEqualTo(OrderStatus.ARCHIVED);
-        assertThat(paid.paidAt()).isEqualTo(paid.archivedAt());
-        // 项目归档联动（跨 BC 唯一写交叉，同事务）
+        assertThat(paid.paidAt()).isNotNull();
+        assertThat(paid.archivedAt()).isNotNull();
+        // 项目归档联动（归档独立事务，支付已落定之后）
         verify(projectLifecycleAppService).archive(PROJECT_ID);
         // 知识沉淀入库（真分块真行）：kind=PRD、幂等键=projectId、块正文来自归档时 PRD
         List<Map<String, Object>> chunks = jdbcTemplate.queryForList(
@@ -137,16 +141,17 @@ class OrderPaymentArchiveTest {
                 .containsEntry("title", "PRD");
         assertThat(String.join("\n", chunks.stream().map(c -> (String) c.get("chunk")).toList()))
                 .contains("宠物店官网", "购物车页");
-        // 订单态变化通知（副作用落定后）：本用例链上共三发（待报价/已报价/已归档），
-        // 末发即支付归档——载荷 projectId/orderId/status=4
+        // 订单态变化通知（副作用落定后）：链上四发（待报价/已报价/已支付/已归档），
+        // 支付与归档分两发——末发即归档（status=4）
         assertThat(publishedStatuses()).containsExactly(
                 OrderStatus.PENDING_QUOTE.getCode(),
                 OrderStatus.QUOTED.getCode(),
+                OrderStatus.PAID.getCode(),
                 OrderStatus.ARCHIVED.getCode());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
         verify(notificationAppService, atLeastOnce()).publish(eq("order-status-changed"), payload.capture());
-        assertThat(payload.getValue()) // captor 末值 = 支付归档那发
+        assertThat(payload.getValue()) // captor 末值 = 归档那发
                 .containsEntry("projectId", Long.toString(PROJECT_ID))
                 .containsEntry("status", OrderStatus.ARCHIVED.getCode())
                 .containsEntry("statusName", "已归档")
@@ -154,30 +159,37 @@ class OrderPaymentArchiveTest {
     }
 
     @Test
-    void given_project_archive_fails_when_pay_then_rollback_order_stays_quoted() {
+    void given_project_archive_fails_when_pay_then_order_stays_paid() {
         stubEmbeddingOk();
         String orderId = quotedOrder();
         when(projectLifecycleAppService.archive(anyLong()))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
 
-        assertThatThrownBy(() -> appService.pay(Long.parseLong(orderId)))
-                .isInstanceOf(ApplicationException.class)
-                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        OrderResponse paid = appService.pay(Long.parseLong(orderId));
 
-        // 回滚面：订单整体退回待支付态（未支付/未归档/无流水号），沉淀与通知不出
+        // 归档失败不抹支付事实：订单留已支付、paidAt/paymentNo 已落、archivedAt 未落、
+        // 项目未归档（归档失败 ≠ 未支付——补偿归后续批次）
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT status, paid_at, archived_at, payment_no FROM ord_orders WHERE id = ?",
                 Long.parseLong(orderId));
-        assertThat(row.get("status")).isEqualTo(OrderStatus.QUOTED.getCode());
-        assertThat(row.get("paid_at")).isNull();
+        assertThat(row.get("status")).isEqualTo(OrderStatus.PAID.getCode());
+        assertThat(row.get("paid_at")).isNotNull();
         assertThat(row.get("archived_at")).isNull();
-        assertThat(row.get("payment_no")).isNull();
+        assertThat((String) row.get("payment_no")).startsWith("MOCK-");
+        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid.paidAt()).isNotNull();
+        assertThat(paid.archivedAt()).isNull();
+        // 项目归档联动被调用但抛错（归档失败，非未调用）
+        verify(projectLifecycleAppService).archive(PROJECT_ID);
+        // 无沉淀（归档未成，唯一沉淀触发点不触发）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
                 Long.toString(PROJECT_ID))).isZero();
-        // 回滚面通知口径：落定的两发（待报价/已报价）之外无新发——已归档态绝不出
+        // 通知口径：待报价/已报价/已支付三发，无「已归档」——归档失败只发「已支付」
         assertThat(publishedStatuses()).containsExactly(
-                OrderStatus.PENDING_QUOTE.getCode(), OrderStatus.QUOTED.getCode());
+                OrderStatus.PENDING_QUOTE.getCode(),
+                OrderStatus.QUOTED.getCode(),
+                OrderStatus.PAID.getCode());
     }
 
     @Test
@@ -212,10 +224,10 @@ class OrderPaymentArchiveTest {
 
     @Test
     void given_pending_quote_or_terminal_order_when_pay_then_rejected() {
-        // 逐态钉死：待报价（无价不可付）、已归档、已取消均非待支付（订单态直改 SQL，
-        // 项目保持进行中——订单终态与项目归档是两件事）
-        for (OrderStatus status : List.of(OrderStatus.PENDING_QUOTE, OrderStatus.ARCHIVED,
-                OrderStatus.CANCELLED)) {
+        // 逐态钉死：待报价（无价不可付）、已支付、已归档、已取消均非待支付（订单态
+        // 直改 SQL，项目保持进行中——订单终态与项目归档是两件事）
+        for (OrderStatus status : List.of(OrderStatus.PENDING_QUOTE, OrderStatus.PAID,
+                OrderStatus.ARCHIVED, OrderStatus.CANCELLED)) {
             String orderId = appService.place(PROJECT_ID).id();
             jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
                     status.getCode(), Long.parseLong(orderId));

@@ -5,10 +5,6 @@ spring:
     url: jdbc:postgresql://localhost:5434/aiplatform
     username: aiplatform
     password: aiplatform-dev
-  data:
-    redis:
-      host: localhost
-      port: 6380
 
 # #29 后台机机面：入站验签凭据走本机 app-registry（8088，启动与 seed 见
 # docs/guide/本机依赖启动.md；apiKey = appCode，admin-console 为 seed 预置应用）

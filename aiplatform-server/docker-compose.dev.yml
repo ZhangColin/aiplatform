@@ -1,7 +1,7 @@
-# 本机开发依赖（dev 环境约定见地图 #1 Notes，启动说明正本 docs/guide/本机依赖启动.md）。
+# 本机开发依赖（启动说明正本 docs/guide/本机依赖启动.md）。
 # 平台 PG 用独立实例 5434：5432 是本机共享 aieducenter 库（无 vector 扩展），
-# 5433 是冻结 demo 的库；本服务库表（wsp_/agt_/knw_/prj_/…）不与它们混放。
-# Redis 走 6380：本机 6379 已被他人实例（带密码）占用。
+# 5433 是冻结 demo 的库；本服务库表（prj_/ord_/wsp_/knw_/…）不与它们混放。
+# 平台自身不用 Redis（会话内存态；沙箱容器的 pg/redis 在各工作区容器内，与此无关）。
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -13,11 +13,6 @@ services:
       - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    ports:
-      - "6380:6379"
 
 volumes:
   pgdata:

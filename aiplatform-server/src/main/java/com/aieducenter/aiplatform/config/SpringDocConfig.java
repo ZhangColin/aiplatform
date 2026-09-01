@@ -55,11 +55,16 @@ public class SpringDocConfig {
         return bcGroup("metering", "计量（base.metering）", "base.metering");
     }
 
-    // -------- business 分区（process 无 REST 面，不设组）--------
+    // -------- business 分区 --------
 
     @Bean
     public GroupedOpenApi projectGroup() {
         return bcGroup("project", "项目（business.project）", "business.project");
+    }
+
+    @Bean
+    public GroupedOpenApi orderGroup() {
+        return bcGroup("order", "订单（business.order，#28 起有 REST 面）", "business.order");
     }
 
     @Bean

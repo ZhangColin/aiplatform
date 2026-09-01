@@ -26,13 +26,12 @@ class WorkspaceTest {
     @Test
     void given_valid_input_when_register_dev_then_workspace_created() {
         Workspace workspace = Workspace.register(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThat(workspace.getKind()).isEqualTo(EnvKind.DEV);
         assertThat(workspace.getId()).isEqualTo(42L);
         assertThat(workspace.workspaceId()).isEqualTo(ID);
         assertThat(workspace.getContainerName()).isEqualTo("ws-42-dev");
-        assertThat(workspace.getHostPort()).isEqualTo(20000);
         assertThat(workspace.getPreviewPort()).isEqualTo(20001);
     }
 
@@ -42,29 +41,28 @@ class WorkspaceTest {
                 WorkspaceHandle.runtime(ID, EnvKind.TEST, "ws-42-test", "net-42")));
 
         assertThat(workspace.getKind()).isEqualTo(EnvKind.TEST);
-        assertThat(workspace.getHostPort()).isZero();
         assertThat(workspace.getPreviewPort()).isZero();
     }
 
     @Test
     void given_blank_fields_when_register_then_rejected() {
         assertThatThrownBy(() -> Workspace.register(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, " ", "net-42", 1, 2))))
+                WorkspaceHandle.dev(ID, " ", "net-42", 2))))
                 .isInstanceOf(DomainException.class);
         // 构造不变量各分支逐一（WSP_005）：空标识 / 空容器名 / 空网络名
-        assertThatThrownBy(() -> Workspace.dev(null, "ws-42-dev", "net-42", 1, 2))
+        assertThatThrownBy(() -> Workspace.dev(null, "ws-42-dev", "net-42", 2))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining("工作区字段不完整");
-        assertThatThrownBy(() -> Workspace.dev(ID, "ws-42-dev", " ", 1, 2))
+        assertThatThrownBy(() -> Workspace.dev(ID, "ws-42-dev", " ", 2))
                 .isInstanceOf(DomainException.class);
-        assertThatThrownBy(() -> Workspace.dev(ID, "ws-42-dev", null, 1, 2))
+        assertThatThrownBy(() -> Workspace.dev(ID, "ws-42-dev", null, 2))
                 .isInstanceOf(DomainException.class);
     }
 
     @Test
     void given_dev_workspace_when_dev_factory_then_created() {
         // dev 显式工厂：带端口注册（与 register(dev 供给) 等价的直接路径）
-        Workspace workspace = Workspace.dev(ID, "ws-42-dev", "net-42", 20000, 20001);
+        Workspace workspace = Workspace.dev(ID, "ws-42-dev", "net-42", 20001);
 
         assertThat(workspace.getKind()).isEqualTo(EnvKind.DEV);
     }
@@ -77,7 +75,7 @@ class WorkspaceTest {
 
     @Test
     void given_same_kind_resource_when_register_twice_then_only_latest_kept() {
-        Workspace workspace = Workspace.dev(ID, "ws-42-dev", "net-42", 20000, 20001);
+        Workspace workspace = Workspace.dev(ID, "ws-42-dev", "net-42", 20001);
 
         workspace.registerResource(new MiddlewareResource(42L, MiddlewareKind.POSTGRESQL,
                 "pg-old", 5432, "postgresql://old"));
@@ -91,7 +89,7 @@ class WorkspaceTest {
     @Test
     void given_provision_with_resources_when_register_then_resources_attached() {
         WorkspaceProvision provision = WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001),
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001),
                 new ProvisionedResource(MiddlewareKind.POSTGRESQL, "pg-42", 35432, "postgresql://pg"),
                 new ProvisionedResource(MiddlewareKind.REDIS, "rd-42", 36379, "redis://rd"));
 
@@ -106,7 +104,7 @@ class WorkspaceTest {
     @Test
     void given_registered_workspace_when_to_handle_then_round_trip() {
         Workspace workspace = Workspace.register(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         WorkspaceHandle handle = workspace.toHandle();
 
@@ -115,7 +113,6 @@ class WorkspaceTest {
         assertThat(handle.kind()).isEqualTo(EnvKind.DEV);
         assertThat(handle.containerName()).isEqualTo("ws-42-dev");
         assertThat(handle.networkName()).isEqualTo("net-42");
-        assertThat(handle.hostPort()).isEqualTo(20000);
         assertThat(handle.previewPort()).isEqualTo(20001);
     }
 
@@ -126,7 +123,6 @@ class WorkspaceTest {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
-        assertThat(workspace.getHostPort()).isZero();
         assertThat(workspace.getPreviewPort()).isZero();
         assertThat(workspace.getContainerName()).isEqualTo("ws-42-dev");
         assertThat(workspace.getNetworkName()).isEqualTo("net-42");
@@ -144,14 +140,13 @@ class WorkspaceTest {
     void given_pending_workspace_when_complete_then_ready_with_ports_and_resources_backfilled() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
         WorkspaceProvision provision = WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001),
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001),
                 new ProvisionedResource(MiddlewareKind.POSTGRESQL, "pg-42", 35432, "postgresql://pg"),
                 new ProvisionedResource(MiddlewareKind.REDIS, "rd-42", 36379, "redis://rd"));
 
         workspace.complete(provision);
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
-        assertThat(workspace.getHostPort()).isEqualTo(20000);
         assertThat(workspace.getPreviewPort()).isEqualTo(20001);
         assertThat(workspace.getResources()).hasSize(2);
     }
@@ -160,7 +155,7 @@ class WorkspaceTest {
     void given_mismatched_provision_when_complete_then_rejected() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
         WorkspaceProvision provision = WorkspaceProvision.of(
-                WorkspaceHandle.dev(WorkspaceId.of("99"), "ws-99-dev", "net-99", 20000, 20001));
+                WorkspaceHandle.dev(WorkspaceId.of("99"), "ws-99-dev", "net-99", 20001));
 
         assertThatThrownBy(() -> workspace.complete(provision))
                 .isInstanceOf(DomainException.class)
@@ -171,10 +166,10 @@ class WorkspaceTest {
     void given_ready_workspace_when_complete_again_then_rejected() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
         workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThatThrownBy(() -> workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001))))
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001))))
                 .isInstanceOf(DomainException.class);
     }
 
@@ -194,7 +189,7 @@ class WorkspaceTest {
                 .markFailed("WSP_002：环境后端操作失败");
 
         assertThatThrownBy(() -> workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001))))
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001))))
                 .isInstanceOf(DomainException.class);
     }
 
@@ -202,7 +197,7 @@ class WorkspaceTest {
     void given_ready_workspace_when_mark_failed_then_rejected() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
         workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThatThrownBy(() -> workspace.markFailed("WSP_002：环境后端操作失败"))
                 .isInstanceOf(DomainException.class);
@@ -219,7 +214,7 @@ class WorkspaceTest {
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
         assertThat(workspace.getProvisionError()).isNull();
-        assertThat(workspace.getHostPort()).isZero();
+        assertThat(workspace.getPreviewPort()).isZero();
         assertThat(workspace.getResources()).isEmpty();
     }
 
@@ -229,11 +224,11 @@ class WorkspaceTest {
                 .markFailed("WSP_002：环境后端操作失败").retry();
 
         workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
         assertThat(workspace.getProvisionError()).isNull();
-        assertThat(workspace.getHostPort()).isEqualTo(20000);
+        assertThat(workspace.getPreviewPort()).isEqualTo(20001);
     }
 
     @Test
@@ -249,7 +244,7 @@ class WorkspaceTest {
     void given_ready_workspace_when_retry_then_rejected() {
         Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
         workspace.complete(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThatThrownBy(workspace::retry)
                 .isInstanceOf(DomainException.class);
@@ -258,7 +253,7 @@ class WorkspaceTest {
     @Test
     void given_registered_workspace_when_status_then_ready() {
         Workspace workspace = Workspace.register(WorkspaceProvision.of(
-                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20000, 20001)));
+                WorkspaceHandle.dev(ID, "ws-42-dev", "net-42", 20001)));
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
     }

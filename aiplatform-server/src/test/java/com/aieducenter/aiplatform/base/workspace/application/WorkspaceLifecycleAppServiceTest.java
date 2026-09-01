@@ -93,7 +93,6 @@ class WorkspaceLifecycleAppServiceTest {
 
         // 创建即返回 PROVISIONING 记录：端口 0、资源清单空、确定性命名已落位
         assertThat(response.status()).isEqualTo(ProvisioningStatus.PROVISIONING);
-        assertThat(response.hostPort()).isZero();
         assertThat(response.previewPort()).isZero();
         assertThat(response.resources()).isEmpty();
         assertThat(response.containerName()).isEqualTo("ws-" + response.workspaceId() + "-dev");
@@ -187,7 +186,6 @@ class WorkspaceLifecycleAppServiceTest {
         // 置备中句柄可取：确定性命名 + 端口 0（BA 对话只消费 containerName，无需等待）
         assertThat(handle.containerName()).isEqualTo("ws-106-dev");
         assertThat(handle.networkName()).isEqualTo("net-106");
-        assertThat(handle.hostPort()).isZero();
         assertThat(handle.previewPort()).isZero();
     }
 
@@ -419,7 +417,7 @@ class WorkspaceLifecycleAppServiceTest {
 
     private WorkspaceProvision devProvision(String workspaceId) {
         WorkspaceHandle handle = WorkspaceHandle.dev(WorkspaceId.of(workspaceId),
-                "ws-100-dev", "net-100", 20000, 20001);
+                "ws-100-dev", "net-100", 20001);
         // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
         return new WorkspaceProvision(handle, List.of(
                 new ProvisionedResource(MiddlewareKind.POSTGRESQL, "ws-100-dev", 0,

@@ -14,9 +14,9 @@ PG_PORT=5432
 REDIS_PORT=6379
 
 # 1) 布局骨架（幂等）：WorkspaceLayout.SKELETON_DIRS 的物理落位
-#    （docs / data/pg / .platform/{skills,rules,sessions,logs}）
+#    （docs / data/pg / .platform/{skills,rules,logs}）
 mkdir -p "$WS_ROOT/docs" "$PG_DATA" "$WS_ROOT/.platform/skills" \
-  "$WS_ROOT/.platform/rules" "$WS_ROOT/.platform/sessions" "$WS_ROOT/.platform/logs"
+  "$WS_ROOT/.platform/rules" "$WS_ROOT/.platform/logs"
 
 # 2) pg：数据进卷（PGDATA=/workspace/data/pg）；未初始化则 initdb。
 #    trust 认证——pg 只监听容器内回环、不映射对外端口，客户端只有同容器进程。

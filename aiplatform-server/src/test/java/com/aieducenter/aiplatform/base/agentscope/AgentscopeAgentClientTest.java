@@ -254,7 +254,7 @@ class AgentscopeAgentClientTest {
     @Test
     void given_workspace_id_when_converse_then_project_dev_workspace_resolved() {
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0, 0));
+                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         givenFirstSeen(true);
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
@@ -497,7 +497,7 @@ class AgentscopeAgentClientTest {
     @Test
     void given_state_slot_absent_when_converse_then_session_created_emitted() {
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0, 0));
+                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         when(stateStore.exists("alice", "s-1")).thenReturn(false);
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "hi"));
         AgentCommand cmd = new AgentCommand("run-1", "你好", null, null, "s-1",
@@ -516,7 +516,7 @@ class AgentscopeAgentClientTest {
         // 跨重启会话状态已存在（cat_agent_state 承载全部智能体会话）：不重发
         // session-created
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0, 0));
+                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         when(stateStore.exists("alice", "s-1")).thenReturn(true);
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "hi"));
         AgentCommand cmd = new AgentCommand("run-2", "继续", null, null, "s-1",

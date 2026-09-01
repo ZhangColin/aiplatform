@@ -14,7 +14,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
 /**
  * 环境后端端口（CONTEXT.md「环境」六条能力面的 Phase A 子集）：薄接口只归一化，
  * 不塞业务语义。后端可替换：本地 Docker（Docker CLI 子进程）→ 上云 TKE/远端
- * （B0 蓝图 §3 演化路径，配置切换适配器，接口不动）。
+ * （配置切换适配器，接口不动）。
  *
  * <p>本片实现四条：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
  * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→卷级联清理）/
@@ -26,12 +26,6 @@ public interface EnvironmentBackend {
 
     /** dev 镜像内置静态预览服务器监听的容器端口（镜像与应用约定的单一事实）。 */
     int DEV_PREVIEW_CONTAINER_PORT = 8081;
-
-    /**
-     * dev 容器内引擎接入点（opencode serve）监听的容器端口（镜像与后端约定的单一
-     * 事实；agentscope 内核消费——宿主映射 hostPort 在工作区句柄上）。
-     */
-    int DEV_ENGINE_CONTAINER_PORT = 4096;
 
     /**
      * 创建工作区并落定全部真实副作用（容器/中间件/.env），返回句柄与资源清单。

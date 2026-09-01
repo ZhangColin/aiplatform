@@ -62,7 +62,6 @@ class WorkspaceProvisionAppServiceTest {
         ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
         verify(workspaceRepository).save(saved.capture());
         assertThat(saved.getValue().getStatus()).isEqualTo(ProvisioningStatus.READY);
-        assertThat(saved.getValue().getHostPort()).isEqualTo(20000);
         assertThat(saved.getValue().getPreviewPort()).isEqualTo(20001);
         assertThat(saved.getValue().getResources()).hasSize(2);
     }
@@ -84,7 +83,7 @@ class WorkspaceProvisionAppServiceTest {
         assertThat(saved.getValue().getProvisionError())
                 .startsWith(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.code());
         // 失败不回填端口/资源（保持置备中占位，端口 0、清单空）
-        assertThat(saved.getValue().getHostPort()).isZero();
+        assertThat(saved.getValue().getPreviewPort()).isZero();
         assertThat(saved.getValue().getResources()).isEmpty();
     }
 
@@ -249,7 +248,7 @@ class WorkspaceProvisionAppServiceTest {
 
     private WorkspaceProvision devProvision(WorkspaceId id) {
         WorkspaceHandle handle = WorkspaceHandle.dev(id,
-                "ws-" + id.value() + "-dev", "net-" + id.value(), 20000, 20001);
+                "ws-" + id.value() + "-dev", "net-" + id.value(), 20001);
         // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
         return new WorkspaceProvision(handle, List.of(
                 new ProvisionedResource(MiddlewareKind.POSTGRESQL, handle.containerName(), 0,

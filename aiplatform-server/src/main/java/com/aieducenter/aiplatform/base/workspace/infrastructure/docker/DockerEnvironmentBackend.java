@@ -36,14 +36,15 @@ import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 本地 Docker 后端（B0 蓝图 §2 片1：docker CLI 子进程 / ProcessBuilder，弱化实现
- * 起步——上云换 TKE 适配器，端口不动，B0 蓝图 §3）。
+ * 本地 Docker 后端（docker CLI 子进程 / ProcessBuilder，弱化实现起步——上云换
+ * TKE 适配器，端口不动）。
  *
- * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node +
- * coding agent 运行时 + pg/redis 中间件 + 静态预览服务器同容器）。{@code /workspace}
+ * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
+ * 应用运行时 + pg/redis 中间件 + 静态预览服务器同容器；编码智能体经平台进程内
+ * AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。{@code /workspace}
  * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
- * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}、引擎会话数据经 XDG_DATA_HOME 重定向
- * {@code .platform}），容器无状态、销毁重建不丢数据。连接串写入
+ * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}），容器无状态、销毁重建不丢数据。
+ * 连接串写入
  * {@code /workspace/.env}（agent 从环境读，容器内回环形态）。容器命名消费确定性命名
  * （{@link WorkspaceNaming}，与记录同源派生），销毁级联因此可从句柄独立完成。
  * Phase A 仅实现 DEV 供给；TEST/PROD（打包产物形态）随后续切片落位。</p>
@@ -53,7 +54,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    private static final String DEV_IMAGE = "aiplatform/dev:0.5";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.6";
 
     private static final int PORT_MIN = 20000;
     private static final int PORT_MAX = 45000;
@@ -77,11 +78,11 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         try {
             runSilently("docker", "volume", "create", volumeOf(containerName));
             ensureDevImage();
-            int[] ports = startDevContainer(workspaceId, containerName);
+            int previewPort = startDevContainer(workspaceId, containerName);
             List<ProvisionedResource> resources = settleMiddleware(workspaceId, containerName);
             return WorkspaceProvision.of(
                     WorkspaceHandle.dev(workspaceId, containerName, WorkspaceNaming.networkName(workspaceId),
-                            ports[0], ports[1]),
+                            previewPort),
                     resources.toArray(new ProvisionedResource[0]));
         } catch (RuntimeException e) {
             // 置备中途失败：已落定的容器/卷无人回收即泄漏（#57），按命名约定级联回滚
@@ -96,7 +97,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         cascadeCleanup(handle.containerName());
     }
 
-    /** 级联清理：容器 → 卷（pg 数据与引擎会话都在卷内，随卷走）；全部尽力而为。 */
+    /** 级联清理：容器 → 卷（pg 数据在卷内，随卷走）；全部尽力而为。 */
     private void cascadeCleanup(String containerName) {
         runSilently("docker", "rm", "-f", containerName);
         runSilently("docker", "volume", "rm", volumeOf(containerName));
@@ -197,25 +198,19 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 "printf '%s' '" + env + "' > " + WorkspaceLayout.absolute(WorkspaceLayout.ENV_FILE));
     }
 
-    private int[] startDevContainer(WorkspaceId workspaceId, String containerName) {
+    private int startDevContainer(WorkspaceId workspaceId, String containerName) {
         for (int attempt = 0; attempt < PORT_ATTEMPTS; attempt++) {
-            int hostPort = randomPort();
             int previewPort = randomPort();
-            if (previewPort == hostPort) {
-                continue;
-            }
             ExecResult r = runCapture("docker", "run", "-d", "--name", containerName,
-                    "-p", hostPort + ":" + EnvironmentBackend.DEV_ENGINE_CONTAINER_PORT,
                     "-p", previewPort + ":" + EnvironmentBackend.DEV_PREVIEW_CONTAINER_PORT,
                     "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
                     "-w", WorkspaceLayout.ROOT,
-                    // 两处归位修复（ADR 0001）：pg 数据进卷、引擎会话数据重定向 .platform
+                    // 归位修复（ADR 0001）：pg 数据进卷（容器内回环，无其他对外端口）
                     "-e", "PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR),
-                    "-e", "XDG_DATA_HOME=" + WorkspaceLayout.absolute(WorkspaceLayout.XDG_DATA_HOME),
                     "-e", "WORKSPACE_DB=" + WorkspaceNaming.databaseName(workspaceId),
                     DEV_IMAGE, "sleep", "infinity");
             if (r.exitCode() == 0) {
-                return new int[]{hostPort, previewPort};
+                return previewPort;
             }
             // 端口被占等失败：清掉半启动容器再试
             runSilently("docker", "rm", "-f", containerName);

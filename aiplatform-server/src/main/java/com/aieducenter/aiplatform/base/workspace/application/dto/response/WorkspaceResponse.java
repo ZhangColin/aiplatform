@@ -21,7 +21,6 @@ public record WorkspaceResponse(
         String kindName,
         String containerName,
         String networkName,
-        int hostPort,
         int previewPort,
         ProvisioningStatus status,
         String statusName,

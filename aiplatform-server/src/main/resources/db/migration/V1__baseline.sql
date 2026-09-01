@@ -21,7 +21,6 @@ CREATE TABLE wsp_workspaces (
     kind                INT NOT NULL,           -- EnvKind：1=DEV 2=TEST 3=PROD
     container_name      VARCHAR(100) NOT NULL,  -- 容器名（exec/预览/清理的锚点）
     network_name        VARCHAR(100) NOT NULL,  -- 项目专属 docker network
-    host_port           INT NOT NULL,           -- 引擎接入点宿主端口（runtime 0）
     preview_port        INT NOT NULL,           -- 预览宿主端口（runtime 0）
     provisioning_status INT NOT NULL DEFAULT 2, -- ProvisioningStatus：1=置备中 2=就绪 3=失败
     provision_error     VARCHAR(500),           -- 归一化失败原因（错误码 + 文案），非失败态 NULL

@@ -63,9 +63,6 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
     @Column(name = "network_name", nullable = false, updatable = false)
     private String networkName;
 
-    @Column(name = "host_port", nullable = false)
-    private int hostPort;
-
     @Column(name = "preview_port", nullable = false)
     private int previewPort;
 
@@ -83,7 +80,7 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
     }
 
     private Workspace(WorkspaceId workspaceId, EnvKind kind, String containerName,
-                      String networkName, int hostPort, int previewPort,
+                      String networkName, int previewPort,
                       ProvisioningStatus status) {
         if (workspaceId == null || kind == null || containerName == null || containerName.isBlank()
                 || networkName == null || networkName.isBlank() || status == null) {
@@ -93,7 +90,6 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         this.kind = kind;
         this.containerName = containerName;
         this.networkName = networkName;
-        this.hostPort = hostPort;
         this.previewPort = previewPort;
         this.status = status;
     }
@@ -102,9 +98,9 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
      * 注册 dev 工作区（环境后端 createWorkspace 落定副作用后调用，带句柄命名锚点 workspaceId）。
      */
     public static Workspace dev(WorkspaceId workspaceId, String containerName, String networkName,
-                                int hostPort, int previewPort) {
+                                int previewPort) {
         return new Workspace(workspaceId, EnvKind.DEV, containerName, networkName,
-                hostPort, previewPort, ProvisioningStatus.READY);
+                previewPort, ProvisioningStatus.READY);
     }
 
     /**
@@ -116,7 +112,7 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
             // 工厂误用（编程错误），非用户可触发的领域规则
             throw new IllegalArgumentException("dev 工作区走 Workspace.dev 注册");
         }
-        return new Workspace(workspaceId, kind, containerName, networkName, 0, 0,
+        return new Workspace(workspaceId, kind, containerName, networkName, 0,
                 ProvisioningStatus.READY);
     }
 
@@ -127,7 +123,7 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         WorkspaceHandle handle = provision.handle();
         Workspace workspace = handle.kind() == EnvKind.DEV
                 ? dev(handle.workspaceId(), handle.containerName(), handle.networkName(),
-                        handle.hostPort(), handle.previewPort())
+                        handle.previewPort())
                 : runtime(handle.workspaceId(), handle.kind(), handle.containerName(),
                         handle.networkName());
         workspace.attachResources(provision);
@@ -142,7 +138,7 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         return new Workspace(workspaceId, kind,
                 WorkspaceNaming.containerName(workspaceId, kind),
                 WorkspaceNaming.networkName(workspaceId),
-                0, 0, ProvisioningStatus.PROVISIONING);
+                0, ProvisioningStatus.PROVISIONING);
     }
 
     /**
@@ -158,7 +154,6 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         if (handle.workspaceId().id() != id || handle.kind() != kind) {
             throw new DomainException(WorkspaceMessage.WORKSPACE_STATE_INVALID);
         }
-        this.hostPort = handle.hostPort();
         this.previewPort = handle.previewPort();
         attachResources(provision);
         this.status = ProvisioningStatus.READY;
@@ -224,6 +219,6 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
      */
     public WorkspaceHandle toHandle() {
         return new WorkspaceHandle(workspaceId(), kind, containerName, networkName,
-                hostPort, previewPort);
+                previewPort);
     }
 }

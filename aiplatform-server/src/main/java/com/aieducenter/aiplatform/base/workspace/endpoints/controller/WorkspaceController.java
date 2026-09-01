@@ -75,7 +75,7 @@ public class WorkspaceController {
     }
 
     @DeleteMapping("/{workspaceId}")
-    @Operation(summary = "销毁工作区", description = "级联清理：容器 → 卷（pg 数据与引擎会话都在卷内）→ 库记录。")
+    @Operation(summary = "销毁工作区", description = "级联清理：容器 → 卷（pg 数据在卷内）→ 库记录。")
     public ApiResponse<Void> destroy(
             @Parameter(description = "工作区 id") @PathVariable String workspaceId) {
         appService.destroy(workspaceId);

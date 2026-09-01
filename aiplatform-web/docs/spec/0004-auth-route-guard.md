@@ -1,7 +1,7 @@
 # Spec 0004 · 登录与路由守卫对接（OIDC BFF 前端侧）
 
 > 产地：wayfinder T7（[#9](https://github.com/ZhangColin/aiplatform-web/issues/9)，grilling 票）。
-> 前置事实：A2 规格已定稿（aiplatform-server `docs/spec/A2-账号与工作台骨架规格.md`）；SSO 联调闭环（aiplatform-server#8）——`redirect_uri = http://localhost:3333/auth/callback`（**前端 origin**，Next 代理到 8888）、issuer `http://identity.localhost:10001`、identity 登录页 `identity.localhost:10002`、cookie `aiplatform_session`（不透明 sessionId，HttpOnly + SameSite=Lax，无 maxAge）。
+> 前置事实：账号 + OIDC BFF 规格当时定稿于 server 侧 A2 规格（Phase-A 历史规格，已随片5-1 清档）；SSO 联调闭环（aiplatform-server#8）——`redirect_uri = http://localhost:3333/auth/callback`（**前端 origin**，Next 代理到 8888）、issuer `http://identity.localhost:10001`、identity 登录页 `identity.localhost:10002`、cookie `aiplatform_session`（不透明 sessionId，HttpOnly + SameSite=Lax，无 maxAge）。
 > 真实实现等后端 A2 实现（aiplatform-server#19）完成、对接 issue 到达后照本 spec 落地（执行票 #17）。returnTo 为跨仓增量需求：[aiplatform-server#32](https://github.com/ZhangColin/aiplatform-server/issues/32)。
 
 ## 1. 对接形态总纲

@@ -41,7 +41,6 @@ export type NotificationEvent =
         projectName: string;
         container: string;
         projectType: string;
-        engine: string;
       };
     }
   | { type: "preview-ready"; payload: { projectId: string; url: string } }

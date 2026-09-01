@@ -479,7 +479,7 @@ class ProjectQueryAppServiceTest {
 
         // 根级非交付物 / 机密 / 逃逸 / 空白一律在判定层拒绝，工作区不被触达
         // （嵌套同名目录如 src/data/x 是交付物，可浏览——归 ProjectFilesTest）
-        for (String path : new String[]{"data/pg/base.sql", ".platform/sessions/x",
+        for (String path : new String[]{"data/pg/base.sql", ".platform/logs/x",
                 "node_modules/r/index.js", ".env", "../escape", "/abs", "  ", null}) {
             assertThatThrownBy(() -> appService.fileContent(projectId, path))
                     .isInstanceOf(ApplicationException.class)

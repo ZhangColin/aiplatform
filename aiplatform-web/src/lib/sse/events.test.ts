@@ -42,7 +42,6 @@ describe("asNotificationEvent", () => {
           projectName: "官网 demo",
           container: "aiplatform-dev-a1b2c3d4",
           projectType: "WEBSITE",
-          engine: "opencode",
         },
         ts: "2026-08-19T02:15:33.123Z",
       }),

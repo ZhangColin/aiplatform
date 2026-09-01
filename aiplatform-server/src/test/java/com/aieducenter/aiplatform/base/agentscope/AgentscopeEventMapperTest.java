@@ -208,7 +208,7 @@ class AgentscopeEventMapperTest {
 
             assertThat(frame.payload()).containsEntry(
                     AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-            // 摘要 = 问题文本（对齐 opencode 问答口径，非工具名）
+            // 摘要 = 问题文本（问答口径，非工具名）
             assertThat(frame.payload()).containsEntry(
                     AgentEventTypes.WAIT_SUMMARY_FIELD, "用哪个框架?");
         }

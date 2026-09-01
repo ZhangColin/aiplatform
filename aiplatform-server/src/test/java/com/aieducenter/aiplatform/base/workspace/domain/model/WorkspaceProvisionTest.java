@@ -40,6 +40,6 @@ class WorkspaceProvisionTest {
     }
 
     private WorkspaceHandle devHandle() {
-        return WorkspaceHandle.dev(WorkspaceId.of("42"), "ws-42-dev", "net-42", 20000, 20001);
+        return WorkspaceHandle.dev(WorkspaceId.of("42"), "ws-42-dev", "net-42", 20001);
     }
 }

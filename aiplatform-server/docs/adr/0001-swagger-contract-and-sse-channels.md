@@ -49,9 +49,10 @@
   - **修订（#61，置备异步化）**：`workspace-created` 的「副作用真实落定」从「容器就绪」收窄为「**工作区记录（PROVISIONING 态）落库**」——docker 置备转后台收敛，创建即发射、容器后台置备中。语义正本见 [SSE事件清单](../spec/SSE事件清单.md)（「信号非权威，状态以 REST 查询 `status` 为准」）。
 - **SSE ≠ 应用事件**。cartisan-boot 的应用事件（BC 间/跨服务，进程内 → 将来消息中间件）与 SSE 呈现通道是两个机制，概念与实现都不混；将来框架层也不合并（桥接至多做成可选项）。
 - 事实命名与将来应用事件对齐（`WorkspaceCreated` 等），但**应用事件管道 Phase A 不架**——今天没有任何后端订阅方（A6 计量走直调上报）。触发条件：环境闲置回收（base 定时回收要通知 business，第一个只能发事件的单向场景）/ 第一个后端订阅方出现 / 跨服务。
-- **修订（A1 · [票 #5](https://github.com/ZhangColin/aiplatform-server/issues/5)，2026-08-20）**：上条细化为——① 业务内 `TaskCompleted`（task→project 回填编排，已有真实订阅方）与 ② base 生命周期事件**发布端**（WorkspaceCreated/Destroyed/PreviewReady，cartisan 应用事件 + Spring 发布器）随各自切片就位；outbox/事件存储/重放等管道设施仍不建；SSE 呈现通道归属不变（业务编排层发射，base 不发 SSE）。详见 [A1 规格](../spec/A1-底座四口子规格.md) §4。
-- **修订（片2a · [票 #20](https://github.com/ZhangColin/aiplatform-server/issues/20)，2026-08-22）**：agent 流通道（`GET /api/agent-events`）落地。底座任务端点（`POST /api/workspaces/{id}/agent/tasks`）直发的事件关联字段为 `runId` + `workspaceId`（「payload 必带 projectId + runId」自片5 业务编排桥接接管发射起对业务直发事件成立）；订阅过滤 `?runId=` / `?workspaceId=` / `?projectId=`（同名规则，可叠用）。增量性为已知限制：opencode message 同步返回，parts 于 run 结束整批透传（demo 同构，逐 part 实时增量 = opencode 事件总线，PoC 升级路径）。
-- **runId**：一次任务下发的运行标识，`POST …/agent/task` 生成并随响应返回，该运行全部流事件携带；与 `sessionId`（跨运行会话寻址）并存不混淆。词表见 CONTEXT.md「运行（Run）」。
+- **修订（A1 · [票 #5](https://github.com/ZhangColin/aiplatform-server/issues/5)，2026-08-20）**：上条细化为——① 业务内 `TaskCompleted`（task→project 回填编排，已有真实订阅方）与 ② base 生命周期事件**发布端**（WorkspaceCreated/Destroyed/PreviewReady，cartisan 应用事件 + Spring 发布器）随各自切片就位；outbox/事件存储/重放等管道设施仍不建；SSE 呈现通道归属不变（业务编排层发射，base 不发 SSE）。（任务/回填概念已随平台重定义出局，见根级 CONTEXT.md；历史规格 A1 已随片5-1 清档）
+- **修订（片2a · [票 #20](https://github.com/ZhangColin/aiplatform-server/issues/20)，2026-08-22）**：agent 流通道（`GET /api/agent-events`）落地。底座任务端点（`POST /api/workspaces/{id}/agent/tasks`）直发的事件关联字段为 `runId` + `workspaceId`（「payload 必带 projectId + runId」自片5 业务编排桥接接管发射起对业务直发事件成立）；订阅过滤 `?runId=` / `?workspaceId=` / `?projectId=`（同名规则，可叠用）。（旧引擎时代 message 同步返回、parts 整批透传的增量性限制，已随单栈 AgentScope 的事件流逐帧映射不复存在——任务端点本身已删）
+- **修订（片5-1 · [票 #31](https://github.com/ZhangColin/aiplatform/issues/31)，2026-09-01）**：智能体栈单栈收敛后（验收门 #25 对照通过），旧编码引擎适配全套（镜像 CLI 工具箱、provider 配置、引擎接入端口、引擎侧会话数据落盘）随本片删除；agent 流唯一生产源 = AgentScope 事件映射（base.agentscope）。
+- **runId**：一次智能体运行的标识（任务下发端点时代由 `POST …/agent/task` 生成返回，现由业务编排生成），该运行全部流事件携带；与 `sessionId`（跨运行会话寻址）并存不混淆。词表见 CONTEXT.md「运行（Run）」。
 
 ### SpringDoc 与落码归属
 

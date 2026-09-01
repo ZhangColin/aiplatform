@@ -70,7 +70,7 @@ class WorkspaceControllerTest {
     void given_dev_workspace_when_create_then_wrapped_in_api_response() throws Exception {
         when(appService.create(any(CreateWorkspaceCommand.class)))
                 .thenReturn(new WorkspaceResponse("100", EnvKind.DEV, "开发",
-                        "ws-100-dev", "net-100", 20000, 20001,
+                        "ws-100-dev", "net-100", 20001,
                         ProvisioningStatus.READY, "就绪", null,
                         List.of(new WorkspaceResponse.MiddlewareResourceResponse(
                                 MiddlewareKind.POSTGRESQL, "PostgreSQL",
@@ -93,7 +93,7 @@ class WorkspaceControllerTest {
     @Test
     void given_existing_workspace_when_get_then_returned() throws Exception {
         when(appService.get("100")).thenReturn(new WorkspaceResponse("100", EnvKind.DEV, "开发",
-                "ws-100-dev", "net-100", 20000, 20001, ProvisioningStatus.READY, "就绪", null,
+                "ws-100-dev", "net-100", 20001, ProvisioningStatus.READY, "就绪", null,
                 List.of(), null));
 
         performAsUser(get("/api/workspaces/100"))
@@ -117,7 +117,7 @@ class WorkspaceControllerTest {
     @Test
     void given_failed_workspace_when_retry_then_provisioning_response_returned() throws Exception {
         when(appService.retry("100")).thenReturn(new WorkspaceResponse("100", EnvKind.DEV, "开发",
-                "ws-100-dev", "net-100", 0, 0, ProvisioningStatus.PROVISIONING, "置备中", null,
+                "ws-100-dev", "net-100", 0, ProvisioningStatus.PROVISIONING, "置备中", null,
                 List.of(), null));
 
         performAsUser(post("/api/workspaces/100/retry"))

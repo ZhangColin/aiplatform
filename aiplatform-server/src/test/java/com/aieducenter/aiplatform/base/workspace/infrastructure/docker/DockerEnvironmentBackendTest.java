@@ -70,18 +70,17 @@ class DockerEnvironmentBackendTest {
         List.of("pg-" + id, "rd-" + id, "net-" + id).forEach(name ->
                 assertThat(docker("inspect", name).exitCode()).as("不应存在 %s", name).isNotZero());
 
-        // 布局定盘（WorkspaceLayout 常量表）物理落位：docs / data/pg / .platform 四目录
+        // 布局定盘（WorkspaceLayout 常量表）物理落位：docs / data/pg / .platform 三目录
         WorkspaceLayout.SKELETON_DIRS.forEach(dir ->
                 assertThat(execIn(handle, "test -d " + WorkspaceLayout.absolute(dir)).exitCode())
                         .as("布局目录 %s 应存在", dir).isZero());
         assertThat(execIn(handle, "test -f " + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR)
                 + "/PG_VERSION").exitCode()).as("PGDATA 应落卷内 data/pg").isZero();
 
-        // 两处归位修复经容器环境可见：PGDATA 进卷、引擎会话数据 XDG 重定向 .platform
+        // 归位修复经容器环境可见：PGDATA 进卷（容器内回环中间件，无其他对外端口）
         String containerEnv = docker("inspect", "-f",
                 "{{range .Config.Env}}{{println .}}{{end}}", handle.containerName()).stdout();
         assertThat(containerEnv).contains("PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR));
-        assertThat(containerEnv).contains("XDG_DATA_HOME=" + WorkspaceLayout.absolute(WorkspaceLayout.XDG_DATA_HOME));
 
         // 中间件真实可服务（容器内回环，就绪等待生效非事件自述）：pg 建表可写、redis 应答
         String dbName = "ws" + id;
@@ -171,7 +170,7 @@ class DockerEnvironmentBackendTest {
                         + " && mkdir -p /workspace/node_modules/leftpad"
                         + " && echo junk > /workspace/node_modules/leftpad/index.js"
                         + " && echo pgdata > /workspace/data/pg/base.fakedb"
-                        + " && echo session > /workspace/.platform/sessions/opencode.db");
+                        + " && echo platform > /workspace/.platform/logs/run.log");
 
         byte[] tarball = backend.packSource(provision.handle());
 

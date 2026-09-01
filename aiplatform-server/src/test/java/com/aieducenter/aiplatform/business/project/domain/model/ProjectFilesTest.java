@@ -30,7 +30,7 @@ class ProjectFilesTest {
         // 根级排除清单与源码包同源：数据 / 平台产物 / 可重建依赖 / 机密
         assertThat(ProjectFiles.isViewable("data/pg/base.sql")).isFalse();
         assertThat(ProjectFiles.isViewable("data")).isFalse();
-        assertThat(ProjectFiles.isViewable(".platform/sessions/x.json")).isFalse();
+        assertThat(ProjectFiles.isViewable(".platform/logs/run.log")).isFalse();
         assertThat(ProjectFiles.isViewable("node_modules/react/index.js")).isFalse();
         assertThat(ProjectFiles.isViewable(".env")).isFalse();
     }

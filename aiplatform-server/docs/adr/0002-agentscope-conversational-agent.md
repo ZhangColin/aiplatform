@@ -3,7 +3,9 @@
 > 状态：**已被取代（superseded，2026-08-31）**——「双轨分野」由平台统一 AgentScope 单栈决议作废（[新领域模型与 CONTEXT.md 重写 #7](https://github.com/ZhangColin/aiplatform/issues/7)、[后端裁剪与重组方案 #8](https://github.com/ZhangColin/aiplatform/issues/8)），本文仅作历史记录；现行权威 = 根级 [CONTEXT.md](../../../CONTEXT.md) 与 [docs/adr/](../../../docs/adr/)（尤其 [ADR 0003 · v1 简化保扩展点](../../../docs/adr/0003-v1-simplify-keep-extension-points.md)）。
 > 原状态：已接受（2026-08-25 · [#40 grilling](https://github.com/ZhangColin/aiplatform-server/issues/40) 落定，基座票 [#44](https://github.com/ZhangColin/aiplatform-server/issues/44)/[#45](https://github.com/ZhangColin/aiplatform-server/issues/45)）
 
-BA 访谈（多轮提问 → 判定明确 → 产出 PRD）这类**对话型智能体**不跑在编码引擎（OpenCode/dsh）上；平台智能体内核选 [AgentScope Java 2.0](https://github.com/agentscope-ai/agentscope-java)。本 ADR 记选型理由、双轨分野与 PRD 落位三项决策，实施细节以各票 brief 为正本。
+BA 访谈（多轮提问 → 判定明确 → 产出 PRD）这类**对话型智能体**不跑在编码引擎上；平台智能体内核选 [AgentScope Java 2.0](https://github.com/agentscope-ai/agentscope-java)。本 ADR 记选型理由、双轨分野与 PRD 落位三项决策，实施细节以各票 brief 为正本。
+
+> **修订（片5-1 · [票 #31](https://github.com/ZhangColin/aiplatform/issues/31)，2026-09-01）**：验收门（#25 双路活体对照）判定通过，AgentScope 成为平台**唯一智能体栈**（BA 与编码智能体同构）——旧编码引擎 CLI 工具箱与适配遗留随本片删除，「双轨分野」一节整体作废（见该节注）。
 
 ## 决策
 
@@ -23,8 +25,9 @@ BA 访谈（多轮提问 → 判定明确 → 产出 PRD）这类**对话型智�
 
 ### 双轨分野：对话智能体（平台级）vs 编码引擎（项目级）
 
-- `Project.engine` 只指**编码引擎**（opencode/dsh——写代码的，DEV/TEST/DEMO/ARCH/修复）；引擎全局配置端点（#42）管的是它。
-- BA 等对话角色走 **AgentScope HarnessAgent**（平台进程内），base 层新模块与 base.agentengine 分立起步，不搅动现有引擎适配；编码引擎路径行为零变化（#45 验收含此条）。
+> **（本节已废，2026-08-31 单栈决议 + 2026-09-01 #31 退役收口）**——BA 与编码智能体统一走 AgentScope（CONTEXT.md「编码智能体」：与 BA 同构，仅角色与工具不同）；`Project.engine` 列、引擎全局配置端点与引擎适配层已随平台重定义删除。以下为决策当时口径，仅作历史记录。
+
+- BA 等对话角色走 **AgentScope HarnessAgent**（平台进程内），base 层新模块与 base.agentengine 分立起步，不搅动当时引擎适配。
 - 基座拆两票：#44 引入 + 最小骨架（依赖、工厂、计量、冒烟）；#45 平台接线（事件→SSE、HITL→等待点、workspace=项目工作区、会话恢复落 PostgreSQL）。
 
 ### PRD = 工作区事实源

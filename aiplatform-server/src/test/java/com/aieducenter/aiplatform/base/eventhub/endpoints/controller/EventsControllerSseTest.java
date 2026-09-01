@@ -112,8 +112,7 @@ class EventsControllerSseTest {
                 "projectId", "p-wire",
                 "projectName", "官网 demo",
                 "container", "aiplatform-dev-p-wire",
-                "projectType", "WEBSITE",
-                "engine", "opencode"));
+                "projectType", "WEBSITE"));
 
         // 线格式：id → event → data（Spring 按设置顺序写出）
         assertThat(client.nextNonCommentLine()).isEqualTo("id:p-wire:1");
@@ -125,7 +124,7 @@ class EventsControllerSseTest {
 
         assertThat(envelope.get("type").asText()).isEqualTo("workspace-created");
         assertThat(envelope.get("payload").get("projectId").asText()).isEqualTo("p-wire");
-        assertThat(envelope.get("payload").get("engine").asText()).isEqualTo("opencode");
+        assertThat(envelope.get("payload").get("projectType").asText()).isEqualTo("WEBSITE");
         assertThat(envelope.get("payload").has("type")).isFalse(); // payload 内禁 type 键名
         String ts = envelope.get("ts").asText();
         assertThat(ts).isNotBlank();

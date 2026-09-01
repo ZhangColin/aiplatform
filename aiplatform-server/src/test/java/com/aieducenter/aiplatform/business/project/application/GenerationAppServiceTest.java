@@ -285,6 +285,42 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_converse_ok_but_service_unreachable_when_generate_then_no_generated_at_and_reinitiate_exit() {
+        // 假完成（#35）：converse 正常结束（模型道歉式放弃 / 被 maxIters 掐断）但 8081
+        // 不可达——核验不过不落 generated_at，走既有重试/终态失败路径，重新发起出口仍在。
+        Long projectId = persistedProject("9812");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
+        // 收口核验探针（curl 8081）不可达 → 核验不过（按命令内容区分，不依赖调用次序）
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains("curl"))))
+                .thenReturn(new ExecResultResponse("", "Connection refused", 7));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-fake", "很抱歉，目前系统尚未真正实现出来"));
+
+        appService.startGeneration(projectId);
+
+        // 核验不过 → 重试到超限转终态：converse 满 maxAttempts 次、重试帧 maxAttempts-1 次
+        int maxAttempts = properties.getMaxAttempts();
+        verify(agentClient, times(maxAttempts)).converse(any(), any());
+        verify(streamAppService, times(maxAttempts - 1))
+                .publish(eq(AgentEventTypes.TASK_RETRYING), anyMap());
+        // 假完成不落 generated_at（AC①：8081 不可达不再落 generated_at）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generated_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId)).isNull();
+
+        // 项目不被空壳锁死（AC②）：generated_at 未落 = 重新发起出口在——核验改可达后重发即成功
+        doReturn(new ExecResultResponse("", "", 0))
+                .when(workspaceLifecycleAppService).exec(any(), any());
+        appService.startGeneration(projectId);
+        verify(agentClient, times(maxAttempts + 1)).converse(any(), any());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generated_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId)).isNotNull();
+    }
+
+    @Test
     void given_generation_in_flight_when_trigger_again_then_prj_017() {
         // 在途守卫（含已提交未起跑）：异步轨道占位期间重复触发拒绝
         Long projectId = persistedProject("9805");

@@ -86,6 +86,14 @@ public class GenerationAppService {
             - 每轮生成或修正收尾前，确认 8081 端口的服务在后台常驻运行——预览呈现的是活的服务。
             """;
 
+    /**
+     * 收口判据核验探针（#35）：converse 无异常不构成成功——编码智能体可能道歉式
+     * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 CODER systemPrompt
+     * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
+     * 端口有 HTTP 应答（连接拒绝即非 0）。
+     */
+    static final String CLOSING_PROBE = "curl -s -o /dev/null http://localhost:8081";
+
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -145,13 +153,29 @@ public class GenerationAppService {
 
     /**
      * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
-     * GENERATE_TASK_PROMPT、重试换轨 RETRY_TASK_PROMPT；成功即 markGenerated
+     * GENERATE_TASK_PROMPT、重试换轨 RETRY_TASK_PROMPT；成功收口（converse 无异常
+     * + 8081 可达，#35 核验在 {@link #markGeneratedIfReachable}）即 markGenerated
      * 收场（首次生成时点单向落位）。
      */
     private void runAttemptsWithRetry(Project project, String firstRunId) {
         coderRunAttempts.run(project, firstRunId,
                 new CoderRunAttempts.Prompts(GENERATE_TASK_PROMPT, RETRY_TASK_PROMPT),
-                () -> markGenerated(project.getId()), "generate");
+                () -> markGeneratedIfReachable(project), "generate");
+    }
+
+    /**
+     * 生成成功收场（#35）：先核验收口判据（8081 可达）再落 generated_at——converse
+     * 无异常不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，
+     * 被共用件尝试环当作该次尝试失败（走重试/终态路径，generated_at 不落位 = 项目
+     * 不被空壳锁死、重新发起出口仍在）。
+     */
+    private void markGeneratedIfReachable(Project project) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(CLOSING_PROBE));
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
+        }
+        markGenerated(project.getId());
     }
 
     /** 首次生成时点落位：重载置位（单向），失败记日志不炸异步轨道（run 已成功）。 */

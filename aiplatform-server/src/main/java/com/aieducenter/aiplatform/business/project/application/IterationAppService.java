@@ -39,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class IterationAppService {
 
     /** 重试续作 prompt：修正轨的重试口径（同工作区不丢数据，续同 coder 会话）。 */
-    static final String FIX_RETRY_TASK_PROMPT =
+    static final String FIX_RETRY_RUN_PROMPT =
             "上一次修正尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
                     + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续完成本轮修正，"
                     + "直至修正落实、服务在 8081 端口可访问。";
@@ -51,7 +51,7 @@ public class IterationAppService {
     /** 修正在途项目集（含已提交未起跑——排队中）：起跑/排队的分岔事实。 */
     private final Set<Long> fixesInFlight = ConcurrentHashMap.newKeySet();
     /** run 进行中排队的修正任务（projectId → 待合并任务清单）。 */
-    private final Map<Long, List<String>> queuedFixTasks = new ConcurrentHashMap<>();
+    private final Map<Long, List<String>> queuedFixRuns = new ConcurrentHashMap<>();
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts) {
@@ -105,7 +105,7 @@ public class IterationAppService {
         String firstRunId;
         synchronized (this) {
             if (!fixesInFlight.add(projectId)) {
-                queuedFixTasks.computeIfAbsent(projectId, key -> new ArrayList<>()).add(trimmed);
+                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(trimmed);
                 return new FixDispatch(null, true);
             }
             firstRunId = AgentStreamAppService.newRunId();
@@ -133,11 +133,11 @@ public class IterationAppService {
             String runId = firstRunId;
             while (true) {
                 coderRunAttempts.run(project, runId,
-                        new CoderRunAttempts.Prompts(fixTaskPrompt(tasks), FIX_RETRY_TASK_PROMPT),
+                        new CoderRunAttempts.Prompts(fixRunPrompt(tasks), FIX_RETRY_RUN_PROMPT),
                         () -> { }, "fix");
                 List<String> queued;
                 synchronized (this) {
-                    List<String> pending = queuedFixTasks.remove(projectId);
+                    List<String> pending = queuedFixRuns.remove(projectId);
                     queued = pending != null ? pending : List.of();
                     if (queued.isEmpty()) {
                         fixesInFlight.remove(projectId);
@@ -163,7 +163,7 @@ public class IterationAppService {
     }
 
     /** 修正任务 prompt：意见转化来的任务清单 + 收口判据复述（8081 常驻）。 */
-    static String fixTaskPrompt(List<String> tasks) {
+    static String fixRunPrompt(List<String> tasks) {
         StringBuilder prompt = new StringBuilder(
                 "系统修正：系统已生成并可操作，用户提出了如下修正意见，请在现有工作区内"
                         + "完成修正（系统的其余部分保持可用）：");

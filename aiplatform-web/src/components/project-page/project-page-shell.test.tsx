@@ -51,8 +51,8 @@ describe("ProjectPageRunStatus · LIVE 真绑定", () => {
     expect(html).not.toContain("00:00");
   });
 
-  it("waiting 也是进行中：等用户 ≠ 终态", () => {
-    seedRun(runOf("waiting", Date.now() - 5_000));
+  it("questioning 也是进行中：等用户 ≠ 终态", () => {
+    seedRun(runOf("questioning", Date.now() - 5_000));
     const html = renderToStaticMarkup(<ProjectPageRunStatus projectId="p1" />);
     expect(html).toContain("LIVE");
   });

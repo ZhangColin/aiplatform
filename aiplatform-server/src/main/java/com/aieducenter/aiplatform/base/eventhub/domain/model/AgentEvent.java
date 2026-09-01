@@ -6,8 +6,8 @@ import java.util.Map;
  * 智能体流通道的一帧（CONTEXT.md「智能体流事件」的载体）：agentscope 基础设施
  * （事件 mapper）产出、业务编排桥接发射、前端按 type 分发。
  *
- * <p>两类（SSE事件清单·通道二）：平台事件（封闭集合：task-start / session-created /
- * error / task-finish / wait-raised，type 取 {@link AgentEventTypes}）与引擎透传事件
+ * <p>两类（SSE事件清单·通道二）：平台事件（封闭集合：run-start / run-created /
+ * error / run-finish / question-raised，type 取 {@link AgentEventTypes}）与引擎透传事件
  * （开放集合：type = 引擎 part 类型原样，payload 的 {@code data} 键内为 part 原样）。</p>
  *
  * <p>每帧 payload 内盖上 {@code runId}（+ 已知时的 {@code engine}/{@code sessionId}）

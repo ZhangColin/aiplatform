@@ -239,7 +239,7 @@ class BaInterviewAppServiceTest {
 
         appService.runInterviewTurn(projectId, "梳理需求");
 
-        // 帧序 role-assigned（engine=agentscope）→ task-start（converse 内）
+        // 帧序 role-assigned（engine=agentscope）→ run-start（converse 内）
         InOrder order = inOrder(streamAppService, agentClient);
         order.verify(streamAppService).publish(org.mockito.ArgumentMatchers.eq(
                         AgentEventTypes.ROLE_ASSIGNED),

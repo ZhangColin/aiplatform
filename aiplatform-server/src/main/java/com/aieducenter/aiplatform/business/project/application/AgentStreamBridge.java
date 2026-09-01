@@ -16,14 +16,14 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 业务编排的智能体流桥（BA 访谈 / 生成共用）：关联字段（projectId）逐帧注入 +
- * role-assigned / task-retrying 发射。关联字段底座不解释、透传；发射失败护栏：
+ * role-assigned / run-retrying 发射。关联字段底座不解释、透传；发射失败护栏：
  * 单帧发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）。
  */
 @Component
 @Slf4j
 public class AgentStreamBridge {
 
-    /** 重试话术正本（用户侧文案，SSE事件清单 task-retrying 行）。 */
+    /** 重试话术正本（用户侧文案，SSE事件清单 run-retrying 行）。 */
     static final String RETRYING_MESSAGE = "遇到问题，正在重试";
 
     private final AgentStreamAppService streamAppService;
@@ -46,7 +46,7 @@ public class AgentStreamBridge {
         };
     }
 
-    /** role-assigned 发射（run 提交前——帧序 role-assigned → task-start → …）。 */
+    /** role-assigned 发射（run 提交前——帧序 role-assigned → run-start → …）。 */
     public void emitRoleAssigned(Long projectId, String runId, RolePreset role) {
         streamAppService.publish(AgentEventTypes.ROLE_ASSIGNED, Map.of(
                 AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
@@ -57,12 +57,12 @@ public class AgentStreamBridge {
     }
 
     /**
-     * task-retrying 发射（生成自动重试）：runId 锚定失败的那次尝试（帧序
-     * error → task-retrying → 下一尝试 task-start），携带即将下发的尝试序号
+     * run-retrying 发射（生成自动重试）：runId 锚定失败的那次尝试（帧序
+     * error → run-retrying → 下一尝试 run-start），携带即将下发的尝试序号
      * 与用户侧话术。
      */
-    public void emitTaskRetrying(Long projectId, String failedRunId, int nextAttempt) {
-        streamAppService.publish(AgentEventTypes.TASK_RETRYING, Map.of(
+    public void emitRunRetrying(Long projectId, String failedRunId, int nextAttempt) {
+        streamAppService.publish(AgentEventTypes.RUN_RETRYING, Map.of(
                 AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
                 AgentStreamAppService.RUN_FIELD, failedRunId,
                 AgentEventTypes.RETRY_ATTEMPT_FIELD, nextAttempt,

@@ -20,7 +20,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  * 事件映射表单点：AgentScope 类型化事件 → 平台智能体流事件帧（SSE事件清单·通道二，
  * 词汇表正本在 eventhub 的 {@link AgentEventTypes}，payload 关联键同源常量化）。
  * run 生命周期帧
- * （task-start / session-created / task-finish / error，平台封闭集合）经静态工厂
+ * （run-start / run-created / run-finish / error，平台封闭集合）经静态工厂
  * 构造；过程帧（引擎透传开放集合，清单已知名型）由 {@link #map} 逐事件产出——
  * 每帧 payload 盖 runId/sessionId/engine，引擎侧细节藏 {@code data} 键内层。
  *
@@ -33,12 +33,12 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>ToolCallStart / ToolCallEnd</td><td>{@code tool}</td><td>toolCallId / toolName / phase</td></tr>
  *   <tr><td>ModelCallStart / ModelCallEnd</td><td>{@code step-start} / {@code step-finish}</td><td>replyId</td></tr>
  *   <tr><td>ExceedMaxIters</td><td>（结煞语）</td><td>{@link #finishToken}</td></tr>
- *   <tr><td>RequireUserConfirm</td><td>{@code wait-raised}</td><td>{@link #waitRaised}（挂起帧，答复续跑归业务编排）</td></tr>
+ *   <tr><td>RequireUserConfirm</td><td>{@code question-raised}</td><td>{@link #questionRaised}（挂起帧，答复续跑归业务编排）</td></tr>
  * </table>
  *
  * <p>HITL 挂起（{@code RequireUserConfirmEvent}）不是过程帧也不是终态：
  * {@link #map} 不产透传帧、{@link #finishToken} 无结煞语，由调用方以
- * {@link #waitRaised} 显式产帧发射；挂起轮的收尾口径 = 不发 task-finish
+ * {@link #questionRaised} 显式产帧发射；挂起轮的收尾口径 = 不发 run-finish
  * （run 尚未终态，等答复续跑后再收口）。</p>
  */
 final class AgentscopeEventMapper {
@@ -50,7 +50,7 @@ final class AgentscopeEventMapper {
     private static final String STEP_START = "step-start";
     private static final String STEP_FINISH = "step-finish";
 
-    /** ExceedMaxIters 的结煞语（task-finish.finish，对齐「引擎结煞语」口径）。 */
+    /** ExceedMaxIters 的结煞语（run-finish.finish，对齐「引擎结煞语」口径）。 */
     private static final String FINISH_EXCEED_MAX_ITERS = "exceed_max_iters";
     private static final String FINISH_END = "end";
 
@@ -113,7 +113,7 @@ final class AgentscopeEventMapper {
     }
 
     /**
-     * 挂起帧：{@code RequireUserConfirmEvent} → {@code wait-raised}——payload 按
+     * 挂起帧：{@code RequireUserConfirmEvent} → {@code question-raised}——payload 按
      * {@link AgentEventTypes} WAIT_* 契约。kind 判定：待确认工具含提问类
      * （ask_user，向用户提问）→ QUESTION 载荷形状；其余（工具参数确认/敏感动作）→
      * PERMISSION。data = toolCalls 待确认清单（答复续跑重建 ConfirmResult 所需的
@@ -125,7 +125,7 @@ final class AgentscopeEventMapper {
      * （截断保短）。恢复入参（模型档位/会话寻址/计量）由业务编排从项目侧事实重建，
      * 不随帧携带。</p>
      */
-    AgentEvent waitRaised(RequireUserConfirmEvent event) {
+    AgentEvent questionRaised(RequireUserConfirmEvent event) {
         List<ToolUseBlock> toolCalls = event.getToolCalls();
         List<ToolUseBlock> questions = toolCalls.stream()
                 .filter(tc -> ASK_USER_TOOL.equals(tc.getName())).toList();
@@ -136,10 +136,10 @@ final class AgentscopeEventMapper {
         if (question) {
             data.put("questions", questionPayloads(questions));
         }
-        return new AgentEvent(AgentEventTypes.WAIT_RAISED, Map.of(
-                AgentEventTypes.WAIT_RUN_FIELD, runId,
-                AgentEventTypes.WAIT_SESSION_FIELD, sessionId,
-                AgentEventTypes.ENGINE_FIELD, engine,
+        return new AgentEvent(AgentEventTypes.QUESTION_RAISED, Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.SESSION_FIELD, sessionId,
+                AgentEventTypes.ROLE_ENGINE_FIELD, engine,
                 AgentEventTypes.WAIT_KIND_FIELD, question ? "QUESTION" : "PERMISSION",
                 AgentEventTypes.WAIT_SUMMARY_FIELD, question
                         ? summaryOfQuestion(questions.get(0))
@@ -212,26 +212,26 @@ final class AgentscopeEventMapper {
 
     // ---------- run 生命周期帧（平台封闭集合） ----------
 
-    static AgentEvent taskStart(String runId, String prompt, String model, String engine) {
-        return new AgentEvent(AgentEventTypes.TASK_START, Map.of(
+    static AgentEvent runStart(String runId, String prompt, String model, String engine) {
+        return new AgentEvent(AgentEventTypes.RUN_START, Map.of(
                 AgentEventTypes.RUN_FIELD, runId,
                 "prompt", prompt,
                 "model", model,
-                AgentEventTypes.ENGINE_FIELD, engine));
+                AgentEventTypes.ROLE_ENGINE_FIELD, engine));
     }
 
-    static AgentEvent sessionCreated(String runId, String sessionId, String engine) {
-        return new AgentEvent(AgentEventTypes.SESSION_CREATED, Map.of(
+    static AgentEvent runCreated(String runId, String sessionId, String engine) {
+        return new AgentEvent(AgentEventTypes.RUN_CREATED, Map.of(
                 AgentEventTypes.RUN_FIELD, runId,
                 AgentEventTypes.SESSION_FIELD, sessionId,
-                AgentEventTypes.ENGINE_FIELD, engine));
+                AgentEventTypes.ROLE_ENGINE_FIELD, engine));
     }
 
-    static AgentEvent taskFinish(String runId, String sessionId, String finish, String engine) {
-        return new AgentEvent(AgentEventTypes.TASK_FINISH, Map.of(
+    static AgentEvent runFinish(String runId, String sessionId, String finish, String engine) {
+        return new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                 AgentEventTypes.RUN_FIELD, runId,
                 AgentEventTypes.SESSION_FIELD, sessionId,
-                AgentEventTypes.ENGINE_FIELD, engine,
+                AgentEventTypes.ROLE_ENGINE_FIELD, engine,
                 AgentEventTypes.FINISH_FIELD, finish != null ? finish : FINISH_END));
     }
 
@@ -247,7 +247,7 @@ final class AgentscopeEventMapper {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.ENGINE_FIELD, engine);
+        payload.put(AgentEventTypes.ROLE_ENGINE_FIELD, engine);
         payload.put("data", data);
         return new AgentEvent(type, payload);
     }

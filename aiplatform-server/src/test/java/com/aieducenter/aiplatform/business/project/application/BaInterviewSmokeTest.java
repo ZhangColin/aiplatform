@@ -146,8 +146,8 @@ class BaInterviewSmokeTest {
         // 1) 一句话开场 → BA 至少一轮实质提问（QUESTION，前端问答卡形状经 JSON 往返）
         BaInterviewAppService.InterviewRun first = appService.runInterviewTurn(projectId,
                 "做一个企业官网");
-        Frame question1 = awaitQuestionWaitOf(first.runId());
-        Map<String, Object> body1 = waitBody(question1);
+        Frame question1 = awaitQuestionOf(first.runId());
+        Map<String, Object> body1 = questionBody(question1);
         assertThat(framesOf(AgentEventTypes.ROLE_ASSIGNED)).isNotEmpty();
         Map<String, Object> asked = firstQuestionOf(body1);
         assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
@@ -158,18 +158,18 @@ class BaInterviewSmokeTest {
         // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
         // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
         settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
-        Frame question2 = awaitNextQuestionWaitOf(first.runId(), engineRefOf(question1));
+        Frame question2 = awaitNextQuestionOf(first.runId(), engineRefOf(question1));
         settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
 
         // 3) 催促收敛：第二问答复后续跑要么再挂新问（逐问以催促文本答复再催）、要么
-        // 收口（task-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
+        // 收口（run-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
         // 出结果（新挂起/收口/异常）前开新轮会与内核挂起态相撞（ASKING 未批复即
         // 报错），而 awaitResumeOutcome 本就阻塞到出结果，回退是死重兼竞态源
         List<String> seenRefs = new ArrayList<>(
                 List.of(engineRefOf(question1), engineRefOf(question2)));
         String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
         for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
-            Frame pending = waitFrameByRef(outcome);
+            Frame pending = questionFrameByRef(outcome);
             seenRefs.add(outcome);
             settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
             outcome = awaitResumeOutcome(allRunIds(), seenRefs);
@@ -281,15 +281,15 @@ class BaInterviewSmokeTest {
     }
 
     /** 等待该 run 的 QUESTION 挂起帧（问答卡呈现源）。 */
-    private Frame awaitQuestionWaitOf(String runId) {
-        Frame wait = awaitFrame(runId, AgentEventTypes.WAIT_RAISED);
-        assertThat(wait.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-        return wait;
+    private Frame awaitQuestionOf(String runId) {
+        Frame question = awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
+        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
+        return question;
     }
 
     /** 挂起帧的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
-    private static String engineRefOf(Frame wait) {
-        return String.valueOf(wait.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
+    private static String engineRefOf(Frame question) {
+        return String.valueOf(question.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
     }
 
     /** 帧的 engineRef（非挂起帧为空串——帧序诊断用）。 */
@@ -299,12 +299,12 @@ class BaInterviewSmokeTest {
     }
 
     /** 等待该 run 的下一个 QUESTION（续跑同 run 再挂起——按排除已见 engineRef 区分）。 */
-    private Frame awaitNextQuestionWaitOf(String runId, String excludeRef) {
+    private Frame awaitNextQuestionOf(String runId, String excludeRef) {
         long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
         while (System.nanoTime() < deadline) {
             for (Frame frame : frames) {
                 if (!runId.equals(frame.runId())
-                        || !AgentEventTypes.WAIT_RAISED.equals(frame.type())) {
+                        || !AgentEventTypes.QUESTION_RAISED.equals(frame.type())) {
                     continue;
                 }
                 if (!excludeRef.equals(engineRefOf(frame))) {
@@ -319,19 +319,19 @@ class BaInterviewSmokeTest {
     }
 
     /** 按 engineRef 取挂起帧（催促循环锚定 awaitResumeOutcome 返回的新挂起）。 */
-    private Frame waitFrameByRef(String engineRef) {
+    private Frame questionFrameByRef(String engineRef) {
         return frames.stream()
-                .filter(f -> AgentEventTypes.WAIT_RAISED.equals(f.type())
+                .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type())
                         && engineRef.equals(engineRefOf(f)))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("engineRef 无对应挂起帧: " + engineRef));
     }
 
-    /** 等待该 run 收口（task-finish；error 视为失败）。 */
+    /** 等待该 run 收口（run-finish；error 视为失败）。 */
     private void awaitRunEnd(String runId) {
-        Frame end = awaitFrame(runId, AgentEventTypes.TASK_FINISH, AgentEventTypes.ERROR);
+        Frame end = awaitFrame(runId, AgentEventTypes.RUN_FINISH, AgentEventTypes.ERROR);
         assertThat(end.type()).as("run %s 异常收口：%s", runId, end.payload())
-                .isEqualTo(AgentEventTypes.TASK_FINISH);
+                .isEqualTo(AgentEventTypes.RUN_FINISH);
     }
 
     /** 续跑出结果（跨候选 run 锚集）：再挂起（返回新 engineRef，排除已见）或收口
@@ -349,10 +349,10 @@ class BaInterviewSmokeTest {
                                     .map(f -> f.type() + "@" + engineRefOrEmpty(f))
                                     .toList());
                 }
-                if (AgentEventTypes.TASK_FINISH.equals(frame.type())) {
+                if (AgentEventTypes.RUN_FINISH.equals(frame.type())) {
                     return "finished";
                 }
-                if (AgentEventTypes.WAIT_RAISED.equals(frame.type())) {
+                if (AgentEventTypes.QUESTION_RAISED.equals(frame.type())) {
                     String ref = engineRefOf(frame);
                     if (!seenRefs.contains(ref)) {
                         return ref;
@@ -399,16 +399,16 @@ class BaInterviewSmokeTest {
 
     /** 答复挂起问（问答作答通道的编排入口调用——同 #19 端点的服务端路径）。 */
     @SuppressWarnings("unchecked")
-    private void settle(Frame wait, String answer) {
-        Map<String, Object> body = waitBody(wait);
+    private void settle(Frame question, String answer) {
+        Map<String, Object> body = questionBody(question);
         List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) body.get("toolCalls");
         assertThat(toolCalls).as("挂起帧 data 应带待确认工具清单").isNotEmpty();
-        appService.answerQuestion(projectId, wait.runId(), engineRefOf(wait), toolCalls, answer);
+        appService.answerQuestion(projectId, question.runId(), engineRefOf(question), toolCalls, answer);
     }
 
-    /** 挂起帧载荷（wait-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
-    private Map<String, Object> waitBody(Frame wait) {
-        return parseBody(wait.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
+    /** 挂起帧载荷（question-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
+    private Map<String, Object> questionBody(Frame question) {
+        return parseBody(question.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
     }
 
     @SuppressWarnings("unchecked")

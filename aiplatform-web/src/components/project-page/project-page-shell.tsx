@@ -107,7 +107,7 @@ export function ProjectPageShell({
 /**
  * 顶栏运行状态（「关了浏览器也在跑」的锚点，LIVE 真绑定·本会话口径）：
  * 直读 streams store 当前项目最近 run（latestProjectRun）。进行中（running /
- * waiting）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归 useRunElapsed
+ * questioning）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归 useRunElapsed
  * 局部）；无 run / 已终态（finished / error）整块不渲染——信号保守但不撒谎。
  */
 export function ProjectPageRunStatus({ projectId }: { projectId: string }) {

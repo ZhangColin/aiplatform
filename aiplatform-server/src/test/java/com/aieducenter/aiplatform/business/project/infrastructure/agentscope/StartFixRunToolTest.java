@@ -36,7 +36,7 @@ class StartFixRunToolTest {
     void given_registration_shape_when_inspected_then_contract_keys_present() {
         assertThat(tool.getName()).isEqualTo("startFixRun");
         assertThat(tool.getParameters()).containsKeys("type", "properties", "required");
-        assertThat(String.valueOf(tool.getParameters().get("required"))).contains("task");
+        assertThat(String.valueOf(tool.getParameters().get("required"))).contains("prompt");
         assertThat(tool.isReadOnly()).isFalse(); // 派修正 run（触发编码动作）
     }
 
@@ -44,13 +44,13 @@ class StartFixRunToolTest {
     void given_any_call_when_check_permissions_then_always_allow() {
         // 修正是迭代协议的预期动作：工具点不放确认（唯一不可逆门在下单快照）
         PermissionDecision decision = tool
-                .checkPermissions(Map.of("task", "改首页布局"), null).block();
+                .checkPermissions(Map.of("prompt", "改首页布局"), null).block();
 
         assertThat(decision.getBehavior()).isEqualTo(PermissionBehavior.ALLOW);
     }
 
     @Test
-    void given_dispatched_when_called_then_task_forwarded_with_run_id() {
+    void given_dispatched_when_called_then_prompt_forwarded_with_run_id() {
         when(iterationAppService.startFixRunByWorkspace("42", "改首页布局"))
                 .thenReturn(new IterationAppService.FixDispatch("fix-run-1", false));
 
@@ -84,20 +84,20 @@ class StartFixRunToolTest {
     }
 
     @Test
-    void given_blank_task_when_called_then_error_without_dispatch() {
+    void given_blank_prompt_when_called_then_error_without_dispatch() {
         ToolResultBlock result = call(" ");
 
         assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
-        assertThat(resultText(result)).contains("task 不能为空");
+        assertThat(resultText(result)).contains("prompt 不能为空");
     }
 
     // ---------- 内部 ----------
 
-    private ToolResultBlock call(String task) {
+    private ToolResultBlock call(String prompt) {
         ToolCallParam param = ToolCallParam.builder()
                 .toolUseBlock(new ToolUseBlock(
-                        "tc-1", StartFixRunTool.NAME, Map.of("task", task), null))
-                .input(Map.of("task", task))
+                        "tc-1", StartFixRunTool.NAME, Map.of("prompt", prompt), null))
+                .input(Map.of("prompt", prompt))
                 .build();
         return Mono.from(tool.callAsync(param)).block();
     }

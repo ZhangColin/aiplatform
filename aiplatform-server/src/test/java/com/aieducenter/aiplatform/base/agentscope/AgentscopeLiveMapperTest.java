@@ -51,7 +51,7 @@ class AgentscopeLiveMapperTest {
             assertThat(frames.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.ENGINE_FIELD, ENGINE,
+                    AgentEventTypes.ROLE_ENGINE_FIELD, ENGINE,
                     AgentEventTypes.LIVE_TEXT_FIELD, "正在编写订单管理页面。"));
         }
 
@@ -138,7 +138,7 @@ class AgentscopeLiveMapperTest {
             assertThat(frames.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.ENGINE_FIELD, ENGINE,
+                    AgentEventTypes.ROLE_ENGINE_FIELD, ENGINE,
                     AgentEventTypes.LIVE_ACTION_FIELD, "正在编写【订单管理】"));
         }
 
@@ -236,7 +236,7 @@ class AgentscopeLiveMapperTest {
             assertThat(frames).singleElement().satisfies(frame ->
                     assertThat(frame.payload()).containsOnlyKeys(
                             AgentEventTypes.RUN_FIELD, AgentEventTypes.SESSION_FIELD,
-                            AgentEventTypes.ENGINE_FIELD, AgentEventTypes.LIVE_TEXT_FIELD));
+                            AgentEventTypes.ROLE_ENGINE_FIELD, AgentEventTypes.LIVE_TEXT_FIELD));
         }
     }
 

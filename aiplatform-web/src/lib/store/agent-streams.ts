@@ -8,7 +8,7 @@ import { create } from "zustand";
  * 重放会把项目当前 run 反转掉）。
  */
 
-export type AgentRunStatus = "running" | "waiting" | "finished" | "error";
+export type AgentRunStatus = "running" | "questioning" | "finished" | "error";
 
 /** run 内分段：平台事件与引擎透传各归其 kind，透传 data 保持 part 原样。 */
 export type AgentStreamSegment =
@@ -19,9 +19,9 @@ export type AgentStreamSegment =
       roleLabel: string;
       engine: string;
     }
-  | { kind: "wait"; id: string; waitKind: string; summary: string }
+  | { kind: "question"; id: string; questionKind: string; summary: string }
   | {
-      /** 生成自动重试（task-retrying）：锚定的尝试失败后同一场生成仍在途。 */
+      /** 生成自动重试（run-retrying）：锚定的尝试失败后同一场生成仍在途。 */
       kind: "retrying";
       id: string;
       attempt: number;
@@ -40,7 +40,7 @@ export type AgentStreamSegment =
 export type AgentRun = {
   runId: string;
   projectId: string;
-  /** task-start 的 prompt / model；缺 task-start 的补建 run 无这些字段。 */
+  /** run-start 的 prompt / model；缺 run-start 的补建 run 无这些字段。 */
   prompt?: string;
   model?: string;
   engine?: string;
@@ -68,7 +68,7 @@ export type AgentStreamsState = {
   startRun: (input: StartRunInput) => void;
   /** run 不存在时按事件携带的 projectId 补建 stub（断线缺口修复），不触发驱逐。 */
   appendSegment: (target: RunTarget, segment: AgentStreamSegment) => void;
-  markSession: (target: RunTarget, sessionId: string) => void;
+  markRunCreated: (target: RunTarget, sessionId: string) => void;
 };
 
 /** 总量软上限。 */
@@ -93,10 +93,10 @@ function ensureRun(set: SetFn, input: StartRunInput, evict: boolean): void {
   const existing = runs[input.runId];
   if (existing) {
     if (!evict) return;
-    // task-start 晚于 role-assigned（帧序 role-assigned → task-start，正本）：run 已由
-    // 首帧补建 stub，这里补 task-start 元数据（prompt/model/engine）而不清已收分段
+    // run-start 晚于 role-assigned（帧序 role-assigned → run-start，正本）：run 已由
+    // 首帧补建 stub，这里补 run-start 元数据（prompt/model/engine）而不清已收分段
     //（stub 的 startedAt 保留——运行锚更早更准）。此前 early-return 会把 prompt 丢掉，
-    // 用户右泡（task-start 的 prompt）永远不出现。
+    // 用户右泡（run-start 的 prompt）永远不出现。
     runs[input.runId] = {
       ...existing,
       prompt: input.prompt,
@@ -148,7 +148,7 @@ export const useAgentStreamsStore = create<AgentStreamsState>((set) => ({
       status: nextRunStatus(run.status, segment),
       segments: [...run.segments, segment],
     })),
-  markSession: (target, sessionId) =>
+  markRunCreated: (target, sessionId) =>
     withRun(set, target, (run) =>
       run.sessionId === sessionId ? run : { ...run, sessionId },
     ),
@@ -156,7 +156,7 @@ export const useAgentStreamsStore = create<AgentStreamsState>((set) => ({
 
 /**
  * 最近 run 读口（顶栏 LIVE / 后续直播视图共用）：该项目插入序最近的一个 run
- * （order 尾部倒查）。驱逐已保证同项目至多 1 个 task-start 建的真 run；断线
+ * （order 尾部倒查）。驱逐已保证同项目至多 1 个 run-start 建的真 run；断线
  * 缺口补建的 stub 在 order 尾部时即最新可见 run。
  */
 export function latestProjectRun(
@@ -170,15 +170,15 @@ export function latestProjectRun(
   return undefined;
 }
 
-/** 终态/等待分段推导 run 状态：wait（问答挂起）= waiting，等用户 ≠ 终态；
- * retrying 把失败尝试的 error 拉回 running（同一场生成仍在途，下一尝试即 task-start）。 */
+/** 终态/等待分段推导 run 状态：question（问答挂起）= questioning，等用户 ≠ 终态；
+ * retrying 把失败尝试的 error 拉回 running（同一场生成仍在途，下一尝试即 run-start）。 */
 function nextRunStatus(
   current: AgentRunStatus,
   segment: AgentStreamSegment,
 ): AgentRunStatus {
   switch (segment.kind) {
-    case "wait":
-      return "waiting";
+    case "question":
+      return "questioning";
     case "retrying":
       return "running";
     case "error":

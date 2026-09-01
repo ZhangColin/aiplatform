@@ -114,7 +114,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
     switch (platform.type) {
-      case "task-start": {
+      case "run-start": {
         const { payload } = platform;
         store.startRun({
           runId: payload.runId,
@@ -123,15 +123,15 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           model: payload.model,
           engine: payload.engine,
         });
-        chat.ingestTaskStart(payload.projectId, payload.runId, payload.prompt);
+        chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderTaskStart(payload.projectId);
+          generation.noteCoderRunStart(payload.projectId);
         }
         return;
       }
-      case "session-created": {
+      case "run-created": {
         const { payload } = platform;
-        store.markSession(payload, payload.sessionId);
+        store.markRunCreated(payload, payload.sessionId);
         return;
       }
       case "role-assigned": {
@@ -149,12 +149,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
-      case "wait-raised": {
+      case "question-raised": {
         const { payload } = platform;
         store.appendSegment(payload, {
-          kind: "wait",
+          kind: "question",
           id: event.id,
-          waitKind: payload.kind,
+          questionKind: payload.kind,
           summary: payload.summary,
         });
         const question = parseQuestion(event.id, payload);
@@ -174,7 +174,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
-      case "task-retrying": {
+      case "run-retrying": {
         const { payload } = platform;
         store.appendSegment(payload, {
           kind: "retrying",
@@ -187,7 +187,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
-      case "task-finish": {
+      case "run-finish": {
         const { payload } = platform;
         store.appendSegment(payload, {
           kind: "finish",

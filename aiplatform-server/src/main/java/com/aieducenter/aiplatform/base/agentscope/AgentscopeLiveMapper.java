@@ -104,7 +104,7 @@ final class AgentscopeLiveMapper {
         return List.of();
     }
 
-    /** run 收尾（task-finish / error / 挂起前）：逐句出已落定段，余下无句读尾整段出（幂等）。 */
+    /** run 收尾（run-finish / error / 挂起前）：逐句出已落定段，余下无句读尾整段出（幂等）。 */
     List<AgentEvent> flush() {
         List<AgentEvent> frames = new ArrayList<>();
         flushSettledSentences(frames);
@@ -211,7 +211,7 @@ final class AgentscopeLiveMapper {
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.ENGINE_FIELD, engine);
+        payload.put(AgentEventTypes.ROLE_ENGINE_FIELD, engine);
         payload.put(field, value);
         return new AgentEvent(type, payload);
     }

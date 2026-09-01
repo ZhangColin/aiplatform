@@ -26,8 +26,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 真实对话冒烟（#44 验收 + #45 流桥）：平台进程内 HarnessAgent 走 DeepSeek 真模型
- * 跑通一轮对话——流帧可观测（task-start → session-created → text 增量连续 →
- * task-finish，runId 锚定、增量拼接 = 汇聚文本），该轮产生恰一条 UsageEvent 落库
+ * 跑通一轮对话——流帧可观测（run-start → run-created → text 增量连续 →
+ * run-finish，runId 锚定、增量拼接 = 汇聚文本），该轮产生恰一条 UsageEvent 落库
  * （subject/dims 归属）。
  *
  * <p>DEEPSEEK_API_KEY 未设置时整类跳过（Assumption，不失败）：流式/计量/幂等键
@@ -86,12 +86,12 @@ class AgentscopeConverseSmokeTest {
                 frames::add);
 
         // 帧序与锚定（#45 事件桥验收：流事件经端口可观测、文本增量连续）
-        assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.TASK_START);
+        assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("runId", runId);
         List<String> deltas = textDeltas(frames);
         assertThat(deltas).isNotEmpty();
         assertThat(String.join("", deltas)).isEqualTo(reply.text());
-        assertThat(frames.get(frames.size() - 1).type()).isEqualTo(AgentEventTypes.TASK_FINISH);
+        assertThat(frames.get(frames.size() - 1).type()).isEqualTo(AgentEventTypes.RUN_FINISH);
         assertThat(frames.get(frames.size() - 1).payload()).containsEntry("runId", runId);
         assertThat(reply.runId()).isEqualTo(runId);
         assertThat(reply.text()).isNotBlank();

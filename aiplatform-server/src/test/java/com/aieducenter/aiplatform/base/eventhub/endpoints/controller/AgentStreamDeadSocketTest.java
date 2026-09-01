@@ -90,7 +90,7 @@ class AgentStreamDeadSocketTest {
             }
             // 撞窗：断连后立即广播（真机 500 的时序）
             String runId = "run-dead-" + i;
-            assertThatCode(() -> appService.publish("task-start",
+            assertThatCode(() -> appService.publish("run-start",
                     Map.of("runId", runId))).doesNotThrowAnyException();
             Thread.sleep(50);   // 给 onError 一点时间清理，进入下一轮
         }
@@ -120,7 +120,7 @@ class AgentStreamDeadSocketTest {
                         AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
                 assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
                 sse.kill();
-                appService.publish("task-start", Map.of("runId", "run-noise-" + i));
+                appService.publish("run-start", Map.of("runId", "run-noise-" + i));
                 Thread.sleep(50);   // async error dispatch 是异步的，给它时间跑
             }
             captured.addAll(appender.list);
@@ -162,13 +162,13 @@ class AgentStreamDeadSocketTest {
             assertThatCode(() -> {
                 Thread racer = new Thread(() -> {
                     try {
-                        appService.publish("task-start", Map.of("runId", runA));
+                        appService.publish("run-start", Map.of("runId", runA));
                     } catch (Throwable ex) {
                         racerFailure.set(ex);
                     }
                 }, "publish-racer");
                 racer.start();
-                appService.publish("task-start", Map.of("runId", runB));
+                appService.publish("run-start", Map.of("runId", runB));
                 racer.join(2000);
             }).doesNotThrowAnyException();
             assertThat(racerFailure.get()).as("并发 publish 线程亦不得抛").isNull();

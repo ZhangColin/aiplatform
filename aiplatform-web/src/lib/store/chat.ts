@@ -9,13 +9,13 @@ import type { RaisedQuestion } from "@/lib/chat/qa";
  * 会话内存态，刷新后由 agent 流通道重放缓冲重建近期对话，用户作答文本不在流中、
  * 刷新即逝为 v1 取舍）。
  *
- * <p><b>BA 判定</b>：role-assigned(role=BA) 登记 baRunIds（task-start 的用户
+ * <p><b>BA 判定</b>：role-assigned(role=BA) 登记 baRunIds（run-start 的用户
  * 气泡只认 BA run，片 2 编码 run 不进对话）；透传帧自带 sessionId，
  * {@code ba-{projectId}} 前缀（后端会话命名约定：角色 × 项目）判定 text /
- * wait-raised / task-finish 归 BA。</p>
+ * question-raised / run-finish 归 BA。</p>
  *
  * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载（含路由回访）会重收近期帧——
- * runId 已入对话的 task-start 不再补用户气泡（乐观发送先落、task-start 回声
+ * runId 已入对话的 run-start 不再补用户气泡（乐观发送先落、run-start 回声
  * 靠「尾条同文」去重），text / 问答 / 失败帧按 SSE 事件 id 只收一次。</p>
  */
 
@@ -29,11 +29,11 @@ type ProjectChat = {
   messages: ChatMessage[];
   /** role-assigned(role=BA) 登记的 run（BA 判定锚一）。 */
   baRunIds: string[];
-  /** 已折算成对话事件的 run（task-start 重放 / 回声去重锚）。 */
+  /** 已折算成对话事件的 run（run-start 重放 / 回声去重锚）。 */
   ingestedRunIds: string[];
   /** 已收帧的 SSE 事件 id（重放去重锚，有界）。 */
   seenEventIds: string[];
-  /** BA 轮进行中（task-start / 作答续跑起，问答挂起或收口落）。 */
+  /** BA 轮进行中（run-start / 作答续跑起，问答挂起或收口落）。 */
   turnActive: boolean;
 };
 
@@ -41,7 +41,7 @@ export type ChatState = {
   chats: Record<string, ProjectChat>;
   // ---- SSE 侧（bridge 唯一写入方） ----
   noteBaRun: (projectId: string, runId: string) => void;
-  ingestTaskStart: (projectId: string, runId: string, prompt?: string) => void;
+  ingestRunStart: (projectId: string, runId: string, prompt?: string) => void;
   appendBaDelta: (
     projectId: string,
     sessionId: string | undefined,
@@ -60,7 +60,7 @@ export type ChatState = {
   appendUserMessage: (projectId: string, text: string) => string;
   /** 作答落定：用户气泡 + 问题卡转已答 + 轮进行中。 */
   submitAnswer: (projectId: string, text: string) => string;
-  /** 发言起轮（BA 将回复；task-start 回声会被去重）。 */
+  /** 发言起轮（BA 将回复；run-start 回声会被去重）。 */
   startTurn: (projectId: string) => void;
   /** 发送失败收轮（无会话锚的落轮口，区别于 SSE 侧 finishTurn 的 BA 会话判定）。 */
   endTurn: (projectId: string) => void;
@@ -103,7 +103,7 @@ function localId(): string {
   return `m${messageSeq}`;
 }
 
-/** 尾条同文去重（task-start 回声 vs 乐观发送的等价气泡）。 */
+/** 尾条同文去重（run-start 回声 vs 乐观发送的等价气泡）。 */
 function lastIsSameUserText(chat: ProjectChat, text: string): boolean {
   const last = chat.messages[chat.messages.length - 1];
   return last !== undefined && last.kind === "user" && last.text === text;
@@ -117,7 +117,7 @@ export const useChatStore = create<ChatState>((set) => ({
       chat.baRunIds.includes(runId) ? chat : { ...chat, baRunIds: pushCapped(chat.baRunIds, runId) },
     ),
 
-  ingestTaskStart: (projectId, runId, prompt) =>
+  ingestRunStart: (projectId, runId, prompt) =>
     updateChat(set, projectId, (chat) => {
       if (chat.ingestedRunIds.includes(runId) || !chat.baRunIds.includes(runId)) return chat;
       const ingested = { ...chat, ingestedRunIds: pushCapped(chat.ingestedRunIds, runId), turnActive: true };

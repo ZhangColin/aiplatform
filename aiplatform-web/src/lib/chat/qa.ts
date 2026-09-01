@@ -1,5 +1,5 @@
 /**
- * 问答卡纯逻辑（issue #19 需求环①）：wait-raised 帧 data → 问答卡形状的解析，
+ * 问答卡纯逻辑（issue #19 需求环①）：question-raised 帧 data → 问答卡形状的解析，
  * 与三种作答形态（单选点即答 / 多选勾选提交 / 自由输入可与已勾选合并）的答复
  * 拼装。形状正本 = SSE事件清单·通道二 `data.questions` 投影
  * （[{header, question, multiple, custom, options[{label}]}]）。
@@ -17,8 +17,8 @@ export type PendingToolCall = {
   input?: unknown;
 };
 
-/** wait-raised 帧载荷面（事件名册 wait-raised 行；data 为引擎载荷原样）。 */
-export type WaitRaisedPayload = {
+/** question-raised 帧载荷面（事件名册 question-raised 行；data 为引擎载荷原样）。 */
+export type QuestionRaisedPayload = {
   runId: string;
   sessionId?: string;
   kind?: string;
@@ -48,13 +48,13 @@ type QuestionProjection = {
 };
 
 /**
- * wait-raised → 问答卡：kind=QUESTION 且 data.questions[0] 可解析才成卡
+ * question-raised → 问答卡：kind=QUESTION 且 data.questions[0] 可解析才成卡
  * （PERMISSION 挂起 / 形状残缺 → null，指令区不呈现交互卡）。选项取 label；
  * 无选项纯开放题照成卡（custom 恒 true，自由输入作答）。
  */
 export function parseQuestion(
   eventId: string,
-  payload: WaitRaisedPayload,
+  payload: QuestionRaisedPayload,
 ): RaisedQuestion | null {
   if (payload.kind !== "QUESTION" || !payload.engineRef) return null;
   const data = asRecord(payload.data);

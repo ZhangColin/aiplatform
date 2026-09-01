@@ -108,10 +108,10 @@ class AgentscopeEventMapperTest {
     class LifecycleFrames {
 
         @Test
-        void task_start_carries_prompt_and_model() {
-            AgentEvent frame = AgentscopeEventMapper.taskStart(RUN_ID, "写个 PRD", "deepseek:m-1", ENGINE);
+        void run_start_carries_prompt_and_model() {
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写个 PRD", "deepseek:m-1", ENGINE);
 
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.TASK_START);
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_START);
             assertThat(frame.payload()).containsOnly(
                     Map.entry("runId", RUN_ID),
                     Map.entry("prompt", "写个 PRD"),
@@ -120,10 +120,10 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void session_created_carries_session_id() {
-            AgentEvent frame = AgentscopeEventMapper.sessionCreated(RUN_ID, SESSION_ID, ENGINE);
+        void run_created_carries_session_id() {
+            AgentEvent frame = AgentscopeEventMapper.runCreated(RUN_ID, SESSION_ID, ENGINE);
 
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.SESSION_CREATED);
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_CREATED);
             assertThat(frame.payload()).containsOnly(
                     Map.entry("runId", RUN_ID),
                     Map.entry("sessionId", SESSION_ID),
@@ -131,10 +131,10 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void task_finish_carries_finish_token() {
-            AgentEvent frame = AgentscopeEventMapper.taskFinish(RUN_ID, SESSION_ID, "end", ENGINE);
+        void run_finish_carries_finish_token() {
+            AgentEvent frame = AgentscopeEventMapper.runFinish(RUN_ID, SESSION_ID, "end", ENGINE);
 
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.TASK_FINISH);
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_FINISH);
             assertThat(frame.payload()).containsOnly(
                     Map.entry("runId", RUN_ID),
                     Map.entry("sessionId", SESSION_ID),
@@ -170,19 +170,19 @@ class AgentscopeEventMapperTest {
     }
 
     @Nested
-    class WaitFrames {
+    class QuestionRaisedFrames {
 
         @Test
-        void confirm_event_maps_to_wait_raised_frame_with_contract_keys() {
+        void confirm_event_maps_to_question_raised_frame_with_contract_keys() {
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-9", java.util.List.of(
                     toolCall("tc-1", "write_file", Map.of("path", "docs/PRD.md"))));
 
-            AgentEvent frame = mapper.waitRaised(event);
+            AgentEvent frame = mapper.questionRaised(event);
 
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.WAIT_RAISED);
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.QUESTION_RAISED);
             assertThat(frame.payload()).containsAllEntriesOf(Map.of(
-                    AgentEventTypes.WAIT_RUN_FIELD, RUN_ID,
-                    AgentEventTypes.WAIT_SESSION_FIELD, SESSION_ID,
+                    AgentEventTypes.RUN_FIELD, RUN_ID,
+                    AgentEventTypes.SESSION_FIELD, SESSION_ID,
                     AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION",
                     AgentEventTypes.WAIT_SUMMARY_FIELD, "write_file",
                     AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9",
@@ -204,7 +204,7 @@ class AgentscopeEventMapperTest {
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-10", java.util.List.of(
                     toolCall("tc-2", "ask_user", Map.of("question", "用哪个框架?"))));
 
-            AgentEvent frame = mapper.waitRaised(event);
+            AgentEvent frame = mapper.questionRaised(event);
 
             assertThat(frame.payload()).containsEntry(
                     AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
@@ -224,7 +224,7 @@ class AgentscopeEventMapperTest {
                             "question", "这个官网主要面向谁?",
                             "options", java.util.List.of("企业客户", "个人用户")))));
 
-            AgentEvent frame = mapper.waitRaised(event);
+            AgentEvent frame = mapper.questionRaised(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
@@ -249,7 +249,7 @@ class AgentscopeEventMapperTest {
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-15", java.util.List.of(
                     toolCall("tc-o", "ask_user", Map.of("question", "还有什么要补充的?"))));
 
-            AgentEvent frame = mapper.waitRaised(event);
+            AgentEvent frame = mapper.questionRaised(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
@@ -273,7 +273,7 @@ class AgentscopeEventMapperTest {
                             "multiple", true,
                             "options", java.util.List.of("预约", "提醒", "会员")))));
 
-            AgentEvent frame = mapper.waitRaised(event);
+            AgentEvent frame = mapper.questionRaised(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
@@ -290,7 +290,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void confirm_event_yields_no_passthrough_frame() {
-            // 挂起不是过程帧：wait-raised 由调用方显式发射，map() 不重复产帧
+            // 挂起不是过程帧：question-raised 由调用方显式发射，map() 不重复产帧
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(
                     toolCall("tc-3", "write_file", Map.of())));
 
@@ -299,7 +299,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void confirm_event_is_a_suspension_not_finish() {
-            // 挂起轮的流终止不是终态：无结煞语（wait-raised 由调用方显式发射）
+            // 挂起轮的流终止不是终态：无结煞语（question-raised 由调用方显式发射）
             assertThat(mapper.finishToken(new RequireUserConfirmEvent("reply-12",
                     java.util.List.of(toolCall("tc-4", "write_file", Map.of()))))).isEmpty();
         }

@@ -46,7 +46,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 /**
  * 迭代编排（#26 验收）：修正 run 与生成同机制（coder-{projectId} 会话稳定绑定 +
  * 同工作区 + CODER 角色卡 + live + 计量 dims + 知识命中前置注入 + 失败自动重试
- * task-retrying 帧）；run 在途时新任务排队（不即派）、当前 run 收口后合并为一场
+ * run-retrying 帧）；run 在途时新任务排队（不即派）、当前 run 收口后合并为一场
  * 修正续派（排队意见不丢、不逐条烧 run）；守卫组（不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
@@ -112,7 +112,7 @@ class IterationAppServiceTest {
         // 修正 run 全要素：复用 coder 会话与同工作区（编码智能体带建系统上下文继续）+
         // CODER 角色卡 + owner + 计量 dims + 流关联 + 直播开（与生成同机制）
         assertThat(value.runId()).isEqualTo(dispatch.runId());
-        assertThat(value.prompt()).isEqualTo(IterationAppService.fixTaskPrompt(
+        assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 List.of("把预约列表按时间倒序排列")));
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.workspaceId()).isEqualTo("9900");
@@ -161,7 +161,7 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         List<AgentCommand> runs = command.getAllValues();
         assertThat(runs.get(1).prompt())
-                .isEqualTo(IterationAppService.fixTaskPrompt(List.of("按钮改蓝色", "加导出")))
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of("按钮改蓝色", "加导出")))
                 .contains("1. 按钮改蓝色").contains("2. 加导出");
         assertThat(runs.get(1).sessionId()).isEqualTo("coder-" + projectId);
         assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
@@ -203,7 +203,7 @@ class IterationAppServiceTest {
         assertThat(command.getValue().prompt())
                 .startsWith("【平台知识库·相似历史需求】")
                 .contains("连锁诊所系统")
-                .endsWith("————\n\n" + IterationAppService.fixTaskPrompt(List.of(task)));
+                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(List.of(task)));
     }
 
     @Test
@@ -217,12 +217,12 @@ class IterationAppServiceTest {
         appService.startFixRun(projectId, "修正首页布局");
         tracks.remove(0).run();
 
-        // 失败自动重试同生成：task-retrying 帧（话术「遇到问题，正在重试」）+ 重试续作轨
+        // 失败自动重试同生成：run-retrying 帧（话术「遇到问题，正在重试」）+ 重试续作轨
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.FIX_RETRY_TASK_PROMPT);
-        verify(streamAppService).publish(eq(AgentEventTypes.TASK_RETRYING), argThat(payload ->
+                .isEqualTo(IterationAppService.FIX_RETRY_RUN_PROMPT);
+        verify(streamAppService).publish(eq(AgentEventTypes.RUN_RETRYING), argThat(payload ->
                 "遇到问题，正在重试".equals(payload.get(AgentEventTypes.RETRY_MESSAGE_FIELD))));
 
         // 重试成功后轨道正常收工：下一场可再起跑

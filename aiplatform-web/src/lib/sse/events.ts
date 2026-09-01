@@ -98,23 +98,23 @@ type AgentPayload = {
 
 export type PlatformAgentEvent =
   | {
-      type: "task-start";
+      type: "run-start";
       payload: AgentPayload & { prompt: string; model: string; engine?: string };
     }
   | {
       type: "role-assigned";
       payload: AgentPayload & { role: string; roleLabel: string; engine: string };
     }
-  | { type: "session-created"; payload: AgentPayload & { sessionId: string; engine?: string } }
+  | { type: "run-created"; payload: AgentPayload & { sessionId: string; engine?: string } }
   | { type: "error"; payload: AgentPayload & { message: string } }
-  | { type: "task-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
+  | { type: "run-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
   | {
       /**
        * 智能体挂起（ask_user 提问等）：答复续跑归业务编排（问答作答通道，需求环）。
        * `engineRef` = 引擎侧请求/权限 id（续跑批复的锚）；`data` = 引擎载荷原样
        * （QUESTION 时含前端问答卡投影 `data.questions`），问答卡切片消费。
        */
-      type: "wait-raised";
+      type: "question-raised";
       payload: AgentPayload & {
         kind: string;
         summary: string;
@@ -125,10 +125,10 @@ export type PlatformAgentEvent =
   | {
       /**
        * 编码 run 自动重试（生成编排层发射，#22）：`runId` 锚定失败的那次尝试
-       * （帧序 error → task-retrying → 下一尝试 task-start）；`message` 为用户侧
+       * （帧序 error → run-retrying → 下一尝试 run-start）；`message` 为用户侧
        * 话术「遇到问题，正在重试」；超限后不再发（末次 error 即终态）。
        */
-      type: "task-retrying";
+      type: "run-retrying";
       payload: AgentPayload & { attempt: number; message: string };
     }
   | {
@@ -148,13 +148,13 @@ export type PlatformAgentEvent =
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
-  "task-start",
+  "run-start",
   "role-assigned",
-  "session-created",
+  "run-created",
   "error",
-  "task-finish",
-  "wait-raised",
-  "task-retrying",
+  "run-finish",
+  "question-raised",
+  "run-retrying",
   "live-text",
   "live-action",
   "live-step",

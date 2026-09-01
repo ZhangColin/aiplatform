@@ -46,8 +46,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 
 /**
- * {@link AgentscopeAgentClient}：流帧序（task-start → session-created → 过程帧 →
- * task-finish / error）、文本增量汇聚、RuntimeContext 组装、模型调用事件 →
+ * {@link AgentscopeAgentClient}：流帧序（run-start → run-created → 过程帧 →
+ * run-finish / error）、文本增量汇聚、RuntimeContext 组装、模型调用事件 →
  * UsageEvent 恰一条、workspaceId → 项目 dev 工作区、挂起语义与 resume。
  */
 @ExtendWith(MockitoExtension.class)
@@ -124,8 +124,8 @@ class AgentscopeAgentClientTest {
         var reply = client.converse(command(null, null), frames::add);
 
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.TASK_START, AgentEventTypes.SESSION_CREATED,
-                "text", "text", "text", AgentEventTypes.TASK_FINISH);
+                AgentEventTypes.RUN_START, AgentEventTypes.RUN_CREATED,
+                "text", "text", "text", AgentEventTypes.RUN_FINISH);
         // 开场帧形状
         assertThat(frames.get(0).payload()).containsOnly(
                 Map.entry("runId", "run-1"), Map.entry("prompt", "你好"),
@@ -161,17 +161,17 @@ class AgentscopeAgentClientTest {
         client.converse(liveCommand(), frames::add);
 
         // 直播帧与透传帧同一 sink 同一流：live-step / live-text（句读成段）/
-        // live-action（写文件人话行）/ live-text（run 收尾尾段），尾段先于 task-finish
+        // live-action（写文件人话行）/ live-text（run 收尾尾段），尾段先于 run-finish
         assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
                 AgentEventTypes.LIVE_STEP, AgentEventTypes.LIVE_TEXT,
                 AgentEventTypes.LIVE_ACTION, AgentEventTypes.LIVE_TEXT,
-                AgentEventTypes.TASK_FINISH);
+                AgentEventTypes.RUN_FINISH);
         AgentEvent tailFrame = frames.stream()
                 .filter(f -> f.type().equals(AgentEventTypes.LIVE_TEXT)
                         && "马上就好".equals(f.payload().get("text")))
                 .findFirst().orElseThrow();
         assertThat(frames.indexOf(tailFrame)).isLessThan(frames.stream().map(AgentEvent::type)
-                .toList().indexOf(AgentEventTypes.TASK_FINISH));
+                .toList().indexOf(AgentEventTypes.RUN_FINISH));
         assertThat(frames.stream().filter(f -> f.type().equals(AgentEventTypes.LIVE_ACTION))
                 .findFirst().orElseThrow().payload())
                 .containsEntry("action", "正在编写【订单管理】");
@@ -209,8 +209,8 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_same_session_second_run_when_converse_then_session_created_not_repeated() {
-        // 首轮槽位无状态（首见发 session-created），首轮落状态后第二轮不再发
+    void given_same_session_second_run_when_converse_then_run_created_not_repeated() {
+        // 首轮槽位无状态（首见发 run-created），首轮落状态后第二轮不再发
         when(stateStore.exists("alice", "s-1")).thenReturn(false, true);
         // （宽匹配不适用于本用例：需逐次返回不同值）
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "一"));
@@ -222,11 +222,11 @@ class AgentscopeAgentClientTest {
         client.converse(command(null, null), frames::add);
 
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.TASK_START, "text", AgentEventTypes.TASK_FINISH);
+                AgentEventTypes.RUN_START, "text", AgentEventTypes.RUN_FINISH);
     }
 
     @Test
-    void given_exceed_max_iters_when_converse_then_task_finish_carries_engine_finish_token() {
+    void given_exceed_max_iters_when_converse_then_run_finish_carries_engine_finish_token() {
         givenFirstSeen(true);
         givenStream(new ExceedMaxItersEvent("r-1", 10, 10));
 
@@ -234,7 +234,7 @@ class AgentscopeAgentClientTest {
         client.converse(command(null, null), frames::add);
 
         AgentEvent finish = frames.get(frames.size() - 1);
-        assertThat(finish.type()).isEqualTo(AgentEventTypes.TASK_FINISH);
+        assertThat(finish.type()).isEqualTo(AgentEventTypes.RUN_FINISH);
         assertThat(finish.payload()).containsEntry("finish", "exceed_max_iters");
     }
 
@@ -343,7 +343,7 @@ class AgentscopeAgentClientTest {
                 .hasMessageContaining("智能体调用失败");
 
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.TASK_START, AgentEventTypes.SESSION_CREATED,
+                AgentEventTypes.RUN_START, AgentEventTypes.RUN_CREATED,
                 AgentEventTypes.ERROR);
         assertThat(frames.get(2).payload()).containsEntry("message", "boom");
     }
@@ -402,7 +402,7 @@ class AgentscopeAgentClientTest {
     // ---------- 挂起语义 / resume / 会话首见判定 ----------
 
     @Test
-    void given_confirm_event_when_converse_then_wait_raised_and_no_task_finish() {
+    void given_confirm_event_when_converse_then_question_raised_and_no_run_finish() {
         givenFirstSeen(true);
         givenStream(
                 new TextBlockDeltaEvent("r-1", "b-1", "需要确认一个操作："),
@@ -412,16 +412,16 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
 
-        // 挂起 = 软终点：wait-raised 发出（问答卡呈现源），不发 task-finish
+        // 挂起 = 软终点：question-raised 发出（问答卡呈现源），不发 run-finish
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.TASK_START, AgentEventTypes.SESSION_CREATED,
-                "text", AgentEventTypes.WAIT_RAISED);
-        AgentEvent wait = frames.get(3);
-        assertThat(wait.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
-        assertThat(wait.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION");
+                AgentEventTypes.RUN_START, AgentEventTypes.RUN_CREATED,
+                "text", AgentEventTypes.QUESTION_RAISED);
+        AgentEvent question = frames.get(3);
+        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
+        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION");
         // data = 待确认工具最小面（恢复入参由业务编排从项目侧事实重建，不随帧携带）
         @SuppressWarnings("unchecked")
-        Map<String, Object> data = (Map<String, Object>) wait.payload()
+        Map<String, Object> data = (Map<String, Object>) question.payload()
                 .get(AgentEventTypes.WAIT_DATA_FIELD);
         assertThat(data).containsOnlyKeys("type", "toolCalls");
         assertThat(String.valueOf(data.get("type"))).isEqualTo("permission");
@@ -449,7 +449,7 @@ class AgentscopeAgentClientTest {
                 .get(Msg.METADATA_CONFIRM_RESULTS)).isInstanceOf(List.class);
         assertThat(resumeMsg.getTextContent()).isEqualTo("approved");
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                "text", AgentEventTypes.TASK_FINISH);
+                "text", AgentEventTypes.RUN_FINISH);
         verify(factory).obtain(any(), any(), eq("deepseek:deepseek-v4-flash"), any());
     }
 
@@ -500,7 +500,7 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_state_slot_absent_when_converse_then_session_created_emitted() {
+    void given_state_slot_absent_when_converse_then_run_created_emitted() {
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
                 WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         when(stateStore.exists("alice", "s-1")).thenReturn(false);
@@ -513,13 +513,13 @@ class AgentscopeAgentClientTest {
 
         verify(stateStore).exists("alice", "s-1");
         assertThat(frames.stream().map(AgentEvent::type)).contains(
-                AgentEventTypes.SESSION_CREATED);
+                AgentEventTypes.RUN_CREATED);
     }
 
     @Test
-    void given_state_slot_present_when_converse_then_session_created_skipped() {
+    void given_state_slot_present_when_converse_then_run_created_skipped() {
         // 跨重启会话状态已存在（cat_agent_state 承载全部智能体会话）：不重发
-        // session-created
+        // run-created
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
                 WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         when(stateStore.exists("alice", "s-1")).thenReturn(true);
@@ -531,6 +531,6 @@ class AgentscopeAgentClientTest {
         client.converse(cmd, frames::add);
 
         assertThat(frames.stream().map(AgentEvent::type))
-                .doesNotContain(AgentEventTypes.SESSION_CREATED);
+                .doesNotContain(AgentEventTypes.RUN_CREATED);
     }
 }

@@ -137,7 +137,7 @@ describe("LiveRail · 直播侧栏（#23 生成环②）", () => {
     render(<LiveRail projectId="p1" />);
     expect(screen.getAllByText("收口前的段。").length).toBeGreaterThan(0);
 
-    // task-finish 落 generation store → 终态：整栏退场（收起即逝）
+    // run-finish 落 generation store → 终态：整栏退场（收起即逝）
     act(() => {
       useGenerationStore.setState({
         generations: { p1: { coderRunIds: ["run1"], coderStatus: "finished", previewEpoch: 1, seenFinishEventIds: ["run1:9"] } },

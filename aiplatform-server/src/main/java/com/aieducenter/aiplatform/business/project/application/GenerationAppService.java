@@ -45,7 +45,7 @@ import lombok.extern.slf4j.Slf4j;
  * PRD（docs/PRD.md）由 BA 先前写出，同样是智能体自读，平台不搬运。</p>
  *
  * <p><b>失败自动重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
- * 已落盘成果保留）：尝试失败先发 {@code task-retrying} 帧（话术「遇到问题，
+ * 已落盘成果保留）：尝试失败先发 {@code run-retrying} 帧（话术「遇到问题，
  * 正在重试」）再下发下一尝试（新 runId）；超限转终态失败，由用户重新发起兜底
  * （generated_at 不落位 = 按钮口径仍在）。run 成功收口才落
  * {@code generated_at}（首次生成时点，单向置位——「确认下单」可见性口径）。</p>
@@ -55,14 +55,14 @@ import lombok.extern.slf4j.Slf4j;
 public class GenerationAppService {
 
     /** 生成任务 prompt（首试下发）：读 PRD 自主实现 + 收口判据（8081 可访问）。 */
-    static final String GENERATE_TASK_PROMPT =
+    static final String GENERATE_RUN_PROMPT =
             "开始做系统：请完整阅读工作区 docs/PRD.md（需求正本，「功能清单」是实现的"
                     + "直接依据），在工作区内把这套系统真正实现出来——带数据库、预置可演示的"
                     + "初始数据，并按平台约定把应用服务跑在 8081 端口（后台常驻），"
                     + "用 curl 确认可访问后收尾。";
 
     /** 重试续作 prompt：同工作区不丢数据——已落盘成果保留，从中断处继续。 */
-    static final String RETRY_TASK_PROMPT =
+    static final String RETRY_RUN_PROMPT =
             "上一次尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
                     + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续把系统做完，"
                     + "直至 docs/PRD.md 功能清单实现、服务在 8081 端口可访问。";
@@ -153,13 +153,13 @@ public class GenerationAppService {
 
     /**
      * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
-     * GENERATE_TASK_PROMPT、重试换轨 RETRY_TASK_PROMPT；成功收口（converse 无异常
+     * GENERATE_RUN_PROMPT、重试换轨 RETRY_RUN_PROMPT；成功收口（converse 无异常
      * + 8081 可达，#35 核验在 {@link #markGeneratedIfReachable}）即 markGenerated
      * 收场（首次生成时点单向落位）。
      */
     private void runAttemptsWithRetry(Project project, String firstRunId) {
         coderRunAttempts.run(project, firstRunId,
-                new CoderRunAttempts.Prompts(GENERATE_TASK_PROMPT, RETRY_TASK_PROMPT),
+                new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
                 () -> markGeneratedIfReachable(project), "generate");
     }
 

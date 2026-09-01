@@ -56,7 +56,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * agentKind=coder + sessionId）、项目工作区、流关联）、工作区布局资产就位先于
  * 首试下发（AGENTS.md 平台约定幂等覆写）、知识命中前置注入首试任务 prompt
  * （query = 任务 prompt；检索失败降级空注入不阻断）、重试不重注入（续同会话，
- * 注入块已在会话历史）、成功收口落 generated_at、失败自动重试（task-retrying 帧
+ * 注入块已在会话历史）、成功收口落 generated_at、失败自动重试（run-retrying 帧
  * + 话术 + 重试 prompt 换轨）、超限转终态（generated_at 不落、在途守卫释放可
  * 重新发起）、守卫组（不存在 / 已归档 / 已生成 / 在途重复触发）。
  */
@@ -132,7 +132,7 @@ class GenerationAppServiceTest {
         verify(agentClient).converse(command.capture(), any());
         AgentCommand value = command.getValue();
         assertThat(value.runId()).isEqualTo(run.runId());
-        assertThat(value.prompt()).isEqualTo(GenerationAppService.GENERATE_TASK_PROMPT);
+        assertThat(value.prompt()).isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt())
@@ -158,13 +158,13 @@ class GenerationAppServiceTest {
 
         appService.startGeneration(projectId);
 
-        verify(knowledgePort).retrieve(eq(GenerationAppService.GENERATE_TASK_PROMPT), eq(5));
+        verify(knowledgePort).retrieve(eq(GenerationAppService.GENERATE_RUN_PROMPT), eq(5));
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().prompt())
                 .startsWith("【平台知识库·相似历史需求】")
                 .contains("宠物医院预约平台").contains("非用户的确认信息")
-                .endsWith("————\n\n" + GenerationAppService.GENERATE_TASK_PROMPT);
+                .endsWith("————\n\n" + GenerationAppService.GENERATE_RUN_PROMPT);
     }
 
     @Test
@@ -181,7 +181,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().prompt())
-                .isEqualTo(GenerationAppService.GENERATE_TASK_PROMPT);
+                .isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
     }
 
     @Test
@@ -233,15 +233,15 @@ class GenerationAppServiceTest {
         List<AgentCommand> attempts = command.getAllValues();
         assertThat(attempts.get(0).runId()).isEqualTo(run.runId());
         assertThat(attempts.get(0).prompt())
-                .endsWith("————\n\n" + GenerationAppService.GENERATE_TASK_PROMPT);
+                .endsWith("————\n\n" + GenerationAppService.GENERATE_RUN_PROMPT);
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId());
-        assertThat(attempts.get(1).prompt()).isEqualTo(GenerationAppService.RETRY_TASK_PROMPT);
+        assertThat(attempts.get(1).prompt()).isEqualTo(GenerationAppService.RETRY_RUN_PROMPT);
         assertThat(attempts.get(1).sessionId()).isEqualTo("coder-" + projectId);
         // 一次下发一次注入：重试续同会话不重检索
         verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
 
-        // 重试帧：锚定失败的那次尝试、携带下一尝试序号与话术（SSE事件清单 task-retrying 行）
-        verify(streamAppService).publish(eq(AgentEventTypes.TASK_RETRYING), argThat(payload ->
+        // 重试帧：锚定失败的那次尝试、携带下一尝试序号与话术（SSE事件清单 run-retrying 行）
+        verify(streamAppService).publish(eq(AgentEventTypes.RUN_RETRYING), argThat(payload ->
                 run.runId().equals(payload.get(AgentStreamAppService.RUN_FIELD))
                         && Integer.valueOf(2).equals(
                                 payload.get(AgentEventTypes.RETRY_ATTEMPT_FIELD))
@@ -268,7 +268,7 @@ class GenerationAppServiceTest {
         int maxAttempts = properties.getMaxAttempts();
         verify(agentClient, times(maxAttempts)).converse(any(), any());
         verify(streamAppService, times(maxAttempts - 1))
-                .publish(eq(AgentEventTypes.TASK_RETRYING), anyMap());
+                .publish(eq(AgentEventTypes.RUN_RETRYING), anyMap());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNull();
@@ -304,7 +304,7 @@ class GenerationAppServiceTest {
         int maxAttempts = properties.getMaxAttempts();
         verify(agentClient, times(maxAttempts)).converse(any(), any());
         verify(streamAppService, times(maxAttempts - 1))
-                .publish(eq(AgentEventTypes.TASK_RETRYING), anyMap());
+                .publish(eq(AgentEventTypes.RUN_RETRYING), anyMap());
         // 假完成不落 generated_at（AC①：8081 不可达不再落 generated_at）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",

@@ -8,7 +8,7 @@ import jakarta.validation.constraints.NotEmpty;
 
 /**
  * 问答卡作答命令（#19 需求环①）：把挂起轮续跑所需的全部事实回传——runId +
- * 待确认工具清单（wait-raised 帧 {@code data.toolCalls} 原样回传，恢复私货从
+ * 待确认工具清单（question-raised 帧 {@code data.toolCalls} 原样回传，恢复私货从
  * 项目侧事实重建、不信前端）+ 用户答复文本（单选 label / 多选 label 拼接 /
  * 自由输入，可与已勾选合并——拼接归前端）。
  *

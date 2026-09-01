@@ -112,7 +112,7 @@ class AgentEventsControllerSseTest {
         // 锁定本测试的帧（发布仍在其后，断言的是 live 帧线格式）
         SseClient client = connect("?runId=run-wire");
 
-        appService.publish("task-start", Map.of(
+        appService.publish("run-start", Map.of(
                 "runId", "run-wire", "prompt", "写个落地页",
                 "model", "deepseek-v4-pro", "engine", "agentscope"));
 
@@ -121,7 +121,7 @@ class AgentEventsControllerSseTest {
         String dataLine = client.nextNonCommentLine();
         JsonNode envelope = objectMapper.readTree(dataLine.substring("data:".length()));
 
-        assertThat(envelope.get("type").asText()).isEqualTo("task-start");
+        assertThat(envelope.get("type").asText()).isEqualTo("run-start");
         assertThat(envelope.get("payload").get("runId").asText()).isEqualTo("run-wire");
         assertThat(envelope.get("payload").get("engine").asText()).isEqualTo("agentscope");
         assertThat(envelope.get("payload").has("type")).isFalse(); // payload 内禁 type 键名
@@ -132,8 +132,8 @@ class AgentEventsControllerSseTest {
     void given_run_filter_when_publish_other_run_then_only_matching_received() throws Exception {
         SseClient client = connect("?runId=run-1");
 
-        appService.publish("task-start", Map.of("runId", "run-2", "prompt", "x"));
-        appService.publish("task-finish", Map.of("runId", "run-1", "finish", "end"));
+        appService.publish("run-start", Map.of("runId", "run-2", "prompt", "x"));
+        appService.publish("run-finish", Map.of("runId", "run-1", "finish", "end"));
 
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-1:1");
         client.skipEventBody();
@@ -167,7 +167,7 @@ class AgentEventsControllerSseTest {
     @Test
     void given_frames_before_connect_when_subscribe_with_last_event_id_then_no_replay()
             throws Exception {
-        appService.publish("task-start", Map.of("runId", "run-recon-9", "prompt", "x"));
+        appService.publish("run-start", Map.of("runId", "run-recon-9", "prompt", "x"));
 
         SseClient client = connect("", "run-earlier:5");
 
@@ -228,7 +228,7 @@ class AgentEventsControllerSseTest {
     @Test
     void given_frames_before_connect_when_subscribe_with_blank_last_event_id_then_replayed()
             throws Exception {
-        appService.publish("task-start", Map.of("runId", "run-blank-9", "prompt", "x"));
+        appService.publish("run-start", Map.of("runId", "run-blank-9", "prompt", "x"));
 
         SseClient client = connect("?runId=run-blank-9", "");
 
@@ -241,7 +241,7 @@ class AgentEventsControllerSseTest {
 
         assertThat(apiDocs).contains("/api/agent-events");
         assertThat(apiDocs).contains("SSE事件清单");   // 名册正本指引
-        assertThat(apiDocs).contains("task-start");   // 名册精简表
+        assertThat(apiDocs).contains("run-start");   // 名册精简表
         assertThat(apiDocs).contains("runId");
     }
 

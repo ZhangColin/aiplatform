@@ -31,8 +31,8 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 /**
  * AgentScope HarnessAgent 客户端（平台唯一智能体内核）：平台进程内跑一轮多轮对话
  * ——AgentScope 事件经 {@link AgentscopeEventMapper}（映射表单点）转平台智能体流帧
- * 逐个回调 sink（task-start/session-created 开场、text/reasoning/tool/step-* 过程、
- * task-finish/error 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂
+ * 逐个回调 sink（run-start/run-created 开场、text/reasoning/tool/step-* 过程、
+ * run-finish/error 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂
  * 构建/工作区解析——同样经 error 帧表达，异步轨道起跑失败不零帧死寂）；命令开
  * {@code live}（编码 run 姿态，#23）时同一事件流另经 {@link AgentscopeLiveMapper}
  * 逐段产直播帧（live-text/live-action/live-step，收口帧前出尾段）；模型调用
@@ -41,15 +41,15 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * agent-usage-{runId}[-{replyId}]，engine=agentscope；归属为空不发明、零用量不报）。
  *
  * <p><b>挂起与续跑（问答机制）</b>：AgentScope 的确认挂起（RequireUserConfirmEvent，
- * 业务侧 ask_user 提问工具触发）= 本轮流软终点——发 {@code wait-raised} 帧（载荷带
+ * 业务侧 ask_user 提问工具触发）= 本轮流软终点——发 {@code question-raised} 帧（载荷带
  * 待确认工具清单，恢复入参由业务编排从项目侧事实重建）后流终止，<b>不发
- * task-finish</b>（run 未终态）；业务编排以 {@link #resume} 续跑（同一
+ * run-finish</b>（run 未终态）；业务编排以 {@link #resume} 续跑（同一
  * (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，访谈上下文
  * 不丢），续跑流可再挂起（一 run 多批准点）或正常收口。失败上抛
  * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 帧）。</p>
  *
  * <p>工作区解析：命令带 workspaceId → 项目 dev 工作区（容器文件面，docker exec
- * 读写，写入即落项目工作区）；缺省 → 配置的本地工作区。session-created 发射口径：
+ * 读写，写入即落项目工作区）；缺省 → 配置的本地工作区。run-created 发射口径：
  * 按 cat_agent_state 槽位首见判定（跨重启不重发——该表承载全部智能体会话）。</p>
  */
 @Component
@@ -130,8 +130,8 @@ public class AgentscopeAgentClient {
 
     /**
      * 挂起续跑（业务编排的问答答复通道调用）：以 ConfirmResult（用户答复/批准/拒绝）
-     * 经同一 (userId, sessionId) 恢复上下文续跑——不重发 task-start/session-created
-     * （run 已开场），可再挂起（wait-raised 再发）或正常收口（task-finish）。
+     * 经同一 (userId, sessionId) 恢复上下文续跑——不重发 run-start/run-created
+     * （run 已开场），可再挂起（question-raised 再发）或正常收口（run-finish）。
      * 计量幂等键带 replyId 后缀（挂起轮已报过 agent-usage-{runId}）。
      */
     public void resume(AgentResume resume, Consumer<AgentEvent> sink) {
@@ -193,17 +193,17 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * converse 前段：公共准备 + 开场帧（task-start / session-created 首见）。本段自身
+     * converse 前段：公共准备 + 开场帧（run-start / run-created 首见）。本段自身
      * 不做失败处理——任一失败由 {@link #converse} 补发 error 帧后上抛。
      */
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared = prepareFor(command.runId(), command.sessionId(), command.userId(),
                 command.modelString(), command.systemPrompt(), command.workspaceId(),
                 command.live());
-        sink.accept(AgentscopeEventMapper.taskStart(command.runId(), command.prompt(),
+        sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
                 prepared.modelRef().toModelString(), ENGINE));
         if (firstSeen(command.userId(), command.sessionId())) {
-            sink.accept(AgentscopeEventMapper.sessionCreated(
+            sink.accept(AgentscopeEventMapper.runCreated(
                     command.runId(), command.sessionId(), ENGINE));
         }
         return prepared;
@@ -230,8 +230,8 @@ public class AgentscopeAgentClient {
 
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐帧映射发射，挂起
-     * （RequireUserConfirm）发 wait-raised 后流终止且不发 task-finish；正常收口发
-     * task-finish；异常发 error 帧。用量无论成败如实上报（幂等键由调用方给）；
+     * （RequireUserConfirm）发 question-raised 后流终止且不发 run-finish；正常收口发
+     * run-finish；异常发 error 帧。用量无论成败如实上报（幂等键由调用方给）；
      * 超时取逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
@@ -250,7 +250,7 @@ public class AgentscopeAgentClient {
             // 直播尾段先出（收口/挂起帧前），挂起轮同理——解说不因流形态丢尾
             flushLive(prepared.live(), sink);
             if (suspension.get() == null) {
-                sink.accept(AgentscopeEventMapper.taskFinish(
+                sink.accept(AgentscopeEventMapper.runFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
             }
             return new TurnResult(text.toString(), null);
@@ -283,7 +283,7 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * session-created 首见判定：cat_agent_state 槽位 (userId, sessionId) 有行即已建
+     * run-created 首见判定：cat_agent_state 槽位 (userId, sessionId) 有行即已建
      * （跨重启不重发；该表承载全部智能体会话）。
      */
     private boolean firstSeen(String userId, String sessionId) {
@@ -301,9 +301,9 @@ public class AgentscopeAgentClient {
             usage.updateAndGet(total -> total.plus(AgentscopeUsageMapper.toTokenUsage(end.getUsage())));
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
-            // 挂起：记软终点标志后发 wait-raised 帧（业务编排据此呈现问答卡），不产透传帧
+            // 挂起：记软终点标志后发 question-raised 帧（业务编排据此呈现问答卡），不产透传帧
             suspension.set(confirm);
-            sink.accept(mapper.waitRaised(confirm));
+            sink.accept(mapper.questionRaised(confirm));
             return;
         }
         mapper.finishToken(event).ifPresent(finish::set);

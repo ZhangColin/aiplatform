@@ -56,7 +56,7 @@ class AgentStreamAppServiceTest {
 
     @Test
     void given_payload_without_run_id_when_publish_then_rejected() {
-        assertThatThrownBy(() -> appService.publish("task-start", Map.of("prompt", "写个落地页")))
+        assertThatThrownBy(() -> appService.publish("run-start", Map.of("prompt", "写个落地页")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("runId");
     }
@@ -65,8 +65,8 @@ class AgentStreamAppServiceTest {
     void given_publish_when_subscribed_then_event_id_uses_run_id_as_stream_id() {
         SseEmitter subscriber = appService.subscribe(null, null, false);
 
-        appService.publish("task-start", Map.of("runId", "run-9", "prompt", "写个落地页"));
-        appService.publish("task-finish", Map.of("runId", "run-9", "finish", "end"));
+        appService.publish("run-start", Map.of("runId", "run-9", "prompt", "写个落地页"));
+        appService.publish("run-finish", Map.of("runId", "run-9", "finish", "end"));
 
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)
@@ -78,8 +78,8 @@ class AgentStreamAppServiceTest {
         // 任务进度页「看某个运行才挂」：?runId= 过滤（与 payload 关联字段同名）
         SseEmitter subscriber = appService.subscribe(null, "run-1", false);
 
-        appService.publish("task-start", Map.of("runId", "run-2", "prompt", "x"));
-        appService.publish("task-start", Map.of("runId", "run-1", "prompt", "y"));
+        appService.publish("run-start", Map.of("runId", "run-2", "prompt", "x"));
+        appService.publish("run-start", Map.of("runId", "run-1", "prompt", "y"));
 
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)
@@ -91,8 +91,8 @@ class AgentStreamAppServiceTest {
         // projectId 是片5 业务桥接注入的透传字段——过滤位先留（AND 语义）
         SseEmitter subscriber = appService.subscribe("proj-1", "run-1", false);
 
-        appService.publish("task-start", Map.of("runId", "run-1", "prompt", "x"));
-        appService.publish("task-start",
+        appService.publish("run-start", Map.of("runId", "run-1", "prompt", "x"));
+        appService.publish("run-start",
                 Map.of("runId", "run-1", "projectId", "proj-1", "prompt", "y"));
 
         assertThat(sender.eventFramesOf(subscriber)).hasSize(1);
@@ -153,7 +153,7 @@ class AgentStreamAppServiceTest {
     /** 重连分野的通道层对应：replay 关（带 Last-Event-ID 的重连）不收缓冲帧。 */
     @Test
     void given_buffered_frames_when_subscribe_without_replay_then_no_backlog() {
-        appService.publish("task-start", Map.of("runId", "run-1", "prompt", "x"));
+        appService.publish("run-start", Map.of("runId", "run-1", "prompt", "x"));
 
         SseEmitter reconnecting = appService.subscribe(null, "run-1", false);
 

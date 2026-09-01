@@ -22,7 +22,7 @@ function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQu
 function playBaTurn(projectId: string, runId: string, prompt: string) {
   const s = useChatStore.getState();
   s.noteBaRun(projectId, runId);
-  s.ingestTaskStart(projectId, runId, prompt);
+  s.ingestRunStart(projectId, runId, prompt);
 }
 
 describe("chat store · 指令区对话累积（#19）", () => {
@@ -30,9 +30,9 @@ describe("chat store · 指令区对话累积（#19）", () => {
     useChatStore.setState({ chats: {} });
   });
 
-  it("一轮 BA 帧：task-start 落用户气泡起轮 → text 增量累积成 BA 气泡 → task-finish 收轮", () => {
+  it("一轮 BA 帧：run-start 落用户气泡起轮 → text 增量累积成 BA 气泡 → run-finish 收轮", () => {
     playBaTurn("p1", "run-1", "给宠物医院做预约系统");
-    expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(true); // task-start 起轮
+    expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(true); // run-start 起轮
 
     useChatStore.getState().appendBaDelta("p1", "ba-p1", "初步理解是", "run-1:3");
     useChatStore.getState().appendBaDelta("p1", "ba-p1", "在线预约。", "run-1:4");
@@ -57,24 +57,24 @@ describe("chat store · 指令区对话累积（#19）", () => {
     expect(chat?.messages).toHaveLength(1); // 只有用户气泡
   });
 
-  it("task-start 只认 role-assigned(BA) 登记过的 run；重放同帧不重复落气泡", () => {
+  it("run-start 只认 role-assigned(BA) 登记过的 run；重放同帧不重复落气泡", () => {
     // 未登记的 run（role-assigned 帧被缓冲淘汰等）不落用户气泡
-    useChatStore.getState().ingestTaskStart("p1", "run-x", "不进对话");
+    useChatStore.getState().ingestRunStart("p1", "run-x", "不进对话");
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
 
     playBaTurn("p1", "run-1", "第一句");
-    useChatStore.getState().ingestTaskStart("p1", "run-1", "第一句"); // 重放/回声
+    useChatStore.getState().ingestRunStart("p1", "run-1", "第一句"); // 重放/回声
     expect(useChatStore.getState().chats["p1"]?.messages).toHaveLength(1);
   });
 
-  it("乐观发送与 task-start 回声去重：尾条同文不重复（runId 落定后彻底闭口）", () => {
+  it("乐观发送与 run-start 回声去重：尾条同文不重复（runId 落定后彻底闭口）", () => {
     const s = useChatStore.getState();
     const id = s.appendUserMessage("p1", "加个会员功能"); // 乐观
     s.startTurn("p1");
     s.noteBaRun("p1", "run-2");
-    s.ingestTaskStart("p1", "run-2", "加个会员功能"); // 回声：尾条同文
+    s.ingestRunStart("p1", "run-2", "加个会员功能"); // 回声：尾条同文
     s.markRunIngested("p1", "run-2"); // POST 返回 runId
-    s.ingestTaskStart("p1", "run-2", "加个会员功能"); // 再回声（重放）：已闭口
+    s.ingestRunStart("p1", "run-2", "加个会员功能"); // 再回声（重放）：已闭口
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toHaveLength(1);
@@ -87,7 +87,7 @@ describe("chat store · 指令区对话累积（#19）", () => {
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(false);
   });
 
-  it("问答：wait-raised 落问答卡并收轮；作答落用户气泡 + 卡转已答 + 起轮；失败重开", () => {
+  it("问答：question-raised 落问答卡并收轮；作答落用户气泡 + 卡转已答 + 起轮；失败重开", () => {
     playBaTurn("p1", "run-1", "需求");
     useChatStore.getState().appendBaDelta("p1", "ba-p1", "先问一句", "run-1:3");
 

@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono;
 /**
  * 向用户提问工具（BA 访谈资产）：访谈式收集信息的挂起源——工具自检恒 ASK
  * （Built-in Checks 不可绕过、不受 permission mode/rules 影响），调用即触发
- * {@code RequireUserConfirmEvent} 挂起 → 智能体流 {@code wait-raised} 帧
+ * {@code RequireUserConfirmEvent} 挂起 → 智能体流 {@code question-raised} 帧
  * （QUESTION 载荷形状，见 {@code AgentscopeEventMapper}）。用户答复经
  * {@code BaInterviewAppService#answerQuestion} 续跑：挂起批复重写本调用 block 的
  * metadata（{@link AgentscopeAgentClient#ANSWER_METADATA_KEY}，模型不可见通道）

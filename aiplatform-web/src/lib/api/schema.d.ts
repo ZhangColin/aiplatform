@@ -165,7 +165,7 @@ export interface paths {
         put?: never;
         /**
          * 问答卡作答（ask_user 挂起续跑）
-         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
+         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
         delete?: never;
@@ -205,7 +205,7 @@ export interface paths {
         put?: never;
         /**
          * 开始做系统（触发首次生成）
-         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -685,11 +685,11 @@ export interface paths {
          *
          *     | type | 类别 | payload 字段 |
          *     |---|---|---|
-         *     | task-start | 平台 | runId, prompt, model, engine |
-         *     | session-created | 平台 | runId, sessionId, engine |
+         *     | run-start | 平台 | runId, prompt, model, engine |
+         *     | run-created | 平台 | runId, sessionId, engine |
          *     | error | 平台 | runId, message |
-         *     | task-finish | 平台 | runId, sessionId, engine, finish |
-         *     | wait-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+         *     | run-finish | 平台 | runId, sessionId, engine, finish |
+         *     | question-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
          *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
          *
          *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。

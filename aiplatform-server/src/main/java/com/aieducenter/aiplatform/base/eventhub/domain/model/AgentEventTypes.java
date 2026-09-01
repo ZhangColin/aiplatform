@@ -11,31 +11,31 @@ package com.aieducenter.aiplatform.base.eventhub.domain.model;
  */
 public final class AgentEventTypes {
 
-    /** 运行开始（runId 随任务响应同值返回）。 */
-    public static final String TASK_START = "task-start";
+    /** 运行开始（runId 随 run 响应同值返回）。 */
+    public static final String RUN_START = "run-start";
 
-    /** 会话建立（复用 sessionId 续跑不发——会话早已建立）。 */
-    public static final String SESSION_CREATED = "session-created";
+    /** 运行创建（cat_agent_state 会话槽位首见发——复用 sessionId 续跑不发，跨重启不重发）。 */
+    public static final String RUN_CREATED = "run-created";
 
     /** 运行失败（异步路径的失败表达，不抛异常）。 */
     public static final String ERROR = "error";
 
     /** 运行结束（finish = 引擎结煞语，如 end / error）。 */
-    public static final String TASK_FINISH = "task-finish";
+    public static final String RUN_FINISH = "run-finish";
 
     /**
      * 智能体挂起出现（ask_user 提问等）：payload 带 runId/sessionId/kind/summary/
      * engineRef/data（引擎载荷原样，含前端问答卡投影与续跑上下文）。答复续跑归
      * 业务编排（问答作答通道，需求环），eventhub 只承载帧。
      */
-    public static final String WAIT_RAISED = "wait-raised";
+    public static final String QUESTION_RAISED = "question-raised";
 
     /**
      * 编码 run 自动重试（生成编排层发射）：一次尝试失败后、下一尝试下发前发射
-     * ——runId 锚定<b>失败的那次尝试</b>（帧序 error → task-retrying → 下一尝试
-     * task-start），用户侧话术「遇到问题，正在重试」由本帧承载。
+     * ——runId 锚定<b>失败的那次尝试</b>（帧序 error → run-retrying → 下一尝试
+     * run-start），用户侧话术「遇到问题，正在重试」由本帧承载。
      */
-    public static final String TASK_RETRYING = "task-retrying";
+    public static final String RUN_RETRYING = "run-retrying";
 
     /** 重试话术键（用户侧文案，发射方给定）。 */
     public static final String RETRY_MESSAGE_FIELD = "message";
@@ -43,19 +43,13 @@ public final class AgentEventTypes {
     /** 即将下发的尝试序号（1 起，首试为 1）。 */
     public static final String RETRY_ATTEMPT_FIELD = "attempt";
 
-    // ---------- payload 关联键（全通道唯一真值；wait-raised 契约键为同值别名） ----------
+    // ---------- payload 关联键（全通道唯一真值） ----------
 
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */
     public static final String RUN_FIELD = "runId";
 
     /** 会话标识（会话建立后各帧携带）。 */
     public static final String SESSION_FIELD = "sessionId";
-
-    /** wait-raised 的 runId 契约键（别名，同 {@link #RUN_FIELD}）。 */
-    public static final String WAIT_RUN_FIELD = RUN_FIELD;
-
-    /** wait-raised 的 sessionId 契约键（别名，同 {@link #SESSION_FIELD}）。 */
-    public static final String WAIT_SESSION_FIELD = SESSION_FIELD;
 
     /** 挂起种类（QUESTION = 向用户提问 / PERMISSION = 工具确认）。 */
     public static final String WAIT_KIND_FIELD = "kind";
@@ -82,10 +76,7 @@ public final class AgentEventTypes {
     /** 承接运行的智能体栈名（单栈 agentscope；各帧 payload 同键携带）。 */
     public static final String ROLE_ENGINE_FIELD = "engine";
 
-    /** 帧自述引擎键（别名，同 {@link #ROLE_ENGINE_FIELD}）。 */
-    public static final String ENGINE_FIELD = ROLE_ENGINE_FIELD;
-
-    /** task-finish 的结煞语键（end / exceed_max_iters 等）。 */
+    /** run-finish 的结煞语键（end / exceed_max_iters 等）。 */
     public static final String FINISH_FIELD = "finish";
 
     // ---------- 直播词汇（#23 生成环②；编码 run 的客户面解说广播） ----------

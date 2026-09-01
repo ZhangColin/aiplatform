@@ -58,11 +58,11 @@ public class AgentEventsController {
 
             | type | 类别 | payload 字段 |
             |---|---|---|
-            | task-start | 平台 | runId, prompt, model, engine |
-            | session-created | 平台 | runId, sessionId, engine |
+            | run-start | 平台 | runId, prompt, model, engine |
+            | run-created | 平台 | runId, sessionId, engine |
             | error | 平台 | runId, message |
-            | task-finish | 平台 | runId, sessionId, engine, finish |
-            | wait-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+            | run-finish | 平台 | runId, sessionId, engine, finish |
+            | question-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
 
             名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。""")

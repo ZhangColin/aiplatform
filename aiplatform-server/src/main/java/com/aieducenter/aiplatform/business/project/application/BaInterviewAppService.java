@@ -113,7 +113,7 @@ public class BaInterviewAppService {
 
     /**
      * 问答答复续跑（ask_user 挂起的恢复）：挂起轮的 runId/engineRef 与待确认工具
-     * 清单（wait-raised 帧 data.toolCalls 形状，前端问答卡回传）+ 用户答复 →
+     * 清单（question-raised 帧 data.toolCalls 形状，前端问答卡回传）+ 用户答复 →
      * ConfirmResult 批复续跑（续跑续在同一 run 上收口，帧序含答复后的下一问或
      * 收口）。恢复私货（角色卡/owner/工作区/计量）从项目侧事实重建，不信前端。
      *

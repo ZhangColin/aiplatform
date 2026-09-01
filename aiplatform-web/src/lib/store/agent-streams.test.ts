@@ -14,7 +14,7 @@ function state() {
 describe("agent-streams store", () => {
   beforeEach(reset);
 
-  it("startRun 建立新 run（running，携带 task-start 元数据）", () => {
+  it("startRun 建立新 run（running，携带 run-start 元数据）", () => {
     state().startRun({ runId: "r1", projectId: "p1", prompt: "实现表单", model: "deepseek-v3" });
 
     expect(state().runs["r1"]).toMatchObject({
@@ -39,9 +39,9 @@ describe("agent-streams store", () => {
     expect(state().runs["r3"].status).toBe("running");
   });
 
-  it("task-start 晚于首帧（role-assigned 补建 stub）→ 补 prompt/model 元数据、不清已收分段", () => {
-    // 正本帧序 role-assigned → task-start（创建即开场）：首帧补建 stub 后
-    // task-start 必须把 prompt 补进去，否则用户的一句话描述永不出现。
+  it("run-start 晚于首帧（role-assigned 补建 stub）→ 补 prompt/model 元数据、不清已收分段", () => {
+    // 正本帧序 role-assigned → run-start（创建即开场）：首帧补建 stub 后
+    // run-start 必须把 prompt 补进去，否则用户的一句话描述永不出现。
     state().appendSegment(
       { runId: "r1", projectId: "p1" },
       { kind: "role", id: "r1:1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
@@ -54,9 +54,9 @@ describe("agent-streams store", () => {
     ]);
   });
 
-  it("task-start 命中已存在 stub 时仍驱逐同项目旧 run", () => {
+  it("run-start 命中已存在 stub 时仍驱逐同项目旧 run", () => {
     state().startRun({ runId: "r1", projectId: "p1", prompt: "旧任务" });
-    // 新 run 首帧先到（补建 stub r2），task-start 随后——旧 run r1 仍应被驱逐
+    // 新 run 首帧先到（补建 stub r2），run-start 随后——旧 run r1 仍应被驱逐
     state().appendSegment(
       { runId: "r2", projectId: "p1" },
       { kind: "role", id: "r2:1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
@@ -81,25 +81,25 @@ describe("agent-streams store", () => {
   it("appendSegment 追加分段；run 不存在时按事件携带的 projectId 补建 stub", () => {
     state().startRun({ runId: "r1", projectId: "p1" });
     state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "text", id: "r1:3", data: { text: "hi" } });
-    // 断线缺口：没收到 task-start，分段先到
+    // 断线缺口：没收到 run-start，分段先到
     state().appendSegment({ runId: "r9", projectId: "p9" }, { kind: "text", id: "r9:1", data: { text: "late" } });
 
     expect(state().runs["r1"].segments).toEqual([{ kind: "text", id: "r1:3", data: { text: "hi" } }]);
     expect(state().runs["r9"]).toMatchObject({ runId: "r9", projectId: "p9", status: "running" });
   });
 
-  it("分段推导 run 状态：wait→waiting、error→error、finish→finished", () => {
+  it("分段推导 run 状态：question→questioning、error→error、finish→finished", () => {
     state().startRun({ runId: "r1", projectId: "p1" });
-    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "wait", id: "a", waitKind: "QUESTION", summary: "字段清单？" });
-    expect(state().runs["r1"].status).toBe("waiting");
+    state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "question", id: "a", questionKind: "QUESTION", summary: "字段清单？" });
+    expect(state().runs["r1"].status).toBe("questioning");
     state().appendSegment({ runId: "r1", projectId: "p1" }, { kind: "finish", id: "c", finish: "end" });
     expect(state().runs["r1"].status).toBe("finished");
   });
 
-  it("markSession 记录 sessionId，run 不存在时同样补建", () => {
+  it("markRunCreated 记录 sessionId，run 不存在时同样补建", () => {
     state().startRun({ runId: "r1", projectId: "p1" });
-    state().markSession({ runId: "r1", projectId: "p1" }, "s-1");
-    state().markSession({ runId: "r2", projectId: "p2" }, "s-2");
+    state().markRunCreated({ runId: "r1", projectId: "p1" }, "s-1");
+    state().markRunCreated({ runId: "r2", projectId: "p2" }, "s-2");
 
     expect(state().runs["r1"].sessionId).toBe("s-1");
     expect(state().runs["r2"]).toMatchObject({ runId: "r2", sessionId: "s-2" });

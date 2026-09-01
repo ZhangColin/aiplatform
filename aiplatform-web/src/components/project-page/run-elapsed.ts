@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { AgentRun } from "@/lib/store/agent-streams";
 
-/** run 进行中（running / waiting，等用户 ≠ 终态）：顶栏 LIVE 挂载与计时 tick 共用谓词。 */
+/** run 进行中（running / questioning，等用户 ≠ 终态）：顶栏 LIVE 挂载与计时 tick 共用谓词。 */
 export function isRunInFlight(run: AgentRun | undefined): boolean {
   return run !== undefined && run.status !== "finished" && run.status !== "error";
 }

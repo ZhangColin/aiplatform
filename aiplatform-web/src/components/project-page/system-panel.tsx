@@ -13,7 +13,7 @@ import { useProjectPreview } from "@/hooks/use-project-preview";
 
 import { StartSystemButton } from "./start-generation";
 
-/** 重试话术的本地回落（帧丢失防御位；正本随 task-retrying 帧下发）。 */
+/** 重试话术的本地回落（帧丢失防御位；正本随 run-retrying 帧下发）。 */
 const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
 
 /**

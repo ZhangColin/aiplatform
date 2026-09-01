@@ -8,7 +8,7 @@ import io.agentscope.core.event.ConfirmResult;
  * 挂起续跑请求（问答答复后的恢复）：以 ConfirmResult（用户答复/批准/拒绝）经同一
  * (userId, sessionId) 从 AgentStateStore 恢复上下文续跑。恢复入参均可由业务编排从
  * 项目侧事实重建（角色卡/owner/工作区），待确认工具清单来自挂起帧载荷
- * （wait-raised 的 data.toolCalls）。
+ * （question-raised 的 data.toolCalls）。
  *
  * @param runId            挂起轮的运行标识（续跑续在同一 run 上收口）
  * @param sessionId        会话标识（状态槽位寻址）

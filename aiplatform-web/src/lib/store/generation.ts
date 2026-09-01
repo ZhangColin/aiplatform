@@ -8,12 +8,12 @@ import { create } from "zustand";
  *
  * <p>与 agent-streams 的分工：streams 是「过程层最近 1 run」（BA/编码互逐），
  * 本 store 是「生成事实」——编码 run 的 runId 登记（role-assigned role=CODER，
- * 后续 task-start/finish/error 帧不带角色，凭登记判定）与跨 run 的状态，BA 轮
+ * 后续 run-start/finish/error 帧不带角色，凭登记判定）与跨 run 的状态，BA 轮
  * 不挤掉。刷新后由 agent 流通道重放缓冲重建（生成中回页可续看状态）。</p>
  *
  * <p><b>预览重挂纪元</b>：run 完成信号驱动预览自动重挂 iframe——每次编码 run
- * 收口（task-finish）纪元 +1，SystemPanel 以 url+epoch 为 iframe key。重放幂等：
- * 通道是带缓冲热流，重挂载会重收近期帧，纪元只对新见的 task-finish 事件 id
+ * 收口（run-finish）纪元 +1，SystemPanel 以 url+epoch 为 iframe key。重放幂等：
+ * 通道是带缓冲热流，重挂载会重收近期帧，纪元只对新见的 run-finish 事件 id
  * 递增（事件 id 去重锚，有界）。</p>
  */
 
@@ -25,11 +25,11 @@ type ProjectGeneration = {
   coderRunIds: string[];
   /** 最近一次编码 run 的状态；undefined = 本会话未见编码 run。 */
   coderStatus?: CoderRunStatus;
-  /** 重试话术（task-retrying 帧下发，用户侧文案正本在服务端）。 */
+  /** 重试话术（run-retrying 帧下发，用户侧文案正本在服务端）。 */
   retryMessage?: string;
   /** 预览重挂纪元（编码 run 每次收口 +1，重放去重）。 */
   previewEpoch: number;
-  /** 已计过纪元的 task-finish 事件 id（重放去重锚，有界）。 */
+  /** 已计过纪元的 run-finish 事件 id（重放去重锚，有界）。 */
   seenFinishEventIds: string[];
 };
 
@@ -38,13 +38,13 @@ export type GenerationState = {
   // ---- SSE 侧（bridge 唯一写入方） ----
   /** role-assigned(role=CODER)：登记编码 run。 */
   noteCoderRun: (projectId: string, runId: string) => void;
-  /** 编码 run 的 task-start：状态 → running。 */
-  noteCoderTaskStart: (projectId: string) => void;
-  /** task-retrying（锚定失败的尝试）：状态 → retrying + 记帧内话术。 */
+  /** 编码 run 的 run-start：状态 → running。 */
+  noteCoderRunStart: (projectId: string) => void;
+  /** run-retrying（锚定失败的尝试）：状态 → retrying + 记帧内话术。 */
   noteCoderRetrying: (projectId: string, message?: string) => void;
-  /** 编码 run 的 task-finish：状态 → finished + 预览纪元 +1（事件 id 去重）。 */
+  /** 编码 run 的 run-finish：状态 → finished + 预览纪元 +1（事件 id 去重）。 */
   noteCoderFinish: (projectId: string, eventId: string) => void;
-  /** 编码 run 的 error：状态 → error（无后续 task-retrying 即超限终态）。 */
+  /** 编码 run 的 error：状态 → error（无后续 run-retrying 即超限终态）。 */
   noteCoderError: (projectId: string) => void;
 };
 
@@ -95,7 +95,7 @@ export const useGenerationStore = create<GenerationState>((set) => ({
       return { ...generation, coderRunIds: pushCapped(generation.coderRunIds, runId) };
     }),
 
-  noteCoderTaskStart: (projectId) =>
+  noteCoderRunStart: (projectId) =>
     updateGeneration(set, projectId, (generation) =>
       generation.coderStatus === "running" ? generation : { ...generation, coderStatus: "running" },
     ),

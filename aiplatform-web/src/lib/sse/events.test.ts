@@ -82,33 +82,33 @@ describe("asNotificationEvent", () => {
 });
 
 describe("agent 流收窄", () => {
-  it("平台事件按名册收窄（正本 task-start 字段）；平台 type 不落入透传口", () => {
+  it("平台事件按名册收窄（正本 run-start 字段）；平台 type 不落入透传口", () => {
     const env = parseSseEnvelope(
       JSON.stringify({
-        type: "task-start",
+        type: "run-start",
         payload: { projectId: "a1b2c3d4", runId: "r1", prompt: "实现预约表单", model: "deepseek-v3" },
         ts: "",
       }),
     );
     expect(asPlatformAgentEvent(env!)).toMatchObject({
-      type: "task-start",
+      type: "run-start",
       payload: { projectId: "a1b2c3d4", runId: "r1", prompt: "实现预约表单" },
     });
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("wait-raised 按正本收窄（payload {projectId, runId, kind, summary}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「通道二」wait-raised 行
+  it("question-raised 按正本收窄（payload {projectId, runId, kind, summary}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「通道二」question-raised 行
     const env = parseSseEnvelope(
       JSON.stringify({
-        type: "wait-raised",
+        type: "question-raised",
         payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", kind: "QUESTION", summary: "选哪个配色" },
         ts: "",
       }),
     );
 
     expect(asPlatformAgentEvent(env!)).toMatchObject({
-      type: "wait-raised",
+      type: "question-raised",
       payload: { projectId: "a1b2c3d4", runId: "r1", kind: "QUESTION", summary: "选哪个配色" },
     });
     expect(asPassthroughAgentEvent(env!)).toBeNull();

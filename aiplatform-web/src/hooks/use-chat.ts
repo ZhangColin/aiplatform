@@ -22,7 +22,7 @@ export function usePostMessage(projectId: string) {
     mutationFn: (command: PostMessageCommand) =>
       api.post<InterviewTurnResponse>(`/projects/${projectId}/messages`, command),
     onMutate: ({ content }) => {
-      // 乐观落用户气泡 + 起轮；runId 回来即入对话登记（task-start 回声不再补气泡）
+      // 乐观落用户气泡 + 起轮；runId 回来即入对话登记（run-start 回声不再补气泡）
       const chat = useChatStore.getState();
       const messageId = chat.appendUserMessage(projectId, content);
       chat.startTurn(projectId);

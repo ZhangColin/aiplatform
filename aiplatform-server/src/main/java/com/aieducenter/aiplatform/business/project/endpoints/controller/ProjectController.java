@@ -120,7 +120,7 @@ public class ProjectController {
     @PostMapping("/{id}/questions/{qid}/answer")
     @Operation(summary = "问答卡作答（ask_user 挂起续跑）",
             description = "qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与"
-                    + "待确认工具清单（wait-raised 帧 data.toolCalls 原样）+ 用户答复文本"
+                    + "待确认工具清单（question-raised 帧 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
                     + "上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
                     + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
@@ -141,7 +141,7 @@ public class ProjectController {
                     + "并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识"
                     + "（挂 /api/agent-events?runId= 的锚），过程帧经 SSE"
                     + "（role-assigned role=CODER）。失败自动重试有限次"
-                    + "（app.generation.max-attempts，默认 3 次含首试）：重试帧 task-retrying"
+                    + "（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying"
                     + "（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"

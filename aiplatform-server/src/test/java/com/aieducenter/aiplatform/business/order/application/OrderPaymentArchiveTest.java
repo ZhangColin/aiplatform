@@ -93,6 +93,8 @@ class OrderPaymentArchiveTest {
                 Long.toString(PROJECT_ID), "宠物店官网", ProjectType.WEBSITE, "官网", "9200",
                 ProjectStatus.IN_PROGRESS, "进行中", false,
                 LocalDateTime.of(2026, 9, 1, 9, 0), null, null, null, null, null));
+        when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))
+                .thenReturn(Map.of(PROJECT_ID, "宠物店官网")); // 沉淀取名面（namesOf 单查询）
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z")));
     }

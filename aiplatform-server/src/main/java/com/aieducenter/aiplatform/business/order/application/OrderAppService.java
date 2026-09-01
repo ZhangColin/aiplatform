@@ -88,7 +88,7 @@ public class OrderAppService {
         Order order = Order.place(projectId, RequestContext.getUserId(),
                 projectQueryAppService.prd(projectId).content());
         try {
-            orderRepository.save(order);
+            order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {
             // 并发下单撞部分唯一索引（预检漏过）：后到者拒绝，同口径翻译；
             // 非本索引的完整性违例不冒名，原样上抛

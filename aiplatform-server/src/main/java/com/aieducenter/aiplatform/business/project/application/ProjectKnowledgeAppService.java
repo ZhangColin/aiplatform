@@ -152,9 +152,15 @@ public class ProjectKnowledgeAppService {
      * 各自独立——沉淀的是归档时点的最新内容）段落分块入库；幂等键 =
      * {@code (PRD, projectId)} 删后插——同项目再成交自然覆盖旧块。失败降级记
      * 日志不炸（丢失容忍，A5 §1）：支付已在归档事务内成功，沉淀不允许把它拖回滚。
+     * 项目名经 {@code namesOf} 单查询取（缺档即降级跳过，不走 detail 全量拼装）。
      */
     public void sinkPrd(Long projectId) {
         try {
+            String projectName = projectQueryAppService.namesOf(List.of(projectId)).get(projectId);
+            if (projectName == null) {
+                log.warn("[knowledge] 项目 {} 缺档，成交 PRD 沉淀跳过", projectId);
+                return;
+            }
             String prd = projectQueryAppService.prd(projectId).content();
             List<String> chunks = chunkByParagraph(prd);
             if (chunks.isEmpty()) {
@@ -162,8 +168,7 @@ public class ProjectKnowledgeAppService {
                 return;
             }
             knowledgePort.index(new KnowledgeSpec(KIND_PRD, projectId.toString(),
-                    projectId.toString(), projectQueryAppService.detail(projectId).name(),
-                    TITLE_PRD, chunks, null));
+                    projectId.toString(), projectName, TITLE_PRD, chunks, null));
             log.info("[knowledge] 项目 {} 成交 PRD 沉淀入库（{} 块）", projectId, chunks.size());
         } catch (RuntimeException e) {
             log.warn("[knowledge] 项目 {} 成交 PRD 沉淀失败（降级跳过，丢失容忍）：{}",

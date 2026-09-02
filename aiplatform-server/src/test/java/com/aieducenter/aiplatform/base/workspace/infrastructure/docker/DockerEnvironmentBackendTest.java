@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assumptions;
 
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
+import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -145,11 +146,33 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
-    void given_created_workspace_when_expose_port_then_preview_url_responds_on_mapped_port() {
+    void given_no_app_serving_when_expose_port_then_not_serving_pending_not_failure() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
 
-        URI url = backend.exposePort(provision.handle(), EnvironmentBackend.DEV_PREVIEW_CONTAINER_PORT);
+        // #45：平台不代起静态兜底服务——应用未起服是待期（503 WSP_012，前端轮询
+        // 续探），不是 500 故障；用户不会经此看到工作区文件列表的中间态
+        assertThatThrownBy(() -> backend.exposePort(provision.handle(),
+                        EnvironmentBackend.DEV_APP_CONTAINER_PORT))
+                .isInstanceOf(ApplicationException.class)
+                .extracting("codeMessage")
+                .isEqualTo(WorkspaceMessage.PREVIEW_NOT_SERVING);
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_app_serving_when_expose_port_then_preview_url_responds_on_mapped_port() {
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+        // 模拟编码智能体已按约定在 8081 起服（#44 尽早起服）：容器内自起监听进程
+        assertThat(backend.exec(provision.handle(),
+                        "nohup node /opt/serve.js /workspace "
+                                + EnvironmentBackend.DEV_APP_CONTAINER_PORT
+                                + " >/dev/null 2>&1 &").exitCode())
+                .as("容器内应用进程应可自起")
+                .isZero();
+
+        URI url = backend.exposePort(provision.handle(), EnvironmentBackend.DEV_APP_CONTAINER_PORT);
 
         assertThat(url.toString()).isEqualTo("http://localhost:" + provision.handle().previewPort() + "/");
         // 真实可访问（任何状态码都算已监听；空 workspace 挂 index 缺失返回 404）

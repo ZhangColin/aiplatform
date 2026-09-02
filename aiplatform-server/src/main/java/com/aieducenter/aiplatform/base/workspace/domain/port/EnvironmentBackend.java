@@ -24,8 +24,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
 @Port(PortType.CLIENT)
 public interface EnvironmentBackend {
 
-    /** dev 镜像内置静态预览服务器监听的容器端口（镜像与应用约定的单一事实）。 */
-    int DEV_PREVIEW_CONTAINER_PORT = 8081;
+    /** 工作区应用服务的约定容器端口（编码智能体起服、平台预览取流量的单一事实，#44）。 */
+    int DEV_APP_CONTAINER_PORT = 8081;
 
     /**
      * 创建工作区并落定全部真实副作用（容器/中间件/.env），返回句柄与资源清单。
@@ -45,6 +45,9 @@ public interface EnvironmentBackend {
 
     /**
      * 暴露容器端口为可访问的预览 URL（本地 = Docker 端口映射；线上 = Ingress/负载均衡）。
+     * 渐进预览口径（#45）：映射置备时已落定、URL 确定，本调用只做探活——应用服务
+     * 由编码智能体按约定自起（#44），平台不代起静态兜底；探活通过才返回 URL
+     * （调用方以此作「应用可访问」判据），短窗未就绪抛 WSP_012（待期，非故障）。
      */
     URI exposePort(WorkspaceHandle handle, int containerPort);
 

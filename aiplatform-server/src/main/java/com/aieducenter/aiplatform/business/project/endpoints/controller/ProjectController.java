@@ -239,8 +239,11 @@ public class ProjectController {
 
     @GetMapping("/{id}/preview")
     @Operation(summary = "预览（工作区端口暴露）",
-            description = "把工作区容器端口发布到主机返回可访问 URL（localhost）；端口真实暴露后"
-                    + "SSE preview-ready。产物可访问即预期效果（未起服务时连接拒绝属真实状态）")
+            description = "端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（编码智能体"
+                    + "按约定自起 8081 服务，#44/#45），探活通过才返回可访问 URL（localhost）并"
+                    + "SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。"
+                    + "应用未起服 = 503 WSP_012 待期（非故障），前端 run 开始即轮询续探；"
+                    + "平台不代起静态兜底服务，无应用期间不出文件列表中间态")
     public ApiResponse<ProjectPreviewResponse> preview(@PathVariable String id) {
         return ApiResponse.ok(appService.preview(parseId(id)));
     }

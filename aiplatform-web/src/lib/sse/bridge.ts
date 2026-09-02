@@ -36,7 +36,10 @@ import {
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
-  "preview-ready": [queryKeys.projects.all],
+  // 预览地址由 REST 响应自身携带、无需失效；preview() 每次成功都会发射本帧，
+  // 若在此失效 projects 前缀会重拉预览查询 → 又成功 → 又发帧——自反馈死循环
+  // （#45 门禁解除后轮询从 run 开始，循环必被踩中，故显式空登）
+  "preview-ready": [],
   "workspace-destroyed": [queryKeys.projects.all],
   // PRD 内容与更新时间在 documents 域；projects 详情的 prdProducedAt 是成果区
   // 长出判据，写出瞬间一并重拉

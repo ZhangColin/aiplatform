@@ -40,7 +40,8 @@ import lombok.extern.slf4j.Slf4j;
  * TKE 适配器，端口不动）。
  *
  * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
- * 应用运行时 + pg/redis 中间件 + 静态预览服务器同容器；编码智能体经平台进程内
+ * 应用运行时 + pg/redis 中间件同容器，预览端口映射置备时落定——应用服务由编码
+ * 智能体按约定自起（#44），平台不代起静态兜底（#45）；编码智能体经平台进程内
  * AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。{@code /workspace}
  * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
  * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}），容器无状态、销毁重建不丢数据。
@@ -60,7 +61,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final int PORT_MAX = 45000;
     private static final int PORT_ATTEMPTS = 10;
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration PREVIEW_READY_TIMEOUT = Duration.ofSeconds(10);
+    /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
+    private static final Duration PREVIEW_PROBE_TIMEOUT = Duration.ofSeconds(2);
 
     private final SecureRandom random = new SecureRandom();
     private final HttpClient http = HttpClient.newBuilder()
@@ -147,16 +149,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     @Override
     public URI exposePort(WorkspaceHandle handle, int containerPort) {
-        // 示意级预览：容器内起静态服务器挂出 /workspace，宿主机经预览端口映射访问；
-        // 真实平台 = 构建产物 + 多进程 + 域名（B0 蓝图演化路径）
-        ExecResult started = runCapture("docker", "exec", "-d", handle.containerName(),
-                "node", "/opt/serve.js", "/workspace", String.valueOf(containerPort));
-        if (!started.ok()) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "预览服务器启动失败: " + started.stderr());
-        }
+        // 渐进预览（#45）：端口映射在置备时已落定，URL 确定；这里只做探活——
+        // 编码智能体按约定自己把应用跑在容器端口（#44 尽早起服），平台不再代起
+        // 静态兜底服务（用户会看到工作区文件列表的中间态，已出局）。探活通过才
+        // 返回 URL（调用方以此作「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，
+        // 前端轮询续探），不做长阻塞等待。
         URI url = URI.create("http://localhost:" + handle.previewPort() + "/");
-        waitForHttpReady(url, "预览服务器 " + handle.containerName());
+        waitForAppServing(url, "工作区应用端口 " + handle.containerName());
         return url;
     }
 
@@ -202,7 +201,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         for (int attempt = 0; attempt < PORT_ATTEMPTS; attempt++) {
             int previewPort = randomPort();
             ExecResult r = runCapture("docker", "run", "-d", "--name", containerName,
-                    "-p", previewPort + ":" + EnvironmentBackend.DEV_PREVIEW_CONTAINER_PORT,
+                    "-p", previewPort + ":" + EnvironmentBackend.DEV_APP_CONTAINER_PORT,
                     "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
                     "-w", WorkspaceLayout.ROOT,
                     // 归位修复（ADR 0001）：pg 数据进卷（容器内回环，无其他对外端口）
@@ -231,9 +230,10 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 "等待 " + target + " 就绪超时");
     }
 
-    /** 轮询 URL 直至有 HTTP 响应（任何状态码都算已监听）或超时——预览真实可访问才返回。 */
-    private void waitForHttpReady(URI url, String target) {
-        long deadline = System.currentTimeMillis() + PREVIEW_READY_TIMEOUT.toMillis();
+    /** 轮询 URL 直至有 HTTP 响应（任何状态码都算已监听）或超时——应用真实可访问才
+     *  返回；超时抛 WSP_012（#45 待期口径，非故障），等应用起服归调用方轮询。 */
+    private void waitForAppServing(URI url, String target) {
+        long deadline = System.currentTimeMillis() + PREVIEW_PROBE_TIMEOUT.toMillis();
         while (System.currentTimeMillis() < deadline) {
             try {
                 HttpRequest request = HttpRequest.newBuilder(url)
@@ -246,7 +246,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             }
             sleep();
         }
-        throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+        throw new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING,
                 "等待 " + target + " 就绪超时");
     }
 

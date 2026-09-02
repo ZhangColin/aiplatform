@@ -6,9 +6,7 @@ import { Hammer, PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { coderStatusOf, retryMessageOf, useGenerationStore } from "@/lib/store/generation";
 import { liveSegmentsOf, useLiveStore, type LiveSegment } from "@/lib/store/live";
-
-/** 重试话术的本地回落（帧丢失防御位；正本随 run-retrying 帧下发）。 */
-const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
+import { FALLBACK_RETRY_MESSAGE } from "@/lib/preview/state";
 
 /**
  * 直播侧栏（#23 生成环②，CONTEXT.md「直播」）：成果区右侧可收展栏，面向客户的

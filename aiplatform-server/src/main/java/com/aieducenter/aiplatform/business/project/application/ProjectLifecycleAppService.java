@@ -171,9 +171,9 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 预览：工作区端口真实暴露（docker publish，可访问 URL）→ SSE
-     * {@code preview-ready} → 返回 URL。产物可访问即预期效果，未起服务时 URL
-     * 返回连接拒绝属真实状态。
+     * 预览（#45 渐进口径）：端口映射置备时已落定、URL 确定，此处探活工作区应用
+     * 端口——通过（编码智能体已起服）→ SSE {@code preview-ready} → 返回 URL；
+     * 未就绪 → 503 WSP_012（待期非故障），前端 run 开始即轮询续探、通过瞬间上页面。
      */
     public ProjectPreviewResponse preview(Long projectId) {
         Project project = requireProject(projectId);

@@ -39,7 +39,7 @@ function observeActiveQuery(queryClient: QueryClient, key: readonly unknown[]) {
   };
 }
 
-describe("bridge · 通知 → invalidate（issue #17 清场后名册：全部失效 projects 域）", () => {
+describe("bridge · 通知 → invalidate（issue #17 清场后名册；preview-ready 空登为例外）", () => {
   let queryClient: QueryClient;
   const teardowns: Array<() => void> = [];
 
@@ -55,7 +55,6 @@ describe("bridge · 通知 → invalidate（issue #17 清场后名册：全部�
 
   it.each([
     "workspace-created",
-    "preview-ready",
     "workspace-destroyed",
     "document-updated",
     "project-renamed",
@@ -67,6 +66,20 @@ describe("bridge · 通知 → invalidate（issue #17 清场后名册：全部�
     dispatchNotificationEvent(queryClient, notificationEvent(type, { projectId: "p1" }));
 
     await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
+  });
+
+  it("preview-ready → 不失效任何域（#45：预览 REST 每次成功都发本帧，失效即自反馈循环）", async () => {
+    const projects = observeActiveQuery(queryClient, queryKeys.projects.all);
+    teardowns.push(projects.unsubscribe);
+    await projects.waitForSettled();
+
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("preview-ready", { projectId: "p1", url: "http://localhost:42659" }),
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(projects.fetchCount()).toBe(1);
   });
 
   it("名册外 type（已删事件 stage-changed / task-updated 等）与坏数据：静默忽略，不抛不失效", async () => {

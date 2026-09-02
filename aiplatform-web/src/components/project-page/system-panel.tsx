@@ -9,22 +9,21 @@ import {
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
+import { liveSegmentsOf, useLiveStore } from "@/lib/store/live";
+import { previewActive, systemPanelPhase } from "@/lib/preview/state";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
 import { StartSystemButton } from "./start-generation";
 
-/** 重试话术的本地回落（帧丢失防御位；正本随 run-retrying 帧下发）。 */
-const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
-
 /**
- * 系统模式主区域（#22 片2-1 + #26 迭代环①）：恒为预览的容器。生成待期 = 空白
- * 浏览器窗 + 一句提示（无进度剧场）；run 完成信号（generation store 预览纪元）
- * 驱动预览自动重挂 iframe——url+epoch 为 key，替掉手动「点击刷新」（生成与修正
- * run 同机制）；重试待期播帧内话术（「遇到问题，正在重试」）；超限终态给重新
- * 发起入口（人工兜底）。ready 判据 = generatedAt（REST 事实，跨会话）或本会话
- * 收口信号（即时性）；收口后的详情重拉（generated_at）归 bridge 失效，本组件
- * 只消费。修正期间（ready 后编码 run 再起）系统保持可见，只在预览上方盖一条
- * 轻提示——中间态不闪断。
+ * 系统模式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片）：恒为预览的
+ * 容器。门禁解除——run 开始（含发起成功的乐观登记）即取预览地址并挂机制，不等
+ * run-finish 纪元；后端探活通过才返回 URL，有 URL 即上真页面（空白页可接受）。
+ * 空态两档（推导归 lib/preview/state 纯函数，本组件只呈现）：无应用 = 占位随
+ * 直播事件推进的步骤提示（自述优先、动作摘要兜底，无信号「正在初始化」）；
+ * 有应用且 run 中 = 保留页面 + 「更新中」轻提示（生长期与修正期同一套）。跨会话
+ * 与重试不闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为
+ * key）；超限终态给重新发起入口（人工兜底）。
  */
 export function SystemPanel({
   projectId,
@@ -42,21 +41,23 @@ export function SystemPanel({
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
   const retryMessage = useGenerationStore((s) => retryMessageOf(s, projectId));
-  const ready = generatedAt != null || epoch > 0;
-  const preview = useProjectPreview(projectId, ready);
-
+  const segments = useLiveStore((s) => liveSegmentsOf(s, projectId));
+  // 门禁解除（#45）：run 开始或已有生成事实即取预览地址——不等收口纪元
+  const active = previewActive(coderStatus, generatedAt);
+  const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
-  // 修正期间轻提示（系统已 ready 后编码 run 又起）：进行中/重试播话术；超限终态
-  // 给失败提示（兜底口径 = 用户再提一次意见重试）——预览全程保持可见，中间态不闪断
-  const fixNotice = !ready
-    ? undefined
-    : coderStatus === "running"
-      ? { failed: false, text: "正在按您的意见修改系统，完成后自动刷新" }
-      : coderStatus === "retrying"
-        ? { failed: false, text: retryMessage ?? FALLBACK_RETRY_MESSAGE }
-        : coderStatus === "error"
-          ? { failed: true, text: "修正遇到了问题，可以再提一次意见重试" }
-          : undefined;
+  const phase = systemPanelPhase({
+    coderStatus,
+    generatedAt,
+    url,
+    error: preview.error,
+    liveSegments: segments,
+    retryMessage,
+  });
+  // 超限终态的人工兜底入口（页面轻提示与占位终态两处共用）
+  const restart = (
+    <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col p-4">
@@ -69,61 +70,57 @@ export function SystemPanel({
             <span className="size-2.5 rounded-full bg-muted-foreground/25" />
           </span>
           <span className="min-w-0 flex-1 truncate rounded-md bg-background px-2.5 py-1 text-center text-xs text-muted-foreground">
-            {ready ? (url ?? "正在接通系统…") : "你的系统"}
+            {active ? (url ?? "正在接通系统…") : "你的系统"}
           </span>
         </div>
 
         {/* 内容区 */}
         <div className="relative min-h-0 flex-1">
-          {fixNotice ? (
+          {phase.kind === "page" && phase.notice ? (
+            // 进行中轻提示（一套话术面：进行中「更新中」/ 重试 / 失败）——预览全程
+            // 保持可见，中间态不闪断
             <div
               className={`absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 border-b px-3 py-1.5 text-xs backdrop-blur ${
-                fixNotice.failed
+                phase.notice.failed
                   ? "bg-destructive/10 text-destructive"
                   : "bg-background/95 text-muted-foreground"
               }`}
             >
-              {fixNotice.failed ? (
-                <TriangleAlert className="size-3.5" />
+              {phase.notice.failed ? (
+                <TriangleAlert className="size-3.5 shrink-0" />
               ) : (
-                <LoaderCircle className="size-3.5 animate-spin" />
+                <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
               )}
-              {fixNotice.text}
+              {phase.notice.text}
+              {phase.notice.offerRestart ? restart : null}
             </div>
           ) : null}
-          {ready ? (
-            url ? (
-              // key 含预览纪元：run 完成信号驱动重挂（同 URL 也强制重建 iframe）
-              <iframe
-                key={previewFrameKey(url, epoch)}
-                src={url}
-                title="系统预览"
-                className="h-full w-full border-0 bg-white"
-              />
-            ) : (
-              <PanelHint>
-                {preview.isError ? (
-                  <span className="text-destructive">预览暂时打不开，稍后会自动重试</span>
-                ) : (
-                  <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                )}
-              </PanelHint>
-            )
-          ) : coderStatus === "retrying" ? (
+          {phase.kind === "page" && url ? (
+            // key 含预览纪元：run 完成信号驱动重挂（同 URL 也强制重建 iframe）
+            <iframe
+              key={previewFrameKey(url, epoch)}
+              src={url}
+              title="系统预览"
+              className="h-full w-full border-0 bg-white"
+            />
+          ) : phase.kind === "hint" ? (
             <PanelHint>
               <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              <p>{retryMessage ?? FALLBACK_RETRY_MESSAGE}</p>
+              <p className="max-w-full truncate">{phase.text}</p>
             </PanelHint>
-          ) : coderStatus === "running" ? (
-            <PanelHint>
-              <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              <p>正在为您生成系统…</p>
-            </PanelHint>
-          ) : coderStatus === "error" ? (
+          ) : phase.kind === "failed" ? (
             <PanelHint>
               <TriangleAlert className="size-5 text-destructive" />
-              <p>生成遇到了问题</p>
-              <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
+              <p>{phase.text}</p>
+              {phase.offerRestart ? restart : null}
+            </PanelHint>
+          ) : phase.kind === "connecting" ? (
+            <PanelHint>
+              {phase.trouble ? (
+                <span className="text-destructive">预览暂时打不开，稍后会自动重试</span>
+              ) : (
+                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              )}
             </PanelHint>
           ) : (
             <PanelHint>

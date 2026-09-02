@@ -22,7 +22,7 @@ export const queryKeys = {
     detail: (id: string) => ["projects", id] as const,
     /** 列表（全量一份；四态过滤/归档折叠在消费端本地分区——#21）。 */
     list: () => ["projects", "list"] as const,
-    /** 系统预览地址（生成收口后启用；run 完成信号 invalidate + iframe 重挂——#22）。 */
+    /** 系统预览地址（#45：run 开始即轮询，探活通过才返回 URL、取到即停）。 */
     preview: (id: string) => ["projects", "preview", id] as const,
     /** 文件树（交付文件只读清单，目录由前端合成；run 收口/PRD 写出随 projects 域失效——#27）。 */
     files: (id: string) => ["projects", "files", id] as const,

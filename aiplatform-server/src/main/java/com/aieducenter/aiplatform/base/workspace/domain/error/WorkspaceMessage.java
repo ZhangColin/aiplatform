@@ -25,7 +25,10 @@ public enum WorkspaceMessage implements CodeMessage {
 
     WORKSPACE_PROVISION_FAILED(500, "WSP_010", "环境置备失败，需要环境的能力暂不可用"),
 
-    WORKSPACE_PROVISION_TIMEOUT(500, "WSP_011", "环境置备等待超时，请稍后重试");
+    WORKSPACE_PROVISION_TIMEOUT(500, "WSP_011", "环境置备等待超时，请稍后重试"),
+
+    /** #45 渐进预览：应用未起服是待期不是故障——前端轮询续探，非终态口径。 */
+    PREVIEW_NOT_SERVING(503, "WSP_012", "预览应用尚未就绪");
 
     private final int httpStatus;
     private final String code;

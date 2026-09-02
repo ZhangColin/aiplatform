@@ -144,12 +144,13 @@ public class WorkspaceLifecycleAppService {
     /**
      * 暴露预览并发 PreviewReady（AFTER_COMMIT）。发布走短事务——订阅方的事务性
      * 监听依赖一个真实提交的事务，这里预览无落库、事务体只含发布。置备中隐式等待
-     * 就绪（#62）后执行。
+     * 就绪（#62）后执行。探活通过才返回（#45：应用可访问的判据）；未就绪抛
+     * WSP_012 待期，由前端轮询续探——本层不做长阻塞等应用起服。
      */
     public URI exposePreview(String workspaceId) {
         Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
         URI url = environmentBackend.exposePort(workspace.toHandle(),
-                EnvironmentBackend.DEV_PREVIEW_CONTAINER_PORT);
+                EnvironmentBackend.DEV_APP_CONTAINER_PORT);
         transactionTemplate.executeWithoutResult(status -> eventPublisher.publishApplicationEvent(
                 PreviewReady.of(workspace.workspaceId(), url)));
         return url;

@@ -78,7 +78,7 @@ class RolePresetTest {
         assertThat(PROMPT).contains("多问");
     }
 
-    // ---------- BA systemPrompt 契约（#26 迭代环①：意见判定分流与排队合并） ----------
+    // ---------- BA systemPrompt 契约（#43 链必达：判定下放、派发归平台） ----------
 
     @Test
     void given_iteration_protocol_when_inspect_then_judgment_routed_without_markers() {
@@ -86,19 +86,20 @@ class RolePresetTest {
         assertThat(PROMPT).contains("统一受理");
         assertThat(PROMPT).contains("不需要用户标注意见类型");
         assertThat(PROMPT).contains("无需逐条征求批准");
-        // 分流两路：实现问题直接派修正 / 需求变更先改 PRD 再派
-        assertThat(PROMPT).contains("实现问题");
-        assertThat(PROMPT).contains("需求变更");
+        // BA 只判需求侧：需求变更先改 PRD、拿不准先问；派发权归平台（角色卡明确
+        // BA 无派发工具——防模型幻觉调用不存在的工具）
+        assertThat(PROMPT).contains("需求侧判定");
         assertThat(PROMPT).contains("先按第 7 条修订 PRD");
-        assertThat(PROMPT).contains("startFixRun");
-        // 判定出口 = 平台派发工具（savePrd → startFixRun 两步走）
         assertThat(PROMPT).contains("savePrd");
+        assertThat(PROMPT).contains("由平台自动安排");
+        assertThat(PROMPT).contains("没有任何派发修正的工具");
+        assertThat(PROMPT).doesNotContain("startFixRun");
     }
 
     @Test
     void given_iteration_protocol_when_inspect_then_queue_merge_and_convergence_urge() {
-        // run 进行中的新意见：受理不丢弃、下一轮合并处理（告知用户）
-        assertThat(PROMPT).contains("排入下一轮合并处理");
+        // run 进行中的新意见：受理不丢弃、下一轮合并处理（告知用户；排队合并由
+        // 平台派发侧承载，BA 只如实告知）
         assertThat(PROMPT).contains("下一轮修正一并处理");
         // 迭代无次数上限 + 意见发散时催促收敛
         assertThat(PROMPT).contains("迭代轮数没有上限");

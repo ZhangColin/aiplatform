@@ -4,16 +4,18 @@ import io.agentscope.core.tool.Toolkit;
 
 /**
  * 智能体工具集 SPI（平台四职责之「补 SPI」）：智能体资产（工具集）归业务侧——
- * BA 与编码智能体的差异只在资产与工具集，base/agentscope 只供内核不供工具。
- * 业务侧实现本接口，按工作区形态给出该会话可用的工具集（本地兜底工作区无项目
- * 语境，通常空集）；工厂构建 agent 时取用（同规格缓存内只取一次）。
+ * 各角色的差异只在资产与工具集，base/agentscope 只供内核不供工具。业务侧实现本
+ * 接口，按<b>角色</b>发放工具集（同一工作区上 BA 与编码智能体拿不同的面）；角色
+ * 语境（{@code agentRole}，业务侧角色的稳定键，底座不解释）为空或未知时通常空集
+ * （本地兜底工作区无项目语境，同空集）；工厂构建 agent 时取用（同规格缓存内只取
+ * 一次）。
  */
 @FunctionalInterface
 public interface AgentToolkitSupplier {
 
     /**
-     * 给定工作区形态的工具集（每次调用返回独立实例——Toolkit 非线程安全，
+     * 给定角色与工作区形态的工具集（每次调用返回独立实例——Toolkit 非线程安全，
      * 调用方不复用返回值）。
      */
-    Toolkit toolkitFor(AgentWorkspace workspace);
+    Toolkit toolkitFor(String agentRole, AgentWorkspace workspace);
 }

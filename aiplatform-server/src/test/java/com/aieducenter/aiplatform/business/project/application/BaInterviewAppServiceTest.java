@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -16,6 +17,8 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+
+import cn.hutool.core.collection.CollUtil;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
+import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
@@ -47,7 +51,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * BA 访谈编排：对话命令的会话寻址（projectId → ba-{projectId} 稳定绑定，每轮
  * 都续此会话）、计量归属（role=BA 维度）、role-assigned 帧序（engine=agentscope）、
  * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起帧
- * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）。
+ * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）；链必达收口（#43）——BA 回合
+ * 收口（无挂起问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；
+ * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）。
  */
 @SpringBootTest
 class BaInterviewAppServiceTest {
@@ -86,6 +92,15 @@ class BaInterviewAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+    }
+
+    /** 已生成形态的项目（迭代期收口派修正的前提事实）。 */
+    private Long persistedGeneratedProject(String workspaceId) {
+        Project project = projectRepository.save(Project.create("迭代访谈项目", null,
+                Long.parseLong(workspaceId), OWNER));
+        project.markPrdProduced();
+        project.markGenerated();
+        return projectRepository.save(project).getId();
     }
 
     @Test
@@ -333,6 +348,129 @@ class BaInterviewAppServiceTest {
         verify(agentClient, never()).converse(any(), any());
         verify(sessionExecutor, never()).submit(any(), any());
         verify(streamAppService, never()).publish(any(), any());
+    }
+
+    // ---------- 链必达收口（#43：BA 无派发权，平台回合收口观测自动派修正） ----------
+
+    @Test
+    void given_generated_project_when_ba_turn_closes_without_dispatch_tool_then_fix_run_dispatched() {
+        // 灵魂用例（#43 缺陷的行为化验证）：脚本化智能体边界——模型只收口（哪怕
+        // 只存了 PRD、不调任何派发工具，BA 也没有派发工具），平台在回合收口时
+        // 自动派修正 run：意见原文为任务，coder 会话 + CODER 角色卡 + 直播开
+        Long projectId = persistedGeneratedProject("9720");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("ba-run", "好的，会把主色调改成绿色"));
+
+        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        AgentCommand fix = command.getAllValues().get(1);
+        assertThat(fix.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(fix.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt());
+        assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
+                List.of("把系统的主色调改成绿色")));
+        assertThat(fix.live()).isTrue();
+        // 修正 run 的 role-assigned 前置（CODER）
+        verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED),
+                argThat(payload -> "CODER".equals(payload.get(AgentEventTypes.ROLE_FIELD))));
+    }
+
+    @Test
+    void given_not_generated_project_when_ba_turn_closes_then_stops_at_ba() {
+        // 守卫沿用：未生成止于 BA（访谈期收口是常态路径，静默不派——不是异常）
+        Long projectId = persistedProject("9721");
+        givenSessionExecutorRunsInline();
+
+        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+
+        verify(agentClient, times(1)).converse(any(), any());
+    }
+
+    @Test
+    void given_pending_question_after_turn_when_close_then_no_dispatch_until_answer_settles() {
+        // 追问挂起 = 本轮未收口：意见不派；答复续跑再挂起（多轮追问）也不派；
+        // 最终收口后派——交接任务锚定意见原文 + 全部追问答复（逐条累积）
+        Long projectId = persistedGeneratedProject("9722");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("ba-run", "先问一下"));
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(false)  // 提交守卫：无挂起（放行本轮）
+                .thenReturn(true)   // 本轮收口观测：挂起在即 → 不派
+                .thenReturn(true)   // 答复①续跑收口观测：再挂起 → 不派
+                .thenReturn(false); // 答复②续跑收口观测：无挂起 → 派
+
+        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        verify(agentClient, times(1)).converse(any(), any());
+
+        appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "要薄荷绿");
+        appService.answerQuestion(projectId, "run-q", "reply-2",
+                List.of(Map.of("id", "tc-2", "name", "ask_user")), "偏冷一点的");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of(
+                        "把系统的主色调改成绿色；用户对追问的答复：要薄荷绿"
+                                + "；用户对追问的答复：偏冷一点的")));
+    }
+
+    @Test
+    void given_fix_in_flight_when_next_opinion_closes_then_queued_and_merged() {
+        // 守卫沿用：在途 run 排队下一轮合并（BA 收口路径的连续两条意见不丢、
+        // 不逐条烧 run）
+        Long projectId = persistedGeneratedProject("9723");
+        List<Runnable> tracks = CollUtil.newArrayList();
+        doAnswer(invocation -> {
+            Runnable task = (Runnable) invocation.getArgument(1);
+            if (("coder-" + projectId).equals(invocation.getArgument(0))) {
+                tracks.add(task); // 修正轨道挂起不跑（模拟在途）
+                return null;
+            }
+            task.run(); // BA 轨道直通
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run", "好的"));
+
+        appService.runInterviewTurn(projectId, "意见一：加导出");
+        appService.runInterviewTurn(projectId, "意见二：改蓝色");
+        // 两条 BA 轮已跑、修正只起了一条轨道（第二条意见未即派新 run）
+        verify(agentClient, times(2)).converse(any(), any());
+
+        tracks.remove(0).run(); // 修正轨道起跑：第一条跑完即合并第二条续派
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(2).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of("意见一：加导出")));
+        assertThat(command.getAllValues().get(3).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of("意见二：改蓝色")));
+    }
+
+    @Test
+    void given_turn_error_when_close_then_no_dispatch() {
+        // BA 轮失败不派修正（意见未被处理；error 帧已表达，用户重提即兜底）——
+        // 内联执行器同生产语义吞掉轨道异常
+        Long projectId = persistedGeneratedProject("9724");
+        doAnswer(invocation -> {
+            try {
+                ((Runnable) invocation.getArgument(1)).run();
+            }
+            catch (RuntimeException e) {
+                // 生产执行器吞掉记日志（异步轨道），此处同语义
+            }
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("BA 轮失败"));
+
+        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+
+        verify(agentClient, times(1)).converse(any(), any());
     }
 
     // ---------- 测试数据 ----------

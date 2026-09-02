@@ -185,7 +185,7 @@ export interface paths {
         put?: never;
         /**
          * 指令区发言（BA 访谈后续轮）
-         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 判定后经 startFixRun 派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001
+         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 只判需求侧（追问/改 PRD），回合收口后平台自动派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;

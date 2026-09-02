@@ -35,7 +35,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                AgentWorkspace workspace);
+                AgentWorkspace workspace, String agentRole);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
@@ -46,9 +46,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace) ->
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentRole) ->
                 buildAgent(stateStore, toolkitSupplier, name, sysPrompt, modelString, workspace,
-                        properties.getMaxIters()));
+                        agentRole, properties.getMaxIters()));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -59,12 +59,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
-            AgentWorkspace workspace) {
-        // sysPrompt/workspace 明文入键（不用 hashCode：碰撞会把不同人格/工作区的
-        // agent 当同规格静默复用）
-        String key = name + "|" + modelString + "|" + sysPrompt + "|" + workspace.identity();
+            AgentWorkspace workspace, String agentRole) {
+        // sysPrompt/workspace/agentRole 明文入键（不用 hashCode：碰撞会把不同人格/
+        // 工作区/工具面的 agent 当同规格静默复用）
+        String key = name + "|" + modelString + "|" + sysPrompt + "|" + workspace.identity()
+                + "|" + agentRole;
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, workspace));
+                k -> builder.build(name, sysPrompt, modelString, workspace, agentRole));
     }
 
     @Override
@@ -82,13 +83,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, String name,
-            String sysPrompt, String modelString, AgentWorkspace workspace, Integer maxIters) {
+            String sysPrompt, String modelString, AgentWorkspace workspace, String agentRole,
+            Integer maxIters) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
                 .model(modelString)
                 .stateStore(stateStore)
-                .toolkit(toolkitSupplier.toolkitFor(workspace));
+                .toolkit(toolkitSupplier.toolkitFor(agentRole, workspace));
         if (maxIters != null) {
             builder.maxIters(maxIters);
         }

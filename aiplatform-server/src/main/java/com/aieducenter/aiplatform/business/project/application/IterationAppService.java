@@ -19,17 +19,18 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 迭代编排（#26 迭代环①）：意见判定内化 BA——平台不设判定器，只提供派发面
- * （BA 的 startFixRun 工具落到本服务）。修正 run 与生成同机制（复用
- * {@code coder-{projectId}} 会话与同工作区——编码智能体带着建系统的全部上下文
- * 继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走共用尝试环
+ * 迭代编排（#26 迭代环① → #43 链必达收口）：意见判定内化 BA，派发权归平台——
+ * BA 回合收口（无追问挂起）由 {@link BaInterviewAppService} 观测并自动调用本服务
+ * 派修正 run，不依赖模型自觉调用派发工具（startFixRun 已撤）。修正 run 与生成同
+ * 机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体带着建系统的
+ * 全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走共用尝试环
  * {@link CoderRunAttempts}）。
  *
- * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（工具结果告知「已排入下一
- * 轮」）；当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户
- * 在 run 中连提多条意见不会被丢弃，也不会每条各烧一场 run。轨道状态（在途标记 +
- * 队列）是进程内事实，重启即清（run 无表口径）：重启后进行中 run 标失败，用户
- * 重新提意见即重新起轨。</p>
+ * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（BA 回复用户「已排入下一轮」）；
+ * 当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户在 run 中
+ * 连提多条意见不会被丢弃，也不会每条各烧一场 run。轨道状态（在途标记 + 队列）是
+ * 进程内事实，重启即清（run 无表口径）：重启后进行中 run 标失败，用户重新提意见
+ * 即重新起轨。</p>
  *
  * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归 BA 协议（角色卡），
  * 平台不设门。</p>
@@ -61,13 +62,14 @@ public class IterationAppService {
     }
 
     /**
-     * 派修正任务：修正 run 空闲即起跑（runId 随派发生成，过程帧经 SSE）；在途则
-     * 排入队列、当前 run 收口后合并续派。
+     * 派修正任务（BA 回合收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
+     * 起跑（runId 随派发生成，过程帧经 SSE）；在途则排入队列、当前 run 收口后
+     * 合并续派。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_019 系统从未生成（迭代在首次生成完成后
-     *                              才开始——首次生成中提意见由此拒绝，模型可如实
-     *                              转告用户等系统做好）
+     *                              才开始——BA 收口侧对未生成项目静默止于 BA，
+     *                              此处守卫兜其余调用面）
      */
     public FixDispatch startFixRun(Long projectId, String task) {
         Project project = projectRepository.findById(projectId)
@@ -75,17 +77,7 @@ public class IterationAppService {
         return dispatch(project, task);
     }
 
-    /**
-     * 派修正任务（BA startFixRun 工具入口）：会话工具只有工作区语境，按工作区
-     * 寻址项目——守卫与派发同 {@link #startFixRun}。
-     */
-    public FixDispatch startFixRunByWorkspace(String workspaceId, String task) {
-        Project project = projectRepository.findByWorkspaceId(Long.parseLong(workspaceId))
-                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
-        return dispatch(project, task);
-    }
-
-    /** 修正派发结果（工具结果回 BA 的口径：起跑 runId / 是否排入下一轮）。 */
+    /** 修正派发结果（起跑 runId / 是否排入下一轮）。 */
     public record FixDispatch(String runId, boolean queued) {
     }
 

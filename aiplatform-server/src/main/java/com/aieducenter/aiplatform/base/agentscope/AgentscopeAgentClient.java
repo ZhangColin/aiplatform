@@ -139,8 +139,7 @@ public class AgentscopeAgentClient {
     public void resume(AgentResume resume, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
         try {
-            prepared = prepareFor(resume.runId(), resume.sessionId(), resume.userId(),
-                    resume.modelString(), resume.systemPrompt(), resume.workspaceId(), false);
+            prepared = prepareFor(TurnSpec.resumeOf(resume));
         }
         catch (RuntimeException e) {
             // 同口径补口（resume 跑在异步轨道，异常被吞只记日志）：前段失败必须先发
@@ -208,13 +207,31 @@ public class AgentscopeAgentClient {
     }
 
     /**
+     * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
+     * 八个同型位置参数的错位面；live 续跑面恒关，#23）。
+     */
+    private record TurnSpec(String runId, String sessionId, String userId, String modelString,
+            String systemPrompt, String workspaceId, String agentRole, boolean live) {
+
+        static TurnSpec of(AgentCommand command) {
+            return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
+                    command.modelString(), command.systemPrompt(), command.workspaceId(),
+                    command.agentRole(), command.live());
+        }
+
+        static TurnSpec resumeOf(AgentResume resume) {
+            return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
+                    resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
+                    resume.agentRole(), false);
+        }
+    }
+
+    /**
      * converse 前段：公共准备 + 开场帧（run-start / run-created 首见）。本段自身
      * 不做失败处理——任一失败由 {@link #converse} 补发 error 帧后上抛。
      */
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
-        PreparedTurn prepared = prepareFor(command.runId(), command.sessionId(), command.userId(),
-                command.modelString(), command.systemPrompt(), command.workspaceId(),
-                command.live());
+        PreparedTurn prepared = prepareFor(TurnSpec.of(command));
         sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
                 prepared.modelRef().toModelString(), ENGINE));
         if (firstSeen(command.userId(), command.sessionId())) {
@@ -226,21 +243,21 @@ public class AgentscopeAgentClient {
 
     /**
      * 前段公共体（converse 首轮与 resume 续跑共用）：模型解析（配置兜底）→ 工作区
-     * 解析 → agent 工厂构建 → 会话上下文与映射表组装；{@code live} 开则另挂直播
-     * 映射表（编码 run 姿态，#23——续跑面暂无直播形态，恒关）。
+     * 解析 → agent 工厂构建（角色键穿透工具装配——按角色发放工具集）→ 会话上下文
+     * 与映射表组装；{@code live} 开则另挂直播映射表（编码 run 姿态，#23——续跑面
+     * 暂无直播形态，恒关）。
      */
-    private PreparedTurn prepareFor(String runId, String sessionId, String userId,
-            String modelString, String systemPrompt, String workspaceId, boolean live) {
-        ModelRef modelRef = ModelRef.parse(modelString != null
-                ? modelString : properties.getDefaultModel());
-        String sysPrompt = systemPrompt != null
-                ? systemPrompt : properties.getDefaultSystemPrompt();
-        AgentWorkspace workspace = resolveWorkspace(workspaceId);
+    private PreparedTurn prepareFor(TurnSpec spec) {
+        ModelRef modelRef = ModelRef.parse(spec.modelString() != null
+                ? spec.modelString() : properties.getDefaultModel());
+        String sysPrompt = spec.systemPrompt() != null
+                ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
+        AgentWorkspace workspace = resolveWorkspace(spec.workspaceId());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), workspace);
-        return new PreparedTurn(modelRef, agent, runtimeContext(sessionId, userId),
-                new AgentscopeEventMapper(runId, sessionId, ENGINE),
-                live ? new AgentscopeLiveMapper(runId, sessionId, ENGINE) : null);
+                modelRef.toModelString(), workspace, spec.agentRole());
+        return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
+                new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
+                spec.live() ? new AgentscopeLiveMapper(spec.runId(), spec.sessionId(), ENGINE) : null);
     }
 
     /**

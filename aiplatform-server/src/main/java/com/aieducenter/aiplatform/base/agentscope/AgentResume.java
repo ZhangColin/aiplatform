@@ -20,6 +20,8 @@ import io.agentscope.core.event.ConfirmResult;
  * @param confirmResults   待确认工具的批复清单（与挂起 toolCalls 一一对应）
  * @param resumeText       恢复消息文本（进 LLM 上下文）
  * @param usageContext     计量归属（可空 → 不上报）
+ * @param agentRole        该轮智能体的角色键（可空，业务侧角色名，底座不解释）——
+ *                        续跑构建 agent 时按角色发放工具集，与首轮命令同键
  */
 public record AgentResume(
         String runId,
@@ -31,5 +33,6 @@ public record AgentResume(
         String replyId,
         List<ConfirmResult> confirmResults,
         String resumeText,
-        UsageContext usageContext) {
+        UsageContext usageContext,
+        String agentRole) {
 }

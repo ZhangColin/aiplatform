@@ -24,8 +24,8 @@ import org.junit.jupiter.api.Test;
  */
 class AgentscopeHarnessAgentFactoryTest {
 
-    /** 工具集空桩（工厂不解释工具内容——装配归 BaToolkitSupplier 测试）。 */
-    private static final AgentToolkitSupplier TOOLKITS = workspace -> new Toolkit();
+    /** 工具集空桩（工厂不解释工具内容——装配归 RoleToolkitSupplier 测试）。 */
+    private static final AgentToolkitSupplier TOOLKITS = (agentRole, workspace) -> new Toolkit();
 
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
@@ -34,7 +34,7 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, workspace) -> {
+                (name, sysPrompt, modelString, workspace, agentRole) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -47,9 +47,9 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
 
         assertThat(second).isSameAs(first);
         assertThat(created).hasSize(1);
@@ -61,17 +61,17 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         factory.obtain("platform-agent", "另一个 sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-chat",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")));
+                new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")), null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("1", "ws-1-dev"));
+                new AgentWorkspace.ProjectDev("1", "ws-1-dev"), null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("2", "ws-2-dev"));
+                new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null);
 
         assertThat(created).hasSize(6);
     }
@@ -82,10 +82,10 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"));
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         // 同 workspaceId 同容器 = 同规格（复用）；同 id 不同容器名 = 不同规格
         HarnessAgent same = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"));
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
 
         assertThat(same).isSameAs(first);
         assertThat(created).hasSize(1);
@@ -97,10 +97,26 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"));
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
 
+        assertThat(created).hasSize(2);
+    }
+
+    @Test
+    void given_same_spec_different_role_when_obtain_then_not_shared() {
+        // 角色入规格键（#43 工具面按角色发放）：同人格同模型同工作区、不同角色 =
+        // 不同工具面，不静默复用
+        List<HarnessAgent> created = new ArrayList<>();
+        AgentscopeHarnessAgentFactory factory = factoryWith(created);
+
+        HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "BA");
+        HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER");
+
+        assertThat(coder).isNotSameAs(ba);
         assertThat(created).hasSize(2);
     }
 
@@ -109,9 +125,9 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         factory.obtain("platform-agent", "sys2", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
 
         factory.destroy();
 
@@ -119,7 +135,7 @@ class AgentscopeHarnessAgentFactoryTest {
             verify(agent, times(1)).close();
         }
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null));
+                new AgentWorkspace.Local(null), null);
         assertThat(created).hasSize(3);
     }
 
@@ -135,7 +151,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 stateStore, TOOLKITS, new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
-                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null));
+                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
     }

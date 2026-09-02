@@ -69,7 +69,8 @@ public class BaInterviewAppService {
      * 一次切入一次注入：后续轮（{@link #runInterviewTurn}）与问答续跑
      * （{@link #answerQuestion}）复用同一注入块，不重检索不重追加。
      *
-     * @throws ApplicationException PRJ_001 项目不存在
+     * @throws ApplicationException PRJ_001 项目不存在；守卫组同 {@link #runInterviewTurn}
+     *                              （自动开场仅 PRJ_001 可实际发生）
      */
     public InterviewRun startInterview(Long projectId, String requirement) {
         knowledgeAppService.establishSessionInjection(projectId, requirement);
@@ -82,7 +83,8 @@ public class BaInterviewAppService {
      * system prompt = 角色卡 + 会话注入块（未建立/空注入/重启后 = 裸角色卡）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
- *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）
+ *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）；
+ *                              PRJ_024 挂起问答待答（同步 409 指路作答，#40 / ADR-0004）
      */
     public InterviewRun runInterviewTurn(Long projectId, String prompt) {
         return turn(projectId, prompt);
@@ -92,6 +94,7 @@ public class BaInterviewAppService {
         Project project = requireInterviewableProject(projectId);
         RolePreset role = RolePreset.BA;
         String sessionId = SESSION_PREFIX + projectId;
+        requireNoPendingQuestion(project, sessionId);
 
         String runId = AgentStreamAppService.newRunId();
         streamBridge.emitRoleAssigned(projectId, runId, role);
@@ -101,8 +104,7 @@ public class BaInterviewAppService {
                 role.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 role.chatModelString(),
                 sessionId,
-                project.getOwnerAccountId() != null
-                        ? project.getOwnerAccountId().toString() : null,
+                ownerUserIdOf(project),
                 usageContextOf(projectId, role, sessionId),
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId));
@@ -130,8 +132,7 @@ public class BaInterviewAppService {
         AgentResume resume = new AgentResume(
                 runId,
                 sessionId,
-                project.getOwnerAccountId() != null
-                        ? project.getOwnerAccountId().toString() : null,
+                ownerUserIdOf(project),
                 Long.toString(project.getWorkspaceId()),
                 role.chatModelString(),
                 role.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
@@ -175,5 +176,21 @@ public class BaInterviewAppService {
         }
         orderQueryAppService.requireNoActiveOrder(projectId);
         return project;
+    }
+
+    /** 挂起问答守卫（#40 / ADR-0004）：会话存在挂起问答（ASKING 态工具块）时
+     * 新输入不盲提交——引擎必拒且 REST 已返 200 只见异步 error 帧；同步 409
+     * 指路作答。作答（resume）在途、ASKING 尚未清库的偶发拦截为已接受竞态边角。
+     * 守卫先于 role-assigned 帧与命令提交，拒绝即零帧。 */
+    private void requireNoPendingQuestion(Project project, String sessionId) {
+        if (agentClient.hasAskingToolCall(ownerUserIdOf(project), sessionId)) {
+            throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
+        }
+    }
+
+    /** owner 的会话寻址 userId（cat_agent_state 槽位 (userId, sessionId) 的 userId 腿）。 */
+    private static String ownerUserIdOf(Project project) {
+        return project.getOwnerAccountId() != null
+                ? project.getOwnerAccountId().toString() : null;
     }
 }

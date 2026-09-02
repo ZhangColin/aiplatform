@@ -72,6 +72,8 @@ public class AgentscopeAgentClient {
     public static final String ANSWER_METADATA_KEY = "answer";
 
     private static final String USAGE_EVENT_PREFIX = "agent-usage-";
+    /** 会话史状态键（引擎 StateBackedMemory 持久化键同源——agentscope 未出公共常量）。 */
+    private static final String MEMORY_MESSAGES_KEY = "memory_messages";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final AgentscopeHarnessAgentFactory factory;
@@ -179,6 +181,19 @@ public class AgentscopeAgentClient {
                 String.valueOf(toolCall.get("id")), String.valueOf(toolCall.get("name")),
                 input, toJson(input), Map.of(ANSWER_METADATA_KEY, answerText),
                 ToolCallState.ASKING));
+    }
+
+    /**
+     * 挂起问答判定（#40 守卫事实源）：会话持久化史（cat_agent_state 的
+     * {@code memory_messages}）中存在 ASKING 态工具块 = 该会话有挂起问答（run
+     * 软终点待答）。业务编排在新 converse 提交前于请求路径同步调用（异步轨道上
+     * 引擎虽也会拒，但 REST 已返 200）；作答复在途、ASKING 尚未清库的偶发误报
+     * 为已接受的竞态边角（ADR-0004）。
+     */
+    public boolean hasAskingToolCall(String userId, String sessionId) {
+        return stateStore.getList(userId, sessionId, MEMORY_MESSAGES_KEY, Msg.class).stream()
+                .flatMap(msg -> msg.getContentBlocks(ToolUseBlock.class).stream())
+                .anyMatch(block -> block.getState() == ToolCallState.ASKING);
     }
 
     // ---------- 内部 ----------

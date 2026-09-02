@@ -45,7 +45,10 @@ public enum ProjectMessage implements CodeMessage {
     FILE_TOO_LARGE(400, "PRJ_022", "文件太大，暂不支持在线查看"),
 
     /** 文件树浏览面（#27）：非文本文件（正文含 NUL），在线查看只收文本。 */
-    FILE_NOT_TEXTUAL(400, "PRJ_023", "该文件不是文本文件，暂不支持在线查看");
+    FILE_NOT_TEXTUAL(400, "PRJ_023", "该文件不是文本文件，暂不支持在线查看"),
+
+    /** 挂起问答守卫（#40 / ADR-0004）：问答待答期间 /messages 不收新输入，指路作答通道。 */
+    QUESTION_PENDING(409, "PRJ_024", "当前有问题待答复，请对问答卡作答后再发送新消息");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

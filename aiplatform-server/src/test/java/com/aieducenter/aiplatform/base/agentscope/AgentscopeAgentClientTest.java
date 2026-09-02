@@ -26,6 +26,8 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.harness.agent.HarnessAgent;
@@ -532,5 +534,30 @@ class AgentscopeAgentClientTest {
 
         assertThat(frames.stream().map(AgentEvent::type))
                 .doesNotContain(AgentEventTypes.RUN_CREATED);
+    }
+
+    @Test
+    void given_history_states_when_has_asking_tool_call_then_reflects_pending() {
+        // 挂起判定谓词（issue #40 守卫事实源）：memory_messages（引擎
+        // StateBackedMemory 持久化的会话史）中存在 ASKING 态 ToolUseBlock
+        // = 会话有挂起问答
+        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
+                .thenReturn(List.of(toolUseMessage(ToolCallState.ASKING)));
+        assertThat(client.hasAskingToolCall("alice", "s-1")).isTrue();
+
+        // 已收口（FINISHED）的问答不算挂起；空史（会话从未挂起）同 false
+        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
+                .thenReturn(List.of(toolUseMessage(ToolCallState.FINISHED)));
+        assertThat(client.hasAskingToolCall("alice", "s-1")).isFalse();
+
+        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
+                .thenReturn(List.of());
+        assertThat(client.hasAskingToolCall("alice", "s-1")).isFalse();
+    }
+
+    private static Msg toolUseMessage(ToolCallState state) {
+        return Msg.builder().role(MsgRole.ASSISTANT).content(List.of(new ToolUseBlock(
+                "tc-1", "ask_user", Map.of("question", "目标用户是谁？"), null, null, state)))
+                .build();
     }
 }

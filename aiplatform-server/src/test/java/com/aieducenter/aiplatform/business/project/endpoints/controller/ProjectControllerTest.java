@@ -514,6 +514,22 @@ class ProjectControllerTest {
     }
 
     @Test
+    void given_pending_question_when_post_message_then_prj_024_as_409() throws Exception {
+        // 挂起问答守卫的 REST 契约（#40 / ADR-0004）：问答待答期间 /messages 同步
+        // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
+        // 行为由应用层守卫测试驱动）
+        when(baInterviewAppService.runInterviewTurn(100L, "测试：请继续"))
+                .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"测试：请继续\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("当前有问题待答复，请对问答卡作答后再发送新消息"));
+    }
+
+    @Test
     void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
         when(baInterviewAppService.runInterviewTurn(404L, "你好"))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));

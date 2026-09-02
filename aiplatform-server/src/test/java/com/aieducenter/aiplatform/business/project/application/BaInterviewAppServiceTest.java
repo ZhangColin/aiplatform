@@ -314,6 +314,27 @@ class BaInterviewAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
+    @Test
+    void given_pending_question_when_turn_then_prj_024_and_no_submission() {
+        // 挂起问答守卫（#40 / ADR-0004）：问答待答期间指令区新输入不盲提交 converse
+        // ——引擎按 ASKING 态拒时 REST 已返 200、只见异步 error 帧；同步 409 指路
+        // 作答。role-assigned 帧也不发（守卫先于任何帧与提交）
+        Long projectId = persistedProject("9715");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "测试：请继续"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
+        assertThatThrownBy(() -> appService.startInterview(projectId, "做一个官网"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
+
+        verify(agentClient, never()).converse(any(), any());
+        verify(sessionExecutor, never()).submit(any(), any());
+        verify(streamAppService, never()).publish(any(), any());
+    }
+
     // ---------- 测试数据 ----------
 
     private Long persistedProject(String workspaceId) {

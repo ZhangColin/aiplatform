@@ -69,6 +69,9 @@ class BaInterviewAppServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private FinishFixFacts finishFixFacts;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -92,6 +95,18 @@ class BaInterviewAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
+    }
+
+    /** 脚本化智能体边界（#46 收口以 finish_fix 事实为准）：BA 正常回复；自动派发
+     * 的修正 run 收口即调 finish_fix（changed=true——coder 会话才记，忠实于工具面）。 */
+    private void givenConverseBaRepliesAndCoderFinishes(String baReply) {
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            }
+            return new AgentReply(command.runId(), baReply);
+        });
     }
 
     /** 已生成形态的项目（迭代期收口派修正的前提事实）。 */
@@ -359,8 +374,7 @@ class BaInterviewAppServiceTest {
         // 自动派修正 run：意见原文为任务，coder 会话 + CODER 角色卡 + 直播开
         Long projectId = persistedGeneratedProject("9720");
         givenSessionExecutorRunsInline();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("ba-run", "好的，会把主色调改成绿色"));
+        givenConverseBaRepliesAndCoderFinishes("好的，会把主色调改成绿色");
 
         appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
 
@@ -394,8 +408,7 @@ class BaInterviewAppServiceTest {
         // 最终收口后派——交接任务锚定意见原文 + 全部追问答复（逐条累积）
         Long projectId = persistedGeneratedProject("9722");
         givenSessionExecutorRunsInline();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("ba-run", "先问一下"));
+        givenConverseBaRepliesAndCoderFinishes("先问一下");
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
                 .thenReturn(false)  // 提交守卫：无挂起（放行本轮）
                 .thenReturn(true)   // 本轮收口观测：挂起在即 → 不派
@@ -433,8 +446,7 @@ class BaInterviewAppServiceTest {
             task.run(); // BA 轨道直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("run", "好的"));
+        givenConverseBaRepliesAndCoderFinishes("好的");
 
         appService.runInterviewTurn(projectId, "意见一：加导出");
         appService.runInterviewTurn(projectId, "意见二：改蓝色");

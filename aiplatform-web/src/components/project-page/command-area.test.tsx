@@ -110,6 +110,18 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     expect(archived).toContain("disabled");
   });
 
+  it("修正收口「未动系统」通告（#46）：平台侧如实告知原因（区别于 BA 话语与错误）", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把主色调改成绿色" },
+      { kind: "ba", id: "b1", text: "已修订 PRD。" },
+      { kind: "notice", id: "n1", text: "纯文档性修订，系统现状已满足" },
+    ]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("本轮意见未改动系统：纯文档性修订，系统现状已满足");
+  });
+
   it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {
     seedChat([{ kind: "ba", id: "b1", text: "已按你的意见修订。" }]);
     seed.notices = { seen: { p1: true }, pending: { p1: true } };

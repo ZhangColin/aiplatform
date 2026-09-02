@@ -164,7 +164,7 @@ public class GenerationAppService {
     private void runAttemptsWithRetry(Project project, String firstRunId) {
         coderRunAttempts.run(project, firstRunId,
                 new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
-                () -> markGeneratedIfReachable(project), "generate");
+                runId -> markGeneratedIfReachable(project), "generate");
     }
 
     /**

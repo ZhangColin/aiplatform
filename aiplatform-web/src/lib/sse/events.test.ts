@@ -135,6 +135,27 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it("fix-unchanged 按正本收窄（payload {projectId, runId, reason}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「通道二」fix-unchanged 行（#46：修正收口·系统未动）
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "fix-unchanged",
+        payload: {
+          projectId: "p1",
+          runId: "r1",
+          reason: "纯文档性修订，系统现状已满足",
+        },
+        ts: "",
+      }),
+    );
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "fix-unchanged",
+      payload: { projectId: "p1", runId: "r1", reason: "纯文档性修订，系统现状已满足" },
+    });
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it("引擎透传事件：data 为引擎 part 原样，字符串 type 照收", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

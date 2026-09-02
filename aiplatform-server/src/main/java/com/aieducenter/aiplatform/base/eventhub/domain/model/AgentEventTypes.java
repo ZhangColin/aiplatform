@@ -79,6 +79,17 @@ public final class AgentEventTypes {
     /** run-finish 的结煞语键（end / exceed_max_iters 等）。 */
     public static final String FINISH_FIELD = "finish";
 
+    /**
+     * 修正 run 收口·系统未动（#46）：编码智能体以 finish_fix(changed=false) 判定
+     * 无需改动时的如实呈现帧——修正轨道收口后发射（正常收口帧 run-finish 之后），
+     * 让用户能区分「不需要改」与「链路断了」。changed=true 不发（现有收口行为
+     * 不回归）。
+     */
+    public static final String FIX_UNCHANGED = "fix-unchanged";
+
+    /** 未动系统的原因键（finish_fix 的 text 原文——用户侧呈现正本）。 */
+    public static final String FIX_UNCHANGED_REASON_FIELD = "reason";
+
     // ---------- 直播词汇（#23 生成环②；编码 run 的客户面解说广播） ----------
     // 前端直播侧栏只消费本组帧（+ run 生命周期平台事件），不耦合引擎透传事件格式；
     // 帧由 base.agentscope 的直播 mapper 逐段生产（SSE事件清单·通道二直播行）。

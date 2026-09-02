@@ -153,4 +153,19 @@ describe("chat store · 指令区对话累积（#19）", () => {
       { kind: "ba", id: expect.any(String), text: "你好" },
     ]);
   });
+
+  it("修正收口「未动系统」通告（#46）：落平台侧通告条，不动 BA 轮态；重放不重复", () => {
+    playBaTurn("p1", "run-1", "把主色调改成绿色");
+    const s = useChatStore.getState();
+    s.noteSystemUnchanged("p1", "纯文档性修订，系统现状已满足", "run-9:12");
+    s.noteSystemUnchanged("p1", "纯文档性修订，系统现状已满足", "run-9:12"); // 重放
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages.filter((m) => m.kind === "notice")).toEqual([
+      { kind: "notice", id: expect.any(String), text: "纯文档性修订，系统现状已满足" },
+    ]);
+    // 通告跟随在 BA 回复之后（时序呈现），且不动 turnActive（修正收口不是 BA 轮）
+    expect(chat?.messages.at(-1)?.kind).toBe("notice");
+    expect(chat?.turnActive).toBe(true);
+  });
 });

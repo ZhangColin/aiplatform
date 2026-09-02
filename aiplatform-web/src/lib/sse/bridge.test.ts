@@ -356,6 +356,58 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
   });
 });
 
+describe("bridge · fix-unchanged → 指令区「未动系统」通告（#46）", () => {
+  beforeEach(() => {
+    useAgentStreamsStore.setState({ runs: {}, order: [] });
+    useChatStore.setState({ chats: {} });
+    useGenerationStore.setState({ generations: {} });
+  });
+
+  function agentEvent(type: string, payload: Record<string, unknown>, id = "run1:1"): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts: "" }) };
+  }
+
+  it("编码 run 的 fix-unchanged → chat store 落通告条（reason 原文）；重放按事件 id 只收一次", () => {
+    dispatchAgentEvent(agentQc,
+      agentEvent(
+        "role-assigned",
+        { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" },
+        "run1:1",
+      ),
+    );
+    dispatchAgentEvent(
+      agentQc,
+      agentEvent(
+        "fix-unchanged",
+        { projectId: "p1", runId: "run1", reason: "纯文档性修订，系统现状已满足" },
+        "run1:9",
+      ),
+    );
+    dispatchAgentEvent(
+      agentQc,
+      agentEvent(
+        "fix-unchanged",
+        { projectId: "p1", runId: "run1", reason: "纯文档性修订，系统现状已满足" },
+        "run1:9",
+      ),
+    );
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      { kind: "notice", id: expect.any(String), text: "纯文档性修订，系统现状已满足" },
+    ]);
+  });
+
+  it("无 CODER 登记的 runId → 忽略（帧序异常防御位），不动对话面", () => {
+    dispatchAgentEvent(
+      agentQc,
+      agentEvent("fix-unchanged", { projectId: "p1", runId: "ghost", reason: "杂音" }, "ghost:1"),
+    );
+
+    expect(useChatStore.getState().chats["p1"]).toBeUndefined();
+  });
+});
+
 describe("bridge · agent 流 → generation store（生成面，#22）", () => {
   beforeEach(() => {
     useAgentStreamsStore.setState({ runs: {}, order: [] });

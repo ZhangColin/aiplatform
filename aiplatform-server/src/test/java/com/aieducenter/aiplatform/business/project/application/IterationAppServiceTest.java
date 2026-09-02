@@ -44,10 +44,12 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 迭代编排（#26 验收）：修正 run 与生成同机制（coder-{projectId} 会话稳定绑定 +
- * 同工作区 + CODER 角色卡 + live + 计量 dims + 知识命中前置注入 + 失败自动重试
- * run-retrying 帧）；run 在途时新任务排队（不即派）、当前 run 收口后合并为一场
- * 修正续派（排队意见不丢、不逐条烧 run）；守卫组（不存在 / 已归档 / 未生成）。
+ * 迭代编排（#26 验收 + #46 结束工具收口）：修正 run 与生成同机制（coder-{projectId}
+ * 会话稳定绑定 + 同工作区 + CODER 角色卡 + live + 计量 dims + 知识命中前置注入 +
+ * 失败自动重试 run-retrying 帧）；run 在途时新任务排队（不即派）、当前 run 收口后
+ * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_fix 工具事实
+ * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」帧，
+ * changed=true 现有收口行为不回归）；守卫组（不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
 class IterationAppServiceTest {
@@ -62,6 +64,9 @@ class IterationAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private FinishFixFacts finishFixFacts;
 
     @MockitoBean
     private AgentscopeAgentClient agentClient;
@@ -90,9 +95,20 @@ class IterationAppServiceTest {
         return tracks;
     }
 
+    /** 脚本化智能体边界：run 正常返回即调 finish_fix（coder 会话才记——忠实于
+     * 工具面按角色发放的事实），收口判定随脚本给定。 */
+    private void givenConverseFinishing(Boolean changed, String text) {
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                finishFixFacts.record(command.workspaceId(), changed, text);
+            }
+            return new AgentReply(command.runId(), "修正完成");
+        });
+    }
+
     private void givenConverseSucceeds() {
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("fix-run", "修正完成"));
+        givenConverseFinishing(true, "已按意见修正");
     }
 
     @Test
@@ -137,9 +153,11 @@ class IterationAppServiceTest {
         CountDownLatch runInFlight = new CountDownLatch(1);
         CountDownLatch releaseRun = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
             runInFlight.countDown();
             releaseRun.await();
-            return new AgentReply("fix-run", "修正完成");
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
         });
 
         IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表加筛选");
@@ -212,7 +230,11 @@ class IterationAppServiceTest {
         List<Runnable> tracks = givenTrackQueued();
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("修正尝试中断"))
-                .thenReturn(new AgentReply("fix-run-2", "修正完成"));
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    finishFixFacts.record(command.workspaceId(), true, "重试轮完成修正并收口");
+                    return new AgentReply(command.runId(), "修正完成");
+                });
 
         appService.startFixRun(projectId, "修正首页布局");
         tracks.remove(0).run();
@@ -242,6 +264,113 @@ class IterationAppServiceTest {
         verify(agentClient, times(3)).converse(any(), any());
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场").queued()).isFalse();
+    }
+
+    // ---------- 结束工具收口（#46：finish_fix 事实观测 + 「未动系统」如实呈现） ----------
+
+    @Test
+    void given_finish_fix_changed_false_when_fix_closes_then_fix_unchanged_frame() {
+        // 灵魂用例（#46）：脚本化结束工具 changed=false → 「未动系统+原因」呈现帧
+        Long projectId = persistedGeneratedProject("9908");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
+                "把首页标题改成「关于我们」");
+        tracks.remove(0).run();
+
+        // fix-unchanged 帧：锚定收口 runId + projectId + 原因原文（不解析自由文本）
+        verify(streamAppService).publish(eq(AgentEventTypes.FIX_UNCHANGED), argThat(payload ->
+                projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
+                        && dispatch.runId().equals(payload.get(AgentStreamAppService.RUN_FIELD))
+                        && "纯文档性修订，系统现状已满足"
+                                .equals(payload.get(AgentEventTypes.FIX_UNCHANGED_REASON_FIELD))));
+        // changed=false 也是正常收口：轨道收工释放，下一场可再起跑
+        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+    }
+
+    @Test
+    void given_finish_fix_changed_true_when_fix_closes_then_no_fix_unchanged_frame() {
+        Long projectId = persistedGeneratedProject("9909");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseFinishing(true, "已把主色调改为绿色");
+
+        appService.startFixRun(projectId, "把主色调改成绿色");
+        tracks.remove(0).run();
+
+        // changed=true：现有收口行为不回归——不发 fix-unchanged（预览刷新/直播收起/
+        // 状态位仍由 run-finish 驱动），轨道正常收工
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
+        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+    }
+
+    @Test
+    void given_no_finish_fix_when_converse_returns_then_treated_as_failed_attempt() {
+        Long projectId = persistedGeneratedProject("9910");
+        List<Runnable> tracks = givenTrackQueued();
+        // 首试正常返回但不调 finish_fix（脚本化「模型忘了收口」）→ 判未正常收口、
+        // 按既有重试口径续试；重试轮调了 → 正常收口
+        when(agentClient.converse(any(), any()))
+                .thenAnswer(invocation -> new AgentReply(
+                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    finishFixFacts.record(command.workspaceId(), true, "重试轮补上收口");
+                    return new AgentReply(command.runId(), "修正完成");
+                });
+
+        appService.startFixRun(projectId, "修一下分页");
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .isEqualTo(IterationAppService.FIX_RETRY_RUN_PROMPT);
+        // 未正常收口如实表达：补发 error 帧（run-finish 已发，帧序 run-finish →
+        // error → run-retrying）+ 重试帧照发（与 converse 异常的重试同一口径）
+        verify(streamAppService).publish(eq(AgentEventTypes.ERROR), argThat(payload ->
+                projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
+                        && payload.get("message").toString().contains("finish_fix")));
+        verify(streamAppService).publish(eq(AgentEventTypes.RUN_RETRYING), any());
+        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+    }
+
+    @Test
+    void given_no_finish_fix_all_attempts_when_fix_then_terminal_and_track_released() {
+        Long projectId = persistedGeneratedProject("9911");
+        List<Runnable> tracks = givenTrackQueued();
+        // 全部尝试都不调 finish_fix：每次收口判定不过 → 重试超限转终态，无
+        // fix-unchanged（未动系统的如实呈现只认工具事实，不认静默），每次尝试补发
+        // error 帧（末次 error 即终态——「链路断了」不得呈现为正常收口），轨道收工释放
+        when(agentClient.converse(any(), any()))
+                .thenAnswer(invocation -> new AgentReply(
+                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
+
+        appService.startFixRun(projectId, "修不动");
+        tracks.remove(0).run();
+
+        verify(agentClient, times(3)).converse(any(), any());
+        verify(streamAppService, times(3)).publish(eq(AgentEventTypes.ERROR), any());
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
+        assertThat(appService.startFixRun(projectId, "再试一场").queued()).isFalse();
+    }
+
+    @Test
+    void given_stale_fact_from_earlier_track_when_new_track_then_not_consumed_as_verdict() {
+        // 轨道起跑清残留：上一轨遗留（或生成 run 误调）的事实不顶本轨的收口判定
+        Long projectId = persistedGeneratedProject("9912");
+        List<Runnable> tracks = givenTrackQueued();
+        finishFixFacts.record("9912", false, "上一轨的旧事实");
+        // 本轨全程不调 finish_fix → 旧事实被清、收口判定不过 → 重试超限转终态
+        when(agentClient.converse(any(), any()))
+                .thenAnswer(invocation -> new AgentReply(
+                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
+
+        appService.startFixRun(projectId, "新一轮意见");
+        tracks.remove(0).run();
+
+        verify(agentClient, times(3)).converse(any(), any());
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
     }
 
     @Test

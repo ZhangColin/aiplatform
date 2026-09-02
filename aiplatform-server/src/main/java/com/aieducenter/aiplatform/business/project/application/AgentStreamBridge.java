@@ -69,6 +69,31 @@ public class AgentStreamBridge {
                 AgentEventTypes.RETRY_MESSAGE_FIELD, RETRYING_MESSAGE));
     }
 
+    /**
+     * fix-unchanged 发射（修正 run 收口·系统未动，#46）：finish_fix 判定
+     * changed=false 时的如实呈现帧——锚定正常收口的那次尝试的 runId（帧序
+     * run-finish → fix-unchanged），reason 为「未动系统」的用户侧原因。
+     */
+    public void emitFixUnchanged(Long projectId, String runId, String reason) {
+        streamAppService.publish(AgentEventTypes.FIX_UNCHANGED, Map.of(
+                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
+                AgentStreamAppService.RUN_FIELD, runId,
+                AgentEventTypes.FIX_UNCHANGED_REASON_FIELD, reason));
+    }
+
+    /**
+     * error 发射（修正收口判据不过，#46）：编码 run 正常返回但未以 finish_fix
+     * 收口——converse 内部不发 error（它自己认为成功了），此处补发如实表达
+     * （末次 error 即终态，与「末次 error 帧即终态表达」的既有口径对齐），
+     * 用户侧能区分「不需要改」与「链路断了」。
+     */
+    public void emitError(Long projectId, String runId, String message) {
+        streamAppService.publish(AgentEventTypes.ERROR, Map.of(
+                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
+                AgentStreamAppService.RUN_FIELD, runId,
+                "message", message));
+    }
+
     /** 关联字段注入（透传不解释；帧序在前——寻址字段不覆盖帧本体字段）。 */
     private static Map<String, Object> withCorrelation(Map<String, Object> payload,
                                                        Map<String, Object> correlation) {

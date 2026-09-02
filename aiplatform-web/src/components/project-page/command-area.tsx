@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Lock, SendHorizontal, TriangleAlert } from "lucide-react";
+import { FileText, Info, Lock, SendHorizontal, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -204,7 +204,7 @@ export function CommandArea({
   );
 }
 
-/** 对话行布局：用户右对齐、BA/问答卡/错误提示左对齐。 */
+/** 对话行布局：用户右对齐、BA/问答卡/错误提示/系统通告左对齐。 */
 function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
@@ -214,6 +214,15 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
       <div className="flex w-full items-start gap-2 text-xs text-destructive">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
         <span>本轮回复中断：{message.text}（可重发）</span>
+      </div>
+    );
+  }
+  if (message.kind === "notice") {
+    // 修正收口「未动系统」（#46）：平台侧如实告知——区分「不需要改」与「链路断了」
+    return (
+      <div className="flex w-full items-start gap-2 text-xs text-muted-foreground">
+        <Info className="mt-0.5 size-3.5 shrink-0" />
+        <span>本轮意见未改动系统：{message.text}</span>
       </div>
     );
   }

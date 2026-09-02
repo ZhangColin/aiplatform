@@ -222,6 +222,12 @@ class IterationChainSmokeTest {
                 .doesNotContain("ask_user")
                 .doesNotContain("savePrd")
                 .doesNotContain("startFixRun");
+        // 4f) 结束工具收口（#46）：真模型以 finish_fix 收口（工具调用帧可见——未
+        //     调用即 run 未正常收口，本断言红），且动了系统（changed=true）不出
+        //     「未动系统」帧——收口以工具事实观测，changed=true 现有收口行为不回归
+        assertThat(coderPayloads).contains("finish_fix");
+        assertThat(coderFrames.stream().map(Frame::type))
+                .doesNotContain(AgentEventTypes.FIX_UNCHANGED);
     }
 
     // ---------- 编排步骤 ----------

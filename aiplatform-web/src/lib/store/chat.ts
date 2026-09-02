@@ -23,6 +23,12 @@ export type ChatMessage =
   | { kind: "user"; id: string; text: string }
   | { kind: "ba"; id: string; text: string }
   | { kind: "error"; id: string; text: string }
+  | {
+      /** 平台侧系统通告（非 BA 话语）：#46 修正收口「未动系统」的原因呈现。 */
+      kind: "notice";
+      id: string;
+      text: string;
+    }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
 type ProjectChat = {
@@ -55,6 +61,8 @@ export type ChatState = {
   ) => void;
   finishTurn: (projectId: string, sessionId: string | undefined) => void;
   noteTurnError: (projectId: string, runId: string, message: string, eventId: string) => void;
+  /** 修正收口「未动系统」通告落指令区（#46；SSE 事件 id 只收一次）。 */
+  noteSystemUnchanged: (projectId: string, reason: string, eventId: string) => void;
   // ---- 发送侧（hooks） ----
   /** 乐观落用户气泡（返回消息 id；失败经 {@link removeMessage} 撤回）。 */
   appendUserMessage: (projectId: string, text: string) => string;
@@ -170,6 +178,16 @@ export const useChatStore = create<ChatState>((set) => ({
           turnActive: false,
         },
         { kind: "error", id: localId(), text: message || "本轮回复失败" },
+      );
+    }),
+
+  noteSystemUnchanged: (projectId, reason, eventId) =>
+    updateChat(set, projectId, (chat) => {
+      // 修正收口不是 BA 轮（turnActive 不动）；重放按事件 id 只收一次
+      if (chat.seenEventIds.includes(eventId)) return chat;
+      return appendMessage(
+        { ...chat, seenEventIds: pushCapped(chat.seenEventIds, eventId) },
+        { kind: "notice", id: localId(), text: reason },
       );
     }),
 

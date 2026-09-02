@@ -132,6 +132,15 @@ export type PlatformAgentEvent =
       payload: AgentPayload & { attempt: number; message: string };
     }
   | {
+      /**
+       * 修正 run 收口·系统未动（#46）：编码智能体以 finish_fix(changed=false) 判定
+       * 无需改动——`reason` 为未动原因；帧序 run-finish → fix-unchanged；changed=true
+       * 不发。指令区呈现「系统未修改 + 原因」，区分「不需要改」与「链路断了」。
+       */
+      type: "fix-unchanged";
+      payload: AgentPayload & { reason: string };
+    }
+  | {
       /** 直播·智能体自述解说段（#23，编码 run 专属）：`text` 为完整段非增量（服务端逐段成型）。 */
       type: "live-text";
       payload: AgentPayload & { text: string };
@@ -155,6 +164,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "run-finish",
   "question-raised",
   "run-retrying",
+  "fix-unchanged",
   "live-text",
   "live-action",
   "live-step",

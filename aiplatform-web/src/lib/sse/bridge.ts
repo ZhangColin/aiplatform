@@ -206,6 +206,16 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
+      case "fix-unchanged": {
+        // 修正收口·系统未动（#46）：如实呈现进指令区（非 BA 话语——平台侧通告，
+        // 「系统未修改 + 原因」让用户区分「不需要改」与「链路断了」）；编码 run
+        // 判定锚同其他 coder 帧（无登记的 runId 忽略——帧序异常的防御位）
+        const { payload } = platform;
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          chat.noteSystemUnchanged(payload.projectId, payload.reason, event.id);
+        }
+        return;
+      }
       // 直播帧（#23）：只进直播面 store（直播侧栏唯一消费面——前端不耦合引擎
       // 事件格式；帧仅编码 run 发射，无需角色过滤）
       case "live-text": {

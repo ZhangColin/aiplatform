@@ -137,20 +137,36 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       generatedAt: null,
       liveSegments: [],
     });
-    expect(phase).toEqual({ kind: "failed", text: "生成遇到了问题", offerRestart: true });
+    expect(phase).toEqual({ kind: "failed", text: "生成遇到了问题", recovery: "restart" });
   });
 
-  it("超限终态且已生成（修正失败、应用探不到）：修正口径、无重新发起", () => {
+  it("超限终态且已生成（修正失败、应用探不到）：修正口径 + 重新修改入口，无重新发起", () => {
     const phase = systemPanelPhase({
       coderStatus: "error",
       generatedAt: "2026-09-01T08:00:00Z",
       liveSegments: [],
     });
-    expect(phase).toEqual({
-      kind: "failed",
-      text: "修正遇到了问题，可以再提一次意见重试",
-      offerRestart: false,
-    });
+    expect(phase).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
+  });
+
+  it("正常态无任何手动触发：run 中/重试中/收口后均不带恢复入口", () => {
+    // 正常流程全自动——恢复入口只在超限终态出现（#48）
+    expect(systemPanelPhase({ coderStatus: "running", generatedAt: null, liveSegments: [] }))
+      .toEqual({ kind: "hint", text: "正在初始化" });
+    expect(
+      systemPanelPhase({ coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] }),
+    ).toEqual({ kind: "hint", text: "正在更新系统" });
+    expect(
+      systemPanelPhase({ coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] }),
+    ).toEqual({ kind: "hint", text: FALLBACK_RETRY_MESSAGE });
+    expect(
+      systemPanelPhase({
+        coderStatus: "finished",
+        generatedAt: "2026-09-01T08:00:00Z",
+        url: "http://localhost:42659",
+        liveSegments: [],
+      }),
+    ).toEqual({ kind: "page", notice: undefined });
   });
 
   // ---------- 第二档：应用可访问（有 URL 即探活通过），页面 + 一套轻提示 ----------
@@ -181,7 +197,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     });
   });
 
-  it("页面 + 超限终态：失败轻提示；从未生成带重新发起、修正轮带再提意见口径", () => {
+  it("页面 + 超限终态：失败轻提示；从未生成带重新发起、修正轮带重新修改入口", () => {
     expect(
       systemPanelPhase({
         coderStatus: "error",
@@ -191,7 +207,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       }),
     ).toEqual({
       kind: "page",
-      notice: { failed: true, text: "生成遇到了问题", offerRestart: true },
+      notice: { failed: true, text: "生成遇到了问题", recovery: "restart" },
     });
     expect(
       systemPanelPhase({
@@ -202,7 +218,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       }),
     ).toEqual({
       kind: "page",
-      notice: { failed: true, text: "修正遇到了问题，可以再提一次意见重试", offerRestart: false },
+      notice: { failed: true, text: "修正遇到了问题", recovery: "refix" },
     });
   });
 

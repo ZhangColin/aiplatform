@@ -13,17 +13,19 @@ import { liveSegmentsOf, useLiveStore } from "@/lib/store/live";
 import { previewActive, systemPanelPhase } from "@/lib/preview/state";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
+import { RestartFixButton } from "./restart-fix";
 import { StartSystemButton } from "./start-generation";
 
 /**
- * 系统模式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片）：恒为预览的
- * 容器。门禁解除——run 开始（含发起成功的乐观登记）即取预览地址并挂机制，不等
- * run-finish 纪元；后端探活通过才返回 URL，有 URL 即上真页面（空白页可接受）。
- * 空态两档（推导归 lib/preview/state 纯函数，本组件只呈现）：无应用 = 占位随
- * 直播事件推进的步骤提示（自述优先、动作摘要兜底，无信号「正在初始化」）；
- * 有应用且 run 中 = 保留页面 + 「更新中」轻提示（生长期与修正期同一套）。跨会话
- * 与重试不闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为
- * key）；超限终态给重新发起入口（人工兜底）。
+ * 系统模式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 修正
+ * 超限终态恢复出口）：恒为预览的容器。门禁解除——run 开始（含发起成功的乐观
+ * 登记）即取预览地址并挂机制，不等 run-finish 纪元；后端探活通过才返回 URL，
+ * 有 URL 即上真页面（空白页可接受）。空态两档（推导归 lib/preview/state 纯
+ * 函数，本组件只呈现）：无应用 = 占位随直播事件推进的步骤提示（自述优先、动作
+ * 摘要兜底，无信号「正在初始化」）；有应用且 run 中 = 保留页面 + 「更新中」
+ * 轻提示（生长期与修正期同一套）。跨会话与重试不闪断：有 URL 就不退占位；run
+ * 收口纪元驱动 iframe 重挂（url+epoch 为 key）；超限终态给人工兜底入口——从未
+ * 生成「重新发起」、修正轮「重新修改」，正常态全无。
  */
 export function SystemPanel({
   projectId,
@@ -54,10 +56,12 @@ export function SystemPanel({
     liveSegments: segments,
     retryMessage,
   });
-  // 超限终态的人工兜底入口（页面轻提示与占位终态两处共用）
+  // 超限终态的人工兜底入口（页面轻提示与占位终态两处共用）：从未生成「重新发起」、
+  // 修正轮「重新修改」（#48，重派终态那场的交接物）
   const restart = (
     <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
   );
+  const refix = <RestartFixButton projectId={projectId} />;
 
   return (
     <div className="flex h-full min-h-0 flex-col p-4">
@@ -92,7 +96,8 @@ export function SystemPanel({
                 <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
               )}
               {phase.notice.text}
-              {phase.notice.offerRestart ? restart : null}
+              {phase.notice.recovery === "restart" ? restart : null}
+              {phase.notice.recovery === "refix" ? refix : null}
             </div>
           ) : null}
           {phase.kind === "page" && url ? (
@@ -112,7 +117,8 @@ export function SystemPanel({
             <PanelHint>
               <TriangleAlert className="size-5 text-destructive" />
               <p>{phase.text}</p>
-              {phase.offerRestart ? restart : null}
+              {phase.recovery === "restart" ? restart : null}
+              {phase.recovery === "refix" ? refix : null}
             </PanelHint>
           ) : phase.kind === "connecting" ? (
             <PanelHint>

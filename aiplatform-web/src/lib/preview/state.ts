@@ -28,8 +28,8 @@ const PREVIEW_NOT_SERVING_CODE = "WSP_012";
 export type PanelNotice = {
   failed: boolean;
   text: string;
-  /** 从未生成过的超限终态：给「重新发起」入口（人工兜底）。 */
-  offerRestart?: boolean;
+  /** 超限终态的人工兜底入口（#48）：restart = 重新发起（从未生成）/ refix = 重新修改（修正轮）。 */
+  recovery?: "restart" | "refix";
 };
 
 /** 系统面板呈现档位。 */
@@ -38,8 +38,8 @@ export type SystemPanelPhase =
   | { kind: "idle" }
   /** 第一档（无应用，run 中）：随直播推进的步骤提示 / 重试话术。 */
   | { kind: "hint"; text: string }
-  /** 超限终态且无页面：问题提示（+ 重新发起）。 */
-  | { kind: "failed"; text: string; offerRestart: boolean }
+  /** 超限终态且无页面：问题提示 + 人工兜底入口（restart / refix，可缺省）。 */
+  | { kind: "failed"; text: string; recovery?: "restart" | "refix" }
   /** 已有生成事实但 URL 未到：接通中；trouble = 真故障（非未就绪）。 */
   | { kind: "connecting"; trouble: boolean }
   /** 第二档（应用可访问）：真页面 + 进行中轻提示（可缺省）。 */
@@ -127,12 +127,16 @@ function noticeOf(
   }
 }
 
-/** 超限终态文案（占位与页面轻提示同源）：从未生成给重新发起，修正轮给再提意见口径。 */
+/**
+ * 超限终态文案与兜底入口（占位与页面轻提示同源，#48 对齐两档）：从未生成给
+ * 「重新发起」，修正轮给「重新修改」（重派终态那场的交接物）——正常流程全自动，
+ * 手动触发只出现在故障终态。
+ */
 function failedOutcome(generatedAt: string | null | undefined): {
   text: string;
-  offerRestart: boolean;
+  recovery: "restart" | "refix";
 } {
   return generatedAt == null
-    ? { text: "生成遇到了问题", offerRestart: true }
-    : { text: "修正遇到了问题，可以再提一次意见重试", offerRestart: false };
+    ? { text: "生成遇到了问题", recovery: "restart" }
+    : { text: "修正遇到了问题", recovery: "refix" };
 }

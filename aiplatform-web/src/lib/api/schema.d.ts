@@ -184,8 +184,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 指令区发言（BA 访谈后续轮）
-         * @description content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——BA 只判需求侧（追问/改 PRD），回合收口后平台自动派修正 run，判定内化无需标注类型）。异步提交即返回，runId = 本轮 BA 运行标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001
+         * 指令区发言（入口三分类派发：意见/咨询/兜底）
+         * @description content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发：意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），回复经 SSE 到达（role-assigned 帧携带角色标签）。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -208,6 +208,26 @@ export interface paths {
          * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/fix-runs/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重新修改（修正 run 超限终态恢复出口）
+         * @description 修正 run 失败自动重试超限转终态后的人工兜底（与生成的「重新发起」对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识（挂 /api/agent-events?runId= 的锚，恢复动作与新 run 的链路关系），重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发：修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001
+         */
+        post: operations["restartFix"];
         delete?: never;
         options?: never;
         head?: never;
@@ -362,7 +382,7 @@ export interface paths {
         post?: never;
         /**
          * 销毁工作区
-         * @description 级联清理：容器 → 卷（pg 数据与引擎会话都在卷内）→ 库记录。
+         * @description 级联清理：容器 → 卷（pg 数据在卷内）→ 库记录。
          */
         delete: operations["destroy"];
         options?: never;
@@ -443,7 +463,7 @@ export interface paths {
         };
         /**
          * 预览（工作区端口暴露）
-         * @description 把工作区容器端口发布到主机返回可访问 URL（localhost）；端口真实暴露后SSE preview-ready。产物可访问即预期效果（未起服务时连接拒绝属真实状态）
+         * @description 端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（编码智能体按约定自起 8081 服务，#44/#45），探活通过才返回可访问 URL（localhost）并SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。应用未起服 = 503 WSP_012 待期（非故障），前端 run 开始即轮询续探；平台不代起静态兜底服务，无应用期间不出文件列表中间态
          */
         get: operations["preview"];
         put?: never;
@@ -924,6 +944,17 @@ export interface components {
             errors?: components["schemas"]["FieldError"][];
         };
         GenerationStartResponse: {
+            runId?: string;
+        };
+        ApiResponseFixRestartResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["FixRestartResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        FixRestartResponse: {
             runId?: string;
         };
         SubmitQuoteCommand: {
@@ -1426,6 +1457,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseGenerationStartResponse"];
+                };
+            };
+        };
+    };
+    restartFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseFixRestartResponse"];
                 };
             };
         };

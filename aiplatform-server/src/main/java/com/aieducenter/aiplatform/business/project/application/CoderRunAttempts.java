@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
  * 编码 run 尝试环（生成与修正共用，#22 落位 / #26 迭代环复用——所有编码 run 同
  * 机制）：每次尝试新 runId + role-assigned 前置，失败有余量发 {@code run-retrying}
  * 帧（话术「遇到问题，正在重试」）续试，超限转终态失败（末次 error 帧即终态表达，
- * 由用户侧重新表达兜底——生成重新发起 / 修正再提意见）。
+ * 由用户侧兜底——生成重新发起 / 修正恢复出口重派或再提意见，#48）。
  *
  * <p>命令全要素同构：CODER 角色卡、{@code coder-{projectId}} 会话（重试续同会话
  * ——已落盘成果保留，同工作区不丢数据）、owner 寻址、长 run 超时、开直播（过程帧
@@ -58,8 +58,10 @@ class CoderRunAttempts {
      *
      * @param what       日志标签（generate / fix）
      * @param firstRunId 首试 runId（调用方预生成随响应回；重试换新 runId 经帧到达）
+     * @return           true = 成功收口；false = 重试超限转终态（末次 error 帧已发，
+     *                   终态后的兜底归调用方——生成重新发起 / 修正恢复出口 #48）
      */
-    void run(Project project, String firstRunId, Prompts prompts, Consumer<String> onSuccess,
+    boolean run(Project project, String firstRunId, Prompts prompts, Consumer<String> onSuccess,
             String what) {
         Long projectId = project.getId();
         String knowledgePrefix = knowledgeAppService.dispatchInjection(prompts.first());
@@ -87,7 +89,7 @@ class CoderRunAttempts {
             try {
                 agentClient.converse(command, streamBridge.sink(projectId));
                 onSuccess.accept(runId);
-                return;
+                return true;
             }
             catch (RuntimeException e) {
                 log.warn("[{}] 项目 {} 第 {}/{} 次尝试失败（runId={}）：{}",
@@ -97,7 +99,8 @@ class CoderRunAttempts {
                 }
             }
         }
-        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户重新发起兜底",
+        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成重新发起/修正恢复出口）",
                 what, projectId, maxAttempts);
+        return false;
     }
 }

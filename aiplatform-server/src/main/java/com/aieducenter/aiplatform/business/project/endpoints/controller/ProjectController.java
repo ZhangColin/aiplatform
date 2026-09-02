@@ -27,12 +27,14 @@ import com.cartisan.web.response.ApiResponse;
 import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
+import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.RenameProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -48,13 +50,14 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言（入口三分类派发）/
- * 问答卡作答 / 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 /
- * 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
+ * 问答卡作答 / 开始做系统（生成）→ 重新修改（修正超限终态恢复出口）→ 归档 /
+ * 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 → 源码包下载 → 预览 →
+ * 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 指令区发言（三分类派发）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 指令区发言（三分类派发）/ 问答作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -62,17 +65,20 @@ public class ProjectController {
     private final DispatchAppService dispatchAppService;
     private final BaInterviewAppService baInterviewAppService;
     private final GenerationAppService generationAppService;
+    private final IterationAppService iterationAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
                              DispatchAppService dispatchAppService,
                              BaInterviewAppService baInterviewAppService,
-                             GenerationAppService generationAppService) {
+                             GenerationAppService generationAppService,
+                             IterationAppService iterationAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
         this.baInterviewAppService = baInterviewAppService;
         this.generationAppService = generationAppService;
+        this.iterationAppService = iterationAppService;
     }
 
     @PostMapping
@@ -160,6 +166,21 @@ public class ProjectController {
     public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 generationAppService.startGeneration(parseId(id)).runId()));
+    }
+
+    @PostMapping("/{id}/fix-runs/restart")
+    @Operation(summary = "重新修改（修正 run 超限终态恢复出口）",
+            description = "修正 run 失败自动重试超限转终态后的人工兜底（与生成的「重新发起」"
+                    + "对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 "
+                    + "coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识"
+                    + "（挂 /api/agent-events?runId= 的锚，恢复动作与新 run 的链路关系），"
+                    + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
+                    + "修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/"
+                    + "已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。"
+                    + "已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001")
+    public ApiResponse<FixRestartResponse> restartFix(@PathVariable String id) {
+        return ApiResponse.ok(new FixRestartResponse(
+                iterationAppService.restartFixRun(parseId(id)).runId()));
     }
 
     @GetMapping("/{id}")

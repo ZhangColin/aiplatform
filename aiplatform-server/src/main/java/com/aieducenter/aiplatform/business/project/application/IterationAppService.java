@@ -39,6 +39,13 @@ import lombok.extern.slf4j.Slf4j;
  * 进程内事实，重启即清（run 无表口径）：重启后进行中 run 标失败，用户重新提意见
  * 即重新起轨。</p>
  *
+ * <p><b>超限终态恢复出口</b>（#48）：修正 run 重试超限转终态时，终态那场的交接
+ * 任务记入 {@link #terminallyFailedTasks}（成功收工即清），恢复出口
+ * {@link #restartFixRun} 据此重派——交接物沿用、新 runId 随响应回（与新 run 的
+ * 链路锚）。仅终态可达：修正在途（进行中/排队中）拒绝 PRJ_025、无终态账（未派过/
+ * 已成功/重启丢账）拒绝 PRJ_026——正常流程全自动，不出现任何手动触发，故障态留
+ * 最后一条生路。</p>
+ *
  * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归 BA 协议（角色卡），
  * 平台不设门。</p>
  */
@@ -64,6 +71,12 @@ public class IterationAppService {
     private final Set<Long> fixesInFlight = ConcurrentHashMap.newKeySet();
     /** run 进行中排队的修正任务（projectId → 待合并任务清单）。 */
     private final Map<Long, List<String>> queuedFixRuns = new ConcurrentHashMap<>();
+    /**
+     * 超限终态那场的交接任务（projectId → 终态任务清单）：恢复出口的重派依据，
+     * 成功收工即清。进程内态与轨道状态同口径——重启丢账，恢复出口 409 指路重提
+     * 意见（既有兜底不变）。
+     */
+    private final Map<Long, List<String>> terminallyFailedTasks = new ConcurrentHashMap<>();
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
@@ -86,9 +99,36 @@ public class IterationAppService {
      *                              此处守卫兜其余调用面）
      */
     public FixDispatch startFixRun(Long projectId, String task) {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
-        return dispatch(project, task);
+        Project project = requireFixableProject(projectId);
+        return dispatch(project, List.of(task.strip()));
+    }
+
+    /**
+     * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接任务（交接物沿用、
+     * 同 coder 会话续上下文），新 runId 随响应回——与新 run 的链路锚（同
+     * {@code /generate} 口径），重派事实落日志可追溯。仅终态可达：修正在途（进行
+     * 中/排队中）PRJ_025；无终态账（未派过修正/已成功收工/重启丢账）PRJ_026；
+     * 归档/未生成守卫同 {@link #startFixRun}。
+     */
+    public FixDispatch restartFixRun(Long projectId) {
+        Project project = requireFixableProject(projectId);
+        List<String> tasks;
+        String firstRunId;
+        synchronized (this) {
+            if (fixesInFlight.contains(projectId)) {
+                throw new ApplicationException(ProjectMessage.FIX_RESTART_IN_FLIGHT);
+            }
+            tasks = terminallyFailedTasks.remove(projectId);
+            if (tasks == null) {
+                throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
+            }
+            fixesInFlight.add(projectId);
+            firstRunId = AgentStreamAppService.newRunId();
+        }
+        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接任务 {} 条，源自超限终态）",
+                projectId, firstRunId, tasks.size());
+        submitFixTrack(project, firstRunId, tasks);
+        return new FixDispatch(firstRunId, false);
     }
 
     /** 修正派发结果（起跑 runId / 是否排入下一轮）。 */
@@ -97,32 +137,39 @@ public class IterationAppService {
 
     // ---------- 内部 ----------
 
-    /** 迭代态守卫 + 派发：未归档 / 已生成（修正 run 的对象是已生成的系统）。 */
-    private FixDispatch dispatch(Project project, String task) {
+    /** 迭代态守卫：未归档 / 已生成（修正 run 的对象是已生成的系统）。 */
+    private Project requireFixableProject(Long projectId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
         if (project.getArchivedAt() != null) {
             throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
         }
         if (project.getGeneratedAt() == null) {
             throw new ApplicationException(ProjectMessage.FIX_RUN_NOT_GENERATED);
         }
-        Long projectId = project.getId();
-        String trimmed = task.strip();
+        return project;
+    }
 
+    /** 迭代态守卫过后的派发：空闲即起跑，在途即排队。 */
+    private FixDispatch dispatch(Project project, List<String> tasks) {
+        Long projectId = project.getId();
         String firstRunId;
         synchronized (this) {
             if (!fixesInFlight.add(projectId)) {
-                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(trimmed);
+                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).addAll(tasks);
                 return new FixDispatch(null, true);
             }
             firstRunId = AgentStreamAppService.newRunId();
         }
-        submitFixTrack(project, firstRunId, trimmed);
+        submitFixTrack(project, firstRunId, tasks);
         return new FixDispatch(firstRunId, false);
     }
 
     /**
      * 修正轨道（异步轨道内）：当前任务跑完（含重试超限）后排空队列——有排队任务
-     * 即合并为一场修正 run 续跑，队列空即收工。
+     * 即合并为一场修正 run 续跑，队列空即收工。收工时按末场成败结算终态账（#48）：
+     * 超限终态即记下该场交接任务（恢复出口 {@link #restartFixRun} 的重派依据），
+     * 成功即清账（正常态无恢复面）。
      *
      * <p><b>在途标记的释放在两处，各自唯一负责一种收场</b>：正常收工在排空块
      * 内——「查队列空 + 清标记」同一临界区，起跑侧的 add 也在同锁内分岔，任务
@@ -131,16 +178,16 @@ public class IterationAppService {
      * 直属于本轨道，直接清不会误伤（{@code released} 防的正是「正常收工后继任
      * 轨道已 add、旧 finally 再盲清一次」的双释放）。</p>
      */
-    private void runFixTrack(Project project, String firstRunId, String firstTask) {
+    private void runFixTrack(Project project, String firstRunId, List<String> firstTasks) {
         Long projectId = project.getId();
         // 本轨收口判定从零起算：上一轨/生成 run 的事实残留不进本轨（#46）
         finishFacts.clear(Long.toString(project.getWorkspaceId()));
         boolean released = false;
         try {
-            List<String> tasks = List.of(firstTask);
+            List<String> tasks = firstTasks;
             String runId = firstRunId;
             while (true) {
-                coderRunAttempts.run(project, runId,
+                boolean succeeded = coderRunAttempts.run(project, runId,
                         new CoderRunAttempts.Prompts(fixRunPrompt(tasks), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId), "fix");
                 List<String> queued;
@@ -150,6 +197,15 @@ public class IterationAppService {
                     if (queued.isEmpty()) {
                         fixesInFlight.remove(projectId);
                         released = true;
+                        // 终态账与释放同临界区结算：恢复出口（同锁内「查在途+取账+占位」）
+                        // 要么见释放前已落的账、要么在收工后自起新轨——不出现「已释放
+                        // 无账」的假 PRJ_026 窗口，也不被先收工的旧轨覆盖
+                        if (succeeded) {
+                            terminallyFailedTasks.remove(projectId);
+                        }
+                        else {
+                            terminallyFailedTasks.put(projectId, List.copyOf(tasks));
+                        }
                     }
                 }
                 if (queued.isEmpty()) {
@@ -208,8 +264,8 @@ public class IterationAppService {
         return prompt.toString();
     }
 
-    private void submitFixTrack(Project project, String firstRunId, String firstTask) {
+    private void submitFixTrack(Project project, String firstRunId, List<String> firstTasks) {
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + project.getId(),
-                () -> runFixTrack(project, firstRunId, firstTask));
+                () -> runFixTrack(project, firstRunId, firstTasks));
     }
 }

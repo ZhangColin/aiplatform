@@ -49,7 +49,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 失败自动重试 run-retrying 帧）；run 在途时新任务排队（不即派）、当前 run 收口后
  * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_fix 工具事实
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」帧，
- * changed=true 现有收口行为不回归）；守卫组（不存在 / 已归档 / 未生成）。
+ * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
+ * 物，正常态 / 在途 / 排队均不可达）；守卫组（不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
 class IterationAppServiceTest {
@@ -388,7 +389,141 @@ class IterationAppServiceTest {
         assertThatThrownBy(() -> appService.startFixRun(-1L, "改一下"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+        // 恢复出口守卫同口径（#48）：归档 / 未生成 / 不存在
+        assertThatThrownBy(() -> appService.restartFixRun(archivedId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+        assertThatThrownBy(() -> appService.restartFixRun(notGeneratedId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RUN_NOT_GENERATED.message());
+        assertThatThrownBy(() -> appService.restartFixRun(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
         verify(agentClient, never()).converse(any(), any());
+    }
+
+    // ---------- 超限终态恢复出口（#48：重派终态那场的交接物） ----------
+
+    @Test
+    void given_fix_terminal_failure_when_restart_fix_then_same_handoff_redispatched() {
+        Long projectId = persistedGeneratedProject("9913");
+        List<Runnable> tracks = givenTrackQueued();
+        // 首场 3 次尝试全失败（超限转终态）；恢复轮收口成功
+        IllegalStateException persistentFailure = new IllegalStateException("持续失败");
+        when(agentClient.converse(any(), any()))
+                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    finishFixFacts.record(command.workspaceId(), true, "恢复轮完成修正");
+                    return new AgentReply(command.runId(), "修正完成");
+                });
+
+        appService.startFixRun(projectId, "把主色调改成绿色");
+        tracks.remove(0).run();
+        verify(agentClient, times(3)).converse(any(), any());
+
+        // 恢复出口：重派修正 run——交接物沿用（同任务清单、同 coder 会话），
+        // 响应 runId 即新 run 首试标识（与新 run 的链路锚，同 /generate 口径）
+        IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
+        assertThat(restart.queued()).isFalse();
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(command.capture(), any());
+        AgentCommand redispatch = command.getAllValues().get(3);
+        assertThat(redispatch.prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of("把主色调改成绿色")));
+        assertThat(redispatch.runId()).isEqualTo(restart.runId());
+        assertThat(redispatch.sessionId()).isEqualTo("coder-" + projectId);
+        // 恢复轮成功收工：终态账清（成功后无恢复面，再恢复即 409）+ 轨道释放（下一场可起跑）
+        assertThatThrownBy(() -> appService.restartFixRun(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
+        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+    }
+
+    @Test
+    void given_fix_succeeded_or_never_dispatched_when_restart_fix_then_rejected() {
+        Long succeededId = persistedGeneratedProject("9914");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+        appService.startFixRun(succeededId, "列表加筛选");
+        tracks.remove(0).run();
+
+        Long neverDispatchedId = persistedGeneratedProject("9915");
+
+        // 正常态无恢复面：成功收工 / 从未派过修正（终态账为空）→ 409 指路重提意见
+        assertThatThrownBy(() -> appService.restartFixRun(succeededId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
+        assertThatThrownBy(() -> appService.restartFixRun(neverDispatchedId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
+        // 拒绝即零动作：成功那场之外不起任何 run
+        verify(agentClient, times(1)).converse(any(), any());
+    }
+
+    @Test
+    void given_fix_in_flight_when_restart_fix_then_rejected() {
+        Long projectId = persistedGeneratedProject("9916");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+        // 轨道已提交未起跑（排队中同在途口径）：恢复出口不可达
+        appService.startFixRun(projectId, "第一条");
+
+        assertThatThrownBy(() -> appService.restartFixRun(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RESTART_IN_FLIGHT.message());
+        verify(agentClient, never()).converse(any(), any());
+    }
+
+    @Test
+    void given_terminal_then_new_opinion_track_when_restart_fix_then_latest_failure_handoff() {
+        // 终态后再提意见起的新轨若又超限：恢复账换新轨的交接物（最近一次终态）
+        Long projectId = persistedGeneratedProject("9917");
+        List<Runnable> tracks = givenTrackQueued();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("持续失败"));
+
+        appService.startFixRun(projectId, "第一次意见");
+        tracks.remove(0).run();
+        appService.startFixRun(projectId, "第二次意见");
+        tracks.remove(0).run();
+
+        IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
+        tracks.remove(0).run();
+        // 重派轨同样烧满 3 次尝试（全败）：第 7 次调用即重派首试
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(9)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(6).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(List.of("第二次意见")));
+        assertThat(command.getAllValues().get(6).runId()).isEqualTo(restart.runId());
+    }
+
+    @Test
+    void given_terminal_failure_with_queued_continuation_when_track_settles_then_no_stale_recovery() {
+        // 首场超限但队列有排队意见：轨道合并续派而非收工——续派场成功即整轨收工，
+        // 终态账不落（首场的失败不是可恢复面，排队合并那场才是末场事实）
+        Long projectId = persistedGeneratedProject("9918");
+        List<Runnable> tracks = givenTrackQueued();
+        IllegalStateException persistentFailure = new IllegalStateException("持续失败");
+        when(agentClient.converse(any(), any()))
+                .thenThrow(persistentFailure, persistentFailure, persistentFailure)
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    finishFixFacts.record(command.workspaceId(), true, "合并续派场完成修正");
+                    return new AgentReply(command.runId(), "修正完成");
+                });
+
+        appService.startFixRun(projectId, "首场意见（将超限）");
+        assertThat(appService.startFixRun(projectId, "排队意见").queued()).isTrue();
+        tracks.remove(0).run();
+
+        // 首场 3 败 + 合并续派 1 成；成功收工 → 无恢复面（首场超限不留陈账）
+        verify(agentClient, times(4)).converse(any(), any());
+        assertThatThrownBy(() -> appService.restartFixRun(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
     }
 
     // ---------- 测试数据 ----------

@@ -8,10 +8,11 @@ import type { LiveSegment } from "@/lib/store/live";
 
 import { SystemPanel, previewFrameKey } from "./system-panel";
 
-// 系统模式主区域（#45 渐进预览第一片）：门禁解除——run 开始即取预览地址；空态
-// 两档——无应用随直播推进步骤提示（自述优先、动作兜底），有应用保留页面 +
-// 「更新中」轻提示一套；跨会话/重试不闪断；超限终态给重新发起。预览地址读口
-// mock 掉（每用例摆 url 有无与 error）。
+// 系统模式主区域（#45 渐进预览第一片 + #48 修正超限终态恢复出口）：门禁解除——
+// run 开始即取预览地址；空态两档——无应用随直播推进步骤提示（自述优先、动作
+// 兜底），有应用保留页面 + 「更新中」轻提示一套；跨会话/重试不闪断；超限终态
+// 给人工兜底入口——从未生成「重新发起」、修正轮「重新修改」，正常态全无。
+// 预览地址读口 mock 掉（每用例摆 url 有无与 error）。
 let previewResult: {
   data?: { url: string };
   error?: unknown;
@@ -28,6 +29,10 @@ vi.mock("@/hooks/use-project-preview", () => ({
 
 vi.mock("@/hooks/use-generate", () => ({
   useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-restart-fix", () => ({
+  useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 // 直播段读口换直摆对象（zustand SSR 快照冻在建店时刻，setState 后渲染读不到
@@ -173,7 +178,20 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("遇到问题，正在重试");
   });
 
-  it("应用可访问且超限终态：轻提示转失败 + 修正轮再提意见口径，页面仍可见", () => {
+  it("超限终态且已生成（修正失败、应用探不到）：修正口径 + 重新修改入口（人工兜底）", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "error",
+    });
+
+    expect(html).toContain("修正遇到了问题");
+    expect(html).toContain("重新修改");
+    // 修正轮不给「重新发起」（系统已生成，重做的事是修正不是重做系统）
+    expect(html).not.toContain("重新发起");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("应用可访问且超限终态：轻提示转失败 + 重新修改入口，页面仍可见", () => {
     const html = renderPanel({
       generatedAt: "2026-08-31T08:00:00Z",
       coderStatus: "error",
@@ -182,7 +200,28 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
 
     expect(html).toContain("<iframe");
     expect(html).toContain("修正遇到了问题");
-    expect(html).toContain("再提一次意见重试");
+    expect(html).toContain("重新修改");
+    expect(html).not.toContain("重新发起");
+  });
+
+  it("正常态无任何手动触发：run 中 / 收口后既无重新发起也无重新修改", () => {
+    // 正常流程全自动（#48：恢复入口只在超限终态出现）
+    const updating = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "running",
+      url: "http://localhost:42659",
+    });
+    expect(updating).toContain("正在更新系统");
+    expect(updating).not.toContain("重新发起");
+    expect(updating).not.toContain("重新修改");
+
+    const finished = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "finished",
+      url: "http://localhost:42659",
+    });
+    expect(finished).not.toContain("重新发起");
+    expect(finished).not.toContain("重新修改");
   });
 
   it("run 收口后：轻提示消失，预览照常", () => {

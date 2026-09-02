@@ -156,6 +156,29 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it("guide-reply 按正本收窄（payload {projectId, runId, prompt, label, text}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「通道二」guide-reply 行（#47：兜底轻引导回复）
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "guide-reply",
+        payload: {
+          projectId: "p1",
+          runId: "r1",
+          prompt: "你好呀",
+          label: "平台",
+          text: "我在这里帮您把系统做出来。",
+        },
+        ts: "",
+      }),
+    );
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "guide-reply",
+      payload: { projectId: "p1", runId: "r1", prompt: "你好呀", label: "平台", text: "我在这里帮您把系统做出来。" },
+    });
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it("引擎透传事件：data 为引擎 part 原样，字符串 type 照收", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

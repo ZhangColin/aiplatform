@@ -208,21 +208,23 @@ public class AgentscopeAgentClient {
 
     /**
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
-     * 八个同型位置参数的错位面；live 续跑面恒关，#23）。
+     * 八个同型位置参数的错位面；live 续跑面恒关，#23；只读面续跑不存在——挂起问答
+     * 是 BA 资产，只读角色无 ask_user，resume 恒读写面）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
-            String systemPrompt, String workspaceId, String agentRole, boolean live) {
+            String systemPrompt, String workspaceId, String agentRole, boolean live,
+            boolean workspaceReadOnly) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.systemPrompt(), command.workspaceId(),
-                    command.agentRole(), command.live());
+                    command.agentRole(), command.live(), command.workspaceReadOnly());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
                     resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
-                    resume.agentRole(), false);
+                    resume.agentRole(), false, false);
         }
     }
 
@@ -252,7 +254,7 @@ public class AgentscopeAgentClient {
                 ? spec.modelString() : properties.getDefaultModel());
         String sysPrompt = spec.systemPrompt() != null
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
-        AgentWorkspace workspace = resolveWorkspace(spec.workspaceId());
+        AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
                 modelRef.toModelString(), workspace, spec.agentRole());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
@@ -298,13 +300,18 @@ public class AgentscopeAgentClient {
         }
     }
 
-    /** 工作区解析：带 workspaceId → 项目 dev 工作区；缺省 → 本地工作区。 */
-    private AgentWorkspace resolveWorkspace(String workspaceId) {
+    /**
+     * 工作区解析：带 workspaceId → 项目 dev 工作区（只读标记则解析为只读面，
+     * #47）；缺省 → 本地工作区。
+     */
+    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new AgentWorkspace.Local(properties.getWorkspace());
         }
         var handle = workspaceLifecycleAppService.handleOf(workspaceId);
-        return new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
+        return readOnly
+                ? new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName())
+                : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 
     private RuntimeContext runtimeContext(String sessionId, String userId) {

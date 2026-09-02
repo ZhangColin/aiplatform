@@ -270,26 +270,89 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
     return { id, data: JSON.stringify({ type, payload, ts: "" }) };
   }
 
-  it("role-assigned(BA) → run-start 落用户气泡；text(data.delta) 累积 BA 气泡", () => {
-    dispatchAgentEvent(agentQc, 
+  it("role-assigned(BA) → run-start 落用户气泡；text(data.delta) 累积带标签气泡", () => {
+    dispatchAgentEvent(agentQc,
       agentEvent(
         "role-assigned",
         { projectId: "p1", runId: "run1", role: "BA", roleLabel: "需求分析师", engine: "agentscope" },
         "run1:1",
       ),
     );
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "做个官网", model: "m1" }, "run1:2"),
     );
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "ba-p1", data: { delta: "初步理解" } }, "run1:3"),
     );
 
     const chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages.map((m) => [m.kind, m.kind === "question" ? m.question : m.text])).toEqual([
-      ["user", "做个官网"],
-      ["ba", "初步理解"],
+    expect(chat?.messages).toEqual([
+      { kind: "user", id: expect.any(String), text: "做个官网" },
+      { kind: "agent", id: expect.any(String), text: "初步理解", label: "需求分析师", runId: "run1" },
     ]);
+  });
+
+  it("role-assigned(ASSISTANT) → 助理轮进对话（#47 咨询分支）：assist- 会话 text 累积、标签随帧", () => {
+    dispatchAgentEvent(agentQc,
+      agentEvent(
+        "role-assigned",
+        { projectId: "p1", runId: "run1", role: "ASSISTANT", roleLabel: "项目助理", engine: "agentscope" },
+        "run1:1",
+      ),
+    );
+    dispatchAgentEvent(agentQc,
+      agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "我后台的地址是什么？", model: "m1" }, "run1:2"),
+    );
+    dispatchAgentEvent(agentQc,
+      agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "assist-p1", data: { delta: "访问地址是 " } }, "run1:3"),
+    );
+    dispatchAgentEvent(agentQc,
+      agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "assist-p1", data: { delta: "http://localhost:32168/" } }, "run1:4"),
+    );
+    dispatchAgentEvent(agentQc,
+      agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "assist-p1", finish: "end" }, "run1:5"),
+    );
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      { kind: "user", id: expect.any(String), text: "我后台的地址是什么？" },
+      {
+        kind: "agent",
+        id: expect.any(String),
+        text: "访问地址是 http://localhost:32168/",
+        label: "项目助理",
+        runId: "run1",
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false);
+  });
+
+  it("guide-reply（#47 兜底分支）→ 用户气泡 + 平台标签引导气泡（重放按事件 id 只收一次）", () => {
+    const frame = agentEvent(
+      "guide-reply",
+      {
+        projectId: "p1",
+        runId: "run1",
+        prompt: "你好呀",
+        label: "平台",
+        text: "我在这里帮您把系统做出来：想改哪里、想加什么功能，直接告诉我。",
+      },
+      "run1:1",
+    );
+    dispatchAgentEvent(agentQc, frame);
+    dispatchAgentEvent(agentQc, { ...frame, id: "run1:1" }); // 重放同帧
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      { kind: "user", id: expect.any(String), text: "你好呀" },
+      {
+        kind: "agent",
+        id: expect.any(String),
+        text: "我在这里帮您把系统做出来：想改哪里、想加什么功能，直接告诉我。",
+        label: "平台",
+      },
+    ]);
+    expect(chat?.turnActive).toBe(false);
   });
 
   it("question-raised(QUESTION + data.questions) → 问答卡（engineRef 随卡，作答回传面）", () => {

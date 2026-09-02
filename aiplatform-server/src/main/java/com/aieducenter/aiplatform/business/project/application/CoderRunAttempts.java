@@ -82,7 +82,8 @@ class CoderRunAttempts {
                     Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),
                     /* live= */ true,
-                    RolePreset.CODER.name());
+                    RolePreset.CODER.name(),
+                    /* workspaceReadOnly= */ false);
             try {
                 agentClient.converse(command, streamBridge.sink(projectId));
                 onSuccess.accept(runId);

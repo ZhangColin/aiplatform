@@ -121,6 +121,25 @@ class AgentscopeHarnessAgentFactoryTest {
     }
 
     @Test
+    void given_same_container_read_only_vs_dev_when_obtain_then_not_shared() {
+        // #47 只读面形态入规格键：同容器同角色、读写/只读两形态 = 不同 agent 实例
+        // （内核工具面不同），不静默复用
+        List<HarnessAgent> created = new ArrayList<>();
+        AgentscopeHarnessAgentFactory factory = factoryWith(created);
+
+        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "X");
+        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X");
+        HarnessAgent readOnlyAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X");
+
+        assertThat(readOnly).isNotSameAs(dev);
+        assertThat(readOnlyAgain).isSameAs(readOnly); // 同规格只读面自身复用
+        assertThat(created).hasSize(2);
+    }
+
+    @Test
     void given_cached_agents_when_destroy_then_all_closed_and_cache_cleared() throws IOException {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);

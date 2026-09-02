@@ -49,13 +49,14 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | type | 类别 | payload 字段 | 说明 |
 |---|---|---|---|
 | `run-start` | 平台 | `projectId` `runId` `prompt` `model` `engine` | 运行开始（runId 随 run 响应同值返回） |
-| `role-assigned` | 平台 | `projectId` `runId` `role` `roleLabel` `engine` | 角色卡分配（业务编排层发射） |
+| `role-assigned` | 平台 | `projectId` `runId` `role` `roleLabel` `engine` | 角色卡分配（业务编排层发射；role ∈ {BA, CODER, ASSISTANT}——ASSISTANT 为助理职能体（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 新增，咨询分支），`roleLabel` 为用户侧呈现标签，前端指令区角色标签随本帧呈现） |
 | `run-created` | 平台 | `projectId` `runId` `sessionId` `engine` | 运行创建（cat_agent_state 会话槽位首见发，跨重启不重发） |
 | `error` | 平台 | `projectId` `runId` `message` | 运行失败 |
 | `run-finish` | 平台 | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等） |
 | `question-raised` | 平台 | `projectId` `runId` `sessionId` `kind` `summary` `engineRef` `data` | 智能体挂起（kind=QUESTION=向用户提问 / PERMISSION=工具确认）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
 | `run-retrying` | 平台 | `projectId` `runId` `attempt` `message` | 编码 run 自动重试（生成编排层发射，[#22](https://github.com/ZhangColin/aiplatform/issues/22) 新增）：一次尝试失败后、下一尝试下发前——`runId` 锚定失败的那次尝试（帧序 `error → run-retrying → 下一尝试 run-start`）；`message` 为用户侧话术「遇到问题，正在重试」；超限后不再发，末次 `error` 即终态（用户重新发起兜底） |
 | `fix-unchanged` | 平台 | `projectId` `runId` `reason` | 修正 run 收口·系统未动（[#46](https://github.com/ZhangColin/aiplatform/issues/46) 新增）：编码智能体以结束工具 `finish_fix(changed=false)` 判定无需改动时的如实呈现——`reason` 为未动原因（finish_fix 的 text 原文，如「纯文档性修订，系统现状已满足」）；`runId` 锚定正常收口的那次尝试（帧序 `run-finish → fix-unchanged`）；changed=true 不发（现有收口行为不回归）；未调用 finish_fix 即 run 未正常收口——该次尝试补发 `error` 帧如实表达后走重试（帧序 `run-finish → error → run-retrying → 下一尝试 run-start`），超限末次 `error` 即终态。前端指令区呈现「系统未修改 + 原因」——让用户能区分「不需要改」与「链路断了」 |
+| `guide-reply` | 平台 | `projectId` `runId` `prompt` `label` `text` | 兜底轻引导回复（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 新增，入口三分类的兜底分支）：非意见非咨询输入（寒暄/闲聊/下单意图等）的平台侧定型引导文案——代码承载非 LLM 产，零产物路径（不起任何智能体 run，本帧即该次派发的全部帧）。`runId` 为派发锚（随派发响应同值返回）；`prompt` 为锚定的用户输入（重放重建对话面用，同 run-start 的 prompt 语义）；`label` 为呈现标签（「平台」——非智能体角色）；`text` 为引导文案（下单意图引导到「确认下单」入口）。前端指令区呈现为带标签的对话气泡 |
 | `live-text` | 平台 | `projectId` `runId` `sessionId` `engine` `text` | 直播·智能体自述解说段（[#23](https://github.com/ZhangColin/aiplatform/issues/23) 新增，编码 run 专属）：`text` 为**完整段非增量**——服务端逐段成型（句读 / 文本块变 / 步骤与动作边界 / 长度上限切段），run 收口帧前出尾段 |
 | `live-action` | 平台 | `projectId` `runId` `sessionId` `engine` `action` | 直播·动作摘要行：工具动作 → 人话模板（`write_file`/`edit_file` → 「正在编写【文件名】」、`command` → 「正在运行命令」）；读类工具与思考、diff 不播 |
 | `live-step` | 平台 | `projectId` `runId` `sessionId` `engine` `step` | 直播·步骤段：`step` 为 run 内序号（1 起，模型调用边界），前端呈现为段间「第 N 步」分隔 |

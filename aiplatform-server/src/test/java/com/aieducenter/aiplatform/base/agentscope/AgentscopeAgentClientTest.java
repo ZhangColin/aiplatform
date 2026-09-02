@@ -101,7 +101,7 @@ class AgentscopeAgentClientTest {
     /** 直播形命令（编码 run 姿态）：同要素 + live 开关。 */
     private AgentCommand liveCommand() {
         return new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, true, null);
+                null, null, Map.of(), null, true, null, false);
     }
 
     private void givenFirstSeen(boolean firstSeen) {
@@ -269,6 +269,23 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
+    void given_read_only_flag_when_converse_then_project_read_only_workspace_resolved() {
+        // #47 助理咨询姿态：workspaceReadOnly 开 → 同一容器解析为只读面（工厂据此
+        // 关内核文件/shell 工具——写面结构性关闭）
+        when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
+                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
+        givenFirstSeen(true);
+        givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+
+        client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
+                null, "42", Map.of(), null, false, "ASSISTANT", true), event -> {
+                });
+
+        verify(factory).obtain(any(), any(), any(),
+                eq(new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev")), eq("ASSISTANT"));
+    }
+
+    @Test
     void given_no_workspace_id_when_converse_then_local_workspace_fallback() {
         givenFirstSeen(true);
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "本地"));
@@ -291,7 +308,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, false, "BA"), event -> {
+                null, "42", Map.of(), null, false, "BA", false), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),

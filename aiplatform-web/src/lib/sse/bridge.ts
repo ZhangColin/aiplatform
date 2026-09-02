@@ -146,7 +146,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           roleLabel: payload.roleLabel,
           engine: payload.engine,
         });
-        if (payload.role === "BA") chat.noteBaRun(payload.projectId, payload.runId);
+        // 对话面 run 登记（#47 三分类后多角色进指令区）：BA / 助理会话 run 才
+        // 进对话（run-start 落用户气泡、text 增量累积）；CODER 归生成面
+        if (payload.role === "BA" || payload.role === "ASSISTANT") {
+          chat.noteChatRun(payload.projectId, payload.runId, payload.roleLabel);
+        }
         if (payload.role === "CODER") {
           generation.noteCoderRun(payload.projectId, payload.runId);
         }
@@ -216,6 +220,19 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
+      case "guide-reply": {
+        // 兜底轻引导（#47 入口三分类）：平台定型文案直达指令区（带标签对话气泡，
+        // 非 run、非智能体话语）；prompt 供重放重建用户气泡；重放按事件 id 只收一次
+        const { payload } = platform;
+        chat.noteGuideReply(
+          payload.projectId,
+          payload.prompt,
+          payload.label,
+          payload.text,
+          event.id,
+        );
+        return;
+      }
       // 直播帧（#23）：只进直播面 store（直播侧栏唯一消费面——前端不耦合引擎
       // 事件格式；帧仅编码 run 发射，无需角色过滤）
       case "live-text": {
@@ -263,10 +280,10 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const kind = PASSTHROUGH_SEGMENT_KINDS[passthrough.type];
   if (kind) {
     store.appendSegment(payload, { kind, id: event.id, data: payload.data });
-    // 指令区对话面只收 BA 的文本增量（思考/补丁/工具帧不进对话）
+    // 指令区对话面只收对话角色（BA/助理）的文本增量（思考/补丁/工具帧不进对话）
     if (kind === "text") {
       const delta = asRecord(payload.data)?.delta;
-      chat.appendBaDelta(payload.projectId, payload.sessionId, delta, event.id);
+      chat.appendAgentDelta(payload.projectId, payload.runId, payload.sessionId, delta, event.id);
     }
   } else {
     // 引擎透传未知名型：data 原样入段，呈现层兜底

@@ -74,7 +74,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
 
     expect(html).not.toContain('data-slot="resizable-panel-group"');
     expect(html).not.toContain("docs/PRD.md");
-    expect(html).toContain("和需求分析师聊聊你的想法");
+    expect(html).toContain("和平台聊聊你的想法");
   });
 
   it("PRD 产出（prdProducedAt 落定）：双槽长出——三模式页签 + PRD 正文", () => {
@@ -158,7 +158,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
-    expect(html).toContain("和需求分析师聊聊你的想法");
+    expect(html).toContain("和平台聊聊你的想法");
     expect(html).not.toContain("订单处理中");
     expect(html).toContain("确认下单"); // 迭代态常驻入口
   });

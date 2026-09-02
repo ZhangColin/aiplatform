@@ -11,7 +11,12 @@ import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import type { LockRow } from "@/lib/orders/lock";
-import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
+import {
+  FALLBACK_AGENT_LABEL,
+  pendingQuestionOf,
+  useChatStore,
+  type ChatMessage,
+} from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 
 import { QuestionCard } from "./question-card";
@@ -19,16 +24,19 @@ import { QuestionCard } from "./question-card";
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
- * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定）：
- * 项目页左侧全程常开的对话区，无标题——BA 开场回应、每轮一问、用户的意见与
- * 答复都在此流动；首次生成后意见即迭代入口（BA 判需求侧，回合收口后平台自动派
- * 修正 run——链必达 #43，指令区形态不变）。发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选
- * 合并），否则即新发言。问题到达自动聚焦输入框（不错过在等你的问题）。对话史 =
- * chat store（SSE 桥喂，重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方
- * 出「PRD 有更新 · 去看看」胶囊——点击即认领并回调场景层跳转成果区；「确认下单」
- * 随首次生成完成常驻输入条上方（#26，装配层判定可见性后注入）。输入可用性吃
- * 锁定式矩阵（#28）：locked（订单处理中）禁用输入并出锁定提示，closed（归档
- * 终态）关闭——矩阵行由装配层判定后注入。
+ * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
+ * #47 入口三分类）：项目页左侧全程常开的对话区，无标题——BA 开场回应、每轮一问、
+ * 用户的意见与答复、助理的咨询作答、平台的兜底轻引导都在此流动；首次生成后意见
+ * 即迭代入口（BA 判需求侧，回合收口后平台自动派修正 run——链必达 #43，指令区
+ * 形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户隐式），气泡角色标签随
+ * role-assigned / guide-reply 帧呈现（BA「需求分析师」/ 助理「项目助理」/ 平台）。
+ * 发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
+ * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store（SSE 桥喂，
+ * 重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出「PRD 有更新 · 去看看」
+ * 胶囊——点击即认领并回调场景层跳转成果区；「确认下单」随首次生成完成常驻输入条
+ * 上方（#26，装配层判定可见性后注入）。输入可用性吃锁定式矩阵（#28）：locked
+ * （订单处理中）禁用输入并出锁定提示，closed（归档终态）关闭——矩阵行由装配层
+ * 判定后注入。
  */
 export function CommandArea({
   projectId,
@@ -49,6 +57,8 @@ export function CommandArea({
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
+  const activeRoleLabel =
+    useChatStore((s) => s.chats[projectId]?.activeRoleLabel) ?? FALLBACK_AGENT_LABEL;
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
 
@@ -88,7 +98,7 @@ export function CommandArea({
     ? "指令区已锁定"
     : pending
       ? "回答上面的问题，回车发送（可与已勾选合并）"
-      : "和需求分析师聊聊你的想法…";
+      : "和平台聊聊你的想法…";
 
   function answer(text: string) {
     if (!pending || disabled) return;
@@ -126,7 +136,7 @@ export function CommandArea({
     <div className="flex h-full min-h-0 flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <p className="pt-2 text-center text-xs text-muted-foreground">
-          把想法告诉需求分析师，TA 会一步步问清你要什么
+          直接说出你的想法：想改什么、想问什么，平台都会接住
         </p>
         {messages.map((message) => (
           <MessageRow key={message.id} message={message}>
@@ -149,7 +159,7 @@ export function CommandArea({
               <Dot delay="150ms" />
               <Dot delay="300ms" />
             </span>
-            需求分析师正在输入
+            {activeRoleLabel}正在输入
           </div>
         ) : null}
       </div>
@@ -204,7 +214,7 @@ export function CommandArea({
   );
 }
 
-/** 对话行布局：用户右对齐、BA/问答卡/错误提示/系统通告左对齐。 */
+/** 对话行布局：用户右对齐、智能体（BA/助理/平台引导）/问答卡/错误提示/系统通告左对齐。 */
 function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
@@ -235,9 +245,10 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
       </div>
     );
   }
+  // 智能体话语（BA/助理）与平台轻引导（#47）：标签随帧落消息，不硬编码角色名
   return (
     <div className="flex w-full flex-col items-start gap-1">
-      <span className="pl-1 text-xs text-muted-foreground">需求分析师</span>
+      <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
       <Bubble variant="muted" align="start">
         <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
       </Bubble>

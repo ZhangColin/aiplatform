@@ -81,4 +81,20 @@ class AgentCommandTest {
 
         assertThat(usage.dims()).containsEntry("agentKind", "ba");
     }
+
+    @Test
+    void given_convenience_forms_when_construct_then_workspace_read_write_default() {
+        // 兼容形（取名 / BA 对话）缺省读写面：workspaceReadOnly 恒 false（#47 前调用面不变）
+        assertThat(command("run-1", "你好", "s-1").workspaceReadOnly()).isFalse();
+        assertThat(new AgentCommand("run-1", "你好", null, null, "s-1", null, null, null,
+                Map.of(), "BA").workspaceReadOnly()).isFalse();
+    }
+
+    @Test
+    void given_canonical_form_when_construct_then_workspace_read_only_kept() {
+        AgentCommand command = new AgentCommand("run-1", "咨询", null, null, "s-1", null,
+                null, "42", Map.of(), null, false, "ASSISTANT", true);
+
+        assertThat(command.workspaceReadOnly()).isTrue(); // 助理咨询姿态：写面结构性关闭
+    }
 }

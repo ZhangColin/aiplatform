@@ -25,6 +25,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
@@ -46,27 +47,30 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言 / 问答卡作答 /
- * 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读
- * 浏览 → 源码包下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言（入口三分类派发）/
+ * 问答卡作答 / 开始做系统（生成）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 /
+ * 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 指令区发言 / 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 指令区发言（三分类派发）/ 问答作答 / 生成 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
     private final ProjectQueryAppService queryAppService;
+    private final DispatchAppService dispatchAppService;
     private final BaInterviewAppService baInterviewAppService;
     private final GenerationAppService generationAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
+                             DispatchAppService dispatchAppService,
                              BaInterviewAppService baInterviewAppService,
                              GenerationAppService generationAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
+        this.dispatchAppService = dispatchAppService;
         this.baInterviewAppService = baInterviewAppService;
         this.generationAppService = generationAppService;
     }
@@ -103,19 +107,24 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/messages")
-    @Operation(summary = "指令区发言（BA 访谈后续轮）",
-            description = "content 即用户在指令区输入的这句话——BA 续同一 ba-{projectId} 会话消化"
-                    + "（催促收敛、PRD 修订意见同从此进；首次生成后对系统的意见也从这里进——"
-                    + "BA 只判需求侧（追问/改 PRD），回合收口后平台自动派修正 run，"
-                    + "判定内化无需标注类型）。"
-                    + "异步提交即返回，runId = 本轮 BA 运行"
-                    + "标识（挂 /api/agent-events?runId= 的锚），回复与下一问经 SSE 到达。"
+    @Operation(summary = "指令区发言（入口三分类派发：意见/咨询/兜底）",
+            description = "content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用"
+                    + "三分类（分类失败/超时兜底按意见处理），再按类派发："
+                    + "意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台"
+                    + "自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集"
+                    + "查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；"
+                    + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，"
+                    + "下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。"
+                    + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / "
+                    + "咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），"
+                    + "回复经 SSE 到达（role-assigned 帧携带角色标签）。"
                     + "空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006"
-                    + "（下单即冻结迭代，取消订单即解冻）；项目不存在 404 PRJ_001")
+                    + "（下单即冻结迭代，取消订单即解冻）；挂起问答待答 409 PRJ_024"
+                    + "（指路作答）；项目不存在 404 PRJ_001")
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
-                baInterviewAppService.runInterviewTurn(parseId(id), command.content()).runId()));
+                dispatchAppService.dispatch(parseId(id), command.content()).runId()));
     }
 
     @PostMapping("/{id}/questions/{qid}/answer")

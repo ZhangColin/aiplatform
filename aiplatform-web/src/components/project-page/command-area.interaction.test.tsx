@@ -52,12 +52,14 @@ function pendingQuestion(overrides: Partial<Extract<ChatMessage, { kind: "questi
 
 function seedChat(messages: ChatMessage[]) {
   seed.state = {
-    chats: { p1: { messages, baRunIds: [], ingestedRunIds: [], seenEventIds: [], turnActive: false } },
+    chats: {
+      p1: { messages, chatRunIds: [], roleLabels: {}, ingestedRunIds: [], seenEventIds: [], turnActive: false },
+    },
   };
 }
 
 function inputOf() {
-  return screen.getByPlaceholderText(/回答上面的问题|和需求分析师聊聊/) as HTMLTextAreaElement;
+  return screen.getByPlaceholderText(/回答上面的问题|和平台聊聊/) as HTMLTextAreaElement;
 }
 
 beforeEach(() => {
@@ -100,7 +102,7 @@ describe("CommandArea · Enter 发送路由（#19 状态机）", () => {
   });
 
   it("无待答问题：Enter 走发言端点；Shift+Enter 不提交；空输入不触发", () => {
-    seedChat([{ kind: "ba", id: "b1", text: "开场" }]);
+    seedChat([{ kind: "agent", id: "b1", text: "开场", label: "需求分析师" }]);
     render(<CommandArea projectId="p1" />);
 
     fireEvent.change(inputOf(), { target: { value: "加个会员功能" } });

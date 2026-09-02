@@ -23,6 +23,9 @@ public final class UsageDims {
     /** 取名调用的智能体种类（一次性辅助调用，非主链角色、无 preset 展示名）。 */
     public static final String AGENT_KIND_NAMING = "naming";
 
+    /** 入口分类调用的智能体种类（#47 三分类轻量调用，一次性辅助面、无 preset 展示名）。 */
+    public static final String AGENT_KIND_CLASSIFY = "classify";
+
     private UsageDims() {
     }
 

@@ -7,26 +7,34 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.FinishFixFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
- * 按角色的工具集装配（#43 工具面收紧 + #46 结束工具）：BA = {ask_user, savePrd}
- * （仅项目 dev 工作区——savePrd 锚定项目，经 {@link PrdArtifactAdapter} 落盘登记）；
- * 派发工具已撤（BA 无派发权，链必达收口在平台代码）；CODER = {finish_fix}
- * （修正收口结束工具——「要不要动系统」的判定面；其余编码工具由 harness 内核
- * 自带，ask_user/savePrd 挂在编码智能体上是泄漏，行为面：编码智能体全程不可能
- * 产问答/存 PRD/派发类工具事件）；无角色语境 / 本地兜底工作区 = 空集。
+ * 按角色的工具集装配（#43 工具面收紧 + #46 结束工具 + #47 助理只读集）：
+ * BA = {ask_user, savePrd}（仅项目 dev 工作区——savePrd 锚定项目，经
+ * {@link PrdArtifactAdapter} 落盘登记）；派发工具已撤（BA 无派发权，链必达收口
+ * 在平台代码）；CODER = {finish_fix}（修正收口结束工具——「要不要动系统」的
+ * 判定面；其余编码工具由 harness 内核自带）；ASSISTANT = 只读三件
+ * {list_workspace_files, read_workspace_file, query_project_facts}（仅随只读
+ * 工作区注册——该形态内核文件/shell 工具已关，全程无任何写类工具事件的可言
+ * 依据）；无角色语境 / 本地兜底工作区 = 空集。
  */
 class RoleToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
     private final FinishFixFacts finishFacts = new FinishFixFacts();
+    private final ProjectRepository projectRepository = mock(ProjectRepository.class);
+    private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
+            mock(WorkspaceLifecycleAppService.class);
 
     private RoleToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new RoleToolkitSupplier(prdArtifacts, finishFacts);
+        return new RoleToolkitSupplier(prdArtifacts, finishFacts, projectRepository,
+                workspaceLifecycleAppService);
     }
 
     @Test
@@ -46,6 +54,26 @@ class RoleToolkitSupplierTest {
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .getToolNames())
                 .containsExactly(FinishFixTool.NAME);
+    }
+
+    @Test
+    void given_assistant_on_read_only_workspace_when_toolkit_then_read_only_trio() {
+        // #47 助理只读集：三件全 readOnly、无任何写面工具；只随只读工作区注册
+        var toolkit = supplier().toolkitFor(RolePreset.ASSISTANT.name(),
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"));
+        assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
+                ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME);
+        for (String name : toolkit.getToolNames()) {
+            assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();
+        }
+    }
+
+    @Test
+    void given_assistant_on_dev_workspace_when_toolkit_then_empty() {
+        // 只读资产不随读写面发放（角色 × 工作区形态双锚，防误配）
+        assertThat(supplier().toolkitFor(RolePreset.ASSISTANT.name(),
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
+                .getToolNames()).isEmpty();
     }
 
     @Test

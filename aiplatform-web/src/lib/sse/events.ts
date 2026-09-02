@@ -141,6 +141,16 @@ export type PlatformAgentEvent =
       payload: AgentPayload & { reason: string };
     }
   | {
+      /**
+       * 兜底轻引导回复（#47 入口三分类）：非意见非咨询输入的平台侧定型文案——
+       * 零产物路径（不起任何智能体 run，本帧即该次派发的全部帧）；`prompt` 为
+       * 锚定的用户输入（重放重建对话面）；`label` 为呈现标签（「平台」）；
+       * `text` 为引导文案（下单意图引导到「确认下单」）。
+       */
+      type: "guide-reply";
+      payload: AgentPayload & { prompt: string; label: string; text: string };
+    }
+  | {
       /** 直播·智能体自述解说段（#23，编码 run 专属）：`text` 为完整段非增量（服务端逐段成型）。 */
       type: "live-text";
       payload: AgentPayload & { text: string };
@@ -165,6 +175,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "question-raised",
   "run-retrying",
   "fix-unchanged",
+  "guide-reply",
   "live-text",
   "live-action",
   "live-step",

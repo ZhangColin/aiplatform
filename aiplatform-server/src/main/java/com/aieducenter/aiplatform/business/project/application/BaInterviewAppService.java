@@ -98,6 +98,26 @@ public class BaInterviewAppService {
     }
 
     /**
+     * 派发入口守卫（#47 三分类的公共前置）：指令区输入无论走哪个分支（意见 /
+     * 咨询 / 兜底）都先过同一组守卫——项目存在 / 未归档（指令区关闭）/ 无未终结
+     * 订单（下单即冻结）/ 无挂起问答（同步 409 指路作答）。归
+     * {@link DispatchAppService} 的 REST 路径同步调用（错误码语义留在响应里），
+     * 各分支方法自带的守卫不动（防御纵深）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
+     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     */
+    public Project requireDispatchableProject(Long projectId) {
+        Project project = requireProject(projectId);
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        orderQueryAppService.requireNoActiveOrder(projectId);
+        requireNoPendingQuestion(project, SESSION_PREFIX + projectId);
+        return project;
+    }
+
+    /**
      * 跑一轮 BA 访谈（指令区发言，prompt 即用户侧输入）：会话执行器异步提交即
      * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达不炸调用方）。
      * system prompt = 角色卡 + 会话注入块（未建立/空注入/重启后 = 裸角色卡）。

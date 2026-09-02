@@ -5,15 +5,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 角色卡 preset（代码配置不落库；v1 资产两个智能体——BA 访谈 + CODER 编码（#22
- * 落位），差异只在资产与工具集）。
+ * 角色卡 preset（代码配置不落库；v1 资产三个智能体——BA 访谈 + CODER 编码（#22
+ * 落位）+ ASSISTANT 咨询应答（#47 落位），差异只在资产与工具集）。
  */
 class RolePresetTest {
 
     @Test
     void given_presets_when_inspect_then_fully_configured() {
         assertThat(RolePreset.values()).extracting(Enum::name)
-                .containsExactly("BA", "CODER");
+                .containsExactly("BA", "CODER", "ASSISTANT");
 
         for (RolePreset role : RolePreset.values()) {
             assertThat(role.getName()).isNotBlank();
@@ -23,12 +23,26 @@ class RolePresetTest {
     }
 
     @Test
-    void given_model_tier_when_inspect_then_ba_flash_coder_pro() {
-        // 模型分档：文档类角色 flash（走链路优先），编码类角色 pro（实现质量优先）
+    void given_model_tier_when_inspect_then_ba_flash_coder_pro_assistant_flash() {
+        // 模型分档：文档类角色 flash（走链路优先），编码类角色 pro（实现质量优先），
+        // 助理答疑 flash（查证作答，快且省）
         assertThat(RolePreset.BA.modelId()).isEqualTo("deepseek-v4-flash");
         assertThat(RolePreset.BA.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
         assertThat(RolePreset.CODER.modelId()).isEqualTo("deepseek-v4-pro");
         assertThat(RolePreset.CODER.chatModelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        assertThat(RolePreset.ASSISTANT.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(RolePreset.ASSISTANT.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
+    }
+
+    @Test
+    void given_assistant_card_when_inspect_then_readonly_answer_protocol_declared() {
+        // #47 只读答疑协议的关键锚词：只答事实（查证后作答、查不到答不知）+ 零动作
+        // （不改文件/不起修改）+ 事实工具三件名（工具面同 RoleToolkitSupplier）
+        String prompt = RolePreset.ASSISTANT.systemPrompt();
+        assertThat(prompt).contains("只答事实").contains("绝不编造").contains("零动作");
+        assertThat(prompt).contains("list_workspace_files")
+                .contains("read_workspace_file")
+                .contains("query_project_facts");
     }
 
     @Test

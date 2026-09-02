@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChatState, ChatMessage } from "@/lib/store/chat";
+import type { ChatState, ChatMessage, ProjectChat } from "@/lib/store/chat";
 import type { PrdNoticesState } from "@/lib/store/prd-notices";
 
 import { CommandArea } from "./command-area";
@@ -27,7 +27,7 @@ vi.mock("@/lib/store/prd-notices", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store/prd-notices")>();
   return {
     ...actual,
-    usePrdNoticesStore: <T,>(selector: (state: Pick<PrdNoticesState, "seen" | "pending">) => T): T =>
+    usePrdNoticesStore: <T,>(selector: (state: Pick<PrdNoticesState, "seen" | "pending">) => T) =>
       selector(seed.notices),
   };
 });
@@ -53,31 +53,52 @@ function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>>
   } satisfies Extract<ChatMessage, { kind: "question" }>;
 }
 
-function seedChat(messages: ChatMessage[], turnActive = false) {
+function seedChat(
+  messages: ChatMessage[],
+  turnActive = false,
+  overrides: Partial<ProjectChat> = {},
+) {
   seed.chats = {
-    chats: { p1: { messages, baRunIds: [], ingestedRunIds: [], seenEventIds: [], turnActive } },
+    chats: {
+      p1: {
+        messages,
+        chatRunIds: [],
+        roleLabels: {},
+        ingestedRunIds: [],
+        seenEventIds: [],
+        turnActive,
+        ...overrides,
+      },
+    },
   };
 }
 
-describe("CommandArea · 指令区（#19 需求环①）", () => {
-  it("对话流：用户气泡右对齐、BA 气泡带「需求分析师」落款、开场引导语常在", () => {
+describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色）", () => {
+  it("对话流：用户气泡右对齐、智能体气泡带各自角色落款（随帧标签，非硬编码）、开场引导语常在", () => {
     seedChat([
       { kind: "user", id: "u1", text: "给宠物医院做预约系统" },
-      { kind: "ba", id: "b1", text: "初步理解：在线预约。" },
+      { kind: "agent", id: "b1", text: "初步理解：在线预约。", label: "需求分析师" },
+      { kind: "user", id: "u2", text: "我后台的地址是什么？" },
+      { kind: "agent", id: "a1", text: "访问地址是 http://localhost:32168/", label: "项目助理" },
+      { kind: "user", id: "u3", text: "你好呀" },
+      { kind: "agent", id: "g1", text: "我在这里帮您把系统做出来。", label: "平台" },
     ]);
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
     expect(html).toContain("给宠物医院做预约系统");
     expect(html).toContain("初步理解：在线预约。");
+    // 角色标签随消息（role-assigned / guide-reply 帧正本），无硬编码角色名
     expect(html).toContain("需求分析师");
-    expect(html).toContain("把想法告诉需求分析师");
+    expect(html).toContain("项目助理");
+    expect(html).toContain("平台");
+    expect(html).toContain("直接说出你的想法");
   });
 
   it("待答问题：问答卡在流内、输入条提示「回答上面的问题」（Enter 即答复锚点）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "做个官网" },
-      { kind: "ba", id: "b1", text: "先问一句" },
+      { kind: "agent", id: "b1", text: "先问一句", label: "需求分析师" },
       question(),
     ]);
 
@@ -87,13 +108,23 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     expect(html).toContain("回答上面的问题");
   });
 
-  it("轮进行中：打字指示（「正在输入」）；无问题时常规输入条", () => {
+  it("轮进行中：打字指示带当轮角色标签；无问题时常规输入条", () => {
+    seedChat([{ kind: "user", id: "u1", text: "加个功能" }], true, {
+      activeRoleLabel: "项目助理",
+    });
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("项目助理正在输入");
+    expect(html).toContain("和平台聊聊你的想法");
+  });
+
+  it("轮进行中标签缺失（帧淘汰残段）：打字指示回退通用标签", () => {
     seedChat([{ kind: "user", id: "u1", text: "加个功能" }], true);
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
-    expect(html).toContain("需求分析师正在输入");
-    expect(html).toContain("和需求分析师聊聊你的想法");
+    expect(html).toContain("智能体正在输入");
   });
 
   it("错误帧呈现中断提示（可重发）；归档禁用输入", () => {
@@ -110,10 +141,10 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
     expect(archived).toContain("disabled");
   });
 
-  it("修正收口「未动系统」通告（#46）：平台侧如实告知原因（区别于 BA 话语与错误）", () => {
+  it("修正收口「未动系统」通告（#46）：平台侧如实告知原因（区别于智能体话语与错误）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色" },
-      { kind: "ba", id: "b1", text: "已修订 PRD。" },
+      { kind: "agent", id: "b1", text: "已修订 PRD。", label: "需求分析师" },
       { kind: "notice", id: "n1", text: "纯文档性修订，系统现状已满足" },
     ]);
 
@@ -123,7 +154,7 @@ describe("CommandArea · 指令区（#19 需求环①）", () => {
   });
 
   it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {
-    seedChat([{ kind: "ba", id: "b1", text: "已按你的意见修订。" }]);
+    seedChat([{ kind: "agent", id: "b1", text: "已按你的意见修订。", label: "需求分析师" }]);
     seed.notices = { seen: { p1: true }, pending: { p1: true } };
 
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain(

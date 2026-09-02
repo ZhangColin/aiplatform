@@ -94,6 +94,22 @@ public class AgentStreamBridge {
                 "message", message));
     }
 
+    /**
+     * guide-reply 发射（兜底轻引导，#47 入口三分类）：非意见非咨询输入的平台侧
+     * 定型文案——零产物路径的全部帧（无智能体 run、无帧序）；runId 为派发锚
+     * （随派发响应同值返回），prompt 随帧携带供重放重建对话面，label 为呈现
+     * 标签（「平台」，非智能体角色）。
+     */
+    public void emitGuideReply(Long projectId, String runId, String prompt, String label,
+            String text) {
+        streamAppService.publish(AgentEventTypes.GUIDE_REPLY, Map.of(
+                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
+                AgentStreamAppService.RUN_FIELD, runId,
+                AgentEventTypes.GUIDE_PROMPT_FIELD, prompt,
+                AgentEventTypes.GUIDE_LABEL_FIELD, label,
+                AgentEventTypes.GUIDE_TEXT_FIELD, text));
+    }
+
     /** 关联字段注入（透传不解释；帧序在前——寻址字段不覆盖帧本体字段）。 */
     private static Map<String, Object> withCorrelation(Map<String, Object> payload,
                                                        Map<String, Object> correlation) {

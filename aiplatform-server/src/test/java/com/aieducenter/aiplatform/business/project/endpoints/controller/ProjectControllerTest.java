@@ -28,6 +28,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
@@ -83,6 +84,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private BaInterviewAppService baInterviewAppService;
+
+    @MockitoBean
+    private DispatchAppService dispatchAppService;
 
     @MockitoBean
     private GenerationAppService generationAppService;
@@ -475,8 +479,9 @@ class ProjectControllerTest {
 
     @Test
     void given_message_when_post_then_run_id_returned() throws Exception {
-        when(baInterviewAppService.runInterviewTurn(100L, "目标用户主要是海外客户"))
-                .thenReturn(new BaInterviewAppService.InterviewRun("run-9"));
+        // #47 入口三分类：/messages 走派发入口（runId = 所派运行，分支归应用层测试）
+        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户"))
+                .thenReturn(new DispatchAppService.DispatchRun("run-9"));
 
         performAsUser(post("/api/projects/100/messages")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -496,13 +501,13 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
                 .andExpect(status().isBadRequest());
-        verify(baInterviewAppService, never()).runInterviewTurn(any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any());
     }
 
     @Test
     void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
         // 归档即指令区关闭（只读终态）
-        when(baInterviewAppService.runInterviewTurn(100L, "再改改"))
+        when(dispatchAppService.dispatch(100L, "再改改"))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
 
         performAsUser(post("/api/projects/100/messages")
@@ -518,7 +523,7 @@ class ProjectControllerTest {
         // 挂起问答守卫的 REST 契约（#40 / ADR-0004）：问答待答期间 /messages 同步
         // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
         // 行为由应用层守卫测试驱动）
-        when(baInterviewAppService.runInterviewTurn(100L, "测试：请继续"))
+        when(dispatchAppService.dispatch(100L, "测试：请继续"))
                 .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
 
         performAsUser(post("/api/projects/100/messages")
@@ -531,7 +536,7 @@ class ProjectControllerTest {
 
     @Test
     void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
-        when(baInterviewAppService.runInterviewTurn(404L, "你好"))
+        when(dispatchAppService.dispatch(404L, "你好"))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
 
         performAsUser(post("/api/projects/404/messages")

@@ -19,7 +19,8 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * 并产直播帧，见 {@link AgentscopeLiveMapper}；缺省 false，BA 对话不流式不留痕）；
  * {@code agentRole} 可空——该轮智能体的角色键（业务侧角色名，底座不解释），
  * 按角色发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；为空 = 无角色语境，
- * 空工具面）。</p>
+ * 空工具面）；{@code workspaceReadOnly}——项目工作区解析为只读面（#47 助理咨询
+ * 姿态：不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）。</p>
  */
 public record AgentCommand(
         String runId,
@@ -33,7 +34,8 @@ public record AgentCommand(
         Map<String, Object> streamCorrelation,
         Duration timeout,
         boolean live,
-        String agentRole) {
+        String agentRole,
+        boolean workspaceReadOnly) {
 
     /** 无逐轮超时的兼容形（取内核配置默认，不开直播）：无角色语境的一次性本地
      * 会话调用面（取名等）不变——空工具面。 */
@@ -41,7 +43,7 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, false, null);
+                usageContext, workspaceId, streamCorrelation, null, false, null, false);
     }
 
     /** 无逐轮超时、带角色的对话形（BA 访谈调用面：不开直播，角色键穿透工具装配）。 */
@@ -49,7 +51,7 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation, String agentRole) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, false, agentRole);
+                usageContext, workspaceId, streamCorrelation, null, false, agentRole, false);
     }
 
     public AgentCommand {

@@ -13,12 +13,14 @@ import org.springframework.stereotype.Component;
  * （name + sysPrompt + model + workspace）构建一次、进程内复用；容器关闭时统一释放
  * （HarnessAgent 是 AutoCloseable）。
  *
- * <p>工作区两形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
+ * <p>工作区三形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（subagents /
  * memory：源码包是交付物，记忆文件不进包）——工作区上下文（AGENTS.md 等）与
- * workspace/tools.json 读取照常，经容器文件面即项目事实。</p>
+ * workspace/tools.json 读取照常，经容器文件面即项目事实；
+ * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#47）——
+ * 容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具（写面结构性关闭）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -100,14 +102,29 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     builder.workspace(local.root());
                 }
             }
-            case AgentWorkspace.ProjectDev dev -> builder
-                    // 名义根：与容器内工作区根同形（路径规范化剥前缀后即工作区锚定形）
-                    .workspace(java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT))
-                    .abstractFilesystem(new DockerExecFilesystem(dev.containerName()))
-                    .disableSubagents()
-                    .disableMemoryHooks()
-                    .disableMemoryTools();
+            case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName());
+            case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, ro.containerName())
+                    // 只读面（#47 助理咨询姿态）：另关内核文件与 shell 工具——
+                    // 写面结构性不存在，项目事实的读取经业务侧只读工具集
+                    // （RoleToolkitSupplier）
+                    .disableFilesystemTools()
+                    .disableShellTool();
         }
         return builder.build();
+    }
+
+    /**
+     * 项目沙箱公共装配（ProjectDev 与 ProjectReadOnly 共用）：名义根与容器内
+     * 工作区根同形（路径规范化剥前缀后即工作区锚定形）、docker exec 文件面、
+     * 关闭会写 harness 内脏进项目工作区的部件（源码包是交付物）。
+     */
+    private static HarnessAgent.Builder projectSandbox(HarnessAgent.Builder builder,
+            String containerName) {
+        return builder
+                .workspace(java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT))
+                .abstractFilesystem(new DockerExecFilesystem(containerName))
+                .disableSubagents()
+                .disableMemoryHooks()
+                .disableMemoryTools();
     }
 }

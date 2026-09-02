@@ -90,6 +90,22 @@ public final class AgentEventTypes {
     /** 未动系统的原因键（finish_fix 的 text 原文——用户侧呈现正本）。 */
     public static final String FIX_UNCHANGED_REASON_FIELD = "reason";
 
+    /**
+     * 兜底轻引导回复（#47 入口三分类）：非意见非咨询输入（寒暄/闲聊/下单意图等）
+     * 的平台侧轻量引导——代码承载的定型文案，零产物路径（不起任何智能体 run），
+     * 无智能体帧序（本帧即全部）；runId 为派发锚（随派发响应同值返回）。
+     */
+    public static final String GUIDE_REPLY = "guide-reply";
+
+    /** 引导回复正文键（平台侧定型文案）。 */
+    public static final String GUIDE_TEXT_FIELD = "text";
+
+    /** 引导回复锚定的用户输入键（重放重建对话面用，同 run-start 的 prompt 语义）。 */
+    public static final String GUIDE_PROMPT_FIELD = "prompt";
+
+    /** 引导回复的呈现标签键（「平台」——非智能体角色，随帧呈现）。 */
+    public static final String GUIDE_LABEL_FIELD = "label";
+
     // ---------- 直播词汇（#23 生成环②；编码 run 的客户面解说广播） ----------
     // 前端直播侧栏只消费本组帧（+ run 生命周期平台事件），不耦合引擎透传事件格式；
     // 帧由 base.agentscope 的直播 mapper 逐段生产（SSE事件清单·通道二直播行）。

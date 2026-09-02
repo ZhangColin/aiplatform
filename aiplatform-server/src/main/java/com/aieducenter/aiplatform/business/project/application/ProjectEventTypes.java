@@ -13,6 +13,13 @@ public final class ProjectEventTypes {
     /** 预览已就绪（端口真实暴露后的 SSE 呈现）。 */
     public static final String PREVIEW_READY = "preview-ready";
 
+    /**
+     * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（直播步骤
+     * 边界）且平台侧探活通过后发射——前端节流重载预览。不携带 url（预览地址经
+     * REST 探活取得且不变）。
+     */
+    public static final String PREVIEW_UPDATED = "preview-updated";
+
     /** 工作区已销毁（删除级联清理落定后）。 */
     public static final String WORKSPACE_DESTROYED = "workspace-destroyed";
 

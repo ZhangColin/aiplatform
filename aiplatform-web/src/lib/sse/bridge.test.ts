@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
-import { useGenerationStore } from "@/lib/store/generation";
+import {
+  PREVIEW_REFRESH_MIN_INTERVAL_MS,
+  useGenerationStore,
+} from "@/lib/store/generation";
 import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { queryKeys } from "@/lib/api/keys";
@@ -145,6 +148,69 @@ describe("bridge · document-updated 载荷展示例外（#20 修订回路）", 
     );
 
     expect(usePrdNoticesStore.getState().seen.p1).toBeUndefined();
+  });
+});
+
+describe("bridge · preview-updated → 逐修改刷新（#49）", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+    useGenerationStore.setState({ generations: {} });
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+    vi.restoreAllMocks();
+  });
+
+  function previewUpdated(): SseEvent {
+    return notificationEvent("preview-updated", { projectId: "p1" });
+  }
+
+  it("通知计预览纪元 +1（iframe 重挂信号，与 run-finish 共一套机制）；不失效任何 REST 域", async () => {
+    const projects = observeActiveQuery(queryClient, queryKeys.projects.all);
+    await projects.waitForSettled();
+
+    dispatchNotificationEvent(queryClient, previewUpdated());
+
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+    // 内容在 iframe 背后的沙箱应用里、URL 不变——REST 域无可失效（重载走纪元非失效）
+    await new Promise((r) => setTimeout(r, 20));
+    expect(projects.fetchCount()).toBe(1);
+  });
+
+  it("节流：秒级最小间隔内的连续通知合并（纪元不重复计），出窗后再计", () => {
+    // 不钉具体毫秒（测试决策）：时点全部由常量推导——间隔内（差 1s）合并、
+    // 满最小间隔（边界值）出窗再计
+    const interval = PREVIEW_REFRESH_MIN_INTERVAL_MS;
+    const base = 10_000;
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(base);
+    dispatchNotificationEvent(queryClient, previewUpdated());
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+
+    // 间隔内（差 1s）的连续通知：合并丢弃——连续通知不闪烁
+    now.mockReturnValue(base + interval - 1000);
+    dispatchNotificationEvent(queryClient, previewUpdated());
+    dispatchNotificationEvent(queryClient, previewUpdated());
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+
+    // 出窗（满最小间隔，边界值）：下一次通知再计
+    now.mockReturnValue(base + interval);
+    dispatchNotificationEvent(queryClient, previewUpdated());
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(2);
+  });
+
+  it("通知按 projectId 隔离，不串门", () => {
+    dispatchNotificationEvent(queryClient, previewUpdated());
+    dispatchNotificationEvent(
+      queryClient,
+      notificationEvent("preview-updated", { projectId: "p2" }),
+    );
+
+    expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+    expect(useGenerationStore.getState().generations["p2"]?.previewEpoch).toBe(1);
   });
 });
 

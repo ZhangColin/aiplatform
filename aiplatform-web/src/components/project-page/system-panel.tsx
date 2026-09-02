@@ -150,8 +150,9 @@ function PanelHint({ children }: { children: ReactNode }) {
 }
 
 /**
- * 预览 iframe 的重挂 key：url + 预览纪元——编码 run 每次收口纪元 +1，同 URL 也
- * 强制重建 iframe（run 完成信号驱动预览自动刷新的唯一机制，替掉手动点击刷新）。
+ * 预览 iframe 的重挂 key：url + 预览纪元——两路信号各自 +1（编码 run 收口
+ * run-finish；逐修改刷新 preview-updated 通知经 store 节流），同 URL 也强制重建
+ * iframe（预览自动刷新的唯一机制，替掉手动点击刷新）。
  */
 export function previewFrameKey(url: string, epoch: number): string {
   return `${url}#${epoch}`;

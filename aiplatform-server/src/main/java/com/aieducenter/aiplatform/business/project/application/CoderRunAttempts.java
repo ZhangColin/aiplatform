@@ -24,7 +24,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>命令全要素同构：CODER 角色卡、{@code coder-{projectId}} 会话（重试续同会话
  * ——已落盘成果保留，同工作区不丢数据）、owner 寻址、长 run 超时、开直播（过程帧
  * 外并产直播帧）、计量 dims（agentKind=coder）、项目工作区、流关联。知识命中前置
- * 注入只进首试 prompt（一次下发一次注入，重试不重检索不重块）。</p>
+ * 注入只进首试 prompt（一次下发一次注入，重试不重检索不重块）。流桥挂逐修改刷新
+ * 装饰（#49：live-step 边界 → 探活 → preview-updated 通知）。</p>
  */
 @Component
 @Slf4j
@@ -41,13 +42,16 @@ class CoderRunAttempts {
     private final AgentStreamBridge streamBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final GenerationProperties properties;
+    private final LiveStepPreviewRefresh previewRefresh;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
-            ProjectKnowledgeAppService knowledgeAppService, GenerationProperties properties) {
+            ProjectKnowledgeAppService knowledgeAppService, GenerationProperties properties,
+            LiveStepPreviewRefresh previewRefresh) {
         this.agentClient = agentClient;
         this.streamBridge = streamBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
+        this.previewRefresh = previewRefresh;
     }
 
     /**
@@ -87,7 +91,10 @@ class CoderRunAttempts {
                     RolePreset.CODER.name(),
                     /* workspaceReadOnly= */ false);
             try {
-                agentClient.converse(command, streamBridge.sink(projectId));
+                // 逐修改刷新（#49）：流桥 sink 外包直播步骤探活装饰——live-step 边界
+                // （完整修改落定）→ 平台侧探活 → 通过才发 preview-updated 通知
+                agentClient.converse(command, previewRefresh.decorate(
+                        projectId, project.getWorkspaceId(), streamBridge.sink(projectId)));
                 onSuccess.accept(runId);
                 return true;
             }

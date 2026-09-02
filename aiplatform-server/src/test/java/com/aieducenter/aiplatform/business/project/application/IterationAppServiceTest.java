@@ -10,14 +10,17 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -34,9 +37,14 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -80,6 +88,14 @@ class IterationAppServiceTest {
 
     @MockitoBean
     private KnowledgePort knowledgePort;
+
+    /** 通知通道（#49 逐修改刷新的观测缝——preview-updated 在此断言）。 */
+    @MockitoBean
+    private PlatformNotificationAppService notificationAppService;
+
+    /** 工作区 exec（#49 步骤边界探活的脚本化缝；既有修正用例不触 exec 不受影响）。 */
+    @MockitoBean
+    private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @AfterEach
     void tearDown() {
@@ -372,6 +388,41 @@ class IterationAppServiceTest {
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
+    }
+
+    // ---------- 逐修改刷新（#49：修正与生成同一口径，刷新挂在共用尝试环） ----------
+
+    @Test
+    void given_fix_run_live_steps_and_probe_ok_when_fix_then_preview_updated_notification() {
+        Long projectId = persistedGeneratedProject("9913");
+        List<Runnable> tracks = givenTrackQueued();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // 脚本化边界：直播步骤序列（step1 起跑边界 + step2 完整修改落定）经捕获的
+        // sink 推入 + finish_fix 收口事实——修正 run 的探活装饰在生成侧同一链上
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(new AgentEvent(AgentEventTypes.LIVE_STEP, Map.of(
+                    AgentStreamAppService.RUN_FIELD, command.runId(),
+                    AgentEventTypes.LIVE_STEP_FIELD, 1)));
+            sink.accept(new AgentEvent(AgentEventTypes.LIVE_STEP, Map.of(
+                    AgentStreamAppService.RUN_FIELD, command.runId(),
+                    AgentEventTypes.LIVE_STEP_FIELD, 2)));
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列");
+        tracks.remove(0).run();
+
+        // 完整修改落定的步骤边界（step≥2）→ 平台侧探活通过 → 刷新通知（step1 不算）
+        verify(notificationAppService, timeout(5000))
+                .publish(eq(ProjectEventTypes.PREVIEW_UPDATED), argThat(payload ->
+                        projectId.toString().equals(
+                                payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
+        // run 正常收口、轨道收工（刷新装饰不改变修正收口行为）
+        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
     }
 
     @Test

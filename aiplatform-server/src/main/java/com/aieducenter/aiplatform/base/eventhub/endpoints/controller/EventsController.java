@@ -54,6 +54,7 @@ public class EventsController {
             |---|---|
             | workspace-created | projectId, projectName, container, projectType |
             | preview-ready | projectId, url |
+            | preview-updated | projectId |
             | workspace-destroyed | projectId |
             | document-updated | projectId, documentType |
             | project-renamed | projectId, projectName |

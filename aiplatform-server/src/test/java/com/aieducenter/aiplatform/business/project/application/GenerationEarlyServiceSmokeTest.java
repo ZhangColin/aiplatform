@@ -6,6 +6,7 @@ import static org.mockito.Mockito.doAnswer;
 
 import java.sql.Timestamp;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Supplier;
@@ -21,6 +22,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
@@ -37,13 +39,16 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 不在整类跳过）：真编码智能体从 PRD 生成系统的过程中，应用端口（8081）在 run
  * 早期即可访问——而不是临近收口才第一次起服务。仅 SSE 发射边 mock 收口观测。
  *
- * <p>机械判据四条：① run 成功收口且 generated_at 落位、收口后 8081 仍可达
+ * <p>机械判据五条：① run 成功收口且 generated_at 落位、收口后 8081 仍可达
  * （收口判据不因「尽早起」放松——converse 无异常不构成成功，8081 可达才落已生成）；
  * ② 8081 首次探活可达发生在 run 进行中（早于 run-finish 帧）；③ 首达时点不晚于
  * run 时长的九成——防旧形态回归的粗线（写完全部代码才起服的旧行为典型落在
  * 95%+ 时点；短 run 分母小、探活节流 ±2s 抖动，不贴更紧的线）；④ 首达之后至少
  * 还有两个直播步骤帧——实质判据（一步≈一次完整修改，起服后仍有两次完整修改
- * 在跑，「起服→curl 验证→收口」的假渐进过不了）。</p>
+ * 在跑，「起服→curl 验证→收口」的假渐进过不了）；⑤ run 过程中 preview-updated
+ * 刷新通知逐步到达（#49 逐修改刷新——步骤边界 + 平台探活门控的真链路：≥2 次、
+ * 首条晚于首个完整修改边界（live-step≥2）且不早于应用首达（探活门控，容探活
+ * 节流抖动 ±3s）、末条不晚于收口后 5s（异步探针与收口的竞态余量））。</p>
  *
  * <p>PRD 直接预置到工作区（等价 savePrd 的写文件 + 置已产出两步——冒烟聚焦编码
  * run 行为，BA 访谈链路另有 IterationChainSmokeTest 覆盖）。生成有自动重试：单次
@@ -105,7 +110,12 @@ class GenerationEarlyServiceSmokeTest {
     @MockitoBean
     private AgentStreamAppService streamAppService;
 
+    /** 通知通道发射边收口（#49 逐修改刷新观测缝）：preview-updated 带时戳捕获。 */
+    @MockitoBean
+    private PlatformNotificationAppService notificationAppService;
+
     private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Frame> notifications = new ConcurrentLinkedQueue<>();
 
     private String workspaceId;
     private Long projectId;
@@ -155,6 +165,11 @@ class GenerationEarlyServiceSmokeTest {
                     System.nanoTime()));
             return null;
         }).when(streamAppService).publish(any(), any());
+        doAnswer(invocation -> {
+            notifications.add(new Frame(invocation.getArgument(0), invocation.getArgument(1),
+                    System.nanoTime()));
+            return null;
+        }).when(notificationAppService).publish(any(), any());
         Project project = projectRepository.save(Project.create("渐进起服冒烟", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
@@ -222,6 +237,34 @@ class GenerationEarlyServiceSmokeTest {
         assertThat(frames.stream().skip(framesAtReach)
                 .filter(f -> AgentEventTypes.LIVE_STEP.equals(f.type())).count())
                 .as("首达之后应仍有至少两个步骤帧到达（增量演进在发生）").isGreaterThanOrEqualTo(2);
+
+        // 6) 判据⑤（#49 逐修改刷新）：preview-updated 通知随步骤逐步到达——收口后
+        //    留一拍让末针落定再结算
+        sleepQuietly();
+        List<Frame> updates = notifications.stream()
+                .filter(f -> ProjectEventTypes.PREVIEW_UPDATED.equals(f.type())).toList();
+        assertThat(updates)
+                .as("run 过程中应逐步发射 preview-updated 刷新通知（预览随步骤前移）")
+                .hasSizeGreaterThanOrEqualTo(2);
+        Frame firstCompletedStep = frames.stream()
+                .filter(f -> AgentEventTypes.LIVE_STEP.equals(f.type()) && stepOf(f) >= 2)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("应存在完整修改边界帧（live-step≥2）"));
+        assertThat(updates.getFirst().atNanos())
+                .as("首条刷新通知应晚于首个完整修改边界（刷新单元 = 一次完整修改）")
+                .isGreaterThanOrEqualTo(firstCompletedStep.atNanos());
+        assertThat(updates.getFirst().atNanos())
+                .as("首条刷新通知应不早于应用首达（平台探活门控，容探活节流抖动）")
+                .isGreaterThanOrEqualTo(firstReachNanos - Duration.ofSeconds(3).toNanos());
+        assertThat(updates.getLast().atNanos())
+                .as("末条刷新通知不应晚于收口后 5s（异步探针与收口的竞态余量）")
+                .isLessThanOrEqualTo(finish.atNanos() + Duration.ofSeconds(5).toNanos());
+    }
+
+    /** live-step 帧的步骤序号（非步骤帧 0）。 */
+    private static int stepOf(Frame frame) {
+        return frame.payload().get(AgentEventTypes.LIVE_STEP_FIELD) instanceof Number step
+                ? step.intValue() : 0;
     }
 
     // ---------- 编排件 ----------
@@ -270,6 +313,10 @@ class GenerationEarlyServiceSmokeTest {
                         (f.atNanos() - startNanos) / 1e9, f.type(),
                         f.payload().getOrDefault(AgentEventTypes.LIVE_ACTION_FIELD, "")));
             }
+        }
+        for (Frame n : notifications) {
+            timeline.append(String.format("%8.1fs [通知] %s%n",
+                    (n.atNanos() - startNanos) / 1e9, n.type()));
         }
         return timeline.toString();
     }

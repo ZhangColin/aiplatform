@@ -11,11 +11,15 @@ import { create } from "zustand";
  * 后续 run-start/finish/error 帧不带角色，凭登记判定）与跨 run 的状态，BA 轮
  * 不挤掉。刷新后由 agent 流通道重放缓冲重建（生成中回页可续看状态）。</p>
  *
- * <p><b>预览重挂纪元</b>：run 完成信号驱动预览自动重挂 iframe——每次编码 run
- * 收口（run-finish）纪元 +1，SystemPanel 以 url+epoch 为 iframe key。重放幂等：
- * 通道是带缓冲热流，重挂载会重收近期帧，纪元只对新见的 run-finish 事件 id
- * 递增（事件 id 去重锚，有界）。</p>
+ * <p><b>预览重挂纪元</b>：两路信号共一套机制——编码 run 收口（run-finish，事件
+ * id 去重防重放重复计）与逐修改刷新（preview-updated 通知，#49——平台侧已按
+ * 「步骤完成 + 探活通过」门控，前端只做节流：秒级最小间隔内的连续通知合并丢弃，
+ * 最终态由收口纪元兜底）各自 +1，SystemPanel 以 url+epoch 为 iframe key。通知
+ * 通道永不补发，preview-updated 无需事件 id 去重。</p>
  */
+
+/** 逐修改刷新的最小重载间隔（秒级，防闪烁；正步间隔远大于此，合并只在尖峰生效）。 */
+export const PREVIEW_REFRESH_MIN_INTERVAL_MS = 3000;
 
 /** 编码 run 状态（生成面视角；重试中的 run 视为仍在生成）。 */
 export type CoderRunStatus = "running" | "retrying" | "finished" | "error";
@@ -31,6 +35,8 @@ type ProjectGeneration = {
   previewEpoch: number;
   /** 已计过纪元的 run-finish 事件 id（重放去重锚，有界）。 */
   seenFinishEventIds: string[];
+  /** 上次逐修改刷新计纪元的时点（节流窗锚，桥传入）。 */
+  previewReloadAt?: number;
 };
 
 export type GenerationState = {
@@ -46,6 +52,11 @@ export type GenerationState = {
   noteCoderFinish: (projectId: string, eventId: string) => void;
   /** 编码 run 的 error：状态 → error（无后续 run-retrying 即超限终态）。 */
   noteCoderError: (projectId: string) => void;
+  /**
+   * 预览内容前移（#49 preview-updated 通知）：节流后计预览纪元——间隔内的连续
+   * 通知合并丢弃（不闪烁），重载由下一次出窗通知或收口纪元兜底。
+   */
+  notePreviewUpdated: (projectId: string, now: number) => void;
 };
 
 /** runId 登记集软上限（agent 流重放缓冲 ~1000 帧）。 */
@@ -129,6 +140,19 @@ export const useGenerationStore = create<GenerationState>((set) => ({
     updateGeneration(set, projectId, (generation) =>
       generation.coderStatus === "error" ? generation : { ...generation, coderStatus: "error" },
     ),
+
+  notePreviewUpdated: (projectId, now) =>
+    updateGeneration(set, projectId, (generation) => {
+      // 节流：距上次刷新不足最小间隔即合并丢弃（连续通知不闪烁；平台侧已按
+      // 「步骤完成且探活通过」门控，出窗后下一次通知或收口纪元会带来最新内容）
+      if (
+        generation.previewReloadAt !== undefined &&
+        now - generation.previewReloadAt < PREVIEW_REFRESH_MIN_INTERVAL_MS
+      ) {
+        return generation;
+      }
+      return { ...generation, previewEpoch: generation.previewEpoch + 1, previewReloadAt: now };
+    }),
 }));
 
 /** 编码 run 判定（bridge 侧用：登记过的 runId 即编码 run）。 */

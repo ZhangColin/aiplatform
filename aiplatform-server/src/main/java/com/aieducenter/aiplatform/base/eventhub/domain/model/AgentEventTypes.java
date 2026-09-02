@@ -106,6 +106,23 @@ public final class AgentEventTypes {
     /** 引导回复的呈现标签键（「平台」——非智能体角色，随帧呈现）。 */
     public static final String GUIDE_LABEL_FIELD = "label";
 
+    // ---------- 派发阶段（#50 阶段状态条；意见/咨询全过程） ----------
+
+    /**
+     * 派发阶段帧（#50）：意见 / 咨询链的阶段推进信号——前端状态条的唯一数据源
+     * （不署智能体名，阶段进度可见）。帧由业务编排层（派发 / BA / 助理 / 修正轨道）
+     * 在阶段边界发射，值集见发射方 {@code DispatchStage}（意见链 analyzing →
+     * clarifying? / updating-prd? → dispatching | queued → fixing → done；咨询链
+     * analyzing → answered）。
+     */
+    public static final String DISPATCH_STAGE = "dispatch-stage";
+
+    /** 阶段值键（发射方 DispatchStage 枚举的 wire 值）。 */
+    public static final String DISPATCH_STAGE_FIELD = "stage";
+
+    /** 完成态是否改动了系统（仅 stage=done 携带：true 已修改 / false 未动系统）。 */
+    public static final String DISPATCH_CHANGED_FIELD = "changed";
+
     // ---------- 直播词汇（#23 生成环②；编码 run 的客户面解说广播） ----------
     // 前端直播侧栏只消费本组帧（+ run 生命周期平台事件），不耦合引擎透传事件格式；
     // 帧由 base.agentscope 的直播 mapper 逐段生产（SSE事件清单·通道二直播行）。

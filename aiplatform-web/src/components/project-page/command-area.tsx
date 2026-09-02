@@ -19,6 +19,7 @@ import {
 } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 
+import { DispatchStageBar } from "./dispatch-stage-bar";
 import { QuestionCard } from "./question-card";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -30,6 +31,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * 即迭代入口（BA 判需求侧，回合收口后平台自动派修正 run——链必达 #43，指令区
  * 形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户隐式），气泡角色标签随
  * role-assigned / guide-reply 帧呈现（BA「需求分析师」/ 助理「项目助理」/ 平台）。
+ * 输入条上方挂派发阶段状态条（#50，dispatch-stage 帧驱动、不署智能体名）。
  * 发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
  * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store（SSE 桥喂，
  * 重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出「PRD 有更新 · 去看看」
@@ -165,6 +167,7 @@ export function CommandArea({
       </div>
 
       <div className="shrink-0 border-t p-3">
+        <DispatchStageBar projectId={projectId} />
         {prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button

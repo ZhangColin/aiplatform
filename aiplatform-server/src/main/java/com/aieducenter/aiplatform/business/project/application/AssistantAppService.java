@@ -60,6 +60,7 @@ public class AssistantAppService {
         String sessionId = SESSION_PREFIX + projectId;
 
         String runId = AgentStreamAppService.newRunId();
+        streamBridge.emitDispatchStage(projectId, runId, DispatchStage.ANALYZING);
         streamBridge.emitRoleAssigned(projectId, runId, role);
         AgentCommand command = new AgentCommand(
                 runId,
@@ -76,8 +77,11 @@ public class AssistantAppService {
                 /* live= */ false,
                 role.name(),
                 /* workspaceReadOnly= */ true);
-        sessionExecutor.submit(sessionId, () ->
-                agentClient.converse(command, streamBridge.sink(projectId)));
+        sessionExecutor.submit(sessionId, () -> {
+            agentClient.converse(command, streamBridge.sink(projectId));
+            // 咨询链收口（#50）：作答落定即终态阶段（失败链无此帧，error 帧如实表达）
+            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.ANSWERED);
+        });
         return new AssistantRun(runId);
     }
 

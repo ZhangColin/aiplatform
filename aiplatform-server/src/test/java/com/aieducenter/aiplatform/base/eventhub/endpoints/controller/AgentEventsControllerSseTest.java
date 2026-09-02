@@ -10,6 +10,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -222,6 +224,65 @@ class AgentEventsControllerSseTest {
     private JsonNode nextFrameEnvelope(SseClient client) throws Exception {
         assertThat(client.nextNonCommentLine()).isEqualTo("event:event");
         return objectMapper.readTree(client.nextNonCommentLine().substring("data:".length()));
+    }
+
+    /**
+     * 派发阶段帧线格式（#50 阶段状态条）：阶段值全集（含 done 的 changed 两态）
+     * 逐帧过线验收——信封 {type,payload,ts}、id {runId}:{seq}（帧序即阶段序）、
+     * payload 内禁 type 键、changed 仅 done 携带。意见链跨 run（BA 轮锚 →
+     * 修正 run 锚）+ 咨询链，按 ?projectId= 订阅同项目双 run 帧连续到达。
+     */
+    @Test
+    void given_dispatch_stage_frames_when_publish_then_full_stage_set_on_the_wire()
+            throws Exception {
+        SseClient client = connect("?projectId=31");
+
+        // 意见链（BA 轮 5 帧 + 修正 run 2 帧）+ 咨询链（2 帧）
+        List<StageWire> walk = List.of(
+                new StageWire("run-op-31", "analyzing", null),
+                new StageWire("run-op-31", "clarifying", null),
+                new StageWire("run-op-31", "updating-prd", null),
+                new StageWire("run-op-31", "dispatching", null),
+                new StageWire("run-op-31", "queued", null),
+                new StageWire("run-fix-31", "fixing", null),
+                new StageWire("run-fix-31", "done", false),
+                new StageWire("run-fix-31", "done", true),
+                new StageWire("run-ask-31", "analyzing", null),
+                new StageWire("run-ask-31", "answered", null));
+        for (StageWire stage : walk) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("projectId", "31");
+            payload.put("runId", stage.runId());
+            payload.put("stage", stage.stage());
+            if (stage.changed() != null) {
+                payload.put("changed", stage.changed());
+            }
+            appService.publish("dispatch-stage", payload);
+        }
+
+        Map<String, Integer> seqByRun = new HashMap<>();
+        for (StageWire stage : walk) {
+            int seq = seqByRun.merge(stage.runId(), 1, Integer::sum);
+            assertThat(client.nextNonCommentLine()).isEqualTo("id:" + stage.runId() + ":" + seq);
+            JsonNode envelope = nextFrameEnvelope(client);
+            assertThat(envelope.get("type").asText()).isEqualTo("dispatch-stage");
+            assertThat(envelope.get("payload").get("projectId").asText()).isEqualTo("31");
+            assertThat(envelope.get("payload").get("runId").asText()).isEqualTo(stage.runId());
+            assertThat(envelope.get("payload").get("stage").asText()).isEqualTo(stage.stage());
+            assertThat(envelope.get("payload").has("type")).isFalse(); // payload 内禁 type 键名
+            if (stage.changed() != null) {
+                assertThat(envelope.get("payload").get("changed").asBoolean())
+                        .isEqualTo(stage.changed());
+            }
+            else {
+                assertThat(envelope.get("payload").has("changed")).isFalse(); // done 之外不带
+            }
+            Instant.parse(envelope.get("ts").asText()); // ISO-8601 可解析（非法即抛）
+        }
+    }
+
+    /** 线格式验收的期望帧（changed 仅 done 携带，null = 不带该键）。 */
+    private record StageWire(String runId, String stage, Boolean changed) {
     }
 
     /** 空串头视同无值（新连接）：空 Last-Event-ID 无信息量——按新连接补发，不吞错误卡。 */

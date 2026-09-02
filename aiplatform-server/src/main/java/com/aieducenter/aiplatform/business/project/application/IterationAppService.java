@@ -187,6 +187,7 @@ public class IterationAppService {
             List<String> tasks = firstTasks;
             String runId = firstRunId;
             while (true) {
+                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.FIXING);
                 boolean succeeded = coderRunAttempts.run(project, runId,
                         new CoderRunAttempts.Prompts(fixRunPrompt(tasks), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId), "fix");
@@ -231,7 +232,7 @@ public class IterationAppService {
      * 即该次尝试失败（走共用尝试环的重试/终态，与生成 8081 核验同口径）；changed=false
      * 发 {@code fix-unchanged} 帧（「未动系统+原因」如实呈现），changed=true 现有
      * 收口行为不动（run-finish 已发，预览刷新/直播收起/状态位为前端对 run-finish 的
-     * 反应）。
+     * 反应）。#50：两态都发完成阶段帧（changed 区分「已修改」与「未动系统」）。
      */
     private void closeFixRun(Project project, String attemptRunId) {
         FinishFixFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
@@ -247,6 +248,7 @@ public class IterationAppService {
             log.info("[fix] 项目 {} 修正收口：系统未动（{}）", project.getId(), fact.text());
             streamBridge.emitFixUnchanged(project.getId(), attemptRunId, fact.text());
         }
+        streamBridge.emitDispatchDone(project.getId(), attemptRunId, fact.changed());
     }
 
     /** 修正任务 prompt：意见转化来的任务清单 + 收口判据复述（8081 常驻 + 结束工具必调）。 */

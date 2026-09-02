@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
+import { useDispatchStageStore } from "@/lib/store/dispatch-stage";
 import {
   PREVIEW_REFRESH_MIN_INTERVAL_MS,
   useGenerationStore,
@@ -482,6 +483,46 @@ describe("bridge · agent 流 → chat store（指令区对话面，#19）", () 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
     expect(chat?.turnActive).toBe(false);
+  });
+});
+
+describe("bridge · dispatch-stage → 阶段 store（#50 阶段状态条）", () => {
+  beforeEach(() => {
+    useDispatchStageStore.setState({ stages: {} });
+  });
+
+  function agentEvent(type: string, payload: Record<string, unknown>, id = "run1:1"): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts: "" }) };
+  }
+
+  it("帧序 last-wins：项目内最新帧即当前阶段（链跨 run，done 带 changed）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "dispatch-stage",
+      { projectId: "p1", runId: "run-ba", stage: "analyzing" },
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "dispatch-stage",
+      { projectId: "p1", runId: "run-fix", stage: "fixing" },
+      "run-fix:1",
+    ));
+    expect(useDispatchStageStore.getState().stages.p1).toEqual({ stage: "fixing" });
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "dispatch-stage",
+      { projectId: "p1", runId: "run-fix", stage: "done", changed: false },
+      "run-fix:2",
+    ));
+    expect(useDispatchStageStore.getState().stages.p1).toEqual({ stage: "done", changed: false });
+  });
+
+  it("名册外 stage 值忽略不炸（前向兼容）", () => {
+    expect(() =>
+      dispatchAgentEvent(agentQc, agentEvent(
+        "dispatch-stage",
+        { projectId: "p1", runId: "run-x", stage: "no-such-stage" },
+      )),
+    ).not.toThrow();
+    expect(useDispatchStageStore.getState().stages.p1).toBeUndefined();
   });
 });
 

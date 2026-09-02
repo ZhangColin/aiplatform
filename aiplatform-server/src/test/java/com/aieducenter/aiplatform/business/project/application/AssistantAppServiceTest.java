@@ -14,6 +14,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -153,5 +155,36 @@ class AssistantAppServiceTest {
 
     private static String projectIdOf(Map<String, Object> payload) {
         return String.valueOf(payload.get(AgentStreamAppService.PROJECT_FIELD));
+    }
+
+    @Test
+    void given_consultation_when_answered_then_stage_frames_analyzing_then_answered() {
+        // #50 咨询链阶段帧：analyzing（受理）→ answered（作答落定）——零产物短路
+        // 的全过程呈现，帧序先于 role-assigned、收口帧后于流帧
+        Project project = projectRepository.save(Project.create("咨询项目", null, 9812L, OWNER));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        when(agentClient.converse(any(), any())).thenAnswer(invocation ->
+                new AgentReply(((AgentCommand) invocation.getArgument(0)).runId(), "地址是 X。"));
+        List<String> stages = new ArrayList<>();
+        doAnswer(invocation -> {
+            if (AgentEventTypes.DISPATCH_STAGE.equals(invocation.getArgument(0))) {
+                stages.add(String.valueOf(
+                        invocation.<Map<String, Object>>getArgument(1)
+                                .get(AgentEventTypes.DISPATCH_STAGE_FIELD)));
+            }
+            return null;
+        }).when(streamAppService).publish(any(), anyMap());
+
+        AssistantAppService.AssistantRun run = appService.answer(project, "地址是什么？");
+
+        assertThat(stages).containsExactly("analyzing", "answered");
+        InOrder order = inOrder(streamAppService);
+        order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
+                "analyzing".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
+                        && run.runId().equals(payload.get(AgentStreamAppService.RUN_FIELD))));
+        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED), anyMap());
     }
 }

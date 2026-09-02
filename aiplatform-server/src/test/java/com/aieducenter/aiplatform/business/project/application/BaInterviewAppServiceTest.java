@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import cn.hutool.core.collection.CollUtil;
 
@@ -37,6 +39,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -483,6 +486,147 @@ class BaInterviewAppServiceTest {
         appService.runInterviewTurn(projectId, "把主色调改成绿色");
 
         verify(agentClient, times(1)).converse(any(), any());
+    }
+
+    // ---------- 派发阶段帧（#50 阶段状态条：意见链全程帧序） ----------
+
+    /** 阶段帧捕获（只收 dispatch-stage，发射序即阶段序）。 */
+    private List<String> givenStageCapture() {
+        List<String> stages = CollUtil.newArrayList();
+        doAnswer(invocation -> {
+            if (AgentEventTypes.DISPATCH_STAGE.equals(invocation.getArgument(0))) {
+                stages.add(String.valueOf(
+                        invocation.<Map<String, Object>>getArgument(1)
+                                .get(AgentEventTypes.DISPATCH_STAGE_FIELD)));
+            }
+            return null;
+        }).when(streamAppService).publish(any(), any());
+        return stages;
+    }
+
+    @Test
+    void given_generated_project_when_zero_action_opinion_then_stage_frames_walk_full_chain() {
+        // #50：BA 零动作的意见（不追问、不改 PRD）状态条完整走完——analyzing →
+        // dispatching → fixing → done(changed=true)，不经 clarifying / updating-prd
+        //（可选阶段缺席不是跳变，是如实）；帧序先于 role-assigned（状态条先开口）
+        Long projectId = persistedGeneratedProject("9730");
+        givenSessionExecutorRunsInline();
+        List<String> stages = givenStageCapture();
+        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
+        String turnRunId = appService.runInterviewTurn(projectId, "把主色调改成绿色").runId();
+
+        assertThat(stages).containsExactly("analyzing", "dispatching", "fixing", "done");
+        // 首帧锚 BA 轮 runId 且先于 role-assigned；完成态区分：changed=true（脚本
+        // finish_fix(changed=true)）——「已修改」与「未动系统」以 changed 分档
+        InOrder order = inOrder(streamAppService);
+        order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE),
+                argThat(payload -> "analyzing".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
+                        && turnRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
+        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED), anyMap());
+        verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
+                "done".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
+                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.DISPATCH_CHANGED_FIELD))));
+    }
+
+    @Test
+    void given_not_generated_project_when_turn_then_no_stage_frames() {
+        // 生成前意见链止于 BA：无隐藏处理段，不发阶段帧（访谈期以对话面本身呈现）——
+        // 状态条不空转、不悬停
+        Long projectId = persistedProject("9731");
+        givenSessionExecutorRunsInline();
+        List<String> stages = givenStageCapture();
+
+        appService.runInterviewTurn(projectId, "做一个官网");
+
+        assertThat(stages).isEmpty();
+    }
+
+    @Test
+    void given_question_raised_when_answer_settles_then_clarifying_then_chain_resumes() {
+        // #50 挂起边界：追问挂起停在 clarifying（不发后续），答复续跑回 analyzing
+        // 再走完链——阶段与链路实际状态一致
+        Long projectId = persistedGeneratedProject("9732");
+        givenSessionExecutorRunsInline();
+        List<String> stages = givenStageCapture();
+        // BA 轮流上挂起帧（kind=QUESTION）；修正 run 收口脚本沿用（changed=true）
+        doAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("ba-")) {
+                Consumer<AgentEvent> sink = invocation.getArgument(1);
+                sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
+                        new java.util.LinkedHashMap<>(Map.of(
+                                "runId", command.runId(),
+                                AgentEventTypes.WAIT_KIND_FIELD, "QUESTION",
+                                AgentEventTypes.WAIT_SUMMARY_FIELD, "主色调想要哪种绿？"))));
+                return new AgentReply(command.runId(), "先问一下");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已修正");
+            return new AgentReply(command.runId(), "修正完成");
+        }).when(agentClient).converse(any(), any());
+        // 提交守卫放行 → 本轮收口观测见挂起（不派）→ 答复续跑收口观测无挂起（派）
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(false)
+                .thenReturn(true)
+                .thenReturn(false);
+
+        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+        assertThat(stages).containsExactly("analyzing", "clarifying"); // 停在追问中
+
+        appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "要薄荷绿");
+        assertThat(stages).containsExactly("analyzing", "clarifying",
+                "analyzing", "dispatching", "fixing", "done"); // 答复后续跑走完
+    }
+
+    @Test
+    void given_ba_calls_save_prd_when_opinion_then_updating_prd_stage() {
+        // #50：BA 判定需求变更调 savePrd（tool 帧 start 边界）→ updating-prd 阶段
+        Long projectId = persistedGeneratedProject("9733");
+        givenSessionExecutorRunsInline();
+        List<String> stages = givenStageCapture();
+        doAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("ba-")) {
+                Consumer<AgentEvent> sink = invocation.getArgument(1);
+                sink.accept(new AgentEvent("tool", new java.util.LinkedHashMap<>(Map.of(
+                        "runId", command.runId(),
+                        "data", Map.of("toolCallId", "tc-1", "toolName", "savePrd",
+                                "phase", "start")))));
+                return new AgentReply(command.runId(), "已按意见更新 PRD");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已修正");
+            return new AgentReply(command.runId(), "修正完成");
+        }).when(agentClient).converse(any(), any());
+
+        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+
+        assertThat(stages).containsExactly("analyzing", "updating-prd", "dispatching",
+                "fixing", "done");
+    }
+
+    @Test
+    void given_fix_in_flight_when_opinion_closes_then_queued_stage() {
+        // #50 排队边界：修正 run 在途时新意见收口 → queued（如实呈现排队，锚本条
+        // 意见的 BA 轮），不起第二条轨道
+        Long projectId = persistedGeneratedProject("9734");
+        List<Runnable> tracks = CollUtil.newArrayList();
+        doAnswer(invocation -> {
+            Runnable task = (Runnable) invocation.getArgument(1);
+            if (("coder-" + projectId).equals(invocation.getArgument(0))) {
+                tracks.add(task); // 修正轨道挂起不跑（模拟在途）
+                return null;
+            }
+            task.run();
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        givenConverseBaRepliesAndCoderFinishes("好的");
+        List<String> stages = givenStageCapture();
+
+        appService.runInterviewTurn(projectId, "意见一：加导出");
+        appService.runInterviewTurn(projectId, "意见二：改蓝色");
+
+        assertThat(stages).containsExactly("analyzing", "dispatching", "analyzing",
+                "dispatching", "queued");
     }
 
     // ---------- 测试数据 ----------

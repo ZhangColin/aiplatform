@@ -110,6 +110,31 @@ public class AgentStreamBridge {
                 AgentEventTypes.GUIDE_TEXT_FIELD, text));
     }
 
+    /**
+     * dispatch-stage 发射（#50 阶段状态条）：意见 / 咨询链的阶段推进帧——前端
+     * 状态条唯一数据源。runId 锚定当前阶段所属的 run（分析/追问/更新 PRD 锚
+     * BA 轮、修正/完成锚修正 run、已答复锚助理轮），链跨 run 推进、帧序即阶段序。
+     */
+    public void emitDispatchStage(Long projectId, String runId, DispatchStage stage) {
+        streamAppService.publish(AgentEventTypes.DISPATCH_STAGE, Map.of(
+                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
+                AgentStreamAppService.RUN_FIELD, runId,
+                AgentEventTypes.DISPATCH_STAGE_FIELD, stage.wireValue()));
+    }
+
+    /**
+     * dispatch-stage·完成态发射（#50）：修正收口的终态阶段，{@code changed} 区分
+     * 「已修改」与「未动系统」（未动的原因另由 {@code fix-unchanged} 帧承载）。
+     */
+    public void emitDispatchDone(Long projectId, String runId, boolean changed) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(AgentStreamAppService.PROJECT_FIELD, projectId.toString());
+        payload.put(AgentStreamAppService.RUN_FIELD, runId);
+        payload.put(AgentEventTypes.DISPATCH_STAGE_FIELD, DispatchStage.DONE.wireValue());
+        payload.put(AgentEventTypes.DISPATCH_CHANGED_FIELD, changed);
+        streamAppService.publish(AgentEventTypes.DISPATCH_STAGE, payload);
+    }
+
     /** 关联字段注入（透传不解释；帧序在前——寻址字段不覆盖帧本体字段）。 */
     private static Map<String, Object> withCorrelation(Map<String, Object> payload,
                                                        Map<String, Object> correlation) {

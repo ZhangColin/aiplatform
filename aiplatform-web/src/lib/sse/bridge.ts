@@ -6,6 +6,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
+import { useDispatchStageStore } from "@/lib/store/dispatch-stage";
 import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { orderStatusToastText } from "@/lib/orders/status";
@@ -121,6 +122,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const store = useAgentStreamsStore.getState();
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
+  const stage = useDispatchStageStore.getState();
   const live = useLiveStore.getState();
 
   const platform = asPlatformAgentEvent(envelope);
@@ -240,6 +242,13 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           payload.text,
           event.id,
         );
+        return;
+      }
+      case "dispatch-stage": {
+        // 派发阶段帧（#50 阶段状态条）：只进阶段 store（指令区状态条唯一消费面；
+        // 帧不承担正确性——失败链停在事发阶段，error 帧另行呈现）
+        const { payload } = platform;
+        stage.noteStage(payload.projectId, payload.stage, payload.changed);
         return;
       }
       // 直播帧（#23）：只进直播面 store（直播侧栏唯一消费面——前端不耦合引擎

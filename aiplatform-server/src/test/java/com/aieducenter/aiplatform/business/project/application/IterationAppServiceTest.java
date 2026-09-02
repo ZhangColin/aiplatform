@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
@@ -25,6 +27,7 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -575,6 +578,59 @@ class IterationAppServiceTest {
         assertThatThrownBy(() -> appService.restartFixRun(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
+    }
+
+    // ---------- 派发阶段帧（#50：修正轨的 fixing / done 发射） ----------
+
+    /** 阶段帧捕获（只收 dispatch-stage，发射序即阶段序）。 */
+    private List<String> givenStageCapture() {
+        List<String> stages = new ArrayList<>();
+        doAnswer(invocation -> {
+            if (AgentEventTypes.DISPATCH_STAGE.equals(invocation.getArgument(0))) {
+                stages.add(String.valueOf(
+                        invocation.<Map<String, Object>>getArgument(1)
+                                .get(AgentEventTypes.DISPATCH_STAGE_FIELD)));
+            }
+            return null;
+        }).when(streamAppService).publish(any(), any());
+        return stages;
+    }
+
+    @Test
+    void given_fix_closes_unchanged_when_settled_then_done_stage_changed_false_after_fix_unchanged() {
+        // #50 完成态区分：changed=false → done(changed=false) 呈现「未动系统」，
+        // 帧序 fix-unchanged（原因通告）→ done（状态条收口）
+        Long projectId = persistedGeneratedProject("9930");
+        List<Runnable> tracks = givenTrackQueued();
+        List<String> stages = givenStageCapture();
+        givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
+
+        appService.startFixRun(projectId, "改主色调");
+        tracks.remove(0).run();
+
+        assertThat(stages).containsExactly("fixing", "done");
+        InOrder order = inOrder(streamAppService);
+        order.verify(streamAppService).publish(eq(AgentEventTypes.FIX_UNCHANGED), anyMap());
+        order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
+                "done".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
+                        && Boolean.FALSE.equals(payload.get(AgentEventTypes.DISPATCH_CHANGED_FIELD))));
+    }
+
+    @Test
+    void given_queued_continuation_when_track_merges_then_fixing_and_done_per_run() {
+        // #50：每场修正 run 一组 fixing → done（首场 + 排队合并续场同口径——状态条
+        // 跟着 run 边界推进，不静默）；changed=true 无 fix-unchanged（既有行为）
+        Long projectId = persistedGeneratedProject("9931");
+        List<Runnable> tracks = givenTrackQueued();
+        List<String> stages = givenStageCapture();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "意见一");
+        assertThat(appService.startFixRun(projectId, "意见二").queued()).isTrue();
+        tracks.remove(0).run(); // 首场收口即合并续场
+
+        assertThat(stages).containsExactly("fixing", "done", "fixing", "done");
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), anyMap());
     }
 
     // ---------- 测试数据 ----------

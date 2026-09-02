@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import org.springframework.stereotype.Service;
 
@@ -14,6 +15,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -52,6 +55,17 @@ public class BaInterviewAppService {
 
     /** BA 会话标识派生前缀（projectId → ba-{projectId}，稳定绑定勿动）。 */
     public static final String SESSION_PREFIX = "ba-";
+
+    /**
+     * 引擎透传工具帧的观测常量（SSE事件清单·通道二透传行：tool 帧 {@code data} 为
+     * {toolCallId, toolName, phase: start|end}）——BA 流上的 savePrd 起跑观测
+     * （#50 阶段状态条「更新 PRD 中」），透传集合开放、契约名照正本引用。
+     */
+    private static final String TOOL_FRAME_TYPE = "tool";
+    private static final String TOOL_DATA_FIELD = "data";
+    private static final String TOOL_NAME_FIELD = "toolName";
+    private static final String TOOL_PHASE_FIELD = "phase";
+    private static final String SAVE_PRD_TOOL = "savePrd";
 
     private final ProjectRepository projectRepository;
     private final AgentscopeAgentClient agentClient;
@@ -138,6 +152,7 @@ public class BaInterviewAppService {
         opinionExchanges.put(sessionId, prompt);
 
         String runId = AgentStreamAppService.newRunId();
+        Consumer<AgentEvent> sink = stageAwareSink(project, runId);
         streamBridge.emitRoleAssigned(projectId, runId, role);
         AgentCommand command = new AgentCommand(
                 runId,
@@ -151,8 +166,8 @@ public class BaInterviewAppService {
                 correlationOf(projectId),
                 role.name());
         sessionExecutor.submit(sessionId, () -> {
-            agentClient.converse(command, streamBridge.sink(projectId));
-            dispatchFixOnTurnClose(projectId, sessionId);
+            agentClient.converse(command, sink);
+            dispatchFixOnTurnClose(projectId, sessionId, runId);
         });
         return new InterviewRun(runId);
     }
@@ -188,9 +203,10 @@ public class BaInterviewAppService {
                 usageContextOf(projectId, role, sessionId),
                 role.name());
         appendOpinionReply(sessionId, answerText);
+        Consumer<AgentEvent> sink = stageAwareSink(project, runId);
         sessionExecutor.submit(sessionId, () -> {
-            agentClient.resume(resume, streamBridge.sink(projectId));
-            dispatchFixOnTurnClose(projectId, sessionId);
+            agentClient.resume(resume, sink);
+            dispatchFixOnTurnClose(projectId, sessionId, runId);
         });
     }
 
@@ -208,8 +224,11 @@ public class BaInterviewAppService {
      * 中的意见原文及追问答复）。BA 无派发权：模型存没存 PRD、调没调任何工具都
      * 不影响派发——链的收口在平台代码。观测或派发失败只记日志（不炸 BA 轨道；
      * 意见不丢，用户重提即兜底）。
+     *
+     * <p>#50：收口派发即发阶段帧——起跑发 {@code dispatching}、在途排队发
+     * {@code queued}（如实呈现排队，锚本条意见的 BA 轮 runId）。</p>
      */
-    private void dispatchFixOnTurnClose(Long projectId, String sessionId) {
+    private void dispatchFixOnTurnClose(Long projectId, String sessionId, String runId) {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
             if (project == null
@@ -224,13 +243,69 @@ public class BaInterviewAppService {
             if (task == null || task.isBlank()) {
                 return; // 锚缺失（put 先于收口，进程内理论不可达）——防御不派
             }
-            iterationAppService.startFixRun(projectId, task);
-            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run", projectId);
+            // 派发中先于派发调用发射（帧序先于轨道起跑——轨道内首帧即 fixing）
+            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.DISPATCHING);
+            IterationAppService.FixDispatch dispatch = iterationAppService.startFixRun(projectId, task);
+            if (dispatch.queued()) {
+                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.QUEUED);
+            }
+            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}）", projectId,
+                    dispatch.queued() ? "排队下一轮" : "起跑");
         }
         catch (RuntimeException e) {
             log.warn("[ba-close] 项目 {} 修正 run 自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }
+    }
+
+    /**
+     * BA 流的阶段观测装饰（#50）：意见链进入状态条的前提是项目已生成（生成前
+     * 意见链止于 BA，无隐藏处理段，不发帧——访谈期以对话面本身呈现）。已生成时
+     * 先发 {@code analyzing}（正在分析您的意见，先于 role-assigned——状态条先
+     * 开口），流中观测两处阶段边界：问答挂起（question-raised·QUESTION）→
+     * {@code clarifying}、savePrd 起跑（tool 帧 start）→ {@code updating-prd}。
+     * 阶段发射失败只记日志不断流。
+     */
+    private Consumer<AgentEvent> stageAwareSink(Project project, String runId) {
+        Consumer<AgentEvent> sink = streamBridge.sink(project.getId());
+        if (project.getGeneratedAt() == null) {
+            return sink;
+        }
+        streamBridge.emitDispatchStage(project.getId(), runId, DispatchStage.ANALYZING);
+        return event -> {
+            sink.accept(event);
+            try {
+                observeStageBoundary(project.getId(), runId, event);
+            }
+            catch (RuntimeException e) {
+                log.warn("[dispatch-stage] 项目 {} 阶段帧发射失败（不断流）：{}",
+                        project.getId(), e.toString());
+            }
+        };
+    }
+
+    /** BA 流上的阶段边界观测：问答挂起 → 追问中；savePrd 起跑 → 更新 PRD 中。 */
+    private void observeStageBoundary(Long projectId, String runId, AgentEvent event) {
+        if (AgentEventTypes.QUESTION_RAISED.equals(event.type()) && isQuestionKind(event)) {
+            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.CLARIFYING);
+            return;
+        }
+        if (TOOL_FRAME_TYPE.equals(event.type()) && isSavePrdStart(event)) {
+            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.UPDATING_PRD);
+        }
+    }
+
+    private static boolean isQuestionKind(AgentEvent event) {
+        return "QUESTION".equals(String.valueOf(event.payload().get(AgentEventTypes.WAIT_KIND_FIELD)));
+    }
+
+    /** savePrd 起跑判定（tool 透传帧 data 形状照 SSE事件清单；只认 start 不认 end——更新中）。 */
+    private static boolean isSavePrdStart(AgentEvent event) {
+        if (!(event.payload().get(TOOL_DATA_FIELD) instanceof Map<?, ?> data)) {
+            return false;
+        }
+        return SAVE_PRD_TOOL.equals(data.get(TOOL_NAME_FIELD))
+                && "start".equals(data.get(TOOL_PHASE_FIELD));
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接任务）；

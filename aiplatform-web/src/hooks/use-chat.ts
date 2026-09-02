@@ -5,12 +5,14 @@ import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { errorText } from "@/lib/api/api-error";
 import { useChatStore } from "@/lib/store/chat";
+import { useDispatchStageStore } from "@/lib/store/dispatch-stage";
 
 /**
  * 指令区两发送口（issue #19 需求环①）：发言（POST /api/projects/{id}/messages，
  * 无待答问题时 Enter 走此）与问答作答（POST /api/projects/{id}/questions/{qid}/
  * answer，qid = 挂起帧 engineRef；body 回传 runId + data.toolCalls 原样 + 答复）。
- * 乐观更新都在 chat store（成功路径 REST/SSE 自愈；失败撤回气泡、问题卡重开）。
+ * 乐观更新都在 chat store（成功路径 REST/SSE 自愈；失败撤回气泡、问题卡重开）；
+ * 发送即重置派发阶段条（#50：上一链终态不滞留，新链 analyzing 帧随后到达）。
  */
 
 type PostMessageCommand = components["schemas"]["PostMessageCommand"];
@@ -26,6 +28,7 @@ export function usePostMessage(projectId: string) {
       const chat = useChatStore.getState();
       const messageId = chat.appendUserMessage(projectId, content);
       chat.startTurn(projectId);
+      useDispatchStageStore.getState().noteSubmitted(projectId);
       return { messageId };
     },
     onSuccess: (result) => {
@@ -46,6 +49,7 @@ export function useAnswerQuestion(projectId: string) {
       api.post<void>(`/projects/${projectId}/questions/${input.qid}/answer`, input.command),
     onMutate: ({ command }) => {
       const messageId = useChatStore.getState().submitAnswer(projectId, command.answer);
+      useDispatchStageStore.getState().noteSubmitted(projectId);
       return { messageId };
     },
     onError: (error, _input, context) => {

@@ -161,6 +161,17 @@ export type PlatformAgentEvent =
       payload: AgentPayload & { prompt: string; label: string; text: string };
     }
   | {
+      /**
+       * 派发阶段帧（#50 阶段状态条的唯一数据源）：意见 / 咨询全过程的阶段推进
+       * 信号，不署智能体名。`stage` ∈ analyzing / clarifying / updating-prd /
+       * dispatching / fixing / queued / done / answered（帧序即阶段序，项目内
+       * 最新帧即当前阶段）；`changed` 仅 done 携带（true 已修改 / false 未动
+       * 系统）。链跨 run：前段锚 BA 轮 runId、fixing/done 锚修正 run 的 runId。
+       */
+      type: "dispatch-stage";
+      payload: AgentPayload & { stage: string; changed?: boolean };
+    }
+  | {
       /** 直播·智能体自述解说段（#23，编码 run 专属）：`text` 为完整段非增量（服务端逐段成型）。 */
       type: "live-text";
       payload: AgentPayload & { text: string };
@@ -186,6 +197,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "run-retrying",
   "fix-unchanged",
   "guide-reply",
+  "dispatch-stage",
   "live-text",
   "live-action",
   "live-step",

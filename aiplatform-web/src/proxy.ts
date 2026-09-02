@@ -25,12 +25,26 @@ export function proxy(request: NextRequest) {
 
   if (request.cookies.has(SESSION_COOKIE)) return NextResponse.next();
 
+  // OIDC BFF 回调失败落地页：后端统一回跳 /?error=exchange_failed / state_mismatch，
+  // 这里必须放行，否则无 cookie 会再被踢回 /auth/login 形成死循环。
+  if (isAuthErrorLandingPage(request)) {
+    return NextResponse.next();
+  }
+
   return NextResponse.redirect(
     new URL(
       buildLoginRedirectUrl(request.nextUrl.pathname, request.nextUrl.search),
       request.url,
     ),
     302,
+  );
+}
+
+/** 后端 callback 失败回跳的错误页：pathname 为根且携带 error 查询参数。 */
+function isAuthErrorLandingPage(request: NextRequest): boolean {
+  return (
+    request.nextUrl.pathname === "/" &&
+    request.nextUrl.searchParams.has("error")
   );
 }
 

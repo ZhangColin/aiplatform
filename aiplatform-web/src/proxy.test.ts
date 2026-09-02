@@ -111,4 +111,18 @@ describe("proxy · 会话判定", () => {
 
     expect(res.status).toBe(302);
   });
+
+  it("认证回调失败落地页 /?error=exchange_failed 应放行，避免死循环", () => {
+    const res = proxy(request("/?error=exchange_failed"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("state 校验失败落地页 /?error=state_mismatch 同样放行", () => {
+    const res = proxy(request("/?error=state_mismatch"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
 });

@@ -6,10 +6,64 @@ spring:
     username: aiplatform
     password: aiplatform-dev
 
-# #29 后台机机面：入站验签凭据走本机 app-registry（8088，启动与 seed 见
-# docs/guide/本机依赖启动.md；apiKey = appCode，admin-console 为 seed 预置应用）
+spring.jpa.show-sql: true
+
+
+# 机机调用签名（cartisan-openapi；与用户会话无关，ADR-0001）；
+# 默认枚举 Controller 关闭（扫描包默认 com.cartisan/com.example，用不到，避免契约噪音）
 cartisan:
+  web:
+    enum-controller:
+      enabled: false
   openapi:
+    # self = 出站调用自己的凭证（v1 无出站调用，壳留位）；键名对齐
+    # CartisanOpenapiProperties.Self（api-key/api-secret）
+    self:
+      api-key: ${OPENAPI_APP_ID:}
+      api-secret: ${OPENAPI_APP_SECRET:}
+    # 入站验签的凭据源（app-registry）——prod 走网关域名（路由即鉴权边界）；
+    # local 覆盖为本机 app-registry bootstrap 端点（见 application-local.yml）
     apikey-service-url: http://localhost:8088/api/app-registry/api-keys/{apiKey}
 
-spring.jpa.show-sql: true
+
+# 片3 · base.knowledge：本机 fastembed embedding 服务（512 维），
+# 启动方式见 docs/guide/本机依赖启动.md（scripts/embedding_server.py）
+app:
+  embedding:
+    url: http://127.0.0.1:9091
+  # base.agentscope：智能体内核（AgentScope HarnessAgent）默认值。
+  # API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry 自行读取）；
+  # workspace 是本地兜底工作区（命令未带 workspaceId 时用，留空 = AgentScope 默认）——
+  # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面）。
+  agentscope:
+    agent-name: platform-agent
+    default-model: deepseek:deepseek-v4-flash
+    default-system-prompt: 你是平台智能体。
+    timeout: 2m
+    # 单 turn 迭代上限：内核缺省 10 会把编码 turn 掐断成 exceed_max_iters 假完成
+    # （依据与取值见 AgentscopeProperties#maxIters 注释——单点事实在此不重述）。
+    max-iters: 300
+  # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
+  # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
+  workspace:
+    provision-max-attempts: 3
+  # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
+  # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
+  # 用户重新发起兜底（#22 重试次数/超时值实施期定）。
+  generation:
+    max-attempts: 3
+    timeout: 30m
+
+# A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
+# 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本机依赖启动.md。
+# 全程 localhost、禁混 127.0.0.1（cookie 按域隔离不带端口，A2 §2 表 8）。
+sso:
+  issuer: ${SSO_ISSUER:http://identity.localhost:10001}
+  client-id: ${SSO_CLIENT_ID:}
+  client-secret: ${SSO_CLIENT_SECRET:}
+  redirect-uri: ${SSO_REDIRECT_URI:http://localhost:3333/auth/callback}
+  scope: ${SSO_SCOPE:openid profile email}
+  app-base-url: ${SSO_APP_BASE_URL:http://localhost:3333}
+  # local 走 http://localhost：Safari/Firefox 不豁免 Secure-over-http，拒存 Secure cookie
+  # （A2 §2 表 8-②）；生产 https 必须 true（application-prod.yml 已翻）
+  cookie-secure: ${SSO_COOKIE_SECURE:false}

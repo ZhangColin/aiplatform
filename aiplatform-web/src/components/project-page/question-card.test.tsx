@@ -55,6 +55,8 @@ describe("QuestionCard · CC 式问答卡（#19）", () => {
     expect(html).toContain("企业客户");
     expect(html).toContain("提交");
     expect(html).toContain("disabled"); // 无勾选不可提交
+    // 选项面换行（真实布局由浏览器级验证收口；此处防类名退化回 nowrap 平铺出屏）
+    expect(html).toMatch(/data-slot="toggle-group"[^>]*flex-wrap/);
   });
 
   it("多选已勾选：勾选项按 pressed 态呈现", () => {

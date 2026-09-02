@@ -66,9 +66,10 @@ export function QuestionCard({
               disabled={!interactive}
               value={selection}
               onValueChange={(value) => onSelectionChange(value)}
+              className="flex-wrap"
             >
               {question.options.map((label) => (
-                <ToggleGroupItem key={label} value={label} aria-label={label}>
+                <ToggleGroupItem key={label} value={label} aria-label={label} className="whitespace-normal">
                   <Check className="size-3.5 opacity-30 group-data-pressed/toggle:opacity-100" />
                   {label}
                 </ToggleGroupItem>
@@ -82,7 +83,7 @@ export function QuestionCard({
                     key={label}
                     size="sm"
                     variant="outline"
-                    className="rounded-full"
+                    className="rounded-full whitespace-normal text-left"
                     onClick={() => onAnswer(label)}
                   >
                     {label}

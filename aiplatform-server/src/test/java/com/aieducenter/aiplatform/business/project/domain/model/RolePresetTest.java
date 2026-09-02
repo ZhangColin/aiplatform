@@ -138,6 +138,15 @@ class RolePresetTest {
     }
 
     @Test
+    void given_coder_protocol_when_inspect_then_service_started_early_and_evolves_incrementally() {
+        // 起服节奏（#44 渐进预览前提）：一开工即以可运行形态起服务（空壳也可）、
+        // 此后增量演进——不是写完全部代码最后才起服务；收口判据不因此放松
+        assertThat(CODER_PROMPT).contains("一开工");
+        assertThat(CODER_PROMPT).contains("增量演进");
+        assertThat(CODER_PROMPT).contains("不要写完全部代码");
+    }
+
+    @Test
     void given_coder_protocol_when_inspect_then_narration_and_term_rules() {
         // 直播解说生产 = 智能体自述为主（#23 直播侧栏消费）；术语口径与 BA 同源
         assertThat(CODER_PROMPT).contains("自述");

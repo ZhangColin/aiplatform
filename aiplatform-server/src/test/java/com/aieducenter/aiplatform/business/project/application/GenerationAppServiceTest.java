@@ -198,7 +198,10 @@ class GenerationAppServiceTest {
                 argThat((WorkspaceExecCommand cmd) ->
                         cmd.command().contains("/workspace/AGENTS.md")
                                 && cmd.command().contains("工作区平台约定")
-                                && cmd.command().contains("8081")));
+                                && cmd.command().contains("8081")
+                                // #44 起服节奏约定进工作区正本（尽早起、增量长）
+                                && cmd.command().contains("一开工就跑起来")
+                                && cmd.command().contains("增量长出页面与功能")));
         order.verify(agentClient).converse(any(), any());
     }
 

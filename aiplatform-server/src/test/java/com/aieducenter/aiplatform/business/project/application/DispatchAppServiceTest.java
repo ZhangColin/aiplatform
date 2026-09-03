@@ -381,7 +381,7 @@ class DispatchAppServiceTest {
     // ---------- 分类输出解析（容错口径） ----------
 
     @Test
-    void given_classifier_outputs_when_parse_then_first_recognized_token_wins() {
+    void given_classifier_outputs_when_parse_then_single_label_hit_and_multi_label_falls_back_to_opinion() {
         assertThat(DispatchAppService.parse("OPINION")).isEqualTo(
                 new DispatchAppService.Classification(DispatchAppService.MessageClass.OPINION, false));
         assertThat(DispatchAppService.parse("inquiry")).isEqualTo(

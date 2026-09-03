@@ -20,6 +20,9 @@ public final class AgentEventTypes {
     /** 运行失败（异步路径的失败表达，不抛异常）。 */
     public static final String ERROR = "error";
 
+    /** 错误帧的用户侧消息键（发射方给定话术，逐次尝试的过程事实）。 */
+    public static final String ERROR_MESSAGE_FIELD = "message";
+
     /** 运行结束（finish = 引擎结煞语，如 end / error）。 */
     public static final String RUN_FINISH = "run-finish";
 

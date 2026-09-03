@@ -238,7 +238,7 @@ final class AgentscopeEventMapper {
     static AgentEvent error(String runId, String message) {
         return new AgentEvent(AgentEventTypes.ERROR, Map.of(
                 AgentEventTypes.RUN_FIELD, runId,
-                "message", message != null ? message : "智能体运行失败"));
+                AgentEventTypes.ERROR_MESSAGE_FIELD, message != null ? message : "智能体运行失败"));
     }
 
     // ---------- 内部 ----------

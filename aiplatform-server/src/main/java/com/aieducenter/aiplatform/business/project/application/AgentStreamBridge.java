@@ -104,7 +104,7 @@ public class AgentStreamBridge {
         streamAppService.publish(AgentEventTypes.ERROR, Map.of(
                 AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
                 AgentStreamAppService.RUN_FIELD, runId,
-                "message", message));
+                AgentEventTypes.ERROR_MESSAGE_FIELD, message));
     }
 
     /**

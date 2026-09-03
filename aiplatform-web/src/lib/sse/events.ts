@@ -174,9 +174,11 @@ export type PlatformAgentEvent =
       /**
        * 派发阶段帧（#50 阶段状态条的唯一数据源）：意见 / 咨询全过程的阶段推进
        * 信号，不署智能体名。`stage` ∈ analyzing / clarifying / updating-prd /
-       * dispatching / fixing / queued / done / answered（帧序即阶段序，项目内
-       * 最新帧即当前阶段）；`changed` 仅 done 携带（true 已修改 / false 未动
-       * 系统）。链跨 run：前段锚 BA 轮 runId、fixing/done 锚修正 run 的 runId。
+       * dispatching / queued / fixing / done / answered / dispatch-failed（帧序
+       * 即阶段序，项目内最新帧即当前阶段；dispatch-failed 为派发失败终态——
+       * 意见锚已消费不自动重试，重提即兜底）；`changed` 仅 done 携带（true 已
+       * 修改 / false 未动系统）。链跨 run：前段锚 BA 轮 runId、fixing/done 锚
+       * 修正 run 的 runId。
        */
       type: "dispatch-stage";
       payload: AgentPayload & { stage: string; changed?: boolean };

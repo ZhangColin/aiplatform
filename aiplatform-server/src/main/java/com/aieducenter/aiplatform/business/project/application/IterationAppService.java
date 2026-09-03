@@ -3,7 +3,6 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,8 +26,8 @@ import lombok.extern.slf4j.Slf4j;
  * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + BA 判定结果（PRD
  * 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
  * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——CODER 重读约定见
- * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时各轮
- * 非空判定全保留，#53）。
+ * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
+ * 配对全保留——各轮「意见 → 修订说明」一一对应，未修订轮显式占位，#55）。
  * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体
  * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走
  * 共用尝试环 {@link CoderRunAttempts}）。
@@ -108,7 +107,8 @@ public class IterationAppService {
      */
     public FixDispatch startFixRun(Long projectId, String task, String prdRevisionSummary) {
         Project project = requireFixableProject(projectId);
-        return dispatch(project, new FixHandoff(List.of(task.strip()), prdRevisionSummary));
+        return dispatch(project, new FixHandoff(
+                List.of(new FixHandoff.Round(task.strip(), prdRevisionSummary))));
     }
 
     /**
@@ -133,8 +133,8 @@ public class IterationAppService {
             fixesInFlight.add(projectId);
             firstRunId = AgentStreamAppService.newRunId();
         }
-        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接意见 {} 条，源自超限终态）",
-                projectId, firstRunId, handoff.opinions().size());
+        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接 {} 轮，源自超限终态）",
+                projectId, firstRunId, handoff.rounds().size());
         submitFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
     }
@@ -145,27 +145,28 @@ public class IterationAppService {
 
     /**
      * 修正 run 交接物（#52，CONTEXT.md「交接物」）：需求侧收口后交给修正的任务
-     * 载体——意见原文清单 + 需求侧判定结果（PRD 改没改、改了什么；null = 本轮
-     * 无 savePrd 调用事实，即未修订）。PRD 引用不随物携带（路径固定
-     * {@link ProjectArtifacts#PRD}，prompt 拼装时引用）。
+     * 载体——逐轮配对的「意见原文 → 该轮判定结果」（{@link Round}，#55）：一轮
+     * 派发一条意见一份判定，配对关系由平台代码在拼装时锚定，不依赖意见清单与
+     * 说明清单的位置对齐——某轮零修订不再引起后续轮错位。summary null = 该轮
+     * 无 savePrd 调用事实（即未修订；占位呈现归 {@link #fixRunPrompt}）。PRD
+     * 引用不随物携带（路径固定 {@link ProjectArtifacts#PRD}，prompt 拼装时引用）。
      */
-    record FixHandoff(List<String> opinions, String prdRevisionSummary) {
+    record FixHandoff(List<Round> rounds) {
 
-        /** 排队合并：意见按派发序串联；非空修订说明按派发序全部保留（#53）——
-         * 跨轮各轮的判定描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、B 轮在其
-         * 上再改 Y），只留最新会让修正侧漏掉早期轮的需求侧变更；同轮多次
-         * savePrd 的「取终值」在捕获层（{@link PrdRevisionFacts} 后写胜出）处理，
-         * 不在此层。全空即 null（「未修订」口径）。 */
+        /** 一轮派发的一条交接：意见原文 + 该轮 PRD 修订说明（null = 该轮未修订）。 */
+        record Round(String opinion, String prdRevisionSummary) {
+        }
+
+        /** 排队合并：各轮按派发序成对串联（#55 逐轮配对）——跨轮各轮的判定
+         * 描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、B 轮在其上再改 Y），只留
+         * 最新会让修正侧漏掉早期轮的需求侧变更（#53）；未修订轮不丢不串位
+         * （null 槽保留轮位，占位呈现归 prompt 拼装）——丢轮即后续全部错位。
+         * 同轮多次 savePrd 的「取终值」在捕获层（{@link PrdRevisionFacts}
+         * 后写胜出）处理，不在此层。 */
         static FixHandoff merge(List<FixHandoff> handoffs) {
-            List<String> opinions = handoffs.stream()
-                    .flatMap(handoff -> handoff.opinions().stream())
-                    .toList();
-            List<String> summaries = handoffs.stream()
-                    .map(FixHandoff::prdRevisionSummary)
-                    .filter(Objects::nonNull)
-                    .toList();
-            return new FixHandoff(opinions,
-                    summaries.isEmpty() ? null : String.join("\n", summaries));
+            return new FixHandoff(handoffs.stream()
+                    .flatMap(handoff -> handoff.rounds().stream())
+                    .toList());
         }
     }
 
@@ -246,10 +247,10 @@ public class IterationAppService {
                 if (queued.isEmpty()) {
                     return;
                 }
-                int mergedOpinions = queued.stream()
-                        .mapToInt(next -> next.opinions().size()).sum();
-                log.info("[fix] 项目 {} 修正轨道续派（合并 {} 条排队任务）",
-                        projectId, mergedOpinions);
+                int mergedRounds = queued.stream()
+                        .mapToInt(next -> next.rounds().size()).sum();
+                log.info("[fix] 项目 {} 修正轨道续派（合并 {} 轮排队意见）",
+                        projectId, mergedRounds);
                 handoff = FixHandoff.merge(queued);
                 runId = AgentStreamAppService.newRunId();
             }
@@ -288,23 +289,25 @@ public class IterationAppService {
     }
 
     /**
-     * 修正任务 prompt：交接物三要素结构化拼装（#52）——意见清单 + 需求侧判定
-     * （PRD 改没改、改了什么）+ PRD 路径引用（不注全文，CODER 重读约定见角色卡）
-     * + 收口判据复述（8081 常驻 + 结束工具必调）。
+     * 修正任务 prompt：交接物三要素结构化拼装（#52，#55 逐轮配对）——每条意见
+     * 原文后紧跟该轮的需求侧判定（已修订带修订说明、未修订显式「本轮无修订」
+     * 占位——哪条意见被哪轮处理了一目了然，不静默缺席）+ PRD 路径引用（不注
+     * 全文，CODER 重读约定见角色卡）+ 收口判据复述（8081 常驻 + 结束工具必调）。
      */
     static String fixRunPrompt(FixHandoff handoff) {
         StringBuilder prompt = new StringBuilder(
-                "系统修正：系统已生成并可操作，用户提出了如下修正意见，请在现有工作区内"
-                        + "完成修正（系统的其余部分保持可用）：");
-        for (int index = 0; index < handoff.opinions().size(); index++) {
-            prompt.append("\n").append(index + 1).append(". ").append(handoff.opinions().get(index));
+                "系统修正：系统已生成并可操作，用户提出了如下修正意见（每条意见后紧跟"
+                        + "该轮的需求侧判定），请在现有工作区内完成修正（系统的其余部分"
+                        + "保持可用）：");
+        for (int index = 0; index < handoff.rounds().size(); index++) {
+            FixHandoff.Round round = handoff.rounds().get(index);
+            prompt.append("\n").append(index + 1).append(". 意见原文：").append(round.opinion())
+                    .append("\n   需求侧判定（BA 已收口）：")
+                    .append(round.prdRevisionSummary() != null
+                            ? "PRD 已修订——" + round.prdRevisionSummary()
+                            : "本轮无修订（未触发 PRD 变更）");
         }
-        prompt.append("\n需求侧判定（BA 已收口）：")
-                .append(handoff.prdRevisionSummary() != null
-                        ? "PRD 已修订，修订说明（按派发序，每段一轮）："
-                                + handoff.prdRevisionSummary()
-                        : "PRD 未修订（上述意见未触发需求文档变更）")
-                .append("。需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
+        prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
                 .append("，以正本与上述意见为准。")
                 .append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
                 .append("\n收尾必须调用 finish_fix 工具：动了系统传 changed=true 并说明改了什么；")

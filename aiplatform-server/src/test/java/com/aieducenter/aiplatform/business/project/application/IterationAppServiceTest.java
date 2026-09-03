@@ -63,9 +63,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」帧，
  * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
  * 物，正常态 / 在途 / 排队均不可达）；交接物三要素（#52：判定结果 + PRD 路径
- * 引用入修正 run prompt；排队合并 #53：意见串联、非空修订说明按派发序全部保留
- * ——跨轮各轮判定描述的是仍生效的增量，只取最新即漏早期轮）；守卫组
- * （不存在 / 已归档 / 未生成）。
+ * 引用入修正 run prompt；排队合并 #55 逐轮配对：各轮「意见 → 修订说明」一一
+ * 对应、未修订轮显式占位不串位——#53 判定全保留的口径不变，载体从两清单
+ * 位置对齐收严为结构化成对）；守卫组（不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
 class IterationAppServiceTest {
@@ -153,7 +153,7 @@ class IterationAppServiceTest {
         // CODER 角色卡 + owner + 计量 dims + 流关联 + 直播开（与生成同机制）
         assertThat(value.runId()).isEqualTo(dispatch.runId());
         assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
-                new IterationAppService.FixHandoff(List.of("把预约列表按时间倒序排列"), null)));
+                singleHandoff("把预约列表按时间倒序排列", null)));
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.workspaceId()).isEqualTo("9900");
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
@@ -203,8 +203,10 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         List<AgentCommand> runs = command.getAllValues();
         assertThat(runs.get(1).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("按钮改蓝色", "加导出"), null)))
-                .contains("1. 按钮改蓝色").contains("2. 加导出");
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
+                        List.of(new IterationAppService.FixHandoff.Round("按钮改蓝色", null),
+                                new IterationAppService.FixHandoff.Round("加导出", null)))))
+                .contains("1. 意见原文：按钮改蓝色").contains("2. 意见原文：加导出");
         assertThat(runs.get(1).sessionId()).isEqualTo("coder-" + projectId);
         assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
         // 轨道收工（队列空）：在途释放——下一场意见可再起跑
@@ -245,7 +247,7 @@ class IterationAppServiceTest {
         assertThat(command.getValue().prompt())
                 .startsWith("【平台知识库·相似历史需求】")
                 .contains("连锁诊所系统")
-                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of(task), null)));
+                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(singleHandoff(task, null)));
     }
 
     @Test
@@ -421,7 +423,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_prd_not_revised_when_fix_then_prompt_states_not_revised_and_dispatch_proceeds() {
-        // BA 流不调 savePrd：交接物如实含「PRD 未修订」口径，修正 run 照派
+        // BA 流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
         Long projectId = persistedGeneratedProject("9920");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -432,15 +434,16 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().prompt())
-                .contains("PRD 未修订")
-                .contains(ProjectArtifacts.PRD)
-                .doesNotContain("修订说明");
+                .contains("本轮无修订")
+                .doesNotContain("PRD 已修订")
+                .contains(ProjectArtifacts.PRD);
     }
 
     @Test
-    void given_queued_handoffs_with_one_revision_when_merged_then_opinions_concat_and_nonempty_only() {
-        // 排队合并：意见串联为一轮；非空修订说明保留、未修订轮不占位（null 不产生
-        // 假「已修订」段）——「后轮未再修订」不影响前轮判定入物
+    void given_queued_rounds_with_and_without_revision_when_merged_then_prompt_pairs_per_round() {
+        // 灵魂用例（#55 story 14 收严）：多轮排队合并且部分轮 BA 未改 PRD——每条
+        // 意见与其修订说明仍一一对应（意见二 ↔ 其修订说明、意见三 ↔ 显式占位），
+        // 无修订轮不引起后续轮错位；配对由平台拼装锚定，不靠两清单位置对齐
         Long projectId = persistedGeneratedProject("9921");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -453,17 +456,18 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .contains("1. 意见二：加导出")
-                .contains("2. 意见三：改蓝色")
-                .contains("为意见二补充了导出功能章节");
+                .contains("1. 意见原文：意见二：加导出"
+                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——为意见二补充了导出功能章节")
+                .contains("2. 意见原文：意见三：改蓝色"
+                        + "\n   需求侧判定（BA 已收口）：本轮无修订（未触发 PRD 变更）");
     }
 
     @Test
     void given_queued_opinions_each_with_revision_when_track_merges_then_prompt_carries_both_rounds() {
         // 灵魂用例（#53）：意见 A 的 BA 轮已把改 X 落盘（summary=改X）在途排队 +
         // 意见 B（summary=改Y）排队 → 当前 run 收口续派时，续派 run 的 prompt 同时
-        // 含 X 与 Y 两段判定（按派发序）——只带最新一段会让编码智能体不知道 X 也是
-        // 需求侧新变更、需要同步到系统
+        // 含 X 与 Y 两段判定（各自配对、按派发序）——只带最新一段会让编码智能体
+        // 不知道 X 也是需求侧新变更、需要同步到系统
         Long projectId = persistedGeneratedProject("9932");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -477,47 +481,53 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         String continuation = command.getAllValues().get(1).prompt();
         assertThat(continuation)
-                .contains("A轮修订：PRD 新增导出功能章节")
-                .contains("B轮修订：主色调约定改为蓝");
-        assertThat(continuation.indexOf("A轮修订：PRD 新增导出功能章节"))
-                .isLessThan(continuation.indexOf("B轮修订：主色调约定改为蓝"));
+                .contains("1. 意见原文：意见A：加导出"
+                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——A轮修订：PRD 新增导出功能章节")
+                .contains("2. 意见原文：意见B：改蓝色"
+                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——B轮修订：主色调约定改为蓝");
     }
 
-    // ---------- 排队合并判定保留（#53：merge 纯函数——非空判定结果按派发序串联） ----------
+    // ---------- 逐轮配对（#55：merge 纯函数——各轮「意见 → 修订说明」成对串联） ----------
 
     @Test
-    void given_handoffs_each_with_revision_when_merged_then_all_kept_in_dispatch_order() {
+    void given_handoffs_each_with_revision_when_merged_then_rounds_pair_opinion_with_own_revision() {
         // 跨轮排队合并：各轮判定描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、
-        // B 轮在其上再改 Y）——两段都在、按派发序
+        // B 轮在其上再改 Y）——各轮成对、按派发序
         IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
-                new IterationAppService.FixHandoff(List.of("意见A"), "A轮修订：改X"),
-                new IterationAppService.FixHandoff(List.of("意见B"), "B轮修订：改Y")));
-        assertThat(merged.opinions()).containsExactly("意见A", "意见B");
-        assertThat(merged.prdRevisionSummary()).contains("A轮修订：改X").contains("B轮修订：改Y");
-        assertThat(merged.prdRevisionSummary().indexOf("A轮修订：改X"))
-                .isLessThan(merged.prdRevisionSummary().indexOf("B轮修订：改Y"));
+                singleHandoff("意见A", "A轮修订：改X"),
+                singleHandoff("意见B", "B轮修订：改Y")));
+        assertThat(merged.rounds()).containsExactly(
+                new IterationAppService.FixHandoff.Round("意见A", "A轮修订：改X"),
+                new IterationAppService.FixHandoff.Round("意见B", "B轮修订：改Y"));
     }
 
     @Test
-    void given_handoffs_with_mixed_revision_when_merged_then_only_nonempty_kept() {
-        // 一空一有：只含非空者（未修订轮不占位）；派发序两侧各验一次
-        IterationAppService.FixHandoff emptyFirst = IterationAppService.FixHandoff.merge(List.of(
-                new IterationAppService.FixHandoff(List.of("意见A"), null),
-                new IterationAppService.FixHandoff(List.of("意见B"), "B轮修订：改Y")));
-        assertThat(emptyFirst.prdRevisionSummary()).isEqualTo("B轮修订：改Y");
-        IterationAppService.FixHandoff emptySecond = IterationAppService.FixHandoff.merge(List.of(
-                new IterationAppService.FixHandoff(List.of("意见A"), "A轮修订：改X"),
-                new IterationAppService.FixHandoff(List.of("意见B"), null)));
-        assertThat(emptySecond.prdRevisionSummary()).isEqualTo("A轮修订：改X");
+    void given_handoffs_mixed_revision_when_merged_then_unrevised_round_kept_in_place() {
+        // 有改有不改：未修订轮不丢不串位——轮次保留、summary 槽 null（占位呈现归
+        // fixRunPrompt，数据层不造「假说明」）；派发序两侧各验一次
+        IterationAppService.FixHandoff unrevisedFirst = IterationAppService.FixHandoff.merge(List.of(
+                singleHandoff("意见A", null),
+                singleHandoff("意见B", "B轮修订：改Y")));
+        assertThat(unrevisedFirst.rounds()).containsExactly(
+                new IterationAppService.FixHandoff.Round("意见A", null),
+                new IterationAppService.FixHandoff.Round("意见B", "B轮修订：改Y"));
+        IterationAppService.FixHandoff unrevisedSecond = IterationAppService.FixHandoff.merge(List.of(
+                singleHandoff("意见A", "A轮修订：改X"),
+                singleHandoff("意见B", null)));
+        assertThat(unrevisedSecond.rounds()).containsExactly(
+                new IterationAppService.FixHandoff.Round("意见A", "A轮修订：改X"),
+                new IterationAppService.FixHandoff.Round("意见B", null));
     }
 
     @Test
-    void given_handoffs_all_without_revision_when_merged_then_summary_null() {
-        // 全空 → null（「PRD 未修订」口径照旧——fixRunPrompt 的 null 分支）
+    void given_handoffs_all_without_revision_when_merged_then_all_rounds_unrevised() {
+        // 全未修订：各轮槽均 null（每轮各自的「本轮无修订」，非全局一杆子）
         IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
-                new IterationAppService.FixHandoff(List.of("意见A"), null),
-                new IterationAppService.FixHandoff(List.of("意见B"), null)));
-        assertThat(merged.prdRevisionSummary()).isNull();
+                singleHandoff("意见A", null),
+                singleHandoff("意见B", null)));
+        assertThat(merged.rounds()).hasSize(2)
+                .extracting(IterationAppService.FixHandoff.Round::prdRevisionSummary)
+                .containsOnlyNulls();
     }
 
     // ---------- 逐修改刷新（#49：修正与生成同一口径，刷新挂在共用尝试环） ----------
@@ -613,8 +623,8 @@ class IterationAppServiceTest {
         verify(agentClient, times(4)).converse(command.capture(), any());
         AgentCommand redispatch = command.getAllValues().get(3);
         assertThat(redispatch.prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
-                        List.of("把主色调改成绿色"), "按意见把主色调改为绿")));
+                .isEqualTo(IterationAppService.fixRunPrompt(
+                        singleHandoff("把主色调改成绿色", "按意见把主色调改为绿")));
         assertThat(redispatch.runId()).isEqualTo(restart.runId());
         assertThat(redispatch.sessionId()).isEqualTo("coder-" + projectId);
         // 恢复轮成功收工：终态账清（成功后无恢复面，再恢复即 409）+ 轨道释放（下一场可起跑）
@@ -678,7 +688,7 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(9)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(6).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("第二次意见"), null)));
+                .isEqualTo(IterationAppService.fixRunPrompt(singleHandoff("第二次意见", null)));
         assertThat(command.getAllValues().get(6).runId()).isEqualTo(restart.runId());
     }
 
@@ -762,6 +772,12 @@ class IterationAppServiceTest {
     }
 
     // ---------- 测试数据 ----------
+
+    /** 单轮交接物（一次派发 = 一轮：一条意见 + 该轮判定）。 */
+    private static IterationAppService.FixHandoff singleHandoff(String opinion, String summary) {
+        return new IterationAppService.FixHandoff(
+                List.of(new IterationAppService.FixHandoff.Round(opinion, summary)));
+    }
 
     /** 已生成形态的项目（迭代的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {

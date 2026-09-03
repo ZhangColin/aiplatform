@@ -60,7 +60,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 收口（无挂起问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；
  * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）；交接物补齐（#52）——
  * savePrd 的 summary 终值与「PRD 未修订」口径入修正 run prompt，本轮判定从零
- * 起算（上轮残留不进）。
+ * 起算（上轮残留不进）；BA 轮在途意见排队成轮（#54）——意见锚随会话任务落
+ * （在途窗口连发各自成轮各自派发、零丢失），converse 炸即清锚（重提即兜底）。
  */
 @SpringBootTest
 class BaInterviewAppServiceTest {
@@ -103,6 +104,20 @@ class BaInterviewAppServiceTest {
     private void givenSessionExecutorRunsInline() {
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+    }
+
+    /** 同生产语义吞掉轨道异常（异步轨道失败经 error 帧表达，执行器只记日志）——
+     * 炸轮用例的执行器形态。 */
+    private void givenSessionExecutorSwallowsFailures() {
+        doAnswer(invocation -> {
+            try {
+                ((Runnable) invocation.getArgument(1)).run();
+            }
+            catch (RuntimeException e) {
+                // 生产执行器吞掉记日志（异步轨道），此处同语义
+            }
             return null;
         }).when(sessionExecutor).submit(any(), any());
     }
@@ -480,15 +495,7 @@ class BaInterviewAppServiceTest {
         // 单一脚本分轮：首轮 record 后抛，次轮正常回复（Mockito 重打桩会以 null
         // 参调旧 answer，故不分设）
         Long projectId = persistedGeneratedProject("9743");
-        doAnswer(invocation -> {
-            try {
-                ((Runnable) invocation.getArgument(1)).run();
-            }
-            catch (RuntimeException e) {
-                // 生产执行器吞掉记日志（异步轨道），此处同语义（首轮 BA 炸）
-            }
-            return null;
-        }).when(sessionExecutor).submit(any(), any());
+        givenSessionExecutorSwallowsFailures();
         AtomicBoolean firstBaTurn = new AtomicBoolean(true);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -586,20 +593,85 @@ class BaInterviewAppServiceTest {
                 .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("意见二：改蓝色"), null)));
     }
 
+    // ---------- BA 轮在途意见排队成轮（#54：锚随任务落 + 失败清锚） ----------
+
+    @Test
+    void given_second_opinion_during_ba_turn_in_flight_when_turns_close_then_each_dispatches_own_opinion() {
+        // 灵魂用例（#54 缺陷的行为化验证）：BA 轮在途（REST 已返、收口未至）窗口
+        // 连发两条意见——各自成轮、各自收口派发，交接物各含自己的意见（现状：
+        // REST 线程 put 覆盖单槽锚，轮1 交接物只剩意见二、轮2 锚空防御不派——
+        // 意见一零丢失承诺被破）；轮2 派发撞在途修正 run → queued（#53 合并续派）
+        Long projectId = persistedGeneratedProject("9725");
+        List<Runnable> baTracks = CollUtil.newArrayList();
+        List<Runnable> coderTracks = CollUtil.newArrayList();
+        doAnswer(invocation -> {
+            Runnable task = (Runnable) invocation.getArgument(1);
+            if (((String) invocation.getArgument(0)).startsWith("ba-")) {
+                baTracks.add(task); // BA 轨道挂起不跑（模拟轮1 在途窗口）
+            } else {
+                coderTracks.add(task); // 修正轨道挂起不跑（模拟在途）
+            }
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        givenConverseBaRepliesAndCoderFinishes("好的");
+        List<String> stages = givenStageCapture();
+
+        appService.runInterviewTurn(projectId, "意见一：加导出");
+        appService.runInterviewTurn(projectId, "意见二：改蓝色"); // 轮1 在途窗口再发
+        assertThat(baTracks).hasSize(2);
+
+        baTracks.remove(0).run(); // 轮1 收口：派发交接物含意见一（现状 = 意见二，先红）
+        baTracks.remove(0).run(); // 轮2 收口：第二次派发、含意见二 → 撞在途修正 → queued
+        // 帧序如实于测试时序：两轮先相继提交（analyzing×2），轨道后跑（收口派发×2，
+        // 第二次撞在途修正 → queued）
+        assertThat(stages).containsExactly("analyzing", "analyzing", "dispatching",
+                "dispatching", "queued");
+
+        coderTracks.remove(0).run(); // 修正轨道起跑：第一场收口即合并排队的意见二续派
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(2).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
+                        List.of("意见一：加导出"), null)));
+        assertThat(command.getAllValues().get(3).prompt())
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
+                        List.of("意见二：改蓝色"), null)));
+    }
+
+    @Test
+    void given_converse_failure_when_turn_then_anchor_cleared_no_stale_opinion_consumed() {
+        // 失败即清锚（#54，对齐「收口即消费」）：converse 炸 → 锚即清——后续收口
+        // （此处脚本化：炸轮后经问答答复续跑收口）不消费到滞留的旧意见；重提即
+        // 兜底，不自动重试；error 帧语义保持（converse 内已发）
+        Long projectId = persistedGeneratedProject("9726");
+        givenSessionExecutorSwallowsFailures();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("ba-")) {
+                throw new IllegalStateException("BA 轮失败"); // 首个（唯一）BA 轮即炸
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.runInterviewTurn(projectId, "意见（本轮将炸）");
+        appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "对追问的答复");
+
+        // 答复续跑收口派修正：交接物意见腿只含答复（自立），不含炸轮滞留的旧意见
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("对追问的答复")
+                .doesNotContain("意见（本轮将炸）");
+    }
+
     @Test
     void given_turn_error_when_close_then_no_dispatch() {
         // BA 轮失败不派修正（意见未被处理；error 帧已表达，用户重提即兜底）——
         // 内联执行器同生产语义吞掉轨道异常
         Long projectId = persistedGeneratedProject("9724");
-        doAnswer(invocation -> {
-            try {
-                ((Runnable) invocation.getArgument(1)).run();
-            }
-            catch (RuntimeException e) {
-                // 生产执行器吞掉记日志（异步轨道），此处同语义
-            }
-            return null;
-        }).when(sessionExecutor).submit(any(), any());
+        givenSessionExecutorSwallowsFailures();
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("BA 轮失败"));
 

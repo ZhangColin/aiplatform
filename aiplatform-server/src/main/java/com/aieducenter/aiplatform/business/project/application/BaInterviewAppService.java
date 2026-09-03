@@ -78,10 +78,11 @@ public class BaInterviewAppService {
     private final PrdRevisionFacts prdRevisions;
 
     /**
-     * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文开场落锚，追问挂起
-     * 期间的答复逐条并入（{@link #appendOpinionReply}）——收口派发的任务即锚的
-     * 终值；收口即消费。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由
-     * PRD 承载）。
+     * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
+     * （任务首行 put，随执行器串行——BA 轮在途的新意见各自成轮，后写不覆盖在途
+     * 轮的锚，#54），追问挂起期间的答复逐条并入（{@link #appendOpinionReply}）
+     * ——收口派发的任务即锚的终值；收口即消费，轮炸即清（失败不留锚，重提即
+     * 兜底）。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由 PRD 承载）。
      */
     private final Map<String, String> opinionExchanges = new ConcurrentHashMap<>();
 
@@ -150,7 +151,6 @@ public class BaInterviewAppService {
         RolePreset role = RolePreset.BA;
         String sessionId = SESSION_PREFIX + projectId;
         requireNoPendingQuestion(project, sessionId);
-        opinionExchanges.put(sessionId, prompt);
 
         String runId = AgentStreamAppService.newRunId();
         Consumer<AgentEvent> sink = stageAwareSink(project, runId);
@@ -167,11 +167,23 @@ public class BaInterviewAppService {
                 correlationOf(projectId),
                 role.name());
         sessionExecutor.submit(sessionId, () -> {
-            // 本轮需求侧判定从零起算（任务首行，随会话执行器串行——上一轮收口
-            // 消费在前，不会被本轮起跑插队 wipe）：上一轮异常滞留（轮炸即收口
-            // 不跑）/访谈期的 savePrd 事实残留不进本轮交接物
+            // 排队成轮（#54）：锚随任务落（同会话 FIFO——后发意见的 put 排在本轮
+            // 收口之后，不覆盖在途轮的锚）：BA 轮在途连发的意见各自成轮、各自
+            // 收口派发，撞在途修正 run 走排队合并
+            opinionExchanges.put(sessionId, prompt);
+            // 本轮需求侧判定从零起算（随会话执行器串行——上一轮收口消费在前，
+            // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的 savePrd 事实残留不进
+            // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
-            agentClient.converse(command, sink);
+            try {
+                agentClient.converse(command, sink);
+            }
+            catch (RuntimeException e) {
+                // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
+                // 不自动重试；error 帧已由 converse 内发出（异常上抛由会话执行器吞）
+                opinionExchanges.remove(sessionId);
+                throw e;
+            }
             dispatchFixOnTurnClose(projectId, sessionId, runId);
         });
         return new InterviewRun(runId);
@@ -251,7 +263,7 @@ public class BaInterviewAppService {
             }
             String task = opinionExchanges.remove(sessionId);
             if (task == null || task.isBlank()) {
-                return; // 锚缺失（put 先于收口，进程内理论不可达）——防御不派
+                return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
             }
             String prdRevisionSummary = prdRevisions.consume(workspaceId);
             // 派发中先于派发调用发射（帧序先于轨道起跑——轨道内首帧即 fixing）

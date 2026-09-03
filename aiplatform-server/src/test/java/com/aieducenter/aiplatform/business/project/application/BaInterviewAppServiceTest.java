@@ -373,7 +373,7 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_pending_question_when_turn_then_prj_024_and_no_submission() {
-        // 挂起问答守卫（#40 / ADR-0004）：问答待答期间指令区新输入不盲提交 converse
+        // 挂起问答守卫（#40 / ADR-0005）：问答待答期间指令区新输入不盲提交 converse
         // ——引擎按 ASKING 态拒时 REST 已返 200、只见异步 error 帧；同步 409 指路
         // 作答。role-assigned 帧也不发（守卫先于任何帧与提交）
         Long projectId = persistedProject("9715");

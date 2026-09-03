@@ -139,7 +139,7 @@ public class BaInterviewAppService {
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
  *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）；
- *                              PRJ_024 挂起问答待答（同步 409 指路作答，#40 / ADR-0004）
+ *                              PRJ_024 挂起问答待答（同步 409 指路作答，#40 / ADR-0005）
      */
     public InterviewRun runInterviewTurn(Long projectId, String prompt) {
         return turn(projectId, prompt);
@@ -363,7 +363,7 @@ public class BaInterviewAppService {
         return project;
     }
 
-    /** 挂起问答守卫（#40 / ADR-0004）：会话存在挂起问答（ASKING 态工具块）时
+    /** 挂起问答守卫（#40 / ADR-0005）：会话存在挂起问答（ASKING 态工具块）时
      * 新输入不盲提交——引擎必拒且 REST 已返 200 只见异步 error 帧；同步 409
      * 指路作答。作答（resume）在途、ASKING 尚未清库的偶发拦截为已接受竞态边角。
      * 守卫先于 role-assigned 帧与命令提交，拒绝即零帧。 */

@@ -1,13 +1,13 @@
 # 调研快照：agentscope-java 编排能力 × SAA graph × subagent（2026-09-02）
 
-> 结论关联：ADR 0003（编排代码化·判定下放）、[派发机制设计 v1](../design/dispatch-orchestration-v1.md)。
+> 结论关联：ADR 0004（编排代码化·判定下放）、[派发机制设计 v1](../design/dispatch-orchestration-v1.md)。
 > 当时版本：平台依赖 `io.agentscope:agentscope-harness:2.0.1`；本地源码仓 `/Users/zhangcolin/workspace/agentscope-java` 在 v2.0.2+73 commits。
 
 ## 结论速览
 
 1. **agentscope-java 2.0.1 无图编排原语**，缺整层图引擎（节点/条件边/图状态/checkpointer/确定性中断）。1.x 曾有 `io.agentscope.core.pipeline.{SequentialPipeline, FanoutPipeline, MsgHub}`，2.0 重构（commit `cc3b2eec`，2026-06-01）整体删除——方向是做减法，官方对图编排的历来答案是外接（v1 文档即指向 Spring AI Alibaba StateGraph，v2 干脆删了 Multi-Agent 章节）。
-2. **subagent 是父 LLM 工具调用式派发**（`agent_spawn` 等），不适用于平台级派发骨架（ADR 0003 否决的形态）；适用于**运行内委托**（见 §4）。
-3. **SAA graph 能力对口但不引入 v1**：拖 spring-ai 全家（双 LLM 栈）、双状态语义、Boot 3.4 vs 3.5 兼容验证；v1 三节点线性拓扑 Java 代码直接可表达。触发信号见 ADR 0003。
+2. **subagent 是父 LLM 工具调用式派发**（`agent_spawn` 等），不适用于平台级派发骨架（ADR 0004 否决的形态）；适用于**运行内委托**（见 §4）。
+3. **SAA graph 能力对口但不引入 v1**：拖 spring-ai 全家（双 LLM 栈）、双状态语义、Boot 3.4 vs 3.5 兼容验证；v1 三节点线性拓扑 Java 代码直接可表达。触发信号见 ADR 0004。
 4. **平台现状即是正确分层**：外层 Java 编排（IterationAppService 一族）+ HarnessAgent 单智能体执行器；会话检查点自落库（`PostgresAgentStateStore` → `cat_agent_state`），问答卡挂起/续跑是平台自己拼的（`RequireUserConfirmEvent` + `ConfirmResult` resume）。
 
 ## 1. 本地事实（jar 解包 + 源码仓双确认）
@@ -50,4 +50,4 @@
 - **助理答复杂咨询**时可 spawn 检索子代理。
 - 障碍：项目工作区 `disableSubagents()`（Factory:105，交付物防脏写）——CODER 用 subagent 需先解决子代理写哪（ISOLATED 桶 vs 交付工作区）；无重试，长任务要外层兜底。
 
-一句话判据：**subagent 管"一个智能体内部雇专家"，派发管"平台让哪个智能体上场"**——两者正交，我们 v1 只需要后者（ADR 0003），前者的扩展点已备。
+一句话判据：**subagent 管"一个智能体内部雇专家"，派发管"平台让哪个智能体上场"**——两者正交，我们 v1 只需要后者（ADR 0004），前者的扩展点已备。

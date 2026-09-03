@@ -15,7 +15,7 @@
 
 - 业务术语（项目/系统/迭代/订单/问答……）前后端共享。在根级 `CONTEXT.md` 中只定义一次；只有真正单侧专属的术语才标注 前端侧 / 后端侧。
 - 两个子项目的旧 `CONTEXT.md` 已删除（2026-08-30，#7）；历史版本见 git。
-- `aiplatform-server/docs/adr/` 与 `aiplatform-web/docs/adr/` 保留作历史可读。**新 ADR 一律写入根级 `docs/adr/`。**
+- `aiplatform-server/docs/adr/` 与 `aiplatform-web/docs/adr/` 保留作历史可读。**新 ADR 一律写入根级 `docs/adr/`**；新设计文档与调研记录同理落根级 `docs/design/`、`docs/research/`。
 
 ## 使用词汇表的语言
 

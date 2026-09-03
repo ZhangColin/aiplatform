@@ -1,6 +1,6 @@
 # 派发机制设计 v1（编排代码化 · 判定下放）
 
-依据：ADR 0003、CONTEXT.md「派发」「迭代」「问答」词条、调研结论（agentscope-java 2.0.1 无图编排原语，subagent 为父 LLM 工具调用式派发、不适用于派发骨架；SAA graph v1 不引入）。编排落在现有外层 Java 代码（IterationAppService 一族），HarnessAgent 继续作单智能体执行器。
+依据：ADR 0004、CONTEXT.md「派发」「迭代」「问答」词条、调研结论（agentscope-java 2.0.1 无图编排原语，subagent 为父 LLM 工具调用式派发、不适用于派发骨架；SAA graph v1 不引入）。编排落在现有外层 Java 代码（IterationAppService 一族），HarnessAgent 继续作单智能体执行器。
 
 ## 1. 编排总图
 
@@ -96,4 +96,4 @@ S1 优先（用户实测痛点，且不依赖 S3–S5）。
 
 ## 8. 演进接口（只留扩展，不实施）
 
-入口判定点即 Leader 编排智能体的种子；届时优先评估 agentscope-java `team/coordination` 模块（未发版，Agent Teams 任务板+邮箱）与 SAA graph 分层（ADR 0003 触发信号为准）。运行内委托（如 CODER 派 reviewer 子任务）可用 subagent 的事件转发（SubagentEventBus 带源标签入 SSE 桥），不作派发骨架。
+入口判定点即 Leader 编排智能体的种子；届时优先评估 agentscope-java `team/coordination` 模块（未发版，Agent Teams 任务板+邮箱）与 SAA graph 分层（ADR 0004 触发信号为准）。运行内委托（如 CODER 派 reviewer 子任务）可用 subagent 的事件转发（SubagentEventBus 带源标签入 SSE 桥），不作派发骨架。

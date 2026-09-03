@@ -550,7 +550,7 @@ class ProjectControllerTest {
 
     @Test
     void given_pending_question_when_post_message_then_prj_024_as_409() throws Exception {
-        // 挂起问答守卫的 REST 契约（#40 / ADR-0004）：问答待答期间 /messages 同步
+        // 挂起问答守卫的 REST 契约（#40 / ADR-0005）：问答待答期间 /messages 同步
         // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
         // 行为由应用层守卫测试驱动）
         when(dispatchAppService.dispatch(100L, "测试：请继续"))

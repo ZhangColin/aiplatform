@@ -187,7 +187,7 @@ public class AgentscopeAgentClient {
      * {@code memory_messages}）中存在 ASKING 态工具块 = 该会话有挂起问答（run
      * 软终点待答）。业务编排在新 converse 提交前于请求路径同步调用（异步轨道上
      * 引擎虽也会拒，但 REST 已返 200）；作答复在途、ASKING 尚未清库的偶发误报
-     * 为已接受的竞态边角（ADR-0004）。
+     * 为已接受的竞态边角（ADR-0005）。
      */
     public boolean hasAskingToolCall(String userId, String sessionId) {
         return stateStore.getList(userId, sessionId, MEMORY_MESSAGES_KEY, Msg.class).stream()

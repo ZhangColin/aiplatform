@@ -27,7 +27,8 @@ import lombok.extern.slf4j.Slf4j;
  * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + BA 判定结果（PRD
  * 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
  * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——CODER 重读约定见
- * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发。
+ * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时各轮
+ * 非空判定全保留，#53）。
  * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体
  * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走
  * 共用尝试环 {@link CoderRunAttempts}）。
@@ -150,18 +151,21 @@ public class IterationAppService {
      */
     record FixHandoff(List<String> opinions, String prdRevisionSummary) {
 
-        /** 排队合并：意见按派发序串联；修订说明取最新非空值（更早的说明描述已被
-         * 后续 savePrd 覆盖的 PRD 旧态，混入即失真）。 */
+        /** 排队合并：意见按派发序串联；非空修订说明按派发序全部保留（#53）——
+         * 跨轮各轮的判定描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、B 轮在其
+         * 上再改 Y），只留最新会让修正侧漏掉早期轮的需求侧变更；同轮多次
+         * savePrd 的「取终值」在捕获层（{@link PrdRevisionFacts} 后写胜出）处理，
+         * 不在此层。全空即 null（「未修订」口径）。 */
         static FixHandoff merge(List<FixHandoff> handoffs) {
             List<String> opinions = handoffs.stream()
                     .flatMap(handoff -> handoff.opinions().stream())
                     .toList();
-            String summary = handoffs.stream()
+            List<String> summaries = handoffs.stream()
                     .map(FixHandoff::prdRevisionSummary)
                     .filter(Objects::nonNull)
-                    .reduce((earlier, latest) -> latest)
-                    .orElse(null);
-            return new FixHandoff(opinions, summary);
+                    .toList();
+            return new FixHandoff(opinions,
+                    summaries.isEmpty() ? null : String.join("\n", summaries));
         }
     }
 
@@ -297,8 +301,9 @@ public class IterationAppService {
         }
         prompt.append("\n需求侧判定（BA 已收口）：")
                 .append(handoff.prdRevisionSummary() != null
-                        ? "PRD 已修订，本轮修订说明：" + handoff.prdRevisionSummary()
-                        : "PRD 未修订（本轮意见未触发需求文档变更）")
+                        ? "PRD 已修订，修订说明（按派发序，每段一轮）："
+                                + handoff.prdRevisionSummary()
+                        : "PRD 未修订（上述意见未触发需求文档变更）")
                 .append("。需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
                 .append("，以正本与上述意见为准。")
                 .append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")

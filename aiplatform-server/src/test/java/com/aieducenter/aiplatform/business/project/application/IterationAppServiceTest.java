@@ -63,7 +63,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」帧，
  * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
  * 物，正常态 / 在途 / 排队均不可达）；交接物三要素（#52：判定结果 + PRD 路径
- * 引用入修正 run prompt，排队合并意见串联、修订说明取最新非空值）；守卫组
+ * 引用入修正 run prompt；排队合并 #53：意见串联、非空修订说明按派发序全部保留
+ * ——跨轮各轮判定描述的是仍生效的增量，只取最新即漏早期轮）；守卫组
  * （不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
@@ -437,9 +438,9 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_queued_handoffs_when_merged_then_opinions_concat_and_latest_nonnull_revision_wins() {
-        // 排队合并：意见串联为一轮；修订说明取最新非空值——更早的说明描述已被后续
-        // savePrd 覆盖的 PRD 旧态，混入即失真（含「后轮未再修订」不顶掉前轮事实）
+    void given_queued_handoffs_with_one_revision_when_merged_then_opinions_concat_and_nonempty_only() {
+        // 排队合并：意见串联为一轮；非空修订说明保留、未修订轮不占位（null 不产生
+        // 假「已修订」段）——「后轮未再修订」不影响前轮判定入物
         Long projectId = persistedGeneratedProject("9921");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -455,6 +456,68 @@ class IterationAppServiceTest {
                 .contains("1. 意见二：加导出")
                 .contains("2. 意见三：改蓝色")
                 .contains("为意见二补充了导出功能章节");
+    }
+
+    @Test
+    void given_queued_opinions_each_with_revision_when_track_merges_then_prompt_carries_both_rounds() {
+        // 灵魂用例（#53）：意见 A 的 BA 轮已把改 X 落盘（summary=改X）在途排队 +
+        // 意见 B（summary=改Y）排队 → 当前 run 收口续派时，续派 run 的 prompt 同时
+        // 含 X 与 Y 两段判定（按派发序）——只带最新一段会让编码智能体不知道 X 也是
+        // 需求侧新变更、需要同步到系统
+        Long projectId = persistedGeneratedProject("9932");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "早前意见（在途）", null);
+        appService.startFixRun(projectId, "意见A：加导出", "A轮修订：PRD 新增导出功能章节");
+        appService.startFixRun(projectId, "意见B：改蓝色", "B轮修订：主色调约定改为蓝");
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        String continuation = command.getAllValues().get(1).prompt();
+        assertThat(continuation)
+                .contains("A轮修订：PRD 新增导出功能章节")
+                .contains("B轮修订：主色调约定改为蓝");
+        assertThat(continuation.indexOf("A轮修订：PRD 新增导出功能章节"))
+                .isLessThan(continuation.indexOf("B轮修订：主色调约定改为蓝"));
+    }
+
+    // ---------- 排队合并判定保留（#53：merge 纯函数——非空判定结果按派发序串联） ----------
+
+    @Test
+    void given_handoffs_each_with_revision_when_merged_then_all_kept_in_dispatch_order() {
+        // 跨轮排队合并：各轮判定描述的是当前 PRD 上仍生效的增量（A 轮落盘 X、
+        // B 轮在其上再改 Y）——两段都在、按派发序
+        IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
+                new IterationAppService.FixHandoff(List.of("意见A"), "A轮修订：改X"),
+                new IterationAppService.FixHandoff(List.of("意见B"), "B轮修订：改Y")));
+        assertThat(merged.opinions()).containsExactly("意见A", "意见B");
+        assertThat(merged.prdRevisionSummary()).contains("A轮修订：改X").contains("B轮修订：改Y");
+        assertThat(merged.prdRevisionSummary().indexOf("A轮修订：改X"))
+                .isLessThan(merged.prdRevisionSummary().indexOf("B轮修订：改Y"));
+    }
+
+    @Test
+    void given_handoffs_with_mixed_revision_when_merged_then_only_nonempty_kept() {
+        // 一空一有：只含非空者（未修订轮不占位）；派发序两侧各验一次
+        IterationAppService.FixHandoff emptyFirst = IterationAppService.FixHandoff.merge(List.of(
+                new IterationAppService.FixHandoff(List.of("意见A"), null),
+                new IterationAppService.FixHandoff(List.of("意见B"), "B轮修订：改Y")));
+        assertThat(emptyFirst.prdRevisionSummary()).isEqualTo("B轮修订：改Y");
+        IterationAppService.FixHandoff emptySecond = IterationAppService.FixHandoff.merge(List.of(
+                new IterationAppService.FixHandoff(List.of("意见A"), "A轮修订：改X"),
+                new IterationAppService.FixHandoff(List.of("意见B"), null)));
+        assertThat(emptySecond.prdRevisionSummary()).isEqualTo("A轮修订：改X");
+    }
+
+    @Test
+    void given_handoffs_all_without_revision_when_merged_then_summary_null() {
+        // 全空 → null（「PRD 未修订」口径照旧——fixRunPrompt 的 null 分支）
+        IterationAppService.FixHandoff merged = IterationAppService.FixHandoff.merge(List.of(
+                new IterationAppService.FixHandoff(List.of("意见A"), null),
+                new IterationAppService.FixHandoff(List.of("意见B"), null)));
+        assertThat(merged.prdRevisionSummary()).isNull();
     }
 
     // ---------- 逐修改刷新（#49：修正与生成同一口径，刷新挂在共用尝试环） ----------

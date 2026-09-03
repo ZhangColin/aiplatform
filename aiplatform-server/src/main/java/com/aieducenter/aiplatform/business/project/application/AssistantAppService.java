@@ -28,9 +28,10 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
  *       owner（槽位跨轮一致），咨询上下文跨轮延续；计量 dims agentKind=assistant。</li>
  * </ul>
  *
- * <p>入口归 {@link DispatchAppService}（三分类的咨询分支）；守卫在派发入口统一
- * 前置（归档 / 订单冻结 / 挂起问答），本服务收到的已是可答的咨询。会话执行器
- * 异步提交即返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达）。</p>
+ * <p>入口归 {@link DispatchAppService}（三分类的咨询分支）；全局守卫（存在 /
+ * 未归档——指令区关闭即全停）在派发入口前置，订单冻结与挂起问答只拦意见链
+ * （#51）——咨询随时可答，本服务收到的即是可答的咨询。会话执行器异步提交即
+ * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达）。</p>
  */
 @Service
 public class AssistantAppService {

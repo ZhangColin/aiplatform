@@ -112,22 +112,19 @@ public class BaInterviewAppService {
     }
 
     /**
-     * 派发入口守卫（#47 三分类的公共前置）：指令区输入无论走哪个分支（意见 /
-     * 咨询 / 兜底）都先过同一组守卫——项目存在 / 未归档（指令区关闭）/ 无未终结
-     * 订单（下单即冻结）/ 无挂起问答（同步 409 指路作答）。归
-     * {@link DispatchAppService} 的 REST 路径同步调用（错误码语义留在响应里），
-     * 各分支方法自带的守卫不动（防御纵深）。
+     * 派发入口全局守卫（#51 守卫后移）：指令区开着的最低门槛——项目存在 / 未归档
+     * （归档 = 指令区物理关闭，咨询与兜底也停）。订单冻结（ORD_006）与挂起问答
+     * （PRJ_024）只拦意见链：意见分岔自带同款守卫（{@link #turn}，防御纵深），
+     * 咨询与兜底随时可答（CONTEXT.md「派发」）。已知代价：被拒意见先烧一次
+     * flash 分类调用（秒级轻调用，接受）。
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
-     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）
      */
     public Project requireDispatchableProject(Long projectId) {
         Project project = requireProject(projectId);
         if (project.getArchivedAt() != null) {
             throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
         }
-        orderQueryAppService.requireNoActiveOrder(projectId);
-        requireNoPendingQuestion(project, SESSION_PREFIX + projectId);
         return project;
     }
 
@@ -222,8 +219,9 @@ public class BaInterviewAppService {
      * = 静默止于 BA（访谈期常态：生成前意见链终点）；收口前归档 = 竞态守卫，
      * 静默不派。三者皆过即平台自动派修正 run（交接任务 = {@link #opinionExchanges}
      * 中的意见原文及追问答复）。BA 无派发权：模型存没存 PRD、调没调任何工具都
-     * 不影响派发——链的收口在平台代码。观测或派发失败只记日志（不炸 BA 轨道；
-     * 意见不丢，用户重提即兜底）。
+     * 不影响派发——链的收口在平台代码。派发失败发 {@code dispatch-failed} 失败
+     * 终态帧如实告知重提（#51：状态条不悬死在「派发中」）；不炸 BA 轨道、不恢复
+     * 意见锚（收口即消费语义保持）、不自动重试——重提即兜底。
      *
      * <p>#50：收口派发即发阶段帧——起跑发 {@code dispatching}、在途排队发
      * {@code queued}（如实呈现排队，锚本条意见的 BA 轮 runId）。</p>
@@ -253,6 +251,15 @@ public class BaInterviewAppService {
                     dispatch.queued() ? "排队下一轮" : "起跑");
         }
         catch (RuntimeException e) {
+            // 派发失败终态帧（#51）：状态条不悬死在「派发中」，如实告知重提——
+            // 意见锚已消费（不恢复）、不自动重试，重提即兜底；发射护栏同阶段帧
+            try {
+                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.DISPATCH_FAILED);
+            }
+            catch (RuntimeException emitFailure) {
+                log.warn("[ba-close] 项目 {} 派发失败终态帧发射失败：{}", projectId,
+                        emitFailure.toString());
+            }
             log.warn("[ba-close] 项目 {} 修正 run 自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }

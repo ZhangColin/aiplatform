@@ -56,6 +56,14 @@ describe("DispatchStageBar · 派发阶段状态条（#50）", () => {
     );
   });
 
+  it("派发失败终态（#51）：如实呈现重提文案，不转圈、失败配色", () => {
+    seedStage("dispatch-failed");
+    const markup = renderToStaticMarkup(<DispatchStageBar projectId="p1" />);
+    expect(markup).toContain("派发失败，请重提您的意见");
+    expect(markup).not.toContain("animate-spin");
+    expect(markup).toContain("text-destructive"); // 失败终态非成功收口
+  });
+
   it("别项目的阶段不串条", () => {
     seedStage("fixing");
     expect(renderToStaticMarkup(<DispatchStageBar projectId="p2" />)).toBe("");

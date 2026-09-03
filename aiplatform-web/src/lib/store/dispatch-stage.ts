@@ -13,9 +13,9 @@ import {
  * （同 chat store 先例）：SSE 侧 = 桥（帧）；发送侧 = use-chat（新发言 / 作答
  * 即重置——上一链终态不滞留到下一链开口，分类 / 起跑期间不显示旧状态）。
  *
- * 刷新后由 agent 流通道重放缓冲重建（重放按原序收帧，态幂等收敛）；失败链无
- * 终态帧，状态条停在事发阶段（error 帧另行呈现，「链路断了」与「不需要改」
- * 可区分）。
+ * 刷新后由 agent 流通道重放缓冲重建（重放按原序收帧，态幂等收敛）；失败链唯一
+ * 的终态帧是 dispatch-failed（#51 派发失败如实告知重提），其余失败无终态帧、
+ * 状态条停在事发阶段（error 帧另行呈现，「链路断了」与「不需要改」可区分）。
  */
 export type DispatchStageState = {
   stages: Record<string, DispatchBarState>;

@@ -17,15 +17,18 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 入口派发编排（#47 三分类）：指令区发言先过公共守卫，再经智能体边界上的轻量
- * 分类调用分岔——意见走 BA（既有意见链）、咨询走助理职能体（
- * {@link AssistantAppService}，零产物短路）、兜底走平台定型引导（零产物，不起
- * 任何智能体 run）。对用户全程隐式（CONTEXT.md「派发」）。
+ * 入口派发编排（#47 三分类）：指令区发言先过全局守卫（存在 / 未归档），再经
+ * 智能体边界上的轻量分类调用分岔——意见走 BA（既有意见链，订单冻结 / 挂起问答
+ * 守卫在此分岔内拦）、咨询走助理职能体（{@link AssistantAppService}，零产物
+ * 短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。对用户
+ * 全程隐式（CONTEXT.md「派发」）。
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
- * 一次性会话（{@code classify-{runId}}，flash 缺省档、空 sink 无帧、不触项目
- * 工作区），同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，
- * 异步化会拿不到真锚）。</p>
+ * 一次性会话（{@code classify-{runId}}，模型档由专用配置键
+ * {@code app.dispatch.classification-model} 决定（缺省 flash 档，代码保证——
+ * 不吃 agentscope 缺省模型的部署配法，#51）、空 sink 无帧、不触项目工作区），
+ * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
+ * 拿不到真锚）。</p>
  *
  * <p><b>失败 / 超时兜底 = 按意见</b>（设计 v1 §3.1 的定向取舍）：误进意见链有
  * BA 把关（追问或改 PRD，代价小）；误判为咨询会丢变更（不可接受）。分类调用
@@ -85,23 +88,30 @@ public class DispatchAppService {
     private final AssistantAppService assistantAppService;
     private final AgentStreamBridge streamBridge;
     private final AgentscopeAgentClient agentClient;
+    private final DispatchProperties properties;
 
     public DispatchAppService(BaInterviewAppService baInterviewAppService,
             AssistantAppService assistantAppService, AgentStreamBridge streamBridge,
-            AgentscopeAgentClient agentClient) {
+            AgentscopeAgentClient agentClient, DispatchProperties properties) {
         this.baInterviewAppService = baInterviewAppService;
         this.assistantAppService = assistantAppService;
         this.streamBridge = streamBridge;
         this.agentClient = agentClient;
+        this.properties = properties;
     }
 
     /**
-     * 派发一条指令区输入（REST 路径同步入口）：公共守卫 → 轻量分类 → 按类分岔。
-     * 响应携带所派 run 的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = 引导帧锚）。
+     * 派发一条指令区输入（REST 路径同步入口）：全局守卫（存在 / 未归档——归档即
+     * 指令区关闭，咨询与兜底也停）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
+     * 挂起问答（PRJ_024）只拦意见链：意见分岔（BA 轮）自带守卫在分类后拦——
+     * 咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类调用，
+     * 秒级轻调用，接受）。响应携带所派 run 的标识（意见 = BA 轮 / 咨询 = 助理轮 /
+     * 兜底 = 引导帧锚）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区
-     *                              关闭）；ORD_006 订单处理中；PRJ_024 挂起问答
-     *                              待答（守卫先于分类——拒绝即零调用零帧）
+     *                              关闭，先于分类——拒绝即零调用零帧）；ORD_006
+     *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
+     *                              分类后拦）
      */
     public DispatchRun dispatch(Long projectId, String prompt) {
         Project project = baInterviewAppService.requireDispatchableProject(projectId);
@@ -149,9 +159,11 @@ public class DispatchAppService {
     }
 
     /**
-     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、flash 缺省档、空 sink
-     * （无 SSE 帧）、不触项目工作区、计量 agentKind=classify。失败 / 超时 /
-     * 输出不可解析一律回落意见链（见类注释的定向取舍）。
+     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档由专用配置键
+     * {@code app.dispatch.classification-model} 决定（缺省 flash，#51——不吃
+     * agentscope 缺省模型的部署配法）、空 sink（无 SSE 帧）、不触项目工作区、
+     * 计量 agentKind=classify。失败 / 超时 / 输出不可解析一律回落意见链（见类
+     * 注释的定向取舍）。
      */
     private Classification classify(Long projectId, String prompt) {
         String runId = AgentStreamAppService.newRunId();
@@ -160,7 +172,7 @@ public class DispatchAppService {
                 runId,
                 prompt,
                 CLASSIFY_SYSTEM_PROMPT,
-                null, // 模型取适配器缺省（flash 档——单标签输出，快且省）
+                properties.getClassificationModel(), // 专用配置键（缺省 flash 档）
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),

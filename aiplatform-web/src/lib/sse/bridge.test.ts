@@ -524,6 +524,19 @@ describe("bridge · dispatch-stage → 阶段 store（#50 阶段状态条）", (
     ).not.toThrow();
     expect(useDispatchStageStore.getState().stages.p1).toBeUndefined();
   });
+
+  it("派发失败终态入 store（#51）：dispatching → dispatch-failed 不悬死", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "dispatch-stage",
+      { projectId: "p1", runId: "run-ba", stage: "dispatching" },
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "dispatch-stage",
+      { projectId: "p1", runId: "run-ba", stage: "dispatch-failed" },
+      "run-ba:2",
+    ));
+    expect(useDispatchStageStore.getState().stages.p1).toEqual({ stage: "dispatch-failed" });
+  });
 });
 
 describe("bridge · fix-unchanged → 指令区「未动系统」通告（#46）", () => {

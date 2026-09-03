@@ -60,6 +60,17 @@ describe("dispatch-stage 帧→状态条视图（#50）", () => {
     expect(dispatchBarView(state)).toEqual({ text: "已答复您的咨询", tone: "settled" });
   });
 
+  it("派发失败终态（#51）：分析中 → 派发中 → 派发失败——如实告知重提，不悬死在派发中", () => {
+    const state = walk([{ stage: "analyzing" }, { stage: "dispatching" }, { stage: "dispatch-failed" }]);
+    expect(dispatchBarView(state)).toEqual({
+      text: "派发失败，请重提您的意见",
+      tone: "failed",
+    });
+    // 重提即兜底：新链开口（发送侧重置 / analyzing 覆盖）不滞留失败终态
+    const reopened = nextDispatchBarState(state, { stage: "analyzing" });
+    expect(dispatchBarView(reopened)?.text).toBe("正在分析您的意见…");
+  });
+
   it("无状态不渲染", () => {
     expect(dispatchBarView(undefined)).toBeUndefined();
   });

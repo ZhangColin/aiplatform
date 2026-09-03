@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -43,8 +44,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 入口派发编排（#47 三分类）：脚本化智能体边界——分类调用按会话前缀脚本化回放
  * 标签，验证三岔：咨询 → 助理会话命令 + 回答（零派发：无 BA、无修正 run）；
  * 分类失败 / 超时 / 输出不可解析 → 兜底按意见（BA 链）；兜底 / 下单意图 →
- * guide-reply 帧（零产物：不起任何 run）+ 下单引导文案。守卫先于分类（拒绝即
- * 零调用零帧）。
+ * guide-reply 帧（零产物：不起任何 run）+ 下单引导文案。守卫矩阵（#51 后移）：
+ * 归档全局先于分类（拒绝即零调用零帧）；订单冻结 / 挂起问答只拦意见（分类后
+ * 拦——咨询与兜底随时可答）。
  */
 @SpringBootTest
 class DispatchAppServiceTest {
@@ -53,6 +55,9 @@ class DispatchAppServiceTest {
 
     @Autowired
     private DispatchAppService appService;
+
+    @Autowired
+    private DispatchProperties dispatchProperties;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -82,10 +87,14 @@ class DispatchAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
-    /** 脚本化分类（classify-* 会话回放标签；其余会话按普通回复）。 */
+    /** 脚本化分类（classify-* 会话回放标签；其余会话按普通回复）。同测重打桩时
+     * when() 的 matcher 空参调用会触发旧 answer——null 直接过，不当真调用。 */
     private void givenClassification(String label, String otherReply) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null; // 重打桩空参（Mockito when() 触发旧 answer）
+            }
             if (command.sessionId().startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX)) {
                 return new AgentReply(command.runId(), label);
             }
@@ -121,10 +130,13 @@ class DispatchAppServiceTest {
         AgentCommand classify = command.getAllValues().get(0);
         AgentCommand assistant = command.getAllValues().get(1);
 
-        // 分类命令：智能体边界轻量调用——一次性会话、缺省 flash 档、不触项目工作区、
+        // 分类命令：智能体边界轻量调用——一次性会话、模型档由专用配置键决定（#51，
+        // 缺省 flash，不吃 agentscope 缺省模型的部署配法）、不触项目工作区、
         // 计量 agentKind=classify、短超时、无流关联（空 sink 无帧）
         assertThat(classify.sessionId()).startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
-        assertThat(classify.modelString()).isNull();
+        assertThat(classify.modelString()).isEqualTo(dispatchProperties.getClassificationModel());
+        assertThat(dispatchProperties.getClassificationModel())
+                .isEqualTo("deepseek:deepseek-v4-flash"); // 缺省即 flash 档（代码保证）
         assertThat(classify.workspaceId()).isNull();
         assertThat(classify.agentRole()).isNull();
         assertThat(classify.live()).isFalse();
@@ -243,7 +255,7 @@ class DispatchAppServiceTest {
 
     @Test
     void given_archived_project_when_dispatch_then_prj_013_before_classification() {
-        // 守卫先于分类：拒绝即零调用零帧（分类调用也是要花钱的模型调用）
+        // 全局守卫（归档 = 指令区物理关闭，咨询与兜底也停）先于分类：拒绝即零调用零帧
         Project project = projectRepository.save(Project.create("归档项目", null,
                 9806L, OWNER));
         project.archive();
@@ -254,6 +266,99 @@ class DispatchAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
         verify(agentClient, never()).converse(any(), any());
         verify(streamAppService, never()).publish(any(), anyMap());
+    }
+
+    // ---------- 守卫后移矩阵（#51：订单冻结 / 挂起问答只拦意见） ----------
+
+    @Test
+    void given_pending_question_when_inquiry_then_assistant_answers() {
+        // 挂起问答期间咨询照常作答（守卫后移——409 指路对咨询语义错误）
+        Long projectId = persistedProject("9808");
+        givenSessionExecutorRunsInline();
+        givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(true); // BA 会话挂起在即（assist 会话不受影响）
+
+        DispatchAppService.DispatchRun run = appService.dispatch(projectId, "我后台的地址是什么？");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        // 分类 + 助理两跳即全部：BA 轨道未触
+        assertThat(command.getAllValues().stream()
+                .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("ba-"));
+        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("assist-" + projectId);
+        assertThat(run.runId()).isNotBlank();
+    }
+
+    @Test
+    void given_pending_question_when_fallback_then_guide_reply() {
+        // 挂起问答期间兜底照常引导（零产物路径不涉意见链）
+        Long projectId = persistedProject("9809");
+        givenClassification("FALLBACK", "不该出现");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(true);
+
+        appService.dispatch(projectId, "你好呀");
+
+        verify(agentClient, times(1)).converse(any(), any()); // 仅分类调用
+        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_pending_question_when_opinion_then_prj_024_after_classification() {
+        // 意见仍 409 指路作答（行为不变）——守卫在分类后拦：被拒意见先烧一次
+        // flash 分类调用（秒级轻调用，接受），拒绝即零帧零提交
+        Long projectId = persistedProject("9810");
+        givenClassification("OPINION", "不该到");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> appService.dispatch(projectId, "把主色调改成绿色"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
+        verify(agentClient, times(1)).converse(any(), any()); // 分类先烧、BA 未触
+        verify(sessionExecutor, never()).submit(any(), any());
+        verify(streamAppService, never()).publish(any(), anyMap());
+    }
+
+    @Test
+    void given_active_order_when_inquiry_or_fallback_then_answerable() {
+        // 订单冻结（下单即冻结迭代）只拦意见链：咨询与兜底随时可答
+        Long projectId = persistedProject("9811");
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9911L, projectId);
+        givenSessionExecutorRunsInline();
+        givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
+
+        appService.dispatch(projectId, "我后台的地址是什么？"); // 咨询：助理照常作答
+
+        givenClassification("FALLBACK", "不该出现");
+        appService.dispatch(projectId, "你好呀"); // 兜底：引导照常
+
+        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(command.capture(), any()); // 分类×2 + 助理
+        assertThat(command.getAllValues().stream()
+                .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("ba-"));
+    }
+
+    @Test
+    void given_active_order_when_opinion_then_ord_006() {
+        // 订单处理中意见仍拒收（行为不变）——分类后拦，取消订单即解冻
+        Long projectId = persistedProject("9812");
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9912L, projectId);
+        givenClassification("OPINION", "不该到");
+
+        assertThatThrownBy(() -> appService.dispatch(projectId, "再改一个地方"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
+        verify(agentClient, times(1)).converse(any(), any()); // 仅分类调用
+        verify(sessionExecutor, never()).submit(any(), any());
     }
 
     @Test

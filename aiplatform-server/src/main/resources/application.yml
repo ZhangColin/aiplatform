@@ -69,6 +69,11 @@ app:
   generation:
     max-attempts: 3
     timeout: 30m
+  # #51 · business.project 派发编排：入口三分类的分类模型档专用键——每条指令区
+  # 消息必经的轻调用，缺省 flash 由代码保证，不吃 agentscope.default-model 的
+  # 部署配法（配重档则每条消息烧一次重模型）。
+  dispatch:
+    classification-model: deepseek:deepseek-v4-flash
 
 # A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
 # 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本机依赖启动.md。

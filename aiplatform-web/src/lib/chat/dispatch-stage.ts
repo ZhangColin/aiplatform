@@ -5,7 +5,8 @@
  *
  * 意见链：analyzing →（clarifying 挂起，答复后续跑 / updating-prd 可选）→
  * dispatching | queued → fixing（接直播——细节在直播侧栏）→ done（changed 区分
- * 「已修改」与「未动系统」）。咨询链：analyzing → answered。帧序即阶段序，
+ * 「已修改」与「未动系统」）；派发失败落 dispatch-failed 终态（不悬死在派发中，
+ * 重提即兜底）。咨询链：analyzing → answered。帧序即阶段序，
  * 项目内最新帧即当前阶段（跨 run：BA 轮锚 → 修正 run 锚，链在项目面上连续）。
  */
 
@@ -18,6 +19,7 @@ export const DISPATCH_STAGES = [
   "fixing",
   "queued",
   "done",
+  "dispatch-failed",
   "answered",
 ] as const;
 
@@ -29,8 +31,9 @@ export type DispatchBarState = {
   changed?: boolean;
 };
 
-/** tone 驱动呈现形态：active 转圈进行中 / waiting 等用户或排队 / settled 收口。 */
-export type DispatchBarTone = "active" | "waiting" | "settled";
+/** tone 驱动呈现形态：active 转圈进行中 / waiting 等用户或排队 / settled 收口 /
+ * failed 失败终态（派发失败如实呈现，非成功收口）。 */
+export type DispatchBarTone = "active" | "waiting" | "settled" | "failed";
 
 export type DispatchBarView = {
   /** 用户侧文案（单点正本；无智能体名、无「开发/构建」）。 */
@@ -77,6 +80,9 @@ export function dispatchBarView(state: DispatchBarState | undefined): DispatchBa
       return state.changed
         ? { text: "已按您的意见修改了系统", tone: "settled" }
         : { text: "本轮意见未改动系统", tone: "settled" };
+    case "dispatch-failed":
+      // 派发失败终态（#51）：如实告知重提——意见已消费、不自动重试，重提即兜底
+      return { text: "派发失败，请重提您的意见", tone: "failed" };
     case "answered":
       return { text: "已答复您的咨询", tone: "settled" };
   }

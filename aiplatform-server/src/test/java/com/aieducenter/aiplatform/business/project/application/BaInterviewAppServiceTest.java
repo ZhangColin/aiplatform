@@ -629,6 +629,35 @@ class BaInterviewAppServiceTest {
                 "dispatching", "queued");
     }
 
+    @Test
+    void given_start_fix_run_failure_when_close_then_dispatch_failed_terminal_stage() {
+        // #51 派发失败终态：收口派修正 run 炸 → dispatch-failed 失败终态帧锚本条
+        // 意见的 BA 轮（状态条不悬死在「派发中」）；意见锚已消费、不自动重试
+        //——重提即兜底（此处脚本化修正轨道提交失败 = startFixRun 抛出的代表路径）
+        Long projectId = persistedGeneratedProject("9735");
+        List<String> stages = givenStageCapture();
+        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
+        doAnswer(invocation -> {
+            String sessionId = invocation.getArgument(0);
+            Runnable task = invocation.getArgument(1);
+            if (sessionId.startsWith("coder-")) {
+                throw new IllegalStateException("修正轨道提交失败");
+            }
+            task.run(); // BA 轨道直通
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+
+        String turnRunId = appService.runInterviewTurn(projectId, "把主色调改成绿色").runId();
+
+        // analyzing → dispatching → dispatch-failed（如实告知重提，不悬死不静默）
+        assertThat(stages).containsExactly("analyzing", "dispatching", "dispatch-failed");
+        verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
+                "dispatch-failed".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
+                        && turnRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
+        // 修正 run 未起跑：无 coder converse，BA 轮失败不炸轨道（会话执行器吞掉）
+        verify(agentClient, times(1)).converse(any(), any());
+    }
+
     // ---------- 测试数据 ----------
 
     private Long persistedProject(String workspaceId) {

@@ -124,9 +124,10 @@ public class ProjectController {
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / "
                     + "咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），"
                     + "回复经 SSE 到达（role-assigned 帧携带角色标签）。"
-                    + "空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006"
-                    + "（下单即冻结迭代，取消订单即解冻）；挂起问答待答 409 PRJ_024"
-                    + "（指路作答）；项目不存在 404 PRJ_001")
+                    + "空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；"
+                    + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与"
+                    + "挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——"
+                    + "咨询与兜底随时可答；项目不存在 404 PRJ_001")
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(

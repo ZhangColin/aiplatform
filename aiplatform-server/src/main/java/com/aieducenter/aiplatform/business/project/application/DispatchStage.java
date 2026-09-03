@@ -16,8 +16,10 @@ package com.aieducenter.aiplatform.business.project.application;
  *   <li><b>咨询链</b>：{@code analyzing} → {@code answered}（零产物短路）。</li>
  * </ul>
  *
- * <p>帧不承担正确性（SSE 事件口径）：失败链无终态阶段帧（error 帧如实表达，
- * 状态条停在事发阶段）；重放缓冲可恢复近期链的阶段（刷新不静默）。</p>
+ * <p>帧不承担正确性（SSE 事件口径）：失败链唯一的终态阶段帧是
+ * {@code dispatch-failed}（BA 收口派修正 run 异常——状态条不悬死在「派发中」），
+ * 其余失败无终态阶段帧（error 帧如实表达，状态条停在事发阶段）；重放缓冲可
+ * 恢复近期链的阶段（刷新不静默）。</p>
  */
 enum DispatchStage {
 
@@ -41,6 +43,10 @@ enum DispatchStage {
 
     /** 完成：修正收口——changed=true 已修改 / false 未动系统（区分呈现）。 */
     DONE("done"),
+
+    /** 派发失败：BA 收口派修正 run 异常的失败终态——如实告知重提（意见锚已
+     * 消费、不自动重试，重提即兜底），状态条不悬死在派发中。 */
+    DISPATCH_FAILED("dispatch-failed"),
 
     /** 已答复：咨询已由平台答复（零产物短路收口）。 */
     ANSWERED("answered");

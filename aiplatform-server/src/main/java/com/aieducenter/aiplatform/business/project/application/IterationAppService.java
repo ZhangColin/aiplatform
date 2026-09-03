@@ -46,11 +46,13 @@ import lombok.extern.slf4j.Slf4j;
  * 即重新起轨。</p>
  *
  * <p><b>超限终态恢复出口</b>（#48）：修正 run 重试超限转终态时，终态那场的交接
- * 任务记入 {@link #terminallyFailedTasks}（成功收工即清），恢复出口
+ * 任务记入 {@link #terminallyFailedHandoffs}（成功收工即清），恢复出口
  * {@link #restartFixRun} 据此重派——交接物沿用、新 runId 随响应回（与新 run 的
  * 链路锚）。仅终态可达：修正在途（进行中/排队中）拒绝 PRJ_025、无终态账（未派过/
  * 已成功/重启丢账）拒绝 PRJ_026——正常流程全自动，不出现任何手动触发，故障态留
- * 最后一条生路。</p>
+ * 最后一条生路。终态收口帧 {@code run-failed} 与终态账同事实点发射（#56）：帧到
+ * ⟺ 恢复出口可达——排队合并续派的中途超限不发（轨道仍在途，「重新修改」出口
+ * 零闪现）。</p>
  *
  * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归 BA 协议（角色卡），
  * 平台不设门。</p>
@@ -223,10 +225,11 @@ public class IterationAppService {
             String runId = firstRunId;
             while (true) {
                 streamBridge.emitDispatchStage(projectId, runId, DispatchStage.FIXING);
-                boolean succeeded = coderRunAttempts.run(project, runId,
+                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId), "fix");
                 List<FixHandoff> queued;
+                boolean terminalFailure = false;
                 synchronized (this) {
                     List<FixHandoff> pending = queuedFixRuns.remove(projectId);
                     queued = pending != null ? pending : List.of();
@@ -236,15 +239,22 @@ public class IterationAppService {
                         // 终态账与释放同临界区结算：恢复出口（同锁内「查在途+取账+占位」）
                         // 要么见释放前已落的账、要么在收工后自起新轨——不出现「已释放
                         // 无账」的假 PRJ_026 窗口，也不被先收工的旧轨覆盖
-                        if (succeeded) {
+                        if (result.succeeded()) {
                             terminallyFailedHandoffs.remove(projectId);
                         }
                         else {
                             terminallyFailedHandoffs.put(projectId, handoff);
+                            terminalFailure = true;
                         }
                     }
                 }
                 if (queued.isEmpty()) {
+                    if (terminalFailure) {
+                        // 终态收口帧（#56）：与终态账同事实点发射——帧到 ⟺ 恢复出口
+                        // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
+                        // 不发（轨道仍在途，「重新修改」零闪现）
+                        streamBridge.emitRunFailed(projectId, result.lastRunId());
+                    }
                     return;
                 }
                 int mergedRounds = queued.stream()
@@ -275,8 +285,9 @@ public class IterationAppService {
         FinishFixFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默失败：run-finish 已发（引擎自认成功），此处补 error 帧
-            // 如实表达（帧序 run-finish → error → run-retrying → …；超限末次 error 即
-            // 终态）——否则「链路断了」在用户侧呈现为正常收口，恰是要消除的困惑
+            // 如实表达（帧序 run-finish → error → run-retrying → …；重试超限由轨道层
+            // 发 run-failed 收口终态，#56）——否则「链路断了」在用户侧呈现为正常收口，
+            // 恰是要消除的困惑
             streamBridge.emitError(project.getId(), attemptRunId,
                     "修正未正常收口：编码智能体未报告收口判定（finish_fix 未调用）");
             throw new IllegalStateException("修正 run 未以 finish_fix 结束工具收口");

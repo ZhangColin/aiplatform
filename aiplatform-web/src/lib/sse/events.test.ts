@@ -114,6 +114,23 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it("run-failed 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「通道二」run-failed 行（#56：编码 run 重试超限终态收口帧）
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "run-failed",
+        payload: { projectId: "a1b2c3d4", runId: "r3" },
+        ts: "",
+      }),
+    );
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "run-failed",
+      payload: { projectId: "a1b2c3d4", runId: "r3" },
+    });
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it.each([
     {
       type: "live-text",

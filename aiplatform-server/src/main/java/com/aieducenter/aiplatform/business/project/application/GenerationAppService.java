@@ -46,9 +46,10 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>失败自动重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
  * 已落盘成果保留）：尝试失败先发 {@code run-retrying} 帧（话术「遇到问题，
- * 正在重试」）再下发下一尝试（新 runId）；超限转终态失败，由用户重新发起兜底
- * （generated_at 不落位 = 按钮口径仍在）。run 成功收口才落
- * {@code generated_at}（首次生成时点，单向置位——「确认下单」可见性口径）。</p>
+ * 正在重试」）再下发下一尝试（新 runId）；超限转终态失败即发 {@code run-failed}
+ * 收口帧（#56），由用户重新发起兜底（generated_at 不落位 = 按钮口径仍在）。run
+ * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——「确认下单」
+ * 可见性口径）。</p>
  */
 @Service
 @Slf4j
@@ -102,6 +103,7 @@ public class GenerationAppService {
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final CoderRunAttempts coderRunAttempts;
+    private final AgentStreamBridge streamBridge;
 
     /** 生成在途项目集（含已提交未起跑——排队中）：重复触发守卫的进程内事实。 */
     private final Set<Long> generationsInFlight = ConcurrentHashMap.newKeySet();
@@ -109,11 +111,12 @@ public class GenerationAppService {
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            CoderRunAttempts coderRunAttempts) {
+            CoderRunAttempts coderRunAttempts, AgentStreamBridge streamBridge) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.coderRunAttempts = coderRunAttempts;
+        this.streamBridge = streamBridge;
     }
 
     /**
@@ -159,12 +162,16 @@ public class GenerationAppService {
      * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
      * GENERATE_RUN_PROMPT、重试换轨 RETRY_RUN_PROMPT；成功收口（converse 无异常
      * + 8081 可达，#35 核验在 {@link #markGeneratedIfReachable}）即 markGenerated
-     * 收场（首次生成时点单向落位）。
+     * 收场（首次生成时点单向落位）。超限转终态即发 {@code run-failed} 收口帧
+     * （#56：生成轨道超限即真终态——前端「重新发起」出口只认本帧）。
      */
     private void runAttemptsWithRetry(Project project, String firstRunId) {
-        coderRunAttempts.run(project, firstRunId,
+        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
                 new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
                 runId -> markGeneratedIfReachable(project), "generate");
+        if (!result.succeeded()) {
+            streamBridge.emitRunFailed(project.getId(), result.lastRunId());
+        }
     }
 
     /**

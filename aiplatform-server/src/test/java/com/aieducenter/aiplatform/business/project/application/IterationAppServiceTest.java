@@ -287,7 +287,14 @@ class IterationAppServiceTest {
         appService.startFixRun(projectId, "修不动", null);
         tracks.remove(0).run();
 
-        verify(agentClient, times(3)).converse(any(), any());
+        ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(attempts.capture(), any());
+        // 终态收口帧（#56）：run-failed 恰一次、锚末次失败的尝试——前端「重新修改」
+        // 出口只认本帧（点击即恢复出口重派链路，不被 PRJ_025 挡回）
+        String lastAttemptRunId = attempts.getAllValues().get(2).runId();
+        verify(streamAppService).publish(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
+                        && lastAttemptRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }
@@ -377,6 +384,8 @@ class IterationAppServiceTest {
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(streamAppService, times(3)).publish(eq(AgentEventTypes.ERROR), any());
+        // 未正常收口的超限同样由 run-failed 收口终态（#56）——帧序 error(末次) → run-failed
+        verify(streamAppService, times(1)).publish(eq(AgentEventTypes.RUN_FAILED), any());
         verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }
@@ -713,6 +722,9 @@ class IterationAppServiceTest {
 
         // 首场 3 败 + 合并续派 1 成；成功收工 → 无恢复面（首场超限不留陈账）
         verify(agentClient, times(4)).converse(any(), any());
+        // 中途超限不是终态（#56）：首场烧满即续派合并场，全程不发 run-failed——
+        // 「重新修改」出口零闪现（轨道仍在途，出口本就会被 PRJ_025 挡回）
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.RUN_FAILED), any());
         assertThatThrownBy(() -> appService.restartFixRun(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());

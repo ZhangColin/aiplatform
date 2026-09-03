@@ -613,10 +613,11 @@ describe("bridge · agent 流 → generation store（生成面，#22）", () => 
     dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统" }, "run1:2"));
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
 
-    // 尝试失败（error）→ 自动重试帧（话术承载）→ 状态回 retrying（同一场生成在途）
+    // 尝试失败（error）是过程事实：不置终态（#56 重试间隔零闪现——终态只认
+    // run-failed 收口帧）→ 自动重试帧（话术承载）→ 状态转 retrying（同一场生成在途）
     dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "中断" }, "run1:8"));
-    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
-    dispatchAgentEvent(agentQc, 
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+    dispatchAgentEvent(agentQc,
       agentEvent("run-retrying", { projectId: "p1", runId: "run1", attempt: 2, message: "遇到问题，正在重试" }, "run1:9"),
     );
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("retrying");
@@ -641,7 +642,7 @@ describe("bridge · agent 流 → generation store（生成面，#22）", () => 
   });
 
   it("run-finish 重放（同事件 id）不重复计预览纪元", () => {
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" }, "run1:1"),
     );
     const finish = agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" }, "run1:9");
@@ -649,6 +650,25 @@ describe("bridge · agent 流 → generation store（生成面，#22）", () => 
     dispatchAgentEvent(agentQc, finish); // 重放（通道带缓冲热流，重挂载重收近期帧）
 
     expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+  });
+
+  it("超限终态：error(末次) → run-failed → 状态 error（恢复出口的唯一判定锚，#56）", () => {
+    dispatchAgentEvent(agentQc,
+      agentEvent("role-assigned", { projectId: "p1", runId: "run1", role: "CODER", roleLabel: "编码智能体", engine: "agentscope" }, "run1:1"),
+    );
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统" }, "run1:2"));
+
+    // 末次失败只有 error 帧仍不判终态——run-failed（轨道真终态收口）才置 error
+    dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "持续失败" }, "run1:8"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+    dispatchAgentEvent(agentQc, agentEvent("run-failed", { projectId: "p1", runId: "run1" }, "run1:9"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+  });
+
+  it("run-failed 无 CODER 登记的 runId → 忽略（帧序异常防御位）", () => {
+    dispatchAgentEvent(agentQc, agentEvent("run-failed", { projectId: "p1", runId: "ghost" }, "ghost:1"));
+
+    expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
   });
 
   it("BA 帧与未登记 run 的帧不进生成面", () => {

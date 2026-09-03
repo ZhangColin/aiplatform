@@ -70,6 +70,19 @@ public class AgentStreamBridge {
     }
 
     /**
+     * run-failed 发射（编码 run 重试超限·终态收口，#56）：轨道层在真终态落定点
+     * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
+     * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道超限即终态。
+     * runId 锚定末次失败的尝试（帧序 error(末次) → run-failed）——前端恢复出口
+     * 只认本帧，重试进行中的 error 帧不判终态（「重新修改」零闪现）。
+     */
+    public void emitRunFailed(Long projectId, String lastFailedRunId) {
+        streamAppService.publish(AgentEventTypes.RUN_FAILED, Map.of(
+                AgentStreamAppService.PROJECT_FIELD, projectId.toString(),
+                AgentStreamAppService.RUN_FIELD, lastFailedRunId));
+    }
+
+    /**
      * fix-unchanged 发射（修正 run 收口·系统未动，#46）：finish_fix 判定
      * changed=false 时的如实呈现帧——锚定正常收口的那次尝试的 runId（帧序
      * run-finish → fix-unchanged），reason 为「未动系统」的用户侧原因。
@@ -84,7 +97,7 @@ public class AgentStreamBridge {
     /**
      * error 发射（修正收口判据不过，#46）：编码 run 正常返回但未以 finish_fix
      * 收口——converse 内部不发 error（它自己认为成功了），此处补发如实表达
-     * （末次 error 即终态，与「末次 error 帧即终态表达」的既有口径对齐），
+     * （error 帧是逐次尝试的过程事实，终态由轨道层的 run-failed 收口，#56），
      * 用户侧能区分「不需要改」与「链路断了」。
      */
     public void emitError(Long projectId, String runId, String message) {

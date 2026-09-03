@@ -136,10 +136,20 @@ export type PlatformAgentEvent =
       /**
        * 编码 run 自动重试（生成编排层发射，#22）：`runId` 锚定失败的那次尝试
        * （帧序 error → run-retrying → 下一尝试 run-start）；`message` 为用户侧
-       * 话术「遇到问题，正在重试」；超限后不再发（末次 error 即终态）。
+       * 话术「遇到问题，正在重试」；超限后不再发——终态由 `run-failed` 收口。
        */
       type: "run-retrying";
       payload: AgentPayload & { attempt: number; message: string };
+    }
+  | {
+      /**
+       * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射（修正轨道与
+       * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` 锚定
+       * 末次失败的尝试（帧序 error(末次) → run-failed）。恢复出口（重新发起 /
+       * 重新修改）只认本帧——重试进行中的 error 帧是过程事实，不判终态（零闪现）。
+       */
+      type: "run-failed";
+      payload: AgentPayload;
     }
   | {
       /**
@@ -195,6 +205,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "run-finish",
   "question-raised",
   "run-retrying",
+  "run-failed",
   "fix-unchanged",
   "guide-reply",
   "dispatch-stage",

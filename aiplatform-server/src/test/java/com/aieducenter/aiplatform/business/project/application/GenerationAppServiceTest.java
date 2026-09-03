@@ -255,6 +255,8 @@ class GenerationAppServiceTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNotNull();
+        // 重试成功 = 非终态：不发 run-failed（恢复出口不出现——正常流程全自动无门，#56）
+        verify(streamAppService, never()).publish(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
     @Test
@@ -269,9 +271,16 @@ class GenerationAppServiceTest {
 
         // 超限转终态：恰 maxAttempts 次尝试、重试帧 maxAttempts-1 次、generated_at 不落
         int maxAttempts = properties.getMaxAttempts();
-        verify(agentClient, times(maxAttempts)).converse(any(), any());
+        ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(maxAttempts)).converse(attempts.capture(), any());
         verify(streamAppService, times(maxAttempts - 1))
                 .publish(eq(AgentEventTypes.RUN_RETRYING), anyMap());
+        // 终态收口帧（#56）：run-failed 恰一次、锚末次失败的尝试（帧序 error(末次) →
+        // run-failed）——前端恢复出口只认本帧，重试进行中的 error 帧不判终态（零闪现）
+        String lastAttemptRunId = attempts.getAllValues().get(maxAttempts - 1).runId();
+        verify(streamAppService).publish(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
+                        && lastAttemptRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNull();

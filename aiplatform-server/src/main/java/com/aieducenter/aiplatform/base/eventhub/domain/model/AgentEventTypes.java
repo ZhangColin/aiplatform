@@ -43,6 +43,15 @@ public final class AgentEventTypes {
     /** 即将下发的尝试序号（1 起，首试为 1）。 */
     public static final String RETRY_ATTEMPT_FIELD = "attempt";
 
+    /**
+     * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
+     * 终态账（恢复出口的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；
+     * 生成轨道超限即终态。runId 锚定<b>末次失败的尝试</b>（帧序 error(末次) →
+     * run-failed）。前端恢复出口（重新发起 / 重新修改）只认本帧——重试进行中的
+     * error 帧是过程事实，不判终态（「重新修改」零闪现）。
+     */
+    public static final String RUN_FAILED = "run-failed";
+
     // ---------- payload 关联键（全通道唯一真值） ----------
 
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */

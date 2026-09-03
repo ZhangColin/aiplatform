@@ -50,8 +50,12 @@ export type GenerationState = {
   noteCoderRetrying: (projectId: string, message?: string) => void;
   /** 编码 run 的 run-finish：状态 → finished + 预览纪元 +1（事件 id 去重）。 */
   noteCoderFinish: (projectId: string, eventId: string) => void;
-  /** 编码 run 的 error：状态 → error（无后续 run-retrying 即超限终态）。 */
-  noteCoderError: (projectId: string) => void;
+  /**
+   * 编码 run 的 run-failed（轨道终态收口帧）：状态 → error。终态的唯一写入口
+   * （#56）——error 帧是逐次尝试的过程事实、无写入口（编译期即不可误判），
+   * 重试间隔内恢复出口零闪现。
+   */
+  noteCoderFailed: (projectId: string) => void;
   /**
    * 预览内容前移（#49 preview-updated 通知）：节流后计预览纪元——间隔内的连续
    * 通知合并丢弃（不闪烁），重载由下一次出窗通知或收口纪元兜底。
@@ -136,7 +140,7 @@ export const useGenerationStore = create<GenerationState>((set) => ({
       };
     }),
 
-  noteCoderError: (projectId) =>
+  noteCoderFailed: (projectId) =>
     updateGeneration(set, projectId, (generation) =>
       generation.coderStatus === "error" ? generation : { ...generation, coderStatus: "error" },
     ),

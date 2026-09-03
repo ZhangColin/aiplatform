@@ -187,9 +187,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           message: payload.message,
         });
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
-        if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderError(payload.projectId);
-        }
+        // 生成面不写状态（#56）：error 是逐次尝试的过程事实，终态只认 run-failed
+        // 收口帧——否则重试间隔内恢复出口闪现（点击被 PRJ_025 挡回）
         return;
       }
       case "run-retrying": {
@@ -202,6 +201,16 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         });
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderRetrying(payload.projectId, payload.message);
+        }
+        return;
+      }
+      case "run-failed": {
+        // 编码 run 超限终态收口（#56）：轨道真终态（帧到 ⟺ 恢复出口可达）——
+        // 「重新发起/重新修改」只认本帧；无 CODER 登记的 runId 忽略（帧序异常
+        // 防御位，同其他 coder 帧）
+        const { payload } = platform;
+        if (isCoderRun(generation, payload.projectId, payload.runId)) {
+          generation.noteCoderFailed(payload.projectId);
         }
         return;
       }

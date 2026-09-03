@@ -185,7 +185,7 @@ export interface paths {
         put?: never;
         /**
          * 指令区发言（入口三分类派发：意见/咨询/兜底）
-         * @description content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发：意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），回复经 SSE 到达（role-assigned 帧携带角色标签）。空白 400；已归档 409 PRJ_013（指令区关闭）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；项目不存在 404 PRJ_001
+         * @description content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发：意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），回复经 SSE 到达（role-assigned 帧携带角色标签）。空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——咨询与兜底随时可答；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -205,7 +205,7 @@ export interface paths {
         put?: never;
         /**
          * 开始做系统（触发首次生成）
-         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying（话术「遇到问题，正在重试」），超限转终态失败、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying（话术「遇到问题，正在重试」），超限转终态发 run-failed 收口帧（前端「重新发起」出口只认本帧）、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -595,6 +595,7 @@ export interface paths {
          *     |---|---|
          *     | workspace-created | projectId, projectName, container, projectType |
          *     | preview-ready | projectId, url |
+         *     | preview-updated | projectId |
          *     | workspace-destroyed | projectId |
          *     | document-updated | projectId, documentType |
          *     | project-renamed | projectId, projectName |

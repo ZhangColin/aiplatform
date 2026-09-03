@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.FinishFixFacts;
+import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
@@ -27,14 +28,15 @@ class RoleToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
     private final FinishFixFacts finishFacts = new FinishFixFacts();
+    private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
 
     private RoleToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new RoleToolkitSupplier(prdArtifacts, finishFacts, projectRepository,
-                workspaceLifecycleAppService);
+        return new RoleToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+                projectRepository, workspaceLifecycleAppService);
     }
 
     @Test

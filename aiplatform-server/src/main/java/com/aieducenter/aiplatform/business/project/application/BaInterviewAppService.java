@@ -39,10 +39,11 @@ import lombok.extern.slf4j.Slf4j;
  * 与智能体资产（ask_user / savePrd 工具集，按角色发放）同归 BA 编排。</p>
  *
  * <p><b>链必达收口（#43）</b>：BA 无派发权——修正 run 的派发不在模型手里，平台
- * 在 BA 回合落定后观测收口（无挂起问答且项目已生成）即自动派修正 run（交接任务
- * = 用户意见原文，见 {@link #dispatchFixOnTurnClose}）。判定结果从工具调用事实
- * 观测，不新增模型自报结论的面；守卫沿用（未生成止于 BA、归档拒、在途排队合并，
- * 归 {@link IterationAppService}）。</p>
+ * 在 BA 回合落定后观测收口（无挂起问答且项目已生成）即自动派修正 run（交接物
+ * = 用户意见原文 + BA 判定结果——PRD 改没改、改了什么，见
+ * {@link #dispatchFixOnTurnClose}）。判定结果从工具调用事实观测
+ * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未生成止于
+ * BA、归档拒、在途排队合并，归 {@link IterationAppService}）。</p>
  *
  * <p><b>流桥</b>：过程帧经 {@link AgentStreamAppService}（eventhub 唯一 SSE 管道）
  * 发射，关联字段（projectId）逐帧注入——底座不解释、透传。发射失败护栏：单帧发射
@@ -74,9 +75,10 @@ public class BaInterviewAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
+    private final PrdRevisionFacts prdRevisions;
 
     /**
-     * 挂起交换的意见锚（sessionId → 交接任务文本）：意见原文开场落锚，追问挂起
+     * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文开场落锚，追问挂起
      * 期间的答复逐条并入（{@link #appendOpinionReply}）——收口派发的任务即锚的
      * 终值；收口即消费。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由
      * PRD 承载）。
@@ -86,7 +88,8 @@ public class BaInterviewAppService {
     public BaInterviewAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
-            OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService) {
+            OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
+            PrdRevisionFacts prdRevisions) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.streamBridge = streamBridge;
@@ -94,6 +97,7 @@ public class BaInterviewAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
+        this.prdRevisions = prdRevisions;
     }
 
     /**
@@ -163,6 +167,10 @@ public class BaInterviewAppService {
                 correlationOf(projectId),
                 role.name());
         sessionExecutor.submit(sessionId, () -> {
+            // 本轮需求侧判定从零起算（任务首行，随会话执行器串行——上一轮收口
+            // 消费在前，不会被本轮起跑插队 wipe）：上一轮异常滞留（轮炸即收口
+            // 不跑）/访谈期的 savePrd 事实残留不进本轮交接物
+            prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             agentClient.converse(command, sink);
             dispatchFixOnTurnClose(projectId, sessionId, runId);
         });
@@ -217,11 +225,13 @@ public class BaInterviewAppService {
      * 链必达收口观测（#43）：BA 回合落定（对话轮收口或问答续跑收口）后观测链的
      * 走向——会话有挂起问答 = 本轮未收口（答复后续跑再判，意见锚保留）；未生成
      * = 静默止于 BA（访谈期常态：生成前意见链终点）；收口前归档 = 竞态守卫，
-     * 静默不派。三者皆过即平台自动派修正 run（交接任务 = {@link #opinionExchanges}
-     * 中的意见原文及追问答复）。BA 无派发权：模型存没存 PRD、调没调任何工具都
-     * 不影响派发——链的收口在平台代码。派发失败发 {@code dispatch-failed} 失败
-     * 终态帧如实告知重提（#51：状态条不悬死在「派发中」）；不炸 BA 轨道、不恢复
-     * 意见锚（收口即消费语义保持）、不自动重试——重提即兜底。
+     * 静默不派。三者皆过即平台自动派修正 run（交接物 = {@link #opinionExchanges}
+     * 中的意见原文及追问答复 + {@link #prdRevisions} 中的 PRD 修订事实——本轮
+     * savePrd 调用的 summary 终值，无调用事实即 null「未修订」）。BA 无派发权：
+     * 模型存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发
+     * 失败发 {@code dispatch-failed} 失败终态帧如实告知重提（#51：状态条不悬死
+     * 在「派发中」）；不炸 BA 轨道、不恢复意见锚（收口即消费语义保持）、不自动
+     * 重试——重提即兜底。
      *
      * <p>#50：收口派发即发阶段帧——起跑发 {@code dispatching}、在途排队发
      * {@code queued}（如实呈现排队，锚本条意见的 BA 轮 runId）。</p>
@@ -233,22 +243,27 @@ public class BaInterviewAppService {
                     || agentClient.hasAskingToolCall(ownerUserIdOf(project), sessionId)) {
                 return;
             }
+            String workspaceId = Long.toString(project.getWorkspaceId());
             if (project.getGeneratedAt() == null || project.getArchivedAt() != null) {
                 opinionExchanges.remove(sessionId); // 收口即消费：锚不留过轮
+                prdRevisions.clear(workspaceId); // 修订事实同锚口径：不留过轮
                 return;
             }
             String task = opinionExchanges.remove(sessionId);
             if (task == null || task.isBlank()) {
                 return; // 锚缺失（put 先于收口，进程内理论不可达）——防御不派
             }
+            String prdRevisionSummary = prdRevisions.consume(workspaceId);
             // 派发中先于派发调用发射（帧序先于轨道起跑——轨道内首帧即 fixing）
             streamBridge.emitDispatchStage(projectId, runId, DispatchStage.DISPATCHING);
-            IterationAppService.FixDispatch dispatch = iterationAppService.startFixRun(projectId, task);
+            IterationAppService.FixDispatch dispatch =
+                    iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
             if (dispatch.queued()) {
                 streamBridge.emitDispatchStage(projectId, runId, DispatchStage.QUEUED);
             }
-            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}）", projectId,
-                    dispatch.queued() ? "排队下一轮" : "起跑");
+            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}，PRD {}）",
+                    projectId, dispatch.queued() ? "排队下一轮" : "起跑",
+                    prdRevisionSummary != null ? "已修订" : "未修订");
         }
         catch (RuntimeException e) {
             // 派发失败终态帧（#51）：状态条不悬死在「派发中」，如实告知重提——
@@ -315,7 +330,7 @@ public class BaInterviewAppService {
                 && "start".equals(data.get(TOOL_PHASE_FIELD));
     }
 
-    /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接任务）；
+    /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；
      * 无锚（重启丢锚的续跑）时以答复自立。 */
     private void appendOpinionReply(String sessionId, String reply) {
         opinionExchanges.compute(sessionId, (key, opinion) -> opinion == null

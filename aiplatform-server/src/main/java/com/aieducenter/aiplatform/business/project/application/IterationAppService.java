@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,6 +15,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +24,10 @@ import lombok.extern.slf4j.Slf4j;
  * 迭代编排（#26 迭代环① → #43 链必达收口 → #46 结束工具收口）：意见判定内化
  * BA，派发权归平台——BA 回合收口（无追问挂起）由 {@link BaInterviewAppService}
  * 观测并自动调用本服务派修正 run，不依赖模型自觉调用派发工具（startFixRun 已撤）。
+ * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + BA 判定结果（PRD
+ * 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
+ * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——CODER 重读约定见
+ * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发。
  * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体
  * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走
  * 共用尝试环 {@link CoderRunAttempts}）。
@@ -69,14 +75,14 @@ public class IterationAppService {
 
     /** 修正在途项目集（含已提交未起跑——排队中）：起跑/排队的分岔事实。 */
     private final Set<Long> fixesInFlight = ConcurrentHashMap.newKeySet();
-    /** run 进行中排队的修正任务（projectId → 待合并任务清单）。 */
-    private final Map<Long, List<String>> queuedFixRuns = new ConcurrentHashMap<>();
+    /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
+    private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
     /**
-     * 超限终态那场的交接任务（projectId → 终态任务清单）：恢复出口的重派依据，
+     * 超限终态那场的交接物（projectId → 终态交接物）：恢复出口的重派依据，
      * 成功收工即清。进程内态与轨道状态同口径——重启丢账，恢复出口 409 指路重提
      * 意见（既有兜底不变）。
      */
-    private final Map<Long, List<String>> terminallyFailedTasks = new ConcurrentHashMap<>();
+    private final Map<Long, FixHandoff> terminallyFailedHandoffs = new ConcurrentHashMap<>();
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
@@ -91,20 +97,21 @@ public class IterationAppService {
     /**
      * 派修正任务（BA 回合收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
      * 起跑（runId 随派发生成，过程帧经 SSE）；在途则排入队列、当前 run 收口后
-     * 合并续派。
+     * 合并续派。交接物三要素中的需求侧判定随派发携带：{@code prdRevisionSummary}
+     * = BA 流 savePrd 的 summary 终值（null = 本轮未修订）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_019 系统从未生成（迭代在首次生成完成后
      *                              才开始——BA 收口侧对未生成项目静默止于 BA，
      *                              此处守卫兜其余调用面）
      */
-    public FixDispatch startFixRun(Long projectId, String task) {
+    public FixDispatch startFixRun(Long projectId, String task, String prdRevisionSummary) {
         Project project = requireFixableProject(projectId);
-        return dispatch(project, List.of(task.strip()));
+        return dispatch(project, new FixHandoff(List.of(task.strip()), prdRevisionSummary));
     }
 
     /**
-     * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接任务（交接物沿用、
+     * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接物（交接物沿用、
      * 同 coder 会话续上下文），新 runId 随响应回——与新 run 的链路锚（同
      * {@code /generate} 口径），重派事实落日志可追溯。仅终态可达：修正在途（进行
      * 中/排队中）PRJ_025；无终态账（未派过修正/已成功收工/重启丢账）PRJ_026；
@@ -112,27 +119,50 @@ public class IterationAppService {
      */
     public FixDispatch restartFixRun(Long projectId) {
         Project project = requireFixableProject(projectId);
-        List<String> tasks;
+        FixHandoff handoff;
         String firstRunId;
         synchronized (this) {
             if (fixesInFlight.contains(projectId)) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_IN_FLIGHT);
             }
-            tasks = terminallyFailedTasks.remove(projectId);
-            if (tasks == null) {
+            handoff = terminallyFailedHandoffs.remove(projectId);
+            if (handoff == null) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
             }
             fixesInFlight.add(projectId);
             firstRunId = AgentStreamAppService.newRunId();
         }
-        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接任务 {} 条，源自超限终态）",
-                projectId, firstRunId, tasks.size());
-        submitFixTrack(project, firstRunId, tasks);
+        log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接意见 {} 条，源自超限终态）",
+                projectId, firstRunId, handoff.opinions().size());
+        submitFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
     }
 
     /** 修正派发结果（起跑 runId / 是否排入下一轮）。 */
     public record FixDispatch(String runId, boolean queued) {
+    }
+
+    /**
+     * 修正 run 交接物（#52，CONTEXT.md「交接物」）：需求侧收口后交给修正的任务
+     * 载体——意见原文清单 + 需求侧判定结果（PRD 改没改、改了什么；null = 本轮
+     * 无 savePrd 调用事实，即未修订）。PRD 引用不随物携带（路径固定
+     * {@link ProjectArtifacts#PRD}，prompt 拼装时引用）。
+     */
+    record FixHandoff(List<String> opinions, String prdRevisionSummary) {
+
+        /** 排队合并：意见按派发序串联；修订说明取最新非空值（更早的说明描述已被
+         * 后续 savePrd 覆盖的 PRD 旧态，混入即失真）。 */
+        static FixHandoff merge(List<FixHandoff> handoffs) {
+            List<String> opinions = handoffs.stream()
+                    .flatMap(handoff -> handoff.opinions().stream())
+                    .toList();
+            String summary = handoffs.stream()
+                    .map(FixHandoff::prdRevisionSummary)
+                    .filter(Objects::nonNull)
+                    .reduce((earlier, latest) -> latest)
+                    .orElse(null);
+            return new FixHandoff(opinions, summary);
+        }
     }
 
     // ---------- 内部 ----------
@@ -151,24 +181,24 @@ public class IterationAppService {
     }
 
     /** 迭代态守卫过后的派发：空闲即起跑，在途即排队。 */
-    private FixDispatch dispatch(Project project, List<String> tasks) {
+    private FixDispatch dispatch(Project project, FixHandoff handoff) {
         Long projectId = project.getId();
         String firstRunId;
         synchronized (this) {
             if (!fixesInFlight.add(projectId)) {
-                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).addAll(tasks);
+                queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(handoff);
                 return new FixDispatch(null, true);
             }
             firstRunId = AgentStreamAppService.newRunId();
         }
-        submitFixTrack(project, firstRunId, tasks);
+        submitFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
     }
 
     /**
      * 修正轨道（异步轨道内）：当前任务跑完（含重试超限）后排空队列——有排队任务
      * 即合并为一场修正 run 续跑，队列空即收工。收工时按末场成败结算终态账（#48）：
-     * 超限终态即记下该场交接任务（恢复出口 {@link #restartFixRun} 的重派依据），
+     * 超限终态即记下该场交接物（恢复出口 {@link #restartFixRun} 的重派依据），
      * 成功即清账（正常态无恢复面）。
      *
      * <p><b>在途标记的释放在两处，各自唯一负责一种收场</b>：正常收工在排空块
@@ -178,22 +208,22 @@ public class IterationAppService {
      * 直属于本轨道，直接清不会误伤（{@code released} 防的正是「正常收工后继任
      * 轨道已 add、旧 finally 再盲清一次」的双释放）。</p>
      */
-    private void runFixTrack(Project project, String firstRunId, List<String> firstTasks) {
+    private void runFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
         Long projectId = project.getId();
         // 本轨收口判定从零起算：上一轨/生成 run 的事实残留不进本轨（#46）
         finishFacts.clear(Long.toString(project.getWorkspaceId()));
         boolean released = false;
         try {
-            List<String> tasks = firstTasks;
+            FixHandoff handoff = firstHandoff;
             String runId = firstRunId;
             while (true) {
                 streamBridge.emitDispatchStage(projectId, runId, DispatchStage.FIXING);
                 boolean succeeded = coderRunAttempts.run(project, runId,
-                        new CoderRunAttempts.Prompts(fixRunPrompt(tasks), FIX_RETRY_RUN_PROMPT),
+                        new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId), "fix");
-                List<String> queued;
+                List<FixHandoff> queued;
                 synchronized (this) {
-                    List<String> pending = queuedFixRuns.remove(projectId);
+                    List<FixHandoff> pending = queuedFixRuns.remove(projectId);
                     queued = pending != null ? pending : List.of();
                     if (queued.isEmpty()) {
                         fixesInFlight.remove(projectId);
@@ -202,19 +232,21 @@ public class IterationAppService {
                         // 要么见释放前已落的账、要么在收工后自起新轨——不出现「已释放
                         // 无账」的假 PRJ_026 窗口，也不被先收工的旧轨覆盖
                         if (succeeded) {
-                            terminallyFailedTasks.remove(projectId);
+                            terminallyFailedHandoffs.remove(projectId);
                         }
                         else {
-                            terminallyFailedTasks.put(projectId, List.copyOf(tasks));
+                            terminallyFailedHandoffs.put(projectId, handoff);
                         }
                     }
                 }
                 if (queued.isEmpty()) {
                     return;
                 }
+                int mergedOpinions = queued.stream()
+                        .mapToInt(next -> next.opinions().size()).sum();
                 log.info("[fix] 项目 {} 修正轨道续派（合并 {} 条排队任务）",
-                        projectId, queued.size());
-                tasks = queued;
+                        projectId, mergedOpinions);
+                handoff = FixHandoff.merge(queued);
                 runId = AgentStreamAppService.newRunId();
             }
         }
@@ -251,23 +283,33 @@ public class IterationAppService {
         streamBridge.emitDispatchDone(project.getId(), attemptRunId, fact.changed());
     }
 
-    /** 修正任务 prompt：意见转化来的任务清单 + 收口判据复述（8081 常驻 + 结束工具必调）。 */
-    static String fixRunPrompt(List<String> tasks) {
+    /**
+     * 修正任务 prompt：交接物三要素结构化拼装（#52）——意见清单 + 需求侧判定
+     * （PRD 改没改、改了什么）+ PRD 路径引用（不注全文，CODER 重读约定见角色卡）
+     * + 收口判据复述（8081 常驻 + 结束工具必调）。
+     */
+    static String fixRunPrompt(FixHandoff handoff) {
         StringBuilder prompt = new StringBuilder(
                 "系统修正：系统已生成并可操作，用户提出了如下修正意见，请在现有工作区内"
                         + "完成修正（系统的其余部分保持可用）：");
-        for (int index = 0; index < tasks.size(); index++) {
-            prompt.append("\n").append(index + 1).append(". ").append(tasks.get(index));
+        for (int index = 0; index < handoff.opinions().size(); index++) {
+            prompt.append("\n").append(index + 1).append(". ").append(handoff.opinions().get(index));
         }
-        prompt.append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
+        prompt.append("\n需求侧判定（BA 已收口）：")
+                .append(handoff.prdRevisionSummary() != null
+                        ? "PRD 已修订，本轮修订说明：" + handoff.prdRevisionSummary()
+                        : "PRD 未修订（本轮意见未触发需求文档变更）")
+                .append("。需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
+                .append("，以正本与上述意见为准。")
+                .append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
                 .append("\n收尾必须调用 finish_fix 工具：动了系统传 changed=true 并说明改了什么；")
                 .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")
                 .append("不调用即本轮修正未收口。");
         return prompt.toString();
     }
 
-    private void submitFixTrack(Project project, String firstRunId, List<String> firstTasks) {
+    private void submitFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + project.getId(),
-                () -> runFixTrack(project, firstRunId, firstTasks));
+                () -> runFixTrack(project, firstRunId, firstHandoff));
     }
 }

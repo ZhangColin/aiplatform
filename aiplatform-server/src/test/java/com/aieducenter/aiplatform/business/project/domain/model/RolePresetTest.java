@@ -87,6 +87,10 @@ class RolePresetTest {
     void given_prd_protocol_when_inspect_then_revision_summary_and_converge_on_demand() {
         // 修订回路：定位章节修订 + 会话内给修订摘要（改了哪些章节）
         assertThat(PROMPT).contains("修订摘要");
+        // #52：savePrd 的 summary 必传（产出说明/修订说明——平台经此观测修订事实）
+        assertThat(PROMPT).contains("summary 传本次产出说明");
+        assertThat(PROMPT).contains("summary 传修订说明");
+        assertThat(PROMPT).contains("必传");
         // 催促收敛：立即收敛、缺口记入待定项；访谈轮数无上限
         assertThat(PROMPT).contains("待定项");
         assertThat(PROMPT).contains("多问");

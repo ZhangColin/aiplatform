@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import cn.hutool.core.collection.CollUtil;
@@ -46,6 +47,7 @@ import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -56,7 +58,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起帧
  * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）；链必达收口（#43）——BA 回合
  * 收口（无挂起问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；
- * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）。
+ * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）；交接物补齐（#52）——
+ * savePrd 的 summary 终值与「PRD 未修订」口径入修正 run prompt，本轮判定从零
+ * 起算（上轮残留不进）。
  */
 @SpringBootTest
 class BaInterviewAppServiceTest {
@@ -74,6 +78,9 @@ class BaInterviewAppServiceTest {
 
     @Autowired
     private FinishFixFacts finishFixFacts;
+
+    @Autowired
+    private PrdRevisionFacts prdRevisions;
 
     @MockitoBean
     private AgentscopeAgentClient agentClient;
@@ -109,6 +116,23 @@ class BaInterviewAppServiceTest {
                 finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             }
             return new AgentReply(command.runId(), baReply);
+        });
+    }
+
+    /** 脚本化智能体边界（#52 修订事实观测）：BA 轮内调 savePrd(content, summary)
+     * 的工具执行事实（真引擎内工具执行在此 mock 收口——登记即调用事实），一轮
+     * 多次调用按序落多条（终值胜出）；修正 run 收口脚本沿用。 */
+    private void givenConverseBaSavesPrdAndCoderFinishes(String... summaries) {
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("ba-")) {
+                for (String summary : summaries) {
+                    prdRevisions.record(command.workspaceId(), summary);
+                }
+                return new AgentReply(command.runId(), "已按意见修订 PRD");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
         });
     }
 
@@ -387,11 +411,107 @@ class BaInterviewAppServiceTest {
         assertThat(fix.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(fix.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt());
         assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
-                List.of("把系统的主色调改成绿色")));
+                new IterationAppService.FixHandoff(List.of("把系统的主色调改成绿色"), null)));
         assertThat(fix.live()).isTrue();
         // 修正 run 的 role-assigned 前置（CODER）
         verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED),
                 argThat(payload -> "CODER".equals(payload.get(AgentEventTypes.ROLE_FIELD))));
+    }
+
+    // ---------- 交接物补齐（#52：BA 判定结果入修正 run） ----------
+
+    @Test
+    void given_ba_saves_prd_with_summary_when_turn_closes_then_handoff_carries_summary_and_prd_path() {
+        // 灵魂用例（#41 Testing Decisions / #52）：脚本化 BA 流调
+        // savePrd(content, summary="…") → 修正 run prompt（交接物）含 summary
+        // 文本与 PRD 路径引用（不注全文）
+        Long projectId = persistedGeneratedProject("9740");
+        givenSessionExecutorRunsInline();
+        givenConverseBaSavesPrdAndCoderFinishes("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）");
+
+        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("PRD 已修订")
+                .contains("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）")
+                .contains(ProjectArtifacts.PRD);
+    }
+
+    @Test
+    void given_ba_without_save_prd_when_turn_closes_then_handoff_states_prd_not_revised() {
+        // BA 流不调 savePrd：交接物如实含「PRD 未修订」口径，修正 run 照派
+        Long projectId = persistedGeneratedProject("9741");
+        givenSessionExecutorRunsInline();
+        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
+
+        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("PRD 未修订")
+                .contains("把系统的主色调改成绿色")
+                .doesNotContain("修订说明：");
+    }
+
+    @Test
+    void given_multiple_save_prd_in_one_turn_when_consumed_then_final_summary_only() {
+        // 一轮多次 savePrd：交接物取终值不混杂（终版说明进 prompt，被覆盖的旧说明不进）
+        Long projectId = persistedGeneratedProject("9742");
+        givenSessionExecutorRunsInline();
+        givenConverseBaSavesPrdAndCoderFinishes("第一次修订说明（将被覆盖）",
+                "终版修订说明：主色调章节改为绿");
+
+        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        String prompt = command.getAllValues().get(1).prompt();
+        assertThat(prompt).contains("终版修订说明：主色调章节改为绿");
+        assertThat(prompt).doesNotContain("第一次修订说明");
+    }
+
+    @Test
+    void given_stale_revision_fact_from_aborted_turn_when_next_turn_settles_then_not_carried() {
+        // 本轮判定从零起算：上一轮 BA 调了 savePrd 但轮炸（收口不跑、事实滞留）
+        // → 下一轮不带残留（任务首行清残——滞留的修订事实不冒充本轮「已修订」）。
+        // 单一脚本分轮：首轮 record 后抛，次轮正常回复（Mockito 重打桩会以 null
+        // 参调旧 answer，故不分设）
+        Long projectId = persistedGeneratedProject("9743");
+        doAnswer(invocation -> {
+            try {
+                ((Runnable) invocation.getArgument(1)).run();
+            }
+            catch (RuntimeException e) {
+                // 生产执行器吞掉记日志（异步轨道），此处同语义（首轮 BA 炸）
+            }
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        AtomicBoolean firstBaTurn = new AtomicBoolean(true);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("ba-")) {
+                if (firstBaTurn.getAndSet(false)) {
+                    prdRevisions.record(command.workspaceId(), "上一轮的修订说明");
+                    throw new IllegalStateException("BA 轮失败");
+                }
+                return new AgentReply(command.runId(), "好的");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.runInterviewTurn(projectId, "上一条意见（本轮将炸）");
+        appService.runInterviewTurn(projectId, "这一条意见不用改 PRD");
+
+        // 首轮炸不派（既有口径）；次轮收口派修正：prompt 如实「未修订」无残留
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(2).prompt())
+                .contains("PRD 未修订")
+                .doesNotContain("上一轮的修订说明");
     }
 
     @Test
@@ -429,9 +549,9 @@ class BaInterviewAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of(
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of(
                         "把系统的主色调改成绿色；用户对追问的答复：要薄荷绿"
-                                + "；用户对追问的答复：偏冷一点的")));
+                                + "；用户对追问的答复：偏冷一点的"), null)));
     }
 
     @Test
@@ -461,9 +581,9 @@ class BaInterviewAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(4)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(2).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of("意见一：加导出")));
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("意见一：加导出"), null)));
         assertThat(command.getAllValues().get(3).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of("意见二：改蓝色")));
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("意见二：改蓝色"), null)));
     }
 
     @Test

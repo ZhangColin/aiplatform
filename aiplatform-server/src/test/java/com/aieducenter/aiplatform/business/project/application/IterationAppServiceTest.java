@@ -50,6 +50,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.command.Workspa
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -61,7 +62,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_fix 工具事实
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」帧，
  * changed=true 现有收口行为不回归）；超限终态恢复出口（#48：重派终态那场的交接
- * 物，正常态 / 在途 / 排队均不可达）；守卫组（不存在 / 已归档 / 未生成）。
+ * 物，正常态 / 在途 / 排队均不可达）；交接物三要素（#52：判定结果 + PRD 路径
+ * 引用入修正 run prompt，排队合并意见串联、修订说明取最新非空值）；守卫组
+ * （不存在 / 已归档 / 未生成）。
  */
 @SpringBootTest
 class IterationAppServiceTest {
@@ -138,7 +141,7 @@ class IterationAppServiceTest {
         givenConverseSucceeds();
 
         IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
-                "把预约列表按时间倒序排列");
+                "把预约列表按时间倒序排列", null);
         tracks.remove(0).run();
 
         assertThat(dispatch.queued()).isFalse();
@@ -149,7 +152,7 @@ class IterationAppServiceTest {
         // CODER 角色卡 + owner + 计量 dims + 流关联 + 直播开（与生成同机制）
         assertThat(value.runId()).isEqualTo(dispatch.runId());
         assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
-                List.of("把预约列表按时间倒序排列")));
+                new IterationAppService.FixHandoff(List.of("把预约列表按时间倒序排列"), null)));
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.workspaceId()).isEqualTo("9900");
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
@@ -180,14 +183,14 @@ class IterationAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表加筛选");
+        IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表加筛选", null);
         Thread trackWorker = new Thread(tracks.remove(0));
         trackWorker.start();
         assertThat(runInFlight.await(5, TimeUnit.SECONDS)).isTrue();
 
         // run 在途：后续任务排队、不即派
-        IterationAppService.FixDispatch second = appService.startFixRun(projectId, "按钮改蓝色");
-        IterationAppService.FixDispatch third = appService.startFixRun(projectId, "加导出");
+        IterationAppService.FixDispatch second = appService.startFixRun(projectId, "按钮改蓝色", null);
+        IterationAppService.FixDispatch third = appService.startFixRun(projectId, "加导出", null);
         assertThat(second.queued()).isTrue();
         assertThat(third.queued()).isTrue();
         verify(agentClient, times(1)).converse(any(), any());
@@ -199,12 +202,12 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         List<AgentCommand> runs = command.getAllValues();
         assertThat(runs.get(1).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of("按钮改蓝色", "加导出")))
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("按钮改蓝色", "加导出"), null)))
                 .contains("1. 按钮改蓝色").contains("2. 加导出");
         assertThat(runs.get(1).sessionId()).isEqualTo("coder-" + projectId);
         assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
         // 轨道收工（队列空）：在途释放——下一场意见可再起跑
-        assertThat(appService.startFixRun(projectId, "再来一轮").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "再来一轮", null).queued()).isFalse();
     }
 
     @Test
@@ -214,8 +217,8 @@ class IterationAppServiceTest {
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
-        appService.startFixRun(projectId, "第一条（轨道已提交未起跑）");
-        assertThat(appService.startFixRun(projectId, "第二条").queued()).isTrue();
+        appService.startFixRun(projectId, "第一条（轨道已提交未起跑）", null);
+        assertThat(appService.startFixRun(projectId, "第二条", null).queued()).isTrue();
         verify(agentClient, never()).converse(any(), any());
 
         // 轨道起跑：第一条跑完即合并第二条（同一场合并语义）
@@ -232,7 +235,7 @@ class IterationAppServiceTest {
         givenConverseSucceeds();
 
         String task = "给库存页加分页";
-        appService.startFixRun(projectId, task);
+        appService.startFixRun(projectId, task, null);
         tracks.remove(0).run();
 
         // 知识命中前置注入（#24 生成/修正同机制）：query = 修正任务 prompt，命中拼前
@@ -241,7 +244,7 @@ class IterationAppServiceTest {
         assertThat(command.getValue().prompt())
                 .startsWith("【平台知识库·相似历史需求】")
                 .contains("连锁诊所系统")
-                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(List.of(task)));
+                .endsWith("————\n\n" + IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of(task), null)));
     }
 
     @Test
@@ -256,7 +259,7 @@ class IterationAppServiceTest {
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
-        appService.startFixRun(projectId, "修正首页布局");
+        appService.startFixRun(projectId, "修正首页布局", null);
         tracks.remove(0).run();
 
         // 失败自动重试同生成：run-retrying 帧（话术「遇到问题，正在重试」）+ 重试续作轨
@@ -268,7 +271,7 @@ class IterationAppServiceTest {
                 "遇到问题，正在重试".equals(payload.get(AgentEventTypes.RETRY_MESSAGE_FIELD))));
 
         // 重试成功后轨道正常收工：下一场可再起跑
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -278,12 +281,12 @@ class IterationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("持续失败"));
 
-        appService.startFixRun(projectId, "修不动");
+        appService.startFixRun(projectId, "修不动", null);
         tracks.remove(0).run();
 
         verify(agentClient, times(3)).converse(any(), any());
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
-        assertThat(appService.startFixRun(projectId, "再试一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }
 
     // ---------- 结束工具收口（#46：finish_fix 事实观测 + 「未动系统」如实呈现） ----------
@@ -296,7 +299,7 @@ class IterationAppServiceTest {
         givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
 
         IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
-                "把首页标题改成「关于我们」");
+                "把首页标题改成「关于我们」", null);
         tracks.remove(0).run();
 
         // fix-unchanged 帧：锚定收口 runId + projectId + 原因原文（不解析自由文本）
@@ -306,7 +309,7 @@ class IterationAppServiceTest {
                         && "纯文档性修订，系统现状已满足"
                                 .equals(payload.get(AgentEventTypes.FIX_UNCHANGED_REASON_FIELD))));
         // changed=false 也是正常收口：轨道收工释放，下一场可再起跑
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -315,13 +318,13 @@ class IterationAppServiceTest {
         List<Runnable> tracks = givenTrackQueued();
         givenConverseFinishing(true, "已把主色调改为绿色");
 
-        appService.startFixRun(projectId, "把主色调改成绿色");
+        appService.startFixRun(projectId, "把主色调改成绿色", null);
         tracks.remove(0).run();
 
         // changed=true：现有收口行为不回归——不发 fix-unchanged（预览刷新/直播收起/
         // 状态位仍由 run-finish 驱动），轨道正常收工
         verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -339,7 +342,7 @@ class IterationAppServiceTest {
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
-        appService.startFixRun(projectId, "修一下分页");
+        appService.startFixRun(projectId, "修一下分页", null);
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -352,7 +355,7 @@ class IterationAppServiceTest {
                 projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
                         && payload.get("message").toString().contains("finish_fix")));
         verify(streamAppService).publish(eq(AgentEventTypes.RUN_RETRYING), any());
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -366,13 +369,13 @@ class IterationAppServiceTest {
                 .thenAnswer(invocation -> new AgentReply(
                         ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
 
-        appService.startFixRun(projectId, "修不动");
+        appService.startFixRun(projectId, "修不动", null);
         tracks.remove(0).run();
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(streamAppService, times(3)).publish(eq(AgentEventTypes.ERROR), any());
         verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
-        assertThat(appService.startFixRun(projectId, "再试一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }
 
     @Test
@@ -386,11 +389,72 @@ class IterationAppServiceTest {
                 .thenAnswer(invocation -> new AgentReply(
                         ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
 
-        appService.startFixRun(projectId, "新一轮意见");
+        appService.startFixRun(projectId, "新一轮意见", null);
         tracks.remove(0).run();
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(streamAppService, never()).publish(eq(AgentEventTypes.FIX_UNCHANGED), any());
+    }
+
+    // ---------- 交接物三要素（#52：BA 判定结果入修正 run prompt） ----------
+
+    @Test
+    void given_prd_revised_when_fix_then_prompt_carries_summary_and_prd_reference() {
+        // 灵魂用例（#41 Testing Decisions）：summary 终值 + PRD 路径引用都进修正
+        // run prompt（不注全文——CODER 重读约定见角色卡）
+        Long projectId = persistedGeneratedProject("9919");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把系统的主色调改成绿色",
+                "按意见把主色调相关约定从蓝改为绿（覆盖本条意见）");
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("PRD 已修订")
+                .contains("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）")
+                .contains(ProjectArtifacts.PRD);
+    }
+
+    @Test
+    void given_prd_not_revised_when_fix_then_prompt_states_not_revised_and_dispatch_proceeds() {
+        // BA 流不调 savePrd：交接物如实含「PRD 未修订」口径，修正 run 照派
+        Long projectId = persistedGeneratedProject("9920");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把系统的主色调改成绿色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any());
+        assertThat(command.getValue().prompt())
+                .contains("PRD 未修订")
+                .contains(ProjectArtifacts.PRD)
+                .doesNotContain("修订说明");
+    }
+
+    @Test
+    void given_queued_handoffs_when_merged_then_opinions_concat_and_latest_nonnull_revision_wins() {
+        // 排队合并：意见串联为一轮；修订说明取最新非空值——更早的说明描述已被后续
+        // savePrd 覆盖的 PRD 旧态，混入即失真（含「后轮未再修订」不顶掉前轮事实）
+        Long projectId = persistedGeneratedProject("9921");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "首条意见（在途）", null);
+        appService.startFixRun(projectId, "意见二：加导出", "为意见二补充了导出功能章节");
+        appService.startFixRun(projectId, "意见三：改蓝色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("1. 意见二：加导出")
+                .contains("2. 意见三：改蓝色")
+                .contains("为意见二补充了导出功能章节");
     }
 
     // ---------- 逐修改刷新（#49：修正与生成同一口径，刷新挂在共用尝试环） ----------
@@ -416,7 +480,7 @@ class IterationAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列");
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
         tracks.remove(0).run();
 
         // 完整修改落定的步骤边界（step≥2）→ 平台侧探活通过 → 刷新通知（step1 不算）
@@ -425,7 +489,7 @@ class IterationAppServiceTest {
                         projectId.toString().equals(
                                 payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
         // run 正常收口、轨道收工（刷新装饰不改变修正收口行为）
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -434,13 +498,13 @@ class IterationAppServiceTest {
                 9906L, OWNER)).getId();
         Long archivedId = persistedArchivedGeneratedProject("9907");
 
-        assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下"))
+        assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下", null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.FIX_RUN_NOT_GENERATED.message());
-        assertThatThrownBy(() -> appService.startFixRun(archivedId, "改一下"))
+        assertThatThrownBy(() -> appService.startFixRun(archivedId, "改一下", null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
-        assertThatThrownBy(() -> appService.startFixRun(-1L, "改一下"))
+        assertThatThrownBy(() -> appService.startFixRun(-1L, "改一下", null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
         // 恢复出口守卫同口径（#48）：归档 / 未生成 / 不存在
@@ -472,11 +536,11 @@ class IterationAppServiceTest {
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
-        appService.startFixRun(projectId, "把主色调改成绿色");
+        appService.startFixRun(projectId, "把主色调改成绿色", "按意见把主色调改为绿");
         tracks.remove(0).run();
         verify(agentClient, times(3)).converse(any(), any());
 
-        // 恢复出口：重派修正 run——交接物沿用（同任务清单、同 coder 会话），
+        // 恢复出口：重派修正 run——交接物沿用（意见清单 + 判定结果、同 coder 会话），
         // 响应 runId 即新 run 首试标识（与新 run 的链路锚，同 /generate 口径）
         IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
         assertThat(restart.queued()).isFalse();
@@ -486,14 +550,15 @@ class IterationAppServiceTest {
         verify(agentClient, times(4)).converse(command.capture(), any());
         AgentCommand redispatch = command.getAllValues().get(3);
         assertThat(redispatch.prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of("把主色调改成绿色")));
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(
+                        List.of("把主色调改成绿色"), "按意见把主色调改为绿")));
         assertThat(redispatch.runId()).isEqualTo(restart.runId());
         assertThat(redispatch.sessionId()).isEqualTo("coder-" + projectId);
         // 恢复轮成功收工：终态账清（成功后无恢复面，再恢复即 409）+ 轨道释放（下一场可起跑）
         assertThatThrownBy(() -> appService.restartFixRun(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.FIX_RESTART_UNAVAILABLE.message());
-        assertThat(appService.startFixRun(projectId, "下一场").queued()).isFalse();
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test
@@ -501,7 +566,7 @@ class IterationAppServiceTest {
         Long succeededId = persistedGeneratedProject("9914");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
-        appService.startFixRun(succeededId, "列表加筛选");
+        appService.startFixRun(succeededId, "列表加筛选", null);
         tracks.remove(0).run();
 
         Long neverDispatchedId = persistedGeneratedProject("9915");
@@ -523,7 +588,7 @@ class IterationAppServiceTest {
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
         // 轨道已提交未起跑（排队中同在途口径）：恢复出口不可达
-        appService.startFixRun(projectId, "第一条");
+        appService.startFixRun(projectId, "第一条", null);
 
         assertThatThrownBy(() -> appService.restartFixRun(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -539,9 +604,9 @@ class IterationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("持续失败"));
 
-        appService.startFixRun(projectId, "第一次意见");
+        appService.startFixRun(projectId, "第一次意见", null);
         tracks.remove(0).run();
-        appService.startFixRun(projectId, "第二次意见");
+        appService.startFixRun(projectId, "第二次意见", null);
         tracks.remove(0).run();
 
         IterationAppService.FixDispatch restart = appService.restartFixRun(projectId);
@@ -550,7 +615,7 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(9)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(6).prompt())
-                .isEqualTo(IterationAppService.fixRunPrompt(List.of("第二次意见")));
+                .isEqualTo(IterationAppService.fixRunPrompt(new IterationAppService.FixHandoff(List.of("第二次意见"), null)));
         assertThat(command.getAllValues().get(6).runId()).isEqualTo(restart.runId());
     }
 
@@ -569,8 +634,8 @@ class IterationAppServiceTest {
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
-        appService.startFixRun(projectId, "首场意见（将超限）");
-        assertThat(appService.startFixRun(projectId, "排队意见").queued()).isTrue();
+        appService.startFixRun(projectId, "首场意见（将超限）", null);
+        assertThat(appService.startFixRun(projectId, "排队意见", null).queued()).isTrue();
         tracks.remove(0).run();
 
         // 首场 3 败 + 合并续派 1 成；成功收工 → 无恢复面（首场超限不留陈账）
@@ -605,7 +670,7 @@ class IterationAppServiceTest {
         List<String> stages = givenStageCapture();
         givenConverseFinishing(false, "纯文档性修订，系统现状已满足");
 
-        appService.startFixRun(projectId, "改主色调");
+        appService.startFixRun(projectId, "改主色调", null);
         tracks.remove(0).run();
 
         assertThat(stages).containsExactly("fixing", "done");
@@ -625,8 +690,8 @@ class IterationAppServiceTest {
         List<String> stages = givenStageCapture();
         givenConverseSucceeds();
 
-        appService.startFixRun(projectId, "意见一");
-        assertThat(appService.startFixRun(projectId, "意见二").queued()).isTrue();
+        appService.startFixRun(projectId, "意见一", null);
+        assertThat(appService.startFixRun(projectId, "意见二", null).queued()).isTrue();
         tracks.remove(0).run(); // 首场收口即合并续场
 
         assertThat(stages).containsExactly("fixing", "done", "fixing", "done");

@@ -273,9 +273,9 @@ public class BaInterviewAppService {
             if (dispatch.queued()) {
                 streamBridge.emitDispatchStage(projectId, runId, DispatchStage.QUEUED);
             }
-            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}，PRD {}）",
+            log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}，{}）",
                     projectId, dispatch.queued() ? "排队下一轮" : "起跑",
-                    prdRevisionSummary != null ? "已修订" : "未修订");
+                    prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
         }
         catch (RuntimeException e) {
             // 派发失败终态帧（#51）：状态条不悬死在「派发中」，如实告知重提——

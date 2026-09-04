@@ -92,7 +92,8 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
     expect(html).toContain("需求分析师");
     expect(html).toContain("项目助理");
     expect(html).toContain("平台");
-    expect(html).toContain("直接说出你的想法");
+    // 常驻文案初版（#79）：缺省访谈期——告知阶段与下一步
+    expect(html).toContain("访谈中");
   });
 
   it("待答问题：问答卡在流内、输入条提示「回答上面的问题」（Enter 即答复锚点）", () => {
@@ -198,5 +199,29 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
       />,
     );
     expect(archived).not.toContain("确认下单");
+  });
+});
+
+describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
+  it("阶段两态：缺省访谈期 / stage=iterate 切迭代期文案", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "已按你的意见修订。", label: "需求分析师" }]);
+
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain("访谈中");
+
+    const iterated = renderToStaticMarkup(<CommandArea projectId="p1" stage="iterate" />);
+    expect(iterated).toContain("迭代中");
+    expect(iterated).not.toContain("访谈中");
+  });
+
+  it("发送框 = 共享 Composer（立体卡片）——首页/项目页同一组件", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场", label: "需求分析师" }]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+    // Composer 卡片形态（ring 圆角卡片 + 圆形发送键 + 类型下拉）
+    expect(html).toContain("rounded-2xl");
+    expect(html).toContain('aria-label="发送"');
+    expect(html).toContain('aria-label="做系统"');
+    // 对话流暂无附件管道：入口隐去（不邀请会被丢弃的操作）
+    expect(html).not.toContain('aria-label="附件"');
   });
 });

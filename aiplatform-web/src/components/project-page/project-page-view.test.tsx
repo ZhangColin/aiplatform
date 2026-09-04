@@ -43,6 +43,16 @@ vi.mock("@/hooks/use-generate", () => ({
   useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
+// 系统范式（默认激活）内「重新修改」按钮的 mutation 口 + 预览地址读口
+//（system-panel.test 同款；无 QueryClientProvider，query 口全 mock）
+vi.mock("@/hooks/use-restart-fix", () => ({
+  useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-project-preview", () => ({
+  useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
+}));
+
 // 订单数据口（#28）：下单动作 stub；订单详情按用例播种（OrderPanel 消费）
 const orderSeed = vi.hoisted(() => ({
   order: undefined as Record<string, unknown> | undefined,
@@ -77,28 +87,29 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).toContain("和平台聊聊你的想法");
   });
 
-  it("PRD 产出（prdProducedAt 落定）：双槽长出——三模式页签 + PRD 正文", () => {
+  it("PRD 产出（prdProducedAt 落定）：成果区自动滑出——双槽 + tab 簇（系统/文档默认挂载，激活 = 系统）", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z" });
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     expect(html).toContain('data-slot="resizable-panel-group"');
     expect(html.match(/data-slot="resizable-panel"/g)).toHaveLength(2);
-    expect(html).toContain("文件");
+    // tab 簇即标题条：默认挂载「系统」「文档」+「+ 新标签页」；仅激活面渲染
+    expect(html).toContain('role="tablist"');
     expect(html).toContain("系统");
-    expect(html).toContain("项目");
-    expect(html).toContain("docs/PRD.md");
-    expect(html).toContain("给宠物医院做预约管理系统。");
+    expect(html).toContain("文档");
+    expect(html).toContain("新标签页");
+    expect(html).not.toContain('data-tree-file'); // 文件范式未挂载（按需）
   });
 
-  it("PRD 已产出且未生成（#22）：对话流卡片 + 文件模式操作条双入口「开始做系统」", () => {
+  it("PRD 已产出且未生成（#22）：对话流卡片入口「开始做系统」+ 系统范式空态呼应", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
+    // 主入口 = 对话流内卡片（系统范式空态同步一句提示）
     expect(html).toContain("需求整理好了，可以开始做系统");
-    // 紧凑入口挂在文件模式操作条（PRD 头部）
-    expect((html.match(/开始做系统/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
   });
 
   it("闲聊期（PRD 未产出）：不出现「开始做系统」入口（无事可做）", () => {

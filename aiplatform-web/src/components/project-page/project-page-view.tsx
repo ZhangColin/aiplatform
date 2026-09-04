@@ -16,57 +16,65 @@ import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 
 import { CommandArea } from "./command-area";
 import { ConfirmOrderButton } from "./confirm-order-button";
-import { OutputsArea } from "./outputs-area";
+import { OutputsArea, useOutputsTabs } from "./outputs-area";
 import { StartGenerationCard, StartSystemButton } from "./start-generation";
 import { ProjectPageRunStatus, ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
 
 /**
- * 项目页装配（issue #17 单站两槽位壳 + #19/#20 需求环 + #22 生成环①）：左指令区
- * （常开对话区，BA 访谈接通）+ 右成果区（文件 / 系统 / 项目三模式，PRD 产出后长出
- * ——判据 = prdProducedAt，document-updated 失效重拉即时切换）。闲聊期
- * （prdProducedAt 未落 = 尚无产物）指令区占满全宽、成果区不渲染。
+ * 项目页装配（issue #17 单站壳 + #19/#20 需求环 + #22 生成环① + #79 对话
+ * 主角式定稿）：居中对话区（BA 访谈接通）+ 呼出式成果区（范式注册表 tab 簇，
+ * PRD 产出后长出并自动滑出——判据 = prdProducedAt，document-updated 失效重拉
+ * 即时切换）。闲聊期（prdProducedAt 未落）对话区占满全宽、成果区不渲染。
  *
- * <p>生成环（#22）：「开始做系统」eligibility 单点在此判定（PRD 已产出 && 未生成 &&
- * 不在生成中——纯动作无门，待定项未清也可点）；对话流内卡片与文件模式操作条同一
- * 动作；编码 run 起跑自动切系统模式（用户手动切换优先至下一自动事件）。「确认下单」
+ * <p>成果区开合与 tab 簇归此持有：有成果自动滑出一次（含回访/刷新）、发起
+ * 生成/编码 run 起跑自动开并切「系统」、下单成功自动挂「订单」、「去看看」
+ * 挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。「开始做系统」
+ * eligibility 单点在此判定（PRD 已产出 && 未生成 && 不在生成中——纯动作无门，
+ * 待定项未清也可点）；对话流内卡片与文件范式操作条同一动作。「确认下单」
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
  * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂输入条按钮、锁定式
- * 矩阵行在此判定（lockRowOf 单点）注入指令区与订单卡、下单成功自动切项目模式看
- * 订单卡。本组件是 agent 流通道首个挂载方（ADR 0003「项目页 mount 建连、unmount
- * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真
- * 绑定：项目建立即自动跑 BA，进行中亮灯。mobile 页签受控：「去看看」胶囊与发起
- * 生成/下单跳成果区。</p>
+ * 矩阵行在此判定（lockRowOf 单点）注入对话区与订单范式。本组件是 agent 流通道
+ * 首个挂载方（ADR 0003「项目页 mount 建连、unmount 即断」）；断流超 ~10s 发
+ * 一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目建立即自动
+ * 跑 BA，进行中亮灯。mobile 页签受控：发起生成/下单跳成果区。</p>
  */
 export function ProjectPageView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
   const [mobileTab, setMobileTab] = useState("chat");
-  const [outputsTab, setOutputsTab] = useState("files");
+  const outputsTabs = useOutputsTabs();
+  /** 成果区呼出态：有成果自动滑出一次（含回访）；用户可收起、顶栏「成果」呼出。 */
+  const [outputsOpen, setOutputsOpen] = useState(false);
   const placeOrder = usePlaceOrder(projectId);
 
   useAgentStreamChannel(projectId);
   const agentStatus = useSseStatus("agent");
   const coderStatus = useGenerationStore((s) => coderStatusOf(s, projectId));
 
-  // 编码 run 起跑（含生成中回页/重连）自动切系统模式——渲染期派生态调整
-  //（同 command-area 勾选重置先例，不用 effect）；用户手动切换保留至下一自动事件
+  // 有成果（PRD 产出）即滑出一次——渲染期派生态（同 seenGenerating 先例），
+  // 含刷新/回访挂载（成果在那里，应当场可见）：seenOutputs 起步 false，
+  // 首帧见成果即开
+  const hasOutputs = !!detail?.prdProducedAt;
+  const [seenOutputs, setSeenOutputs] = useState(false);
+  if (hasOutputs && !seenOutputs) {
+    setSeenOutputs(true);
+    setOutputsOpen(true);
+  }
+
+  // 编码 run 起跑（含生成中回页/重连）自动开成果区并切「系统」——渲染期派生态
+  // 调整（不用 effect）；用户手动切换保留至下一自动事件
   const generating = coderStatus === "running" || coderStatus === "retrying";
   const [seenGenerating, setSeenGenerating] = useState(generating);
   if (generating !== seenGenerating) {
     setSeenGenerating(generating);
-    if (generating) setOutputsTab("system");
+    if (generating) openOutputsTo("system");
   }
 
-  /** 发起生成成功即看系统模式（空白浏览器窗 + 一句提示；mobile 跳成果区）。 */
-  function handleGenerated() {
-    setOutputsTab("system");
-    setMobileTab("outputs");
-  }
-
-  /** 下单成功即看项目模式的订单卡（等待文案 + 取消入口；mobile 跳成果区）。 */
-  function handleOrdered() {
-    setOutputsTab("project");
+  /** 开成果区并挂某范式（mobile 跳成果区页）——自动切换三入口共用的动作。 */
+  function openOutputsTo(id: string) {
+    setOutputsOpen(true);
+    outputsTabs.mount(id);
     setMobileTab("outputs");
   }
 
@@ -108,7 +116,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
     );
   }
 
-  // 闲聊期（尚无产物）：指令区占满全宽；PRD 产出后长出成果区（右槽 + 双页签）
+  // 闲聊期（尚无产物）：对话区占满全宽；PRD 产出后长出成果区（呼出式 + 双页签）
   const chatOnly = !detail?.prdProducedAt;
 
   // 「开始做系统」eligibility（单点）：PRD 已产出 && 未生成过 && 不在生成中
@@ -124,7 +132,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
     activeOrderId: detail?.activeOrder?.id ?? null,
   });
 
-  // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——指令区禁用+提示、成果区只读
+  // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——对话区禁用+提示、成果区只读
   const lock = lockRowOf({ archived: detail?.archived, activeOrder: detail?.activeOrder });
 
   // 订单卡挂的单（#30）：未终结单优先；归档终态挂最近单出完整记录（支付归档后
@@ -144,22 +152,23 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
         )
       }
       running={<ProjectPageRunStatus projectId={projectId} />}
-      left={
+      chat={
         <CommandArea
           projectId={projectId}
           lock={lock}
-          onSeePrd={() => setMobileTab("outputs")}
+          stage={chatOnly ? "interview" : "iterate"}
+          onSeePrd={() => openOutputsTo("docs")}
           generationCard={
             <StartGenerationCard
               projectId={projectId}
               eligible={generationEligible}
-              onGenerated={handleGenerated}
+              onGenerated={() => openOutputsTo("system")}
             />
           }
           confirmOrder={
             showConfirmOrder ? (
               <ConfirmOrderButton
-                onConfirm={() => placeOrder.mutate(undefined, { onSuccess: handleOrdered })}
+                onConfirm={() => placeOrder.mutate(undefined, { onSuccess: () => openOutputsTo("order") })}
               />
             ) : null
           }
@@ -168,23 +177,25 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
       outputs={
         chatOnly ? undefined : (
           <OutputsArea
-            projectId={projectId}
-            generatedAt={detail?.generatedAt}
-            coderStatus={coderStatus}
-            orderCardId={orderCardId}
-            projectArchived={!!detail?.archived}
-            tab={outputsTab}
-            onTabChange={setOutputsTab}
-            onGenerated={handleGenerated}
-            generationAction={
-              generationEligible ? (
-                <StartSystemButton projectId={projectId} onGenerated={handleGenerated} />
-              ) : null
-            }
+            tabs={outputsTabs}
+            ctx={{
+              projectId,
+              generatedAt: detail?.generatedAt,
+              coderStatus,
+              orderCardId,
+              projectArchived: !!detail?.archived,
+              onGenerated: () => openOutputsTo("system"),
+              generationAction: generationEligible ? (
+                <StartSystemButton projectId={projectId} onGenerated={() => openOutputsTo("system")} />
+              ) : null,
+            }}
+            onClose={() => setOutputsOpen(false)}
           />
         )
       }
-      mobileTabs={chatOnly ? ["指令区"] : ["指令区", "成果区"]}
+      outputsOpen={outputsOpen}
+      onOutputsOpen={() => setOutputsOpen(true)}
+      mobileTabs={chatOnly ? ["对话"] : ["对话", "成果"]}
       mobileTab={chatOnly ? undefined : mobileTab}
       onMobileTabChange={setMobileTab}
     />

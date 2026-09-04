@@ -12,7 +12,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type RefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,8 +35,9 @@ import { PLATFORM_MODES } from "@/lib/modes";
  *
  * 输入受控（首页示例 chips 点选填入、项目页接对话流都由调用侧持态）；附件为
  * 组件内本地态——上传管道不在本票（#76「沿用既有上传能力」，现有服务端无
- * 上传端点），选择即挂 chip、可删可加，随 onSubmit 一并交出、发出即清。
- * 类型下拉 v1 仅「做系统」，做页面/写文档为「敬请期待」占位。
+ * 上传端点），选择即挂 chip、可删可加，随 onSubmit 一并交出、发出即清；
+ * 调用侧消费不了附件时传 attachmentsEnabled=false 隐去入口（不邀请会被
+ * 丢弃的操作）。类型下拉 v1 仅「做系统」，做页面/写文档为「敬请期待」占位。
  */
 
 /** 附件条目（物料区与 chip 行共用形状）。 */
@@ -66,6 +67,9 @@ export function Composer({
   onValueChange,
   onSubmit,
   submitPending = false,
+  disabled = false,
+  attachmentsEnabled = true,
+  inputRef,
   placeholder = "说说你想做什么…",
 }: {
   /** hero = 首页居中大框（加大一号）；项目页常规尺寸。 */
@@ -76,6 +80,12 @@ export function Composer({
   onSubmit: (text: string, attachments: ComposerAttachment[]) => void;
   /** 提交进行中（发送键转 Spinner 且禁用）。 */
   submitPending?: boolean;
+  /** 整体禁用（项目页锁定态：输入与发送停用）。 */
+  disabled?: boolean;
+  /** 附件入口（回形针 + chip 行）：调用侧无上传管道时置 false 隐去——不邀请会被丢弃的操作。 */
+  attachmentsEnabled?: boolean;
+  /** 输入框外接 ref（项目页：问题到达自动聚焦）。 */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
 }) {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -85,6 +95,10 @@ export function Composer({
 
   // 自动增高：随输入长高、上限后内部滚动（create-project-form 既有口径迁入）。
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setTextarea = (el: HTMLTextAreaElement | null) => {
+    textareaRef.current = el;
+    if (inputRef) inputRef.current = el;
+  };
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -92,7 +106,7 @@ export function Composer({
     el.style.height = `${el.scrollHeight}px`;
   }, [value]);
 
-  const canSubmit = value.trim().length > 0 && !submitPending;
+  const canSubmit = value.trim().length > 0 && !submitPending && !disabled;
 
   function submit() {
     if (!canSubmit) return;
@@ -136,12 +150,13 @@ export function Composer({
       )}
     >
       <textarea
-        ref={textareaRef}
+        ref={setTextarea}
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         rows={hero ? 3 : 2}
+        disabled={disabled}
         aria-label={placeholder}
         className={cn(
           "w-full resize-none border-0 bg-transparent p-0 outline-none placeholder:text-muted-foreground/70",
@@ -149,7 +164,7 @@ export function Composer({
         )}
       />
 
-      {attachments.length > 0 ? (
+      {attachmentsEnabled && attachments.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {attachments.map((m) => (
             <span
@@ -174,10 +189,12 @@ export function Composer({
       ) : null}
 
       <div className={cn("flex items-center gap-1", hero ? "mt-3" : "mt-2")}>
+        {attachmentsEnabled ? (
         <Popover open={materialsOpen} onOpenChange={setMaterialsOpen}>
           <PopoverTrigger
             className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="附件"
+            disabled={disabled}
           >
             <Paperclip className="size-4" /> 附件
           </PopoverTrigger>
@@ -219,11 +236,12 @@ export function Composer({
             </div>
           </PopoverContent>
         </Popover>
-
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label={mode}
+            disabled={disabled}
           >
             <Sparkles className="size-3.5" /> {mode} <ChevronDown className="size-3" />
           </DropdownMenuTrigger>

@@ -1,15 +1,13 @@
 "use client";
 
-import { FileText, Info, Lock, SendHorizontal, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { FileText, Info, Lock, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Composer } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
-import { isSubmitEnter } from "@/lib/chat/enter";
 import type { LockRow } from "@/lib/orders/lock";
 import {
   FALLBACK_AGENT_LABEL,
@@ -24,25 +22,31 @@ import { QuestionCard } from "./question-card";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
+/** 常驻文案（#79 初版）：随访谈/迭代阶段化，告诉用户「现在在哪、下一步能做什么」。 */
+const STAGE_HINTS = {
+  interview: "访谈中：说说你的想法，平台会提问、把要点整理成需求文档，聊清楚后动手做系统",
+  iterate: "迭代中：想改什么、想问什么直接说，每轮修改都会更新文档、留下记录",
+} as const;
+
 /**
- * 指令区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
- * #47 入口三分类）：项目页左侧全程常开的对话区，无标题——BA 开场回应、每轮一问、
- * 用户的意见与答复、助理的咨询作答、平台的兜底轻引导都在此流动；首次生成后意见
- * 即迭代入口（BA 判需求侧，回合收口后平台自动派修正 run——链必达 #43，指令区
- * 形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户隐式），气泡角色标签随
- * role-assigned / guide-reply 帧呈现（BA「需求分析师」/ 助理「项目助理」/ 平台）。
- * 输入条上方挂派发阶段状态条（#50，dispatch-stage 帧驱动、不署智能体名）。
- * 发送路由：有待答问题时 Enter 即当前问题的答复（可与已勾选合并），否则即新发言。
- * 问题到达自动聚焦输入框（不错过在等你的问题）。对话史 = chat store（SSE 桥喂，
- * 重放可重建近期轮）。PRD 修订到达（未认领）时输入条上方出「PRD 有更新 · 去看看」
- * 胶囊——点击即认领并回调场景层跳转成果区；「确认下单」随首次生成完成常驻输入条
- * 上方（#26，装配层判定可见性后注入）。输入可用性吃锁定式矩阵（#28）：locked
- * （订单处理中）禁用输入并出锁定提示，closed（归档终态）关闭——矩阵行由装配层
- * 判定后注入。
+ * 对话区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
+ * #47 入口三分类；#79 起居中当主角）：项目页全程常开的对话区，无标题——BA
+ * 开场回应、每轮一问、用户的意见与答复、助理的咨询作答、平台的兜底轻引导都在
+ * 此流动；首次生成后意见即迭代入口（BA 判需求侧，回合收口后平台自动派修正
+ * run——链必达 #43，形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户
+ * 隐式），气泡角色标签随 role-assigned / guide-reply 帧呈现（BA「需求分析
+ * 师」/ 助理「项目助理」/ 平台）。发送框 = 共享 Composer（首页/项目页同一
+ * 组件，#76）；Enter 路由：有待答问题时即当前问题的答复（可与已勾选合并），
+ * 否则即新发言。输入条上方挂派发阶段状态条（#50）与「PRD 有更新 · 去看看」
+ * 胶囊（点击认领并回调场景层跳成果区）；「确认下单」随首次生成完成常驻输入
+ * 条上方（#26）。输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
+ * 输入并出锁定提示，closed（归档终态）关闭。对话史 = chat store（SSE 桥喂，
+ * 重放可重建近期轮）；事件面不动（过程呈现待事件票接入）。
  */
 export function CommandArea({
   projectId,
   lock,
+  stage = "interview",
   onSeePrd,
   generationCard,
   confirmOrder,
@@ -50,7 +54,9 @@ export function CommandArea({
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
   lock?: LockRow;
-  /** 「去看看」跳转回调（mobile 切成果区页签等），认领（ack）在本组件内。 */
+  /** 阶段（常驻文案两态）：缺省访谈期，PRD 产出后装配层切迭代期。 */
+  stage?: keyof typeof STAGE_HINTS;
+  /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
   generationCard?: ReactNode;
@@ -115,31 +121,24 @@ export function CommandArea({
     setSelection([]);
   }
 
-  function submit() {
-    const text = input.trim();
-    if (!text || disabled || sending) return;
+  /** Composer 提交（Enter / 发送键同一入口；对话流暂无附件管道，入口已隐）。 */
+  function submit(text: string) {
+    if (!text.trim() || disabled || sending) return;
     if (pending) {
-      const merged = composeAnswer(selection, text);
+      const merged = composeAnswer(selection, text.trim());
       if (!merged) return;
       answer(merged);
     } else {
-      postMessage.mutate({ content: text });
+      postMessage.mutate({ content: text.trim() });
     }
     setInput("");
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!isSubmitEnter(event)) return;
-    event.preventDefault();
-    submit();
-  }
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // 居中当主角（#79）：对话列限宽居中，宽屏不散读
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        <p className="pt-2 text-center text-xs text-muted-foreground">
-          直接说出你的想法：想改什么、想问什么，平台都会接住
-        </p>
+        <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[stage]}</p>
         {messages.map((message) => (
           <MessageRow key={message.id} message={message}>
             {message.kind === "question" ? (
@@ -166,7 +165,7 @@ export function CommandArea({
         ) : null}
       </div>
 
-      <div className="shrink-0 border-t p-3">
+      <div className="shrink-0 p-3">
         <DispatchStageBar projectId={projectId} />
         {prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
@@ -191,27 +190,16 @@ export function CommandArea({
             {lock.chatHint}
           </div>
         ) : null}
-        <div className="flex items-end gap-2">
-          <Textarea
-            ref={inputRef}
-            rows={1}
-            value={input}
-            disabled={disabled}
-            placeholder={placeholder}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            className="field-sizing-fixed max-h-32 min-h-9 resize-none"
-          />
-          <Button
-            size="icon"
-            className="size-9 shrink-0"
-            aria-label={pending ? "作答" : "发送"}
-            disabled={disabled || !input.trim() || sending}
-            onClick={submit}
-          >
-            {sending ? <Spinner /> : <SendHorizontal className="size-4" />}
-          </Button>
-        </div>
+        <Composer
+          value={input}
+          onValueChange={setInput}
+          onSubmit={submit}
+          submitPending={sending}
+          disabled={disabled}
+          attachmentsEnabled={false}
+          inputRef={inputRef}
+          placeholder={placeholder}
+        />
       </div>
     </div>
   );

@@ -1,78 +1,175 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { PanelRightClose, Plus, X } from "lucide-react";
+import { useState } from "react";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
-import { FilesPanel } from "./files-panel";
 import { LiveRail } from "./live-panel";
-import { OrderPanel } from "./order-panel";
-import { SystemPanel } from "./system-panel";
-import type { CoderRunStatus } from "@/lib/store/generation";
+import { PARADIGMS, paradigmOf, type ParadigmCtx } from "./paradigms";
 
 /**
- * 成果区（#20 长出 / #22 系统模式长出 / #23 直播侧栏 / #27 文件树 / #28 订单卡
- * / #30 归档终态记录）：文件 / 系统 / 项目三模式 + 右侧可收展直播栏（跨模式
- * 常驻——直播是 run 的面，不是某个模式的面；run 结束即逝归 LiveRail 自管）。
- * 文件模式 = FilesPanel（交付文件树 + 点看内容，PRD 是缺省一篇；操作条可挂
- * 「开始做系统」）；系统模式 = SystemPanel（空白浏览器窗 → run 完成自动挂
- * 预览）；项目模式 = OrderPanel（订单当前态卡，无订单 = 引导占位；归档终态
- * 挂最近订单出完整记录）。tab 受控归装配层（ProjectPageView）：编码 run 起跑
- * 自动切系统模式、下单自动切项目模式，用户手动切换优先至下一自动事件。
+ * 成果区（#72 决议呼出式 / #79 落地）：tab 簇即标题条（UI 面不标区名）——
+ * 已挂范式 tab +「+ 新标签页」（按范式注册表加挂）+ 收起键，一行即标题；
+ * 主体 = 激活范式 + 直播侧栏（跨范式常驻——直播是 run 的面，run 结束即逝归
+ * LiveRail 自管）。平铺无圆角：与对话列同墙同地。tab 状态归装配层
+ * （useOutputsTabs）：自动切换（生成→系统、下单→订单、「去看看」→文档）与
+ * 手动切换同一入口。
  */
+
+/** 成果区 tab 簇状态（装配层持有；自动/手动切换同一入口）。 */
+export type OutputsTabs = {
+  /** 已挂载范式 id（注册表序）。 */
+  openTabs: string[];
+  /** 激活范式 id。 */
+  activeTab: string;
+  /** 挂载（若无）并激活某范式——「+ 新标签页」与自动切换共用。 */
+  mount: (id: string) => void;
+  /** 仅切换激活（tab 点选）。 */
+  activate: (id: string) => void;
+  /** 关闭某范式 tab；关的是激活范式则回退剩余首个，最后一面不可关。 */
+  close: (id: string) => void;
+};
+
+/** tab 簇一体状态（单一 state 对象保证挂载/关闭对 openTabs+activeTab 的原子调整）。 */
+type TabsState = { openTabs: string[]; activeTab: string };
+
+/** tab 簇状态（默认挂载 = 注册表 defaultOn；激活缺省主舞台「系统」）。 */
+export function useOutputsTabs(): OutputsTabs {
+  const [state, setState] = useState<TabsState>(() => ({
+    openTabs: PARADIGMS.filter((p) => p.defaultOn).map((p) => p.id),
+    activeTab: PARADIGMS[0].id,
+  }));
+
+  function mount(id: string) {
+    setState(({ openTabs }) => ({
+      openTabs: openTabs.includes(id) ? openTabs : [...openTabs, id],
+      activeTab: id,
+    }));
+  }
+
+  function close(id: string) {
+    setState(({ openTabs, activeTab }) => {
+      const next = openTabs.filter((t) => t !== id);
+      if (next.length === 0) return { openTabs, activeTab }; // 至少留一面
+      return { openTabs: next, activeTab: activeTab === id ? next[0] : activeTab };
+    });
+  }
+
+  return {
+    openTabs: state.openTabs,
+    activeTab: state.activeTab,
+    mount,
+    activate: (id) => setState((s) => ({ ...s, activeTab: id })),
+    close,
+  };
+}
+
 export function OutputsArea({
-  projectId,
-  generatedAt,
-  coderStatus,
-  orderCardId,
-  projectArchived,
-  tab,
-  onTabChange,
-  generationAction,
-  onGenerated,
+  tabs,
+  ctx,
+  onClose,
 }: {
-  projectId: string;
-  /** 首次生成时点（REST 事实；null = 未生成过）。 */
-  generatedAt?: string | null;
-  /** 本会话编码 run 状态（undefined = 未见）。 */
-  coderStatus?: CoderRunStatus;
-  /** 订单卡挂的单（未终结单优先；归档终态挂最近单，null = 无单 → 占位，#30）。 */
-  orderCardId?: string | null;
-  /** 项目归档终态（无订单时的占位文案口径）。 */
-  projectArchived?: boolean;
-  /** 受控 tab（装配层持有，自动切换与手动切换同一入口）。 */
-  tab: string;
-  onTabChange: (value: string) => void;
-  /** 文件模式操作条动作（「开始做系统」，不 eligible 时为 null）。 */
-  generationAction?: ReactNode;
-  /** 发起生成成功回调（透传 SystemPanel 的重新发起；完整版归装配层）。 */
-  onGenerated: () => void;
+  /** tab 簇状态（装配层的 useOutputsTabs 返回值）。 */
+  tabs: OutputsTabs;
+  /** 范式渲染上下文（项目事实与回调）。 */
+  ctx: ParadigmCtx;
+  /** 收起成果区（呼出式的收回侧）。 */
+  onClose: () => void;
 }) {
+  const addable = PARADIGMS.filter((p) => !tabs.openTabs.includes(p.id));
+  const active = paradigmOf(tabs.activeTab);
+
   return (
-    // 主区域（三模式）+ 直播侧栏：lg+ 左右分栏、窄屏上下堆叠（直播为顶部条）
-    <div className="flex h-full min-h-0 flex-col lg:flex-row">
-      <Tabs value={tab} onValueChange={onTabChange} className="flex h-full min-h-0 flex-1 flex-col">
-        <TabsList className="m-2 grid grid-cols-3">
-          <TabsTrigger value="files">文件</TabsTrigger>
-          <TabsTrigger value="system">系统</TabsTrigger>
-          <TabsTrigger value="project">项目</TabsTrigger>
-        </TabsList>
-        <TabsContent value="files" className="min-h-0 flex-1 border-t">
-          <FilesPanel projectId={projectId} actions={generationAction} />
-        </TabsContent>
-        <TabsContent value="system" className="min-h-0 flex-1 border-t">
-          <SystemPanel
-            projectId={projectId}
-            generatedAt={generatedAt}
-            coderStatus={coderStatus}
-            onGenerated={onGenerated}
-          />
-        </TabsContent>
-        <TabsContent value="project" className="min-h-0 flex-1 border-t">
-          <OrderPanel orderId={orderCardId} projectArchived={projectArchived} />
-        </TabsContent>
-      </Tabs>
-      <LiveRail projectId={projectId} />
+    <div className="flex h-full min-h-0 flex-col">
+      {/* tab 条即标题条：tab 簇 +「+ 新标签页」+ 收起 */}
+      <div
+        className="flex h-11 shrink-0 items-center gap-0.5 overflow-x-auto border-b pl-2 pr-1"
+        role="tablist"
+        aria-label="成果区"
+      >
+        {tabs.openTabs.map((id) => {
+          const p = paradigmOf(id)!;
+          const activeNow = tabs.activeTab === id;
+          return (
+            <span
+              key={id}
+              className={cn(
+                "group flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors",
+                activeNow ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/50",
+              )}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeNow}
+                className="flex items-center gap-1.5"
+                onClick={() => tabs.activate(id)}
+              >
+                {p.icon} {p.label}
+              </button>
+              {tabs.openTabs.length > 1 ? (
+                <button
+                  type="button"
+                  className="rounded p-0.5 opacity-0 transition-opacity hover:bg-background group-hover:opacity-100"
+                  onClick={() => tabs.close(id)}
+                  aria-label={`关闭${p.label}`}
+                >
+                  <X className="size-3" />
+                </button>
+              ) : null}
+            </span>
+          );
+        })}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
+            aria-label="新标签页"
+          >
+            <Plus className="size-3.5" /> 新标签页
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            {addable.length === 0 ? (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">能挂的都挂上了</div>
+            ) : (
+              addable.map((p) => (
+                <DropdownMenuItem key={p.id} onClick={() => tabs.mount(p.id)}>
+                  <span className="flex items-start gap-2">
+                    <span className="mt-0.5">{p.icon}</span>
+                    <span>
+                      <span className="block text-[13px]">{p.label}</span>
+                      <span className="block text-xs text-muted-foreground">{p.blurb}</span>
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <span className="flex-1" />
+        {/* 收起键只对 lg 呼出式布局有意义（<lg 走双页签，收起无可见效果） */}
+        <button
+          type="button"
+          className="hidden rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
+          onClick={onClose}
+          aria-label="收起成果区"
+          title="收起成果区"
+        >
+          <PanelRightClose className="size-4" />
+        </button>
+      </div>
+
+      {/* 主体：激活范式 + 直播侧栏（跨范式常驻） */}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col">{active?.render(ctx)}</div>
+        <LiveRail projectId={ctx.projectId} />
+      </div>
     </div>
   );
 }

@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SiteShell } from "./site-shell";
 
-// active 态推导与本测试无关（首页高亮与否不改变菜单结构）
-vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+// 路径可播种（首页 / 项目页两档——#79 项目页默认收成 icon rail）
+const pathSeed = vi.hoisted(() => ({ path: "/" }));
+vi.mock("next/navigation", () => ({ usePathname: () => pathSeed.path }));
 
 // 历史项目数据驱动（useRecentProjects 走 query，桩掉给一条）
 vi.mock("@/hooks/use-projects", () => ({
@@ -24,7 +25,7 @@ function navAnchors(html: string): { href: string; text: string }[] {
   }));
 }
 
-describe("SiteShell（#76 侧栏定稿形态装配）", () => {
+describe("SiteShell（#76 侧栏定稿形态装配 / #79 项目页 icon rail）", () => {
   it("导航锚 = 新建项目 / 首页 / 历史项目直列 / 全部项目", () => {
     const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
     const anchors = navAnchors(html);
@@ -39,5 +40,16 @@ describe("SiteShell（#76 侧栏定稿形态装配）", () => {
     expect(anchors[1].text).toBe("首页");
     expect(anchors[2].text).toContain("巷口花店小程序");
     expect(anchors[3].text).toBe("全部项目");
+  });
+});
+
+describe("SiteShell · 项目页默认 icon rail（#79）", () => {
+  it("/projects/[id]：侧栏缺省收起（icon rail），其余面缺省展开", () => {
+    pathSeed.path = "/projects/p1";
+    const rail = renderToStaticMarkup(<SiteShell>x</SiteShell>);
+    expect(rail).toContain('data-collapsible="icon"');
+
+    pathSeed.path = "/projects";
+    expect(renderToStaticMarkup(<SiteShell>x</SiteShell>)).not.toContain('data-collapsible="icon"');
   });
 });

@@ -129,6 +129,18 @@
   --sidebar-ring: oklch(0.632 0.162 252.1);
 }
 
+/* 成果区呼出式滑入（#79）：有成果自动滑出，动效即状态切换反馈（原型同款）。 */
+@keyframes outputs-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

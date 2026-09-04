@@ -78,9 +78,9 @@ describe("FilesPanel · 文件树浏览（#27）", () => {
   it("缺省选中 PRD：markdown 正文直出 + 树上目录合成、PRD 祖先自动展开", () => {
     const { container } = render(<FilesPanel projectId="p1" />);
 
-    // PRD 内容与文件标识（#20 口径平移）
+    // PRD 内容与篇名（#20 口径，#79 起标题走友好名「需求文档」而非路径）
     expect(container.textContent).toContain("给宠物医院做预约管理系统。");
-    expect(container.textContent).toContain("docs/PRD.md");
+    expect(container.querySelector("h2")?.textContent).toBe("需求文档");
     expect(container.querySelector("h1")?.textContent).toBe("需求背景");
     // 树：根级目录（docs 已随选中祖先展开见 PRD.md；src 收起）+ 根级文件
     expect(container.textContent).toContain("AGENTS.md");

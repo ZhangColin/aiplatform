@@ -425,51 +425,97 @@ function FailedCard({
 }
 
 /** 假物料（原型）：对话时上传的附件。 */
-const MATERIALS = [
+type Material = { name: string; size: string; icon: React.ReactNode };
+const INITIAL_MATERIALS: Material[] = [
   { name: "门店照片.jpg", size: "2.1 MB", icon: <ImageIcon className="size-3.5" /> },
   { name: "旧价目表.pdf", size: "380 KB", icon: <FileText className="size-3.5" /> },
 ];
 
-/** 输入条（含附件呼出物料区，#63 口径）；onSend 在原型中不真发。 */
+/**
+ * 消息发送框（首页 hero 与项目页共用，#63 附件口径）：
+ * 上 = 输入区（占位）；中 = 附件 chip 行（可删）；下 = 工具行（回形针物料区 + 发送）。
+ * 容器 focus-within  ring + 阴影过渡；发送键 pill 形（容器方、发送圆的既定规则）。
+ */
 export function Composer({ hero = false }: { hero?: boolean }) {
+  const [materials, setMaterials] = React.useState(INITIAL_MATERIALS);
+  const [open, setOpen] = React.useState(false);
+  const addMock = () => {
+    setMaterials((m) => [...m, { name: `新拍的价目表${m.length - 1}.jpg`, size: "1.4 MB", icon: <ImageIcon className="size-3.5" /> }]);
+    setOpen(false);
+  };
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-xl border bg-background px-3",
-        hero ? "py-3 shadow-sm" : "py-2.5",
+        "rounded-2xl border bg-background shadow-sm transition-shadow",
+        "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary/15",
+        hero ? "p-3.5" : "p-3",
       )}
     >
-      <Popover>
-        <PopoverTrigger className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-          <Paperclip className="size-4" />
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-72 p-0">
-          <div className="border-b px-3 py-2 text-xs font-semibold">项目物料</div>
-          <div className="p-1.5">
-            {MATERIALS.map((m) => (
-              <div key={m.name} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/60">
-                <span className="text-muted-foreground">{m.icon}</span>
-                <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                <span className="text-xs text-muted-foreground">{m.size}</span>
-              </div>
-            ))}
-          </div>
-          <div className="border-t p-1.5">
-            <Button variant="ghost" size="sm" className="w-full justify-start text-xs" disabled>
-              <Upload className="size-3.5" /> 上传文件（原型占位）
-            </Button>
-            <p className="px-2 pt-1 text-[11px] leading-relaxed text-muted-foreground">
-              照片、价目表、旧系统截图都可以传——做系统时智能体会参考。
-            </p>
-          </div>
-        </PopoverContent>
-      </Popover>
-      <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground/70">
+      <div className={cn("text-muted-foreground/70", hero ? "min-h-10 text-[15px]" : "min-h-6 text-sm")}>
         {hero ? "一句话说说你想做什么…（原型里请到项目页播放场景）" : "说说想改什么…"}
-      </span>
-      <Button size="icon" className={cn("rounded-lg", hero ? "size-8" : "size-7")} disabled>
-        <ArrowUp className="size-4" />
-      </Button>
+      </div>
+      {materials.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {materials.map((m) => (
+            <span
+              key={m.name}
+              className="flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1 pl-2 pr-1 text-xs text-foreground/80"
+            >
+              <span className="text-muted-foreground">{m.icon}</span>
+              {m.name}
+              <button
+                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                onClick={() => setMaterials((ms) => ms.filter((x) => x.name !== m.name))}
+                aria-label={`移除${m.name}`}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className={cn("flex items-center", hero ? "mt-3" : "mt-2")}>
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <Paperclip className="size-4" /> 附件
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80 p-0">
+            <div className="border-b px-3 py-2 text-xs font-semibold">项目物料</div>
+            <div className="p-1.5">
+              {materials.map((m) => (
+                <div key={m.name} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/60">
+                  <span className="text-muted-foreground">{m.icon}</span>
+                  <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                  <span className="text-xs text-muted-foreground">{m.size}</span>
+                </div>
+              ))}
+              {materials.length === 0 ? (
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">还没有物料</div>
+              ) : null}
+            </div>
+            <div className="border-t p-2">
+              <button
+                onClick={addMock}
+                className="flex w-full flex-col items-center gap-1 rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              >
+                <Upload className="size-4" />
+                点击上传（原型：点我模拟传一张）
+              </button>
+              <p className="px-1 pt-2 text-[11px] leading-relaxed text-muted-foreground">
+                照片、价目表、旧系统截图都可以传，做系统时智能体会参考。
+              </p>
+            </div>
+          </PopoverContent>
+        </Popover>
+        <span className="ml-auto" />
+        <Button
+          size="icon"
+          className={cn("rounded-full transition-transform active:scale-90", hero ? "size-9" : "size-8")}
+          disabled
+        >
+          <ArrowUp className="size-4" />
+        </Button>
+      </div>
     </div>
   );
 }

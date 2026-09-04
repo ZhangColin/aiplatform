@@ -83,8 +83,8 @@ function ProjectBody({ engine }: { engine: ReturnType<typeof useRunEngine> }) {
           <div className="ml-auto flex items-center gap-2">
             {state.runActive ? <LivePill /> : null}
             {!wsOpen ? (
-              <Button size="sm" variant="outline" className="h-7 text-xs transition-transform active:scale-95" onClick={() => setWsOpen(true)}>
-                <PanelRightOpen className="size-3.5" /> 打开工作区
+              <Button size="sm" variant="outline" className="h-7 text-xs transition-transform active:scale-95" onClick={() => setWsOpen(true)} title="展开成果面板">
+                <PanelRightOpen className="size-3.5" /> 成果
               </Button>
             ) : null}
           </div>

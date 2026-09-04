@@ -276,4 +276,41 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
       previewFrameKey("http://localhost:42659", 1),
     );
   });
+
+  // ---------- #80 浏览器条 / 浅色锁定 / 工具条形态位 ----------
+
+  it("浏览器条三件就位（页面在时）：手动刷新、桌面/手机切换、新窗口打开；地址胶囊出真地址", () => {
+    const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
+
+    for (const label of ["刷新预览", "桌面预览", "手机预览", "在新窗口打开预览"]) {
+      expect(html).toContain(`aria-label="${label}"`);
+    }
+    // 胶囊出真地址（诚实口径，不演装饰域名）
+    expect(html.match(/http:\/\/localhost:42659/g)).toHaveLength(2); // 胶囊 + iframe src
+  });
+
+  it("无页面时刷新与新窗口不可点、工具条不出场（可点击的仅真实现的能力）", () => {
+    const html = renderPanel({ coderStatus: "running" });
+
+    for (const label of ["刷新预览", "在新窗口打开预览"]) {
+      const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))![0];
+      expect(tag).toContain("disabled");
+    }
+    expect(html).not.toContain("待启用");
+  });
+
+  it("舞台浅色锁定：内容区挂 light-lock（用户产物不随平台 Light/Dark 翻转）", () => {
+    const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
+    expect(html).toContain("light-lock");
+  });
+
+  it("页面在时工具条形态位出场：四件全置灰标注待启用（圈选归圈注票，改字未来增强）", () => {
+    const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
+
+    for (const label of ["选择组件", "直接改文字", "画笔圈选", "评论"]) {
+      const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}（待启用）"[^>]*>`))![0];
+      expect(tag).toContain("disabled");
+    }
+    expect(html).toContain("待启用");
+  });
 });

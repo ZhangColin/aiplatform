@@ -60,7 +60,11 @@
  * - 排印阶梯：标题不收字距；正文 14/1.75；辅助说明 13；仅时间戳/角标 12；
  *   区段标签 medium；全库禁 10–11px 微字。
  */
-:root {
+/* 浅色档单源两用（#80 预览浅色锁定）：:root 是平台浅色主题；.light-lock 把
+   同一组语义变量钉在子树上——预览里的系统是用户产物，html.dark 也翻转不了它
+   （预览舞台与新窗口独立页共用）。 */
+:root,
+.light-lock {
   --background: oklch(0.985 0.001 106);
   --foreground: oklch(0.216 0.006 56);
   --card: oklch(1 0 0);
@@ -127,6 +131,11 @@
   --sidebar-accent-foreground: oklch(0.985 0.001 106);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.632 0.162 252.1);
+}
+
+/* 锁定域内的 UA 控件（滚动条等）也按浅色渲染，不露出深色残影。 */
+.light-lock {
+  color-scheme: light;
 }
 
 /* 成果区呼出式滑入（#79）：有成果自动滑出，动效即状态切换反馈（原型同款）。 */

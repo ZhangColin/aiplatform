@@ -20,14 +20,18 @@ import {
   Folder,
   FolderOpen,
   Lock,
+  MessageSquarePlus,
   Monitor,
+  MousePointer2,
   Package,
+  Pencil,
   ReceiptText,
   RefreshCw,
   RotateCcw,
   Settings,
   Smartphone,
   SquareTerminal,
+  Type,
   Truck,
 } from "lucide-react";
 
@@ -102,7 +106,43 @@ export function PreviewPane({ state, onDispatch }: { state: RunState; onDispatch
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
-      <div className={cn("min-h-0 flex-1 overflow-y-auto", device === "mobile" && "flex justify-center bg-muted/30 p-4")}>
+      <PreviewStage stage={stage} device={device} />
+    </div>
+  );
+}
+
+/** 预览舞台 + 底部浮动工具条（Lovable 式，形态提案，实现讨论归 #73）。 */
+function PreviewStage({ stage, device }: { stage: number; device: "desktop" | "mobile" }) {
+  const [tool, setTool] = React.useState<null | "select" | "text" | "draw" | "comment">(null);
+  const [pins, setPins] = React.useState<{ x: number; y: number; text: string; open: boolean }[]>([]);
+  const areaRef = React.useRef<HTMLDivElement>(null);
+
+  const TOOL_HINT: Record<string, string> = {
+    select: "点选任何一个组件，把它作为谈话对象（原型提案）",
+    text: "点页面上的文字直接改（原型提案）",
+    draw: "按住画个圈，圈出要说的地方（原型提案）",
+    comment: "点击要评论的位置，留下批注（可真的试试）",
+  };
+
+  const dropPin = (e: React.MouseEvent) => {
+    if (tool !== "comment" || !areaRef.current) return;
+    const r = areaRef.current.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * 100;
+    const y = ((e.clientY - r.top) / r.height) * 100;
+    setPins((ps) => [...ps.map((p) => ({ ...p, open: false })), { x, y, text: "", open: true }]);
+  };
+
+  return (
+    <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div
+        ref={areaRef}
+        onClick={dropPin}
+        className={cn(
+          "h-full overflow-y-auto",
+          device === "mobile" && "flex justify-center bg-muted/30 p-4",
+          tool === "comment" && "cursor-crosshair",
+        )}
+      >
         {stage === 0 ? (
           <Empty className="h-full">
             <EmptyHeader>
@@ -127,6 +167,74 @@ export function PreviewPane({ state, onDispatch }: { state: RunState; onDispatch
             )}
           </div>
         )}
+      </div>
+      {/* 评论图钉（Lovable 式区块批注） */}
+      {pins.map((pin, i) => (
+        <div key={i} className="absolute z-20" style={{ left: `${pin.x}%`, top: `${pin.y}%` }}>
+          <button
+            className="flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-md transition-transform hover:scale-110"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPins((ps) => ps.map((p, j) => (j === i ? { ...p, open: !p.open } : { ...p, open: false })));
+            }}
+          >
+            {i + 1}
+          </button>
+          {pin.open ? (
+            <div className="absolute left-3 top-3 w-60 rounded-xl border bg-background p-2.5 shadow-lg" onClick={(e) => e.stopPropagation()}>
+              {pin.text ? (
+                <p className="text-sm">{pin.text}</p>
+              ) : (
+                <input
+                  autoFocus
+                  placeholder="这里想怎么改？"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.currentTarget.value.trim()) {
+                      const v = e.currentTarget.value.trim();
+                      setPins((ps) => ps.map((p, j) => (j === i ? { ...p, text: v, open: false } : p)));
+                    }
+                  }}
+                />
+              )}
+              <div className="mt-1.5 text-[11px] text-muted-foreground">
+                {pin.text ? "已随下一条意见发给智能体（原型）" : "回车确认，随下一条意见发出"}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ))}
+      {/* 底部浮动工具条 */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex flex-col items-center gap-1.5">
+        {tool ? (
+          <div className="pointer-events-auto rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-700 dark:text-amber-400">
+            {TOOL_HINT[tool]}
+          </div>
+        ) : null}
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border bg-background/95 px-1.5 py-1 shadow-lg backdrop-blur">
+          {([
+            { id: "select", icon: <MousePointer2 className="size-3.5" />, label: "选择组件" },
+            { id: "text", icon: <Type className="size-3.5" />, label: "直接改文字" },
+            { id: "draw", icon: <Pencil className="size-3.5" />, label: "画笔圈选" },
+            { id: "comment", icon: <MessageSquarePlus className="size-3.5" />, label: "评论" },
+          ] as const).map((t) => (
+            <button
+              key={t.id}
+              title={t.label}
+              onClick={() => setTool((cur) => (cur === t.id ? null : t.id))}
+              className={cn(
+                "rounded-full p-2 transition-colors",
+                tool === t.id ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {t.icon}
+            </button>
+          ))}
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <span className="px-1.5 text-[10px] font-medium text-muted-foreground/60" title="本工具条是形态提案，实现讨论归 #73">
+            #73 提案
+          </span>
+        </div>
       </div>
     </div>
   );

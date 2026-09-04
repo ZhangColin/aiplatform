@@ -17,6 +17,7 @@ import {
   Files,
   Image as ImageIcon,
   Link2,
+  Mic,
   Monitor,
   Package,
   Palette,
@@ -33,6 +34,12 @@ import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Message,
   MessageAvatar,
@@ -243,7 +250,7 @@ function PartView({
 
 function ActionRow({ part }: { part: Extract<Part, { type: "action" }> }) {
   return (
-    <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-[13px]">
+    <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
       <span className="text-muted-foreground">{ACTION_ICONS[part.icon]}</span>
       <span className={cn("min-w-0 flex-1", part.status === "done" && "text-muted-foreground")}>
         {part.label}
@@ -342,7 +349,7 @@ function WrapCard({
       </div>
       <p className="text-sm leading-relaxed">{part.summary}</p>
       {part.lines.map((l, i) => (
-        <div key={i} className="mt-1.5 flex items-start gap-2 text-[13px]">
+        <div key={i} className="mt-1.5 flex items-start gap-2 text-sm">
           {l.side === "doc" ? (
             <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           ) : (
@@ -432,13 +439,14 @@ const INITIAL_MATERIALS: Material[] = [
 ];
 
 /**
- * 消息发送框（首页 hero 与项目页共用，#63 附件口径）：
- * 上 = 输入区（占位）；中 = 附件 chip 行（可删）；下 = 工具行（回形针物料区 + 发送）。
- * 容器 focus-within  ring + 阴影过渡；发送键 pill 形（容器方、发送圆的既定规则）。
+ * 消息发送框（Lovable/Bolt 形态）：立体卡片（ring + 分层阴影），
+ * 输入区 → 附件 chip 行（可删）→ 工具行（附件物料区 / 类型下拉 / 语音 / 圆形发送）。
+ * 首页 hero 与项目页共用，hero 加大一号。
  */
 export function Composer({ hero = false }: { hero?: boolean }) {
   const [materials, setMaterials] = React.useState(INITIAL_MATERIALS);
   const [open, setOpen] = React.useState(false);
+  const [mode, setMode] = React.useState("做系统");
   const addMock = () => {
     setMaterials((m) => [...m, { name: `新拍的价目表${m.length - 1}.jpg`, size: "1.4 MB", icon: <ImageIcon className="size-3.5" /> }]);
     setOpen(false);
@@ -446,12 +454,13 @@ export function Composer({ hero = false }: { hero?: boolean }) {
   return (
     <div
       className={cn(
-        "rounded-2xl border bg-background shadow-sm transition-shadow",
-        "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-primary/15",
-        hero ? "p-3.5" : "p-3",
+        "rounded-2xl bg-background ring-1 ring-border/60 transition-shadow",
+        "shadow-[0_12px_32px_-16px_rgb(0_0_0/0.25)]",
+        "focus-within:shadow-[0_16px_40px_-16px_rgb(0_0_0/0.3)] focus-within:ring-primary/30",
+        hero ? "p-4" : "p-3",
       )}
     >
-      <div className={cn("text-muted-foreground/70", hero ? "min-h-10 text-[15px]" : "min-h-6 text-sm")}>
+      <div className={cn("text-muted-foreground/70", hero ? "min-h-12 text-base" : "min-h-7 text-sm")}>
         {hero ? "一句话说说你想做什么…（原型里请到项目页播放场景）" : "说说想改什么…"}
       </div>
       {materials.length > 0 ? (
@@ -474,7 +483,7 @@ export function Composer({ hero = false }: { hero?: boolean }) {
           ))}
         </div>
       ) : null}
-      <div className={cn("flex items-center", hero ? "mt-3" : "mt-2")}>
+      <div className={cn("flex items-center gap-1", hero ? "mt-3" : "mt-2")}>
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
             <Paperclip className="size-4" /> 附件
@@ -483,7 +492,7 @@ export function Composer({ hero = false }: { hero?: boolean }) {
             <div className="border-b px-3 py-2 text-xs font-semibold">项目物料</div>
             <div className="p-1.5">
               {materials.map((m) => (
-                <div key={m.name} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/60">
+                <div key={m.name} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
                   <span className="text-muted-foreground">{m.icon}</span>
                   <span className="min-w-0 flex-1 truncate">{m.name}</span>
                   <span className="text-xs text-muted-foreground">{m.size}</span>
@@ -507,7 +516,24 @@ export function Composer({ hero = false }: { hero?: boolean }) {
             </div>
           </PopoverContent>
         </Popover>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <Sparkles className="size-3.5" /> {mode} <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {["做系统", "做页面", "写文档"].map((m) => (
+              <DropdownMenuItem key={m} disabled={m !== "做系统"} onClick={() => setMode(m)}>
+                <span className="flex-1">{m}</span>
+                {m === mode ? <Check className="size-3.5" /> : null}
+                {m !== "做系统" ? <span className="text-[10px] text-muted-foreground/60">敬请期待</span> : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="ml-auto" />
+        <Button variant="ghost" size="icon" className="size-8 rounded-full text-muted-foreground" aria-label="语音输入（原型占位）" disabled>
+          <Mic className="size-4" />
+        </Button>
         <Button
           size="icon"
           className={cn("rounded-full transition-transform active:scale-90", hero ? "size-9" : "size-8")}

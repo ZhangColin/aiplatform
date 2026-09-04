@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 
 import { ChatMessages, Composer, LivePill } from "../../_shared/chat-parts";
@@ -74,9 +75,9 @@ function ProjectBody({ engine }: { engine: ReturnType<typeof useRunEngine> }) {
   }, [state.viewing]);
 
   return (
-    <>
-      {/* 对话主角列 */}
-      <div className="flex min-w-0 flex-1 flex-col">
+    <ResizablePanelGroup orientation="horizontal" className="min-w-0 flex-1">
+      {/* 对话主角列（宽度可拖） */}
+      <ResizablePanel defaultSize={wsOpen ? 46 : 100} minSize={30} className="flex flex-col">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <span className="truncate text-sm font-medium">巷口花店小程序</span>
           <div className="ml-auto flex items-center gap-2">
@@ -95,23 +96,28 @@ function ProjectBody({ engine }: { engine: ReturnType<typeof useRunEngine> }) {
             <Composer />
           </div>
         </div>
-      </div>
-      {/* 呼出式工作区：tab 条即标题条（滑入动效 = 状态切换反馈） */}
+      </ResizablePanel>
+      {/* 呼出式工作区：tab 条即标题条（滑入动效 = 状态切换反馈）；拖拽分隔条调宽（Bolt 层次感） */}
       {wsOpen ? (
-        <div className="proto-ws-in flex w-[54%] shrink-0 flex-col border-l bg-background">
-          <style>{`@keyframes protoWsIn { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } } .proto-ws-in { animation: protoWsIn .22s ease-out; }`}</style>
-          <WorkspaceBar
-            state={state}
-            onDispatch={engine.commit}
-            openTabs={openTabs}
-            setOpenTabs={setOpenTabs}
-            active={active}
-            setActive={setActive}
-            onClose={() => setWsOpen(false)}
-          />
-        </div>
+        <>
+          <ResizableHandle withHandle className="w-2 border-0 bg-transparent" />
+          <ResizablePanel defaultSize={54} minSize={34} className="proto-ws-in">
+            <style>{`@keyframes protoWsIn { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } } .proto-ws-in { animation: protoWsIn .22s ease-out; }`}</style>
+            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
+              <WorkspaceBar
+                state={state}
+                onDispatch={engine.commit}
+                openTabs={openTabs}
+                setOpenTabs={setOpenTabs}
+                active={active}
+                setActive={setActive}
+                onClose={() => setWsOpen(false)}
+              />
+            </div>
+          </ResizablePanel>
+        </>
       ) : null}
-    </>
+    </ResizablePanelGroup>
   );
 }
 

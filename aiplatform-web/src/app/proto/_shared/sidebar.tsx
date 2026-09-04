@@ -8,16 +8,24 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useTheme } from "next-themes";
 import {
-  CircleUser,
+  Check,
+  ChevronsUpDown,
   Home,
+  LogOut,
+  Monitor,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Sparkles,
+  Sun,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -102,7 +110,7 @@ function RailContent({
         </RailLink>
       ))}
       <div className="mt-auto">
-        <RailButton label="我的账号"><CircleUser className="size-4" /></RailButton>
+        <UserMenu collapsed />
       </div>
     </>
   );
@@ -204,9 +212,67 @@ function WideContent({
           <span className="text-[10px] text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">{p.updated}</span>
         </Link>
       ))}
-      <div className="mt-auto flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground">
-        <CircleUser className="size-4" /> 我的账号
+      <div className="mt-auto">
+        <UserMenu />
       </div>
     </>
+  );
+}
+
+/** 左下角个人菜单（Lovable 式浮出）：账户信息 + 主题（浅色/深色/跟随系统）+ 退出登录。 */
+function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
+  const { theme, setTheme } = useTheme();
+  /* next-themes 挂载守卫（useSyncExternalStore 写法，避开 setState-in-effect） */
+  const mounted = React.useSyncExternalStore(() => () => {}, () => true, () => false);
+  const THEMES = [
+    { value: "light", label: "浅色", icon: <Sun className="size-3.5" /> },
+    { value: "dark", label: "深色", icon: <Moon className="size-3.5" /> },
+    { value: "system", label: "跟随系统", icon: <Monitor className="size-3.5" /> },
+  ];
+  return (
+    <Popover>
+      <PopoverTrigger
+        className={cn(
+          "flex w-full items-center gap-2 rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+          collapsed ? "mt-2 justify-center p-1.5" : "px-2 py-1.5",
+        )}
+      >
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-bold text-background">N</span>
+        {!collapsed ? (
+          <>
+            <span className="min-w-0 flex-1 truncate text-left">我的账号</span>
+            <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground/60" />
+          </>
+        ) : null}
+      </PopoverTrigger>
+      <PopoverContent side={collapsed ? "right" : "top"} align="start" className="w-60 p-1.5">
+        <div className="flex items-center gap-2.5 px-2 py-2">
+          <span className="flex size-9 items-center justify-center rounded-full bg-foreground text-xs font-bold text-background">N</span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">我的账号</div>
+            <div className="truncate text-xs text-muted-foreground">me@example.com</div>
+          </div>
+        </div>
+        <Separator className="my-1" />
+        <div className="px-2 pb-1 pt-1.5 text-xs text-muted-foreground">主题</div>
+        <div className="space-y-0.5 px-1 pb-1">
+          {THEMES.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setTheme(t.value)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
+            >
+                  <span className="text-muted-foreground">{t.icon}</span>
+              <span className="flex-1 text-left">{t.label}</span>
+              {mounted && theme === t.value ? <Check className="size-3.5 text-primary" /> : null}
+            </button>
+          ))}
+        </div>
+        <Separator className="my-1" />
+        <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10">
+          <LogOut className="size-3.5" /> 退出登录
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 }

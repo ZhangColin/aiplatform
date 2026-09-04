@@ -1,12 +1,12 @@
 "use client";
 
-import { PanelLeftIcon } from "lucide-react";
+import { Home, LayoutGrid, PanelLeftIcon, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { ModeToggle } from "@/components/mode-toggle";
-import { UserMenu } from "@/components/user-menu";
+import { AccountMenu } from "@/components/account-menu";
+import { ProjectAvatar } from "@/components/project-avatar";
 import { Button } from "@/components/ui/button";
 import {
   Sidebar,
@@ -22,59 +22,31 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useRecentProjects } from "@/hooks/use-projects";
+import { PLATFORM_MODES } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 
 /**
- * 主 Layout 的通用层实现（issue #17 前端清场）：sidebar 框架（品牌位 + 分组
- * 菜单 + footer）归通用层，菜单内容（groups）归场景层配置。active 态由路由推导，
- * href 项渲染为 Link。收起交互归品牌行：展开态品牌行 = 品牌 + 右侧收起按钮；
- * 收起态 = 图标条，点 Logo 或空白处展开。
+ * 侧栏定稿形态（#72 / #76）：新建项目 + 首页 +「能做这些」模式位 + 历史项目
+ * 色块头像，左下角个人菜单（主题三态 + 退出登录）。默认展开；收起成 icon
+ * rail 的完整形态（Tooltip、项目头像条）归 #79 项目页版面票，本票先由
+ * shadcn collapsible="icon" 骨架兜底（图标剩位、空白处点开）。
  */
 
-export type AppNavItem = {
-  key: string;
-  label: string;
-  icon?: ReactNode;
-  href: string;
-};
+/** 侧栏历史项目条数（列表全量在 /projects）。 */
+const SIDEBAR_PROJECT_LIMIT = 8;
 
-/** 场景菜单分组：label 可省（首页 + 我的项目两项无分组标签）。 */
-export type AppNavGroup = { label?: string; items: AppNavItem[] };
-
-export type AppSidebarProps = {
-  groups: AppNavGroup[];
-};
-
-/**
- * active 态 = 全部菜单项 href 的最长前缀匹配（pathname 命中多条前缀时只有最长者
- * 高亮——落地页 /projects 与详情 /projects/{id} 不双亮）。
- */
-function useActiveKey(groups: AppSidebarProps["groups"]) {
+export function AppSidebar() {
   const pathname = usePathname();
-  const items = groups.flatMap((group) => group.items);
-  let best: AppNavItem | null = null;
-  for (const item of items) {
-    const matched = pathname === item.href || pathname.startsWith(`${item.href}/`);
-    if (matched && (best === null || item.href.length > best.href.length)) {
-      best = item;
-    }
-  }
-  return best?.key ?? null;
-}
-
-export function AppSidebar({ groups }: AppSidebarProps) {
-  const activeKey = useActiveKey(groups);
-  // 收起态判定补 !isMobile：mobile 走 Sheet 始终按展开态渲染，图标条语义只在
-  // 桌面 collapsible="icon" 生效。
+  const projects = useRecentProjects().slice(0, SIDEBAR_PROJECT_LIMIT);
+  // 收起态判定补 !isMobile：mobile 走 Sheet 始终按展开态渲染。
   const { state, isMobile, setOpen, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
 
   return (
     <Sidebar collapsible="icon">
-      {/* 图标条空白处 = 展开：垫在导航之下的整条按钮，点导航图标仍导航（菜单项
-          均为定位元素，绘制在其上），点空白落到此层展开。裸 <button> 同
-          ui/sidebar 的 SidebarRail 先例——不可见命中层无设计系统观感可取，
-          Button 的 hover/focus 样式整条泛光反是干扰。 */}
+      {/* 图标条空白处 = 展开：垫在导航之下的整条按钮（先例注释见 git 历史，
+          交互归 icon rail 精化票 #79）。 */}
       <button
         type="button"
         aria-label="展开菜单"
@@ -82,12 +54,10 @@ export function AppSidebar({ groups }: AppSidebarProps) {
         onClick={() => setOpen(true)}
         className="absolute inset-0 hidden cursor-pointer group-data-[collapsible=icon]:block"
       />
-      {/* 品牌/脚手在空白展开层之上（z-10），自身按钮不被其盖住 */}
       <SidebarHeader className="relative z-10">
         <SidebarMenu>
           <SidebarMenuItem>
             {collapsed ? (
-              // 收起态品牌位 = 展开（点 Logo 展开）
               <SidebarMenuButton
                 size="lg"
                 tooltip="展开菜单"
@@ -98,7 +68,6 @@ export function AppSidebar({ groups }: AppSidebarProps) {
                 <BrandName />
               </SidebarMenuButton>
             ) : (
-              // 展开态品牌行 = 品牌 + 右侧收起按钮
               <div className="flex w-full items-center gap-1">
                 <SidebarMenuButton size="lg" className="min-w-0 flex-1 gap-2">
                   <BrandMark />
@@ -119,30 +88,103 @@ export function AppSidebar({ groups }: AppSidebarProps) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        {groups.map((group) =>
-          group.items.length === 0 ? null : (
-            <SidebarGroup key={group.label ?? group.items[0]?.key ?? "group"}>
-              {group.label ? <SidebarGroupLabel>{group.label}</SidebarGroupLabel> : null}
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {group.items.map((item) => (
-                    <SidebarNavItem key={item.key} item={item} active={item.key === activeKey} />
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ),
-        )}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                {collapsed ? (
+                  <SidebarMenuButton tooltip="新建项目" render={<Link href="/" />}>
+                    <Plus />
+                    <span>新建项目</span>
+                  </SidebarMenuButton>
+                ) : (
+                  <Button
+                    className="w-full justify-start transition-transform active:scale-[0.98]"
+                    size="sm"
+                    nativeButton={false}
+                    render={<Link href="/" />}
+                  >
+                    <Plus className="size-4" /> 新建项目
+                  </Button>
+                )}
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="首页"
+                  isActive={pathname === "/"}
+                  render={<Link href="/" />}
+                >
+                  <Home />
+                  <span>首页</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>能做这些</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {PLATFORM_MODES.map((m) => (
+                <SidebarMenuItem key={m.label}>
+                  <SidebarMenuButton
+                    tooltip={m.label}
+                    isActive={m.live}
+                    disabled={!m.live}
+                    aria-label={m.live ? m.label : `${m.label}（敬请期待）`}
+                  >
+                    <Sparkles />
+                    <span>{m.label}</span>
+                    {!m.live ? (
+                      <span className="ml-auto text-xs text-muted-foreground/60 group-data-[collapsible=icon]:hidden">
+                        敬请期待
+                      </span>
+                    ) : null}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>历史项目</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {projects.map((project) => {
+                const name = project.name || "未命名项目";
+                return (
+                  <SidebarMenuItem key={project.id}>
+                    <SidebarMenuButton
+                      tooltip={name}
+                      isActive={pathname === `/projects/${project.id}`}
+                      render={<Link href={`/projects/${project.id}`} />}
+                    >
+                      <ProjectAvatar name={name} className="size-6 rounded-md" />
+                      <span className="truncate">{name}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="全部项目"
+                  isActive={pathname === "/projects"}
+                  render={<Link href="/projects" />}
+                >
+                  <LayoutGrid />
+                  <span>全部项目</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="relative z-10">
         <SidebarMenu>
           <SidebarMenuItem>
-            {/* 两个独立触发器（UserMenu/ModeToggle 各自是按钮），不能裹进
-                SidebarMenuButton——button 套 button 是非法嵌套，hydration 必炸。 */}
-            <div className="flex items-center gap-1 px-1 text-muted-foreground group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-0">
-              <UserMenu />
-              <ModeToggle />
-            </div>
+            <AccountMenu collapsed={collapsed} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
@@ -162,17 +204,6 @@ function BrandMark() {
 /** 品牌名（两分支共用；展开分支补 truncate）。 */
 function BrandName({ className }: { className?: string }) {
   return <span className={cn("text-sm font-semibold", className)}>AI 开发平台</span>;
-}
-
-function SidebarNavItem({ item, active }: { item: AppNavItem; active: boolean }) {
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton isActive={active} tooltip={item.label} render={<Link href={item.href} />}>
-        {item.icon}
-        <span className="truncate">{item.label}</span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
 }
 
 /** 非项目页同壳：页头（标题 + 说明）由各页自带，收起/展开归品牌行。 */

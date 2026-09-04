@@ -147,7 +147,7 @@ function LiveRailBody({
 function LiveLine({ segment }: { segment: LiveSegment }) {
   if (segment.kind === "step") {
     return (
-      <div className="flex items-center gap-2 py-0.5 text-[10px] text-muted-foreground/70">
+      <div className="flex items-center gap-2 py-0.5 text-xs text-muted-foreground/70">
         <span className="h-px flex-1 bg-border" />
         第 {segment.step} 步
         <span className="h-px flex-1 bg-border" />

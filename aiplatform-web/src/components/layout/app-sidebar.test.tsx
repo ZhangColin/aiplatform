@@ -6,15 +6,20 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./app-sidebar";
 
 // active 态推导与本测试无关
-vi.mock("next/navigation", () => ({ usePathname: () => "/projects" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
-// UserMenu / ModeToggle 的渲染契约 = 各自产出一个触发 <button>（真实实现即如此）。
-// 桩掉以避免拉入 query client / theme provider，同时保留本测试要锁的嵌套模式。
-vi.mock("@/components/user-menu", () => ({
-  UserMenu: () => <button data-testid="user-menu">用户</button>,
+// 历史项目数据驱动（useRecentProjects 走 query，桩掉并给两条）
+vi.mock("@/hooks/use-projects", () => ({
+  useRecentProjects: () => [
+    { id: "p1", name: "巷口花店小程序" },
+    { id: "p2", name: "社区团购站" },
+  ],
 }));
-vi.mock("@/components/mode-toggle", () => ({
-  ModeToggle: () => <button data-testid="mode-toggle">主题</button>,
+
+// AccountMenu 的渲染契约 = 产出一个触发 <button>。桩掉以避免拉入
+// query client / theme provider，同时保留本测试要锁的嵌套模式。
+vi.mock("@/components/account-menu", () => ({
+  AccountMenu: () => <button data-testid="account-menu">账号</button>,
 }));
 
 /** 任何 <button> 不得出现在另一个 <button> 内（非法嵌套 → 浏览器修正 DOM → hydration 必炸）。 */
@@ -33,33 +38,38 @@ function assertNoNestedButton(html: string) {
   }
 }
 
-describe("AppSidebar（issue #17 前端清场）", () => {
-  it("footer 不出现 button 嵌套（hydration 回归：UserMenu/ModeToggle 均为触发按钮）", () => {
+describe("AppSidebar（#76 侧栏定稿形态）", () => {
+  it("展开态：新建项目主按钮 + 首页 +「能做这些」+ 历史项目色块 + 全部项目", () => {
+    const html = renderSidebar(true);
+    expect(html).toContain("新建项目");
+    expect(html).toContain('href="/"');
+    expect(html).toContain("能做这些");
+    expect(html).toContain("做系统");
+    expect(html).toContain("做页面");
+    expect(html).toContain("历史项目");
+    expect(html).toContain("巷口花店小程序");
+    expect(html).toContain('href="/projects/p1"');
+    expect(html).toContain('href="/projects"'); // 全部项目
+  });
+
+  it("footer 不出现 button 嵌套（hydration 回归：AccountMenu 为触发按钮）", () => {
     const html = renderSidebar(true);
     assertNoNestedButton(html);
   });
 
-  it("展开态品牌行 = 品牌 + 收起按钮，无站点切换 dropdown（站点下拉已删）", () => {
+  it("展开态品牌行 = 品牌 + 收起按钮（收起按钮在品牌名之后）", () => {
     const html = renderSidebar(true);
-    expect(html).not.toContain('data-slot="dropdown-menu-trigger"');
-    expect(html).not.toContain('aria-haspopup="menu"');
-    // 收起按钮存在，且在品牌行「AI 开发平台」之后（flex 行内 DOM 顺序 = 视觉右侧）
     const collapseAt = html.indexOf('aria-label="收起菜单"');
     expect(collapseAt).toBeGreaterThan(-1);
     expect(collapseAt).toBeGreaterThan(html.indexOf("AI 开发平台"));
   });
 
-  it("收起态 = 图标条：Logo/空白处展开、导航图标仍可点", () => {
+  it("收起态 = 图标条：Logo/空白处展开、导航图标仍可导航", () => {
     const html = renderSidebar(false);
-    // 整条 rail 处于 icon 收起态
     expect(html).toContain('data-collapsible="icon"');
-    // 两个展开入口：Logo 按钮 + 图标条空白展开层
     expect(html.match(/aria-label="展开菜单"/g)).toHaveLength(2);
-    // 导航图标仍在且可导航（href 项渲染为锚点）。「可点」的层序不归 SSR 断言：
-    // 依赖 ui/sidebar 的菜单项均为定位元素、绘制在空白展开层之上（见组件注释）
     expect(html).toContain('href="/"');
-    expect(html).toContain('href="/projects"');
-    // 收起按钮只在展开态品牌行出现
+    expect(html).toContain('href="/projects/p1"');
     expect(html).not.toContain('aria-label="收起菜单"');
   });
 });
@@ -68,16 +78,7 @@ describe("AppSidebar（issue #17 前端清场）", () => {
 function renderSidebar(open: boolean) {
   return renderToStaticMarkup(
     <SidebarProvider open={open}>
-      <AppSidebar
-        groups={[
-          {
-            items: [
-              { key: "home", label: "首页", href: "/" },
-              { key: "projects", label: "我的项目", href: "/projects" },
-            ],
-          },
-        ]}
-      />
+      <AppSidebar />
     </SidebarProvider>,
   );
 }

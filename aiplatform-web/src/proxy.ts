@@ -19,6 +19,14 @@ function isDeletedRoute(pathname: string): boolean {
  * （Next.js 16 起 middleware 文件约定更名为 proxy，行为一致。）
  */
 export function proxy(request: NextRequest) {
+  // 一次性原型路由（#68 过程可见性走查，/proto/*）：仅开发环境放行，随原型归档一并删除。
+  if (
+    process.env.NODE_ENV !== "production" &&
+    (request.nextUrl.pathname === "/proto" || request.nextUrl.pathname.startsWith("/proto/"))
+  ) {
+    return NextResponse.next();
+  }
+
   if (isDeletedRoute(request.nextUrl.pathname)) {
     return NextResponse.redirect(new URL("/", request.url), 302);
   }

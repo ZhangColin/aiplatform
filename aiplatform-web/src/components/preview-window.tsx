@@ -3,7 +3,7 @@
 import { LoaderCircle, Monitor, TriangleAlert } from "lucide-react";
 
 import { useProjectPreview } from "@/hooks/use-project-preview";
-import { isPreviewNotServing } from "@/lib/preview/state";
+import { TROUBLE_NOTICE, previewTrouble } from "@/lib/preview/state";
 
 /**
  * 预览新窗口独立页主体（#80「在新窗口打开」的落地）：只渲染用户系统本身——
@@ -16,7 +16,7 @@ import { isPreviewNotServing } from "@/lib/preview/state";
 export function PreviewWindow({ projectId }: { projectId: string }) {
   const preview = useProjectPreview(projectId, true);
   const url = preview.data?.url;
-  const trouble = preview.error != null && !isPreviewNotServing(preview.error);
+  const trouble = previewTrouble(preview.error);
 
   return (
     <div className="light-lock flex h-svh flex-col bg-background text-foreground">
@@ -25,7 +25,7 @@ export function PreviewWindow({ projectId }: { projectId: string }) {
       ) : trouble ? (
         <WindowHint>
           <TriangleAlert className="size-5 text-destructive" />
-          <p>预览暂时打不开，稍后会自动重试</p>
+          <p>{TROUBLE_NOTICE}</p>
         </WindowHint>
       ) : (
         <WindowHint>

@@ -21,6 +21,9 @@ export const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
 /** run 进行中、页面已可见的统一轻提示（生成长出与修正同一套，#45 合并）。 */
 export const UPDATING_NOTICE = "正在更新系统，完成后自动刷新";
 
+/** 预览真故障（非未就绪）的打不开口径（系统面板与新窗口独立页共用，#80）。 */
+export const TROUBLE_NOTICE = "预览暂时打不开，稍后会自动重试";
+
 /** 后端「预览应用尚未就绪」错误码（WSP_012，503——轮询继续，非故障）。 */
 const PREVIEW_NOT_SERVING_CODE = "WSP_012";
 
@@ -73,6 +76,11 @@ export function isPreviewNotServing(error: unknown): boolean {
   return error instanceof ApiError && error.code === PREVIEW_NOT_SERVING_CODE;
 }
 
+/** 预览查询 error 是否真故障（有错且非未就绪；系统面板与新窗口独立页共用，#80）。 */
+export function previewTrouble(error: unknown): boolean {
+  return error != null && !isPreviewNotServing(error);
+}
+
 /** 系统面板呈现档位的唯一推导入口。 */
 export function systemPanelPhase(input: {
   coderStatus?: CoderRunStatus;
@@ -106,7 +114,7 @@ export function systemPanelPhase(input: {
     };
   }
   // finished / 仅有生成事实：URL 未到 = 接通中；未就绪（WSP_012）同接通中
-  return { kind: "connecting", trouble: error != null && !isPreviewNotServing(error) };
+  return { kind: "connecting", trouble: previewTrouble(error) };
 }
 
 /** 页面上的进行中轻提示（一套话术面：进行中 / 重试 / 失败）。 */

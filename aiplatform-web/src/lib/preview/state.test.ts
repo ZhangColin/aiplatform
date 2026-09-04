@@ -7,6 +7,7 @@ import {
   FALLBACK_RETRY_MESSAGE,
   UPDATING_NOTICE,
   isPreviewNotServing,
+  previewTrouble,
   liveHintOf,
   previewActive,
   systemPanelPhase,
@@ -284,6 +285,15 @@ describe("isPreviewNotServing · 探活未就绪判定", () => {
     ).toBe(false);
     expect(isPreviewNotServing(new Error("network"))).toBe(false);
     expect(isPreviewNotServing(undefined)).toBe(false);
+  });
+});
+
+describe("previewTrouble · 真故障判定（#80 新窗口独立页与面板共用）", () => {
+  it("无错与未就绪（WSP_012）不是真故障；其他错误才是", () => {
+    expect(previewTrouble(undefined)).toBe(false);
+    expect(previewTrouble(notServingError())).toBe(false);
+    expect(previewTrouble(new ApiError({ status: 500, code: "WSP_002", message: "x" }))).toBe(true);
+    expect(previewTrouble(new Error("network"))).toBe(true);
   });
 });
 

@@ -19,7 +19,7 @@ import {
 } from "@/lib/store/generation";
 import { liveSegmentsOf, useLiveStore } from "@/lib/store/live";
 import { cn } from "@/lib/utils";
-import { previewActive, systemPanelPhase } from "@/lib/preview/state";
+import { TROUBLE_NOTICE, previewActive, systemPanelPhase } from "@/lib/preview/state";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
 import { PreviewToolbar } from "./preview-toolbar";
@@ -28,6 +28,10 @@ import { StartSystemButton } from "./start-generation";
 
 /** 预览设备宽度档（#80 浏览器条）：手机档 = 390px 手机框居中，桌面档全幅。 */
 type PreviewDevice = "desktop" | "mobile";
+
+/** 浏览器条图标键（刷新 / 新窗口）共用样式：无页面可点时置灰。 */
+const BAR_BUTTON_CLASS =
+  "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 修正
@@ -97,7 +101,7 @@ export function SystemPanel({
           onClick={() => setRefreshTick((t) => t + 1)}
           title="刷新预览"
           aria-label="刷新预览"
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          className={BAR_BUTTON_CLASS}
         >
           <RotateCw className="size-3.5" />
         </button>
@@ -130,11 +134,11 @@ export function SystemPanel({
         </ToggleGroup>
         <button
           type="button"
-          disabled={!url}
+          disabled={!pageLive}
           onClick={() => window.open(`/preview/${projectId}`, "_blank", "noopener")}
           title="在新窗口打开预览"
           aria-label="在新窗口打开预览"
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          className={BAR_BUTTON_CLASS}
         >
           <ExternalLink className="size-3.5" />
         </button>
@@ -163,7 +167,9 @@ export function SystemPanel({
             {phase.notice.recovery === "refix" ? refix : null}
           </div>
         ) : null}
-        {/* 舞台浅色锁定（#80）：预览里的系统是用户产物，html.dark 也翻转不了 */}
+        {/* 舞台浅色锁定（#80）：预览里的系统是用户产物，html.dark 也翻转不了；
+            空态提示也落锁内——视口即浅色，如同真浏览器的空白页（轻提示与工具条
+            是浮在视口上的平台件，归锁外随平台走） */}
         <div className="light-lock h-full min-h-0 bg-background text-foreground">
           {pageLive ? (
             // 双层壳同构（仅样式差异）：设备切换不重挂 iframe——宽度是布局变化
@@ -207,7 +213,7 @@ export function SystemPanel({
           ) : phase.kind === "connecting" ? (
             <PanelHint>
               {phase.trouble ? (
-                <span className="text-destructive">预览暂时打不开，稍后会自动重试</span>
+                <span className="text-destructive">{TROUBLE_NOTICE}</span>
               ) : (
                 <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
               )}
@@ -236,11 +242,10 @@ function PanelHint({ children }: { children: ReactNode }) {
 }
 
 /**
- * 预览 iframe 的重挂 key：url + 预览纪元——纪元两路信号各自 +1（编码 run 收口
- * run-finish；逐修改刷新 preview-updated 通知经 store 节流）再加手动刷新的本地
- * 节拍（#80，调用点并入 epoch 传入），同 URL 也强制重建 iframe（预览刷新的唯一
- * 机制）。
+ * 预览 iframe 的重挂 key：url + 重载序号——序号汇三路信号（编码 run 收口
+ * run-finish；逐修改刷新 preview-updated 通知经 store 节流；手动刷新的本地节拍
+ * #80，调用点求和传入），同 URL 也强制重建 iframe（预览刷新的唯一机制）。
  */
-export function previewFrameKey(url: string, epoch: number): string {
-  return `${url}#${epoch}`;
+export function previewFrameKey(url: string, reload: number): string {
+  return `${url}#${reload}`;
 }

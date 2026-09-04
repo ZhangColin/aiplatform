@@ -38,10 +38,10 @@ export default function PlatformHome() {
       />
       {/* 克制的底色层次：顶部一线极淡的主色晕，向下即隐（不喧宾夺主） */}
       <main className="relative min-w-0 flex-1 overflow-y-auto">
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(60%_100%_at_50%_0%,var(--color-primary)_0%,transparent_100%)] opacity-[0.05]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(60%_100%_at_50%_0%,var(--color-primary)_0%,transparent_100%)] opacity-[0.05] dark:opacity-[0.09]" />
         <div className="relative mx-auto flex w-full max-w-2xl flex-col px-6 pb-24 pt-16">
-          <h1 className="text-center text-3xl font-bold tracking-tight md:text-4xl">想做什么，直接说</h1>
-          <p className="mt-3 text-center text-[15px] text-muted-foreground">
+          <h1 className="text-center text-3xl font-bold tracking-normal md:text-4xl">想做什么，直接说</h1>
+          <p className="mt-3 text-center text-base leading-7 text-muted-foreground">
             聊清楚需求，看着它一点点变成能用的系统
           </p>
           <div className="mt-6">
@@ -51,7 +51,7 @@ export default function PlatformHome() {
             {EXAMPLES.map((e) => (
               <button
                 key={e}
-                className="rounded-full border bg-background px-3.5 py-1.5 text-xs text-muted-foreground transition-all hover:border-primary/40 hover:text-foreground active:scale-95"
+                className="rounded-full border bg-background px-3.5 py-1.5 text-[13px] text-muted-foreground transition-all hover:border-primary/40 hover:text-foreground active:scale-95"
               >
                 {e}
               </button>
@@ -65,11 +65,11 @@ export default function PlatformHome() {
               >
                 <span className={`inline-flex rounded-xl p-2 ${c.tint}`}>{c.icon}</span>
                 <div className="mt-2.5 text-sm font-semibold">{c.t}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">{c.d}</div>
+                <div className="mt-0.5 text-[13px] text-muted-foreground">{c.d}</div>
               </button>
             ))}
           </div>
-          <p className="mt-5 text-center text-xs text-muted-foreground">
+          <p className="mt-5 text-center text-[13px] text-muted-foreground">
             点模板一句话开工，或直接在输入框里描述你的想法
           </p>
 
@@ -90,8 +90,8 @@ export default function PlatformHome() {
                 >
                   <ProjectAvatar name={p.name} tint={p.tint} />
                   <div className="mt-2.5 truncate text-sm font-semibold">{p.name}</div>
-                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">{p.stage}</Badge>
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                    <Badge variant="secondary" className="px-1.5 py-0 text-xs">{p.stage}</Badge>
                     <Clock3 className="size-3" /> {p.updated}
                   </div>
                 </Link>

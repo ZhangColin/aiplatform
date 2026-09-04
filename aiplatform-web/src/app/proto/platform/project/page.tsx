@@ -97,13 +97,14 @@ function ProjectBody({ engine }: { engine: ReturnType<typeof useRunEngine> }) {
           </div>
         </div>
       </ResizablePanel>
-      {/* 呼出式工作区：tab 条即标题条（滑入动效 = 状态切换反馈）；拖拽分隔条调宽（Bolt 层次感） */}
+      {/* 呼出式工作区：tab 条即标题条（滑入动效 = 状态切换反馈）；拖拽分隔条调宽。
+          平铺无圆角——与对话列同墙同地，四角圆润反而割裂。 */}
       {wsOpen ? (
         <>
           <ResizableHandle withHandle className="w-2 border-0 bg-transparent" />
           <ResizablePanel defaultSize={54} minSize={34} className="proto-ws-in">
             <style>{`@keyframes protoWsIn { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } } .proto-ws-in { animation: protoWsIn .22s ease-out; }`}</style>
-            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-background shadow-sm">
+            <div className="flex h-full min-h-0 flex-col border-l bg-background">
               <WorkspaceBar
                 state={state}
                 onDispatch={engine.commit}

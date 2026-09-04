@@ -127,7 +127,7 @@ export function ChatMessages({
                     <Sparkles className="size-3.5 text-muted-foreground" />
                   </MessageAvatar>
                   <MessageContent>
-                    <div className="flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-xs text-muted-foreground">
+                    <div className="flex w-fit items-center gap-2 rounded-xl border px-3 py-2 text-[13px] text-muted-foreground">
                       <TypingDots /> 正在处理您的消息…
                     </div>
                   </MessageContent>
@@ -186,7 +186,7 @@ function WorkMessage({
             <PartView key={i} part={p} onAnswer={onAnswer} onDispatch={onDispatch} onRetry={onRetry} />
           ))}
           {growing && !waitingAnswer ? (
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-2 flex items-center gap-2 text-[13px] text-muted-foreground">
               <TypingDots /> 正在干活…
             </div>
           ) : null}
@@ -203,7 +203,7 @@ function WorkHeader() {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="mb-1 flex items-center gap-2 text-xs font-medium">
+    <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
       <span className="relative flex size-2">
         <span className="absolute inline-flex size-full animate-ping rounded-full bg-foreground/50" />
         <span className="relative inline-flex size-2 rounded-full bg-foreground/70" />
@@ -232,7 +232,7 @@ function PartView({
       return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
     case "step":
       return (
-        <div className="mt-3 mb-1 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+        <div className="mb-1 mt-3 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
           {part.title}
           <Separator className="flex-1" />
         </div>
@@ -397,10 +397,10 @@ function WrapCard({
         </span>
       </div>
       <div className="mt-3 flex gap-2">
-        <Button size="sm" variant="outline" className="h-7 bg-background text-xs" onClick={() => onDispatch({ t: "view-version", n: part.version })}>
+        <Button size="sm" variant="outline" className="h-8 bg-background text-[13px]" onClick={() => onDispatch({ t: "view-version", n: part.version })}>
           <Eye className="size-3.5" /> 查看当时
         </Button>
-        <Button size="sm" variant="outline" className="h-7 bg-background text-xs" onClick={() => onDispatch({ t: "view-version", n: part.version })}>
+        <Button size="sm" variant="outline" className="h-8 bg-background text-[13px]" onClick={() => onDispatch({ t: "view-version", n: part.version })}>
           <RotateCcw className="size-3.5" /> 回滚到此
         </Button>
       </div>

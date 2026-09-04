@@ -12,6 +12,7 @@ import {
   ChevronRight,
   CreditCard,
   Database,
+  ExternalLink,
   Eye,
   FileCode2,
   FileJson2,
@@ -37,17 +38,9 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -89,7 +82,9 @@ export function PreviewPane({ state, onDispatch }: { state: RunState; onDispatch
       ) : null}
       {/* 浏览器工具栏（Kimi 式：地址 + 设备切换 + 刷新） */}
       <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-muted/40 px-3">
-        <RefreshCw className="size-3.5 text-muted-foreground" />
+        <button title="刷新（原型摆件）" className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+          <RefreshCw className="size-3.5" />
+        </button>
         <div className="mx-auto flex w-full max-w-md items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
           <Lock className="size-3" /> preview·巷口花店.做系统.app
         </div>
@@ -105,6 +100,13 @@ export function PreviewPane({ state, onDispatch }: { state: RunState; onDispatch
             <Smartphone className="size-3.5" />
           </ToggleGroupItem>
         </ToggleGroup>
+        <button
+          title="在新窗口打开预览"
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          onClick={() => window.open(`/proto/platform/preview?stage=${stage}`, "_blank")}
+        >
+          <ExternalLink className="size-3.5" />
+        </button>
       </div>
       <PreviewStage stage={stage} device={device} />
     </div>
@@ -138,29 +140,27 @@ function PreviewStage({ stage, device }: { stage: number; device: "desktop" | "m
         ref={areaRef}
         onClick={dropPin}
         className={cn(
-          "h-full overflow-y-auto",
-          device === "mobile" && "flex justify-center bg-muted/30 p-4",
+          "h-full overflow-y-auto bg-white",
+          device === "mobile" && "flex justify-center bg-zinc-100 p-4",
           tool === "comment" && "cursor-crosshair",
         )}
       >
         {stage === 0 ? (
-          <Empty className="h-full">
-            <EmptyHeader>
-              <EmptyMedia variant="icon"><Flower2 /></EmptyMedia>
-              <EmptyTitle>系统还没有做出来</EmptyTitle>
-              <EmptyDescription>开工后，这里会一点点长出你的花店小程序</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          <div className="flex h-full flex-col items-center justify-center gap-2 bg-white">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500"><Flower2 className="size-5" /></span>
+            <div className="text-sm font-semibold text-zinc-900">系统还没有做出来</div>
+            <div className="text-xs text-zinc-500">开工后，这里会一点点长出你的花店小程序</div>
+          </div>
         ) : (
           <div className={cn(device === "mobile" && "h-fit w-[390px] overflow-hidden rounded-2xl border bg-background shadow-sm")}>
             {stage === 1 ? (
-              <div className="space-y-3 p-4">
-                <Skeleton className="h-9 w-full" />
-                <Skeleton className="h-28 w-full" />
+              <div className="space-y-3 bg-white p-4">
+                <Skel className="h-9 w-full" />
+                <Skel className="h-28 w-full" />
                 <div className="grid grid-cols-3 gap-2.5">
-                  <Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" />
+                  <Skel className="h-28" /><Skel className="h-28" /><Skel className="h-28" />
                 </div>
-                <Skeleton className="h-9 w-full" />
+                <Skel className="h-9 w-full" />
               </div>
             ) : (
               <ShopPreview stage={stage} />
@@ -197,7 +197,7 @@ function PreviewStage({ stage, device }: { stage: number; device: "desktop" | "m
                   }}
                 />
               )}
-              <div className="mt-1.5 text-[11px] text-muted-foreground">
+              <div className="mt-1.5 text-xs text-muted-foreground">
                 {pin.text ? "已随下一条意见发给智能体（原型）" : "回车确认，随下一条意见发出"}
               </div>
             </div>
@@ -231,7 +231,7 @@ function PreviewStage({ stage, device }: { stage: number; device: "desktop" | "m
             </button>
           ))}
           <span className="mx-0.5 h-4 w-px bg-border" />
-          <span className="px-1.5 text-[10px] font-medium text-muted-foreground/60" title="本工具条是形态提案，实现讨论归 #73">
+          <span className="px-1.5 text-xs text-muted-foreground/60" title="本工具条是形态提案，实现讨论归 #73">
             #73 提案
           </span>
         </div>
@@ -240,7 +240,11 @@ function PreviewStage({ stage, device }: { stage: number; device: "desktop" | "m
   );
 }
 
-function ShopPreview({ stage }: { stage: number }) {
+export function Skel({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-zinc-200", className)} />;
+}
+
+export function ShopPreview({ stage }: { stage: number }) {
   const pink = stage >= 4;
   const colored = stage >= 3;
   const member = stage >= 5;
@@ -248,10 +252,10 @@ function ShopPreview({ stage }: { stage: number }) {
     ["粉玫瑰", 68, "🌹"], ["向日葵", 45, "🌻"], ["洋桔梗", 52, "💐"],
   ];
   return (
-    <div className="text-[13px]">
-      <div className="flex items-center border-b px-3.5 py-2.5">
+    <div className="bg-white text-[13px] text-zinc-900">
+      <div className="flex items-center border-b border-zinc-200 px-3.5 py-2.5">
         <span className="text-[15px] font-bold">🌷 巷口花店</span>
-        <span className="ml-auto text-muted-foreground">🛒</span>
+        <span className="ml-auto text-zinc-400">🛒</span>
       </div>
       <div
         className={cn(
@@ -262,16 +266,16 @@ function ShopPreview({ stage }: { stage: number }) {
         {colored ? (
           <>
             <h2 className="mb-1 text-lg font-semibold">今日鲜花 · 当日送达</h2>
-            <p className="mb-3 text-muted-foreground">巷口花店，把新鲜送到手上</p>
+            <p className="mb-3 text-zinc-500">巷口花店，把新鲜送到手上</p>
             <span className={cn("inline-block rounded-full px-4 py-1.5 text-[13px] font-semibold text-white", pink ? "bg-pink-600" : "bg-green-600")}>
               去逛逛
             </span>
           </>
         ) : (
           <div className="space-y-2">
-            <Skeleton className="h-5 w-3/5" />
-            <Skeleton className="h-3.5 w-4/5" />
-            <Skeleton className="h-8 w-24 rounded-full" />
+            <Skel className="h-5 w-3/5" />
+            <Skel className="h-3.5 w-4/5" />
+            <Skel className="h-8 w-24 rounded-full" />
           </div>
         )}
       </div>
@@ -282,22 +286,22 @@ function ShopPreview({ stage }: { stage: number }) {
       ) : null}
       <div className="grid grid-cols-3 gap-2.5 px-3.5 pt-1 pb-3.5">
         {flowers.map(([name, price, emoji]) => (
-          <div key={name} className="overflow-hidden rounded-lg border">
-            <div className={cn("flex h-[74px] items-center justify-center text-[34px]", colored ? (pink ? "bg-pink-50" : "bg-green-50") : "bg-muted")}>
-              {colored ? emoji : <Skeleton className="size-10" />}
+          <div key={name} className="overflow-hidden rounded-lg border border-zinc-200">
+            <div className={cn("flex h-[74px] items-center justify-center text-[34px]", colored ? (pink ? "bg-pink-50" : "bg-green-50") : "bg-zinc-100")}>
+              {colored ? emoji : <Skel className="size-10" />}
             </div>
             <div className="px-2.5 pt-1.5 pb-2">
               <div className="font-semibold">{name}</div>
-              <div className={cn("mt-0.5 font-bold", colored ? (pink ? "text-pink-600" : "text-green-600") : "text-muted-foreground")}>
+              <div className={cn("mt-0.5 font-bold", colored ? (pink ? "text-pink-600" : "text-green-600") : "text-zinc-500")}>
                 ¥{price}
               </div>
             </div>
           </div>
         ))}
       </div>
-      <div className="flex border-t py-2 text-xs">
+      <div className="flex border-t border-zinc-200 py-2 text-xs">
         {["首页", "分类", "购物车", "我的"].map((t, i) => (
-          <span key={t} className={cn("flex-1 text-center", i === 0 ? "font-semibold" : "text-muted-foreground")}>{t}</span>
+          <span key={t} className={cn("flex-1 text-center", i === 0 ? "font-semibold" : "text-zinc-400")}>{t}</span>
         ))}
       </div>
     </div>
@@ -346,22 +350,22 @@ function Fresh({ children }: { children: React.ReactNode }) {
 function PrdView({ doc }: { doc: RunState["doc"] }) {
   return (
     <div className="mx-auto max-w-xl px-6 py-6">
-      <h1 className="text-lg font-semibold tracking-tight">巷口花店小程序 · 需求文档</h1>
-      <p className="mb-5 mt-0.5 text-xs text-muted-foreground">由访谈整理，随每轮修改更新</p>
+      <h1 className="text-lg font-semibold">巷口花店小程序 · 需求文档</h1>
+      <p className="mb-5 mt-0.5 text-[13px] text-muted-foreground">由访谈整理，随每轮修改更新</p>
       <h3 className="mb-1 mt-4 text-sm font-semibold">一、做什么</h3>
-      <p className="text-[13.5px] leading-relaxed text-foreground/80">给「巷口花店」做一个微信小程序：客人能浏览鲜花、下单付款，店主能收到订单。</p>
+      <p className="text-sm leading-7 text-foreground/80">给「巷口花店」做一个微信小程序：客人能浏览鲜花、下单付款，店主能收到订单。</p>
       <h3 className="mb-1 mt-4 text-sm font-semibold">二、整体风格</h3>
-      <p className="text-[13.5px] leading-relaxed text-foreground/80">
+      <p className="text-sm leading-7 text-foreground/80">
         {doc.pink ? <Fresh>整体配色为粉色系，温馨柔和。</Fresh> : "整体配色为绿色系，清新自然。"}
       </p>
       <h3 className="mb-1 mt-4 text-sm font-semibold">三、配送说明</h3>
-      <p className="text-[13.5px] leading-relaxed text-foreground/80">
+      <p className="text-sm leading-7 text-foreground/80">
         {doc.citywide ? <Fresh>全城配送。</Fresh> : "门店 3 公里内配送。"}
       </p>
       {doc.member ? (
         <>
           <h3 className="mb-1 mt-4 text-sm font-semibold">四、会员充值</h3>
-          <p className="text-[13.5px] leading-relaxed text-foreground/80">
+          <p className="text-sm leading-7 text-foreground/80">
             <Fresh>会员可充值余额，充 100 送 20，下单可用余额支付。</Fresh>
           </p>
         </>
@@ -373,12 +377,12 @@ function PrdView({ doc }: { doc: RunState["doc"] }) {
 function FaqView() {
   return (
     <div className="mx-auto max-w-xl px-6 py-6">
-      <h1 className="text-lg font-semibold tracking-tight">常见问题</h1>
-      <p className="mb-5 mt-0.5 text-xs text-muted-foreground">智能体在沟通过程中顺手整理</p>
+      <h1 className="text-lg font-semibold">常见问题</h1>
+      <p className="mb-5 mt-0.5 text-[13px] text-muted-foreground">智能体在沟通过程中顺手整理</p>
       <h3 className="mb-1 mt-4 text-sm font-semibold">做好的系统在哪能看？</h3>
-      <p className="text-[13.5px] leading-relaxed text-foreground/80">做好后「系统」页就能直接点开用；正式对外用需要下单发布。</p>
+      <p className="text-sm leading-7 text-foreground/80">做好后「系统」页就能直接点开用；正式对外用需要下单发布。</p>
       <h3 className="mb-1 mt-4 text-sm font-semibold">改需求要重新做一遍吗？</h3>
-      <p className="text-[13.5px] leading-relaxed text-foreground/80">不用。直接说要改什么，智能体只动相关部分，每轮改动都会留下版本。</p>
+      <p className="text-sm leading-7 text-foreground/80">不用。直接说要改什么，智能体只动相关部分，每轮改动都会留下版本。</p>
     </div>
   );
 }
@@ -465,8 +469,8 @@ export function FilesPane() {
                   >
                     {fileIcon(f.path)}
                     <span className="min-w-0 flex-1 truncate">{f.path}</span>
-                    {f.status === "M" ? <span className="text-[10px] font-bold text-amber-600">M</span> : null}
-                    {f.status === "U" ? <span className="text-[10px] font-bold text-green-600">U</span> : null}
+                    {f.status === "M" ? <span className="text-xs font-bold text-amber-600">M</span> : null}
+                    {f.status === "U" ? <span className="text-xs font-bold text-green-600">U</span> : null}
                   </button>
                 );
               })}
@@ -536,7 +540,7 @@ export function ShellPane() {
           <span className="inline-block h-3.5 w-1.5 animate-pulse bg-zinc-400" />
         </div>
       </div>
-      <div className="shrink-0 border-t border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-600">
+      <div className="shrink-0 border-t border-zinc-800 px-3 py-1.5 text-xs text-zinc-600">
         原型：终端是「未来 dev 面」范式的演示，经同一注册表挂载；非技术用户面默认不挂
       </div>
     </div>
@@ -584,9 +588,9 @@ export function OrderPane() {
           <Button className="mt-4 w-full transition-transform active:scale-[0.98]">
             <CreditCard className="size-4" /> 去支付（原型占位）
           </Button>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">支付后平台安排发布上线，全程可在对话里追问进度</p>
+          <p className="mt-2 text-center text-xs text-muted-foreground">支付后平台安排发布上线，全程可在对话里追问进度</p>
         </div>
-        <p className="mt-3 text-center text-[11px] text-muted-foreground/70">订单卡是「临时安放的信息位」，可挪位、可扩展</p>
+        <p className="mt-3 text-center text-xs text-muted-foreground/70">订单卡是「临时安放的信息位」，可挪位、可扩展</p>
       </div>
     </div>
   );
@@ -609,7 +613,7 @@ export function DataPane() {
         <Package className="size-4 text-muted-foreground" />
         <span className="text-sm font-medium">商品数据</span>
         <span className="text-xs text-muted-foreground">{PRODUCT_ROWS.length} 条</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">系统在用的数据，可查看（编辑是未来增强）</span>
+        <span className="ml-auto text-xs text-muted-foreground">系统在用的数据，可查看（编辑是未来增强）</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="overflow-hidden rounded-xl border">

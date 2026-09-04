@@ -34,9 +34,9 @@ import { Brand } from "./chat-parts";
 export type ProtoProject = { id: string; name: string; stage: string; updated: string; tint: string };
 
 export const PROTO_PROJECTS: ProtoProject[] = [
-  { id: "flower", name: "巷口花店小程序", stage: "迭代中", updated: "2 小时前", tint: "bg-rose-100 text-rose-700" },
-  { id: "groupon", name: "社区团购站", stage: "访谈中", updated: "昨天", tint: "bg-amber-100 text-amber-700" },
-  { id: "yoga", name: "瑜伽馆预约", stage: "已发布", updated: "3 天前", tint: "bg-emerald-100 text-emerald-700" },
+  { id: "flower", name: "巷口花店小程序", stage: "迭代中", updated: "2 小时前", tint: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300" },
+  { id: "groupon", name: "社区团购站", stage: "访谈中", updated: "昨天", tint: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" },
+  { id: "yoga", name: "瑜伽馆预约", stage: "已发布", updated: "3 天前", tint: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" },
 ];
 
 /** 项目头像：首字色块（比 emoji 更产品化）。 */
@@ -184,7 +184,7 @@ function WideContent({
       >
         <Home className="size-4" /> 首页
       </Link>
-      <div className="mt-4 px-2 text-xs font-semibold text-muted-foreground">能做这些</div>
+      <div className="mt-4 px-2 text-[13px] font-medium text-muted-foreground">能做这些</div>
       {MODES.map((m) => (
         <button
           key={m.label}
@@ -194,10 +194,10 @@ function WideContent({
           )}
         >
           <Sparkles className="size-3.5" /> {m.label}
-          {!m.live && <span className="ml-auto text-[10px] text-muted-foreground/60">敬请期待</span>}
+          {!m.live && <span className="ml-auto text-xs text-muted-foreground/60">敬请期待</span>}
         </button>
       ))}
-      <div className="mt-4 px-2 text-xs font-semibold text-muted-foreground">历史项目</div>
+      <div className="mt-4 px-2 text-[13px] font-medium text-muted-foreground">历史项目</div>
       {PROTO_PROJECTS.map((p) => (
         <Link
           key={p.id}
@@ -209,7 +209,7 @@ function WideContent({
         >
           <ProjectAvatar name={p.name} tint={p.tint} className="size-6 rounded-md text-[11px]" />
           <span className="min-w-0 flex-1 truncate">{p.name}</span>
-          <span className="text-[10px] text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">{p.updated}</span>
+          <span className="text-xs text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">{p.updated}</span>
         </Link>
       ))}
       <div className="mt-auto">

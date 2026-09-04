@@ -227,6 +227,49 @@ class AgentEventsControllerSseTest {
     }
 
     /**
+     * 消息部件线格式（#77 parts 契约）：动作卡全生命周期（started → running →
+     * completed）+ 步骤分组过线验收——统一信封、id {runId}:{seq}、payload 扁平
+     * （内禁 type 键名、无 data 键——旧前端透传收窄不误收，双发射零变化）。
+     */
+    @Test
+    void given_part_events_when_publish_then_lifecycle_on_the_wire() throws Exception {
+        SseClient client = connect("?projectId=77");
+
+        appService.publish("part-step", Map.of(
+                "projectId", "77", "runId", "run-parts", "sessionId", "coder-77",
+                "engine", "agentscope", "step", 1));
+        String[][] lifecycle = {
+                {"started", "编写【代码文件】"},
+                {"running", "编写【订单管理】"},
+                {"completed", "编写【订单管理】"},
+        };
+        for (String[] action : lifecycle) {
+            appService.publish("part-action", Map.of(
+                    "projectId", "77", "runId", "run-parts", "sessionId", "coder-77",
+                    "engine", "agentscope", "toolCallId", "tc-1", "toolName", "write_file",
+                    "state", action[0], "label", action[1]));
+        }
+
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-parts:1");
+        JsonNode step = nextFrameEnvelope(client);
+        assertThat(step.get("type").asText()).isEqualTo("part-step");
+        assertThat(step.get("payload").get("step").asInt()).isEqualTo(1);
+        Instant.parse(step.get("ts").asText()); // ISO-8601 可解析（非法即抛）
+
+        int seq = 1;
+        for (String[] action : lifecycle) {
+            assertThat(client.nextNonCommentLine()).isEqualTo("id:run-parts:" + ++seq);
+            JsonNode envelope = nextFrameEnvelope(client);
+            assertThat(envelope.get("type").asText()).isEqualTo("part-action");
+            assertThat(envelope.get("payload").get("toolCallId").asText()).isEqualTo("tc-1");
+            assertThat(envelope.get("payload").get("state").asText()).isEqualTo(action[0]);
+            assertThat(envelope.get("payload").get("label").asText()).isEqualTo(action[1]);
+            assertThat(envelope.get("payload").has("type")).isFalse(); // payload 内禁 type 键名
+            assertThat(envelope.get("payload").has("data")).isFalse(); // 部件载荷扁平，无 data 键
+        }
+    }
+
+    /**
      * 派发阶段帧线格式（#50 阶段状态条）：阶段值全集（含 done 的 changed 两态）
      * 逐帧过线验收——信封 {type,payload,ts}、id {runId}:{seq}（帧序即阶段序）、
      * payload 内禁 type 键、changed 仅 done 携带。意见链跨 run（BA 轮锚 →

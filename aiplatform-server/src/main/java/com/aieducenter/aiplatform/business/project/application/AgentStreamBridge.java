@@ -83,7 +83,7 @@ public class AgentStreamBridge {
     }
 
     /**
-     * fix-unchanged 发射（修正 run 收口·系统未动，#46）：finish_fix 判定
+     * fix-unchanged 发射（修正 run 收口·系统未动，#46）：finish_edit 判定
      * changed=false 时的如实呈现帧——锚定正常收口的那次尝试的 runId（帧序
      * run-finish → fix-unchanged），reason 为「未动系统」的用户侧原因。
      */
@@ -95,7 +95,7 @@ public class AgentStreamBridge {
     }
 
     /**
-     * error 发射（修正收口判据不过，#46）：编码 run 正常返回但未以 finish_fix
+     * error 发射（修正收口判据不过，#46）：编码 run 正常返回但未以 finish_edit
      * 收口——converse 内部不发 error（它自己认为成功了），此处补发如实表达
      * （error 帧是逐次尝试的过程事实，终态由轨道层的 run-failed 收口，#56），
      * 用户侧能区分「不需要改」与「链路断了」。

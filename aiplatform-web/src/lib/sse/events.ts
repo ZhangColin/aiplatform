@@ -153,7 +153,7 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 修正 run 收口·系统未动（#46）：编码智能体以 finish_fix(changed=false) 判定
+       * 修正 run 收口·系统未动（#46）：编码智能体以 finish_edit(changed=false) 判定
        * 无需改动——`reason` 为未动原因；帧序 run-finish → fix-unchanged；changed=true
        * 不发。指令区呈现「系统未修改 + 原因」，区分「不需要改」与「链路断了」。
        */

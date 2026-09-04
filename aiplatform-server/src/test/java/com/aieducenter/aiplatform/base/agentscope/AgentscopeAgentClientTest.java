@@ -25,9 +25,11 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.ToolCallState;
+import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.harness.agent.HarnessAgent;
@@ -125,9 +127,10 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         var reply = client.converse(command(null, null), frames::add);
 
+        // 双发射过渡期：透传 text 帧照发，解说尾段另成 part-text 部件（收口帧前）
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.RUN_CREATED,
-                "text", "text", "text", AgentEventTypes.RUN_FINISH);
+                "text", "text", "text", AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
         // 开场帧形状
         assertThat(frames.get(0).payload()).containsOnly(
                 Map.entry("runId", "run-1"), Map.entry("prompt", "你好"),
@@ -140,8 +143,12 @@ class AgentscopeAgentClientTest {
                 "runId", "run-1", "sessionId", "s-1", "engine", "agentscope"));
         assertThat(frames.get(2).payload().get("data"))
                 .isEqualTo(Map.of("delta", "你", "blockId", "b-1"));
+        // 解说部件 = 完整段（句读/收尾切段，非增量）、扁平载荷无 data 键
+        assertThat(frames.get(5).payload()).containsOnly(
+                Map.entry("runId", "run-1"), Map.entry("sessionId", "s-1"),
+                Map.entry("engine", "agentscope"), Map.entry("text", "你好呀"));
         // 收口帧
-        assertThat(frames.get(5).payload()).containsEntry("finish", "end");
+        assertThat(frames.get(6).payload()).containsEntry("finish", "end");
         // 回复文本 = 增量拼接
         assertThat(reply.runId()).isEqualTo("run-1");
         assertThat(reply.text()).isEqualTo("你好呀");
@@ -196,7 +203,8 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_plain_command_when_converse_then_no_live_frames() {
-        // BA 对话不开直播（对话不流式不留痕）：同一事件流无 live-* 帧
+        // BA 对话不开直播（对话不流式不留痕）：同一事件流无 live-* 帧；部件恒挂
+        // （消息部件是全部智能体事件的呈现地基，#77——BA 轮也产部件）
         givenFirstSeen(true);
         givenStream(
                 new ModelCallStartEvent("r-1"),
@@ -208,6 +216,9 @@ class AgentscopeAgentClientTest {
 
         assertThat(frames.stream().map(AgentEvent::type))
                 .noneMatch(type -> type.startsWith("live-"));
+        assertThat(frames.stream().map(AgentEvent::type))
+                .contains(AgentEventTypes.PART_STEP, AgentEventTypes.PART_TEXT,
+                        AgentEventTypes.PART_ACTION);
     }
 
     @Test
@@ -224,7 +235,8 @@ class AgentscopeAgentClientTest {
         client.converse(command(null, null), frames::add);
 
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.RUN_START, "text", AgentEventTypes.RUN_FINISH);
+                AgentEventTypes.RUN_START, "text", AgentEventTypes.PART_TEXT,
+                AgentEventTypes.RUN_FINISH);
     }
 
     @Test
@@ -366,6 +378,138 @@ class AgentscopeAgentClientTest {
         verifyNoInteractions(usageEventSink);
     }
 
+    // ---------- 消息部件（#77 parts 契约：双发射过渡期，与 live-* 旧族并行） ----------
+
+    /**
+     * 验收锚点（#77）：脚本化智能体会话——薄缝（agent 工厂 + 事件流）按剧本吐
+     * 原生事件，converse 产出的事件流断言部件序列：动作卡开始/进行中/完成全生命
+     * 周期（动作一开始即出部件，非调用落定才出）、同一动作 toolCallId 锚定跨状态、
+     * label 自 running 起为具体对象。
+     */
+    @Test
+    void given_scripted_coding_run_when_converse_then_part_events_full_lifecycle() {
+        givenFirstSeen(true);
+        givenStream(
+                new ModelCallStartEvent("reply-1"),
+                new TextBlockDeltaEvent("reply-1", "b-1", "正在编写订单管理页面。"),
+                new ToolCallStartEvent("reply-1", "tc-1", "write_file"),
+                new ToolCallDeltaEvent("reply-1", "tc-1", "write_file",
+                        "{\"path\":\"src/pages/订单管理.tsx\"}"),
+                new ToolCallEndEvent("reply-1", "tc-1", "write_file"),
+                new ToolResultEndEvent("reply-1", "tc-1", "write_file", ToolResultState.SUCCESS),
+                new TextBlockDeltaEvent("reply-1", "b-2", "订单管理完成"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(liveCommand(), frames::add);
+
+        // 部件序列：步骤分组 → 解说段 → 动作 started（参数在途，通用对象）→
+        // 动作 running（参数落定，具体对象）→ 动作 completed → 解说尾段 → 收口
+        assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
+                AgentEventTypes.PART_STEP,
+                AgentEventTypes.PART_TEXT,
+                AgentEventTypes.PART_ACTION,
+                AgentEventTypes.PART_ACTION,
+                AgentEventTypes.PART_ACTION,
+                AgentEventTypes.PART_TEXT,
+                AgentEventTypes.RUN_FINISH);
+
+        List<AgentEvent> actions = frames.stream()
+                .filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)).toList();
+        assertThat(actions).hasSize(3);
+        // 同一动作跨状态同锚（toolCallId）
+        assertThat(actions).allSatisfy(action -> {
+            assertThat(action.payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "tc-1");
+            assertThat(action.payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "write_file");
+        });
+        assertThat(actions.stream().map(a -> a.payload()
+                .get(AgentEventTypes.PART_ACTION_STATE_FIELD)))
+                .containsExactly("started", "running", "completed");
+        // label：started 通用对象（参数在途）→ running 起具体对象（无时态——时态由 state）
+        assertThat(actions.get(0).payload()).containsEntry(
+                AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【代码文件】");
+        assertThat(actions.get(1).payload()).containsEntry(
+                AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】");
+        assertThat(actions.get(2).payload()).containsEntry(
+                AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】");
+        // 步骤分组部件 = 1 起序号
+        assertThat(frames.stream()
+                .filter(f -> AgentEventTypes.PART_STEP.equals(f.type()))
+                .findFirst().orElseThrow().payload())
+                .containsEntry(AgentEventTypes.PART_STEP_FIELD, 1);
+    }
+
+    /** 动作失败态：工具结果 error → part-action state=failed（动作层状态，非 run 终态）。 */
+    @Test
+    void given_tool_error_result_when_converse_then_part_action_failed_state() {
+        givenFirstSeen(true);
+        givenStream(
+                new ToolCallStartEvent("reply-1", "tc-1", "command"),
+                new ToolCallEndEvent("reply-1", "tc-1", "command"),
+                new ToolResultEndEvent("reply-1", "tc-1", "command", ToolResultState.ERROR));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(liveCommand(), frames::add);
+
+        List<AgentEvent> actions = frames.stream()
+                .filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)).toList();
+        assertThat(actions.stream().map(a -> a.payload()
+                .get(AgentEventTypes.PART_ACTION_STATE_FIELD)))
+                .containsExactly("started", "running", "failed");
+    }
+
+    /**
+     * 双发射过渡（#77）：编码 run 同一事件流上旧族（live-* + 引擎透传 tool）照发、
+     * 前端零变化——部件载荷扁平（无 {@code data} 键，前端透传收窄守卫不误收）。
+     */
+    @Test
+    void given_scripted_coding_run_when_converse_then_old_family_parallel_and_parts_flat() {
+        givenFirstSeen(true);
+        givenStream(
+                new ModelCallStartEvent("reply-1"),
+                new TextBlockDeltaEvent("reply-1", "b-1", "正在编写订单管理页面。"),
+                new ToolCallStartEvent("reply-1", "tc-1", "write_file"),
+                new ToolCallDeltaEvent("reply-1", "tc-1", "write_file",
+                        "{\"path\":\"src/pages/订单管理.tsx\"}"),
+                new ToolCallEndEvent("reply-1", "tc-1", "write_file"),
+                new ToolResultEndEvent("reply-1", "tc-1", "write_file", ToolResultState.SUCCESS));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(liveCommand(), frames::add);
+
+        // 旧族并行：live-* 三型 + 引擎透传（step-start/tool）照发
+        assertThat(frames.stream().map(AgentEvent::type)).contains(
+                AgentEventTypes.LIVE_STEP, AgentEventTypes.LIVE_TEXT, AgentEventTypes.LIVE_ACTION,
+                "step-start", "tool");
+        // 部件载荷扁平：无 data 键（前端未知 type + 无 data 即忽略——双发射期零变化）
+        assertThat(frames.stream()
+                .filter(f -> f.type().startsWith("part-"))
+                .filter(f -> f.payload().containsKey("data")))
+                .isEmpty();
+    }
+
+    /** run-start 并入角色键（#77 引擎信息归一，为 role-assigned 退役做准备）：带角色命令携带、无角色不携带。 */
+    @Test
+    void given_agent_role_when_converse_then_run_start_carries_role_key() {
+        givenFirstSeen(true);
+        givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
+                null, null, Map.of(), null, true, "CODER", false), frames::add);
+
+        assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
+        assertThat(frames.get(0).payload()).containsEntry("role", "CODER");
+
+        // 无角色语境（取名等一次性调用）：run-start 不带 role 键
+        givenFirstSeen(true);
+        givenStream(new TextBlockDeltaEvent("r-2", "b-1", "名"));
+        List<AgentEvent> plain = new ArrayList<>();
+        client.converse(command(null, null), plain::add);
+        assertThat(plain.get(0).payload()).doesNotContainKey("role");
+    }
+
     @Test
     void given_stream_error_when_converse_then_error_frame_then_exception() {
         givenFirstSeen(true);
@@ -448,11 +592,12 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
 
-        // 挂起 = 软终点：question-raised 发出（问答卡呈现源），不发 run-finish
+        // 挂起 = 软终点：解说尾段部件先出（问答卡前不留解说尾巴）、question-raised
+        // 发出（问答卡呈现源），不发 run-finish
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.RUN_CREATED,
-                "text", AgentEventTypes.QUESTION_RAISED);
-        AgentEvent question = frames.get(3);
+                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.QUESTION_RAISED);
+        AgentEvent question = frames.get(4);
         assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
         assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION");
         // data = 待确认工具最小面（恢复入参由业务编排从项目侧事实重建，不随帧携带）
@@ -484,8 +629,9 @@ class AgentscopeAgentClientTest {
         assertThat(resumeMsg.getMetadata()
                 .get(Msg.METADATA_CONFIRM_RESULTS)).isInstanceOf(List.class);
         assertThat(resumeMsg.getTextContent()).isEqualTo("approved");
+        // 续跑流部件恒挂：解说尾段部件在收口帧前
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                "text", AgentEventTypes.RUN_FINISH);
+                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
         verify(factory).obtain(any(), any(), eq("deepseek:deepseek-v4-flash"), any(), any());
     }
 

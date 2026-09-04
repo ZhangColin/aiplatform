@@ -161,7 +161,7 @@ class SavePrdToolTest {
 
     @Test
     void given_multiple_saves_in_one_round_when_consumed_then_latest_summary_wins() {
-        // 一轮多次 savePrd：交接物取终值不混杂（后写胜出——同 FinishFixFacts 口径）
+        // 一轮多次 savePrd：交接物取终值不混杂（后写胜出——同 FinishEditFacts 口径）
         call("# PRD v1", "第一次修订说明");
         call("# PRD v2", "第二次修订说明（终值）");
 

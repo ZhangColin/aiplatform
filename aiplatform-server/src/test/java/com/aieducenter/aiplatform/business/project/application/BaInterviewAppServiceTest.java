@@ -80,7 +80,7 @@ class BaInterviewAppServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
-    private FinishFixFacts finishFixFacts;
+    private FinishEditFacts finishFixFacts;
 
     @Autowired
     private PrdRevisionFacts prdRevisions;
@@ -124,8 +124,8 @@ class BaInterviewAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
-    /** 脚本化智能体边界（#46 收口以 finish_fix 事实为准）：BA 正常回复；自动派发
-     * 的修正 run 收口即调 finish_fix（changed=true——coder 会话才记，忠实于工具面）。 */
+    /** 脚本化智能体边界（#46 收口以 finish_edit 事实为准）：BA 正常回复；自动派发
+     * 的修正 run 收口即调 finish_edit（changed=true——coder 会话才记，忠实于工具面）。 */
     private void givenConverseBaRepliesAndCoderFinishes(String baReply) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -759,7 +759,7 @@ class BaInterviewAppServiceTest {
 
         assertThat(stages).containsExactly("analyzing", "dispatching", "fixing", "done");
         // 首帧锚 BA 轮 runId 且先于 role-assigned；完成态区分：changed=true（脚本
-        // finish_fix(changed=true)）——「已修改」与「未动系统」以 changed 分档
+        // finish_edit(changed=true)）——「已修改」与「未动系统」以 changed 分档
         InOrder order = inOrder(streamAppService);
         order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE),
                 argThat(payload -> "analyzing".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))

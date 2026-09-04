@@ -23,7 +23,7 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
  * {@link PrdArtifactAdapter#onWritten}（置「PRD 已产出」状态位 + 发 document-updated）
  * + 修订事实登记（{@link PrdRevisionFacts}——summary 必传，平台从工具调用事实
  * 观测「改没改、改了什么」入交接物，#52）。落盘/回调任一失败回错误结果（模型
- * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_fix 必调哲学）。
+ * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
  *
  * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，无最终版一说
  * （唯一不可逆门 = 确认下单的快照冻结）。仅随项目 dev 工作区注册

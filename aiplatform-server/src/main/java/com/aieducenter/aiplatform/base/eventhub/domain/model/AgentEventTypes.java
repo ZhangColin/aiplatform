@@ -92,14 +92,14 @@ public final class AgentEventTypes {
     public static final String FINISH_FIELD = "finish";
 
     /**
-     * 修正 run 收口·系统未动（#46）：编码智能体以 finish_fix(changed=false) 判定
+     * 修正 run 收口·系统未动（#46）：编码智能体以 finish_edit(changed=false) 判定
      * 无需改动时的如实呈现帧——修正轨道收口后发射（正常收口帧 run-finish 之后），
      * 让用户能区分「不需要改」与「链路断了」。changed=true 不发（现有收口行为
      * 不回归）。
      */
     public static final String FIX_UNCHANGED = "fix-unchanged";
 
-    /** 未动系统的原因键（finish_fix 的 text 原文——用户侧呈现正本）。 */
+    /** 未动系统的原因键（finish_edit 的 text 原文——用户侧呈现正本）。 */
     public static final String FIX_UNCHANGED_REASON_FIELD = "reason";
 
     /**
@@ -156,6 +156,60 @@ public final class AgentEventTypes {
 
     /** live-step 的步骤序号键（1 起）。 */
     public static final String LIVE_STEP_FIELD = "step";
+
+    // ---------- 消息部件（parts 契约，#77 扩展相；词根 = agentscope 原生 part 族） ----------
+    // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
+    // 动作部件 + 步骤分组），收口定格。由 base.agentscope 的部件映射表产出；双发射
+    // 过渡期与 live-* 旧族并行（前端迁移 #81 后由 #82 收缩退役旧族）。
+
+    /** 解说文本部件：text 为完整段非增量（服务端逐段成型，段切分同直播口径）。 */
+    public static final String PART_TEXT = "part-text";
+
+    /** part-text 的段文本键（完整段）。 */
+    public static final String PART_TEXT_FIELD = "text";
+
+    /**
+     * 工具动作部件（动作卡）：开始/进行中/完成/失败全生命周期——动作一开始即出
+     * 帧（现状 live-action 仅调用落定才出），同一动作以 toolCallId 锚定跨状态更新。
+     */
+    public static final String PART_ACTION = "part-action";
+
+    /** part-action 的动作锚键（引擎工具调用 id，跨状态同值）。 */
+    public static final String PART_ACTION_TOOL_CALL_FIELD = "toolCallId";
+
+    /** part-action 的工具名键（引擎原生名，前端图标映射用）。 */
+    public static final String PART_ACTION_TOOL_NAME_FIELD = "toolName";
+
+    /** part-action 的生命周期状态键（值 = PART_ACTION_STATE_* 常量）。 */
+    public static final String PART_ACTION_STATE_FIELD = "state";
+
+    /** 动作开始（模型发起工具调用，参数在途）——动作卡出现即「进行中」。 */
+    public static final String PART_ACTION_STATE_STARTED = "started";
+
+    /** 动作进行中（参数落定、工具执行中——label 至此为具体对象）。 */
+    public static final String PART_ACTION_STATE_RUNNING = "running";
+
+    /** 动作完成（工具结果成功返回）。 */
+    public static final String PART_ACTION_STATE_COMPLETED = "completed";
+
+    /** 动作失败（工具结果出错/被拒/中断——动作层状态；run 层唯一失败终态仍是 run-failed）。 */
+    public static final String PART_ACTION_STATE_FAILED = "failed";
+
+    /** part-action 的动作对象短语键（人话行，无时态——时态由 state 表达）。 */
+    public static final String PART_ACTION_LABEL_FIELD = "label";
+
+    /** 步骤分组部件：run 内步骤序号（模型调用边界，1 起；问答续跑为新流段重新起算）。 */
+    public static final String PART_STEP = "part-step";
+
+    /** part-step 的步骤序号键（1 起）。 */
+    public static final String PART_STEP_FIELD = "step";
+
+    /**
+     * 消息附件部件（契约预留，#97 圈注）：圈注锚随消息发送的载荷位——结构化定位
+     * + 标注类型 + 可选评语，锚载荷 schema 随 SSE事件清单定形。本票只占契约位，
+     * 无生产方（圈注管道随 #97 落地）。
+     */
+    public static final String PART_ATTACHMENT = "part-attachment";
 
     private AgentEventTypes() {
     }

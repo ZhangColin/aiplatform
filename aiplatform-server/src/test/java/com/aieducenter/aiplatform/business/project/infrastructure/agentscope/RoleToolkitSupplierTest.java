@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
-import com.aieducenter.aiplatform.business.project.application.FinishFixFacts;
+import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -18,7 +18,7 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
  * 按角色的工具集装配（#43 工具面收紧 + #46 结束工具 + #47 助理只读集）：
  * BA = {ask_user, savePrd}（仅项目 dev 工作区——savePrd 锚定项目，经
  * {@link PrdArtifactAdapter} 落盘登记）；派发工具已撤（BA 无派发权，链必达收口
- * 在平台代码）；CODER = {finish_fix}（修正收口结束工具——「要不要动系统」的
+ * 在平台代码）；CODER = {finish_edit}（修正收口结束工具——「要不要动系统」的
  * 判定面；其余编码工具由 harness 内核自带）；ASSISTANT = 只读三件
  * {list_workspace_files, read_workspace_file, query_project_facts}（仅随只读
  * 工作区注册——该形态内核文件/shell 工具已关，全程无任何写类工具事件的可言
@@ -27,7 +27,7 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
 class RoleToolkitSupplierTest {
 
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
-    private final FinishFixFacts finishFacts = new FinishFixFacts();
+    private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
@@ -48,14 +48,14 @@ class RoleToolkitSupplierTest {
     }
 
     @Test
-    void given_coder_on_project_dev_when_toolkit_then_finish_fix_only() {
+    void given_coder_on_project_dev_when_toolkit_then_finish_edit_only() {
         // 编码智能体的业务工具面 = 结束工具（#46 修正收口判定）一个：BA 资产不再
         // 泄漏（#43 前 CODER 名义上挂着 ask_user/savePrd/startFixRun），编码工具
         // 由 harness 内核自带
         assertThat(supplier().toolkitFor(RolePreset.CODER.name(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .getToolNames())
-                .containsExactly(FinishFixTool.NAME);
+                .containsExactly(FinishEditTool.NAME);
     }
 
     @Test

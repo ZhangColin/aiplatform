@@ -109,7 +109,8 @@ class AgentscopeEventMapperTest {
 
         @Test
         void run_start_carries_prompt_and_model() {
-            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写个 PRD", "deepseek:m-1", ENGINE);
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写个 PRD", "deepseek:m-1",
+                    ENGINE, null);
 
             assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_START);
             assertThat(frame.payload()).containsOnly(
@@ -117,6 +118,15 @@ class AgentscopeEventMapperTest {
                     Map.entry("prompt", "写个 PRD"),
                     Map.entry("model", "deepseek:m-1"),
                     Map.entry("engine", ENGINE));
+        }
+
+        /** #77 引擎信息归一：角色键并入 run-start（可空不携带——无角色语境的一次性调用）。 */
+        @Test
+        void run_start_with_role_carries_role_key() {
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "deepseek:m-1",
+                    ENGINE, "CODER");
+
+            assertThat(frame.payload()).containsEntry("role", "CODER");
         }
 
         @Test

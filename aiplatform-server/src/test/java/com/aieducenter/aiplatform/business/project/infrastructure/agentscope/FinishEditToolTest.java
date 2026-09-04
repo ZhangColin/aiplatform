@@ -14,21 +14,21 @@ import io.agentscope.core.permission.PermissionDecision;
 import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
-import com.aieducenter.aiplatform.business.project.application.FinishFixFacts;
+import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 
 /**
- * {@link FinishFixTool}（#46）：判定事实登记（changed + 说明/原因，后写胜出）+
+ * {@link FinishEditTool}（#46）：判定事实登记（changed + 说明/原因，后写胜出）+
  * 参数缺失回错误结果（模型可见可重试）+ 权限自检恒放行（判定收口是修正协议的
  * 预期终点）。readOnly（不动工作区，效果仅平台侧事实）。
  */
-class FinishFixToolTest {
+class FinishEditToolTest {
 
-    private final FinishFixFacts facts = new FinishFixFacts();
-    private final FinishFixTool tool = new FinishFixTool("42", facts);
+    private final FinishEditFacts facts = new FinishEditFacts();
+    private final FinishEditTool tool = new FinishEditTool("42", facts);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
-        assertThat(tool.getName()).isEqualTo("finish_fix");
+        assertThat(tool.getName()).isEqualTo("finish_edit");
         assertThat(tool.getParameters()).containsKeys("type", "properties", "required");
         assertThat(String.valueOf(tool.getParameters().get("required")))
                 .contains("changed").contains("text");
@@ -49,7 +49,7 @@ class FinishFixToolTest {
         ToolResultBlock result = call(Map.of("changed", true, "text", "已把主色调改为绿色"));
 
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
-        assertThat(facts.consume("42")).isEqualTo(new FinishFixFacts.Fact(true, "已把主色调改为绿色"));
+        assertThat(facts.consume("42")).isEqualTo(new FinishEditFacts.Fact(true, "已把主色调改为绿色"));
         assertThat(resultText(result)).contains("已落实");
     }
 
@@ -60,7 +60,7 @@ class FinishFixToolTest {
 
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
         assertThat(facts.consume("42"))
-                .isEqualTo(new FinishFixFacts.Fact(false, "纯文档性修订，系统现状已满足"));
+                .isEqualTo(new FinishEditFacts.Fact(false, "纯文档性修订，系统现状已满足"));
         assertThat(resultText(result)).contains("无需改动");
     }
 
@@ -70,7 +70,7 @@ class FinishFixToolTest {
         call(Map.of("changed", false, "text", "复查后判定无需改动"));
 
         assertThat(facts.consume("42"))
-                .isEqualTo(new FinishFixFacts.Fact(false, "复查后判定无需改动"));
+                .isEqualTo(new FinishEditFacts.Fact(false, "复查后判定无需改动"));
     }
 
     @Test
@@ -95,7 +95,7 @@ class FinishFixToolTest {
     private ToolResultBlock call(Map<String, Object> input) {
         ToolCallParam param = ToolCallParam.builder()
                 .toolUseBlock(new io.agentscope.core.message.ToolUseBlock(
-                        "tc-1", FinishFixTool.NAME, input, null))
+                        "tc-1", FinishEditTool.NAME, input, null))
                 .input(input)
                 .build();
         return Mono.from(tool.callAsync(param)).block();

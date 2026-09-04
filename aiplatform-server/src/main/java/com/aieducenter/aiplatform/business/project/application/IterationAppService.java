@@ -32,9 +32,9 @@ import lombok.extern.slf4j.Slf4j;
  * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走
  * 共用尝试环 {@link CoderRunAttempts}）。
  *
- * <p><b>收口以 finish_fix 工具事实为准</b>（#46）：编码智能体判定本轮要不要动系统
+ * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：编码智能体判定本轮要不要动系统
  * ——动则修改后报 changed=true+改了什么，不动（纯文档性修订、系统现状已满足等）也
- * 必报 changed=false+原因，判定从工具调用事实观测（{@link FinishFixFacts}），不解析
+ * 必报 changed=false+原因，判定从工具调用事实观测（{@link FinishEditFacts}），不解析
  * 自由文本。未调用即 run 未正常收口，按既有重试/终态机制处理；changed=false 经
  * {@code fix-unchanged} 帧如实呈现「未动系统+原因」——用户能区分「不需要改」与
  * 「链路断了」。</p>
@@ -65,14 +65,14 @@ public class IterationAppService {
     static final String FIX_RETRY_RUN_PROMPT =
             "上一次修正尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
                     + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续完成本轮修正，"
-                    + "直至修正落实、服务在 8081 端口可访问，最后调用 finish_fix 工具收口"
+                    + "直至修正落实、服务在 8081 端口可访问，最后调用 finish_edit 工具收口"
                     + "（动了系统传 changed=true 并说明改了什么；判定无需改动也必须调用，"
                     + "传 changed=false 并说明原因）。";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
     private final CoderRunAttempts coderRunAttempts;
-    private final FinishFixFacts finishFacts;
+    private final FinishEditFacts finishFacts;
     private final AgentStreamBridge streamBridge;
 
     /** 修正在途项目集（含已提交未起跑——排队中）：起跑/排队的分岔事实。 */
@@ -88,7 +88,7 @@ public class IterationAppService {
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
-            FinishFixFacts finishFacts, AgentStreamBridge streamBridge) {
+            FinishEditFacts finishFacts, AgentStreamBridge streamBridge) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -275,22 +275,22 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46）：以 finish_fix 工具事实为准——无事实 = run 未正常收口，抛出
+     * 修正收口（#46）：以 finish_edit 工具事实为准——无事实 = run 未正常收口，抛出
      * 即该次尝试失败（走共用尝试环的重试/终态，与生成 8081 核验同口径）；changed=false
      * 发 {@code fix-unchanged} 帧（「未动系统+原因」如实呈现），changed=true 现有
      * 收口行为不动（run-finish 已发，预览刷新/直播收起/状态位为前端对 run-finish 的
      * 反应）。#50：两态都发完成阶段帧（changed 区分「已修改」与「未动系统」）。
      */
     private void closeFixRun(Project project, String attemptRunId) {
-        FinishFixFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
+        FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默失败：run-finish 已发（引擎自认成功），此处补 error 帧
             // 如实表达（帧序 run-finish → error → run-retrying → …；重试超限由轨道层
             // 发 run-failed 收口终态，#56）——否则「链路断了」在用户侧呈现为正常收口，
             // 恰是要消除的困惑
             streamBridge.emitError(project.getId(), attemptRunId,
-                    "修正未正常收口：编码智能体未报告收口判定（finish_fix 未调用）");
-            throw new IllegalStateException("修正 run 未以 finish_fix 结束工具收口");
+                    "修正未正常收口：编码智能体未报告收口判定（finish_edit 未调用）");
+            throw new IllegalStateException("修正 run 未以 finish_edit 结束工具收口");
         }
         if (!fact.changed()) {
             log.info("[fix] 项目 {} 修正收口：系统未动（{}）", project.getId(), fact.text());
@@ -321,7 +321,7 @@ public class IterationAppService {
         prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
                 .append("，以正本与上述意见为准。")
                 .append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
-                .append("\n收尾必须调用 finish_fix 工具：动了系统传 changed=true 并说明改了什么；")
+                .append("\n收尾必须调用 finish_edit 工具：动了系统传 changed=true 并说明改了什么；")
                 .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")
                 .append("不调用即本轮修正未收口。");
         return prompt.toString();

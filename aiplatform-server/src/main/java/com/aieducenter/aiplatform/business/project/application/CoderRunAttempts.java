@@ -66,7 +66,7 @@ class CoderRunAttempts {
     /**
      * 跑一场编码 run（有限次尝试）：成功收口即 {@code onSuccess}（收口回调携该次
      * 尝试的 runId——修正收口帧锚定用；回调抛异常即该次尝试失败，走重试/终态——
-     * 收口判据不满足的既有口径，如生成 8081 核验 / 修正 finish_fix 事实）。项目
+     * 收口判据不满足的既有口径，如生成 8081 核验 / 修正 finish_edit 事实）。项目
      * 事实（工作区 / owner）从聚合派生。
      *
      * @param what       日志标签（generate / fix）

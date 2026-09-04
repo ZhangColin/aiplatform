@@ -58,13 +58,18 @@ public class AgentEventsController {
 
             | type | 类别 | payload 字段 |
             |---|---|---|
-            | run-start | 平台 | runId, prompt, model, engine |
-            | run-created | 平台 | runId, sessionId, engine |
+            | run-start | 平台 | runId, prompt, model, engine, role（可空） |
             | error | 平台 | runId, message |
             | run-finish | 平台 | runId, sessionId, engine, finish |
             | question-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+            | run-failed / guide-reply | 平台 | runId（+ guide-reply 的 prompt/label/text） |
+            | part-text | 部件 | text（完整段非增量——消息部件契约） |
+            | part-action | 部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
+            | part-step | 部件 | step（1 起序号） |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
 
+            双发射过渡期另并行发射旧族（role-assigned / run-created / run-retrying /
+            fix-unchanged / dispatch-stage / live-*，语义不变，随 #82 退役）。
             名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。""")
     public SseEmitter subscribe(
             @Parameter(description = "按项目过滤（业务桥接注入的字段；缺省不过滤）")

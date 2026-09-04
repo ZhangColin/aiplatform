@@ -21,8 +21,8 @@
               （守卫：已归档拒；未生成 → 止于 BA；在途 run → 排队合并）
               │
               [CODER] 开发侧判定：动系统？
-              ├─ 动 → 修改系统 → finish_fix(changed=true, summary)
-              └─ 不动 → finish_fix(changed=false, reason)
+              ├─ 动 → 修改系统 → finish_edit(changed=true, summary)
+              └─ 不动 → finish_edit(changed=false, reason)
               │
               [代码] 收口：状态条 / 直播 / 预览刷新；「不动」如实呈现
 ```
@@ -38,7 +38,7 @@ LLM 只做判定动作（调不调工具）；判定结果由平台从工具调�
 | 消息类型 | 入口判定（轻量 LLM） | 结构化分类调用 | `type ∈ {OPINION, INQUIRY, FALLBACK}`；失败兜底=OPINION |
 | 要不要追问 | BA | `ask_user` | `question-raised` 事件 → 链挂起，答复续跑 |
 | 要不要改 PRD | BA | `savePrd` | 调用事实+修订说明 → `prdUpdated`、`prdChangeSummary` |
-| 要不要动系统 | CODER | `finish_fix(changed, text)` 结束工具 | run 收口读事实 → `systemChanged`、摘要/原因 |
+| 要不要动系统 | CODER | `finish_edit(changed, text)` 结束工具 | run 收口读事实 → `systemChanged`、摘要/原因 |
 
 ## 3. 各环节规格
 
@@ -58,7 +58,7 @@ LLM 只做判定动作（调不调工具）；判定结果由平台从工具调�
 - 守卫沿用：PRJ_013 归档拒、PRJ_019 未生成止于 BA；在途 run 排队合并（现有 while 状态机不动）。
 
 ### 3.4 CODER 环节
-- 新增结束工具 `finish_fix(changed: bool, text: string)`：判定不动系统时也**必须**调用（`changed=false` + 原因），run 收口以它为准。
+- 新增结束工具 `finish_edit(changed: bool, text: string)`：判定不动系统时也**必须**调用（`changed=false` + 原因），run 收口以它为准。
 - 「不动」呈现：收口时如实说明（如"纯文档性修订 / 系统现状已满足，未动系统"+原因）——防「主色调式困惑」换位重现。
 - 修正 run 重试超限终态保留恢复出口（仅异常态出现，正常态全自动）。
 
@@ -87,7 +87,7 @@ LLM 只做判定动作（调不调工具）；判定结果由平台从工具调�
 | 片 | 内容 | 直接效果 |
 |---|---|---|
 | S1 | 撤 `startFixRun`；BA turn 收口观测 `savePrd` 事实 → 代码自动派修正 run | **修复「改主色调只改 PRD」** |
-| S2 | CODER `finish_fix` + 「不动」如实呈现 | 链尾闭环，困惑不换位重现 |
+| S2 | CODER `finish_edit` + 「不动」如实呈现 | 链尾闭环，困惑不换位重现 |
 | S3 | 入口判定 + 助理职能体 | 咨询零产物短路 |
 | S4 | 工具面按角色收紧 | 修 CODER 工具泄漏 |
 | S5 | `dispatch-stage` 状态条 | 「正在分析您的意见…→需求已更新，正在修改系统…」 |

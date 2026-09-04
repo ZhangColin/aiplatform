@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { WorkPart } from "@/lib/store/work-message";
+import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
-import { WorkMessage, formatDuration, formatElapsed, type WorkSnapshot } from "./work-message";
+import { WorkMessage, formatDuration, formatElapsed } from "./work-message";
 
 function work(overrides: Partial<WorkSnapshot> = {}): WorkSnapshot {
   return {
@@ -72,6 +72,7 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
       <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "failed" })] })} />,
     );
     expect(failed).toContain("没做成");
+    expect(failed).toContain("5 秒"); // 失败也带时长（试了多久如实可读）
   });
 
   it("收口定格：头部与打字点退场、部件留驻（动作时长定格不跳动）", () => {

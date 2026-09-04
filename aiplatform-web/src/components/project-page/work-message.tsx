@@ -6,16 +6,7 @@ import { useEffect, useState } from "react";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import type { WorkPart } from "@/lib/store/work-message";
-
-/** 工作消息 store 的单项目快照（部件 + 定格态；渲染只读）。 */
-export type WorkSnapshot = {
-  runId: string;
-  startedAt: number;
-  frozen: boolean;
-  frozenAt?: number;
-  parts: WorkPart[];
-};
+import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / command；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -102,8 +93,8 @@ function WorkPartRow({
 
 /**
  * 单行动作状态卡：图标 + 对象短语 + 状态（进行中转圈 / 完成打勾带时长 / 失败
- * 「没做成」）。定格后未终态的动作（run 收口截断的少数）不再转圈——时长停在
- * 定格时刻、不带终态标。
+ * 「没做成」带时长——试了多久如实可读）。定格后未终态的动作（run 收口截断的
+ * 少数）不再转圈——时长停在定格时刻、不带终态标。
  */
 function ActionRow({
   part,
@@ -130,7 +121,8 @@ function ActionRow({
         </span>
       ) : part.state === "failed" ? (
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
-          <X className="size-3.5" strokeWidth={3} /> 没做成
+          <X className="size-3.5" strokeWidth={3} /> 没做成{" "}
+          {formatDuration((part.endedAt ?? tickStop) - part.startedAt)}
         </span>
       ) : frozen ? (
         <span className="shrink-0 text-xs text-muted-foreground">

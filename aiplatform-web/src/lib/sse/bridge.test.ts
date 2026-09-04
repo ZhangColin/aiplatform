@@ -693,7 +693,7 @@ describe("bridge · agent 流 → live store（直播面，#23）", () => {
     return { id, data: JSON.stringify({ type, payload, ts: "" }) };
   }
 
-  it("live-* 帧已停用不再渲染（#81 前端切新）：服务端双发射期内前端过滤，直播 store 零写入", () => {
+  it("live-* 事件已停用不再渲染（#81 前端切新）：服务端双发射期内前端过滤，直播 store 零写入", () => {
     dispatchAgentEvent(agentQc, agentEvent(
       "live-step",
       { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
@@ -808,6 +808,42 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
 
     expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
+  });
+
+  it("动作失败态（镜面服务端 given_tool_error_result…）：工具结果 error → part-action failed → 部件定格 failed 带时长", () => {
+    const t0 = "2026-09-05T06:00:00.000Z";
+    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", role: "CODER" },
+      "run1:1",
+      at(0),
+    ));
+    for (const [id, sec, state] of [
+      ["run1:2", 2, "started"],
+      ["run1:3", 3, "running"],
+      ["run1:4", 7, "failed"],
+    ] as const) {
+      dispatchAgentEvent(agentQc, agentEvent(
+        "part-action",
+        { ...base, toolCallId: "tc-9", toolName: "command", state, label: "执行【安装依赖】" },
+        id,
+        at(sec),
+      ));
+    }
+
+    const parts = useWorkMessageStore.getState().works["p1"]?.parts ?? [];
+    const card = parts.find((part) => part.kind === "action");
+    expect(card).toMatchObject({
+      kind: "action",
+      toolCallId: "tc-9",
+      state: "failed",
+      label: "执行【安装依赖】",
+      startedAt: Date.parse(at(2)),
+      endedAt: Date.parse(at(7)), // 失败也落时长（5 秒）
+    });
   });
 
   it("run-failed 也定格（run 失败是唯一失败终态，恢复出口在生成面）", () => {

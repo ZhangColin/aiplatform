@@ -68,17 +68,17 @@ describe("workHintOf · 占位步骤提示信号（解说自述优先、动作�
 
   it("无自述时取最新动作摘要兜底", () => {
     const segments = [
-      seg.action("a1", "正在编写【app.js】"),
-      seg.action("a2", "正在编写【index.html】"),
+      seg.action("a1", "编写【app.js】"),
+      seg.action("a2", "编写【index.html】"),
     ];
-    expect(workHintOf(segments)).toBe("正在编写【index.html】");
+    expect(workHintOf(segments)).toBe("编写【index.html】");
   });
 
   it("自述优先于更晚的动作（提示停在解说口径，不随文件动作跳变）", () => {
     const segments = [
       seg.text("t1", "正在创建首页"),
-      seg.action("a1", "正在编写【index.html】"),
-      seg.action("a2", "正在编写【style.css】"),
+      seg.action("a1", "编写【index.html】"),
+      seg.action("a2", "编写【style.css】"),
     ];
     expect(workHintOf(segments)).toBe("正在创建首页");
   });

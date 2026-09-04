@@ -129,21 +129,21 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
       coderStatus: "running",
       parts: [
         seg.text("t1", "正在创建首页"),
-        seg.action("a1", "正在编写【index.html】"),
+        seg.action("a1", "编写【index.html】"),
       ],
     });
 
     expect(html).toContain("正在创建首页");
-    expect(html).not.toContain("正在编写【index.html】");
+    expect(html).not.toContain("编写【index.html】");
   });
 
   it("生成中且无应用：无自述时动作对象兜底", () => {
     const html = renderPanel({
       coderStatus: "running",
-      parts: [seg.action("a1", "正在编写【index.html】")],
+      parts: [seg.action("a1", "编写【index.html】")],
     });
 
-    expect(html).toContain("正在编写【index.html】");
+    expect(html).toContain("编写【index.html】");
   });
 
   it("重试中且无应用：播「遇到问题，正在重试」话术", () => {

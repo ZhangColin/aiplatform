@@ -175,6 +175,32 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
     expect(work()?.runId).toBe("r1");
     expect(work()?.parts).toHaveLength(1);
   });
+
+  it("生长中锚 + 异 runId 的编码部件（迟到/重放残段）：忽略不闪空（重锚只在无锚或已定格时）", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r2", 0);
+    notePart("p1", ref({ eventId: "r2:2", runId: "r2" }), { kind: "text", text: "当前尝试解说" });
+
+    // 上一尝试 r1 的残段（同 coder 会话、异 runId）迟到：不清当前锚
+    notePart("p1", ref({ eventId: "r1:9", runId: "r1", at: 99_999 }), { kind: "text", text: "残段" });
+
+    expect(work()?.runId).toBe("r2");
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("已定格锚 + 异 runId 的编码部件（新 run 的 run-start 被缓冲淘汰）：重锚新 run", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "上一轮解说" });
+    freezeWork("p1", "r1", 10_000);
+
+    notePart("p1", ref({ eventId: "r2:5", runId: "r2", at: 50_000 }), { kind: "text", text: "新一轮解说" });
+
+    expect(work()?.runId).toBe("r2");
+    expect(work()?.frozen).toBe(false);
+    expect(work()?.startedAt).toBe(50_000);
+    expect(work()?.parts).toHaveLength(1);
+  });
 });
 
 describe("work-message store · 重放幂等与定格", () => {

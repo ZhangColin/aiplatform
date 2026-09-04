@@ -12,12 +12,13 @@ import { create } from "zustand";
  *
  * <p><b>锚定判定</b>：部件事件全事件流恒挂（BA/助理 run 也产部件）——工作消息只
  * 锚编码 run。锚由 run-start(role=CODER) 落；重放缓冲淘汰了 run-start 时按
- * {@code coder-} 会话前缀补建（刷新回访续看进行中 run；BA/助理会话不误建——
- * 会话命名约定：角色 × 项目，同 chat store 的 ba-/assist- 判定先例）。</p>
+ * {@code coder-} 会话前缀补建（刷新回访续看进行中 run；上一轮已定格、新 run 的
+ * run-start 又被淘汰时同一口重锚；BA/助理会话不误建——会话命名约定：角色 ×
+ * 项目，同 chat store 的 ba-/assist- 判定先例）。</p>
  *
- * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载会重收近期帧——部件事件按 SSE
+ * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载会重收近期事件——部件事件按 SSE
  * 完整事件 id 只收一次；run-start 同 runId 不清已长部件（重放先到 run-start、
- * 后到部件帧但已被 id 去重，清了就只剩空壳）。</p>
+ * 后到部件事件但已被 id 去重，清了就只剩空壳）。</p>
  */
 
 /** 动作部件生命周期（正本 part-action 行：started / running / completed / failed）。 */
@@ -42,7 +43,7 @@ export type WorkPart =
       state: WorkActionState;
       /** 动作对象短语（人话行，无时态——时态由 state 表达）。 */
       label: string;
-      /** 动作起跑时间戳（ms；started 帧的信封 ts）。 */
+      /** 动作起跑时间戳（ms；started 事件的信封 ts）。 */
       startedAt: number;
       /** 终态落定时间戳（时长 = endedAt - startedAt）。 */
       endedAt?: number;
@@ -51,7 +52,7 @@ export type WorkPart =
 /** 部件事件的最小关联（信封公共字段 + 事件 id + 信封 ts）。 */
 export type PartEventRef = {
   runId: string;
-  /** 会话标识（补建锚的 coder- 前缀判定；run-start 后的帧恒携带）。 */
+  /** 会话标识（补建锚的 coder- 前缀判定；run-start 后的事件恒携带）。 */
   sessionId?: string;
   /** SSE 完整事件 id（重放去重锚 + 部件 React key）。 */
   eventId: string;
@@ -85,6 +86,9 @@ type ProjectWork = {
   seenEventIds: string[];
 };
 
+/** 工作消息呈现快照（ProjectWork 去重放簿记——UI 消费面单一来源）。 */
+export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
+
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
   /** 编码 run 起跑（run-start role=CODER）：新 runId 重开，同 runId 幂等。 */
@@ -95,7 +99,7 @@ export type WorkMessageState = {
   freezeWork: (projectId: string, runId: string, at: number) => void;
 };
 
-/** 部件数软上限（重放缓冲 ~1000 帧的投影，内存有界）。 */
+/** 部件数软上限（重放缓冲 ~1000 事件的投影，内存有界）。 */
 const MAX_PARTS = 300;
 /** 事件 id 去重集软上限。 */
 const MAX_IDS = 1000;
@@ -179,9 +183,12 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
 
   notePart: (projectId, ref, input) =>
     updateWork(set, projectId, (work) => {
-      // 锚不在（重放缺 run-start）：仅编码会话补建——BA/助理的部件不建工作消息
-      //（对话面走 text 增量气泡，部件与其并行双发射）
+      // 锚不在或已定格（重放缺 run-start / 上一轮定格后新 run 已开工）：仅编码
+      // 会话补建/重锚——BA/助理的部件不建工作消息（对话面走 text 增量气泡，部件
+      // 与其并行双发射）。生长中的锚 + 异 runId = 上一尝试的迟到/重放残段，忽略
+      //（有序流不至，防御位——清锚会闪空消息）
       if (work === undefined || work.runId !== ref.runId) {
+        if (work !== undefined && !work.frozen) return work;
         if (!ref.sessionId?.startsWith(CODER_SESSION_PREFIX)) return work;
         work = { runId: ref.runId, startedAt: ref.at, frozen: false, parts: [], seenEventIds: [] };
       }

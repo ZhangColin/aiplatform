@@ -39,7 +39,7 @@ class AgentscopeEventMapperTest {
     class ProcessEvents {
 
         @Test
-        void text_delta_maps_to_text_frame_with_delta_payload() {
+        void given_text_delta_when_map_then_text_frame_with_delta_payload() {
             AgentEvent frame = mapper.map(new TextBlockDeltaEvent("reply-1", "b-1", "你好"));
 
             assertThat(frame).isNotNull();
@@ -53,7 +53,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void thinking_delta_maps_to_reasoning_frame() {
+        void given_thinking_delta_when_map_then_reasoning_frame() {
             AgentEvent frame = mapper.map(new ThinkingBlockDeltaEvent("reply-1", "b-2", "想一想"));
 
             assertThat(frame.type()).isEqualTo("reasoning");
@@ -63,7 +63,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void tool_call_start_and_end_map_to_tool_frames_with_phase() {
+        void given_tool_call_start_and_end_when_map_then_tool_frames_with_phase() {
             AgentEvent start = mapper.map(new ToolCallStartEvent("reply-1", "tc-1", "write_file"));
             AgentEvent end = mapper.map(new ToolCallEndEvent("reply-1", "tc-1", "write_file"));
 
@@ -84,7 +84,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void model_call_boundaries_map_to_step_frames() {
+        void given_model_call_boundaries_when_map_then_step_frames() {
             AgentEvent start = mapper.map(new ModelCallStartEvent("reply-1"));
             AgentEvent end = mapper.map(new ModelCallEndEvent("reply-1", null));
 
@@ -96,7 +96,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void unmapped_events_are_skipped() {
+        void given_unmapped_events_when_map_then_no_frame() {
             // 边界/块尾/结果等未映射类型不产帧（扩展点：HITL 类归 #48）
             assertThat(mapper.map(new TextBlockEndEvent("reply-1", "b-1"))).isNull();
             assertThat(mapper.map(new AgentEndEvent("reply-1"))).isNull();
@@ -108,7 +108,7 @@ class AgentscopeEventMapperTest {
     class LifecycleFrames {
 
         @Test
-        void run_start_carries_prompt_and_model() {
+        void given_run_start_when_built_then_carries_prompt_and_model() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写个 PRD", "deepseek:m-1",
                     ENGINE, null);
 
@@ -122,7 +122,7 @@ class AgentscopeEventMapperTest {
 
         /** #77 引擎信息归一：角色键并入 run-start（可空不携带——无角色语境的一次性调用）。 */
         @Test
-        void run_start_with_role_carries_role_key() {
+        void given_run_start_with_role_when_built_then_carries_role_key() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "deepseek:m-1",
                     ENGINE, "CODER");
 
@@ -130,7 +130,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void run_created_carries_session_id() {
+        void given_run_created_when_built_then_carries_session_id() {
             AgentEvent frame = AgentscopeEventMapper.runCreated(RUN_ID, SESSION_ID, ENGINE);
 
             assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_CREATED);
@@ -141,7 +141,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void run_finish_carries_finish_token() {
+        void given_run_finish_when_built_then_carries_finish_token() {
             AgentEvent frame = AgentscopeEventMapper.runFinish(RUN_ID, SESSION_ID, "end", ENGINE);
 
             assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_FINISH);
@@ -153,7 +153,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void error_carries_message() {
+        void given_error_when_built_then_carries_message() {
             AgentEvent frame = AgentscopeEventMapper.error(RUN_ID, "模型超时");
 
             assertThat(frame.type()).isEqualTo(AgentEventTypes.ERROR);
@@ -167,13 +167,13 @@ class AgentscopeEventMapperTest {
     class FinishToken {
 
         @Test
-        void exceed_max_iters_is_a_terminal_finish_token() {
+        void given_exceed_max_iters_when_finish_token_then_terminal_token() {
             assertThat(mapper.finishToken(new ExceedMaxItersEvent("reply-1", 10, 10)))
                     .contains("exceed_max_iters");
         }
 
         @Test
-        void other_events_have_no_finish_token() {
+        void given_other_events_when_finish_token_then_empty() {
             assertThat(mapper.finishToken(new TextBlockDeltaEvent("r", "b", "d"))).isEmpty();
             assertThat(mapper.finishToken(new AgentEndEvent("reply-1"))).isEmpty();
         }
@@ -183,7 +183,7 @@ class AgentscopeEventMapperTest {
     class QuestionRaisedFrames {
 
         @Test
-        void confirm_event_maps_to_question_raised_frame_with_contract_keys() {
+        void given_confirm_event_when_question_raised_then_frame_with_contract_keys() {
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-9", java.util.List.of(
                     toolCall("tc-1", "write_file", Map.of("path", "docs/PRD.md"))));
 
@@ -209,7 +209,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void ask_user_tool_maps_to_question_kind() {
+        void given_ask_user_tool_when_question_raised_then_question_kind() {
             // 向用户提问（ask_user）= QUESTION 载荷形状；工具参数确认/敏感动作 = PERMISSION
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-10", java.util.List.of(
                     toolCall("tc-2", "ask_user", Map.of("question", "用哪个框架?"))));
@@ -224,7 +224,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void ask_user_question_body_projects_pending_questions_shape() {
+        void given_ask_user_question_body_when_question_raised_then_pending_questions_shape() {
             // #40：QUESTION body 增 questions 投影（前端问答卡契约 header/question/
             // multiple/custom/options[{label}]——custom 必须显式 true，否则无选项题
             // 整题被前端丢弃）；toolCalls 面不动（答复续跑侧仍按它重建）
@@ -254,7 +254,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void ask_user_without_header_or_options_still_answerable() {
+        void given_ask_user_without_header_or_options_when_question_raised_then_still_answerable() {
             // header 缺省中性兜底、options 空 + custom=true：纯开放题前端仍可自由输入作答
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-15", java.util.List.of(
                     toolCall("tc-o", "ask_user", Map.of("question", "还有什么要补充的?"))));
@@ -273,7 +273,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void ask_user_multiple_flag_projects_to_question() {
+        void given_ask_user_multiple_flag_when_question_raised_then_projected_to_question() {
             // #19 多选问答：multiple 从 ask_user 入参投影（问答卡多选勾选提交），
             // 缺省 false（单选点即答）
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-16", java.util.List.of(
@@ -299,7 +299,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void confirm_event_yields_no_passthrough_frame() {
+        void given_confirm_event_when_map_then_no_passthrough_frame() {
             // 挂起不是过程帧：question-raised 由调用方显式发射，map() 不重复产帧
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(
                     toolCall("tc-3", "write_file", Map.of())));
@@ -308,7 +308,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void confirm_event_is_a_suspension_not_finish() {
+        void given_confirm_event_when_stream_completes_then_suspension_not_finish() {
             // 挂起轮的流终止不是终态：无结煞语（question-raised 由调用方显式发射）
             assertThat(mapper.finishToken(new RequireUserConfirmEvent("reply-12",
                     java.util.List.of(toolCall("tc-4", "write_file", Map.of()))))).isEmpty();

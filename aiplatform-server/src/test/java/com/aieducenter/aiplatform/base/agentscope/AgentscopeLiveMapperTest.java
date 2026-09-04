@@ -42,7 +42,7 @@ class AgentscopeLiveMapperTest {
     class NarrationSegments {
 
         @Test
-        void text_accumulates_and_flushes_on_sentence_ender() {
+        void given_narration_accumulating_when_sentence_settles_then_live_text_frame() {
             assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在编写"))).isEmpty();
 
             List<AgentEvent> frames = mapper.map(new TextBlockDeltaEvent("r", "b-1", "订单管理页面。"));
@@ -56,7 +56,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void tail_without_ender_flushes_once_at_run_end() {
+        void given_tail_without_ender_when_flush_then_single_frame_at_run_end() {
             // 无句读、无边界事件：map 不出段，run 收尾 flush 出尾段（恰一帧）
             assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "马上就好"))).isEmpty();
 
@@ -72,7 +72,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void multi_sentence_delta_settles_one_frame_per_sentence() {
+        void given_multi_sentence_delta_when_arriving_then_one_frame_per_sentence() {
             // 粗粒度增量（一次到达多句）：句读落定即出段——每句一帧，不憋整块
             List<AgentEvent> frames = mapper.map(new TextBlockDeltaEvent("r", "b-1",
                     "第一句。第二句！第三句"));
@@ -90,7 +90,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void block_change_flushes_pending_segment() {
+        void given_pending_text_when_block_changes_then_flushed_before_new_block() {
             mapper.map(new TextBlockDeltaEvent("r", "b-1", "第一段"));
 
             List<AgentEvent> frames = mapper.map(new TextBlockDeltaEvent("r", "b-2", "第二段。"));
@@ -103,7 +103,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void oversize_segment_flushes_without_sentence_ender() {
+        void given_oversize_text_when_offered_then_flushed_without_ender() {
             // 长度上限切段（直播时延有界）：超限即出段，不等句读
             String longDelta = "字".repeat(200);
 
@@ -115,7 +115,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void blank_narration_produces_no_frame() {
+        void given_blank_narration_when_mapped_then_no_frame() {
             assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "  "))).isEmpty();
             assertThat(mapper.flush()).isEmpty();
         }
@@ -125,7 +125,7 @@ class AgentscopeLiveMapperTest {
     class ActionLines {
 
         @Test
-        void write_file_end_yields_action_with_label_from_path() {
+        void given_write_file_args_when_call_ends_then_action_with_label_from_path() {
             // 参数增量分片到达（真实流形态），调用落定点拼全解析
             mapper.map(new ToolCallStartEvent("r", "tc-1", "write_file"));
             mapper.map(new ToolCallDeltaEvent("r", "tc-1", "write_file",
@@ -143,7 +143,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void edit_file_shares_the_writing_template() {
+        void given_edit_file_when_call_ends_then_writing_template_shared() {
             mapper.map(new ToolCallStartEvent("r", "tc-2", "edit_file"));
             mapper.map(new ToolCallDeltaEvent("r", "tc-2", "edit_file",
                     "{\"path\":\"/workspace/src/orders.tsx\"}"));
@@ -155,7 +155,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void command_yields_plain_action_line() {
+        void given_command_when_call_ends_then_plain_action_line() {
             mapper.map(new ToolCallStartEvent("r", "tc-3", "command"));
 
             List<AgentEvent> frames = mapper.map(new ToolCallEndEvent("r", "tc-3", "command"));
@@ -166,7 +166,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void write_file_without_parsable_args_falls_back_to_generic_line() {
+        void given_unparsable_write_file_args_when_call_ends_then_generic_label() {
             // 参数流缺失（非流式参数形态）：同一模板、通用标签兜底
             mapper.map(new ToolCallStartEvent("r", "tc-4", "write_file"));
 
@@ -177,7 +177,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void read_tools_are_not_broadcast() {
+        void given_read_tools_when_calls_end_then_not_broadcast() {
             assertThat(mapper.map(new ToolCallEndEvent("r", "tc-5", "read_file"))).isEmpty();
             assertThat(mapper.map(new ToolCallEndEvent("r", "tc-6", "grep_files"))).isEmpty();
             assertThat(mapper.map(new ToolCallEndEvent("r", "tc-7", "glob_files"))).isEmpty();
@@ -189,7 +189,7 @@ class AgentscopeLiveMapperTest {
     class StepsAndBoundaries {
 
         @Test
-        void model_call_starts_count_steps_from_one() {
+        void given_model_call_starts_when_counting_then_steps_from_one() {
             List<AgentEvent> first = mapper.map(new ModelCallStartEvent("reply-1"));
             List<AgentEvent> second = mapper.map(new ModelCallStartEvent("reply-2"));
 
@@ -202,7 +202,7 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void pending_narration_flushes_before_action_and_step_frames() {
+        void given_pending_narration_when_action_arrives_then_flushed_before_action_frame() {
             mapper.map(new TextBlockDeltaEvent("r", "b-1", "开始搭数据库"));
 
             List<AgentEvent> frames = mapper.map(new ToolCallEndEvent("r", "tc-9", "command"));
@@ -212,12 +212,12 @@ class AgentscopeLiveMapperTest {
         }
 
         @Test
-        void thinking_is_never_broadcast() {
+        void given_thinking_delta_when_mapped_then_never_broadcast() {
             assertThat(mapper.map(new ThinkingBlockDeltaEvent("r", "b-9", "内部思考"))).isEmpty();
         }
 
         @Test
-        void unmapped_events_produce_nothing() {
+        void given_unmapped_events_when_mapped_then_nothing() {
             assertThat(mapper.map(new AgentEndEvent("reply-9"))).isEmpty();
         }
     }
@@ -226,7 +226,7 @@ class AgentscopeLiveMapperTest {
     class WireShape {
 
         @Test
-        void every_frame_carries_correlation_and_no_type_key_in_payload() {
+        void given_any_frame_when_built_then_correlation_keys_and_no_type_key() {
             mapper.map(new ToolCallEndEvent("r", "tc-1", "command"));
 
             // 信封契约：payload 顶层禁 type 键名（关联字段 + 段字段即全部）
@@ -242,7 +242,7 @@ class AgentscopeLiveMapperTest {
 
     @DisplayName("烟囱：一段真实形态的事件序列出帧有序")
     @Test
-    void full_sequence_emits_ordered_frames() {
+    void given_real_shaped_sequence_when_mapped_then_ordered_frames() {
         List<AgentEvent> all = List.of();
         all = concat(all, mapper.map(new ModelCallStartEvent("reply-1")));
         all = concat(all, mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在准备演示数据。")));

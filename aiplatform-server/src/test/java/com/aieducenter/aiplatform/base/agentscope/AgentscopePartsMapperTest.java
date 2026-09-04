@@ -44,7 +44,7 @@ class AgentscopePartsMapperTest {
     class TextParts {
 
         @Test
-        void text_accumulates_and_settles_on_sentence_ender() {
+        void given_narration_accumulating_when_sentence_settles_then_part_text() {
             assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在编写"))).isEmpty();
 
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1", "订单管理页面。"));
@@ -58,7 +58,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void tail_without_ender_drains_once_at_run_end() {
+        void given_tail_without_ender_when_drain_then_single_part_at_run_end() {
             assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "马上就好"))).isEmpty();
 
             List<AgentEvent> tail = mapper.drain();
@@ -76,7 +76,7 @@ class AgentscopePartsMapperTest {
     class ActionParts {
 
         @Test
-        void write_action_lifecycle_started_running_completed_with_same_anchor() {
+        void given_write_action_when_full_lifecycle_then_started_running_completed_same_anchor() {
             List<AgentEvent> started = mapper.map(new ToolCallStartEvent("r", "tc-1", "write_file"));
             mapper.map(new ToolCallDeltaEvent("r", "tc-1", "write_file",
                     "{\"path\":\"src/pages/订单管理.tsx\"}"));
@@ -105,7 +105,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void failed_result_yields_failed_state() {
+        void given_error_result_when_lifecycle_completes_then_failed_state() {
             mapper.map(new ToolCallStartEvent("r", "tc-2", "command"));
             mapper.map(new ToolCallEndEvent("r", "tc-2", "command"));
 
@@ -119,7 +119,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void denied_and_interrupted_results_yield_failed_state() {
+        void given_denied_and_interrupted_results_when_lifecycle_completes_then_failed_state() {
             for (ToolResultState state : List.of(ToolResultState.DENIED, ToolResultState.INTERRUPTED)) {
                 AgentscopePartsMapper fresh = new AgentscopePartsMapper(RUN_ID, SESSION_ID, ENGINE);
                 fresh.map(new ToolCallStartEvent("r", "tc-9", "command"));
@@ -131,7 +131,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void read_tools_produce_no_action_parts() {
+        void given_read_tools_when_mapped_then_no_action_parts() {
             assertThat(mapper.map(new ToolCallStartEvent("r", "tc-3", "read_file"))).isEmpty();
             assertThat(mapper.map(new ToolCallEndEvent("r", "tc-3", "read_file"))).isEmpty();
             assertThat(mapper.map(new ToolResultEndEvent("r", "tc-3", "read_file",
@@ -144,7 +144,7 @@ class AgentscopePartsMapperTest {
     class StepsAndBoundaries {
 
         @Test
-        void model_call_starts_count_steps_from_one() {
+        void given_model_call_starts_when_counting_then_steps_from_one() {
             List<AgentEvent> first = mapper.map(new ModelCallStartEvent("reply-1"));
             List<AgentEvent> second = mapper.map(new ModelCallStartEvent("reply-2"));
 
@@ -157,7 +157,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void pending_narration_drains_before_action_and_step_parts() {
+        void given_pending_narration_when_action_arrives_then_drained_before_action_part() {
             mapper.map(new TextBlockDeltaEvent("r", "b-1", "开始搭数据库"));
 
             List<AgentEvent> atAction = mapper.map(new ToolCallStartEvent("r", "tc-5", "command"));
@@ -169,7 +169,7 @@ class AgentscopePartsMapperTest {
         }
 
         @Test
-        void thinking_and_unmapped_events_produce_no_parts() {
+        void given_thinking_and_unmapped_events_when_mapped_then_no_parts() {
             assertThat(mapper.map(new ThinkingBlockDeltaEvent("r", "b-9", "内部思考"))).isEmpty();
             assertThat(mapper.map(new AgentEndEvent("reply-9"))).isEmpty();
         }
@@ -179,7 +179,7 @@ class AgentscopePartsMapperTest {
     class WireShape {
 
         @Test
-        void every_part_carries_correlation_flat_and_no_type_or_data_key() {
+        void given_any_part_when_built_then_flat_keys_and_no_type_or_data_key() {
             // 信封契约：payload 顶层禁 type 键名；部件载荷扁平（无 data 键——前端
             // 透传收窄以 data 键为准，双发射期部件不被旧前端误收）
             mapper.map(new ToolCallStartEvent("r", "tc-1", "command"));
@@ -194,7 +194,7 @@ class AgentscopePartsMapperTest {
 
     @DisplayName("烟囱：一段真实形态的事件序列出部件有序")
     @Test
-    void full_sequence_emits_ordered_parts() {
+    void given_real_shaped_sequence_when_mapped_then_ordered_parts() {
         List<AgentEvent> all = List.of();
         all = concat(all, mapper.map(new ModelCallStartEvent("reply-1")));
         all = concat(all, mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在准备演示数据。")));

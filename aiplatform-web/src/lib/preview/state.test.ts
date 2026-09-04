@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api/api-error";
-import type { LiveSegment } from "@/lib/store/live";
+import type { WorkPart } from "@/lib/store/work-message";
 
 import {
   FALLBACK_RETRY_MESSAGE,
   UPDATING_NOTICE,
   isPreviewNotServing,
   previewTrouble,
-  liveHintOf,
+  workHintOf,
   previewActive,
   systemPanelPhase,
 } from "./state";
@@ -19,9 +19,17 @@ function notServingError() {
 }
 
 const seg = {
-  text: (id: string, text: string): LiveSegment => ({ kind: "text", id, text }),
-  action: (id: string, action: string): LiveSegment => ({ kind: "action", id, action }),
-  step: (id: string, step: number): LiveSegment => ({ kind: "step", id, step }),
+  text: (id: string, text: string): WorkPart => ({ kind: "text", id, text }),
+  action: (id: string, action: string): WorkPart => ({
+    kind: "action",
+    id,
+    toolCallId: id,
+    toolName: "write_file",
+    state: "completed",
+    label: action,
+    startedAt: 0,
+  }),
+  step: (id: string, step: number): WorkPart => ({ kind: "step", id, step }),
 };
 
 describe("previewActive · 门禁解除（#45）", () => {
@@ -45,9 +53,9 @@ describe("previewActive · 门禁解除（#45）", () => {
   });
 });
 
-describe("liveHintOf · 占位步骤提示信号（自述优先、动作摘要兜底）", () => {
+describe("workHintOf · 占位步骤提示信号（解说自述优先、动作对象兜底；#81 自直播段平移）", () => {
   it("无信号 = undefined（调用侧落初始文案）", () => {
-    expect(liveHintOf([])).toBeUndefined();
+    expect(workHintOf([])).toBeUndefined();
   });
 
   it("取最新自述段（多段取末段）", () => {
@@ -55,7 +63,7 @@ describe("liveHintOf · 占位步骤提示信号（自述优先、动作摘要�
       seg.text("t1", "正在初始化项目"),
       seg.text("t2", "正在创建首页"),
     ];
-    expect(liveHintOf(segments)).toBe("正在创建首页");
+    expect(workHintOf(segments)).toBe("正在创建首页");
   });
 
   it("无自述时取最新动作摘要兜底", () => {
@@ -63,7 +71,7 @@ describe("liveHintOf · 占位步骤提示信号（自述优先、动作摘要�
       seg.action("a1", "正在编写【app.js】"),
       seg.action("a2", "正在编写【index.html】"),
     ];
-    expect(liveHintOf(segments)).toBe("正在编写【index.html】");
+    expect(workHintOf(segments)).toBe("正在编写【index.html】");
   });
 
   it("自述优先于更晚的动作（提示停在解说口径，不随文件动作跳变）", () => {
@@ -72,19 +80,19 @@ describe("liveHintOf · 占位步骤提示信号（自述优先、动作摘要�
       seg.action("a1", "正在编写【index.html】"),
       seg.action("a2", "正在编写【style.css】"),
     ];
-    expect(liveHintOf(segments)).toBe("正在创建首页");
+    expect(workHintOf(segments)).toBe("正在创建首页");
   });
 
   it("步骤分隔段不参与（非用户语言）", () => {
     const segments = [seg.text("t1", "正在创建首页"), seg.step("s1", 2)];
-    expect(liveHintOf(segments)).toBe("正在创建首页");
-    expect(liveHintOf([seg.step("s1", 1)])).toBeUndefined();
+    expect(workHintOf(segments)).toBe("正在创建首页");
+    expect(workHintOf([seg.step("s1", 1)])).toBeUndefined();
   });
 });
 
 describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
   it("idle：未见 run 未生成 = 引导占位", () => {
-    expect(systemPanelPhase({ coderStatus: undefined, generatedAt: null, liveSegments: [] })).toEqual({
+    expect(systemPanelPhase({ coderStatus: undefined, generatedAt: null, parts: [] })).toEqual({
       kind: "idle",
     });
   });
@@ -95,7 +103,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: "running",
       generatedAt: null,
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "hint", text: "正在初始化" });
   });
@@ -104,7 +112,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: "running",
       generatedAt: null,
-      liveSegments: [seg.text("t1", "正在创建首页")],
+      parts: [seg.text("t1", "正在创建首页")],
     });
     expect(phase).toEqual({ kind: "hint", text: "正在创建首页" });
   });
@@ -113,20 +121,20 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: "running",
       generatedAt: "2026-09-01T08:00:00Z",
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "hint", text: "正在更新系统" });
   });
 
   it("retrying 且无应用：播重试话术（帧内正本，缺省回落本地字面量）", () => {
     expect(
-      systemPanelPhase({ coderStatus: "retrying", generatedAt: null, liveSegments: [] }),
+      systemPanelPhase({ coderStatus: "retrying", generatedAt: null, parts: [] }),
     ).toEqual({ kind: "hint", text: FALLBACK_RETRY_MESSAGE });
     expect(
       systemPanelPhase({
         coderStatus: "retrying",
         generatedAt: null,
-        liveSegments: [],
+        parts: [],
         retryMessage: "服务波动，正在恢复",
       }),
     ).toEqual({ kind: "hint", text: "服务波动，正在恢复" });
@@ -136,7 +144,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: "error",
       generatedAt: null,
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "failed", text: "生成遇到了问题", recovery: "restart" });
   });
@@ -145,27 +153,27 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: "error",
       generatedAt: "2026-09-01T08:00:00Z",
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
   });
 
   it("正常态无任何手动触发：run 中/重试中/收口后均不带恢复入口", () => {
     // 正常流程全自动——恢复入口只在超限终态出现（#48）
-    expect(systemPanelPhase({ coderStatus: "running", generatedAt: null, liveSegments: [] }))
+    expect(systemPanelPhase({ coderStatus: "running", generatedAt: null, parts: [] }))
       .toEqual({ kind: "hint", text: "正在初始化" });
     expect(
-      systemPanelPhase({ coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] }),
+      systemPanelPhase({ coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] }),
     ).toEqual({ kind: "hint", text: "正在更新系统" });
     expect(
-      systemPanelPhase({ coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] }),
+      systemPanelPhase({ coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", parts: [] }),
     ).toEqual({ kind: "hint", text: FALLBACK_RETRY_MESSAGE });
     expect(
       systemPanelPhase({
         coderStatus: "finished",
         generatedAt: "2026-09-01T08:00:00Z",
         url: "http://localhost:42659",
-        liveSegments: [],
+        parts: [],
       }),
     ).toEqual({ kind: "page", notice: undefined });
   });
@@ -177,7 +185,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       coderStatus: "running",
       generatedAt: null,
       url: "http://localhost:42659",
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "page", notice: { failed: false, text: UPDATING_NOTICE } });
     // 合并后的唯一话术（旧修正专用文案不再另立一套）
@@ -189,7 +197,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       coderStatus: "retrying",
       generatedAt: null,
       url: "http://localhost:42659",
-      liveSegments: [],
+      parts: [],
       retryMessage: "服务波动，正在恢复",
     });
     expect(phase).toEqual({
@@ -204,7 +212,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
         coderStatus: "error",
         generatedAt: null,
         url: "http://localhost:42659",
-        liveSegments: [],
+        parts: [],
       }),
     ).toEqual({
       kind: "page",
@@ -215,7 +223,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
         coderStatus: "error",
         generatedAt: "2026-09-01T08:00:00Z",
         url: "http://localhost:42659",
-        liveSegments: [],
+        parts: [],
       }),
     ).toEqual({
       kind: "page",
@@ -228,7 +236,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       coderStatus: "finished",
       generatedAt: "2026-09-01T08:00:00Z",
       url: "http://localhost:42659",
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "page", notice: undefined });
   });
@@ -240,7 +248,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       coderStatus: undefined,
       generatedAt: "2026-09-01T08:00:00Z",
       url: "http://localhost:42659",
-      liveSegments: [],
+      parts: [],
     });
     expect(phase.kind).toBe("page");
   });
@@ -251,14 +259,14 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
         coderStatus: undefined,
         generatedAt: "2026-09-01T08:00:00Z",
         error: notServingError(),
-        liveSegments: [],
+        parts: [],
       }),
     ).toEqual({ kind: "connecting", trouble: false });
     expect(
       systemPanelPhase({
         coderStatus: undefined,
         generatedAt: "2026-09-01T08:00:00Z",
-        liveSegments: [],
+        parts: [],
       }),
     ).toEqual({ kind: "connecting", trouble: false });
   });
@@ -268,7 +276,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       coderStatus: undefined,
       generatedAt: "2026-09-01T08:00:00Z",
       error: new ApiError({ status: 500, code: "WSP_002", message: "环境后端操作失败" }),
-      liveSegments: [],
+      parts: [],
     });
     expect(phase).toEqual({ kind: "connecting", trouble: true });
   });
@@ -300,18 +308,18 @@ describe("previewTrouble · 真故障判定（#80 新窗口独立页与面板共
 describe("用户可见文案遵循「生成」词条 Avoid（不出现开发/构建）", () => {
   it("平台自有占位与提示话术全部合规", () => {
     const cases: Parameters<typeof systemPanelPhase>[0][] = [
-      { coderStatus: undefined, generatedAt: null, liveSegments: [] },
-      { coderStatus: "running", generatedAt: null, liveSegments: [] },
-      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] },
-      { coderStatus: "retrying", generatedAt: null, liveSegments: [] },
-      { coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] },
-      { coderStatus: "error", generatedAt: null, liveSegments: [] },
-      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", liveSegments: [] },
-      { coderStatus: "running", generatedAt: null, url: "http://localhost:42659", liveSegments: [] },
-      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", liveSegments: [] },
-      { coderStatus: "retrying", generatedAt: null, url: "http://x", liveSegments: [] },
-      { coderStatus: "error", generatedAt: null, url: "http://x", liveSegments: [] },
-      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", liveSegments: [] },
+      { coderStatus: undefined, generatedAt: null, parts: [] },
+      { coderStatus: "running", generatedAt: null, parts: [] },
+      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
+      { coderStatus: "retrying", generatedAt: null, parts: [] },
+      { coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
+      { coderStatus: "error", generatedAt: null, parts: [] },
+      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
+      { coderStatus: "running", generatedAt: null, url: "http://localhost:42659", parts: [] },
+      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
+      { coderStatus: "retrying", generatedAt: null, url: "http://x", parts: [] },
+      { coderStatus: "error", generatedAt: null, url: "http://x", parts: [] },
+      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
     ];
     for (const input of cases) {
       const phase = systemPanelPhase(input);

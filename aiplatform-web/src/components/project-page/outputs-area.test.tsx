@@ -27,12 +27,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
 }));
 
-// 直播侧栏装配哨兵（#23）：成果区主体挂 LiveRail（跨范式常驻）；其内部
-// 呈现与生命周期归 live-panel.test（client render 覆盖）
-vi.mock("./live-panel", () => ({
-  LiveRail: () => <div data-testid="live-rail-stub" />,
-}));
-
 const CTX: ParadigmCtx = { projectId: "p1", onGenerated: () => {} };
 
 /** Harness：装配层持 tab 簇状态（useOutputsTabs）喂 OutputsArea。 */
@@ -70,9 +64,4 @@ describe("OutputsArea · 呼出式 tab 簇（#79 范式注册表）", () => {
     expect(html).toContain('aria-label="收起成果区"');
   });
 
-  it("直播侧栏挂进成果区主体（跨范式常驻，#23）", () => {
-    const html = renderArea();
-
-    expect(html).toContain('data-testid="live-rail-stub"');
-  });
 });

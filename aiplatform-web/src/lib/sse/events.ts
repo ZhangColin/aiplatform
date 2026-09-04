@@ -109,7 +109,16 @@ type AgentPayload = {
 export type PlatformAgentEvent =
   | {
       type: "run-start";
-      payload: AgentPayload & { prompt: string; model: string; engine?: string };
+      payload: AgentPayload & {
+        prompt: string;
+        model: string;
+        engine?: string;
+        /**
+         * 角色键（#77 引擎信息归一：业务侧角色卡枚举名，如 CODER；无角色语境的
+         * 一次性调用不携带）——工作消息的锚定判据（编码 run 起工作消息）。
+         */
+        role?: string;
+      };
     }
   | {
       type: "role-assigned";
@@ -197,6 +206,34 @@ export type PlatformAgentEvent =
       /** 直播·步骤段（#23）：run 内步骤序号（1 起），呈现为「第 N 步」分隔。 */
       type: "live-step";
       payload: AgentPayload & { step: number };
+    }
+  // ---------- 消息部件（parts 契约，#77 正本「消息部件事件」节；#81 前端消费） ----------
+  | {
+      /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口帧前出尾段）。 */
+      type: "part-text";
+      payload: AgentPayload & { engine: string; text: string };
+    }
+  | {
+      /**
+       * 工具动作部件（动作卡）：开始/进行中/完成/失败全生命周期——动作一开始即出
+       * 事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ started（参数在途，
+       * label 通用对象）/ running（参数落定，label 具体对象）/ completed / failed
+       * （动作层状态；run 层唯一失败终态仍是 run-failed）；`label` 无时态（时态由
+       * state 表达）。播报工具封闭表：write_file / edit_file / command。
+       */
+      type: "part-action";
+      payload: AgentPayload & {
+        engine: string;
+        toolCallId: string;
+        toolName: string;
+        state: "started" | "running" | "completed" | "failed";
+        label: string;
+      };
+    }
+  | {
+      /** 步骤分组部件：run 内步骤序号（1 起，模型调用边界），呈现「第 N 步」分组头。 */
+      type: "part-step";
+      payload: AgentPayload & { engine: string; step: number };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -214,6 +251,9 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "live-text",
   "live-action",
   "live-step",
+  "part-text",
+  "part-action",
+  "part-step",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

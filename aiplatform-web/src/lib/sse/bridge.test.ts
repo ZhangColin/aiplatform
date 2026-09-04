@@ -10,6 +10,7 @@ import {
 } from "@/lib/store/generation";
 import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { queryKeys } from "@/lib/api/keys";
 
 import { dispatchAgentEvent, dispatchNotificationEvent } from "./bridge";
@@ -692,7 +693,7 @@ describe("bridge · agent 流 → live store（直播面，#23）", () => {
     return { id, data: JSON.stringify({ type, payload, ts: "" }) };
   }
 
-  it("live-* 帧按 run 落直播段；engine 透传帧不进直播面（不耦合引擎格式）", () => {
+  it("live-* 帧已停用不再渲染（#81 前端切新）：服务端双发射期内前端过滤，直播 store 零写入", () => {
     dispatchAgentEvent(agentQc, agentEvent(
       "live-step",
       { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
@@ -708,21 +709,140 @@ describe("bridge · agent 流 → live store（直播面，#23）", () => {
       { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", action: "正在编写【订单管理】" },
       "run1:4",
     ));
-    // 引擎透传帧同流到达：直播面不收（text 增量是引擎格式，直播段已由服务端成型）
+
+    // 过滤断言：旧族三型不产生任何渲染（live store 不写、过程呈现归工作消息）
+    expect(useLiveStore.getState().lives).toEqual({});
+  });
+});
+
+describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切新）", () => {
+  beforeEach(() => {
+    useWorkMessageStore.setState({ works: {} });
+  });
+
+  /** 事件工厂：带信封 ts（部件时长与起跑锚的时间源）。 */
+  function agentEvent(
+    type: string,
+    payload: Record<string, unknown>,
+    id: string,
+    ts = "",
+  ): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts }) };
+  }
+
+  /**
+   * 镜面服务端断言（AgentscopeAgentClientTest·given_scripted_coding_run_
+   * when_converse_then_part_events_full_lifecycle）：同一剧本的部件序列 →
+   * 前端工作消息部件结构——双侧同源于契约正本（SSE事件清单·消息部件事件节）。
+   */
+  it("编码 run 全部件序：步骤分组 → 解说 → 动作 started/running/completed → 解说 → 收口定格", () => {
+    const t0 = "2026-09-05T06:00:00.000Z";
+    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+
     dispatchAgentEvent(agentQc, agentEvent(
-      "text",
-      { projectId: "p1", runId: "run1", data: { delta: "raw", blockId: "b1" } },
+      "run-start",
+      { ...base, prompt: "做系统", model: "deepseek-v4-pro", role: "CODER" },
+      "run1:1",
+      at(0),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-step", { ...base, step: 1 }, "run1:2", at(1)));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在编写订单管理页面。" }, "run1:3", at(2)));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-action",
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "started", label: "编写【代码文件】" },
+      "run1:4",
+      at(3),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-action",
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【订单管理】" },
       "run1:5",
+      at(4),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-action",
+      { ...base, toolCallId: "tc-1", toolName: "write_file", state: "completed", label: "编写【订单管理】" },
+      "run1:6",
+      at(8),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "订单管理完成" }, "run1:7", at(9)));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { ...base, finish: "end" },
+      "run1:8",
+      at(10),
     ));
 
-    expect(useLiveStore.getState().lives["p1"]).toEqual({
-      runId: "run1",
-      segments: [
-        { kind: "step", id: "run1:2", step: 1 },
-        { kind: "text", id: "run1:3", text: "正在准备演示数据。" },
-        { kind: "action", id: "run1:4", action: "正在编写【订单管理】" },
-      ],
-    });
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.runId).toBe("run1");
+    expect(work?.frozen).toBe(true); // 收口定格
+    expect(work?.frozenAt).toBe(Date.parse(at(10)));
+    expect(work?.parts).toEqual([
+      { kind: "step", id: "run1:2", step: 1 },
+      { kind: "text", id: "run1:3", text: "正在编写订单管理页面。" },
+      {
+        kind: "action",
+        id: "run1:4",
+        toolCallId: "tc-1",
+        toolName: "write_file",
+        state: "completed",
+        label: "编写【订单管理】", // running 起具体对象，终态复述不闪换
+        startedAt: Date.parse(at(3)),
+        endedAt: Date.parse(at(8)), // 时长 5 秒（信封 ts 差）
+      },
+      { kind: "text", id: "run1:7", text: "订单管理完成" },
+    ]);
+  });
+
+  it("run-start 无 CODER 角色（BA/助理/一次性调用）不起工作消息；BA 部件不误建", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "rb", prompt: "追问", model: "m", role: "BA", sessionId: "ba-p1" },
+      "rb:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-text",
+      { projectId: "p1", runId: "rb", sessionId: "ba-p1", engine: "agentscope", text: "BA 解说段" },
+      "rb:2",
+    ));
+
+    expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
+  });
+
+  it("run-failed 也定格（run 失败是唯一失败终态，恢复出口在生成面）", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", role: "CODER" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-failed",
+      { projectId: "p1", runId: "run1" },
+      "run1:2",
+    ));
+
+    expect(useWorkMessageStore.getState().works["p1"]?.frozen).toBe(true);
+  });
+
+  it("重试下一尝试（新 runId 的 run-start）重开工作消息——旧尝试部件不残留", () => {
+    const base = { projectId: "p1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, runId: "run1", prompt: "做系统", model: "m", role: "CODER" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, runId: "run1", text: "第一尝试解说" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, runId: "run2", prompt: "做系统", model: "m", role: "CODER" },
+      "run2:1",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.runId).toBe("run2");
+    expect(work?.parts).toEqual([]);
   });
 });
 

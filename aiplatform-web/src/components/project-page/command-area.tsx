@@ -16,9 +16,11 @@ import {
   type ChatMessage,
 } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 
 import { DispatchStageBar } from "./dispatch-stage-bar";
 import { QuestionCard } from "./question-card";
+import { WorkMessage } from "./work-message";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
@@ -35,13 +37,15 @@ const STAGE_HINTS = {
  * 此流动；首次生成后意见即迭代入口（BA 判需求侧，回合收口后平台自动派修正
  * run——链必达 #43，形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户
  * 隐式），气泡角色标签随 role-assigned / guide-reply 帧呈现（BA「需求分析
- * 师」/ 助理「项目助理」/ 平台）。发送框 = 共享 Composer（首页/项目页同一
+ * 师」/ 助理「项目助理」/ 平台）。编码 run 进行中对话流末尾呈现一条生长中的
+ * 工作消息（#81 parts 契约：解说 + 动作状态卡 + 步骤分组，思考与代码不播），
+ * 收口定格。发送框 = 共享 Composer（首页/项目页同一
  * 组件，#76）；Enter 路由：有待答问题时即当前问题的答复（可与已勾选合并），
  * 否则即新发言。输入条上方挂派发阶段状态条（#50）与「PRD 有更新 · 去看看」
  * 胶囊（点击认领并回调场景层跳成果区）；「确认下单」随首次生成完成常驻输入
  * 条上方（#26）。输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
  * 输入并出锁定提示，closed（归档终态）关闭。对话史 = chat store（SSE 桥喂，
- * 重放可重建近期轮）；事件面不动（过程呈现待事件票接入）。
+ * 重放可重建近期轮）。
  */
 export function CommandArea({
   projectId,
@@ -69,6 +73,9 @@ export function CommandArea({
     useChatStore((s) => s.chats[projectId]?.activeRoleLabel) ?? FALLBACK_AGENT_LABEL;
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
+  // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
+  // 收口定格留驻（凝聚物收尾卡归后续票）
+  const work = useWorkMessageStore((s) => s.works[projectId]);
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
@@ -94,11 +101,11 @@ export function CommandArea({
     if (pendingId && !disabled) inputRef.current?.focus();
   }, [pendingId, disabled]);
 
-  // 新内容自动滚底（消息流增长或打字指示出现）
+  // 新内容自动滚底（消息流增长、工作消息长部件或打字指示出现）
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, turnActive]);
+  }, [messages, work?.parts.length, turnActive]);
 
   const sending = postMessage.isPending || answerQuestion.isPending;
   // 禁用态的锁定提示由输入条上方的横幅承载（具体缘由），占位只留一句短话不重复
@@ -152,6 +159,7 @@ export function CommandArea({
             ) : null}
           </MessageRow>
         ))}
+        {work ? <WorkMessage work={work} /> : null}
         {!disabled && generationCard ? generationCard : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

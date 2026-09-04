@@ -196,6 +196,77 @@ describe("agent 流收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it.each([
+    {
+      type: "part-text",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", text: "正在编写订单管理页面。" },
+    },
+    {
+      type: "part-action",
+      payload: {
+        projectId: "p1",
+        runId: "r1",
+        sessionId: "coder-p1",
+        engine: "agentscope",
+        toolCallId: "tc-1",
+        toolName: "write_file",
+        state: "started",
+        label: "编写【代码文件】",
+      },
+    },
+    {
+      type: "part-step",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
+    },
+  ] as const)("消息部件帧 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
+    // 期望值来自正本「消息部件事件」节（#77 parts 契约；字段值镜像服务端
+    // AgentscopeAgentClientTest 的部件序列断言——双侧同源于契约正本）
+    const env = parseSseEnvelope(JSON.stringify({ ...frame, ts: "" }));
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject(frame);
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
+  it("part-action 的 state 值域收窄（started/running/completed/failed 全生命周期）", () => {
+    for (const state of ["started", "running", "completed", "failed"] as const) {
+      const env = parseSseEnvelope(
+        JSON.stringify({
+          type: "part-action",
+          payload: {
+            projectId: "p1",
+            runId: "r1",
+            sessionId: "coder-p1",
+            engine: "agentscope",
+            toolCallId: "tc-1",
+            toolName: "write_file",
+            state,
+            label: "编写【订单管理】",
+          },
+          ts: "",
+        }),
+      );
+      const event = asPlatformAgentEvent(env!);
+      expect(event?.type).toBe("part-action");
+      if (event?.type === "part-action") {
+        expect(event.payload.state).toBe(state);
+      }
+    }
+  });
+
+  it("run-start 携角色键（#77 引擎信息归一：role=CODER 标编码 run）", () => {
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "run-start",
+        payload: { projectId: "p1", runId: "r1", prompt: "做系统", model: "m", engine: "agentscope", role: "CODER" },
+        ts: "",
+      }),
+    );
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "run-start",
+      payload: { role: "CODER" },
+    });
+  });
+
   it("引擎透传事件：data 为引擎 part 原样，字符串 type 照收", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

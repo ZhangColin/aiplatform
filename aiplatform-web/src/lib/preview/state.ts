@@ -1,6 +1,6 @@
 import { ApiError } from "@/lib/api/api-error";
 import type { CoderRunStatus } from "@/lib/store/generation";
-import type { LiveSegment } from "@/lib/store/live";
+import type { WorkPart } from "@/lib/store/work-message";
 
 /**
  * 系统面板呈现态推导（#45 预览门禁解除 + 空态两档）：纯函数、无 React——
@@ -57,16 +57,16 @@ export function previewActive(
 }
 
 /**
- * 占位步骤提示信号：智能体自述优先、动作摘要兜底（与直播同口径）；步骤分隔段
- * 非用户语言不参与。自述取最新一段并压过其后的动作行——提示停在解说口径
- * （「正在创建首页」），不随逐文件动作跳变。
+ * 占位步骤提示信号（#81 起源 = 工作消息部件，原直播段口径平移）：解说自述优先、
+ * 动作对象短语兜底；步骤分组段非用户语言不参与。自述取最新一段并压过其后的动作
+ * 行——提示停在解说口径（「正在创建首页」），不随逐文件动作跳变。
  */
-export function liveHintOf(segments: LiveSegment[]): string | undefined {
+export function workHintOf(parts: readonly WorkPart[]): string | undefined {
   let action: string | undefined;
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const segment = segments[i];
-    if (segment.kind === "text") return segment.text;
-    if (segment.kind === "action" && action === undefined) action = segment.action;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (part.kind === "text") return part.text;
+    if (part.kind === "action" && action === undefined) action = part.label;
   }
   return action;
 }
@@ -89,10 +89,11 @@ export function systemPanelPhase(input: {
   url?: string;
   /** 预览查询的 error（未就绪 WSP_012 视同待期）。 */
   error?: unknown;
-  liveSegments: LiveSegment[];
+  /** 当前工作消息部件（占位提示信号源，#81 自直播段平移）。 */
+  parts: readonly WorkPart[];
   retryMessage?: string;
 }): SystemPanelPhase {
-  const { coderStatus, generatedAt, url, error, liveSegments, retryMessage } = input;
+  const { coderStatus, generatedAt, url, error, parts, retryMessage } = input;
 
   // 有 URL 即上页面（跨会话直接显示系统现状；重试期间不退占位——不闪断）
   if (url) {
@@ -107,7 +108,7 @@ export function systemPanelPhase(input: {
     return { kind: "hint", text: retryMessage ?? FALLBACK_RETRY_MESSAGE };
   }
   if (coderStatus === "running") {
-    const hint = liveHintOf(liveSegments);
+    const hint = workHintOf(parts);
     return {
       kind: "hint",
       text: hint ?? (generatedAt != null ? "正在更新系统" : "正在初始化"),

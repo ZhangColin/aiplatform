@@ -11,16 +11,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-import { LiveRail } from "./live-panel";
 import { PARADIGMS, paradigmOf, type ParadigmCtx } from "./paradigms";
 
 /**
  * 成果区（#72 决议呼出式 / #79 落地）：tab 簇即标题条（UI 面不标区名）——
  * 已挂范式 tab +「+ 新标签页」（按范式注册表加挂）+ 收起键，一行即标题；
- * 主体 = 激活范式 + 直播侧栏（跨范式常驻——直播是 run 的面，run 结束即逝归
- * LiveRail 自管）。平铺无圆角：与对话列同墙同地。tab 状态归装配层
- * （useOutputsTabs）：自动切换（生成→系统、下单→订单、「去看看」→文档）与
- * 手动切换同一入口。
+ * 主体 = 激活范式（run 过程呈现归对话区工作消息——#81 直播侧栏下线）。
+ * 平铺无圆角：与对话列同墙同地。tab 状态归装配层（useOutputsTabs）：
+ * 自动切换（生成→系统、下单→订单、「去看看」→文档）与手动切换同一入口。
  */
 
 /** 成果区 tab 簇状态（装配层持有；自动/手动切换同一入口）。 */
@@ -165,11 +163,8 @@ export function OutputsArea({
         </button>
       </div>
 
-      {/* 主体：激活范式 + 直播侧栏（跨范式常驻） */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="flex min-h-0 flex-1 flex-col">{active?.render(ctx)}</div>
-        <LiveRail projectId={ctx.projectId} />
-      </div>
+      {/* 主体：激活范式（run 过程呈现归对话区工作消息，#81 直播侧栏下线） */}
+      <div className="flex min-h-0 flex-1 flex-col">{active?.render(ctx)}</div>
     </div>
   );
 }

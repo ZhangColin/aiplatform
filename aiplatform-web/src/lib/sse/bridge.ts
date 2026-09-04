@@ -7,8 +7,8 @@ import { useAgentStreamsStore } from "@/lib/store/agent-streams";
 import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { useDispatchStageStore } from "@/lib/store/dispatch-stage";
-import { useLiveStore } from "@/lib/store/live";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { orderStatusToastText } from "@/lib/orders/status";
 
 import type { SseEvent } from "./connection";
@@ -115,7 +115,7 @@ const PASSTHROUGH_SEGMENT_KINDS: Record<string, "text" | "reasoning" | "patch" |
   tool: "tool",
 };
 
-/** agent 流事件 → streams store + chat store + generation store（分段 id = SSE 完整事件 id，React key 白拿）。 */
+/** agent 流事件 → streams store + chat store + generation store + 工作消息 store（分段 id = SSE 完整事件 id，React key 白拿）。 */
 export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
   if (!envelope) return;
@@ -123,7 +123,9 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
   const stage = useDispatchStageStore.getState();
-  const live = useLiveStore.getState();
+  const work = useWorkMessageStore.getState();
+  // 信封 ts 是部件时长与起跑锚的唯一时间源（重放保留原值，客户端到达时序不可用）
+  const at = eventTime(envelope.ts);
 
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
@@ -140,6 +142,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderRunStart(payload.projectId);
+        }
+        // 工作消息锚（#81 新契约判据）：run-start 携 CODER 角色 = 编码 run，
+        // 对话区起一条生长中的工作消息（BA/助理/无角色 run 不起——对话面走气泡）
+        if (payload.role === "CODER") {
+          work.startWork(payload.projectId, payload.runId, at);
         }
         return;
       }
@@ -212,6 +219,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId);
         }
+        // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）
+        work.freezeWork(payload.projectId, payload.runId, at);
         return;
       }
       case "run-finish": {
@@ -222,6 +231,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           finish: payload.finish,
         });
         chat.finishTurn(payload.projectId, payload.sessionId);
+        // 工作消息定格（run 收口 = 消息定格；非锚定 run 的收口在 store 内忽略）
+        work.freezeWork(payload.projectId, payload.runId, at);
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFinish(payload.projectId, event.id);
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
@@ -260,35 +271,45 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         stage.noteStage(payload.projectId, payload.stage, payload.changed);
         return;
       }
-      // 直播帧（#23）：只进直播面 store（直播侧栏唯一消费面——前端不耦合引擎
-      // 事件格式；帧仅编码 run 发射，无需角色过滤）
-      case "live-text": {
+      // ---- 消息部件（parts 契约，#81 前端切新）→ 工作消息 store ----
+      // 部件全事件流恒挂（BA/助理 run 也产部件）——store 侧锚定守卫只收编码 run。
+      case "part-text": {
         const { payload } = platform;
-        live.noteLiveSegment(payload.projectId, payload.runId, {
-          kind: "text",
-          id: event.id,
-          text: payload.text,
-        });
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { kind: "text", text: payload.text },
+        );
         return;
       }
-      case "live-action": {
+      case "part-action": {
         const { payload } = platform;
-        live.noteLiveSegment(payload.projectId, payload.runId, {
-          kind: "action",
-          id: event.id,
-          action: payload.action,
-        });
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          {
+            kind: "action",
+            toolCallId: payload.toolCallId,
+            toolName: payload.toolName,
+            state: payload.state,
+            label: payload.label,
+          },
+        );
         return;
       }
-      case "live-step": {
+      case "part-step": {
         const { payload } = platform;
-        live.noteLiveSegment(payload.projectId, payload.runId, {
-          kind: "step",
-          id: event.id,
-          step: payload.step,
-        });
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { kind: "step", step: payload.step },
+        );
         return;
       }
+      // ---- 旧族过滤（#81 双发射过渡期）：live-* 直播三型停用不再渲染——服务端
+      // 仍在双发射，此处显式落空（switch 不命中即过滤）；解析代码（events.ts 的
+      // live-* 类型与 live store）保留至收缩票 #82 随旧族一并删除 ----
+      // live-text / live-action / live-step：no-op
     }
   }
 
@@ -327,4 +348,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/** 信封 ts → ms（坏值回落客户端时钟：时长粗对齐总好过锚丢失）。 */
+function eventTime(ts: string): number {
+  const parsed = Date.parse(ts);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
 }

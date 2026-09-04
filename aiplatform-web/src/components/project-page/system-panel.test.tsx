@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CoderRunStatus } from "@/lib/store/generation";
 import { useGenerationStore } from "@/lib/store/generation";
-import type { LiveSegment } from "@/lib/store/live";
+import type { WorkPart } from "@/lib/store/work-message";
 
 import { SystemPanel, previewFrameKey } from "./system-panel";
 
 // 系统模式主区域（#45 渐进预览第一片 + #48 修正超限终态恢复出口）：门禁解除——
-// run 开始即取预览地址；空态两档——无应用随直播推进步骤提示（自述优先、动作
-// 兜底），有应用保留页面 + 「更新中」轻提示一套；跨会话/重试不闪断；超限终态
+// run 开始即取预览地址；空态两档——无应用随工作消息部件推进步骤提示（#81 自
+// 直播段平移：解说自述优先、动作兜底），有应用保留页面 + 「更新中」轻提示一套；
+// 跨会话/重试不闪断；超限终态
 // 给人工兜底入口——从未生成「重新发起」、修正轮「重新修改」，正常态全无。
 // 预览地址读口 mock 掉（每用例摆 url 有无与 error）。
 let previewResult: {
@@ -35,45 +36,53 @@ vi.mock("@/hooks/use-restart-fix", () => ({
   useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-// 直播段读口换直摆对象（zustand SSR 快照冻在建店时刻，setState 后渲染读不到
-// ——同 previewFrameKey 测试注释的约束；liveSegmentsOf 留真实现走真实推导）
-const liveLives: Record<string, { runId: string; segments: LiveSegment[] }> = {};
-vi.mock("@/lib/store/live", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/store/live")>();
+// 工作消息部件读口换直摆对象（zustand SSR 快照冻在建店时刻，setState 后渲染读
+// 不到——同 previewFrameKey 测试注释的约束；workPartsOf 留真实现走真实推导）
+const seededWorks: Record<string, { runId: string; parts: WorkPart[] }> = {};
+vi.mock("@/lib/store/work-message", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store/work-message")>();
   return {
     ...actual,
-    useLiveStore: (selector: (state: { lives: typeof liveLives }) => unknown) =>
-      selector({ lives: liveLives }),
+    useWorkMessageStore: (selector: (state: { works: typeof seededWorks }) => unknown) =>
+      selector({ works: seededWorks }),
   };
 });
 
 const seg = {
-  text: (id: string, text: string): LiveSegment => ({ kind: "text", id, text }),
-  action: (id: string, action: string): LiveSegment => ({ kind: "action", id, action }),
+  text: (id: string, text: string): WorkPart => ({ kind: "text", id, text }),
+  action: (id: string, action: string): WorkPart => ({
+    kind: "action",
+    id,
+    toolCallId: id,
+    toolName: "write_file",
+    state: "completed",
+    label: action,
+    startedAt: 0,
+  }),
 };
 
 function renderPanel({
   generatedAt,
   coderStatus,
   epoch = 0,
-  liveSegments = [],
+  parts = [],
   url,
   error,
 }: {
   generatedAt?: string | null;
   coderStatus?: CoderRunStatus;
   epoch?: number;
-  liveSegments?: LiveSegment[];
+  parts?: WorkPart[];
   url?: string;
   error?: unknown;
 }) {
   useGenerationStore.setState({
     generations: { p1: { coderRunIds: [], coderStatus, previewEpoch: epoch, seenFinishEventIds: [] } },
   });
-  if (liveSegments.length) {
-    liveLives.p1 = { runId: "run-1", segments: liveSegments };
+  if (parts.length) {
+    seededWorks.p1 = { runId: "run-1", parts };
   } else {
-    delete liveLives.p1;
+    delete seededWorks.p1;
   }
   previewResult = { data: url ? { url } : undefined, error, isPending: false, isError: error != null };
   return renderToStaticMarkup(
@@ -91,7 +100,7 @@ function renderPanel({
 describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档）", () => {
   beforeEach(() => {
     useGenerationStore.setState({ generations: {} });
-    for (const key of Object.keys(liveLives)) delete liveLives[key];
+    for (const key of Object.keys(seededWorks)) delete seededWorks[key];
     previewResult = { isPending: false, isError: false };
   });
 
@@ -104,7 +113,7 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).not.toContain("正在接通系统");
   });
 
-  // ---------- 第一档：无应用，占位随直播事件推进 ----------
+  // ---------- 第一档：无应用，占位随工作消息部件推进 ----------
 
   it("生成中且无应用：初始「正在初始化」，无 iframe、无文件列表", () => {
     const html = renderPanel({ coderStatus: "running" });
@@ -115,10 +124,10 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("正在接通系统…");
   });
 
-  it("生成中且无应用：直播自述推进占位（最新自述优先于更晚的动作行）", () => {
+  it("生成中且无应用：解说自述推进占位（最新自述优先于更晚的动作行）", () => {
     const html = renderPanel({
       coderStatus: "running",
-      liveSegments: [
+      parts: [
         seg.text("t1", "正在创建首页"),
         seg.action("a1", "正在编写【index.html】"),
       ],
@@ -128,10 +137,10 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).not.toContain("正在编写【index.html】");
   });
 
-  it("生成中且无应用：无自述时动作摘要兜底", () => {
+  it("生成中且无应用：无自述时动作对象兜底", () => {
     const html = renderPanel({
       coderStatus: "running",
-      liveSegments: [seg.action("a1", "正在编写【index.html】")],
+      parts: [seg.action("a1", "正在编写【index.html】")],
     });
 
     expect(html).toContain("正在编写【index.html】");

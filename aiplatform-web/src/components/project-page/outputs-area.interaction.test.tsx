@@ -30,10 +30,6 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
 }));
 
-vi.mock("./live-panel", () => ({
-  LiveRail: () => <div data-testid="live-rail-stub" />,
-}));
-
 const CTX: ParadigmCtx = { projectId: "p1", onGenerated: () => {} };
 const onClose = vi.fn();
 

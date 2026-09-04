@@ -12,6 +12,7 @@ import { lockRowOf } from "@/lib/orders/lock";
 const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
+  works: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -29,6 +30,15 @@ vi.mock("@/lib/store/prd-notices", async (importOriginal) => {
     ...actual,
     usePrdNoticesStore: <T,>(selector: (state: Pick<PrdNoticesState, "seen" | "pending">) => T) =>
       selector(seed.notices),
+  };
+});
+
+vi.mock("@/lib/store/work-message", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store/work-message")>();
+  return {
+    ...actual,
+    useWorkMessageStore: <T,>(selector: (state: { works: typeof seed.works }) => T): T =>
+      selector({ works: seed.works }),
   };
 });
 
@@ -58,6 +68,7 @@ function seedChat(
   turnActive = false,
   overrides: Partial<ProjectChat> = {},
 ) {
+  seed.works = {}; // 工作消息种子独立于对话史（仅个别用例摆），每次重置
   seed.chats = {
     chats: {
       p1: {
@@ -140,6 +151,41 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
     );
     expect(archived).toContain("项目已归档，指令区已关闭");
     expect(archived).toContain("disabled");
+  });
+
+  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——解说 + 步骤分组 + 动作卡）", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把主色调改成绿色" },
+      { kind: "agent", id: "b1", text: "已接住意见，开始处理。", label: "需求分析师" },
+    ]);
+    seed.works = {
+      p1: {
+        runId: "run-1",
+        startedAt: 1_000,
+        frozen: false,
+        parts: [
+          { kind: "step", id: "run-1:2", step: 1 },
+          { kind: "text", id: "run-1:3", text: "正在调整全局配色。" },
+          {
+            kind: "action",
+            id: "run-1:4",
+            toolCallId: "tc-1",
+            toolName: "edit_file",
+            state: "running",
+            label: "修改【全局样式】",
+            startedAt: 1_000,
+          },
+        ],
+      },
+    };
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("正在做");
+    expect(html).toContain("第 1 步");
+    expect(html).toContain("正在调整全局配色。");
+    expect(html).toContain("修改【全局样式】");
+    expect(html).toContain("进行中");
   });
 
   it("修正收口「未动系统」通告（#46）：平台侧如实告知原因（区别于智能体话语与错误）", () => {

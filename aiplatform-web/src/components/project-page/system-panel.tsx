@@ -17,7 +17,7 @@ import {
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
-import { liveSegmentsOf, useLiveStore } from "@/lib/store/live";
+import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
 import { cn } from "@/lib/utils";
 import { TROUBLE_NOTICE, previewActive, systemPanelPhase } from "@/lib/preview/state";
 import { useProjectPreview } from "@/hooks/use-project-preview";
@@ -39,7 +39,8 @@ const BAR_BUTTON_CLASS =
  * 容器。门禁解除——run 开始（含发起成功的乐观登记）即取预览地址并挂机制，
  * 不等 run-finish 纪元；后端探活通过才返回 URL，有 URL 即上真页面（空白页可
  * 接受）。空态两档（推导归 lib/preview/state 纯函数，本组件只呈现）：无应用 =
- * 占位随直播事件推进的步骤提示（自述优先、动作摘要兜底，无信号「正在初始化」）；
+ * 占位随工作消息部件推进的步骤提示（#81 自直播段平移：解说自述优先、动作对象
+ * 兜底，无信号「正在初始化」）；
  * 有应用且 run 中 = 保留页面 +「更新中」轻提示（生长期与修正期同一套）。跨会话
  * 与重试不闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为
  * key，手动刷新的本地节拍并入同 key）；超限终态给人工兜底入口——从未生成
@@ -66,7 +67,7 @@ export function SystemPanel({
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
   const retryMessage = useGenerationStore((s) => retryMessageOf(s, projectId));
-  const segments = useLiveStore((s) => liveSegmentsOf(s, projectId));
+  const parts = useWorkMessageStore((s) => workPartsOf(s, projectId));
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
   const [refreshTick, setRefreshTick] = useState(0);
@@ -79,7 +80,7 @@ export function SystemPanel({
     generatedAt,
     url,
     error: preview.error,
-    liveSegments: segments,
+    parts,
     retryMessage,
   });
   const pageLive = phase.kind === "page" && !!url;

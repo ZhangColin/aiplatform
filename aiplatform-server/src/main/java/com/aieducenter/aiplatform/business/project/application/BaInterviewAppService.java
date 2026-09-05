@@ -214,7 +214,7 @@ public class BaInterviewAppService {
         });
     }
 
-    /** 一轮访谈的运行标识（前端挂智能体流 ?runId= 的锚）。 */
+    /** 一轮访谈的运行标识（前端挂智能体事件 ?runId= 的锚）。 */
     public record InterviewRun(String runId) {
     }
 
@@ -256,7 +256,16 @@ public class BaInterviewAppService {
                     prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
         }
         catch (RuntimeException e) {
-            // 派发失败（#51）：意见锚已消费（不恢复）、不自动重试，用户重提即兜底
+            // 派发失败（#51 → #82 失败家族归位）：意见锚已消费（不恢复）、不自动
+            // 重试，用户重提即兜底——失败信号归 error 事件（dispatch-failed 阶段族
+            // 已退役），对话面如实呈现不静默
+            try {
+                eventBridge.emitError(projectId, runId, "意见派发失败，请重新发送");
+            }
+            catch (RuntimeException emitFailure) {
+                log.warn("[ba-close] 项目 {} 派发失败事件发射失败：{}", projectId,
+                        emitFailure.toString());
+            }
             log.warn("[ba-close] 项目 {} 修正 run 自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }

@@ -1,7 +1,7 @@
 package com.aieducenter.aiplatform.base.eventhub.domain.model;
 
 /**
- * SSE 事件 id：{@code {streamId}:{seq}}（通知通道 streamId=projectId，agent 流通道
+ * SSE 事件 id：{@code {streamId}:{seq}}（通知族 streamId=projectId，智能体事件族
  * streamId=runId）。seq 在同一 streamId 内单调递增、从 1 起——补发（Last-Event-ID）
  * Phase A 不做，但 id 复合格式与单调性从第一天成立（B0 蓝图 §4① 吸收点）。
  *

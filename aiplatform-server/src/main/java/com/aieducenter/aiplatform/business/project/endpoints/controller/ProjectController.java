@@ -88,7 +88,7 @@ public class ProjectController {
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动 BA 运行 runId（挂 /api/events?runId= 的锚）。"
-                    + "SSE：workspace-created → agent 流事件")
+                    + "SSE：workspace-created → 智能体事件")
     public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
         return ApiResponse.ok(appService.create(command));
     }

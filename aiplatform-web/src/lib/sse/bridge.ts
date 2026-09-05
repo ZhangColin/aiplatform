@@ -107,9 +107,6 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
   NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification);
 }
 
-/** 已知引擎透传名型 → 对话面消费（解说文本增量；思考/补丁/工具不进对话）。 */
-const CHAT_PASSTHROUGH_TYPES: ReadonlySet<string> = new Set(["text"]);
-
 /**
  * 智能体事件 → agent-runs store + chat store + generation store + 工作消息 store
  * 分发（事件 id = SSE 完整事件 id，React key 白拿）。run-start 携带角色键（引擎
@@ -247,11 +244,12 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     }
   }
 
-  // 引擎透传（开放集合）：唯一消费面 = 对话角色的解说文本增量（BA/助理对话气泡）；
-  // 其余名型（reasoning/patch/tool/step-*）过程呈现归工作消息部件，不进任何 store
+  // 引擎透传（开放集合）：唯一消费面 = 对话角色的解说文本增量（text——BA/助理
+  // 对话气泡）；其余名型（reasoning/patch/tool/step-*）过程呈现归工作消息部件，
+  // 不进任何 store
   const passthrough = asPassthroughAgentEvent(envelope);
   if (!passthrough) return;
-  if (CHAT_PASSTHROUGH_TYPES.has(passthrough.type)) {
+  if (passthrough.type === "text") {
     const { payload } = passthrough;
     const delta = asRecord(payload.data)?.delta;
     chat.appendAgentDelta(payload.projectId, payload.runId, payload.sessionId, delta, event.id);

@@ -10,7 +10,7 @@ import type { ParadigmCtx } from "./paradigms";
  * 成果区 tab 簇交互契约（#79 验收锚）：「+ 新标签页」按范式注册表挂载并激活、
  * tab 可关闭（关激活面回退剩余首个、最后一面不可关）、tab 点选切换激活、
  * 收起键回调。沿 command-area.interaction 先例（happy-dom 逐文件例外）；
- * 断言用原生属性（本仓无 jest-dom）。数据口与直播侧栏 mock 掉。
+ * 断言用原生属性（本仓无 jest-dom）。数据口 mock 掉。
  */
 vi.mock("@/hooks/use-project-files", () => ({
   useProjectFiles: () => ({

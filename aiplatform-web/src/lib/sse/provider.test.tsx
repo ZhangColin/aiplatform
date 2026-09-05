@@ -11,7 +11,7 @@ import { SseProvider } from "./provider";
 /**
  * 通知通道的 StrictMode 实证（issue #60）：provider 与 agent-channel 守卫同构
  * （probe-cancel），root 级挂载同样吃双挂载——agent 侧已锁，此处补齐另一条
- * 通道，双通道单连接的声明才算完整锁定。
+ * 通道，单端点单流的声明才算完整锁定。
  */
 
 class FakeEventSource {

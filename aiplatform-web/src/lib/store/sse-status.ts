@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-/** SSE 双通道标识（ADR 0003：通知通道 root 常开 / agent 流通道项目页建连）。 */
+/** SSE 连接姿态标识（ADR 0003 + #82 单端点：通知族 root 常开连接 / 智能体事件项目页过滤连接）。 */
 export type SseChannel = "notification" | "agent";
 
 /** 传输层三态：connecting = 建连中（含原生自动重连的 CONNECTING）。 */
@@ -14,7 +14,7 @@ type SseStatusState = {
 /**
  * SSE 传输层状态（ADR 0003）：connection.ts 唯一写入方；
  * 读方 = 项目页 agent 流指示器 + 门控轮询（useSseFallbackPolling）。
- * 与 agent-streams（过程层）分家的理由见 ADR Considered Options「store 合一 vs 分两个」。
+ * 与 agent-runs（运行注册表）分家的理由见 ADR Considered Options「store 合一 vs 分两个」。
  */
 export const useSseStatusStore = create<SseStatusState>((set) => ({
   statuses: { notification: "offline", agent: "offline" },

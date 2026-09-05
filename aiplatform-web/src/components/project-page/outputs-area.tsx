@@ -16,7 +16,7 @@ import { PARADIGMS, paradigmOf, type ParadigmCtx } from "./paradigms";
 /**
  * 成果区（#72 决议呼出式 / #79 落地）：tab 簇即标题条（UI 面不标区名）——
  * 已挂范式 tab +「+ 新标签页」（按范式注册表加挂）+ 收起键，一行即标题；
- * 主体 = 激活范式（run 过程呈现归对话区工作消息——#81 直播侧栏下线）。
+ * 主体 = 激活范式（run 过程呈现归对话区工作消息）。
  * 平铺无圆角：与对话列同墙同地。tab 状态归装配层（useOutputsTabs）：
  * 自动切换（生成→系统、下单→订单、「去看看」→文档）与手动切换同一入口。
  */
@@ -163,7 +163,7 @@ export function OutputsArea({
         </button>
       </div>
 
-      {/* 主体：激活范式（run 过程呈现归对话区工作消息，#81 直播侧栏下线） */}
+      {/* 主体：激活范式（run 过程呈现归对话区工作消息） */}
       <div className="flex min-h-0 flex-1 flex-col">{active?.render(ctx)}</div>
     </div>
   );

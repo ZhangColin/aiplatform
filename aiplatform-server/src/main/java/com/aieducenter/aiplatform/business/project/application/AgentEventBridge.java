@@ -55,6 +55,19 @@ public class AgentEventBridge {
     }
 
     /**
+     * error 发射（失败家族——非重试族的失败表达）：意见链收口后派发修正 run 失败
+     * （#51 → #82 失败家族归位：dispatch-failed 阶段族退役，失败信号归本事件）——
+     * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口 BA 轮的 runId（对话面
+     * 已登记，失败提示随对话呈现）。
+     */
+    public void emitError(Long projectId, String runId, String message) {
+        eventsAppService.publishAgentEvent(AgentEventTypes.ERROR, Map.of(
+                EventsAppService.PROJECT_FIELD, projectId.toString(),
+                EventsAppService.RUN_FIELD, runId,
+                AgentEventTypes.ERROR_MESSAGE_FIELD, message));
+    }
+
+    /**
      * guide-reply 发射（兜底轻引导，#47 入口三分类）：非意见非咨询输入的平台侧
      * 定型文案——零产物路径的全部事件（无智能体 run、无事件序）；runId 为派发锚
      * （随派发响应同值返回），prompt 随事件携带供重放重建对话面，label 为呈现

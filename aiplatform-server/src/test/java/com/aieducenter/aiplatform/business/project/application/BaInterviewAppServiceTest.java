@@ -781,6 +781,12 @@ class BaInterviewAppServiceTest {
         verify(agentClient, times(1)).converse(any(), any()); // 无 coder converse
         verify(eventsAppService, never()).publishAgentEvent(
                 eq(AgentEventTypes.RUN_FAILED), anyMap()); // 派发失败不是 run 终态
+        // 失败家族归位（#82）：dispatch-failed 阶段族退役后，失败信号归 error
+        // 事件——锚定收口 BA 轮、如实呈现重提（不静默）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.ERROR), argThat(payload ->
+                projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
+                        && "意见派发失败，请重新发送".equals(
+                                payload.get(AgentEventTypes.ERROR_MESSAGE_FIELD))));
     }
 
     // ---------- 测试数据 ----------

@@ -3,29 +3,29 @@ import { create } from "zustand";
 import type { RaisedQuestion } from "@/lib/chat/qa";
 
 /**
- * 指令区对话 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
+ * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：按项目累积对话面（用户发言 / 智能体回复增量 / 问答卡 /
- * 平台轻引导），区别于 agent-streams 的「过程层最近 1 run」——对话史跨 run 常驻
- * （store 是会话内存态，刷新后由 agent 流通道重放缓冲重建近期对话，用户作答文本
+ * 平台轻引导），区别于 agent-runs 的「运行注册表」——对话史跨 run 常驻
+ * （store 是会话内存态，刷新后由事件流重放缓冲重建近期对话，用户作答文本
  * 不在流中、刷新即逝为 v1 取舍）。
  *
- * <p><b>对话面 run 判定</b>（#47 三分类后多角色进对话）：role-assigned 的
- * BA / ASSISTANT 登记为会话 run（run-start 的用户气泡只认对话面 run，片 2 编码
- * run 不进对话）；透传事件自带 sessionId，{@code ba-{projectId}} /
- * {@code assist-{projectId}} 前缀（后端会话命名约定：角色 × 项目）判定 text /
- * question-raised / run-finish 归属。</p>
+ * <p><b>对话面 run 判定</b>（#47 三分类后多角色进对话）：run-start 携角色键
+ * （role=BA / ASSISTANT）即登记为会话 run（run-start 的用户气泡只认对话面 run，
+ * 编码 run 不进对话——过程长在工作消息）；透传事件自带 sessionId，
+ * {@code ba-{projectId}} / {@code assist-{projectId}} 前缀（后端会话命名约定：
+ * 角色 × 项目）判定 text / question-raised / run-finish 归属。</p>
  *
- * <p><b>角色标签随派发事件呈现</b>（#47）：role-assigned 事件的 roleLabel 是标签
- * 正本，按 runId 登记、逐消息取用（BA「需求分析师」/ 助理「项目助理」）；事件缺失
- * 的重放残段回退通用「智能体」。平台轻引导（guide-reply）自带 label（「平台」，
- * 非智能体角色）。</p>
+ * <p><b>角色标签</b>（#82 起）：角色标签正本随 role-assigned 事件退役——界面无
+ * 角色标签是终态口径（用户故事「界面上只有一个它」+ ADR 0006），智能体话语统一
+ * 通用「智能体」（#86 单会话收敛后清理收尾）；平台轻引导（guide-reply）自带
+ * label（「平台」，非智能体角色）。</p>
  *
  * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载（含路由回访）会重收近期事件——
  * runId 已入对话的 run-start 不再补用户气泡（乐观发送先落、run-start 回声
  * 靠「尾条同文」去重），text / 问答 / 失败事件按 SSE 事件 id 只收一次。</p>
  */
 
-/** 事件缺失时智能体消息的回退标签（标签正本在 role-assigned 事件）。 */
+/** 智能体消息的呈现标签（角色标签退役后的统一口径，#86 后随单会话清理）。 */
 export const FALLBACK_AGENT_LABEL = "智能体";
 
 /** guide-reply 事件缺 label 时的呈现兜底（正本在后端 GUIDE_LABEL）。 */

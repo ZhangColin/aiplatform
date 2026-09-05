@@ -167,9 +167,9 @@ public class SseChannelHub {
     }
 
     /**
-     * 补投重放事件并接管重放期间到达的 live 事件：发完一批、订阅级锁内取下一批 pending，
+     * 补投重放事件并接管重放期间到达的实时事件：发完一批、订阅级锁内取下一批 pending，
      * 取空才切 replaying=false——重放期间到达的事件必然进过 pending（不漏），任何直发
-     * live 事件必然晚于全部补投事件（不乱序）。谓词过滤在锁外做（事件不可变，等价且临界区
+     * 实时事件必然晚于全部补投事件（不乱序）。谓词过滤在锁外做（事件不可变，等价且临界区
      * 最小化）。
      */
     private void deliverBacklog(ChannelState state, Subscription subscription, List<SseServerEvent> backlog) {

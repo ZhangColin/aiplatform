@@ -2,7 +2,7 @@ package com.aieducenter.aiplatform.business.order.application;
 
 /**
  * 平台通知事件名册常量（#30 交易环③，ADR-0001：代码侧每 BC 一个 EventTypes
- * 常量类，禁止字符串字面量散落；正本见 docs/spec/SSE事件清单.md·通道一）。订单
+ * 常量类，禁止字符串字面量散落；正本见 docs/spec/SSE事件清单.md·平台通知族）。订单
  * 上下文在状态变化副作用真实落定后发射（base 不发 SSE）；前端消费 = toast
  * （点击直达项目页）+ 失效订单/项目域重查。
  */
@@ -15,7 +15,7 @@ public final class OrderEventTypes {
      */
     public static final String ORDER_STATUS_CHANGED = "order-status-changed";
 
-    // ---------- payload 契约键（SSE事件清单·通道一） ----------
+    // ---------- payload 契约键（SSE事件清单·平台通知族） ----------
 
     /** 关联字段（通知通道 streamId 同值）。 */
     public static final String PROJECT_ID_FIELD = "projectId";

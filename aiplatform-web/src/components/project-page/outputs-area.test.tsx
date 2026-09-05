@@ -7,7 +7,7 @@ import type { ParadigmCtx } from "./paradigms";
 
 // 成果区（#79 呼出式 tab 簇）：tab 条即标题条——默认挂载「系统」「文档」、
 // 激活 = 系统（SystemPanel 空态；系统面板断言归 system-panel.test）、「+
-// 新标签页」与收起键就位、直播侧栏跨范式常驻。挂载/关闭/切换的交互契约归
+// 新标签页」与收起键就位。挂载/关闭/切换的交互契约归
 // outputs-area.interaction.test（happy-dom）。数据口 mock 掉。
 vi.mock("@/hooks/use-project-files", () => ({
   useProjectFiles: () => ({

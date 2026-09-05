@@ -4,7 +4,7 @@ import type { WorkPart } from "@/lib/store/work-message";
 
 /**
  * 系统面板呈现态推导（#45 预览门禁解除 + 空态两档）：纯函数、无 React——
- * 输入 = 生成面事实（coderStatus / generatedAt）+ 预览查询结果 + 直播段，输出
+ * 输入 = 生成面事实（coderStatus / generatedAt）+ 预览查询结果 + 工作消息部件，输出
  * 面板该呈现哪一档。门禁口径：run 开始（含发起成功的乐观登记）或已有生成事实
  * 即启动预览机制，不等 run-finish 纪元；应用可访问的判据 = REST 探活通过才返回
  * URL（后端 WSP_012 语义），有 URL 即上页面。
@@ -54,7 +54,7 @@ export function previewActive(
 }
 
 /**
- * 占位步骤提示信号（#81 起源 = 工作消息部件，原直播段口径平移）：解说自述优先、
+ * 占位步骤提示信号（起源 = 工作消息部件）：解说自述优先、
  * 动作对象短语兜底；步骤分组段非用户语言不参与。自述取最新一段并压过其后的动作
  * 行——提示停在解说口径（「正在创建首页」），不随逐文件动作跳变。
  */
@@ -86,7 +86,7 @@ export function systemPanelPhase(input: {
   url?: string;
   /** 预览查询的 error（未就绪 WSP_012 视同待期）。 */
   error?: unknown;
-  /** 当前工作消息部件（占位提示信号源，#81 自直播段平移）。 */
+  /** 当前工作消息部件（占位提示信号源）。 */
   parts: readonly WorkPart[];
 }): SystemPanelPhase {
   const { coderStatus, generatedAt, url, error, parts } = input;

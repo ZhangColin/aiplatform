@@ -14,7 +14,7 @@ import com.aieducenter.aiplatform.business.identity.endpoints.interceptor.ApiAut
  * springdoc 的静态资源（index.html），此处重定向补齐。404 语义恢复见
  * {@code com.aieducenter.aiplatform.web.NotFoundExceptionHandler}。</p>
  *
- * <p>A2 起全 {@code /api/**} 拦截（含 SSE 双通道），无会话 401；白名单路径
+ * <p>A2 起全 {@code /api/**} 拦截（含 SSE 事件端点），无会话 401；白名单路径
  * （/auth/**、/v3/api-docs/**、/swagger-ui/**、actuator）不在 /api 下，天然放行。
  * {@code /api/backoffice/**}（#29 后台机机面）排除会话拦截——鉴权由
  * cartisan-openapi 五头 HMAC 签名闸接管（控制器类级 {@code @RequireSignature}，

@@ -2,7 +2,7 @@ package com.aieducenter.aiplatform.business.project.application;
 
 /**
  * 平台通知事件名册常量（ADR-0001：代码侧每 BC 一个 EventTypes 常量类，禁止字符串
- * 字面量散落；正本见 docs/spec/SSE事件清单.md·通道一）。本上下文编排层在副作用
+ * 字面量散落；正本见 docs/spec/SSE事件清单.md·平台通知族）。本上下文编排层在副作用
  * 真实落定后发射（base 不发 SSE——底座零业务概念的自然推论）。
  */
 public final class ProjectEventTypes {
@@ -14,7 +14,7 @@ public final class ProjectEventTypes {
     public static final String PREVIEW_READY = "preview-ready";
 
     /**
-     * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（直播步骤
+     * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（步骤分组部件
      * 边界）且平台侧探活通过后发射——前端节流重载预览。不携带 url（预览地址经
      * REST 探活取得且不变）。
      */
@@ -38,7 +38,7 @@ public final class ProjectEventTypes {
      */
     public static final String PROJECT_RENAMED = "project-renamed";
 
-    // ---------- payload 契约键（SSE事件清单·通道一） ----------
+    // ---------- payload 契约键（SSE事件清单·平台通知族） ----------
 
     /** 关联字段（通知通道 streamId 同值）。 */
     public static final String PROJECT_ID_FIELD = "projectId";

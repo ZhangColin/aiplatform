@@ -8,7 +8,7 @@
  *       HarnessAgent 单轮对话（converse）与挂起续跑（resume，问答答复通道的 mechanics）；
  *       模型串解析（provider:modelId 白名单，暂仅 deepseek）、工作区分型
  *       （本地 / 项目 dev 容器 docker exec 文件面）</li>
- *   <li>事件桥：AgentScope 类型化事件 → 平台智能体流事件（词汇表在 eventhub 的
+ *   <li>事件桥：AgentScope 类型化事件 → 平台智能体事件（词汇表在 eventhub 的
  *       AgentEventTypes，映射表单点 AgentscopeEventMapper）</li>
  *   <li>会话恢复：AgentState 落 PostgreSQL（cat_agent_state 承载全部智能体会话，
  *       (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑</li>

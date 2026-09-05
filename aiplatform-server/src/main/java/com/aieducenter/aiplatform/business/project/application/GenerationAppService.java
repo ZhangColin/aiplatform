@@ -31,9 +31,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
- * <p><b>编码 run 开直播</b>（#23 生成环②）：命令带 {@code live}——过程事件外并产
- * 直播事件（智能体自述逐段 + 工具动作人话行 + 步骤），前端直播侧栏消费；BA 对话
- * 不开（对话不流式不留痕）。</p>
+ * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡 + 步骤分组）随全部智能体
+ * 事件流产出（parts 契约，前端长成工作消息）。</p>
  *
  * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
  * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
@@ -152,7 +151,7 @@ public class GenerationAppService {
         return new GenerationRun(firstRunId);
     }
 
-    /** 一场生成（首试）的运行标识（前端挂智能体流 ?runId= 的锚；重试换新 runId 经事件到达）。 */
+    /** 一场生成（首试）的运行标识（前端挂智能体事件 ?runId= 的锚；重试换新 runId 经事件到达）。 */
     public record GenerationRun(String runId) {
     }
 

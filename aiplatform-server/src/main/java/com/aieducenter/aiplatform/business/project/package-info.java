@@ -10,7 +10,7 @@
  *       工具集 + PRD 落盘业务登记）</li>
  *   <li>角色卡 preset（v1 仅 BA，代码配置不落库）与 PRD 读侧</li>
  *   <li>SSE 编排层发射：平台通知（workspace-created / preview-ready /
- *       workspace-destroyed / document-updated / project-renamed）+ 智能体流
+ *       workspace-destroyed / document-updated / project-renamed）+ 智能体事件
  *       projectId 桥接（eventhub 唯一 SSE 管道）</li>
  * </ul>
  *

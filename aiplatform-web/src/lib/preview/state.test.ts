@@ -51,7 +51,7 @@ describe("previewActive · 门禁解除（#45）", () => {
   });
 });
 
-describe("workHintOf · 占位步骤提示信号（解说自述优先、动作对象兜底；#81 自直播段平移）", () => {
+describe("workHintOf · 占位步骤提示信号（解说自述优先、动作对象兜底）", () => {
   it("无信号 = undefined（调用侧落初始文案）", () => {
     expect(workHintOf([])).toBeUndefined();
   });

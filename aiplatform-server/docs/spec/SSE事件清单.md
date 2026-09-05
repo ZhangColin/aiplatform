@@ -62,7 +62,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | type | payload 字段 | 说明 |
 |---|---|---|
 | `run-start` | `projectId` `runId` `prompt` `model` `engine` `role`（可空） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带角色键 `role`（业务侧角色卡的枚举名，如 CODER；无角色语境的一次性调用不携带）——前端工作消息（编码 run）与对话面 run（BA/ASSISTANT）的登记锚 |
-| `error` | `projectId` `runId` `message` | 运行失败（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
+| `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口 BA 轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
 | `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口） |
 | `question-raised` | `projectId` `runId` `sessionId` `kind` `summary` `engineRef` `data` | 智能体挂起（kind=QUESTION=向用户提问 / PERMISSION=工具确认）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面。PERMISSION 拆独立事件（`permission-required`）与作答通道分家归后续票 |
 | `run-failed` | `projectId` `runId` | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` 锚定末次失败的尝试。**run 失败为唯一失败终态**——重试全程静默（中间错误不出用户面），前端恢复出口只认本事件 |

@@ -20,7 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 
 /**
- * SSE 事件端点（单端点单流，ADR-0001 + #82 双通道合并）：{@code GET /api/events}
+ * SSE 事件端点（单端点单流，ADR-0001 + #82 通道合并）：{@code GET /api/events}
  * 一条流承载两族事件——平台通知族 + 智能体事件族（合并通道不合并语义）。
  * eventhub 是唯一 SSE 管道，通道语义归 {@link EventsAppService}。
  *

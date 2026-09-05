@@ -11,7 +11,7 @@ import com.cartisan.core.context.RequestContext;
 import com.aieducenter.aiplatform.web.AuthException;
 
 /**
- * {@code /api/**} 鉴权拦截器（A2 §6：全拦截面含 SSE 双通道，无会话 401）。
+ * {@code /api/**} 鉴权拦截器（A2 §6：全拦截面含 SSE 事件端点，无会话 401）。
  *
  * <p>白名单（{@code /auth/**}、{@code /v3/api-docs/**}、{@code /swagger-ui/**}、
  * actuator health）不落在 {@code /api/**} 下——按路径模式注册即天然放行。用户

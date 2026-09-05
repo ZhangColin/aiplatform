@@ -1,7 +1,7 @@
 /**
  * 问答卡纯逻辑（issue #19 需求环①）：question-raised 事件 data → 问答卡形状的解析，
  * 与三种作答形态（单选点即答 / 多选勾选提交 / 自由输入可与已勾选合并）的答复
- * 拼装。形状正本 = SSE事件清单·通道二 `data.questions` 投影
+ * 拼装。形状正本 = SSE事件清单·智能体事件族 `data.questions` 投影
  * （[{header, question, multiple, custom, options[{label}]}]）。
  */
 

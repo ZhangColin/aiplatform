@@ -80,7 +80,7 @@ public class AssistantAppService {
         return new AssistantRun(runId);
     }
 
-    /** 一轮咨询应答的运行标识（前端挂智能体流 ?runId= 的锚）。 */
+    /** 一轮咨询应答的运行标识（前端挂智能体事件 ?runId= 的锚）。 */
     public record AssistantRun(String runId) {
     }
 

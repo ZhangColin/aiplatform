@@ -125,7 +125,7 @@ public class DispatchAppService {
         };
     }
 
-    /** 一次派发的运行标识（前端挂智能体流 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
+    /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
     public record DispatchRun(String runId) {
     }
 

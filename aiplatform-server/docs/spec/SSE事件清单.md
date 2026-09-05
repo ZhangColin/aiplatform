@@ -69,6 +69,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `permission-resolved` | `projectId` `runId` `engineRef` `approved` | 权限确认落定（[#83](https://github.com/ZhangColin/aiplatform/issues/83)）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）；run 终态仍归 `run-finish`/`run-failed` |
 | `run-failed` | `projectId` `runId` | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` = 该场 run 的用户面标识（首试 runId——[#84](https://github.com/ZhangColin/aiplatform/issues/84) 重试不换新锚）。**run 失败为唯一失败终态**——重试全程静默（中间错误与重试信号不出用户面：无逐次 `error`、无重试 `run-start`），前端恢复出口只认本事件 |
 | `guide-reply` | `projectId` `runId` `prompt` `label` `text` | 兜底轻引导回复（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支）：非意见非咨询输入的平台侧定型引导文案——零产物路径（不起任何智能体 run，本事件即该次派发的全部）。`runId` 为派发锚；`prompt` 为锚定的用户输入（重放重建对话面用）；`label` 为呈现标签（「平台」）；`text` 为引导文案 |
+| `acceptance-start` | `projectId` `runId` | 受理开始（[#87](https://github.com/ZhangColin/aiplatform/issues/87) 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链轮）开场的受理事实，**对话区受理动作卡的呈现源**——意见已接住、主智能体正在受理（需求不清则追问；需求变更则改 PRD），衔接轮收口自动派的更新 run 工作消息（原派发阶段「更新 PRD 中」呈现位的归位，不设其余阶段事件依赖）。守卫全过后、受理动作前发射，先于该轮 `run-start` 到达（动作卡先出、解说随后，对话区连续可见）；受理落定**不出新事件**——由该轮 `run-finish` / `error` 收口事件推导（挂起-续跑是同一受理轮，不重发）。场景矩阵收口：咨询轮与纯追问轮（访谈期意见轮）不发 |
 
 #### 消息部件事件（`part-*`）
 

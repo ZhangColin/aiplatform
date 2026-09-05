@@ -34,6 +34,7 @@ export function usePostMessage(projectId: string) {
     onError: (error, _command, context) => {
       const chat = useChatStore.getState();
       if (context?.messageId) chat.removeMessage(projectId, context.messageId);
+      chat.removeTrailingAcceptance(projectId); // #87：受理事件已到而提交失败（REST 500）——尾卡随气泡同撤，不悬转
       chat.endTurn(projectId);
       toast.error(errorText(error, "发送失败，请稍后重试"));
     },

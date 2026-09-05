@@ -451,16 +451,68 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
 
   it("error / run-finish（对话 run）→ 收轮 + 中断提示", () => {
     dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "需求", agent: "main" }, "run1:2"));
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:3"),
     );
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "main-p1", finish: "end" }, "run1:4"),
     );
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
     expect(chat?.turnActive).toBe(false);
+  });
+
+  it("受理动作卡全轮序（#87）：意见 → acceptance-start 落卡（先于 run-start——服务端守卫后、受理动作前发）→ 追问挂起不落定 → 答复续跑收口（run-finish）落定——衔接更新 run 工作消息", () => {
+    // 镜面服务端 MainAgentAppServiceTest 脚本化受理轮（追问分岔）：事件序 =
+    // acceptance-start → run-start(agent=main) → 解说 → question-raised →
+    // （作答）run-finish → run-start(agent=executor，更新 run 工作消息起锚）
+    dispatchAgentEvent(agentQc, agentEvent("acceptance-start", { projectId: "p1", runId: "run1" }, "run1:1"));
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "把系统的主色调改成绿色", model: "m1", agent: "main" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "main-p1", data: { delta: "我来处理这个需求" } }, "run1:3"));
+    dispatchAgentEvent(agentQc,
+      agentEvent(
+        "question-raised",
+        {
+          projectId: "p1",
+          runId: "run1",
+          sessionId: "main-p1",
+          summary: "想要哪种绿?",
+          engineRef: "reply-7",
+          data: {
+            toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
+            questions: [{ header: "主色调", question: "想要哪种绿?", multiple: false, custom: true, options: [{ label: "薄荷绿" }] }],
+          },
+        },
+        "run1:4",
+      ),
+    );
+    let chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toEqual([
+      { kind: "user", id: expect.any(String), text: "把系统的主色调改成绿色" },
+      { kind: "acceptance", id: "run1:1", runId: "run1", settled: false },
+      { kind: "agent", id: expect.any(String), text: "我来处理这个需求", runId: "run1" },
+      expect.objectContaining({ kind: "question", runId: "run1" }),
+    ]);
+
+    // 答复续跑收口：run-finish 落定受理卡（受理完成）；随后更新 run 起跑（executor
+    // 工作消息）——对话区连续衔接
+    dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "main-p1", finish: "end" }, "run1:5"));
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run9", prompt: "系统更新：把主色调改为绿", model: "m1", agent: "executor" }, "run9:1"));
+
+    chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages[1]).toMatchObject({ kind: "acceptance", runId: "run1", settled: true });
+    expect(useWorkMessageStore.getState().works["p1"]).toMatchObject({ runId: "run9" });
+  });
+
+  it("受理轮失败（error）：受理卡落定不死转（#87——炸轮有中断提示兜底，卡不悬转）", () => {
+    dispatchAgentEvent(agentQc, agentEvent("acceptance-start", { projectId: "p1", runId: "run1" }, "run1:1"));
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "意见", model: "m1", agent: "main" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:3"));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages[1]).toMatchObject({ kind: "acceptance", runId: "run1", settled: true });
+    expect(chat?.messages.filter((m) => m.kind === "error")).toHaveLength(1);
   });
 });
 

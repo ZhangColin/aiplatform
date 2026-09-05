@@ -631,6 +631,101 @@ class MainAgentAppServiceTest {
         assertThat(fix.agentKey()).isEqualTo("executor"); // run-start 携配置键（引擎信息归一）
     }
 
+    // ---------- 受理动作卡（#87：受理轮过程呈现——迭代期意见轮开场受理事件） ----------
+
+    @Test
+    void given_scripted_acceptance_round_when_opinion_then_acceptance_event_then_fix_run() {
+        // 灵魂用例（#87 验收①）：意见 → 受理事件（受理动作卡呈现源）→ 主智能体受理
+        // （改 PRD——savePrd 事实）→ 收口自动派更新 run（衔接工作消息）。受理事件
+        // 锚定本轮 runId、恰一次，且先于受理动作本身发出（意见已接住的动作卡先出，
+        // 解说随后——对话区连续可见的呈现序）
+        Long projectId = persistedGeneratedProject("9760");
+        givenSessionExecutorRunsInline();
+        givenConverseMainSavesPrdAndExecutorFinishes("主色调约定改为绿");
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+
+        InOrder order = inOrder(eventsAppService, agentClient);
+        order.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.ACCEPTANCE_START),
+                argThat(payload -> projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
+                        && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
+        order.verify(agentClient, times(2)).converse(any(), any());
+        // 衔接：受理轮收口自动派更新 run（executor 配置键 = 工作消息的呈现锚）
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).agentKey()).isEqualTo("executor");
+    }
+
+    @Test
+    void given_scripted_acceptance_with_question_when_answer_settles_then_acceptance_event_once_and_fix_run() {
+        // 灵魂用例（#87 验收①追问分岔）：意见 → 受理事件 → 追问挂起（需求不清则
+        // 追问——挂起期间不派）→ 答复续跑收口（改 PRD 落定）→ 派更新 run。挂起-
+        // 续跑是同一受理轮的过程：受理事件全程恰一次、锚定意见轮 runId（续跑不重发卡）
+        Long projectId = persistedGeneratedProject("9761");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) { // 意见轮：以追问挂起
+                Consumer<AgentEvent> sink = invocation.getArgument(1);
+                sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
+                        new java.util.LinkedHashMap<>(Map.of(
+                                "runId", command.runId(),
+                                AgentEventTypes.WAIT_SUMMARY_FIELD, "主色调想要哪种绿？"))));
+                return new AgentReply(command.runId(), "先问一下");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
+            AgentResume resume = invocation.getArgument(0);
+            prdRevisions.record(resume.workspaceId(), "主色调约定改为绿"); // 答复后落 PRD 修订
+            return new AgentReply(resume.runId(), "已按答复修订 PRD");
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 提交守卫：放行本轮
+                .thenReturn(true)   // 意见轮收口观测：挂起在即 → 不派
+                .thenReturn(false); // 答复续跑收口观测：无挂起 → 派
+        when(agentClient.hasAskingToolCall(any(), argThat(s -> s != null && !s.startsWith("main-"))))
+                .thenReturn(false); // 其余会话（防御面默认值，不影响脚本序）
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+        appService.answerQuestion(projectId, run.runId(), "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "要薄荷绿");
+
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.ACCEPTANCE_START),
+                argThat(payload -> projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
+                        && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).agentKey()).isEqualTo("executor");
+    }
+
+    @Test
+    void given_not_generated_project_when_opinion_turn_then_no_acceptance_event() {
+        // 场景矩阵（#87 验收②）：纯追问轮（访谈期意见轮——受理对象尚不存在，轮的
+        // 形态是每轮一问的追问梳理）不出受理动作卡
+        Long projectId = persistedProject("9762");
+        givenSessionExecutorRunsInline();
+
+        appService.runOpinionTurn(projectId, "把主色调改成绿色");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.ACCEPTANCE_START), anyMap());
+    }
+
+    @Test
+    void given_inquiry_when_answered_then_no_acceptance_event() {
+        // 场景矩阵（#87 验收②）：咨询轮（零产物短路——同会话直答）不出受理动作卡
+        Long projectId = persistedGeneratedProject("9763");
+        givenSessionExecutorRunsInline();
+
+        appService.answerInquiry(projectRepository.findById(projectId).orElseThrow(),
+                "系统的访问地址是什么？");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.ACCEPTANCE_START), anyMap());
+    }
+
     // ---------- 交接物补齐（#52：需求侧判定结果入修正 run） ----------
 
     @Test

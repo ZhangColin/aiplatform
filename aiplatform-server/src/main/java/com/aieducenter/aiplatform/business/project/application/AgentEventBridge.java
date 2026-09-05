@@ -99,6 +99,32 @@ public class AgentEventBridge {
                 AgentEventTypes.PERMISSION_APPROVED_FIELD, approved));
     }
 
+    /**
+     * acceptance-start 发射（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理
+     * 事实——意见已接住、主智能体正在受理（追问或改 PRD 的过程呈现位，衔接收口
+     * 自动派的更新 run 工作消息）。纯呈现事件：受理落定不出新事件（该轮
+     * run-finish / error 即收口）；发射走 {@link #publishQuietly}——失败只记日志
+     * 不断受理（其余 emit* 是语义关键事件，失败如实上抛不静默）。
+     */
+    public void emitAcceptanceStarted(Long projectId, String runId) {
+        publishQuietly(AgentEventTypes.ACCEPTANCE_START, Map.of(
+                EventsAppService.PROJECT_FIELD, projectId.toString(),
+                EventsAppService.RUN_FIELD, runId));
+    }
+
+    /**
+     * 纯呈现事件的静默发射（#87）：失败只记日志不上抛——呈现面失败不牵连受理/
+     * 对话本身（SSE 是「让 UI 活」的面，不承担正确性；sink 护栏同款，收拢单点）。
+     */
+    private void publishQuietly(String type, Map<String, Object> payload) {
+        try {
+            eventsAppService.publishAgentEvent(type, payload);
+        }
+        catch (RuntimeException e) {
+            log.warn("[agent-event] 事件发射失败（{}）：{}", type, e.getMessage());
+        }
+    }
+
     /** 关联字段注入（透传不解释；事件序在前——寻址字段不覆盖事件本体字段）。 */
     private static Map<String, Object> withCorrelation(Map<String, Object> payload,
                                                        Map<String, Object> correlation) {

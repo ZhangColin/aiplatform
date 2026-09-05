@@ -192,6 +192,16 @@ export type PlatformAgentEvent =
       payload: AgentPayload & { prompt: string; label: string; text: string };
     }
   | {
+      /**
+       * 受理开始（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理事实——意见
+       * 已接住、主智能体正在受理（追问或改 PRD）。对话区受理动作卡的呈现源；受理
+       * 落定不出新事件（该轮 run-finish / error 推导）。场景矩阵：咨询轮与纯追问轮
+       * （访谈期意见轮）服务端不发。
+       */
+      type: "acceptance-start";
+      payload: AgentPayload;
+    }
+  | {
       /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
       type: "part-text";
       payload: AgentPayload & { engine: string; text: string };
@@ -239,6 +249,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "permission-resolved",
   "run-failed",
   "guide-reply",
+  "acceptance-start",
   "part-text",
   "part-action",
   "part-step",

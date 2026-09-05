@@ -256,6 +256,13 @@ public class MainAgentAppService {
         requireNoPendingQuestion(project, sessionId);
 
         String runId = EventsAppService.newRunId();
+        // 受理动作卡（#87）：迭代期意见轮（受理轮）开场即发受理事件——意见已接住、
+        // 主智能体正在受理（追问或改 PRD 的过程呈现位，衔接轮收口自动派的更新 run
+        // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
+        // 轮走 {@link #answerInquiry}，场景矩阵均无卡
+        if (project.isGenerated()) {
+            eventBridge.emitAcceptanceStarted(projectId, runId);
+        }
         AgentCommand command = mainCommand(project, runId, prompt);
         sessionExecutor.submit(sessionId, () -> {
             // 排队成轮（#54）：锚随任务落（同会话 FIFO——后发意见的 put 排在本轮

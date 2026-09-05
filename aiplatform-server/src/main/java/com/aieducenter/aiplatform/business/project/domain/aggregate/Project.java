@@ -166,6 +166,14 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         return ownerAccountId != null ? ownerAccountId.toString() : null;
     }
 
+    /**
+     * 系统已生成（迭代期判据——受理轮 / 修正 run 守卫与访谈期〔纯追问轮〕的分界）：
+     * {@link #markGenerated} 首次落值后恒真（幂等单向，无清位路径）。
+     */
+    public boolean isGenerated() {
+        return generatedAt != null;
+    }
+
     @PrePersist
     void prePersist() {
         if (id == null) {

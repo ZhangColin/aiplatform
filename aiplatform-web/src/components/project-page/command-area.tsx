@@ -1,11 +1,13 @@
 "use client";
 
-import { FileText, Lock, TriangleAlert } from "lucide-react";
+import { Check, FileText, Inbox, Lock, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Composer } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import type { LockRow } from "@/lib/orders/lock";
@@ -204,10 +206,13 @@ export function CommandArea({
   );
 }
 
-/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/错误提示/平台引导左对齐。 */
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/受理动作卡/错误提示/平台引导左对齐。 */
 function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
+  }
+  if (message.kind === "acceptance") {
+    return <AcceptanceRow message={message} />;
   }
   if (message.kind === "error") {
     return (
@@ -246,5 +251,29 @@ function Dot({ delay }: { delay: string }) {
       className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70"
       style={{ animationDelay: delay }}
     />
+  );
+}
+
+/**
+ * 受理动作卡（#87 受理轮过程呈现）：意见已接住、正在受理的单行状态卡（形态同
+ * 工作消息动作行——图标 + 对象 + 状态）。受理中转圈（追问挂起期间保持——同一
+ * 受理轮仍在途）；该轮收口（run-finish / error 推导）落定为「意见已受理」，
+ * 衔接随后到达的更新 run 工作消息。
+ */
+function AcceptanceRow({ message }: { message: Extract<ChatMessage, { kind: "acceptance" }> }) {
+  return (
+    <div className="flex w-full justify-start">
+      <div className="flex w-full items-center gap-2 rounded-xl border border-foreground/10 px-3 py-2 text-sm">
+        <Inbox className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={cn("min-w-0 flex-1", message.settled && "text-muted-foreground")}>
+          {message.settled ? "意见已受理" : "已收到你的意见，正在处理"}
+        </span>
+        {message.settled ? (
+          <Check className="size-3.5 shrink-0 text-green-600" strokeWidth={3} />
+        ) : (
+          <Spinner className="size-3 shrink-0 text-muted-foreground" />
+        )}
+      </div>
+    </div>
   );
 }

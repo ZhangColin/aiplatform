@@ -5,7 +5,7 @@ import type { RaisedQuestion } from "@/lib/chat/qa";
 /**
  * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：按项目累积对话面（用户发言 / 智能体回复增量 / 问答卡 /
- * 平台轻引导），区别于 agent-runs 的「运行注册表」——对话史跨 run 常驻
+ * 平台轻引导 / 受理动作卡），区别于 agent-runs 的「运行注册表」——对话史跨 run 常驻
  * （store 是会话内存态，刷新后由事件流重放缓冲重建近期对话，用户作答文本
  * 不在流中、刷新即逝为 v1 取舍）。
  *
@@ -38,6 +38,18 @@ export type ChatMessage =
       label?: string;
       runId?: string;
     }
+  | {
+      /**
+       * 受理动作卡（#87）：受理轮（迭代期意见轮）开场的受理锚——意见已接住、
+       * 正在受理（追问或改 PRD 的过程呈现位，衔接更新 run 工作消息）。id = 受理
+       * 事件 id（重放去重）；落定（settled）由该轮收口事件推导（run-finish /
+       * error），挂起追问不落定（同一受理轮仍在途）。
+       */
+      kind: "acceptance";
+      id: string;
+      runId: string;
+      settled: boolean;
+    }
   | { kind: "error"; id: string; text: string }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
@@ -68,6 +80,10 @@ export type ChatState = {
   raiseQuestion: (projectId: string, runId: string | undefined, question: RaisedQuestion) => void;
   finishTurn: (projectId: string, runId: string | undefined) => void;
   noteTurnError: (projectId: string, runId: string, message: string, eventId: string) => void;
+  /** 受理动作卡落卡（#87；SSE 事件 id 只收一次——先于 run-start 到达，不设 run 登记）。 */
+  noteAcceptance: (projectId: string, runId: string, eventId: string) => void;
+  /** 受理卡落定（#87：该受理轮收口——run-finish / error；幂等，异 runId 无操作）。 */
+  settleAcceptance: (projectId: string, runId: string) => void;
   /** 平台轻引导落对话面（#47 兜底分支；prompt 重建用户气泡，SSE 事件 id 只收一次）。 */
   noteGuideReply: (
     projectId: string,
@@ -86,6 +102,9 @@ export type ChatState = {
   /** 发送失败收轮（无会话锚的落轮口，区别于 SSE 侧 finishTurn 的 runId 判定）。 */
   endTurn: (projectId: string) => void;
   removeMessage: (projectId: string, messageId: string) => void;
+  /** 发送失败撤尾卡（#87）：撤回乐观气泡时尾随的未落定受理卡一并撤——受理事件
+   *  先于提交失败发出时（REST 500），该轮无 run-finish/error 可落定，随气泡同撤。 */
+  removeTrailingAcceptance: (projectId: string) => void;
   /** 作答发送失败：撤回用户气泡 + 问题卡重开。 */
   reopenQuestion: (projectId: string) => void;
   markRunIngested: (projectId: string, runId: string) => void;
@@ -126,6 +145,27 @@ function lastIsSameUserText(chat: ProjectChat, text: string): boolean {
   return last !== undefined && last.kind === "user" && last.text === text;
 }
 
+/** 用户气泡落位（#87）：尾部的同 run 受理卡之前插入——重放重建时受理事件先于
+ *  run-start 到达，意见气泡仍落在其受理卡上方（卡承接的是这条意见）。 */
+function insertUserMessage(
+  chat: ProjectChat,
+  runId: string,
+  text: string,
+): ProjectChat {
+  const messages = [...chat.messages];
+  let insertAt = messages.length;
+  while (insertAt > 0) {
+    const prev = messages[insertAt - 1];
+    if (prev.kind === "acceptance" && prev.runId === runId) {
+      insertAt--;
+    } else {
+      break;
+    }
+  }
+  messages.splice(insertAt, 0, { kind: "user", id: localId(), text });
+  return { ...chat, messages };
+}
+
 export const useChatStore = create<ChatState>((set) => ({
   chats: {},
 
@@ -145,7 +185,9 @@ export const useChatStore = create<ChatState>((set) => ({
         turnActive: true,
       };
       if (!prompt || lastIsSameUserText(ingested, prompt)) return ingested;
-      return appendMessage(ingested, { kind: "user", id: localId(), text: prompt });
+      // 受理事件先于 run-start 到达（#87：服务端守卫后即发）——重放重建时用户
+      // 气泡插到本 run 受理卡之前（意见在卡上，卡承接的是这条意见）
+      return insertUserMessage(ingested, runId, prompt);
     }),
 
   appendAgentDelta: (projectId, runId, delta, eventId) =>
@@ -231,6 +273,32 @@ export const useChatStore = create<ChatState>((set) => ({
       });
     }),
 
+  noteAcceptance: (projectId, runId, eventId) =>
+    updateChat(set, projectId, (chat) => {
+      // 受理事件先于 run-start 到达（动作卡先出、解说随后）——不设 chatRunIds
+      // 登记，SSE 事件 id 即去重锚
+      if (chat.seenEventIds.includes(eventId)) return chat;
+      const seen = { ...chat, seenEventIds: pushCapped(chat.seenEventIds, eventId) };
+      return appendMessage(seen, {
+        kind: "acceptance",
+        id: eventId,
+        runId,
+        settled: false,
+      });
+    }),
+
+  settleAcceptance: (projectId, runId) =>
+    updateChat(set, projectId, (chat) => {
+      const target = chat.messages.find(
+        (message) => message.kind === "acceptance" && message.runId === runId && !message.settled,
+      );
+      if (!target) return chat; // 无该轮受理卡（咨询/纯追问轮）或已落定——幂等
+      const messages = chat.messages.map((message) =>
+        message === target ? { ...target, settled: true } : message,
+      );
+      return { ...chat, messages };
+    }),
+
   appendUserMessage: (projectId, text) => {
     const id = localId();
     updateChat(set, projectId, (chat) =>
@@ -264,6 +332,16 @@ export const useChatStore = create<ChatState>((set) => ({
       ...chat,
       messages: chat.messages.filter((message) => message.id !== messageId),
     })),
+
+  removeTrailingAcceptance: (projectId) =>
+    updateChat(set, projectId, (chat) => {
+      const last = chat.messages[chat.messages.length - 1];
+      if (last === undefined || last.kind !== "acceptance" || last.settled) return chat;
+      return {
+        ...chat,
+        messages: chat.messages.slice(0, -1),
+      };
+    }),
 
   reopenQuestion: (projectId) =>
     updateChat(set, projectId, (chat) => {

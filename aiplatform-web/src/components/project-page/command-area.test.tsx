@@ -118,6 +118,28 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("回答上面的问题");
   });
 
+  it("受理动作卡（#87）：受理中在意见下方呈现「正在处理」；落定（收口推导）转「意见已受理」", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把系统的主色调改成绿色" },
+      { kind: "acceptance", id: "run-1:1", runId: "run-1", settled: false },
+      { kind: "agent", id: "b1", text: "我来处理这个需求" },
+    ]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("已收到你的意见，正在处理");
+    expect(html.indexOf("把系统的主色调改成绿色")).toBeLessThan(
+      html.indexOf("已收到你的意见，正在处理"),
+    ); // 意见在卡上（卡承接这条意见）
+
+    seedChat([
+      { kind: "user", id: "u1", text: "把系统的主色调改成绿色" },
+      { kind: "acceptance", id: "run-1:1", runId: "run-1", settled: true },
+    ]);
+
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain("意见已受理");
+  });
+
   it("轮进行中：打字指示无角色前缀；无问题时常规输入条", () => {
     seedChat([{ kind: "user", id: "u1", text: "加个功能" }], true);
 

@@ -63,6 +63,74 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     expect(agents.find((m) => m.text === "我在这里帮您…")?.label).toBe("平台");
   });
 
+  it("受理动作卡（#87）：受理事件落卡（受理中）→ 该轮收口（run-finish/error）落定；重放同事件不重复；问答挂起不落定", () => {
+    playMainTurn("p1", "run-1", "把系统的主色调改成绿色");
+    const s = useChatStore.getState();
+    s.noteAcceptance("p1", "run-1", "run-1:0");
+    s.noteAcceptance("p1", "run-1", "run-1:0"); // 重放同事件 id 只收一次
+    s.appendAgentDelta("p1", "run-1", "我来处理这个需求", "run-1:3");
+    s.raiseQuestion("p1", "run-1", question("run-1:5")); // 追问挂起：受理仍在途，卡不落定
+    s.submitAnswer("p1", "要薄荷绿");
+    // 续跑收口：桥在收口事件处合成收轮 + 受理卡落定（受理完成——衔接更新 run
+    // 工作消息）；异 run 落定为无操作（每卡锚自己的受理轮）
+    s.finishTurn("p1", "run-1");
+    s.settleAcceptance("p1", "run-1");
+    s.settleAcceptance("p1", "run-9");
+
+    const chat = useChatStore.getState().chats["p1"];
+    const cards = chat?.messages.filter((m): m is Extract<ChatMessage, { kind: "acceptance" }> => m.kind === "acceptance");
+    expect(cards).toHaveLength(1);
+    expect(cards?.[0]).toMatchObject({ kind: "acceptance", runId: "run-1", settled: true });
+    // 呈现序：用户气泡 → 受理卡 → 解说（动作卡先于解说——意见已接住的反馈先出）
+    expect(chat?.messages.map((m) => m.kind)).toEqual(["user", "acceptance", "agent", "question", "user"]);
+  });
+
+  it("受理卡落定幂等（收口与失败事件双达不闪换）；error 落定同路（炸轮不死转）", () => {
+    useChatStore.getState().noteAcceptance("p1", "run-1", "run-1:0");
+    useChatStore.getState().settleAcceptance("p1", "run-1");
+    useChatStore.getState().settleAcceptance("p1", "run-1");
+
+    const cards = useChatStore.getState().chats["p1"]?.messages.filter(
+      (m): m is Extract<ChatMessage, { kind: "acceptance" }> => m.kind === "acceptance",
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards?.[0].settled).toBe(true);
+  });
+
+  it("发送失败撤尾卡（#87 code-review）：受理事件已到而提交失败——尾随未落定卡随乐观气泡同撤；已落定/非尾卡不动", () => {
+    const s = useChatStore.getState();
+    s.appendUserMessage("p1", "把系统的主色调改成绿色");
+    s.noteAcceptance("p1", "run-1", "run-1:0"); // 服务端守卫后发出、提交随即失败
+    s.removeTrailingAcceptance("p1");
+
+    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual(["user"]);
+
+    // 已落定的尾卡（历史轮）不撤；解说之后的卡非尾卡（受理在途的正常序）不撤
+    s.noteAcceptance("p1", "run-2", "run-2:0");
+    s.settleAcceptance("p1", "run-2");
+    s.removeTrailingAcceptance("p1");
+    s.noteChatRun("p1", "run-3");
+    s.noteAcceptance("p1", "run-3", "run-3:0");
+    s.appendAgentDelta("p1", "run-3", "受理中", "run-3:1"); // 解说落在卡后（正常序）
+    s.removeTrailingAcceptance("p1"); // 尾条是解说非卡 → 无操作
+
+    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual([
+      "user", "acceptance", "acceptance", "agent",
+    ]);
+  });
+
+  it("重放序：受理事件先于 run-start 到达时，用户气泡插到受理卡上方（#87——意见在卡上）", () => {
+    const s = useChatStore.getState();
+    s.noteChatRun("p1", "run-1");
+    s.noteAcceptance("p1", "run-1", "run-1:1"); // 服务端守卫后即发：事件序在前
+    s.ingestRunStart("p1", "run-1", "把系统的主色调改成绿色"); // 重放重建用户气泡
+    s.appendAgentDelta("p1", "run-1", "我来处理", "run-1:3");
+
+    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind)).toEqual([
+      "user", "acceptance", "agent",
+    ]);
+  });
+
   it("未登记 run 的 text / 问答 / finish 不进对话（runId 锚定；编码 run 的解说不进对话）", () => {
     playMainTurn("p1", "run-1", "需求");
 

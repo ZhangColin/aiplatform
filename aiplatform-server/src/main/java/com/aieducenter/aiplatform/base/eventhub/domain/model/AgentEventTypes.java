@@ -101,6 +101,16 @@ public final class AgentEventTypes {
      */
     public static final String GUIDE_REPLY = "guide-reply";
 
+    /**
+     * 受理开始（#87 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链
+     * 轮）开场的受理事实——意见已接住、主智能体正在受理（需求不清则追问；需求
+     * 变更则改 PRD）。对话区受理动作卡的呈现源（意见到更新 run 工作消息之间的
+     * 呈现位，原「更新 PRD 中」阶段的归位）；受理落定不出新事件——由该轮
+     * run-finish / error 收口事件推导（重放面随事件族重建）。场景矩阵收口：咨询
+     * 轮与纯追问轮（访谈期意见轮）不发。
+     */
+    public static final String ACCEPTANCE_START = "acceptance-start";
+
     /** 引导回复正文键（平台侧定型文案）。 */
     public static final String GUIDE_TEXT_FIELD = "text";
 

@@ -76,6 +76,7 @@ public class EventsController {
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish |
             | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
+            | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
             | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
             | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
             | part-step | 智能体·部件 | step（1 起序号） |

@@ -201,6 +201,24 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
+  it("acceptance-start 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「生命周期事件」acceptance-start 行（#87：受理动作卡——受理轮
+    // 开场受理事实，对话区动作卡呈现源）
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "acceptance-start",
+        payload: { projectId: "p1", runId: "r1" },
+        ts: "",
+      }),
+    );
+
+    expect(asPlatformAgentEvent(env!)).toMatchObject({
+      type: "acceptance-start",
+      payload: { projectId: "p1", runId: "r1" },
+    });
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it.each([
     {
       type: "part-text",

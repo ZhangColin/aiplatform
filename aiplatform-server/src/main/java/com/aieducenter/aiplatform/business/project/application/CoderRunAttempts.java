@@ -1,9 +1,15 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Component;
 
@@ -12,6 +18,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -61,6 +68,21 @@ class CoderRunAttempts {
     }
 
     /**
+     * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
+     * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = finish_edit 工具
+     * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本环
+     * 只拼装不判定。
+     */
+    record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
+            String systemNote) {
+
+        /** 生成轮判定：PRD 未动、系统产出（首次）。 */
+        static ClosingJudgment generation() {
+            return new ClosingJudgment(false, null, true, null);
+        }
+    }
+
+    /**
      * 一场编码 run 的收场事实：成败（终态收口事件 run-failed 的用户面锚 = 调用方
      * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）。
      */
@@ -88,9 +110,15 @@ class CoderRunAttempts {
 
     /**
      * 跑一场编码 run（有限次尝试）：成功收口即 {@code onSuccess}（收口回调携该次
-     * 尝试的 runId——修正收口事件锚定用；回调抛异常即该次尝试失败，走重试/终态——
-     * 收口判据不满足的既有口径，如生成 8081 核验 / 修正 finish_edit 事实）。项目
-     * 事实（工作区 / owner）从聚合派生。
+     * 尝试的 runId，返回收口判定的权威事实——#88 判定行；回调抛异常即该次尝试
+     * 失败，走重试/终态——收口判据不满足的既有口径，如生成 8081 核验 / 修正
+     * finish_edit 事实）。项目事实（工作区 / owner）从聚合派生。
+     *
+     * <p><b>收口扩载（#88）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
+     * 载荷——摘要（判定事实的合并叙事）/ 判定行（onSuccess 返回的权威事实）/ 变更
+     * 清单（{@link AgentReply#changes()} 的文件级观察，跨尝试同路径合并）/ 轮末
+     * 统计（时长 = 首试起跑到收口）。咨询/纯追问轮不经本环，run-finish 无扩载
+     * （无收尾卡）。</p>
      *
      * @param what       日志标签（generate / fix）
      * @param firstRunId 首试 runId（调用方预生成随响应回 = 用户面 run 身份，全程
@@ -99,11 +127,13 @@ class CoderRunAttempts {
      *                   事件 run-failed 锚首试 runId，与生成重新发起 / 修正恢复
      *                   出口（#48/#56）衔接
      */
-    RunResult run(Project project, String firstRunId, Prompts prompts, Consumer<String> onSuccess,
-            String what) {
+    RunResult run(Project project, String firstRunId, Prompts prompts,
+            Function<String, ClosingJudgment> onSuccess, String what) {
         Long projectId = project.getId();
         String knowledgePrefix = knowledgeAppService.dispatchInjection(prompts.first());
         int maxAttempts = properties.getMaxAttempts();
+        Instant runStartedAt = Instant.now();
+        List<FileChange> runChanges = new ArrayList<>();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
             AgentCommand command = new AgentCommand(
@@ -139,7 +169,11 @@ class CoderRunAttempts {
                     }
                     projection.accept(event);
                 };
-                settlePermissions(command, agentClient.converse(command, sink), sink, firstRunId);
+                List<FileChange> attemptChanges = new ArrayList<>();
+                AgentReply reply = agentClient.converse(command, sink);
+                attemptChanges.addAll(reply.changes());
+                settlePermissions(command, reply, sink, firstRunId, attemptChanges);
+                runChanges.addAll(attemptChanges);
                 // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 修正
                 // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
                 // 「检查中」、落定出结果，位于被押后的 run-finish 之前（收口前播报）。
@@ -148,8 +182,9 @@ class CoderRunAttempts {
                 //（超限转终态）时出，与轨道层 run-failed 同窗口。状态终值 = 探活结果，
                 // 随智能体事件族进重放缓冲，可被收尾统计消费（#88 轮末统计行）
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
+                ClosingJudgment judgment;
                 try {
-                    onSuccess.accept(attemptRunId);
+                    judgment = onSuccess.apply(attemptRunId);
                 }
                 catch (RuntimeException e) {
                     if (attempt == maxAttempts) {
@@ -159,7 +194,8 @@ class CoderRunAttempts {
                 }
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
-                    projection.accept(pendingFinish.get());
+                    projection.accept(withClosing(pendingFinish.get(), judgment, runChanges,
+                            runStartedAt, what));
                 }
                 return new RunResult(true);
             }
@@ -173,6 +209,67 @@ class CoderRunAttempts {
         return new RunResult(false);
     }
 
+    /** 日志标签（what）：生成轨——摘要口径分岔用。 */
+    private static final String GENERATE_LABEL = "generate";
+
+    /**
+     * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
+     * schema 见 SSE事件清单·收口扩载（对话史落库与版本锚定复用同一载荷）。
+     * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径跨尝试
+     * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。
+     */
+    private static AgentEvent withClosing(AgentEvent finish, ClosingJudgment judgment,
+            List<FileChange> changes, Instant runStartedAt, String what) {
+        Map<String, Object> closing = new LinkedHashMap<>();
+        closing.put("summary", closingSummary(judgment, what));
+        closing.put("prdChanged", judgment.prdChanged());
+        if (judgment.prdNote() != null) {
+            closing.put("prdNote", judgment.prdNote());
+        }
+        closing.put("systemChanged", judgment.systemChanged());
+        if (judgment.systemNote() != null) {
+            closing.put("systemNote", judgment.systemNote());
+        }
+        closing.put("files", filePayloads(changes));
+        closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
+        Map<String, Object> payload = new LinkedHashMap<>(finish.payload());
+        payload.put(AgentEventTypes.CLOSING_FIELD, closing);
+        return new AgentEvent(finish.type(), payload);
+    }
+
+    /** 摘要（判定事实的合并叙事——文档与系统不分侧，四类收口各一句）。 */
+    private static String closingSummary(ClosingJudgment judgment, String what) {
+        if (GENERATE_LABEL.equals(what)) {
+            return "首次生成了系统";
+        }
+        if (judgment.prdChanged() && judgment.systemChanged()) {
+            return "修订了需求文档，并更新了系统";
+        }
+        if (judgment.prdChanged()) {
+            return "修订了需求文档，系统无需改动";
+        }
+        if (judgment.systemChanged()) {
+            return "更新了系统";
+        }
+        return "本轮系统无需改动";
+    }
+
+    /** 变更清单载荷：同路径合并行数、按路径排序（呈现稳定，非时间序）。 */
+    private static List<Map<String, Object>> filePayloads(List<FileChange> changes) {
+        Map<String, int[]> merged = new TreeMap<>();
+        for (FileChange change : changes) {
+            int[] lines = merged.computeIfAbsent(change.path(), key -> new int[2]);
+            lines[0] += change.added();
+            lines[1] += change.removed();
+        }
+        return merged.entrySet().stream()
+                .map(entry -> Map.<String, Object>of(
+                        "path", entry.getKey(),
+                        "added", entry.getValue()[0],
+                        "removed", entry.getValue()[1]))
+                .toList();
+    }
+
     /**
      * 权限确认驻留与续跑（#83）：挂起（软终点）即等作答——批准/拒绝以 ConfirmResult
      * 续跑同 run（命令全要素同构，恢复私货从本环命令原样携带），续跑可再挂起
@@ -181,13 +278,16 @@ class CoderRunAttempts {
      *
      * @param userRunId 用户面 run 身份（首试 runId，#84）——挂起会合与作答校验的
      *                  锚，与投影后事件同锚（前端按所见 runId 作答）
+     * @param changes  本尝试的文件变更观察累积口（#88 收口扩载——续跑段的变更
+     *                  与首段同场，随 attempt 一并计入）
      */
     private AgentReply settlePermissions(AgentCommand command, AgentReply reply,
-            Consumer<AgentEvent> sink, String userRunId) {
+            Consumer<AgentEvent> sink, String userRunId, List<FileChange> changes) {
         while (reply.suspension() != null && reply.suspension().permission()) {
             AgentSuspension suspension = reply.suspension();
             boolean approved = permissions.await(suspension.engineRef(), userRunId);
             reply = agentClient.resume(permissionResume(command, suspension, approved), sink);
+            changes.addAll(reply.changes());
         }
         if (reply.suspension() != null) {
             throw new IllegalStateException(

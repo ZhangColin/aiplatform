@@ -14,8 +14,12 @@ import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.ModelCallEndEvent;
 import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallDeltaEvent;
+import io.agentscope.core.event.ToolCallEndEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.ToolCallState;
+import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.state.AgentStateStore;
@@ -129,7 +133,8 @@ public class AgentscopeAgentClient {
                     + ", model=" + prepared.modelRef().toModelString() + "）："
                     + result.error().getMessage(), result.error());
         }
-        return new AgentReply(command.runId(), result.text(), result.suspension());
+        return new AgentReply(command.runId(), result.text(), result.suspension(),
+                result.changes());
     }
 
     /**
@@ -168,7 +173,8 @@ public class AgentscopeAgentClient {
                     + ", model=" + prepared.modelRef().toModelString() + "）："
                     + result.error().getMessage(), result.error());
         }
-        return new AgentReply(resume.runId(), result.text(), result.suspension());
+        return new AgentReply(resume.runId(), result.text(), result.suspension(),
+                result.changes());
     }
 
     /**
@@ -223,13 +229,16 @@ public class AgentscopeAgentClient {
 
     // ---------- 内部 ----------
 
-    /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败）。 */
-    private record TurnResult(String text, AgentSuspension suspension, Throwable error) {
+    /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败；
+     *  changes = 本流段成功的文件变更事实——#88 收口扩载的观察面）。 */
+    private record TurnResult(String text, AgentSuspension suspension, Throwable error,
+            List<FileChange> changes) {
     }
 
-    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表）。 */
+    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表 +
+     * 文件变更事实观察面）。 */
     private record PreparedTurn(ModelRef modelRef, HarnessAgent agent, RuntimeContext ctx,
-            AgentscopeEventMapper mapper, AgentscopePartsMapper parts) {
+            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges) {
     }
 
     /**
@@ -280,7 +289,8 @@ public class AgentscopeAgentClient {
                 modelRef.toModelString(), workspace, spec.agentKey());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
-                new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE));
+                new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
+                new FileChangeFacts());
     }
 
     /**
@@ -301,6 +311,7 @@ public class AgentscopeAgentClient {
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
+                            prepared.fileChanges(),
                             sink, text, usage, finish, suspended, suspendedQuestion))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
@@ -309,17 +320,18 @@ public class AgentscopeAgentClient {
             if (suspension == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
-                return new TurnResult(text.toString(), null, null);
+                return new TurnResult(text.toString(), null, null, prepared.fileChanges().changes());
             }
             return new TurnResult(text.toString(), new AgentSuspension(
                     suspension.getReplyId(), suspendedQuestion.get(),
-                    toolCallFace(suspension)), null);
+                    toolCallFace(suspension)), null, prepared.fileChanges().changes());
         }
         catch (Exception e) {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
-            return new TurnResult(text.toString(), null, e);
+            return new TurnResult(text.toString(), null, e, List.of());
         }
+
         finally {
             reportUsage(usageIdempotencyKey, usage.get(), runId,
                     prepared.ctx().getSessionId(), prepared.modelRef(), usageContext);
@@ -348,7 +360,7 @@ public class AgentscopeAgentClient {
     }
 
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
-            AgentscopeEventMapper mapper, AgentscopePartsMapper parts,
+            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges,
             Consumer<AgentEvent> sink, StringBuilder text, AtomicReference<TokenUsage> usage,
             AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspended,
             AtomicReference<Boolean> suspendedQuestion) {
@@ -367,6 +379,17 @@ public class AgentscopeAgentClient {
             drainParts(parts, sink);
             sink.accept(mapper.suspension(confirm));
             return;
+        }
+        // 文件变更事实（#88 收口扩载）：写文件类工具的参数与结果边界——与部件
+        // 映射并行观察同一事件流（事实观察，非呈现）
+        if (event instanceof ToolCallDeltaEvent delta) {
+            fileChanges.onDelta(delta);
+        }
+        else if (event instanceof ToolCallEndEvent end) {
+            fileChanges.onCallEnd(end.getToolCallName(), end.getToolCallId());
+        }
+        else if (event instanceof ToolResultEndEvent end) {
+            fileChanges.onResultEnd(end.getToolCallId(), end.getState() == ToolResultState.SUCCESS);
         }
         mapper.finishToken(event).ifPresent(finish::set);
         AgentEvent frame = mapper.map(event);

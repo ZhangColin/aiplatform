@@ -7,7 +7,7 @@ import { useAgentRunsStore } from "@/lib/store/agent-runs";
 import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore } from "@/lib/store/work-message";
+import { useWorkMessageStore, type WorkClosing } from "@/lib/store/work-message";
 import { orderStatusToastText } from "@/lib/orders/status";
 
 import type { SseEvent } from "./connection";
@@ -225,8 +225,9 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 受理卡落定（#87）：受理轮收口（受理完成——追问挂起轮不发本事件，挂起
         // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接
         chat.settleAcceptance(payload.projectId, payload.runId);
-        // 工作消息定格（run 收口 = 消息定格；非锚定 run 的收口在 store 内忽略）
-        work.freezeWork(payload.projectId, payload.runId, at);
+        // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88
+        // 收尾卡权威事实，非锚定 run 的收口在 store 内忽略）
+        work.freezeWork(payload.projectId, payload.runId, at, closingOf(payload.closing));
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFinish(payload.projectId, event.id);
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
@@ -321,6 +322,36 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/**
+ * closing 载荷的容错收窄（#88 收尾卡）：payload 为线上数据，类型镜像只做信任
+ * 转型、缺字段容错归消费端——此处只兜「closing 键非对象」的形状异常（异常形状
+ * 视同无收尾卡，工作消息保持定格流水，不出坏卡）；files 非数组回落空清单。
+ */
+function closingOf(closing: unknown): WorkClosing | undefined {
+  const record = asRecord(closing);
+  if (!record) return undefined;
+  return {
+    summary: typeof record.summary === "string" ? record.summary : "",
+    prdChanged: record.prdChanged === true,
+    prdNote: typeof record.prdNote === "string" ? record.prdNote : undefined,
+    systemChanged: record.systemChanged === true,
+    systemNote: typeof record.systemNote === "string" ? record.systemNote : undefined,
+    files: Array.isArray(record.files)
+      ? record.files.flatMap((file) => {
+          const entry = asRecord(file);
+          return entry && typeof entry.path === "string"
+            ? [{
+                path: entry.path,
+                added: typeof entry.added === "number" ? entry.added : 0,
+                removed: typeof entry.removed === "number" ? entry.removed : 0,
+              }]
+            : [];
+        })
+      : [],
+    durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
+  };
 }
 
 /** 信封 ts → ms（坏值回落客户端时钟：时长粗对齐总好过锚丢失）。 */

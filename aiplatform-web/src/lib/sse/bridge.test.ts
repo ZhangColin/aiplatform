@@ -990,3 +990,97 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     queryClient.clear();
   });
 });
+
+describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#88）", () => {
+  beforeEach(() => {
+    useAgentRunsStore.setState({ runs: {}, order: [] });
+    useChatStore.setState({ chats: {} });
+    useGenerationStore.setState({ generations: {} });
+    useWorkMessageStore.setState({ works: {} });
+  });
+
+  function agentEvent(
+    type: string,
+    payload: Record<string, unknown>,
+    id: string,
+    ts = "",
+  ): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts }) };
+  }
+
+  const closing = {
+    summary: "修订了需求文档，并更新了系统",
+    prdChanged: true,
+    prdNote: "配送范围改为全国",
+    systemChanged: true,
+    systemNote: "下单页新增配送范围说明",
+    files: [
+      { path: "/src/App.jsx", added: 4, removed: 0 },
+      { path: "/src/pages/Orders.jsx", added: 12, removed: 3 },
+    ],
+    durationMs: 183_420,
+  };
+
+  /**
+   * 镜面服务端断言（IterationAppServiceTest·given_scripted_update_round_when_fix_
+   * closes_then_run_finish_carries_authoritative_closing）：编码 run 真收口的
+   * run-finish 携 closing——工作消息定格为收尾卡（权威事实入 store、过程部件
+   * 退场），判定行不由前端推导。
+   */
+  it("编码 run 收口携 closing：收尾卡权威事实落 store、过程明细清空（收尾卡即凝聚物）", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "系统修正：下单页加配送范围说明", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在更新下单页" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "passed" }, "run1:3"));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { ...base, finish: "end", closing },
+      "run1:4",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.frozen).toBe(true);
+    expect(work?.closing).toEqual(closing);
+    expect(work?.parts).toEqual([]);
+  });
+
+  it("咨询/纯追问轮 run-finish 无 closing：不产收尾卡（对话面照常收轮）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "run1", prompt: "系统现在什么状态？", model: "m", agent: "main" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { projectId: "p1", runId: "run1", sessionId: "main-p1", finish: "end" },
+      "run1:2",
+    ));
+
+    // 主智能体轮不锚工作消息（对话面走气泡）——无收尾卡可言
+    expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
+    expect(useChatStore.getState().chats["p1"]?.messages.length).toBeGreaterThan(0);
+  });
+
+  it("closing 形状异常（非对象）：视同无收尾卡，工作消息保持定格流水不出坏卡", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在做" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { ...base, finish: "end", closing: "坏形状" },
+      "run1:3",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.closing).toBeUndefined();
+    expect(work?.parts).toHaveLength(1);
+  });
+});

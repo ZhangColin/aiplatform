@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { useAnswerPermission } from "@/hooks/use-answer-permission";
 import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
+import { ClosingCard } from "./closing-card";
+
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / command；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   write_file: <FileCode2 className="size-3.5" />,
@@ -25,7 +27,8 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
  * 确认卡（#83：需批准的工具操作，批准/拒绝即续跑——与问答卡分形态）+ 自检播报
  * 行（#85：收口判据核验「正在检查系统 → ✅/❌」）。思考与
  * 代码不播、无进度条/百分比；run 开始即出现（空部件也出「正在做」头部），
- * 收口定格（头部与打字点退场、时长停跳，部件留驻凝聚物收尾卡前的定格态）。
+ * 成功收口定格为收尾卡（#88：closing 在场即凝聚物呈现，过程部件已退场），
+ * 失败定格（run-failed）流水留驻。
  * 计时 tick 归组件局部（UI 关注，非流状态——同 run-elapsed 先例）。
  */
 export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId: string }) {
@@ -37,6 +40,9 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
     return () => clearInterval(timer);
   }, [growing, work.runId]);
 
+  // 收尾卡（#88 定格收口）：成功收口的凝聚物——过程部件已清，本卡即消息的收尾
+  // 部件（不是另起的卡）
+  if (work.closing) return <ClosingCard closing={work.closing} />;
   // 定格且无部件（run 起跑即死）：空壳不占位
   if (work.frozen && work.parts.length === 0) return null;
   // 未终态动作的时长冻结锚：定格时刻（定格后不再随 tick 走）

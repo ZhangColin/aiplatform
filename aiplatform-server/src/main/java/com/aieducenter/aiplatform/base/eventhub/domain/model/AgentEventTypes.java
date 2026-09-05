@@ -28,8 +28,21 @@ public final class AgentEventTypes {
     /** 失败事件的用户侧消息键。 */
     public static final String ERROR_MESSAGE_FIELD = "message";
 
-    /** 运行结束（finish = 引擎结煞语，如 end / error）。 */
+    /**
+     * 运行结束（finish = 引擎结煞语，如 end / error）。编码 run 在收口判据落定后
+     * 扩载 {@link #CLOSING_FIELD}（#88 收尾卡——服务端权威的摘要/判定行/变更清单/
+     * 轮末统计，schema 见 SSE事件清单·收口扩载节）；主智能体对话轮（咨询/纯追问）
+     * 不携带——无收尾卡。
+     */
     public static final String RUN_FINISH = "run-finish";
+
+    /**
+     * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
+     * systemChanged, systemNote?, files[{path,added,removed}], durationMs }——
+     * 对话史落库（#89）与版本锚定（#91）复用同一载荷。判定与清单以平台可观测
+     * 事实为准（工具调用/探活），不由模型自报。
+     */
+    public static final String CLOSING_FIELD = "closing";
 
     /**
      * 智能体挂起提问（ask_user 触发，#83 起纯 QUESTION——权限确认已拆独立事件

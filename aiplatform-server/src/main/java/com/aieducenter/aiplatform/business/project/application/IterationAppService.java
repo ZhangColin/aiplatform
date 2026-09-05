@@ -223,9 +223,11 @@ public class IterationAppService {
             FixHandoff handoff = firstHandoff;
             String runId = firstRunId;
             while (true) {
+                // 循环内再赋值的局部不进 lambda：本场交接物取逐轮快照（判定行随场）
+                FixHandoff currentHandoff = handoff;
                 CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
-                        attemptRunId -> closeFixRun(project, attemptRunId), "fix");
+                        attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff), "fix");
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (this) {
@@ -274,12 +276,16 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46）：以 finish_edit 工具事实为准——无事实 = run 未正常收口，抛出
-     * 即该次尝试失败（走共用尝试环的静默重试/终态，与生成 8081 核验同口径）；
-     * changed=false（判定无需改动）的呈现归收口扩载权威化（#88 收尾卡判定行），
-     * 本层只记事实日志。
+     * 修正收口（#46 + #88 判定行）：以 finish_edit 工具事实为准——无事实 = run 未
+     * 正常收口，抛出即该次尝试失败（走共用尝试环的静默重试/终态，与生成 8081 核验
+     * 同口径）；事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
+     * changed + 说明，PRD 改没改 = 本场交接物各轮的修订说明（null = 未修订轮；
+     * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
+     * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
+     * （#88 收尾卡判定行），本层只记事实日志。
      */
-    private void closeFixRun(Project project, String attemptRunId) {
+    private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
+            FixHandoff handoff) {
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
@@ -291,6 +297,15 @@ public class IterationAppService {
             log.info("[fix] 项目 {} 修正收口：系统未动（{}）——判定呈现归收口扩载（#88）",
                     project.getId(), fact.text());
         }
+        List<String> prdNotes = handoff.rounds().stream()
+                .map(FixHandoff.Round::prdRevisionSummary)
+                .filter(summary -> summary != null && !summary.isBlank())
+                .toList();
+        return new CoderRunAttempts.ClosingJudgment(
+                !prdNotes.isEmpty(),
+                prdNotes.isEmpty() ? null : String.join("；", prdNotes),
+                fact.changed(),
+                fact.text());
     }
 
     /**

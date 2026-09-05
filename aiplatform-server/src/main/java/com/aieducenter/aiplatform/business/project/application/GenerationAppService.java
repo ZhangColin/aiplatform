@@ -168,7 +168,12 @@ public class GenerationAppService {
     private void runAttemptsWithRetry(Project project, String firstRunId) {
         CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
                 new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
-                runId -> markGeneratedIfReachable(project), "generate");
+                runId -> {
+                    markGeneratedIfReachable(project);
+                    // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体
+                    // 先行写出）、系统产出（8081 探活收口事实）
+                    return CoderRunAttempts.ClosingJudgment.generation();
+                }, "generate");
         if (!result.succeeded()) {
             // run-failed 锚 = 该场 run 的用户面标识（首试 runId，#84 重试不换新锚）
             eventBridge.emitRunFailed(project.getId(), firstRunId);

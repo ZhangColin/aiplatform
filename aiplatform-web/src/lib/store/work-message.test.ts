@@ -371,3 +371,72 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     expect(work()?.parts).toEqual([]);
   });
 });
+
+describe("work-message store · 定格收尾卡（#88 收口扩载）", () => {
+  const closing = {
+    summary: "修订了需求文档，并更新了系统",
+    prdChanged: true,
+    prdNote: "配送范围改为全国",
+    systemChanged: true,
+    systemNote: "下单页新增配送范围说明",
+    files: [{ path: "/src/App.jsx", added: 4, removed: 0 }],
+    durationMs: 183_420,
+  };
+
+  it("freezeWork 携 closing：收尾部件在场、过程部件清空（明细不常驻——收尾卡即凝聚物）", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
+    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), {
+      kind: "action",
+      toolCallId: "tc-1",
+      toolName: "write_file",
+      state: "completed",
+      label: "编写【订单管理】",
+    });
+
+    freezeWork("p1", "r1", 183_420, closing);
+
+    expect(work()).toMatchObject({ frozen: true, frozenAt: 183_420, closing });
+    expect(work()?.parts).toEqual([]);
+  });
+
+  it("无 closing 定格（run-failed）：流水留驻、无收尾卡（恢复出口归生成面）", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
+
+    freezeWork("p1", "r1", 9_000);
+
+    expect(work()?.closing).toBeUndefined();
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("已定格再收 closing（重放序防御）：忽略不换装；非锚定 run 的 closing 忽略", () => {
+    const { startWork, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    freezeWork("p1", "r1", 5_000);
+
+    freezeWork("p1", "r1", 6_000, closing);
+    expect(work()?.closing).toBeUndefined();
+
+    freezeWork("p1", "r9", 7_000, closing);
+    expect(work()?.runId).toBe("r1");
+  });
+
+  it("下一场编码 run 重开：上一场收尾卡随旧消息退场（对话史承载归 #89）", () => {
+    const { startWork, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    freezeWork("p1", "r1", 5_000, closing);
+
+    startWork("p1", "r2", 20_000);
+
+    expect(work()).toEqual({
+      runId: "r2",
+      startedAt: 20_000,
+      frozen: false,
+      parts: [],
+      seenEventIds: [],
+    });
+  });
+});

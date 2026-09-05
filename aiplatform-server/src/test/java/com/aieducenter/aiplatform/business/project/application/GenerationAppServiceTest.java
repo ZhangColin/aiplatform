@@ -38,6 +38,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -414,6 +415,42 @@ class GenerationAppServiceTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNotNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_scripted_generation_when_closes_then_run_finish_carries_generation_closing() {
+        // #88 收口扩载·生成轮：收尾卡权威事实随 run-finish 到达——PRD 未动（生成不
+        // 改 PRD）、系统产出（8081 探活收口事实）、变更清单 = 工具调用观察、时长在场
+        Long projectId = persistedProject("9816");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                    "prompt", command.prompt(), "model", "m", "role", "CODER")));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(), Map.of(
+                    AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成", null, List.of(
+                    new FileChange("/src/App.jsx", 40, 0),
+                    new FileChange("/src/pages/Home.jsx", 60, 0)));
+        });
+
+        appService.startGeneration(projectId);
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing)
+                .containsEntry("summary", "首次生成了系统")
+                .containsEntry("prdChanged", false)
+                .containsEntry("systemChanged", true);
+        assertThat(closing).doesNotContainKey("prdNote").doesNotContainKey("systemNote");
+        assertThat((List<Map<String, Object>>) closing.get("files")).hasSize(2);
+        assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }
 
     @Test

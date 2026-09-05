@@ -107,6 +107,28 @@ type AgentPayload = {
   sessionId?: string;
 };
 
+/** 收口扩载的文件条目（正本 closing.files 元素）：path = 工作区锚定形，行数为活动量口径。 */
+export type SseClosingFile = {
+  path: string;
+  added: number;
+  removed: number;
+};
+
+/**
+ * 收口扩载（#88 正本 closing schema）：收尾卡的服务端权威事实——摘要/判定行
+ * （PRD/系统改没改 + 各自说明）/变更清单（文件级）/轮末统计（时长；文件数与
+ * 变更行数由 files 派生）。判定与清单以平台可观测事实为准，不由模型自报。
+ */
+export type SseClosing = {
+  summary: string;
+  prdChanged: boolean;
+  prdNote?: string;
+  systemChanged: boolean;
+  systemNote?: string;
+  files: SseClosingFile[];
+  durationMs: number;
+};
+
 export type PlatformAgentEvent =
   | {
       /** 运行开始：一场 run 恰一次（#84 静默重试——编码 run 重试不新发，用户面
@@ -128,9 +150,11 @@ export type PlatformAgentEvent =
   | { type: "error"; payload: AgentPayload & { message: string } }
   | {
       /** 运行结束：到达即真收口（#84——编码 run 在收口判据落定后才发，一场至多
-       * 一次、中场无假收口）；挂起轮不发（软终点）。 */
+       * 一次、中场无假收口）；挂起轮不发（软终点）。编码 run 真收口携带 `closing`
+       * （#88 收口扩载——收尾卡的服务端权威事实，四要素 schema 见正本）；主智能体
+       * 对话轮（咨询/纯追问）不携带——无收尾卡。 */
       type: "run-finish";
-      payload: AgentPayload & { sessionId: string; finish: string };
+      payload: AgentPayload & { sessionId: string; finish: string; closing?: SseClosing };
     }
   | {
       /**

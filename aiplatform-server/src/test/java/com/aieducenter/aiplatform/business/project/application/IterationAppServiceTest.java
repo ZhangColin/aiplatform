@@ -42,6 +42,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -623,6 +624,91 @@ class IterationAppServiceTest {
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
+    }
+
+    // ---------- 收口扩载（#88：判定行 + 变更清单 + 轮末统计，服务端权威） ----------
+
+    /**
+     * 脚本化收口轮（#88 验收缝）：真实事件序（run-start → 解说部件 → run-finish）
+     * + finish_edit 事实 + 回复携带文件变更观察（真实客户端的 AgentReply.changes 面）。
+     */
+    private void givenConverseClosing(Boolean changed, String finishEditText,
+            List<FileChange> changes) {
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(),
+                    Map.of(AgentEventTypes.PART_TEXT_FIELD, "正在按意见更新系统")));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            finishFixFacts.record(command.workspaceId(), changed, finishEditText);
+            return new AgentReply(command.runId(), "修正完成", null, changes);
+        });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
+        // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
+        // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、
+        // 系统改没改 = finish_edit 工具事实，不由模型自报）；清单与统计源 = 工具
+        // 调用观察（文件级）+ run 时长
+        Long projectId = persistedGeneratedProject("9915");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
+                new FileChange("/src/pages/Orders.jsx", 12, 3),
+                new FileChange("/src/App.jsx", 4, 0)));
+
+        appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        // 扩载随被押后的 run-finish 一体到达（收口判据落定后——真收口才扩载）
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing)
+                .containsEntry("summary", "修订了需求文档，并更新了系统")
+                .containsEntry("prdChanged", true)
+                .containsEntry("prdNote", "配送范围改为全国")
+                .containsEntry("systemChanged", true)
+                .containsEntry("systemNote", "下单页新增配送范围说明");
+        // 变更清单：文件级、路径排序稳定
+        assertThat((List<Map<String, Object>>) closing.get("files")).containsExactly(
+                Map.of("path", "/src/App.jsx", "added", 4, "removed", 0),
+                Map.of("path", "/src/pages/Orders.jsx", "added", 12, "removed", 3));
+        // 轮末统计：时长在场（≥0——起跑到收口的活动量，非墙钟断言）
+        assertThat(closing.get("durationMs")).isInstanceOf(Long.class);
+        assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_finish_edit_unchanged_when_fix_closes_then_closing_judgment_reflects_reason() {
+        // 判定行的另一半（#88）：系统无需改动——原因随判定行权威承载（旧「编辑无
+        // 变化」前端推导退役，权威值到位）；无修订说明的轮 prdChanged=false
+        Long projectId = persistedGeneratedProject("9916");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseClosing(false, "页面上没有写死配送范围，都以文档为准", List.of());
+
+        appService.startFixRun(projectId, "把配送范围改成全国", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing)
+                .containsEntry("summary", "本轮系统无需改动")
+                .containsEntry("prdChanged", false)
+                .containsEntry("systemChanged", false)
+                .containsEntry("systemNote", "页面上没有写死配送范围，都以文档为准");
+        assertThat(closing).doesNotContainKey("prdNote");
+        assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
     }
 
     // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------

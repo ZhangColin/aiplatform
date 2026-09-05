@@ -63,7 +63,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 |---|---|---|
 | `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
 | `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
-| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口） |
+| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡 |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 起纯 QUESTION——权限确认已拆独立事件）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
 | `permission-required` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 权限确认挂起（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 事件拆分，词根 = 引擎权限确认原语 RequireUserConfirmEvent 的非提问面）：run 执行中需用户批准的工具操作（危险命令 → 确认卡长在工作消息流，批准/拒绝两个动作）。`summary` = 首工具的命令文本（截断保短，确认卡摘要行）；`data.toolCalls` = 待确认工具最小面（确认卡呈现待批准操作的依据）。**作答走权限作答通道**（`POST /api/projects/{id}/permissions/{ref}/answer`，ref=engineRef；与问答作答分家——互不串扰）；生产触发面 = 平台侧 `command` 工具的破坏性命令自检（封闭小表：递归强删/提权/格式化与裸写设备/关机族/fork 炸弹） |
 | `permission-resolved` | `projectId` `runId` `engineRef` `approved` | 权限确认落定（[#83](https://github.com/ZhangColin/aiplatform/issues/83)）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）；run 终态仍归 `run-finish`/`run-failed` |
@@ -80,6 +80,32 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `part-step` | `projectId` `runId` `sessionId` `engine` `step` | 步骤分组部件：`step` 为流段内序号（1 起，模型调用边界），呈现为「第 N 步」分组头；问答续跑为新流段重新起算 |
 | `part-check` | `projectId` `runId` `sessionId` `state` | 自检播报部件（[#85](https://github.com/ZhangColin/aiplatform/issues/85)：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的呈现——**平台侧产出**（不经引擎部件映射表，收口判据是平台事实：生成 = 8081 探活、更新 = finish_edit 收口事实），核验开始发 `checking`、落定发 `passed`/`failed`。静默重试同构口径（#84）：尝试间核验未过**不发 `failed`**——部件停在 `checking`（重试信号不外泄，重复 `checking` 幂等）；`failed` 仅在末次尝试未过（超限转终态）时发，与 `run-failed` 同窗口到达。状态终值（passed/failed）= 探活结果，可被收尾统计消费（#88 轮末统计行） |
 | `part-attachment` | —— | **契约预留**（无生产方，[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地时启用）：消息附件部件——圈注锚随消息发送的载荷位，schema 见[下节](#消息附件部件锚载荷-schema预留97) |
+
+#### 收口扩载 closing schema（#88）
+
+run-finish 的 `closing` 对象——收尾卡（工作消息定格后的收尾部件，非另起的卡）的唯一权威事实源，**对话史落库（#89）与版本锚定（#91）复用同一载荷**。判定与清单以平台可观测事实为准（工具调用/探活），不由模型自报：
+
+```
+closing: {
+  summary:      "本轮做了什么（判定事实的合并叙事，文档与系统不分侧）"  # 四类收口各一句：
+                #   首次生成了系统 / 修订了需求文档，并更新了系统 / 修订了需求文档，系统无需改动
+                #   / 更新了系统 / 本轮系统无需改动
+  prdChanged:   true | false        # 判定行·PRD 改没改（更新轮 = 交接物修订说明事实；生成轮恒 false）
+  prdNote:      "修订说明"          # 可缺省——未修订/无说明（多轮排队合并以「；」连缀）
+  systemChanged: true | false       # 判定行·系统改没改（更新轮 = finish_edit 工具事实；生成轮 = 探活收口产出）
+  systemNote:   "改了什么/为什么无需改"  # 可缺省（生成轮无；更新轮 = finish_edit 必带说明）
+  files: [                         # 变更清单（文件清单级——服务端不产出 patch 类事件，清单由本扩载权威承载）
+    { path: "/src/App.jsx", added: 40, removed: 0 }   # path = 工作区锚定形；行数为
+    ...                                              # write_file（新文件行数）/ edit_file（新旧串行数）
+  ],                               # 的活动量口径：同路径跨尝试合并、按路径排序；
+                                   # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
+                                   # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff
+  durationMs: 183420               # 轮末统计·时长（首试起跑到收口；文件数/变更行数由 files 派生）
+}
+```
+
+- **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 自检通过（part-check passed 先行）——前端过程明细（解说段/动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
+- **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
 #### 消息附件部件锚载荷 schema（预留，#97）
 

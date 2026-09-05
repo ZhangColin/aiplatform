@@ -73,7 +73,7 @@ public class EventsController {
             | workspace-created / preview-ready / preview-updated / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
             | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
             | error | 智能体·生命周期 | runId, message |
-            | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish |
+            | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
             | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
             | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |

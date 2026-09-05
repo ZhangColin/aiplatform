@@ -4,7 +4,7 @@ import { Check, ChevronDown, Clock3, FileText, Monitor, ShieldCheck } from "luci
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
-import type { WorkClosing } from "@/lib/store/work-message";
+import type { WorkClosing } from "@/lib/store/chat";
 
 import { formatDuration } from "./work-message";
 

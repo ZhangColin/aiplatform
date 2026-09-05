@@ -9,12 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
+import { useConversation } from "@/hooks/use-conversation";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import type { LockRow } from "@/lib/orders/lock";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
+import { ClosingCard } from "./closing-card";
 import { QuestionCard } from "./question-card";
 import { WorkMessage } from "./work-message";
 
@@ -73,6 +75,9 @@ export function CommandArea({
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
+  // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
+  // 重连失效驱动增量水合，live 事件只承载在途增量
+  useConversation(projectId);
 
   const [input, setInput] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
@@ -206,13 +211,21 @@ export function CommandArea({
   );
 }
 
-/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/受理动作卡/错误提示/平台引导左对齐。 */
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/受理动作卡/错误提示/平台引导左对齐。 */
 function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
   if (message.kind === "acceptance") {
     return <AcceptanceRow message={message} />;
+  }
+  if (message.kind === "closing") {
+    // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
+    return (
+      <div className="flex w-full justify-start">
+        <ClosingCard closing={message.closing} />
+      </div>
+    );
   }
   if (message.kind === "error") {
     return (

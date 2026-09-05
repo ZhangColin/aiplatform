@@ -26,6 +26,7 @@ import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
+import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
@@ -36,6 +37,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.command.Creat
 import com.aieducenter.aiplatform.business.project.application.dto.command.PermissionAnswerCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.RenameProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
@@ -69,6 +71,7 @@ public class ProjectController {
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
     private final RunPermissionAppService runPermissionAppService;
+    private final ConversationHistoryAppService conversationHistoryAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
@@ -76,7 +79,8 @@ public class ProjectController {
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
-                             RunPermissionAppService runPermissionAppService) {
+                             RunPermissionAppService runPermissionAppService,
+                             ConversationHistoryAppService conversationHistoryAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
@@ -84,6 +88,7 @@ public class ProjectController {
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
         this.runPermissionAppService = runPermissionAppService;
+        this.conversationHistoryAppService = conversationHistoryAppService;
     }
 
     @PostMapping
@@ -212,6 +217,18 @@ public class ProjectController {
             description = "status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）")
     public ApiResponse<ProjectDetailResponse> get(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(parseId(id)));
+    }
+
+    @GetMapping("/{id}/conversation")
+    @Operation(summary = "对话史（对话面全量，#89 前端水合源）",
+            description = "对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / "
+                    + "平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）"
+                    + "不在其中（收尾卡已是凝聚物）。kind 小写名分岔；question = question-raised 事件"
+                    + "载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = "
+                    + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读"
+                    + "（对话区只读终态）；项目不存在 404 PRJ_001")
+    public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
+        return ApiResponse.ok(conversationHistoryAppService.read(parseId(id)));
     }
 
     @PostMapping("/{id}/archive")

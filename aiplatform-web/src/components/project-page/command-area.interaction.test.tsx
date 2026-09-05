@@ -29,6 +29,10 @@ vi.mock("@/lib/store/chat", async (importOriginal) => {
   };
 });
 
+vi.mock("@/hooks/use-conversation", () => ({
+  useConversation: () => ({}),
+}));
+
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: postMutate }),
   useAnswerQuestion: () => ({ isPending: false, mutate: answerMutate }),

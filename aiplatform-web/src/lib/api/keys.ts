@@ -48,4 +48,14 @@ export const queryKeys = {
     /** 订单详情（状态 + 时间戳组 + 报价面：金额/备注/改价历史，#29）。 */
     detail: (id: string) => ["orders", "detail", id] as const,
   },
+  /**
+   * 对话史域（#89 对话史落库④）：对话面全量的水合源（用户发言/智能体回复/
+   * 问答卡/问答作答/收尾卡/轻引导，写入序即对话序）。轮收口事件（run-finish）
+   * 与重连的广谱 invalidate 失效本域——增量水合接管 live 片段（闭史以 REST 为准）。
+   */
+  conversation: {
+    all: ["conversation"] as const,
+    /** 项目对话史（全量有序）。 */
+    of: (id: string) => ["conversation", id] as const,
+  },
 } as const;

@@ -319,7 +319,7 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toEqual([
-      { kind: "user", id: expect.any(String), text: "做个官网" },
+      { kind: "user", id: expect.any(String), text: "做个官网", runId: "run1" },
       { kind: "agent", id: expect.any(String), text: "初步理解", runId: "run1" },
     ]);
     expect(chat?.turnActive).toBe(true);
@@ -341,7 +341,7 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toEqual([
-      { kind: "user", id: expect.any(String), text: "我后台的地址是什么？" },
+      { kind: "user", id: expect.any(String), text: "我后台的地址是什么？", runId: "run1" },
       {
         kind: "agent",
         id: expect.any(String),
@@ -380,12 +380,13 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toEqual([
-      { kind: "user", id: expect.any(String), text: "你好呀" },
+      { kind: "user", id: expect.any(String), text: "你好呀", runId: "run1" },
       {
         kind: "agent",
         id: expect.any(String),
         text: "我在这里帮您把系统做出来：想改哪里、想加什么功能，直接告诉我。",
         label: "平台",
+        runId: "run1",
       },
     ]);
     expect(chat?.turnActive).toBe(false);
@@ -489,7 +490,7 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     );
     let chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toEqual([
-      { kind: "user", id: expect.any(String), text: "把系统的主色调改成绿色" },
+      { kind: "user", id: expect.any(String), text: "把系统的主色调改成绿色", runId: "run1" },
       { kind: "acceptance", id: "run1:1", runId: "run1", settled: false },
       { kind: "agent", id: expect.any(String), text: "我来处理这个需求", runId: "run1" },
       expect.objectContaining({ kind: "question", runId: "run1" }),
@@ -1024,10 +1025,11 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
   /**
    * 镜面服务端断言（IterationAppServiceTest·given_scripted_update_round_when_fix_
    * closes_then_run_finish_carries_authoritative_closing）：编码 run 真收口的
-   * run-finish 携 closing——工作消息定格为收尾卡（权威事实入 store、过程部件
-   * 退场），判定行不由前端推导。
+   * run-finish 携 closing——收尾卡归对话流（#89：chat store 常驻、live 到达经
+   * appendClosing），工作消息过程部件退场（判定行不由前端推导）；对话史域失效
+   * （水合增量接管）。
    */
-  it("编码 run 收口携 closing：收尾卡权威事实落 store、过程明细清空（收尾卡即凝聚物）", () => {
+  it("编码 run 收口携 closing：收尾卡落对话流、过程明细清空、对话史域失效（#89）", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
@@ -1044,8 +1046,20 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.frozen).toBe(true);
-    expect(work?.closing).toEqual(closing);
-    expect(work?.parts).toEqual([]);
+    expect(work?.parts).toEqual([]); // 凝聚物退场
+    // 收尾卡归对话流（#89）：chat store 常驻（live 到达，id = 事件 id 去重锚）
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    const card = messages.find((message) => message.kind === "closing");
+    expect(card).toMatchObject({ runId: "run1", closing });
+    // 闭史以 REST 为准：轮收口即失效对话史域（水合增量接管 live 片段）
+    const invalidate = vi.spyOn(agentQc, "invalidateQueries");
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { projectId: "p1", runId: "run2", sessionId: "coder-p1", finish: "end" },
+      "run2:1",
+    ));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation"] });
+    invalidate.mockRestore();
   });
 
   it("咨询/纯追问轮 run-finish 无 closing：不产收尾卡（对话面照常收轮）", () => {
@@ -1062,7 +1076,9 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
 
     // 主智能体轮不锚工作消息（对话面走气泡）——无收尾卡可言
     expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
-    expect(useChatStore.getState().chats["p1"]?.messages.length).toBeGreaterThan(0);
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(messages.some((message) => message.kind === "closing")).toBe(false);
+    expect(messages.length).toBeGreaterThan(0);
   });
 
   it("closing 形状异常（非对象）：视同无收尾卡，工作消息保持定格流水不出坏卡", () => {
@@ -1080,7 +1096,8 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
     ));
 
     const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.closing).toBeUndefined();
     expect(work?.parts).toHaveLength(1);
+    const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
+    expect(messages.some((message) => message.kind === "closing")).toBe(false);
   });
 });

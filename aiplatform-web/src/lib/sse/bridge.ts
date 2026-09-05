@@ -2,12 +2,13 @@ import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { parseQuestion } from "@/lib/chat/qa";
+import { asRecord } from "@/lib/utils";
 import { queryKeys } from "@/lib/api/keys";
 import { useAgentRunsStore } from "@/lib/store/agent-runs";
-import { useChatStore } from "@/lib/store/chat";
+import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore, type WorkClosing } from "@/lib/store/work-message";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { orderStatusToastText } from "@/lib/orders/status";
 
 import type { SseEvent } from "./connection";
@@ -225,23 +226,31 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 受理卡落定（#87）：受理轮收口（受理完成——追问挂起轮不发本事件，挂起
         // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接
         chat.settleAcceptance(payload.projectId, payload.runId);
-        // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88
-        // 收尾卡权威事实，非锚定 run 的收口在 store 内忽略）
-        work.freezeWork(payload.projectId, payload.runId, at, closingOf(payload.closing));
+        // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88/#89
+        // 收尾卡权威事实归对话流，过程部件退场，非锚定 run 的收口在 store 内忽略）
+        const closing = toWorkClosing(payload.closing);
+        work.freezeWork(payload.projectId, payload.runId, at, closing);
+        if (closing) {
+          chat.appendClosing(payload.projectId, payload.runId, closing, event.id);
+        }
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFinish(payload.projectId, event.id);
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
           // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
+        // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量
+        // 接管 live 片段（#89：闭史以 REST 为准）
+        void queryClient.invalidateQueries({ queryKey: queryKeys.conversation.all });
         return;
       }
       case "guide-reply": {
         // 兜底轻引导（#47 入口三分类）：平台定型文案直达对话面（带标签对话气泡，
-        // 非 run、非智能体话语）；prompt 供重放重建用户气泡；重放按事件 id 只收一次
+        // 非 run、非智能体话语）；prompt 供重建用户气泡；runId 锚定水合退位合并
         const { payload } = platform;
         chat.noteGuideReply(
           payload.projectId,
+          payload.runId,
           payload.prompt,
           payload.label,
           payload.text,
@@ -316,42 +325,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     const delta = asRecord(payload.data)?.delta;
     chat.appendAgentDelta(payload.projectId, payload.runId, delta, event.id);
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-/**
- * closing 载荷的容错收窄（#88 收尾卡）：payload 为线上数据，类型镜像只做信任
- * 转型、缺字段容错归消费端——此处只兜「closing 键非对象」的形状异常（异常形状
- * 视同无收尾卡，工作消息保持定格流水，不出坏卡）；files 非数组回落空清单。
- */
-function closingOf(closing: unknown): WorkClosing | undefined {
-  const record = asRecord(closing);
-  if (!record) return undefined;
-  return {
-    summary: typeof record.summary === "string" ? record.summary : "",
-    prdChanged: record.prdChanged === true,
-    prdNote: typeof record.prdNote === "string" ? record.prdNote : undefined,
-    systemChanged: record.systemChanged === true,
-    systemNote: typeof record.systemNote === "string" ? record.systemNote : undefined,
-    files: Array.isArray(record.files)
-      ? record.files.flatMap((file) => {
-          const entry = asRecord(file);
-          return entry && typeof entry.path === "string"
-            ? [{
-                path: entry.path,
-                added: typeof entry.added === "number" ? entry.added : 0,
-                removed: typeof entry.removed === "number" ? entry.removed : 0,
-              }]
-            : [];
-        })
-      : [],
-    durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
-  };
 }
 
 /** 信封 ts → ms（坏值回落客户端时钟：时长粗对齐总好过锚丢失）。 */

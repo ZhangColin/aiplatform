@@ -46,7 +46,8 @@ export function useAnswerQuestion(projectId: string) {
     mutationFn: (input: { qid: string; command: AnswerQuestionCommand }) =>
       api.post<void>(`/projects/${projectId}/questions/${input.qid}/answer`, input.command),
     onMutate: ({ command }) => {
-      const messageId = useChatStore.getState().submitAnswer(projectId, command.answer);
+      // 作答气泡锚定挂起轮 runId（水合退位的合并锚，#89）
+      const messageId = useChatStore.getState().submitAnswer(projectId, command.answer, command.runId);
       return { messageId };
     },
     onError: (error, _input, context) => {

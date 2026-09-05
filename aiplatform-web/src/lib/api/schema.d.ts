@@ -165,7 +165,7 @@ export interface paths {
         put?: never;
         /**
          * 问答卡作答（ask_user 挂起续跑）
-         * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
+         * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
         delete?: never;
@@ -225,7 +225,7 @@ export interface paths {
         put?: never;
         /**
          * 开始做系统（触发首次生成）
-         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次（app.generation.max-attempts，默认 3 次含首试，中间失败不出用户面），超限转终态发 run-failed 收口事件（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次（app.generation.max-attempts，默认 3 次含首试，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -554,6 +554,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 对话史（对话面全量，#89 前端水合源）
+         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 小写名分岔；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
+         */
+        get: operations["conversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orders/{id}": {
         parameters: {
             query?: never;
@@ -606,31 +626,35 @@ export interface paths {
          * @description 一条流承载两族事件（合并通道不合并语义）：
          *
          *     - 平台通知族（状态变化广播）：只作实时呈现、状态以 REST 重查为准，永不补发；
-         *     - 智能体事件族（运行过程流）：带近期事件缓冲的热流——新连接（无
-         *       Last-Event-ID 值——缺席或空串）先补发命中订阅过滤的最近缓冲事件（默认
-         *       1000 条，配置 app.agent-events.replay-depth），再无缝进实时流；断线重连
-         *       （浏览器自动携带非空 Last-Event-ID）不补发，前端以 REST 重查兜底。
+         *     - 智能体事件族（运行过程流）：带近期事件缓冲的热流——断线重连（浏览器自动
+         *       携带非空 Last-Event-ID）先补发缓冲中锚事件之后命中订阅过滤的事件（断线
+         *       窗口；锚已被逐出或随重启丢失则补发整段缓冲——缓冲内事件必然晚于锚），
+         *       再无缝进实时流；新连接（Last-Event-ID 缺席或空串——含刷新/回访）不补发，
+         *       对话史经 REST 水合（GET /api/projects/{id}/conversation，#89），平台状态
+         *       以查询收敛。缓冲为单实例内存态（重启即失，多实例化时需重估）。
          *
          *     信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
          *     智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
          *     对象、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`。
          *
          *     订阅：`?projectId=` / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；
-         *     缺省 = 只收平台通知族（智能体事件族只投递给带过滤的订阅）。
+         *     缺省 = 只收平台通知族（智能体事件族只投递给带过滤的订阅——过程细节是项目
+         *     内事实）。智能体事件带 projectId（编排桥接注入）。
          *
-         *     名册（type → payload 字段）：
+         *     名册（type → 说明，payload 除关联字段外）：
          *
          *     | type | 族 | payload 字段 |
          *     |---|---|---|
-         *     | workspace-created | 通知 | projectId, projectName, container, projectType |
-         *     | preview-ready | 通知 | projectId, url |
-         *     | preview-updated | 通知 | projectId |
-         *     | workspace-destroyed | 通知 | projectId |
-         *     | document-updated | 通知 | projectId, documentType |
-         *     | project-renamed | 通知 | projectId, projectName |
-         *     | order-status-changed | 通知 | projectId, orderId, status, statusName |
-         *     | run-start / error / run-finish / question-raised / run-failed / guide-reply | 智能体·生命周期 | runId（+ 各自载荷） |
-         *     | part-text / part-action / part-step | 智能体·部件 | runId（+ 部件载荷） |
+         *     | workspace-created / preview-ready / preview-updated / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
+         *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
+         *     | error | 智能体·生命周期 | runId, message |
+         *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
+         *     | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+         *     | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
+         *     | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
+         *     | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
+         *     | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
+         *     | part-step | 智能体·部件 | step（1 起序号） |
          *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
          *
          *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。
@@ -897,10 +921,6 @@ export interface components {
             toolCalls: components["schemas"]["ToolCall"][];
             answer: string;
         };
-        PermissionAnswerCommand: {
-            runId: string;
-            approved: boolean;
-        };
         ToolCall: {
             id?: string;
             name?: string;
@@ -915,6 +935,10 @@ export interface components {
             data?: Record<string, never>;
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
+        };
+        PermissionAnswerCommand: {
+            runId: string;
+            approved: boolean;
         };
         PostMessageCommand: {
             content: string;
@@ -1082,6 +1106,31 @@ export interface components {
         ProjectFileContentResponse: {
             path?: string;
             content?: string;
+        };
+        ApiResponseListConversationEntryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ConversationEntryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        ConversationEntryResponse: {
+            /** Format: int64 */
+            id?: number;
+            /** Format: int32 */
+            kind?: number;
+            runId?: string;
+            text?: string;
+            question?: {
+                [key: string]: Record<string, never>;
+            };
+            closing?: {
+                [key: string]: Record<string, never>;
+            };
+            answered?: boolean;
+            /** Format: date-time */
+            at?: string;
         };
         ApiResponseMeResponse: {
             /** Format: int32 */
@@ -1865,6 +1914,28 @@ export interface operations {
             };
         };
     };
+    conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListConversationEntryResponse"];
+                };
+            };
+        };
+    };
     detail: {
         parameters: {
             query?: never;
@@ -1916,7 +1987,7 @@ export interface operations {
                 runId?: string;
             };
             header?: {
-                /** @description SSE 断线重连自动携带；无值（缺席或空串）= 新连接 = 先补发最近智能体缓冲事件，有值 = 重连 = 不补发（REST 重查兜底） */
+                /** @description SSE 断线重连自动携带；有值 = 重连 = 补发锚事件之后的缓冲窗口（断线补发），无值 = 新连接 = 不补发（对话史经 REST 水合，平台状态以查询收敛） */
                 "Last-Event-ID"?: string;
             };
             path?: never;

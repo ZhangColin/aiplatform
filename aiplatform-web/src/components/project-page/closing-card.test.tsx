@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { WorkClosing } from "@/lib/store/work-message";
+import type { WorkClosing } from "@/lib/store/chat";
 
 import { ClosingCard } from "./closing-card";
 

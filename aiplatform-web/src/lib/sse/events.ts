@@ -95,7 +95,7 @@ export function asNotificationEvent(envelope: SseEnvelope): NotificationEvent | 
     : null;
 }
 
-// ── 智能体事件族（重放族：新连接补发近期事件）────────────────────────────────
+// ── 智能体事件族（断线补发族，#89：重连补断线窗口，新连接不补发）────────────────
 // 平台事件 = 封闭集合（字段扁平，下表为准）；引擎透传 = 开放集合，`data` 为
 // 引擎 part 原样。退役五族（role-assigned / run-created / run-retrying /
 // fix-unchanged / dispatch-stage / live-*）不进名册——旧事件到达按 miss 忽略。
@@ -209,7 +209,7 @@ export type PlatformAgentEvent =
       /**
        * 兜底轻引导回复（#47 入口三分类）：非意见非咨询输入的平台侧定型文案——
        * 零产物路径（不起任何智能体 run，本事件即该次派发的全部）；`prompt` 为
-       * 锚定的用户输入（重放重建对话面）；`label` 为呈现标签（「平台」）；
+       * 锚定的用户输入（事件到达重建对话面；回访经对话史水合——#89）；`label` 为呈现标签（「平台」）；
        * `text` 为引导文案（下单意图引导到「确认下单」）。
        */
       type: "guide-reply";

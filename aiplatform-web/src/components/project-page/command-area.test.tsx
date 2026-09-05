@@ -42,6 +42,10 @@ vi.mock("@/lib/store/work-message", async (importOriginal) => {
   };
 });
 
+vi.mock("@/hooks/use-conversation", () => ({
+  useConversation: () => ({}),
+}));
+
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),

@@ -53,6 +53,7 @@ public class ProjectLifecycleAppService {
     private final EventsAppService eventsAppService;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
+    private final ConversationHistoryAppService conversationHistory;
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -62,6 +63,7 @@ public class ProjectLifecycleAppService {
                                       EventsAppService eventsAppService,
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
+                                      ConversationHistoryAppService conversationHistory,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.mainAgentAppService = mainAgentAppService;
@@ -70,6 +72,7 @@ public class ProjectLifecycleAppService {
         this.eventsAppService = eventsAppService;
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
+        this.conversationHistory = conversationHistory;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -158,14 +161,15 @@ public class ProjectLifecycleAppService {
 
     /**
      * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
-     * 删除（历史子表随 FK 级联）→ knw_chunks 级联清理（尽力而为）→
-     * SSE workspace-destroyed。
+     * 删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用显式清，
+     * 尽力而为）→ SSE workspace-destroyed。
      */
     public void delete(Long projectId) {
         Project project = requireProject(projectId);
         destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
+        conversationHistory.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString()));
     }

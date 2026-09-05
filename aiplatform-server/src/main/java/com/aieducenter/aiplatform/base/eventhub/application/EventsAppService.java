@@ -18,9 +18,11 @@ import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub
  *
  * <ul>
  *   <li><b>智能体事件族</b>（{@link #publishAgentEvent}）：关联字段 {@code runId}
- *       必带（{@code projectId} 由业务编排桥接注入）；进近期事件缓冲（重放族）
- *       ——新连接（无 Last-Event-ID）先收命中订阅过滤的最近缓冲事件再进实时流，
- *       断线重连不补发、REST 重查兜底。streamId = runId（id 行 {@code {runId}:{seq}}）。</li>
+ *       必带（{@code projectId} 由业务编排桥接注入）；进近期事件缓冲（断线补发族）
+ *       ——断线重连（Last-Event-ID 在场）先收缓冲中锚事件之后命中订阅过滤的事件
+ *       （断线窗口），新连接（刷新）不补发（对话史经 REST 水合，#89——重放缓冲
+ *       只承担断线窗口，不再承担刷新重建）。streamId = runId（id 行
+ *       {@code {runId}:{seq}}）。</li>
  *   <li><b>平台通知族</b>（{@link #publishNotification}）：关联字段 {@code projectId}
  *       必带；<b>不进缓冲</b>（{@code broadcastUnbuffered}）——只达实时订阅、新连接
  *       不补发，「通知只作实时呈现、状态以查询为准」。streamId = projectId。</li>
@@ -29,8 +31,9 @@ import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub
  * <p><b>订阅过滤与族投递</b>：{@code ?projectId=} / {@code ?runId=}（与 payload
  * 关联字段同名，可叠用 AND；缺省 = 通知族全量）。智能体事件族只投递给带过滤
  * （projectId 或 runId）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤
- * 订阅（站点级常开连接）只收平台通知族。Last-Event-ID 请求头作新连/重连分野
- * （分野由订阅端点按请求头裁定，本层只见重放开关）。</p>
+ * 订阅（站点级常开连接）只收平台通知族。Last-Event-ID 请求头作新连/重连分野：
+ * 有值（浏览器断线重连自动携带）= 断线补发（缓冲中锚事件之后的窗口），无值
+ * （新连接/刷新）= 不补发（#89 起——对话史水合归 REST，重放缓冲降级为断线补发）。</p>
  *
  * <p>发射制：业务编排层在副作用真实落定后调用（base 区不发 SSE）；事件 type
  * 名册见 docs/spec/SSE事件清单.md（代码侧引用 {@code XxxEventTypes} 常量类，
@@ -52,20 +55,22 @@ public class EventsAppService {
 
     public EventsAppService(SseChannelHub hub, AgentEventProperties properties) {
         this.hub = hub;
-        // 智能体事件族 = 带近期事件缓冲的热流（重放族）：构造期注册，先于任何
-        // 订阅/广播（内核 fail-fast 约定）；通知族经 broadcastUnbuffered 逐发射豁免
+        // 智能体事件族 = 带近期事件缓冲的热流（断线补发族，#89）：构造期注册，先于
+        // 任何订阅/广播（内核 fail-fast 约定）；通知族经 broadcastUnbuffered 逐发射豁免
         hub.registerReplay(CHANNEL, properties.getReplayDepth());
     }
 
     /**
      * 订阅事件流（单端点单流，两族混载）。过滤参数可单用可叠用（AND），均为空 =
-     * 只收平台通知族（智能体事件族不投递给未过滤订阅）。replay：新连接（无
-     * Last-Event-ID）开——先收命中过滤谓词的最近智能体缓冲事件再进实时流；重连
-     * 关——不重放，REST 重查兜底。重放谓词与实时谓词同一（含族投递规则），通知族
-     * 不在缓冲、天然不补发。
+     * 只收平台通知族（智能体事件族不投递给未过滤订阅）。断线补发（#89 重放缓冲
+     * 降级）：lastEventId 非空（浏览器断线重连自动携带）——先收缓冲中锚事件之后
+     * 命中过滤谓词的智能体事件（断线窗口，锚不在缓冲则整段缓冲）再进实时流；空
+     * （新连接/刷新）不补发——对话史经 REST 水合，重放缓冲只承担断线窗口、不再
+     * 承担刷新重建。补发谓词与实时谓词同一（含族投递规则），通知族不在缓冲、
+     * 天然不补发。
      */
-    public SseEmitter subscribe(String projectId, String runId, boolean replay) {
-        return hub.subscribe(CHANNEL, deliveryPredicate(projectId, runId), replay);
+    public SseEmitter subscribe(String projectId, String runId, String lastEventId) {
+        return hub.subscribe(CHANNEL, deliveryPredicate(projectId, runId), lastEventId);
     }
 
     /**

@@ -12,10 +12,11 @@ import { probeSessionAlive, SseConnection } from "./connection";
  * message handler。同一端点上的通知族由站点级常开连接（SseProvider）消费，
  * 此处按项目过滤只收智能体事件族——两连接族内分工，不重复处理。
  *
- * 新连接（无 Last-Event-ID）由服务端补发命中项目过滤的近期智能体缓冲事件
- * （工作消息/对话面重放重建）；断线重连不补发，重连成功 → 广谱 invalidate
- * （事件不承担正确性，粗对齐零风险）。去重开（事件流 append-only，重复一眼
- * 可见；键 = 完整事件 id，连接层既有 Set）。
+ * #89 断线补发：新连接（刷新/回访，无 Last-Event-ID）不补发——对话史经 REST
+ * 水合（useConversation）、平台状态以查询收敛；断线重连（浏览器自动携带
+ * Last-Event-ID）由服务端补发锚之后的断线窗口，重连成功 → 广谱 invalidate
+ * （事件不承担正确性，粗对齐零风险）。去重开（补发窗口与实时流不重投；
+ * 键 = 完整事件 id，连接层既有 Set）。
  */
 export function useAgentEventChannel(projectId: string) {
   const queryClient = useQueryClient();

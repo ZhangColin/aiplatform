@@ -9,7 +9,7 @@ import { create } from "zustand";
  * <p>与 agent-runs 的分工：runs 是「顶栏 LIVE 的运行注册表」（对话/编码互逐），
  * 本 store 是「生成事实」——编码 run 的 runId 登记（run-start agent=executor，后续
  * error/run-finish 事件不带角色，凭登记判定）与跨 run 的状态，对话轮不挤掉。
- * 刷新后由事件流重放缓冲重建（生成中回页可续看状态）。重试静默（#84）：中间
+ * 刷新后由断线补发窗口重建（#89：重连补发，新连接不补发——生成中回页可续看状态）。重试静默（#84）：中间
  * 失败不出事件，run 失败（run-failed）为唯一失败终态。</p>
  *
  * <p><b>预览重挂纪元</b>：两路信号共一套机制——编码 run 收口（run-finish，事件

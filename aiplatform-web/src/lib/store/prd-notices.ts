@@ -9,7 +9,7 @@ import { create } from "zustand";
  *
  * <p>「这次写入是不是修订」是 REST 重查拿不到的语义（prd_produced_at 每次
  * 写出都刷新，首产/修订不可分）——这正是 ADR 0003 的载荷展示例外形态。
- * 内存态：刷新即逝为 v1 取舍（通知通道无 replay，不复活；对话史同口径）；
+ * 内存态：刷新即逝为 v1 取舍（通知通道无补发，不复活）；
  * SSE 断线期间的修订静默走门控轮询刷新正文、不出胶囊（事件不承担正确性）。</p>
  */
 export type PrdNoticesState = {

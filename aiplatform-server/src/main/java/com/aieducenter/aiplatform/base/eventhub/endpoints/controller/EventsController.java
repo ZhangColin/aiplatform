@@ -42,21 +42,24 @@ public class EventsController {
     }
 
     /**
-     * 订阅事件流（两族混载）。Last-Event-ID 请求头作新连/重连分野：无值（缺席或
-     * 空串）= 新连接 = 先补发命中订阅过滤的最近智能体缓冲事件（默认 1000 条，
-     * app.agent-events.replay-depth）再进实时流；有值 = 断线重连 = 不补发
-     * （REST 重查兜底，不做 seq 续传）。通知族永不补发（不进缓冲）。
+     * 订阅事件流（两族混载）。Last-Event-ID 请求头作新连/重连分野（#89 断线补发）：
+     * 有值（浏览器断线重连自动携带）= 断线补发——先补发命中订阅过滤的智能体缓冲
+     * 事件中锚事件之后的窗口（默认 1000 条深，app.agent-events.replay-depth）再进
+     * 实时流；无值（缺席或空串）= 新连接/刷新 = 不补发——对话史经 REST 水合
+     * （GET /api/projects/{id}/conversation），重放缓冲只承担断线窗口。通知族永不
+     * 补发（不进缓冲）。
      */
     @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "订阅事件流（SSE，单端点单流）", description = """
             一条流承载两族事件（合并通道不合并语义）：
 
             - 平台通知族（状态变化广播）：只作实时呈现、状态以 REST 重查为准，永不补发；
-            - 智能体事件族（运行过程流）：带近期事件缓冲的热流——新连接（无
-              Last-Event-ID 值——缺席或空串）先补发命中订阅过滤的最近缓冲事件（默认
-              1000 条，配置 app.agent-events.replay-depth），再无缝进实时流；断线重连
-              （浏览器自动携带非空 Last-Event-ID）不补发，前端以 REST 重查兜底。缓冲为
-              单实例内存态（重启即失，多实例化时需重估）。
+            - 智能体事件族（运行过程流）：带近期事件缓冲的热流——断线重连（浏览器自动
+              携带非空 Last-Event-ID）先补发缓冲中锚事件之后命中订阅过滤的事件（断线
+              窗口；锚已被逐出或随重启丢失则补发整段缓冲——缓冲内事件必然晚于锚），
+              再无缝进实时流；新连接（Last-Event-ID 缺席或空串——含刷新/回访）不补发，
+              对话史经 REST 水合（GET /api/projects/{id}/conversation，#89），平台状态
+              以查询收敛。缓冲为单实例内存态（重启即失，多实例化时需重估）。
 
             信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
             智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
@@ -89,12 +92,12 @@ public class EventsController {
             @Parameter(description = "按运行过滤（智能体事件族的「看某个运行才挂」姿势；缺省不过滤）")
             @RequestParam(required = false) String runId,
             @Parameter(in = ParameterIn.HEADER, description = "SSE 断线重连自动携带；"
-                    + "无值（缺席或空串）= 新连接 = 先补发最近智能体缓冲事件，有值 = 重连 = "
-                    + "不补发（REST 重查兜底）")
+                    + "有值 = 重连 = 补发锚事件之后的缓冲窗口（断线补发），无值 = 新连接 = "
+                    + "不补发（对话史经 REST 水合，平台状态以查询收敛）")
             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         // 新连/重连分野：空串视同无值（新连接）——浏览器只在真见过事件后才带非空值
         return appService.subscribe(projectId, runId,
-                lastEventId == null || lastEventId.isBlank());
+                lastEventId != null && !lastEventId.isBlank() ? lastEventId : null);
     }
 
     /**

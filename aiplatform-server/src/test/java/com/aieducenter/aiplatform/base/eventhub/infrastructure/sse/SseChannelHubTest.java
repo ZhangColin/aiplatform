@@ -232,12 +232,48 @@ class SseChannelHubTest {
         assertThat(sender.framesOf(emitter)).hasSize(pingsAtShutdown);
     }
 
-    // ---------- 近期事件重放（#55：注册 opt-in，通知通道不动） ----------
+    // ---------- 断线补发（#89 重放缓冲降级：锚点窗口，注册 opt-in，通知通道不动） ----------
 
     @Test
-    void given_registered_channel_without_subscribers_when_broadcast_then_late_replay_subscription_receives_filtered_frames() {
-        // 事故主场景（#53 spec）：起跑即死的事件在零订阅时发出，晚到订阅仍要看到；
-        // 订阅谓词对重放同样过滤命中（别的项目/运行的事件不泄漏）
+    void given_reconnect_anchor_in_buffer_when_subscribe_then_only_window_after_anchor_replayed() {
+        // 灵魂用例（#89 断线补发）：重连携带 Last-Event-ID（锚在缓冲内）——只补发锚
+        // 之后的断线窗口（锚本身不重发）；锚 = 末事件时窗口为空（无错过即无补发）
+        SseChannelHub hub = newHub(Duration.ofSeconds(600));
+        hub.registerReplay(REPLAYABLE, 100);
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 1));
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 2));
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 3));
+
+        SseEmitter reconnected = hub.subscribe(REPLAYABLE, payload -> true, "run-1:1");
+        SseEmitter upToDate = hub.subscribe(REPLAYABLE, payload -> true, "run-1:3");
+
+        assertThat(sender.eventFramesOf(reconnected))
+                .extracting(SseServerEvent::id)
+                .containsExactly("run-1:2", "run-1:3"); // 只补锚后的窗口
+        assertThat(sender.eventFramesOf(upToDate)).isEmpty(); // 锚 = 末事件：窗口空
+    }
+
+    @Test
+    void given_reconnect_anchor_evicted_when_subscribe_then_whole_buffer_replayed() {
+        // 锚已被容量逐出（或随重启丢失）：环形缓冲只留最新事件，锚不在即缓冲内全部
+        // 事件晚于锚——整段皆断线窗口，整段补发不重复
+        SseChannelHub hub = newHub(Duration.ofSeconds(600));
+        hub.registerReplay(REPLAYABLE, 2);
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 1));
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 2));
+        hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 3));
+
+        SseEmitter reconnected = hub.subscribe(REPLAYABLE, payload -> true, "run-1:1");
+
+        assertThat(sender.eventFramesOf(reconnected))
+                .extracting(SseServerEvent::id)
+                .containsExactly("run-1:2", "run-1:3"); // run-1:1 已被逐出，整段缓冲补发
+    }
+
+    @Test
+    void given_registered_channel_without_subscribers_when_broadcast_then_reconnect_receives_filtered_frames() {
+        // 事故主场景（#53 spec 衣钵）：零订阅时发出的事件，重连订阅仍要看到（锚不在
+        // 缓冲 = 整段补发）；订阅谓词对补发同样过滤命中（别的项目/运行的事件不泄漏）
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
 
@@ -246,27 +282,28 @@ class SseChannelHubTest {
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "text", "hi"));
 
         SseEmitter late = hub.subscribe(REPLAYABLE,
-                payload -> "p1".equals(payload.get("projectId")), true);
+                payload -> "p1".equals(payload.get("projectId")), "run-0:0");
 
         assertThat(sender.framesOf(late)).hasSize(3); // ping + 命中谓词的两事件
         assertThat(sender.framesOf(late).get(0).comment()).isEqualTo("ping");
         assertThat(sender.eventFramesOf(late))
                 .extracting(SseServerEvent::id)
-                .containsExactly("run-1:1", "run-1:2"); // 原事件 id 重放，p2 事件被谓词滤掉
+                .containsExactly("run-1:1", "run-1:2"); // 原事件 id 补发，p2 事件被谓词滤掉
         assertThat(sender.eventFramesOf(late))
                 .extracting(frame -> ((EventEnvelope) frame.data()).type())
                 .containsExactly("error", "text-delta");
     }
 
     @Test
-    void given_subscription_between_broadcasts_when_replay_on_then_replay_then_live_without_dup_or_gap() {
-        // 接缝核心：订阅夹在两次广播之间——先收重放事件（b1）、再无缝进实时流（b2），
+    void given_reconnect_between_broadcasts_when_anchor_set_then_replay_then_live_without_dup_or_gap() {
+        // 接缝核心：重连夹在两次广播之间——先收补发窗口事件、再无缝进实时流，
         // id 同一口径、seq 续接、不重不漏不乱序
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
+        hub.broadcast(REPLAYABLE, "run-0", "text-delta", Map.of("projectId", "p1", "n", 0));
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 1));
 
-        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, true);
+        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, "run-0:1");
 
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 2));
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 3));
@@ -278,8 +315,8 @@ class SseChannelHubTest {
 
     @Test
     void given_replay_in_progress_when_live_frame_arrives_then_pending_delivered_after_backlog() {
-        // 重放进行中到达的 live 事件进订阅级 pending 队列，重放毕按序补投——
-        // 发送缝 hook 在重放首条下发时同步触发一次广播，确定性命中该窗口
+        // 补发进行中到达的 live 事件进订阅级 pending 队列，补发毕按序补投——
+        // 发送缝 hook 在补发首条下发时同步触发一次广播，确定性命中该窗口
         AtomicBoolean fired = new AtomicBoolean();
         AtomicReference<SseChannelHub> hubRef = new AtomicReference<>();
         SseChannelHub hub = newHub((emitter, event) -> {
@@ -293,41 +330,25 @@ class SseChannelHubTest {
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 1));
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 2));
 
-        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, true);
+        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, "run-0:0");
 
-        // hook 在「事件已入缓冲、重放发送中」触发的 live 事件经 pending 补投，仍落在全部重放事件之后
+        // hook 在「事件已入缓冲、补发发送中」触发的 live 事件经 pending 补投，仍落在全部补发事件之后
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)
                 .containsExactly("run-1:1", "run-1:2", "run-1:3");
     }
 
     @Test
-    void given_capacity_two_when_three_broadcasts_then_only_latest_two_replayed() {
-        // 有界环形缓冲：容量上界生效、旧事件逐出
-        SseChannelHub hub = newHub(Duration.ofSeconds(600));
-        hub.registerReplay(REPLAYABLE, 2);
-
-        for (int n = 1; n <= 3; n++) {
-            hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", n));
-        }
-
-        SseEmitter late = hub.subscribe(REPLAYABLE, payload -> true, true);
-
-        assertThat(sender.eventFramesOf(late))
-                .extracting(SseServerEvent::id)
-                .containsExactly("run-1:2", "run-1:3"); // run-1:1 已被逐出
-    }
-
-    @Test
-    void given_replay_off_when_subscribe_then_no_replay_and_live_still_flows() {
-        // 重放开关关 = 现行为：连接前已发出的事件拿不到（注册通道也不补），之后照常实时收
+    void given_fresh_connection_when_subscribe_then_no_replay_and_live_still_flows() {
+        // 新连接（刷新/回访，无 Last-Event-ID）不补发（#89：对话史经 REST 水合，
+        // 重放缓冲只承担断线窗口）——连接前已发出的事件拿不到，之后照常实时收
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1"));
 
-        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, false);
+        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, null);
 
-        assertThat(sender.eventFramesOf(subscriber)).isEmpty(); // 只有初始 ping，无重放
+        assertThat(sender.eventFramesOf(subscriber)).isEmpty(); // 只有初始 ping，无补发
 
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1"));
 
@@ -337,14 +358,14 @@ class SseChannelHubTest {
     }
 
     @Test
-    void given_unregistered_channel_when_subscribe_with_replay_then_current_behavior() {
-        // 未注册通道不受重放开关影响（注册面即「哪些通道补发」的唯一定义处）
+    void given_unregistered_channel_when_subscribe_with_anchor_then_current_behavior() {
+        // 未注册通道不受补发影响（注册面即「哪些通道补发」的唯一定义处）
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
 
         assertThatCode(() -> hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1")))
                 .doesNotThrowAnyException(); // 零订阅 noop（未注册不缓冲）
 
-        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, true);
+        SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, "run-0:0");
 
         assertThat(sender.eventFramesOf(subscriber)).isEmpty();
 
@@ -357,7 +378,7 @@ class SseChannelHubTest {
 
     @Test
     void given_registered_channel_when_broadcast_then_zero_subscriber_frames_still_buffered_with_seq() {
-        // 已订阅者视角：注册通道上重放订阅不干扰既有实时订阅；缓冲中的事件对后到者可见
+        // 已订阅者视角：注册通道上重连订阅不干扰既有实时订阅；缓冲中的事件对重连者可见
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
         SseEmitter first = hub.subscribe(REPLAYABLE, payload -> true);
@@ -365,14 +386,14 @@ class SseChannelHubTest {
 
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1", "n", 1));
 
-        SseEmitter second = hub.subscribe(REPLAYABLE, payload -> true, true);
+        SseEmitter second = hub.subscribe(REPLAYABLE, payload -> true, "run-0:0");
 
         assertThat(sender.eventFramesOf(first))
                 .extracting(SseServerEvent::id)
-                .containsExactly("run-1:1"); // 既有订阅实时收到，不受重放影响
+                .containsExactly("run-1:1"); // 既有订阅实时收到，不受补发影响
         assertThat(sender.eventFramesOf(second))
                 .extracting(SseServerEvent::id)
-                .containsExactly("run-1:1"); // 晚到重放订阅收到同一条、同一 id（跨订阅各投一次，不算重复）
+                .containsExactly("run-1:1"); // 重连订阅收到同一条、同一 id（跨订阅各投一次，不算重复）
     }
 
     @Test
@@ -428,7 +449,7 @@ class SseChannelHubTest {
             }
             Future<SseEmitter> subscription = pool.submit(() -> {
                 start.await();
-                return hub.subscribe(REPLAYABLE, payload -> true, true);
+                return hub.subscribe(REPLAYABLE, payload -> true, "run-0:0");
             });
             start.countDown();
             for (Future<?> job : jobs) {
@@ -490,13 +511,13 @@ class SseChannelHubTest {
             pool.shutdownNow();
         }
 
-        hub.subscribe(REPLAYABLE, payload -> true, true);
+        hub.subscribe(REPLAYABLE, payload -> true, "run-0:0");
 
         int total = broadcasterThreads * framesPerThread;
         List<Long> seqs = frames.stream()
                 .map(frame -> Long.parseLong(frame.id().substring("run-1:".length())))
                 .toList();
-        assertThat(seqs).isSorted();  // 重放流按 id 序：缓冲序 == seq 序
+        assertThat(seqs).isSorted();  // 补发流按 id 序：缓冲序 == seq 序
         assertThat(seqs.stream().collect(Collectors.toSet()))
                 .isEqualTo(IntStream.rangeClosed(1, total)
                         .mapToObj(Long::valueOf)

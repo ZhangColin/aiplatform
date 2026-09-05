@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Map;
 
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -58,6 +59,9 @@ class DispatchAppServiceTest {
     private DispatchAppService appService;
 
     @Autowired
+    private ConversationHistoryAppService conversationHistory;
+
+    @Autowired
     private DispatchProperties dispatchProperties;
 
     @Autowired
@@ -78,6 +82,7 @@ class DispatchAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -221,6 +226,13 @@ class DispatchAppServiceTest {
                 .containsEntry(AgentEventTypes.GUIDE_PROMPT_FIELD, "你好呀")
                 .containsEntry(AgentEventTypes.GUIDE_LABEL_FIELD, DispatchAppService.GUIDE_LABEL)
                 .containsEntry(AgentEventTypes.GUIDE_TEXT_FIELD, DispatchAppService.GUIDE_GENERIC_TEXT);
+        // 对话史（#89）：轻引导也落库（用户发言 + 定型文案两行——刷新后引导不消失）
+        // kind 为 Integer code（1=user 6=guide，正本 ConversationEntryKind）
+        assertThat(conversationHistory.read(projectId))
+                .extracting(entry -> entry.kind(), entry -> entry.text())
+                .containsExactly(
+                        Tuple.tuple(1, "你好呀"),
+                        Tuple.tuple(6, DispatchAppService.GUIDE_GENERIC_TEXT));
     }
 
     @Test

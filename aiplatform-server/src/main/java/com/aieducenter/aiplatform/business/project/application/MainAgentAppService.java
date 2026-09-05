@@ -58,10 +58,14 @@ import lombok.extern.slf4j.Slf4j;
  * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未生成止于
  * 对话、归档拒、在途排队合并，归 {@link IterationAppService}）。</p>
  *
- * <p><b>事件桥</b>：过程事件经 {@link EventsAppService}（eventhub 唯一 SSE 管道）
- * 发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射失败护栏：单事件
- * 发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；对话本身的成败
- * 以 error 事件 + 异常表达（会话执行器吞掉记日志，REST 快返回）。</p>
+ * <p><b>事件桥与对话史（#89）</b>：过程事件经 {@link EventsAppService}（eventhub
+ * 唯一 SSE 管道）发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射
+ * 失败护栏：单事件发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；
+ * 对话本身的成败以 error 事件 + 异常表达（会话执行器吞掉记日志，REST 快返回）。
+ * 对话史落库的主写口在本编排：用户发言提交侧同步落（守卫全过后——失败上抛撤回
+ * REST 面，「落库 ⟺ 说过」不漂移），智能体回复段与问答卡在轮落定点按对话序落
+ * （{@link ConversationHistoryAppService.TurnRecorder}——挂起段文本先落、问答卡
+ * 随后），收尾卡归编码 run 收口（{@code CoderRunAttempts}）。</p>
  */
 @Service
 @Slf4j
@@ -78,6 +82,7 @@ public class MainAgentAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final PrdRevisionFacts prdRevisions;
+    private final ConversationHistoryAppService conversationHistory;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -105,7 +110,7 @@ public class MainAgentAppService {
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
-            PrdRevisionFacts prdRevisions) {
+            PrdRevisionFacts prdRevisions, ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -114,6 +119,7 @@ public class MainAgentAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.prdRevisions = prdRevisions;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -191,10 +197,15 @@ public class MainAgentAppService {
             throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
         }
         String runId = EventsAppService.newRunId();
+        conversationHistory.recordUserUtterance(projectId, runId, question);
         AgentCommand command = mainCommand(project, runId, question);
         // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
-        sessionExecutor.submit(sessionId, () ->
-                agentClient.converse(command, eventBridge.sink(projectId)));
+        sessionExecutor.submit(sessionId, () -> {
+            ConversationHistoryAppService.TurnRecorder recorder =
+                    conversationHistory.recorder(projectId, eventBridge.sink(projectId));
+            AgentReply reply = agentClient.converse(command, recorder);
+            recorder.settle(runId, reply);
+        });
         return new MainAgentRun(runId);
     }
 
@@ -211,6 +222,7 @@ public class MainAgentAppService {
             List<Map<String, Object>> pendingToolCalls, String answerText) {
         Project project = requireUpdatableProject(projectId);
         String sessionId = sessionIdOf(projectId);
+        conversationHistory.recordAnswer(projectId, runId, answerText);
 
         AgentResume resume = new AgentResume(
                 runId,
@@ -228,10 +240,13 @@ public class MainAgentAppService {
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true);
         appendOpinionReply(sessionId, answerText);
-        Consumer<AgentEvent> sink = eventBridge.sink(projectId);
+        ConversationHistoryAppService.TurnRecorder recorder =
+                conversationHistory.recorder(projectId, eventBridge.sink(projectId));
         sessionExecutor.submit(sessionId, () -> {
             try {
-                settleSuspendedQuestion(sessionId, runId, agentClient.resume(resume, sink));
+                AgentReply reply = agentClient.resume(resume, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
             }
             catch (RuntimeException e) {
                 // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
@@ -256,6 +271,9 @@ public class MainAgentAppService {
         requireNoPendingQuestion(project, sessionId);
 
         String runId = EventsAppService.newRunId();
+        // 对话史落库（#89）：提交守卫全过后同步落用户发言（失败上抛撤回 REST 面——
+        // 「落库 ⟺ 说过」不漂移）；智能体回复段在轮落定点写（见 recordTurnReply）
+        conversationHistory.recordUserUtterance(projectId, runId, prompt);
         // 受理动作卡（#87）：迭代期意见轮（受理轮）开场即发受理事件——意见已接住、
         // 主智能体正在受理（追问或改 PRD 的过程呈现位，衔接轮收口自动派的更新 run
         // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
@@ -274,8 +292,11 @@ public class MainAgentAppService {
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             try {
-                settleSuspendedQuestion(sessionId, runId,
-                        agentClient.converse(command, eventBridge.sink(projectId)));
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(projectId));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
             }
             catch (RuntimeException e) {
                 // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，

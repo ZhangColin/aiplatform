@@ -44,9 +44,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * 事件端点真实验收（单端点单流，#82 双通道合并）：真实 HTTP/SSE 线格式——心跳注释行、
  * 统一信封 {type,payload,ts}、通知 id {projectId}:{seq} / 智能体事件 id {runId}:{seq}、
  * ?projectId= / ?runId= 过滤、fire-and-forget、<b>合并通道不合并语义</b>（智能体事件族
- * 新连接重放补发；通知族永不补发）、族投递规则（智能体事件不进未过滤订阅）、swagger
- * 端点描述嵌名册指引。窄上下文（{@link NarrowApp} 只扫 eventhub + 共享 web/config，
- * 排除数据面 autoconfig）不依赖本机 PG。
+ * 断线补发——Last-Event-ID 锚点窗口，新连接不补发；通知族永不补发）、族投递规则
+ * （智能体事件不进未过滤订阅）、swagger 端点描述嵌名册指引。窄上下文（{@link
+ * NarrowApp} 只扫 eventhub + 共享 web/config，排除数据面 autoconfig）不依赖本机 PG。
  */
 @SpringBootTest(classes = EventsControllerSseTest.NarrowApp.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
@@ -263,15 +263,38 @@ class EventsControllerSseTest {
         assertThat(healthy.nextNonCommentLine()).isEqualTo("id:p-ff:2");
     }
 
-    // ---------- 合并通道不合并语义：智能体族重放 / 通知族永不补发 ----------
+    // ---------- 合并通道不合并语义：智能体族断线补发 / 通知族永不补发 ----------
 
     /**
-     * 事故回归上线形态（#53/#56）：建项目后对话起跑即死，error 事件（带 projectId）
-     * 发于零订阅——彼时浏览器还在导航/首编译；项目页就绪后以新连接（无
-     * Last-Event-ID）按 ?projectId= 订阅，补发事件必须到达（原事件 id，非重发）。
+     * 断线补发（#89 重放缓冲降级）：零订阅（断线）窗口发出的智能体事件进缓冲——
+     * 重连（Last-Event-ID 锚在缓冲内）只补发锚之后的断线窗口（原事件 id，非重发）。
      */
     @Test
-    void given_agent_event_before_connect_when_subscribe_without_last_event_id_then_event_replayed()
+    void given_agent_events_before_reconnect_when_subscribe_with_anchor_then_window_replayed()
+            throws Exception {
+        appService.publishAgentEvent("part-text", Map.of(
+                "projectId", "17", "runId", "run-anch-9", "text", "断线前已见"));
+        appService.publishAgentEvent("part-text", Map.of(
+                "projectId", "17", "runId", "run-anch-9", "text", "断线窗口内"));
+        appService.publishAgentEvent("part-text", Map.of(
+                "projectId", "18", "runId", "run-anch-10", "text", "别家项目的事件"));
+
+        SseClient client = connect("?projectId=17", "run-anch-9:1");
+
+        // 只补锚（run-anch-9:1）之后的窗口；别项目事件被订阅谓词滤掉
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-anch-9:2");
+        JsonNode envelope = nextFrameEnvelope(client);
+        assertThat(envelope.get("payload").get("text").asText()).isEqualTo("断线窗口内");
+        assertThat(client.nextNonCommentLine(1500)).isNull();
+    }
+
+    /**
+     * 新连接（刷新/回访，无 Last-Event-ID）不补发（#89）：对话史经 REST 水合
+     * （GET /api/projects/{id}/conversation），重放缓冲只承担断线窗口——缓冲中的
+     * 事件对新连接不可见，实时流照常。
+     */
+    @Test
+    void given_agent_event_before_connect_when_subscribe_without_last_event_id_then_no_replay()
             throws Exception {
         appService.publishAgentEvent("error", Map.of(
                 "projectId", "7", "runId", "run-9",
@@ -279,23 +302,20 @@ class EventsControllerSseTest {
 
         SseClient client = connect("?projectId=7");
 
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-9:1");
-        assertThat(client.nextNonCommentLine()).isEqualTo("event:event");
-        JsonNode envelope = objectMapper.readTree(
-                client.nextNonCommentLine().substring("data:".length()));
-        assertThat(envelope.get("type").asText()).isEqualTo("error");
-        assertThat(envelope.get("payload").get("projectId").asText()).isEqualTo("7");
+        assertThat(client.nextNonCommentLine(1500)).isNull();
+        appService.publishAgentEvent("part-text", Map.of(
+                "projectId", "7", "runId", "run-9", "text", "实时事件照常"));
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-9:2");
     }
 
     /**
-     * 断线补发（#23 生成环② → parts 契约）：编码 run 进行中用户刷新页面——部件事件
-     * 在零订阅期间发射进缓冲，项目页就绪后以新连接（无 Last-Event-ID）按 ?projectId=
-     * 订阅，当前 run 的部件事件按原序原 id 补达（续看进行中 run）；别项目事件不泄漏。
+     * 断线补发窗口的部件序（parts 契约，#23 生成环②衣钵）：编码 run 进行中断线——
+     * 重连后断线窗口内的部件事件按原序原 id 补达（续看进行中 run）；别项目不泄漏。
      */
     @Test
-    void given_part_events_before_connect_when_subscribe_by_project_then_replayed_in_order()
+    void given_part_events_before_reconnect_when_subscribe_by_project_then_window_in_order()
             throws Exception {
-        // 零订阅窗口内的当前 run 事件（部件 + 引擎透传真实形态）
+        // 断线窗口内的当前 run 事件（部件 + 引擎透传真实形态）
         appService.publishAgentEvent("part-step", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
                 "engine", "agentscope", "step", 1));
@@ -310,7 +330,8 @@ class EventsControllerSseTest {
                 "projectId", "24", "runId", "run-other", "sessionId", "coder-24",
                 "engine", "agentscope", "text", "别家项目的事件"));
 
-        SseClient client = connect("?projectId=23");
+        // 锚已被逐出/丢失的断线重连（整段缓冲皆窗口）：按 ?projectId= 过滤补发
+        SseClient client = connect("?projectId=23", "run-gone:9");
 
         // 补发按发射序、id 取 runId 流（部件与透传同一 id 空间）；别项目被过滤
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:1");
@@ -333,40 +354,29 @@ class EventsControllerSseTest {
     }
 
     /**
-     * 通知族「只作实时呈现，状态以查询为准」：零订阅窗口发出的通知不进缓冲——
-     * 新连接（无 Last-Event-ID）不补发（与智能体事件族同一连接上语义分家）。
+     * 通知族「只作实时呈现，状态以查询为准」：不进缓冲——重连也不补发（与智能体
+     * 事件族同一连接上语义分家，断线由 REST 重查收敛）。
      */
     @Test
-    void given_notification_before_connect_when_subscribe_without_last_event_id_then_not_replayed()
+    void given_notification_before_reconnect_when_subscribe_then_not_replayed()
             throws Exception {
         appService.publishNotification("workspace-created", Map.of(
-                "projectId", "7", "projectName", "官网 demo", "container", "c", "projectType", "WEBSITE"));
+                "projectId", "19", "projectName", "官网 demo", "container", "c", "projectType", "WEBSITE"));
 
-        SseClient client = connect("?projectId=7");
-
-        assertThat(client.nextNonCommentLine(1500)).isNull();
-    }
-
-    /** 重连分野：带 Last-Event-ID = 浏览器自动重连姿态——不补发，维持 REST 重查兜底。 */
-    @Test
-    void given_agent_events_before_connect_when_subscribe_with_last_event_id_then_no_replay()
-            throws Exception {
-        appService.publishAgentEvent("run-start", Map.of("runId", "run-recon-9", "prompt", "x"));
-
-        SseClient client = connect("", "run-earlier:5");
+        SseClient client = connect("?projectId=19", "run-gone2:9");
 
         assertThat(client.nextNonCommentLine(1500)).isNull();
     }
 
-    /** 空串头视同无值（新连接）：空 Last-Event-ID 无信息量——按新连接补发，不吞错误卡。 */
+    /** 空串头视同无值（新连接）：空 Last-Event-ID 无信息量——按新连接不补发。 */
     @Test
-    void given_agent_events_before_connect_when_subscribe_with_blank_last_event_id_then_replayed()
+    void given_agent_events_before_connect_when_subscribe_with_blank_last_event_id_then_no_replay()
             throws Exception {
         appService.publishAgentEvent("run-start", Map.of("runId", "run-blank-9", "prompt", "x"));
 
         SseClient client = connect("?runId=run-blank-9", "");
 
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-blank-9:1");
+        assertThat(client.nextNonCommentLine(1500)).isNull();
     }
 
     // ---------- 部件契约线格式 ----------

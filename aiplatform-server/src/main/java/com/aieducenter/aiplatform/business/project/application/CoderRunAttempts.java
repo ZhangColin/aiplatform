@@ -95,17 +95,19 @@ class CoderRunAttempts {
     private final GenerationProperties properties;
     private final StepBoundaryPreviewRefresh previewRefresh;
     private final RunPermissionAppService permissions;
+    private final ConversationHistoryAppService conversationHistory;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
             GenerationProperties properties, StepBoundaryPreviewRefresh previewRefresh,
-            RunPermissionAppService permissions) {
+            RunPermissionAppService permissions, ConversationHistoryAppService conversationHistory) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
         this.previewRefresh = previewRefresh;
         this.permissions = permissions;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -194,8 +196,13 @@ class CoderRunAttempts {
                 }
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
-                    projection.accept(withClosing(pendingFinish.get(), judgment, runChanges,
-                            runStartedAt, what));
+                    Map<String, Object> closing = closingPayload(judgment, runChanges,
+                            runStartedAt, what);
+                    // 对话史落库（#89 收尾卡腿）：先落库后发 run-finish——事件即触发
+                    // 前端对话史域失效重拉（水合按 run 整体接管 live 片段），次序反转
+                    // 会让重拉撞上未落库的空窗（code-review #89）
+                    conversationHistory.recordClosing(projectId, firstRunId, closing);
+                    projection.accept(withClosing(pendingFinish.get(), closing));
                 }
                 return new RunResult(true);
             }
@@ -214,11 +221,12 @@ class CoderRunAttempts {
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
-     * schema 见 SSE事件清单·收口扩载（对话史落库与版本锚定复用同一载荷）。
+     * schema 见 SSE事件清单·收口扩载（对话史落库 #89 与版本锚定 #91 复用同一载荷，
+     * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径跨尝试
      * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。
      */
-    private static AgentEvent withClosing(AgentEvent finish, ClosingJudgment judgment,
+    private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put("summary", closingSummary(judgment, what));
@@ -232,6 +240,11 @@ class CoderRunAttempts {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
+        return closing;
+    }
+
+    /** 被押后的 run-finish 加挂 closing 载荷（载荷拼装归 {@link #closingPayload}）。 */
+    private static AgentEvent withClosing(AgentEvent finish, Map<String, Object> closing) {
         Map<String, Object> payload = new LinkedHashMap<>(finish.payload());
         payload.put(AgentEventTypes.CLOSING_FIELD, closing);
         return new AgentEvent(finish.type(), payload);

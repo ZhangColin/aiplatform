@@ -10,8 +10,6 @@ import { cn } from "@/lib/utils";
 import { useAnswerPermission } from "@/hooks/use-answer-permission";
 import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
-import { ClosingCard } from "./closing-card";
-
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / command；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   write_file: <FileCode2 className="size-3.5" />,
@@ -40,10 +38,8 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
     return () => clearInterval(timer);
   }, [growing, work.runId]);
 
-  // 收尾卡（#88 定格收口）：成功收口的凝聚物——过程部件已清，本卡即消息的收尾
-  // 部件（不是另起的卡）
-  if (work.closing) return <ClosingCard closing={work.closing} />;
-  // 定格且无部件（run 起跑即死）：空壳不占位
+  // 成功收口（closing 携带，#89）：收尾卡归对话流常驻（chat store）、过程部件已
+  // 退场——本消息空壳不占位；run-failed 定格流水留驻（恢复出口）
   if (work.frozen && work.parts.length === 0) return null;
   // 未终态动作的时长冻结锚：定格时刻（定格后不再随 tick 走）
   const tickStop = work.frozen ? (work.frozenAt ?? now) : now;

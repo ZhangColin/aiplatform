@@ -6,23 +6,23 @@ import { create } from "zustand";
  * ：解说文本部件 + 工具动作部件 + 步骤分组部件），run 收口定格。
  *
  * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
- * run-failed 定格（不再生长、时长停跳）。成功收口（run-finish 携 closing，#88）
- * 定格为<b>收尾卡</b>——closing 在场即消息的收尾部件、过程部件清空（明细不常驻，
- * 收尾卡即凝聚物）；run-failed 定格无 closing，流水留驻（恢复出口归生成面）；下一场
- * 编码 run（新 runId = 新一轮）重开新消息、旧消息不保留。静默重试不出用户面（#84：
- * run-start 一场恰一次、用户面 run 身份 = 首试 runId 全程不变）——生长中重来
- * 新 runId 属事件序异常（防御位忽略，不清锚闪空消息）。思考与代码不进部件
- * （服务端口径），本 store 无进度条语义。</p>
+ * run-failed 定格（不再生长、时长停跳）。成功收口（run-finish 携 closing，#88/#89
+ * 收尾卡归对话流常驻）——closing 在场即过程部件清空（明细不常驻，收尾卡即凝聚物，
+ * 卡本体长在 chat store：live 经 appendClosing、回访经对话史水合）；run-failed 定格
+ * 流水留驻（恢复出口归生成面）；下一场编码 run（新 runId = 新一轮）重开新消息、
+ * 旧消息不保留。静默重试不出用户面（#84：run-start 一场恰一次、用户面 run 身份
+ * = 首试 runId 全程不变）——生长中重来新 runId 属事件序异常（防御位忽略，不清锚
+ * 闪空消息）。思考与代码不进部件（服务端口径），本 store 无进度条语义。</p>
  *
  * <p><b>锚定判定</b>：部件事件全事件流恒挂（主智能体对话轮也产部件）——工作消息
- * 只锚编码 run。锚由 run-start(agent=executor) 落；重放缓冲淘汰了 run-start 时
- * 按 {@code coder-} 会话前缀补建（刷新回访续看进行中 run；上一轮已定格、新 run
- * 的 run-start 又被淘汰时同一口重锚；主智能体的 main- 会话不误建——#86 单会话
- * 收敛后前缀判定只此一处残留：编码 run 的会话是执行侧寻址事实，非角色判定）。</p>
+ * 只锚编码 run。锚由 run-start(agent=executor) 落；断线补发窗口淘汰了 run-start 时
+ * 按 {@code coder-} 会话前缀补建（重连续看进行中 run；上一轮已定格、新 run 的
+ * run-start 又被淘汰时同一口重锚；主智能体的 main- 会话不误建——#86 单会话收敛后
+ * 前缀判定只此一处残留：编码 run 的会话是执行侧寻址事实，非角色判定）。</p>
  *
- * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载会重收近期事件——部件事件按 SSE
- * 完整事件 id 只收一次；run-start 同 runId 不清已长部件（重放先到 run-start、
- * 后到部件事件但已被 id 去重，清了就只剩空壳）。</p>
+ * <p><b>重放幂等</b>：断线补发窗口会重收已见部件事件——按 SSE 完整事件 id 只收
+ * 一次；run-start 同 runId 不清已长部件（补发先到 run-start、后到部件事件但已被
+ * id 去重，清了就只剩空壳）。</p>
  */
 
 /** 动作部件生命周期（正本 part-action 行：started / running / completed / failed）。 */
@@ -104,23 +104,6 @@ export type PartEventRef = {
   at: number;
 };
 
-/**
- * 收尾卡权威事实（#88 收口扩载的工作消息投影——桥从 run-finish.closing 落）：
- * run 收口 = 消息定格，收尾卡即其收尾部件（不是另起的卡）。四要素 = 摘要
- * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
- * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
- * 过程明细（解说段、动作卡流水）收口后不常驻——closing 到达即清部件，收尾卡是凝聚物。
- */
-export type WorkClosing = {
-  summary: string;
-  prdChanged: boolean;
-  prdNote?: string;
-  systemChanged: boolean;
-  systemNote?: string;
-  files: { path: string; added: number; removed: number }[];
-  durationMs: number;
-};
-
 /** 桥侧部件输入（store 负责落 id / 时长 / 原位更新）。 */
 export type WorkPartInput =
   | { kind: "text"; text: string }
@@ -144,12 +127,6 @@ type ProjectWork = {
   frozen: boolean;
   /** 定格时间戳（未终态动作的时长冻结锚）。 */
   frozenAt?: number;
-  /**
-   * 收尾卡（#88）：成功收口（run-finish 携 closing）的凝聚物——在场即消息的
-   * 收尾部件、过程部件已清（明细不常驻）；run-failed 定格无 closing（恢复出口
-   * 归生成面，流水留驻可读）。
-   */
-  closing?: WorkClosing;
   parts: WorkPart[];
   /** 已收部件事件的 SSE id（重放去重锚，有界）。 */
   seenEventIds: string[];
@@ -172,10 +149,11 @@ export type WorkMessageState = {
   resolvePermission: (projectId: string, engineRef: string, state: WorkPermissionState) => void;
   /**
    * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。携 closing
-   * （#88：编码 run 真收口的服务端权威事实）即收尾部件在场、过程部件清空（明细
-   * 不常驻——收尾卡即凝聚物）；咨询/纯追问轮无 closing，不产收尾卡。
+   * （#88：编码 run 真收口）即过程部件清空（明细不常驻——收尾卡即凝聚物，卡本体
+   * 归 chat store 对话流，#89）；无 closing（run-failed / 对话轮收口）流水留驻或
+   * 本就为空。
    */
-  freezeWork: (projectId: string, runId: string, at: number, closing?: WorkClosing) => void;
+  freezeWork: (projectId: string, runId: string, at: number, closing?: unknown) => void;
 };
 
 /** 部件数软上限（重放缓冲 ~1000 事件的投影，内存有界）。 */
@@ -331,9 +309,10 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   freezeWork: (projectId, runId, at, closing) =>
     updateWork(set, projectId, (work) => {
       if (work?.runId !== runId || work.frozen) return work;
-      // 收尾卡在场即凝聚物（#88）：过程部件清空（明细不常驻），去重簿记同清
+      // 收尾卡在场即凝聚物（#88/#89）：过程部件清空（明细不常驻——卡本体归 chat
+      // store 对话流），去重簿记同清；无 closing 流水留驻
       return closing
-        ? { ...work, frozen: true, frozenAt: at, closing, parts: [], seenEventIds: [] }
+        ? { ...work, frozen: true, frozenAt: at, parts: [], seenEventIds: [] }
         : { ...work, frozen: true, frozenAt: at };
     }),
 }));

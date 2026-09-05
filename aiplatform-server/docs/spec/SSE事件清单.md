@@ -1,7 +1,7 @@
 # SSE 事件清单（正本）
 
 > 平台 SSE 事件的名册与信封正本，[ADR-0001](../adr/0001-swagger-contract-and-sse-channels.md) 定稿、#82 起单端点单流。前端消费以本文 + swagger 端点描述为准。
-> 事件只让 UI「活」，不承担正确性：断线丢失可接受，状态以 REST 查询为准（通知族口径；智能体事件族另有重放）。
+> 事件只让 UI「活」，不承担正确性：断线丢失可接受，状态以 REST 查询为准（通知族口径；智能体事件族另有断线补发，对话史以 REST 水合收敛，[#89](https://github.com/ZhangColin/aiplatform/issues/89)）。
 >
 > **治理**：eventhub 是唯一 SSE 管道、单端点单流（平台通知 + 智能体事件共用一条流，合并通道不合并语义——词汇表归 eventhub，智能体事件由 base.agentscope 的 mapper 翻译填充）。新增顶层 type 必须先进本清单再上线（code review 检查）；代码侧只允许引用 `XxxEventTypes` 常量类，禁止字符串字面量散落。
 
@@ -18,14 +18,14 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 - 心跳：每 15s 发注释行 `:ping`（不进 listener，仅保活）。
 - 订阅：`GET /api/events?projectId=xxx&runId=xxx`（过滤参数与 payload 关联字段同名，多参数 AND；缺省 = 只收通知族）。
 - **族投递规则**：智能体事件族只投递给带过滤（`projectId` 或 `runId`）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤订阅（站点级常开连接）只收平台通知族。
-- **Last-Event-ID 分野**：无值（缺席或空串）= 新连接 = 先收命中过滤的最近智能体缓冲事件（见下）再进实时流；有值（浏览器断线重连自动携带）= 不补发、不做 seq 续传，前端对齐维持 REST 重查兜底。
+- **Last-Event-ID 分野（#89 断线补发）**：有值（浏览器断线重连自动携带）= 断线补发——先收命中过滤的智能体缓冲事件中**锚事件之后**的窗口（见下）再进实时流；无值（缺席或空串）= 新连接（刷新/回访）= **不补发**——对话史经 REST 水合（`GET /api/projects/{id}/conversation`），平台状态以查询收敛。
 
 ## 两族语义（合并通道不合并语义）
 
 一条流承载两族事件，语义分家（[#82](https://github.com/ZhangColin/aiplatform/issues/82) 双通道合并）：
 
-- **平台通知族**：**永不补发**——发射不进重放缓冲，只达实时订阅；「只作实时呈现，状态以查询为准」（CONTEXT.md「平台通知」）。断线由前端 REST 重查兜底。
-- **智能体事件族**：**带近期事件缓冲的热流**（[#56](https://github.com/ZhangColin/aiplatform/issues/56)，[#53](https://github.com/ZhangColin/aiplatform-server/issues/53)）——事件一经发射即进有界缓冲（零订阅时也进），默认最近 1000 条、配置 `app.agent-events.replay-depth`。新连接先收命中过滤的缓冲事件（原事件 id）、再无缝进实时流；断线重连不补发。缓冲为**单实例内存态**（重启即失），多实例化时需重估。
+- **平台通知族**：**永不补发**——发射不进缓冲，只达实时订阅；「只作实时呈现，状态以查询为准」（CONTEXT.md「平台通知」）。断线由前端 REST 重查兜底。
+- **智能体事件族**：**带近期事件缓冲的热流（断线补发）**（[#56](https://github.com/ZhangColin/aiplatform-server/issues/56)、[#53](https://github.com/ZhangColin/aiplatform-server/issues/53)，[#89](https://github.com/ZhangColin/aiplatform/issues/89) 起降级）——事件一经发射即进有界缓冲（零订阅时也进），默认最近 1000 条、配置 `app.agent-events.replay-depth`。断线重连（Last-Event-ID 在场）补发**锚事件之后**命中过滤的窗口（锚已被容量逐出或随重启丢失则整段缓冲——缓冲内事件必然晚于锚，不重复）；**新连接（刷新/回访）不补发**——对话史落库后水合重建归 REST（`GET /api/projects/{id}/conversation`），重放缓冲只承担断线窗口、不再承担刷新重建。缓冲为**单实例内存态**（重启即失），多实例化时需重估。
 
 ## 平台通知族
 
@@ -66,9 +66,9 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡 |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 起纯 QUESTION——权限确认已拆独立事件）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
 | `permission-required` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 权限确认挂起（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 事件拆分，词根 = 引擎权限确认原语 RequireUserConfirmEvent 的非提问面）：run 执行中需用户批准的工具操作（危险命令 → 确认卡长在工作消息流，批准/拒绝两个动作）。`summary` = 首工具的命令文本（截断保短，确认卡摘要行）；`data.toolCalls` = 待确认工具最小面（确认卡呈现待批准操作的依据）。**作答走权限作答通道**（`POST /api/projects/{id}/permissions/{ref}/answer`，ref=engineRef；与问答作答分家——互不串扰）；生产触发面 = 平台侧 `command` 工具的破坏性命令自检（封闭小表：递归强删/提权/格式化与裸写设备/关机族/fork 炸弹） |
-| `permission-resolved` | `projectId` `runId` `engineRef` `approved` | 权限确认落定（[#83](https://github.com/ZhangColin/aiplatform/issues/83)）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）；run 终态仍归 `run-finish`/`run-failed` |
+| `permission-resolved` | `projectId` `runId` `engineRef` `approved` | 权限确认落定（[#83](https://github.com/ZhangColin/aiplatform/issues/83)）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒终态的呈现源（呈现事实双通道：断线补发窗口内事件可达；刷新经对话史水合——#89，确认卡不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）；run 终态仍归 `run-finish`/`run-failed` |
 | `run-failed` | `projectId` `runId` | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` = 该场 run 的用户面标识（首试 runId——[#84](https://github.com/ZhangColin/aiplatform/issues/84) 重试不换新锚）。**run 失败为唯一失败终态**——重试全程静默（中间错误与重试信号不出用户面：无逐次 `error`、无重试 `run-start`），前端恢复出口只认本事件 |
-| `guide-reply` | `projectId` `runId` `prompt` `label` `text` | 兜底轻引导回复（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支）：非意见非咨询输入的平台侧定型引导文案——零产物路径（不起任何智能体 run，本事件即该次派发的全部）。`runId` 为派发锚；`prompt` 为锚定的用户输入（重放重建对话面用）；`label` 为呈现标签（「平台」）；`text` 为引导文案 |
+| `guide-reply` | `projectId` `runId` `prompt` `label` `text` | 兜底轻引导回复（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支）：非意见非咨询输入的平台侧定型引导文案——零产物路径（不起任何智能体 run，本事件即该次派发的全部）。`runId` 为派发锚；`prompt` 为锚定的用户输入（事件到达重建对话面用；回访经对话史水合——#89）；`label` 为呈现标签（「平台」）；`text` 为引导文案 |
 | `acceptance-start` | `projectId` `runId` | 受理开始（[#87](https://github.com/ZhangColin/aiplatform/issues/87) 受理动作卡）：受理轮（迭代期意见轮——项目已生成后的意见链轮）开场的受理事实，**对话区受理动作卡的呈现源**——意见已接住、主智能体正在受理（需求不清则追问；需求变更则改 PRD），衔接轮收口自动派的更新 run 工作消息（原派发阶段「更新 PRD 中」呈现位的归位，不设其余阶段事件依赖）。守卫全过后、受理动作前发射，先于该轮 `run-start` 到达（动作卡先出、解说随后，对话区连续可见）；受理落定**不出新事件**——由该轮 `run-finish` / `error` 收口事件推导（挂起-续跑是同一受理轮，不重发）。场景矩阵收口：咨询轮与纯追问轮（访谈期意见轮）不发 |
 
 #### 消息部件事件（`part-*`）
@@ -139,4 +139,4 @@ annotation:
 
 ## 前端通用模块（约定）
 
-站点布局级挂常开连接（未过滤订阅——只收通知族），项目页挂项目过滤连接（`?projectId=`——通知 + 智能体事件两族、重放补发面）；模块统一管连接建立、心跳透明、自动重连、重连后 REST 重查钩子、按 type 分发回调——页面只声明关心的 type，不重复写连接逻辑。同一连接上的通知族由常开连接消费，项目页连接只分发智能体事件族（族内分工，防双连接双处理）。
+站点布局级挂常开连接（未过滤订阅——只收通知族），项目页挂项目过滤连接（`?projectId=`——通知 + 智能体事件两族、断线补发面；新连接不补发，对话史经 REST 水合——#89）；模块统一管连接建立、心跳透明、自动重连、重连后 REST 重查钩子、按 type 分发回调——页面只声明关心的 type，不重复写连接逻辑。同一连接上的通知族由常开连接消费，项目页连接只分发智能体事件族（族内分工，防双连接双处理）。

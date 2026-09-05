@@ -90,13 +90,16 @@ public class DispatchAppService {
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final DispatchProperties properties;
+    private final ConversationHistoryAppService conversationHistory;
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
-            AgentscopeAgentClient agentClient, DispatchProperties properties) {
+            AgentscopeAgentClient agentClient, DispatchProperties properties,
+            ConversationHistoryAppService conversationHistory) {
         this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.properties = properties;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -152,6 +155,9 @@ public class DispatchAppService {
                         ? GUIDE_ORDER_TEXT_GENERATED : GUIDE_ORDER_TEXT_NOT_GENERATED)
                 : GUIDE_GENERIC_TEXT;
         eventBridge.emitGuideReply(project.getId(), runId, prompt, GUIDE_LABEL, text);
+        // 对话史落库（#89）：轻引导也是对话面——用户发言 + 定型文案两行（事件已发，
+        // 补写失败只记日志）
+        conversationHistory.recordGuide(project.getId(), runId, prompt, text);
         log.info("[dispatch] 项目 {} 兜底引导（{}）", project.getId(),
                 orderIntent ? "下单意图" : "泛引导");
         return new DispatchRun(runId);

@@ -34,11 +34,13 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.SseEventId;
  * 进重放缓冲）在应用层（如 {@code EventsAppService}）。将来提取为 cartisan-boot
  * 模块（拟名 cartisan-sse）时，本类整体迁出。</p>
  *
- * <p>近期事件重放（{@code Flux.replay(N)} 语义）：通道经 {@link #registerReplay} 显式
- * 注册（携带容量）后，可重放广播一律进 per-channel 有界环形缓冲——零订阅时也入
- * 缓冲、seq 照常分配；新订阅（重放开）先收命中订阅谓词的最近事件（原事件 id）再进
- * 实时流。未注册通道「永不补发」语义分毫不变；单通道混双语义（#82 单端点单流）经
- * {@link #broadcastUnbuffered} 逐发射豁免缓冲——通知族只达实时订阅。</p>
+ * <p>近期事件重放（{@code Flux.replay(N)} 语义，#89 起降级为<b>断线补发</b>）：通道经
+ * {@link #registerReplay} 显式注册（携带容量）后，可重放广播一律进 per-channel 有界
+ * 环形缓冲——零订阅时也入缓冲、seq 照常分配；带锚事件 id 的订阅（断线重连，浏览器
+ * 自动携带 Last-Event-ID）先收缓冲中锚之后命中订阅谓词的事件（原事件 id）再进实时
+ * 流——只补断线窗口，新连接（刷新）不补发（对话史经 REST 水合，重放缓冲不再承担
+ * 刷新重建）。未注册通道「永不补发」语义分毫不变；单通道混双语义（#82 单端点单流）
+ * 经 {@link #broadcastUnbuffered} 逐发射豁免缓冲——通知族只达实时订阅。</p>
  *
  * <p>线程模型：广播在调用方线程同步扇出（内存内，快）；心跳由单线程
  * {@code sse-heartbeat} 周期执行。对同一 emitter 的并发发送经订阅级
@@ -112,10 +114,10 @@ public class SseChannelHub {
     }
 
     /**
-     * 订阅一个通道（重放开关关）。见 {@link #subscribe(String, Predicate, boolean)}。
+     * 订阅一个通道（不补发）。见 {@link #subscribe(String, Predicate, String)}。
      */
     public SseEmitter subscribe(String channel, Predicate<Map<String, Object>> filter) {
-        return subscribe(channel, filter, false);
+        return subscribe(channel, filter, null);
     }
 
     /**
@@ -123,17 +125,21 @@ public class SseChannelHub {
      * 不超时（断连由心跳发送失败逐出）；连接建立即刻发一条 {@code :ping}，
      * 冲刷响应头并作即时存活信号。
      *
-     * <p>replay=true 且通道已注册重放缓冲（{@link #registerReplay}）：先收命中订阅
-     * 谓词的最近缓冲事件（原事件 id，与实时事件同一 id 口径）、再无缝进实时流。replay
-     * 开关对未注册通道无效果（现行为）。</p>
+     * <p><b>断线补发（#89 重放缓冲降级）</b>：{@code afterEventId} 非空（浏览器断线
+     * 重连自动携带的 Last-Event-ID）且通道已注册重放缓冲（{@link #registerReplay}）
+     * 时，先补发缓冲中该锚事件<b>之后</b>命中订阅谓词的事件（断线窗口，原事件 id）
+     * 再无缝进实时流；锚已被容量逐出或随重启丢失时补发整段缓冲（缓冲内事件必然
+     * 晚于锚，不会重复）。{@code afterEventId} 为 null（新连接/刷新）不补发——
+     * 对话史经 REST 水合（#89），重放缓冲只承担断线窗口、不再承担刷新重建。</p>
      */
-    public SseEmitter subscribe(String channel, Predicate<Map<String, Object>> filter, boolean replay) {
+    public SseEmitter subscribe(String channel, Predicate<Map<String, Object>> filter,
+            String afterEventId) {
         Predicate<Map<String, Object>> effectiveFilter = filter == null ? payload -> true : filter;
         ChannelState state = channels.computeIfAbsent(channel, key -> new ChannelState());
         SseEmitter emitter = new SseEmitter(0L);
         Subscription subscription = new Subscription(channel, emitter, effectiveFilter);
 
-        List<SseServerEvent> backlog = snapshotAndRegister(state, subscription, replay);
+        List<SseServerEvent> backlog = snapshotAndRegister(state, subscription, afterEventId);
         emitter.onCompletion(() -> state.subscriptions.remove(subscription));
         emitter.onTimeout(() -> state.subscriptions.remove(subscription));
         emitter.onError(throwable -> state.subscriptions.remove(subscription));
@@ -144,14 +150,15 @@ public class SseChannelHub {
     }
 
     /**
-     * 重放开且通道已注册缓冲：通道临界区内完成「缓冲快照+订阅注册」（与广播侧
+     * 断线补发开且通道已注册缓冲：通道临界区内完成「缓冲快照+订阅注册」（与广播侧
      * 「入缓冲+订阅快照」互斥——接缝不重不漏的关键：事件要么在快照里、要么在广播
      * 遍历集合里，恰得其一）。订阅先标记 replaying 再注册，此后广播事件先入订阅级
-     * pending 队列。否则直接注册（现行为）。
+     * pending 队列。否则直接注册（新连接不补发）。
      */
-    private List<SseServerEvent> snapshotAndRegister(ChannelState state, Subscription subscription, boolean replay) {
+    private List<SseServerEvent> snapshotAndRegister(ChannelState state, Subscription subscription,
+            String afterEventId) {
         ReplayBuffer buffer = state.replayBuffer;
-        if (!replay || buffer == null) {
+        if (afterEventId == null || buffer == null) {
             state.subscriptions.add(subscription);
             return List.of();
         }
@@ -160,10 +167,24 @@ public class SseChannelHub {
         try {
             List<SseServerEvent> snapshot = buffer.snapshot();
             state.subscriptions.add(subscription);
-            return snapshot;
+            return windowAfter(snapshot, afterEventId);
         } finally {
             state.channelLock.unlock();
         }
+    }
+
+    /**
+     * 锚点窗口：锚在缓冲内 → 锚之后的缓冲事件（断线补发窗口）；锚不在（容量逐出 /
+     * 重启丢失）→ 整段缓冲（环形缓冲只留最新事件，锚之前的事件若还在则锚也在——
+     * 锚不在即缓冲内全部事件晚于锚，整段皆断线窗口，补发不重复）。
+     */
+    private static List<SseServerEvent> windowAfter(List<SseServerEvent> snapshot, String anchorId) {
+        for (int i = 0; i < snapshot.size(); i++) {
+            if (anchorId.equals(snapshot.get(i).id())) {
+                return snapshot.subList(i + 1, snapshot.size());
+            }
+        }
+        return snapshot;
     }
 
     /**

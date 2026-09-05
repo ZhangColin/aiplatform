@@ -6,6 +6,7 @@
  */
 
 import type { components } from "@/lib/api/schema";
+import { asRecord } from "@/lib/utils";
 
 /** 作答端点回传的待确认工具形状（swagger AnswerQuestionCommand.toolCalls 元素）。 */
 type AnswerToolCall = NonNullable<components["schemas"]["AnswerQuestionCommand"]["toolCalls"]>[number];
@@ -106,11 +107,7 @@ export function toAnswerToolCalls(calls: readonly PendingToolCall[]): AnswerTool
   }));
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
+
 
 function labelOf(option: unknown): string | null {
   const record = asRecord(option);

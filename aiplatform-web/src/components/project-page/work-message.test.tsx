@@ -202,25 +202,15 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
   });
 });
 
-describe("WorkMessage · 定格收尾卡（#88：closing 在场即收尾部件）", () => {
-  it("成功收口：收尾卡呈现、过程部件退场（不出现「正在做」与打字点）", () => {
-    const html = renderWithClient(work({
-      frozen: true,
-      frozenAt: 183_420,
-      closing: {
-        summary: "首次生成了系统",
-        prdChanged: false,
-        systemChanged: true,
-        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
-        durationMs: 183_420,
-      },
-      parts: [action()], // 已清空是 store 职责；此处防御部件残留也不双呈现
-    }));
+describe("WorkMessage · 定格收口（#88/#89：收尾卡归对话流，过程明细退场）", () => {
+  it("成功收口（closing 携带）：过程部件已退场（store 职责清空）——空壳不占位（收尾卡长在对话流）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ frozen: true, frozenAt: 183_420, parts: [] })} projectId="p1" />,
+    );
 
-    expect(html).toContain("本轮完成");
-    expect(html).toContain("首次生成了系统");
     expect(html).not.toContain("正在做");
     expect(html).not.toContain("编写【订单管理】");
+    expect(html).not.toContain("本轮完成"); // 卡本体归 chat store（CommandArea 渲染）
   });
 
   it("失败定格（run-failed 无 closing）：流水留驻、不出收尾卡", () => {

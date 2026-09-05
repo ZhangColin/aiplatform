@@ -34,6 +34,8 @@ import com.aieducenter.aiplatform.business.project.application.IterationAppServi
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.RunPermissionAppService;
+import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -99,6 +101,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private RunPermissionAppService runPermissionAppService;
+
+    @MockitoBean
+    private ConversationHistoryAppService conversationHistoryAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -210,6 +215,47 @@ class ProjectControllerTest {
     void given_non_numeric_id_when_get_then_404() throws Exception {
         performAsUser(get("/api/projects/abc"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
+        // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
+        // code——1=user 3=question 5=closing）、question/closing 载荷原样、
+        // id 升序（写入序 = 对话序）
+        when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
+                new ConversationEntryResponse(1L, 1, "run-1", "做一个官网",
+                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
+                new ConversationEntryResponse(2L, 3, "run-1", null,
+                        Map.of("engineRef", "reply-1", "data", Map.of()),
+                        null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "run-2", null, null,
+                        Map.of("summary", "首次生成了系统", "prdChanged", false,
+                                "systemChanged", true, "files", List.of(), "durationMs", 183420),
+                        false, LocalDateTime.of(2026, 9, 5, 10, 9))));
+
+        performAsUser(get("/api/projects/100/conversation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.length()").value(3))
+                .andExpect(jsonPath("$.data[0].kind").value(1))
+                .andExpect(jsonPath("$.data[0].text").value("做一个官网"))
+                .andExpect(jsonPath("$.data[1].kind").value(3))
+                .andExpect(jsonPath("$.data[1].answered").value(false))
+                .andExpect(jsonPath("$.data[1].question.engineRef").value("reply-1"))
+                .andExpect(jsonPath("$.data[2].kind").value(5))
+                .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420));
+    }
+
+    @Test
+    void given_unknown_project_when_read_conversation_then_prj_001_mapped_to_404() throws Exception {
+        when(conversationHistoryAppService.read(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(get("/api/projects/404/conversation"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("项目不存在"));
     }
 
     @Test

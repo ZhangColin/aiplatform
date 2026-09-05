@@ -110,7 +110,6 @@ export type PartEventRef = {
  * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
  * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
  * 过程明细（解说段、动作卡流水）收口后不常驻——closing 到达即清部件，收尾卡是凝聚物。
- * 动作卡流水）收口后不常驻——closing 到达即清部件，收尾卡是凝聚物。
  */
 export type WorkClosing = {
   summary: string;

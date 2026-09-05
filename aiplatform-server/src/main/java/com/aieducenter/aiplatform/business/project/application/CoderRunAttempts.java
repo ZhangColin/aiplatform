@@ -209,8 +209,8 @@ class CoderRunAttempts {
         return new RunResult(false);
     }
 
-    /** 日志标签（what）：生成轨——摘要口径分岔用。 */
-    private static final String GENERATE_LABEL = "generate";
+    /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
+    static final String GENERATE_LABEL = "generate";
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——

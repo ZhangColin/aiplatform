@@ -66,7 +66,13 @@ public enum ProjectMessage implements CodeMessage {
     VERSION_VIEW_LIMIT(409, "PRJ_029", "同时查看的版本过多，请先关闭一个再查看"),
 
     /** 查看会话关闭守卫（#92）：viewId 不在在途会话内（已关闭/平台重启丢账）。 */
-    VERSION_VIEW_NOT_FOUND(404, "PRJ_030", "该查看会话不存在或已关闭");
+    VERSION_VIEW_NOT_FOUND(404, "PRJ_030", "该查看会话不存在或已关闭"),
+
+    /** 回滚并发守卫（#100）：编码 run 在途（生成/修正）——回滚会丢其在途未提交改动。 */
+    VERSION_ROLLBACK_RUN_IN_FLIGHT(409, "PRJ_031", "系统正在更新，请稍后再回滚"),
+
+    /** 回滚脏树守卫（#100）：工作树有未提交 tracked 改动（如失败 run 残留）——restore 会静默丢弃。 */
+    VERSION_ROLLBACK_DIRTY_TREE(409, "PRJ_032", "系统有未完成的改动，请稍后再回滚");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

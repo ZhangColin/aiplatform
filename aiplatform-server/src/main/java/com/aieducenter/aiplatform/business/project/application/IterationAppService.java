@@ -3,7 +3,6 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
@@ -73,9 +72,8 @@ public class IterationAppService {
     private final CoderRunAttempts coderRunAttempts;
     private final FinishEditFacts finishFacts;
     private final AgentEventBridge eventBridge;
+    private final CodingRunTrack codingRunTrack;
 
-    /** 修正在途项目集（含已提交未起跑——排队中）：起跑/排队的分岔事实。 */
-    private final Set<Long> fixesInFlight = ConcurrentHashMap.newKeySet();
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
     /**
@@ -87,12 +85,14 @@ public class IterationAppService {
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
-            FinishEditFacts finishFacts, AgentEventBridge eventBridge) {
+            FinishEditFacts finishFacts, AgentEventBridge eventBridge,
+            CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
         this.finishFacts = finishFacts;
         this.eventBridge = eventBridge;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -123,15 +123,15 @@ public class IterationAppService {
         Project project = requireFixableProject(projectId);
         FixHandoff handoff;
         String firstRunId;
-        synchronized (this) {
-            if (fixesInFlight.contains(projectId)) {
+        synchronized (codingRunTrack) {
+            if (codingRunTrack.isInFlight(projectId)) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_IN_FLIGHT);
             }
             handoff = terminallyFailedHandoffs.remove(projectId);
             if (handoff == null) {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
             }
-            fixesInFlight.add(projectId);
+            codingRunTrack.begin(projectId);
             firstRunId = EventsAppService.newRunId();
         }
         log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接 {} 轮，源自超限终态）",
@@ -190,8 +190,8 @@ public class IterationAppService {
     private FixDispatch dispatch(Project project, FixHandoff handoff) {
         Long projectId = project.getId();
         String firstRunId;
-        synchronized (this) {
-            if (!fixesInFlight.add(projectId)) {
+        synchronized (codingRunTrack) {
+            if (!codingRunTrack.begin(projectId)) {
                 queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(handoff);
                 return new FixDispatch(null, true);
             }
@@ -230,11 +230,11 @@ public class IterationAppService {
                         attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff), "fix");
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
-                synchronized (this) {
+                synchronized (codingRunTrack) {
                     List<FixHandoff> pending = queuedFixRuns.remove(projectId);
                     queued = pending != null ? pending : List.of();
                     if (queued.isEmpty()) {
-                        fixesInFlight.remove(projectId);
+                        codingRunTrack.end(projectId);
                         released = true;
                         // 终态账与释放同临界区结算：恢复出口（同锁内「查在途+取账+占位」）
                         // 要么见释放前已落的账、要么在收工后自起新轨——不出现「已释放
@@ -268,8 +268,8 @@ public class IterationAppService {
         }
         finally {
             if (!released) {
-                synchronized (this) {
-                    fixesInFlight.remove(projectId);
+                synchronized (codingRunTrack) {
+                    codingRunTrack.end(projectId);
                 }
             }
         }

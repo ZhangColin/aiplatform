@@ -168,6 +168,30 @@ class WorkspaceVersionsLiveTest {
                 .as("回滚后继续迭代的产物应基于回滚后代码").isEqualTo("<html>v3-after-rollback</html>");
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_dirty_worktree_when_status_then_untracked_ignored_tracked_detected() {
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 干净树（收口成版后无未提交 tracked 改动）
+        exec("echo '<html>v1</html>' > /workspace/index.html");
+        commit("首次生成了系统", "111");
+        ExecResult clean = exec(WorkspaceVersions.statusCommand());
+        assertThat(clean.exitCode()).isZero();
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(clean.stdout())).isFalse();
+
+        // 仅 untracked（scratch.txt，非交付面）→ restore 不触，不算会被丢弃的改动
+        exec("echo 'draft' > /workspace/scratch.txt");
+        ExecResult onlyUntracked = exec(WorkspaceVersions.statusCommand());
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(onlyUntracked.stdout())).isFalse();
+
+        // 改动 tracked 交付物（index.html）→ 脏树检出（回滚会静默丢弃，须拒）
+        exec("echo '<html>v2-wip</html>' > /workspace/index.html");
+        ExecResult dirty = exec(WorkspaceVersions.statusCommand());
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(dirty.stdout())).isTrue();
+    }
+
     // ---------- 工具 ----------
 
     /** 幂等 init + 成版提交（两道命令串联，回读 HEAD hash）。 */

@@ -118,6 +118,31 @@ public final class WorkspaceVersions {
     }
 
     /**
+     * 工作树脏检（#100 回滚并发守卫）：{@code git status --porcelain} 全量输出，
+     * stdout 逐行 = 工作树/索引相对 HEAD 的改动（含 untracked {@code ??} 行——
+     * restore 不触 untracked，故解析时过滤）。
+     */
+    public static String statusCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git status --porcelain";
+    }
+
+    /**
+     * 是否存未提交的 tracked 改动（#100）：{@code git restore} 只动 tracked 文件，
+     * 故 untracked（{@code ??} 行）不算会被丢弃的改动；其余任何行（modified /
+     * staged / deleted / added 等）都表示 restore 会静默丢弃的未提交 tracked 改动。
+     */
+    public static boolean hasUncommittedTrackedChanges(String stdout) {
+        for (String line : stdout.split("\n")) {
+            String status = line.trim();
+            if (status.isEmpty() || status.startsWith("??")) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * 单版本元数据读取：ref 不存在 exit {@value #EXIT_NO_VERSION}；否则该 commit
      * 单条 log（格式同 {@link #listCommand()}）。
      *

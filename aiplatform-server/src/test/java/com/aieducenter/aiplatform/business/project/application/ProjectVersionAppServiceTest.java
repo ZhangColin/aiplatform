@@ -60,6 +60,9 @@ class ProjectVersionAppServiceTest {
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
+    @Autowired
+    private CodingRunTrack codingRunTrack;
+
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
@@ -188,7 +191,9 @@ class ProjectVersionAppServiceTest {
     void given_valid_ref_when_rollback_then_appends_new_version_anchored_to_source() {
         Long projectId = persistedProject("9910");
         stubExec((command, out) -> {
-            if (command.contains("git restore")) {
+            if (command.contains("git status")) {
+                out.stdout = ""; // 工作树干净（并发守卫放行）
+            } else if (command.contains("git restore")) {
                 out.stdout = HASH_2 + "\n";
             } else if (command.contains(HASH_2)) {
                 out.stdout = rollbackLogLine(HASH_2, 1700000200L, "回滚到「首次生成了系统」", HASH_1);
@@ -203,12 +208,14 @@ class ProjectVersionAppServiceTest {
         assertThat(rolled.rollbackFrom()).isEqualTo(HASH_1);
         assertThat(rolled.runId()).isNull();
         assertThat(rolled.subject()).isEqualTo("回滚到「首次生成了系统」");
-        // 寻址守卫（show 目标）→ rollbackCommand（restore + Rollback-From）→ 回读新版本（show）
-        assertThat(recordedCommands).hasSize(3);
+        // 寻址守卫（show 目标）→ 脏树守卫（status）→ rollbackCommand（restore + Rollback-From）
+        // → 回读新版本（show）
+        assertThat(recordedCommands).hasSize(4);
         assertThat(recordedCommands.get(0)).contains("git log -1").contains(HASH_1);
-        assertThat(recordedCommands.get(1))
+        assertThat(recordedCommands.get(1)).contains("git status --porcelain");
+        assertThat(recordedCommands.get(2))
                 .contains("git restore").contains("Rollback-From: " + HASH_1);
-        assertThat(recordedCommands.get(2)).contains("git log -1").contains(HASH_2);
+        assertThat(recordedCommands.get(3)).contains("git log -1").contains(HASH_2);
     }
 
     @Test
@@ -235,7 +242,58 @@ class ProjectVersionAppServiceTest {
     void given_exec_failure_when_rollback_then_environment_failure_not_quiet() {
         Long projectId = persistedProject("9913");
         stubExec((command, out) -> {
-            if (command.contains("git restore")) {
+            if (command.contains("git status")) {
+                out.stdout = ""; // 脏树守卫放行，让 restore 失败走到环境故障
+            } else if (command.contains("git restore")) {
+                out.exitCode = 128;
+            } else {
+                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+            }
+        });
+
+        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+    }
+
+    @Test
+    void given_run_in_flight_when_rollback_then_409_before_restore() {
+        Long projectId = persistedProject("9914");
+        stubExec((command, out) -> out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111"));
+        codingRunTrack.begin(projectId);
+
+        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_ROLLBACK_RUN_IN_FLIGHT.message());
+        // 在途守卫在寻址后即拒：只过 show，未触脏树检查 / restore（不丢在途改动）
+        assertThat(recordedCommands).hasSize(1);
+        assertThat(recordedCommands.get(0)).contains("git log -1").contains(HASH_1);
+    }
+
+    @Test
+    void given_dirty_tree_when_rollback_then_409_not_silent_discard() {
+        Long projectId = persistedProject("9915");
+        stubExec((command, out) -> {
+            if (command.contains("git status")) {
+                out.stdout = " M src/app.js"; // 未提交 tracked 改动（如失败 run 残留）
+            } else {
+                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+            }
+        });
+
+        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_ROLLBACK_DIRTY_TREE.message());
+        // 脏树守卫即拒：show + status 两命令，未触 restore（不静默丢弃）
+        assertThat(recordedCommands).hasSize(2);
+        assertThat(recordedCommands.get(1)).contains("git status --porcelain");
+    }
+
+    @Test
+    void given_status_exec_failure_when_rollback_then_environment_failure() {
+        Long projectId = persistedProject("9916");
+        stubExec((command, out) -> {
+            if (command.contains("git status")) {
                 out.exitCode = 128;
             } else {
                 out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");

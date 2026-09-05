@@ -175,6 +175,28 @@ class ProjectVersionControllerTest {
                 .andExpect(jsonPath("$.message").value("版本不存在"));
     }
 
+    @Test
+    void given_run_in_flight_when_rollback_then_409() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_ROLLBACK_RUN_IN_FLIGHT))
+                .when(versionAppService).rollback(any(), anyString());
+
+        performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("系统正在更新，请稍后再回滚"));
+    }
+
+    @Test
+    void given_dirty_tree_when_rollback_then_409() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_ROLLBACK_DIRTY_TREE))
+                .when(versionAppService).rollback(any(), anyString());
+
+        performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("系统有未完成的改动，请稍后再回滚"));
+    }
+
     static class ExceptionAdviceConfig {
 
         @Bean

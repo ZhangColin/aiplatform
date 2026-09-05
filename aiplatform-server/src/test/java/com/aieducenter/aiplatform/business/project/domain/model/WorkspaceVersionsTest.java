@@ -126,6 +126,33 @@ class WorkspaceVersionsTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void given_workspace_when_status_command_then_porcelain_full() {
+        String command = WorkspaceVersions.statusCommand();
+
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git status --porcelain");
+    }
+
+    // ---------- 脏树解析（#100 回滚并发守卫） ----------
+
+    @Test
+    void given_clean_porcelain_when_has_uncommitted_tracked_changes_then_false() {
+        // 空输出（无改动）或仅有 untracked（??）行——restore 不触 untracked，不算会被丢弃的改动
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("")).isFalse();
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? data/new.txt\n?? draft.md")).isFalse();
+    }
+
+    @Test
+    void given_tracked_change_when_has_uncommitted_tracked_changes_then_true() {
+        // modified（工作树）/ staged / deleted 等 tracked 改动——restore 会静默丢弃
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" M src/app.js")).isTrue();
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("M  src/app.js")).isTrue();
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(" D src/old.js")).isTrue();
+        // 混合：untracked 与 tracked 并存，只要有 tracked 即脏
+        assertThat(WorkspaceVersions.hasUncommittedTrackedChanges("?? new.txt\n M src/app.js")).isTrue();
+    }
+
     // ---------- log 解析 ----------
 
     @Test

@@ -49,13 +49,15 @@ public class ProjectVersionAppService {
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final ConversationEntryRepository entries;
+    private final CodingRunTrack codingRunTrack;
 
     public ProjectVersionAppService(ProjectRepository projectRepository,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            ConversationEntryRepository entries) {
+            ConversationEntryRepository entries, CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.entries = entries;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -129,15 +131,19 @@ public class ProjectVersionAppService {
      * 回滚到此（#93）：把工作区系统代码复位到目标版本的树、追加为一个新版本
      * （历史只追加不改写），数据不在此跟踪面故原样保留（回滚只回代码不回数据）。
      * 目标版本经寻址守卫（{@link #requireVersion}）——非成版 / 非 hex 一律 404
-     * 且不触工作区。失败如实上抛（用户面动作，区别于收口成版的 quietly）。
+     * 且不触工作区；再经并发守卫（#100 {@link #requireRollbackSafe}）——在途 run
+     * 或脏工作树 409 拒绝。失败如实上抛（用户面动作，区别于收口成版的 quietly）。
      *
      * @return 追加出的新版本（回滚版本：runId 空、rollbackFrom 锚定源版本）
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_028 版本不存在（含非
-     *                              hash 形态 ref）；WSP_002 回滚执行环境故障
+     *                              hash 形态 ref）；PRJ_031 在途 run；PRJ_032
+     *                              脏工作树；WSP_002 回滚执行环境故障
      */
     public VersionResponse rollback(Long projectId, String ref) {
         Project project = loadProject(projectId);
         WorkspaceVersion target = resolveVersion(project, ref);
+        // 并发守卫（#100）：在途 run / 脏工作树 → 拒（回退安全感——不丢在途未提交改动）
+        requireRollbackSafe(project);
         String subject = "回滚到「" + target.subject() + "」";
         ExecResultResponse result = exec(project, WorkspaceVersions.rollbackCommand(ref, subject));
         if (result == null || result.exitCode() != 0) {
@@ -174,6 +180,26 @@ public class ProjectVersionAppService {
             throw new ApplicationException(ProjectMessage.VERSION_NOT_FOUND);
         }
         return parsed.get(0);
+    }
+
+    /**
+     * 回滚前并发守卫（#100）：在途编码 run（生成/修正——工作区正被 run 执行体读写）
+     * 或脏工作树（未提交 tracked 改动，含失败 run 残留）一律 409 拒绝——回退安全感：
+     * 回滚不静默丢弃在途未提交改动。在途检查是进程内标记（无 exec）；脏树检查
+     * {@code git status --porcelain} 兜「失败 run 残留脏树但无在途标记」的边界。
+     */
+    private void requireRollbackSafe(Project project) {
+        if (codingRunTrack.isInFlight(project.getId())) {
+            throw new ApplicationException(ProjectMessage.VERSION_ROLLBACK_RUN_IN_FLIGHT);
+        }
+        ExecResultResponse status = exec(project, WorkspaceVersions.statusCommand());
+        if (status == null || status.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "回滚前工作树检查失败: " + (status == null ? "exec 无结果" : status.stderr()));
+        }
+        if (WorkspaceVersions.hasUncommittedTrackedChanges(status.stdout())) {
+            throw new ApplicationException(ProjectMessage.VERSION_ROLLBACK_DIRTY_TREE);
+        }
     }
 
     /** exec 通道出口（命令构造归 {@link WorkspaceVersions} 纯函数）。 */

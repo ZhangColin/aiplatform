@@ -1,8 +1,5 @@
 package com.aieducenter.aiplatform.business.project.application;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
 import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
@@ -104,19 +101,19 @@ public class GenerationAppService {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final CoderRunAttempts coderRunAttempts;
     private final AgentEventBridge eventBridge;
-
-    /** 生成在途项目集（含已提交未起跑——排队中）：重复触发守卫的进程内事实。 */
-    private final Set<Long> generationsInFlight = ConcurrentHashMap.newKeySet();
+    private final CodingRunTrack codingRunTrack;
 
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge) {
+            CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
+            CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.coderRunAttempts = coderRunAttempts;
         this.eventBridge = eventBridge;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -130,13 +127,13 @@ public class GenerationAppService {
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
-        if (!generationsInFlight.add(projectId)) {
+        if (!codingRunTrack.begin(projectId)) {
             throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
         }
         try {
             placeConventionsAsset(project);
         } catch (RuntimeException e) {
-            generationsInFlight.remove(projectId);
+            codingRunTrack.end(projectId);
             throw e;
         }
 
@@ -146,7 +143,7 @@ public class GenerationAppService {
                 runAttemptsWithRetry(project, firstRunId);
             }
             finally {
-                generationsInFlight.remove(projectId);
+                codingRunTrack.end(projectId);
             }
         });
         return new GenerationRun(firstRunId);

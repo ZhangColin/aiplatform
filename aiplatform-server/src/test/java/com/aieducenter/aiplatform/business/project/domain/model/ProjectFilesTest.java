@@ -52,7 +52,8 @@ class ProjectFilesTest {
         // prune、根级 .env 排除（与源码包 tar 同口径）、%P 相对路径、%s 字节大小
         assertThat(ProjectFiles.listCommand()).isEqualTo(
                 "find /workspace \\( -path /workspace/node_modules -o -path /workspace/data"
-                        + " -o -path /workspace/.platform -o -path /workspace/.git \\) -prune -o -type f"
+                        + " -o -path /workspace/.platform -o -path /workspace/agents"
+                        + " -o -path /workspace/.git \\) -prune -o -type f"
                         + " ! -path /workspace/.env -printf '%s\\t%P\\n'");
     }
 

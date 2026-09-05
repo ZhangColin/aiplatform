@@ -48,6 +48,13 @@ public final class WorkspaceLayout {
     /** 平台产物目录（skills/rules/logs 的父目录）。 */
     public static final String PLATFORM_DIR = ".platform";
 
+    /**
+     * 子智能体 per-agent 工作区根（#95 委派位）：框架 ISOLATED 工作区布局的落点
+     * （{@code agents/<name>/workspace/}，自动创建、namespace 隔离）——引擎自带，
+     * 零新机制。进非交付目录集（子智能体报告/记忆不进源码包）。
+     */
+    public static final String AGENTS_DIR = "agents";
+
     /** 平台产物：技能资产。 */
     public static final String SKILLS_DIR = PLATFORM_DIR + "/skills";
 
@@ -72,13 +79,14 @@ public final class WorkspaceLayout {
 
     /**
      * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物
-     * （{@link #PLATFORM_DIR}）、可重建依赖（node_modules）与版本元数据（.git）
-     * 不是交付物——源码包打包、平台文件树只读端点与版本层 .gitignore（#91）共用
-     * 此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由版本层 git 管道产出，
-     * 不入源码包/文件树/版本跟踪（git 自排除，入名单为三者口径统一）。
+     * （{@link #PLATFORM_DIR}）、子智能体工作区（{@link #AGENTS_DIR}，#95 委派位
+     * 隔离根——交付目录无子智能体脏写）、可重建依赖（node_modules）与版本元数据
+     * （.git）不是交付物——源码包打包、平台文件树只读端点与版本层 .gitignore（#91）
+     * 共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由版本层 git 管道
+     * 产出，不入源码包/文件树/版本跟踪（git 自排除，入名单为三者口径统一）。
      */
     public static final List<String> NON_DELIVERABLE_DIRS = List.of(
-            "node_modules", DATA_DIR, PLATFORM_DIR, GIT_DIR);
+            "node_modules", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, GIT_DIR);
 
     private WorkspaceLayout() {
     }

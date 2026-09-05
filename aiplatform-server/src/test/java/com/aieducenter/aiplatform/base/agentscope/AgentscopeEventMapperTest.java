@@ -322,4 +322,45 @@ class AgentscopeEventMapperTest {
             return new io.agentscope.core.message.ToolUseBlock(id, name, input);
         }
     }
+
+    @Nested
+    class SourceAttribution {
+
+        /** #95 委派位：执行体自身事件 source 为空——不携带 source 键（用户面无角色标签）。 */
+        @Test
+        void given_parent_event_with_null_source_when_map_then_no_source_field() {
+            AgentEvent frame = mapper.map(new TextBlockDeltaEvent("reply-1", "b-1", "执行体自述"));
+
+            assertThat(frame.payload()).doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
+        }
+
+        /** #95：子智能体转发进父流的事件带引擎 source 路径——映射为末段名（来源归属值）。 */
+        @Test
+        void given_subagent_event_with_source_path_when_map_then_source_field_is_last_segment() {
+            AgentEvent frame = mapper.map(new TextBlockDeltaEvent("reply-1", "b-1", "自测通过。")
+                    .withSource("platform-agent/self-test"));
+
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        }
+
+        /** 工具事件同样带来源（动作卡分角色播的依据）。 */
+        @Test
+        void given_tool_event_with_source_when_map_then_source_on_tool_frame() {
+            AgentEvent frame = mapper.map(new ToolCallStartEvent("reply-1", "tc-1", "command")
+                    .withSource("platform-agent/self-test"));
+
+            assertThat(frame.type()).isEqualTo("tool");
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        }
+
+        /** sourceOf 口径：空串归一为 null（不携带）；无斜杠的裸名原样（防御位）。 */
+        @Test
+        void given_source_of_edge_cases_when_extracted_then_normalized() {
+            assertThat(AgentscopeEventMapper.sourceOf(
+                    new TextBlockDeltaEvent("r", "b", "x").withSource(""))).isNull();
+            assertThat(AgentscopeEventMapper.sourceOf(
+                    new TextBlockDeltaEvent("r", "b", "x").withSource("self-test")))
+                    .isEqualTo("self-test");
+        }
+    }
 }

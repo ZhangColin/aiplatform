@@ -401,6 +401,41 @@ class AgentscopeAgentClientTest {
                 .isEmpty();
     }
 
+    /**
+     * 脚本化委派（#95 委派位）：子智能体转发进父流的事件带引擎 source 路径——converse
+     * 经双映射表（透传 + 部件）产出来源归属（值 = 末段名）；执行体自身事件缺省不携带
+     * source（用户面仍无角色标签）。同一事件流上执行体与子智能体交错，各自归位。
+     */
+    @Test
+    void given_scripted_delegation_when_converse_then_events_carry_source_attribution() {
+        givenStream(
+                new TextBlockDeltaEvent("reply-1", "b-1", "执行体自述。"),
+                new TextBlockDeltaEvent("reply-1", "b-2", "自测通过。")
+                        .withSource("platform-agent/self-test"),
+                new ToolCallEndEvent("reply-1", "tc-1", "command")
+                        .withSource("platform-agent/self-test"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(command(null, null), frames::add);
+
+        // 透传 text：执行体段无 source、子智能体段带 source（末段名）
+        List<AgentEvent> texts = frames.stream().filter(f -> "text".equals(f.type())).toList();
+        assertThat(texts).hasSize(2);
+        assertThat(texts.get(0).payload()).doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
+        assertThat(texts.get(1).payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        // 部件事件：part-text / part-action 带来源归属（分角色播的依据）
+        List<AgentEvent> parts = frames.stream()
+                .filter(f -> f.type().startsWith("part-")).toList();
+        assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)))
+                .singleElement().satisfies(f ->
+                        assertThat(f.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test"));
+        assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_TEXT)))
+                .anySatisfy(f -> assertThat(f.payload())
+                        .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test"))
+                .anySatisfy(f -> assertThat(f.payload())
+                        .doesNotContainKey(AgentEventTypes.SOURCE_FIELD));
+    }
+
     /** run-start 并入角色键（引擎信息归一）：带角色命令携带、无角色不携带——前端工作消息/对话面的锚定判据。 */
     @Test
     void given_agent_key_when_converse_then_run_start_carries_agent_key() {

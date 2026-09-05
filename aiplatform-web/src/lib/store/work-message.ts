@@ -46,8 +46,8 @@ function isCheckSettled(state: WorkCheckState): boolean {
 
 /** 工作消息部件（part-* 事件 + 权限确认事件的投影）。 */
 export type WorkPart =
-  | { kind: "text"; id: string; text: string }
-  | { kind: "step"; id: string; step: number }
+  | { kind: "text"; id: string; source?: string; text: string }
+  | { kind: "step"; id: string; source?: string; step: number }
   | {
       kind: "permission";
       /** React key（确认卡首见事件 id）。 */
@@ -64,6 +64,8 @@ export type WorkPart =
       kind: "action";
       /** React key（动作行首见事件 id——状态更新不改键，原位换装）。 */
       id: string;
+      /** 来源归属（#95 委派位：子智能体名；执行体缺省——分角色播的依据）。 */
+      source?: string;
       /** 动作锚（同一动作跨状态同值，更新原位命中判定）。 */
       toolCallId: string;
       toolName: string;
@@ -102,6 +104,8 @@ export type PartEventRef = {
   eventId: string;
   /** 信封 ts（ms）——时长与起跑锚。 */
   at: number;
+  /** 来源归属（#95 委派位：子智能体名；执行体缺省）。 */
+  source?: string;
 };
 
 /** 桥侧部件输入（store 负责落 id / 时长 / 原位更新）。 */
@@ -220,6 +224,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
         {
           kind: "action",
           id: ref.eventId,
+          source: ref.source,
           toolCallId: input.toolCallId,
           toolName: input.toolName,
           state: input.state,
@@ -233,7 +238,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
   }
   const part: WorkPart =
     input.kind === "text"
-      ? { kind: "text", id: ref.eventId, text: input.text }
+      ? { kind: "text", id: ref.eventId, source: ref.source, text: input.text }
       : input.kind === "permission"
         ? {
             kind: "permission",
@@ -243,7 +248,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
             state: "pending",
             at: ref.at,
           }
-        : { kind: "step", id: ref.eventId, step: input.step };
+        : { kind: "step", id: ref.eventId, source: ref.source, step: input.step };
   return { ...work, parts: capParts([...work.parts, part]) };
 }
 

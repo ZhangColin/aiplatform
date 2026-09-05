@@ -75,33 +75,37 @@ final class AgentscopeEventMapper {
 
     /** 过程事件 → 透传事件；未映射类型返回 {@code null}（跳过）。 */
     AgentEvent map(io.agentscope.core.event.AgentEvent event) {
+        // 来源归属（#95 委派位）：子智能体转发进父流的事件带引擎 source 路径，执行体
+        // 自身的事件 source 为空——缺省不携带（用户面仍无角色标签，source 只供过程
+        // 呈现归属）
+        String source = sourceOf(event);
         if (event instanceof TextBlockDeltaEvent delta) {
-            return passthrough(TEXT, Map.of(
+            return passthrough(TEXT, source, Map.of(
                     "delta", nvl(delta.getDelta()),
                     "blockId", nvl(delta.getBlockId())));
         }
         if (event instanceof ThinkingBlockDeltaEvent delta) {
-            return passthrough(REASONING, Map.of(
+            return passthrough(REASONING, source, Map.of(
                     "delta", nvl(delta.getDelta()),
                     "blockId", nvl(delta.getBlockId())));
         }
         if (event instanceof ToolCallStartEvent start) {
-            return passthrough(TOOL, Map.of(
+            return passthrough(TOOL, source, Map.of(
                     "toolCallId", nvl(start.getToolCallId()),
                     "toolName", nvl(start.getToolCallName()),
                     "phase", "start"));
         }
         if (event instanceof ToolCallEndEvent end) {
-            return passthrough(TOOL, Map.of(
+            return passthrough(TOOL, source, Map.of(
                     "toolCallId", nvl(end.getToolCallId()),
                     "toolName", nvl(end.getToolCallName()),
                     "phase", "end"));
         }
         if (event instanceof ModelCallStartEvent start) {
-            return passthrough(STEP_START, Map.of("replyId", nvl(start.getReplyId())));
+            return passthrough(STEP_START, source, Map.of("replyId", nvl(start.getReplyId())));
         }
         if (event instanceof ModelCallEndEvent end) {
-            return passthrough(STEP_FINISH, Map.of("replyId", nvl(end.getReplyId())));
+            return passthrough(STEP_FINISH, source, Map.of("replyId", nvl(end.getReplyId())));
         }
         return null;
     }
@@ -283,13 +287,30 @@ final class AgentscopeEventMapper {
 
     // ---------- 内部 ----------
 
-    private AgentEvent passthrough(String type, Map<String, Object> data) {
+    private AgentEvent passthrough(String type, String source, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
+        if (source != null) {
+            payload.put(AgentEventTypes.SOURCE_FIELD, source);
+        }
         payload.put("data", data);
         return new AgentEvent(type, payload);
+    }
+
+    /**
+     * 引擎 source 路径 → 子智能体名（末段）：执行体事件 source 为空返回 {@code null}
+     * （不携带）；子智能体事件返回其声明名（如 {@code "self-test"}——路径末段，
+     * 嵌套委派取直接来源层）。空串归一为 null。
+     */
+    static String sourceOf(io.agentscope.core.event.AgentEvent event) {
+        String source = event.getSource();
+        if (source == null || source.isBlank()) {
+            return null;
+        }
+        int idx = source.lastIndexOf('/');
+        return idx < 0 ? source : source.substring(idx + 1);
     }
 
     private static String nvl(String s) {

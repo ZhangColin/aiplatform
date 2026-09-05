@@ -272,7 +272,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
+            source: payload.source },
           { kind: "text", text: payload.text },
         );
         return;
@@ -281,7 +282,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
+            source: payload.source },
           {
             kind: "action",
             toolCallId: payload.toolCallId,
@@ -296,7 +298,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
+            source: payload.source },
           { kind: "step", step: payload.step },
         );
         return;

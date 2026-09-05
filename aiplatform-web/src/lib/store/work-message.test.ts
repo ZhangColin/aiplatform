@@ -444,4 +444,26 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
       seenEventIds: [],
     });
   });
+
+  it("source 归属（#95 委派位）：子智能体部件带 source，执行体缺省（分角色播的依据）", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "执行体解说" });
+    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), { kind: "step", step: 1 });
+    notePart("p1", ref({ eventId: "r1:3", source: "self-test" }), {
+      kind: "action",
+      toolCallId: "tc-1",
+      toolName: "command",
+      state: "completed",
+      label: "运行命令",
+    });
+
+    const parts = work()!.parts;
+    const text = parts[0] as Extract<WorkPart, { kind: "text" }>;
+    const step = parts[1] as Extract<WorkPart, { kind: "step" }>;
+    const action = parts[2] as Extract<WorkPart, { kind: "action" }>;
+    expect(text.source).toBeUndefined();
+    expect(step.source).toBe("self-test");
+    expect(action.source).toBe("self-test");
+  });
 });

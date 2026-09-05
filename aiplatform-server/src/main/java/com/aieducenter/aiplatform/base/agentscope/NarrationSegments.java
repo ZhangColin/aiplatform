@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import io.agentscope.core.event.TextBlockDeltaEvent;
 
@@ -12,6 +13,8 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
  *   <li>句读（。！？；…换行及西文对应符号）落定即出段；</li>
  *   <li>文本块变（blockId 变化）先出余段——段与段有序不串；</li>
  *   <li>长度上限切段（时延有界，不等句读）；</li>
+ *   <li>来源切换（#95 委派位：执行体 ↔ 子智能体）也先出余段——段带来源归属，不跨
+ *       角色串段；</li>
  *   <li>run 收尾 / 挂起 / 步骤与动作边界由调用方 {@link #drain()} 出尾段（幂等，
  *       空白不出段）。</li>
  * </ul>
@@ -24,13 +27,24 @@ final class NarrationSegments {
     /** 句读符（段切分依据；中西文并列收全）。 */
     private static final String SENTENCE_ENDERS = "。！？；…!?;\n";
 
+    /** 一段解说：文本 + 来源归属（source 可空 = 执行体自身）。 */
+    record Segment(String text, String source) {
+    }
+
     private final StringBuilder text = new StringBuilder();
     private String blockId = "";
+    /** 当前缓冲的来源归属（#95：段随来源切换切分，不跨角色串段）。 */
+    private String source;
 
-    /** 文本增量 → 落定段（0..n：一次到达的长增量含多句时逐句出段）。 */
-    List<String> offer(TextBlockDeltaEvent delta) {
+    /** 文本增量 → 落定段（0..n：一次到达的长增量含多句时逐句出段）；source 为该增量来源。 */
+    List<Segment> offer(TextBlockDeltaEvent delta, String source) {
         String deltaBlock = nvl(delta.getBlockId());
-        List<String> segments = new ArrayList<>();
+        List<Segment> segments = new ArrayList<>();
+        if (!Objects.equals(source, this.source)) {
+            // 来源切换即段边界（执行体 ↔ 子智能体）：先出上一来源余段
+            drainInto(segments);
+            this.source = source;
+        }
         if (!deltaBlock.equals(blockId)) {
             // 块变即段边界：先出上一块余段
             drainInto(segments);
@@ -47,20 +61,20 @@ final class NarrationSegments {
     }
 
     /** 出余段（边界/收尾用，幂等；空白不出段）。 */
-    List<String> drain() {
-        List<String> segments = new ArrayList<>();
+    List<Segment> drain() {
+        List<Segment> segments = new ArrayList<>();
         drainInto(segments);
         return segments;
     }
 
     // ---------- 内部 ----------
 
-    private void drainInto(List<String> segments) {
+    private void drainInto(List<Segment> segments) {
         if (text.length() == 0 || text.toString().isBlank()) {
             text.setLength(0);
             return;
         }
-        segments.add(text.toString());
+        segments.add(new Segment(text.toString(), source));
         text.setLength(0);
     }
 
@@ -69,14 +83,14 @@ final class NarrationSegments {
      * 「句读落定即出段」对粗粒度增量同样成立）；无句读的尾部留在缓冲等下一边界
      * 或收尾 drain。
      */
-    private void settleSentences(List<String> segments) {
+    private void settleSentences(List<Segment> segments) {
         int start = 0;
         int settled = 0;
         for (int i = 0; i < text.length(); i++) {
             if (SENTENCE_ENDERS.indexOf(text.charAt(i)) >= 0) {
                 String sentence = text.substring(start, i + 1);
                 if (!sentence.isBlank()) {
-                    segments.add(sentence);
+                    segments.add(new Segment(sentence, source));
                 }
                 start = i + 1;
                 settled = start;

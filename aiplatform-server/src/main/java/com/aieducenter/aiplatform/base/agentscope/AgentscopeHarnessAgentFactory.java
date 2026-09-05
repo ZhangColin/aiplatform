@@ -16,10 +16,12 @@ import org.springframework.stereotype.Component;
  * <p>工作区三形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
- * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（subagents /
- * memory：源码包是交付物，记忆文件不进包）与内核 shell 工具（#83：执行体的命令
- * 走业务侧 ConfirmingShellTool，破坏性命令挂确认卡）——工作区上下文（AGENTS.md
- * 等）与 workspace/tools.json 读取照常，经容器文件面即项目事实；
+ * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
+ * 是交付物，记忆文件不进包）与内核 shell 工具（#83：执行体的命令走业务侧
+ * ConfirmingShellTool，破坏性命令挂确认卡）——工作区上下文（AGENTS.md 等）与
+ * workspace/tools.json 读取照常，经容器文件面即项目事实；subagents 委派位在此
+ * 开启（#95：子智能体经 {@link AgentSubagentSupplier} 挂载，隔离根落位平台目录
+ * 下进非交付目录集），只读面在分支处单独关闭；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
  * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）。</p>
@@ -51,9 +53,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
-            AgentscopeProperties properties) {
+            AgentSubagentSupplier subagentSupplier, AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey) ->
-                buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier,
+                buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
                         name, sysPrompt, modelString, workspace, agentKey,
                         properties.getMaxIters()));
     }
@@ -90,6 +92,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
+            AgentSubagentSupplier subagentSupplier,
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
             String agentKey, Integer maxIters) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
@@ -104,6 +107,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .disableDefaultWorkspaceSkills();
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);
+        // 委派位（#95）：按配置挂载子智能体声明——无声明挂载返回空集即框架不注入
+        // <available_subagents>（主智能体/无配置语境空集）；子智能体隔离根由声明
+        // 携带（框架 ISOLATED 工作区布局），工厂不另建机制
+        subagentSupplier.subagentsFor(agentKey, workspace)
+                .forEach(builder::subagent);
         if (maxIters != null) {
             builder.maxIters(maxIters);
         }
@@ -121,9 +129,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, ro.containerName())
                     // 只读面（#86 主智能体对话姿态）：另关内核文件与 shell 工具——
                     // 写面结构性不存在，项目事实的读取经业务侧只读工具集
-                    // （ProfileToolkitSupplier）
+                    // （ProfileToolkitSupplier）；委派是 run 内机制（#95 委派位只开在
+                    // ProjectDev），主智能体永不委派——子智能体一并关闭
                     .disableFilesystemTools()
-                    .disableShellTool();
+                    .disableShellTool()
+                    .disableSubagents();
         }
         return builder.build();
     }
@@ -131,14 +141,15 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     /**
      * 项目沙箱公共装配（ProjectDev 与 ProjectReadOnly 共用）：名义根与容器内
      * 工作区根同形（路径规范化剥前缀后即工作区锚定形）、docker exec 文件面、
-     * 关闭会写 harness 内脏进项目工作区的部件（源码包是交付物）。
+     * 关闭会写 harness 内脏进项目工作区的部件（memory：源码包是交付物，记忆文件
+     * 不进包）。subagents 不在公共装配关——委派位（#95）只开在 ProjectDev，只读面
+     * 在分支处单独关闭。
      */
     private static HarnessAgent.Builder projectSandbox(HarnessAgent.Builder builder,
             String containerName) {
         return builder
                 .workspace(java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT))
                 .abstractFilesystem(new DockerExecFilesystem(containerName))
-                .disableSubagents()
                 .disableMemoryHooks()
                 .disableMemoryTools();
     }

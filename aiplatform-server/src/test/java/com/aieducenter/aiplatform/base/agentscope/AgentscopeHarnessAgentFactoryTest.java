@@ -31,6 +31,9 @@ class AgentscopeHarnessAgentFactoryTest {
     private static final AgentSkillRepositorySupplier SKILL_REPOS =
             (agentKey, workspace) -> List.of();
 
+    /** 子智能体空桩（#95 委派位——无声明挂载即框架不注入 <available_subagents>）。 */
+    private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
+
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
     }
@@ -171,11 +174,45 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, new AgentscopeProperties());
+                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
+    }
+
+    /**
+     * 委派位结构守护（#95）：ProjectDev（run 执行体）开子智能体（工厂不再 disableSubagents，
+     * 框架装 subagent 中间件——含通用子智能体），ProjectReadOnly（主智能体对话姿态）关
+     * 子智能体（委派是 run 内机制，主智能体永不委派）。真构建路径（需 API key 建模型，
+     * 无 key 跳过——同 {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
+     */
+    @Test
+    void given_project_dev_when_built_then_subagents_enabled() {
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过真构建断言");
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                new AgentscopeProperties());
+
+        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
+
+        assertThat(dev.getSubagentAgentManager()).isNotNull();
+    }
+
+    @Test
+    void given_project_read_only_when_built_then_subagents_disabled() {
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过真构建断言");
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                new AgentscopeProperties());
+
+        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
+
+        assertThat(readOnly.getSubagentAgentManager()).isNull();
     }
 }

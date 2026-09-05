@@ -221,4 +221,59 @@ class AgentscopePartsMapperTest {
         merged.addAll(more);
         return merged;
     }
+
+    @Nested
+    class SourceAttribution {
+
+        /** #95 委派位：执行体自身部件不携带 source（缺省 = 执行体）。 */
+        @Test
+        void given_parent_narration_when_mapped_then_no_source_field() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1", "执行体自述。"));
+
+            assertThat(parts).singleElement().satisfies(part ->
+                    assertThat(part.payload()).doesNotContainKey(AgentEventTypes.SOURCE_FIELD));
+        }
+
+        /** #95：子智能体解说段带来源归属（过程呈现分角色播的依据）。 */
+        @Test
+        void given_subagent_narration_when_mapped_then_part_text_carries_source() {
+            List<AgentEvent> parts = mapper.map(
+                    new TextBlockDeltaEvent("r", "b-1", "自测逐项通过。")
+                            .withSource("platform-agent/self-test"));
+
+            assertThat(parts).singleElement().satisfies(part -> {
+                assertThat(part.type()).isEqualTo(AgentEventTypes.PART_TEXT);
+                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+            });
+        }
+
+        /** 子智能体动作卡带来源（动作卡分角色播——自测清单式播报的呈现依据）。 */
+        @Test
+        void given_subagent_action_when_mapped_then_part_action_carries_source() {
+            List<AgentEvent> parts = mapper.map(
+                    new ToolCallStartEvent("r", "tc-1", "command").withSource("self-test"));
+
+            assertThat(parts).singleElement().satisfies(part -> {
+                assertThat(part.type()).isEqualTo(AgentEventTypes.PART_ACTION);
+                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+            });
+        }
+
+        /** 来源切换即段边界：执行体余段先出（执行体来源），子智能体段随后（子智能体来源）。 */
+        @Test
+        void given_source_switch_mid_narration_when_mapped_then_segments_split_by_source() {
+            mapper.map(new TextBlockDeltaEvent("r", "b-1", "执行体说半句"));
+
+            List<AgentEvent> parts = mapper.map(
+                    new TextBlockDeltaEvent("r", "b-2", "子智能体接上。").withSource("self-test"));
+
+            assertThat(parts).hasSize(2);
+            assertThat(parts.get(0).payload())
+                    .containsEntry(AgentEventTypes.PART_TEXT_FIELD, "执行体说半句")
+                    .doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
+            assertThat(parts.get(1).payload())
+                    .containsEntry(AgentEventTypes.PART_TEXT_FIELD, "子智能体接上。")
+                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        }
+    }
 }

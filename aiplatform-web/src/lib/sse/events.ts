@@ -230,7 +230,7 @@ export type PlatformAgentEvent =
   | {
       /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
       type: "part-text";
-      payload: AgentPayload & { engine: string; text: string };
+      payload: AgentPayload & { engine: string; source?: string; text: string };
     }
   | {
       /**
@@ -243,6 +243,7 @@ export type PlatformAgentEvent =
       type: "part-action";
       payload: AgentPayload & {
         engine: string;
+        source?: string;
         toolCallId: string;
         toolName: string;
         state: "started" | "running" | "completed" | "failed";
@@ -252,7 +253,7 @@ export type PlatformAgentEvent =
   | {
       /** 步骤分组部件：run 内步骤序号（1 起，模型调用边界），呈现「第 N 步」分组头。 */
       type: "part-step";
-      payload: AgentPayload & { engine: string; step: number };
+      payload: AgentPayload & { engine: string; source?: string; step: number };
     }
   | {
       /**
@@ -295,7 +296,8 @@ const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([
 export type PassthroughAgentEvent = {
   /** 名册列已知名型，开放集合不限于它们。 */
   type: string;
-  payload: AgentPayload & { data: unknown };
+  /** `source`（#95 委派位）：子智能体转发进父流的事件带子智能体名，执行体缺省。 */
+  payload: AgentPayload & { source?: string; data: unknown };
 };
 
 /**

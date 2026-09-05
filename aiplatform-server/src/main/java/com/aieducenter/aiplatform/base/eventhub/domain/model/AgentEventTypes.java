@@ -104,6 +104,14 @@ public final class AgentEventTypes {
     /** 承接运行的智能体栈名（单栈 agentscope；各事件 payload 同键携带）。 */
     public static final String ENGINE_FIELD = "engine";
 
+    /**
+     * 事件来源归属（#95 委派位）：run 执行体自身产出的过程事件不携带（缺省 =
+     * 执行体——用户面仍无角色标签）；子智能体（经 run 执行体委派，如自测）转发进
+     * 父流的事件携带子智能体名（值 = 引擎 source 路径的末段）。source 只用于过程
+     * 呈现归属（分角色播），不是用户面角色标签。
+     */
+    public static final String SOURCE_FIELD = "source";
+
     /** run-finish 的结煞语键（end / exceed_max_iters 等）。 */
     public static final String FINISH_FIELD = "finish";
 

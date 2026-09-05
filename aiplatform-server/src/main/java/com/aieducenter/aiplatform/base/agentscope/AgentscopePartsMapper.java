@@ -62,8 +62,12 @@ final class AgentscopePartsMapper {
 
     /** 过程事件 → 部件事件（0..n：边界事件可先带余段部件再出自身部件）；未映射类型产空。 */
     List<AgentEvent> map(io.agentscope.core.event.AgentEvent event) {
+        // 来源归属（#95 委派位）：子智能体转发进父流的事件带引擎 source 路径，执行体
+        // 自身的事件 source 为空——缺省不携带（用户面仍无角色标签，source 只供过程
+        // 呈现归属）
+        String source = AgentscopeEventMapper.sourceOf(event);
         if (event instanceof TextBlockDeltaEvent delta) {
-            return textParts(narration.offer(delta));
+            return textParts(narration.offer(delta, source));
         }
         if (event instanceof ToolCallDeltaEvent delta) {
             // 工具参数增量只累积不出部件（动作对象短语在边界点取）
@@ -75,24 +79,24 @@ final class AgentscopePartsMapper {
             drainNarrationInto(parts);
             steps += 1;
             parts.add(frame(AgentEventTypes.PART_STEP,
-                    AgentEventTypes.PART_STEP_FIELD, steps));
+                    AgentEventTypes.PART_STEP_FIELD, steps, source));
             return parts;
         }
         if (event instanceof ToolCallStartEvent start) {
             drainNarrationInto(parts);
             actionPart(parts, start.getToolCallName(), start.getToolCallId(),
-                    AgentEventTypes.PART_ACTION_STATE_STARTED, false);
+                    AgentEventTypes.PART_ACTION_STATE_STARTED, false, source);
             return parts;
         }
         if (event instanceof ToolCallEndEvent end) {
             drainNarrationInto(parts);
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
-                    AgentEventTypes.PART_ACTION_STATE_RUNNING, true);
+                    AgentEventTypes.PART_ACTION_STATE_RUNNING, true, source);
             return parts;
         }
         if (event instanceof ToolResultEndEvent end) {
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
-                    resultState(end.getState()), false);
+                    resultState(end.getState()), false, source);
             return parts;
         }
         // 其余事件（思考/读类工具/块尾/挂起等）：不出部件
@@ -120,7 +124,7 @@ final class AgentscopePartsMapper {
     /** 动作部件（封闭表内工具才有；label 无时态，时态由 state 表达——非终态存档
      *  动作对象、终态复述已锚定对象：动作卡跨状态同一行，不闪换文案）。 */
     private void actionPart(List<AgentEvent> parts, String toolName, String toolCallId,
-            String state, boolean consumeArgs) {
+            String state, boolean consumeArgs, String source) {
         Optional<String> phrase = actions.objectPhrase(nvl(toolName), nvl(toolCallId), consumeArgs);
         if (phrase.isEmpty()) {
             return;
@@ -139,6 +143,9 @@ final class AgentscopePartsMapper {
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
+        if (source != null) {
+            payload.put(AgentEventTypes.SOURCE_FIELD, source);
+        }
         payload.put(AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, nvl(toolCallId));
         payload.put(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, nvl(toolName));
         payload.put(AgentEventTypes.PART_ACTION_STATE_FIELD, state);
@@ -146,10 +153,11 @@ final class AgentscopePartsMapper {
         parts.add(new AgentEvent(AgentEventTypes.PART_ACTION, payload));
     }
 
-    private List<AgentEvent> textParts(List<String> segments) {
+    private List<AgentEvent> textParts(List<NarrationSegments.Segment> segments) {
         List<AgentEvent> parts = new ArrayList<>();
-        segments.forEach(text -> parts.add(frame(
-                AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD, text)));
+        segments.forEach(segment -> parts.add(frame(
+                AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD,
+                segment.text(), segment.source())));
         return parts;
     }
 
@@ -157,11 +165,14 @@ final class AgentscopePartsMapper {
         parts.addAll(textParts(narration.drain()));
     }
 
-    private AgentEvent frame(String type, String field, Object value) {
+    private AgentEvent frame(String type, String field, Object value, String source) {
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
+        if (source != null) {
+            payload.put(AgentEventTypes.SOURCE_FIELD, source);
+        }
         payload.put(field, value);
         return new AgentEvent(type, payload);
     }

@@ -63,8 +63,8 @@ class ProjectVersionControllerTest {
     @Test
     void given_two_versions_when_list_then_newest_first_wrapped() throws Exception {
         when(versionAppService.list(any())).thenReturn(List.of(
-                new VersionResponse("c2c2c2c2", "更新了系统", "222", LocalDateTime.of(2026, 9, 5, 12, 0)),
-                new VersionResponse("a1a1a1a1", "首次生成了系统", "111", LocalDateTime.of(2026, 9, 5, 11, 0))));
+                new VersionResponse("c2c2c2c2", "更新了系统", "222", null, LocalDateTime.of(2026, 9, 5, 12, 0)),
+                new VersionResponse("a1a1a1a1", "首次生成了系统", "111", null, LocalDateTime.of(2026, 9, 5, 11, 0))));
 
         performAsUser(get("/api/projects/100/versions"))
                 .andExpect(status().isOk())
@@ -77,7 +77,7 @@ class ProjectVersionControllerTest {
     @Test
     void given_version_with_closing_when_detail_then_anchored_payload() throws Exception {
         when(versionAppService.detail(any(), anyString())).thenReturn(
-                new VersionDetailResponse("a1a1a1a1", "更新了系统", "222",
+                new VersionDetailResponse("a1a1a1a1", "更新了系统", "222", null,
                         LocalDateTime.of(2026, 9, 5, 12, 0),
                         Map.of("summary", "更新了系统", "systemChanged", true)));
 
@@ -149,6 +149,30 @@ class ProjectVersionControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409))
                 .andExpect(jsonPath("$.message").value("同时查看的版本过多，请先关闭一个再查看"));
+    }
+
+    @Test
+    void given_valid_ref_when_rollback_then_new_version_wrapped() throws Exception {
+        when(versionAppService.rollback(any(), anyString())).thenReturn(
+                new VersionResponse("d3d3d3d3", "回滚到「更新了系统」", null, "a1a1a1a1",
+                        LocalDateTime.of(2026, 9, 5, 13, 0)));
+
+        performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.commitHash").value("d3d3d3d3"))
+                .andExpect(jsonPath("$.data.rollbackFrom").value("a1a1a1a1"))
+                .andExpect(jsonPath("$.data.runId").isEmpty());
+    }
+
+    @Test
+    void given_unknown_ref_when_rollback_then_404() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_NOT_FOUND))
+                .when(versionAppService).rollback(any(), anyString());
+
+        performAsUser(post("/api/projects/100/versions/beefbeef/rollback"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("版本不存在"));
     }
 
     static class ExceptionAdviceConfig {

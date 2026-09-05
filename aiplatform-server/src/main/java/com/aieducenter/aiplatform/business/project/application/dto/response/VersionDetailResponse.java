@@ -8,13 +8,15 @@ import java.util.Map;
 import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceVersion;
 
 /**
- * 版本详情读面（#91）：版本元数据 + 锚定的收尾卡载荷（Run-Id 联接对话史
+ * 版本详情读面（#91/#93）：版本元数据 + 锚定的收尾卡载荷（Run-Id 联接对话史
  * closing 条目——收尾卡落库失败等缺口下 closing 可空，版本元数据仍如实返回）。
+ * 回滚版本无 run / 收尾卡（runId 与 closing 均为空，rollbackFrom 锚定源版本）。
  */
 public record VersionDetailResponse(
         String commitHash,
         String subject,
         String runId,
+        String rollbackFrom,
         LocalDateTime committedAt,
         Map<String, Object> closing) {
 
@@ -24,6 +26,7 @@ public record VersionDetailResponse(
                 version.commitHash(),
                 version.subject(),
                 version.runId(),
+                version.rollbackFrom(),
                 LocalDateTime.ofInstant(
                         Instant.ofEpochSecond(version.committedAtEpochSeconds()),
                         ZoneId.systemDefault()),

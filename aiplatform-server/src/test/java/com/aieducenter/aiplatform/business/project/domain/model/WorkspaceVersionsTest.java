@@ -102,6 +102,30 @@ class WorkspaceVersionsTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void given_ref_and_subject_when_rollback_command_then_restore_then_append_commit_with_rollback_trailer() {
+        String command = WorkspaceVersions.rollbackCommand("a1b2c3d", "回滚到「更新了系统」");
+
+        // 复位工作树到目标 commit（restore --source，只动 tracked——数据不在跟踪面保留）→
+        // 追加新 commit（HEAD 不动、无 rebase/force）→ 携 Rollback-From trailer 锚定源版本
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git restore --source='a1b2c3d' --staged --worktree .");
+        assertThat(command).contains("git commit -q --allow-empty");
+        assertThat(command).contains("-m '回滚到「更新了系统」'");
+        assertThat(command).contains("-m 'Rollback-From: a1b2c3d'");
+        assertThat(command).contains("git rev-parse HEAD");
+        // 历史只追加不改写——绝无 reset --hard / rebase / push --force 类操作
+        assertThat(command).doesNotContain("rebase").doesNotContain("--hard").doesNotContain("--force");
+    }
+
+    @Test
+    void given_non_hex_ref_when_rollback_command_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("main; rm -rf /", "x"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.rollbackCommand("$(id)", "x"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     // ---------- log 解析 ----------
 
     @Test
@@ -135,6 +159,20 @@ class WorkspaceVersionsTest {
 
         assertThat(versions).hasSize(1);
         assertThat(versions.get(0).runId()).isEqualTo("222");
+    }
+
+    @Test
+    void given_rollback_commit_when_parse_then_version_with_rollback_from_and_null_run_id() {
+        // 回滚版本是版本序列成员（Rollback-From trailer 第二判据）——runId 空、rollbackFrom 锚源
+        String stdout = "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3" + FS + "1700000300" + FS
+                + "回滚到「首次生成了系统」" + FS + "Rollback-From: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\n" + RS;
+
+        List<WorkspaceVersion> versions = WorkspaceVersions.parseLog(stdout);
+
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).runId()).isNull();
+        assertThat(versions.get(0).rollbackFrom()).isEqualTo("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
+        assertThat(versions.get(0).subject()).isEqualTo("回滚到「首次生成了系统」");
     }
 
     @Test

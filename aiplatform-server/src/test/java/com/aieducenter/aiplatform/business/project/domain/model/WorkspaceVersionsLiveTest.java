@@ -117,6 +117,57 @@ class WorkspaceVersionsLiveTest {
         }
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_versions_when_rollback_then_append_version_code_reverted_data_kept_and_iteration_continues() {
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 两轮成版：v1 → v2（v2 改动 index.html）
+        exec("echo '<html>v1</html>' > /workspace/index.html");
+        String hash1 = commit("首次生成了系统", "111");
+        exec("echo '<html>v2</html>' > /workspace/index.html");
+        String hash2 = commit("更新了系统", "222");
+        // 业务数据（非跟踪面，落 data/ 进卷）：回滚只回代码、不应触碰
+        exec("mkdir -p /workspace/data && echo 'keep-me' > /workspace/data/keep.txt");
+
+        // 回滚到 v1：追加新 commit、代码复位、数据保留
+        ExecResult rolled = exec(WorkspaceVersions.rollbackCommand(hash1, "回滚到「首次生成了系统」"));
+        assertThat(rolled.exitCode()).as("回滚应成功：%s", rolled.stderr()).isZero();
+        String rollbackHash = rolled.stdout().trim();
+        assertThat(rollbackHash).isNotEmpty().isNotEqualTo(hash1).isNotEqualTo(hash2);
+
+        // git log 即版本序列：追加新版本（新→旧：回滚 → v2 → v1），历史只追加不改写
+        ExecResult log = exec(WorkspaceVersions.listCommand());
+        assertThat(log.exitCode()).isZero();
+        var versions = WorkspaceVersions.parseLog(log.stdout());
+        assertThat(versions).hasSize(3);
+        assertThat(versions.get(0).commitHash()).isEqualTo(rollbackHash);
+        assertThat(versions.get(0).rollbackFrom()).isEqualTo(hash1);
+        assertThat(versions.get(0).runId()).isNull();
+        assertThat(versions.get(1).commitHash()).isEqualTo(hash2);
+        assertThat(versions.get(2).commitHash()).isEqualTo(hash1);
+
+        // 系统代码回到当时（回滚 commit 树 = v1 内容）、数据保留
+        assertThat(exec("git -C /workspace show " + rollbackHash + ":index.html").stdout().trim())
+                .as("回滚 commit 树应含 v1 代码").isEqualTo("<html>v1</html>");
+        assertThat(exec("cat /workspace/index.html").stdout().trim())
+                .as("工作树应已复位到 v1 代码").isEqualTo("<html>v1</html>");
+        assertThat(exec("cat /workspace/data/keep.txt").stdout().trim())
+                .as("业务数据应保留（回滚只回代码）").isEqualTo("keep-me");
+        // 回滚后数据仍可写（AC2「可继续读写」——非跟踪面数据目录随卷可写、不被回滚触碰）
+        exec("echo 'after-rollback' > /workspace/data/keep2.txt");
+        assertThat(exec("cat /workspace/data/keep2.txt").stdout().trim())
+                .as("回滚后业务数据应可继续写").isEqualTo("after-rollback");
+
+        // 回滚后可继续迭代：下一轮 run 收口正常成新版本（基于回滚后代码）
+        exec("echo '<html>v3-after-rollback</html>' > /workspace/index.html");
+        String hash3 = commit("回滚后继续迭代", "333");
+        assertThat(hash3).isNotEmpty().isNotEqualTo(rollbackHash);
+        assertThat(exec("git -C /workspace show " + hash3 + ":index.html").stdout().trim())
+                .as("回滚后继续迭代的产物应基于回滚后代码").isEqualTo("<html>v3-after-rollback</html>");
+    }
+
     // ---------- 工具 ----------
 
     /** 幂等 init + 成版提交（两道命令串联，回读 HEAD hash）。 */

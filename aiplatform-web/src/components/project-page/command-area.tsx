@@ -146,7 +146,7 @@ export function CommandArea({
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[stage]}</p>
         {messages.map((message) => (
-          <MessageRow key={message.id} message={message}>
+          <MessageRow key={message.id} message={message} projectId={projectId}>
             {message.kind === "question" ? (
               <QuestionCard
                 question={message}
@@ -212,7 +212,7 @@ export function CommandArea({
 }
 
 /** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/受理动作卡/错误提示/平台引导左对齐。 */
-function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
+function MessageRow({ message, children, projectId }: { message: ChatMessage; children?: ReactNode; projectId: string }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
@@ -223,7 +223,7 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
     return (
       <div className="flex w-full justify-start">
-        <ClosingCard closing={message.closing} />
+        <ClosingCard closing={message.closing} projectId={projectId} />
       </div>
     );
   }

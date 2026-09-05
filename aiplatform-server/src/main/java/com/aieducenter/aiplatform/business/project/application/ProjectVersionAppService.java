@@ -25,17 +25,22 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 版本用例（#91 版本层地基）：每轮 run 收口自动成版（容器内 git，版本正本 =
- * git log，无便利表）+ 版本列表/详情读面。
+ * 版本用例（#91 版本层地基 + #93 回滚）：每轮 run 收口自动成版（容器内 git，
+ * 版本正本 = git log，无便利表）+ 版本列表/详情读面 + 回滚到此（追加版本、
+ * 只回代码不回数据）。
  *
  * <p><b>成版写口</b>：{@link #commitAtClosing} 由编码 run 尝试环的真收口块调用
  * （生成与更新同环；失败轮不到真收口、天然不成版）。失败 quietly 只记日志——
  * 照 {@code ConversationHistoryAppService.recordClosing} 先例，成版成败不绑架
  * run 收口（缺 version 键即本轮未成版，用户面无感，排查走日志）。</p>
  *
+ * <p><b>回滚写口</b>：{@link #rollback} 由用户显式触发（收尾卡「回滚到此」），
+ * 与收口成版不同——失败如实上抛（用户面动作，不 quietly 吞），走环境故障
+ * WSP_002。</p>
+ *
  * <p><b>读面</b>：git log 实时读取（exec 不经业务事务，同 {@code ProjectQueryAppService}
  * 形制）；详情锚定收尾卡——版本的 Run-Id trailer 联接对话史 closing 条目（#89
- * 同载荷复用）。</p>
+ * 同载荷复用；回滚版本无 run，closing 为空）。</p>
  */
 @Service
 @Slf4j
@@ -118,6 +123,29 @@ public class ProjectVersionAppService {
      */
     public void requireVersion(Long projectId, String ref) {
         requireVersion(loadProject(projectId), ref);
+    }
+
+    /**
+     * 回滚到此（#93）：把工作区系统代码复位到目标版本的树、追加为一个新版本
+     * （历史只追加不改写），数据不在此跟踪面故原样保留（回滚只回代码不回数据）。
+     * 目标版本经寻址守卫（{@link #requireVersion}）——非成版 / 非 hex 一律 404
+     * 且不触工作区。失败如实上抛（用户面动作，区别于收口成版的 quietly）。
+     *
+     * @return 追加出的新版本（回滚版本：runId 空、rollbackFrom 锚定源版本）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_028 版本不存在（含非
+     *                              hash 形态 ref）；WSP_002 回滚执行环境故障
+     */
+    public VersionResponse rollback(Long projectId, String ref) {
+        Project project = loadProject(projectId);
+        WorkspaceVersion target = resolveVersion(project, ref);
+        String subject = "回滚到「" + target.subject() + "」";
+        ExecResultResponse result = exec(project, WorkspaceVersions.rollbackCommand(ref, subject));
+        if (result == null || result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "回滚失败: " + (result == null ? "exec 无结果" : result.stderr()));
+        }
+        // 回读追加出的新版本（正本 = git log）——响应 committedAt 与列表口径一致，不取本地 now
+        return VersionResponse.of(resolveVersion(project, result.stdout().trim()));
     }
 
     /** 同上，但复用调用方已加载的聚合（避免查看编排的二次查库）。 */

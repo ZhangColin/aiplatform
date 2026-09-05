@@ -23,6 +23,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -181,6 +182,71 @@ class ProjectVersionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
+    // ---------- 回滚到此 ----------
+
+    @Test
+    void given_valid_ref_when_rollback_then_appends_new_version_anchored_to_source() {
+        Long projectId = persistedProject("9910");
+        stubExec((command, out) -> {
+            if (command.contains("git restore")) {
+                out.stdout = HASH_2 + "\n";
+            } else if (command.contains(HASH_2)) {
+                out.stdout = rollbackLogLine(HASH_2, 1700000200L, "回滚到「首次生成了系统」", HASH_1);
+            } else {
+                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+            }
+        });
+
+        VersionResponse rolled = appService.rollback(projectId, HASH_1);
+
+        assertThat(rolled.commitHash()).isEqualTo(HASH_2);
+        assertThat(rolled.rollbackFrom()).isEqualTo(HASH_1);
+        assertThat(rolled.runId()).isNull();
+        assertThat(rolled.subject()).isEqualTo("回滚到「首次生成了系统」");
+        // 寻址守卫（show 目标）→ rollbackCommand（restore + Rollback-From）→ 回读新版本（show）
+        assertThat(recordedCommands).hasSize(3);
+        assertThat(recordedCommands.get(0)).contains("git log -1").contains(HASH_1);
+        assertThat(recordedCommands.get(1))
+                .contains("git restore").contains("Rollback-From: " + HASH_1);
+        assertThat(recordedCommands.get(2)).contains("git log -1").contains(HASH_2);
+    }
+
+    @Test
+    void given_unknown_ref_when_rollback_then_404() {
+        Long projectId = persistedProject("9911");
+        stubExec((command, out) -> out.exitCode = 3);
+
+        assertThatThrownBy(() -> appService.rollback(projectId, "beefbeef"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_NOT_FOUND.message());
+    }
+
+    @Test
+    void given_malformed_ref_when_rollback_then_404_without_touching_workspace() {
+        Long projectId = persistedProject("9912");
+
+        assertThatThrownBy(() -> appService.rollback(projectId, "main; rm -rf /"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_NOT_FOUND.message());
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any());
+    }
+
+    @Test
+    void given_exec_failure_when_rollback_then_environment_failure_not_quiet() {
+        Long projectId = persistedProject("9913");
+        stubExec((command, out) -> {
+            if (command.contains("git restore")) {
+                out.exitCode = 128;
+            } else {
+                out.stdout = logLine(HASH_1, 1700000100L, "首次生成了系统", "111");
+            }
+        });
+
+        assertThatThrownBy(() -> appService.rollback(projectId, HASH_1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+    }
+
     // ---------- 观测件 ----------
 
     private Long persistedProject(String workspaceId) {
@@ -193,6 +259,11 @@ class ProjectVersionAppServiceTest {
     /** git log 单行（字段 \u001f 分隔、记录 \u001e 收尾——与 WorkspaceVersions 格式同源）。 */
     private static String logLine(String hash, long at, String subject, String runId) {
         return hash + FS + at + FS + subject + FS + "Run-Id: " + runId + "\n" + RS;
+    }
+
+    /** git log 单行的回滚变体（Rollback-From trailer，runId 空）。 */
+    private static String rollbackLogLine(String hash, long at, String subject, String rollbackFrom) {
+        return hash + FS + at + FS + subject + FS + "Rollback-From: " + rollbackFrom + "\n" + RS;
     }
 
     /** exec 通道脚本化：按命令内容写结果（缺省 exit 0 空输出）；命令全量录制。 */

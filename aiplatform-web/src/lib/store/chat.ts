@@ -46,6 +46,8 @@ export type WorkClosing = {
   systemNote?: string;
   files: { path: string; added: number; removed: number }[];
   durationMs: number;
+  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
+  version?: string;
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -593,6 +595,7 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
         })
       : [],
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
+    version: typeof record.version === "string" ? record.version : undefined,
   };
 }
 

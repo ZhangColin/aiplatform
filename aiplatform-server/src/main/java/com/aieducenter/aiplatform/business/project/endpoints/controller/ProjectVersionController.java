@@ -70,6 +70,17 @@ public class ProjectVersionController {
         return ApiResponse.ok(snapshotAppService.startView(ProjectIds.parse(projectId), ref));
     }
 
+    @PostMapping("/{ref}/rollback")
+    @Operation(summary = "回滚到此（追加新版本）",
+            description = "把系统代码复位到该版本（ref = commit hash）、追加为新版本——历史只追加"
+                    + "不改写（rebase/force 零使用）、只回代码不回数据；回滚后迭代照常（下一轮 run"
+                    + "基于回滚后代码）。返回追加出的新版本（runId 空、rollbackFrom 锚定源版本）。"
+                    + "版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；环境故障 WSP_002")
+    public ApiResponse<VersionResponse> rollback(@PathVariable String projectId,
+            @PathVariable String ref) {
+        return ApiResponse.ok(versionAppService.rollback(ProjectIds.parse(projectId), ref));
+    }
+
     @DeleteMapping("/{ref}/view/{viewId}")
     @Operation(summary = "关闭查看会话（销毁快照容器）",
             description = "销毁 viewId 对应的快照容器（副本随容器可写层消失，工作区零变化）。"

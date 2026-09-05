@@ -1,12 +1,25 @@
 "use client";
 
-import { Check, ChevronDown, Clock3, FileText, Monitor, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown, Clock3, Eye, FileText, Monitor, RotateCcw, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { useRollbackVersion, useStartVersionView, useStopVersionView } from "@/hooks/use-version";
 import type { WorkClosing } from "@/lib/store/chat";
+import { cn } from "@/lib/utils";
 
 import { formatDuration } from "./work-message";
+import { VersionViewDialog } from "./version-view-dialog";
 
 /** 变更清单默认可见条数（其余收进「查看全部」——清单可长，卡不无限长）。 */
 const VISIBLE_FILES = 5;
@@ -17,14 +30,54 @@ const VISIBLE_FILES = 5;
  * 事实的合并叙事）/ 判定行（PRD/系统改没改 + 原因——不由前端推导，旧「编辑无
  * 变化」推导口径已移除）/ 变更清单（文件级，+N −M 行数）/ 轮末统计（时长/文件
  * 数/变更行数 + 自检通过——closing 在场 ⟺ 收口判据核验通过）。过程明细已随
- * 定格退场（凝聚物）；「查看当时 / 回滚到此」版本控件归版本层（#91–#93）。
+ * 定格退场（凝聚物）；「查看当时 / 回滚到此」版本控件（#92/#93）随 closing.version
+ * 成版锚点呈现（成版失败缺 version 键则不出，版本动作无锚不可用）。
  */
-export function ClosingCard({ closing }: { closing: WorkClosing }) {
+export function ClosingCard({ closing, projectId }: { closing: WorkClosing; projectId: string }) {
   const [filesOpen, setFilesOpen] = useState(false);
   const files = closing.files;
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
   const added = files.reduce((total, file) => total + file.added, 0);
   const removed = files.reduce((total, file) => total + file.removed, 0);
+
+  // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁）；回滚 = 追加新版本
+  const version = closing.version;
+  const [viewOpen, setViewOpen] = useState(false);
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const startView = useStartVersionView(projectId);
+  const stopView = useStopVersionView(projectId);
+  const rollback = useRollbackVersion(projectId);
+  // 起服中关窗（data 未就绪）→ 记下，待快照就绪即销毁——防起服完成却无人关闭的孤儿快照
+  const closePendingView = useRef(false);
+
+  function openView() {
+    if (!version) return;
+    closePendingView.current = false;
+    setViewOpen(true);
+    startView.mutate(version);
+  }
+
+  function handleViewOpenChange(open: boolean) {
+    if (!open) {
+      const view = startView.data;
+      if (view && version) {
+        stopView.mutate({ version, viewId: view.viewId });
+        startView.reset();
+      } else {
+        closePendingView.current = true;
+      }
+    }
+    setViewOpen(open);
+  }
+
+  // 快照就绪时若窗口已关（起服中关窗）→ 立即销毁，不留孤儿
+  useEffect(() => {
+    if (closePendingView.current && startView.data && version) {
+      stopView.mutate({ version, viewId: startView.data.viewId });
+      startView.reset();
+      closePendingView.current = false;
+    }
+  }, [startView.data, version, stopView, startView]);
 
   return (
     <div className="rounded-xl border border-green-600/25 bg-green-500/[0.06] p-3">
@@ -119,6 +172,53 @@ export function ClosingCard({ closing }: { closing: WorkClosing }) {
           </>
         ) : null}
       </div>
+
+      {/* 版本控件（#92/#93）：成版锚点在场才可用——查看当时（起快照只逛不换）/回滚到此
+          （追加版本、只回代码不回数据）。成版失败（缺 version）轮不出控件。 */}
+      {version ? (
+        <>
+          <div className="mt-2.5 flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={openView}>
+              <Eye className="size-3.5" />
+              查看当时
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 px-2.5 text-xs"
+              onClick={() => setRollbackOpen(true)}
+            >
+              <RotateCcw className="size-3.5" />
+              回滚到此
+            </Button>
+          </div>
+
+          <VersionViewDialog
+            open={viewOpen}
+            onOpenChange={handleViewOpenChange}
+            pending={startView.isPending}
+            error={startView.isError}
+            previewUrl={startView.data?.previewUrl}
+          />
+
+          <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>回滚到这个版本？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  系统代码会回到该版本，业务数据保留；回滚会追加一个新版本，历史不丢失。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>再想想</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={() => rollback.mutate(version)}>
+                  回滚
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -127,6 +127,8 @@ export type SseClosing = {
   systemNote?: string;
   files: SseClosingFile[];
   durationMs: number;
+  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。 */
+  version?: string;
 };
 
 export type PlatformAgentEvent =

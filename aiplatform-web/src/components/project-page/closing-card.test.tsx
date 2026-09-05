@@ -1,9 +1,24 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { WorkClosing } from "@/lib/store/chat";
 
 import { ClosingCard } from "./closing-card";
+
+// 版本动作 hook 契约面 mock（起/停快照、回滚——请求面归 use-version 与后端测试，
+// 本测试只验收尾卡形态与版本控件的成版锚点门控）
+vi.mock("@/hooks/use-version", () => ({
+  useStartVersionView: () => ({
+    isPending: false,
+    isError: false,
+    data: undefined,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useStopVersionView: () => ({ mutate: vi.fn() }),
+  useRollbackVersion: () => ({ mutate: vi.fn() }),
+}));
 
 function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
   return {
@@ -21,14 +36,23 @@ function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
   };
 }
 
+function renderCard(card: WorkClosing) {
+  return renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <ClosingCard closing={card} projectId="100" />
+    </QueryClientProvider>,
+  );
+}
+
 /**
  * 收尾卡四要素（#88 AC①）：摘要 / 判定行（服务端权威值直译，非前端推导）/
  * 变更清单（文件级 +N −M）/ 轮末统计（时长 + 文件数 + 变更行数 + 检查通过）
+ * + 版本控件（#92/#93：成版锚点 version 在场才出「查看当时 / 回滚到此」）
  * ——SSR 断言（形态轻、事件→状态归桥接测试，Testing Decisions 口径）。
  */
 describe("ClosingCard · 四要素（#88 定格收口）", () => {
   it("四要素齐：摘要、判定行（带原因）、变更清单、轮末统计", () => {
-    const html = renderToStaticMarkup(<ClosingCard closing={closing()} />);
+    const html = renderCard(closing());
 
     expect(html).toContain("本轮完成");
     expect(html).toContain("修订了需求文档，并更新了系统"); // 摘要（合并叙事）
@@ -48,17 +72,15 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
   });
 
   it("系统无需改动轮：判定行如实呈现原因、空清单不出清单区与文件统计", () => {
-    const html = renderToStaticMarkup(
-      <ClosingCard
-        closing={closing({
-          summary: "本轮系统无需改动",
-          prdChanged: false,
-          prdNote: undefined,
-          systemChanged: false,
-          systemNote: "页面上没有写死配送范围，都以文档为准",
-          files: [],
-        })}
-      />,
+    const html = renderCard(
+      closing({
+        summary: "本轮系统无需改动",
+        prdChanged: false,
+        prdNote: undefined,
+        systemChanged: false,
+        systemNote: "页面上没有写死配送范围，都以文档为准",
+        files: [],
+      }),
     );
 
     expect(html).toContain("本轮系统无需改动");
@@ -71,17 +93,15 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
   });
 
   it("生成轮：摘要「首次生成了系统」、判定行无原因注脚（说明缺省）", () => {
-    const html = renderToStaticMarkup(
-      <ClosingCard
-        closing={closing({
-          summary: "首次生成了系统",
-          prdChanged: false,
-          prdNote: undefined,
-          systemChanged: true,
-          systemNote: undefined,
-          files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
-        })}
-      />,
+    const html = renderCard(
+      closing({
+        summary: "首次生成了系统",
+        prdChanged: false,
+        prdNote: undefined,
+        systemChanged: true,
+        systemNote: undefined,
+        files: [{ path: "/src/App.jsx", added: 40, removed: 0 }],
+      }),
     );
 
     expect(html).toContain("首次生成了系统");
@@ -95,10 +115,26 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
       added: 1,
       removed: 0,
     }));
-    const html = renderToStaticMarkup(<ClosingCard closing={closing({ files })} />);
+    const html = renderCard(closing({ files }));
 
     expect(html).toContain("/src/File5.jsx");
     expect(html).not.toContain("/src/File6.jsx"); // 五条之外收进折叠（SSR 默认收起）
     expect(html).toContain("查看全部 7 个文件");
+  });
+});
+
+describe("ClosingCard · 版本控件（#92/#93）", () => {
+  it("成版锚点（version）在场：出「查看当时 / 回滚到此」两动作", () => {
+    const html = renderCard(closing({ version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" }));
+
+    expect(html).toContain("查看当时");
+    expect(html).toContain("回滚到此");
+  });
+
+  it("成版失败（缺 version 键）：不出版本控件", () => {
+    const html = renderCard(closing({ version: undefined }));
+
+    expect(html).not.toContain("查看当时");
+    expect(html).not.toContain("回滚到此");
   });
 });

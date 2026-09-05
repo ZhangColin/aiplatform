@@ -20,8 +20,10 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 体并列，ADR 0006）。子智能体任务自包含、结果回交执行体，不直接面对用户；事件带
  * source 归属（过程呈现分角色播，用户面无角色标签）。
  *
- * <p>自测子智能体为首位升级候选（CONTEXT.md「运行」——自检现为最简探活收口），
- * v1 只接委派位（挂载点 + 隔离根 + source 归属），自测清单式播报随后续票落地。</p>
+ * <p>自测子智能体为 run 自检段的执行侧升级（#96：自检现为最简探活收口 → 自测子
+ * 智能体跑交付代码测试）：正文指令逐项 ✅/❌ 清单式播报（解说经 source=self-test
+ * 归属进工作消息）+ 报告写隔离根 + 结果回交执行体。平台侧收尾统计（closing.selfTest）
+ * 由 run 尝试环从自测 command 动作终态观测，不解析子智能体自由文本。</p>
  */
 @Component
 public class ProfileSubagentSupplier implements AgentSubagentSupplier {
@@ -38,7 +40,9 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     private static final String SELF_TEST_BODY = "你是 run 执行体委派的自测子智能体，专项负责运行自测。"
             + "工作协议：\n"
             + "1. 只读工作区内的系统代码（应用代码与 docs/），不修改任何交付文件。\n"
-            + "2. 用 command 工具运行测试/探活命令，验证系统可用。\n"
+            + "2. 用 command 工具逐项运行测试/探活命令，验证系统可用；每跑一项就播报一句"
+            + "清单式结果（如「首页可访问 ✅」「留言板数据落库 ✅」「8081 服务常驻 ❌」）"
+            + "——逐项 ✅/❌ 播报，失败项如实 ❌，不粉饰、不省略。\n"
             + "3. 把自测结果（逐项 ✅/❌）写成报告写入你的隔离工作区（write_file）。\n"
             + "4. 结果以简短文本回交 run 执行体，不直接面对用户。\n"
             + "全程使用中文。";

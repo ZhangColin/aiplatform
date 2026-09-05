@@ -449,9 +449,74 @@ class GenerationAppServiceTest {
                 .containsEntry("summary", "首次生成了系统")
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", true);
-        assertThat(closing).doesNotContainKey("prdNote").doesNotContainKey("systemNote");
+        assertThat(closing).doesNotContainKey("prdNote").doesNotContainKey("systemNote")
+                .doesNotContainKey(AgentEventTypes.SELF_TEST_FIELD); // 无自测动作 → selfTest 可缺省
         assertThat((List<Map<String, Object>>) closing.get("files")).hasSize(2);
         assertThat((Long) closing.get("durationMs")).isGreaterThanOrEqualTo(0L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_scripted_self_test_when_closes_then_closing_carries_self_test_total() {
+        // #96 AC①：自测子智能体（source=self-test）的 command 动作按 toolCallId 去重
+        // 进收尾卡统计（total = 自测跑了几项测试命令）。判定以平台可观测的命令动作
+        // 事实为准（不解析子智能体自由文本——逐项 ✅/❌ 明细在过程播报，收尾卡只带
+        // 「自测几项」聚合）；执行体自身（source 缺省）的命令不计
+        Long projectId = persistedProject("9817");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                    "prompt", command.prompt(), "model", "m", "role", "CODER")));
+            // 执行体自身的命令动作（source 缺省）——不计入自测统计
+            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "exec-1",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【起服命令】")));
+            // 自测子智能体的命令动作：三条（同 toolCallId 跨态只记一次——st-1 补一条
+            // 过渡态 started 验去重）
+            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                    AgentEventTypes.SOURCE_FIELD, "self-test",
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_STARTED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
+            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                    AgentEventTypes.SOURCE_FIELD, "self-test",
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
+            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                    AgentEventTypes.SOURCE_FIELD, "self-test",
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-2",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【留言落库】")));
+            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                    AgentEventTypes.SOURCE_FIELD, "self-test",
+                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-3",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【8081 常驻】")));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(), Map.of(
+                    AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.startGeneration(projectId);
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        // 去重后 3 条自测命令（st-1 的 started/completed 两态只记一条）
+        assertThat((Map<String, Object>) closing.get(AgentEventTypes.SELF_TEST_FIELD))
+                .containsEntry(AgentEventTypes.SELF_TEST_TOTAL_FIELD, 3);
     }
 
     @Test

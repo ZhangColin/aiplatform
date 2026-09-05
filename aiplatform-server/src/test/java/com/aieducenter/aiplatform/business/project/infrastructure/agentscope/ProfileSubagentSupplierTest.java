@@ -32,6 +32,22 @@ class ProfileSubagentSupplierTest {
     }
 
     @Test
+    void given_self_test_body_when_built_then_instructs_checklist_broadcast() {
+        // #96 清单式播报：正文指令逐项 ✅/❌ 播报（经 source=self-test 解说进工作消息）
+        // + 报告写隔离根 + 结果回交执行体；失败项如实 ❌ 不粉饰
+        SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
+
+        assertThat(declaration.getInlineAgentsBody())
+                .contains("逐项")
+                .contains("✅")
+                .contains("❌")
+                .contains("播报")
+                .contains("write_file")
+                .contains("回交");
+    }
+
+    @Test
     void given_self_test_when_built_then_isolated_workspace_under_platform_dir() {
         SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);

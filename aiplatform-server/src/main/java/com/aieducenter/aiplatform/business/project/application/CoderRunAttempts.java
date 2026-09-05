@@ -4,8 +4,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -26,6 +28,8 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
+import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ConfirmingShellTool;
+import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -167,11 +171,18 @@ class CoderRunAttempts {
                 // 不过即该次尝试失败走重试——中场 run-finish 若出用户面，工作消息定格
                 // 了又生长（重试信号外泄）、run-failed 前出现假收口
                 AtomicReference<AgentEvent> pendingFinish = new AtomicReference<>();
+                // 自测观察（#96）：自测子智能体（source=self-test）的 command 动作按
+                // toolCallId 去重计数，收口计入 closing.selfTest.total——判定以平台可
+                // 观测的命令动作事实为准（自测跑了几项命令），不解析子智能体自由文本。
+                // 每次尝试各起一账（重试尝试的自测随尝试失败作废，只成功尝试的自测
+                // 进收尾统计）
+                Set<String> selfTestCommands = new LinkedHashSet<>();
                 Consumer<AgentEvent> sink = event -> {
                     if (AgentEventTypes.RUN_FINISH.equals(event.type())) {
                         pendingFinish.set(event);
                         return;
                     }
+                    observeSelfTest(event, selfTestCommands);
                     projection.accept(event);
                 };
                 List<FileChange> attemptChanges = new ArrayList<>();
@@ -200,7 +211,7 @@ class CoderRunAttempts {
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
-                            runStartedAt, what);
+                            runStartedAt, what, selfTestCommands);
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
@@ -245,7 +256,8 @@ class CoderRunAttempts {
      * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
-            List<FileChange> changes, Instant runStartedAt, String what) {
+            List<FileChange> changes, Instant runStartedAt, String what,
+            Set<String> selfTestCommands) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -258,7 +270,48 @@ class CoderRunAttempts {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
+        Map<String, Object> selfTest = selfTestStatistic(selfTestCommands);
+        if (selfTest != null) {
+            closing.put(AgentEventTypes.SELF_TEST_FIELD, selfTest);
+        }
         return closing;
+    }
+
+    /**
+     * 自测观察（#96）：自测子智能体（source=self-test）的 command 动作部件按
+     * toolCallId 去重入账（started/running/completed/failed 任一态即记一条——同
+     * toolCallId 跨态只记一次，Set 天然去重）。只在自测子智能体的命令动作上落账：
+     * 执行体自身（source 缺省）的 command 不计、读类工具不进部件（无账可记）。
+     * 只记「自测跑了几项命令」——命令工具的成败态不反映测试成败（非零退出码仍是
+     * completed），平台不据此伪报通过/未过（不粉饰、不瞎判）。
+     */
+    private static void observeSelfTest(AgentEvent event, Set<String> selfTestCommands) {
+        if (!AgentEventTypes.PART_ACTION.equals(event.type())) {
+            return;
+        }
+        if (!ProfileSubagentSupplier.SELF_TEST_NAME
+                .equals(event.payload().get(AgentEventTypes.SOURCE_FIELD))) {
+            return;
+        }
+        if (!ConfirmingShellTool.NAME
+                .equals(event.payload().get(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD))) {
+            return;
+        }
+        selfTestCommands.add(String.valueOf(
+                event.payload().get(AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD)));
+    }
+
+    /**
+     * 自测统计（#96 收尾卡轮末统计）：{@code { total }}——自测子智能体跑了几项
+     * 测试命令。无自测命令动作（自测子智能体未跑）返回 {@code null}（closing 不
+     * 携带 selfTest 键，前端缺省不显示自测统计行）。逐项 ✅/❌ 明细在过程播报，
+     * 收尾卡只带聚合计数。
+     */
+    private static Map<String, Object> selfTestStatistic(Set<String> selfTestCommands) {
+        if (selfTestCommands.isEmpty()) {
+            return null;
+        }
+        return Map.of(AgentEventTypes.SELF_TEST_TOTAL_FIELD, selfTestCommands.size());
     }
 
     /** 被押后的 run-finish 加挂 closing 载荷（载荷拼装归 {@link #closingPayload}）。 */

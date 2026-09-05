@@ -123,6 +123,21 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
   });
 });
 
+describe("ClosingCard · 自测统计（#96 清单式播报的收尾统计）", () => {
+  it("自测统计在场：轮末统计带「自测 N 项」（只记项数，不伪报通过/未过）", () => {
+    const html = renderCard(closing({ selfTest: { total: 3 } }));
+
+    expect(html).toContain("自测 3 项");
+  });
+
+  it("自测缺省（子智能体未跑）：不出自测统计行", () => {
+    const html = renderCard(closing());
+
+    expect(html).not.toContain("自测");
+    expect(html).toContain("检查通过"); // 平台收口判据（8081 探活）恒在
+  });
+});
+
 describe("ClosingCard · 版本控件（#92/#93）", () => {
   it("成版锚点（version）在场：出「查看当时 / 回滚到此」两动作", () => {
     const html = renderCard(closing({ version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" }));

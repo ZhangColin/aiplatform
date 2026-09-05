@@ -38,11 +38,26 @@ public final class AgentEventTypes {
 
     /**
      * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
-     * systemChanged, systemNote?, files[{path,added,removed}], durationMs }——
-     * 对话史落库（#89）与版本锚定（#91）复用同一载荷。判定与清单以平台可观测
-     * 事实为准（工具调用/探活），不由模型自报。
+     * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
+     * selfTest?{total}（#96）, version?（#91） }——对话史落库（#89）与版本锚定
+     * （#91）复用同一载荷。判定与清单以平台可观测事实为准（工具调用/探活），
+     * 不由模型自报。
      */
     public static final String CLOSING_FIELD = "closing";
+
+    /**
+     * 收口扩载的自测键（#96 自测子智能体清单式播报的收尾统计）：值为对象
+     * {@code { total }}——自测子智能体（source=self-test）的 command 动作去重计数
+     * （一项 = 一条测试命令）。判定以平台可观测的命令动作事实为准；<b>可缺省</b>
+     * ——自测子智能体未跑（无 self-test 命令动作）时本键不携带。逐项 ✅/❌ 的
+     * 通过/未过明细在过程播报（解说段）里，收尾卡只带「自测几项」的聚合——命令
+     * 工具的成功/失败态不反映测试成败（非零退出码仍是 completed），平台不据此
+     * 伪报通过/未过（不粉饰、不瞎判）。
+     */
+    public static final String SELF_TEST_FIELD = "selfTest";
+
+    /** selfTest 对象的项数键（自测 command 动作去重计数）。 */
+    public static final String SELF_TEST_TOTAL_FIELD = "total";
 
     /**
      * 智能体挂起提问（ask_user 触发，#83 起纯 QUESTION——权限确认已拆独立事件

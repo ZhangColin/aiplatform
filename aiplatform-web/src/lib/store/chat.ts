@@ -48,6 +48,9 @@ export type WorkClosing = {
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
   version?: string;
+  /** 自测统计（#96 自测子智能体清单式播报的收尾统计）：可缺省——自测子智能体未跑时不携带。
+   *  只记「自测跑了几项」——逐项 ✅/❌ 明细在过程播报里，收尾卡不带通过/未过伪判。 */
+  selfTest?: { total: number };
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -596,7 +599,16 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
       : [],
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
+    selfTest: toSelfTest(record.selfTest),
   };
+}
+
+/** selfTest 载荷容错收窄（#96）：非对象或 total 为 0（无自测动作）回落 undefined。 */
+function toSelfTest(raw: unknown): { total: number } | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const total = typeof record.total === "number" ? record.total : 0;
+  return total > 0 ? { total } : undefined;
 }
 
 type SetFn = (partial: Partial<ChatState>) => void;

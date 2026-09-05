@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Clock3, Eye, FileText, Monitor, RotateCcw, ShieldCheck } from "lucide-react";
+import { Check, ChevronDown, Clock3, Eye, FileText, ListChecks, Monitor, RotateCcw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -39,6 +39,8 @@ export function ClosingCard({ closing, projectId }: { closing: WorkClosing; proj
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
   const added = files.reduce((total, file) => total + file.added, 0);
   const removed = files.reduce((total, file) => total + file.removed, 0);
+  // 自测统计（#96）：可缺省——自测子智能体未跑时不携带；只记「自测几项」，逐项 ✅/❌ 明细在过程播报
+  const selfTest = closing.selfTest;
 
   // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁）；回滚 = 追加新版本
   const version = closing.version;
@@ -151,11 +153,17 @@ export function ClosingCard({ closing, projectId }: { closing: WorkClosing; proj
         </div>
       ) : null}
 
-      {/* 轮末统计：自检通过（closing 在场 ⟺ 收口判据核验通过）+ 时长 + 文件数 + 变更行数 */}
+      {/* 轮末统计：自检通过（closing 在场 ⟺ 收口判据核验通过）+ 自测统计（#96 自测
+          子智能体清单式播报的收尾统计——可缺省）+ 时长 + 文件数 + 变更行数 */}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1">
           <ShieldCheck className="size-3.5" /> 检查通过
         </span>
+        {selfTest ? (
+          <span className="flex items-center gap-1">
+            <ListChecks className="size-3.5" /> 自测 {selfTest.total} 项
+          </span>
+        ) : null}
         <span className="flex items-center gap-1">
           <Clock3 className="size-3.5" /> 用时{" "}
           <b className="font-medium text-foreground/80">{formatDuration(closing.durationMs)}</b>

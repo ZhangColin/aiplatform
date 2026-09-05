@@ -121,7 +121,7 @@ describe("SseConnection", () => {
     const onEvent = vi.fn();
     const conn = new SseConnection({
       channel: "agent",
-      url: "/api/agent-events?projectId=p1",
+      url: "/api/events?projectId=p1",
       dedupe: true,
       onEvent,
     });
@@ -151,7 +151,7 @@ describe("SseConnection", () => {
     const onEvent = vi.fn();
     const conn = new SseConnection({
       channel: "agent",
-      url: "/api/agent-events",
+      url: "/api/events",
       dedupe: true,
       onEvent,
     });
@@ -256,7 +256,7 @@ describe("SseConnection", () => {
   it("close()：关连接置 offline，并取消挂起的再播种（agent 通道 unmount 即断）", async () => {
     vi.useFakeTimers();
     try {
-      const conn = new SseConnection({ channel: "agent", url: "/api/agent-events", onEvent: vi.fn() });
+      const conn = new SseConnection({ channel: "agent", url: "/api/events", onEvent: vi.fn() });
       conn.connect();
       const es = FakeEventSource.instances[0];
       es.simulateOpen();

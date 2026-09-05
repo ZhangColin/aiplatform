@@ -13,14 +13,14 @@ import { useSseStatusStore, type SseChannel } from "@/lib/store/sse-status";
  */
 
 export type SseEvent = {
-  /** SSE `id:` 字段（通知通道 {projectId}:{seq}，agent 流 {runId}:{seq}）。 */
+  /** SSE `id:` 字段（通知族 {projectId}:{seq}，智能体事件族 {runId}:{seq}）。 */
   id: string;
   data: string;
 };
 
 export type SseConnectionOptions = {
   channel: SseChannel;
-  /** 相对路径（rewrite → 后端，同源 cookie 自动携带），如 `/api/agent-events?projectId=p1`。 */
+  /** 相对路径（rewrite → 后端，同源 cookie 自动携带），如 `/api/events?projectId=p1`。 */
   url: string;
   /** agent 流通道去重（键 = 完整事件 id，带上限清空——将来接补发的现成缝）；通知通道消费幂等，不开。 */
   dedupe?: boolean;

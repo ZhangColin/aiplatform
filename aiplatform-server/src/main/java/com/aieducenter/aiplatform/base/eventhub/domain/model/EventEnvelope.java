@@ -5,7 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * SSE 统一信封（两通道共用）：{@code data = {"type":..., "payload":{...}, "ts":...}}。
+ * SSE 统一信封（单通道两族共用）：{@code data = {"type":..., "payload":{...}, "ts":...}}。
  *
  * <p>信封契约（docs/spec/SSE事件清单.md · ADR-0001）：payload 恒为对象且必带关联字段
  * （关联字段的必带校验属通道语义，在应用层做）；payload 内禁用 {@code type} 键名——

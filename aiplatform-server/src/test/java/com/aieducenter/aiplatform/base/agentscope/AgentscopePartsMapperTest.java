@@ -24,9 +24,9 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 /**
  * {@link AgentscopePartsMapper} 单点映射表（#77 parts 契约的唯一生产方）：AgentScope
  * 事件 → 消息部件事件（part-text / part-action / part-step）。口径：动作卡全生命
- * 周期（开始即出帧——工具调用发起即 started，参数落定 running，结果返回
+ * 周期（开始即出事件——工具调用发起即 started，参数落定 running，结果返回
  * completed/failed，同一 toolCallId 锚定）；解说切段与直播同内核；思考与读类
- * 工具不进部件。每帧 payload 盖 runId/sessionId/engine + 部件字段（扁平，无 data 键）。
+ * 工具不进部件。每事件 payload 盖 runId/sessionId/engine + 部件字段（扁平，无 data 键）。
  */
 class AgentscopePartsMapperTest {
 
@@ -53,7 +53,7 @@ class AgentscopePartsMapperTest {
             assertThat(parts.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.ROLE_ENGINE_FIELD, ENGINE,
+                    AgentEventTypes.ENGINE_FIELD, ENGINE,
                     AgentEventTypes.PART_TEXT_FIELD, "正在编写订单管理页面。"));
         }
 
@@ -88,7 +88,7 @@ class AgentscopePartsMapperTest {
             assertThat(started.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.ROLE_ENGINE_FIELD, ENGINE,
+                    AgentEventTypes.ENGINE_FIELD, ENGINE,
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "tc-1",
                     AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "write_file",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_STARTED,
@@ -188,7 +188,7 @@ class AgentscopePartsMapperTest {
             assertThat(parts).singleElement().satisfies(part ->
                     assertThat(part.payload()).containsOnlyKeys(
                             AgentEventTypes.RUN_FIELD, AgentEventTypes.SESSION_FIELD,
-                            AgentEventTypes.ROLE_ENGINE_FIELD, AgentEventTypes.PART_TEXT_FIELD));
+                            AgentEventTypes.ENGINE_FIELD, AgentEventTypes.PART_TEXT_FIELD));
         }
     }
 

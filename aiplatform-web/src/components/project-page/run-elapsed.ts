@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import type { AgentRun } from "@/lib/store/agent-streams";
+import type { AgentRun } from "@/lib/store/agent-runs";
 
 /** run 进行中（running / questioning，等用户 ≠ 终态）：顶栏 LIVE 挂载与计时 tick 共用谓词。 */
 export function isRunInFlight(run: AgentRun | undefined): boolean {

@@ -31,8 +31,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -44,13 +43,13 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 逐修改刷新（#49）：直播步骤边界（live-step，step≥2 = 一次完整修改落定）→
+ * 逐修改刷新（#49）：步骤分组边界（part-step，step≥2 = 一次完整修改落定）→
  * 平台侧探活（8081，与收口核验同判据）→ 通过才发 {@code preview-updated} 通知；
- * 探活失败/异常不发射、不炸编码 run。主缝 = 智能体边界 mock（脚本化直播步骤序列
- * 经捕获的 sink 逐帧推入）+ 工作区 exec mock（探活结果脚本化，按命令内容区分）。
+ * 探活失败/异常不发射、不炸编码 run。主缝 = 智能体边界 mock（脚本化部件步骤序列
+ * 经捕获的 sink 逐事件推入）+ 工作区 exec mock（探活结果脚本化，按命令内容区分）。
  */
 @SpringBootTest
-class LiveStepPreviewRefreshTest {
+class StepBoundaryPreviewRefreshTest {
 
     private static final long OWNER = 3897654321098765432L;
 
@@ -70,10 +69,7 @@ class LiveStepPreviewRefreshTest {
     private AgentscopeAgentClient agentClient;
 
     @MockitoBean
-    private AgentStreamAppService streamAppService;
-
-    @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
@@ -104,20 +100,20 @@ class LiveStepPreviewRefreshTest {
     }
 
     /**
-     * 脚本化智能体边界：往捕获的流桥 sink 逐帧推直播序列（自述段 + 步骤段），
-     * 模拟 mapper 在模型调用边界的产出——探活装饰正是挂在这条 sink 链上。
+     * 脚本化智能体边界：往捕获的事件桥 sink 逐事件推部件序列（解说段 + 步骤段），
+     * 模拟部件映射表在模型调用边界的产出——探活装饰正是挂在这条 sink 链上。
      */
-    private void givenConverseEmittingLiveSteps(int... steps) {
+    private void givenConverseEmittingPartSteps(int... steps) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(new AgentEvent(AgentEventTypes.LIVE_TEXT, Map.of(
-                    AgentStreamAppService.RUN_FIELD, command.runId(),
-                    AgentEventTypes.LIVE_TEXT_FIELD, "正在创建首页。")));
+            sink.accept(new AgentEvent(AgentEventTypes.PART_TEXT, Map.of(
+                    EventsAppService.RUN_FIELD, command.runId(),
+                    AgentEventTypes.PART_TEXT_FIELD, "正在创建首页。")));
             for (int step : steps) {
-                sink.accept(new AgentEvent(AgentEventTypes.LIVE_STEP, Map.of(
-                        AgentStreamAppService.RUN_FIELD, command.runId(),
-                        AgentEventTypes.LIVE_STEP_FIELD, step)));
+                sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
+                        EventsAppService.RUN_FIELD, command.runId(),
+                        AgentEventTypes.PART_STEP_FIELD, step)));
             }
             return new AgentReply(command.runId(), "系统已生成");
         });
@@ -128,21 +124,21 @@ class LiveStepPreviewRefreshTest {
         Long projectId = persistedProject("9820");
         givenSessionExecutorRunsInline();
         givenExecSucceeds();
-        givenConverseEmittingLiveSteps(1, 2, 3);
+        givenConverseEmittingPartSteps(1, 2, 3);
 
         appService.startGeneration(projectId);
 
         // 刷新信号 = 步骤边界且 step≥2（step1 是起跑边界无完整修改）：恰两次通知，
         // 探活通过后发射（异步专职线程，timeout 收敛）
-        verify(notificationAppService, timeout(PROBE_SETTLE_MS).times(2))
-                .publish(eq(ProjectEventTypes.PREVIEW_UPDATED), argThat(payload ->
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(2))
+                .publishNotification(eq(ProjectEventTypes.PREVIEW_UPDATED), argThat(payload ->
                         projectId.toString().equals(
                                 payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
-        // 帧原样透传不因装饰丢帧：live-step 照发智能体流通道（含 projectId 注入）
-        verify(streamAppService, timeout(PROBE_SETTLE_MS).times(3))
-                .publish(eq(AgentEventTypes.LIVE_STEP), argThat(payload ->
+        // 事件原样透传不因装饰丢事件：part-step 照发智能体事件族（含 projectId 注入）
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(3))
+                .publishAgentEvent(eq(AgentEventTypes.PART_STEP), argThat(payload ->
                         projectId.toString().equals(
-                                payload.get(AgentStreamAppService.PROJECT_FIELD))));
+                                payload.get(EventsAppService.PROJECT_FIELD))));
         // run 照常成功收口（刷新装饰不改变收口行为）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
@@ -154,7 +150,7 @@ class LiveStepPreviewRefreshTest {
         Long projectId = persistedProject("9821");
         givenSessionExecutorRunsInline();
         givenExecSucceeds(); // AGENTS.md 写入等非探活命令成功
-        givenConverseEmittingLiveSteps(1, 2, 3);
+        givenConverseEmittingPartSteps(1, 2, 3);
         // 探活不可达（应用未起服——待期常态）：curl 退出码非 0（收口核验同判据同桩，
         // 生成走重试属预期；断言面只在「不发射刷新通知」）
         when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
@@ -168,8 +164,8 @@ class LiveStepPreviewRefreshTest {
         verify(workspaceLifecycleAppService, timeout(PROBE_SETTLE_MS).atLeastOnce())
                 .exec(eq("9821"), argThat((WorkspaceExecCommand cmd) ->
                         cmd.command().equals(GenerationAppService.CLOSING_PROBE)));
-        verify(notificationAppService, never())
-                .publish(any(), argThat(payload ->
+        verify(eventsAppService, never())
+                .publishNotification(any(), argThat(payload ->
                         projectId.toString().equals(
                                 payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
     }
@@ -193,12 +189,12 @@ class LiveStepPreviewRefreshTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(new AgentEvent(AgentEventTypes.LIVE_STEP, Map.of(
-                    AgentStreamAppService.RUN_FIELD, command.runId(),
-                    AgentEventTypes.LIVE_STEP_FIELD, 2)));
-            sink.accept(new AgentEvent(AgentEventTypes.LIVE_STEP, Map.of(
-                    AgentStreamAppService.RUN_FIELD, command.runId(),
-                    AgentEventTypes.LIVE_STEP_FIELD, 3)));
+            sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
+                    EventsAppService.RUN_FIELD, command.runId(),
+                    AgentEventTypes.PART_STEP_FIELD, 2)));
+            sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
+                    EventsAppService.RUN_FIELD, command.runId(),
+                    AgentEventTypes.PART_STEP_FIELD, 3)));
             // 等两针都执行过（都抛了）再收口——此后收口核验走成功桩
             assertThat(await(probesObserved)).isTrue();
             probesThrow.set(false);
@@ -207,31 +203,31 @@ class LiveStepPreviewRefreshTest {
 
         appService.startGeneration(projectId);
 
-        // 探活异常不发射通知、不炸编码 run：流帧照发、run 成功收口、generated_at 落位
+        // 探活异常不发射通知、不炸编码 run：事件照发、run 成功收口、generated_at 落位
         // （两针已在 converse 内确认执行完毕——异常被吞，此后无发射路径，never 确定）
-        verify(streamAppService, timeout(PROBE_SETTLE_MS).times(2))
-                .publish(eq(AgentEventTypes.LIVE_STEP), anyMap());
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(2))
+                .publishAgentEvent(eq(AgentEventTypes.PART_STEP), anyMap());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNotNull();
-        verify(notificationAppService, never())
-                .publish(any(), argThat(payload ->
+        verify(eventsAppService, never())
+                .publishNotification(any(), argThat(payload ->
                         projectId.toString().equals(
                                 payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
     }
 
     @Test
-    void given_step_one_or_non_step_frames_only_when_generate_then_no_notification() {
+    void given_step_one_or_non_step_events_only_when_generate_then_no_notification() {
         Long projectId = persistedProject("9823");
         givenSessionExecutorRunsInline();
         givenExecSucceeds();
-        // 只有起跑边界（step1）与非步骤帧：无完整修改落定，不触发刷新信号（无探针任务）
-        givenConverseEmittingLiveSteps(1);
+        // 只有起跑边界（step1）与非步骤事件：无完整修改落定，不触发刷新信号（无探针任务）
+        givenConverseEmittingPartSteps(1);
 
         appService.startGeneration(projectId);
 
-        verify(notificationAppService, never())
-                .publish(eq(ProjectEventTypes.PREVIEW_UPDATED), anyMap());
+        verify(eventsAppService, never())
+                .publishNotification(eq(ProjectEventTypes.PREVIEW_UPDATED), anyMap());
         // run 照常成功（无刷新信号不影响生成）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",

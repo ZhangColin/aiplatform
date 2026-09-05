@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
@@ -37,7 +37,7 @@ class ProjectLifecycleCreateRollbackTest {
     private BaInterviewAppService baInterviewAppService;
 
     @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private ProjectRepository projectRepository;
@@ -56,8 +56,8 @@ class ProjectLifecycleCreateRollbackTest {
 
         // 落库失败 → 回收已落定的工作区；不发射任何 SSE、不开 BA 访谈、不取名
         verify(workspaceLifecycleAppService).destroy("9300");
-        verifyNoInteractions(notificationAppService);
+        verifyNoInteractions(eventsAppService);
         verifyNoInteractions(baInterviewAppService);
-        verify(notificationAppService, never()).publish(any(), any());
+        verify(eventsAppService, never()).publishNotification(any(), any());
     }
 }

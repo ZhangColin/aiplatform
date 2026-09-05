@@ -17,7 +17,7 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
@@ -69,7 +69,7 @@ class ProjectLifecycleAppServiceTest {
     private BaInterviewAppService baInterviewAppService;
 
     @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     /** 取名服务 mock（编排只验触发，取名本体见 ProjectNamingAppServiceTest）。 */
     @MockitoBean
@@ -125,7 +125,7 @@ class ProjectLifecycleAppServiceTest {
         // SSE（副作用落定后）：workspace-created
         ArgumentCaptor<Map<String, Object>> created =
                 ArgumentCaptor.forClass(Map.class);
-        verify(notificationAppService).publish(eq(ProjectEventTypes.WORKSPACE_CREATED),
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_CREATED),
                 created.capture());
         assertThat(created.getValue())
                 .containsEntry("projectId", projectId.toString())
@@ -216,7 +216,7 @@ class ProjectLifecycleAppServiceTest {
                 .isEqualTo("品牌官网");
         assertThat(response.name()).isEqualTo("品牌官网");
         // 单账号 v1：改名不设状态限制、不发射 SSE（REST 响应即触达）
-        verify(notificationAppService, never()).publish(any(), any());
+        verify(eventsAppService, never()).publishNotification(any(), any());
     }
 
     @Test
@@ -280,7 +280,7 @@ class ProjectLifecycleAppServiceTest {
         verify(workspaceLifecycleAppService).destroy("9200");
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
-        verify(notificationAppService).publish(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 eq(Map.of("projectId", projectId.toString())));
     }
 
@@ -294,7 +294,7 @@ class ProjectLifecycleAppServiceTest {
 
         // 物理销毁失败不阻断记录删除（真删级联优先，物理残留可重试）
         verifyNoRows();
-        verify(notificationAppService).publish(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 eq(Map.of("projectId", projectId.toString())));
     }
 
@@ -317,7 +317,7 @@ class ProjectLifecycleAppServiceTest {
         // 端口真实暴露（docker publish 先行）→ 返回可访问 URL
         assertThat(response.url()).isEqualTo("http://localhost:30080");
         // SSE preview-ready（projectId + url）
-        verify(notificationAppService).publish(eq(ProjectEventTypes.PREVIEW_READY),
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
                 eq(Map.of("projectId", projectId.toString(), "url", "http://localhost:30080")));
     }
 

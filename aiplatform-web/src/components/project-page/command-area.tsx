@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Info, Lock, TriangleAlert } from "lucide-react";
+import { FileText, Lock, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Composer } from "@/components/composer/composer";
@@ -18,7 +18,6 @@ import {
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
-import { DispatchStageBar } from "./dispatch-stage-bar";
 import { QuestionCard } from "./question-card";
 import { WorkMessage } from "./work-message";
 
@@ -36,7 +35,7 @@ const STAGE_HINTS = {
  * 开场回应、每轮一问、用户的意见与答复、助理的咨询作答、平台的兜底轻引导都在
  * 此流动；首次生成后意见即迭代入口（BA 判需求侧，回合收口后平台自动派修正
  * run——链必达 #43，形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户
- * 隐式），气泡角色标签随 role-assigned / guide-reply 帧呈现（BA「需求分析
+ * 隐式），气泡标签随事件呈现（智能体统一「智能体」、guide-reply 自带「平台」
  * 师」/ 助理「项目助理」/ 平台）。编码 run 进行中对话流末尾呈现一条生长中的
  * 工作消息（#81 parts 契约：解说 + 动作状态卡 + 步骤分组，思考与代码不播），
  * 收口定格。发送框 = 共享 Composer（首页/项目页同一
@@ -174,7 +173,6 @@ export function CommandArea({
       </div>
 
       <div className="shrink-0 p-3">
-        <DispatchStageBar projectId={projectId} />
         {prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
@@ -226,15 +224,6 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
       </div>
     );
   }
-  if (message.kind === "notice") {
-    // 修正收口「未动系统」（#46）：平台侧如实告知——区分「不需要改」与「链路断了」
-    return (
-      <div className="flex w-full items-start gap-2 text-xs text-muted-foreground">
-        <Info className="mt-0.5 size-3.5 shrink-0" />
-        <span>本轮意见未改动系统：{message.text}</span>
-      </div>
-    );
-  }
   if (message.kind === "user") {
     return (
       <div className="flex w-full justify-end">
@@ -244,7 +233,7 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
       </div>
     );
   }
-  // 智能体话语（BA/助理）与平台轻引导（#47）：标签随帧落消息，不硬编码角色名
+  // 智能体话语（BA/助理）与平台轻引导（#47）：标签随事件落消息，不硬编码角色名
   return (
     <div className="flex w-full flex-col items-start gap-1">
       <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>

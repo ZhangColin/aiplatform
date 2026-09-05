@@ -10,12 +10,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.event.ToolCallDeltaEvent;
 
 /**
- * 工具动作 → 人话行单点（直播 live-action 与部件 part-action 的共用生产内核，
- * #77 提取）：工具名封闭表 + 参数增量累积 + 路径提取——平台不加翻译机器。
- * write_file / edit_file 经参数增量（ToolCallDelta）累积解析 path，取文件名去
- * 扩展名为标签 →「编写【标签】」；command →「运行命令」；read_file / grep /
- * glob / list 等读类不播（对客户是噪音）。行文为动作对象短语（无时态——
- * 「编写【订单管理】」），直播侧自带「正在」前缀、部件侧时态由 state 表达。
+ * 工具动作 → 人话行单点（部件 part-action 的生产内核）：工具名封闭表 + 参数增量
+ * 累积 + 路径提取——平台不加翻译机器。write_file / edit_file 经参数增量
+ * （ToolCallDelta）累积解析 path，取文件名去扩展名为标签 →「编写【标签】」；
+ * command →「运行命令」；read_file / grep / glob / list 等读类不播（对客户是
+ * 噪音）。行文为动作对象短语（无时态——「编写【订单管理】」，时态由动作部件的
+ * state 表达）。
  */
 final class ToolActionLines {
 

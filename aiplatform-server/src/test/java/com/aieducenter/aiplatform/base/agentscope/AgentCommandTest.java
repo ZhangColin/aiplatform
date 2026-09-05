@@ -93,7 +93,7 @@ class AgentCommandTest {
     @Test
     void given_canonical_form_when_construct_then_workspace_read_only_kept() {
         AgentCommand command = new AgentCommand("run-1", "咨询", null, null, "s-1", null,
-                null, "42", Map.of(), null, false, "ASSISTANT", true);
+                null, "42", Map.of(), null, "ASSISTANT", true);
 
         assertThat(command.workspaceReadOnly()).isTrue(); // 助理咨询姿态：写面结构性关闭
     }

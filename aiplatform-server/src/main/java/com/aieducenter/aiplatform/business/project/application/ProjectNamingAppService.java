@@ -13,8 +13,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 项目取名服务（grilling 定案「异步取名」）：创建即落占位名
  * {@link Project#PLACEHOLDER_NAME}，创建后经智能体内核的一次静默轻调用
- * （AgentScope，空 sink——无 SSE 帧）据 requirement 生成项目名并落位；
+ * （AgentScope，空 sink——无 SSE 事件）据 requirement 生成项目名并落位；
  * 落库即发 {@code project-renamed}（#52 触达补口：
  * 前端失效 projects 域重拉，停留中的页面上名字静默浮现，ChatGPT 式——守卫不覆写
  * 与失败保占位均不发）。⚠️ 红线：禁止字符串截取派生——净化不过关/内核失败/超时
@@ -59,7 +59,7 @@ public class ProjectNamingAppService implements DisposableBean {
 
     private final AgentscopeAgentClient agentClient;
     private final ProjectRepository projectRepository;
-    private final PlatformNotificationAppService notificationAppService;
+    private final EventsAppService eventsAppService;
     /** 提交通道（生产=虚拟线程池；测试=直通同步）。 */
     private final Executor executor;
     /** 生产执行器生命周期（测试注入直通道时为 null）。 */
@@ -68,10 +68,10 @@ public class ProjectNamingAppService implements DisposableBean {
     @Autowired
     public ProjectNamingAppService(AgentscopeAgentClient agentClient,
             ProjectRepository projectRepository,
-            PlatformNotificationAppService notificationAppService) {
+            EventsAppService eventsAppService) {
         this.agentClient = agentClient;
         this.projectRepository = projectRepository;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
         this.ownedExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "project-naming");
             thread.setDaemon(true);
@@ -83,10 +83,10 @@ public class ProjectNamingAppService implements DisposableBean {
     /** 测试便利构造（直通道，无生命周期）。 */
     ProjectNamingAppService(AgentscopeAgentClient agentClient,
             ProjectRepository projectRepository,
-            PlatformNotificationAppService notificationAppService, Executor executor) {
+            EventsAppService eventsAppService, Executor executor) {
         this.agentClient = agentClient;
         this.projectRepository = projectRepository;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
         this.executor = executor;
         this.ownedExecutor = null;
     }
@@ -129,7 +129,7 @@ public class ProjectNamingAppService implements DisposableBean {
                 projectRepository.save(project);
                 // #52 触达补口：落定即广播（取名跑在自有执行器线程，save 自动提交后
                 // 发射即满足 ADR-0001「事务提交后发射」；projectId 即本方法入参）
-                notificationAppService.publish(ProjectEventTypes.PROJECT_RENAMED, Map.of(
+                eventsAppService.publishNotification(ProjectEventTypes.PROJECT_RENAMED, Map.of(
                         ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                         ProjectEventTypes.PROJECT_NAME_FIELD, project.getName()));
             } else {
@@ -141,7 +141,7 @@ public class ProjectNamingAppService implements DisposableBean {
     /** 静默轻调用取名：naming-{projectId} 一次性会话、本地工作区、缺省 flash 档模型。 */
     private String converseForName(Long projectId, String requirement) {
         AgentCommand command = new AgentCommand(
-                AgentStreamAppService.newRunId(),
+                EventsAppService.newRunId(),
                 requirement,
                 NAMING_SYSTEM_PROMPT,
                 null, // 模型取适配器缺省（对话轨道 flash 档，快且省）

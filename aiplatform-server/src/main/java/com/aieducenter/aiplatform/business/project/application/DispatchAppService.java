@@ -10,7 +10,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
@@ -26,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
  * 一次性会话（{@code classify-{runId}}，模型档由专用配置键
  * {@code app.dispatch.classification-model} 决定（缺省 flash 档，代码保证——
- * 不吃 agentscope 缺省模型的部署配法，#51）、空 sink 无帧、不触项目工作区），
+ * 不吃 agentscope 缺省模型的部署配法，#51）、空 sink 无事件、不触项目工作区），
  * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
  * 拿不到真锚）。</p>
  *
@@ -35,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
  * 异常、超时或输出不可解析一律回落意见链。</p>
  *
  * <p><b>兜底类零产物</b>：轻量引导回复为平台定型文案（代码承载，非 LLM 产），
- * 经 {@code guide-reply} 帧直达指令区；下单意图归兜底的引导分岔——指引
+ * 经 {@code guide-reply} 事件直达指令区；下单意图归兜底的引导分岔——指引
  * 「确认下单」入口（未生成时如实说明入口出现时机）。全程不起 run、不动任何
  * 产物。</p>
  */
@@ -86,16 +86,16 @@ public class DispatchAppService {
 
     private final BaInterviewAppService baInterviewAppService;
     private final AssistantAppService assistantAppService;
-    private final AgentStreamBridge streamBridge;
+    private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final DispatchProperties properties;
 
     public DispatchAppService(BaInterviewAppService baInterviewAppService,
-            AssistantAppService assistantAppService, AgentStreamBridge streamBridge,
+            AssistantAppService assistantAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, DispatchProperties properties) {
         this.baInterviewAppService = baInterviewAppService;
         this.assistantAppService = assistantAppService;
-        this.streamBridge = streamBridge;
+        this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.properties = properties;
     }
@@ -106,10 +106,10 @@ public class DispatchAppService {
      * 挂起问答（PRJ_024）只拦意见链：意见分岔（BA 轮）自带守卫在分类后拦——
      * 咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类调用，
      * 秒级轻调用，接受）。响应携带所派 run 的标识（意见 = BA 轮 / 咨询 = 助理轮 /
-     * 兜底 = 引导帧锚）。
+     * 兜底 = 引导事件锚）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区
-     *                              关闭，先于分类——拒绝即零调用零帧）；ORD_006
+     *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）
      */
@@ -125,7 +125,7 @@ public class DispatchAppService {
         };
     }
 
-    /** 一次派发的运行标识（前端挂智能体流 ?runId= 的锚；兜底路径锚 guide-reply 帧）。 */
+    /** 一次派发的运行标识（前端挂智能体流 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
     public record DispatchRun(String runId) {
     }
 
@@ -143,16 +143,16 @@ public class DispatchAppService {
     // ---------- 内部 ----------
 
     /**
-     * 兜底轻引导：发 {@code guide-reply} 帧（零产物路径的全部帧）即收口——不起
+     * 兜底轻引导：发 {@code guide-reply} 事件（零产物路径的全部事件）即收口——不起
      * run、不提交会话、不动任何产物。runId 为派发锚。
      */
     private DispatchRun guideReply(Project project, String prompt, boolean orderIntent) {
-        String runId = AgentStreamAppService.newRunId();
+        String runId = EventsAppService.newRunId();
         String text = orderIntent
                 ? (project.getGeneratedAt() != null
                         ? GUIDE_ORDER_TEXT_GENERATED : GUIDE_ORDER_TEXT_NOT_GENERATED)
                 : GUIDE_GENERIC_TEXT;
-        streamBridge.emitGuideReply(project.getId(), runId, prompt, GUIDE_LABEL, text);
+        eventBridge.emitGuideReply(project.getId(), runId, prompt, GUIDE_LABEL, text);
         log.info("[dispatch] 项目 {} 兜底引导（{}）", project.getId(),
                 orderIntent ? "下单意图" : "泛引导");
         return new DispatchRun(runId);
@@ -161,12 +161,12 @@ public class DispatchAppService {
     /**
      * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档由专用配置键
      * {@code app.dispatch.classification-model} 决定（缺省 flash，#51——不吃
-     * agentscope 缺省模型的部署配法）、空 sink（无 SSE 帧）、不触项目工作区、
+     * agentscope 缺省模型的部署配法）、空 sink（无 SSE 事件）、不触项目工作区、
      * 计量 agentKind=classify。失败 / 超时 / 输出不可解析一律回落意见链（见类
      * 注释的定向取舍）。
      */
     private Classification classify(Long projectId, String prompt) {
-        String runId = AgentStreamAppService.newRunId();
+        String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
         AgentCommand command = new AgentCommand(
                 runId,
@@ -180,7 +180,6 @@ public class DispatchAppService {
                 null, // 本地兜底工作区：分类不读写项目工作区
                 Map.of(),
                 CLASSIFY_TIMEOUT,
-                /* live= */ false,
                 null,
                 /* workspaceReadOnly= */ false);
         try {

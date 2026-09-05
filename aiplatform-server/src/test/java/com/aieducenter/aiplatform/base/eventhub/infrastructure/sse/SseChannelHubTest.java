@@ -183,7 +183,7 @@ class SseChannelHubTest {
         assertThat(sender.eventFramesOf(healthy))
                 .extracting(SseServerEvent::id)
                 .containsExactly("p1:1", "p1:2");
-        // broken 仅收到订阅时的初始 ping（当时未断），事件帧一无所获；
+        // broken 仅收到订阅时的初始 ping（当时未断），事件一无所获；
         // 发送尝试 = 初始 ping + 第一次广播失败的一次，第二次广播不再尝试
         assertThat(sender.eventFramesOf(broken)).isEmpty();
         assertThat(sender.attemptsFor(broken)).isEqualTo(2);
@@ -232,12 +232,12 @@ class SseChannelHubTest {
         assertThat(sender.framesOf(emitter)).hasSize(pingsAtShutdown);
     }
 
-    // ---------- 近期帧重放（#55：注册 opt-in，通知通道不动） ----------
+    // ---------- 近期事件重放（#55：注册 opt-in，通知通道不动） ----------
 
     @Test
     void given_registered_channel_without_subscribers_when_broadcast_then_late_replay_subscription_receives_filtered_frames() {
-        // 事故主场景（#53 spec）：起跑即死的帧在零订阅时发出，晚到订阅仍要看到；
-        // 订阅谓词对重放同样过滤命中（别的项目/运行的帧不泄漏）
+        // 事故主场景（#53 spec）：起跑即死的事件在零订阅时发出，晚到订阅仍要看到；
+        // 订阅谓词对重放同样过滤命中（别的项目/运行的事件不泄漏）
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
 
@@ -248,11 +248,11 @@ class SseChannelHubTest {
         SseEmitter late = hub.subscribe(REPLAYABLE,
                 payload -> "p1".equals(payload.get("projectId")), true);
 
-        assertThat(sender.framesOf(late)).hasSize(3); // ping + 命中谓词的两帧
+        assertThat(sender.framesOf(late)).hasSize(3); // ping + 命中谓词的两事件
         assertThat(sender.framesOf(late).get(0).comment()).isEqualTo("ping");
         assertThat(sender.eventFramesOf(late))
                 .extracting(SseServerEvent::id)
-                .containsExactly("run-1:1", "run-1:2"); // 原事件 id 重放，p2 帧被谓词滤掉
+                .containsExactly("run-1:1", "run-1:2"); // 原事件 id 重放，p2 事件被谓词滤掉
         assertThat(sender.eventFramesOf(late))
                 .extracting(frame -> ((EventEnvelope) frame.data()).type())
                 .containsExactly("error", "text-delta");
@@ -260,7 +260,7 @@ class SseChannelHubTest {
 
     @Test
     void given_subscription_between_broadcasts_when_replay_on_then_replay_then_live_without_dup_or_gap() {
-        // 接缝核心：订阅夹在两次广播之间——先收重放帧（b1）、再无缝进实时流（b2），
+        // 接缝核心：订阅夹在两次广播之间——先收重放事件（b1）、再无缝进实时流（b2），
         // id 同一口径、seq 续接、不重不漏不乱序
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
@@ -278,8 +278,8 @@ class SseChannelHubTest {
 
     @Test
     void given_replay_in_progress_when_live_frame_arrives_then_pending_delivered_after_backlog() {
-        // 重放进行中到达的 live 帧进订阅级 pending 队列，重放毕按序补投——
-        // 发送缝 hook 在重放首帧下发时同步触发一次广播，确定性命中该窗口
+        // 重放进行中到达的 live 事件进订阅级 pending 队列，重放毕按序补投——
+        // 发送缝 hook 在重放首条下发时同步触发一次广播，确定性命中该窗口
         AtomicBoolean fired = new AtomicBoolean();
         AtomicReference<SseChannelHub> hubRef = new AtomicReference<>();
         SseChannelHub hub = newHub((emitter, event) -> {
@@ -295,7 +295,7 @@ class SseChannelHubTest {
 
         SseEmitter subscriber = hub.subscribe(REPLAYABLE, payload -> true, true);
 
-        // hook 在「帧已入缓冲、重放发送中」触发的 live 帧经 pending 补投，仍落在全部重放帧之后
+        // hook 在「事件已入缓冲、重放发送中」触发的 live 事件经 pending 补投，仍落在全部重放事件之后
         assertThat(sender.eventFramesOf(subscriber))
                 .extracting(SseServerEvent::id)
                 .containsExactly("run-1:1", "run-1:2", "run-1:3");
@@ -303,7 +303,7 @@ class SseChannelHubTest {
 
     @Test
     void given_capacity_two_when_three_broadcasts_then_only_latest_two_replayed() {
-        // 有界环形缓冲：容量上界生效、旧帧逐出
+        // 有界环形缓冲：容量上界生效、旧事件逐出
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 2);
 
@@ -320,7 +320,7 @@ class SseChannelHubTest {
 
     @Test
     void given_replay_off_when_subscribe_then_no_replay_and_live_still_flows() {
-        // 重放开关关 = 现行为：连接前已发出的帧拿不到（注册通道也不补），之后照常实时收
+        // 重放开关关 = 现行为：连接前已发出的事件拿不到（注册通道也不补），之后照常实时收
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
         hub.broadcast(REPLAYABLE, "run-1", "text-delta", Map.of("projectId", "p1"));
@@ -357,7 +357,7 @@ class SseChannelHubTest {
 
     @Test
     void given_registered_channel_when_broadcast_then_zero_subscriber_frames_still_buffered_with_seq() {
-        // 已订阅者视角：注册通道上重放订阅不干扰既有实时订阅；缓冲中的帧对后到者可见
+        // 已订阅者视角：注册通道上重放订阅不干扰既有实时订阅；缓冲中的事件对后到者可见
         SseChannelHub hub = newHub(Duration.ofSeconds(600));
         hub.registerReplay(REPLAYABLE, 100);
         SseEmitter first = hub.subscribe(REPLAYABLE, payload -> true);
@@ -372,7 +372,7 @@ class SseChannelHubTest {
                 .containsExactly("run-1:1"); // 既有订阅实时收到，不受重放影响
         assertThat(sender.eventFramesOf(second))
                 .extracting(SseServerEvent::id)
-                .containsExactly("run-1:1"); // 晚到重放订阅收到同一帧、同一 id（跨订阅各投一次，不算重复）
+                .containsExactly("run-1:1"); // 晚到重放订阅收到同一条、同一 id（跨订阅各投一次，不算重复）
     }
 
     @Test
@@ -396,8 +396,8 @@ class SseChannelHubTest {
     @Test
     void given_concurrent_broadcasts_and_late_replay_subscription_when_settled_then_no_dup_no_gap()
             throws Exception {
-        // 并发接缝压测：4 广播线程 × 50 帧与晚到重放订阅赛跑——收到的 id 无重复、
-        // 无缺口（每帧恰得其一：重放快照 / pending 补投 / 直发）。注意：并发广播线程
+        // 并发接缝压测：4 广播线程 × 50 事件与晚到重放订阅赛跑——收到的 id 无重复、
+        // 无缺口（每事件恰得其一：重放快照 / pending 补投 / 直发）。注意：并发广播线程
         // 间的到达序本就无 FIFO 保证（订阅级锁只串行化发送，与既有内核一致），故
         // 不断言整体有序——「重放 → live」的顺序契约由上方串行用例锁定
         // （记录缝需线程安全，故本用例自带 sender）
@@ -448,15 +448,15 @@ class SseChannelHubTest {
                 .mapToObj(Long::valueOf)
                 .collect(Collectors.toSet());
         assertThat(seqs.stream().collect(Collectors.toSet()))
-                .isEqualTo(expected); // 缓冲容量 ≥ 总帧数：1..total 一帧不少一帧不多
+                .isEqualTo(expected); // 缓冲容量 ≥ 总事件数：1..total 一条不少一条不多
     }
 
     @Test
     void given_concurrent_broadcasts_when_replay_after_settled_then_replayed_in_id_order()
             throws Exception {
-        // seq 分配与入缓冲同临界区的回归锁：并发广播线程的帧在缓冲里必须按 seq 序
+        // seq 分配与入缓冲同临界区的回归锁：并发广播线程的事件在缓冲里必须按 seq 序
         // 排列（谁的 incrementAndGet 在前谁先进），全部落定后晚到重放订阅收到的
-        // 帧严格按 id 递增——重放流自身不乱序（live 直发交错是另一回事，见上用例）
+        // 事件严格按 id 递增——重放流自身不乱序（live 直发交错是另一回事，见上用例）
         List<SseServerEvent> frames = new CopyOnWriteArrayList<>();
         SseChannelHub hub = newHub((emitter, event) -> {
             if (event.id() != null) {

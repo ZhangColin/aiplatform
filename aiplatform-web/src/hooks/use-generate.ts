@@ -18,9 +18,10 @@ export function useGenerate(projectId: string) {
     mutationFn: () =>
       api.post<GenerationStartResponse>(`/projects/${projectId}/generate`),
     onSuccess: (result) => {
-      const generation = useGenerationStore.getState();
-      if (result?.runId) generation.noteCoderRun(projectId, result.runId);
-      generation.noteCoderRunStart(projectId);
+      if (result?.runId) {
+        // 乐观登记编码 run 在途（run-start 随后到，重放/回声幂等）
+        useGenerationStore.getState().noteCoderRun(projectId, result.runId);
+      }
     },
     onError: (error) => {
       toast.error(errorText(error, "发起生成失败，请稍后重试"));

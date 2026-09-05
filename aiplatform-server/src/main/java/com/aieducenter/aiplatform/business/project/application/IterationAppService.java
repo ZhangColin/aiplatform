@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -29,15 +29,14 @@ import lombok.extern.slf4j.Slf4j;
  * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
  * 配对全保留——各轮「意见 → 修订说明」一一对应，未修订轮显式占位，#55）。
  * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体
- * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败自动重试 / 直播 / 计量全走
+ * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败静默重试 / 计量全走
  * 共用尝试环 {@link CoderRunAttempts}）。
  *
  * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：编码智能体判定本轮要不要动系统
  * ——动则修改后报 changed=true+改了什么，不动（纯文档性修订、系统现状已满足等）也
  * 必报 changed=false+原因，判定从工具调用事实观测（{@link FinishEditFacts}），不解析
- * 自由文本。未调用即 run 未正常收口，按既有重试/终态机制处理；changed=false 经
- * {@code fix-unchanged} 帧如实呈现「未动系统+原因」——用户能区分「不需要改」与
- * 「链路断了」。</p>
+ * 自由文本。未调用即 run 未正常收口，按既有静默重试/终态机制处理；判定结果
+ * （changed 与原因）的呈现归收口扩载权威化（#88 收尾卡判定行）。</p>
  *
  * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（BA 回复用户「已排入下一轮」）；
  * 当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户在 run 中
@@ -50,7 +49,7 @@ import lombok.extern.slf4j.Slf4j;
  * {@link #restartFixRun} 据此重派——交接物沿用、新 runId 随响应回（与新 run 的
  * 链路锚）。仅终态可达：修正在途（进行中/排队中）拒绝 PRJ_025、无终态账（未派过/
  * 已成功/重启丢账）拒绝 PRJ_026——正常流程全自动，不出现任何手动触发，故障态留
- * 最后一条生路。终态收口帧 {@code run-failed} 与终态账同事实点发射（#56）：帧到
+ * 最后一条生路。终态收口事件 {@code run-failed} 与终态账同事实点发射（#56）：事件到
  * ⟺ 恢复出口可达——排队合并续派的中途超限不发（轨道仍在途，「重新修改」出口
  * 零闪现）。</p>
  *
@@ -73,7 +72,7 @@ public class IterationAppService {
     private final AgentSessionExecutor sessionExecutor;
     private final CoderRunAttempts coderRunAttempts;
     private final FinishEditFacts finishFacts;
-    private final AgentStreamBridge streamBridge;
+    private final AgentEventBridge eventBridge;
 
     /** 修正在途项目集（含已提交未起跑——排队中）：起跑/排队的分岔事实。 */
     private final Set<Long> fixesInFlight = ConcurrentHashMap.newKeySet();
@@ -88,17 +87,17 @@ public class IterationAppService {
 
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
-            FinishEditFacts finishFacts, AgentStreamBridge streamBridge) {
+            FinishEditFacts finishFacts, AgentEventBridge eventBridge) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
         this.finishFacts = finishFacts;
-        this.streamBridge = streamBridge;
+        this.eventBridge = eventBridge;
     }
 
     /**
      * 派修正任务（BA 回合收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
-     * 起跑（runId 随派发生成，过程帧经 SSE）；在途则排入队列、当前 run 收口后
+     * 起跑（runId 随派发生成，过程事件经 SSE）；在途则排入队列、当前 run 收口后
      * 合并续派。交接物三要素中的需求侧判定随派发携带：{@code prdRevisionSummary}
      * = BA 流 savePrd 的 summary 终值（null = 本轮未修订）。
      *
@@ -133,7 +132,7 @@ public class IterationAppService {
                 throw new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE);
             }
             fixesInFlight.add(projectId);
-            firstRunId = AgentStreamAppService.newRunId();
+            firstRunId = EventsAppService.newRunId();
         }
         log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接 {} 轮，源自超限终态）",
                 projectId, firstRunId, handoff.rounds().size());
@@ -196,7 +195,7 @@ public class IterationAppService {
                 queuedFixRuns.computeIfAbsent(projectId, key -> new ArrayList<>()).add(handoff);
                 return new FixDispatch(null, true);
             }
-            firstRunId = AgentStreamAppService.newRunId();
+            firstRunId = EventsAppService.newRunId();
         }
         submitFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
@@ -224,7 +223,6 @@ public class IterationAppService {
             FixHandoff handoff = firstHandoff;
             String runId = firstRunId;
             while (true) {
-                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.FIXING);
                 CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId), "fix");
@@ -250,10 +248,10 @@ public class IterationAppService {
                 }
                 if (queued.isEmpty()) {
                     if (terminalFailure) {
-                        // 终态收口帧（#56）：与终态账同事实点发射——帧到 ⟺ 恢复出口
+                        // 终态收口事件（#56）：与终态账同事实点发射——事件到 ⟺ 恢复出口
                         // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
                         // 不发（轨道仍在途，「重新修改」零闪现）
-                        streamBridge.emitRunFailed(projectId, result.lastRunId());
+                        eventBridge.emitRunFailed(projectId, result.lastRunId());
                     }
                     return;
                 }
@@ -262,7 +260,7 @@ public class IterationAppService {
                 log.info("[fix] 项目 {} 修正轨道续派（合并 {} 轮排队意见）",
                         projectId, mergedRounds);
                 handoff = FixHandoff.merge(queued);
-                runId = AgentStreamAppService.newRunId();
+                runId = EventsAppService.newRunId();
             }
         }
         finally {
@@ -276,27 +274,22 @@ public class IterationAppService {
 
     /**
      * 修正收口（#46）：以 finish_edit 工具事实为准——无事实 = run 未正常收口，抛出
-     * 即该次尝试失败（走共用尝试环的重试/终态，与生成 8081 核验同口径）；changed=false
-     * 发 {@code fix-unchanged} 帧（「未动系统+原因」如实呈现），changed=true 现有
-     * 收口行为不动（run-finish 已发，预览刷新/直播收起/状态位为前端对 run-finish 的
-     * 反应）。#50：两态都发完成阶段帧（changed 区分「已修改」与「未动系统」）。
+     * 即该次尝试失败（走共用尝试环的静默重试/终态，与生成 8081 核验同口径）；
+     * changed=false（判定无需改动）的呈现归收口扩载权威化（#88 收尾卡判定行），
+     * 本层只记事实日志。
      */
     private void closeFixRun(Project project, String attemptRunId) {
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
-            // 未正常收口不是静默失败：run-finish 已发（引擎自认成功），此处补 error 帧
-            // 如实表达（帧序 run-finish → error → run-retrying → …；重试超限由轨道层
-            // 发 run-failed 收口终态，#56）——否则「链路断了」在用户侧呈现为正常收口，
-            // 恰是要消除的困惑
-            streamBridge.emitError(project.getId(), attemptRunId,
-                    "修正未正常收口：编码智能体未报告收口判定（finish_edit 未调用）");
+            // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
+            // 重试；重试超限由轨道层发 run-failed 收口终态（#56）——用户面要么清楚
+            // （成功收口）要么出结果（唯一失败终态）
             throw new IllegalStateException("修正 run 未以 finish_edit 结束工具收口");
         }
         if (!fact.changed()) {
-            log.info("[fix] 项目 {} 修正收口：系统未动（{}）", project.getId(), fact.text());
-            streamBridge.emitFixUnchanged(project.getId(), attemptRunId, fact.text());
+            log.info("[fix] 项目 {} 修正收口：系统未动（{}）——判定呈现归收口扩载（#88）",
+                    project.getId(), fact.text());
         }
-        streamBridge.emitDispatchDone(project.getId(), attemptRunId, fact.changed());
     }
 
     /**

@@ -30,7 +30,7 @@ function questionRaised(data: unknown, kind = "QUESTION"): QuestionRaisedPayload
 }
 
 describe("parseQuestion · question-raised → 问答卡（#19）", () => {
-  it("QUESTION 帧解析出问答卡全要素（qid=engineRef、toolCalls 回传面随卡）", () => {
+  it("QUESTION 事件解析出问答卡全要素（qid=engineRef、toolCalls 回传面随卡）", () => {
     const q = parseQuestion("run-9:12", questionRaised(questionData()));
 
     expect(q).toMatchObject({
@@ -82,7 +82,7 @@ describe("toggleSelection · 多选勾选切换", () => {
 });
 
 describe("toAnswerToolCalls · 回传面收窄", () => {
-  it("挂起帧元素原样收窄为作答命令形状（非字符串字段弃守）", () => {
+  it("挂起事件元素原样收窄为作答命令形状（非字符串字段弃守）", () => {
     expect(
       toAnswerToolCalls([
         { id: "tc-1", name: "ask_user", input: { question: "面向谁?" } },

@@ -23,8 +23,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
@@ -69,13 +69,10 @@ class BaInterviewSmokeTest {
     @Autowired
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
-    /** SSE 发射边收口：捕获全帧（真实链路无订阅者，发射本身是观测缝）。 */
+    /** 事件发射边收口（单端点单流）：智能体事件与通知分口捕获（真实链路无订阅者，
+     *  发射本身是观测缝）。 */
     @MockitoBean
-    private AgentStreamAppService streamAppService;
-
-    /** 通知通道发射边收口（document-updated 观测；BA 访谈链路无其余通知方）。 */
-    @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Notify> notifies = new ConcurrentLinkedQueue<>();
@@ -133,11 +130,11 @@ class BaInterviewSmokeTest {
         doAnswer(invocation -> {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
-        }).when(streamAppService).publish(any(), any());
+        }).when(eventsAppService).publishAgentEvent(any(), any());
         doAnswer(invocation -> {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
-        }).when(notificationAppService).publish(any(), any());
+        }).when(eventsAppService).publishNotification(any(), any());
         Project project = projectRepository.save(Project.create("冒烟官网", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
@@ -148,7 +145,7 @@ class BaInterviewSmokeTest {
                 "做一个企业官网");
         Frame question1 = awaitQuestionOf(first.runId());
         Map<String, Object> body1 = questionBody(question1);
-        assertThat(framesOf(AgentEventTypes.ROLE_ASSIGNED)).isNotEmpty();
+        assertThat(framesOf(AgentEventTypes.RUN_START)).isNotEmpty();   // 开场事件到达（角色键已并入）
         Map<String, Object> asked = firstQuestionOf(body1);
         assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
         // 问答卡形状齐备即可——单选/多选由模型按问题性质定，不锁死（曾断 multiple=false
@@ -174,7 +171,7 @@ class BaInterviewSmokeTest {
             settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
             outcome = awaitResumeOutcome(allRunIds(), seenRefs);
         }
-        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获帧序：%s）",
+        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获事件序：%s）",
                 frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
                 .isEqualTo("finished");
 
@@ -280,19 +277,19 @@ class BaInterviewSmokeTest {
         assertThat(offenders).as("#34：tool_use input 不应含 answer 键（违规件 id）").isEmpty();
     }
 
-    /** 等待该 run 的 QUESTION 挂起帧（问答卡呈现源）。 */
+    /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源）。 */
     private Frame awaitQuestionOf(String runId) {
         Frame question = awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
         assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
         return question;
     }
 
-    /** 挂起帧的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
+    /** 挂起事件的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
     private static String engineRefOf(Frame question) {
         return String.valueOf(question.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
     }
 
-    /** 帧的 engineRef（非挂起帧为空串——帧序诊断用）。 */
+    /** 事件的 engineRef（非挂起事件为空串——事件序诊断用）。 */
     private static String engineRefOrEmpty(Frame frame) {
         Object ref = frame.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD);
         return ref != null ? String.valueOf(ref) : "";
@@ -318,13 +315,13 @@ class BaInterviewSmokeTest {
         throw new AssertionError("答复续跑未再挂起提问（run=" + runId + "）——访谈在第二轮前收敛");
     }
 
-    /** 按 engineRef 取挂起帧（催促循环锚定 awaitResumeOutcome 返回的新挂起）。 */
+    /** 按 engineRef 取挂起事件（催促循环锚定 awaitResumeOutcome 返回的新挂起）。 */
     private Frame questionFrameByRef(String engineRef) {
         return frames.stream()
                 .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type())
                         && engineRef.equals(engineRefOf(f)))
                 .findFirst()
-                .orElseThrow(() -> new AssertionError("engineRef 无对应挂起帧: " + engineRef));
+                .orElseThrow(() -> new AssertionError("engineRef 无对应挂起事件: " + engineRef));
     }
 
     /** 等待该 run 收口（run-finish；error 视为失败）。 */
@@ -345,7 +342,7 @@ class BaInterviewSmokeTest {
                 }
                 if (AgentEventTypes.ERROR.equals(frame.type())) {
                     throw new AssertionError("run 异常收口：" + frame.payload()
-                            + "；已捕获帧序：" + frames.stream()
+                            + "；已捕获事件序：" + frames.stream()
                                     .map(f -> f.type() + "@" + engineRefOrEmpty(f))
                                     .toList());
                 }
@@ -361,7 +358,7 @@ class BaInterviewSmokeTest {
             }
             sleepQuietly();
         }
-        throw new AssertionError("续跑无结果超时（runs=" + runIds + "）；已捕获帧序："
+        throw new AssertionError("续跑无结果超时（runs=" + runIds + "）；已捕获事件序："
                 + frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList());
     }
 
@@ -375,7 +372,7 @@ class BaInterviewSmokeTest {
             }
             sleepQuietly();
         }
-        throw new AssertionError("等待帧超时（" + List.of(types) + " run=" + runId
+        throw new AssertionError("等待事件超时（" + List.of(types) + " run=" + runId
                 + "），已捕获：" + frames.stream().map(f -> f.type() + "@" + f.runId()).toList());
     }
 
@@ -402,11 +399,11 @@ class BaInterviewSmokeTest {
     private void settle(Frame question, String answer) {
         Map<String, Object> body = questionBody(question);
         List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) body.get("toolCalls");
-        assertThat(toolCalls).as("挂起帧 data 应带待确认工具清单").isNotEmpty();
+        assertThat(toolCalls).as("挂起事件 data 应带待确认工具清单").isNotEmpty();
         appService.answerQuestion(projectId, question.runId(), engineRefOf(question), toolCalls, answer);
     }
 
-    /** 挂起帧载荷（question-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
+    /** 挂起事件载荷（question-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
     private Map<String, Object> questionBody(Frame question) {
         return parseBody(question.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
     }
@@ -419,7 +416,7 @@ class BaInterviewSmokeTest {
             }
             return new ObjectMapper().readValue(String.valueOf(raw), Map.class);
         } catch (java.io.IOException e) {
-            throw new AssertionError("挂起帧 body 解析失败: " + raw, e);
+            throw new AssertionError("挂起事件 body 解析失败: " + raw, e);
         }
     }
 

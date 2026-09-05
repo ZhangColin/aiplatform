@@ -146,13 +146,6 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("编写【index.html】");
   });
 
-  it("重试中且无应用：播「遇到问题，正在重试」话术", () => {
-    const html = renderPanel({ coderStatus: "retrying" });
-
-    expect(html).toContain("遇到问题，正在重试");
-    expect(html).not.toContain("<iframe");
-  });
-
   it("超限终态且未生成：问题提示 + 重新发起入口（人工兜底）", () => {
     const html = renderPanel({ coderStatus: "error" });
 
@@ -175,16 +168,6 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("完成后自动刷新");
     // 合并为一套：旧修正专用话术不再并存
     expect(html).not.toContain("正在按您的意见修改系统");
-  });
-
-  it("应用可访问且重试中：页面不退占位（不闪断），轻提示播重试话术", () => {
-    const html = renderPanel({
-      coderStatus: "retrying",
-      url: "http://localhost:42659",
-    });
-
-    expect(html).toContain("<iframe");
-    expect(html).toContain("遇到问题，正在重试");
   });
 
   it("超限终态且已生成（修正失败、应用探不到）：修正口径 + 重新修改入口（人工兜底）", () => {

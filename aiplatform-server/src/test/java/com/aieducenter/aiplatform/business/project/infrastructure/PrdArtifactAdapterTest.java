@@ -13,7 +13,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -49,7 +49,7 @@ class PrdArtifactAdapterTest {
 
     /** SSE 发射边收口（真实链路无订阅者，发射本身是观测缝）。 */
     @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     @AfterEach
     void tearDown() {
@@ -87,8 +87,8 @@ class PrdArtifactAdapterTest {
 
         // 修订再执行：三更新——位刷新（时间戳只前进）+ 事件每执行必发
         assertThat(bitOf(project.getId())).isAfterOrEqualTo(first);
-        verify(notificationAppService, times(2))
-                .publish(eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+        verify(eventsAppService, times(2))
+                .publishNotification(eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
     }
 
     @Test
@@ -97,15 +97,15 @@ class PrdArtifactAdapterTest {
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
 
-        verify(notificationAppService, never()).publish(anyString(), anyMap());
+        verify(eventsAppService, never()).publishNotification(anyString(), anyMap());
     }
 
     // ---------- 内部 ----------
 
     private Map<String, Object> publishedPayload() {
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(notificationAppService)
-                .publish(eq(ProjectEventTypes.DOCUMENT_UPDATED), payload.capture());
+        verify(eventsAppService)
+                .publishNotification(eq(ProjectEventTypes.DOCUMENT_UPDATED), payload.capture());
         return payload.getValue();
     }
 

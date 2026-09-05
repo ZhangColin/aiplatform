@@ -11,7 +11,7 @@
  *   <li>角色卡 preset（v1 仅 BA，代码配置不落库）与 PRD 读侧</li>
  *   <li>SSE 编排层发射：平台通知（workspace-created / preview-ready /
  *       workspace-destroyed / document-updated / project-renamed）+ 智能体流
- *       projectId 桥接与 role-assigned 发射（eventhub 唯一 SSE 管道）</li>
+ *       projectId 桥接（eventhub 唯一 SSE 管道）</li>
  * </ul>
  *
  * <h3>限界上下文</h3>

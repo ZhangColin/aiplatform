@@ -4,7 +4,6 @@ import { ApiError } from "@/lib/api/api-error";
 import type { WorkPart } from "@/lib/store/work-message";
 
 import {
-  FALLBACK_RETRY_MESSAGE,
   UPDATING_NOTICE,
   isPreviewNotServing,
   previewTrouble,
@@ -37,8 +36,7 @@ describe("previewActive · 门禁解除（#45）", () => {
     expect(previewActive("running", null)).toBe(true);
   });
 
-  it("重试/收口/终态同样在机制内（有 URL 即上页面）", () => {
-    expect(previewActive("retrying", null)).toBe(true);
+  it("收口/终态同样在机制内（有 URL 即上页面）", () => {
     expect(previewActive("finished", null)).toBe(true);
     expect(previewActive("error", null)).toBe(true);
   });
@@ -97,7 +95,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     });
   });
 
-  // ---------- 第一档：无应用，占位随直播事件推进 ----------
+  // ---------- 第一档：无应用，占位随工作消息部件推进 ----------
 
   it("running 且无应用：无信号落「正在初始化」", () => {
     const phase = systemPanelPhase({
@@ -108,7 +106,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     expect(phase).toEqual({ kind: "hint", text: "正在初始化" });
   });
 
-  it("running 且无应用：直播自述推进占位文案", () => {
+  it("running 且无应用：解说自述推进占位文案", () => {
     const phase = systemPanelPhase({
       coderStatus: "running",
       generatedAt: null,
@@ -124,20 +122,6 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
       parts: [],
     });
     expect(phase).toEqual({ kind: "hint", text: "正在更新系统" });
-  });
-
-  it("retrying 且无应用：播重试话术（帧内正本，缺省回落本地字面量）", () => {
-    expect(
-      systemPanelPhase({ coderStatus: "retrying", generatedAt: null, parts: [] }),
-    ).toEqual({ kind: "hint", text: FALLBACK_RETRY_MESSAGE });
-    expect(
-      systemPanelPhase({
-        coderStatus: "retrying",
-        generatedAt: null,
-        parts: [],
-        retryMessage: "服务波动，正在恢复",
-      }),
-    ).toEqual({ kind: "hint", text: "服务波动，正在恢复" });
   });
 
   it("超限终态且从未生成：问题提示 + 重新发起", () => {
@@ -158,16 +142,13 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     expect(phase).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
   });
 
-  it("正常态无任何手动触发：run 中/重试中/收口后均不带恢复入口", () => {
+  it("正常态无任何手动触发：run 中/收口后均不带恢复入口", () => {
     // 正常流程全自动——恢复入口只在超限终态出现（#48）
     expect(systemPanelPhase({ coderStatus: "running", generatedAt: null, parts: [] }))
       .toEqual({ kind: "hint", text: "正在初始化" });
     expect(
       systemPanelPhase({ coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] }),
     ).toEqual({ kind: "hint", text: "正在更新系统" });
-    expect(
-      systemPanelPhase({ coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", parts: [] }),
-    ).toEqual({ kind: "hint", text: FALLBACK_RETRY_MESSAGE });
     expect(
       systemPanelPhase({
         coderStatus: "finished",
@@ -190,20 +171,6 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     expect(phase).toEqual({ kind: "page", notice: { failed: false, text: UPDATING_NOTICE } });
     // 合并后的唯一话术（旧修正专用文案不再另立一套）
     expect(UPDATING_NOTICE).toBe("正在更新系统，完成后自动刷新");
-  });
-
-  it("页面 + retrying：轻提示播重试话术，页面不退占位（重试不闪断）", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "retrying",
-      generatedAt: null,
-      url: "http://localhost:42659",
-      parts: [],
-      retryMessage: "服务波动，正在恢复",
-    });
-    expect(phase).toEqual({
-      kind: "page",
-      notice: { failed: false, text: "服务波动，正在恢复" },
-    });
   });
 
   it("页面 + 超限终态：失败轻提示；从未生成带重新发起、修正轮带重新修改入口", () => {
@@ -311,13 +278,10 @@ describe("用户可见文案遵循「生成」词条 Avoid（不出现开发/构
       { coderStatus: undefined, generatedAt: null, parts: [] },
       { coderStatus: "running", generatedAt: null, parts: [] },
       { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
-      { coderStatus: "retrying", generatedAt: null, parts: [] },
-      { coderStatus: "retrying", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
       { coderStatus: "error", generatedAt: null, parts: [] },
       { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
       { coderStatus: "running", generatedAt: null, url: "http://localhost:42659", parts: [] },
       { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
-      { coderStatus: "retrying", generatedAt: null, url: "http://x", parts: [] },
       { coderStatus: "error", generatedAt: null, url: "http://x", parts: [] },
       { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
     ];

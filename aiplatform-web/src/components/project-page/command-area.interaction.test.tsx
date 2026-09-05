@@ -53,7 +53,7 @@ function pendingQuestion(overrides: Partial<Extract<ChatMessage, { kind: "questi
 function seedChat(messages: ChatMessage[]) {
   seed.state = {
     chats: {
-      p1: { messages, chatRunIds: [], roleLabels: {}, ingestedRunIds: [], seenEventIds: [], turnActive: false },
+      p1: { messages, chatRunIds: [], ingestedRunIds: [], seenEventIds: [], turnActive: false },
     },
   };
 }

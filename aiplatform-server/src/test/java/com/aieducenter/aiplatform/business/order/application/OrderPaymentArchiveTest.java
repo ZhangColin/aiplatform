@@ -17,7 +17,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -83,7 +83,7 @@ class OrderPaymentArchiveTest {
 
     /** SSE 发布器：验证订单态变化通知（副作用落定后发射）。 */
     @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     /** embedding 端口：mock 供给 512 维向量（知识沉淀入库的真向量面）。 */
     @MockitoBean
@@ -150,7 +150,7 @@ class OrderPaymentArchiveTest {
                 OrderStatus.ARCHIVED.getCode());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(notificationAppService, atLeastOnce()).publish(eq("order-status-changed"), payload.capture());
+        verify(eventsAppService, atLeastOnce()).publishNotification(eq("order-status-changed"), payload.capture());
         assertThat(payload.getValue()) // captor 末值 = 归档那发
                 .containsEntry("projectId", Long.toString(PROJECT_ID))
                 .containsEntry("status", OrderStatus.ARCHIVED.getCode())
@@ -264,8 +264,8 @@ class OrderPaymentArchiveTest {
     @SuppressWarnings("unchecked")
     private List<Object> publishedStatuses() {
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(notificationAppService, atLeastOnce())
-                .publish(eq("order-status-changed"), payload.capture());
+        verify(eventsAppService, atLeastOnce())
+                .publishNotification(eq("order-status-changed"), payload.capture());
         return payload.getAllValues().stream().map(p -> p.get("status")).toList();
     }
 

@@ -8,21 +8,17 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,9 +28,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
-import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
@@ -44,9 +39,10 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 /**
  * 助理职能体（#47 咨询零产物短路）：会话寻址（projectId → assist-{projectId}
  * 稳定绑定）+ 角色卡/模型/只读工作区姿态（workspaceReadOnly——工具面只读的结构
- * 前提）+ 计量归属（agentKind=assistant）+ role-assigned 帧序；
+ * 前提）+ 计量归属（agentKind=assistant）；
  * <b>零产物的行为验证</b>：一轮应答全程无任何写类事件——不触知识检索、无
- * document-updated、无修正 run（无 coder 会话命令）、PRD 与系统状态位不动。
+ * document-updated、无修正 run（无 coder 会话命令）、PRD 与系统状态位不动；
+ * <b>收缩验收（#82）</b>：应答不再发射退役族（role-assigned / dispatch-stage）。
  */
 @SpringBootTest
 class AssistantAppServiceTest {
@@ -66,7 +62,7 @@ class AssistantAppServiceTest {
     private AgentscopeAgentClient agentClient;
 
     @MockitoBean
-    private AgentStreamAppService streamAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
@@ -87,7 +83,7 @@ class AssistantAppServiceTest {
             ((Runnable) invocation.getArgument(1)).run();
             return null;
         }).when(sessionExecutor).submit(any(), any());
-        // 脚本化边界：回放一段回答并产一帧流事件（帧经流桥到达）
+        // 脚本化边界：回放一段回答并产一条流事件（事件经事件桥到达）
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Consumer<AgentEvent> sink = invocation.getArgument(1);
@@ -111,18 +107,17 @@ class AssistantAppServiceTest {
         assertThat(value.agentRole()).isEqualTo(RolePreset.ASSISTANT.name());
         assertThat(value.workspaceReadOnly()).isTrue(); // 只读面：写面结构性关闭
         assertThat(value.workspaceId()).isEqualTo("9810");
-        assertThat(value.live()).isFalse();
         assertThat(value.usageContext().dims()).isEqualTo(
                 UsageDims.of(project.getId(), UsageDims.kindOf(RolePreset.ASSISTANT),
                         "assist-" + project.getId()));
 
-        // 帧序：role-assigned(ASSISTANT) 前置 → 流帧（关联字段注入）
-        InOrder order = inOrder(streamAppService, agentClient);
-        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED),
-                argThat(payload -> "ASSISTANT".equals(payload.get(AgentEventTypes.ROLE_FIELD))));
-        order.verify(agentClient).converse(any(), any());
-        verify(streamAppService).publish(eq("text"), argThat(payload ->
+        // 流事件经事件桥到达（关联字段注入）；退役族零发射
+        verify(eventsAppService).publishAgentEvent(eq("text"), argThat(payload ->
                 projectIdOf(payload).equals(project.getId().toString())));
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq("role-assigned"), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq("dispatch-stage"), anyMap());
     }
 
     @Test
@@ -143,8 +138,8 @@ class AssistantAppServiceTest {
         appService.answer(project, "现在的报价是多少？");
 
         verify(agentClient, times(1)).converse(any(), any()); // 无 coder- 第二轮 = 无修正 run
-        verify(streamAppService, never()).publish(
-                eq(com.aieducenter.aiplatform.business.project.application.ProjectEventTypes.DOCUMENT_UPDATED),
+        verify(eventsAppService, never()).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED),
                 anyMap());
         verify(knowledgePort, never()).retrieve(anyString(), anyInt()); // 咨询不知识命中
         Project after = projectRepository.findById(project.getId()).orElseThrow();
@@ -154,37 +149,6 @@ class AssistantAppServiceTest {
     }
 
     private static String projectIdOf(Map<String, Object> payload) {
-        return String.valueOf(payload.get(AgentStreamAppService.PROJECT_FIELD));
-    }
-
-    @Test
-    void given_consultation_when_answered_then_stage_frames_analyzing_then_answered() {
-        // #50 咨询链阶段帧：analyzing（受理）→ answered（作答落定）——零产物短路
-        // 的全过程呈现，帧序先于 role-assigned、收口帧后于流帧
-        Project project = projectRepository.save(Project.create("咨询项目", null, 9812L, OWNER));
-        doAnswer(invocation -> {
-            ((Runnable) invocation.getArgument(1)).run();
-            return null;
-        }).when(sessionExecutor).submit(any(), any());
-        when(agentClient.converse(any(), any())).thenAnswer(invocation ->
-                new AgentReply(((AgentCommand) invocation.getArgument(0)).runId(), "地址是 X。"));
-        List<String> stages = new ArrayList<>();
-        doAnswer(invocation -> {
-            if (AgentEventTypes.DISPATCH_STAGE.equals(invocation.getArgument(0))) {
-                stages.add(String.valueOf(
-                        invocation.<Map<String, Object>>getArgument(1)
-                                .get(AgentEventTypes.DISPATCH_STAGE_FIELD)));
-            }
-            return null;
-        }).when(streamAppService).publish(any(), anyMap());
-
-        AssistantAppService.AssistantRun run = appService.answer(project, "地址是什么？");
-
-        assertThat(stages).containsExactly("analyzing", "answered");
-        InOrder order = inOrder(streamAppService);
-        order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
-                "analyzing".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
-                        && run.runId().equals(payload.get(AgentStreamAppService.RUN_FIELD))));
-        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED), anyMap());
+        return String.valueOf(payload.get(EventsAppService.PROJECT_FIELD));
     }
 }

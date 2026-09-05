@@ -9,9 +9,11 @@ import { dispatchNotificationEvent } from "./bridge";
 import { probeSessionAlive, SseConnection } from "./connection";
 
 /**
- * 通知通道（`/api/events`）的 root 级挂载点（ADR 0003）：登录后单例常开、
- * 缺省全量不过滤，切站点不断线；每标签页天然各持一条。agent 流通道不在此挂——
- * 项目页 mount 建连、unmount 即断，首个挂载方 = 项目页（agent-channel.tsx，#23）。
+ * 站点级常开连接（单端点单流 `/api/events`，ADR 0003 + #82 合并）：登录后单例
+ * 常开、缺省不过滤，切站点不断线；每标签页天然各持一条。未过滤订阅只收平台
+ * 通知族（服务端族投递规则——智能体事件只投给带过滤的订阅），root 挂载点即
+ * 通知族的唯一消费面。智能体事件连接不在此挂——项目页 mount 建连、unmount
+ * 即断（agent-event-channel.tsx，按项目过滤订阅）。
  */
 export function SseProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();

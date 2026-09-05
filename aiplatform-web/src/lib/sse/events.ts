@@ -7,7 +7,7 @@
  * 直接信任转型（同源本地后端）；缺字段的容错呈现归消费端。
  */
 
-/** 两通道统一信封：`data = {type, payload, ts}`（正本「信封」节）。 */
+/** 单端点单流统一信封：`data = {type, payload, ts}`（正本「信封」节）。 */
 export type SseEnvelope = {
   type: string;
   payload: Record<string, unknown>;
@@ -30,8 +30,8 @@ export function parseSseEnvelope(raw: string): SseEnvelope | null {
   return { type, payload: payload as Record<string, unknown>, ts: typeof ts === "string" ? ts : "" };
 }
 
-// ── 通道一：平台通知（`GET /api/events`，封闭集合）──────────────────────────
-// 字段表镜像正本「通道一」；正本更新时同步改这里。
+// ── 平台通知族（单端点单流上的广播族，封闭集合）──────────────────────────────
+// 字段表镜像正本「平台通知族」；正本更新时同步改这里。
 
 export type NotificationEvent =
   | {
@@ -46,8 +46,8 @@ export type NotificationEvent =
   | { type: "preview-ready"; payload: { projectId: string; url: string } }
   | {
       /**
-       * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（直播
-       * 步骤边界）且平台侧探活通过后发射——前端节流重载预览（秒级最小间隔）；
+       * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（步骤分组
+       * 边界）且平台侧探活通过后发射——前端节流重载预览（秒级最小间隔）；
        * 不带 url（预览地址经 REST 取得且不变）。
        */
       type: "preview-updated";
@@ -88,18 +88,19 @@ const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
   "order-status-changed",
 ] satisfies Array<NotificationEvent["type"]>);
 
-/** 通道一为封闭集合：名册外 type → null（桥按 miss 忽略）。 */
+/** 通知族为封闭集合：名册外 type → null（消费端按 miss 忽略）。 */
 export function asNotificationEvent(envelope: SseEnvelope): NotificationEvent | null {
   return NOTIFICATION_TYPES.has(envelope.type)
     ? (envelope as unknown as NotificationEvent)
     : null;
 }
 
-// ── 通道二：agent 流（`GET /api/agent-events`）─────────────────────────────
+// ── 智能体事件族（重放族：新连接补发近期事件）────────────────────────────────
 // 平台事件 = 封闭集合（字段扁平，下表为准）；引擎透传 = 开放集合，`data` 为
-// 引擎 part 原样（字段表初版，随片 2 / 片 5 spec 细化——正本注）。
+// 引擎 part 原样。退役五族（role-assigned / run-created / run-retrying /
+// fix-unchanged / dispatch-stage / live-*）不进名册——旧事件到达按 miss 忽略。
 
-/** agent 流 payload 的公共关联字段：必带 projectId + runId，sessionId 建立后携带。 */
+/** 智能体事件 payload 的公共关联字段：必带 projectId + runId，sessionId 建立后携带。 */
 type AgentPayload = {
   projectId: string;
   runId: string;
@@ -114,17 +115,13 @@ export type PlatformAgentEvent =
         model: string;
         engine?: string;
         /**
-         * 角色键（#77 引擎信息归一：业务侧角色卡枚举名，如 CODER；无角色语境的
-         * 一次性调用不携带）——工作消息的锚定判据（编码 run 起工作消息）。
+         * 角色键（引擎信息归一：业务侧角色卡枚举名，如 CODER；无角色语境的
+         * 一次性调用不携带）——工作消息的锚定判据（编码 run 起工作消息）、
+         * 对话面 run 的登记判据（BA/ASSISTANT 进对话）。
          */
         role?: string;
       };
     }
-  | {
-      type: "role-assigned";
-      payload: AgentPayload & { role: string; roleLabel: string; engine: string };
-    }
-  | { type: "run-created"; payload: AgentPayload & { sessionId: string; engine?: string } }
   | { type: "error"; payload: AgentPayload & { message: string } }
   | { type: "run-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
   | {
@@ -143,36 +140,18 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 编码 run 自动重试（生成编排层发射，#22）：`runId` 锚定失败的那次尝试
-       * （帧序 error → run-retrying → 下一尝试 run-start）；`message` 为用户侧
-       * 话术「遇到问题，正在重试」；超限后不再发——终态由 `run-failed` 收口。
-       */
-      type: "run-retrying";
-      payload: AgentPayload & { attempt: number; message: string };
-    }
-  | {
-      /**
        * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射（修正轨道与
        * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` 锚定
-       * 末次失败的尝试（帧序 error(末次) → run-failed）。恢复出口（重新发起 /
-       * 重新修改）只认本帧——重试进行中的 error 帧是过程事实，不判终态（零闪现）。
+       * 末次失败的尝试。恢复出口（重新发起 / 重新修改）只认本事件——run 失败为
+       * 唯一失败终态，重试全程静默（中间错误不出用户面）。
        */
       type: "run-failed";
       payload: AgentPayload;
     }
   | {
       /**
-       * 修正 run 收口·系统未动（#46）：编码智能体以 finish_edit(changed=false) 判定
-       * 无需改动——`reason` 为未动原因；帧序 run-finish → fix-unchanged；changed=true
-       * 不发。指令区呈现「系统未修改 + 原因」，区分「不需要改」与「链路断了」。
-       */
-      type: "fix-unchanged";
-      payload: AgentPayload & { reason: string };
-    }
-  | {
-      /**
        * 兜底轻引导回复（#47 入口三分类）：非意见非咨询输入的平台侧定型文案——
-       * 零产物路径（不起任何智能体 run，本帧即该次派发的全部帧）；`prompt` 为
+       * 零产物路径（不起任何智能体 run，本事件即该次派发的全部）；`prompt` 为
        * 锚定的用户输入（重放重建对话面）；`label` 为呈现标签（「平台」）；
        * `text` 为引导文案（下单意图引导到「确认下单」）。
        */
@@ -180,36 +159,7 @@ export type PlatformAgentEvent =
       payload: AgentPayload & { prompt: string; label: string; text: string };
     }
   | {
-      /**
-       * 派发阶段帧（#50 阶段状态条的唯一数据源）：意见 / 咨询全过程的阶段推进
-       * 信号，不署智能体名。`stage` ∈ analyzing / clarifying / updating-prd /
-       * dispatching / queued / fixing / done / answered / dispatch-failed（帧序
-       * 即阶段序，项目内最新帧即当前阶段；dispatch-failed 为派发失败终态——
-       * 意见锚已消费不自动重试，重提即兜底）；`changed` 仅 done 携带（true 已
-       * 修改 / false 未动系统）。链跨 run：前段锚 BA 轮 runId、fixing/done 锚
-       * 修正 run 的 runId。
-       */
-      type: "dispatch-stage";
-      payload: AgentPayload & { stage: string; changed?: boolean };
-    }
-  | {
-      /** 直播·智能体自述解说段（#23，编码 run 专属）：`text` 为完整段非增量（服务端逐段成型）。 */
-      type: "live-text";
-      payload: AgentPayload & { text: string };
-    }
-  | {
-      /** 直播·动作摘要行（#23）：工具动作 → 人话（如「正在编写【订单管理】」）。 */
-      type: "live-action";
-      payload: AgentPayload & { action: string };
-    }
-  | {
-      /** 直播·步骤段（#23）：run 内步骤序号（1 起），呈现为「第 N 步」分隔。 */
-      type: "live-step";
-      payload: AgentPayload & { step: number };
-    }
-  // ---------- 消息部件（parts 契约，#77 正本「消息部件事件」节；#81 前端消费） ----------
-  | {
-      /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口帧前出尾段）。 */
+      /** 解说文本部件：`text` 为完整段非增量（服务端逐段成型，收口事件前出尾段）。 */
       type: "part-text";
       payload: AgentPayload & { engine: string; text: string };
     }
@@ -238,19 +188,11 @@ export type PlatformAgentEvent =
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "run-start",
-  "role-assigned",
-  "run-created",
   "error",
   "run-finish",
   "question-raised",
-  "run-retrying",
   "run-failed",
-  "fix-unchanged",
   "guide-reply",
-  "dispatch-stage",
-  "live-text",
-  "live-action",
-  "live-step",
   "part-text",
   "part-action",
   "part-step",
@@ -273,7 +215,7 @@ export type PassthroughAgentEvent = {
 };
 
 /**
- * 通道二收窄（两个函数而非一个判别联合）：透传 `type: string` 若并入联合会与
+ * 智能体事件族收窄（两个函数而非一个判别联合）：透传 `type: string` 若并入联合会与
  * 平台事件字面量重叠、破坏 switch 收窄，故平台 / 透传各自收窄。透传是开放
  * 集合——带 `data` 的未知 type 同样收窄为透传，不返回 null。
  */

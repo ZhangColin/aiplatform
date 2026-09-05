@@ -26,7 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 真实对话冒烟（#44 验收 + #45 流桥）：平台进程内 HarnessAgent 走 DeepSeek 真模型
- * 跑通一轮对话——流帧可观测（run-start → run-created → text 增量连续 →
+ * 跑通一轮对话——流事件可观测（run-start → text 增量连续 →
  * run-finish，runId 锚定、增量拼接 = 汇聚文本），该轮产生恰一条 UsageEvent 落库
  * （subject/dims 归属）。
  *
@@ -85,7 +85,7 @@ class AgentscopeConverseSmokeTest {
                         null, Map.of()),
                 frames::add);
 
-        // 帧序与锚定（#45 事件桥验收：流事件经端口可观测、文本增量连续）
+        // 事件序与锚定（#45 事件桥验收：流事件经端口可观测、文本增量连续）
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("runId", runId);
         List<String> deltas = textDeltas(frames);

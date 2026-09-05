@@ -12,7 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -43,7 +43,7 @@ class ProjectNamingAppServiceTest {
     private ProjectRepository projectRepository;
 
     @Mock
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     @Test
     void given_wrapped_reply_when_name_async_then_sanitized_name_renames_placeholder() {
@@ -171,7 +171,7 @@ class ProjectNamingAppServiceTest {
         service.nameAsync(49L, "做一个高端家具品牌官网");
 
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(notificationAppService).publish(eq(ProjectEventTypes.PROJECT_RENAMED),
+        verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PROJECT_RENAMED),
                 payload.capture());
         assertThat(payload.getValue()).containsOnly(
                 Map.entry("projectId", "49"), Map.entry("projectName", "品牌官网"));
@@ -189,7 +189,7 @@ class ProjectNamingAppServiceTest {
 
         service.nameAsync(50L, "做一个官网");
 
-        verify(notificationAppService, never()).publish(anyString(), anyMap());
+        verify(eventsAppService, never()).publishNotification(anyString(), anyMap());
     }
 
     @Test
@@ -201,7 +201,7 @@ class ProjectNamingAppServiceTest {
 
         service.nameAsync(51L, "做一个官网");
 
-        verify(notificationAppService, never()).publish(anyString(), anyMap());
+        verify(eventsAppService, never()).publishNotification(anyString(), anyMap());
     }
 
     // ---------- 测试数据 ----------
@@ -209,7 +209,7 @@ class ProjectNamingAppServiceTest {
     /** 直通执行器：nameAsync 提交即同步执行（异步语义在编排测试覆盖）。 */
     private ProjectNamingAppService service() {
         return new ProjectNamingAppService(agentClient, projectRepository,
-                notificationAppService, Runnable::run);
+                eventsAppService, Runnable::run);
     }
 
     private Project placeholderProject() {

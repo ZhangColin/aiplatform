@@ -105,7 +105,7 @@ export interface paths {
         put?: never;
         /**
          * 建项目（一句话创建：建即自动跑 BA 需求梳理）
-         * @description 创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，失败保占位经改名端点可改）；类型单模板服务端缺省。单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。响应携带自动 BA 运行 runId（挂 /api/agent-events?runId= 的锚）。SSE：workspace-created → agent 流事件
+         * @description 创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，失败保占位经改名端点可改）；类型单模板服务端缺省。单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。响应携带自动 BA 运行 runId（挂 /api/events?runId= 的锚）。SSE：workspace-created → 智能体事件
          */
         post: operations["create_1"];
         delete?: never;
@@ -165,7 +165,7 @@ export interface paths {
         put?: never;
         /**
          * 问答卡作答（ask_user 挂起续跑）
-         * @description qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 帧 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
+         * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
         delete?: never;
@@ -185,7 +185,7 @@ export interface paths {
         put?: never;
         /**
          * 指令区发言（入口三分类派发：意见/咨询/兜底）
-         * @description content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发：意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），回复经 SSE 到达（role-assigned 帧携带角色标签）。空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——咨询与兜底随时可答；项目不存在 404 PRJ_001
+         * @description content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发：意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达指令区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / 咨询 = 助理轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带角色键 role）。空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——咨询与兜底随时可答；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -205,7 +205,7 @@ export interface paths {
         put?: never;
         /**
          * 开始做系统（触发首次生成）
-         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/agent-events?runId= 的锚），过程帧经 SSE（role-assigned role=CODER）。失败自动重试有限次（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying（话术「遇到问题，正在重试」），超限转终态发 run-failed 收口帧（前端「重新发起」出口只认本帧）、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
+         * @description 纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start role=CODER 起工作消息）。失败自动静默重试有限次（app.generation.max-attempts，默认 3 次含首试，中间失败不出用户面），超限转终态发 run-failed 收口事件（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、由用户重新发起兜底。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，本守卫拦直连调用）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -225,7 +225,7 @@ export interface paths {
         put?: never;
         /**
          * 重新修改（修正 run 超限终态恢复出口）
-         * @description 修正 run 失败自动重试超限转终态后的人工兜底（与生成的「重新发起」对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识（挂 /api/agent-events?runId= 的锚，恢复动作与新 run 的链路关系），重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发：修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001
+         * @description 修正 run 失败自动重试超限转终态后的人工兜底（与生成的「重新发起」对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发：修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001
          */
         post: operations["restartFix"];
         delete?: never;
@@ -582,24 +582,36 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 订阅平台通知事件流（SSE）
-         * @description 平台状态变化的广播（通道一）。事件只让 UI「活」，状态以 REST 重查为准，永不补发。
+         * 订阅事件流（SSE，单端点单流）
+         * @description 一条流承载两族事件（合并通道不合并语义）：
          *
-         *     信封：SSE name 恒为 `event`；id = `{projectId}:{seq}`；data = `{"type","payload","ts"}`
-         *     （payload 恒为对象、必带 projectId、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`
-         *     （不进 listener，仅保活）。订阅：`?projectId=` 过滤（缺省全量）。
+         *     - 平台通知族（状态变化广播）：只作实时呈现、状态以 REST 重查为准，永不补发；
+         *     - 智能体事件族（运行过程流）：带近期事件缓冲的热流——新连接（无
+         *       Last-Event-ID 值——缺席或空串）先补发命中订阅过滤的最近缓冲事件（默认
+         *       1000 条，配置 app.agent-events.replay-depth），再无缝进实时流；断线重连
+         *       （浏览器自动携带非空 Last-Event-ID）不补发，前端以 REST 重查兜底。
+         *
+         *     信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
+         *     智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
+         *     对象、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`。
+         *
+         *     订阅：`?projectId=` / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；
+         *     缺省 = 只收平台通知族（智能体事件族只投递给带过滤的订阅）。
          *
          *     名册（type → payload 字段）：
          *
-         *     | type | payload 字段 |
-         *     |---|---|
-         *     | workspace-created | projectId, projectName, container, projectType |
-         *     | preview-ready | projectId, url |
-         *     | preview-updated | projectId |
-         *     | workspace-destroyed | projectId |
-         *     | document-updated | projectId, documentType |
-         *     | project-renamed | projectId, projectName |
-         *     | order-status-changed | projectId, orderId, status, statusName |
+         *     | type | 族 | payload 字段 |
+         *     |---|---|---|
+         *     | workspace-created | 通知 | projectId, projectName, container, projectType |
+         *     | preview-ready | 通知 | projectId, url |
+         *     | preview-updated | 通知 | projectId |
+         *     | workspace-destroyed | 通知 | projectId |
+         *     | document-updated | 通知 | projectId, documentType |
+         *     | project-renamed | 通知 | projectId, projectName |
+         *     | order-status-changed | 通知 | projectId, orderId, status, statusName |
+         *     | run-start / error / run-finish / question-raised / run-failed / guide-reply | 智能体·生命周期 | runId（+ 各自载荷） |
+         *     | part-text / part-action / part-step | 智能体·部件 | runId（+ 部件载荷） |
+         *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
          *
          *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。
          */
@@ -674,48 +686,6 @@ export interface paths {
          *     - 500 WSP_002 — 环境后端操作失败
          */
         get: operations["sourcePackage_1"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agent-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 订阅智能体流事件流（SSE）
-         * @description 一次智能体运行的增量过程流（通道二，组件级消费——看某个运行才挂）。
-         *     带近期帧缓冲的热流：新连接（无 Last-Event-ID 值——缺席或空串）先补发命中订阅
-         *     过滤的最近缓冲帧（默认 1000 帧，配置 app.agent-stream.replay-depth），再无缝进
-         *     实时流；断线重连（浏览器自动携带非空 Last-Event-ID）不补发，前端对齐以 REST
-         *     重查兜底。缓冲为单实例内存态（重启即失，多实例化时需重估）。
-         *
-         *     信封：SSE name 恒为 `event`；id = `{runId}:{seq}`；data = `{"type","payload","ts"}`
-         *     （payload 恒为对象、必带 runId、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`。
-         *     订阅：`?projectId=` / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND；
-         *     缺省全量）；智能体事件带 projectId（编排桥接注入）。
-         *
-         *     名册（type → 说明，payload 除关联字段外）：
-         *
-         *     | type | 类别 | payload 字段 |
-         *     |---|---|---|
-         *     | run-start | 平台 | runId, prompt, model, engine |
-         *     | run-created | 平台 | runId, sessionId, engine |
-         *     | error | 平台 | runId, message |
-         *     | run-finish | 平台 | runId, sessionId, engine, finish |
-         *     | question-raised | 平台 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
-         *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
-         *
-         *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。
-         */
-        get: operations["subscribe_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1889,10 +1859,15 @@ export interface operations {
     subscribe: {
         parameters: {
             query?: {
-                /** @description 按项目过滤（与信封关联字段同名；缺省 = 全量） */
+                /** @description 按项目过滤（与信封关联字段同名；缺省只收通知族） */
                 projectId?: string;
+                /** @description 按运行过滤（智能体事件族的「看某个运行才挂」姿势；缺省不过滤） */
+                runId?: string;
             };
-            header?: never;
+            header?: {
+                /** @description SSE 断线重连自动携带；无值（缺席或空串）= 新连接 = 先补发最近智能体缓冲事件，有值 = 重连 = 不补发（REST 重查兜底） */
+                "Last-Event-ID"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1973,34 +1948,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": string;
-                };
-            };
-        };
-    };
-    subscribe_1: {
-        parameters: {
-            query?: {
-                /** @description 按项目过滤（业务桥接注入的字段；缺省不过滤） */
-                projectId?: string;
-                /** @description 按运行过滤（「看某个运行才挂」的常规姿势） */
-                runId?: string;
-            };
-            header?: {
-                /** @description SSE 断线重连自动携带；无值（缺席或空串）= 新连接 = 先补发最近缓冲帧，有值 = 重连 = 不补发（REST 重查兜底） */
-                "Last-Event-ID"?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": components["schemas"]["SseEmitter"];
                 };
             };
         };

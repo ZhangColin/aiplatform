@@ -3,10 +3,9 @@ import { toast } from "sonner";
 
 import { parseQuestion } from "@/lib/chat/qa";
 import { queryKeys } from "@/lib/api/keys";
-import { useAgentStreamsStore } from "@/lib/store/agent-streams";
+import { useAgentRunsStore } from "@/lib/store/agent-runs";
 import { useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
-import { useDispatchStageStore } from "@/lib/store/dispatch-stage";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 import { orderStatusToastText } from "@/lib/orders/status";
@@ -21,13 +20,14 @@ import {
 } from "./events";
 
 /**
- * 事件 → 状态桥（ADR 0003）：
- * - 通知通道 = 声明式失效注册表 + 载荷展示白名单（REST 重查拿不到的载荷写轻量
+ * 事件 → 状态桥（ADR 0003；单端点单流，#82）：
+ * - 通知族 = 声明式失效注册表 + 载荷展示白名单（REST 重查拿不到的载荷写轻量
  *   store 或即时呈现——本文件是 store 唯一事件写入方；订单态变化 toast 是即时
- *   呈现例外，#30）；
- * - agent 通道 = 事件 → agent-streams store（过程层）+ chat store（指令区对话面）
- *   + generation store（生成面）分发；编码 run 收口的失效也在此（generated_at
- *   落库后详情重拉，正确性走 REST）。
+ *   呈现例外，#30）——通知由站点级常开连接消费（SseProvider），项目页的智能体
+ *   事件连接不重复分发（族内分工，防双连接双处理）；
+ * - 智能体事件族 = 事件 → agent-runs store（运行注册表）+ chat store（对话面）
+ *   + generation store（生成面）+ 工作消息 store（生长中的工作消息）分发；编码
+ *   run 收口的失效也在此（generated_at 落库后详情重拉，正确性走 REST）。
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
@@ -37,8 +37,8 @@ import {
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
-  // 预览地址由 REST 响应自身携带、无需失效；preview() 每次成功都会发射本帧，
-  // 若在此失效 projects 前缀会重拉预览查询 → 又成功 → 又发帧——自反馈死循环
+  // 预览地址由 REST 响应自身携带、无需失效；preview() 每次成功都会发射本事件，
+  // 若在此失效 projects 前缀会重拉预览查询 → 又成功 → 又发事件——自反馈死循环
   // （#45 门禁解除后轮询从 run 开始，循环必被踩中，故显式空登）
   "preview-ready": [],
   // 逐修改刷新（#49）：内容在 iframe 背后的沙箱应用里、REST 域无变化可失效，
@@ -107,22 +107,24 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
   NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification);
 }
 
-/** 已知引擎透传名型 → 直入分段 kind（名册「通道二」引擎透传行；未知名型走 passthrough 段）。 */
-const PASSTHROUGH_SEGMENT_KINDS: Record<string, "text" | "reasoning" | "patch" | "tool"> = {
-  text: "text",
-  reasoning: "reasoning",
-  patch: "patch",
-  tool: "tool",
-};
+/** 已知引擎透传名型 → 对话面消费（解说文本增量；思考/补丁/工具不进对话）。 */
+const CHAT_PASSTHROUGH_TYPES: ReadonlySet<string> = new Set(["text"]);
 
-/** agent 流事件 → streams store + chat store + generation store + 工作消息 store（分段 id = SSE 完整事件 id，React key 白拿）。 */
+/**
+ * 智能体事件 → agent-runs store + chat store + generation store + 工作消息 store
+ * 分发（事件 id = SSE 完整事件 id，React key 白拿）。run-start 携带角色键（引擎
+ * 信息归一）——对话面 run 与编码 run 的登记锚都在此：BA/ASSISTANT 进对话、
+ * CODER 起工作消息。
+ */
 export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
   if (!envelope) return;
-  const store = useAgentStreamsStore.getState();
+  // 单端点单流上通知族与智能体事件族混载：本分发口只消费智能体事件族——
+  // 通知族由站点级常开连接的 dispatchNotificationEvent 消费（防双连接双处理）
+  if (asNotificationEvent(envelope)) return;
+  const runs = useAgentRunsStore.getState();
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
-  const stage = useDispatchStageStore.getState();
   const work = useWorkMessageStore.getState();
   // 信封 ts 是部件时长与起跑锚的唯一时间源（重放保留原值，客户端到达时序不可用）
   const at = eventTime(envelope.ts);
@@ -132,90 +134,44 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     switch (platform.type) {
       case "run-start": {
         const { payload } = platform;
-        store.startRun({
-          runId: payload.runId,
-          projectId: payload.projectId,
-          prompt: payload.prompt,
-          model: payload.model,
-          engine: payload.engine,
-        });
-        chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
-        if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderRunStart(payload.projectId);
-        }
-        // 工作消息锚（#81 新契约判据）：run-start 携 CODER 角色 = 编码 run，
-        // 对话区起一条生长中的工作消息（BA/助理/无角色 run 不起——对话面走气泡）
-        if (payload.role === "CODER") {
-          work.startWork(payload.projectId, payload.runId, at);
-        }
-        return;
-      }
-      case "run-created": {
-        const { payload } = platform;
-        store.markRunCreated(payload, payload.sessionId);
-        return;
-      }
-      case "role-assigned": {
-        const { payload } = platform;
-        store.appendSegment(payload, {
-          kind: "role",
-          id: event.id,
-          role: payload.role,
-          roleLabel: payload.roleLabel,
-          engine: payload.engine,
-        });
-        // 对话面 run 登记（#47 三分类后多角色进指令区）：BA / 助理会话 run 才
-        // 进对话（run-start 落用户气泡、text 增量累积）；CODER 归生成面
-        if (payload.role === "BA" || payload.role === "ASSISTANT") {
-          chat.noteChatRun(payload.projectId, payload.runId, payload.roleLabel);
-        }
+        // 运行注册表（LIVE 脉冲锚）：新 runId 重开（同项目驱逐旧 run）
+        runs.startRun({ runId: payload.runId, projectId: payload.projectId, at });
+        // 角色键 = 会话/呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
+        // CODER → 编码 run（生成面登记 + 工作消息起锚）；BA/ASSISTANT → 对话面
+        // run（登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.role === "CODER") {
           generation.noteCoderRun(payload.projectId, payload.runId);
+          work.startWork(payload.projectId, payload.runId, at);
+        } else if (payload.role === "BA" || payload.role === "ASSISTANT") {
+          chat.noteChatRun(payload.projectId, payload.runId);
+          chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
         }
         return;
       }
       case "question-raised": {
         const { payload } = platform;
-        store.appendSegment(payload, {
-          kind: "question",
-          id: event.id,
-          questionKind: payload.kind,
-          summary: payload.summary,
-        });
+        runs.setRunStatus(
+          { runId: payload.runId, projectId: payload.projectId, at },
+          "questioning",
+        );
         const question = parseQuestion(event.id, payload);
         if (question) chat.raiseQuestion(payload.projectId, payload.sessionId, question);
         return;
       }
       case "error": {
         const { payload } = platform;
-        store.appendSegment(payload, {
-          kind: "error",
-          id: event.id,
-          message: payload.message,
-        });
+        // 对话轮失败（非重试族——编码 run 尝试环内中间错误不出用户面事件流）：
+        // 对话面收轮 + 失败气泡；生成面不写状态（#84）
+        runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
-        // 生成面不写状态（#56）：error 是逐次尝试的过程事实，终态只认 run-failed
-        // 收口帧——否则重试间隔内恢复出口闪现（点击被 PRJ_025 挡回）
-        return;
-      }
-      case "run-retrying": {
-        const { payload } = platform;
-        store.appendSegment(payload, {
-          kind: "retrying",
-          id: event.id,
-          attempt: payload.attempt,
-          message: payload.message,
-        });
-        if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderRetrying(payload.projectId, payload.message);
-        }
         return;
       }
       case "run-failed": {
-        // 编码 run 超限终态收口（#56）：轨道真终态（帧到 ⟺ 恢复出口可达）——
-        // 「重新发起/重新修改」只认本帧；无 CODER 登记的 runId 忽略（帧序异常
-        // 防御位，同其他 coder 帧）
+        // 编码 run 超限终态收口（#56）：轨道真终态（事件到 ⟺ 恢复出口可达）——
+        // 「重新发起/重新修改」只认本事件；无 CODER 登记的 runId 忽略（事件序
+        // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
+        runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId);
         }
@@ -225,11 +181,10 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "run-finish": {
         const { payload } = platform;
-        store.appendSegment(payload, {
-          kind: "finish",
-          id: event.id,
-          finish: payload.finish,
-        });
+        runs.setRunStatus(
+          { runId: payload.runId, projectId: payload.projectId, at },
+          "finished",
+        );
         chat.finishTurn(payload.projectId, payload.sessionId);
         // 工作消息定格（run 收口 = 消息定格；非锚定 run 的收口在 store 内忽略）
         work.freezeWork(payload.projectId, payload.runId, at);
@@ -241,18 +196,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         }
         return;
       }
-      case "fix-unchanged": {
-        // 修正收口·系统未动（#46）：如实呈现进指令区（非 BA 话语——平台侧通告，
-        // 「系统未修改 + 原因」让用户区分「不需要改」与「链路断了」）；编码 run
-        // 判定锚同其他 coder 帧（无登记的 runId 忽略——帧序异常的防御位）
-        const { payload } = platform;
-        if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          chat.noteSystemUnchanged(payload.projectId, payload.reason, event.id);
-        }
-        return;
-      }
       case "guide-reply": {
-        // 兜底轻引导（#47 入口三分类）：平台定型文案直达指令区（带标签对话气泡，
+        // 兜底轻引导（#47 入口三分类）：平台定型文案直达对话面（带标签对话气泡，
         // 非 run、非智能体话语）；prompt 供重放重建用户气泡；重放按事件 id 只收一次
         const { payload } = platform;
         chat.noteGuideReply(
@@ -264,14 +209,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
-      case "dispatch-stage": {
-        // 派发阶段帧（#50 阶段状态条）：只进阶段 store（指令区状态条唯一消费面；
-        // 帧不承担正确性——失败链停在事发阶段，error 帧另行呈现）
-        const { payload } = platform;
-        stage.noteStage(payload.projectId, payload.stage, payload.changed);
-        return;
-      }
-      // ---- 消息部件（parts 契约，#81 前端切新）→ 工作消息 store ----
+      // ---- 消息部件（parts 契约）→ 工作消息 store ----
       // 部件全事件流恒挂（BA/助理 run 也产部件）——store 侧锚定守卫只收编码 run。
       case "part-text": {
         const { payload } = platform;
@@ -306,41 +244,17 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
-      // ---- 旧族过滤（#81 双发射过渡期）：live-* 直播三型停用不再渲染——服务端
-      // 仍在双发射，此处显式落空（switch 不命中即过滤）；解析代码（events.ts 的
-      // live-* 类型与 live store）保留至收缩票 #82 随旧族一并删除 ----
-      // live-text / live-action / live-step：no-op
     }
   }
 
+  // 引擎透传（开放集合）：唯一消费面 = 对话角色的解说文本增量（BA/助理对话气泡）；
+  // 其余名型（reasoning/patch/tool/step-*）过程呈现归工作消息部件，不进任何 store
   const passthrough = asPassthroughAgentEvent(envelope);
   if (!passthrough) return;
-  const { payload } = passthrough;
-  if (passthrough.type === "step-start" || passthrough.type === "step-finish") {
-    store.appendSegment(payload, {
-      kind: "step",
-      id: event.id,
-      phase: passthrough.type === "step-start" ? "start" : "finish",
-      data: payload.data,
-    });
-    return;
-  }
-  const kind = PASSTHROUGH_SEGMENT_KINDS[passthrough.type];
-  if (kind) {
-    store.appendSegment(payload, { kind, id: event.id, data: payload.data });
-    // 指令区对话面只收对话角色（BA/助理）的文本增量（思考/补丁/工具帧不进对话）
-    if (kind === "text") {
-      const delta = asRecord(payload.data)?.delta;
-      chat.appendAgentDelta(payload.projectId, payload.runId, payload.sessionId, delta, event.id);
-    }
-  } else {
-    // 引擎透传未知名型：data 原样入段，呈现层兜底
-    store.appendSegment(payload, {
-      kind: "passthrough",
-      id: event.id,
-      type: passthrough.type,
-      data: payload.data,
-    });
+  if (CHAT_PASSTHROUGH_TYPES.has(passthrough.type)) {
+    const { payload } = passthrough;
+    const delta = asRecord(payload.data)?.delta;
+    chat.appendAgentDelta(payload.projectId, payload.runId, payload.sessionId, delta, event.id);
   }
 }
 

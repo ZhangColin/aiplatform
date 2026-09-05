@@ -1,5 +1,5 @@
 /**
- * 问答卡纯逻辑（issue #19 需求环①）：question-raised 帧 data → 问答卡形状的解析，
+ * 问答卡纯逻辑（issue #19 需求环①）：question-raised 事件 data → 问答卡形状的解析，
  * 与三种作答形态（单选点即答 / 多选勾选提交 / 自由输入可与已勾选合并）的答复
  * 拼装。形状正本 = SSE事件清单·通道二 `data.questions` 投影
  * （[{header, question, multiple, custom, options[{label}]}]）。
@@ -10,14 +10,14 @@ import type { components } from "@/lib/api/schema";
 /** 作答端点回传的待确认工具形状（swagger AnswerQuestionCommand.toolCalls 元素）。 */
 type AnswerToolCall = NonNullable<components["schemas"]["AnswerQuestionCommand"]["toolCalls"]>[number];
 
-/** 待确认工具（挂起帧 data.toolCalls 元素原样——作答端点回传面，前端不解释）。 */
+/** 待确认工具（挂起事件 data.toolCalls 元素原样——作答端点回传面，前端不解释）。 */
 export type PendingToolCall = {
   id?: unknown;
   name?: unknown;
   input?: unknown;
 };
 
-/** question-raised 帧载荷面（事件名册 question-raised 行；data 为引擎载荷原样）。 */
+/** question-raised 事件载荷面（事件名册 question-raised 行；data 为引擎载荷原样）。 */
 export type QuestionRaisedPayload = {
   runId: string;
   sessionId?: string;
@@ -95,7 +95,7 @@ export function toggleSelection(current: readonly string[], label: string): stri
     : [...current, label];
 }
 
-/** 挂起帧 data.toolCalls → 作答命令形状（回传面原样收窄：字符串/对象之外弃守）。 */
+/** 挂起事件 data.toolCalls → 作答命令形状（回传面原样收窄：字符串/对象之外弃守）。 */
 export function toAnswerToolCalls(calls: readonly PendingToolCall[]): AnswerToolCall[] {
   return calls.map((call) => ({
     id: typeof call.id === "string" ? call.id : undefined,

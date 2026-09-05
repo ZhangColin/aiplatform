@@ -87,7 +87,7 @@ public class ProjectController {
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
-                    + "响应携带自动 BA 运行 runId（挂 /api/agent-events?runId= 的锚）。"
+                    + "响应携带自动 BA 运行 runId（挂 /api/events?runId= 的锚）。"
                     + "SSE：workspace-created → agent 流事件")
     public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
         return ApiResponse.ok(appService.create(command));
@@ -119,11 +119,11 @@ public class ProjectController {
                     + "意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台"
                     + "自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集"
                     + "查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；"
-                    + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 帧直达指令区，零产物，"
+                    + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达指令区，零产物，"
                     + "下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。"
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / "
-                    + "咨询 = 助理轮 / 兜底 = guide-reply 帧锚，挂 /api/agent-events?runId= ），"
-                    + "回复经 SSE 到达（role-assigned 帧携带角色标签）。"
+                    + "咨询 = 助理轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
+                    + "回复经 SSE 到达（run-start 事件携带角色键 role）。"
                     + "空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；"
                     + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与"
                     + "挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——"
@@ -136,10 +136,10 @@ public class ProjectController {
 
     @PostMapping("/{id}/questions/{qid}/answer")
     @Operation(summary = "问答卡作答（ask_user 挂起续跑）",
-            description = "qid = 挂起帧 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与"
-                    + "待确认工具清单（question-raised 帧 data.toolCalls 原样）+ 用户答复文本"
+            description = "qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与"
+                    + "待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
-                    + "上收口，过程帧经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
+                    + "上收口，过程事件经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
                     + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,
@@ -156,11 +156,12 @@ public class ProjectController {
                     + "布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体"
                     + "（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统"
                     + "并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识"
-                    + "（挂 /api/agent-events?runId= 的锚），过程帧经 SSE"
-                    + "（role-assigned role=CODER）。失败自动重试有限次"
-                    + "（app.generation.max-attempts，默认 3 次含首试）：重试帧 run-retrying"
-                    + "（话术「遇到问题，正在重试」），超限转终态发 run-failed 收口帧"
-                    + "（前端「重新发起」出口只认本帧）、由用户重新发起兜底。"
+                    + "（挂 /api/events?runId= 的锚），过程事件经 SSE"
+                    + "（run-start role=CODER 起工作消息）。失败自动静默重试有限次"
+                    + "（app.generation.max-attempts，默认 3 次含首试，中间失败不出"
+                    + "用户面事件），超限转终态发 run-failed 收口事件"
+                    + "（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、"
+                    + "由用户重新发起兜底。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
                     + "PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，"
@@ -175,7 +176,7 @@ public class ProjectController {
             description = "修正 run 失败自动重试超限转终态后的人工兜底（与生成的「重新发起」"
                     + "对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 "
                     + "coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识"
-                    + "（挂 /api/agent-events?runId= 的锚，恢复动作与新 run 的链路关系），"
+                    + "（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），"
                     + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
                     + "修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/"
                     + "已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。"

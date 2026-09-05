@@ -14,9 +14,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
-import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -45,10 +44,10 @@ import lombok.extern.slf4j.Slf4j;
  * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未生成止于
  * BA、归档拒、在途排队合并，归 {@link IterationAppService}）。</p>
  *
- * <p><b>流桥</b>：过程帧经 {@link AgentStreamAppService}（eventhub 唯一 SSE 管道）
- * 发射，关联字段（projectId）逐帧注入——底座不解释、透传。发射失败护栏：单帧发射
- * 异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；对话本身的成败以
- * error 帧 + 异常表达（会话执行器吞掉记日志，REST 快返回）。</p>
+ * <p><b>事件桥</b>：过程事件经 {@link EventsAppService}（eventhub 唯一 SSE 管道）
+ * 发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射失败护栏：单事件
+ * 发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；对话本身的成败
+ * 以 error 事件 + 异常表达（会话执行器吞掉记日志，REST 快返回）。</p>
  */
 @Service
 @Slf4j
@@ -57,20 +56,9 @@ public class BaInterviewAppService {
     /** BA 会话标识派生前缀（projectId → ba-{projectId}，稳定绑定勿动）。 */
     public static final String SESSION_PREFIX = "ba-";
 
-    /**
-     * 引擎透传工具帧的观测常量（SSE事件清单·通道二透传行：tool 帧 {@code data} 为
-     * {toolCallId, toolName, phase: start|end}）——BA 流上的 savePrd 起跑观测
-     * （#50 阶段状态条「更新 PRD 中」），透传集合开放、契约名照正本引用。
-     */
-    private static final String TOOL_FRAME_TYPE = "tool";
-    private static final String TOOL_DATA_FIELD = "data";
-    private static final String TOOL_NAME_FIELD = "toolName";
-    private static final String TOOL_PHASE_FIELD = "phase";
-    private static final String SAVE_PRD_TOOL = "savePrd";
-
     private final ProjectRepository projectRepository;
     private final AgentscopeAgentClient agentClient;
-    private final AgentStreamBridge streamBridge;
+    private final AgentEventBridge eventBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final OrderQueryAppService orderQueryAppService;
@@ -87,13 +75,13 @@ public class BaInterviewAppService {
     private final Map<String, String> opinionExchanges = new ConcurrentHashMap<>();
 
     public BaInterviewAppService(ProjectRepository projectRepository,
-            AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
+            AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
             PrdRevisionFacts prdRevisions) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
-        this.streamBridge = streamBridge;
+        this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
         this.orderQueryAppService = orderQueryAppService;
@@ -135,7 +123,7 @@ public class BaInterviewAppService {
 
     /**
      * 跑一轮 BA 访谈（指令区发言，prompt 即用户侧输入）：会话执行器异步提交即
-     * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达不炸调用方）。
+     * 返回（runId 随响应回，过程事件经 SSE；失败经 error 事件表达不炸调用方）。
      * system prompt = 角色卡 + 会话注入块（未建立/空注入/重启后 = 裸角色卡）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
@@ -152,9 +140,8 @@ public class BaInterviewAppService {
         String sessionId = SESSION_PREFIX + projectId;
         requireNoPendingQuestion(project, sessionId);
 
-        String runId = AgentStreamAppService.newRunId();
-        Consumer<AgentEvent> sink = stageAwareSink(project, runId);
-        streamBridge.emitRoleAssigned(projectId, runId, role);
+        String runId = EventsAppService.newRunId();
+        Consumer<AgentEvent> sink = eventBridge.sink(projectId);
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
@@ -180,7 +167,7 @@ public class BaInterviewAppService {
             }
             catch (RuntimeException e) {
                 // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
-                // 不自动重试；error 帧已由 converse 内发出（异常上抛由会话执行器吞）
+                // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
                 opinionExchanges.remove(sessionId);
                 throw e;
             }
@@ -191,8 +178,8 @@ public class BaInterviewAppService {
 
     /**
      * 问答答复续跑（ask_user 挂起的恢复）：挂起轮的 runId/engineRef 与待确认工具
-     * 清单（question-raised 帧 data.toolCalls 形状，前端问答卡回传）+ 用户答复 →
-     * ConfirmResult 批复续跑（续跑续在同一 run 上收口，帧序含答复后的下一问或
+     * 清单（question-raised 事件 data.toolCalls 形状，前端问答卡回传）+ 用户答复 →
+     * ConfirmResult 批复续跑（续跑续在同一 run 上收口，事件序含答复后的下一问或
      * 收口）。恢复私货（角色卡/owner/工作区/计量）从项目侧事实重建，不信前端。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区关闭）；
@@ -220,7 +207,7 @@ public class BaInterviewAppService {
                 usageContextOf(projectId, role, sessionId),
                 role.name());
         appendOpinionReply(sessionId, answerText);
-        Consumer<AgentEvent> sink = stageAwareSink(project, runId);
+        Consumer<AgentEvent> sink = eventBridge.sink(projectId);
         sessionExecutor.submit(sessionId, () -> {
             agentClient.resume(resume, sink);
             dispatchFixOnTurnClose(projectId, sessionId, runId);
@@ -241,12 +228,8 @@ public class BaInterviewAppService {
      * 中的意见原文及追问答复 + {@link #prdRevisions} 中的 PRD 修订事实——本轮
      * savePrd 调用的 summary 终值，无调用事实即 null「未修订」）。BA 无派发权：
      * 模型存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发
-     * 失败发 {@code dispatch-failed} 失败终态帧如实告知重提（#51：状态条不悬死
-     * 在「派发中」）；不炸 BA 轨道、不恢复意见锚（收口即消费语义保持）、不自动
-     * 重试——重提即兜底。
-     *
-     * <p>#50：收口派发即发阶段帧——起跑发 {@code dispatching}、在途排队发
-     * {@code queued}（如实呈现排队，锚本条意见的 BA 轮 runId）。</p>
+     * 失败不炸 BA 轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——用户
+     * 重提即兜底。
      */
     private void dispatchFixOnTurnClose(Long projectId, String sessionId, String runId) {
         try {
@@ -266,80 +249,17 @@ public class BaInterviewAppService {
                 return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
             }
             String prdRevisionSummary = prdRevisions.consume(workspaceId);
-            // 派发中先于派发调用发射（帧序先于轨道起跑——轨道内首帧即 fixing）
-            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.DISPATCHING);
             IterationAppService.FixDispatch dispatch =
                     iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
-            if (dispatch.queued()) {
-                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.QUEUED);
-            }
             log.info("[ba-close] 项目 {} BA 回合收口，平台自动派修正 run（{}，{}）",
                     projectId, dispatch.queued() ? "排队下一轮" : "起跑",
                     prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
         }
         catch (RuntimeException e) {
-            // 派发失败终态帧（#51）：状态条不悬死在「派发中」，如实告知重提——
-            // 意见锚已消费（不恢复）、不自动重试，重提即兜底；发射护栏同阶段帧
-            try {
-                streamBridge.emitDispatchStage(projectId, runId, DispatchStage.DISPATCH_FAILED);
-            }
-            catch (RuntimeException emitFailure) {
-                log.warn("[ba-close] 项目 {} 派发失败终态帧发射失败：{}", projectId,
-                        emitFailure.toString());
-            }
+            // 派发失败（#51）：意见锚已消费（不恢复）、不自动重试，用户重提即兜底
             log.warn("[ba-close] 项目 {} 修正 run 自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }
-    }
-
-    /**
-     * BA 流的阶段观测装饰（#50）：意见链进入状态条的前提是项目已生成（生成前
-     * 意见链止于 BA，无隐藏处理段，不发帧——访谈期以对话面本身呈现）。已生成时
-     * 先发 {@code analyzing}（正在分析您的意见，先于 role-assigned——状态条先
-     * 开口），流中观测两处阶段边界：问答挂起（question-raised·QUESTION）→
-     * {@code clarifying}、savePrd 起跑（tool 帧 start）→ {@code updating-prd}。
-     * 阶段发射失败只记日志不断流。
-     */
-    private Consumer<AgentEvent> stageAwareSink(Project project, String runId) {
-        Consumer<AgentEvent> sink = streamBridge.sink(project.getId());
-        if (project.getGeneratedAt() == null) {
-            return sink;
-        }
-        streamBridge.emitDispatchStage(project.getId(), runId, DispatchStage.ANALYZING);
-        return event -> {
-            sink.accept(event);
-            try {
-                observeStageBoundary(project.getId(), runId, event);
-            }
-            catch (RuntimeException e) {
-                log.warn("[dispatch-stage] 项目 {} 阶段帧发射失败（不断流）：{}",
-                        project.getId(), e.toString());
-            }
-        };
-    }
-
-    /** BA 流上的阶段边界观测：问答挂起 → 追问中；savePrd 起跑 → 更新 PRD 中。 */
-    private void observeStageBoundary(Long projectId, String runId, AgentEvent event) {
-        if (AgentEventTypes.QUESTION_RAISED.equals(event.type()) && isQuestionKind(event)) {
-            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.CLARIFYING);
-            return;
-        }
-        if (TOOL_FRAME_TYPE.equals(event.type()) && isSavePrdStart(event)) {
-            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.UPDATING_PRD);
-        }
-    }
-
-    private static boolean isQuestionKind(AgentEvent event) {
-        return "QUESTION".equals(String.valueOf(event.payload().get(AgentEventTypes.WAIT_KIND_FIELD)));
-    }
-
-    /** savePrd 起跑判定（tool 透传帧 data 形状照 SSE事件清单；只认 start 不认 end——更新中）。 */
-    private static boolean isSavePrdStart(AgentEvent event) {
-        if (!(event.payload().get(TOOL_DATA_FIELD) instanceof Map<?, ?> data)) {
-            return false;
-        }
-        return SAVE_PRD_TOOL.equals(data.get(TOOL_NAME_FIELD))
-                && "start".equals(data.get(TOOL_PHASE_FIELD));
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；
@@ -350,7 +270,7 @@ public class BaInterviewAppService {
     }
 
     private static Map<String, Object> correlationOf(Long projectId) {
-        return Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString());
+        return Map.of(EventsAppService.PROJECT_FIELD, projectId.toString());
     }
 
     private static UsageContext usageContextOf(Long projectId, RolePreset role,
@@ -376,9 +296,9 @@ public class BaInterviewAppService {
     }
 
     /** 挂起问答守卫（#40 / ADR-0005）：会话存在挂起问答（ASKING 态工具块）时
-     * 新输入不盲提交——引擎必拒且 REST 已返 200 只见异步 error 帧；同步 409
+     * 新输入不盲提交——引擎必拒且 REST 已返 200 只见异步 error 事件；同步 409
      * 指路作答。作答（resume）在途、ASKING 尚未清库的偶发拦截为已接受竞态边角。
-     * 守卫先于 role-assigned 帧与命令提交，拒绝即零帧。 */
+     * 守卫先于命令提交，拒绝即零事件。 */
     private void requireNoPendingQuestion(Project project, String sessionId) {
         if (agentClient.hasAskingToolCall(ownerUserIdOf(project), sessionId)) {
             throw new ApplicationException(ProjectMessage.QUESTION_PENDING);

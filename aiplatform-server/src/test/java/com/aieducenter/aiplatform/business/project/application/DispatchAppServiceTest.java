@@ -31,7 +31,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -44,8 +44,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 入口派发编排（#47 三分类）：脚本化智能体边界——分类调用按会话前缀脚本化回放
  * 标签，验证三岔：咨询 → 助理会话命令 + 回答（零派发：无 BA、无修正 run）；
  * 分类失败 / 超时 / 输出不可解析 → 兜底按意见（BA 链）；兜底 / 下单意图 →
- * guide-reply 帧（零产物：不起任何 run）+ 下单引导文案。守卫矩阵（#51 后移）：
- * 归档全局先于分类（拒绝即零调用零帧）；订单冻结 / 挂起问答只拦意见（分类后
+ * guide-reply 事件（零产物：不起任何 run）+ 下单引导文案。守卫矩阵（#51 后移）：
+ * 归档全局先于分类（拒绝即零调用零事件）；订单冻结 / 挂起问答只拦意见（分类后
  * 拦——咨询与兜底随时可答）。
  */
 @SpringBootTest
@@ -69,7 +69,7 @@ class DispatchAppServiceTest {
     private AgentscopeAgentClient agentClient;
 
     @MockitoBean
-    private AgentStreamAppService streamAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
@@ -132,14 +132,13 @@ class DispatchAppServiceTest {
 
         // 分类命令：智能体边界轻量调用——一次性会话、模型档由专用配置键决定（#51，
         // 缺省 flash，不吃 agentscope 缺省模型的部署配法）、不触项目工作区、
-        // 计量 agentKind=classify、短超时、无流关联（空 sink 无帧）
+        // 计量 agentKind=classify、短超时、无流关联（空 sink 无事件）
         assertThat(classify.sessionId()).startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
         assertThat(classify.modelString()).isEqualTo(dispatchProperties.getClassificationModel());
         assertThat(dispatchProperties.getClassificationModel())
                 .isEqualTo("deepseek:deepseek-v4-flash"); // 缺省即 flash 档（代码保证）
         assertThat(classify.workspaceId()).isNull();
         assertThat(classify.agentRole()).isNull();
-        assertThat(classify.live()).isFalse();
         assertThat(classify.timeout()).isEqualTo(java.time.Duration.ofSeconds(15));
         assertThat(classify.usageContext().dims()).containsEntry(
                 UsageDims.KEY_AGENT_KIND, UsageDims.AGENT_KIND_CLASSIFY);
@@ -156,18 +155,14 @@ class DispatchAppServiceTest {
         assertThat(assistant.usageContext().dims()).isEqualTo(
                 UsageDims.of(projectId, UsageDims.kindOf(RolePreset.ASSISTANT),
                         "assist-" + projectId));
-        assertThat(assistant.live()).isFalse();
 
-        // 回答经 SSE 到达（runId = 助理轮）；role-assigned(ASSISTANT) 前置
+        // 回答经 SSE 到达（runId = 助理轮）；收缩验收（#82）：role-assigned 零发射
         assertThat(run.runId()).isEqualTo(assistant.runId());
-        verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED),
-                argThat(payload -> "ASSISTANT".equals(payload.get(AgentEventTypes.ROLE_FIELD))
-                        && RolePreset.ASSISTANT.getName()
-                                .equals(payload.get(AgentEventTypes.ROLE_LABEL_FIELD))));
+        verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), anyMap());
         // 零派发断言：两 converse 之外无任何轨道（修正 run 会是第三条 coder- 会话命令）
         assertThat(command.getAllValues().stream()
                 .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("coder-"));
-        verify(streamAppService, never()).publish(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
     }
 
     @Test
@@ -209,7 +204,7 @@ class DispatchAppServiceTest {
 
     @Test
     void given_fallback_when_dispatch_then_guide_reply_frame_and_zero_runs() {
-        // 兜底 → 平台定型引导（guide-reply 帧直达，零产物：不提交任何会话轨道）
+        // 兜底 → 平台定型引导（guide-reply 事件直达，零产物：不提交任何会话轨道）
         Long projectId = persistedProject("9803");
         givenClassification("FALLBACK", "不该出现");
 
@@ -218,9 +213,9 @@ class DispatchAppServiceTest {
         verify(agentClient, times(1)).converse(any(), any()); // 仅分类调用
         verify(sessionExecutor, never()).submit(any(), any());
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), payload.capture());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), payload.capture());
         assertThat(payload.getValue())
-                .containsEntry(AgentStreamAppService.PROJECT_FIELD, projectId.toString())
+                .containsEntry(EventsAppService.PROJECT_FIELD, projectId.toString())
                 .containsEntry(AgentEventTypes.RUN_FIELD, run.runId())
                 .containsEntry(AgentEventTypes.GUIDE_PROMPT_FIELD, "你好呀")
                 .containsEntry(AgentEventTypes.GUIDE_LABEL_FIELD, DispatchAppService.GUIDE_LABEL)
@@ -234,7 +229,7 @@ class DispatchAppServiceTest {
 
         appService.dispatch(projectId, "我想下单了");
 
-        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), argThat(
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), argThat(
                 payload -> String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
                         .contains("确认下单")));
         verify(agentClient, times(1)).converse(any(), any());
@@ -248,14 +243,14 @@ class DispatchAppServiceTest {
 
         appService.dispatch(projectId, "多少钱？怎么买");
 
-        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), argThat(
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), argThat(
                 payload -> String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
                         .contains("首次生成完成")));
     }
 
     @Test
     void given_archived_project_when_dispatch_then_prj_013_before_classification() {
-        // 全局守卫（归档 = 指令区物理关闭，咨询与兜底也停）先于分类：拒绝即零调用零帧
+        // 全局守卫（归档 = 指令区物理关闭，咨询与兜底也停）先于分类：拒绝即零调用零事件
         Project project = projectRepository.save(Project.create("归档项目", null,
                 9806L, OWNER));
         project.archive();
@@ -265,7 +260,7 @@ class DispatchAppServiceTest {
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
         verify(agentClient, never()).converse(any(), any());
-        verify(streamAppService, never()).publish(any(), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(any(), anyMap());
     }
 
     // ---------- 守卫后移矩阵（#51：订单冻结 / 挂起问答只拦意见） ----------
@@ -301,13 +296,13 @@ class DispatchAppServiceTest {
         appService.dispatch(projectId, "你好呀");
 
         verify(agentClient, times(1)).converse(any(), any()); // 仅分类调用
-        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
     }
 
     @Test
     void given_pending_question_when_opinion_then_prj_024_after_classification() {
         // 意见仍 409 指路作答（行为不变）——守卫在分类后拦：被拒意见先烧一次
-        // flash 分类调用（秒级轻调用，接受），拒绝即零帧零提交
+        // flash 分类调用（秒级轻调用，接受），拒绝即零事件零提交
         Long projectId = persistedProject("9810");
         givenClassification("OPINION", "不该到");
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
@@ -318,7 +313,7 @@ class DispatchAppServiceTest {
                 .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
         verify(agentClient, times(1)).converse(any(), any()); // 分类先烧、BA 未触
         verify(sessionExecutor, never()).submit(any(), any());
-        verify(streamAppService, never()).publish(any(), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(any(), anyMap());
     }
 
     @Test
@@ -337,7 +332,7 @@ class DispatchAppServiceTest {
         givenClassification("FALLBACK", "不该出现");
         appService.dispatch(projectId, "你好呀"); // 兜底：引导照常
 
-        verify(streamAppService).publish(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(command.capture(), any()); // 分类×2 + 助理
         assertThat(command.getAllValues().stream()
@@ -363,18 +358,14 @@ class DispatchAppServiceTest {
 
     @Test
     void given_opinion_when_dispatch_then_role_assigned_precedes_converse() {
-        // 意见链帧序不回归：role-assigned(BA) → converse（分类在帧前静默完成）
+        // 意见链不回归：BA 轮 converse 到达（分类在其前静默完成）
         Long projectId = persistedProject("9807");
         givenSessionExecutorRunsInline();
         givenClassification("OPINION", "好的");
 
         appService.dispatch(projectId, "加个导出功能");
 
-        InOrder order = inOrder(streamAppService, agentClient);
-        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED), argThat(
-                payload -> "BA".equals(payload.get(AgentEventTypes.ROLE_FIELD))));
-        // 帧后的那条 converse 即 BA 轮（分类 converse 在帧前静默完成——总量 2）
-        order.verify(agentClient).converse(any(), any());
+        // 意见链：BA 轮 converse 到达（分类 converse 在其前静默完成——总量 2）
         verify(agentClient, times(2)).converse(any(), any());
     }
 

@@ -1,5 +1,7 @@
 # 派发机制设计 v1（编排代码化 · 判定下放）
 
+> **历史设计记录（部分词汇已退役）**：本文写就时的 `dispatch-stage` 阶段状态条、`role-assigned`、`live-step` 等事件族已随体验改版 #82 全量退役（归位生命周期/部件事件，正本见 aiplatform-server `docs/spec/SSE事件清单.md`）；编排骨架（入口三分类、链必达收口、排队合并、交接物）仍然有效。
+
 依据：ADR 0004、CONTEXT.md「派发」「迭代」「问答」词条、调研结论（agentscope-java 2.0.1 无图编排原语，subagent 为父 LLM 工具调用式派发、不适用于派发骨架；SAA graph v1 不引入）。编排落在现有外层 Java 代码（IterationAppService 一族），HarnessAgent 继续作单智能体执行器。
 
 ## 1. 编排总图

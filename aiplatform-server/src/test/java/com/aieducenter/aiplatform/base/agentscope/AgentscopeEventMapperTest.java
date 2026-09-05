@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link AgentscopeEventMapper} 单点映射表（#45 事件桥正本）：AgentScope 事件 →
- * 平台 agent 流事件帧。每类映射断言 type + payload 形状（对齐 SSE事件清单·通道二
+ * 平台事件。每类映射断言 type + payload 形状（对齐 SSE事件清单·智能体事件族
  * 引擎透传口径：runId/sessionId/engine/data）。
  */
 class AgentscopeEventMapperTest {
@@ -97,7 +97,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void given_unmapped_events_when_map_then_no_frame() {
-            // 边界/块尾/结果等未映射类型不产帧（扩展点：HITL 类归 #48）
+            // 边界/块尾/结果等未映射类型不产事件（扩展点：HITL 类归 #48）
             assertThat(mapper.map(new TextBlockEndEvent("reply-1", "b-1"))).isNull();
             assertThat(mapper.map(new AgentEndEvent("reply-1"))).isNull();
             assertThat(mapper.map(new AgentResultEvent((Msg) null))).isNull();
@@ -127,17 +127,6 @@ class AgentscopeEventMapperTest {
                     ENGINE, "CODER");
 
             assertThat(frame.payload()).containsEntry("role", "CODER");
-        }
-
-        @Test
-        void given_run_created_when_built_then_carries_session_id() {
-            AgentEvent frame = AgentscopeEventMapper.runCreated(RUN_ID, SESSION_ID, ENGINE);
-
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_CREATED);
-            assertThat(frame.payload()).containsOnly(
-                    Map.entry("runId", RUN_ID),
-                    Map.entry("sessionId", SESSION_ID),
-                    Map.entry("engine", ENGINE));
         }
 
         @Test
@@ -201,7 +190,7 @@ class AgentscopeEventMapperTest {
             Map<String, Object> data = (Map<String, Object>) frame.payload()
                     .get(AgentEventTypes.WAIT_DATA_FIELD);
             // 引擎载荷：待确认工具清单（答复续跑侧据此重建 ConfirmResult；恢复入参
-            // 由业务编排从项目侧事实重建，不随帧携带）
+            // 由业务编排从项目侧事实重建，不随事件携带）
             assertThat(data).containsOnlyKeys("type", "toolCalls");
             assertThat(data.get("type")).isEqualTo("permission");
             assertThat(data.get("toolCalls")).isEqualTo(java.util.List.of(
@@ -300,7 +289,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void given_confirm_event_when_map_then_no_passthrough_frame() {
-            // 挂起不是过程帧：question-raised 由调用方显式发射，map() 不重复产帧
+            // 挂起不是过程事件：question-raised 由调用方显式发射，map() 不重复产事件
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(
                     toolCall("tc-3", "write_file", Map.of())));
 

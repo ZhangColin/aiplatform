@@ -36,7 +36,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -56,7 +56,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * agentKind=coder + sessionId）、项目工作区、流关联）、工作区布局资产就位先于
  * 首试下发（AGENTS.md 平台约定幂等覆写）、知识命中前置注入首试任务 prompt
  * （query = 任务 prompt；检索失败降级空注入不阻断）、重试不重注入（续同会话，
- * 注入块已在会话历史）、成功收口落 generated_at、失败自动重试（run-retrying 帧
+ * 注入块已在会话历史）、成功收口落 generated_at、失败自动静默重试（中间信号零发
  * + 话术 + 重试 prompt 换轨）、超限转终态（generated_at 不落、在途守卫释放可
  * 重新发起）、守卫组（不存在 / 已归档 / 已生成 / 在途重复触发）。
  */
@@ -64,6 +64,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 class GenerationAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;
+
+    /** 退役名（#82）：静默重试守卫的断言面——重试信号不出用户面事件流。 */
+    private static final String RETIRED_RETRYING = "run-retrying";
 
     @Autowired
     private GenerationAppService appService;
@@ -81,7 +84,7 @@ class GenerationAppServiceTest {
     private AgentscopeAgentClient agentClient;
 
     @MockitoBean
-    private AgentStreamAppService streamAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
@@ -144,8 +147,7 @@ class GenerationAppServiceTest {
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
                 UsageDims.kindOf(RolePreset.CODER), "coder-" + projectId));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
-        // 编码 run 开直播（#23）：过程帧外并产直播帧；BA 对话命令不带（对话不流式）
-        assertThat(value.live()).isTrue();
+        assertThat(value.agentRole()).isEqualTo("CODER"); // run-start 携角色键（工作消息锚）
     }
 
     @Test
@@ -243,20 +245,16 @@ class GenerationAppServiceTest {
         // 一次下发一次注入：重试续同会话不重检索
         verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
 
-        // 重试帧：锚定失败的那次尝试、携带下一尝试序号与话术（SSE事件清单 run-retrying 行）
-        verify(streamAppService).publish(eq(AgentEventTypes.RUN_RETRYING), argThat(payload ->
-                run.runId().equals(payload.get(AgentStreamAppService.RUN_FIELD))
-                        && Integer.valueOf(2).equals(
-                                payload.get(AgentEventTypes.RETRY_ATTEMPT_FIELD))
-                        && "遇到问题，正在重试".equals(
-                                payload.get(AgentEventTypes.RETRY_MESSAGE_FIELD))));
+        // 静默重试（#82/#84）：无重试信号、无逐次 error（run 失败为唯一失败终态）
+        verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), anyMap());
 
         // 第二次尝试成功 → generated_at 落位
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNotNull();
         // 重试成功 = 非终态：不发 run-failed（恢复出口不出现——正常流程全自动无门，#56）
-        verify(streamAppService, never()).publish(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
     @Test
@@ -269,18 +267,19 @@ class GenerationAppServiceTest {
 
         appService.startGeneration(projectId);
 
-        // 超限转终态：恰 maxAttempts 次尝试、重试帧 maxAttempts-1 次、generated_at 不落
+        // 超限转终态：恰 maxAttempts 次尝试、全程静默（无重试信号 / error）、
+        // generated_at 不落
         int maxAttempts = properties.getMaxAttempts();
         ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(maxAttempts)).converse(attempts.capture(), any());
-        verify(streamAppService, times(maxAttempts - 1))
-                .publish(eq(AgentEventTypes.RUN_RETRYING), anyMap());
-        // 终态收口帧（#56）：run-failed 恰一次、锚末次失败的尝试（帧序 error(末次) →
-        // run-failed）——前端恢复出口只认本帧，重试进行中的 error 帧不判终态（零闪现）
+        verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), anyMap());
+        // 终态收口事件（#56）：run-failed 恰一次、锚末次失败的尝试——前端恢复出口
+        // 只认本事件（run 失败为唯一失败终态）
         String lastAttemptRunId = attempts.getAllValues().get(maxAttempts - 1).runId();
-        verify(streamAppService).publish(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
-                projectId.toString().equals(payload.get(AgentStreamAppService.PROJECT_FIELD))
-                        && lastAttemptRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
+                        && lastAttemptRunId.equals(payload.get(EventsAppService.RUN_FIELD))));
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNull();
@@ -312,11 +311,10 @@ class GenerationAppServiceTest {
 
         appService.startGeneration(projectId);
 
-        // 核验不过 → 重试到超限转终态：converse 满 maxAttempts 次、重试帧 maxAttempts-1 次
+        // 核验不过 → 静默重试到超限转终态：converse 满 maxAttempts 次、中间信号零发
         int maxAttempts = properties.getMaxAttempts();
         verify(agentClient, times(maxAttempts)).converse(any(), any());
-        verify(streamAppService, times(maxAttempts - 1))
-                .publish(eq(AgentEventTypes.RUN_RETRYING), anyMap());
+        verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
         // 假完成不落 generated_at（AC①：8081 不可达不再落 generated_at）
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",

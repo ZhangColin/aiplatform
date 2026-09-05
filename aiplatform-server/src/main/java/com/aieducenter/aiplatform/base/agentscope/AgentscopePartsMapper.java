@@ -18,14 +18,12 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 
 /**
- * 部件映射表单点（#77 parts 契约的生产方）：AgentScope 事件 → 平台消息部件事件
+ * 部件映射表单点（parts 契约的生产方）：AgentScope 事件 → 平台消息部件事件
  * （词汇正本 = eventhub {@link AgentEventTypes} 部件组；词根取 agentscope 原生
- * part 族，薄翻译不套某家词表）。与 {@link AgentscopeLiveMapper} 同批内核
- * （{@link NarrationSegments} / {@link ToolActionLines}）——区别在部件面的完整
- * 生命周期：工具动作<b>开始即出帧</b>（live-action 仅调用落定才出），动作卡以
- * toolCallId 锚定跨状态（开始/进行中/完成/失败）；解说切段与步骤分组与直播
- * 同口径。全事件流恒挂（不限编码 run）——消息 = 有序部件集合是全部智能体事件
- * 的呈现地基。
+ * part 族，薄翻译不套某家词表）。解说切段与动作行内核独立承载
+ * （{@link NarrationSegments} / {@link ToolActionLines}）；工具动作<b>开始即出
+ * 事件</b>（动作卡全生命周期），以 toolCallId 锚定跨状态（开始/进行中/完成/失败）。
+ * 全事件流恒挂（不限编码 run）——消息 = 有序部件集合是全部智能体事件的呈现地基。
  *
  * <table border="1">
  *   <caption>AgentScope 事件 → 消息部件事件</caption>
@@ -37,9 +35,9 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>ModelCallStart（步骤计数）</td><td>{@code part-step}</td><td>step（1 起序号）</td>
  * </table>
  *
- * <p>思考（reasoning）与读类工具不进部件（同直播口径：对客户是噪音）；读类动作
- * 的呈现位随 #81 前端迁移按需扩表。步骤与动作边界先出解说余段（段与段有序
- * 不串），run 收尾/挂起由调用方 {@link #drain()} 出尾段（幂等）。</p>
+ * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
+ * 需要扩表。步骤与动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
+ * 调用方 {@link #drain()} 出尾段（幂等）。</p>
  */
 final class AgentscopePartsMapper {
 
@@ -140,7 +138,7 @@ final class AgentscopePartsMapper {
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.ROLE_ENGINE_FIELD, engine);
+        payload.put(AgentEventTypes.ENGINE_FIELD, engine);
         payload.put(AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, nvl(toolCallId));
         payload.put(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, nvl(toolName));
         payload.put(AgentEventTypes.PART_ACTION_STATE_FIELD, state);
@@ -163,7 +161,7 @@ final class AgentscopePartsMapper {
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
-        payload.put(AgentEventTypes.ROLE_ENGINE_FIELD, engine);
+        payload.put(AgentEventTypes.ENGINE_FIELD, engine);
         payload.put(field, value);
         return new AgentEvent(type, payload);
     }

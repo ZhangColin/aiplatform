@@ -3,7 +3,7 @@ package com.aieducenter.aiplatform.base.eventhub.infrastructure.sse;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * SSE 线格式帧（内核内部用语）：事件帧（id + name + data）或心跳注释帧（comment）。
+ * SSE 线格式行（内核内部用语）：事件行（id + name + data）或心跳注释行（comment）。
  *
  * <p>内核以本值对象组装与测试发送内容，{@link #toBuilder()} 才转 Spring 的
  * {@link SseEmitter.SseEventBuilder}——Spring builder 不可内省，测试缝留在本类型。</p>

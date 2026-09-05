@@ -29,16 +29,6 @@ vi.mock("@/hooks/use-restart-fix", () => ({
   useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-const liveLives: Record<string, never> = {};
-vi.mock("@/lib/store/live", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/store/live")>();
-  return {
-    ...actual,
-    useLiveStore: (selector: (state: { lives: typeof liveLives }) => unknown) =>
-      selector({ lives: liveLives }),
-  };
-});
-
 function renderPanel() {
   useGenerationStore.setState({
     generations: { p1: { coderRunIds: [], coderStatus: "running", previewEpoch: 0, seenFinishEventIds: [] } },

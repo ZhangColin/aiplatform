@@ -74,7 +74,6 @@ function seedChat(
       p1: {
         messages,
         chatRunIds: [],
-        roleLabels: {},
         ingestedRunIds: [],
         seenEventIds: [],
         turnActive,
@@ -85,7 +84,7 @@ function seedChat(
 }
 
 describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色）", () => {
-  it("对话流：用户气泡右对齐、智能体气泡带各自角色落款（随帧标签，非硬编码）、开场引导语常在", () => {
+  it("对话流：用户气泡右对齐、智能体气泡带各自角色落款（随事件标签，非硬编码）、开场引导语常在", () => {
     seedChat([
       { kind: "user", id: "u1", text: "给宠物医院做预约系统" },
       { kind: "agent", id: "b1", text: "初步理解：在线预约。", label: "需求分析师" },
@@ -99,7 +98,7 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
 
     expect(html).toContain("给宠物医院做预约系统");
     expect(html).toContain("初步理解：在线预约。");
-    // 角色标签随消息（role-assigned / guide-reply 帧正本），无硬编码角色名
+    // 标签随消息（智能体回退通用标签、guide-reply 自带「平台」），无硬编码角色名
     expect(html).toContain("需求分析师");
     expect(html).toContain("项目助理");
     expect(html).toContain("平台");
@@ -131,7 +130,7 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
     expect(html).toContain("和平台聊聊你的想法");
   });
 
-  it("轮进行中标签缺失（帧淘汰残段）：打字指示回退通用标签", () => {
+  it("轮进行中标签缺失（事件淘汰残段）：打字指示回退通用标签", () => {
     seedChat([{ kind: "user", id: "u1", text: "加个功能" }], true);
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
@@ -139,7 +138,7 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
     expect(html).toContain("智能体正在输入");
   });
 
-  it("错误帧呈现中断提示（可重发）；归档禁用输入", () => {
+  it("错误事件呈现中断提示（可重发）；归档禁用输入", () => {
     seedChat([{ kind: "error", id: "e1", text: "模型调用失败" }]);
 
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).toContain(
@@ -186,18 +185,6 @@ describe("CommandArea · 指令区（#19 需求环① + #47 三分类多角色�
     expect(html).toContain("正在调整全局配色。");
     expect(html).toContain("修改【全局样式】");
     expect(html).toContain("进行中");
-  });
-
-  it("修正收口「未动系统」通告（#46）：平台侧如实告知原因（区别于智能体话语与错误）", () => {
-    seedChat([
-      { kind: "user", id: "u1", text: "把主色调改成绿色" },
-      { kind: "agent", id: "b1", text: "已修订 PRD。", label: "需求分析师" },
-      { kind: "notice", id: "n1", text: "纯文档性修订，系统现状已满足" },
-    ]);
-
-    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
-
-    expect(html).toContain("本轮意见未改动系统：纯文档性修订，系统现状已满足");
   });
 
   it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {

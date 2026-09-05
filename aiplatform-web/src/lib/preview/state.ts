@@ -9,14 +9,11 @@ import type { WorkPart } from "@/lib/store/work-message";
  * 即启动预览机制，不等 run-finish 纪元；应用可访问的判据 = REST 探活通过才返回
  * URL（后端 WSP_012 语义），有 URL 即上页面。
  *
- * <p>空态两档（CONTEXT.md「预览」）：无应用 = 占位随直播事件推进的步骤提示
- * （自述优先、动作摘要兜底，无信号落初始文案）；有应用且 run 中 = 保留页面 +
- * 「更新中」轻提示——生成长出与修正同一套，不两套并存。重试与跨会话不闪断：
- * 有 URL 就不退占位。</p>
+ * <p>空态两档（CONTEXT.md「预览」）：无应用 = 占位随工作消息部件推进的步骤
+ * 提示（解说自述优先、动作对象兜底，无信号落初始文案）；有应用且 run 中 =
+ * 保留页面 +「更新中」轻提示——生成长出与修正同一套，不两套并存。重试静默
+ * （#84：run 失败为唯一失败终态）与跨会话不闪断：有 URL 就不退占位。</p>
  */
-
-/** 重试话术的本地回落（帧丢失防御位；正本随 run-retrying 帧下发）。 */
-export const FALLBACK_RETRY_MESSAGE = "遇到问题，正在重试";
 
 /** run 进行中、页面已可见的统一轻提示（生成长出与修正同一套，#45 合并）。 */
 export const UPDATING_NOTICE = "正在更新系统，完成后自动刷新";
@@ -39,7 +36,7 @@ export type PanelNotice = {
 export type SystemPanelPhase =
   /** 未开始：空白浏览器窗 + 引导占位。 */
   | { kind: "idle" }
-  /** 第一档（无应用，run 中）：随直播推进的步骤提示 / 重试话术。 */
+  /** 第一档（无应用，run 中）：随工作消息部件推进的步骤提示。 */
   | { kind: "hint"; text: string }
   /** 超限终态且无页面：问题提示 + 人工兜底入口（restart / refix，可缺省）。 */
   | { kind: "failed"; text: string; recovery?: "restart" | "refix" }
@@ -91,21 +88,17 @@ export function systemPanelPhase(input: {
   error?: unknown;
   /** 当前工作消息部件（占位提示信号源，#81 自直播段平移）。 */
   parts: readonly WorkPart[];
-  retryMessage?: string;
 }): SystemPanelPhase {
-  const { coderStatus, generatedAt, url, error, parts, retryMessage } = input;
+  const { coderStatus, generatedAt, url, error, parts } = input;
 
-  // 有 URL 即上页面（跨会话直接显示系统现状；重试期间不退占位——不闪断）
+  // 有 URL 即上页面（跨会话直接显示系统现状；重试静默期间不退占位——不闪断）
   if (url) {
-    return { kind: "page", notice: noticeOf(coderStatus, generatedAt, retryMessage) };
+    return { kind: "page", notice: noticeOf(coderStatus, generatedAt) };
   }
   if (!previewActive(coderStatus, generatedAt)) return { kind: "idle" };
 
   if (coderStatus === "error") {
     return { kind: "failed", ...failedOutcome(generatedAt) };
-  }
-  if (coderStatus === "retrying") {
-    return { kind: "hint", text: retryMessage ?? FALLBACK_RETRY_MESSAGE };
   }
   if (coderStatus === "running") {
     const hint = workHintOf(parts);
@@ -118,17 +111,14 @@ export function systemPanelPhase(input: {
   return { kind: "connecting", trouble: previewTrouble(error) };
 }
 
-/** 页面上的进行中轻提示（一套话术面：进行中 / 重试 / 失败）。 */
+/** 页面上的进行中轻提示（一套话术面：进行中 / 失败）。 */
 function noticeOf(
   coderStatus: CoderRunStatus | undefined,
   generatedAt: string | null | undefined,
-  retryMessage: string | undefined,
 ): PanelNotice | undefined {
   switch (coderStatus) {
     case "running":
       return { failed: false, text: UPDATING_NOTICE };
-    case "retrying":
-      return { failed: false, text: retryMessage ?? FALLBACK_RETRY_MESSAGE };
     case "error":
       return { failed: true, ...failedOutcome(generatedAt) };
     default:

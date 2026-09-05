@@ -578,7 +578,7 @@ class ProjectControllerTest {
 
     @Test
     void given_question_answer_when_answer_then_ok_and_facts_passed() throws Exception {
-        // qid（路径）= 挂起帧 engineRef；请求体回传 runId + data.toolCalls 原样 + 答复
+        // qid（路径）= 挂起事件 engineRef；请求体回传 runId + data.toolCalls 原样 + 答复
         performAsUser(post("/api/projects/100/questions/reply-7/answer")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

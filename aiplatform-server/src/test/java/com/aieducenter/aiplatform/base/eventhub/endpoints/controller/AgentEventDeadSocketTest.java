@@ -26,8 +26,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamProperties;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub;
 import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
@@ -38,16 +37,16 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * 死连接回归（真机日志噪音复刻）：真实 HTTP/SSE 订阅后以 RST 掀掉客户端 socket，
- * 撞「服务端 onError 尚未移除订阅」窗口内 broadcast——向死连接写帧失败会被
+ * 撞「服务端 onError 尚未移除订阅」窗口内 broadcast——向死连接写事件失败会被
  * sendOrEvict catch（fire-and-forget 契约），但容器 async 机制把异常 dispatch
- * 回 SSE 端点：全局异常处理器打 ERROR（栈带原始业务帧，极易误读为业务 500）+
+ * 回 SSE 端点：全局异常处理器打 ERROR（栈带原始业务事件，极易误读为业务 500）+
  * ApiResponse 写不进 text/event-stream 的二次 WARN。本回归守住两条：
  * 调用方不抛、断连不出 ERROR 噪音（SSE 端点本地 @ExceptionHandler 静默）。
  *
  * <p>与 {@link SseChannelHubTest} 的 RecordingSseSender 用例互补：单测里 emitter
  * 无 handler，complete() 是 no-op——正是「测试全绿、真机一用就错」的那一环。</p>
  */
-@SpringBootTest(classes = AgentStreamDeadSocketTest.NarrowApp.class,
+@SpringBootTest(classes = AgentEventDeadSocketTest.NarrowApp.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.autoconfigure.exclude="
                 + "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
@@ -58,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
                 + "org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration,"
                 + "com.cartisan.data.jpa.config.CartisanDataJpaAutoConfiguration"
 })
-class AgentStreamDeadSocketTest {
+class AgentEventDeadSocketTest {
 
     private static final String TEST_SESSION_ID = "agent-sse-dead-socket-test";
 
@@ -66,7 +65,7 @@ class AgentStreamDeadSocketTest {
     private int port;
 
     @Autowired
-    private AgentStreamAppService appService;
+    private EventsAppService appService;
 
     @Autowired
     private BffSessionStore sessionStore;
@@ -90,7 +89,7 @@ class AgentStreamDeadSocketTest {
             }
             // 撞窗：断连后立即广播（真机 500 的时序）
             String runId = "run-dead-" + i;
-            assertThatCode(() -> appService.publish("run-start",
+            assertThatCode(() -> appService.publishAgentEvent("run-start",
                     Map.of("runId", runId))).doesNotThrowAnyException();
             Thread.sleep(50);   // 给 onError 一点时间清理，进入下一轮
         }
@@ -120,7 +119,7 @@ class AgentStreamDeadSocketTest {
                         AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
                 assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
                 sse.kill();
-                appService.publish("run-start", Map.of("runId", "run-noise-" + i));
+                appService.publishAgentEvent("run-start", Map.of("runId", "run-noise-" + i));
                 Thread.sleep(50);   // async error dispatch 是异步的，给它时间跑
             }
             captured.addAll(appender.list);
@@ -162,13 +161,13 @@ class AgentStreamDeadSocketTest {
             assertThatCode(() -> {
                 Thread racer = new Thread(() -> {
                     try {
-                        appService.publish("run-start", Map.of("runId", runA));
+                        appService.publishAgentEvent("run-start", Map.of("runId", runA));
                     } catch (Throwable ex) {
                         racerFailure.set(ex);
                     }
                 }, "publish-racer");
                 racer.start();
-                appService.publish("run-start", Map.of("runId", runB));
+                appService.publishAgentEvent("run-start", Map.of("runId", runB));
                 racer.join(2000);
             }).doesNotThrowAnyException();
             assertThat(racerFailure.get()).as("并发 publish 线程亦不得抛").isNull();
@@ -195,7 +194,7 @@ class AgentStreamDeadSocketTest {
             socket.setTcpNoDelay(true);
             // BufferedReader 无超时——soTimeout 切片让 awaitPing 的截止时间可兑现
             socket.setSoTimeout(250);
-            String request = "GET /api/agent-events HTTP/1.1\r\n"
+            String request = "GET /api/events HTTP/1.1\r\n"
                     + "Host: localhost:" + port + "\r\n"
                     + "Accept: text/event-stream\r\n"
                     + "Cookie: " + cookie + "\r\n"
@@ -207,7 +206,7 @@ class AgentStreamDeadSocketTest {
             return new RawSseClient(socket, reader);
         }
 
-        /** 等到首帧 :ping（订阅已建立并完成响应头冲刷）。 */
+        /** 等到首条 :ping（订阅已建立并完成响应头冲刷）。 */
         boolean awaitPing(Duration timeout) throws Exception {
             long deadline = System.nanoTime() + timeout.toNanos();
             while (System.nanoTime() < deadline) {
@@ -240,7 +239,7 @@ class AgentStreamDeadSocketTest {
     }
 
     /**
-     * 窄上下文入口（同 AgentEventsControllerSseTest 形态）：不依赖本机 PG。
+     * 窄上下文入口（同 EventsControllerSseTest 形态）：不依赖本机 PG。
      */
     @SpringBootConfiguration
     @EnableAutoConfiguration

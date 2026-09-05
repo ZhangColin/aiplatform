@@ -9,7 +9,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
@@ -31,8 +31,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
- * <p><b>编码 run 开直播</b>（#23 生成环②）：命令带 {@code live}——过程帧外并产
- * 直播帧（智能体自述逐段 + 工具动作人话行 + 步骤），前端直播侧栏消费；BA 对话
+ * <p><b>编码 run 开直播</b>（#23 生成环②）：命令带 {@code live}——过程事件外并产
+ * 直播事件（智能体自述逐段 + 工具动作人话行 + 步骤），前端直播侧栏消费；BA 对话
  * 不开（对话不流式不留痕）。</p>
  *
  * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
@@ -44,10 +44,10 @@ import lombok.extern.slf4j.Slf4j;
  * （幂等覆写，内容平台所有）——编码智能体经 harness 工作区上下文自读；
  * PRD（docs/PRD.md）由 BA 先前写出，同样是智能体自读，平台不搬运。</p>
  *
- * <p><b>失败自动重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
- * 已落盘成果保留）：尝试失败先发 {@code run-retrying} 帧（话术「遇到问题，
- * 正在重试」）再下发下一尝试（新 runId）；超限转终态失败即发 {@code run-failed}
- * 收口帧（#56），由用户重新发起兜底（generated_at 不落位 = 按钮口径仍在）。run
+ * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
+ * 已落盘成果保留）：中间失败不出用户面事件；超限转终态失败即发 {@code run-failed}
+ * 收口事件（#56，run 失败为唯一失败终态），由用户重新发起兜底（generated_at
+ * 不落位 = 按钮口径仍在）。run
  * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——「确认下单」
  * 可见性口径）。</p>
  */
@@ -103,7 +103,7 @@ public class GenerationAppService {
     private final AgentSessionExecutor sessionExecutor;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final CoderRunAttempts coderRunAttempts;
-    private final AgentStreamBridge streamBridge;
+    private final AgentEventBridge eventBridge;
 
     /** 生成在途项目集（含已提交未起跑——排队中）：重复触发守卫的进程内事实。 */
     private final Set<Long> generationsInFlight = ConcurrentHashMap.newKeySet();
@@ -111,17 +111,17 @@ public class GenerationAppService {
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            CoderRunAttempts coderRunAttempts, AgentStreamBridge streamBridge) {
+            CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.coderRunAttempts = coderRunAttempts;
-        this.streamBridge = streamBridge;
+        this.eventBridge = eventBridge;
     }
 
     /**
      * 开始做系统（触发首次生成）：守卫 → AGENTS.md 资产就位 → 异步提交编码 run
-     * （首试 runId 随响应回，过程帧经 SSE；失败重试与超限兜底在异步轨道内）。
+     * （首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_017 已生成或生成在途（重复发起）；
@@ -140,7 +140,7 @@ public class GenerationAppService {
             throw e;
         }
 
-        String firstRunId = AgentStreamAppService.newRunId();
+        String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
             try {
                 runAttemptsWithRetry(project, firstRunId);
@@ -152,7 +152,7 @@ public class GenerationAppService {
         return new GenerationRun(firstRunId);
     }
 
-    /** 一场生成（首试）的运行标识（前端挂智能体流 ?runId= 的锚；重试换新 runId 经帧到达）。 */
+    /** 一场生成（首试）的运行标识（前端挂智能体流 ?runId= 的锚；重试换新 runId 经事件到达）。 */
     public record GenerationRun(String runId) {
     }
 
@@ -162,15 +162,15 @@ public class GenerationAppService {
      * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
      * GENERATE_RUN_PROMPT、重试换轨 RETRY_RUN_PROMPT；成功收口（converse 无异常
      * + 8081 可达，#35 核验在 {@link #markGeneratedIfReachable}）即 markGenerated
-     * 收场（首次生成时点单向落位）。超限转终态即发 {@code run-failed} 收口帧
-     * （#56：生成轨道超限即真终态——前端「重新发起」出口只认本帧）。
+     * 收场（首次生成时点单向落位）。超限转终态即发 {@code run-failed} 收口事件
+     * （#56：生成轨道超限即真终态——前端「重新发起」出口只认本事件）。
      */
     private void runAttemptsWithRetry(Project project, String firstRunId) {
         CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
                 new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
                 runId -> markGeneratedIfReachable(project), "generate");
         if (!result.succeeded()) {
-            streamBridge.emitRunFailed(project.getId(), result.lastRunId());
+            eventBridge.emitRunFailed(project.getId(), result.lastRunId());
         }
     }
 

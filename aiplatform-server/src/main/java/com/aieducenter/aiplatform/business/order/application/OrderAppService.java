@@ -9,7 +9,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -51,7 +51,7 @@ public class OrderAppService {
     private final ProjectLifecycleAppService projectLifecycleAppService;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
     private final PaymentPort paymentPort;
-    private final PlatformNotificationAppService notificationAppService;
+    private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
 
     public OrderAppService(OrderRepository orderRepository,
@@ -59,14 +59,14 @@ public class OrderAppService {
                            ProjectLifecycleAppService projectLifecycleAppService,
                            ProjectKnowledgeAppService projectKnowledgeAppService,
                            PaymentPort paymentPort,
-                           PlatformNotificationAppService notificationAppService,
+                           EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
         this.orderRepository = orderRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
         this.paymentPort = paymentPort;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -200,7 +200,7 @@ public class OrderAppService {
     }
 
     private void publishStatusChanged(Order order) {
-        notificationAppService.publish(OrderEventTypes.ORDER_STATUS_CHANGED, Map.of(
+        eventsAppService.publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, Map.of(
                 OrderEventTypes.PROJECT_ID_FIELD, order.getProjectId().toString(),
                 OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
                 OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),

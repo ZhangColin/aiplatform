@@ -24,8 +24,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
@@ -77,13 +77,10 @@ class IterationChainSmokeTest {
     @Autowired
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
-    /** SSE 发射边收口：捕获全帧（真实链路无订阅者，发射本身是观测缝）。 */
+    /** 事件发射边收口（单端点单流）：智能体事件与通知分口捕获（真实链路无订阅者，
+     *  发射本身是观测缝）。 */
     @MockitoBean
-    private AgentStreamAppService streamAppService;
-
-    /** 通知通道发射边收口（document-updated 观测）。 */
-    @MockitoBean
-    private PlatformNotificationAppService notificationAppService;
+    private EventsAppService eventsAppService;
 
     private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Notify> notifies = new ConcurrentLinkedQueue<>();
@@ -142,18 +139,18 @@ class IterationChainSmokeTest {
     @Test
     @Timeout(1200)
     void given_generated_system_when_color_opinion_then_prd_updated_and_fix_auto_dispatched() {
-        // 0) 真实 dev 容器 + 工作区记录 + 项目落库；帧/通知捕获就位
+        // 0) 真实 dev 容器 + 工作区记录 + 项目落库；事件/通知捕获就位
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
         doAnswer(invocation -> {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
-        }).when(streamAppService).publish(any(), any());
+        }).when(eventsAppService).publishAgentEvent(any(), any());
         doAnswer(invocation -> {
             notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
-        }).when(notificationAppService).publish(any(), any());
+        }).when(eventsAppService).publishNotification(any(), any());
         Project project = projectRepository.save(Project.create("链必达冒烟", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
@@ -181,20 +178,20 @@ class IterationChainSmokeTest {
         // 4a) PRD 更新：PRD 正文含绿（需求侧已落）
         awaitUntil(FIX_DEADLINE, () -> prdContent().contains("绿"));
 
-        // 4b) 平台自动派修正 run：role-assigned(CODER) 帧到达——链的收口在平台
+        // 4b) 平台自动派修正 run：run-start(role=CODER) 事件到达——链的收口在平台
         //     代码，模型漏调任何工具都不断链
         Frame coderAssigned = awaitFrame(FIX_DEADLINE, frame ->
-                AgentEventTypes.ROLE_ASSIGNED.equals(frame.type())
+                AgentEventTypes.RUN_START.equals(frame.type())
                         && "CODER".equals(frame.payload().get(AgentEventTypes.ROLE_FIELD)));
         assertThat(coderAssigned.runId()).isNotEmpty();
 
-        // 4c) 修正 run 真跑完（真模型改真系统；error 帧即链路失败，如实红）
+        // 4c) 修正 run 真跑完（真模型改真系统；error 事件即链路失败，如实红）
         Frame end = awaitUntil(FIX_DEADLINE, () -> frames.stream()
                 .filter(f -> coderAssigned.runId().equals(f.runId()))
                 .filter(f -> AgentEventTypes.RUN_FINISH.equals(f.type())
                         || AgentEventTypes.ERROR.equals(f.type()))
                 .findFirst().orElse(null));
-        assertThat(end.type()).as("修正 run 异常收口（帧序诊断见断言信息）")
+        assertThat(end.type()).as("修正 run 异常收口（事件序诊断见断言信息）")
                 .isEqualTo(AgentEventTypes.RUN_FINISH);
 
         // 4d) 系统自动跟着改：页面仍可访问、内容已变、蓝色主色字面量被换掉
@@ -222,12 +219,12 @@ class IterationChainSmokeTest {
                 .doesNotContain("ask_user")
                 .doesNotContain("savePrd")
                 .doesNotContain("startFixRun");
-        // 4f) 结束工具收口（#46）：真模型以 finish_edit 收口（工具调用帧可见——未
-        //     调用即 run 未正常收口，本断言红），且动了系统（changed=true）不出
-        //     「未动系统」帧——收口以工具事实观测，changed=true 现有收口行为不回归
+        // 4f) 结束工具收口（#46）：真模型以 finish_edit 收口（工具调用事件可见——
+        //     未调用即 run 未正常收口，本断言红）；fix-unchanged 已退役（#82），
+        //     判定呈现归收口扩载（#88）
         assertThat(coderPayloads).contains("finish_edit");
         assertThat(coderFrames.stream().map(Frame::type))
-                .doesNotContain(AgentEventTypes.FIX_UNCHANGED);
+                .doesNotContain("fix-unchanged");
     }
 
     // ---------- 编排步骤 ----------
@@ -239,7 +236,7 @@ class IterationChainSmokeTest {
             outcome = settlePending(outcome,
                     "不要再继续提问了，现在就结束访谈，直接产出 PRD");
         }
-        assertThat(outcome).as("访谈未在限轮内收敛（帧序见日志）").isEqualTo("finished");
+        assertThat(outcome).as("访谈未在限轮内收敛（事件序见日志）").isEqualTo("finished");
         awaitUntil(TURN_DEADLINE, () -> !prdContent().isBlank());
     }
 
@@ -250,7 +247,7 @@ class IterationChainSmokeTest {
             outcome = settlePending(outcome,
                     "不用再问了：就按这条意见处理——把系统的主色调改成绿色，请直接修订 PRD");
         }
-        assertThat(outcome).as("意见轮未在限轮内收口（帧序见日志）").isEqualTo("finished");
+        assertThat(outcome).as("意见轮未在限轮内收口（事件序见日志）").isEqualTo("finished");
     }
 
     /** 跑一轮 BA（意见/开场文本进指令区口径），返回首个结果（engineRef / finished）。 */
@@ -268,10 +265,10 @@ class IterationChainSmokeTest {
                 .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type())
                         && engineRef.equals(String.valueOf(
                                 f.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD))))
-                .findFirst().orElseThrow(() -> new AssertionError("engineRef 无挂起帧: " + engineRef));
+                .findFirst().orElseThrow(() -> new AssertionError("engineRef 无挂起事件: " + engineRef));
         Map<String, Object> body = parseBody(question.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
         List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) body.get("toolCalls");
-        assertThat(toolCalls).as("挂起帧 data 应带待确认工具清单").isNotEmpty();
+        assertThat(toolCalls).as("挂起事件 data 应带待确认工具清单").isNotEmpty();
         appService.answerQuestion(projectId, question.runId(), engineRef, toolCalls, answer);
         return awaitOutcome();
     }
@@ -356,13 +353,13 @@ class IterationChainSmokeTest {
             }
             return new ObjectMapper().readValue(String.valueOf(raw), Map.class);
         } catch (IOException e) {
-            throw new AssertionError("挂起帧 body 解析失败: " + raw, e);
+            throw new AssertionError("挂起事件 body 解析失败: " + raw, e);
         }
     }
 
     /**
      * 有界轮询直到条件成立（null / false / 空串 = 未达成继续等；超时红，附已
-     * 捕获帧序诊断）。条件抛 AssertionError 即刻失败（BA 轮 error 帧口径）。
+     * 捕获事件序诊断）。条件抛 AssertionError 即刻失败（BA 轮 error 事件口径）。
      */
     private <T> T awaitUntil(Duration deadline, Supplier<T> condition) {
         long end = System.nanoTime() + deadline.toNanos();
@@ -373,7 +370,7 @@ class IterationChainSmokeTest {
             }
             sleepQuietly();
         }
-        throw new AssertionError("等待超时（" + deadline + "），已捕获帧序："
+        throw new AssertionError("等待超时（" + deadline + "），已捕获事件序："
                 + frames.stream().map(f -> f.type() + "@" + f.runId()).toList());
     }
 

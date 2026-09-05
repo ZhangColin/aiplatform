@@ -13,7 +13,6 @@ import { useState, type ReactNode } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   previewEpochOf,
-  retryMessageOf,
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
@@ -66,7 +65,6 @@ export function SystemPanel({
   onGenerated: () => void;
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
-  const retryMessage = useGenerationStore((s) => retryMessageOf(s, projectId));
   const parts = useWorkMessageStore((s) => workPartsOf(s, projectId));
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
@@ -81,7 +79,6 @@ export function SystemPanel({
     url,
     error: preview.error,
     parts,
-    retryMessage,
   });
   const pageLive = phase.kind === "page" && !!url;
   // 超限终态的人工兜底入口（页面轻提示与占位终态两处共用）：从未生成「重新发起」、

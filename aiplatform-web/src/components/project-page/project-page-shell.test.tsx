@@ -2,27 +2,27 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider } from "@/components/ui/sidebar";
-import type { AgentRun, AgentStreamsState } from "@/lib/store/agent-streams";
+import type { AgentRun, AgentRunsState } from "@/lib/store/agent-runs";
 
 import { ProjectPageRunStatus, ProjectPageShell } from "./project-page-shell";
 
-// 顶栏运行状态（LIVE 真绑定）直读 streams store（最近 run 读口
+// 顶栏运行状态（LIVE 真绑定）直读运行注册表（最近 run 读口
 // latestProjectRun）。zustand v5 在 react-dom/server 下 server snapshot
 // 读 create 时初始快照、setState 播种对静态渲染不可见，mock 单个 hook
-// 直读种子状态，store 本体行为由 agent-streams.test 覆盖。
-type SeedState = Pick<AgentStreamsState, "runs" | "order">;
+// 直读种子状态，store 本体行为由 agent-runs.test 覆盖。
+type SeedState = Pick<AgentRunsState, "runs" | "order">;
 const seed = vi.hoisted(() => ({ state: { runs: {}, order: [] } as SeedState }));
 
-vi.mock("@/lib/store/agent-streams", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/store/agent-streams")>();
+vi.mock("@/lib/store/agent-runs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store/agent-runs")>();
   return {
     ...actual,
-    useAgentStreamsStore: <T,>(selector: (state: SeedState) => T): T => selector(seed.state),
+    useAgentRunsStore: <T,>(selector: (state: SeedState) => T): T => selector(seed.state),
   };
 });
 
 function runOf(status: AgentRun["status"], startedAt = Date.now() - 65_000): AgentRun {
-  return { runId: "r1", projectId: "p1", status, startedAt, segments: [] };
+  return { runId: "r1", projectId: "p1", status, startedAt };
 }
 
 function seedRun(run: AgentRun) {

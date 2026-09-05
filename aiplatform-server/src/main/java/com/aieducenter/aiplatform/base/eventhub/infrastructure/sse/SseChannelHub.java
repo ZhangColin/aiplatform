@@ -27,25 +27,24 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.SseEventId;
 /**
  * SSE 传输内核（ADR-0001 落码归属·片1）：emitter 管理 / 心跳 / predicate 过滤订阅 /
- * 信封与 id 分配 / fire-and-forget 广播 / 近期帧重放（注册 opt-in）。内存单实例起步
- * （重启丢事件，通知通道本就永不补发；多实例化见 B0 蓝图 §3 升级路径）。
+ * 信封与 id 分配 / fire-and-forget 广播 / 近期事件重放（注册 opt-in）。内存单实例起步
+ * （重启丢事件，通知族本就永不补发；多实例化见 B0 蓝图 §3 升级路径）。
  *
- * <p>通道按名泛化，零业务概念：通道语义（路径、关联字段、streamId 取值）在应用层
- * （如 {@code PlatformNotificationAppService}），片2a 的 agent 流通道复用本内核。
- * 双通道只共用本传输内核，是两回事。将来提取为 cartisan-boot 模块（拟名
- * cartisan-sse）时，本类整体迁出。</p>
+ * <p>通道按名泛化，零业务概念：通道语义（路径、关联字段、streamId 取值、哪些事件
+ * 进重放缓冲）在应用层（如 {@code EventsAppService}）。将来提取为 cartisan-boot
+ * 模块（拟名 cartisan-sse）时，本类整体迁出。</p>
  *
- * <p>近期帧重放（{@code Flux.replay(N)} 语义）：通道经 {@link #registerReplay} 显式
- * 注册（携带容量）后，广播帧一律进 per-channel 有界环形缓冲——零订阅时也入缓冲、
- * seq 照常分配；新订阅（重放开）先收命中订阅谓词的最近帧（原事件 id）再进实时流。
- * 未注册通道「永不补发」语义分毫不变（注册面即「哪些通道补发」的唯一定义处）。
- * 缓冲不追终态、不按 runId 分桶、单实例内存态。</p>
+ * <p>近期事件重放（{@code Flux.replay(N)} 语义）：通道经 {@link #registerReplay} 显式
+ * 注册（携带容量）后，可重放广播一律进 per-channel 有界环形缓冲——零订阅时也入
+ * 缓冲、seq 照常分配；新订阅（重放开）先收命中订阅谓词的最近事件（原事件 id）再进
+ * 实时流。未注册通道「永不补发」语义分毫不变；单通道混双语义（#82 单端点单流）经
+ * {@link #broadcastUnbuffered} 逐发射豁免缓冲——通知族只达实时订阅。</p>
  *
  * <p>线程模型：广播在调用方线程同步扇出（内存内，快）；心跳由单线程
  * {@code sse-heartbeat} 周期执行。对同一 emitter 的并发发送经订阅级
  * {@link ReentrantLock} 串行，心跳遇锁即跳过（该连接正有事件在发，即存活）。
  * 重放接缝：通道级锁互斥「缓冲快照+订阅注册」与「入缓冲+订阅快照」，网络发送一律
- * 锁外；重放进行中的订阅，live 帧进订阅级 pending 队列、重放毕按序补投——重放与
+ * 锁外；重放进行中的订阅，实时事件进订阅级 pending 队列、重放毕按序补投——重放与
  * 实时流不重不漏不乱序。</p>
  *
  * <p>已知取舍：重放补投在订阅建立的调用方线程上同步执行，慢客户端会拖住对同一通道
@@ -58,7 +57,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.SseEventId;
 @Component
 public class SseChannelHub {
 
-    /** SSE name 恒为 event（两通道统一信封，前端每通道一个 listener）。 */
+    /** SSE name 恒为 event（统一信封，前端每连接一个 listener）。 */
     public static final String EVENT_NAME = "event";
 
     /** 心跳注释行：每 15s 发 {@code :ping}，防代理掐空闲连接（ADR-0001）。 */
@@ -89,9 +88,9 @@ public class SseChannelHub {
     }
 
     /**
-     * 注册通道开启近期帧重放（opt-in，#55）：此后该通道的广播帧（含零订阅时）一律
-     * 进入 per-channel 有界环形缓冲（容量 capacity，旧帧逐出），携带重放开的新订阅
-     * 先收命中订阅谓词的最近帧再进实时流。未注册通道「永不补发」语义不动。
+     * 注册通道开启近期事件重放（opt-in，#55）：此后该通道的广播事件（含零订阅时）一律
+     * 进入 per-channel 有界环形缓冲（容量 capacity，旧事件逐出），携带重放开的新订阅
+     * 先收命中订阅谓词的最近事件再进实时流。未注册通道「永不补发」语义不动。
      *
      * <p>须先于该通道的订阅/广播使用（生产接线在启动期调用）；容量非正、重复注册均
      * 属调用方 bug，fail-fast。缓冲为单实例内存态，不感知终态、不按 runId 分桶。</p>
@@ -121,11 +120,11 @@ public class SseChannelHub {
 
     /**
      * 订阅一个通道。filter 为订阅过滤谓词（作用于事件 payload），null 视为全量。
-     * 不超时（断连由心跳发送失败逐出）；连接建立即刻发一帧 {@code :ping}，
+     * 不超时（断连由心跳发送失败逐出）；连接建立即刻发一条 {@code :ping}，
      * 冲刷响应头并作即时存活信号。
      *
      * <p>replay=true 且通道已注册重放缓冲（{@link #registerReplay}）：先收命中订阅
-     * 谓词的最近缓冲帧（原事件 id，与实时帧同一 id 口径）、再无缝进实时流。replay
+     * 谓词的最近缓冲事件（原事件 id，与实时事件同一 id 口径）、再无缝进实时流。replay
      * 开关对未注册通道无效果（现行为）。</p>
      */
     public SseEmitter subscribe(String channel, Predicate<Map<String, Object>> filter, boolean replay) {
@@ -146,8 +145,8 @@ public class SseChannelHub {
 
     /**
      * 重放开且通道已注册缓冲：通道临界区内完成「缓冲快照+订阅注册」（与广播侧
-     * 「入缓冲+订阅快照」互斥——接缝不重不漏的关键：帧要么在快照里、要么在广播
-     * 遍历集合里，恰得其一）。订阅先标记 replaying 再注册，此后广播帧先入订阅级
+     * 「入缓冲+订阅快照」互斥——接缝不重不漏的关键：事件要么在快照里、要么在广播
+     * 遍历集合里，恰得其一）。订阅先标记 replaying 再注册，此后广播事件先入订阅级
      * pending 队列。否则直接注册（现行为）。
      */
     private List<SseServerEvent> snapshotAndRegister(ChannelState state, Subscription subscription, boolean replay) {
@@ -168,9 +167,9 @@ public class SseChannelHub {
     }
 
     /**
-     * 补投重放帧并接管重放期间到达的 live 帧：发完一批、订阅级锁内取下一批 pending，
-     * 取空才切 replaying=false——重放期间到达的帧必然进过 pending（不漏），任何直发
-     * live 帧必然晚于全部补投帧（不乱序）。谓词过滤在锁外做（帧不可变，等价且临界区
+     * 补投重放事件并接管重放期间到达的 live 事件：发完一批、订阅级锁内取下一批 pending，
+     * 取空才切 replaying=false——重放期间到达的事件必然进过 pending（不漏），任何直发
+     * live 事件必然晚于全部补投事件（不乱序）。谓词过滤在锁外做（事件不可变，等价且临界区
      * 最小化）。
      */
     private void deliverBacklog(ChannelState state, Subscription subscription, List<SseServerEvent> backlog) {
@@ -199,18 +198,33 @@ public class SseChannelHub {
     }
 
     /**
-     * 广播一帧事件到通道内所有过滤命中的订阅。fire-and-forget：单订阅发送失败只记
+     * 广播一条事件到通道内所有过滤命中的订阅。fire-and-forget：单订阅发送失败只记
      * 日志并逐出，绝不影响调用方与其他订阅；信封契约违约（如 payload 内含 type 键）
      * 属调用方 bug，发射前 fail-fast 抛 IllegalArgumentException。
      *
-     * <p>注册了重放缓冲的通道：帧入 per-channel 有界缓冲（零订阅时也入，seq 照常
-     * 分配——重放帧与实时帧同一 id 口径）；未注册通道零订阅时 noop、不分配 seq
+     * <p>注册了重放缓冲的通道：事件入 per-channel 有界缓冲（零订阅时也入，seq 照常
+     * 分配——重放事件与实时事件同一 id 口径）；未注册通道零订阅时 noop、不分配 seq
      * （现行为）。</p>
      *
-     * @param streamId 事件归属的流标识（通知通道=projectId，agent 流通道=runId），
+     * @param streamId 事件归属的流标识（平台通知=projectId，智能体事件=runId），
      *                 id 行取 {@code {streamId}:{seq}}，seq 同流内单调递增
      */
     public void broadcast(String channel, String streamId, String type, Map<String, Object> payload) {
+        doBroadcast(channel, streamId, type, payload, true);
+    }
+
+    /**
+     * 广播一条<b>不进重放缓冲</b>的事件（单端点单流合并后通知族的语义腿，#82）：
+     * 只达实时订阅，新连接不补发——「通知只作实时呈现、状态以查询为准」在内核
+     * 的落点。id 分配与订阅扇出与 {@link #broadcast} 同口径（同通道同一 seq 序）。
+     */
+    public void broadcastUnbuffered(String channel, String streamId, String type,
+            Map<String, Object> payload) {
+        doBroadcast(channel, streamId, type, payload, false);
+    }
+
+    private void doBroadcast(String channel, String streamId, String type,
+            Map<String, Object> payload, boolean replayable) {
         EventEnvelope envelope = new EventEnvelope(type, payload, clock.instant());
         ChannelState state = channels.get(channel);
         if (state == null) {
@@ -225,12 +239,12 @@ public class SseChannelHub {
         state.channelLock.lock();
         try {
             // seq 分配与入缓冲同临界区：缓冲序 == seq 序（并发广播下重放流仍按 id 序，
-            // 容量逐出的也恒为最旧帧）
+            // 容量逐出的也恒为最旧事件）
             long seq = state.sequences
                     .computeIfAbsent(streamId, key -> new AtomicLong())
                     .incrementAndGet();
             frame = SseServerEvent.of(new SseEventId(streamId, seq).value(), EVENT_NAME, envelope);
-            if (buffer != null) {
+            if (buffer != null && replayable) {
                 buffer.append(frame);
             }
             subscribers = List.copyOf(state.subscriptions);
@@ -246,7 +260,7 @@ public class SseChannelHub {
         }
     }
 
-    /** 重放进行中的订阅：帧入订阅级 pending 队列（重放毕按序补投）；否则直接发送。 */
+    /** 重放进行中的订阅：事件入订阅级 pending 队列（重放毕按序补投）；否则直接发送。 */
     private void enqueueOrSend(ChannelState state, Subscription subscription, SseServerEvent frame) {
         subscription.lock.lock();
         try {
@@ -320,7 +334,7 @@ public class SseChannelHub {
     /**
      * 一个订阅：emitter + 过滤谓词；lock 串行化对同一 emitter 的并发发送
      * （广播线程 vs 心跳线程）——SseEmitter 非线程安全。重放进行中（replaying，
-     * 仅注册通道+重放开的新订阅有此窗口）时，广播帧先入 pending、重放毕按序补投；
+     * 仅注册通道+重放开的新订阅有此窗口）时，广播事件先入 pending、重放毕按序补投；
      * 「入 pending」与「切 replaying=false + 取走 pending」经同一把 lock 互斥。
      */
     private static final class Subscription {
@@ -353,7 +367,7 @@ public class SseChannelHub {
         }
     }
 
-    /** per-channel 有界环形缓冲（帧不可变，快照与追加可安全共享）。 */
+    /** per-channel 有界环形缓冲（事件不可变，快照与追加可安全共享）。 */
     private static final class ReplayBuffer {
         private final int capacity;
         private final Deque<SseServerEvent> frames = new ArrayDeque<>();
@@ -362,7 +376,7 @@ public class SseChannelHub {
             this.capacity = capacity;
         }
 
-        /** 追加并按容量逐出最旧帧。 */
+        /** 追加并按容量逐出最旧事件。 */
         private void append(SseServerEvent frame) {
             frames.addLast(frame);
             while (frames.size() > capacity) {

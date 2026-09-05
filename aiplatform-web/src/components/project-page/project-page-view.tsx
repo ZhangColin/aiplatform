@@ -9,7 +9,7 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProject } from "@/hooks/use-project";
 import { errorText } from "@/lib/api/api-error";
-import { useAgentStreamChannel } from "@/lib/sse/agent-channel";
+import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 import { coderStatusOf, useGenerationStore } from "@/lib/store/generation";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
@@ -48,13 +48,13 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   const [outputsOpen, setOutputsOpen] = useState(false);
   const placeOrder = usePlaceOrder(projectId);
 
-  useAgentStreamChannel(projectId);
+  useAgentEventChannel(projectId);
   const agentStatus = useSseStatus("agent");
   const coderStatus = useGenerationStore((s) => coderStatusOf(s, projectId));
 
   // 有成果（PRD 产出）即滑出一次——渲染期派生态（同 seenGenerating 先例），
   // 含刷新/回访挂载（成果在那里，应当场可见）：seenOutputs 起步 false，
-  // 首帧见成果即开
+  // 首条见成果即开
   const hasOutputs = !!detail?.prdProducedAt;
   const [seenOutputs, setSeenOutputs] = useState(false);
   if (hasOutputs && !seenOutputs) {
@@ -64,7 +64,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
 
   // 编码 run 起跑（含生成中回页/重连）自动开成果区并切「系统」——渲染期派生态
   // 调整（不用 effect）；用户手动切换保留至下一自动事件
-  const generating = coderStatus === "running" || coderStatus === "retrying";
+  const generating = coderStatus === "running";
   const [seenGenerating, setSeenGenerating] = useState(generating);
   if (generating !== seenGenerating) {
     setSeenGenerating(generating);
@@ -88,7 +88,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
     }
     if (agentStatus !== "offline" || !wasConnected.current) return;
     const timer = setTimeout(() => {
-      toast.warning("直播连接已断开，正在自动重连", { id: "agent-channel-offline" });
+      toast.warning("过程事件连接已断开，正在自动重连", { id: "agent-channel-offline" });
     }, 10_000);
     return () => clearTimeout(timer);
   }, [agentStatus]);

@@ -13,7 +13,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -50,7 +50,7 @@ public class ProjectLifecycleAppService {
     private final BaInterviewAppService baInterviewAppService;
     private final ProjectRepository projectRepository;
     private final ProjectQueryAppService queryAppService;
-    private final PlatformNotificationAppService notificationAppService;
+    private final EventsAppService eventsAppService;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final TransactionTemplate transactionTemplate;
@@ -59,7 +59,7 @@ public class ProjectLifecycleAppService {
                                       BaInterviewAppService baInterviewAppService,
                                       ProjectRepository projectRepository,
                                       ProjectQueryAppService queryAppService,
-                                      PlatformNotificationAppService notificationAppService,
+                                      EventsAppService eventsAppService,
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       TransactionTemplate transactionTemplate) {
@@ -67,7 +67,7 @@ public class ProjectLifecycleAppService {
         this.baInterviewAppService = baInterviewAppService;
         this.projectRepository = projectRepository;
         this.queryAppService = queryAppService;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.transactionTemplate = transactionTemplate;
@@ -95,7 +95,7 @@ public class ProjectLifecycleAppService {
         }
 
         // SSE（副作用真实落定后发射，ADR-0001）
-        notificationAppService.publish(ProjectEventTypes.WORKSPACE_CREATED, Map.of(
+        eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_CREATED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
                 ProjectEventTypes.PROJECT_NAME_FIELD, project.getName(),
                 ProjectEventTypes.CONTAINER_FIELD, workspace.containerName(),
@@ -166,7 +166,7 @@ public class ProjectLifecycleAppService {
         destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
-        notificationAppService.publish(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
+        eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString()));
     }
 
@@ -179,7 +179,7 @@ public class ProjectLifecycleAppService {
         Project project = requireProject(projectId);
         URI url = workspaceLifecycleAppService
                 .exposePreview(Long.toString(project.getWorkspaceId()));
-        notificationAppService.publish(ProjectEventTypes.PREVIEW_READY, Map.of(
+        eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 ProjectEventTypes.URL_FIELD, url.toString()));
         return new ProjectPreviewResponse(url.toString());

@@ -8,7 +8,7 @@ import java.util.function.Consumer;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.stereotype.Component;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -18,14 +18,14 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 直播步骤边界驱动的预览刷新（#49 逐修改刷新）：刷新单元 = 一次完整修改——以编码
- * run 的 {@code live-step} 帧（每次模型调用≈一次完整修改）为刷新信号，收到即
+ * 步骤边界驱动的预览刷新（#49 逐修改刷新）：刷新单元 = 一次完整修改——以编码
+ * run 的 {@code part-step} 部件（每次模型调用≈一次完整修改）为刷新信号，收到即
  * 平台侧探活工作区应用端口（8081，与生成收口核验同判据 {@link GenerationAppService#CLOSING_PROBE}），
  * <b>探活通过才发射 {@code preview-updated} 通知</b>（前端节流重载预览）；未通过
- * 不发射——前端保持最后好状态，不闪断。生成与修正同一口径（挂在共用尝试环的
- * 流桥 sink 上，见 {@link CoderRunAttempts}）。
+ * 不发射——前端保持最后好状态，不闪断。生成与更新同一口径（挂在共用尝试环的
+ * 事件桥 sink 上，见 {@link CoderRunAttempts}）。
  *
- * <p>{@code live-step} 的 {@code step=1} 是起跑边界（尚无完整修改），不算刷新信号；
+ * <p>{@code part-step} 的 {@code step=1} 是起跑边界（尚无完整修改），不算刷新信号；
  * 末步完成由 run-finish 收口重挂兜底。探针不判内容只判可访问（HTTP 有应答即可），
  * 中间态报错的兜底归编码智能体自愈循环（CONTEXT.md「预览」）。</p>
  *
@@ -36,10 +36,10 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-class LiveStepPreviewRefresh implements DisposableBean {
+class StepBoundaryPreviewRefresh implements DisposableBean {
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final PlatformNotificationAppService notificationAppService;
+    private final EventsAppService eventsAppService;
     /** 探活专职单线程（daemon）：FIFO 保步骤序；容量无界——每步至多一探，节奏天然稀疏。 */
     private final ExecutorService probeWorker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "preview-step-probe");
@@ -47,14 +47,14 @@ class LiveStepPreviewRefresh implements DisposableBean {
         return thread;
     });
 
-    LiveStepPreviewRefresh(WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            PlatformNotificationAppService notificationAppService) {
+    StepBoundaryPreviewRefresh(WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            EventsAppService eventsAppService) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
     }
 
     /**
-     * 装饰编码 run 的流桥 sink：帧原样透传（发射照旧），直播步骤边界（完整修改
+     * 装饰编码 run 的事件桥 sink：事件原样透传（发射照旧），步骤分组边界（完整修改
      * 落定）另触发异步「探活 → 通过才发刷新通知」。
      */
     Consumer<AgentEvent> decorate(Long projectId, Long workspaceId, Consumer<AgentEvent> sink) {
@@ -66,12 +66,12 @@ class LiveStepPreviewRefresh implements DisposableBean {
         };
     }
 
-    /** 完整修改落定判据：live-step 且 step≥2（第 N 帧到达 = 第 N-1 次模型调用已完整结束）。 */
+    /** 完整修改落定判据：part-step 且 step≥2（第 N 个部件到达 = 第 N-1 次模型调用已完整结束）。 */
     private static boolean completedModification(AgentEvent event) {
-        if (!AgentEventTypes.LIVE_STEP.equals(event.type())) {
+        if (!AgentEventTypes.PART_STEP.equals(event.type())) {
             return false;
         }
-        return event.payload().get(AgentEventTypes.LIVE_STEP_FIELD) instanceof Number step
+        return event.payload().get(AgentEventTypes.PART_STEP_FIELD) instanceof Number step
                 && step.intValue() >= 2;
     }
 
@@ -86,7 +86,7 @@ class LiveStepPreviewRefresh implements DisposableBean {
                         projectId, result.exitCode());
                 return;
             }
-            notificationAppService.publish(ProjectEventTypes.PREVIEW_UPDATED, Map.of(
+            eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_UPDATED, Map.of(
                     ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString()));
         }
         catch (RuntimeException e) {

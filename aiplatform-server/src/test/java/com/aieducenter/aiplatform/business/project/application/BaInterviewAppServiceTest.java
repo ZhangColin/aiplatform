@@ -39,7 +39,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
@@ -54,8 +54,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 
 /**
  * BA 访谈编排：对话命令的会话寻址（projectId → ba-{projectId} 稳定绑定，每轮
- * 都续此会话）、计量归属（role=BA 维度）、role-assigned 帧序（engine=agentscope）、
- * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起帧
+ * 都续此会话）、计量归属（role=BA 维度）、run-start 携角色键（引擎信息归一）、
+ * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起事件
  * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）；链必达收口（#43）——BA 回合
  * 收口（无挂起问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；
  * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）；交接物补齐（#52）——
@@ -89,7 +89,7 @@ class BaInterviewAppServiceTest {
     private AgentscopeAgentClient agentClient;
 
     @MockitoBean
-    private AgentStreamAppService streamAppService;
+    private EventsAppService eventsAppService;
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
@@ -110,7 +110,7 @@ class BaInterviewAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
-    /** 同生产语义吞掉轨道异常（异步轨道失败经 error 帧表达，执行器只记日志）——
+    /** 同生产语义吞掉轨道异常（异步轨道失败经 error 事件表达，执行器只记日志）——
      * 炸轮用例的执行器形态。 */
     private void givenSessionExecutorSwallowsFailures() {
         doAnswer(invocation -> {
@@ -307,24 +307,22 @@ class BaInterviewAppServiceTest {
     }
 
     @Test
-    void given_turn_when_run_then_role_assigned_first_then_converse() {
+    void given_turn_when_run_then_no_role_assigned_emitted() {
+        // 收缩验收（#82）：角色键已并入 run-start（converse 内发射），编排层不再
+        // 前置 role-assigned——退役族零发射
         Long projectId = persistedProject("9701");
         givenSessionExecutorRunsInline();
 
         appService.runInterviewTurn(projectId, "梳理需求");
 
-        // 帧序 role-assigned（engine=agentscope）→ run-start（converse 内）
-        InOrder order = inOrder(streamAppService, agentClient);
-        order.verify(streamAppService).publish(org.mockito.ArgumentMatchers.eq(
-                        AgentEventTypes.ROLE_ASSIGNED),
-                org.mockito.ArgumentMatchers.anyMap());
-        order.verify(agentClient).converse(any(), any());
+        verify(agentClient).converse(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), anyMap());
     }
 
     @Test
     void given_turn_frames_when_bridge_publishes_then_project_id_injected_per_frame() {
-        // 流桥：编排注入的关联字段（projectId）逐帧并入 payload（帧序在前——寻址
-        // 字段不覆盖帧本体字段）；发射失败不断流（护栏）
+        // 流桥：编排注入的关联字段（projectId）逐事件并入 payload（事件序在前——寻址
+        // 字段不覆盖事件本体字段）；发射失败不断流（护栏）
         Long projectId = persistedProject("9702");
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
@@ -342,7 +340,7 @@ class BaInterviewAppServiceTest {
         appService.runInterviewTurn(projectId, "做一个官网");
 
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(streamAppService).publish(org.mockito.ArgumentMatchers.eq("text"), payload.capture());
+        verify(eventsAppService).publishAgentEvent(org.mockito.ArgumentMatchers.eq("text"), payload.capture());
         assertThat(payload.getValue()).containsEntry("projectId", projectId.toString())
                 .containsEntry("runId", "run-x");
     }
@@ -350,7 +348,7 @@ class BaInterviewAppServiceTest {
     @Test
     void given_question_answer_when_resume_then_rebuilt_from_project_facts() {
         // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/角色卡/计量），
-        // 待确认工具来自挂起帧载荷——不信前端回传的恢复私货
+        // 待确认工具来自挂起事件载荷——不信前端回传的恢复私货
         Long projectId = persistedProject("9703");
         givenSessionExecutorRunsInline();
         List<Map<String, Object>> pendingToolCalls = List.of(Map.of(
@@ -391,8 +389,8 @@ class BaInterviewAppServiceTest {
     @Test
     void given_pending_question_when_turn_then_prj_024_and_no_submission() {
         // 挂起问答守卫（#40 / ADR-0005）：问答待答期间指令区新输入不盲提交 converse
-        // ——引擎按 ASKING 态拒时 REST 已返 200、只见异步 error 帧；同步 409 指路
-        // 作答。role-assigned 帧也不发（守卫先于任何帧与提交）
+        // ——引擎按 ASKING 态拒时 REST 已返 200、只见异步 error 事件；同步 409 指路
+        // 作答。任何事件也不发（守卫先于提交）
         Long projectId = persistedProject("9715");
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
                 .thenReturn(true);
@@ -406,7 +404,8 @@ class BaInterviewAppServiceTest {
 
         verify(agentClient, never()).converse(any(), any());
         verify(sessionExecutor, never()).submit(any(), any());
-        verify(streamAppService, never()).publish(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(any(), any());
+        verify(eventsAppService, never()).publishNotification(any(), any());
     }
 
     // ---------- 链必达收口（#43：BA 无派发权，平台回合收口观测自动派修正） ----------
@@ -415,7 +414,7 @@ class BaInterviewAppServiceTest {
     void given_generated_project_when_ba_turn_closes_without_dispatch_tool_then_fix_run_dispatched() {
         // 灵魂用例（#43 缺陷的行为化验证）：脚本化智能体边界——模型只收口（哪怕
         // 只存了 PRD、不调任何派发工具，BA 也没有派发工具），平台在回合收口时
-        // 自动派修正 run：意见原文为任务，coder 会话 + CODER 角色卡 + 直播开
+        // 自动派修正 run：意见原文为任务，coder 会话 + CODER 角色卡
         Long projectId = persistedGeneratedProject("9720");
         givenSessionExecutorRunsInline();
         givenConverseBaRepliesAndCoderFinishes("好的，会把主色调改成绿色");
@@ -429,10 +428,7 @@ class BaInterviewAppServiceTest {
         assertThat(fix.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt());
         assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 handoff("把系统的主色调改成绿色", null)));
-        assertThat(fix.live()).isTrue();
-        // 修正 run 的 role-assigned 前置（CODER）
-        verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED),
-                argThat(payload -> "CODER".equals(payload.get(AgentEventTypes.ROLE_FIELD))));
+        assertThat(fix.agentRole()).isEqualTo("CODER"); // run-start 携带角色键（引擎信息归一）
     }
 
     // ---------- 交接物补齐（#52：BA 判定结果入修正 run） ----------
@@ -666,18 +662,13 @@ class BaInterviewAppServiceTest {
             return null;
         }).when(sessionExecutor).submit(any(), any());
         givenConverseBaRepliesAndCoderFinishes("好的");
-        List<String> stages = givenStageCapture();
 
         appService.runInterviewTurn(projectId, "意见一：加导出");
         appService.runInterviewTurn(projectId, "意见二：改蓝色"); // 轮1 在途窗口再发
         assertThat(baTracks).hasSize(2);
 
-        baTracks.remove(0).run(); // 轮1 收口：派发交接物含意见一（现状 = 意见二，先红）
-        baTracks.remove(0).run(); // 轮2 收口：第二次派发、含意见二 → 撞在途修正 → queued
-        // 帧序如实于测试时序：两轮先相继提交（analyzing×2），轨道后跑（收口派发×2，
-        // 第二次撞在途修正 → queued）
-        assertThat(stages).containsExactly("analyzing", "analyzing", "dispatching",
-                "dispatching", "queued");
+        baTracks.remove(0).run(); // 轮1 收口：派发交接物含意见一
+        baTracks.remove(0).run(); // 轮2 收口：第二次派发、含意见二 → 撞在途修正 → 排队
 
         coderTracks.remove(0).run(); // 修正轨道起跑：第一场收口即合并排队的意见二续派
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -692,7 +683,7 @@ class BaInterviewAppServiceTest {
     void given_converse_failure_when_turn_then_anchor_cleared_no_stale_opinion_consumed() {
         // 失败即清锚（#54，对齐「收口即消费」）：converse 炸 → 锚即清——后续收口
         // （此处脚本化：炸轮后经问答答复续跑收口）不消费到滞留的旧意见；重提即
-        // 兜底，不自动重试；error 帧语义保持（converse 内已发）
+        // 兜底，不自动重试；error 事件语义保持（converse 内已发）
         Long projectId = persistedGeneratedProject("9726");
         givenSessionExecutorSwallowsFailures();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -718,7 +709,7 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_turn_error_when_close_then_no_dispatch() {
-        // BA 轮失败不派修正（意见未被处理；error 帧已表达，用户重提即兜底）——
+        // BA 轮失败不派修正（意见未被处理；error 事件已表达，用户重提即兜底）——
         // 内联执行器同生产语义吞掉轨道异常
         Long projectId = persistedGeneratedProject("9724");
         givenSessionExecutorSwallowsFailures();
@@ -730,67 +721,13 @@ class BaInterviewAppServiceTest {
         verify(agentClient, times(1)).converse(any(), any());
     }
 
-    // ---------- 派发阶段帧（#50 阶段状态条：意见链全程帧序） ----------
-
-    /** 阶段帧捕获（只收 dispatch-stage，发射序即阶段序）。 */
-    private List<String> givenStageCapture() {
-        List<String> stages = CollUtil.newArrayList();
-        doAnswer(invocation -> {
-            if (AgentEventTypes.DISPATCH_STAGE.equals(invocation.getArgument(0))) {
-                stages.add(String.valueOf(
-                        invocation.<Map<String, Object>>getArgument(1)
-                                .get(AgentEventTypes.DISPATCH_STAGE_FIELD)));
-            }
-            return null;
-        }).when(streamAppService).publish(any(), any());
-        return stages;
-    }
-
     @Test
-    void given_generated_project_when_zero_action_opinion_then_stage_frames_walk_full_chain() {
-        // #50：BA 零动作的意见（不追问、不改 PRD）状态条完整走完——analyzing →
-        // dispatching → fixing → done(changed=true)，不经 clarifying / updating-prd
-        //（可选阶段缺席不是跳变，是如实）；帧序先于 role-assigned（状态条先开口）
-        Long projectId = persistedGeneratedProject("9730");
-        givenSessionExecutorRunsInline();
-        List<String> stages = givenStageCapture();
-        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
-        String turnRunId = appService.runInterviewTurn(projectId, "把主色调改成绿色").runId();
-
-        assertThat(stages).containsExactly("analyzing", "dispatching", "fixing", "done");
-        // 首帧锚 BA 轮 runId 且先于 role-assigned；完成态区分：changed=true（脚本
-        // finish_edit(changed=true)）——「已修改」与「未动系统」以 changed 分档
-        InOrder order = inOrder(streamAppService);
-        order.verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE),
-                argThat(payload -> "analyzing".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
-                        && turnRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
-        order.verify(streamAppService).publish(eq(AgentEventTypes.ROLE_ASSIGNED), anyMap());
-        verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
-                "done".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
-                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.DISPATCH_CHANGED_FIELD))));
-    }
-
-    @Test
-    void given_not_generated_project_when_turn_then_no_stage_frames() {
-        // 生成前意见链止于 BA：无隐藏处理段，不发阶段帧（访谈期以对话面本身呈现）——
-        // 状态条不空转、不悬停
-        Long projectId = persistedProject("9731");
-        givenSessionExecutorRunsInline();
-        List<String> stages = givenStageCapture();
-
-        appService.runInterviewTurn(projectId, "做一个官网");
-
-        assertThat(stages).isEmpty();
-    }
-
-    @Test
-    void given_question_raised_when_answer_settles_then_clarifying_then_chain_resumes() {
-        // #50 挂起边界：追问挂起停在 clarifying（不发后续），答复续跑回 analyzing
-        // 再走完链——阶段与链路实际状态一致
+    void given_question_raised_when_answer_settles_then_dispatch_waits_and_carries_reply() {
+        // 挂起边界（行为核）：追问挂起期间收口不派修正（链停在等答复），答复续跑
+        // 收口后派发——交接物意见腿含原意见与追问答复
         Long projectId = persistedGeneratedProject("9732");
         givenSessionExecutorRunsInline();
-        List<String> stages = givenStageCapture();
-        // BA 轮流上挂起帧（kind=QUESTION）；修正 run 收口脚本沿用（changed=true）
+        // BA 轮流上挂起事件（kind=QUESTION）；修正 run 收口脚本沿用（changed=true）
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("ba-")) {
@@ -812,72 +749,22 @@ class BaInterviewAppServiceTest {
                 .thenReturn(false);
 
         appService.runInterviewTurn(projectId, "把主色调改成绿色");
-        assertThat(stages).containsExactly("analyzing", "clarifying"); // 停在追问中
+        verify(agentClient, times(1)).converse(any(), any()); // 挂起期间无修正 run
 
         appService.answerQuestion(projectId, "run-q", "reply-1",
                 List.of(Map.of("id", "tc-1", "name", "ask_user")), "要薄荷绿");
-        assertThat(stages).containsExactly("analyzing", "clarifying",
-                "analyzing", "dispatching", "fixing", "done"); // 答复后续跑走完
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("把主色调改成绿色")
+                .contains("要薄荷绿"); // 答复并入交接物随派发
     }
 
     @Test
-    void given_ba_calls_save_prd_when_opinion_then_updating_prd_stage() {
-        // #50：BA 判定需求变更调 savePrd（tool 帧 start 边界）→ updating-prd 阶段
-        Long projectId = persistedGeneratedProject("9733");
-        givenSessionExecutorRunsInline();
-        List<String> stages = givenStageCapture();
-        doAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
-                Consumer<AgentEvent> sink = invocation.getArgument(1);
-                sink.accept(new AgentEvent("tool", new java.util.LinkedHashMap<>(Map.of(
-                        "runId", command.runId(),
-                        "data", Map.of("toolCallId", "tc-1", "toolName", "savePrd",
-                                "phase", "start")))));
-                return new AgentReply(command.runId(), "已按意见更新 PRD");
-            }
-            finishFixFacts.record(command.workspaceId(), true, "已修正");
-            return new AgentReply(command.runId(), "修正完成");
-        }).when(agentClient).converse(any(), any());
-
-        appService.runInterviewTurn(projectId, "把主色调改成绿色");
-
-        assertThat(stages).containsExactly("analyzing", "updating-prd", "dispatching",
-                "fixing", "done");
-    }
-
-    @Test
-    void given_fix_in_flight_when_opinion_closes_then_queued_stage() {
-        // #50 排队边界：修正 run 在途时新意见收口 → queued（如实呈现排队，锚本条
-        // 意见的 BA 轮），不起第二条轨道
-        Long projectId = persistedGeneratedProject("9734");
-        List<Runnable> tracks = CollUtil.newArrayList();
-        doAnswer(invocation -> {
-            Runnable task = (Runnable) invocation.getArgument(1);
-            if (("coder-" + projectId).equals(invocation.getArgument(0))) {
-                tracks.add(task); // 修正轨道挂起不跑（模拟在途）
-                return null;
-            }
-            task.run();
-            return null;
-        }).when(sessionExecutor).submit(any(), any());
-        givenConverseBaRepliesAndCoderFinishes("好的");
-        List<String> stages = givenStageCapture();
-
-        appService.runInterviewTurn(projectId, "意见一：加导出");
-        appService.runInterviewTurn(projectId, "意见二：改蓝色");
-
-        assertThat(stages).containsExactly("analyzing", "dispatching", "analyzing",
-                "dispatching", "queued");
-    }
-
-    @Test
-    void given_start_fix_run_failure_when_close_then_dispatch_failed_terminal_stage() {
-        // #51 派发失败终态：收口派修正 run 炸 → dispatch-failed 失败终态帧锚本条
-        // 意见的 BA 轮（状态条不悬死在「派发中」）；意见锚已消费、不自动重试
-        //——重提即兜底（此处脚本化修正轨道提交失败 = startFixRun 抛出的代表路径）
+    void given_start_fix_run_failure_when_close_then_track_survives_no_coder_run() {
+        // #51 派发失败（行为核）：收口派修正 run 炸——意见锚已消费、不自动重试，
+        // 用户重提即兜底；BA 轨道不被炸穿（会话执行器吞掉），修正 run 未起跑
         Long projectId = persistedGeneratedProject("9735");
-        List<String> stages = givenStageCapture();
         givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
         doAnswer(invocation -> {
             String sessionId = invocation.getArgument(0);
@@ -889,15 +776,11 @@ class BaInterviewAppServiceTest {
             return null;
         }).when(sessionExecutor).submit(any(), any());
 
-        String turnRunId = appService.runInterviewTurn(projectId, "把主色调改成绿色").runId();
+        appService.runInterviewTurn(projectId, "把主色调改成绿色");
 
-        // analyzing → dispatching → dispatch-failed（如实告知重提，不悬死不静默）
-        assertThat(stages).containsExactly("analyzing", "dispatching", "dispatch-failed");
-        verify(streamAppService).publish(eq(AgentEventTypes.DISPATCH_STAGE), argThat(payload ->
-                "dispatch-failed".equals(payload.get(AgentEventTypes.DISPATCH_STAGE_FIELD))
-                        && turnRunId.equals(payload.get(AgentStreamAppService.RUN_FIELD))));
-        // 修正 run 未起跑：无 coder converse，BA 轮失败不炸轨道（会话执行器吞掉）
-        verify(agentClient, times(1)).converse(any(), any());
+        verify(agentClient, times(1)).converse(any(), any()); // 无 coder converse
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.RUN_FAILED), anyMap()); // 派发失败不是 run 终态
     }
 
     // ---------- 测试数据 ----------

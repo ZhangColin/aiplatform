@@ -31,7 +31,7 @@ class AgentSessionExecutorTest {
 
     @Test
     void given_task_throws_when_submit_then_swallowed_not_reraised() {
-        // 异步轨道的失败表达归 error 帧——执行器吞掉任务异常，不外溢给提交方
+        // 异步轨道的失败表达归 error 事件——执行器吞掉任务异常，不外溢给提交方
         List<String> ran = new ArrayList<>();
         AgentSessionExecutor executor = new AgentSessionExecutor((Executor) task -> {
             task.run();

@@ -12,7 +12,7 @@ import cn.hutool.core.map.MapUtil;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 测试夹具：记录每个 emitter 收到的帧与发送尝试数；可对指定 emitter 恒抛异常模拟断连。
+ * 测试夹具：记录每个 emitter 收到的事件与发送尝试数；可对指定 emitter 恒抛异常模拟断连。
  * 内核测试与通道应用服务测试共用（白盒验证通道语义的接线）。
  */
 public final class RecordingSseSender implements SseSender {
@@ -38,7 +38,7 @@ public final class RecordingSseSender implements SseSender {
         return received.getOrDefault(emitter, List.of());
     }
 
-    /** 只取事件帧（排除心跳注释帧）。 */
+    /** 只取事件行（排除心跳注释行）。 */
     public List<SseServerEvent> eventFramesOf(SseEmitter emitter) {
         return framesOf(emitter).stream().filter(frame -> frame.id() != null).toList();
     }

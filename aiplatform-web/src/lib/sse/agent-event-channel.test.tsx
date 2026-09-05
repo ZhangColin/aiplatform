@@ -6,7 +6,7 @@ import { StrictMode, useEffect } from "react";
 
 import { useSseStatusStore } from "@/lib/store/sse-status";
 
-import { useAgentStreamChannel } from "./agent-channel";
+import { useAgentEventChannel } from "./agent-event-channel";
 
 /**
  * agent 流通道的 StrictMode 实证（issue #60）：双挂载下 probe-cancel 守卫
@@ -56,7 +56,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useAgentStreamChannel：StrictMode 双挂载（issue #60）", () => {
+describe("useAgentEventChannel：StrictMode 双挂载（issue #60）", () => {
   it("哨兵自证：本环境 effect 双跑（否则以下断言空转）", () => {
     let setups = 0;
     function Sentinel() {
@@ -75,7 +75,7 @@ describe("useAgentStreamChannel：StrictMode 双挂载（issue #60）", () => {
       useEffect(() => {
         setups += 1;
       }, []);
-      useAgentStreamChannel("p1");
+      useAgentEventChannel("p1");
       return null;
     }
 
@@ -97,7 +97,7 @@ describe("useAgentStreamChannel：StrictMode 双挂载（issue #60）", () => {
 
     // 首个探针被 cleanup 作废 → 只建一条；两个 probe 搭同一 in-flight GET（client 去重）
     expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0].url).toBe("/api/agent-events?projectId=p1");
+    expect(FakeEventSource.instances[0].url).toBe("/api/events?projectId=p1");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(useSseStatusStore.getState().statuses.agent).toBe("connecting");
 

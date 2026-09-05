@@ -8,7 +8,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
-import com.aieducenter.aiplatform.base.eventhub.application.AgentStreamAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
@@ -31,7 +31,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
  * <p>入口归 {@link DispatchAppService}（三分类的咨询分支）；全局守卫（存在 /
  * 未归档——指令区关闭即全停）在派发入口前置，订单冻结与挂起问答只拦意见链
  * （#51）——咨询随时可答，本服务收到的即是可答的咨询。会话执行器异步提交即
- * 返回（runId 随响应回，过程帧经 SSE；失败经 error 帧表达）。</p>
+ * 返回（runId 随响应回，过程事件经 SSE；失败经 error 事件表达）。</p>
  */
 @Service
 public class AssistantAppService {
@@ -40,19 +40,19 @@ public class AssistantAppService {
     public static final String SESSION_PREFIX = "assist-";
 
     private final AgentscopeAgentClient agentClient;
-    private final AgentStreamBridge streamBridge;
+    private final AgentEventBridge eventBridge;
     private final AgentSessionExecutor sessionExecutor;
 
-    public AssistantAppService(AgentscopeAgentClient agentClient, AgentStreamBridge streamBridge,
+    public AssistantAppService(AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor) {
         this.agentClient = agentClient;
-        this.streamBridge = streamBridge;
+        this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
     }
 
     /**
-     * 应答一条咨询（prompt 即用户侧输入）：role-assigned（ASSISTANT）前置后异步
-     * 提交——回答经 SSE 到达，runId 随响应回。项目事实由派发入口守卫后的聚合
+     * 应答一条咨询（prompt 即用户侧输入）：异步提交——回答经 SSE 到达，runId
+     * 随响应回。项目事实由派发入口守卫后的聚合
      * 携带（owner / 工作区寻址不入前端信）。
      */
     public AssistantRun answer(Project project, String question) {
@@ -60,9 +60,7 @@ public class AssistantAppService {
         RolePreset role = RolePreset.ASSISTANT;
         String sessionId = SESSION_PREFIX + projectId;
 
-        String runId = AgentStreamAppService.newRunId();
-        streamBridge.emitDispatchStage(projectId, runId, DispatchStage.ANALYZING);
-        streamBridge.emitRoleAssigned(projectId, runId, role);
+        String runId = EventsAppService.newRunId();
         AgentCommand command = new AgentCommand(
                 runId,
                 question,
@@ -73,16 +71,12 @@ public class AssistantAppService {
                 new UsageContext(Long.toString(projectId),
                         UsageDims.of(projectId, UsageDims.kindOf(role), sessionId)),
                 Long.toString(project.getWorkspaceId()),
-                Map.of(AgentStreamAppService.PROJECT_FIELD, projectId.toString()),
+                Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                 null,
-                /* live= */ false,
                 role.name(),
                 /* workspaceReadOnly= */ true);
-        sessionExecutor.submit(sessionId, () -> {
-            agentClient.converse(command, streamBridge.sink(projectId));
-            // 咨询链收口（#50）：作答落定即终态阶段（失败链无此帧，error 帧如实表达）
-            streamBridge.emitDispatchStage(projectId, runId, DispatchStage.ANSWERED);
-        });
+        sessionExecutor.submit(sessionId, () ->
+                agentClient.converse(command, eventBridge.sink(projectId)));
         return new AssistantRun(runId);
     }
 

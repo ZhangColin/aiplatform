@@ -63,8 +63,8 @@ vi.mock("@/hooks/use-order", () => ({
   useCancelOrder: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-vi.mock("@/lib/sse/agent-channel", () => ({
-  useAgentStreamChannel: () => {},
+vi.mock("@/lib/sse/agent-event-channel", () => ({
+  useAgentEventChannel: () => {},
 }));
 
 vi.mock("@/lib/sse/provider", () => ({

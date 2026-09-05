@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
  * 等待的第二来源），哈希碰撞时退化为同 stripe 排队——不劣于串行。并行度上界 =
  * stripe 数（{@value #STRIPES}，daemon）。
  *
- * <p>任务异常吞掉记日志（REST 快返回的异步轨道——失败经 error 帧表达，不炸调用方）；
+ * <p>任务异常吞掉记日志（REST 快返回的异步轨道——失败经 error 事件表达，不炸调用方）；
  * 执行器是进程内状态，重启即清（会话状态在 cat_agent_state，按会话标识恢复）。</p>
  */
 @Component

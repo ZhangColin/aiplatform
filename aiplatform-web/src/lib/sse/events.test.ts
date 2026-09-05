@@ -81,7 +81,7 @@ describe("asNotificationEvent", () => {
   });
 });
 
-describe("agent 流收窄", () => {
+describe("智能体事件族收窄", () => {
   it("平台事件按名册收窄（正本 run-start 字段）；平台 type 不落入透传口", () => {
     const env = parseSseEnvelope(
       JSON.stringify({
@@ -98,7 +98,7 @@ describe("agent 流收窄", () => {
   });
 
   it("question-raised 按正本收窄（payload {projectId, runId, kind, summary}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「通道二」question-raised 行
+    // 期望值来自正本「智能体事件族」question-raised 行
     const env = parseSseEnvelope(
       JSON.stringify({
         type: "question-raised",
@@ -115,7 +115,7 @@ describe("agent 流收窄", () => {
   });
 
   it("run-failed 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「通道二」run-failed 行（#56：编码 run 重试超限终态收口帧）
+    // 期望值来自正本「智能体事件族」run-failed 行（#56：编码 run 重试超限终态收口事件）
     const env = parseSseEnvelope(
       JSON.stringify({
         type: "run-failed",
@@ -132,49 +132,25 @@ describe("agent 流收窄", () => {
   });
 
   it.each([
-    {
-      type: "live-text",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", text: "正在准备演示数据。" },
-    },
-    {
-      type: "live-action",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", action: "正在编写【订单管理】" },
-    },
-    {
-      type: "live-step",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-1", engine: "agentscope", step: 2 },
-    },
-  ] as const)("直播帧 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
-    // 期望值来自正本「通道二」live-* 行（#23：编码 run 专属直播词汇）
-    const env = parseSseEnvelope(JSON.stringify({ ...frame, ts: "" }));
-
-    expect(asPlatformAgentEvent(env!)).toMatchObject(frame);
-    expect(asPassthroughAgentEvent(env!)).toBeNull();
-  });
-
-  it("fix-unchanged 按正本收窄（payload {projectId, runId, reason}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「通道二」fix-unchanged 行（#46：修正收口·系统未动）
+    "role-assigned",
+    "run-created",
+    "run-retrying",
+    "fix-unchanged",
+    "dispatch-stage",
+    "live-text",
+    "live-action",
+    "live-step",
+  ] as const)("退役事件 $type 不进名册：平台口与透传口都收不到（到达即 miss 忽略）", (type) => {
+    // 收缩验收（#82）：退役五族零残留——解析层不认旧名，消费层零处理
     const env = parseSseEnvelope(
-      JSON.stringify({
-        type: "fix-unchanged",
-        payload: {
-          projectId: "p1",
-          runId: "r1",
-          reason: "纯文档性修订，系统现状已满足",
-        },
-        ts: "",
-      }),
+      JSON.stringify({ type, payload: { projectId: "p1", runId: "r1", data: { x: 1 } }, ts: "" }),
     );
 
-    expect(asPlatformAgentEvent(env!)).toMatchObject({
-      type: "fix-unchanged",
-      payload: { projectId: "p1", runId: "r1", reason: "纯文档性修订，系统现状已满足" },
-    });
-    expect(asPassthroughAgentEvent(env!)).toBeNull();
+    expect(asPlatformAgentEvent(env!)).toBeNull();
   });
 
   it("guide-reply 按正本收窄（payload {projectId, runId, prompt, label, text}）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「通道二」guide-reply 行（#47：兜底轻引导回复）
+    // 期望值来自正本「智能体事件族」guide-reply 行（#47：兜底轻引导回复）
     const env = parseSseEnvelope(
       JSON.stringify({
         type: "guide-reply",

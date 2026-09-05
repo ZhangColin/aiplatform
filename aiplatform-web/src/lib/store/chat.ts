@@ -11,24 +11,24 @@ import type { RaisedQuestion } from "@/lib/chat/qa";
  *
  * <p><b>对话面 run 判定</b>（#47 三分类后多角色进对话）：role-assigned 的
  * BA / ASSISTANT 登记为会话 run（run-start 的用户气泡只认对话面 run，片 2 编码
- * run 不进对话）；透传帧自带 sessionId，{@code ba-{projectId}} /
+ * run 不进对话）；透传事件自带 sessionId，{@code ba-{projectId}} /
  * {@code assist-{projectId}} 前缀（后端会话命名约定：角色 × 项目）判定 text /
  * question-raised / run-finish 归属。</p>
  *
- * <p><b>角色标签随派发帧呈现</b>（#47）：role-assigned 帧的 roleLabel 是标签
- * 正本，按 runId 登记、逐消息取用（BA「需求分析师」/ 助理「项目助理」）；帧缺失
+ * <p><b>角色标签随派发事件呈现</b>（#47）：role-assigned 事件的 roleLabel 是标签
+ * 正本，按 runId 登记、逐消息取用（BA「需求分析师」/ 助理「项目助理」）；事件缺失
  * 的重放残段回退通用「智能体」。平台轻引导（guide-reply）自带 label（「平台」，
  * 非智能体角色）。</p>
  *
- * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载（含路由回访）会重收近期帧——
+ * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载（含路由回访）会重收近期事件——
  * runId 已入对话的 run-start 不再补用户气泡（乐观发送先落、run-start 回声
- * 靠「尾条同文」去重），text / 问答 / 失败帧按 SSE 事件 id 只收一次。</p>
+ * 靠「尾条同文」去重），text / 问答 / 失败事件按 SSE 事件 id 只收一次。</p>
  */
 
-/** 帧缺失时智能体消息的回退标签（标签正本在 role-assigned 帧）。 */
+/** 事件缺失时智能体消息的回退标签（标签正本在 role-assigned 事件）。 */
 export const FALLBACK_AGENT_LABEL = "智能体";
 
-/** guide-reply 帧缺 label 时的呈现兜底（正本在后端 GUIDE_LABEL）。 */
+/** guide-reply 事件缺 label 时的呈现兜底（正本在后端 GUIDE_LABEL）。 */
 export const DEFAULT_GUIDE_LABEL = "平台";
 
 export type ChatMessage =
@@ -42,35 +42,27 @@ export type ChatMessage =
       runId?: string;
     }
   | { kind: "error"; id: string; text: string }
-  | {
-      /** 平台侧系统通告（非智能体话语）：#46 修正收口「未动系统」的原因呈现。 */
-      kind: "notice";
-      id: string;
-      text: string;
-    }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
 export type ProjectChat = {
   messages: ChatMessage[];
-  /** role-assigned(BA/ASSISTANT) 登记的对话面 run（run-start 用户气泡的判定锚）。 */
+  /** run-start(role=BA/ASSISTANT) 登记的对话面 run（run-start 用户气泡的判定锚）。 */
   chatRunIds: string[];
-  /** runId → 角色标签（role-assigned 帧 roleLabel 正本，#47 标签随帧呈现）。 */
-  roleLabels: Record<string, string>;
   /** 已折算成对话事件的 run（run-start 重放 / 回声去重锚）。 */
   ingestedRunIds: string[];
-  /** 已收帧的 SSE 事件 id（重放去重锚，有界）。 */
+  /** 已收事件的 SSE 事件 id（重放去重锚，有界）。 */
   seenEventIds: string[];
   /** 对话轮进行中（run-start / 作答续跑起，问答挂起或收口落）。 */
   turnActive: boolean;
-  /** 轮进行中的角色标签（打字指示文案；帧缺失回退 {@link FALLBACK_AGENT_LABEL}）。 */
+  /** 轮进行中的角色标签（打字指示文案；事件缺失回退 {@link FALLBACK_AGENT_LABEL}）。 */
   activeRoleLabel?: string;
 };
 
 export type ChatState = {
   chats: Record<string, ProjectChat>;
   // ---- SSE 侧（bridge 唯一写入方） ----
-  /** role-assigned(BA/ASSISTANT) 登记对话面 run + 角色标签。 */
-  noteChatRun: (projectId: string, runId: string, roleLabel?: string) => void;
+  /** run-start(role=BA/ASSISTANT) 登记对话面 run。 */
+  noteChatRun: (projectId: string, runId: string) => void;
   ingestRunStart: (projectId: string, runId: string, prompt?: string) => void;
   appendAgentDelta: (
     projectId: string,
@@ -86,9 +78,7 @@ export type ChatState = {
   ) => void;
   finishTurn: (projectId: string, sessionId: string | undefined) => void;
   noteTurnError: (projectId: string, runId: string, message: string, eventId: string) => void;
-  /** 修正收口「未动系统」通告落指令区（#46；SSE 事件 id 只收一次）。 */
-  noteSystemUnchanged: (projectId: string, reason: string, eventId: string) => void;
-  /** 平台轻引导落指令区（#47 兜底分支；prompt 重建用户气泡，SSE 事件 id 只收一次）。 */
+  /** 平台轻引导落对话面（#47 兜底分支；prompt 重建用户气泡，SSE 事件 id 只收一次）。 */
   noteGuideReply: (
     projectId: string,
     prompt: string | undefined,
@@ -111,17 +101,14 @@ export type ChatState = {
   markRunIngested: (projectId: string, runId: string) => void;
 };
 
-/** 消息条数软上限（重放缓冲 ~1000 帧，对话史内存有界）。 */
+/** 消息条数软上限（重放缓冲 ~1000 事件，对话史内存有界）。 */
 const MAX_MESSAGES = 200;
 /** run / 事件 id 去重集软上限。 */
 const MAX_IDS = 500;
-/** roleLabels 键软上限（与 id 集同量级）。 */
-const MAX_LABELS = 500;
 
 const emptyChat: ProjectChat = {
   messages: [],
   chatRunIds: [],
-  roleLabels: {},
   ingestedRunIds: [],
   seenEventIds: [],
   turnActive: false,
@@ -147,16 +134,6 @@ function pushCapped(list: string[], id: string): string[] {
   return next.length > MAX_IDS ? next.slice(next.length - MAX_IDS) : next;
 }
 
-/** runId → 标签登记（后写胜出；键数有界——老键先出）。 */
-function withLabelCapped(labels: Record<string, string>, runId: string, label: string) {
-  const entries: Array<[string, string]> = Object.keys(labels)
-    .filter((key) => key !== runId)
-    .map((key) => [key, labels[key]]);
-  entries.push([runId, label]);
-  const overflow = Math.max(0, entries.length - MAX_LABELS);
-  return Object.fromEntries(entries.slice(overflow));
-}
-
 let messageSeq = 0;
 function localId(): string {
   messageSeq += 1;
@@ -172,12 +149,12 @@ function lastIsSameUserText(chat: ProjectChat, text: string): boolean {
 export const useChatStore = create<ChatState>((set) => ({
   chats: {},
 
-  noteChatRun: (projectId, runId, roleLabel) =>
-    updateChat(set, projectId, (chat) => {
-      const registered = { ...chat, chatRunIds: pushCapped(chat.chatRunIds, runId) };
-      if (!roleLabel) return registered;
-      return { ...registered, roleLabels: withLabelCapped(chat.roleLabels, runId, roleLabel) };
-    }),
+  noteChatRun: (projectId, runId) =>
+    updateChat(set, projectId, (chat) =>
+      chat.chatRunIds.includes(runId)
+        ? chat
+        : { ...chat, chatRunIds: pushCapped(chat.chatRunIds, runId) },
+    ),
 
   ingestRunStart: (projectId, runId, prompt) =>
     updateChat(set, projectId, (chat) => {
@@ -186,8 +163,7 @@ export const useChatStore = create<ChatState>((set) => ({
         ...chat,
         ingestedRunIds: pushCapped(chat.ingestedRunIds, runId),
         turnActive: true,
-        // 每轮刷新（帧被缓冲淘汰时清空回退通用标签，不沿用上一轮的陈旧角色）
-        activeRoleLabel: chat.roleLabels[runId],
+        activeRoleLabel: FALLBACK_AGENT_LABEL,
       };
       if (!prompt || lastIsSameUserText(ingested, prompt)) return ingested;
       return appendMessage(ingested, { kind: "user", id: localId(), text: prompt });
@@ -198,7 +174,7 @@ export const useChatStore = create<ChatState>((set) => ({
       if (!isChatSession(sessionId, projectId) || typeof delta !== "string" || !delta) return chat;
       if (chat.seenEventIds.includes(eventId)) return chat;
       const seen = { ...chat, seenEventIds: pushCapped(chat.seenEventIds, eventId) };
-      const label = (runId && chat.roleLabels[runId]) || FALLBACK_AGENT_LABEL;
+      const label = FALLBACK_AGENT_LABEL;
       const last = seen.messages[seen.messages.length - 1];
       // 同 run 的连续增量拼接成一条（runId 锚定——跨 run/角色交错不互并）
       if (
@@ -249,16 +225,6 @@ export const useChatStore = create<ChatState>((set) => ({
           activeRoleLabel: undefined,
         },
         { kind: "error", id: localId(), text: message || "本轮回复失败" },
-      );
-    }),
-
-  noteSystemUnchanged: (projectId, reason, eventId) =>
-    updateChat(set, projectId, (chat) => {
-      // 修正收口不是对话轮（turnActive 不动）；重放按事件 id 只收一次
-      if (chat.seenEventIds.includes(eventId)) return chat;
-      return appendMessage(
-        { ...chat, seenEventIds: pushCapped(chat.seenEventIds, eventId) },
-        { kind: "notice", id: localId(), text: reason },
       );
     }),
 

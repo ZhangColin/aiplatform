@@ -30,38 +30,35 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 
 /**
  * AgentScope HarnessAgent 客户端（平台唯一智能体内核）：平台进程内跑一轮多轮对话
- * ——AgentScope 事件经 {@link AgentscopeEventMapper}（映射表单点）转平台智能体流帧
- * 逐个回调 sink（run-start/run-created 开场、text/reasoning/tool/step-* 过程、
- * run-finish/error 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂
- * 构建/工作区解析——同样经 error 帧表达，异步轨道起跑失败不零帧死寂）；同一事件
- * 流恒经 {@link AgentscopePartsMapper} 产消息部件事件（part-*，#77 parts 契约：
- * 动作卡全生命周期 + 解说/步骤分组，收口/挂起帧前出解说尾段）；命令开 {@code live}
- * （编码 run 姿态，#23）时另经 {@link AgentscopeLiveMapper}
- * 逐段产直播帧（live-text/live-action/live-step，收口帧前出尾段，过渡期并行）；模型调用
- * 事件（ReAct 每迭代一条 ModelCallEnd）五桶累积，对话结束（含失败轮，已耗 token
- * 如实计量）按命令的 usageContext 上报恰一条 UsageEvent（幂等键
- * agent-usage-{runId}[-{replyId}]，engine=agentscope；归属为空不发明、零用量不报）。
+ * ——AgentScope 事件经 {@link AgentscopeEventMapper}（映射表单点）转平台智能体事件
+ * 逐个回调 sink（run-start 开场、text/reasoning/tool/step-* 过程、run-finish/error
+ * 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂构建/工作区解析
+ * ——同样经 error 事件表达，异步轨道起跑失败不零事件死寂）；同一事件流恒经
+ * {@link AgentscopePartsMapper} 产消息部件事件（part-*，parts 契约：动作卡全生命
+ * 周期 + 解说/步骤分组，收口/挂起事件前出解说尾段）；模型调用事件（ReAct 每迭代
+ * 一条 ModelCallEnd）五桶累积，对话结束（含失败轮，已耗 token 如实计量）按命令的
+ * usageContext 上报恰一条 UsageEvent（幂等键 agent-usage-{runId}[-{replyId}]，
+ * engine=agentscope；归属为空不发明、零用量不报）。
  *
  * <p><b>挂起与续跑（问答机制）</b>：AgentScope 的确认挂起（RequireUserConfirmEvent，
- * 业务侧 ask_user 提问工具触发）= 本轮流软终点——发 {@code question-raised} 帧（载荷带
+ * 业务侧 ask_user 提问工具触发）= 本轮流软终点——发 {@code question-raised} 事件（载荷带
  * 待确认工具清单，恢复入参由业务编排从项目侧事实重建）后流终止，<b>不发
  * run-finish</b>（run 未终态）；业务编排以 {@link #resume} 续跑（同一
  * (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，访谈上下文
  * 不丢），续跑流可再挂起（一 run 多批准点）或正常收口。失败上抛
- * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 帧）。</p>
+ * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
  *
  * <p>工作区解析：命令带 workspaceId → 项目 dev 工作区（容器文件面，docker exec
- * 读写，写入即落项目工作区）；缺省 → 配置的本地工作区。run-created 发射口径：
- * 按 cat_agent_state 槽位首见判定（跨重启不重发——该表承载全部智能体会话）。</p>
+ * 读写，写入即落项目工作区）；缺省 → 配置的本地工作区。</p>
  */
 @Component
 public class AgentscopeAgentClient {
 
-    /** 智能体栈单栈自述名（agent 流帧的引擎值正本——计量不记引擎）。 */
+    /** 智能体栈单栈自述名（智能体事件的引擎值正本——计量不记引擎）。 */
     public static final String ENGINE = "agentscope";
 
     /**
-     * 提问工具注册名：业务侧 AskUserTool 以此名注册，mapper 以此名判定挂起帧的
+     * 提问工具注册名：业务侧 AskUserTool 以此名注册，mapper 以此名判定挂起事件的
      * QUESTION 载荷形状——两端共用一个真值（工具在 business，名字契约在此）。
      */
     public static final String ASK_USER_TOOL_NAME = "ask_user";
@@ -108,15 +105,15 @@ public class AgentscopeAgentClient {
         this.clock = clock;
     }
 
-    /** 跑一轮对话：过程帧实时回调 sink（payload 已带 runId；关联字段由编排桥注入）。 */
+    /** 跑一轮对话：过程事件实时回调 sink（payload 已带 runId；关联字段由编排桥注入）。 */
     public AgentReply converse(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
         try {
             prepared = prepareTurn(command, sink);
         }
         catch (RuntimeException e) {
-            // 前段（模型解析/agent 工厂构建/工作区解析）失败原是零帧区（异步轨道吞
-            // 异常只记日志，用户只见死寂）——补发 error 帧（runId 锚定 = command 的）
+            // 前段（模型解析/agent 工厂构建/工作区解析）失败原是零事件区（异步轨道吞
+            // 异常只记日志，用户只见死寂）——补发 error 事件（runId 锚定 = command 的）
             // 后照常上抛；静默调用（空 sink）无害丢弃
             sink.accept(AgentscopeEventMapper.error(command.runId(), e.getMessage()));
             throw e;
@@ -134,7 +131,7 @@ public class AgentscopeAgentClient {
 
     /**
      * 挂起续跑（业务编排的问答答复通道调用）：以 ConfirmResult（用户答复/批准/拒绝）
-     * 经同一 (userId, sessionId) 恢复上下文续跑——不重发 run-start/run-created
+     * 经同一 (userId, sessionId) 恢复上下文续跑——不重发 run-start
      * （run 已开场），可再挂起（question-raised 再发）或正常收口（run-finish）。
      * 计量幂等键带 replyId 后缀（挂起轮已报过 agent-usage-{runId}）。
      */
@@ -145,7 +142,7 @@ public class AgentscopeAgentClient {
         }
         catch (RuntimeException e) {
             // 同口径补口（resume 跑在异步轨道，异常被吞只记日志）：前段失败必须先发
-            // error 帧（runId 锚定）再上抛——缺 API key 致模型创建失败这类故障，
+            // error 事件（runId 锚定）再上抛——缺 API key 致模型创建失败这类故障，
             // 用户侧有明确报错而非死寂
             sink.accept(AgentscopeEventMapper.error(resume.runId(), e.getMessage()));
             throw e;
@@ -164,7 +161,7 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * 提问类挂起的续跑批复：待确认工具（挂起帧 data.toolCalls 元素形状 {id,name,input}）
+     * 提问类挂起的续跑批复：待确认工具（挂起事件 data.toolCalls 元素形状 {id,name,input}）
      * + 用户答复 → ConfirmResult（input 原样不重写；答复注入重写 block 的 metadata
      * {@link #ANSWER_METADATA_KEY}——模型不可见通道，提问工具执行即读它作为工具
      * 结果回给模型。答复进 input 会持久化进会话教模型自答，#34）。重建为 ASKING 态
@@ -203,54 +200,48 @@ public class AgentscopeAgentClient {
     private record TurnResult(String text, Throwable error) {
     }
 
-    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 映射表 + 部件映射表 + 可选直播映射表）。 */
+    /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表）。 */
     private record PreparedTurn(ModelRef modelRef, HarnessAgent agent, RuntimeContext ctx,
-            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, AgentscopeLiveMapper live) {
+            AgentscopeEventMapper mapper, AgentscopePartsMapper parts) {
     }
 
     /**
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
-     * 八个同型位置参数的错位面；live 续跑面恒关，#23；只读面续跑不存在——挂起问答
-     * 是 BA 资产，只读角色无 ask_user，resume 恒读写面）。
+     * 同型位置参数的错位面；只读面续跑不存在——挂起问答是 BA 资产，只读角色无
+     * ask_user，resume 恒读写面）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
-            String systemPrompt, String workspaceId, String agentRole, boolean live,
+            String systemPrompt, String workspaceId, String agentRole,
             boolean workspaceReadOnly) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.systemPrompt(), command.workspaceId(),
-                    command.agentRole(), command.live(), command.workspaceReadOnly());
+                    command.agentRole(), command.workspaceReadOnly());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
                     resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
-                    resume.agentRole(), false, false);
+                    resume.agentRole(), false);
         }
     }
 
     /**
-     * converse 前段：公共准备 + 开场帧（run-start / run-created 首见）。本段自身
-     * 不做失败处理——任一失败由 {@link #converse} 补发 error 帧后上抛。
+     * converse 前段：公共准备 + 开场事件（run-start）。本段自身不做失败处理——
+     * 任一失败由 {@link #converse} 补发 error 事件后上抛。
      */
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared = prepareFor(TurnSpec.of(command));
         sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
                 prepared.modelRef().toModelString(), ENGINE, command.agentRole()));
-        if (firstSeen(command.userId(), command.sessionId())) {
-            sink.accept(AgentscopeEventMapper.runCreated(
-                    command.runId(), command.sessionId(), ENGINE));
-        }
         return prepared;
     }
 
     /**
      * 前段公共体（converse 首轮与 resume 续跑共用）：模型解析（配置兜底）→ 工作区
      * 解析 → agent 工厂构建（角色键穿透工具装配——按角色发放工具集）→ 会话上下文
-     * 与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现地基，#77；
-     * {@code live} 开则另挂直播映射表：编码 run 姿态，#23——续跑面暂无直播形态，
-     * 恒关）。
+     * 与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现地基）。
      */
     private PreparedTurn prepareFor(TurnSpec spec) {
         ModelRef modelRef = ModelRef.parse(spec.modelString() != null
@@ -262,14 +253,13 @@ public class AgentscopeAgentClient {
                 modelRef.toModelString(), workspace, spec.agentRole());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
-                new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
-                spec.live() ? new AgentscopeLiveMapper(spec.runId(), spec.sessionId(), ENGINE) : null);
+                new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE));
     }
 
     /**
-     * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐帧映射发射，挂起
+     * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐个映射发射，挂起
      * （RequireUserConfirm）发 question-raised 后流终止且不发 run-finish；正常收口发
-     * run-finish；异常发 error 帧。用量无论成败如实上报（幂等键由调用方给）；
+     * run-finish；异常发 error 事件。用量无论成败如实上报（幂等键由调用方给）；
      * 超时取逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
@@ -283,10 +273,9 @@ public class AgentscopeAgentClient {
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                            prepared.live(), sink, text, usage, finish, suspension))
+                            sink, text, usage, finish, suspension))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
-            // 直播/部件尾段先出（收口帧前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
-            flushLive(prepared.live(), sink);
+            // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
             drainParts(prepared.parts(), sink);
             if (suspension.get() == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
@@ -295,7 +284,6 @@ public class AgentscopeAgentClient {
             return new TurnResult(text.toString(), null);
         }
         catch (Exception e) {
-            flushLive(prepared.live(), sink);
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             return new TurnResult(text.toString(), e);
@@ -327,16 +315,8 @@ public class AgentscopeAgentClient {
                 .build();
     }
 
-    /**
-     * run-created 首见判定：cat_agent_state 槽位 (userId, sessionId) 有行即已建
-     * （跨重启不重发；该表承载全部智能体会话）。
-     */
-    private boolean firstSeen(String userId, String sessionId) {
-        return !stateStore.exists(userId, sessionId);
-    }
-
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
-            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, AgentscopeLiveMapper live,
+            AgentscopeEventMapper mapper, AgentscopePartsMapper parts,
             Consumer<AgentEvent> sink, StringBuilder text, AtomicReference<TokenUsage> usage,
             AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspension) {
         if (event instanceof TextBlockDeltaEvent delta) {
@@ -346,8 +326,8 @@ public class AgentscopeAgentClient {
             usage.updateAndGet(total -> total.plus(AgentscopeUsageMapper.toTokenUsage(end.getUsage())));
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
-            // 挂起：先出部件解说尾段（问答卡前不留解说尾巴）再发 question-raised 帧
-            // （业务编排据此呈现问答卡），不产透传帧
+            // 挂起：先出部件解说尾段（问答卡前不留解说尾巴）再发 question-raised 事件
+            // （业务编排据此呈现问答卡），不产透传事件
             suspension.set(confirm);
             drainParts(parts, sink);
             sink.accept(mapper.questionRaised(confirm));
@@ -358,19 +338,8 @@ public class AgentscopeAgentClient {
         if (frame != null) {
             sink.accept(frame);
         }
-        // 直播帧（live 开才有）：同一 sink 同一流逐段产出（#23）
-        if (live != null) {
-            live.map(event).forEach(sink);
-        }
-        // 部件事件：全事件流恒挂（#77 parts 契约）
+        // 部件事件：全事件流恒挂（parts 契约）
         parts.map(event).forEach(sink);
-    }
-
-    /** 直播收尾：余段出帧（无直播/已空则 no-op，幂等）。 */
-    private static void flushLive(AgentscopeLiveMapper live, Consumer<AgentEvent> sink) {
-        if (live != null) {
-            live.flush().forEach(sink);
-        }
     }
 
     /** 部件收尾：解说余段出部件（幂等）。 */

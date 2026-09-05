@@ -2,9 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  // SSE 穿透开关：rewrite 代理的 /api/agent-events、/api/events 在 Next 默认
-  // compress（gzip 攒缓冲）下帧被扣在压缩缓冲——EventSource onopen 后一个事件
-  // 都收不到（浏览器必带 Accept-Encoding，症状 = 直播/问答卡/错误提示全静默；
+  // SSE 穿透开关：rewrite 代理的 /api/events 在 Next 默认
+  // compress（gzip 攒缓冲）下事件被扣在压缩缓冲——EventSource onopen 后一个事件
+  // 都收不到（浏览器必带 Accept-Encoding，症状 = 问答卡/错误提示全静默；
   // curl 不带该头则正常，故 API 级冒烟抓不到，须浏览器级验证）。SSE 与代理的
   // 动态 API 本就不该由应用层压缩，静态资源压缩交由前置设施。
   compress: false,

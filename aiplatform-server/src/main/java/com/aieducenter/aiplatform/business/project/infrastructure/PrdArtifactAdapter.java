@@ -7,7 +7,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 
-import com.aieducenter.aiplatform.base.eventhub.application.PlatformNotificationAppService;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -26,14 +26,14 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 public class PrdArtifactAdapter {
 
     private final ProjectRepository projectRepository;
-    private final PlatformNotificationAppService notificationAppService;
+    private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
 
     public PrdArtifactAdapter(ProjectRepository projectRepository,
-            PlatformNotificationAppService notificationAppService,
+            EventsAppService eventsAppService,
             TransactionTemplate transactionTemplate) {
         this.projectRepository = projectRepository;
-        this.notificationAppService = notificationAppService;
+        this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -49,7 +49,7 @@ public class PrdArtifactAdapter {
             projectRepository.save(project);
             return project.getId().toString();
         });
-        notificationAppService.publish(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
+        eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId,
                 ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD));
     }

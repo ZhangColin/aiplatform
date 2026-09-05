@@ -1,4 +1,4 @@
-# swagger 为唯一契约，SSE 双通道
+# swagger 为唯一契约，SSE 单端点单流
 
 > 状态：已接受（2026-08-19 · [wayfinder 票 #3](https://github.com/ZhangColin/aiplatform-server/issues/3)）
 
@@ -27,21 +27,21 @@
 - identity 服务刚建，swagger 与行为不符处协作调整（例：`/token` swagger 误标 query、实测 form body）。
 - swagger 调试：浏览器同源先 `/auth/login` 登录，cookie 由同源请求自动携带（行为未实测，见 PoC 清单）。
 
-### SSE：双通道
+### SSE：单端点单流（#82 修订）
 
-| | `GET /api/events`（平台通知） | `GET /api/agent-events`（agent 流） |
+| | 平台通知族 | 智能体事件族 |
 |---|---|---|
-| 内容 | 状态变化广播（`workspace-created` 等） | 智能体运行过程流（`task-start`…`task-finish`） |
-| 消费者 | 门户布局级常开 | 任务进度页组件级，看某个运行才挂 |
+| 内容 | 状态变化广播（`workspace-created` 等） | 智能体运行过程流（`run-start`…`part-*`…`run-finish`） |
+| 消费姿态 | 站点级常开（未过滤订阅只收本族） | 项目页按 `?projectId=` 过滤订阅（重放补发面） |
 | id | `{projectId}:{seq}` | `{runId}:{seq}` |
-| 补发 | 永不（REST 重查兜底） | Phase A 不做，ID 格式从第一天留缝 |
+| 补发 | 永不（REST 重查兜底） | 近期事件缓冲热流（#56 起，新连接补发） |
 
-- 两通道**只共用 SSE 技术，是两回事**：平台通知是状态变化的呈现信号（低频、永不补发）；agent 流是与 LLM 交互过程流的细化（一次运行一连串增量，AgentScope event 同构，高频，补发有将来）。拆通道同时消掉 demo 的三层嵌套信封。
+- 一条流两族语义（合并通道不合并语义）：拆的是语义不是连接——通知低频永不补发、智能体事件高频带重放，在单通道内以 per-publish 缓冲豁免分家。
 - 统一信封：SSE name 恒为 `event`；`data = {type, payload, ts}`（ISO-8601）；**payload 恒为对象且必带关联字段**（通知：`projectId`；agent 流：`projectId` + `runId`，`sessionId` 有则带）；payload 内禁用 `type` 键名（demo 的项目类型字段更名 `projectType`）。
 - 寻址：过滤参数与信封字段同名（`?projectId=`），缺省全量（开发平台视角）；Phase A 只实现 `projectId` 过滤，`userId` 可见性过滤 A2 后加——实现分期，契约从第一天寻址完备（参考 Replit：按项目按任务，不按人）。
 - 心跳：每 15s 发 SSE 注释行 `:ping`（不进前端 listener，防 Next 代理掐空闲连接）。
 - 重连：EventSource 自动重连，前端重连后 REST 重拉对齐；事件只让 UI「活」，不承担正确性。
-- 事件名册正本：[docs/spec/SSE事件清单.md](../spec/SSE事件清单.md)（双通道两节）；代码侧每 BC 一个 `XxxEventTypes` 常量类，禁止字符串字面量散落；swagger 端点描述嵌精简表指向正本；新增顶层 type 必须先进清单（review 检查）。
+- 事件名册正本：[docs/spec/SSE事件清单.md](../spec/SSE事件清单.md)（两族两节）；代码侧每 BC 一个 `XxxEventTypes` 常量类，禁止字符串字面量散落；swagger 端点描述嵌精简表指向正本；新增顶层 type 必须先进清单（review 检查）。
 
 ### 事件产生机制与概念定位
 
@@ -52,6 +52,7 @@
 - **修订（A1 · [票 #5](https://github.com/ZhangColin/aiplatform-server/issues/5)，2026-08-20）**：上条细化为——① 业务内 `TaskCompleted`（task→project 回填编排，已有真实订阅方）与 ② base 生命周期事件**发布端**（WorkspaceCreated/Destroyed/PreviewReady，cartisan 应用事件 + Spring 发布器）随各自切片就位；outbox/事件存储/重放等管道设施仍不建；SSE 呈现通道归属不变（业务编排层发射，base 不发 SSE）。（任务/回填概念已随平台重定义出局，见根级 CONTEXT.md；历史规格 A1 已随片5-1 清档）
 - **修订（片2a · [票 #20](https://github.com/ZhangColin/aiplatform-server/issues/20)，2026-08-22）**：agent 流通道（`GET /api/agent-events`）落地。底座任务端点（`POST /api/workspaces/{id}/agent/tasks`）直发的事件关联字段为 `runId` + `workspaceId`（「payload 必带 projectId + runId」自片5 业务编排桥接接管发射起对业务直发事件成立）；订阅过滤 `?runId=` / `?workspaceId=` / `?projectId=`（同名规则，可叠用）。（旧引擎时代 message 同步返回、parts 整批透传的增量性限制，已随单栈 AgentScope 的事件流逐帧映射不复存在——任务端点本身已删）
 - **修订（片5-1 · [票 #31](https://github.com/ZhangColin/aiplatform/issues/31)，2026-09-01）**：智能体栈单栈收敛后（验收门 #25 对照通过），旧编码引擎适配全套（镜像 CLI 工具箱、provider 配置、引擎接入端口、引擎侧会话数据落盘）随本片删除；agent 流唯一生产源 = AgentScope 事件映射（base.agentscope）。
+- **修订（体验改版 #82 · [票 #82](https://github.com/ZhangColin/aiplatform/issues/82)，2026-09-05）**：SSE 收敛为**单端点单流**——`GET /api/events` 一条流承载平台通知族 + 智能体事件族（`GET /api/agent-events` 退役）。当初 Considered Options 否掉「单通道混双类事件」的重连语义冲突，现以**合并通道不合并语义**解开：智能体事件族保持近期事件缓冲重放（新连接补发），通知族发射不进缓冲、永不补发（内核 per-publish 豁免），Last-Event-ID 仍只作新连/重连分野、不触发任何补发——原否决理由不再成立。族投递规则：智能体事件只投给带过滤（projectId/runId）的订阅，未过滤常开连接只收通知族（过程细节是项目内事实）。同批退役五族事件（role-assigned / run-created / run-retrying / fix-unchanged / dispatch-stage 九值 / live-*），词汇正本见 [SSE事件清单](../spec/SSE事件清单.md)。
 - **runId**：一次智能体运行的标识（任务下发端点时代由 `POST …/agent/task` 生成返回，现由业务编排生成），该运行全部流事件携带；与 `sessionId`（跨运行会话寻址）并存不混淆。词表见 CONTEXT.md「运行（Run）」。
 
 ### SpringDoc 与落码归属
@@ -61,7 +62,7 @@
 
 ## Considered Options
 
-- **单通道混双类事件（demo 形态）**：否——重连语义冲突（补发只对 agent 流有意义，混通道 Last-Event-ID 无法自洽）、频率差三个数量级、消费者姿态不同。
+- **单通道混双类事件（demo 形态）**：初版否——重连语义冲突（补发只对 agent 流有意义，混通道 Last-Event-ID 无法自洽）、频率差三个数量级、消费者姿态不同。**#82 修订推翻**：per-publish 缓冲豁免让两族语义在单通道内自洽（见上文修订注记），频率与姿态差由族投递规则（未过滤订阅只收通知族）化解。
 - **生命周期事件即应用事件、先架 Spring ApplicationEvent 管道**：否——零后端订阅方的发布订阅 = 绕一跳的直接调用（正是 cartisan 砍领域事件的理由）；且发射方/关联字段对不上（base 只知 workspaceId，SSE 要 projectId）。
 - **`/api/v1` 版本段**：否——无独立客户端，仪式感成本。
 - **SSE 事件 schema 做进 swagger**：否——为文档生成造无运行时用途的类；名册正本 + 常量类双轨更轻。
@@ -70,5 +71,5 @@
 ## Consequences
 
 - 通知通道让前端可以「活」，但**正确性永远走 REST**：事件丢失或未连接，页面照常工作。
-- SSE 传输内核（emitter/心跳/过滤/信封）零业务概念——**先用后提**：片 1/2/5 双通道遛熟（含 Next 代理保活实测）后，提取为 cartisan-boot 模块（拟名 `cartisan-sse`）；应用侧只留通道语义与名册。
+- SSE 传输内核（emitter/心跳/过滤/信封）零业务概念——**先用后提**：片 1/2/5 与 #82 单端点单流遛熟（含 Next 代理保活实测）后，提取为 cartisan-boot 模块（拟名 `cartisan-sse`）；应用侧只留通道语义与名册。
 - PoC 清单（片 1 验收前过一遍，各 ≤半天，预写备选）：① swagger UI 同源请求是否自动携带登录 cookie；② Next rewrites 对 SSE 的缓冲/超时行为与 `:ping` 心跳有效性。

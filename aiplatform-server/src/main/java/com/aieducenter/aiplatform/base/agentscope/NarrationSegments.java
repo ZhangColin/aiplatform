@@ -6,8 +6,8 @@ import java.util.List;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 
 /**
- * 解说文本切段单点（直播 live-text 与部件 part-text 的共用生产内核，#77 提取）：
- * 文本增量 → 完整段序列（一段一文本，非增量）。段切分口径（CONTEXT.md「直播」）：
+ * 解说文本切段单点（部件 part-text 的生产内核）：文本增量 → 完整段序列（一段一
+ * 文本，非增量）。段切分口径（解说部件「完整段非增量」契约）：
  * <ul>
  *   <li>句读（。！？；…换行及西文对应符号）落定即出段；</li>
  *   <li>文本块变（blockId 变化）先出余段——段与段有序不串；</li>

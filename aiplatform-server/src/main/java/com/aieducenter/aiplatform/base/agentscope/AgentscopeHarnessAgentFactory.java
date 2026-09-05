@@ -27,7 +27,8 @@ import org.springframework.stereotype.Component;
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
  * 替换框架缺省的本地 JSON 文件实现（单机 {@code ~/.agentscope/state/}，多副本/
- * 重启语义不成立）。工具集经 {@link AgentToolkitSupplier}（业务侧资产）注入。</p>
+ * 重启语义不成立）。工具集经 {@link AgentToolkitSupplier}、技能经
+ * {@link AgentSkillRepositorySupplier}（业务侧资产，#94 技能位）注入。</p>
  */
 @Slf4j
 @Component
@@ -49,10 +50,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
-            AgentToolkitSupplier toolkitSupplier, AgentscopeProperties properties) {
+            AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
+            AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey) ->
-                buildAgent(stateStore, toolkitSupplier, name, sysPrompt, modelString, workspace,
-                        agentKey, properties.getMaxIters()));
+                buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier,
+                        name, sysPrompt, modelString, workspace, agentKey,
+                        properties.getMaxIters()));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -86,15 +89,21 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
-            AgentToolkitSupplier toolkitSupplier, String name,
-            String sysPrompt, String modelString, AgentWorkspace workspace, String agentKey,
-            Integer maxIters) {
+            AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
+            String name, String sysPrompt, String modelString, AgentWorkspace workspace,
+            String agentKey, Integer maxIters) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
                 .model(modelString)
                 .stateStore(stateStore)
-                .toolkit(toolkitSupplier.toolkitFor(agentKey, workspace));
+                .toolkit(toolkitSupplier.toolkitFor(agentKey, workspace))
+                // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
+                // 不注入 <available_skills>；本平台工作区技能用 .platform/skills/（非
+                // 框架 skills/），关闭框架工作区技能自动合成免无谓文件面往返
+                .disableDefaultWorkspaceSkills();
+        skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
+                .forEach(builder::skillRepository);
         if (maxIters != null) {
             builder.maxIters(maxIters);
         }

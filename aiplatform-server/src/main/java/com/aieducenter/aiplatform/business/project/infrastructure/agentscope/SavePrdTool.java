@@ -13,7 +13,6 @@ import reactor.core.publisher.Mono;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.agentscope.DockerExecFilesystem;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
-import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
@@ -57,8 +56,7 @@ public class SavePrdTool extends ToolBase {
                 .name(NAME)
                 .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。判定需求已明确"
                         + "（四方面信息齐备或用户催促收敛）时调用：content 传完整 PRD "
-                        + "markdown 全文，固定七章节依序为" + ProjectArtifacts.PRD_SECTIONS
-                        + "（功能清单编号列出页面与功能点、每点附验收要点）；summary "
+                        + "markdown 全文（结构与写法遵循 prd-writing 技能）；summary "
                         + "传本轮说明（修订：改了什么、覆盖哪些意见；首次产出：PRD "
                         + "覆盖了什么）——必传，平台经此观测修订事实。每次调用"
                         + "覆盖旧版；成功后向用户简短总结（修订时给修订摘要），不再提问。")

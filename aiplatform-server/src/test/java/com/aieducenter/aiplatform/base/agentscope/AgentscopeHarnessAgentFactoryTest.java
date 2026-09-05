@@ -27,6 +27,10 @@ class AgentscopeHarnessAgentFactoryTest {
     /** 工具集空桩（工厂不解释工具内容——装配归 RoleToolkitSupplier 测试）。 */
     private static final AgentToolkitSupplier TOOLKITS = (agentKey, workspace) -> new Toolkit();
 
+    /** 技能仓库空桩（#94 技能位——无技能挂载即框架不注入 <available_skills>）。 */
+    private static final AgentSkillRepositorySupplier SKILL_REPOS =
+            (agentKey, workspace) -> List.of();
+
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
     }
@@ -167,7 +171,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, new AgentscopeProperties());
+                stateStore, TOOLKITS, SKILL_REPOS, new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null);

@@ -17,7 +17,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 工作区文件树只读工具（#47 助理资产）：执行命令与文件模式端点同源
+ * 工作区文件树只读工具（主智能体答询资产）：执行命令与文件模式端点同源
  * （{@code ProjectFiles.listCommand}，交付文件视图口径）；输出为解析后的清单行；
  * 容器故障如实回错误结果（模型可见可重试）；工具面 readOnly。
  */

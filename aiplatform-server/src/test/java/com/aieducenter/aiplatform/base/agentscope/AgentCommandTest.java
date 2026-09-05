@@ -95,6 +95,6 @@ class AgentCommandTest {
         AgentCommand command = new AgentCommand("run-1", "咨询", null, null, "s-1", null,
                 null, "42", Map.of(), null, "ASSISTANT", true);
 
-        assertThat(command.workspaceReadOnly()).isTrue(); // 助理咨询姿态：写面结构性关闭
+        assertThat(command.workspaceReadOnly()).isTrue(); // 主智能体对话姿态：写面结构性关闭
     }
 }

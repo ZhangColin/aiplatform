@@ -22,7 +22,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 项目事实查询工具（#47 助理资产）：事实清单拼装——系统访问地址以预览端口映射
+ * 项目事实查询工具（主智能体答询资产）：事实清单拼装——系统访问地址以预览端口映射
  * 为准（「我后台的地址」的正答）、未产出/未生成如实呈现（不装样子）；工作区
  * 句柄解析失败如实报「暂不可知」（不编造地址）；工具面 readOnly。
  */

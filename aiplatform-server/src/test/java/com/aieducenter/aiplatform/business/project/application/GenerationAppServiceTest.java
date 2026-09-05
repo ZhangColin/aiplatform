@@ -55,7 +55,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 
 /**
  * 生成编排（#22 验收 + #24 知识命中前置注入）：编码命令全要素（coder-{projectId}
- * 会话稳定绑定、CODER 角色卡与长任务超时、owner 寻址、计量 dims（projectId +
+ * 会话稳定绑定、EXECUTOR 配置与长任务超时、owner 寻址、计量 dims（projectId +
  * agentKind=coder + sessionId）、项目工作区、流关联）、工作区布局资产就位先于
  * 首试下发（AGENTS.md 平台约定幂等覆写）、知识命中前置注入首试任务 prompt
  * （query = 任务 prompt；检索失败降级空注入不阻断）、重试不重注入（续同会话，
@@ -146,7 +146,7 @@ class GenerationAppServiceTest {
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
-        // 编码命令全要素：coder 会话稳定绑定 + owner 寻址 + CODER 角色卡（平台技术
+        // 编码命令全要素：coder 会话稳定绑定 + owner 寻址 + EXECUTOR 配置（平台技术
         // 约定）+ 长任务超时 + 计量 dims（#24：projectId + agentKind=coder +
         // sessionId）+ 项目工作区 + 流关联
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);

@@ -24,7 +24,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
-import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
@@ -43,7 +42,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
  * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
  * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
- * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=ba）。</p>
+ * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=main）。</p>
  */
 @SpringBootTest
 class MainAgentSessionSmokeTest {

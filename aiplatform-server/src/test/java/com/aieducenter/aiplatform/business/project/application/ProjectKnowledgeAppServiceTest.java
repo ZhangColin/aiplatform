@@ -101,7 +101,7 @@ class ProjectKnowledgeAppServiceTest {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of());
 
         assertThat(appService.establishSessionInjection(9502L, "全新的想法")).isEmpty(); // 空命中
-        assertThat(appService.sessionTailOf(9502L)).isEmpty(); // 不落缓存（裸角色卡照跑）
+        assertThat(appService.sessionTailOf(9502L)).isEmpty(); // 不落缓存（裸配置照跑）
         assertThat(appService.establishSessionInjection(9502L, " ")).isEmpty(); // 空 query 不检索
         assertThat(appService.establishSessionInjection(9502L, null)).isEmpty();
         verify(knowledgePort).retrieve(eq("全新的想法"), anyInt()); // 空 query 未触检索

@@ -71,7 +71,7 @@ public class EventsController {
             | type | 族 | payload 字段 |
             |---|---|---|
             | workspace-created / preview-ready / preview-updated / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
-            | run-start | 智能体·生命周期 | runId, prompt, model, engine, role（可空） |
+            | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
             | error | 智能体·生命周期 | runId, message |
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish |
             | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |

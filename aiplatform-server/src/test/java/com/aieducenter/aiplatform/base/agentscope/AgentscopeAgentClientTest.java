@@ -202,7 +202,7 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_read_only_flag_when_converse_then_project_read_only_workspace_resolved() {
-        // #47 助理咨询姿态：workspaceReadOnly 开 → 同一容器解析为只读面（工厂据此
+        // #86 主智能体对话姿态：workspaceReadOnly 开 → 同一容器解析为只读面（工厂据此
         // 关内核文件/shell 工具——写面结构性关闭）
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
                 WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));

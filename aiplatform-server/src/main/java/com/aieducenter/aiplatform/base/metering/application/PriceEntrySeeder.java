@@ -17,8 +17,8 @@ import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepo
 
 /**
  * 单价启动种子（A6 §1 维护入口之一：v1 = 手工 SQL + 本种子；维护 API 挂 fog
- * 「管理后台」）。现役模型 = demo 角色卡档位 deepseek-v4-pro / deepseek-v4-flash
- * （business RolePreset），DeepSeek 无缓存写/推理独立口径 → 每模型三行
+ * 「管理后台」）。现役模型 = demo 配置档位 deepseek-v4-pro / deepseek-v4-flash
+ * （business AgentProfile），DeepSeek 无缓存写/推理独立口径 → 每模型三行
  * （input / cache_read / output）。
  *
  * <p><b>数值口径</b>（A6 §1 纪律：以官方定价页实时值为准，不抄研究稿）：2026-08-22

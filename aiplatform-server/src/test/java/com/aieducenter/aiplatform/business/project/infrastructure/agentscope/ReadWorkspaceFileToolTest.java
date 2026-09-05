@@ -17,7 +17,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 工作区文件内容只读工具（#47 助理资产）：与文件模式「点看」端点同口径——
+ * 工作区文件内容只读工具（主智能体答询资产）：与文件模式「点看」端点同口径——
  * isViewable 判定先行（非交付物/机密/逃逸路径拒绝且不触容器）、退出码语义
  * （1 不存在 / 2 超限 / 0 首行字节大小 + 余文正文）；模型上下文护栏（超长截断
  * 明示）；工具面 readOnly。

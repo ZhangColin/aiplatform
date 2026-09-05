@@ -101,10 +101,14 @@ closing: {
                                    # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
                                    # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff
   durationMs: 183420               # 轮末统计·时长（首试起跑到收口；文件数/变更行数由 files 派生）
+  version:     "a1b2c3d4e5f6..."   # 可缺省——版本锚定（#91）：收口自动成版的 commit hash
+                                   # （容器内 git，主题 = 摘要、Run-Id trailer 锚定收尾卡）；
+                                   # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响
 }
 ```
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 自检通过（part-check passed 先行）——前端过程明细（解说段/动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
+- **版本锚定（#91）**：`closing.version`（可缺省）= 收口自动成版的 commit hash——版本正本 = 容器内 git log（无便利表），Run-Id trailer 联接收尾卡与版本；版本详情 API 复用 `closing` 载荷锚定收尾卡。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
 #### 消息附件部件锚载荷 schema（预留，#97）

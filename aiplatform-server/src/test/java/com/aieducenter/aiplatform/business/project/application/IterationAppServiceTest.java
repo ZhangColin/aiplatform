@@ -688,6 +688,29 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void given_scripted_update_round_when_fix_closes_then_version_committed_and_hash_in_closing() {
+        // 版本锚定（#91）：收口自动成版——commit hash 回填 closing 的 version 键
+        // （SSE 扩载与对话史落库同载荷，版本详情复用）
+        Long projectId = persistedGeneratedProject("9917");
+        List<Runnable> tracks = givenTrackQueued();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n", "", 0));
+        givenConverseClosing(true, "下单页新增配送范围说明", List.of(
+                new FileChange("/src/pages/Orders.jsx", 12, 3)));
+
+        appService.startFixRun(projectId, "下单页加配送范围说明", "配送范围改为全国");
+        tracks.remove(0).run();
+
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payload.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payload.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(closing).containsEntry("version", "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void given_finish_edit_unchanged_when_fix_closes_then_closing_judgment_reflects_reason() {
         // 判定行的另一半（#88）：系统无需改动——原因随判定行权威承载（旧「编辑无
         // 变化」前端推导退役，权威值到位）；无修订说明的轮 prdChanged=false

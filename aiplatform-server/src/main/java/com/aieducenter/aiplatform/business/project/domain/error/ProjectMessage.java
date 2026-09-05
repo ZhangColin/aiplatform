@@ -57,7 +57,10 @@ public enum ProjectMessage implements CodeMessage {
     FIX_RESTART_UNAVAILABLE(409, "PRJ_026", "没有可恢复的修正，请在对话区重新提意见"),
 
     /** 权限作答守卫（#83）：确认不存在或已落定（过期卡/平台重启丢账），指路刷新。 */
-    PERMISSION_ANSWER_STALE(409, "PRJ_027", "该确认已失效（运行已收口或平台已重启），请刷新查看最新状态");
+    PERMISSION_ANSWER_STALE(409, "PRJ_027", "该确认已失效（运行已收口或平台已重启），请刷新查看最新状态"),
+
+    /** 版本详情守卫（#91）：ref 不是成版 commit（含非 hash 形态——用户可控入参不进 shell）。 */
+    VERSION_NOT_FOUND(404, "PRJ_028", "版本不存在");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

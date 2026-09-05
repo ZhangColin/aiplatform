@@ -55,7 +55,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    private static final String DEV_IMAGE = "aiplatform/dev:0.6";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.7";
 
     private static final int PORT_MIN = 20000;
     private static final int PORT_MAX = 45000;

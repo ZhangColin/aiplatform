@@ -5,10 +5,11 @@ FROM node:22-bookworm
 # 销毁重建由入口脚本自愈。pg 取 bookworm 发行版的 postgresql-15（旧独立容器为
 # pgvector:pg16——沙箱应用用不上 vector 扩展，跟随发行版省一层外部 apt 源；
 # 版本差异对生成应用透明）。编码智能体 = AgentScope 进程内单栈（平台侧运行），
-# 容器只承载应用运行时与中间件，不装智能体 CLI。
+# 容器只承载应用运行时与中间件，不装智能体 CLI。git 显式安装（版本层 #91：
+# 收口自动成版走容器内 git；基座 buildpack-deps 隐式自带，显式声明防漂移）。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        postgresql-15 postgresql-client-15 redis-server \
+        postgresql-15 postgresql-client-15 redis-server git \
     && rm -rf /var/lib/apt/lists/*
 
 # 工作区自愈入口：布局骨架 + 容器内 pg/redis 幂等起服务后 exec 交还启动命令

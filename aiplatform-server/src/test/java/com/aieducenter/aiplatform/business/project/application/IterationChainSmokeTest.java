@@ -34,6 +34,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,6 +77,9 @@ class IterationChainSmokeTest {
 
     @Autowired
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
+    @Autowired
+    private ProjectVersionAppService versionAppService;
 
     /** 事件发射边收口（单端点单流）：智能体事件与通知分口捕获（真实链路无订阅者，
      *  发射本身是观测缝）。 */
@@ -225,6 +229,12 @@ class IterationChainSmokeTest {
         assertThat(coderPayloads).contains("finish_edit");
         assertThat(coderFrames.stream().map(Frame::type))
                 .doesNotContain("fix-unchanged");
+        // 4g) 收口自动成版（#91）：修正 run 收口即容器内 git 成版——版本序列至少
+        //     一条、Run-Id 锚定该修正 run（版本正本 = git log，真容器真 git）
+        awaitUntil(FIX_DEADLINE, () -> !versionAppService.list(projectId).isEmpty());
+        assertThat(versionAppService.list(projectId))
+                .extracting(VersionResponse::runId)
+                .contains(coderAssigned.runId());
     }
 
     // ---------- 编排步骤 ----------

@@ -96,11 +96,13 @@ class CoderRunAttempts {
     private final StepBoundaryPreviewRefresh previewRefresh;
     private final RunPermissionAppService permissions;
     private final ConversationHistoryAppService conversationHistory;
+    private final ProjectVersionAppService versions;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
             GenerationProperties properties, StepBoundaryPreviewRefresh previewRefresh,
-            RunPermissionAppService permissions, ConversationHistoryAppService conversationHistory) {
+            RunPermissionAppService permissions, ConversationHistoryAppService conversationHistory,
+            ProjectVersionAppService versions) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -108,6 +110,7 @@ class CoderRunAttempts {
         this.previewRefresh = previewRefresh;
         this.permissions = permissions;
         this.conversationHistory = conversationHistory;
+        this.versions = versions;
     }
 
     /**
@@ -198,6 +201,15 @@ class CoderRunAttempts {
                 if (pendingFinish.get() != null) {
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what);
+                    // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
+                    // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
+                    // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
+                    // （缺 version 键 = 本轮未成版，run 收口不受影响）
+                    String versionHash = versions.commitAtClosing(project, firstRunId,
+                            (String) closing.get(CLOSING_SUMMARY_FIELD));
+                    if (versionHash != null) {
+                        closing.put(CLOSING_VERSION_FIELD, versionHash);
+                    }
                     // 对话史落库（#89 收尾卡腿）：先落库后发 run-finish——事件即触发
                     // 前端对话史域失效重拉（水合按 run 整体接管 live 片段），次序反转
                     // 会让重拉撞上未落库的空窗（code-review #89）
@@ -219,6 +231,12 @@ class CoderRunAttempts {
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
 
+    /** 收口扩载载荷的摘要键（成版提交主题 + 版本详情叙事同源）。 */
+    static final String CLOSING_SUMMARY_FIELD = "summary";
+
+    /** 收口扩载载荷的版本键（#91 收口自动成版回填的 commit hash；成版失败缺省）。 */
+    static final String CLOSING_VERSION_FIELD = "version";
+
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
      * schema 见 SSE事件清单·收口扩载（对话史落库 #89 与版本锚定 #91 复用同一载荷，
@@ -229,7 +247,7 @@ class CoderRunAttempts {
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what) {
         Map<String, Object> closing = new LinkedHashMap<>();
-        closing.put("summary", closingSummary(judgment, what));
+        closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
         if (judgment.prdNote() != null) {
             closing.put("prdNote", judgment.prdNote());

@@ -60,6 +60,9 @@ public final class WorkspaceLayout {
     /** 约定三：.env——平台向工作区注入连接串的唯一通道。 */
     public static final String ENV_FILE = ".env";
 
+    /** 版本元数据目录（#91 容器内 git 仓库——版本正本 git log 落点，随卷持久）。 */
+    public static final String GIT_DIR = ".git";
+
     /**
      * 约定二的目录面（init 骨架幂等落位的清单）：布局中的全部目录——应用代码占根
      * 无目录约定，AGENTS.md 是文件资产非目录，都不在骨架内。
@@ -69,11 +72,13 @@ public final class WorkspaceLayout {
 
     /**
      * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物
-     * （{@link #PLATFORM_DIR}）与可重建依赖（node_modules）不是交付物——源码包
-     * 打包与平台文件树只读端点共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。
+     * （{@link #PLATFORM_DIR}）、可重建依赖（node_modules）与版本元数据（.git）
+     * 不是交付物——源码包打包、平台文件树只读端点与版本层 .gitignore（#91）共用
+     * 此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由版本层 git 管道产出，
+     * 不入源码包/文件树/版本跟踪（git 自排除，入名单为三者口径统一）。
      */
     public static final List<String> NON_DELIVERABLE_DIRS = List.of(
-            "node_modules", DATA_DIR, PLATFORM_DIR);
+            "node_modules", DATA_DIR, PLATFORM_DIR, GIT_DIR);
 
     private WorkspaceLayout() {
     }

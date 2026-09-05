@@ -20,6 +20,10 @@ public interface ConversationEntryRepository extends BaseRepository<Conversation
     Optional<ConversationEntry> findFirstByRunIdAndKindAndAnsweredFalseOrderByIdDesc(
             String runId, ConversationEntryKind kind);
 
+    /** 项目内某 run 的收尾卡条目（版本详情锚定收尾卡的联接读口，#91）。 */
+    Optional<ConversationEntry> findFirstByProjectIdAndRunIdAndKindOrderByIdDesc(
+            Long projectId, String runId, ConversationEntryKind kind);
+
     /** 项目删除的级联清理入口（编排调用，同表族软引用约定）。 */
     void deleteByProjectId(Long projectId);
 }

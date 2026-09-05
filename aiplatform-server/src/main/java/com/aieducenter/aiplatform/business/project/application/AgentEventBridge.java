@@ -45,13 +45,14 @@ public class AgentEventBridge {
      * run-failed 发射（编码 run 重试超限·终态收口，#56）：轨道层在真终态落定点
      * 调用——修正轨道与终态账（恢复出口 {@code restartFixRun} 的重派依据）同
      * 事实点，排队合并续派的中途超限不发（轨道仍在途）；生成轨道超限即终态。
-     * runId 锚定末次失败的尝试——前端恢复出口只认本事件，run 失败为唯一失败
-     * 终态（重试全程静默，中间失败不出事件）。
+     * runId = 该场 run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚，
+     * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
+     * 失败终态（重试全程静默，中间失败不出事件）。
      */
-    public void emitRunFailed(Long projectId, String lastFailedRunId) {
+    public void emitRunFailed(Long projectId, String runId) {
         eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, Map.of(
                 EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.RUN_FIELD, lastFailedRunId));
+                EventsAppService.RUN_FIELD, runId));
     }
 
     /**

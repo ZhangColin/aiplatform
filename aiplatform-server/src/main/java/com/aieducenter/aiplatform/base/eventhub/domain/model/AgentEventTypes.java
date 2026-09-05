@@ -14,7 +14,8 @@ public final class AgentEventTypes {
     /**
      * 运行开始（runId 随 run 响应同值返回）。engine/model 之外携带角色键
      * {@code role}（业务侧角色卡的枚举名，如 CODER；无角色语境的一次性调用
-     * 不携带）——前端工作消息/对话面的锚定判据。
+     * 不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次：编码 run 静默
+     * 重试（#84）不新发——用户面 run 身份 = 首试 runId 全程不变。
      */
     public static final String RUN_START = "run-start";
 
@@ -60,9 +61,10 @@ public final class AgentEventTypes {
     /**
      * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
      * 终态账（恢复出口的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；
-     * 生成轨道超限即终态。runId 锚定<b>末次失败的尝试</b>（事件序 run-failed，
-     * 前面的尝试失败静默）。前端恢复出口（重新发起 / 重新修改）只认本事件——
-     * run 失败为唯一失败终态。
+     * 生成轨道超限即终态。runId = 该场 run 的<b>用户面标识</b>（首试 runId——#84
+     * 静默重试：重试不换新锚、不新发 {@link #RUN_START}，中间尝试的内部 runId
+     * 不出用户面，事件序上 run-failed 前无任何失败/重试信号）。前端恢复出口
+     * （重新发起 / 重新修改）只认本事件——run 失败为唯一失败终态。
      */
     public static final String RUN_FAILED = "run-failed";
 

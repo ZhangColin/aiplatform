@@ -109,6 +109,8 @@ type AgentPayload = {
 
 export type PlatformAgentEvent =
   | {
+      /** 运行开始：一场 run 恰一次（#84 静默重试——编码 run 重试不新发，用户面
+       * run 身份 = 首试 runId 全程不变）。 */
       type: "run-start";
       payload: AgentPayload & {
         prompt: string;
@@ -123,7 +125,12 @@ export type PlatformAgentEvent =
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }
-  | { type: "run-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
+  | {
+      /** 运行结束：到达即真收口（#84——编码 run 在收口判据落定后才发，一场至多
+       * 一次、中场无假收口）；挂起轮不发（软终点）。 */
+      type: "run-finish";
+      payload: AgentPayload & { sessionId: string; finish: string };
+    }
   | {
       /**
        * 智能体挂起提问（#83 起纯 QUESTION——权限确认已拆 permission-required）：答复
@@ -164,9 +171,11 @@ export type PlatformAgentEvent =
   | {
       /**
        * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射（修正轨道与
-       * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` 锚定
-       * 末次失败的尝试。恢复出口（重新发起 / 重新修改）只认本事件——run 失败为
-       * 唯一失败终态，重试全程静默（中间错误不出用户面）。
+       * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` = 该场
+       * run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚、不新发
+       * run-start，中间尝试的内部 runId 不出用户面）。恢复出口（重新发起 /
+       * 重新修改）只认本事件——run 失败为唯一失败终态，重试全程静默（中间错误
+       * 不出用户面）。
        */
       type: "run-failed";
       payload: AgentPayload;

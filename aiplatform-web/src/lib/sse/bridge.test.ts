@@ -474,25 +474,64 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     return { id, data: JSON.stringify({ type, payload, ts: "" }) };
   }
 
-  it("编码 run 事件序：run-start(role=CODER) 登记即 running → 重试静默（新 runId 起跑）→ 收口纪元 +1", () => {
+  it("编码 run 事件序：run-start(role=CODER) 登记即 running → 静默重试零信号 → 收口纪元 +1", () => {
     dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", role: "CODER" }, "run1:1"));
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
 
-    // 重试静默（#82/#84）：中间失败不出用户面事件——旧 error / run-retrying 已退役，
-    // 退役名到达按 miss 忽略，状态不因杂音漂移
+    // 静默重试（#84）：重试族过程事实不进用户面事件流——重试不新发 run-start、
+    // 用户面 run 身份 = 首试 runId 全程不变（中途只见部件正常生长）；退役名
+    // 到达按 miss 忽略，状态不因杂音漂移
     dispatchAgentEvent(agentQc, agentEvent("run-retrying", { projectId: "p1", runId: "run1", attempt: 2, message: "遇到问题，正在重试" }, "run1:9"));
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope", text: "从中断处继续" }, "run1:10"));
 
-    // 重试尝试（新 runId，同样登记）收口 → finished + 预览纪元 +1（重挂信号）
-    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run2", prompt: "继续完成", role: "CODER" }, "run2:1"));
-    dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p1", runId: "run2", sessionId: "coder-p1", finish: "end" }, "run2:9"));
+    // 同锚收口 → finished + 预览纪元 +1（重挂信号）
+    dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" }, "run1:11"));
 
     const generation = useGenerationStore.getState().generations["p1"];
     expect(generation?.coderStatus).toBe("finished");
     expect(generation?.previewEpoch).toBe(1);
+    // 工作消息持续生长后定格（重试不重置——run-start 恰一次）
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.runId).toBe("run1");
+    expect(work?.parts).toHaveLength(1);
+    expect(work?.frozen).toBe(true);
 
     // 编码事件不进对话面（对话面只收 BA/ASSISTANT）
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
+  });
+
+  it("无中途闪错（#84 AC④）：失败终态前每一拍都无错误 UI——状态恒 running、对话面零错误气泡", () => {
+    // 事件序列断言（与服务端脚本化用例同源）：run-start → 部件生长 →（中间错误
+    // 与重试信号不进用户面事件流）→ run-failed 唯一失败终态。逐拍断言错误 UI
+    // 永不短暂出现
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    const sequence: [string, Record<string, unknown>][] = [
+      ["run-start", { ...base, prompt: "做系统", model: "m", role: "CODER" }],
+      ["part-step", { ...base, step: 1 }],
+      ["part-text", { ...base, text: "先搭骨架" }],
+      ["part-action", { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【首页】" }],
+    ];
+    sequence.forEach(([type, payload], index) => {
+      dispatchAgentEvent(agentQc, agentEvent(type, payload, `run1:${index + 1}`));
+      // 每一拍：生成面已登记且无错误态、对话面零错误气泡（中途闪错 = 回归）
+      expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+      expect(useChatStore.getState().chats["p1"]?.messages ?? []).toHaveLength(0);
+    });
+
+    // 防御位：编码 run 的 error 事件（服务端投影失守的事件序异常）也不闪任何
+    // 错误 UI——对话面不写失败气泡、生成面不写错误态、运行注册表不转 error
+    dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:8"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
+    expect(useChatStore.getState().chats["p1"]?.messages ?? []).toHaveLength(0);
+    expect(useAgentRunsStore.getState().runs["run1"]?.status).toBe("running");
+
+    // 唯一失败终态：run-failed 到达才转 error——工作消息定格、部件留驻
+    dispatchAgentEvent(agentQc, agentEvent("run-failed", { projectId: "p1", runId: "run1" }, "run1:9"));
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.frozen).toBe(true);
+    expect(work?.parts).toHaveLength(3);
   });
 
   it("run-finish 重放（同事件 id）不重复计预览纪元", () => {

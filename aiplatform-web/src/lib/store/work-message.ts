@@ -6,8 +6,10 @@ import { create } from "zustand";
  * ：解说文本部件 + 工具动作部件 + 步骤分组部件），run 收口定格。
  *
  * <p>run 开始即出现（run-start 携 CODER 角色）、随部件事件逐段生长；run-finish /
- * run-failed 定格（不再生长、时长停跳，凝聚物收尾卡归后续票）；下一次编码 run
- * （新 runId，含重试下一尝试）重开新消息、旧消息不保留。思考与代码不进部件
+ * run-failed 定格（不再生长、时长停跳，凝聚物收尾卡归后续票）；下一场编码 run
+ * （新 runId = 新一轮）重开新消息、旧消息不保留。静默重试不出用户面（#84：
+ * run-start 一场恰一次、用户面 run 身份 = 首试 runId 全程不变）——生长中重来
+ * 新 runId 属事件序异常（防御位忽略，不清锚闪空消息）。思考与代码不进部件
  * （服务端口径），本 store 无进度条语义。</p>
  *
  * <p><b>锚定判定</b>：部件事件全事件流恒挂（BA/助理 run 也产部件）——工作消息只
@@ -89,7 +91,7 @@ export type WorkPartInput =
     };
 
 type ProjectWork = {
-  /** 工作消息锚定的 run（新 runId 即重开——重试下一尝试 / 新一轮）。 */
+  /** 工作消息锚定的 run（新 runId 即重开——下一场 run；静默重试不换新锚，#84）。 */
   runId: string;
   /** run 起跑时间戳（头部总时长锚；补建锚取首部件 ts）。 */
   startedAt: number;
@@ -214,10 +216,10 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
 
   notePart: (projectId, ref, input) =>
     updateWork(set, projectId, (work) => {
-      // 锚不在或已定格（重放缺 run-start / 上一轮定格后新 run 已开工）：仅编码
+      // 锚不在或已定格（重放缺 run-start / 上一场定格后新 run 已开工）：仅编码
       // 会话补建/重锚——BA/助理的部件不建工作消息（对话面走 text 增量气泡，部件
-      // 与其并行双发射）。生长中的锚 + 异 runId = 上一尝试的迟到/重放残段，忽略
-      //（有序流不至，防御位——清锚会闪空消息）
+      // 与其并行双发射）。生长中的锚 + 异 runId = 事件序异常（静默重试不换新锚，
+      // #84——有序流不至，防御位忽略；清锚会闪空消息）
       if (work === undefined || work.runId !== ref.runId) {
         if (work !== undefined && !work.frozen) return work;
         if (!ref.sessionId?.startsWith(CODER_SESSION_PREFIX)) return work;

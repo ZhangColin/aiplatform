@@ -151,7 +151,7 @@ public class GenerationAppService {
         return new GenerationRun(firstRunId);
     }
 
-    /** 一场生成（首试）的运行标识（前端挂智能体事件 ?runId= 的锚；重试换新 runId 经事件到达）。 */
+    /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */
     public record GenerationRun(String runId) {
     }
 
@@ -169,7 +169,8 @@ public class GenerationAppService {
                 new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
                 runId -> markGeneratedIfReachable(project), "generate");
         if (!result.succeeded()) {
-            eventBridge.emitRunFailed(project.getId(), result.lastRunId());
+            // run-failed 锚 = 该场 run 的用户面标识（首试 runId，#84 重试不换新锚）
+            eventBridge.emitRunFailed(project.getId(), firstRunId);
         }
     }
 

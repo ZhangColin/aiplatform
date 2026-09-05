@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -41,7 +42,6 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
-import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -130,6 +130,14 @@ class IterationAppServiceTest {
             }
             return new AgentReply(command.runId(), "修正完成");
         });
+    }
+
+    /**
+     * 脚本化智能体事件缝（#84 验收）的本地别名：剧本体在
+     * {@link AgentEventScripts}（生成/迭代共用，契约变化单点同步）。
+     */
+    private static AgentEvent scripted(String type, String runId, Map<String, Object> extra) {
+        return AgentEventScripts.scripted(type, runId, extra);
     }
 
     private void givenConverseSucceeds() {
@@ -222,7 +230,7 @@ class IterationAppServiceTest {
             if (suspendedOnce.compareAndSet(false, true)) {
                 Consumer<AgentEvent> sink = invocation.getArgument(1);
                 sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_REQUIRED,
-                        new java.util.LinkedHashMap<>(Map.of(
+                        new LinkedHashMap<>(Map.of(
                                 "runId", command.runId(),
                                 AgentEventTypes.WAIT_ENGINE_REF_FIELD, engineRef,
                                 AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
@@ -307,6 +315,80 @@ class IterationAppServiceTest {
     }
 
     @Test
+    void given_retry_attempt_suspends_when_approved_then_user_facing_anchor_is_first_run_id()
+            throws InterruptedException {
+        // #84 × #83 交叉面：首试中途错误静默重试，重试尝试（内部新 runId）触发权限
+        // 挂起——确认卡事件归一首试 runId（用户面 run 身份不变），作答校验以首试
+        // runId 为锚（前端按所见作答）；续跑引擎侧仍锚当次尝试的内部 runId
+        Long projectId = persistedGeneratedProject("9913");
+        List<Runnable> tracks = givenTrackQueued();
+        String engineRef = "reply-perm-retry";
+        when(agentClient.converse(any(), any()))
+                // 首试：中途错误（error 事件 + 异常上浮）
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "role", "CODER")));
+                    sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
+                            AgentEventTypes.ERROR_MESSAGE_FIELD, "首次尝试中断")));
+                    throw new IllegalStateException("首次尝试中断");
+                })
+                // 重试尝试：重开场（应被投影滤掉）后挂起权限确认
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "role", "CODER")));
+                    sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_REQUIRED,
+                            new LinkedHashMap<>(Map.of(
+                                    "runId", command.runId(),
+                                    AgentEventTypes.WAIT_ENGINE_REF_FIELD, engineRef,
+                                    AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
+                                    AgentEventTypes.WAIT_DATA_FIELD, Map.of("toolCalls", List.of(
+                                            Map.of("id", "tc-9", "name", "command",
+                                                    "input", Map.of("command", "rm -rf /workspace/data"))))))));
+                    return new AgentReply(command.runId(), "需要确认", new AgentSuspension(
+                            engineRef, false, List.of(Map.of(
+                                    "id", "tc-9", "name", "command",
+                                    "input", Map.of("command", "rm -rf /workspace/data")))));
+                });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
+            AgentResume resume = invocation.getArgument(0);
+            finishFixFacts.record(resume.workspaceId(), true, "批准后完成修正");
+            return new AgentReply(resume.runId(), "续跑收口");
+        });
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "清理临时数据目录", null);
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
+        // 确认卡事件锚 = 首试 runId（重试尝试的内部 runId 不出用户面）
+        ArgumentCaptor<Map<String, Object>> requiredPayload = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, timeout(5000)).publishAgentEvent(
+                eq(AgentEventTypes.PERMISSION_REQUIRED), requiredPayload.capture());
+        assertThat(requiredPayload.getValue().get(AgentEventTypes.RUN_FIELD))
+                .isEqualTo(dispatch.runId());
+
+        // 作答以首试 runId 为锚（校验通过即证明挂起会合登记的是用户面身份）
+        runPermissionAppService.answer(projectId, dispatch.runId(), engineRef, true);
+        worker.join(5000);
+
+        // 续跑引擎侧锚当次尝试的内部 runId（第二次 converse 的命令）；批准位落定
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().runId()).isEqualTo(commands.getAllValues().get(1).runId());
+        assertThat(resume.getValue().confirmResults().get(0).isConfirmed()).isTrue();
+
+        // 全程静默：run-start 恰一次（首试）、零 error、零 run-failed；轨道正常收工
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_START), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+    }
+
+    @Test
     void given_queued_tasks_when_track_not_run_yet_then_in_flight_covers_queued_start() {
         // 已提交未起跑（排队中）也算在途：重复派发仍排队，不并发起第二条轨道
         Long projectId = persistedGeneratedProject("9902");
@@ -347,15 +429,30 @@ class IterationAppServiceTest {
     void given_first_attempt_fails_when_fix_then_silent_retry_with_retry_prompt() {
         Long projectId = persistedGeneratedProject("9904");
         List<Runnable> tracks = givenTrackQueued();
+        // 剧本（#84 事件序列断言）：首试中途错误（error 事件 + 异常上浮）；重试尝试
+        //（内部新 runId）真实客户端会再发 run-start 与部件，收口 run-finish
         when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("修正尝试中断"))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "role", "CODER")));
+                    sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
+                            AgentEventTypes.ERROR_MESSAGE_FIELD, "修正尝试中断")));
+                    throw new IllegalStateException("修正尝试中断");
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "role", "CODER")));
+                    sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
+                            AgentEventTypes.PART_TEXT_FIELD, "从中断处继续修正")));
                     finishFixFacts.record(command.workspaceId(), true, "重试轮完成修正并收口");
                     return new AgentReply(command.runId(), "修正完成");
                 });
 
-        appService.startFixRun(projectId, "修正首页布局", null);
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "修正首页布局", null);
         tracks.remove(0).run();
 
         // 失败自动静默重试（#82/#84 口径）：重试续作轨照走，用户面零中间信号——
@@ -366,6 +463,16 @@ class IterationAppServiceTest {
                 .isEqualTo(IterationAppService.FIX_RETRY_RUN_PROMPT);
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
+
+        // 用户面 run 身份 = 首试 runId 全程不变（#84）：重试不新发 run-start、
+        // 重试尝试的部件归一首试锚——工作消息只见正常生长
+        ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(types.capture(), payloads.capture());
+        assertThat(types.getAllValues())
+                .containsExactly(AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT);
+        assertThat(payloads.getAllValues()).allSatisfy(payload ->
+                assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(dispatch.runId()));
 
         // 重试成功后轨道正常收工：下一场可再起跑
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
@@ -378,17 +485,17 @@ class IterationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("持续失败"));
 
-        appService.startFixRun(projectId, "修不动", null);
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "修不动", null);
         tracks.remove(0).run();
 
         ArgumentCaptor<AgentCommand> attempts = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(attempts.capture(), any());
-        // 终态收口事件（#56）：run-failed 恰一次、锚末次失败的尝试——前端「重新修改」
-        // 出口只认本事件（点击即恢复出口重派链路，不被 PRJ_025 挡回）
-        String lastAttemptRunId = attempts.getAllValues().get(2).runId();
+        // 终态收口事件（#56）：run-failed 恰一次、锚该场 run 的用户面标识（首试
+        // runId——重试不换新锚，#84）——前端「重新修改」出口只认本事件（点击即恢复
+        // 出口重派链路，不被 PRJ_025 挡回）
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
-                        && lastAttemptRunId.equals(payload.get(EventsAppService.RUN_FIELD))));
+                        && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
     }

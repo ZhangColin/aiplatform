@@ -191,8 +191,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "error": {
         const { payload } = platform;
-        // 对话轮失败（非重试族——编码 run 尝试环内中间错误不出用户面事件流）：
-        // 对话面收轮 + 失败气泡；生成面不写状态（#84）
+        // 编码 run 的 error = 事件序异常（#84：尝试环内中间错误不出用户面事件流，
+        // 服务端投影失守的防御位）——不写任何 UI（中途闪错即本票防的回归），
+        // run 层唯一失败终态仍归 run-failed
+        if (isCoderRun(generation, payload.projectId, payload.runId)) return;
+        // 对话轮失败（非重试族）：对话面收轮 + 失败气泡；生成面不写状态（#84）
         runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
         return;

@@ -61,13 +61,13 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 | type | payload 字段 | 说明 |
 |---|---|---|
-| `run-start` | `projectId` `runId` `prompt` `model` `engine` `role`（可空） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带角色键 `role`（业务侧角色卡的枚举名，如 CODER；无角色语境的一次性调用不携带）——前端工作消息（编码 run）与对话面 run（BA/ASSISTANT）的登记锚 |
+| `run-start` | `projectId` `runId` `prompt` `model` `engine` `role`（可空） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带角色键 `role`（业务侧角色卡的枚举名，如 CODER；无角色语境的一次性调用不携带）——前端工作消息（编码 run）与对话面 run（BA/ASSISTANT）的登记锚。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
 | `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口 BA 轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
-| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口） |
+| `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口） |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 起纯 QUESTION——权限确认已拆独立事件）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
 | `permission-required` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 权限确认挂起（[#83](https://github.com/ZhangColin/aiplatform/issues/83) 事件拆分，词根 = 引擎权限确认原语 RequireUserConfirmEvent 的非提问面）：run 执行中需用户批准的工具操作（危险命令 → 确认卡长在工作消息流，批准/拒绝两个动作）。`summary` = 首工具的命令文本（截断保短，确认卡摘要行）；`data.toolCalls` = 待确认工具最小面（确认卡呈现待批准操作的依据）。**作答走权限作答通道**（`POST /api/projects/{id}/permissions/{ref}/answer`，ref=engineRef；与问答作答分家——互不串扰）；生产触发面 = 平台侧 `command` 工具的破坏性命令自检（封闭小表：递归强删/提权/格式化与裸写设备/关机族/fork 炸弹） |
 | `permission-resolved` | `projectId` `runId` `engineRef` `approved` | 权限确认落定（[#83](https://github.com/ZhangColin/aiplatform/issues/83)）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）；run 终态仍归 `run-finish`/`run-failed` |
-| `run-failed` | `projectId` `runId` | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` 锚定末次失败的尝试。**run 失败为唯一失败终态**——重试全程静默（中间错误不出用户面），前端恢复出口只认本事件 |
+| `run-failed` | `projectId` `runId` | 编码 run 重试超限·终态收口（[#56](https://github.com/ZhangColin/aiplatform/issues/56)）：轨道层在真终态落定点发射——修正轨道与终态账（恢复出口 `restartFixRun` 的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；生成轨道超限即终态。`runId` = 该场 run 的用户面标识（首试 runId——[#84](https://github.com/ZhangColin/aiplatform/issues/84) 重试不换新锚）。**run 失败为唯一失败终态**——重试全程静默（中间错误与重试信号不出用户面：无逐次 `error`、无重试 `run-start`），前端恢复出口只认本事件 |
 | `guide-reply` | `projectId` `runId` `prompt` `label` `text` | 兜底轻引导回复（[#47](https://github.com/ZhangColin/aiplatform/issues/47) 入口三分类的兜底分支）：非意见非咨询输入的平台侧定型引导文案——零产物路径（不起任何智能体 run，本事件即该次派发的全部）。`runId` 为派发锚；`prompt` 为锚定的用户输入（重放重建对话面用）；`label` 为呈现标签（「平台」）；`text` 为引导文案 |
 
 #### 消息部件事件（`part-*`）

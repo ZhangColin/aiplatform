@@ -18,8 +18,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -240,7 +243,7 @@ class GenerationAppServiceTest {
     }
 
     @Test
-    void given_first_attempt_fails_when_retry_then_retrying_frame_then_second_succeeds() {
+    void given_first_attempt_fails_when_retry_then_second_succeeds_silently() {
         Long projectId = persistedProject("9803");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -252,7 +255,7 @@ class GenerationAppServiceTest {
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
-        // 重试换新 runId（首试 runId 只属于第一次尝试）、prompt 换重试续作轨
+        // 重试换内部 runId（计量幂等/日志逐次唯一）、prompt 换重试续作轨
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         List<AgentCommand> attempts = command.getAllValues();
@@ -277,16 +280,137 @@ class GenerationAppServiceTest {
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
+    /**
+     * 脚本化智能体事件缝（#84 验收）的本地别名：剧本体在
+     * {@link AgentEventScripts}（生成/迭代共用，契约变化单点同步）。
+     */
+    private static AgentEvent scripted(String type, String runId, Map<String, Object> extra) {
+        return AgentEventScripts.scripted(type, runId, extra);
+    }
+
+    @Test
+    void given_retryable_error_scripted_when_generate_then_user_stream_single_run_identity() {
+        // #84 AC①③：注入可重试错误的脚本化 run——用户面全程无中间错误呈现、无重试
+        // 信号（重试不新发 run-start、内部 attempt runId 不出用户面），重试成功只见
+        // 工作消息正常生长（部件流连续）+ 正常收口
+        Long projectId = persistedProject("9813");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                // 首试：开场 + 解说 + 动作在途，中途错误（底座补 error 事件）后异常上浮
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "model", "m", "role", "CODER")));
+                    sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
+                            AgentEventTypes.PART_TEXT_FIELD, "先搭骨架")));
+                    sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
+                            AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "tc-1",
+                            AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "write_file",
+                            AgentEventTypes.PART_ACTION_STATE_FIELD,
+                                    AgentEventTypes.PART_ACTION_STATE_RUNNING,
+                            AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【首页】")));
+                    sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
+                            AgentEventTypes.ERROR_MESSAGE_FIELD, "模型调用中断")));
+                    throw new IllegalStateException("模型调用中断");
+                })
+                // 重试尝试（内部新 runId）：真实客户端会再发 run-start 与部件、收口 run-finish
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                            "prompt", command.prompt(), "model", "m", "role", "CODER")));
+                    sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
+                            AgentEventTypes.PART_TEXT_FIELD, "从中断处继续")));
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(), Map.of(
+                            AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "系统已生成");
+                });
+
+        GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
+
+        // 用户面事件序列：恰一次 run-start（锚首试 runId）、部件流连续、run-finish
+        // 收口；零 error、零重试开场、零 run-failed——重试族过程事实零外泄
+        ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(5)).publishAgentEvent(types.capture(), payloads.capture());
+        assertThat(types.getAllValues()).containsExactly(
+                AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
+                AgentEventTypes.PART_ACTION, AgentEventTypes.PART_TEXT,
+                AgentEventTypes.RUN_FINISH);
+        assertThat(payloads.getAllValues())
+                .allSatisfy(payload -> assertThat(payload.get(AgentEventTypes.RUN_FIELD))
+                        .isEqualTo(run.runId()))
+                .noneSatisfy(payload -> assertThat(String.valueOf(payload.get("prompt")))
+                        .contains("上一次尝试中断")); // 内部重试 prompt 不外泄
+        // 重试成功 → generated_at 落位（唯一终态是成功的收口，非失败）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generated_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId)).isNotNull();
+    }
+
+    @Test
+    void given_fake_close_then_retry_scripted_when_generate_then_run_finish_only_at_true_close() {
+        // #84 假完成不闪收口：converse 正常返回但收口判据不过（8081 不可达）= 该次
+        // 尝试失败走重试——中场 run-finish 不出用户面（定格了又生长 = 重试信号外泄），
+        // 真收口才发；工作消息只见连续生长
+        Long projectId = persistedProject("9814");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
+        // 收口核验探针：首试不可达、重试可达
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains("curl"))))
+                .thenReturn(new ExecResultResponse("", "Connection refused", 7))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // 剧本：每次尝试都正常收口（开场 + 解说 + run-finish）——判据成败由探针定
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                    "prompt", command.prompt(), "model", "m", "role", "CODER")));
+            sink.accept(scripted(AgentEventTypes.PART_TEXT, command.runId(), Map.of(
+                    AgentEventTypes.PART_TEXT_FIELD, "本尝试完工")));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(), Map.of(
+                    AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完工");
+        });
+
+        GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
+
+        // 用户面事件序列：恰一次 run-start（首试）、部件流连续、恰一次 run-finish
+        //（真收口）——全锚首试 runId；零 error、零 run-failed
+        ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(4)).publishAgentEvent(types.capture(), payloads.capture());
+        assertThat(types.getAllValues()).containsExactly(
+                AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
+                AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
+        assertThat(payloads.getAllValues()).allSatisfy(payload ->
+                assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(run.runId()));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT generated_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId)).isNotNull();
+    }
+
     @Test
     void given_all_attempts_fail_when_exceed_limit_then_terminal_without_generated_at() {
+        // #84 AC②：注入不可恢复错误——唯一失败终态（run-failed）呈现，恢复出口可用
         Long projectId = persistedProject("9804");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("已生成");
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("持续失败"));
+        // 剧本：每次尝试都开场后中途错误（error 事件 + 异常上浮）——全程不可恢复
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
+                    "prompt", command.prompt(), "model", "m", "role", "CODER")));
+            sink.accept(scripted(AgentEventTypes.ERROR, command.runId(), Map.of(
+                    AgentEventTypes.ERROR_MESSAGE_FIELD, "持续失败")));
+            throw new IllegalStateException("持续失败");
+        });
 
-        appService.startGeneration(projectId);
+        GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
         // 超限转终态：恰 maxAttempts 次尝试、全程静默（无重试信号 / error）、
         // generated_at 不落
@@ -295,18 +419,19 @@ class GenerationAppServiceTest {
         verify(agentClient, times(maxAttempts)).converse(attempts.capture(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), anyMap());
-        // 终态收口事件（#56）：run-failed 恰一次、锚末次失败的尝试——前端恢复出口
-        // 只认本事件（run 失败为唯一失败终态）
-        String lastAttemptRunId = attempts.getAllValues().get(maxAttempts - 1).runId();
+        // 重试尝试的 run-start 不外泄：用户面全程恰一次开场（首试）
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_START), anyMap());
+        // 终态收口事件（#56）：run-failed 恰一次、锚该场 run 的用户面标识（首试
+        // runId——重试不换新锚，#84）——前端恢复出口只认本事件（run 失败为唯一失败终态）
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
-                        && lastAttemptRunId.equals(payload.get(EventsAppService.RUN_FIELD))));
+                        && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNull();
 
         // 在途守卫已释放：用户重新发起兜底路径可再走（generated_at 未落 = 按钮口径仍在）
-        // ——重打桩走 doReturn（旧 thenThrow 仍在效期，when() 内调用会先抛）
+        // ——重打桩走 doReturn（旧 thenAnswer 仍在效期，when() 内调用会先跑旧桩）
         doReturn(new AgentReply("run-again", "系统已生成"))
                 .when(agentClient).converse(any(), any());
         appService.startGeneration(projectId);

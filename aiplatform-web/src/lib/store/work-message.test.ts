@@ -303,3 +303,71 @@ describe("work-message store · 确认卡（#83 权限确认：长在工作消�
     expect(permissionPart()?.state).toBe("pending");
   });
 });
+
+describe("work-message store · 自检播报（#85：一场 run 一个自检部件，原位换装）", () => {
+  function checkPart() {
+    return work()?.parts.find(
+      (part): part is Extract<WorkPart, { kind: "check" }> => part.kind === "check",
+    );
+  }
+
+  it("checking → passed：同一行原位换装（React key 不变），起跑锚取首条 checking、落定记 endedAt", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+
+    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+    expect(checkPart()).toEqual({ kind: "check", id: "r1:8", state: "checking", startedAt: 8_000 });
+
+    notePart("p1", ref({ eventId: "r1:9", at: 9_500 }), { kind: "check", state: "passed" });
+    expect(work()?.parts).toHaveLength(1);
+    expect(checkPart()).toEqual({
+      kind: "check",
+      id: "r1:8", // 原位更新不改键
+      state: "passed",
+      startedAt: 8_000,
+      endedAt: 9_500, // 落定时间戳（探活结果留痕，收尾卡统计行随 #88 消费）
+    });
+  });
+
+  it("静默重试口径：重复 checking 幂等（不闪换、起跑锚不重置、部件引用不变）", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+    const partsBefore = work()?.parts;
+
+    // 首试核验未过（不出 ❌）→ 重试核验再发 checking——用户面仍是同一次检查
+    //（事件 id 簿记照收 = 重放去重口径；部件面零变更 = 不触发部件重渲染）
+    notePart("p1", ref({ eventId: "r1:12", at: 20_000 }), { kind: "check", state: "checking" });
+
+    expect(work()?.parts).toBe(partsBefore); // 部件引用不变
+    expect(checkPart()?.startedAt).toBe(8_000);
+  });
+
+  it("末次核验未过：checking → failed（与 run-failed 同窗口，❌ 定格留驻）", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+
+    notePart("p1", ref({ eventId: "r1:9", at: 9_000 }), { kind: "check", state: "failed" });
+    freezeWork("p1", "r1", 9_100);
+
+    expect(checkPart()).toMatchObject({ state: "failed", endedAt: 9_000 });
+    expect(work()?.frozen).toBe(true);
+  });
+
+  it("定格后自检事件不进（重放/迟到防御）；未锚定 BA 会话的 part-check 不建工作消息", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    freezeWork("p1", "r1", 5_000);
+
+    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "checking" });
+    expect(work()?.parts).toEqual([]);
+
+    // 部件全事件流恒挂但只锚编码 run：BA 会话的 part-check 不补建工作消息
+    notePart("p1", ref({ eventId: "rb:3", runId: "rb", sessionId: "ba-p1" }), {
+      kind: "check",
+      state: "checking",
+    });
+    expect(work()?.parts).toEqual([]);
+  });
+});

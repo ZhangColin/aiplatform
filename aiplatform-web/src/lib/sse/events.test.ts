@@ -223,6 +223,11 @@ describe("智能体事件族收窄", () => {
       type: "part-step",
       payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
     },
+    {
+      // 自检播报（#85）：平台侧产出（不经引擎映射表——无 engine 字段）
+      type: "part-check",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", state: "checking" },
+    },
   ] as const)("消息部件事件 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
     // 期望值来自正本「消息部件事件」节（#77 parts 契约；字段值镜像服务端
     // AgentscopeAgentClientTest 的部件序列断言——双侧同源于契约正本）

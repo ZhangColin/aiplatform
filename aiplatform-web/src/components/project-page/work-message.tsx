@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileCode2, Hammer, ShieldQuestion, SquareTerminal, X } from "lucide-react";
+import { Check, FileCode2, Hammer, ShieldCheck, ShieldQuestion, SquareTerminal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,8 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
  * 生长中的工作消息（#81 事件模型迁移，形态同 #68 原型已验证形）：对话区内一条
  * 随部件逐段生长的消息——解说文本部件（智能体用户语言解说）+ 单行动作状态卡
  * （图标 + 对象 + 进行中/完成/失败 + 时长）+ 步骤分组头（「第 N 步」）+ 权限
- * 确认卡（#83：需批准的工具操作，批准/拒绝即续跑——与问答卡分形态）。思考与
+ * 确认卡（#83：需批准的工具操作，批准/拒绝即续跑——与问答卡分形态）+ 自检播报
+ * 行（#85：收口判据核验「正在检查系统 → ✅/❌」）。思考与
  * 代码不播、无进度条/百分比；run 开始即出现（空部件也出「正在做」头部），
  * 收口定格（头部与打字点退场、时长停跳，部件留驻凝聚物收尾卡前的定格态）。
  * 计时 tick 归组件局部（UI 关注，非流状态——同 run-elapsed 先例）。
@@ -77,7 +78,7 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
   );
 }
 
-/** 部件呈现：解说 = 正文段；步骤 = 分组头；权限确认 = 确认卡；动作 = 单行状态卡。 */
+/** 部件呈现：解说 = 正文段；步骤 = 分组头；权限确认 = 确认卡；自检 = 一句话播报行；动作 = 单行状态卡。 */
 function WorkPartRow({
   part,
   frozen,
@@ -105,7 +106,50 @@ function WorkPartRow({
   if (part.kind === "permission") {
     return <PermissionRow part={part} frozen={frozen} projectId={projectId} runId={runId} />;
   }
+  if (part.kind === "check") {
+    return <CheckRow part={part} frozen={frozen} />;
+  }
   return <ActionRow part={part} frozen={frozen} tickStop={tickStop} />;
+}
+
+/**
+ * 自检播报行（#85，spec「正在检查系统 → ✅/❌」）：收口判据核验的一句话呈现——
+ * 核验中转圈，落定原位换 ✅（检查通过）/❌（检查未过）；终值即探活结果（收尾卡
+ * 统计行随 #88 消费）。定格截断的「检查中」（run 未进核验即终态的防御面）不再
+ * 转圈、如实留「检查中」字样。
+ */
+function CheckRow({
+  part,
+  frozen,
+}: {
+  part: Extract<WorkPart, { kind: "check" }>;
+  frozen: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
+      <span className="shrink-0 text-muted-foreground">
+        <ShieldCheck className="size-3.5" />
+      </span>
+      {part.state === "passed" ? (
+        <>
+          <span className="min-w-0 flex-1 text-muted-foreground">检查通过</span>
+          <Check className="size-3.5 shrink-0 text-green-600" strokeWidth={3} />
+        </>
+      ) : part.state === "failed" ? (
+        <>
+          <span className="min-w-0 flex-1 text-muted-foreground">检查未过</span>
+          <X className="size-3.5 shrink-0 text-destructive" strokeWidth={3} />
+        </>
+      ) : (
+        <>
+          <span className={cn("min-w-0 flex-1", frozen && "text-muted-foreground")}>
+            正在检查系统
+          </span>
+          {!frozen ? <Spinner className="size-3 shrink-0 text-muted-foreground" /> : null}
+        </>
+      )}
+    </div>
+  );
 }
 
 /**

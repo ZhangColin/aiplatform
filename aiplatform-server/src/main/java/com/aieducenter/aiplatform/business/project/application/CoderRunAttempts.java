@@ -27,7 +27,8 @@ import lombok.extern.slf4j.Slf4j;
  * 机制）：失败有余量<b>静默续试</b>（#84：中间错误与重试信号不出用户面事件流，
  * <b>用户面 run 身份 = 首试 runId 全程不变</b>——重试尝试的内部 runId 逐次换新仅
  * 服务计量幂等键与日志，经用户面投影 {@link #userFacingProjection} 归一、重试不
- * 新发 run-start；run-finish 押后到收口判据落定——假完成不闪中场收口；run 失败
+ * 新发 run-start；run-finish 押后到收口判据落定——假完成不闪中场收口，判据核验
+ * 出自检播报 part-check「检查中 → ✅/❌」（#85）；run 失败
  * 是唯一失败终态），超限转终态失败——终态收口事件
  * {@code run-failed} 由<b>轨道层</b>在真终态落定点发射（#56：修正轨道排队合并
  * 续派的中途超限不是终态，本层不判），用户侧兜底——生成重新发起 / 修正恢复出口
@@ -139,7 +140,24 @@ class CoderRunAttempts {
                     projection.accept(event);
                 };
                 settlePermissions(command, agentClient.converse(command, sink), sink, firstRunId);
-                onSuccess.accept(attemptRunId);
+                // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 修正
+                // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
+                // 「检查中」、落定出结果，位于被押后的 run-finish 之前（收口前播报）。
+                // 静默重试同构口径：尝试间核验未过不出 ❌（部件停在「检查中」——重试
+                // 信号不外泄，重试核验再发「检查中」前端幂等）；❌ 仅在末次尝试未过
+                //（超限转终态）时出，与轨道层 run-failed 同窗口。状态终值 = 探活结果，
+                // 随智能体事件族进重放缓冲，可被收尾统计消费（#88 轮末统计行）
+                emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
+                try {
+                    onSuccess.accept(attemptRunId);
+                }
+                catch (RuntimeException e) {
+                    if (attempt == maxAttempts) {
+                        emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_FAILED);
+                    }
+                    throw e;
+                }
+                emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
                     projection.accept(pendingFinish.get());
                 }
@@ -203,6 +221,19 @@ class CoderRunAttempts {
                         : "用户已拒绝该操作。",
                 command.usageContext(),
                 command.agentRole());
+    }
+
+    /**
+     * 自检播报事件（#85）：平台侧收口判据核验的部件事实（不经引擎部件映射表——
+     * 判据是平台事实），payload = runId + sessionId + state。经用户面投影发射——
+     * 重试尝试归锚首试 runId（用户面 run 身份不变）。
+     */
+    private static void emitSelfCheck(Consumer<AgentEvent> projection, AgentCommand command,
+            String state) {
+        projection.accept(new AgentEvent(AgentEventTypes.PART_CHECK, Map.of(
+                AgentEventTypes.RUN_FIELD, command.runId(),
+                AgentEventTypes.SESSION_FIELD, command.sessionId(),
+                AgentEventTypes.PART_CHECK_STATE_FIELD, state)));
     }
 
     /**

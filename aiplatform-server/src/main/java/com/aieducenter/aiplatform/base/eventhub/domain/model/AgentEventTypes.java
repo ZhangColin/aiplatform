@@ -157,6 +157,30 @@ public final class AgentEventTypes {
     public static final String PART_STEP_FIELD = "step";
 
     /**
+     * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
+     * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成 = 8081
+     * 探活、更新 = finish_edit 收口事实），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、
+     * 落定发 {@link #PART_CHECK_STATE_PASSED}/{@link #PART_CHECK_STATE_FAILED}。静默重试
+     * 同构口径（#84）：尝试间核验未过不发 failed——部件停在 checking（重试信号不外泄，
+     * 重复 checking 幂等）；failed 仅在末次尝试未过（超限转终态）时发，与
+     * {@link #RUN_FAILED} 同窗口到达。状态终值 = 探活结果，可被收尾统计消费（#88
+     * 轮末统计行）。
+     */
+    public static final String PART_CHECK = "part-check";
+
+    /** part-check 的核验状态键（值 = PART_CHECK_STATE_* 常量）。 */
+    public static final String PART_CHECK_STATE_FIELD = "state";
+
+    /** 核验进行中（收口判据核验开始——「正在检查系统」）。 */
+    public static final String PART_CHECK_STATE_CHECKING = "checking";
+
+    /** 核验通过（收口判据落定，run-finish 随之放行）。 */
+    public static final String PART_CHECK_STATE_PASSED = "passed";
+
+    /** 核验未过（仅末次尝试——超限转终态，与 run-failed 同窗口）。 */
+    public static final String PART_CHECK_STATE_FAILED = "failed";
+
+    /**
      * 消息附件部件（契约预留，#97 圈注）：圈注锚随消息发送的载荷位——结构化定位
      * + 标注类型 + 可选评语，锚载荷 schema 随 SSE事件清单定形。本票只占契约位，
      * 无生产方（圈注管道随 #97 落地）。

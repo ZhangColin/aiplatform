@@ -278,6 +278,17 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
+      case "part-check": {
+        // 自检播报（#85）：收口判据核验「检查中 → ✅/❌」——平台侧产出（无 engine
+        // 字段）；一场 run 一个自检部件，跨状态原位换装归 store
+        const { payload } = platform;
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { kind: "check", state: payload.state },
+        );
+        return;
+      }
     }
   }
 

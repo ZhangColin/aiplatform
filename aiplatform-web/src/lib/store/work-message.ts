@@ -26,12 +26,20 @@ import { create } from "zustand";
 /** 动作部件生命周期（正本 part-action 行：started / running / completed / failed）。 */
 export type WorkActionState = "started" | "running" | "completed" | "failed";
 
+/** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
+export type WorkCheckState = "checking" | "passed" | "failed";
+
 /** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态）。 */
 export type WorkPermissionState = "pending" | "approved" | "denied";
 
 /** 终态判定（completed / failed——时长定格、文案换终态色）。 */
 function isTerminalState(state: WorkActionState): boolean {
   return state === "completed" || state === "failed";
+}
+
+/** 自检落定判定（passed / failed——「检查中」的唯一出路）。 */
+function isCheckSettled(state: WorkCheckState): boolean {
+  return state !== "checking";
 }
 
 /** 工作消息部件（part-* 事件 + 权限确认事件的投影）。 */
@@ -64,6 +72,23 @@ export type WorkPart =
       startedAt: number;
       /** 终态落定时间戳（时长 = endedAt - startedAt）。 */
       endedAt?: number;
+    }
+  | {
+      /**
+       * 自检部件（#85「正在检查系统 → ✅/❌」）：一场 run 至多一个——收口判据
+       * 核验的呈现，跨状态原位换装（checking → passed/failed）。静默重试口径：
+       * 尝试间核验未过不出 failed（重复 checking 幂等——用户面一次检查），
+       * failed 仅末次未过（与 run-failed 同窗口）。终值即探活结果（startedAt/
+       * endedAt 留痕，收尾卡统计行随 #88 消费）。
+       */
+      kind: "check";
+      /** React key（首见 checking 事件 id——原位更新不改键）。 */
+      id: string;
+      state: WorkCheckState;
+      /** 核验开始时间戳（ms；首条 checking 的信封 ts——重试不重置）。 */
+      startedAt: number;
+      /** 落定时间戳（passed/failed 的信封 ts）。 */
+      endedAt?: number;
     };
 
 /** 部件事件的最小关联（信封公共字段 + 事件 id + 信封 ts）。 */
@@ -82,6 +107,7 @@ export type WorkPartInput =
   | { kind: "text"; text: string }
   | { kind: "step"; step: number }
   | { kind: "permission"; engineRef: string; summary: string }
+  | { kind: "check"; state: WorkCheckState }
   | {
       kind: "action";
       toolCallId: string;
@@ -136,8 +162,37 @@ function appendCapped(list: string[], id: string): string[] {
   return next.length > MAX_IDS ? next.slice(next.length - MAX_IDS) : next;
 }
 
-/** 部件应用（动作原位更新；返回原数组引用即无变更）。 */
+/** 部件应用（动作/自检原位更新；返回原数组引用即无变更）。 */
 function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): ProjectWork {
+  if (input.kind === "check") {
+    // 一场 run 至多一个自检部件：跨状态原位换装。静默重试的重复 checking 幂等
+    // （同态不改引用——不闪换、不重置起跑锚）；落定（passed/failed）记 endedAt
+    const existing = work.parts.find(
+      (part): part is Extract<WorkPart, { kind: "check" }> => part.kind === "check",
+    );
+    if (existing) {
+      if (existing.state === input.state) return work;
+      const updated: Extract<WorkPart, { kind: "check" }> = {
+        ...existing,
+        state: input.state,
+        endedAt: isCheckSettled(input.state) ? ref.at : existing.endedAt,
+      };
+      return { ...work, parts: work.parts.map((part) => (part === existing ? updated : part)) };
+    }
+    return {
+      ...work,
+      parts: capParts([
+        ...work.parts,
+        {
+          kind: "check",
+          id: ref.eventId,
+          state: input.state,
+          startedAt: ref.at,
+          endedAt: isCheckSettled(input.state) ? ref.at : undefined,
+        },
+      ]),
+    };
+  }
   if (input.kind === "action") {
     const existing = work.parts.find(
       (part): part is Extract<WorkPart, { kind: "action" }> =>

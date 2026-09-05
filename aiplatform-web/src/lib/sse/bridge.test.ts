@@ -669,6 +669,74 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ]);
   });
 
+  /**
+   * 自检播报（#85，镜面服务端 GenerationAppServiceTest·收口核验事件序断言）：
+   * 收口判据核验「检查中 → 通过」位于真收口 run-finish 前——工作消息尾部一个
+   * 自检部件原位换装，run-finish 定格后留驻（终值 = 探活结果，收尾卡统计行
+   * 随 #88 消费）。
+   */
+  it("part-check：checking → passed 原位换装后随 run-finish 定格（无 engine 字段的平台侧部件）", () => {
+    const t0 = "2026-09-05T06:00:00.000Z";
+    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1" };
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", engine: "agentscope", role: "CODER" },
+      "run1:1",
+      at(0),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, engine: "agentscope", text: "骨架已就位" }, "run1:2", at(1)));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "checking" }, "run1:3", at(8)));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...base, state: "passed" }, "run1:4", at(9)));
+    dispatchAgentEvent(agentQc, agentEvent("run-finish", { ...base, engine: "agentscope", finish: "end" }, "run1:5", at(10)));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.frozen).toBe(true);
+    expect(work?.parts).toEqual([
+      { kind: "text", id: "run1:2", text: "骨架已就位" },
+      {
+        kind: "check",
+        id: "run1:3", // 首见 checking 事件 id——原位换装不改键
+        state: "passed",
+        startedAt: Date.parse(at(8)),
+        endedAt: Date.parse(at(9)),
+      },
+    ]);
+  });
+
+  /**
+   * 自检终态面（镜面服务端「核验全程不过」断言）：末次核验未过 ❌ 先于
+   * run-failed 到达——自检部件定格 failed，工作消息随 run-failed 定格。
+   */
+  it("part-check failed → run-failed：❌ 定格留驻，消息定格", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", prompt: "做系统", model: "m", role: "CODER" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-check",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", state: "checking" },
+      "run1:2",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-check",
+      { projectId: "p1", runId: "run1", sessionId: "coder-p1", state: "failed" },
+      "run1:3",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-failed",
+      { projectId: "p1", runId: "run1" },
+      "run1:4",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.frozen).toBe(true);
+    expect(work?.parts).toHaveLength(1);
+    expect(work?.parts[0]).toMatchObject({ kind: "check", state: "failed" });
+  });
+
   it("run-start 无 CODER 角色（BA/助理/一次性调用）不起工作消息；BA 部件不误建", () => {
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",

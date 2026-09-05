@@ -49,7 +49,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 ### 消息模型（parts 契约）
 
-**消息 = 有序部件集合（parts）**（六源行业同构；词根基准 = agentscope 原生 part 族——文本/推理/工具调用请求/文件，mapper 保持薄翻译层，不强套某家词表）。run 进行中 = 对话区内一条**生长中的工作消息**（解说文本部件 + 工具动作部件，带状态；步骤分组分段），run 收口 = 消息定格。部件事件（`part-*`）由 base.agentscope 的部件映射表（`AgentscopePartsMapper`）从同一 AgentScope 事件流产出，全事件流恒挂（不限编码 run）；思考与代码补丁不进部件（思考与代码流不播——CONTEXT.md「智能体事件」）。
+**消息 = 有序部件集合（parts）**（六源行业同构；词根基准 = agentscope 原生 part 族——文本/推理/工具调用请求/文件，mapper 保持薄翻译层，不强套某家词表）。run 进行中 = 对话区内一条**生长中的工作消息**（解说文本部件 + 工具动作部件，带状态；步骤分组分段），run 收口 = 消息定格。部件事件（`part-*`）由 base.agentscope 的部件映射表（`AgentscopePartsMapper`）从同一 AgentScope 事件流产出，全事件流恒挂（不限编码 run）——例外：`part-check` 由平台侧收口判据核验产出（自检是平台事实，不经引擎 mapper，[#85](https://github.com/ZhangColin/aiplatform/issues/85)）；思考与代码补丁不进部件（思考与代码流不播——CONTEXT.md「智能体事件」）。
 
 下表「payload 字段」列的关联字段 = `runId`（必带）+ `projectId`（业务编排桥接注入）+ `sessionId`（会话建立后携带）。三类事件：
 
@@ -77,6 +77,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `part-text` | `projectId` `runId` `sessionId` `engine` `text` | 解说文本部件：`text` 为**完整段非增量**——服务端逐段成型（句读 / 文本块变 / 步骤与动作边界 / 长度上限切段），run 收口事件前出尾段 |
 | `part-action` | `projectId` `runId` `sessionId` `engine` `toolCallId` `toolName` `state` `label` | 工具动作部件（动作卡）：**开始/进行中/完成/失败全生命周期**——动作一开始即出事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ `started`（模型发起工具调用，参数在途）/ `running`（参数落定、工具执行中）/ `completed`（结果成功）/ `failed`（结果出错/被拒/中断——动作层状态，run 层唯一失败终态仍是 run-failed）。`label` = 动作对象短语（人话行，无时态——时态由 state 表达；started 时参数在途为通用对象如「编写【代码文件】」，running 起解析参数为具体对象如「编写【订单管理】」，终态复述不闪换）。播报工具为封闭表：write_file / edit_file / command——读类工具不进部件（对客户是噪音） |
 | `part-step` | `projectId` `runId` `sessionId` `engine` `step` | 步骤分组部件：`step` 为流段内序号（1 起，模型调用边界），呈现为「第 N 步」分组头；问答续跑为新流段重新起算 |
+| `part-check` | `projectId` `runId` `sessionId` `state` | 自检播报部件（[#85](https://github.com/ZhangColin/aiplatform/issues/85)：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的呈现——**平台侧产出**（不经引擎部件映射表，收口判据是平台事实：生成 = 8081 探活、更新 = finish_edit 收口事实），核验开始发 `checking`、落定发 `passed`/`failed`。静默重试同构口径（#84）：尝试间核验未过**不发 `failed`**——部件停在 `checking`（重试信号不外泄，重复 `checking` 幂等）；`failed` 仅在末次尝试未过（超限转终态）时发，与 `run-failed` 同窗口到达。状态终值（passed/failed）= 探活结果，可被收尾统计消费（#88 轮末统计行） |
 | `part-attachment` | —— | **契约预留**（无生产方，[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地时启用）：消息附件部件——圈注锚随消息发送的载荷位，schema 见[下节](#消息附件部件锚载荷-schema预留97) |
 
 #### 消息附件部件锚载荷 schema（预留，#97）

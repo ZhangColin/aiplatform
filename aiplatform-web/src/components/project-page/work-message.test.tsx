@@ -157,6 +157,51 @@ describe("WorkMessage · 确认卡（#83 权限确认：长在工作消息流，
   });
 });
 
+describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/❌」）", () => {
+  function checkPart(overrides: Partial<Extract<WorkPart, { kind: "check" }>> = {}) {
+    return {
+      kind: "check",
+      id: "run-1:8",
+      state: "checking",
+      startedAt: 8_000,
+      ...overrides,
+    } satisfies Extract<WorkPart, { kind: "check" }>;
+  }
+
+  it("核验中：「正在检查系统」+ 进行中转圈", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [checkPart()] })} projectId="p1" />,
+    );
+
+    expect(html).toContain("正在检查系统");
+    expect(html).toContain("animate-spin"); // Spinner 在转
+  });
+
+  it("核验通过 / 未过：原位换 ✅「检查通过」/ ❌「检查未过」，转圈退场", () => {
+    const passed = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [checkPart({ state: "passed", endedAt: 9_500 })] })} projectId="p1" />,
+    );
+    expect(passed).toContain("检查通过");
+    expect(passed).not.toContain("正在检查系统");
+    expect(passed).not.toContain("animate-spin");
+
+    const failed = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [checkPart({ state: "failed", endedAt: 9_500 })] })} projectId="p1" />,
+    );
+    expect(failed).toContain("检查未过");
+    expect(failed).not.toContain("animate-spin");
+  });
+
+  it("定格截断的「检查中」（run 未进核验即终态的防御面）：转圈退场、字样如实留驻", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ frozen: true, frozenAt: 60_000, parts: [checkPart()] })} projectId="p1" />,
+    );
+
+    expect(html).toContain("正在检查系统");
+    expect(html).not.toContain("animate-spin");
+  });
+});
+
 describe("时长格式（用户语言，整秒）", () => {
   it("动作时长：<60 秒「N 秒」，跨分「M 分 SS 秒」", () => {
     expect(formatDuration(4_300)).toBe("4 秒");

@@ -465,14 +465,23 @@ class IterationAppServiceTest {
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
 
         // 用户面 run 身份 = 首试 runId 全程不变（#84）：重试不新发 run-start、
-        // 重试尝试的部件归一首试锚——工作消息只见正常生长
+        // 重试尝试的部件归一首试锚——工作消息只见正常生长；自检播报（#85）：收口
+        // 判据核验（finish_edit 事实）「检查中 → 通过」随正常收口出现
         ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(2)).publishAgentEvent(types.capture(), payloads.capture());
+        verify(eventsAppService, times(4)).publishAgentEvent(types.capture(), payloads.capture());
         assertThat(types.getAllValues())
-                .containsExactly(AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT);
+                .containsExactly(AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
+                        AgentEventTypes.PART_CHECK, AgentEventTypes.PART_CHECK);
         assertThat(payloads.getAllValues()).allSatisfy(payload ->
                 assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(dispatch.runId()));
+        // 自检状态序：检查中 → 通过（首试死于 converse 中途、未进核验，恰一对）
+        assertThat(payloads.getAllValues().get(2))
+                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING);
+        assertThat(payloads.getAllValues().get(3))
+                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
+                        AgentEventTypes.PART_CHECK_STATE_PASSED);
 
         // 重试成功后轨道正常收工：下一场可再起跑
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
@@ -576,6 +585,23 @@ class IterationAppServiceTest {
 
         verify(agentClient, times(3)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
+        // 自检播报（#85）终态面：逐次「检查中」（尝试间未过不出 ❌），末次未过出 ❌
+        // ——❌ 先于 run-failed 到达（同终态窗口）
+        ArgumentCaptor<Map<String, Object>> checks = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(4)).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
+                checks.capture());
+        assertThat(checks.getAllValues())
+                .extracting(payload -> payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))
+                .containsExactly(
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_FAILED);
+        InOrder closeOrder = inOrder(eventsAppService);
+        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
+                argThat(payload -> AgentEventTypes.PART_CHECK_STATE_FAILED.equals(
+                        payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))));
+        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         // 未正常收口的超限同样由 run-failed 收口终态（#56）
         verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();

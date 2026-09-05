@@ -330,15 +330,25 @@ class GenerationAppServiceTest {
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
-        // 用户面事件序列：恰一次 run-start（锚首试 runId）、部件流连续、run-finish
+        // 用户面事件序列：恰一次 run-start（锚首试 runId）、部件流连续、自检播报
+        //（#85：收口判据核验「检查中 → 通过」，位于真收口 run-finish 前）、run-finish
         // 收口；零 error、零重试开场、零 run-failed——重试族过程事实零外泄
         ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(5)).publishAgentEvent(types.capture(), payloads.capture());
+        verify(eventsAppService, times(7)).publishAgentEvent(types.capture(), payloads.capture());
         assertThat(types.getAllValues()).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
                 AgentEventTypes.PART_ACTION, AgentEventTypes.PART_TEXT,
+                AgentEventTypes.PART_CHECK, AgentEventTypes.PART_CHECK,
                 AgentEventTypes.RUN_FINISH);
+        // 自检播报状态序：检查中 → 通过（首试死于 converse 中途、未进核验，恰一对）
+        assertThat(payloads.getAllValues().get(4))
+                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING)
+                .containsEntry(AgentEventTypes.SESSION_FIELD, "coder-" + projectId);
+        assertThat(payloads.getAllValues().get(5))
+                .containsEntry(AgentEventTypes.PART_CHECK_STATE_FIELD,
+                        AgentEventTypes.PART_CHECK_STATE_PASSED);
         assertThat(payloads.getAllValues())
                 .allSatisfy(payload -> assertThat(payload.get(AgentEventTypes.RUN_FIELD))
                         .isEqualTo(run.runId()))
@@ -378,14 +388,27 @@ class GenerationAppServiceTest {
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
-        // 用户面事件序列：恰一次 run-start（首试）、部件流连续、恰一次 run-finish
-        //（真收口）——全锚首试 runId；零 error、零 run-failed
+        // 用户面事件序列：恰一次 run-start（首试）、部件流连续、自检播报（#85：
+        // 首试核验未过不出 ❌——部件停在「检查中」，重试不外泄；重试核验过出
+        // 「通过」）、恰一次 run-finish（真收口）——全锚首试 runId；零 error、零 run-failed
         ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService, times(4)).publishAgentEvent(types.capture(), payloads.capture());
+        verify(eventsAppService, times(7)).publishAgentEvent(types.capture(), payloads.capture());
         assertThat(types.getAllValues()).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.PART_TEXT,
-                AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
+                AgentEventTypes.PART_CHECK, AgentEventTypes.PART_TEXT,
+                AgentEventTypes.PART_CHECK, AgentEventTypes.PART_CHECK,
+                AgentEventTypes.RUN_FINISH);
+        // 自检状态序：检查中（首试未过，静默）→ 检查中（重试核验）→ 通过——全程无 failed
+        ArgumentCaptor<Map<String, Object>> checks = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(3)).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
+                checks.capture());
+        assertThat(checks.getAllValues())
+                .extracting(payload -> payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))
+                .containsExactly(
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_PASSED);
         assertThat(payloads.getAllValues()).allSatisfy(payload ->
                 assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(run.runId()));
         assertThat(jdbcTemplate.queryForObject(
@@ -474,6 +497,45 @@ class GenerationAppServiceTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",
                 java.sql.Timestamp.class, projectId)).isNotNull();
+    }
+
+    @Test
+    void given_close_check_fails_all_attempts_when_generate_then_check_failed_before_run_failed() {
+        // 自检播报（#85）终态面：收口核验全程不过（converse 正常返回但 8081 始终不可达）
+        // ——逐次「检查中」（尝试间核验未过不出 ❌，静默重试同构口径），末次未过出 ❌，
+        // ❌ 先于 run-failed 到达（同终态窗口）；全锚用户面 run 标识（首试 runId）
+        Long projectId = persistedProject("9815");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds(); // AGENTS.md 写入成功；探针（curl）全程不可达
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains("curl"))))
+                .thenReturn(new ExecResultResponse("", "Connection refused", 7));
+        givenConverseSucceeds("很抱歉，没做完"); // 剧本无部件事件——用户面只剩自检与终态
+
+        GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
+
+        int maxAttempts = properties.getMaxAttempts();
+        // 自检状态序：逐次尝试各一发 checking（尝试间核验未过不出 ❌），末次核验
+        // 落定补一发 failed——恰 maxAttempts+1 条 = checking×n + failed
+        ArgumentCaptor<Map<String, Object>> checks = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(maxAttempts + 1)).publishAgentEvent(
+                eq(AgentEventTypes.PART_CHECK), checks.capture());
+        List<String> expectedStates = new ArrayList<>(
+                java.util.Collections.nCopies(maxAttempts, AgentEventTypes.PART_CHECK_STATE_CHECKING));
+        expectedStates.add(AgentEventTypes.PART_CHECK_STATE_FAILED);
+        assertThat(checks.getAllValues())
+                .extracting(payload -> payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))
+                .containsExactlyElementsOf(expectedStates);
+        assertThat(checks.getAllValues()).allSatisfy(payload -> {
+            assertThat(payload.get(AgentEventTypes.RUN_FIELD)).isEqualTo(run.runId());
+            assertThat(payload.get(AgentEventTypes.SESSION_FIELD)).isEqualTo("coder-" + projectId);
+        });
+        // ❌ 与 run-failed 同窗口且先于它（前端恢复出口只认 run-failed——❌ 先到不抢终态）
+        InOrder order = inOrder(eventsAppService);
+        order.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
+                argThat(payload -> AgentEventTypes.PART_CHECK_STATE_FAILED.equals(
+                        payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))));
+        order.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
     @Test

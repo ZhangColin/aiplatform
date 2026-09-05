@@ -216,6 +216,17 @@ export type PlatformAgentEvent =
       /** 步骤分组部件：run 内步骤序号（1 起，模型调用边界），呈现「第 N 步」分组头。 */
       type: "part-step";
       payload: AgentPayload & { engine: string; step: number };
+    }
+  | {
+      /**
+       * 自检播报部件（#85「正在检查系统 → ✅/❌」）：run 收口判据核验的呈现——
+       * 平台侧产出（不经引擎映射表，无 engine 字段；判据是平台事实）。`state` ∈
+       * checking（核验中）/ passed / failed；静默重试同构：尝试间核验未过不发
+       * failed（部件停在 checking，重复 checking 幂等），failed 仅末次未过（超限
+       * 转终态）与 run-failed 同窗口。终值 = 探活结果，收尾卡统计行随 #88 消费。
+       */
+      type: "part-check";
+      payload: AgentPayload & { sessionId: string; state: "checking" | "passed" | "failed" };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -230,6 +241,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "part-text",
   "part-action",
   "part-step",
+  "part-check",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

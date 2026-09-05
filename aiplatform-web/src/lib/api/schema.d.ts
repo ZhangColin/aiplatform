@@ -174,6 +174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/permissions/{ref}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 权限确认卡作答（run 内需批准操作的批准/拒绝续跑，#83 与问答作答分家）
+         * @description ref = 挂起事件 engineRef（续跑批复的锚），请求体只携带批准位 + 挂起轮 runId（串卡校验）——恢复私货不回传（挂起事实在平台侧）。批准即放行执行；拒绝即引擎写「用户已拒绝」工具结果回模型，run 据此改道或如实收口（可能仍收口成功）。作答受理即发 permission-resolved 事件（确认卡转已批/已拒），续跑过程事件经 SSE。runId 不符或确认已失效（运行已收口/平台重启丢账）409 PRJ_027（刷新查看最新状态）；项目不存在 404 PRJ_001
+         */
+        post: operations["answerPermission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/messages": {
         parameters: {
             query?: never;
@@ -877,6 +897,10 @@ export interface components {
             toolCalls: components["schemas"]["ToolCall"][];
             answer: string;
         };
+        PermissionAnswerCommand: {
+            runId: string;
+            approved: boolean;
+        };
         ToolCall: {
             id?: string;
             name?: string;
@@ -1370,6 +1394,33 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AnswerQuestionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    answerPermission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PermissionAnswerCommand"];
             };
         };
         responses: {

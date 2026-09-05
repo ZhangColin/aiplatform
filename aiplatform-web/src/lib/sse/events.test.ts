@@ -97,21 +97,50 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("question-raised 按正本收窄（payload {projectId, runId, kind, summary}）；平台 type 不落入透传口", () => {
+  it("question-raised 按正本收窄（#83 起纯 QUESTION——payload {projectId, runId, summary, engineRef, data}）；平台 type 不落入透传口", () => {
     // 期望值来自正本「智能体事件族」question-raised 行
     const env = parseSseEnvelope(
       JSON.stringify({
         type: "question-raised",
-        payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", kind: "QUESTION", summary: "选哪个配色" },
+        payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", summary: "选哪个配色", engineRef: "reply-1", data: { questions: [] } },
         ts: "",
       }),
     );
 
     expect(asPlatformAgentEvent(env!)).toMatchObject({
       type: "question-raised",
-      payload: { projectId: "a1b2c3d4", runId: "r1", kind: "QUESTION", summary: "选哪个配色" },
+      payload: { projectId: "a1b2c3d4", runId: "r1", summary: "选哪个配色", engineRef: "reply-1" },
     });
     expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
+  it("permission-required / permission-resolved 按正本收窄（#83 事件拆分）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「智能体事件族」permission-required / permission-resolved 行
+    const required = parseSseEnvelope(
+      JSON.stringify({
+        type: "permission-required",
+        payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", summary: "rm -rf /workspace/data", engineRef: "reply-9", data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
+        ts: "",
+      }),
+    );
+    expect(asPlatformAgentEvent(required!)).toMatchObject({
+      type: "permission-required",
+      payload: { projectId: "a1b2c3d4", runId: "r1", summary: "rm -rf /workspace/data", engineRef: "reply-9" },
+    });
+    expect(asPassthroughAgentEvent(required!)).toBeNull();
+
+    const resolved = parseSseEnvelope(
+      JSON.stringify({
+        type: "permission-resolved",
+        payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9", approved: false },
+        ts: "",
+      }),
+    );
+    expect(asPlatformAgentEvent(resolved!)).toMatchObject({
+      type: "permission-resolved",
+      payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9", approved: false },
+    });
+    expect(asPassthroughAgentEvent(resolved!)).toBeNull();
   });
 
   it("run-failed 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {

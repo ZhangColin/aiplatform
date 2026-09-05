@@ -209,7 +209,15 @@ public class BaInterviewAppService {
         appendOpinionReply(sessionId, answerText);
         Consumer<AgentEvent> sink = eventBridge.sink(projectId);
         sessionExecutor.submit(sessionId, () -> {
-            agentClient.resume(resume, sink);
+            try {
+                agentClient.resume(resume, sink);
+            }
+            catch (RuntimeException e) {
+                // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
+                // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
+                opinionExchanges.remove(sessionId);
+                throw e;
+            }
             dispatchFixOnTurnClose(projectId, sessionId, runId);
         });
     }

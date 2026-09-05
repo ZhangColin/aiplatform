@@ -17,8 +17,9 @@ import org.springframework.stereotype.Component;
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（subagents /
- * memory：源码包是交付物，记忆文件不进包）——工作区上下文（AGENTS.md 等）与
- * workspace/tools.json 读取照常，经容器文件面即项目事实；
+ * memory：源码包是交付物，记忆文件不进包）与内核 shell 工具（#83：CODER 的命令
+ * 走业务侧 ConfirmingShellTool，破坏性命令挂确认卡）——工作区上下文（AGENTS.md
+ * 等）与 workspace/tools.json 读取照常，经容器文件面即项目事实；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#47）——
  * 容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具（写面结构性关闭）。</p>
  *
@@ -102,7 +103,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     builder.workspace(local.root());
                 }
             }
-            case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName());
+            case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName())
+                    // #83 权限确认触发面：内核 shell 退位——CODER 的命令走业务侧
+                    // ConfirmingShellTool（ToolBase 自检 ASK 挂确认卡；内核 shell 非
+                    // ToolBase 引擎拦不住，注册名 execute 也进不了播报表）
+                    .disableShellTool();
             case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, ro.containerName())
                     // 只读面（#47 助理咨询姿态）：另关内核文件与 shell 工具——
                     // 写面结构性不存在，项目事实的读取经业务侧只读工具集

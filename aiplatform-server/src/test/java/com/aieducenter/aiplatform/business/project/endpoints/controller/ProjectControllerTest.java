@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.application.GenerationAppServ
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.RunPermissionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -50,6 +51,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -94,6 +96,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private IterationAppService iterationAppService;
+
+    @MockitoBean
+    private RunPermissionAppService runPermissionAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -594,6 +599,33 @@ class ProjectControllerTest {
                 List.of(Map.of("id", "tc-1", "name", "ask_user",
                         "input", Map.of("question", "目标用户是谁？"))),
                 "海外企业客户");
+    }
+
+    @Test
+    void given_permission_answer_when_answer_then_ok_and_facts_passed() throws Exception {
+        // #83 作答通道分家：ref（路径）= 挂起事件 engineRef；请求体只带 runId + 批准位
+        // ——恢复私货不回传（挂起事实在平台侧），与问答作答互不串扰
+        performAsUser(post("/api/projects/100/permissions/reply-9/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"runId\":\"run-42\",\"approved\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(runPermissionAppService).answer(100L, "run-42", "reply-9", true);
+    }
+
+    @Test
+    void given_stale_permission_when_answer_then_prj_027_as_409() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.PERMISSION_ANSWER_STALE))
+                .when(runPermissionAppService).answer(any(), any(), any(), anyBoolean());
+
+        performAsUser(post("/api/projects/100/permissions/reply-stale/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"runId\":\"run-42\",\"approved\":false}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value(
+                        ProjectMessage.PERMISSION_ANSWER_STALE.message()));
     }
 
     @Test

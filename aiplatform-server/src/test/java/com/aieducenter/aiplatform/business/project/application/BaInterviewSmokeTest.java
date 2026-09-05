@@ -277,11 +277,9 @@ class BaInterviewSmokeTest {
         assertThat(offenders).as("#34：tool_use input 不应含 answer 键（违规件 id）").isEmpty();
     }
 
-    /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源）。 */
+    /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源；#83 拆分后纯 QUESTION——kind 键已退役）。 */
     private Frame awaitQuestionOf(String runId) {
-        Frame question = awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
-        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-        return question;
+        return awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
     }
 
     /** 挂起事件的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
@@ -305,8 +303,6 @@ class BaInterviewSmokeTest {
                     continue;
                 }
                 if (!excludeRef.equals(engineRefOf(frame))) {
-                    assertThat(frame.payload())
-                            .containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
                     return frame;
                 }
             }

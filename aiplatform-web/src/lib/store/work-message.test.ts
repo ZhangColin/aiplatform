@@ -244,3 +244,62 @@ describe("work-message store · 重放幂等与定格", () => {
     expect(work()?.frozen).toBe(false);
   });
 });
+
+describe("work-message store · 确认卡（#83 权限确认：长在工作消息流）", () => {
+  function permissionPart() {
+    return work()?.parts.find(
+      (part): part is Extract<WorkPart, { kind: "permission" }> => part.kind === "permission",
+    );
+  }
+
+  it("permission-required 部件入消息（pending 态、engineRef/summary 随卡）；重放按事件 id 去重", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    const input = { kind: "permission", engineRef: "reply-1", summary: "rm -rf /workspace/data" } as const;
+
+    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), input);
+    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), input);
+
+    const card = permissionPart();
+    expect(work()?.parts).toHaveLength(1);
+    expect(card).toMatchObject({
+      id: "r1:2",
+      engineRef: "reply-1",
+      summary: "rm -rf /workspace/data",
+      state: "pending",
+      at: 1_000,
+    });
+  });
+
+  it("resolvePermission 落定（permission-resolved 事件与作答乐观更新双写口）：同值幂等、异值以事件为准", () => {
+    const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "permission",
+      engineRef: "reply-1",
+      summary: "清理数据",
+    });
+
+    resolvePermission("p1", "reply-1", "denied"); // 乐观：拒绝
+    expect(permissionPart()?.state).toBe("denied");
+    resolvePermission("p1", "reply-1", "denied"); // 事件双达（同值）幂等
+    expect(permissionPart()?.state).toBe("denied");
+    resolvePermission("p1", "reply-1", "pending"); // 作答失败回滚重开
+    expect(permissionPart()?.state).toBe("pending");
+  });
+
+  it("resolvePermission 未知 engineRef（重放缺口/异项目）忽略；无锚项目忽略", () => {
+    const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
+    startWork("p1", "r1", 0);
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "permission",
+      engineRef: "reply-1",
+      summary: "清理数据",
+    });
+
+    resolvePermission("p1", "reply-x", "approved");
+    resolvePermission("p9", "reply-1", "approved");
+
+    expect(permissionPart()?.state).toBe("pending");
+  });
+});

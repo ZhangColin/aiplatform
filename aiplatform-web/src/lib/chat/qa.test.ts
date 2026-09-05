@@ -10,7 +10,6 @@ import {
 
 function questionData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    type: "question",
     toolCalls: [{ id: "tc-1", name: "ask_user", input: { question: "面向谁?" } }],
     questions: [
       {
@@ -25,11 +24,11 @@ function questionData(overrides: Record<string, unknown> = {}): Record<string, u
   };
 }
 
-function questionRaised(data: unknown, kind = "QUESTION"): QuestionRaisedPayload {
-  return { runId: "run-9", kind, engineRef: "reply-7", data };
+function questionRaised(data: unknown): QuestionRaisedPayload {
+  return { runId: "run-9", engineRef: "reply-7", data };
 }
 
-describe("parseQuestion · question-raised → 问答卡（#19）", () => {
+describe("parseQuestion · question-raised → 问答卡（#19；#83 起纯 QUESTION——权限面已拆）", () => {
   it("QUESTION 事件解析出问答卡全要素（qid=engineRef、toolCalls 回传面随卡）", () => {
     const q = parseQuestion("run-9:12", questionRaised(questionData()));
 
@@ -48,14 +47,13 @@ describe("parseQuestion · question-raised → 问答卡（#19）", () => {
   it("multiple 投影（多选问答卡）；无 options 纯开放题照成卡", () => {
     expect(parseQuestion("e1", questionRaised(questionData({ multiple: true })))?.multiple).toBe(true);
 
-    const open = parseQuestion("e2", questionRaised({ type: "question", toolCalls: [], questions: [{ question: "还有什么要补充?" }] }));
+    const open = parseQuestion("e2", questionRaised({ toolCalls: [], questions: [{ question: "还有什么要补充?" }] }));
     expect(open).toMatchObject({ options: [], header: "提问", question: "还有什么要补充?" });
   });
 
-  it("PERMISSION 挂起 / 无 engineRef / data 残缺 → 不成卡（指令区不呈现交互卡）", () => {
-    expect(parseQuestion("e1", questionRaised(questionData(), "PERMISSION"))).toBeNull();
-    expect(parseQuestion("e2", { runId: "run-9", kind: "QUESTION", data: questionData() })).toBeNull();
-    expect(parseQuestion("e3", questionRaised({ type: "question", toolCalls: [] }))).toBeNull();
+  it("无 engineRef / data 残缺 → 不成卡（指令区不呈现交互卡）", () => {
+    expect(parseQuestion("e2", { runId: "run-9", data: questionData() })).toBeNull();
+    expect(parseQuestion("e3", questionRaised({ toolCalls: [] }))).toBeNull();
     expect(parseQuestion("e4", questionRaised(null))).toBeNull();
   });
 });

@@ -18,7 +18,8 @@ import io.agentscope.core.tool.Toolkit;
  * #47 助理只读集）：BA = ask_user（每轮一问的挂起源）+ savePrd（PRD 落盘 +
  * 业务登记 + 修订事实登记，#52）——派发工具已撤（BA 无派发权，链的收口在平台
  * 代码）；CODER = finish_edit（修正收口结束工具——「要不要动系统」的判定面，
- * 其余编码工具由 harness 内核自带）；ASSISTANT = 只读三件（文件树 / 文件内容 /
+ * 其余编码工具由 harness 内核自带）+ command（#83 需确认的命令工具——替位内核
+ * shell，破坏性命令挂起确认卡）；ASSISTANT = 只读三件（文件树 / 文件内容 /
  * 项目事实），随只读工作区注册（该形态内核文件/shell 工具已关——写面结构性
  * 不存在）；其余角色 / 本地兜底工作区 / 无角色语境 = 空集（模型不可见）。
  */
@@ -53,6 +54,9 @@ public class RoleToolkitSupplier implements AgentToolkitSupplier {
         if (RolePreset.CODER.name().equals(agentRole)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
             toolkit.registerAgentTool(new FinishEditTool(dev.workspaceId(), finishFacts));
+            // #83 权限确认触发面：破坏性命令经平台侧 command 工具自检 ASK（内核 shell
+            // 已被工厂对本工作区关闭——非 ToolBase，引擎拦不住也进不了播报表）
+            toolkit.registerAgentTool(new ConfirmingShellTool(dev.containerName()));
         }
         if (RolePreset.ASSISTANT.name().equals(agentRole)
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {

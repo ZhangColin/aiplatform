@@ -242,7 +242,7 @@ describe("bridge · 智能体事件 → 运行注册表（agent-runs，顶栏 LI
 
     dispatchAgentEvent(
       agentQc,
-      agentEvent("question-raised", { projectId: "p1", runId: "run1", kind: "QUESTION", summary: "选哪个配色" }, "run1:5"),
+      agentEvent("question-raised", { projectId: "p1", runId: "run1", summary: "选哪个配色" }, "run1:5"),
     );
     expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning");
 
@@ -400,11 +400,10 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
           projectId: "p1",
           runId: "run1",
           sessionId: "ba-p1",
-          kind: "QUESTION",
+          
           summary: "面向谁?",
           engineRef: "reply-7",
           data: {
-            type: "question",
             toolCalls: [{ id: "tc-1", name: "ask_user", input: {} }],
             questions: [{ header: "目标用户", question: "面向谁?", multiple: false, custom: true, options: [{ label: "企业客户" }] }],
           },
@@ -423,19 +422,29 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     });
   });
 
-  it("PERMISSION 挂起不成卡；非 BA 会话的 text 不进对话", () => {
-    dispatchAgentEvent(agentQc, 
+  it("PERMISSION 挂起不进对话（#83 起拆 permission-required 走工作消息确认卡）；非 BA 会话的 text 不进对话", () => {
+    dispatchAgentEvent(agentQc,
       agentEvent(
-        "question-raised",
-        { projectId: "p1", runId: "run1", sessionId: "s1", kind: "PERMISSION", summary: "write_file", engineRef: "reply-1", data: {} },
+        "permission-required",
+        { projectId: "p1", runId: "run1", sessionId: "coder-p1", summary: "rm -rf data", engineRef: "reply-1", data: { toolCalls: [{ id: "tc-1", name: "command", input: { command: "rm -rf data" } }] } },
         "run1:3",
       ),
     );
-    dispatchAgentEvent(agentQc, 
+    dispatchAgentEvent(agentQc,
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", data: { delta: "写代码" } }, "run1:4"),
     );
 
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
+    // 权限挂起落工作消息确认卡（待答，engineRef 随卡作答）
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.parts).toHaveLength(1);
+    expect(work?.parts[0]).toMatchObject({
+      kind: "permission",
+      engineRef: "reply-1",
+      summary: "rm -rf data",
+      state: "pending",
+    });
+    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning");
   });
 
   it("error / run-finish（BA 会话）→ 收轮 + 中断提示", () => {
@@ -670,6 +679,68 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       startedAt: Date.parse(at(2)),
       endedAt: Date.parse(at(7)), // 失败也落时长（5 秒）
     });
+  });
+
+  it("permission-required → 确认卡部件（pending）→ permission-resolved 落定终态（镜面服务端 #83 拆分）", () => {
+    const t0 = "2026-09-05T06:00:00.000Z";
+    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", role: "CODER" },
+      "run1:1",
+      at(0),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-required",
+      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
+        data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
+      "run1:5",
+      at(5),
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.parts).toEqual([
+      {
+        kind: "permission",
+        id: "run1:5",
+        engineRef: "reply-9",
+        summary: "rm -rf /workspace/data",
+        state: "pending",
+        at: Date.parse(at(5)),
+      },
+    ]);
+    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning"); // 等用户 ≠ 终态
+
+    // 作答落定（批准）：确认卡转已批终态 + run 回 running（续跑中；终态仍归 run-finish/failed）
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-resolved",
+      { projectId: "p1", runId: "run1", engineRef: "reply-9", approved: true },
+      "run1:9",
+      at(12),
+    ));
+    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
+      .toMatchObject({ kind: "permission", state: "approved" });
+    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("running");
+
+    // 重放（断线重连先收缓冲）：required+resolved 双达确认卡不回退成待答（事件 id 去重 + 同值幂等）
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-required",
+      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
+        data: { toolCalls: [{ id: "tc-9", name: "command", input: {} }] } },
+      "run1:5",
+      at(5),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-resolved",
+      { projectId: "p1", runId: "run1", engineRef: "reply-9", approved: true },
+      "run1:9",
+      at(12),
+    ));
+    expect(useWorkMessageStore.getState().works["p1"]?.parts).toHaveLength(1);
+    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
+      .toMatchObject({ kind: "permission", state: "approved" });
   });
 
   it("run-failed 也定格（run 失败是唯一失败终态，恢复出口在生成面）", () => {

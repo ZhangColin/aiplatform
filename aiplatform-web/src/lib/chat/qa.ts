@@ -21,7 +21,6 @@ export type PendingToolCall = {
 export type QuestionRaisedPayload = {
   runId: string;
   sessionId?: string;
-  kind?: string;
   engineRef?: string;
   data?: unknown;
 };
@@ -48,15 +47,16 @@ type QuestionProjection = {
 };
 
 /**
- * question-raised → 问答卡：kind=QUESTION 且 data.questions[0] 可解析才成卡
- * （PERMISSION 挂起 / 形状残缺 → null，指令区不呈现交互卡）。选项取 label；
- * 无选项纯开放题照成卡（custom 恒 true，自由输入作答）。
+ * question-raised → 问答卡（#83 起纯 QUESTION——权限确认已拆 permission-required，
+ * 不再按 kind 分岔）：data.questions[0] 可解析才成卡（形状残缺 → null，指令区
+ * 不呈现交互卡）。选项取 label；无选项纯开放题照成卡（custom 恒 true，自由输入
+ * 作答）。
  */
 export function parseQuestion(
   eventId: string,
   payload: QuestionRaisedPayload,
 ): RaisedQuestion | null {
-  if (payload.kind !== "QUESTION" || !payload.engineRef) return null;
+  if (!payload.engineRef) return null;
   const data = asRecord(payload.data);
   const first = asRecord(data && Array.isArray(data.questions) ? data.questions[0] : null);
   if (!first) return null;

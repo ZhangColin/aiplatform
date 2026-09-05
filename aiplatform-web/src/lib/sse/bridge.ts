@@ -155,6 +155,40 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         if (question) chat.raiseQuestion(payload.projectId, payload.sessionId, question);
         return;
       }
+      // ---- 权限确认（#83 作答通道分家）：确认卡长在工作消息流，与问答卡分形态 ----
+      case "permission-required": {
+        const { payload } = platform;
+        // 等用户 ≠ 终态（同问答挂起语义）；作答后 permission-resolved 回 running
+        runs.setRunStatus(
+          { runId: payload.runId, projectId: payload.projectId, at },
+          "questioning",
+        );
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          {
+            kind: "permission",
+            engineRef: typeof payload.engineRef === "string" ? payload.engineRef : "",
+            summary: payload.summary,
+          },
+        );
+        return;
+      }
+      case "permission-resolved": {
+        const { payload } = platform;
+        // run 续跑进行中（批准的动作卡随后完成 / 拒绝的动作卡随后失败）；终态仍归
+        // run-finish / run-failed
+        runs.setRunStatus(
+          { runId: payload.runId, projectId: payload.projectId, at },
+          "running",
+        );
+        work.resolvePermission(
+          payload.projectId,
+          payload.engineRef,
+          payload.approved ? "approved" : "denied",
+        );
+        return;
+      }
       case "error": {
         const { payload } = platform;
         // 对话轮失败（非重试族——编码 run 尝试环内中间错误不出用户面事件流）：

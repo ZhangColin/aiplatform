@@ -48,14 +48,15 @@ class RoleToolkitSupplierTest {
     }
 
     @Test
-    void given_coder_on_project_dev_when_toolkit_then_finish_edit_only() {
-        // 编码智能体的业务工具面 = 结束工具（#46 修正收口判定）一个：BA 资产不再
-        // 泄漏（#43 前 CODER 名义上挂着 ask_user/savePrd/startFixRun），编码工具
+    void given_coder_on_project_dev_when_toolkit_then_finish_edit_and_command() {
+        // 编码智能体的业务工具面 = 结束工具（#46 修正收口判定）+ 需确认的命令工具
+        // （#83：command 替位内核 shell——破坏性命令挂确认卡）：BA 资产不再泄漏
+        // （#43 前 CODER 名义上挂着 ask_user/savePrd/startFixRun），其余编码工具
         // 由 harness 内核自带
         assertThat(supplier().toolkitFor(RolePreset.CODER.name(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .getToolNames())
-                .containsExactly(FinishEditTool.NAME);
+                .containsExactlyInAnyOrder(FinishEditTool.NAME, ConfirmingShellTool.NAME);
     }
 
     @Test

@@ -169,51 +169,64 @@ class AgentscopeEventMapperTest {
     }
 
     @Nested
-    class QuestionRaisedFrames {
+    class SuspensionFrames {
 
         @Test
-        void given_confirm_event_when_question_raised_then_frame_with_contract_keys() {
+        void given_non_ask_user_confirm_when_suspension_then_permission_required_event() {
+            // #83 事件拆分：工具操作确认（非提问）→ 独立 permission-required（确认卡）
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-9", java.util.List.of(
-                    toolCall("tc-1", "write_file", Map.of("path", "docs/PRD.md"))));
+                    toolCall("tc-1", "command", Map.of("command", "rm -rf /workspace/data"))));
 
-            AgentEvent frame = mapper.questionRaised(event);
+            AgentEvent frame = mapper.suspension(event);
 
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.QUESTION_RAISED);
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.PERMISSION_REQUIRED);
             assertThat(frame.payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION",
-                    AgentEventTypes.WAIT_SUMMARY_FIELD, "write_file",
+                    AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
                     AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9",
                     "engine", ENGINE));
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
                     .get(AgentEventTypes.WAIT_DATA_FIELD);
-            // 引擎载荷：待确认工具清单（答复续跑侧据此重建 ConfirmResult；恢复入参
-            // 由业务编排从项目侧事实重建，不随事件携带）
-            assertThat(data).containsOnlyKeys("type", "toolCalls");
-            assertThat(data.get("type")).isEqualTo("permission");
+            // 引擎载荷：待确认工具清单（作答复跑侧据此重建 ConfirmResult；恢复入参
+            // 由业务编排从项目侧事实重建，不随事件携带）——无 questions 投影
+            assertThat(data).containsOnlyKeys("toolCalls");
             assertThat(data.get("toolCalls")).isEqualTo(java.util.List.of(
-                    Map.of("id", "tc-1", "name", "write_file", "input", Map.of("path", "docs/PRD.md"))));
+                    Map.of("id", "tc-1", "name", "command",
+                            "input", Map.of("command", "rm -rf /workspace/data"))));
         }
 
         @Test
-        void given_ask_user_tool_when_question_raised_then_question_kind() {
-            // 向用户提问（ask_user）= QUESTION 载荷形状；工具参数确认/敏感动作 = PERMISSION
+        void given_non_command_tool_when_suspension_then_summary_falls_back_to_tool_name() {
+            // 非命令工具（无 command 入参）摘要回落工具名
+            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-13", java.util.List.of(
+                    toolCall("tc-1", "write_file", Map.of("path", "docs/PRD.md"))));
+
+            AgentEvent frame = mapper.suspension(event);
+
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.PERMISSION_REQUIRED);
+            assertThat(frame.payload()).containsEntry(
+                    AgentEventTypes.WAIT_SUMMARY_FIELD, "write_file");
+        }
+
+        @Test
+        void given_ask_user_tool_when_suspension_then_question_raised_event() {
+            // 向用户提问（ask_user）= question-raised（问答卡，问答作答通道）
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-10", java.util.List.of(
                     toolCall("tc-2", "ask_user", Map.of("question", "用哪个框架?"))));
 
-            AgentEvent frame = mapper.questionRaised(event);
+            AgentEvent frame = mapper.suspension(event);
 
-            assertThat(frame.payload()).containsEntry(
-                    AgentEventTypes.WAIT_KIND_FIELD, "QUESTION");
-            // 摘要 = 问题文本（问答口径，非工具名）
+            assertThat(frame.type()).isEqualTo(AgentEventTypes.QUESTION_RAISED);
+            // 摘要 = 问题文本（问答口径，非工具名）；kind 已随拆分退役（type 即判别）
             assertThat(frame.payload()).containsEntry(
                     AgentEventTypes.WAIT_SUMMARY_FIELD, "用哪个框架?");
+            assertThat(frame.payload()).doesNotContainKey("kind");
         }
 
         @Test
-        void given_ask_user_question_body_when_question_raised_then_pending_questions_shape() {
+        void given_ask_user_question_body_when_suspension_then_pending_questions_shape() {
             // #40：QUESTION body 增 questions 投影（前端问答卡契约 header/question/
             // multiple/custom/options[{label}]——custom 必须显式 true，否则无选项题
             // 整题被前端丢弃）；toolCalls 面不动（答复续跑侧仍按它重建）
@@ -223,11 +236,12 @@ class AgentscopeEventMapperTest {
                             "question", "这个官网主要面向谁?",
                             "options", java.util.List.of("企业客户", "个人用户")))));
 
-            AgentEvent frame = mapper.questionRaised(event);
+            AgentEvent frame = mapper.suspension(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
                     .get(AgentEventTypes.WAIT_DATA_FIELD);
+            assertThat(data).containsOnlyKeys("toolCalls", "questions");
             assertThat(data.get("questions")).isEqualTo(java.util.List.of(Map.of(
                     "header", "目标用户",
                     "question", "这个官网主要面向谁?",
@@ -243,12 +257,12 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void given_ask_user_without_header_or_options_when_question_raised_then_still_answerable() {
+        void given_ask_user_without_header_or_options_when_suspension_then_still_answerable() {
             // header 缺省中性兜底、options 空 + custom=true：纯开放题前端仍可自由输入作答
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-15", java.util.List.of(
                     toolCall("tc-o", "ask_user", Map.of("question", "还有什么要补充的?"))));
 
-            AgentEvent frame = mapper.questionRaised(event);
+            AgentEvent frame = mapper.suspension(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
@@ -262,7 +276,7 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
-        void given_ask_user_multiple_flag_when_question_raised_then_projected_to_question() {
+        void given_ask_user_multiple_flag_when_suspension_then_projected_to_question() {
             // #19 多选问答：multiple 从 ask_user 入参投影（问答卡多选勾选提交），
             // 缺省 false（单选点即答）
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-16", java.util.List.of(
@@ -272,7 +286,7 @@ class AgentscopeEventMapperTest {
                             "multiple", true,
                             "options", java.util.List.of("预约", "提醒", "会员")))));
 
-            AgentEvent frame = mapper.questionRaised(event);
+            AgentEvent frame = mapper.suspension(event);
 
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) frame.payload()
@@ -289,7 +303,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void given_confirm_event_when_map_then_no_passthrough_frame() {
-            // 挂起不是过程事件：question-raised 由调用方显式发射，map() 不重复产事件
+            // 挂起不是过程事件：挂起事件由调用方显式发射，map() 不重复产事件
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(
                     toolCall("tc-3", "write_file", Map.of())));
 
@@ -298,7 +312,7 @@ class AgentscopeEventMapperTest {
 
         @Test
         void given_confirm_event_when_stream_completes_then_suspension_not_finish() {
-            // 挂起轮的流终止不是终态：无结煞语（question-raised 由调用方显式发射）
+            // 挂起轮的流终止不是终态：无结煞语（挂起事件由调用方显式发射）
             assertThat(mapper.finishToken(new RequireUserConfirmEvent("reply-12",
                     java.util.List.of(toolCall("tc-4", "write_file", Map.of()))))).isEmpty();
         }

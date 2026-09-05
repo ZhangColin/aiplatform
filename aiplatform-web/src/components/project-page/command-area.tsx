@@ -158,7 +158,7 @@ export function CommandArea({
             ) : null}
           </MessageRow>
         ))}
-        {work ? <WorkMessage work={work} /> : null}
+        {work ? <WorkMessage work={work} projectId={projectId} /> : null}
         {!disabled && generationCard ? generationCard : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">

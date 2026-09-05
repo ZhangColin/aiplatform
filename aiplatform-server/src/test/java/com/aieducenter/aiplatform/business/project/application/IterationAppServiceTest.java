@@ -37,7 +37,9 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
@@ -74,6 +76,9 @@ class IterationAppServiceTest {
 
     @Autowired
     private IterationAppService appService;
+
+    @Autowired
+    private RunPermissionAppService runPermissionAppService;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -204,6 +209,101 @@ class IterationAppServiceTest {
         assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
         // 轨道收工（队列空）：在途释放——下一场意见可再起跑
         assertThat(appService.startFixRun(projectId, "再来一轮", null).queued()).isFalse();
+    }
+
+    /**
+     * 权限确认挂起的脚本化缝（#83）：首场修正 run 触发需批准操作（permission-required
+     * 事件 + 软终点挂起面），续跑与后续对话正常收口——配合作答分支驱动轨道分岔。
+     */
+    private void givenConverseSuspendsOnce(String engineRef, String resumeText) {
+        java.util.concurrent.atomic.AtomicBoolean suspendedOnce = new java.util.concurrent.atomic.AtomicBoolean();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (suspendedOnce.compareAndSet(false, true)) {
+                Consumer<AgentEvent> sink = invocation.getArgument(1);
+                sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_REQUIRED,
+                        new java.util.LinkedHashMap<>(Map.of(
+                                "runId", command.runId(),
+                                AgentEventTypes.WAIT_ENGINE_REF_FIELD, engineRef,
+                                AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
+                                AgentEventTypes.WAIT_DATA_FIELD, Map.of("toolCalls", List.of(
+                                        Map.of("id", "tc-9", "name", "command",
+                                                "input", Map.of("command", "rm -rf /workspace/data"))))))));
+                return new AgentReply(command.runId(), "需要确认", new AgentSuspension(
+                        engineRef, false, List.of(Map.of(
+                                "id", "tc-9", "name", "command",
+                                "input", Map.of("command", "rm -rf /workspace/data")))));
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
+            AgentResume resume = invocation.getArgument(0);
+            finishFixFacts.record(resume.workspaceId(), true, resumeText);
+            return new AgentReply(resume.runId(), "续跑收口");
+        });
+    }
+
+    @Test
+    void given_permission_suspension_when_approved_then_same_run_resumes_and_track_settles()
+            throws InterruptedException {
+        // #83 批准分岔（端到端·轨道级脚本化）：需批准操作 → permission-required 事件 +
+        // 轨道驻留（不收口/不重试/不发 run-failed）→ 批准 → 同 run 续跑（ConfirmResult
+        // 批准位、engineRef 锚）→ finish_edit 事实照常收口 → 队列照常排空
+        Long projectId = persistedGeneratedProject("9906");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSuspendsOnce("reply-perm-approve", "批准后完成修正");
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "清理临时数据目录", null);
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
+        verify(eventsAppService, timeout(5000))
+                .publishAgentEvent(eq(AgentEventTypes.PERMISSION_REQUIRED), any());
+
+        // 挂起期间意见照常排队（权限挂起不拦意见链——「更新过程在途」语义不变）
+        assertThat(appService.startFixRun(projectId, "顺带改个颜色", null).queued()).isTrue();
+
+        runPermissionAppService.answer(projectId, dispatch.runId(), "reply-perm-approve", true);
+        worker.join(5000);
+
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().runId()).isEqualTo(dispatch.runId());
+        assertThat(resume.getValue().replyId()).isEqualTo("reply-perm-approve");
+        assertThat(resume.getValue().sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(resume.getValue().confirmResults()).hasSize(1);
+        assertThat(resume.getValue().confirmResults().get(0).isConfirmed()).isTrue();
+        assertThat(resume.getValue().confirmResults().get(0).getToolCall().getName()).isEqualTo("command");
+        // 落定事件（确认卡转已批终态）与排队合并续派（第二场对话正常收口）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PERMISSION_RESOLVED), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+        verify(agentClient, times(2)).converse(any(), any());
+    }
+
+    @Test
+    void given_permission_suspension_when_denied_then_run_continues_with_denied_result()
+            throws InterruptedException {
+        // #83 拒绝分岔：拒绝 = ConfirmResult(confirmed=false) 续跑（引擎写 DENIED 工具结果
+        // 回模型，模型改道或如实收口——run 不终止），轨道照常收口
+        Long projectId = persistedGeneratedProject("9907");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSuspendsOnce("reply-perm-deny", "改用其他方式完成修正");
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "重装依赖", null);
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
+        verify(eventsAppService, timeout(5000))
+                .publishAgentEvent(eq(AgentEventTypes.PERMISSION_REQUIRED), any());
+
+        runPermissionAppService.answer(projectId, dispatch.runId(), "reply-perm-deny", false);
+        worker.join(5000);
+
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().confirmResults().get(0).isConfirmed()).isFalse();
+        assertThat(resume.getValue().resumeText()).contains("拒绝");
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PERMISSION_RESOLVED), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
     }
 
     @Test

@@ -126,17 +126,40 @@ export type PlatformAgentEvent =
   | { type: "run-finish"; payload: AgentPayload & { sessionId: string; finish: string } }
   | {
       /**
-       * 智能体挂起（ask_user 提问等）：答复续跑归业务编排（问答作答通道，需求环）。
-       * `engineRef` = 引擎侧请求/权限 id（续跑批复的锚）；`data` = 引擎载荷原样
-       * （QUESTION 时含前端问答卡投影 `data.questions`），问答卡切片消费。
+       * 智能体挂起提问（#83 起纯 QUESTION——权限确认已拆 permission-required）：答复
+       * 续跑归业务编排（问答作答通道，需求环）。`engineRef` = 引擎侧请求 id（续跑
+       * 批复的锚）；`data` = 引擎载荷原样（含前端问答卡投影 `data.questions`），
+       * 问答卡切片消费。
        */
       type: "question-raised";
       payload: AgentPayload & {
-        kind: string;
         summary: string;
         engineRef?: string;
         data?: unknown;
       };
+    }
+  | {
+      /**
+       * 权限确认挂起（#83 事件拆分，词根 = 引擎权限确认原语的非提问面）：run 执行中
+       * 需用户批准的工具操作（如危险命令）→ 工作消息流内确认卡（批准/拒绝两个
+       * 动作）。作答走权限作答通道（与问答作答分家）。`summary` = 首工具命令文本
+       * （截断）；`data.toolCalls` = 待确认工具最小面（确认卡呈现待批准操作的依据）。
+       */
+      type: "permission-required";
+      payload: AgentPayload & {
+        summary: string;
+        engineRef?: string;
+        data?: unknown;
+      };
+    }
+  | {
+      /**
+       * 权限确认落定（#83）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒
+       * 终态（重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程
+       * 事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）。
+       */
+      type: "permission-resolved";
+      payload: AgentPayload & { engineRef: string; approved: boolean };
     }
   | {
       /**
@@ -191,6 +214,8 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "error",
   "run-finish",
   "question-raised",
+  "permission-required",
+  "permission-resolved",
   "run-failed",
   "guide-reply",
   "part-text",

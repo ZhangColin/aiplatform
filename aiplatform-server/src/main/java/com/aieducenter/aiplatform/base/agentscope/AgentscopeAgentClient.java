@@ -40,12 +40,14 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * usageContext 上报恰一条 UsageEvent（幂等键 agent-usage-{runId}[-{replyId}]，
  * engine=agentscope；归属为空不发明、零用量不报）。
  *
- * <p><b>挂起与续跑（问答机制）</b>：AgentScope 的确认挂起（RequireUserConfirmEvent，
- * 业务侧 ask_user 提问工具触发）= 本轮流软终点——发 {@code question-raised} 事件（载荷带
- * 待确认工具清单，恢复入参由业务编排从项目侧事实重建）后流终止，<b>不发
- * run-finish</b>（run 未终态）；业务编排以 {@link #resume} 续跑（同一
- * (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，访谈上下文
- * 不丢），续跑流可再挂起（一 run 多批准点）或正常收口。失败上抛
+ * <p><b>挂起与续跑（作答机制，#83 通道分家）</b>：AgentScope 的确认挂起
+ * （RequireUserConfirmEvent——ask_user 提问或需批准的工具操作）= 本轮流软终点——
+ * 按分诊发 {@code question-raised}（问答卡，问答作答通道）或 {@code
+ * permission-required}（确认卡，权限作答通道）事件（载荷带待确认工具清单，恢复
+ * 入参由业务编排从项目侧事实重建）后流终止，<b>不发 run-finish</b>（run 未终态），
+ * 挂起事实随返回值 {@link AgentReply#suspension()} 上浮；业务编排以 {@link #resume}
+ * 续跑（同一 (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，
+ * 访谈上下文不丢），续跑流可再挂起（一 run 多批准点）或正常收口。失败上抛
  * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
  *
  * <p>工作区解析：命令带 workspaceId → 项目 dev 工作区（容器文件面，docker exec
@@ -126,16 +128,18 @@ public class AgentscopeAgentClient {
                     + ", model=" + prepared.modelRef().toModelString() + "）："
                     + result.error().getMessage(), result.error());
         }
-        return new AgentReply(command.runId(), result.text());
+        return new AgentReply(command.runId(), result.text(), result.suspension());
     }
 
     /**
-     * 挂起续跑（业务编排的问答答复通道调用）：以 ConfirmResult（用户答复/批准/拒绝）
-     * 经同一 (userId, sessionId) 恢复上下文续跑——不重发 run-start
-     * （run 已开场），可再挂起（question-raised 再发）或正常收口（run-finish）。
-     * 计量幂等键带 replyId 后缀（挂起轮已报过 agent-usage-{runId}）。
+     * 挂起续跑（业务编排的作答复原通道——问答作答与权限作答共用内核面）：以
+     * ConfirmResult（用户答复/批准/拒绝）经同一 (userId, sessionId) 恢复上下文
+     * 续跑——不重发 run-start（run 已开场），可再挂起（question-raised /
+     * permission-required 再发）或正常收口（run-finish）。计量幂等键带 replyId
+     * 后缀（挂起轮已报过 agent-usage-{runId}）。挂起轮软终点以返回值
+     * {@link AgentReply#suspension()} 表达。
      */
-    public void resume(AgentResume resume, Consumer<AgentEvent> sink) {
+    public AgentReply resume(AgentResume resume, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
         try {
             prepared = prepareFor(TurnSpec.resumeOf(resume));
@@ -155,9 +159,15 @@ public class AgentscopeAgentClient {
                 .metadata(metadata)
                 .build();
 
-        runTurn(prepared, List.of(resumeMsg), resume.runId(),
+        TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + resume.replyId(),
                 resume.usageContext(), null, sink);
+        if (result.error() != null) {
+            throw new IllegalStateException("智能体续跑失败（runId=" + resume.runId()
+                    + ", model=" + prepared.modelRef().toModelString() + "）："
+                    + result.error().getMessage(), result.error());
+        }
+        return new AgentReply(resume.runId(), result.text(), result.suspension());
     }
 
     /**
@@ -194,10 +204,26 @@ public class AgentscopeAgentClient {
                 .anyMatch(block -> block.getState() == ToolCallState.ASKING);
     }
 
+    /**
+     * 权限确认类挂起的续跑批复（#83 权限作答通道）：待确认工具 + 批准位 →
+     * ConfirmResult（input 原样不重写；批准 = confirmed=true，拒绝 = false——引擎
+     * 对拒绝写 DENIED 态工具结果回模型，模型可见拒绝事实、可改道或自行收口）。
+     * 重建形状同 {@link #answeredToolCall}（ASKING 同形、content 回填 JSON 串）。
+     */
+    public static ConfirmResult confirmedToolCall(Map<String, Object> toolCall, boolean approved) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        if (toolCall.get("input") instanceof Map<?, ?> inputMap) {
+            inputMap.forEach((key, value) -> input.put(String.valueOf(key), value));
+        }
+        return new ConfirmResult(approved, new ToolUseBlock(
+                String.valueOf(toolCall.get("id")), String.valueOf(toolCall.get("name")),
+                input, toJson(input), Map.of(), ToolCallState.ASKING));
+    }
+
     // ---------- 内部 ----------
 
-    /** 一轮流的结果（挂起轮 text 为已生成部分；error 非空 = 失败）。 */
-    private record TurnResult(String text, Throwable error) {
+    /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败）。 */
+    private record TurnResult(String text, AgentSuspension suspension, Throwable error) {
     }
 
     /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表）。 */
@@ -258,9 +284,9 @@ public class AgentscopeAgentClient {
 
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐个映射发射，挂起
-     * （RequireUserConfirm）发 question-raised 后流终止且不发 run-finish；正常收口发
-     * run-finish；异常发 error 事件。用量无论成败如实上报（幂等键由调用方给）；
-     * 超时取逐轮指定（可空 = 内核配置默认）。
+     * （RequireUserConfirm）按分诊发 question-raised / permission-required 后流终止
+     * 且不发 run-finish；正常收口发 run-finish；异常发 error 事件。用量无论成败
+     * 如实上报（幂等键由调用方给）；超时取逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
@@ -268,25 +294,30 @@ public class AgentscopeAgentClient {
         StringBuilder text = new StringBuilder();
         AtomicReference<TokenUsage> usage = new AtomicReference<>(TokenUsage.ZERO);
         AtomicReference<String> finish = new AtomicReference<>();
-        AtomicReference<RequireUserConfirmEvent> suspension = new AtomicReference<>();
+        AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
+        AtomicReference<Boolean> suspendedQuestion = new AtomicReference<>();
         AgentscopeEventMapper mapper = prepared.mapper();
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                            sink, text, usage, finish, suspension))
+                            sink, text, usage, finish, suspended, suspendedQuestion))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
             drainParts(prepared.parts(), sink);
-            if (suspension.get() == null) {
+            RequireUserConfirmEvent suspension = suspended.get();
+            if (suspension == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
+                return new TurnResult(text.toString(), null, null);
             }
-            return new TurnResult(text.toString(), null);
+            return new TurnResult(text.toString(), new AgentSuspension(
+                    suspension.getReplyId(), suspendedQuestion.get(),
+                    toolCallFace(suspension)), null);
         }
         catch (Exception e) {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
-            return new TurnResult(text.toString(), e);
+            return new TurnResult(text.toString(), null, e);
         }
         finally {
             reportUsage(usageIdempotencyKey, usage.get(), runId,
@@ -318,7 +349,8 @@ public class AgentscopeAgentClient {
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
             AgentscopeEventMapper mapper, AgentscopePartsMapper parts,
             Consumer<AgentEvent> sink, StringBuilder text, AtomicReference<TokenUsage> usage,
-            AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspension) {
+            AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspended,
+            AtomicReference<Boolean> suspendedQuestion) {
         if (event instanceof TextBlockDeltaEvent delta) {
             text.append(delta.getDelta());
         }
@@ -326,11 +358,13 @@ public class AgentscopeAgentClient {
             usage.updateAndGet(total -> total.plus(AgentscopeUsageMapper.toTokenUsage(end.getUsage())));
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
-            // 挂起：先出部件解说尾段（问答卡前不留解说尾巴）再发 question-raised 事件
-            // （业务编排据此呈现问答卡），不产透传事件
-            suspension.set(confirm);
+            // 挂起：先出部件解说尾段（确认/问答卡前不留解说尾巴）再按分诊发挂起事件
+            // （question-raised 问答卡 / permission-required 确认卡），不产透传事件
+            suspended.set(confirm);
+            suspendedQuestion.set(confirm.getToolCalls().stream()
+                    .anyMatch(tc -> ASK_USER_TOOL_NAME.equals(tc.getName())));
             drainParts(parts, sink);
-            sink.accept(mapper.questionRaised(confirm));
+            sink.accept(mapper.suspension(confirm));
             return;
         }
         mapper.finishToken(event).ifPresent(finish::set);
@@ -340,6 +374,11 @@ public class AgentscopeAgentClient {
         }
         // 部件事件：全事件流恒挂（parts 契约）
         parts.map(event).forEach(sink);
+    }
+
+    /** 挂起事件的待确认工具最小面（AgentSuspension.toolCalls 的形状，同事件 data.toolCalls）。 */
+    private static List<Map<String, Object>> toolCallFace(RequireUserConfirmEvent event) {
+        return AgentscopeEventMapper.toolCallPayloads(event.getToolCalls());
     }
 
     /** 部件收尾：解说余段出部件（幂等）。 */

@@ -6,6 +6,9 @@ import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
+import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.AgentResume;
+import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
@@ -29,6 +32,14 @@ import lombok.extern.slf4j.Slf4j;
  * （agentKind=coder）、项目工作区、流关联。知识命中前置注入只进首试 prompt（一次
  * 下发一次注入，重试不重检索不重块）。流桥挂步骤边界探活装饰（#49 逐修改刷新：
  * part-step 边界 → 探活 → preview-updated 通知）。</p>
+ *
+ * <p><b>权限确认挂起（#83）</b>：run 内需批准的工具操作（危险命令）以
+ * {@code permission-required} 事件呈现确认卡后流软终点——本环在挂起点驻留
+ * （{@link RunPermissionAppService#await}，持有会话执行器 stripe；作答由权限
+ * 作答通道在请求线程直接唤醒，无自锁），批准/拒绝即以 ConfirmResult 续跑同
+ * run（拒绝语义 = 引擎写 DENIED 工具结果回模型，改道或自行收口）。挂起期间
+ * 轨道不收口、不重试（不是尝试失败）、不排空队列——run 仍在途，意见照常排队
+ * 合并。</p>
  */
 @Component
 @Slf4j
@@ -53,15 +64,18 @@ class CoderRunAttempts {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final GenerationProperties properties;
     private final StepBoundaryPreviewRefresh previewRefresh;
+    private final RunPermissionAppService permissions;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
-            GenerationProperties properties, StepBoundaryPreviewRefresh previewRefresh) {
+            GenerationProperties properties, StepBoundaryPreviewRefresh previewRefresh,
+            RunPermissionAppService permissions) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
         this.previewRefresh = previewRefresh;
+        this.permissions = permissions;
     }
 
     /**
@@ -104,8 +118,9 @@ class CoderRunAttempts {
             try {
                 // 逐修改刷新（#49）：事件桥 sink 外包步骤边界探活装饰——part-step 边界
                 // （完整修改落定）→ 平台侧探活 → 通过才发 preview-updated 通知
-                agentClient.converse(command, silentRetryErrors(previewRefresh.decorate(
-                        projectId, project.getWorkspaceId(), eventBridge.sink(projectId))));
+                Consumer<AgentEvent> sink = silentRetryErrors(previewRefresh.decorate(
+                        projectId, project.getWorkspaceId(), eventBridge.sink(projectId)));
+                settlePermissions(command, agentClient.converse(command, sink), sink);
                 onSuccess.accept(runId);
                 return new RunResult(true, runId);
             }
@@ -117,6 +132,53 @@ class CoderRunAttempts {
         log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成重新发起/修正恢复出口）",
                 what, projectId, maxAttempts);
         return new RunResult(false, lastRunId);
+    }
+
+    /**
+     * 权限确认驻留与续跑（#83）：挂起（软终点）即等作答——批准/拒绝以 ConfirmResult
+     * 续跑同 run（命令全要素同构，恢复私货从本环命令原样携带），续跑可再挂起
+     * （一 run 多确认点）。问答挂起在编码 run 不可达（CODER 无 ask_user 工具），
+     * 防御即失败（走尝试环重试，最终 run-failed——不静默错频道）。
+     */
+    private AgentReply settlePermissions(AgentCommand command, AgentReply reply,
+            Consumer<AgentEvent> sink) {
+        while (reply.suspension() != null && reply.suspension().permission()) {
+            AgentSuspension suspension = reply.suspension();
+            boolean approved = permissions.await(suspension.engineRef(), command.runId());
+            reply = agentClient.resume(permissionResume(command, suspension, approved), sink);
+        }
+        if (reply.suspension() != null) {
+            throw new IllegalStateException(
+                    "编码 run 出现提问挂起（CODER 无 ask_user 工具，不可达）：engineRef="
+                            + reply.suspension().engineRef());
+        }
+        return reply;
+    }
+
+    /**
+     * 权限作答的续跑请求：命令全要素同构（会话/角色卡/计量/工作区原样——run 上下文
+     * 不因确认点漂移），ConfirmResult 按批准位重建（拒绝 = confirmed=false，引擎写
+     * DENIED 工具结果回模型）。续跑文本给模型明确的决策反馈与拒绝后的出路
+     * （改道或如实收口），不替模型做决定。
+     */
+    private static AgentResume permissionResume(AgentCommand command, AgentSuspension suspension,
+            boolean approved) {
+        return new AgentResume(
+                command.runId(),
+                command.sessionId(),
+                command.userId(),
+                command.workspaceId(),
+                command.modelString(),
+                command.systemPrompt(),
+                suspension.engineRef(),
+                suspension.toolCalls().stream()
+                        .map(toolCall -> AgentscopeAgentClient.confirmedToolCall(toolCall, approved))
+                        .toList(),
+                approved
+                        ? "用户已批准该操作，请继续执行并完成本轮任务。"
+                        : "用户已拒绝该操作。",
+                command.usageContext(),
+                command.agentRole());
     }
 
     /**

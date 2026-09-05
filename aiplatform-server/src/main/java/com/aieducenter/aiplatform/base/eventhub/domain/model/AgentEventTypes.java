@@ -31,11 +31,31 @@ public final class AgentEventTypes {
     public static final String RUN_FINISH = "run-finish";
 
     /**
-     * 智能体挂起出现（ask_user 提问等）：payload 带 runId/sessionId/kind/summary/
-     * engineRef/data（引擎载荷原样，含前端问答卡投影与续跑上下文）。答复续跑归
-     * 业务编排（问答作答通道，需求环），eventhub 只承载事件。
+     * 智能体挂起提问（ask_user 触发，#83 起纯 QUESTION——权限确认已拆独立事件
+     * {@link #PERMISSION_REQUIRED}）：payload 带 runId/sessionId/summary/engineRef/
+     * data（引擎载荷原样，含前端问答卡投影与续跑上下文）。答复续跑归业务编排
+     * （问答作答通道，需求环），eventhub 只承载事件。
      */
     public static final String QUESTION_RAISED = "question-raised";
+
+    /**
+     * 权限确认挂起出现（#83 事件拆分：词根 = 引擎权限确认原语
+     * RequireUserConfirmEvent 的非提问面——危险命令等待用户批准）：payload 带
+     * runId/sessionId/summary/engineRef/data（data.toolCalls 为待确认工具最小面，
+     * 确认卡呈现源）。批准/拒绝续跑归业务编排（权限作答通道，与问答作答分家——
+     * 互不串扰），eventhub 只承载事件。
+     */
+    public static final String PERMISSION_REQUIRED = "permission-required";
+
+    /**
+     * 权限确认落定（#83）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒
+     * 终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行
+     * 经 run 过程事件到达。
+     */
+    public static final String PERMISSION_RESOLVED = "permission-resolved";
+
+    /** permission-resolved 的批准位键（true = 已批准 / false = 已拒绝）。 */
+    public static final String PERMISSION_APPROVED_FIELD = "approved";
 
     /**
      * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
@@ -53,9 +73,6 @@ public final class AgentEventTypes {
 
     /** 会话标识（会话建立后各事件携带）。 */
     public static final String SESSION_FIELD = "sessionId";
-
-    /** 挂起种类（QUESTION = 向用户提问 / PERMISSION = 工具确认）。 */
-    public static final String WAIT_KIND_FIELD = "kind";
 
     /** mapper 提取的中性短文本。 */
     public static final String WAIT_SUMMARY_FIELD = "summary";

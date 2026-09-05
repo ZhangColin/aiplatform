@@ -54,7 +54,10 @@ public enum ProjectMessage implements CodeMessage {
     FIX_RESTART_IN_FLIGHT(409, "PRJ_025", "修正正在进行中，无需手动恢复"),
 
     /** 修正恢复出口守卫（#48）：无超限终态账（未派过/已成功收工/重启丢账），指路重提意见。 */
-    FIX_RESTART_UNAVAILABLE(409, "PRJ_026", "没有可恢复的修正，请在指令区重新提意见");
+    FIX_RESTART_UNAVAILABLE(409, "PRJ_026", "没有可恢复的修正，请在指令区重新提意见"),
+
+    /** 权限作答守卫（#83）：确认不存在或已落定（过期卡/平台重启丢账），指路刷新。 */
+    PERMISSION_ANSWER_STALE(409, "PRJ_027", "该确认已失效（运行已收口或平台已重启），请刷新查看最新状态");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

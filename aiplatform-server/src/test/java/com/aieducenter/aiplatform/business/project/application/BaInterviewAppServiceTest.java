@@ -727,7 +727,7 @@ class BaInterviewAppServiceTest {
         // 收口后派发——交接物意见腿含原意见与追问答复
         Long projectId = persistedGeneratedProject("9732");
         givenSessionExecutorRunsInline();
-        // BA 轮流上挂起事件（kind=QUESTION）；修正 run 收口脚本沿用（changed=true）
+        // BA 轮流上挂起事件（question-raised，#83 拆分后无 kind 键）；修正 run 收口脚本沿用（changed=true）
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("ba-")) {
@@ -735,7 +735,6 @@ class BaInterviewAppServiceTest {
                 sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
                         new java.util.LinkedHashMap<>(Map.of(
                                 "runId", command.runId(),
-                                AgentEventTypes.WAIT_KIND_FIELD, "QUESTION",
                                 AgentEventTypes.WAIT_SUMMARY_FIELD, "主色调想要哪种绿？"))));
                 return new AgentReply(command.runId(), "先问一下");
             }

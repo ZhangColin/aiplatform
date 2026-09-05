@@ -95,6 +95,13 @@ class GenerationAppServiceTest {
     @MockitoBean
     private KnowledgePort knowledgePort;
 
+    /**
+     * 权限作答通道（#83）：mock 时 rails 的 await 返 false——异常残留路径会变续跑
+     *（既有用例不触挂起，无影响；挂起/作答行为在 IterationAppServiceTest 镜面）。
+     */
+    @MockitoBean
+    private RunPermissionAppService runPermissionAppService;
+
     /** 两命中的检索桩（下发前置注入 happy path）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
@@ -115,6 +122,13 @@ class GenerationAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
+    /** 智能体边界正常收口脚本：converse 返回正常收口的 AgentReply（无挂起面）。 */
+    private void givenConverseSucceeds(String text) {
+        when(agentClient.converse(any(AgentCommand.class), any()))
+                .thenAnswer(invocation -> new AgentReply(
+                        invocation.getArgument(0, AgentCommand.class).runId(), text));
+    }
+
     private void givenAgentsMdWriteSucceeds() {
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -125,6 +139,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9800");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
 
         GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
 
@@ -156,6 +171,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9810");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         givenKnowledgeHits();
 
         appService.startGeneration(projectId);
@@ -175,6 +191,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9811");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         doThrow(new RuntimeException("pgvector 抖动")).when(knowledgePort)
                 .retrieve(anyString(), anyInt());
 
@@ -192,6 +209,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9801");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
 
         appService.startGeneration(projectId);
 
@@ -212,6 +230,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9802");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
 
         appService.startGeneration(projectId);
 
@@ -225,6 +244,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9803");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         givenKnowledgeHits(); // 首试带前置注入，重试不重注入（注入块已在会话历史）
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("首次尝试中断"))
@@ -262,6 +282,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9804");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         when(agentClient.converse(any(), any()))
                 .thenThrow(new IllegalStateException("持续失败"));
 
@@ -335,6 +356,7 @@ class GenerationAppServiceTest {
         // 在途守卫（含已提交未起跑）：异步轨道占位期间重复触发拒绝
         Long projectId = persistedProject("9805");
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         List<Runnable> queued = new ArrayList<>();
         doAnswer(invocation -> {
             queued.add((Runnable) invocation.getArgument(1));
@@ -402,6 +424,7 @@ class GenerationAppServiceTest {
 
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
         doReturn(new AgentReply("run-y", "系统已生成"))
                 .when(agentClient).converse(any(), any());
         appService.startGeneration(projectId);

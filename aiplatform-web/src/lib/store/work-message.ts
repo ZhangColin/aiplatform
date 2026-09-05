@@ -24,15 +24,30 @@ import { create } from "zustand";
 /** 动作部件生命周期（正本 part-action 行：started / running / completed / failed）。 */
 export type WorkActionState = "started" | "running" | "completed" | "failed";
 
+/** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态）。 */
+export type WorkPermissionState = "pending" | "approved" | "denied";
+
 /** 终态判定（completed / failed——时长定格、文案换终态色）。 */
 function isTerminalState(state: WorkActionState): boolean {
   return state === "completed" || state === "failed";
 }
 
-/** 工作消息部件（part-* 事件的投影）。 */
+/** 工作消息部件（part-* 事件 + 权限确认事件的投影）。 */
 export type WorkPart =
   | { kind: "text"; id: string; text: string }
   | { kind: "step"; id: string; step: number }
+  | {
+      kind: "permission";
+      /** React key（确认卡首见事件 id）。 */
+      id: string;
+      /** 作答锚（挂起事件 engineRef——权限作答通道的 REST 寻址腿）。 */
+      engineRef: string;
+      /** 待确认操作摘要（首工具命令文本，服务端截断保短）。 */
+      summary: string;
+      state: WorkPermissionState;
+      /** 挂起时间戳（ms；事件信封 ts）。 */
+      at: number;
+    }
   | {
       kind: "action";
       /** React key（动作行首见事件 id——状态更新不改键，原位换装）。 */
@@ -64,6 +79,7 @@ export type PartEventRef = {
 export type WorkPartInput =
   | { kind: "text"; text: string }
   | { kind: "step"; step: number }
+  | { kind: "permission"; engineRef: string; summary: string }
   | {
       kind: "action";
       toolCallId: string;
@@ -95,6 +111,12 @@ export type WorkMessageState = {
   startWork: (projectId: string, runId: string, at: number) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
+  /**
+   * 确认卡状态落定（#83）：permission-resolved 事件与作答乐观更新双写口——同值
+   * 幂等（事件与乐观双到达不闪换；回滚传 "pending"）。无该 engineRef 的确认部件
+   * 时忽略（重放缺口 / 异项目）。
+   */
+  resolvePermission: (projectId: string, engineRef: string, state: WorkPermissionState) => void;
   /** run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。 */
   freezeWork: (projectId: string, runId: string, at: number) => void;
 };
@@ -148,7 +170,16 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
   const part: WorkPart =
     input.kind === "text"
       ? { kind: "text", id: ref.eventId, text: input.text }
-      : { kind: "step", id: ref.eventId, step: input.step };
+      : input.kind === "permission"
+        ? {
+            kind: "permission",
+            id: ref.eventId,
+            engineRef: input.engineRef,
+            summary: input.summary,
+            state: "pending",
+            at: ref.at,
+          }
+        : { kind: "step", id: ref.eventId, step: input.step };
   return { ...work, parts: capParts([...work.parts, part]) };
 }
 
@@ -195,6 +226,20 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
       if (work.frozen) return work; // 定格不进部件（收口后无增量）
       if (work.seenEventIds.includes(ref.eventId)) return work; // 重放去重
       return applyPart({ ...work, seenEventIds: appendCapped(work.seenEventIds, ref.eventId) }, ref, input);
+    }),
+
+  resolvePermission: (projectId, engineRef, state) =>
+    updateWork(set, projectId, (work) => {
+      if (work === undefined) return work;
+      const target = work.parts.find(
+        (part): part is Extract<WorkPart, { kind: "permission" }> =>
+          part.kind === "permission" && part.engineRef === engineRef,
+      );
+      if (!target || target.state === state) return work;
+      const parts = work.parts.map((part) =>
+        part === target ? { ...target, state } : part,
+      );
+      return { ...work, parts };
     }),
 
   freezeWork: (projectId, runId, at) =>

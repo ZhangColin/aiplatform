@@ -488,29 +488,52 @@ class AgentscopeAgentClientTest {
     // ---------- 挂起语义 / resume ----------
 
     @Test
-    void given_confirm_event_when_converse_then_question_raised_and_no_run_finish() {
+    void given_non_ask_user_confirm_event_when_converse_then_permission_required_and_no_run_finish() {
         givenStream(
                 new TextBlockDeltaEvent("r-1", "b-1", "需要确认一个操作："),
                 new RequireUserConfirmEvent("reply-9", List.of(
-                        new ToolUseBlock("tc-1", "write_file", Map.of("path", "docs/PRD.md")))));
+                        new ToolUseBlock("tc-1", "command",
+                                Map.of("command", "rm -rf /workspace/data")))));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        var reply = client.converse(command(null, null), frames::add);
 
-        // 挂起 = 软终点：解说尾段部件先出（问答卡前不留解说尾巴）、question-raised
-        // 发出（问答卡呈现源），不发 run-finish
+        // #83 事件拆分：非提问挂起 = permission-required（确认卡呈现源）；挂起 = 软终点
+        // ——解说尾段部件先出（确认卡前不留解说尾巴），不发 run-finish，挂起面随返回值上浮
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START,
-                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.QUESTION_RAISED);
-        AgentEvent question = frames.get(3);
-        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
-        assertThat(question.payload()).containsEntry(AgentEventTypes.WAIT_KIND_FIELD, "PERMISSION");
+                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.PERMISSION_REQUIRED);
+        AgentEvent permission = frames.get(3);
+        assertThat(permission.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
+        assertThat(permission.payload()).containsEntry(
+                AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data");
         // data = 待确认工具最小面（恢复入参由业务编排从项目侧事实重建，不随事件携带）
         @SuppressWarnings("unchecked")
-        Map<String, Object> data = (Map<String, Object>) question.payload()
+        Map<String, Object> data = (Map<String, Object>) permission.payload()
                 .get(AgentEventTypes.WAIT_DATA_FIELD);
-        assertThat(data).containsOnlyKeys("type", "toolCalls");
-        assertThat(String.valueOf(data.get("type"))).isEqualTo("permission");
+        assertThat(data).containsOnlyKeys("toolCalls");
+        assertThat(reply.suspension()).isNotNull();
+        assertThat(reply.suspension().engineRef()).isEqualTo("reply-9");
+        assertThat(reply.suspension().question()).isFalse();
+        assertThat(reply.suspension().toolCalls()).isEqualTo(List.of(Map.of(
+                "id", "tc-1", "name", "command",
+                "input", Map.of("command", "rm -rf /workspace/data"))));
+    }
+
+    @Test
+    void given_ask_user_confirm_event_when_converse_then_question_raised_with_question_suspension() {
+        givenStream(
+                new RequireUserConfirmEvent("reply-8", List.of(
+                        new ToolUseBlock("tc-q", "ask_user", Map.of("question", "用哪个框架?")))));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        var reply = client.converse(command(null, null), frames::add);
+
+        // 提问挂起 = question-raised（问答作答通道），挂起面 question=true
+        assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
+                AgentEventTypes.RUN_START, AgentEventTypes.QUESTION_RAISED);
+        assertThat(reply.suspension().question()).isTrue();
+        assertThat(reply.suspension().engineRef()).isEqualTo("reply-8");
     }
 
     @Test
@@ -584,6 +607,30 @@ class AgentscopeAgentClientTest {
         assertThat(result.getToolCall().getMetadata())
                 .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "甲号方案");
         assertThat(result.getToolCall().getState()).isEqualTo(io.agentscope.core.message.ToolCallState.ASKING);
+    }
+
+    @Test
+    void given_confirmed_tool_call_shape_when_rebuild_then_approved_flag_and_untouched_input() {
+        // 权限作答复跑批复重建（#83）：批准位进 ConfirmResult（拒绝 = false，引擎写
+        // DENIED 工具结果回模型）；input 原样、无答复 metadata（批准/拒绝无文本面）
+        ConfirmResult approved = AgentscopeAgentClient.confirmedToolCall(
+                Map.of("id", "tc-9", "name", "command",
+                        "input", Map.of("command", "rm -rf /workspace/data")),
+                true);
+        assertThat(approved.isConfirmed()).isTrue();
+        assertThat(approved.getToolCall().getName()).isEqualTo("command");
+        assertThat(approved.getToolCall().getInput())
+                .containsEntry("command", "rm -rf /workspace/data");
+        assertThat(approved.getToolCall().getMetadata()).isEmpty();
+        assertThat(approved.getToolCall().getContent()).contains("rm -rf");
+        assertThat(approved.getToolCall().getState())
+                .isEqualTo(io.agentscope.core.message.ToolCallState.ASKING);
+
+        ConfirmResult denied = AgentscopeAgentClient.confirmedToolCall(
+                Map.of("id", "tc-9", "name", "command",
+                        "input", Map.of("command", "rm -rf /workspace/data")),
+                false);
+        assertThat(denied.isConfirmed()).isFalse();
     }
 
     @Test

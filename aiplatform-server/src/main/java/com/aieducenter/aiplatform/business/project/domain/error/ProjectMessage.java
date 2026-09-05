@@ -26,11 +26,11 @@ public enum ProjectMessage implements CodeMessage {
     /** PRD 读端点的「未产出」口径（工作区无 docs/PRD.md）——区别于项目不存在的 PRJ_001。 */
     PRD_NOT_PRODUCED(404, "PRJ_015", "PRD 尚未产出"),
 
-    /** 「开始做系统」重复发起守卫：已生成（调整走指令区意见）或生成在途。 */
+    /** 「开始做系统」重复发起守卫：已生成（调整走对话区意见）或生成在途。 */
     GENERATION_ALREADY_REQUESTED(409, "PRJ_017", "系统已生成或正在生成中，请勿重复发起"),
 
     /** 「开始做系统」前置事实守卫：PRD 从未产出（待定项未清不设门，无 PRD 除外）。 */
-    GENERATION_PRD_NOT_PRODUCED(409, "PRJ_018", "PRD 尚未产出，先和需求分析师聊出 PRD 再开始做系统"),
+    GENERATION_PRD_NOT_PRODUCED(409, "PRJ_018", "PRD 尚未产出，先在对话区把需求聊出 PRD 再开始做系统"),
 
     /** 修正任务前置事实守卫：系统从未生成（迭代在首次生成完成后才开始）。 */
     FIX_RUN_NOT_GENERATED(409, "PRJ_019", "系统还没做好，等系统生成完成后再提修改意见"),
@@ -54,7 +54,7 @@ public enum ProjectMessage implements CodeMessage {
     FIX_RESTART_IN_FLIGHT(409, "PRJ_025", "修正正在进行中，无需手动恢复"),
 
     /** 修正恢复出口守卫（#48）：无超限终态账（未派过/已成功收工/重启丢账），指路重提意见。 */
-    FIX_RESTART_UNAVAILABLE(409, "PRJ_026", "没有可恢复的修正，请在指令区重新提意见"),
+    FIX_RESTART_UNAVAILABLE(409, "PRJ_026", "没有可恢复的修正，请在对话区重新提意见"),
 
     /** 权限作答守卫（#83）：确认不存在或已落定（过期卡/平台重启丢账），指路刷新。 */
     PERMISSION_ANSWER_STALE(409, "PRJ_027", "该确认已失效（运行已收口或平台已重启），请刷新查看最新状态");

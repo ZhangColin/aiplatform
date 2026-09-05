@@ -36,7 +36,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 
 /**
  * 尽早起服真模型冒烟（#44 渐进预览前提；DEEPSEEK_API_KEY 未设或 docker daemon
- * 不在整类跳过）：真编码智能体从 PRD 生成系统的过程中，应用端口（8081）在 run
+ * 不在整类跳过）：真 run 执行体从 PRD 生成系统的过程中，应用端口（8081）在 run
  * 早期即可访问——而不是临近收口才第一次起服务。仅 SSE 发射边 mock 收口观测。
  *
  * <p>机械判据五条：① run 成功收口且 generated_at 落位、收口后 8081 仍可达
@@ -51,7 +51,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 节流抖动 ±3s）、末条不晚于收口后 5s（异步探针与收口的竞态余量））。</p>
  *
  * <p>PRD 直接预置到工作区（等价 savePrd 的写文件 + 置已产出两步——冒烟聚焦编码
- * run 行为，BA 访谈链路另有 IterationChainSmokeTest 覆盖）。生成有自动重试：单次
+ * run 行为，主智能体访谈链路另有 IterationChainSmokeTest 覆盖）。生成有自动重试：单次
  * 尝试的中间失败静默续试不算失败，退出条件只认 run-finish，超时红
  * 并附事件序诊断。</p>
  */
@@ -153,7 +153,7 @@ class GenerationEarlyServiceSmokeTest {
     @Timeout(2400)
     void given_prd_when_generate_then_app_port_reachable_early_in_run() {
         // 0) 真实 dev 容器 + 工作区记录 + 项目落库；事件捕获就位；PRD 预置（写文件 +
-        //    置已产出——等价 savePrd，不走 BA 访谈）
+        //    置已产出——等价 savePrd，不走访谈链路）
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();

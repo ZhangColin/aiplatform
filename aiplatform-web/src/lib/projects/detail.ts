@@ -12,7 +12,7 @@ export type ProjectDetail = {
   statusName?: string;
   archived?: boolean;
   createdAt?: string;
-  /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，指令区占满全宽）。 */
+  /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，对话区占满全宽）。 */
   prdProducedAt?: string | null;
   /** 首次生成时点（run 成功收口单向置位；缺省 = 未生成过——「开始做系统」可发起）。 */
   generatedAt?: string | null;

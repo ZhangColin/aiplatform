@@ -5,7 +5,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 /**
  * 一个工作区在环境后端处的运行时句柄（CONTEXT.md「沙箱」能力面的操作锚点）：
  * exec / exposePort / destroyWorkspace 都以它寻址。单容器化（ADR 0001）后与
- * {@link WorkspaceLayout} 布局常量表共同构成编码智能体/平台对沙箱的全部约定。
+ * {@link WorkspaceLayout} 布局常量表共同构成 run 执行体/平台对沙箱的全部约定。
  *
  * <p>与库记录同形（{@code wsp_workspaces} 持久化后可随时重建），服务重启接回
  * = 从记录还原本句柄。previewPort 仅 dev 环境有意义（预览宿主端口），runtime

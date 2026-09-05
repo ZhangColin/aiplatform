@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RaisedQuestion } from "@/lib/chat/qa";
 
-import { FALLBACK_AGENT_LABEL, pendingQuestionOf, useChatStore } from "./chat";
+import { pendingQuestionOf, useChatStore, type ChatMessage } from "./chat";
 
 function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQuestion {
   return {
@@ -18,32 +18,25 @@ function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQu
   };
 }
 
-/** 一轮完整 BA 事件序的模拟（bridge 之外的 store 直驱，事件序语义同 bridge 侧）。 */
-function playBaTurn(projectId: string, runId: string, prompt: string) {
+/** 一轮主智能体对话事件序的模拟（bridge 之外的 store 直驱，事件序语义同 bridge 侧）。 */
+function playMainTurn(projectId: string, runId: string, prompt: string) {
   const s = useChatStore.getState();
   s.noteChatRun(projectId, runId);
   s.ingestRunStart(projectId, runId, prompt);
 }
 
-/** 一轮助理应答事件序（#47 咨询分支：assist- 会话）。 */
-function playAssistantTurn(projectId: string, runId: string, prompt: string) {
-  const s = useChatStore.getState();
-  s.noteChatRun(projectId, runId);
-  s.ingestRunStart(projectId, runId, prompt);
-}
-
-describe("chat store · 指令区对话累积（#19）", () => {
+describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", () => {
   beforeEach(() => {
     useChatStore.setState({ chats: {} });
   });
 
-  it("一轮 BA 事件：run-start 落用户气泡起轮 → text 增量累积成带标签气泡 → run-finish 收轮", () => {
-    playBaTurn("p1", "run-1", "给宠物医院做预约系统");
+  it("一轮主智能体事件：run-start 落用户气泡起轮 → text 增量累积成无标签气泡 → run-finish 收轮", () => {
+    playMainTurn("p1", "run-1", "给宠物医院做预约系统");
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(true); // run-start 起轮
 
-    useChatStore.getState().appendAgentDelta("p1", "run-1", "ba-p1", "初步理解是", "run-1:3");
-    useChatStore.getState().appendAgentDelta("p1", "run-1", "ba-p1", "在线预约。", "run-1:4");
-    useChatStore.getState().finishTurn("p1", "ba-p1");
+    useChatStore.getState().appendAgentDelta("p1", "run-1", "初步理解是", "run-1:3");
+    useChatStore.getState().appendAgentDelta("p1", "run-1", "在线预约。", "run-1:4");
+    useChatStore.getState().finishTurn("p1", "run-1");
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages).toEqual([
@@ -52,38 +45,35 @@ describe("chat store · 指令区对话累积（#19）", () => {
         kind: "agent",
         id: expect.any(String),
         text: "初步理解是在线预约。",
-        label: FALLBACK_AGENT_LABEL,
         runId: "run-1",
       },
     ]);
     expect(chat?.turnActive).toBe(false); // 收口落轮
   });
 
-  it("助理轮（#47）：assist- 会话的 text 进对话；打字指示用通用标签", () => {
-    playAssistantTurn("p1", "run-5", "我后台的地址是什么？");
-    expect(useChatStore.getState().chats["p1"]?.activeRoleLabel).toBe(FALLBACK_AGENT_LABEL);
+  it("智能体话语无署名（#86 界面上只有一个「它」）；平台轻引导自带「平台」", () => {
+    playMainTurn("p1", "run-1", "需求");
+    useChatStore.getState().appendAgentDelta("p1", "run-1", "好的", "run-1:3");
+    useChatStore.getState().noteGuideReply("p1", "你好呀", "平台", "我在这里帮您…", "run-7:1");
 
-    useChatStore.getState().appendAgentDelta("p1", "run-5", "assist-p1", "访问地址是 ", "run-5:3");
-    useChatStore.getState().appendAgentDelta("p1", "run-5", "assist-p1", "http://localhost:32168/", "run-5:4");
-    useChatStore.getState().finishTurn("p1", "assist-p1");
-
-    const chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages.at(-1)).toMatchObject({
-      kind: "agent",
-      text: "访问地址是 http://localhost:32168/",
-      label: FALLBACK_AGENT_LABEL,
-    });
-    expect(chat?.turnActive).toBe(false);
-    expect(chat?.activeRoleLabel).toBeUndefined(); // 收轮清标签
+    const agents = (useChatStore.getState().chats["p1"]?.messages ?? []).filter(
+      (m): m is Extract<ChatMessage, { kind: "agent" }> => m.kind === "agent",
+    );
+    expect(agents.find((m) => m.text === "好的")?.label).toBeUndefined();
+    expect(agents.find((m) => m.text === "我在这里帮您…")?.label).toBe("平台");
   });
 
-  it("角色事件缺失的残段（重放边界）：text 仍进对话，标签回退通用", () => {
-    useChatStore.getState().appendAgentDelta("p1", "run-9", "ba-p1", "旧轮残段", "run-9:2");
+  it("未登记 run 的 text / 问答 / finish 不进对话（runId 锚定；编码 run 的解说不进对话）", () => {
+    playMainTurn("p1", "run-1", "需求");
 
-    expect(useChatStore.getState().chats["p1"]?.messages.at(-1)).toMatchObject({
-      kind: "agent",
-      label: FALLBACK_AGENT_LABEL,
-    });
+    useChatStore.getState().appendAgentDelta("p1", "run-9", "写代码中", "run-9:3");
+    useChatStore.getState().raiseQuestion("p1", "run-9", question("run-9:5"));
+    useChatStore.getState().finishTurn("p1", "run-9");
+    useChatStore.getState().appendAgentDelta("p2", "run-2", "串台", "run-2:1");
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages).toHaveLength(1); // 只有用户气泡
+    expect(chat?.turnActive).toBe(true); // 未登记 run 的 finish 不收轮
   });
 
   it("平台轻引导（#47 兜底）：prompt 落用户气泡（重放重建）+ 平台标签气泡 + 收轮；重放不重复", () => {
@@ -108,23 +98,12 @@ describe("chat store · 指令区对话累积（#19）", () => {
     expect(useChatStore.getState().chats["p1"]?.messages).toHaveLength(2);
   });
 
-  it("非对话会话的 text / finish 不进对话（coder- 前缀，片 2 起的判别面）", () => {
-    playBaTurn("p1", "run-1", "需求");
-
-    useChatStore.getState().appendAgentDelta("p1", "run-1", "coder-p1", "写代码中", "run-1:3");
-    useChatStore.getState().finishTurn("p1", "coder-p1");
-    useChatStore.getState().appendAgentDelta("p2", "run-2", "ba-p2", "串台", "run-2:1");
-
-    const chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages).toHaveLength(1); // 只有用户气泡
-  });
-
   it("run-start 只认登记过的对话面 run；重放同事件不重复落气泡", () => {
-    // 未登记的 run（run-start 角色键缺失等）不落用户气泡
+    // 未登记的 run（run-start 配置键缺失等）不落用户气泡
     useChatStore.getState().ingestRunStart("p1", "run-x", "不进对话");
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
 
-    playBaTurn("p1", "run-1", "第一句");
+    playMainTurn("p1", "run-1", "第一句");
     useChatStore.getState().ingestRunStart("p1", "run-1", "第一句"); // 重放/回声
     expect(useChatStore.getState().chats["p1"]?.messages).toHaveLength(1);
   });
@@ -150,11 +129,11 @@ describe("chat store · 指令区对话累积（#19）", () => {
   });
 
   it("问答：question-raised 落问答卡并收轮；作答落用户气泡 + 卡转已答 + 起轮；失败重开", () => {
-    playBaTurn("p1", "run-1", "需求");
-    useChatStore.getState().appendAgentDelta("p1", "run-1", "ba-p1", "先问一句", "run-1:3");
+    playMainTurn("p1", "run-1", "需求");
+    useChatStore.getState().appendAgentDelta("p1", "run-1", "先问一句", "run-1:3");
 
     const s = useChatStore.getState();
-    s.raiseQuestion("p1", "ba-p1", question("run-1:5"));
+    s.raiseQuestion("p1", "run-1", question("run-1:5"));
     expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
     expect(useChatStore.getState().chats["p1"]?.turnActive).toBe(false);
 
@@ -166,12 +145,11 @@ describe("chat store · 指令区对话累积（#19）", () => {
       text: "企业客户",
     });
 
-    // 作答后 BA 续流：新一轮智能体气泡另起（问题卡之后不拼接）
-    useChatStore.getState().appendAgentDelta("p1", "run-1", "ba-p1", "收到，下一个问题…", "run-1:9");
+    // 作答后主智能体续流：新一轮智能体气泡另起（问题卡之后不拼接）
+    useChatStore.getState().appendAgentDelta("p1", "run-1", "收到，下一个问题…", "run-1:9");
     expect(useChatStore.getState().chats["p1"]?.messages.at(-1)).toMatchObject({
       kind: "agent",
       text: "收到，下一个问题…",
-      label: FALLBACK_AGENT_LABEL,
     });
 
     // 发送失败：撤回气泡 + 问题卡重开
@@ -182,10 +160,10 @@ describe("chat store · 指令区对话累积（#19）", () => {
 
   it("新问题取代旧未答问题（一轮一问）；重放同事件不重复成卡", () => {
     const s = useChatStore.getState();
-    playBaTurn("p1", "run-1", "需求");
-    s.raiseQuestion("p1", "ba-p1", question("run-1:5"));
-    s.raiseQuestion("p1", "ba-p1", question("run-1:9", { question: "范围?" })); // 取代
-    s.raiseQuestion("p1", "ba-p1", question("run-1:9", { question: "范围?" })); // 重放
+    playMainTurn("p1", "run-1", "需求");
+    s.raiseQuestion("p1", "run-1", question("run-1:5"));
+    s.raiseQuestion("p1", "run-1", question("run-1:9", { question: "范围?" })); // 取代
+    s.raiseQuestion("p1", "run-1", question("run-1:9", { question: "范围?" })); // 重放
 
     const chat = useChatStore.getState().chats["p1"];
     const cards = chat?.messages.filter((m) => m.kind === "question") ?? [];
@@ -194,7 +172,7 @@ describe("chat store · 指令区对话累积（#19）", () => {
   });
 
   it("error 事件落中断提示并收轮（对话轮不死寂）；非对话 run 不落；重放不重复", () => {
-    playBaTurn("p1", "run-1", "需求");
+    playMainTurn("p1", "run-1", "需求");
     const s = useChatStore.getState();
     s.noteTurnError("p1", "run-1", "模型调用失败", "run-1:7");
     s.noteTurnError("p1", "run-1", "模型调用失败", "run-1:7"); // 重放
@@ -206,43 +184,41 @@ describe("chat store · 指令区对话累积（#19）", () => {
   });
 
   it("text 增量重放去重（事件 id 只收一次）——路由回访不双份", () => {
-    playBaTurn("p1", "run-1", "需求");
+    playMainTurn("p1", "run-1", "需求");
     const s = useChatStore.getState();
-    s.appendAgentDelta("p1", "run-1", "ba-p1", "你好", "run-1:3");
-    s.appendAgentDelta("p1", "run-1", "ba-p1", "你好", "run-1:3"); // 重放同事件
+    s.appendAgentDelta("p1", "run-1", "你好", "run-1:3");
+    s.appendAgentDelta("p1", "run-1", "你好", "run-1:3"); // 重放同事件
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.filter((m) => m.kind === "agent")).toEqual([
-      { kind: "agent", id: expect.any(String), text: "你好", label: FALLBACK_AGENT_LABEL, runId: "run-1" },
+      { kind: "agent", id: expect.any(String), text: "你好", runId: "run-1" },
     ]);
   });
 
-  it("相邻轮的气泡不互并（runId 锚定——角色标签退役后的交错保护）", () => {
-    playBaTurn("p1", "run-1", "需求");
-    playAssistantTurn("p1", "run-2", "地址是什么");
+  it("相邻轮的气泡不互并（runId 锚定——追问与答询连续同会话、不同轮各成气泡）", () => {
+    playMainTurn("p1", "run-1", "把主色调改成绿色");
+    playMainTurn("p1", "run-2", "我后台的地址是什么？");
     const s = useChatStore.getState();
-    s.appendAgentDelta("p1", "run-1", "ba-p1", "BA 的话", "run-1:3");
-    s.appendAgentDelta("p1", "run-2", "assist-p1", "助理的回答", "run-2:3");
+    s.appendAgentDelta("p1", "run-1", "意见轮的话", "run-1:3");
+    s.appendAgentDelta("p1", "run-2", "答询轮的回答", "run-2:3");
 
     const chat = useChatStore.getState().chats["p1"];
     expect(chat?.messages.filter((m) => m.kind === "agent").map((m) => [m.text, m.runId])).toEqual([
-      ["BA 的话", "run-1"],
-      ["助理的回答", "run-2"],
+      ["意见轮的话", "run-1"],
+      ["答询轮的回答", "run-2"],
     ]);
   });
 
-  it("同标签不同 run 也不互并（runId 锚定合并——事件缺失残段同为回退标签的交错保护）", () => {
-    playBaTurn("p1", "run-1", "需求");
-    const s2 = useChatStore.getState();
-    // 两个残段 run 都没有 role 事件（同为回退标签「智能体」）
-    s2.appendAgentDelta("p1", "run-a", "ba-p1", "第一段", "run-a:1");
-    s2.appendAgentDelta("p1", "run-b", "ba-p1", "第二段", "run-b:1");
+  it("平台引导气泡之后的智能体增量不与其互并（带标签气泡不是增量合并目标）", () => {
+    playMainTurn("p1", "run-1", "需求");
+    const s = useChatStore.getState();
+    s.noteGuideReply("p1", "你好呀", "平台", "我在这里帮您…", "run-7:1");
+    s.appendAgentDelta("p1", "run-1", "智能体的话", "run-1:3");
 
     const chat = useChatStore.getState().chats["p1"];
-    expect(chat?.messages.filter((m) => m.kind === "agent").map((m) => [m.text, m.runId])).toEqual([
-      ["第一段", "run-a"],
-      ["第二段", "run-b"],
+    expect(chat?.messages.filter((m) => m.kind === "agent").map((m) => [m.text, m.label])).toEqual([
+      ["我在这里帮您…", "平台"],
+      ["智能体的话", undefined],
     ]);
   });
-
 });

@@ -19,7 +19,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param archived       是否已归档（单向终点）
  * @param createdAt      创建时间
  * @param updatedAt      更新时间（审计列）
- * @param prdProducedAt  PRD 产出时点（成果区长出判据；NULL = 闲聊期——指令区占满
+ * @param prdProducedAt  PRD 产出时点（成果区长出判据；NULL = 闲聊期——对话区占满
  *                       全宽、成果区未长）
  * @param generatedAt    首次生成时点（run 成功收口单向置位；NULL = 未生成过——
  *                       「开始做系统」可发起、「确认下单」不可见的推导口径）

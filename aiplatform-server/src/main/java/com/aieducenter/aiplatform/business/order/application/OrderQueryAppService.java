@@ -18,7 +18,7 @@ import com.aieducenter.aiplatform.business.order.domain.repository.OrderReposito
 
 /**
  * 订单读面（#28 交易环①）：向 project 上下文供给「未终结订单事实」——项目
- * 详情/列表的嵌入字段（锁定式矩阵与四态过滤的推导输入）与指令区冻结守卫共用。
+ * 详情/列表的嵌入字段（锁定式矩阵与四态过滤的推导输入）与对话区冻结守卫共用。
  * 与 {@link OrderAppService}（写面，依赖 project 读面）分立两 bean，避免
  * project ⇄ order 应用服务互相构造注入成环。
  */
@@ -41,7 +41,7 @@ public class OrderQueryAppService {
 
     /**
      * 冻结守卫（#28「下单即冻结迭代」的判定面）：项目挂着未终结订单即抛
-     * ORD_006——指令区意见受理（project 上下文）经此守门，错误语义归订单侧
+     * ORD_006——对话区意见受理（project 上下文）经此守门，错误语义归订单侧
      * 单点，调用方不触订单 domain 词汇。
      */
     public void requireNoActiveOrder(Long projectId) {

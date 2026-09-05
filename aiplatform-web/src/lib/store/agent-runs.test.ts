@@ -37,7 +37,7 @@ describe("agent-runs store · run-start 建档", () => {
     expect(useAgentRunsStore.getState().order).toEqual(["run1"]);
   });
 
-  it("同项目新 run-start 驱逐旧 run（互逐：BA/编码轮流坐庄，注册表只留最近）", () => {
+  it("同项目新 run-start 驱逐旧 run（互逐：对话/编码轮流坐庄，注册表只留最近）", () => {
     seedRun("p1", "run1", 1_000);
     seedRun("p1", "run2", 2_000);
 

@@ -24,7 +24,7 @@ import { lockRowOf } from "@/lib/orders/lock";
 
 /**
  * 项目页装配（issue #17 单站壳 + #19/#20 需求环 + #22 生成环① + #79 对话
- * 主角式定稿）：居中对话区（BA 访谈接通）+ 呼出式成果区（范式注册表 tab 簇，
+ * 主角式定稿）：居中对话区（主智能体对话接通）+ 呼出式成果区（范式注册表 tab 簇，
  * PRD 产出后长出并自动滑出——判据 = prdProducedAt，document-updated 失效重拉
  * 即时切换）。闲聊期（prdProducedAt 未落）对话区占满全宽、成果区不渲染。
  *
@@ -38,7 +38,7 @@ import { lockRowOf } from "@/lib/orders/lock";
  * 矩阵行在此判定（lockRowOf 单点）注入对话区与订单范式。本组件是 agent 流通道
  * 首个挂载方（ADR 0003「项目页 mount 建连、unmount 即断」）；断流超 ~10s 发
  * 一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目建立即自动
- * 跑 BA，进行中亮灯。mobile 页签受控：发起生成/下单跳成果区。</p>
+ * 跑生成，进行中亮灯。mobile 页签受控：发起生成/下单跳成果区。</p>
  */
 export function ProjectPageView({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);

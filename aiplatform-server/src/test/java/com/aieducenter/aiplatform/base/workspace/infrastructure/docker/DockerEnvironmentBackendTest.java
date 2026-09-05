@@ -164,7 +164,7 @@ class DockerEnvironmentBackendTest {
     void given_app_serving_when_expose_port_then_preview_url_responds_on_mapped_port() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
-        // 模拟编码智能体已按约定在 8081 起服（#44 尽早起服）：容器内自起监听进程
+        // 模拟 run 执行体已按约定在 8081 起服（#44 尽早起服）：容器内自起监听进程
         assertThat(backend.exec(provision.handle(),
                         "nohup node /opt/serve.js /workspace "
                                 + EnvironmentBackend.DEV_APP_CONTAINER_PORT

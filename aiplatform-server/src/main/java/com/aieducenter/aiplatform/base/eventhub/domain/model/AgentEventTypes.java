@@ -12,10 +12,10 @@ package com.aieducenter.aiplatform.base.eventhub.domain.model;
 public final class AgentEventTypes {
 
     /**
-     * 运行开始（runId 随 run 响应同值返回）。engine/model 之外携带角色键
-     * {@code role}（业务侧角色卡的枚举名，如 CODER；无角色语境的一次性调用
-     * 不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次：编码 run 静默
-     * 重试（#84）不新发——用户面 run 身份 = 首试 runId 全程不变。
+     * 运行开始（runId 随 run 响应同值返回）。engine/model 之外携带智能体配置键
+     * {@code agent}（业务侧 AgentProfile 的稳定键，如 executor；无配置语境的
+     * 一次性调用不携带）——前端工作消息/对话面的锚定判据。一场 run 恰一次：
+     * 编码 run 静默重试（#84）不新发——用户面 run 身份 = 首试 runId 全程不变。
      */
     public static final String RUN_START = "run-start";
 
@@ -85,8 +85,8 @@ public final class AgentEventTypes {
     /** 引擎载荷原样（eventhub 不解释）。 */
     public static final String WAIT_DATA_FIELD = "data";
 
-    /** 角色卡标识（RolePreset 枚举名；run-start 携带）。 */
-    public static final String ROLE_FIELD = "role";
+    /** 智能体配置键（AgentProfile 稳定键，如 main/executor；run-start 携带）。 */
+    public static final String AGENT_FIELD = "agent";
 
     /** 承接运行的智能体栈名（单栈 agentscope；各事件 payload 同键携带）。 */
     public static final String ENGINE_FIELD = "engine";

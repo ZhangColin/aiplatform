@@ -17,7 +17,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
 import lombok.extern.slf4j.Slf4j;
@@ -34,11 +34,12 @@ import lombok.extern.slf4j.Slf4j;
  * 续派的中途超限不是终态，本层不判），用户侧兜底——生成重新发起 / 修正恢复出口
  * 重派或再提意见（#48）。
  *
- * <p>命令全要素同构：CODER 角色卡、{@code coder-{projectId}} 会话（重试续同会话
- * ——已落盘成果保留，同工作区不丢数据）、owner 寻址、长 run 超时、计量 dims
- * （agentKind=coder）、项目工作区、流关联。知识命中前置注入只进首试 prompt（一次
- * 下发一次注入，重试不重检索不重块）。流桥挂步骤边界探活装饰（#49 逐修改刷新：
- * part-step 边界 → 探活 → preview-updated 通知）。</p>
+ * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}）、
+ * {@code coder-{projectId}} 会话（重试续同会话——已落盘成果保留，同工作区不丢
+ * 数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、项目工作区、
+ * 流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试不重检索不重
+ * 块）。流桥挂步骤边界探活装饰（#49 逐修改刷新：part-step 边界 → 探活 →
+ * preview-updated 通知）。</p>
  *
  * <p><b>权限确认挂起（#83）</b>：run 内需批准的工具操作（危险命令）以
  * {@code permission-required} 事件呈现确认卡后流软终点——本环在挂起点驻留
@@ -108,18 +109,18 @@ class CoderRunAttempts {
             AgentCommand command = new AgentCommand(
                     attemptRunId,
                     attempt == 1 ? knowledgePrefix + prompts.first() : prompts.retry(),
-                    RolePreset.CODER.systemPrompt(),
-                    RolePreset.CODER.chatModelString(),
+                    AgentProfile.EXECUTOR.systemPrompt(),
+                    AgentProfile.EXECUTOR.chatModelString(),
                     SESSION_PREFIX + projectId,
                     project.getOwnerAccountId() != null
                             ? project.getOwnerAccountId().toString() : null,
                     new UsageContext(Long.toString(projectId),
-                            UsageDims.of(projectId, UsageDims.kindOf(RolePreset.CODER),
+                            UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.EXECUTOR),
                                     SESSION_PREFIX + projectId)),
                     Long.toString(project.getWorkspaceId()),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),
-                    RolePreset.CODER.name(),
+                    AgentProfile.EXECUTOR.key(),
                     /* workspaceReadOnly= */ false);
             try {
                 // 逐修改刷新（#49）：事件桥 sink 外包步骤边界探活装饰——part-step 边界
@@ -176,7 +177,7 @@ class CoderRunAttempts {
     /**
      * 权限确认驻留与续跑（#83）：挂起（软终点）即等作答——批准/拒绝以 ConfirmResult
      * 续跑同 run（命令全要素同构，恢复私货从本环命令原样携带），续跑可再挂起
-     * （一 run 多确认点）。问答挂起在编码 run 不可达（CODER 无 ask_user 工具），
+     * （一 run 多确认点）。问答挂起在编码 run 不可达（执行体无 ask_user 工具），
      * 防御即失败（走尝试环重试，最终 run-failed——不静默错频道）。
      *
      * @param userRunId 用户面 run 身份（首试 runId，#84）——挂起会合与作答校验的
@@ -191,14 +192,14 @@ class CoderRunAttempts {
         }
         if (reply.suspension() != null) {
             throw new IllegalStateException(
-                    "编码 run 出现提问挂起（CODER 无 ask_user 工具，不可达）：engineRef="
+                    "编码 run 出现提问挂起（执行体无 ask_user 工具，不可达）：engineRef="
                             + reply.suspension().engineRef());
         }
         return reply;
     }
 
     /**
-     * 权限作答的续跑请求：命令全要素同构（会话/角色卡/计量/工作区原样——run 上下文
+     * 权限作答的续跑请求：命令全要素同构（会话/配置/计量/工作区原样——run 上下文
      * 不因确认点漂移），ConfirmResult 按批准位重建（拒绝 = confirmed=false，引擎写
      * DENIED 工具结果回模型）。续跑文本给模型明确的决策反馈与拒绝后的出路
      * （改道或如实收口），不替模型做决定。
@@ -220,7 +221,8 @@ class CoderRunAttempts {
                         ? "用户已批准该操作，请继续执行并完成本轮任务。"
                         : "用户已拒绝该操作。",
                 command.usageContext(),
-                command.agentRole());
+                command.agentKey(),
+                command.workspaceReadOnly());
     }
 
     /**

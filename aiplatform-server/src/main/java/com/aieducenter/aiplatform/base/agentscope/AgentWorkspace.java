@@ -12,9 +12,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  *       本地文件系统直用</li>
  *   <li>{@link ProjectDev}：项目 dev 工作区——dev 容器内 {@code /workspace}（Docker
  *       常开口径），智能体经 docker exec 读写，写入即落项目工作区（源码包可见）</li>
- *   <li>{@link ProjectReadOnly}：项目工作区只读面（#47 助理咨询姿态）——同一 dev
- *       容器同一根，但不挂内核文件/命令工具（写面结构性关闭；业务侧以只读工具集
- *       自查自答，见 {@code RoleToolkitSupplier}）</li>
+ *   <li>{@link ProjectReadOnly}：项目工作区只读面（#86 主智能体对话姿态）——同一
+ *       dev 容器同一根，但不挂内核文件/命令工具（写面结构性关闭；业务侧以只读
+ *       工具集自查自答，见 {@code ProfileToolkitSupplier}）</li>
  * </ul>
  */
 public sealed interface AgentWorkspace {
@@ -54,7 +54,7 @@ public sealed interface AgentWorkspace {
     }
 
     /**
-     * 项目工作区只读面（#47）：容器与根同 {@link ProjectDev}（工作区上下文照常
+     * 项目工作区只读面：容器与根同 {@link ProjectDev}（工作区上下文照常
      * 可读），差异在工具面——工厂对本形态关闭内核文件与 shell 工具（无写面），
      * 项目事实的读取经业务侧只读工具集（文件树/文件内容/项目事实）。
      */

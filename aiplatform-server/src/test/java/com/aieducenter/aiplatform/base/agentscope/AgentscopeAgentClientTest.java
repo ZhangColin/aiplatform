@@ -144,7 +144,7 @@ class AgentscopeAgentClientTest {
     void given_any_command_when_converse_then_retired_families_absent_and_parts_always_on() {
         // 收缩验收（#82）：退役五族零残留——任何命令的事件流无 live-* / role-assigned /
         // run-created / run-retrying / fix-unchanged / dispatch-stage；部件恒挂
-        // （消息部件是全部智能体事件的呈现地基——BA 轮也产部件）
+        // （消息部件是全部智能体事件的呈现地基——主智能体对话轮也产部件）
         givenStream(
                 new ModelCallStartEvent("r-1"),
                 new TextBlockDeltaEvent("r-1", "b-1", "访谈自述。"),
@@ -230,18 +230,18 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_agent_role_when_converse_then_role_threaded_into_agent_build() {
-        // #43 工具面按角色发放：命令的角色键穿透到 agent 工厂构建——BA 与编码
+        // #43 工具面按配置发放：命令的配置键穿透到 agent 工厂构建——主智能体与执行
         // 智能体同一工作区、不同角色 → 不同工具面的寻址腿
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
                 WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "BA", false), event -> {
+                null, "42", Map.of(), null, "main", false), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.ProjectDev("42", "ws-42-dev")), eq("BA"));
+                eq(new AgentWorkspace.ProjectDev("42", "ws-42-dev")), eq("main"));
     }
 
     @Test
@@ -403,7 +403,7 @@ class AgentscopeAgentClientTest {
 
     /** run-start 并入角色键（引擎信息归一）：带角色命令携带、无角色不携带——前端工作消息/对话面的锚定判据。 */
     @Test
-    void given_agent_role_when_converse_then_run_start_carries_role_key() {
+    void given_agent_key_when_converse_then_run_start_carries_agent_key() {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
         List<AgentEvent> frames = new ArrayList<>();
@@ -411,13 +411,13 @@ class AgentscopeAgentClientTest {
                 null, null, Map.of(), null, "CODER", false), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
-        assertThat(frames.get(0).payload()).containsEntry("role", "CODER");
+        assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
 
-        // 无角色语境（取名等一次性调用）：run-start 不带 role 键
+        // 无配置语境（取名等一次性调用）：run-start 不带 agent 键
         givenStream(new TextBlockDeltaEvent("r-2", "b-1", "名"));
         List<AgentEvent> plain = new ArrayList<>();
         client.converse(command(null, null), plain::add);
-        assertThat(plain.get(0).payload()).doesNotContainKey("role");
+        assertThat(plain.get(0).payload()).doesNotContainKey("agent");
     }
 
     @Test
@@ -549,7 +549,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null), frames::add);
+                "approved", null, null, false), frames::add);
 
         // 恢复消息带 ConfirmResult metadata（AgentScope 挂起恢复口）；续跑流正常收口
         verify(agent).streamEvents(messages.capture(), any(RuntimeContext.class));
@@ -576,7 +576,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null), frames::add))
+                "approved", null, null, false), frames::add))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(frames.stream().map(AgentEvent::type))

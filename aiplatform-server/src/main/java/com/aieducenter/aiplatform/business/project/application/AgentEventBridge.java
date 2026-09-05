@@ -13,7 +13,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 业务编排的智能体事件桥（BA 访谈 / 生成共用）：关联字段（projectId）逐事件注入
+ * 业务编排的智能体事件桥（主智能体对话 / 生成共用）：关联字段（projectId）逐事件注入
  * 后经事件通道发射。关联字段底座不解释、透传；发射失败护栏：单事件发射异常只记
  * 日志不断流（SSE 是「让 UI 活」的面，不承担正确性）。
  */
@@ -58,7 +58,7 @@ public class AgentEventBridge {
     /**
      * error 发射（失败家族——非重试族的失败表达）：意见链收口后派发修正 run 失败
      * （#51 → #82 失败家族归位：dispatch-failed 阶段族退役，失败信号归本事件）——
-     * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口 BA 轮的 runId（对话面
+     * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面
      * 已登记，失败提示随对话呈现）。
      */
     public void emitError(Long projectId, String runId, String message) {

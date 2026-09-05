@@ -51,7 +51,7 @@ describe("parseQuestion · question-raised → 问答卡（#19；#83 起纯 QUES
     expect(open).toMatchObject({ options: [], header: "提问", question: "还有什么要补充?" });
   });
 
-  it("无 engineRef / data 残缺 → 不成卡（指令区不呈现交互卡）", () => {
+  it("无 engineRef / data 残缺 → 不成卡（对话区不呈现交互卡）", () => {
     expect(parseQuestion("e2", { runId: "run-9", data: questionData() })).toBeNull();
     expect(parseQuestion("e3", questionRaised({ toolCalls: [] }))).toBeNull();
     expect(parseQuestion("e4", questionRaised(null))).toBeNull();

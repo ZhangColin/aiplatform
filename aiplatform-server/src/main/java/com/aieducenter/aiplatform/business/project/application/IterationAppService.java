@@ -20,25 +20,25 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 迭代编排（#26 迭代环① → #43 链必达收口 → #46 结束工具收口）：意见判定内化
- * BA，派发权归平台——BA 回合收口（无追问挂起）由 {@link BaInterviewAppService}
+ * 迭代编排（#26 迭代环① → #43 链必达收口 → #46 结束工具收口）：需求侧判定内化
+ * 主智能体，派发权归平台——意见轮收口（无追问挂起）由 {@link MainAgentAppService}
  * 观测并自动调用本服务派修正 run，不依赖模型自觉调用派发工具（startFixRun 已撤）。
- * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + BA 判定结果（PRD
- * 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
- * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——CODER 重读约定见
- * 角色卡），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
+ * 交接物三要素（#52，CONTEXT.md「交接物」）：意见原文清单 + 主智能体的需求侧判定
+ * （PRD 改没改、改了什么——{@link PrdRevisionFacts} 从 savePrd 工具调用事实观测）
+ * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——执行体重读约定见
+ * 配置），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
  * 配对全保留——各轮「意见 → 修订说明」一一对应，未修订轮显式占位，#55）。
- * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——编码智能体
- * 带着建系统的全部上下文继续干活；知识命中前置注入 / 失败静默重试 / 计量全走
- * 共用尝试环 {@link CoderRunAttempts}）。
+ * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——run
+ * 执行体带着建系统的全部上下文继续干活；知识命中前置注入 / 失败静默重试 / 计量
+ * 全走共用尝试环 {@link CoderRunAttempts}）。
  *
- * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：编码智能体判定本轮要不要动系统
+ * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：执行体判定本轮要不要动系统
  * ——动则修改后报 changed=true+改了什么，不动（纯文档性修订、系统现状已满足等）也
  * 必报 changed=false+原因，判定从工具调用事实观测（{@link FinishEditFacts}），不解析
  * 自由文本。未调用即 run 未正常收口，按既有静默重试/终态机制处理；判定结果
  * （changed 与原因）的呈现归收口扩载权威化（#88 收尾卡判定行）。</p>
  *
- * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（BA 回复用户「已排入下一轮」）；
+ * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（主智能体回复用户「已排入下一轮」）；
  * 当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户在 run 中
  * 连提多条意见不会被丢弃，也不会每条各烧一场 run。轨道状态（在途标记 + 队列）是
  * 进程内事实，重启即清（run 无表口径）：重启后进行中 run 标失败，用户重新提意见
@@ -53,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
  * ⟺ 恢复出口可达——排队合并续派的中途超限不发（轨道仍在途，「重新修改」出口
  * 零闪现）。</p>
  *
- * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归 BA 协议（角色卡），
+ * <p><b>无次数上限</b>：迭代轮数不设界，意见发散时的收敛催促归主智能体协议（配置），
  * 平台不设门。</p>
  */
 @Service
@@ -96,14 +96,14 @@ public class IterationAppService {
     }
 
     /**
-     * 派修正任务（BA 回合收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
+     * 派修正任务（意见轮收口的平台自动派发入口，#43 链必达）：修正 run 空闲即
      * 起跑（runId 随派发生成，过程事件经 SSE）；在途则排入队列、当前 run 收口后
      * 合并续派。交接物三要素中的需求侧判定随派发携带：{@code prdRevisionSummary}
-     * = BA 流 savePrd 的 summary 终值（null = 本轮未修订）。
+     * = 主智能体轮 savePrd 的 summary 终值（null = 本轮未修订）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_019 系统从未生成（迭代在首次生成完成后
-     *                              才开始——BA 收口侧对未生成项目静默止于 BA，
+     *                              才开始——意见收口侧对未生成项目静默止于对话，
      *                              此处守卫兜其余调用面）
      */
     public FixDispatch startFixRun(Long projectId, String task, String prdRevisionSummary) {
@@ -297,7 +297,7 @@ public class IterationAppService {
      * 修正任务 prompt：交接物三要素结构化拼装（#52，#55 逐轮配对）——每条意见
      * 原文后紧跟该轮的需求侧判定（已修订带修订说明、未修订显式「本轮无修订」
      * 占位——哪条意见被哪轮处理了一目了然，不静默缺席）+ PRD 路径引用（不注
-     * 全文，CODER 重读约定见角色卡）+ 收口判据复述（8081 常驻 + 结束工具必调）。
+     * 全文，执行体重读约定见配置）+ 收口判据复述（8081 常驻 + 结束工具必调）。
      */
     static String fixRunPrompt(FixHandoff handoff) {
         StringBuilder prompt = new StringBuilder(
@@ -307,7 +307,7 @@ public class IterationAppService {
         for (int index = 0; index < handoff.rounds().size(); index++) {
             FixHandoff.Round round = handoff.rounds().get(index);
             prompt.append("\n").append(index + 1).append(". 意见原文：").append(round.opinion())
-                    .append("\n   需求侧判定（BA 已收口）：")
+                    .append("\n   需求侧判定（主智能体已收口）：")
                     .append(round.prdRevisionSummary() != null
                             ? "PRD 已修订——" + round.prdRevisionSummary()
                             : "本轮无修订（未触发 PRD 变更）");

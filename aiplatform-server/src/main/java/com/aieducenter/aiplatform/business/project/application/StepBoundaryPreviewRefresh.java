@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>{@code part-step} 的 {@code step=1} 是起跑边界（尚无完整修改），不算刷新信号；
  * 末步完成由 run-finish 收口重挂兜底。探针不判内容只判可访问（HTTP 有应答即可），
- * 中间态报错的兜底归编码智能体自愈循环（CONTEXT.md「预览」）。</p>
+ * 中间态报错的兜底归 run 执行体自愈循环（CONTEXT.md「预览」）。</p>
  *
  * <p>探活在专职单线程上异步执行：sink 在流消费线程（reactor）上被调，docker exec
  * 是慢操作不能阻塞流（单线程兼得步骤序——探活按边界顺序出结果）；探活失败与

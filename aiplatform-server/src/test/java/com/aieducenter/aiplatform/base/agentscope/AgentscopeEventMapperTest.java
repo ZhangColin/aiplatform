@@ -122,11 +122,11 @@ class AgentscopeEventMapperTest {
 
         /** #77 引擎信息归一：角色键并入 run-start（可空不携带——无角色语境的一次性调用）。 */
         @Test
-        void given_run_start_with_role_when_built_then_carries_role_key() {
+        void given_run_start_with_agent_key_when_built_then_carries_agent_key() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "deepseek:m-1",
                     ENGINE, "CODER");
 
-            assertThat(frame.payload()).containsEntry("role", "CODER");
+            assertThat(frame.payload()).containsEntry("agent", "CODER");
         }
 
         @Test

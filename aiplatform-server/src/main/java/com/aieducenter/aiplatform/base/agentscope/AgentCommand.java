@@ -11,15 +11,15 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * <p>{@code runId} 为本轮调用的平台标识（计量幂等键与事件锚定都基于它）；
  * {@code systemPrompt} / {@code modelString} 可空——为空时取配置默认；
  * {@code usageContext} 可空——为空则本轮不上报用量（底座不发明归属）；
- * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目 dev 工作区
- * （智能体读写项目文件，BA 写 docs/PRD.md 的基础）；{@code streamCorrelation}
- * 可空——流关联字段（如 projectId，底座不解释，逐事件注入智能体事件 payload）；
- * {@code timeout} 可空——本轮对话超时，为空取内核配置默认（对话轮 2 分钟量级，
- * 编码轮长任务另行指定）；{@code agentRole} 可空——该轮智能体的角色键（业务侧
- * 角色名，底座不解释），按角色发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；
- * 为空 = 无角色语境，空工具面）；{@code workspaceReadOnly}——项目工作区解析为
- * 只读面（#47 助理咨询姿态：不挂内核文件/shell 工具，写面结构性关闭；缺省
- * false = 读写面）。</p>
+ * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
+ * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
+ * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
+ * 可空——本轮对话超时，为空取内核配置默认（对话轮 2 分钟量级，编码轮长任务
+ * 另行指定）；{@code agentKey} 可空——该轮智能体的配置键（业务侧配置标识，
+ * 底座不解释），按配置发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；
+ * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
+ * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
+ * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）。</p>
  */
 public record AgentCommand(
         String runId,
@@ -32,10 +32,10 @@ public record AgentCommand(
         String workspaceId,
         Map<String, Object> streamCorrelation,
         Duration timeout,
-        String agentRole,
+        String agentKey,
         boolean workspaceReadOnly) {
 
-    /** 无逐轮超时的兼容形（取内核配置默认）：无角色语境的一次性本地会话调用面
+    /** 无逐轮超时的兼容形（取内核配置默认）：无配置语境的一次性本地会话调用面
      * （取名等）不变——空工具面。 */
     public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
             String sessionId, String userId, UsageContext usageContext,
@@ -44,12 +44,12 @@ public record AgentCommand(
                 usageContext, workspaceId, streamCorrelation, null, null, false);
     }
 
-    /** 无逐轮超时、带角色的对话形（BA 访谈调用面：角色键穿透工具装配）。 */
+    /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
     public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
             String sessionId, String userId, UsageContext usageContext,
-            String workspaceId, Map<String, Object> streamCorrelation, String agentRole) {
+            String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, agentRole, false);
+                usageContext, workspaceId, streamCorrelation, null, agentKey, false);
     }
 
     public AgentCommand {

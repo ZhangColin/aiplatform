@@ -66,7 +66,7 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
 
     /**
      * 「PRD 已产出」状态位：PRD 事实源是工作区 {@code docs/PRD.md}，本位只记
-     * 「BA 已写出过」这一事实（成果区长出判据）——NULL = 未产出；写入方是 BA 的
+     * 「PRD 已写出过」这一事实（成果区长出判据）——NULL = 未产出；写入方是主智能体的
      * savePrd（写文件成功即置位）。时间戳随每次写出刷新（产出/更新共用，
      * v1 无版本链）。
      */

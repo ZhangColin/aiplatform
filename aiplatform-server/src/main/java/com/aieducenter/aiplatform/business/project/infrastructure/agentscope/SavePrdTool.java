@@ -17,7 +17,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
- * 保存 PRD 工具（BA 访谈资产）：BA 判定需求明确（含催促收敛）后的产物动作——效果 =
+ * 保存 PRD 工具（主智能体资产）：主智能体判定需求明确（含催促收敛）后的产物动作——效果 =
  * 写 {@code docs/PRD.md} 到项目 dev 工作区（经 {@link PrdArtifactAdapter#workspacePath}
  * 的业务正本路径，docker exec 覆盖写——修订再执行即更新）+ 回调
  * {@link PrdArtifactAdapter#onWritten}（置「PRD 已产出」状态位 + 发 document-updated）
@@ -26,9 +26,10 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
  * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
  *
  * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，无最终版一说
- * （唯一不可逆门 = 确认下单的快照冻结）。仅随项目 dev 工作区注册
- * （{@link RoleToolkitSupplier}）。执行体阻塞（docker exec + 置位事务），框架
- * ToolExecutor 缺省 boundedElastic 调度，阻塞安全。</p>
+ * （唯一不可逆门 = 确认下单的快照冻结）。仅随项目只读工作区注册
+ * （{@link ProfileToolkitSupplier}，#86 主智能体对话姿态）。执行体阻塞
+ * （docker exec + 置位事务），框架 ToolExecutor 缺省 boundedElastic 调度，
+ * 阻塞安全。</p>
  */
 public class SavePrdTool extends ToolBase {
 

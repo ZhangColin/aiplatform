@@ -60,7 +60,7 @@ class KnowledgePortSemanticTest {
 
     @Test
     void given_indexed_topical_chunks_when_retrieve_then_related_chunk_ranked_first() {
-        knowledgePort.index(new KnowledgeSpec("ARTIFACT", "p1:BA:PRD.md", "p1", "电商系统",
+        knowledgePort.index(new KnowledgeSpec("ARTIFACT", "p1:MAIN:PRD.md", "p1", "电商系统",
                 "PRD.md",
                 List.of("用户登录模块采用手机号验证码登录，密码使用 bcrypt 加密存储。",
                         "订单支付支持支付宝与微信支付，支付回调需验签。"),

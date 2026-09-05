@@ -20,14 +20,14 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * 项目生命周期用例：建项目 = 工作区副作用先行落定 → 一事务建 Project（占位名）
- * → SSE 通知 → 前缀段自动开 BA 访谈（「建项目即自动跑 BA」，初始描述即开场输入）
+ * → SSE 通知 → 前缀段自动开主智能体对话（初始描述即开场输入）
  * + 异步 LLM 取名。
  *
  * <p>创建精简（spec 0002 §3.1 一句话创建）：入参只剩 requirement——类型单模板
@@ -47,7 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectLifecycleAppService {
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
-    private final BaInterviewAppService baInterviewAppService;
+    private final MainAgentAppService mainAgentAppService;
     private final ProjectRepository projectRepository;
     private final ProjectQueryAppService queryAppService;
     private final EventsAppService eventsAppService;
@@ -56,7 +56,7 @@ public class ProjectLifecycleAppService {
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
-                                      BaInterviewAppService baInterviewAppService,
+                                      MainAgentAppService mainAgentAppService,
                                       ProjectRepository projectRepository,
                                       ProjectQueryAppService queryAppService,
                                       EventsAppService eventsAppService,
@@ -64,7 +64,7 @@ public class ProjectLifecycleAppService {
                                       ProjectNamingAppService namingService,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
-        this.baInterviewAppService = baInterviewAppService;
+        this.mainAgentAppService = mainAgentAppService;
         this.projectRepository = projectRepository;
         this.queryAppService = queryAppService;
         this.eventsAppService = eventsAppService;
@@ -76,8 +76,8 @@ public class ProjectLifecycleAppService {
     /**
      * 建项目（只传 requirement）：dev 工作区落定 → 一事务 Project（占位名 + 类型
      * 服务端缺省）→ SSE workspace-created → 异步 LLM 取名（不等结果，失败保占位）
-     * → 自动开始 BA 访谈（经 {@link BaInterviewAppService}，欢迎语 + 首个澄清
-     * 问题）。BA 起跑失败不回滚建项目（项目已成立，失败原因经 error 事件/日志表达）。
+     * → 自动开始主智能体对话（经 {@link MainAgentAppService}，欢迎语 + 首个澄清
+     * 问题）。起跑失败不回滚建项目（项目已成立，失败原因经 error 事件/日志表达）。
      */
     public ProjectCreatedResponse create(CreateProjectCommand command) {
         WorkspaceResponse workspace = workspaceLifecycleAppService
@@ -104,15 +104,15 @@ public class ProjectLifecycleAppService {
         // 异步 LLM 取名（占位名先落，取名后台完成落位；空 requirement 不取名）
         namingService.nameAsync(project.getId(), command.requirement());
 
-        // 前缀段自动：建项目即开始 BA 访谈（初始描述即开场输入；会话建立轮做
+        // 前缀段自动：建项目即开始主智能体对话（初始描述即开场输入；会话建立轮做
         // 知识命中注入——query = 初始需求原文）
         String prompt = command.requirement() == null || command.requirement().isBlank()
-                ? RolePreset.DEFAULT_KICKOFF_PROMPT : command.requirement();
-        BaInterviewAppService.InterviewRun run;
+                ? AgentProfile.DEFAULT_KICKOFF_PROMPT : command.requirement();
+        MainAgentAppService.MainAgentRun run;
         try {
-            run = baInterviewAppService.startInterview(project.getId(), prompt);
+            run = mainAgentAppService.startConversation(project.getId(), prompt);
         } catch (RuntimeException e) {
-            log.warn("项目 {} 自动 BA 起跑失败（项目已成立，不回滚）", project.getId(), e);
+            log.warn("项目 {} 自动对话起跑失败（项目已成立，不回滚）", project.getId(), e);
             return new ProjectCreatedResponse(queryAppService.detail(project.getId()), null);
         }
         return new ProjectCreatedResponse(queryAppService.detail(project.getId()),
@@ -172,7 +172,7 @@ public class ProjectLifecycleAppService {
 
     /**
      * 预览（#45 渐进口径）：端口映射置备时已落定、URL 确定，此处探活工作区应用
-     * 端口——通过（编码智能体已起服）→ SSE {@code preview-ready} → 返回 URL；
+     * 端口——通过（run 执行体已起服）→ SSE {@code preview-ready} → 返回 URL；
      * 未就绪 → 503 WSP_012（待期非故障），前端 run 开始即轮询续探、通过瞬间上页面。
      */
     public ProjectPreviewResponse preview(Long projectId) {

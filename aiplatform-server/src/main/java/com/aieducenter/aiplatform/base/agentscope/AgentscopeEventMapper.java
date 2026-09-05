@@ -20,8 +20,8 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  * 事件映射表单点：AgentScope 类型化事件 → 平台智能体事件（SSE事件清单·智能体
  * 事件族，词汇表正本在 eventhub 的 {@link AgentEventTypes}，payload 关联键同源
  * 常量化）。run 生命周期事件（run-start / run-finish / error，平台封闭集合）经
- * 静态工厂构造（run-start 并入角色键——引擎信息归一，前端工作消息/对话面的
- * 锚定判据）；过程事件（引擎透传开放集合，清单已知名型）由 {@link #map} 逐事件
+ * 静态工厂构造（run-start 并入智能体配置键——引擎信息归一，前端工作消息/对话
+ * 面的锚定判据）；过程事件（引擎透传开放集合，清单已知名型）由 {@link #map} 逐事件
  * 产出——每事件 payload 盖 runId/sessionId/engine，引擎侧细节藏 {@code data}
  * 键内层。消息部件事件（part-*）不在本表——由 {@link AgentscopePartsMapper}
  * 另行产出。
@@ -250,18 +250,19 @@ final class AgentscopeEventMapper {
     // ---------- run 生命周期事件（平台封闭集合） ----------
 
     /**
-     * run 开始事件：引擎信息归一——engine/model 之外携带角色键 {@code role}
-     * （业务侧 AgentCommand 的角色键，可空不携带；前端工作消息/对话面的锚定判据）。
+     * run 开始事件：引擎信息归一——engine/model 之外携带智能体配置键
+     * {@code agent}（业务侧 AgentCommand 的配置键，可空不携带；前端工作消息/
+     * 对话面的锚定判据）。
      */
     static AgentEvent runStart(String runId, String prompt, String model, String engine,
-            String agentRole) {
+            String agentKey) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put("prompt", prompt);
         payload.put("model", model);
         payload.put(AgentEventTypes.ENGINE_FIELD, engine);
-        if (agentRole != null && !agentRole.isBlank()) {
-            payload.put(AgentEventTypes.ROLE_FIELD, agentRole);
+        if (agentKey != null && !agentKey.isBlank()) {
+            payload.put(AgentEventTypes.AGENT_FIELD, agentKey);
         }
         return new AgentEvent(AgentEventTypes.RUN_START, payload);
     }

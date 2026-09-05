@@ -30,7 +30,7 @@ function renderPanel(orderId?: string, projectArchived = false) {
 }
 
 describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
-  it("无未终结订单：引导占位（「确认下单」入口在指令区）", () => {
+  it("无未终结订单：引导占位（「确认下单」入口在对话区）", () => {
     const html = renderPanel();
 
     expect(html).toContain("还没有订单");

@@ -11,7 +11,7 @@ import { ORDER_STATUS } from "@/lib/orders/lock";
  * 订单数据层（#28 交易环① + #29 交易环② + #30 交易环③）：详情查询 +
  * 下单/取消/支付三动作。三动作都改变「项目挂着未终结订单」或项目归档态这一
  * 事实（详情 activeOrder/latestOrder/archived 嵌入 = 锁定式矩阵与归档终态的
- * 推导输入），成功即失效整项目域——指令区锁定/解锁、订单卡进出、列表四态分区
+ * 推导输入），成功即失效整项目域——对话区锁定/解锁、订单卡进出、列表四态分区
  * 随重拉自愈；订单域自身也失效（旧订单详情不再被引用）。
  */
 
@@ -52,7 +52,7 @@ export function usePlaceOrder(projectId: string) {
   });
 }
 
-/** 取消订单（未支付态）：取消即解冻回迭代态，指令区恢复受理意见。 */
+/** 取消订单（未支付态）：取消即解冻回迭代态，对话区恢复受理意见。 */
 export function useCancelOrder() {
   const queryClient = useQueryClient();
   return useMutation({

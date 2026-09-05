@@ -6,9 +6,9 @@ import { create } from "zustand";
  * SSE 侧 = 桥（事件）；发送侧 = use-generate（发起成功的乐观登记，SSE 事件随后
  * 到达并幂等收敛）。
  *
- * <p>与 agent-runs 的分工：runs 是「顶栏 LIVE 的运行注册表」（BA/编码互逐），
- * 本 store 是「生成事实」——编码 run 的 runId 登记（run-start role=CODER，后续
- * error/run-finish 事件不带角色，凭登记判定）与跨 run 的状态，BA 轮不挤掉。
+ * <p>与 agent-runs 的分工：runs 是「顶栏 LIVE 的运行注册表」（对话/编码互逐），
+ * 本 store 是「生成事实」——编码 run 的 runId 登记（run-start agent=executor，后续
+ * error/run-finish 事件不带角色，凭登记判定）与跨 run 的状态，对话轮不挤掉。
  * 刷新后由事件流重放缓冲重建（生成中回页可续看状态）。重试静默（#84）：中间
  * 失败不出事件，run 失败（run-failed）为唯一失败终态。</p>
  *

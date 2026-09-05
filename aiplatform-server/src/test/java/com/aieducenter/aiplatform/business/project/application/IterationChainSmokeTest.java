@@ -40,14 +40,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 迭代链必达真模型冒烟（#43；DEEPSEEK_API_KEY 未设或 docker daemon 不在整类
- * 跳过）：「改主色调」场景全链绿——真 BA（真模型 + 真 dev 容器 + 真会话状态）修订
- * PRD 后，平台在 BA 回合收口<b>自动</b>派修正 run（不依赖任何派发工具调用——BA
- * 也没有派发工具），真编码智能体把系统改掉。仅 SSE / 通知发射边（无订阅者的
+ * 跳过）：「改主色调」场景全链绿——真主智能体（真模型 + 真 dev 容器 + 真会话状态）修订
+ * PRD 后，平台在 意见轮收口<b>自动</b>派修正 run（不依赖任何派发工具调用——主智能体
+ * 也没有派发工具），真 run 执行体把系统改掉。仅 SSE / 通知发射边（无订阅者的
  * 广播口）mock 收口观测。
  *
- * <p>链路编排：压缩访谈（一句话 → 追问即催促收敛 → savePrd，BA 会话内有自己写的
+ * <p>链路编排：压缩访谈（一句话 → 追问即催促收敛 → savePrd，主智能体会话内有自己写的
  * PRD 上下文）→ 预置 8081 常驻小系统（主色 #3b82f6 蓝）+ 置已生成 → 意见轮「把
- * 系统的主色调改成绿色」→ 断言三件事：PRD 更新（含绿）、CODER run 自动起跑并
+ * 系统的主色调改成绿色」→ 断言三件事：PRD 更新（含绿）、修正 run 自动起跑并
  * 收口、服务页面换色（蓝主色字面量消失）。</p>
  */
 @SpringBootTest
@@ -60,7 +60,7 @@ class IterationChainSmokeTest {
     private static final String BLUE_MAIN_COLOR = "#3b82f6";
 
     @Autowired
-    private BaInterviewAppService appService;
+    private MainAgentAppService appService;
 
     @Autowired
     private ProjectQueryAppService queryAppService;
@@ -89,7 +89,7 @@ class IterationChainSmokeTest {
 
     private String workspaceId;
     private Long projectId;
-    private String baSessionId;
+    private String mainSessionId;
     private String coderSessionId;
     private String pageBefore;
 
@@ -115,9 +115,9 @@ class IterationChainSmokeTest {
 
     @AfterEach
     void tearDown() {
-        if (baSessionId != null) {
-            jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", baSessionId);
-            jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", baSessionId);
+        if (mainSessionId != null) {
+            jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", mainSessionId);
+            jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", mainSessionId);
         }
         if (coderSessionId != null) {
             jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", coderSessionId);
@@ -154,10 +154,10 @@ class IterationChainSmokeTest {
         Project project = projectRepository.save(Project.create("链必达冒烟", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
-        baSessionId = BaInterviewAppService.SESSION_PREFIX + projectId;
+        mainSessionId = MainAgentAppService.SESSION_PREFIX + projectId;
         coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
 
-        // 1) 压缩访谈：一句话 → 追问即催促收敛 → savePrd 产出 PRD（BA 会话内有
+        // 1) 压缩访谈：一句话 → 追问即催促收敛 → savePrd 产出 PRD（主智能体会话内有
         //    自己写的 PRD 上下文——后续修订才有正本可依）
         convergeToInterviewPrd("做一个单页展示系统，主色调用蓝色，页面简洁");
         assertThat(prdContent()).as("访谈收敛后 PRD 应已产出且含主色调约定").contains("蓝");
@@ -171,18 +171,18 @@ class IterationChainSmokeTest {
             projectRepository.save(p);
         });
 
-        // 3) 意见轮（真 BA）：改主色调——按新角色卡，BA 只判需求侧（此为需求变更
+        // 3) 意见轮（真主智能体）：改主色调——按主智能体协议，只判需求侧（此为需求变更
         //    → savePrd 修订），不调任何派发工具（也没有）
         settleOpinion("系统做得很好。现在提一条修改意见：请把系统的主色调改成绿色。");
 
         // 4a) PRD 更新：PRD 正文含绿（需求侧已落）
         awaitUntil(FIX_DEADLINE, () -> prdContent().contains("绿"));
 
-        // 4b) 平台自动派修正 run：run-start(role=CODER) 事件到达——链的收口在平台
+        // 4b) 平台自动派修正 run：run-start(agent=executor) 事件到达——链的收口在平台
         //     代码，模型漏调任何工具都不断链
         Frame coderAssigned = awaitFrame(FIX_DEADLINE, frame ->
                 AgentEventTypes.RUN_START.equals(frame.type())
-                        && "CODER".equals(frame.payload().get(AgentEventTypes.ROLE_FIELD)));
+                        && "executor".equals(frame.payload().get(AgentEventTypes.AGENT_FIELD)));
         assertThat(coderAssigned.runId()).isNotEmpty();
 
         // 4c) 修正 run 真跑完（真模型改真系统；error 事件即链路失败，如实红）
@@ -206,8 +206,8 @@ class IterationChainSmokeTest {
         assertThat(pageAfter).as("主色蓝应被换掉（改后页面：%s）", pageAfter)
                 .doesNotContain(BLUE_MAIN_COLOR);
 
-        // 4e) 编码智能体工具面收紧的行为事实（真链路）：修正 run 全程无问答挂起、
-        //     无问答/存 PRD/派发类工具面痕迹——这些工具不在 CODER 的工具面，模型
+        // 4e) 执行体工具面收紧的行为事实（真链路）：修正 run 全程无问答挂起、
+        //     无问答/存 PRD/派发类工具面痕迹——这些工具不在执行体的工具面，模型
         //     无从调用
         List<Frame> coderFrames = frames.stream()
                 .filter(f -> coderAssigned.runId().equals(f.runId())).toList();
@@ -250,11 +250,11 @@ class IterationChainSmokeTest {
         assertThat(outcome).as("意见轮未在限轮内收口（事件序见日志）").isEqualTo("finished");
     }
 
-    /** 跑一轮 BA（意见/开场文本进指令区口径），返回首个结果（engineRef / finished）。 */
+    /** 跑一轮主智能体对话（意见文本口径），返回首个结果（engineRef / finished）。 */
     private String runBaTurn(String text) {
         frames.clear();
         seenRefs.clear();
-        appService.runInterviewTurn(projectId, text);
+        appService.runOpinionTurn(projectId, text);
         return awaitOutcome();
     }
 
@@ -273,12 +273,12 @@ class IterationChainSmokeTest {
         return awaitOutcome();
     }
 
-    /** 等当前 BA 轮出结果：再挂起（返回新 engineRef）或收口（"finished"；error 红）。 */
+    /** 等当前对话轮出结果：再挂起（返回新 engineRef）或收口（"finished"；error 红）。 */
     private String awaitOutcome() {
         return awaitUntil(TURN_DEADLINE, () -> {
             for (Frame frame : frames) {
                 if (AgentEventTypes.ERROR.equals(frame.type())) {
-                    throw new AssertionError("BA 轮异常收口：" + frame.payload());
+                    throw new AssertionError("对话轮异常收口：" + frame.payload());
                 }
             }
             for (Frame frame : frames) {
@@ -359,7 +359,7 @@ class IterationChainSmokeTest {
 
     /**
      * 有界轮询直到条件成立（null / false / 空串 = 未达成继续等；超时红，附已
-     * 捕获事件序诊断）。条件抛 AssertionError 即刻失败（BA 轮 error 事件口径）。
+     * 捕获事件序诊断）。条件抛 AssertionError 即刻失败（对话轮 error 事件口径）。
      */
     private <T> T awaitUntil(Duration deadline, Supplier<T> condition) {
         long end = System.nanoTime() + deadline.toNanos();

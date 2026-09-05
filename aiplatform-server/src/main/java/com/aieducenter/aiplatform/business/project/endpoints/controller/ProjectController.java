@@ -24,7 +24,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import com.cartisan.web.response.ApiResponse;
 
-import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
@@ -51,21 +51,21 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 项目 REST 面：一句话建项目（建即自动跑 BA）→ 指令区发言（入口三分类派发）/
- * 问答卡作答 / 权限确认卡作答 / 开始做系统（生成）→ 重新修改（修正超限终态恢复
- * 出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 → 源码包
- * 下载 → 预览 → 删除真删级联。
+ * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
+ * 派发）/ 问答卡作答 / 权限确认卡作答 / 开始做系统（生成）→ 重新修改（修正超限
+ * 终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
+ * 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 指令区发言（三分类派发）/ 问答作答 / 权限确认作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 权限确认作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
     private final ProjectQueryAppService queryAppService;
     private final DispatchAppService dispatchAppService;
-    private final BaInterviewAppService baInterviewAppService;
+    private final MainAgentAppService mainAgentAppService;
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
     private final RunPermissionAppService runPermissionAppService;
@@ -73,26 +73,26 @@ public class ProjectController {
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
                              DispatchAppService dispatchAppService,
-                             BaInterviewAppService baInterviewAppService,
+                             MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
                              RunPermissionAppService runPermissionAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
-        this.baInterviewAppService = baInterviewAppService;
+        this.mainAgentAppService = mainAgentAppService;
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
         this.runPermissionAppService = runPermissionAppService;
     }
 
     @PostMapping
-    @Operation(summary = "建项目（一句话创建：建即自动跑 BA 需求梳理）",
+    @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
-                    + "响应携带自动 BA 运行 runId（挂 /api/events?runId= 的锚）。"
+                    + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
                     + "SSE：workspace-created → 智能体事件")
     public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
         return ApiResponse.ok(appService.create(command));
@@ -118,18 +118,19 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/messages")
-    @Operation(summary = "指令区发言（入口三分类派发：意见/咨询/兜底）",
-            description = "content 即用户在指令区输入的这句话。平台先经智能体边界上的轻量分类调用"
-                    + "三分类（分类失败/超时兜底按意见处理），再按类派发："
-                    + "意见 → BA 续同一 ba-{projectId} 会话消化（追问/改 PRD，回合收口后平台"
-                    + "自动派修正 run）；咨询 → 助理职能体（assist-{projectId} 会话，只读工具集"
+    @Operation(summary = "对话区发言（入口三分类派发：意见/咨询/兜底）",
+            description = "content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用"
+                    + "三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一"
+                    + "主智能体单会话（main-{projectId}）连续："
+                    + "意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台"
+                    + "自动派修正 run）；咨询 → 主智能体答询轮（只读工具集"
                     + "查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；"
-                    + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达指令区，零产物，"
+                    + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，"
                     + "下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。"
-                    + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = BA 轮 / "
-                    + "咨询 = 助理轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
-                    + "回复经 SSE 到达（run-start 事件携带角色键 role）。"
-                    + "空白 400；已归档 409 PRJ_013（指令区关闭——咨询与兜底同拦）；"
+                    + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / "
+                    + "咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
+                    + "回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。"
+                    + "空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；"
                     + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与"
                     + "挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——"
                     + "咨询与兜底随时可答；项目不存在 404 PRJ_001")
@@ -144,12 +145,12 @@ public class ProjectController {
             description = "qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与"
                     + "待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本"
                     + "（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run "
-                    + "上收口，过程事件经 SSE；恢复私货（会话/角色卡/工作区）从项目侧事实重建。"
+                    + "上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。"
                     + "空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<Void> answerQuestion(@PathVariable String id, @PathVariable String qid,
             @Valid @RequestBody AnswerQuestionCommand command) {
-        baInterviewAppService.answerQuestion(parseId(id), command.runId(), qid,
+        mainAgentAppService.answerQuestion(parseId(id), command.runId(), qid,
                 command.toolCalls().stream().map(AnswerQuestionCommand.ToolCall::toMap).toList(),
                 command.answer());
         return ApiResponse.ok();
@@ -172,11 +173,11 @@ public class ProjectController {
     @PostMapping("/{id}/generate")
     @Operation(summary = "开始做系统（触发首次生成）",
             description = "纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区"
-                    + "布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发编码智能体"
+                    + "布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体"
                     + "（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统"
                     + "并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识"
                     + "（挂 /api/events?runId= 的锚），过程事件经 SSE"
-                    + "（run-start role=CODER 起工作消息）。失败自动静默重试有限次"
+                    + "（run-start agent=executor 起工作消息）。失败自动静默重试有限次"
                     + "（app.generation.max-attempts，默认 3 次含首试，中间失败不出"
                     + "用户面事件），超限转终态发 run-failed 收口事件"
                     + "（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、"
@@ -198,7 +199,7 @@ public class ProjectController {
                     + "（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），"
                     + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
                     + "修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/"
-                    + "已成功收工/平台重启丢账）409 PRJ_026（指路指令区重提意见）。"
+                    + "已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。"
                     + "已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001")
     public ApiResponse<FixRestartResponse> restartFix(@PathVariable String id) {
         return ApiResponse.ok(new FixRestartResponse(
@@ -242,7 +243,7 @@ public class ProjectController {
 
     @GetMapping("/{id}/prd")
     @Operation(summary = "PRD 读（当前版 markdown，直读工作区）",
-            description = "PRD = 项目 dev 工作区的 docs/PRD.md（事实源，BA 的 savePrd 写出，"
+            description = "PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，"
                     + "v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，"
                     + "updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）"
                     + "404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
@@ -291,7 +292,7 @@ public class ProjectController {
 
     @GetMapping("/{id}/preview")
     @Operation(summary = "预览（工作区端口暴露）",
-            description = "端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（编码智能体"
+            description = "端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（run 执行体"
                     + "按约定自起 8081 服务，#44/#45），探活通过才返回可访问 URL（localhost）并"
                     + "SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。"
                     + "应用未起服 = 503 WSP_012 待期（非故障），前端 run 开始即轮询续探；"

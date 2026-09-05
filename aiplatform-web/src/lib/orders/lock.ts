@@ -1,9 +1,9 @@
 /**
  * 锁定式矩阵（#28 交易环①，#13 spec 前端节）：订单态 × UI 可用性的纯函数——
- * 指令区输入态与成果区只读口径的唯一推导点，消费方（项目页装配/指令区/订单卡）
+ * 对话区输入态与成果区只读口径的唯一推导点，消费方（项目页装配/对话区/订单卡）
  * 只读结果不做判定。行定义：
  *
- * | 态                 | 指令区       | 成果区     | 订单卡主操作面       |
+ * | 态                 | 对话区       | 成果区     | 订单卡主操作面       |
  * |--------------------|--------------|------------|----------------------|
  * | 进行中（无未终结单）| 全功能       | 可操作     | 无卡（确认下单常驻） |
  * | 待报价/待支付       | 禁用+锁定提示| 只读可看   | 等待文案 + 取消      |
@@ -29,13 +29,13 @@ export type ActiveOrderFact = {
   statusName?: string;
 };
 
-/** 指令区输入态：open 可用 / locked 订单锁定（禁用+提示）/ closed 终态关闭。 */
+/** 对话区输入态：open 可用 / locked 订单锁定（禁用+提示）/ closed 终态关闭。 */
 export type ChatInputMode = "open" | "locked" | "closed";
 
 /** 锁定式矩阵一行（UI 可用性的推导结果）。 */
 export type LockRow = {
   chatInput: ChatInputMode;
-  /** 指令区锁定/关闭提示文案（open 时不设）。 */
+  /** 对话区锁定/关闭提示文案（open 时不设）。 */
   chatHint?: string;
   /** 成果区只读（锁定与终态下仅可看；进行中随各模式自有交互）。 */
   outputsLocked: boolean;
@@ -55,7 +55,7 @@ export function lockRowOf(input: {
   if (input.archived) {
     return {
       chatInput: "closed",
-      chatHint: "项目已归档，指令区已关闭",
+      chatHint: "项目已归档，对话区已关闭",
       outputsLocked: true,
     };
   }

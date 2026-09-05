@@ -109,9 +109,9 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
 
 /**
  * 智能体事件 → agent-runs store + chat store + generation store + 工作消息 store
- * 分发（事件 id = SSE 完整事件 id，React key 白拿）。run-start 携带角色键（引擎
- * 信息归一）——对话面 run 与编码 run 的登记锚都在此：BA/ASSISTANT 进对话、
- * CODER 起工作消息。
+ * 分发（事件 id = SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键
+ * （引擎信息归一）——呈现形态的登记锚都在此：executor 起工作消息、main 进对话面
+ * （#86 单会话收敛：对话只有主智能体一座，无角色分支）。
  */
 export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
@@ -133,13 +133,13 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         // 运行注册表（LIVE 脉冲锚）：新 runId 重开（同项目驱逐旧 run）
         runs.startRun({ runId: payload.runId, projectId: payload.projectId, at });
-        // 角色键 = 会话/呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
-        // CODER → 编码 run（生成面登记 + 工作消息起锚）；BA/ASSISTANT → 对话面
-        // run（登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
-        if (payload.role === "CODER") {
+        // 配置键 = 呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
+        // executor → 编码 run（生成面登记 + 工作消息起锚）；main → 对话面 run
+        // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
+        if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
           work.startWork(payload.projectId, payload.runId, at);
-        } else if (payload.role === "BA" || payload.role === "ASSISTANT") {
+        } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
         }
@@ -152,7 +152,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           "questioning",
         );
         const question = parseQuestion(event.id, payload);
-        if (question) chat.raiseQuestion(payload.projectId, payload.sessionId, question);
+        if (question) chat.raiseQuestion(payload.projectId, payload.runId, question);
         return;
       }
       // ---- 权限确认（#83 作答通道分家）：确认卡长在工作消息流，与问答卡分形态 ----
@@ -202,7 +202,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "run-failed": {
         // 编码 run 超限终态收口（#56）：轨道真终态（事件到 ⟺ 恢复出口可达）——
-        // 「重新发起/重新修改」只认本事件；无 CODER 登记的 runId 忽略（事件序
+        // 「重新发起/重新修改」只认本事件；无 executor 登记的 runId 忽略（事件序
         // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
         runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
@@ -219,7 +219,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           { runId: payload.runId, projectId: payload.projectId, at },
           "finished",
         );
-        chat.finishTurn(payload.projectId, payload.sessionId);
+        chat.finishTurn(payload.projectId, payload.runId);
         // 工作消息定格（run 收口 = 消息定格；非锚定 run 的收口在 store 内忽略）
         work.freezeWork(payload.projectId, payload.runId, at);
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
@@ -244,7 +244,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         return;
       }
       // ---- 消息部件（parts 契约）→ 工作消息 store ----
-      // 部件全事件流恒挂（BA/助理 run 也产部件）——store 侧锚定守卫只收编码 run。
+      // 部件全事件流恒挂（主智能体对话轮也产部件）——store 侧锚定守卫只收编码 run。
       case "part-text": {
         const { payload } = platform;
         work.notePart(
@@ -292,15 +292,15 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     }
   }
 
-  // 引擎透传（开放集合）：唯一消费面 = 对话角色的解说文本增量（text——BA/助理
-  // 对话气泡）；其余名型（reasoning/patch/tool/step-*）过程呈现归工作消息部件，
+  // 引擎透传（开放集合）：唯一消费面 = 主智能体的解说文本增量（text——对话
+  // 气泡）；其余名型（reasoning/patch/tool/step-*）过程呈现归工作消息部件，
   // 不进任何 store
   const passthrough = asPassthroughAgentEvent(envelope);
   if (!passthrough) return;
   if (passthrough.type === "text") {
     const { payload } = passthrough;
     const delta = asRecord(payload.data)?.delta;
-    chat.appendAgentDelta(payload.projectId, payload.runId, payload.sessionId, delta, event.id);
+    chat.appendAgentDelta(payload.projectId, payload.runId, delta, event.id);
   }
 }
 

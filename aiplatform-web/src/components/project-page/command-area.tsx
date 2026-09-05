@@ -9,12 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import type { LockRow } from "@/lib/orders/lock";
-import {
-  FALLBACK_AGENT_LABEL,
-  pendingQuestionOf,
-  useChatStore,
-  type ChatMessage,
-} from "@/lib/store/chat";
+import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
@@ -31,12 +26,12 @@ const STAGE_HINTS = {
 
 /**
  * 对话区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
- * #47 入口三分类；#79 起居中当主角）：项目页全程常开的对话区，无标题——BA
- * 开场回应、每轮一问、用户的意见与答复、助理的咨询作答、平台的兜底轻引导都在
- * 此流动；首次生成后意见即迭代入口（BA 判需求侧，回合收口后平台自动派修正
+ * #47 入口三分类；#79 起居中当主角；#86 单会话收敛）：项目页全程常开的对话区，
+ * 无标题——主智能体的开场回应、每轮一问、答询作答、意见受理都在同一会话连续
+ * （界面上只有一个「它」，无角色标签），平台的兜底轻引导自带「平台」署名。
+ * 首次生成后意见即迭代入口（主智能体判需求侧，轮收口后平台自动派修正
  * run——链必达 #43，形态不变）。发言入口归平台派发（意见/咨询/兜底，对用户
- * 隐式），气泡标签统一「智能体」（角色标签退役，#82）、guide-reply 自带
- * 「平台」。编码 run 进行中对话流末尾呈现一条生长中的
+ * 隐式）。编码 run 进行中对话流末尾呈现一条生长中的
  * 工作消息（#81 parts 契约：解说 + 动作状态卡 + 步骤分组，思考与代码不播），
  * 收口定格。发送框 = 共享 Composer（首页/项目页同一
  * 组件，#76）；Enter 路由：有待答问题时即当前问题的答复（可与已勾选合并），
@@ -68,8 +63,6 @@ export function CommandArea({
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
-  const activeRoleLabel =
-    useChatStore((s) => s.chats[projectId]?.activeRoleLabel) ?? FALLBACK_AGENT_LABEL;
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
@@ -109,7 +102,7 @@ export function CommandArea({
   const sending = postMessage.isPending || answerQuestion.isPending;
   // 禁用态的锁定提示由输入条上方的横幅承载（具体缘由），占位只留一句短话不重复
   const placeholder = disabled
-    ? "指令区已锁定"
+    ? "对话区已锁定"
     : pending
       ? "回答上面的问题，回车发送（可与已勾选合并）"
       : "和平台聊聊你的想法…";
@@ -167,7 +160,7 @@ export function CommandArea({
               <Dot delay="150ms" />
               <Dot delay="300ms" />
             </span>
-            {activeRoleLabel}正在输入
+            正在输入
           </div>
         ) : null}
       </div>
@@ -211,7 +204,7 @@ export function CommandArea({
   );
 }
 
-/** 对话行布局：用户右对齐、智能体（BA/助理/平台引导）/问答卡/错误提示/系统通告左对齐。 */
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/错误提示/平台引导左对齐。 */
 function MessageRow({ message, children }: { message: ChatMessage; children?: ReactNode }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
@@ -233,10 +226,13 @@ function MessageRow({ message, children }: { message: ChatMessage; children?: Re
       </div>
     );
   }
-  // 智能体话语（BA/助理）与平台轻引导（#47）：标签随事件落消息，不硬编码角色名
+  // 智能体话语无署名（#86：界面上只有一个「它」）；平台轻引导（#47）自带
+  // 「平台」署名——平台自己说话，非智能体角色
   return (
     <div className="flex w-full flex-col items-start gap-1">
-      <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
+      {message.label ? (
+        <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
+      ) : null}
       <Bubble variant="muted" align="start">
         <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
       </Bubble>

@@ -14,13 +14,13 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 项目事实查询工具（助理职能体资产，#47）：答「我后台的地址与账号密码是什么」
+ * 项目事实查询工具（主智能体答询资产，#47 → #86 并轨）：答「我后台的地址与账号密码是什么」
  * 的事实半边——系统访问地址（预览端口映射，置备时已落定）与项目关键事实
  * （名称/状态/创建、PRD 产出、首次生成时点）。纯读（库查询 + 工作区句柄），
  * 工具面 readOnly；账号密码的事实半边在文件面（说明文档/初始数据代码），归
  * {@link ReadWorkspaceFileTool} 查证。
  *
- * <p>仅随项目只读工作区注册（{@link RoleToolkitSupplier}）。时间戳以
+ * <p>仅随项目只读工作区注册（{@link ProfileToolkitSupplier}）。时间戳以
  * {@link DateTimeFormat#ISO} 缺省（Instant#toString，秒精度足够答疑）。</p>
  */
 public class ProjectFactsTool extends ToolBase {

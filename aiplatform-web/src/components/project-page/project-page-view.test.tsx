@@ -5,8 +5,8 @@ import type { ProjectDetail } from "@/lib/projects/detail";
 
 import { ProjectPageView } from "./project-page-view";
 
-// 项目页装配的双态切换（#20 验收口径）：闲聊期（prdProducedAt 未落）指令区
-// 占满全宽、成果区不渲染；PRD 产出后成果区长出（三模式 + PRD 正文）、指令区
+// 项目页装配的双态切换（#20 验收口径）：闲聊期（prdProducedAt 未落）对话区
+// 占满全宽、成果区不渲染；PRD 产出后成果区长出（三模式 + PRD 正文）、对话区
 // 退为左槽。数据/SSE 面 mock 掉——壳层结构断言，PRD 正文经 use-prd mock 直出。
 const seed = vi.hoisted(() => ({ detail: undefined as ProjectDetail | undefined }));
 
@@ -77,7 +77,7 @@ function detail(overrides: Partial<ProjectDetail> = {}): ProjectDetail {
 }
 
 describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
-  it("闲聊期（prdProducedAt 未落）：指令区占满全宽、无成果区页签与三模式", () => {
+  it("闲聊期（prdProducedAt 未落）：对话区占满全宽、无成果区页签与三模式", () => {
     seed.detail = detail({ prdProducedAt: null });
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
@@ -120,7 +120,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).not.toContain("开始做系统");
   });
 
-  it("已生成（generatedAt 落定）：入口退场——调整走指令区意见（迭代环）", () => {
+  it("已生成（generatedAt 落定）：入口退场——调整走对话区意见（迭代环）", () => {
     seed.detail = detail({
       prdProducedAt: "2026-08-31T08:00:00Z",
       generatedAt: "2026-08-31T09:00:00Z",
@@ -146,7 +146,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
 
   // ---------- 订单锁定装配（#28 交易环①：下单即冻结——锁定式矩阵待报价行） ----------
 
-  it("挂着待报价订单：指令区禁用出锁定提示、「确认下单」退场（锁定式矩阵接线）", () => {
+  it("挂着待报价订单：对话区禁用出锁定提示、「确认下单」退场（锁定式矩阵接线）", () => {
     // 订单卡内容归 order-panel.test（SSR 只渲染激活 tab，项目模式非缺省）
     seed.detail = detail({
       prdProducedAt: "2026-08-31T08:00:00Z",
@@ -161,7 +161,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).not.toContain("确认下单");
   });
 
-  it("无订单（迭代态）：指令区可输入、无锁定提示", () => {
+  it("无订单（迭代态）：对话区可输入、无锁定提示", () => {
     seed.detail = detail({
       prdProducedAt: "2026-08-31T08:00:00Z",
       generatedAt: "2026-08-31T09:00:00Z",

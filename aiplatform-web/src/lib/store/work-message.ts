@@ -5,18 +5,18 @@ import { create } from "zustand";
  * 状态三分法）：按项目记当前编码 run 的**生长中的工作消息**（parts 契约的部件投影
  * ：解说文本部件 + 工具动作部件 + 步骤分组部件），run 收口定格。
  *
- * <p>run 开始即出现（run-start 携 CODER 角色）、随部件事件逐段生长；run-finish /
+ * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
  * run-failed 定格（不再生长、时长停跳，凝聚物收尾卡归后续票）；下一场编码 run
  * （新 runId = 新一轮）重开新消息、旧消息不保留。静默重试不出用户面（#84：
  * run-start 一场恰一次、用户面 run 身份 = 首试 runId 全程不变）——生长中重来
  * 新 runId 属事件序异常（防御位忽略，不清锚闪空消息）。思考与代码不进部件
  * （服务端口径），本 store 无进度条语义。</p>
  *
- * <p><b>锚定判定</b>：部件事件全事件流恒挂（BA/助理 run 也产部件）——工作消息只
- * 锚编码 run。锚由 run-start(role=CODER) 落；重放缓冲淘汰了 run-start 时按
- * {@code coder-} 会话前缀补建（刷新回访续看进行中 run；上一轮已定格、新 run 的
- * run-start 又被淘汰时同一口重锚；BA/助理会话不误建——会话命名约定：角色 ×
- * 项目，同 chat store 的 ba-/assist- 判定先例）。</p>
+ * <p><b>锚定判定</b>：部件事件全事件流恒挂（主智能体对话轮也产部件）——工作消息
+ * 只锚编码 run。锚由 run-start(agent=executor) 落；重放缓冲淘汰了 run-start 时
+ * 按 {@code coder-} 会话前缀补建（刷新回访续看进行中 run；上一轮已定格、新 run
+ * 的 run-start 又被淘汰时同一口重锚；主智能体的 main- 会话不误建——#86 单会话
+ * 收敛后前缀判定只此一处残留：编码 run 的会话是执行侧寻址事实，非角色判定）。</p>
  *
  * <p><b>重放幂等</b>：通道是带缓冲热流，重新挂载会重收近期事件——部件事件按 SSE
  * 完整事件 id 只收一次；run-start 同 runId 不清已长部件（重放先到 run-start、
@@ -135,7 +135,7 @@ export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
 
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
-  /** 编码 run 起跑（run-start role=CODER）：新 runId 重开，同 runId 幂等。 */
+  /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等。 */
   startWork: (projectId: string, runId: string, at: number) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
@@ -272,7 +272,7 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   notePart: (projectId, ref, input) =>
     updateWork(set, projectId, (work) => {
       // 锚不在或已定格（重放缺 run-start / 上一场定格后新 run 已开工）：仅编码
-      // 会话补建/重锚——BA/助理的部件不建工作消息（对话面走 text 增量气泡，部件
+      // 会话补建/重锚——主智能体的部件不建工作消息（对话面走 text 增量气泡，部件
       // 与其并行双发射）。生长中的锚 + 异 runId = 事件序异常（静默重试不换新锚，
       // #84——有序流不至，防御位忽略；清锚会闪空消息）
       if (work === undefined || work.runId !== ref.runId) {

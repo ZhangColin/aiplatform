@@ -10,7 +10,7 @@ type PrdResponse = components["schemas"]["PrdResponse"];
 
 /**
  * 当前版 PRD（#20 成果区文件模式）：`GET …/prd` = 项目工作区 docs/PRD.md
- * 直读（markdown + updatedAt，v1 无版本链只最新版，BA 的 savePrd 写出）。
+ * 直读（markdown + updatedAt，v1 无版本链只最新版，主智能体的 savePrd 写出）。
  * **未产出是正常态**——后端以 404 PRJ_015 区分「工作区无该文件」与项目不存在
  * （PRJ_001），这里把前者归一为 null（面板据 null 呈引导占位），其余错误照抛。
  * 实时性失效源 = 通知通道 document-updated（桥失效 documents 域）；断线走

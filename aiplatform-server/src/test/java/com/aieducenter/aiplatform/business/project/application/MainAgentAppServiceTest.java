@@ -47,31 +47,34 @@ import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * BA 访谈编排：对话命令的会话寻址（projectId → ba-{projectId} 稳定绑定，每轮
- * 都续此会话）、计量归属（role=BA 维度）、run-start 携角色键（引擎信息归一）、
- * 会话建立轮的知识命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起事件
- * 载荷 + 答复 → resume 从项目侧事实重建恢复私货）；链必达收口（#43）——BA 回合
- * 收口（无挂起问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；
- * 未生成止于 BA；在途排队合并；追问挂起待答复收口再派）；交接物补齐（#52）——
- * savePrd 的 summary 终值与「本轮无修订」占位口径入修正 run prompt，本轮判定从零
- * 起算（上轮残留不进）；BA 轮在途意见排队成轮（#54）——意见锚随会话任务落
- * （在途窗口连发各自成轮各自派发、零丢失），converse 炸即清锚（重提即兜底）；
- * 排队合并逐轮配对（#55）——交接物各轮「意见 → 修订说明」一一对应、未修订轮
- * 显式占位（配对由平台拼装锚定，不靠清单位置对齐）。
+ * 主智能体单会话编排（#86 并轨，ADR 0006）：对话命令的会话寻址（projectId →
+ * main-{projectId} 稳定绑定，追问 / 答询 / 受理意见每轮都续此会话——脚本化多轮
+ * 验收「追问 → 咨询 → 提意见全部落在同一会话」）、计量归属（agentKind=main）、
+ * 只读工作区姿态（workspaceReadOnly——写面结构性关闭的前提）、会话建立轮的知识
+ * 命中注入（尾部 + 失败降级）、归档守卫、问答答复续跑（挂起事件载荷 + 答复 →
+ * resume 从项目侧事实重建恢复私货）；<b>咨询零产物短路</b>（#47 语义随并轨保持：
+ * 同会话直答、不锚意见、不派修正 run）；链必达收口（#43）——意见轮收口（无挂起
+ * 问答）且项目已生成时平台自动派修正 run（模型不调派发工具也必达；未生成止于
+ * 对话；在途排队合并；追问挂起待答复收口再派）；交接物补齐（#52）——savePrd 的
+ * summary 终值与「本轮无修订」占位口径入修正 run prompt，本轮判定从零起算（上轮
+ * 残留不进）；意见轮在途意见排队成轮（#54）——意见锚随会话任务落（在途窗口连发
+ * 各自成轮各自派发、零丢失），converse 炸即清锚（重提即兜底）；排队合并逐轮配对
+ * （#55）——交接物各轮「意见 → 修订说明」一一对应、未修订轮显式占位（配对由
+ * 平台拼装锚定，不靠清单位置对齐）。
  */
 @SpringBootTest
-class BaInterviewAppServiceTest {
+class MainAgentAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;
 
     @Autowired
-    private BaInterviewAppService appService;
+    private MainAgentAppService appService;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -124,25 +127,26 @@ class BaInterviewAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
-    /** 脚本化智能体边界（#46 收口以 finish_edit 事实为准）：BA 正常回复；自动派发
-     * 的修正 run 收口即调 finish_edit（changed=true——coder 会话才记，忠实于工具面）。 */
-    private void givenConverseBaRepliesAndCoderFinishes(String baReply) {
+    /** 脚本化智能体边界（#46 收口以 finish_edit 事实为准）：主智能体正常回复；
+     * 自动派发的修正 run 收口即调 finish_edit（changed=true——coder 会话才记，
+     * 忠实于工具面）。 */
+    private void givenConverseMainRepliesAndExecutorFinishes(String mainReply) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             }
-            return new AgentReply(command.runId(), baReply);
+            return new AgentReply(command.runId(), mainReply);
         });
     }
 
-    /** 脚本化智能体边界（#52 修订事实观测）：BA 轮内调 savePrd(content, summary)
-     * 的工具执行事实（真引擎内工具执行在此 mock 收口——登记即调用事实），一轮
-     * 多次调用按序落多条（终值胜出）；修正 run 收口脚本沿用。 */
-    private void givenConverseBaSavesPrdAndCoderFinishes(String... summaries) {
+    /** 脚本化智能体边界（#52 修订事实观测）：主智能体轮内调 savePrd(content,
+     * summary) 的工具执行事实（真引擎内工具执行在此 mock 收口——登记即调用事实），
+     * 一轮多次调用按序落多条（终值胜出）；修正 run 收口脚本沿用。 */
+    private void givenConverseMainSavesPrdAndExecutorFinishes(String... summaries) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
+            if (command.sessionId().startsWith("main-")) {
                 for (String summary : summaries) {
                     prdRevisions.record(command.workspaceId(), summary);
                 }
@@ -163,33 +167,98 @@ class BaInterviewAppServiceTest {
     }
 
     @Test
-    void given_project_when_interview_turn_then_command_bound_to_ba_session() {
+    void given_project_when_opinion_turn_then_command_bound_to_main_session() {
         Long projectId = persistedProject("9700");
         givenSessionExecutorRunsInline();
 
-        BaInterviewAppService.InterviewRun run = appService.runInterviewTurn(projectId, "做一个官网");
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 对话命令全要素：BA 会话稳定绑定 + owner 寻址 + 角色卡模型/人格 + 计量归属 + 项目工作区 + 流关联
+        // 对话命令全要素：主智能体会话稳定绑定 + owner 寻址 + 配置模型/协议 + 计量归属
+        // + 项目工作区 + 流关联 + 只读面（写面结构性关闭）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         AgentCommand value = command.getValue();
         assertThat(value.runId()).isEqualTo(run.runId());
         assertThat(value.prompt()).isEqualTo("做一个官网");
-        assertThat(value.sessionId()).isEqualTo("ba-" + projectId);
+        assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).contains("ask_user");
-        assertThat(value.modelString()).isEqualTo(RolePreset.BA.chatModelString());
+        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
+        assertThat(value.workspaceReadOnly()).isTrue();
         assertThat(value.workspaceId()).isEqualTo("9700");
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(
-                UsageDims.of(projectId, UsageDims.kindOf(RolePreset.BA), "ba-" + projectId));
-        // 后续轮不重注知识：systemPrompt 即角色卡原文
-        assertThat(value.systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
+                UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
+        // 后续轮不重注知识：systemPrompt 即配置原文
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
     }
 
     @Test
-    void given_knowledge_hits_when_start_interview_then_injected_at_prompt_tail() {
+    void given_scripted_multi_turn_when_followup_inquiry_opinion_then_all_same_session() {
+        // 灵魂用例（#86 验收①：脚本化多轮——追问 → 咨询 → 提意见全部落在同一会话，
+        // 连续不换会话）：开场追问挂起（question-raised）→ 答复续跑（resume 同会话）
+        // → 咨询直答（同会话 converse，零产物不派 run）→ 意见受理（同会话 converse，
+        // savePrd 修订 + 收口自动派修正 run）——全程 main-{projectId} 恒定，修正 run
+        // 才走 coder-{projectId}
+        Long projectId = persistedGeneratedProject("9705");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                if (command.prompt().contains("预约系统")) { // 开场轮：追问挂起
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
+                            new java.util.LinkedHashMap<>(Map.of(
+                                    "runId", command.runId(),
+                                    AgentEventTypes.WAIT_SUMMARY_FIELD, "给谁用、谁来操作？"))));
+                }
+                if (command.prompt().contains("主色调")) { // 意见轮：修订 PRD
+                    prdRevisions.record(command.workspaceId(), "主色调约定改为绿");
+                }
+                return new AgentReply(command.runId(), "好的");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+        // 挂起事实脚本：开场提交放行 → 开场收口见挂起（不派）→ 答复收口无挂起（派）
+        // → 意见轮提交放行 → 意见轮收口无挂起（派）
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)
+                .thenReturn(true)
+                .thenReturn(false)
+                .thenReturn(false)
+                .thenReturn(false);
+
+        appService.startConversation(projectId, "给宠物医院做预约系统");
+        appService.answerQuestion(projectId, "run-q", "reply-1",
+                List.of(Map.of("id", "tc-1", "name", "ask_user")), "宠物主人自己操作");
+        appService.answerInquiry(projectRepository.findById(projectId).orElseThrow(),
+                "我后台的地址是什么？");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+
+        // 会话恒定：主智能体的三轮 converse（开场 / 咨询 / 意见）与一次 resume 全在
+        // main-{projectId}；修正 run（开场意见自答后收口派 + 意见轮收口派）走 coder-
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(5)).converse(command.capture(), any());
+        List<AgentCommand> all = command.getAllValues();
+        assertThat(all).extracting(AgentCommand::sessionId)
+                .containsExactly("main-" + projectId, "coder-" + projectId,
+                        "main-" + projectId, "main-" + projectId, "coder-" + projectId);
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().sessionId()).isEqualTo("main-" + projectId);
+        assertThat(resume.getValue().workspaceReadOnly()).isTrue();
+        // 意见轮交接物：意见原文 + 修订说明（savePrd 事实）随修正 run 下发
+        assertThat(all.get(4).prompt())
+                .contains("把系统的主色调改成绿色")
+                .contains("PRD 已修订")
+                .contains("主色调约定改为绿");
+    }
+
+    @Test
+    void given_knowledge_hits_when_start_conversation_then_injected_at_prompt_tail() {
         // 会话建立轮（建项目自动开场）：query = 初始需求原文，命中块接 system prompt 尾部
         Long projectId = persistedProject("9710");
         givenSessionExecutorRunsInline();
@@ -197,19 +266,19 @@ class BaInterviewAppServiceTest {
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。")));
 
-        appService.startInterview(projectId, "给宠物医院做预约系统");
+        appService.startConversation(projectId, "给宠物医院做预约系统");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().systemPrompt())
-                .startsWith(RolePreset.BA.systemPrompt())
+                .startsWith(AgentProfile.MAIN.systemPrompt())
                 .endsWith("核心场景：主人在线选医生预约。")
                 .contains("【平台知识库·相似历史需求】");
     }
 
     @Test
     void given_established_session_when_later_turns_then_same_tail_reused_no_re_retrieval() {
-        // 一次切入一次注入的持续面：会话建立后，后续轮（发言）与续跑（作答）的
+        // 一次切入一次注入的持续面：会话建立后，后续轮（发言/答询）与续跑（作答）的
         // system prompt 复用同一注入块（agent 工厂按 prompt 缓存 → 同 agent 实例），
         // 知识检索只发生一次（迭代不重注）
         Long projectId = persistedProject("9713");
@@ -218,8 +287,8 @@ class BaInterviewAppServiceTest {
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。")));
 
-        appService.startInterview(projectId, "给宠物医院做预约系统");
-        appService.runInterviewTurn(projectId, "主要是海外客户");
+        appService.startConversation(projectId, "给宠物医院做预约系统");
+        appService.runOpinionTurn(projectId, "主要是海外客户");
         appService.answerQuestion(projectId, "run-q", "reply-1",
                 List.of(Map.of("id", "tc-1", "name", "ask_user")), "企业客户");
 
@@ -227,7 +296,7 @@ class BaInterviewAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
         verify(agentClient).resume(resume.capture(), any());
-        String expected = RolePreset.BA.systemPrompt() + "\n\n【平台知识库·相似历史需求】"
+        String expected = AgentProfile.MAIN.systemPrompt() + "\n\n【平台知识库·相似历史需求】"
                 + "以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考"
                 + "（非用户的确认信息，不构成对当前需求的约束）："
                 + "\n\n〔宠物医院预约平台〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
@@ -238,29 +307,29 @@ class BaInterviewAppServiceTest {
     }
 
     @Test
-    void given_retrieval_failure_when_start_interview_then_interview_still_starts() {
-        // 检索失败降级为空注入：访谈照常开始（systemPrompt = 角色卡原文），不阻断对话
+    void given_retrieval_failure_when_start_conversation_then_conversation_still_starts() {
+        // 检索失败降级为空注入：访谈照常开始（systemPrompt = 配置原文），不阻断对话
         Long projectId = persistedProject("9711");
         givenSessionExecutorRunsInline();
         doThrow(new RuntimeException("embedding 不可用"))
                 .when(knowledgePort).retrieve(anyString(), anyInt());
 
-        appService.startInterview(projectId, "做一个官网");
+        appService.startConversation(projectId, "做一个官网");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
-        assertThat(command.getValue().systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
+        assertThat(command.getValue().systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
     }
 
     @Test
     void given_archived_project_when_turn_or_answer_then_prj_013() {
-        // 归档即指令区关闭（只读终态）：发言与作答一并拒绝
+        // 归档即对话区关闭（只读终态）：发言与作答一并拒绝
         Long projectId = persistedArchivedProject("9712");
 
-        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "再聊聊"))
+        assertThatThrownBy(() -> appService.runOpinionTurn(projectId, "再聊聊"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
-        assertThatThrownBy(() -> appService.startInterview(projectId, "做一个官网"))
+        assertThatThrownBy(() -> appService.startConversation(projectId, "做一个官网"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
         assertThatThrownBy(() -> appService.answerQuestion(projectId, "run-q", "reply-1",
@@ -273,14 +342,14 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_active_order_when_turn_or_answer_then_ord_006_frozen() {
-        // 下单即冻结迭代：未终结订单在即，指令区新发言与作答一并拒收（取消即解冻）
-        Long projectId = persistedProject("9713");
+        // 下单即冻结迭代：未终结订单在即，对话区新意见与作答一并拒收（取消即解冻）
+        Long projectId = persistedProject("9716");
         jdbcTemplate.update(
                 "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
                         + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 9913L, projectId);
 
-        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "再改一个地方"))
+        assertThatThrownBy(() -> appService.runOpinionTurn(projectId, "再改一个地方"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
         assertThatThrownBy(() -> appService.answerQuestion(projectId, "run-q", "reply-1",
@@ -293,7 +362,7 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_cancelled_order_when_turn_then_unfrozen() {
-        // 取消即解冻：终态订单不再拦发言，迭代继续
+        // 取消即解冻：终态订单不再拦意见，迭代继续
         Long projectId = persistedProject("9714");
         jdbcTemplate.update(
                 "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
@@ -301,7 +370,7 @@ class BaInterviewAppServiceTest {
                 9914L, projectId);
         givenSessionExecutorRunsInline();
 
-        appService.runInterviewTurn(projectId, "继续改");
+        appService.runOpinionTurn(projectId, "继续改");
 
         verify(agentClient).converse(any(), any());
     }
@@ -313,7 +382,7 @@ class BaInterviewAppServiceTest {
         Long projectId = persistedProject("9701");
         givenSessionExecutorRunsInline();
 
-        appService.runInterviewTurn(projectId, "梳理需求");
+        appService.runOpinionTurn(projectId, "梳理需求");
 
         verify(agentClient).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), anyMap());
@@ -337,7 +406,7 @@ class BaInterviewAppServiceTest {
             return null;
         }).when(agentClient).converse(any(), any());
 
-        appService.runInterviewTurn(projectId, "做一个官网");
+        appService.runOpinionTurn(projectId, "做一个官网");
 
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(org.mockito.ArgumentMatchers.eq("text"), payload.capture());
@@ -347,7 +416,7 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_question_answer_when_resume_then_rebuilt_from_project_facts() {
-        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/角色卡/计量），
+        // 问答答复续跑：恢复私货从项目侧事实重建（会话/owner/工作区/配置/计量），
         // 待确认工具来自挂起事件载荷——不信前端回传的恢复私货
         Long projectId = persistedProject("9703");
         givenSessionExecutorRunsInline();
@@ -361,11 +430,13 @@ class BaInterviewAppServiceTest {
         verify(agentClient).resume(resume.capture(), any());
         AgentResume value = resume.getValue();
         assertThat(value.runId()).isEqualTo("run-q");
-        assertThat(value.sessionId()).isEqualTo("ba-" + projectId);
+        assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.workspaceId()).isEqualTo("9703");
-        assertThat(value.modelString()).isEqualTo(RolePreset.BA.chatModelString());
-        assertThat(value.systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
+        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
+        assertThat(value.workspaceReadOnly()).isTrue(); // 续跑同只读面（#86：不漂移成读写面）
         assertThat(value.replyId()).isEqualTo("reply-9");
         assertThat(value.resumeText()).isEqualTo("海外企业客户");
         assertThat(value.confirmResults()).hasSize(1);
@@ -376,29 +447,29 @@ class BaInterviewAppServiceTest {
         assertThat(value.confirmResults().get(0).getToolCall().getMetadata())
                 .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "海外企业客户");
         assertThat(value.usageContext().dims()).isEqualTo(
-                UsageDims.of(projectId, UsageDims.kindOf(RolePreset.BA), "ba-" + projectId));
+                UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
     }
 
     @Test
     void given_missing_project_when_turn_then_prj_001() {
-        assertThatThrownBy(() -> appService.runInterviewTurn(-1L, "梳理需求"))
+        assertThatThrownBy(() -> appService.runOpinionTurn(-1L, "梳理需求"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
     @Test
     void given_pending_question_when_turn_then_prj_024_and_no_submission() {
-        // 挂起问答守卫（#40 / ADR-0005）：问答待答期间指令区新输入不盲提交 converse
+        // 挂起问答守卫（#40 / ADR-0005）：问答待答期间意见新输入不盲提交 converse
         // ——引擎按 ASKING 态拒时 REST 已返 200、只见异步 error 事件；同步 409 指路
         // 作答。任何事件也不发（守卫先于提交）
         Long projectId = persistedProject("9715");
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(true);
 
-        assertThatThrownBy(() -> appService.runInterviewTurn(projectId, "测试：请继续"))
+        assertThatThrownBy(() -> appService.runOpinionTurn(projectId, "测试：请继续"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
-        assertThatThrownBy(() -> appService.startInterview(projectId, "做一个官网"))
+        assertThatThrownBy(() -> appService.startConversation(projectId, "做一个官网"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
 
@@ -408,41 +479,81 @@ class BaInterviewAppServiceTest {
         verify(eventsAppService, never()).publishNotification(any(), any());
     }
 
-    // ---------- 链必达收口（#43：BA 无派发权，平台回合收口观测自动派修正） ----------
+    // ---------- 咨询车道（#47 零产物短路，#86 并轨单会话） ----------
 
     @Test
-    void given_generated_project_when_ba_turn_closes_without_dispatch_tool_then_fix_run_dispatched() {
+    void given_consultation_when_answered_then_same_main_session_zero_artifact() {
+        // 咨询与意见同会话（#86）：答询轮绑同一 main-{projectId}、只读面、配置=MAIN；
+        // 零产物——已生成项目也不派修正 run（无第二轮 coder converse）、无
+        // document-updated、不触知识检索、状态位不动
+        Long projectId = persistedGeneratedProject("9810");
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return new AgentReply(command.runId(), "系统访问地址是 http://localhost:32168/。");
+        });
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "我后台的地址是什么？");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(command.capture(), any()); // 唯一一条 = 答询轮本身
+        AgentCommand value = command.getValue();
+        assertThat(value.runId()).isEqualTo(run.runId());
+        assertThat(value.prompt()).isEqualTo("我后台的地址是什么？");
+        assertThat(value.sessionId()).isEqualTo("main-" + projectId);
+        assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
+        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
+        assertThat(value.workspaceReadOnly()).isTrue();
+        assertThat(value.usageContext().dims()).isEqualTo(
+                UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
+
+        verify(eventsAppService, never()).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), anyMap());
+        verify(knowledgePort, never()).retrieve(anyString(), anyInt()); // 咨询不知识命中
+        Project after = projectRepository.findById(projectId).orElseThrow();
+        assertThat(after.getPrdProducedAt()).isEqualTo(project.getPrdProducedAt());
+        assertThat(after.getGeneratedAt()).isEqualTo(project.getGeneratedAt());
+        assertThat(after.getArchivedAt()).isNull();
+    }
+
+    // ---------- 链必达收口（#43：主智能体无派发权，平台意见轮收口观测自动派修正） ----------
+
+    @Test
+    void given_generated_project_when_opinion_turn_closes_without_dispatch_tool_then_fix_run_dispatched() {
         // 灵魂用例（#43 缺陷的行为化验证）：脚本化智能体边界——模型只收口（哪怕
-        // 只存了 PRD、不调任何派发工具，BA 也没有派发工具），平台在回合收口时
-        // 自动派修正 run：意见原文为任务，coder 会话 + CODER 角色卡
+        // 只存了 PRD、不调任何派发工具，主智能体也没有派发工具），平台在轮收口时
+        // 自动派修正 run：意见原文为任务，coder 会话 + 执行体配置
         Long projectId = persistedGeneratedProject("9720");
         givenSessionExecutorRunsInline();
-        givenConverseBaRepliesAndCoderFinishes("好的，会把主色调改成绿色");
+        givenConverseMainRepliesAndExecutorFinishes("好的，会把主色调改成绿色");
 
-        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand fix = command.getAllValues().get(1);
         assertThat(fix.sessionId()).isEqualTo("coder-" + projectId);
-        assertThat(fix.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt());
+        assertThat(fix.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 handoff("把系统的主色调改成绿色", null)));
-        assertThat(fix.agentRole()).isEqualTo("CODER"); // run-start 携带角色键（引擎信息归一）
+        assertThat(fix.agentKey()).isEqualTo("executor"); // run-start 携配置键（引擎信息归一）
     }
 
-    // ---------- 交接物补齐（#52：BA 判定结果入修正 run） ----------
+    // ---------- 交接物补齐（#52：需求侧判定结果入修正 run） ----------
 
     @Test
-    void given_ba_saves_prd_with_summary_when_turn_closes_then_handoff_carries_summary_and_prd_path() {
-        // 灵魂用例（#41 Testing Decisions / #52）：脚本化 BA 流调
+    void given_main_saves_prd_with_summary_when_turn_closes_then_handoff_carries_summary_and_prd_path() {
+        // 灵魂用例（#41 Testing Decisions / #52）：脚本化主智能体流调
         // savePrd(content, summary="…") → 修正 run prompt（交接物）含 summary
         // 文本与 PRD 路径引用（不注全文）
         Long projectId = persistedGeneratedProject("9740");
         givenSessionExecutorRunsInline();
-        givenConverseBaSavesPrdAndCoderFinishes("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）");
+        givenConverseMainSavesPrdAndExecutorFinishes("按意见把主色调相关约定从蓝改为绿（覆盖本条意见）");
 
-        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
@@ -453,13 +564,13 @@ class BaInterviewAppServiceTest {
     }
 
     @Test
-    void given_ba_without_save_prd_when_turn_closes_then_handoff_states_prd_not_revised() {
-        // BA 流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
+    void given_main_without_save_prd_when_turn_closes_then_handoff_states_prd_not_revised() {
+        // 主智能体流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
         Long projectId = persistedGeneratedProject("9741");
         givenSessionExecutorRunsInline();
-        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
+        givenConverseMainRepliesAndExecutorFinishes("好的，会处理的");
 
-        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
@@ -471,9 +582,9 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_queued_rounds_with_and_without_revision_when_merged_then_prompt_pairs_per_round() {
-        // 灵魂用例（#55 story 14 收严，BA 边界脚本化各轮「改/不改」）：修正 run
-        // 在途时两条意见先后收口排队——轮2 的 BA 改了 PRD（savePrd 落事实）、轮3
-        // 未改（无事实）→ 合并续派 run 的 prompt 逐轮配对：意见二↔轮2 修订说明、
+        // 灵魂用例（#55 story 14 收严，边界脚本化各轮「改/不改」）：修正 run
+        // 在途时两条意见先后收口排队——轮2 的主智能体改了 PRD（savePrd 落事实）、
+        // 轮3 未改（无事实）→ 合并续派 run 的 prompt 逐轮配对：意见二↔轮2 修订说明、
         // 意见三↔「本轮无修订」显式占位——配对由平台拼装锚定，不靠意见清单与
         // 说明清单的位置对齐（某轮零修订不再让后续意见错认说明）
         Long projectId = persistedGeneratedProject("9744");
@@ -484,12 +595,12 @@ class BaInterviewAppServiceTest {
                 coderTracks.add(task); // 修正轨道挂起不跑（模拟首场在途）
                 return null;
             }
-            task.run(); // BA 轮直通
+            task.run(); // 主智能体轮直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
+            if (command.sessionId().startsWith("main-")) {
                 // 脚本化判定动作：意见二的轮调 savePrd（登记修订事实），其余轮不调
                 if ("意见二：改蓝色".equals(command.prompt())) {
                     prdRevisions.record(command.workspaceId(), "B轮修订：主色调约定改为蓝");
@@ -500,9 +611,9 @@ class BaInterviewAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.runInterviewTurn(projectId, "意见一：加导出");
-        appService.runInterviewTurn(projectId, "意见二：改蓝色");
-        appService.runInterviewTurn(projectId, "意见三：加导出格式");
+        appService.runOpinionTurn(projectId, "意见一：加导出");
+        appService.runOpinionTurn(projectId, "意见二：改蓝色");
+        appService.runOpinionTurn(projectId, "意见三：加导出格式");
         coderTracks.remove(0).run(); // 首场收口 → 合并排队两轮续派
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -510,13 +621,13 @@ class BaInterviewAppServiceTest {
         // 首场（意见一，未修订）：占位配对
         assertThat(command.getAllValues().get(3).prompt())
                 .contains("1. 意见原文：意见一：加导出"
-                        + "\n   需求侧判定（BA 已收口）：本轮无修订（未触发 PRD 变更）");
+                        + "\n   需求侧判定（主智能体已收口）：本轮无修订（未触发 PRD 变更）");
         // 合并续派场：意见二↔其修订说明、意见三↔占位，逐轮一一对应
         assertThat(command.getAllValues().get(4).prompt())
                 .contains("1. 意见原文：意见二：改蓝色"
-                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——B轮修订：主色调约定改为蓝")
+                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——B轮修订：主色调约定改为蓝")
                 .contains("2. 意见原文：意见三：加导出格式"
-                        + "\n   需求侧判定（BA 已收口）：本轮无修订（未触发 PRD 变更）");
+                        + "\n   需求侧判定（主智能体已收口）：本轮无修订（未触发 PRD 变更）");
     }
 
     @Test
@@ -524,10 +635,10 @@ class BaInterviewAppServiceTest {
         // 一轮多次 savePrd：交接物取终值不混杂（终版说明进 prompt，被覆盖的旧说明不进）
         Long projectId = persistedGeneratedProject("9742");
         givenSessionExecutorRunsInline();
-        givenConverseBaSavesPrdAndCoderFinishes("第一次修订说明（将被覆盖）",
+        givenConverseMainSavesPrdAndExecutorFinishes("第一次修订说明（将被覆盖）",
                 "终版修订说明：主色调章节改为绿");
 
-        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
@@ -538,19 +649,19 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_stale_revision_fact_from_aborted_turn_when_next_turn_settles_then_not_carried() {
-        // 本轮判定从零起算：上一轮 BA 调了 savePrd 但轮炸（收口不跑、事实滞留）
+        // 本轮判定从零起算：上一轮主智能体调了 savePrd 但轮炸（收口不跑、事实滞留）
         // → 下一轮不带残留（任务首行清残——滞留的修订事实不冒充本轮「已修订」）。
         // 单一脚本分轮：首轮 record 后抛，次轮正常回复（Mockito 重打桩会以 null
         // 参调旧 answer，故不分设）
         Long projectId = persistedGeneratedProject("9743");
         givenSessionExecutorSwallowsFailures();
-        AtomicBoolean firstBaTurn = new AtomicBoolean(true);
+        AtomicBoolean firstMainTurn = new AtomicBoolean(true);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
-                if (firstBaTurn.getAndSet(false)) {
+            if (command.sessionId().startsWith("main-")) {
+                if (firstMainTurn.getAndSet(false)) {
                     prdRevisions.record(command.workspaceId(), "上一轮的修订说明");
-                    throw new IllegalStateException("BA 轮失败");
+                    throw new IllegalStateException("对话轮失败");
                 }
                 return new AgentReply(command.runId(), "好的");
             }
@@ -558,8 +669,8 @@ class BaInterviewAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.runInterviewTurn(projectId, "上一条意见（本轮将炸）");
-        appService.runInterviewTurn(projectId, "这一条意见不用改 PRD");
+        appService.runOpinionTurn(projectId, "上一条意见（本轮将炸）");
+        appService.runOpinionTurn(projectId, "这一条意见不用改 PRD");
 
         // 首轮炸不派（既有口径）；次轮收口派修正：prompt 如实「本轮无修订」无残留
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -570,12 +681,12 @@ class BaInterviewAppServiceTest {
     }
 
     @Test
-    void given_not_generated_project_when_ba_turn_closes_then_stops_at_ba() {
-        // 守卫沿用：未生成止于 BA（访谈期收口是常态路径，静默不派——不是异常）
+    void given_not_generated_project_when_opinion_turn_closes_then_stops_at_conversation() {
+        // 守卫沿用：未生成止于对话（访谈期收口是常态路径，静默不派——不是异常）
         Long projectId = persistedProject("9721");
         givenSessionExecutorRunsInline();
 
-        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把主色调改成绿色");
 
         verify(agentClient, times(1)).converse(any(), any());
     }
@@ -586,14 +697,14 @@ class BaInterviewAppServiceTest {
         // 最终收口后派——交接任务锚定意见原文 + 全部追问答复（逐条累积）
         Long projectId = persistedGeneratedProject("9722");
         givenSessionExecutorRunsInline();
-        givenConverseBaRepliesAndCoderFinishes("先问一下");
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+        givenConverseMainRepliesAndExecutorFinishes("先问一下");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(false)  // 提交守卫：无挂起（放行本轮）
                 .thenReturn(true)   // 本轮收口观测：挂起在即 → 不派
                 .thenReturn(true)   // 答复①续跑收口观测：再挂起 → 不派
                 .thenReturn(false); // 答复②续跑收口观测：无挂起 → 派
 
-        appService.runInterviewTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
         verify(agentClient, times(1)).converse(any(), any());
 
         appService.answerQuestion(projectId, "run-q", "reply-1",
@@ -611,7 +722,7 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_fix_in_flight_when_next_opinion_closes_then_queued_and_merged() {
-        // 守卫沿用：在途 run 排队下一轮合并（BA 收口路径的连续两条意见不丢、
+        // 守卫沿用：在途 run 排队下一轮合并（意见收口路径的连续两条意见不丢、
         // 不逐条烧 run）
         Long projectId = persistedGeneratedProject("9723");
         List<Runnable> tracks = CollUtil.newArrayList();
@@ -621,14 +732,14 @@ class BaInterviewAppServiceTest {
                 tracks.add(task); // 修正轨道挂起不跑（模拟在途）
                 return null;
             }
-            task.run(); // BA 轨道直通
+            task.run(); // 主智能体轨道直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
-        givenConverseBaRepliesAndCoderFinishes("好的");
+        givenConverseMainRepliesAndExecutorFinishes("好的");
 
-        appService.runInterviewTurn(projectId, "意见一：加导出");
-        appService.runInterviewTurn(projectId, "意见二：改蓝色");
-        // 两条 BA 轮已跑、修正只起了一条轨道（第二条意见未即派新 run）
+        appService.runOpinionTurn(projectId, "意见一：加导出");
+        appService.runOpinionTurn(projectId, "意见二：改蓝色");
+        // 两条意见轮已跑、修正只起了一条轨道（第二条意见未即派新 run）
         verify(agentClient, times(2)).converse(any(), any());
 
         tracks.remove(0).run(); // 修正轨道起跑：第一条跑完即合并第二条续派
@@ -641,34 +752,34 @@ class BaInterviewAppServiceTest {
                 .isEqualTo(IterationAppService.fixRunPrompt(handoff("意见二：改蓝色", null)));
     }
 
-    // ---------- BA 轮在途意见排队成轮（#54：锚随任务落 + 失败清锚） ----------
+    // ---------- 意见轮在途意见排队成轮（#54：锚随任务落 + 失败清锚） ----------
 
     @Test
-    void given_second_opinion_during_ba_turn_in_flight_when_turns_close_then_each_dispatches_own_opinion() {
-        // 灵魂用例（#54 缺陷的行为化验证）：BA 轮在途（REST 已返、收口未至）窗口
+    void given_second_opinion_during_turn_in_flight_when_turns_close_then_each_dispatches_own_opinion() {
+        // 灵魂用例（#54 缺陷的行为化验证）：意见轮在途（REST 已返、收口未至）窗口
         // 连发两条意见——各自成轮、各自收口派发，交接物各含自己的意见（现状：
         // REST 线程 put 覆盖单槽锚，轮1 交接物只剩意见二、轮2 锚空防御不派——
         // 意见一零丢失承诺被破）；轮2 派发撞在途修正 run → queued（#53 合并续派）
         Long projectId = persistedGeneratedProject("9725");
-        List<Runnable> baTracks = CollUtil.newArrayList();
+        List<Runnable> mainTracks = CollUtil.newArrayList();
         List<Runnable> coderTracks = CollUtil.newArrayList();
         doAnswer(invocation -> {
             Runnable task = (Runnable) invocation.getArgument(1);
-            if (((String) invocation.getArgument(0)).startsWith("ba-")) {
-                baTracks.add(task); // BA 轨道挂起不跑（模拟轮1 在途窗口）
+            if (((String) invocation.getArgument(0)).startsWith("main-")) {
+                mainTracks.add(task); // 主智能体轨道挂起不跑（模拟轮1 在途窗口）
             } else {
                 coderTracks.add(task); // 修正轨道挂起不跑（模拟在途）
             }
             return null;
         }).when(sessionExecutor).submit(any(), any());
-        givenConverseBaRepliesAndCoderFinishes("好的");
+        givenConverseMainRepliesAndExecutorFinishes("好的");
 
-        appService.runInterviewTurn(projectId, "意见一：加导出");
-        appService.runInterviewTurn(projectId, "意见二：改蓝色"); // 轮1 在途窗口再发
-        assertThat(baTracks).hasSize(2);
+        appService.runOpinionTurn(projectId, "意见一：加导出");
+        appService.runOpinionTurn(projectId, "意见二：改蓝色"); // 轮1 在途窗口再发
+        assertThat(mainTracks).hasSize(2);
 
-        baTracks.remove(0).run(); // 轮1 收口：派发交接物含意见一
-        baTracks.remove(0).run(); // 轮2 收口：第二次派发、含意见二 → 撞在途修正 → 排队
+        mainTracks.remove(0).run(); // 轮1 收口：派发交接物含意见一
+        mainTracks.remove(0).run(); // 轮2 收口：第二次派发、含意见二 → 撞在途修正 → 排队
 
         coderTracks.remove(0).run(); // 修正轨道起跑：第一场收口即合并排队的意见二续派
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
@@ -688,14 +799,14 @@ class BaInterviewAppServiceTest {
         givenSessionExecutorSwallowsFailures();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
-                throw new IllegalStateException("BA 轮失败"); // 首个（唯一）BA 轮即炸
+            if (command.sessionId().startsWith("main-")) {
+                throw new IllegalStateException("对话轮失败"); // 首个（唯一）对话轮即炸
             }
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             return new AgentReply(command.runId(), "修正完成");
         });
 
-        appService.runInterviewTurn(projectId, "意见（本轮将炸）");
+        appService.runOpinionTurn(projectId, "意见（本轮将炸）");
         appService.answerQuestion(projectId, "run-q", "reply-1",
                 List.of(Map.of("id", "tc-1", "name", "ask_user")), "对追问的答复");
 
@@ -709,14 +820,14 @@ class BaInterviewAppServiceTest {
 
     @Test
     void given_turn_error_when_close_then_no_dispatch() {
-        // BA 轮失败不派修正（意见未被处理；error 事件已表达，用户重提即兜底）——
+        // 对话轮失败不派修正（意见未被处理；error 事件已表达，用户重提即兜底）——
         // 内联执行器同生产语义吞掉轨道异常
         Long projectId = persistedGeneratedProject("9724");
         givenSessionExecutorSwallowsFailures();
         when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("BA 轮失败"));
+                .thenThrow(new IllegalStateException("对话轮失败"));
 
-        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把主色调改成绿色");
 
         verify(agentClient, times(1)).converse(any(), any());
     }
@@ -727,10 +838,11 @@ class BaInterviewAppServiceTest {
         // 收口后派发——交接物意见腿含原意见与追问答复
         Long projectId = persistedGeneratedProject("9732");
         givenSessionExecutorRunsInline();
-        // BA 轮流上挂起事件（question-raised，#83 拆分后无 kind 键）；修正 run 收口脚本沿用（changed=true）
+        // 主智能体轮流上挂起事件（question-raised，#83 拆分后无 kind 键）；修正 run
+        // 收口脚本沿用（changed=true）
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (command.sessionId().startsWith("ba-")) {
+            if (command.sessionId().startsWith("main-")) {
                 Consumer<AgentEvent> sink = invocation.getArgument(1);
                 sink.accept(new AgentEvent(AgentEventTypes.QUESTION_RAISED,
                         new java.util.LinkedHashMap<>(Map.of(
@@ -742,12 +854,12 @@ class BaInterviewAppServiceTest {
             return new AgentReply(command.runId(), "修正完成");
         }).when(agentClient).converse(any(), any());
         // 提交守卫放行 → 本轮收口观测见挂起（不派）→ 答复续跑收口观测无挂起（派）
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(false)
                 .thenReturn(true)
                 .thenReturn(false);
 
-        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把主色调改成绿色");
         verify(agentClient, times(1)).converse(any(), any()); // 挂起期间无修正 run
 
         appService.answerQuestion(projectId, "run-q", "reply-1",
@@ -762,26 +874,26 @@ class BaInterviewAppServiceTest {
     @Test
     void given_start_fix_run_failure_when_close_then_track_survives_no_coder_run() {
         // #51 派发失败（行为核）：收口派修正 run 炸——意见锚已消费、不自动重试，
-        // 用户重提即兜底；BA 轨道不被炸穿（会话执行器吞掉），修正 run 未起跑
+        // 用户重提即兜底；对话轨道不被炸穿（会话执行器吞掉），修正 run 未起跑
         Long projectId = persistedGeneratedProject("9735");
-        givenConverseBaRepliesAndCoderFinishes("好的，会处理的");
+        givenConverseMainRepliesAndExecutorFinishes("好的，会处理的");
         doAnswer(invocation -> {
             String sessionId = invocation.getArgument(0);
             Runnable task = invocation.getArgument(1);
             if (sessionId.startsWith("coder-")) {
                 throw new IllegalStateException("修正轨道提交失败");
             }
-            task.run(); // BA 轨道直通
+            task.run(); // 主智能体轨道直通
             return null;
         }).when(sessionExecutor).submit(any(), any());
 
-        appService.runInterviewTurn(projectId, "把主色调改成绿色");
+        appService.runOpinionTurn(projectId, "把主色调改成绿色");
 
         verify(agentClient, times(1)).converse(any(), any()); // 无 coder converse
         verify(eventsAppService, never()).publishAgentEvent(
                 eq(AgentEventTypes.RUN_FAILED), anyMap()); // 派发失败不是 run 终态
         // 失败家族归位（#82）：dispatch-failed 阶段族退役后，失败信号归 error
-        // 事件——锚定收口 BA 轮、如实呈现重提（不静默）
+        // 事件——锚定收口轮、如实呈现重提（不静默）
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.ERROR), argThat(payload ->
                 projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
                         && "意见派发失败，请重新发送".equals(

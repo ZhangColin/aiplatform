@@ -50,8 +50,9 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 访谈上下文不丢），续跑流可再挂起（一 run 多批准点）或正常收口。失败上抛
  * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
  *
- * <p>工作区解析：命令带 workspaceId → 项目 dev 工作区（容器文件面，docker exec
- * 读写，写入即落项目工作区）；缺省 → 配置的本地工作区。</p>
+ * <p>工作区解析：命令带 workspaceId → 项目工作区（容器文件面，docker exec
+ * 读写，写入即落项目工作区；只读面只关内核文件/shell 工具，业务侧工具自带
+ * 读写口径）；缺省 → 配置的本地工作区。</p>
  */
 @Component
 public class AgentscopeAgentClient {
@@ -233,23 +234,23 @@ public class AgentscopeAgentClient {
 
     /**
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
-     * 同型位置参数的错位面；只读面续跑不存在——挂起问答是 BA 资产，只读角色无
-     * ask_user，resume 恒读写面）。
+     * 同型位置参数的错位面；工作区形态随命令/续跑请求原样携带——主智能体的问答
+     * 挂起续跑同只读面，不漂移成读写面）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
-            String systemPrompt, String workspaceId, String agentRole,
+            String systemPrompt, String workspaceId, String agentKey,
             boolean workspaceReadOnly) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.systemPrompt(), command.workspaceId(),
-                    command.agentRole(), command.workspaceReadOnly());
+                    command.agentKey(), command.workspaceReadOnly());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
                     resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
-                    resume.agentRole(), false);
+                    resume.agentKey(), resume.workspaceReadOnly());
         }
     }
 
@@ -260,13 +261,13 @@ public class AgentscopeAgentClient {
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared = prepareFor(TurnSpec.of(command));
         sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
-                prepared.modelRef().toModelString(), ENGINE, command.agentRole()));
+                prepared.modelRef().toModelString(), ENGINE, command.agentKey()));
         return prepared;
     }
 
     /**
      * 前段公共体（converse 首轮与 resume 续跑共用）：模型解析（配置兜底）→ 工作区
-     * 解析 → agent 工厂构建（角色键穿透工具装配——按角色发放工具集）→ 会话上下文
+     * 解析 → agent 工厂构建（配置键穿透工具装配——按配置发放工具集）→ 会话上下文
      * 与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现地基）。
      */
     private PreparedTurn prepareFor(TurnSpec spec) {
@@ -276,7 +277,7 @@ public class AgentscopeAgentClient {
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), workspace, spec.agentRole());
+                modelRef.toModelString(), workspace, spec.agentKey());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE));
@@ -326,8 +327,8 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * 工作区解析：带 workspaceId → 项目 dev 工作区（只读标记则解析为只读面，
-     * #47）；缺省 → 本地工作区。
+     * 工作区解析：带 workspaceId → 项目工作区（只读标记则解析为只读面——#86 起
+     * 主智能体的对话姿态：写面结构性关闭）；缺省 → 本地工作区。
      */
     private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly) {
         if (workspaceId == null || workspaceId.isBlank()) {

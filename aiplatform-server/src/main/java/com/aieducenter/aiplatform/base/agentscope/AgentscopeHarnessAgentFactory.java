@@ -17,11 +17,12 @@ import org.springframework.stereotype.Component;
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（subagents /
- * memory：源码包是交付物，记忆文件不进包）与内核 shell 工具（#83：CODER 的命令
+ * memory：源码包是交付物，记忆文件不进包）与内核 shell 工具（#83：执行体的命令
  * 走业务侧 ConfirmingShellTool，破坏性命令挂确认卡）——工作区上下文（AGENTS.md
  * 等）与 workspace/tools.json 读取照常，经容器文件面即项目事实；
- * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#47）——
- * 容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具（写面结构性关闭）。</p>
+ * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
+ * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
+ * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -38,7 +39,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                AgentWorkspace workspace, String agentRole);
+                AgentWorkspace workspace, String agentKey);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
@@ -49,9 +50,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentRole) ->
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey) ->
                 buildAgent(stateStore, toolkitSupplier, name, sysPrompt, modelString, workspace,
-                        agentRole, properties.getMaxIters()));
+                        agentKey, properties.getMaxIters()));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -62,13 +63,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
-            AgentWorkspace workspace, String agentRole) {
-        // sysPrompt/workspace/agentRole 明文入键（不用 hashCode：碰撞会把不同人格/
+            AgentWorkspace workspace, String agentKey) {
+        // sysPrompt/workspace/agentKey 明文入键（不用 hashCode：碰撞会把不同人格/
         // 工作区/工具面的 agent 当同规格静默复用）
         String key = name + "|" + modelString + "|" + sysPrompt + "|" + workspace.identity()
-                + "|" + agentRole;
+                + "|" + agentKey;
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, workspace, agentRole));
+                k -> builder.build(name, sysPrompt, modelString, workspace, agentKey));
     }
 
     @Override
@@ -86,14 +87,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, String name,
-            String sysPrompt, String modelString, AgentWorkspace workspace, String agentRole,
+            String sysPrompt, String modelString, AgentWorkspace workspace, String agentKey,
             Integer maxIters) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
                 .model(modelString)
                 .stateStore(stateStore)
-                .toolkit(toolkitSupplier.toolkitFor(agentRole, workspace));
+                .toolkit(toolkitSupplier.toolkitFor(agentKey, workspace));
         if (maxIters != null) {
             builder.maxIters(maxIters);
         }
@@ -104,14 +105,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 }
             }
             case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName())
-                    // #83 权限确认触发面：内核 shell 退位——CODER 的命令走业务侧
+                    // #83 权限确认触发面：内核 shell 退位——执行体的命令走业务侧
                     // ConfirmingShellTool（ToolBase 自检 ASK 挂确认卡；内核 shell 非
                     // ToolBase 引擎拦不住，注册名 execute 也进不了播报表）
                     .disableShellTool();
             case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, ro.containerName())
-                    // 只读面（#47 助理咨询姿态）：另关内核文件与 shell 工具——
+                    // 只读面（#86 主智能体对话姿态）：另关内核文件与 shell 工具——
                     // 写面结构性不存在，项目事实的读取经业务侧只读工具集
-                    // （RoleToolkitSupplier）
+                    // （ProfileToolkitSupplier）
                     .disableFilesystemTools()
                     .disableShellTool();
         }

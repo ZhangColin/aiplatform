@@ -36,17 +36,18 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 入口派发编排（#47 三分类）：脚本化智能体边界——分类调用按会话前缀脚本化回放
- * 标签，验证三岔：咨询 → 助理会话命令 + 回答（零派发：无 BA、无修正 run）；
- * 分类失败 / 超时 / 输出不可解析 → 兜底按意见（BA 链）；兜底 / 下单意图 →
- * guide-reply 事件（零产物：不起任何 run）+ 下单引导文案。守卫矩阵（#51 后移）：
- * 归档全局先于分类（拒绝即零调用零事件）；订单冻结 / 挂起问答只拦意见（分类后
- * 拦——咨询与兜底随时可答）。
+ * 入口派发编排（#47 三分类，#86 并轨后意见与咨询同主智能体会话）：脚本化智能体
+ * 边界——分类调用按会话前缀脚本化回放标签，验证三岔：咨询 → 主智能体答询轮
+ * 命令 + 回答（同 main-{projectId} 会话、零派发：无修正 run）；分类失败 / 超时 /
+ * 输出不可解析 → 兜底按意见（意见轮照常）；兜底 / 下单意图 → guide-reply 事件
+ * （零产物：不起任何 run）+ 下单引导文案。守卫矩阵（#51 后移）：归档全局先于
+ * 分类（拒绝即零调用零事件）；订单冻结 / 挂起问答只拦意见（分类后拦——咨询与
+ * 兜底随时可答）。
  */
 @SpringBootTest
 class DispatchAppServiceTest {
@@ -117,8 +118,8 @@ class DispatchAppServiceTest {
     }
 
     @Test
-    void given_inquiry_when_dispatch_then_assistant_session_answers_with_zero_dispatch() {
-        // 咨询 → 助理会话命令 + 回答；零派发：无 BA converse、无修正 run、无 savePrd 面
+    void given_inquiry_when_dispatch_then_main_session_answers_with_zero_dispatch() {
+        // 咨询 → 主智能体答询轮命令 + 回答（同会话直答）；零派发：无修正 run、无 savePrd 面
         Long projectId = persistedProject("9800");
         givenSessionExecutorRunsInline();
         givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
@@ -128,7 +129,7 @@ class DispatchAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand classify = command.getAllValues().get(0);
-        AgentCommand assistant = command.getAllValues().get(1);
+        AgentCommand inquiry = command.getAllValues().get(1);
 
         // 分类命令：智能体边界轻量调用——一次性会话、模型档由专用配置键决定（#51，
         // 缺省 flash，不吃 agentscope 缺省模型的部署配法）、不触项目工作区、
@@ -138,26 +139,26 @@ class DispatchAppServiceTest {
         assertThat(dispatchProperties.getClassificationModel())
                 .isEqualTo("deepseek:deepseek-v4-flash"); // 缺省即 flash 档（代码保证）
         assertThat(classify.workspaceId()).isNull();
-        assertThat(classify.agentRole()).isNull();
+        assertThat(classify.agentKey()).isNull();
         assertThat(classify.timeout()).isEqualTo(java.time.Duration.ofSeconds(15));
         assertThat(classify.usageContext().dims()).containsEntry(
                 UsageDims.KEY_AGENT_KIND, UsageDims.AGENT_KIND_CLASSIFY);
 
-        // 助理命令：assist-{projectId} 会话 + ASSISTANT 角色卡 + flash 档 + 只读工作区
-        assertThat(assistant.sessionId()).isEqualTo("assist-" + projectId);
-        assertThat(assistant.prompt()).isEqualTo("我后台的地址是什么？");
-        assertThat(assistant.systemPrompt()).isEqualTo(RolePreset.ASSISTANT.systemPrompt());
-        assertThat(assistant.modelString()).isEqualTo(RolePreset.ASSISTANT.chatModelString());
-        assertThat(assistant.agentRole()).isEqualTo(RolePreset.ASSISTANT.name());
-        assertThat(assistant.workspaceReadOnly()).isTrue();
-        assertThat(assistant.workspaceId()).isEqualTo("9800");
-        assertThat(assistant.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(assistant.usageContext().dims()).isEqualTo(
-                UsageDims.of(projectId, UsageDims.kindOf(RolePreset.ASSISTANT),
-                        "assist-" + projectId));
+        // 答询轮命令：main-{projectId} 会话（与意见轮同会话）+ 主智能体配置 + flash 档 + 只读面
+        assertThat(inquiry.sessionId()).isEqualTo("main-" + projectId);
+        assertThat(inquiry.prompt()).isEqualTo("我后台的地址是什么？");
+        assertThat(inquiry.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        assertThat(inquiry.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(inquiry.agentKey()).isEqualTo(AgentProfile.MAIN.key());
+        assertThat(inquiry.workspaceReadOnly()).isTrue();
+        assertThat(inquiry.workspaceId()).isEqualTo("9800");
+        assertThat(inquiry.userId()).isEqualTo(Long.toString(OWNER));
+        assertThat(inquiry.usageContext().dims()).isEqualTo(
+                UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN),
+                        "main-" + projectId));
 
-        // 回答经 SSE 到达（runId = 助理轮）；收缩验收（#82）：role-assigned 零发射
-        assertThat(run.runId()).isEqualTo(assistant.runId());
+        // 回答经 SSE 到达（runId = 答询轮）；收缩验收（#82）：role-assigned 零发射
+        assertThat(run.runId()).isEqualTo(inquiry.runId());
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), anyMap());
         // 零派发断言：两 converse 之外无任何轨道（修正 run 会是第三条 coder- 会话命令）
         assertThat(command.getAllValues().stream()
@@ -167,7 +168,7 @@ class DispatchAppServiceTest {
 
     @Test
     void given_classification_failure_when_dispatch_then_opinion_chain() {
-        // 分类调用炸（失败/超时同 catch）→ 兜底按意见：BA 链照常（误进意见链有 BA 把关）
+        // 分类调用炸（失败/超时同 catch）→ 兜底按意见：意见链照常（误进意见链有主智能体把关）
         Long projectId = persistedProject("9801");
         givenSessionExecutorRunsInline();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -175,17 +176,17 @@ class DispatchAppServiceTest {
             if (command.sessionId().startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX)) {
                 throw new IllegalStateException("分类超时");
             }
-            return new AgentReply(command.runId(), "BA 已受理");
+            return new AgentReply(command.runId(), "已受理");
         });
 
         appService.dispatch(projectId, "把主色调改成绿色");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
-        AgentCommand ba = command.getAllValues().get(1);
-        assertThat(ba.sessionId()).isEqualTo("ba-" + projectId);
-        assertThat(ba.systemPrompt()).isEqualTo(RolePreset.BA.systemPrompt());
-        assertThat(ba.workspaceReadOnly()).isFalse();
+        AgentCommand opinion = command.getAllValues().get(1);
+        assertThat(opinion.sessionId()).isEqualTo("main-" + projectId);
+        assertThat(opinion.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        assertThat(opinion.workspaceReadOnly()).isTrue(); // 主智能体恒只读面（写面结构性关闭）
     }
 
     @Test
@@ -193,13 +194,13 @@ class DispatchAppServiceTest {
         // 输出不可解析（自由文本）→ 同失败口径：回落意见链
         Long projectId = persistedProject("9802");
         givenSessionExecutorRunsInline();
-        givenClassification("这句话既不是标签也不是分类", "BA 已受理");
+        givenClassification("这句话既不是标签也不是分类", "已受理");
 
         appService.dispatch(projectId, "嗯嗯");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("ba-" + projectId);
+        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("main-" + projectId);
     }
 
     @Test
@@ -266,23 +267,22 @@ class DispatchAppServiceTest {
     // ---------- 守卫后移矩阵（#51：订单冻结 / 挂起问答只拦意见） ----------
 
     @Test
-    void given_pending_question_when_inquiry_then_assistant_answers() {
-        // 挂起问答期间咨询照常作答（守卫后移——409 指路对咨询语义错误）
+    void given_pending_question_when_inquiry_then_answered() {
+        // 挂起问答期间咨询照常作答（守卫后移——409 指路对咨询语义错误；答询轮无守卫，
+        // 同会话直答。引擎对挂起会话新 converse 的拒绝仅在问答卡未及呈现的窄竞态）
         Long projectId = persistedProject("9808");
         givenSessionExecutorRunsInline();
         givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
-                .thenReturn(true); // BA 会话挂起在即（assist 会话不受影响）
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(true); // 会话挂起在即（答询轮不查守卫）
 
         DispatchAppService.DispatchRun run = appService.dispatch(projectId, "我后台的地址是什么？");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
-        // 分类 + 助理两跳即全部：BA 轨道未触
-        assertThat(command.getAllValues().stream()
-                .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("ba-"));
-        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("assist-" + projectId);
-        assertThat(run.runId()).isNotBlank();
+        // 分类 + 答询两跳即全部：意见轨道未触（第三跳会是 main- 意见轮 + 守卫 409）
+        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("main-" + projectId);
+        assertThat(run.runId()).isEqualTo(command.getAllValues().get(1).runId());
     }
 
     @Test
@@ -290,7 +290,7 @@ class DispatchAppServiceTest {
         // 挂起问答期间兜底照常引导（零产物路径不涉意见链）
         Long projectId = persistedProject("9809");
         givenClassification("FALLBACK", "不该出现");
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(true);
 
         appService.dispatch(projectId, "你好呀");
@@ -305,13 +305,13 @@ class DispatchAppServiceTest {
         // flash 分类调用（秒级轻调用，接受），拒绝即零事件零提交
         Long projectId = persistedProject("9810");
         givenClassification("OPINION", "不该到");
-        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "ba-" + projectId))
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> appService.dispatch(projectId, "把主色调改成绿色"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
-        verify(agentClient, times(1)).converse(any(), any()); // 分类先烧、BA 未触
+        verify(agentClient, times(1)).converse(any(), any()); // 分类先烧、意见轮未触
         verify(sessionExecutor, never()).submit(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(any(), anyMap());
     }
@@ -327,16 +327,16 @@ class DispatchAppServiceTest {
         givenSessionExecutorRunsInline();
         givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
 
-        appService.dispatch(projectId, "我后台的地址是什么？"); // 咨询：助理照常作答
+        appService.dispatch(projectId, "我后台的地址是什么？"); // 咨询：答询轮照常作答
 
         givenClassification("FALLBACK", "不该出现");
         appService.dispatch(projectId, "你好呀"); // 兜底：引导照常
 
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(command.capture(), any()); // 分类×2 + 助理
+        verify(agentClient, times(3)).converse(command.capture(), any()); // 分类×2 + 答询
         assertThat(command.getAllValues().stream()
-                .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("ba-"));
+                .map(AgentCommand::sessionId)).noneMatch(id -> id.startsWith("coder-"));
     }
 
     @Test
@@ -357,15 +357,15 @@ class DispatchAppServiceTest {
     }
 
     @Test
-    void given_opinion_when_dispatch_then_role_assigned_precedes_converse() {
-        // 意见链不回归：BA 轮 converse 到达（分类在其前静默完成）
+    void given_opinion_when_dispatch_then_opinion_turn_converses_after_classification() {
+        // 意见链不回归：意见轮 converse 到达（分类在其前静默完成）
         Long projectId = persistedProject("9807");
         givenSessionExecutorRunsInline();
         givenClassification("OPINION", "好的");
 
         appService.dispatch(projectId, "加个导出功能");
 
-        // 意见链：BA 轮 converse 到达（分类 converse 在其前静默完成——总量 2）
+        // 意见链：意见轮 converse 到达（分类 converse 在其前静默完成——总量 2）
         verify(agentClient, times(2)).converse(any(), any());
     }
 

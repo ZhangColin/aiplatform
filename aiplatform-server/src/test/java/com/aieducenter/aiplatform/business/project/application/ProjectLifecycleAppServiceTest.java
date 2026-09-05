@@ -32,7 +32,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 项目生命周期用例：建项目 = 工作区副作用 → 一事务 Project（占位名）→ SSE
- * workspace-created → 自动跑 BA；删除真删级联 + workspace-destroyed；归档/改名的
+ * workspace-created → 自动开主智能体对话；删除真删级联 + workspace-destroyed；归档/改名的
  * 聚合不变量。Docker 链路在 WorkspaceLifecycleAppServiceTest（mock 工作区服务，
  * 聚焦编排）。
  */
@@ -66,7 +66,7 @@ class ProjectLifecycleAppServiceTest {
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @MockitoBean
-    private BaInterviewAppService baInterviewAppService;
+    private MainAgentAppService mainAgentAppService;
 
     @MockitoBean
     private EventsAppService eventsAppService;
@@ -120,7 +120,7 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 单模板服务端缺省
         assertThat(response.project().workspaceId()).isEqualTo("9100");
         assertThat(response.project().status()).isEqualTo(ProjectStatus.IN_PROGRESS);
-        assertThat(response.runId()).isEqualTo("run-1"); // 自动 BA 运行标识随响应返回
+        assertThat(response.runId()).isEqualTo("run-1"); // 自动开场运行标识随响应返回
 
         // SSE（副作用落定后）：workspace-created
         ArgumentCaptor<Map<String, Object>> created =
@@ -136,8 +136,8 @@ class ProjectLifecycleAppServiceTest {
         // 异步取名：requirement 为取名输入，触发即返（不等结果）
         verify(namingService).nameAsync(projectId, "做一个官网");
 
-        // 前缀段自动：BA 访谈开场（初始描述即首条对话输入）
-        verify(baInterviewAppService).startInterview(projectId, "做一个官网");
+        // 前缀段自动：主智能体对话开场（初始描述即首条对话输入）
+        verify(mainAgentAppService).startConversation(projectId, "做一个官网");
     }
 
     @Test
@@ -151,20 +151,20 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
         // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
         //（blank 不发起轻调用，见 ProjectNamingAppServiceTest）
-        verify(baInterviewAppService).startInterview(
-                Long.parseLong(response.project().id()), RolePreset.DEFAULT_KICKOFF_PROMPT);
+        verify(mainAgentAppService).startConversation(
+                Long.parseLong(response.project().id()), AgentProfile.DEFAULT_KICKOFF_PROMPT);
     }
 
     @Test
     void given_auto_ba_failure_when_create_then_project_kept_and_run_id_absent() {
         stubWorkspace("9102", "aiplatform-dev-102");
-        when(baInterviewAppService.startInterview(any(), any()))
+        when(mainAgentAppService.startConversation(any(), any()))
                 .thenThrow(new RuntimeException("对话智能体不可用"));
 
         ProjectCreatedResponse response = appService.create(
                 new CreateProjectCommand(null));
 
-        // BA 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
+        // 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
         assertThat(response.runId()).isNull();
         assertThat(projectRepository.count()).isEqualTo(1);
     }
@@ -323,10 +323,10 @@ class ProjectLifecycleAppServiceTest {
 
     // ---------- 测试数据 ----------
 
-    /** BA 访谈编排桩：接受即回 runId（编排细节见 BaInterviewAppServiceTest）。 */
+    /** 主智能体编排桩：接受即回 runId（编排细节见 MainAgentAppServiceTest）。 */
     private void stubInterviewAccepted(String runId) {
-        when(baInterviewAppService.startInterview(any(), any()))
-                .thenReturn(new BaInterviewAppService.InterviewRun(runId));
+        when(mainAgentAppService.startConversation(any(), any()))
+                .thenReturn(new MainAgentAppService.MainAgentRun(runId));
     }
 
     private void stubWorkspace(String workspaceId, String containerName) {

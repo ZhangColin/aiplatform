@@ -36,9 +36,9 @@ import lombok.extern.slf4j.Slf4j;
  * 实现——全部文件操作与 shell 执行落在既有沙箱容器的 {@code /workspace}（Docker
  * 常开口径），写入即进源码包（平台文件树只读端点同视图），不新建容器、不改容器拓扑。
  *
- * <p><b>sandbox 接口是编码智能体的命脉</b>：HarnessAgent 只在 AbstractFilesystem
+ * <p><b>sandbox 接口是 run 执行体的命脉</b>：HarnessAgent 只在 AbstractFilesystem
  * 实现为 {@link AbstractSandboxFilesystem} 时注册 ShellExecuteTool——只实现文件面
- * 会让编码智能体没有命令执行工具（装依赖/起服务/收口自检全部无从谈起）。</p>
+ * 会让 run 执行体没有命令执行工具（装依赖/起服务/收口自检全部无从谈起）。</p>
  *
  * <p>语义对齐 AgentScope 本地文件系统：路径为工作区锚定形（{@code /docs/PRD.md}，
  * 根 = 容器工作区根；{@code ..} 阻断）；ls 缺失目录回空、write 对既有文件拒绝、

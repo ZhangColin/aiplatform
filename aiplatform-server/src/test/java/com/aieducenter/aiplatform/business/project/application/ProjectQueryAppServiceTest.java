@@ -264,12 +264,12 @@ class ProjectQueryAppServiceTest {
                                 TokenKind.INPUT)),
                         List.of(new UsageSummary.ModelUsage("deepseek", "deepseek-v4-pro",
                                 tokens)),
-                        List.of(new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "ba", tokens),
+                        List.of(new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "main", tokens),
                                 new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "naming", tokens),
-                                new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "coder",
+                                new UsageSummary.DimUsage(UsageDims.KEY_AGENT_KIND, "executor",
                                         new TokenUsage(1, 2, 0, 0, 0)),
                                 new UsageSummary.DimUsage(UsageDims.KEY_SESSION_ID,
-                                        "ba-" + projectId, tokens))));
+                                        "main-" + projectId, tokens))));
 
         ProjectUsageResponse response = appService.usage(projectId);
 
@@ -285,14 +285,14 @@ class ProjectQueryAppServiceTest {
                         TokenKind.INPUT, "输入"));
         assertThat(response.byModel()).hasSize(1); // 分模型
         assertThat(response.byModel().get(0).model()).isEqualTo("deepseek-v4-pro");
-        // 分智能体 = dims.agentKind 维度（主链角色带展示名，辅助标记/naming label 为
+        // 分智能体 = dims.agentKind 维度（主链配置带展示名，辅助标记/naming label 为
         // null）；sessionId 等其他维度键不进该桶
         assertThat(response.byAgentKind())
                 .extracting(ProjectUsageResponse.AgentKindUsage::agentKind)
-                .containsExactly("ba", "naming", "coder");
+                .containsExactly("main", "naming", "executor");
         assertThat(response.byAgentKind())
                 .extracting(ProjectUsageResponse.AgentKindUsage::agentKindLabel)
-                .containsExactly("需求分析师", null, "编码智能体");
+                .containsExactly("主智能体", null, "run 执行体");
     }
 
     @Test

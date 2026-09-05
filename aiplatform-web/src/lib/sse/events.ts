@@ -55,7 +55,7 @@ export type NotificationEvent =
     }
   | { type: "workspace-destroyed"; payload: { projectId: string } }
   | {
-      /** 工作区文档产物写出/修订落定；v1 唯一写入方 = BA 的 savePrd。 */
+      /** 工作区文档产物写出/修订落定；v1 唯一写入方 = 主智能体的 savePrd。 */
       type: "document-updated";
       payload: { projectId: string; documentType: string };
     }
@@ -117,11 +117,12 @@ export type PlatformAgentEvent =
         model: string;
         engine?: string;
         /**
-         * 角色键（引擎信息归一：业务侧角色卡枚举名，如 CODER；无角色语境的
-         * 一次性调用不携带）——工作消息的锚定判据（编码 run 起工作消息）、
-         * 对话面 run 的登记判据（BA/ASSISTANT 进对话）。
+         * 智能体配置键（引擎信息归一：业务侧 AgentProfile 稳定键——main 主智能体
+         * 对话轮 / executor 编码 run；无配置语境的一次性调用不携带）——呈现形态
+         * 的登记锚：executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有
+         * 主智能体一座）。
          */
-        role?: string;
+        agent?: string;
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }

@@ -13,7 +13,7 @@ describe("lockRowOf · 锁定式矩阵", () => {
     expect(lockRowOf({})).toEqual({ chatInput: "open", outputsLocked: false });
   });
 
-  it("待报价：指令区禁用+锁定提示、成果区只读（本片接线行）", () => {
+  it("待报价：对话区禁用+锁定提示、成果区只读（本片接线行）", () => {
     const row = lockRowOf({
       activeOrder: { id: "o1", status: ORDER_STATUS.pendingQuote, statusName: "待报价" },
     });
@@ -35,7 +35,7 @@ describe("lockRowOf · 锁定式矩阵", () => {
     expect(lockRowOf({ activeOrder: { id: "o1" } }).chatInput).toBe("locked");
   });
 
-  it("已支付（归档前的瞬时态）/订单已归档：终态行——指令区关闭、全只读", () => {
+  it("已支付（归档前的瞬时态）/订单已归档：终态行——对话区关闭、全只读", () => {
     for (const status of [ORDER_STATUS.paid, ORDER_STATUS.archived]) {
       const row = lockRowOf({ activeOrder: { id: "o1", status } });
       expect(row.chatInput).toBe("closed");
@@ -43,10 +43,10 @@ describe("lockRowOf · 锁定式矩阵", () => {
     }
   });
 
-  it("已归档项目（归档终态，无订单事实）：指令区关闭、全只读", () => {
+  it("已归档项目（归档终态，无订单事实）：对话区关闭、全只读", () => {
     const row = lockRowOf({ archived: true });
     expect(row.chatInput).toBe("closed");
-    expect(row.chatHint).toBe("项目已归档，指令区已关闭");
+    expect(row.chatHint).toBe("项目已归档，对话区已关闭");
     expect(row.outputsLocked).toBe(true);
   });
 

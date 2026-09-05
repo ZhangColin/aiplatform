@@ -36,7 +36,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFil
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -49,7 +49,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 public class ProjectQueryAppService {
 
     /**
-     * PRD 在 dev 容器内的绝对路径（事实锚定——PRD = 工作区文件，编码智能体同视图
+     * PRD 在 dev 容器内的绝对路径（事实锚定——PRD = 工作区文件，run 执行体同视图
      * 直读，写入即进源码包；由布局常量表派生，根不散落字面量）。
      */
     private static final String PRD_CONTAINER_PATH = WorkspaceLayout.absolute(ProjectArtifacts.PRD);
@@ -138,7 +138,7 @@ public class ProjectQueryAppService {
         List<ProjectUsageResponse.AgentKindUsage> byAgentKind = summary.byDims().stream()
                 .filter(dim -> UsageDims.KEY_AGENT_KIND.equals(dim.dimKey()))
                 .map(dim -> new ProjectUsageResponse.AgentKindUsage(dim.dimValue(),
-                        RolePreset.byName(dim.dimValue()).map(RolePreset::getName).orElse(null),
+                        AgentProfile.byKey(dim.dimValue()).map(AgentProfile::getName).orElse(null),
                         dim.tokens()))
                 .toList();
         return new ProjectUsageResponse(Long.toString(projectId), summary.total(), cost,

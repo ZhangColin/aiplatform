@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  * 一律保占位（经改名端点可改），绝无「requirement 前 N 字符」兜底。
  *
  * <p>时机与线程：创建响应不等取名（REST 即时返回）；本服务自持单线程执行器
- * fire-and-forget——不占 BA 会话执行器（开场问答卡不被取名排队拖慢），串行
+ * fire-and-forget——不占主智能体会话执行器（开场问答卡不被取名排队拖慢），串行
  * 又是必要的：全部取名共用同一缓存 HarnessAgent 实例（工厂按 prompt/工作区键
  * 复用），单线程保证同一 agent 上不并发 streamEvents（并发安全性上游未背书）。
  * 落位守卫：只顶替仍是占位名的项目（取名在飞时用户已改名则不覆写）；项目已删

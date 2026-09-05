@@ -4,7 +4,7 @@ import { create } from "zustand";
  * PRD 更新提示 store（#20 修订回路，SSE 相关 store——桥为唯一事件写入方，
  * ADR 0003 状态三分法）：document-updated(PRD) 到达时按「是否已见过该项目
  * 产出」分岔——首次产出只登记 seen（成果区长出本身即信号，不打扰）；此后
- * 每次写入置 pending（指令区「PRD 有更新 · 去看看」胶囊与 PRD 卡「已更新」
+ * 每次写入置 pending（对话区「PRD 有更新 · 去看看」胶囊与 PRD 卡「已更新」
  * 标记的显隐源）。「去看看」即认领（acknowledge 清 pending）。
  *
  * <p>「这次写入是不是修订」是 REST 重查拿不到的语义（prd_produced_at 每次

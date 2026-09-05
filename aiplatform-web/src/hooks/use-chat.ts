@@ -7,7 +7,7 @@ import { errorText } from "@/lib/api/api-error";
 import { useChatStore } from "@/lib/store/chat";
 
 /**
- * 指令区两发送口（issue #19 需求环①）：发言（POST /api/projects/{id}/messages，
+ * 对话区两发送口（issue #19 需求环①）：发言（POST /api/projects/{id}/messages，
  * 无待答问题时 Enter 走此）与问答作答（POST /api/projects/{id}/questions/{qid}/
  * answer，qid = 挂起事件 engineRef；body 回传 runId + data.toolCalls 原样 + 答复）。
  * 乐观更新都在 chat store（成功路径 REST/SSE 自愈；失败撤回气泡、问题卡重开）。

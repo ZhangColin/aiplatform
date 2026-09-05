@@ -42,12 +42,12 @@ class AgentCommandTest {
         UsageContext usage = new UsageContext("prj-1", Map.of("agentKind", "ba"));
 
         AgentCommand command = new AgentCommand(
-                "run-1", "你好", "你是 BA", "deepseek:deepseek-v4-flash",
+                "run-1", "你好", "你是主智能体", "deepseek:deepseek-v4-flash",
                 "s-1", "alice", usage, "42", Map.of("projectId", "42"));
 
         assertThat(command.runId()).isEqualTo("run-1");
         assertThat(command.prompt()).isEqualTo("你好");
-        assertThat(command.systemPrompt()).isEqualTo("你是 BA");
+        assertThat(command.systemPrompt()).isEqualTo("你是主智能体");
         assertThat(command.modelString()).isEqualTo("deepseek:deepseek-v4-flash");
         assertThat(command.sessionId()).isEqualTo("s-1");
         assertThat(command.userId()).isEqualTo("alice");
@@ -84,10 +84,10 @@ class AgentCommandTest {
 
     @Test
     void given_convenience_forms_when_construct_then_workspace_read_write_default() {
-        // 兼容形（取名 / BA 对话）缺省读写面：workspaceReadOnly 恒 false（#47 前调用面不变）
+        // 兼容形（取名 / 无语境一次性调用）缺省读写面：workspaceReadOnly 恒 false（#47 前调用面不变）
         assertThat(command("run-1", "你好", "s-1").workspaceReadOnly()).isFalse();
         assertThat(new AgentCommand("run-1", "你好", null, null, "s-1", null, null, null,
-                Map.of(), "BA").workspaceReadOnly()).isFalse();
+                Map.of(), "main").workspaceReadOnly()).isFalse();
     }
 
     @Test

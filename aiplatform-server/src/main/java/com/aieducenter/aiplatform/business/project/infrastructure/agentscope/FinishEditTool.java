@@ -12,7 +12,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 修正收口结束工具（编码智能体资产，#46）：编码智能体对「本轮要不要动系统」的
+ * 修正收口结束工具（run 执行体资产，#46）：run 执行体对「本轮要不要动系统」的
  * 开发侧判定动作——判定结果由平台从本工具调用事实观测（{@link FinishEditFacts}），
  * 不解析自由文本。必调（含不动系统的情形）：动了系统 → changed=true + 改了什么；
  * 不动（纯文档性修订、系统现状已满足等）→ changed=false + 原因——用户侧据此
@@ -21,7 +21,7 @@ import reactor.core.publisher.Mono;
  *
  * <p>无需用户确认（权限自检恒放行）：判定收口是修正协议的预期终点。效果仅
  * 平台侧事实登记（不动工作区），readOnly；重复调用后写胜出。仅随项目 dev 工作
- * 区注册（{@link RoleToolkitSupplier}）。</p>
+ * 区注册（{@link ProfileToolkitSupplier}）。</p>
  */
 public class FinishEditTool extends ToolBase {
 

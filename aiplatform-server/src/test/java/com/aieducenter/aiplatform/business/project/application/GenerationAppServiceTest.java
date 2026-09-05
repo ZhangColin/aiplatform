@@ -49,7 +49,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -156,16 +156,16 @@ class GenerationAppServiceTest {
         assertThat(value.prompt()).isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(value.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt())
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
-        assertThat(value.modelString()).isEqualTo(RolePreset.CODER.chatModelString());
+        assertThat(value.modelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
         assertThat(value.timeout()).isEqualTo(properties.getTimeout());
         assertThat(value.workspaceId()).isEqualTo("9800");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
-                UsageDims.kindOf(RolePreset.CODER), "coder-" + projectId));
+                UsageDims.kindOf(AgentProfile.EXECUTOR), "coder-" + projectId));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
-        assertThat(value.agentRole()).isEqualTo("CODER"); // run-start 携角色键（工作消息锚）
+        assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（工作消息锚）
     }
 
     @Test

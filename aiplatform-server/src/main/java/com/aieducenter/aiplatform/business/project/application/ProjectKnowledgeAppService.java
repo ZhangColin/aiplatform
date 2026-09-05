@@ -18,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
  * 知识沉淀编排（业务侧缝）：入库/检索/清理的存储语义归 base.knowledge
  * （{@link KnowledgePort}），「什么时机沉淀什么素材」是业务知识，在此落定。
  * v1 的沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；命中注入在需求环
- * （BA 会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。
+ * （主智能体会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。
  *
  * <p><b>降级契约</b>：摄取/清理/命中检索一律失败不炸——记日志跳过、降级为空
  * 注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索空列表）。</p>
@@ -40,10 +40,10 @@ public class ProjectKnowledgeAppService {
     static final String TITLE_PRD = "PRD";
 
     /**
-     * BA 会话已注入的知识块（projectId → 注入块）：会话建立时检索一次落此
+     * 主智能体会话已注入的知识块（projectId → 注入块）：会话建立时检索一次落此
      * （一次切入一次注入），后续轮/续跑复用同一块——不重检索不重追加（agent
      * 工厂按 systemPrompt 缓存，同块即同 agent 实例）。进程内态：重启后为空
-     * （后续轮退化为无知识块的裸角色卡——会话恢复不重注的降级面）。
+     * （后续轮退化为无知识块的裸配置——会话恢复不重注的降级面）。
      */
     private final Map<Long, String> establishedSessionTails = new ConcurrentHashMap<>();
 
@@ -59,11 +59,11 @@ public class ProjectKnowledgeAppService {
         this.hitTopK = hitTopK;
     }
 
-    // ---------- 知识命中（BA 会话建立注入，#19） ----------
+    // ---------- 知识命中（主智能体会话建立注入，#19） ----------
 
     /**
-     * BA 会话建立的知识命中注入（一次切入一次注入）：query = 用户初始需求原文
-     * （超长截断），命中拼为「背景资料」块落会话缓存并返回——由调用方接在 BA
+     * 主智能体会话建立的知识命中注入（一次切入一次注入）：query = 用户初始需求原文
+     * （超长截断），命中拼为「背景资料」块落会话缓存并返回——由调用方接在主智能体
      * system prompt 尾部（知识是背景非指令，#5 决议①）。后续轮/续跑经
      * {@link #sessionTailOf} 复用同一块（不重检索）。空命中 / 检索失败 / 空
      * query = 空注入降级（不落缓存），访谈照常开始。
@@ -77,17 +77,17 @@ public class ProjectKnowledgeAppService {
         return tail;
     }
 
-    /** 会话已注入的知识块（未建立 / 空注入 / 重启后 = 空串，裸角色卡照跑）。 */
+    /** 会话已注入的知识块（未建立 / 空注入 / 重启后 = 空串，裸配置照跑）。 */
     public String sessionTailOf(Long projectId) {
         return establishedSessionTails.getOrDefault(projectId, "");
     }
 
     private String composeSessionInjection(String requirement) {
-        List<KnowledgeHit> hits = retrieveDegraded(requirement, "BA 会话建立");
+        List<KnowledgeHit> hits = retrieveDegraded(requirement, "主智能体会话建立");
         if (hits.isEmpty()) {
             return "";
         }
-        log.info("[knowledge] BA 会话建立注入命中 {} 条", hits.size());
+        log.info("[knowledge] 主智能体会话建立注入命中 {} 条", hits.size());
         StringBuilder block = new StringBuilder("\n\n【平台知识库·相似历史需求】")
                 .append("以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考")
                 .append("（非用户的确认信息，不构成对当前需求的约束）：");
@@ -100,7 +100,7 @@ public class ProjectKnowledgeAppService {
     /**
      * 生成/修正过程下发的知识命中前置注入（一次下发一次注入）：query = 任务
      * prompt 截 2000 字，命中拼为「背景资料」前置块返回——自带收尾分隔，调用方
-     * 直接 {@code prefix + 任务 prompt}（知识是背景非指令，限定语与 BA 尾注同款）。
+     * 直接 {@code prefix + 任务 prompt}（知识是背景非指令，限定语与主智能体尾注同款）。
      * 空命中 / 检索失败 / 空任务 prompt = 空注入降级（空串），run 照旧下发不阻断。
      */
     public String dispatchInjection(String taskPrompt) {

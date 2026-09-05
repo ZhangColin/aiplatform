@@ -12,11 +12,11 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 向用户提问工具（BA 访谈资产）：访谈式收集信息的挂起源——工具自检恒 ASK
+ * 向用户提问工具（主智能体资产）：访谈式收集信息的挂起源——工具自检恒 ASK
  * （Built-in Checks 不可绕过、不受 permission mode/rules 影响），调用即触发
  * {@code RequireUserConfirmEvent} 挂起 → 智能体事件族 {@code question-raised}
  * （QUESTION 载荷形状，见 {@code AgentscopeEventMapper}）。用户答复经
- * {@code BaInterviewAppService#answerQuestion} 续跑：挂起批复重写本调用 block 的
+ * {@code MainAgentAppService#answerQuestion} 续跑：挂起批复重写本调用 block 的
  * metadata（{@link AgentscopeAgentClient#ANSWER_METADATA_KEY}，模型不可见通道）
  * 携带答复——本工具执行即以之作为工具结果回给模型，访谈继续。
  *

@@ -9,9 +9,9 @@ import { composeAnswer } from "@/lib/chat/qa";
 import { cn } from "@/lib/utils";
 
 /**
- * 问答卡（issue #19 需求环①，CC 式）：BA 每轮一问的呈现与作答面——单选 chip
+ * 问答卡（issue #19 需求环①，CC 式）：主智能体每轮一问的呈现与作答面——单选 chip
  * 点即答、多选勾选后一次提交（提交按钮无勾选禁用）、纯开放题（无选项）靠输入条
- * 自由输入作答。已答（或被新问题取代）转只读终态，勾选状态由父层（指令区）持有
+ * 自由输入作答。已答（或被新问题取代）转只读终态，勾选状态由父层（对话区）持有
  * ——输入条 Enter 作答要与已勾选合并。
  */
 export type QuestionCardProps = {

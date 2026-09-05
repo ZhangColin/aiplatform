@@ -78,7 +78,7 @@ export function PrdDoc({
 
 /**
  * markdown 元素样式（GFM：表格 / 删除线 / 任务列表等随 remark-gfm 启用；
- * react-markdown 默认不渲染内嵌 HTML、URL 白名单转换，BA 产物安全呈现）。
+ * react-markdown 默认不渲染内嵌 HTML、URL 白名单转换，主智能体产物安全呈现）。
  * 覆写只解构需要的 props——注入的 node 等不透传 DOM。
  */
 const markdownComponents: Components = {
@@ -112,7 +112,7 @@ const markdownComponents: Components = {
       {children}
     </table>
   ),
-  // 内嵌图片域名不可穷举（BA 产物），next/image 的 remotePatterns 不适用
+  // 内嵌图片域名不可穷举（主智能体产物），next/image 的 remotePatterns 不适用
   img: ({ src, alt }) => (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={src} alt={alt ?? ""} className="max-w-full rounded-lg border" />

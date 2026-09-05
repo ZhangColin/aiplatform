@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class AgentscopeHarnessAgentFactoryTest {
 
     /** 工具集空桩（工厂不解释工具内容——装配归 RoleToolkitSupplier 测试）。 */
-    private static final AgentToolkitSupplier TOOLKITS = (agentRole, workspace) -> new Toolkit();
+    private static final AgentToolkitSupplier TOOLKITS = (agentKey, workspace) -> new Toolkit();
 
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
@@ -34,7 +34,7 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, workspace, agentRole) -> {
+                (name, sysPrompt, modelString, workspace, agentKey) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -112,7 +112,7 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "BA");
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "main");
         HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER");
 

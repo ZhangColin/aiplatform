@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 派发编排配置（前缀 app.dispatch，#51）：入口三分类的分类模型档专用键——
- * 分类是每条指令区消息必经的轻调用，缺省落在 flash 档由代码保证，不吃
+ * 分类是每条对话区消息必经的轻调用，缺省落在 flash 档由代码保证，不吃
  * {@code app.agentscope.default-model} 的缺省（部署把缺省配成重档则每条消息
  * 烧一次重模型），不依赖部署记性。
  */

@@ -15,13 +15,13 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 工作区文件内容只读工具（助理职能体资产，#47）：读一个交付文件的文本内容——
+ * 工作区文件内容只读工具（主智能体答询资产，#47 → #86 并轨）：读一个交付文件的文本内容——
  * 与文件模式「点看」端点同一口径（{@link ProjectFiles#isViewable} 判定 +
  * {@link ProjectFiles#contentCommand} 容器侧限读：非交付物/机密/逃逸路径一律
  * 拒绝，超 1 MiB 不读取）。输出另设模型上下文护栏（超长截断明示）。
  *
  * <p>纯读：无任何写面，工具面 readOnly；仅随项目只读工作区注册
- * （{@link RoleToolkitSupplier}）。执行体阻塞（docker exec），框架 ToolExecutor
+ * （{@link ProfileToolkitSupplier}）。执行体阻塞（docker exec），框架 ToolExecutor
  * 缺省 boundedElastic 调度，阻塞安全。</p>
  */
 public class ReadWorkspaceFileTool extends ToolBase {

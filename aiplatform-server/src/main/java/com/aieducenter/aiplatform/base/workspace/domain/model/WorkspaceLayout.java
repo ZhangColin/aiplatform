@@ -4,30 +4,30 @@ import java.util.List;
 
 /**
  * 工作区布局常量表（ADR 0001 / #12 调研收口，#15 定盘）：单容器 all-in-one 之下
- * 编码智能体与平台对工作区的全部物理约定收拢于此，四条约定——
+ * run 执行体与平台对工作区的全部物理约定收拢于此，四条约定——
  *
  * <ol>
  *   <li><b>根路径</b>：容器内唯一持久根 {@link #ROOT}（{@code -v 卷:ROOT -w ROOT}），
- *       供给、编码智能体文件面、平台读侧同锚，不散落第二根</li>
+ *       供给、run 执行体文件面、平台读侧同锚，不散落第二根</li>
  *   <li><b>布局</b>：根下五类落位——AGENTS.md（平台约定，内容归生成环资产）、
  *       {@code docs/}（PRD 等文档）、应用代码占根、{@code data/pg/}（pg 数据，
  *       PGDATA 进卷）、{@code .platform/{skills,rules,logs}}（平台产物）</li>
  *   <li><b>.env 唯一注入通道</b>：平台生成的连接串只经 {@link #ENV_FILE} 进工作区，
- *       编码智能体与应用从环境读，不经其他注入面</li>
+ *       run 执行体与应用从环境读，不经其他注入面</li>
  *   <li><b>可重建性断言</b>：全部持久物（代码、文档、数据、平台产物）都在卷内——
  *       容器无状态，可随时销毁重建，{@code init-workspace.sh} 对既有卷幂等自愈；
  *       会话状态不落工作区（平台侧唯一落 {@code cat_agent_state} 库）</li>
  * </ol>
  *
  * <p>约定取「根与约定」不建文件面网关（#12）：本表只是常量的正本，通路仍是各
- * 消费方原生物理面（编码智能体经 docker exec 读写即容器文件面）。条目一律工作区
+ * 消费方原生物理面（run 执行体经 docker exec 读写即容器文件面）。条目一律工作区
  * 锚定形（相对根），容器绝对形态经 {@link #absolute}
  * 派生；物理落位断言见 DockerEnvironmentBackendTest。跨上下文消费（agentscope /
  * business.project）直连本 domain 常量是显式例外——纯常量契约不值得上应用层网关。</p>
  */
 public final class WorkspaceLayout {
 
-    /** 约定一：容器内工作区根（唯一持久锚点，docker -v/-w 与编码智能体/平台文件面的同源事实）。 */
+    /** 约定一：容器内工作区根（唯一持久锚点，docker -v/-w 与 run 执行体/平台文件面的同源事实）。 */
     public static final String ROOT = "/workspace";
 
     /** 约定二：平台约定文件（生成环注入内容，v1 由 system prompt 承载、文件面随资产就位）。 */

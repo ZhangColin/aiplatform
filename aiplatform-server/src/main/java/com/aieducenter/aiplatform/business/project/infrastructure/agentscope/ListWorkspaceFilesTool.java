@@ -14,11 +14,12 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 工作区文件树只读工具（助理职能体资产，#47）：交付文件视图的清单——与文件模式
- * 端点同一口径（{@link ProjectFiles#listCommand}：源头剪枝非交付物，机密与巨树
- * 不进清单）。纯读：docker exec 只跑 find，无任何写面；工具面 readOnly。
+ * 工作区文件树只读工具（主智能体答询资产，#47 → #86 并轨）：交付文件视图的
+ * 清单——与文件模式端点同一口径（{@link ProjectFiles#listCommand}：源头剪枝
+ * 非交付物，机密与巨树不进清单）。纯读：docker exec 只跑 find，无任何写面；
+ * 工具面 readOnly。
  *
- * <p>仅随项目只读工作区注册（{@link RoleToolkitSupplier}——ASSISTANT 角色不含
+ * <p>仅随项目只读工作区注册（{@link ProfileToolkitSupplier}——只读形态已关
  * 内核文件/shell 工具，本工具即其文件面）。执行体阻塞（docker exec），框架
  * ToolExecutor 缺省 boundedElastic 调度，阻塞安全。</p>
  */

@@ -8,7 +8,7 @@ import type { ChatState, ChatMessage } from "@/lib/store/chat";
 import { CommandArea } from "./command-area";
 
 /**
- * 指令区发送路由的状态机（#19 验收口径）：有待答问题时 Enter = 当前问题的答复
+ * 对话区发送路由的状态机（#19 验收口径）：有待答问题时 Enter = 当前问题的答复
  * （POST questions/{qid}/answer，可与已勾选合并）；无待答问题时 Enter = 新发言
  * （POST messages）；空输入不触发。SSR 断言不挂事件，此文件是本仓「客户端交互
  * 逐文件 happy-dom」例外（vitest.config 注）。#20 增：修订胶囊点击 = 认领
@@ -102,7 +102,7 @@ describe("CommandArea · Enter 发送路由（#19 状态机）", () => {
   });
 
   it("无待答问题：Enter 走发言端点；Shift+Enter 不提交；空输入不触发", () => {
-    seedChat([{ kind: "agent", id: "b1", text: "开场", label: "需求分析师" }]);
+    seedChat([{ kind: "agent", id: "b1", text: "开场", }]);
     render(<CommandArea projectId="p1" />);
 
     fireEvent.change(inputOf(), { target: { value: "加个会员功能" } });

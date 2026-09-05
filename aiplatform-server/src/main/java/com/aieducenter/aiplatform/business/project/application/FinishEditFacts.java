@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 /**
- * finish_edit 结束工具的调用事实登记（#46）：编码智能体对「要不要动系统」的判定
+ * finish_edit 结束工具的调用事实登记（#46）：执行体对「要不要动系统」的判定
  * 从工具调用事实观测（不解析自由文本）——工具执行体落事实于此，修正轨道收口
  * （{@link IterationAppService}）读取判定。进程内事实（run 无表口径）：重启即清，
  * 与轨道在途标记同取舍；key = 工作区（一个项目一个编码会话，事实即项目当下最新

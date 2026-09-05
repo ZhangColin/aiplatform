@@ -41,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
  * 应用运行时 + pg/redis 中间件同容器，预览端口映射置备时落定——应用服务由编码
- * 智能体按约定自起（#44），平台不代起静态兜底（#45）；编码智能体经平台进程内
+ * 智能体按约定自起（#44），平台不代起静态兜底（#45）；run 执行体经平台进程内
  * AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。{@code /workspace}
  * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
  * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}），容器无状态、销毁重建不丢数据。
@@ -150,7 +150,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     @Override
     public URI exposePort(WorkspaceHandle handle, int containerPort) {
         // 渐进预览（#45）：端口映射在置备时已落定，URL 确定；这里只做探活——
-        // 编码智能体按约定自己把应用跑在容器端口（#44 尽早起服），平台不再代起
+        // run 执行体按约定自己把应用跑在容器端口（#44 尽早起服），平台不再代起
         // 静态兜底服务（用户会看到工作区文件列表的中间态，已出局）。探活通过才
         // 返回 URL（调用方以此作「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，
         // 前端轮询续探），不做长阻塞等待。

@@ -313,7 +313,7 @@ class DockerExecFilesystemTest {
         assertThat(exec.ran("cat > '/workspace/docs/it'\\''s.md'")).isTrue();
     }
 
-    // ---------- shell 执行面（sandbox 接口，编码智能体命令通道） ----------
+    // ---------- shell 执行面（sandbox 接口，run 执行体命令通道） ----------
 
     @Test
     void given_shell_command_when_executed_then_passthrough_with_merged_streams() {

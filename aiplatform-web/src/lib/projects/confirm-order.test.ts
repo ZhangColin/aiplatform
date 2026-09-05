@@ -19,13 +19,13 @@ describe("confirmOrderVisible · 确认下单可见性（#26 迭代环①）", (
     expect(confirmOrderVisible({ generatedAt: "2026-08-31T08:00:00Z" })).toBe(true);
   });
 
-  it("已归档（支付完成终态）：不可见——指令区已关闭", () => {
+  it("已归档（支付完成终态）：不可见——对话区已关闭", () => {
     expect(
       confirmOrderVisible({ generatedAt: "2026-09-01T00:00:00Z", archived: true }),
     ).toBe(false);
   });
 
-  it("存在未终结订单：不可见（订单期间指令区转订单状态视图，交易环①口径）", () => {
+  it("存在未终结订单：不可见（订单期间对话区转订单状态视图，交易环①口径）", () => {
     expect(
       confirmOrderVisible({
         generatedAt: "2026-09-01T00:00:00Z",

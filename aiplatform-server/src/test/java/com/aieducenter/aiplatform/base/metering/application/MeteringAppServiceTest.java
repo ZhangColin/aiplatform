@@ -74,7 +74,7 @@ class MeteringAppServiceTest {
     @Test
     void given_same_event_id_when_report_twice_then_counted_once_no_error() {
         UsageEvent event = event("evt-dup", PROJ_1, T1, "deepseek", "deepseek-v4-pro",
-                agentDims(PROJ_1, "ba", "ba-1"), new TokenUsage(100, 50, 0, 0, 0));
+                agentDims(PROJ_1, "main", "main-1"), new TokenUsage(100, 50, 0, 0, 0));
 
         usageEventSink.report(event);
         usageEventSink.report(event);   // 幂等：静默吸收，不抛错
@@ -117,11 +117,11 @@ class MeteringAppServiceTest {
         // 分维度（终态 dims 口径 projectId + agentKind + sessionId）：事件内每个
         // (key, value) 各成一桶，键值序稳定
         assertThat(summary.byDims()).containsExactly(
-                new UsageSummary.DimUsage("agentKind", "ba", new TokenUsage(10, 5, 0, 0, 0)),
                 new UsageSummary.DimUsage("agentKind", "coder", new TokenUsage(1101, 52, 23, 4, 5)),
+                new UsageSummary.DimUsage("agentKind", "main", new TokenUsage(10, 5, 0, 0, 0)),
                 new UsageSummary.DimUsage("projectId", PROJ_1, new TokenUsage(1111, 57, 23, 4, 5)),
-                new UsageSummary.DimUsage("sessionId", "ba-1", new TokenUsage(10, 5, 0, 0, 0)),
-                new UsageSummary.DimUsage("sessionId", "coder-1", new TokenUsage(1101, 52, 23, 4, 5)));
+                new UsageSummary.DimUsage("sessionId", "coder-1", new TokenUsage(1101, 52, 23, 4, 5)),
+                new UsageSummary.DimUsage("sessionId", "main-1", new TokenUsage(10, 5, 0, 0, 0)));
     }
 
     @Test
@@ -185,9 +185,9 @@ class MeteringAppServiceTest {
         // A：deepseek pro，编码 run（终态 dims 三键）
         usageEventSink.report(event("evt-a", PROJ_1, T1, "deepseek", "deepseek-v4-pro",
                 agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(100, 50, 20, 0, 0)));
-        // B：deepseek flash，BA 会话
+        // B：deepseek flash，主智能体会话
         usageEventSink.report(event("evt-b", PROJ_1, T2, "deepseek", "deepseek-v4-flash",
-                agentDims(PROJ_1, "ba", "ba-1"), new TokenUsage(10, 5, 0, 0, 0)));
+                agentDims(PROJ_1, "main", "main-1"), new TokenUsage(10, 5, 0, 0, 0)));
         // C：anthropic，编码 run（五档全非零）
         usageEventSink.report(event("evt-c", PROJ_1, T3, "anthropic", "claude-fable-5",
                 agentDims(PROJ_1, "coder", "coder-1"), new TokenUsage(1, 2, 3, 4, 5)));

@@ -156,21 +156,21 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
     expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(1);
   });
 
-  it("无锚 + BA/助理会话的部件：不建工作消息（对话面走 text 增量气泡，部件并行不双渲染）", () => {
+  it("无锚 + 主智能体会话的部件：不建工作消息（对话面走 text 增量气泡，部件并行不双渲染）", () => {
     const { notePart } = useWorkMessageStore.getState();
-    notePart("p1", ref({ eventId: "b1:2", sessionId: "ba-p1", runId: "rb" }), { kind: "text", text: "BA 解说" });
-    notePart("p1", ref({ eventId: "b2:2", sessionId: "assist-p1", runId: "ra" }), { kind: "text", text: "助理作答" });
+    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), { kind: "text", text: "对话轮解说" });
+    notePart("p1", ref({ eventId: "b2:2", sessionId: "main-p1", runId: "ra" }), { kind: "text", text: "答询作答" });
     notePart("p1", ref({ eventId: "b3:2", sessionId: undefined, runId: "rn" }), { kind: "text", text: "无会话" });
 
     expect(work()).toBeUndefined();
   });
 
-  it("有锚 + 异 runId 的 BA 部件：锚定消息不受扰（不重开不进件）", () => {
+  it("有锚 + 异 runId 的对话部件：锚定消息不受扰（不重开不进件）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1", 0);
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "编码解说" });
 
-    notePart("p1", ref({ eventId: "b1:2", sessionId: "ba-p1", runId: "rb" }), { kind: "text", text: "BA 插话" });
+    notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), { kind: "text", text: "对话轮插话" });
 
     expect(work()?.runId).toBe("r1");
     expect(work()?.parts).toHaveLength(1);
@@ -235,7 +235,7 @@ describe("work-message store · 重放幂等与定格", () => {
     expect(work()?.parts).toHaveLength(1);
   });
 
-  it("freezeWork 非锚定 run（BA 收口）忽略", () => {
+  it("freezeWork 非锚定 run（对话轮收口）忽略", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1", 0);
 
@@ -355,7 +355,7 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     expect(work()?.frozen).toBe(true);
   });
 
-  it("定格后自检事件不进（重放/迟到防御）；未锚定 BA 会话的 part-check 不建工作消息", () => {
+  it("定格后自检事件不进（重放/迟到防御）；未锚定对话会话的 part-check 不建工作消息", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1", 0);
     freezeWork("p1", "r1", 5_000);
@@ -363,8 +363,8 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "checking" });
     expect(work()?.parts).toEqual([]);
 
-    // 部件全事件流恒挂但只锚编码 run：BA 会话的 part-check 不补建工作消息
-    notePart("p1", ref({ eventId: "rb:3", runId: "rb", sessionId: "ba-p1" }), {
+    // 部件全事件流恒挂但只锚编码 run：对话会话的 part-check 不补建工作消息
+    notePart("p1", ref({ eventId: "rb:3", runId: "rb", sessionId: "main-p1" }), {
       kind: "check",
       state: "checking",
     });

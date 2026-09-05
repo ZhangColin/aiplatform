@@ -21,7 +21,7 @@ import io.agentscope.harness.agent.filesystem.model.WriteResult;
 /**
  * 工作区桥真实验收（#45：副作用以真实状态为准，B0 §5 口径）：真 dev 工作区 +
  * {@link DockerExecFilesystem} 全链——对话智能体写 docs/PRD.md → 容器内可见 →
- * 源码包（packSource 同一打包口径）含该文件（BA 写 PRD 的基础）。daemon 不在
+ * 源码包（packSource 同一打包口径）含该文件（主智能体写 PRD 的基础）。daemon 不在
  * 则跳过（CI 无 docker 时不红）。
  */
 class AgentscopeProjectWorkspaceSmokeTest {

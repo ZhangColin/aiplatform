@@ -17,16 +17,17 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 生成编排（#22 片2-1）：「开始做系统」→ 编码智能体 run。编码智能体与 BA 同构
+ * 生成编排（#22 片2-1）：「开始做系统」→ 编码 run。run 执行体与主智能体同构
  * （AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝极薄），
- * 仅资产与工具不同：会话 {@code coder-{projectId}}、角色卡 = 平台技术约定 +
- * 实现协议（{@link RolePreset#CODER}）、无业务工具（编码工具由 harness 内核自带）。
+ * 仅资产与工具不同：会话 {@code coder-{projectId}}、配置 = 平台技术约定 +
+ * 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
+ * 内核自带）。
  *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
@@ -40,8 +41,8 @@ import lombok.extern.slf4j.Slf4j;
  * 会话（注入块已在会话历史），不重检索不重注入。</p>
  *
  * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
- * （幂等覆写，内容平台所有）——编码智能体经 harness 工作区上下文自读；
- * PRD（docs/PRD.md）由 BA 先前写出，同样是智能体自读，平台不搬运。</p>
+ * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
+ * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
  *
  * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
  * 已落盘成果保留）：中间失败不出用户面事件；超限转终态失败即发 {@code run-failed}
@@ -56,7 +57,7 @@ public class GenerationAppService {
 
     /**
      * 生成任务 prompt（首试下发）：读 PRD 自主实现 + 先起服后增量长（#44 渐进
-     * 预览前提，与角色卡/工作区约定同口径）+ 收口判据（8081 可访问）。
+     * 预览前提，与配置/工作区约定同口径）+ 收口判据（8081 可访问）。
      */
     static final String GENERATE_RUN_PROMPT =
             "开始做系统：请完整阅读工作区 docs/PRD.md（需求正本，「功能清单」是实现的"
@@ -72,7 +73,7 @@ public class GenerationAppService {
 
     /**
      * AGENTS.md 平台约定正文（工作区布局资产，#22 就位）：工作区物理约定的正本
-     * ——harness 工作区上下文自动注入编码智能体，也是后续迭代 run / 引擎资产的
+     * ——harness 工作区上下文自动注入 run 执行体，也是后续迭代 run / 引擎资产的
      * 演进载体。内容平台所有（无用户可控片段），幂等覆写。
      */
     static final String AGENTS_MD_CONTENT = """
@@ -91,8 +92,8 @@ public class GenerationAppService {
             """;
 
     /**
-     * 收口判据核验探针（#35）：converse 无异常不构成成功——编码智能体可能道歉式
-     * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 CODER systemPrompt
+     * 收口判据核验探针（#35）：converse 无异常不构成成功——run 执行体可能道歉式
+     * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 EXECUTOR systemPrompt
      * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
      * 端口有 HTTP 应答（连接拒绝即非 0）。
      */
@@ -220,7 +221,7 @@ public class GenerationAppService {
     }
 
     /**
-     * 可生成守卫：存在 / 未归档 / 未生成过（已生成项目的调整走指令区意见，迭代环）/
+     * 可生成守卫：存在 / 未归档 / 未生成过（已生成项目的调整走对话区意见，迭代环）/
      * PRD 已产出（「无门」指待定项不设门；编码 run 的任务就是读 PRD，无 PRD 起跑
      * 只会空烧重试——守的是动作成立的前置事实，不是流程门）。
      */

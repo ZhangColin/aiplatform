@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 建项目落库失败的回滚面（照片1b workspace 的兜底形态）：库记录失败时回收
- * 已落定的工作区物理资源，不留孤儿容器；失败原样抛出，不发 SSE、不跑 BA。
+ * 已落定的工作区物理资源，不留孤儿容器；失败原样抛出，不发 SSE、不开主智能体对话。
  */
 @SpringBootTest
 class ProjectLifecycleCreateRollbackTest {
@@ -34,7 +34,7 @@ class ProjectLifecycleCreateRollbackTest {
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @MockitoBean
-    private BaInterviewAppService baInterviewAppService;
+    private MainAgentAppService mainAgentAppService;
 
     @MockitoBean
     private EventsAppService eventsAppService;
@@ -54,10 +54,10 @@ class ProjectLifecycleCreateRollbackTest {
                 new CreateProjectCommand("做一个官网")))
                 .isInstanceOf(IllegalStateException.class);
 
-        // 落库失败 → 回收已落定的工作区；不发射任何 SSE、不开 BA 访谈、不取名
+        // 落库失败 → 回收已落定的工作区；不发射任何 SSE、不开主智能体对话、不取名
         verify(workspaceLifecycleAppService).destroy("9300");
         verifyNoInteractions(eventsAppService);
-        verifyNoInteractions(baInterviewAppService);
+        verifyNoInteractions(mainAgentAppService);
         verify(eventsAppService, never()).publishNotification(any(), any());
     }
 }

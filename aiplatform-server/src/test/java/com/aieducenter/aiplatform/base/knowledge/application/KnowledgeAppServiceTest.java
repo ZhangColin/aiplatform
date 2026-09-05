@@ -53,8 +53,8 @@ class KnowledgeAppServiceTest {
 
     @Test
     void given_new_spec_when_index_then_chunks_written_with_seq_and_meta() {
-        KnowledgeSpec spec = spec("ARTIFACT", "proj-a:BA:PRD.md", PROJ_A, "电商系统", "PRD.md",
-                List.of("第一段需求", "第二段需求"), Map.of("stage", "BA"));
+        KnowledgeSpec spec = spec("ARTIFACT", "proj-a:MAIN:PRD.md", PROJ_A, "电商系统", "PRD.md",
+                List.of("第一段需求", "第二段需求"), Map.of("stage", "MAIN"));
         when(embeddingClient.embed(spec.chunks())).thenReturn(List.of(hot(0), hot(1)));
 
         knowledgePort.index(spec);
@@ -66,7 +66,7 @@ class KnowledgeAppServiceTest {
                 "SELECT chunk FROM knw_chunks WHERE seq = 1", String.class)).isEqualTo("第二段需求");
         // 元数据透传（底座不解释，原样可取）+ 向量落位
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT meta->>'stage' FROM knw_chunks WHERE seq = 0", String.class)).isEqualTo("BA");
+                "SELECT meta->>'stage' FROM knw_chunks WHERE seq = 0", String.class)).isEqualTo("MAIN");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT embedding IS NOT NULL FROM knw_chunks WHERE seq = 0", Boolean.class)).isTrue();
         assertThat(jdbcTemplate.queryForObject(
@@ -95,7 +95,7 @@ class KnowledgeAppServiceTest {
 
     @Test
     void given_different_source_ref_when_index_then_coexist() {
-        KnowledgeSpec artifact = spec("ARTIFACT", "proj-a:BA:PRD.md", PROJ_A, "电商系统", "PRD.md",
+        KnowledgeSpec artifact = spec("ARTIFACT", "proj-a:MAIN:PRD.md", PROJ_A, "电商系统", "PRD.md",
                 List.of("需求"), null);
         KnowledgeSpec bug = spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("缺陷"), null);
         when(embeddingClient.embed(artifact.chunks())).thenReturn(List.of(hot(0)));
@@ -151,7 +151,7 @@ class KnowledgeAppServiceTest {
         // 全局跨项目纯相似（A5 §3）：query 与 proj-a 块同向、与 proj-b 块半同向
         float[] query = vector(1, 1);
         when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(query));
-        indexDirect(spec("ARTIFACT", "proj-a:BA:PRD.md", PROJ_A, "电商系统", "PRD.md",
+        indexDirect(spec("ARTIFACT", "proj-a:MAIN:PRD.md", PROJ_A, "电商系统", "PRD.md",
                 List.of("密码加密方案"), null), vector(1, 1));
         indexDirect(spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("登录超时缺陷"), null),
                 vector(1, 0.5f));
@@ -167,7 +167,7 @@ class KnowledgeAppServiceTest {
     @Test
     void given_top_k_one_when_retrieve_then_single_best_hit() {
         when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
-        indexDirect(spec("ARTIFACT", "proj-a:BA:PRD.md", PROJ_A, "电商系统", "PRD.md",
+        indexDirect(spec("ARTIFACT", "proj-a:MAIN:PRD.md", PROJ_A, "电商系统", "PRD.md",
                 List.of("密码加密方案"), null), vector(1, 1));
         indexDirect(spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("登录超时缺陷"), null),
                 vector(1, 0.5f));
@@ -185,7 +185,7 @@ class KnowledgeAppServiceTest {
 
     @Test
     void given_project_chunks_when_purge_by_project_then_only_that_project_removed() {
-        indexDirect(spec("ARTIFACT", "proj-a:BA:PRD.md", PROJ_A, "电商系统", "PRD.md",
+        indexDirect(spec("ARTIFACT", "proj-a:MAIN:PRD.md", PROJ_A, "电商系统", "PRD.md",
                 List.of("需求"), null), hot(0));
         indexDirect(spec("BUG", "bug-9", PROJ_B, "物流系统", "登录超时", List.of("缺陷"), null), hot(1));
 

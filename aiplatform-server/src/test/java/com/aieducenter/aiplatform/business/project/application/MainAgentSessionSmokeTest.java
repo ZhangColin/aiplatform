@@ -36,22 +36,22 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * BA 访谈循环真模型冒烟（DEEPSEEK_API_KEY 未设或 docker daemon 不在整类跳过）：
+ * 主智能体访谈循环真模型冒烟（DEEPSEEK_API_KEY 未设或 docker daemon 不在整类跳过）：
  * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
  * （无订阅者的广播口）一处 mock 收口观测。
  *
  * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
  * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
- * （BA 停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
+ * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
  * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=ba）。</p>
  */
 @SpringBootTest
-class BaInterviewSmokeTest {
+class MainAgentSessionSmokeTest {
 
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(150);
 
     @Autowired
-    private BaInterviewAppService appService;
+    private MainAgentAppService appService;
 
     @Autowired
     private ProjectQueryAppService queryAppService;
@@ -96,7 +96,7 @@ class BaInterviewSmokeTest {
         Assumptions.assumeTrue(
                 System.getenv("DEEPSEEK_API_KEY") != null
                         && !System.getenv("DEEPSEEK_API_KEY").isBlank(),
-                "DEEPSEEK_API_KEY 未设置，跳过真模型 BA 访谈冒烟");
+                "DEEPSEEK_API_KEY 未设置，跳过真模型主智能体访谈冒烟");
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
     }
 
@@ -138,10 +138,10 @@ class BaInterviewSmokeTest {
         Project project = projectRepository.save(Project.create("冒烟官网", null,
                 Long.parseLong(workspaceId), null));
         projectId = project.getId();
-        sessionId = BaInterviewAppService.SESSION_PREFIX + projectId;
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
 
-        // 1) 一句话开场 → BA 至少一轮实质提问（QUESTION，前端问答卡形状经 JSON 往返）
-        BaInterviewAppService.InterviewRun first = appService.runInterviewTurn(projectId,
+        // 1) 一句话开场 → 主智能体至少一轮实质提问（QUESTION，前端问答卡形状经 JSON 往返）
+        MainAgentAppService.MainAgentRun first = appService.runOpinionTurn(projectId,
                 "做一个企业官网");
         Frame question1 = awaitQuestionOf(first.runId());
         Map<String, Object> body1 = questionBody(question1);
@@ -181,16 +181,23 @@ class BaInterviewSmokeTest {
         assertNoAnswerKeyInToolUseInputs();
 
         // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
-        //    （PRD 读端点直读工作区文件——编码智能体同视图）
+        //    （PRD 读端点直读工作区文件——run 执行体同视图）
         awaitPrdProduced(1);
         assertThat(prdBitOf(projectId)).isNotNull();
         PrdResponse prd = queryAppService.prd(projectId);
         assertThat(prd.content()).as("PRD 正文（真模型产出）").isNotBlank();
         assertThat(prd.updatedAt()).isNotNull();
 
+        // 4b) 咨询答询（#86 同会话）：问项目情况——同一 main 会话直接作答（零产物），
+        //     随后的修订与回溯仍在同会话连续
+        MainAgentAppService.MainAgentRun inquiry = appService.answerInquiry(project,
+                "现在项目有 PRD 了吗？如有，请用一句话概括它写了什么，不要提问");
+        awaitRunEnd(inquiry.runId());
+        assertThat(textOf(inquiry.runId())).as("咨询应在同会话直接作答").isNotBlank();
+
         // 5) PRD 修订（savePrd 再次执行）：三更新——文件/状态位/事件
         LocalDateTime firstBit = prdBitOf(projectId);
-        BaInterviewAppService.InterviewRun revision = appService.runInterviewTurn(projectId,
+        MainAgentAppService.MainAgentRun revision = appService.runOpinionTurn(projectId,
                 "需求有更新：官网要增加一个博客板块，请修订并重新保存 PRD");
         awaitRunEnd(revision.runId());
         awaitPrdProduced(2);
@@ -198,12 +205,12 @@ class BaInterviewSmokeTest {
         assertThat(queryAppService.prd(projectId).content()).isNotBlank();
 
         // 6) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
-        BaInterviewAppService.InterviewRun recall = appService.runInterviewTurn(projectId,
+        MainAgentAppService.MainAgentRun recall = appService.runOpinionTurn(projectId,
                 "回顾访谈：我把目标用户答成了什么？只回答「海外企业客户」相关的答案要点，不要再提问");
         awaitRunEnd(recall.runId());
         assertThat(textOf(recall.runId())).contains("海外");
 
-        // 7) 计量：BA 对话用量落 UsageEvent（dims 终态口径：agentKind=ba、归属项目）
+        // 7) 计量：主智能体对话用量落 UsageEvent（dims 终态口径：agentKind=main、归属项目）
         Integer usageRows = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM met_usage_events WHERE session_id = ?", Integer.class,
                 sessionId);
@@ -212,7 +219,7 @@ class BaInterviewSmokeTest {
                 "SELECT subject, dims->>'agentKind' AS agent_kind FROM met_usage_events"
                         + " WHERE session_id = ? LIMIT 1", sessionId);
         assertThat(String.valueOf(usage.get("subject"))).isEqualTo(projectId.toString());
-        assertThat(String.valueOf(usage.get("agent_kind"))).isEqualTo("ba");
+        assertThat(String.valueOf(usage.get("agent_kind"))).isEqualTo("main");
     }
 
     // ---------- 内部 ----------
@@ -250,7 +257,7 @@ class BaInterviewSmokeTest {
                 LocalDateTime.class, projectId);
     }
 
-    /** BA 会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */
+    /** 主智能体会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */
     private String sessionStateJson() {
         return jdbcTemplate.queryForObject(
                 "SELECT state_data FROM cat_agent_state WHERE session_id = ?",

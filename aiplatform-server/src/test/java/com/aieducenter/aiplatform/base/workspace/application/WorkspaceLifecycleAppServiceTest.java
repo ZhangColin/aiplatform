@@ -183,7 +183,7 @@ class WorkspaceLifecycleAppServiceTest {
 
         WorkspaceHandle handle = appService.handleOf("106");
 
-        // 置备中句柄可取：确定性命名 + 端口 0（BA 对话只消费 containerName，无需等待）
+        // 置备中句柄可取：确定性命名 + 端口 0（主智能体对话只消费 containerName，无需等待）
         assertThat(handle.containerName()).isEqualTo("ws-106-dev");
         assertThat(handle.networkName()).isEqualTo("net-106");
         assertThat(handle.previewPort()).isZero();

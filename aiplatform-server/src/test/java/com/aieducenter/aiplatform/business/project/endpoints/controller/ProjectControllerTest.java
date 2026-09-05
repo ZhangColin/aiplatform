@@ -27,7 +27,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
-import com.aieducenter.aiplatform.business.project.application.BaInterviewAppService;
+import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
@@ -66,7 +66,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 项目 REST 面（swagger 契约验收）：ApiResponse 信封、建项目响应携带自动 BA
+ * 项目 REST 面（swagger 契约验收）：ApiResponse 信封、建项目响应携带自动开场运行
  * runId、类型 Integer code 双向、PRJ_001 → 404、参数校验；归档/用量/源码包/
  * 列表过滤的契约面。
  */
@@ -86,7 +86,7 @@ class ProjectControllerTest {
     private ProjectQueryAppService queryAppService;
 
     @MockitoBean
-    private BaInterviewAppService baInterviewAppService;
+    private MainAgentAppService mainAgentAppService;
 
     @MockitoBean
     private DispatchAppService dispatchAppService;
@@ -278,7 +278,7 @@ class ProjectControllerTest {
         performAsUser(post("/api/projects/100/generate"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409))
-                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先和需求分析师聊出 PRD 再开始做系统"));
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD 再开始做系统"));
     }
 
     @Test
@@ -304,7 +304,7 @@ class ProjectControllerTest {
         performAsUser(post("/api/projects/100/fix-runs/restart"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409))
-                .andExpect(jsonPath("$.message").value("没有可恢复的修正，请在指令区重新提意见"));
+                .andExpect(jsonPath("$.message").value("没有可恢复的修正，请在对话区重新提意见"));
     }
 
     @Test
@@ -368,7 +368,7 @@ class ProjectControllerTest {
                         TokenKind.INPUT, TokenKind.INPUT.getName())),
                 List.of(new ProjectUsageResponse.ModelUsage("deepseek", "deepseek-v4-pro",
                         tokens)),
-                List.of(new ProjectUsageResponse.AgentKindUsage("coder", "编码智能体",
+                List.of(new ProjectUsageResponse.AgentKindUsage("executor", "run 执行体",
                         tokens))));
 
         performAsUser(get("/api/projects/100/usage"))
@@ -381,8 +381,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.unpriced[0].tokenKind").value(1))
                 .andExpect(jsonPath("$.data.unpriced[0].tokenKindName").value("输入"))
                 .andExpect(jsonPath("$.data.byModel[0].model").value("deepseek-v4-pro"))
-                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("coder"))
-                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindLabel").value("编码智能体"));
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("executor"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindLabel").value("run 执行体"));
     }
 
     @Test
@@ -595,7 +595,7 @@ class ProjectControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        verify(baInterviewAppService).answerQuestion(100L, "run-9", "reply-7",
+        verify(mainAgentAppService).answerQuestion(100L, "run-9", "reply-7",
                 List.of(Map.of("id", "tc-1", "name", "ask_user",
                         "input", Map.of("question", "目标用户是谁？"))),
                 "海外企业客户");
@@ -643,13 +643,13 @@ class ProjectControllerTest {
                                 {"runId":"run-9","toolCalls":[],"answer":"有"}
                                 """))
                 .andExpect(status().isBadRequest());
-        verify(baInterviewAppService, never()).answerQuestion(any(), any(), any(), any(), any());
+        verify(mainAgentAppService, never()).answerQuestion(any(), any(), any(), any(), any());
     }
 
     @Test
     void given_archived_or_unknown_project_when_answer_then_mapped() throws Exception {
         doThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
-                .when(baInterviewAppService).answerQuestion(eq(100L), any(), any(), any(), any());
+                .when(mainAgentAppService).answerQuestion(eq(100L), any(), any(), any(), any());
 
         performAsUser(post("/api/projects/100/questions/reply-7/answer")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -661,7 +661,7 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
 
         doThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND))
-                .when(baInterviewAppService).answerQuestion(eq(404L), any(), any(), any(), any());
+                .when(mainAgentAppService).answerQuestion(eq(404L), any(), any(), any(), any());
         performAsUser(post("/api/projects/404/questions/reply-7/answer")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

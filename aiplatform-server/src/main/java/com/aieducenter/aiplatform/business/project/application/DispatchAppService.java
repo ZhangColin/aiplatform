@@ -17,11 +17,13 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 入口派发编排（#47 三分类）：指令区发言先过全局守卫（存在 / 未归档），再经
- * 智能体边界上的轻量分类调用分岔——意见走 BA（既有意见链，订单冻结 / 挂起问答
- * 守卫在此分岔内拦）、咨询走助理职能体（{@link AssistantAppService}，零产物
- * 短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。对用户
- * 全程隐式（CONTEXT.md「派发」）。
+ * 入口派发编排（#47 三分类，#86 并轨后归一主智能体单会话）：对话区发言先过全局
+ * 守卫（存在 / 未归档），再经智能体边界上的轻量分类调用分岔——意见走主智能体
+ * 意见轮（{@link MainAgentAppService#runOpinionTurn}，订单冻结 / 挂起问答守卫在
+ * 此分岔内拦）、咨询走主智能体答询轮（{@link MainAgentAppService#answerInquiry}，
+ * 零产物短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。
+ * 意见与咨询同一 {@code main-{projectId}} 会话连续（#86）——分岔只是车道语义
+ * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
  * 一次性会话（{@code classify-{runId}}，模型档由专用配置键
@@ -31,11 +33,11 @@ import lombok.extern.slf4j.Slf4j;
  * 拿不到真锚）。</p>
  *
  * <p><b>失败 / 超时兜底 = 按意见</b>（设计 v1 §3.1 的定向取舍）：误进意见链有
- * BA 把关（追问或改 PRD，代价小）；误判为咨询会丢变更（不可接受）。分类调用
- * 异常、超时或输出不可解析一律回落意见链。</p>
+ * 主智能体把关（追问或改 PRD，代价小）；误判为咨询会丢变更（不可接受）。分类
+ * 调用异常、超时或输出不可解析一律回落意见链。</p>
  *
  * <p><b>兜底类零产物</b>：轻量引导回复为平台定型文案（代码承载，非 LLM 产），
- * 经 {@code guide-reply} 事件直达指令区；下单意图归兜底的引导分岔——指引
+ * 经 {@code guide-reply} 事件直达对话区；下单意图归兜底的引导分岔——指引
  * 「确认下单」入口（未生成时如实说明入口出现时机）。全程不起 run、不动任何
  * 产物。</p>
  */
@@ -57,7 +59,7 @@ public class DispatchAppService {
      * 兜底的引导分岔——同一终止形态，仅文案不同）；拿不准意见/咨询时判意见。
      */
     private static final String CLASSIFY_SYSTEM_PROMPT =
-            "你是平台项目指令区的入口分类器，把用户发来的消息分类后只输出分类标签本身。"
+            "你是平台项目对话区的入口分类器，把用户发来的消息分类后只输出分类标签本身。"
                     + "分类定义：\n"
                     + "OPINION（意见）：想让平台改点什么——改系统、加功能、调范围、改需求，"
                     + "或推进需求梳理的答复与补充；拿不准是不是要改时也算 OPINION。\n"
@@ -84,43 +86,40 @@ public class DispatchAppService {
     /** 引导回复呈现标签（非智能体角色——平台自己说话）。 */
     static final String GUIDE_LABEL = "平台";
 
-    private final BaInterviewAppService baInterviewAppService;
-    private final AssistantAppService assistantAppService;
+    private final MainAgentAppService mainAgentAppService;
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
     private final DispatchProperties properties;
 
-    public DispatchAppService(BaInterviewAppService baInterviewAppService,
-            AssistantAppService assistantAppService, AgentEventBridge eventBridge,
+    public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, DispatchProperties properties) {
-        this.baInterviewAppService = baInterviewAppService;
-        this.assistantAppService = assistantAppService;
+        this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.properties = properties;
     }
 
     /**
-     * 派发一条指令区输入（REST 路径同步入口）：全局守卫（存在 / 未归档——归档即
-     * 指令区关闭，咨询与兜底也停）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
-     * 挂起问答（PRJ_024）只拦意见链：意见分岔（BA 轮）自带守卫在分类后拦——
-     * 咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类调用，
-     * 秒级轻调用，接受）。响应携带所派 run 的标识（意见 = BA 轮 / 咨询 = 助理轮 /
-     * 兜底 = 引导事件锚）。
+     * 派发一条对话区输入（REST 路径同步入口）：全局守卫（存在 / 未归档——归档即
+     * 对话区关闭，咨询与兜底也停）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
+     * 挂起问答（PRJ_024）只拦意见链：意见分岔（主智能体意见轮）自带守卫在分类后
+     * 拦——咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类
+     * 调用，秒级轻调用，接受）。响应携带所派 run 的标识（意见 = 意见轮 / 咨询 =
+     * 答询轮 / 兜底 = 引导事件锚）。
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（指令区
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区
      *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）
      */
     public DispatchRun dispatch(Long projectId, String prompt) {
-        Project project = baInterviewAppService.requireDispatchableProject(projectId);
+        Project project = mainAgentAppService.requireDispatchableProject(projectId);
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {
             case OPINION -> new DispatchRun(
-                    baInterviewAppService.runInterviewTurn(projectId, prompt).runId());
+                    mainAgentAppService.runOpinionTurn(projectId, prompt).runId());
             case INQUIRY -> new DispatchRun(
-                    assistantAppService.answer(project, prompt).runId());
+                    mainAgentAppService.answerInquiry(project, prompt).runId());
             case FALLBACK -> guideReply(project, prompt, classified.orderIntent());
         };
     }
@@ -129,7 +128,7 @@ public class DispatchAppService {
     public record DispatchRun(String runId) {
     }
 
-    /** 指令区消息三分类（CONTEXT.md「派发」；下单意图是兜底的引导分岔信号）。 */
+    /** 对话区消息三分类（CONTEXT.md「派发」；下单意图是兜底的引导分岔信号）。 */
     enum MessageClass {
         OPINION, INQUIRY, FALLBACK
     }
@@ -219,7 +218,7 @@ public class DispatchAppService {
             return null;
         }
         if (distinct > 1) {
-            return Classification.OPINION_FALLBACK; // 歧义兜底：宁进意见链（有 BA 把关）
+            return Classification.OPINION_FALLBACK; // 歧义兜底：宁进意见链（有主智能体把关）
         }
         if (orderIntent) {
             return new Classification(MessageClass.FALLBACK, true);

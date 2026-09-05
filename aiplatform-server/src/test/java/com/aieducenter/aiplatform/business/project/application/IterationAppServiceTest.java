@@ -53,7 +53,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
-import com.aieducenter.aiplatform.business.project.domain.model.RolePreset;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -158,7 +158,7 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         AgentCommand value = command.getValue();
-        // 修正 run 全要素：复用 coder 会话与同工作区（编码智能体带建系统上下文继续）+
+        // 修正 run 全要素：复用 coder 会话与同工作区（run 执行体带建系统上下文继续）+
         // CODER 角色卡 + owner + 计量 dims + 流关联（与生成同机制）
         assertThat(value.runId()).isEqualTo(dispatch.runId());
         assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
@@ -166,11 +166,11 @@ class IterationAppServiceTest {
         assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(value.workspaceId()).isEqualTo("9900");
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(value.systemPrompt()).isEqualTo(RolePreset.CODER.systemPrompt());
+        assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
-                UsageDims.kindOf(RolePreset.CODER), "coder-" + projectId));
+                UsageDims.kindOf(AgentProfile.EXECUTOR), "coder-" + projectId));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
-        assertThat(value.agentRole()).isEqualTo("CODER"); // run-start 携角色键（前端编码 run 判定锚）
+        assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（前端编码 run 判定锚）
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), any());
     }
 
@@ -625,7 +625,7 @@ class IterationAppServiceTest {
         verify(eventsAppService, never()).publishAgentEvent(eq("fix-unchanged"), any());
     }
 
-    // ---------- 交接物三要素（#52：BA 判定结果入修正 run prompt） ----------
+    // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------
 
     @Test
     void given_prd_revised_when_fix_then_prompt_carries_summary_and_prd_reference() {
@@ -649,7 +649,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_prd_not_revised_when_fix_then_prompt_states_not_revised_and_dispatch_proceeds() {
-        // BA 流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
+        // 主智能体流不调 savePrd：交接物如实含「本轮无修订」占位口径，修正 run 照派
         Long projectId = persistedGeneratedProject("9920");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -667,7 +667,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_queued_rounds_with_and_without_revision_when_merged_then_prompt_pairs_per_round() {
-        // 灵魂用例（#55 story 14 收严）：多轮排队合并且部分轮 BA 未改 PRD——每条
+        // 灵魂用例（#55 story 14 收严）：多轮排队合并且部分轮未改 PRD——每条
         // 意见与其修订说明仍一一对应（意见二 ↔ 其修订说明、意见三 ↔ 显式占位），
         // 无修订轮不引起后续轮错位；配对由平台拼装锚定，不靠两清单位置对齐
         Long projectId = persistedGeneratedProject("9921");
@@ -683,16 +683,16 @@ class IterationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
                 .contains("1. 意见原文：意见二：加导出"
-                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——为意见二补充了导出功能章节")
+                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——为意见二补充了导出功能章节")
                 .contains("2. 意见原文：意见三：改蓝色"
-                        + "\n   需求侧判定（BA 已收口）：本轮无修订（未触发 PRD 变更）");
+                        + "\n   需求侧判定（主智能体已收口）：本轮无修订（未触发 PRD 变更）");
     }
 
     @Test
     void given_queued_opinions_each_with_revision_when_track_merges_then_prompt_carries_both_rounds() {
-        // 灵魂用例（#53）：意见 A 的 BA 轮已把改 X 落盘（summary=改X）在途排队 +
+        // 灵魂用例（#53）：意见 A 的轮已把改 X 落盘（summary=改X）在途排队 +
         // 意见 B（summary=改Y）排队 → 当前 run 收口续派时，续派 run 的 prompt 同时
-        // 含 X 与 Y 两段判定（各自配对、按派发序）——只带最新一段会让编码智能体
+        // 含 X 与 Y 两段判定（各自配对、按派发序）——只带最新一段会让 run 执行体
         // 不知道 X 也是需求侧新变更、需要同步到系统
         Long projectId = persistedGeneratedProject("9932");
         List<Runnable> tracks = givenTrackQueued();
@@ -708,9 +708,9 @@ class IterationAppServiceTest {
         String continuation = command.getAllValues().get(1).prompt();
         assertThat(continuation)
                 .contains("1. 意见原文：意见A：加导出"
-                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——A轮修订：PRD 新增导出功能章节")
+                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——A轮修订：PRD 新增导出功能章节")
                 .contains("2. 意见原文：意见B：改蓝色"
-                        + "\n   需求侧判定（BA 已收口）：PRD 已修订——B轮修订：主色调约定改为蓝");
+                        + "\n   需求侧判定（主智能体已收口）：PRD 已修订——B轮修订：主色调约定改为蓝");
     }
 
     // ---------- 逐轮配对（#55：merge 纯函数——各轮「意见 → 修订说明」成对串联） ----------

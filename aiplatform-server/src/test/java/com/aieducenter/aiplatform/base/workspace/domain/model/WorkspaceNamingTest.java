@@ -32,4 +32,14 @@ class WorkspaceNamingTest {
         // 容器内应用库名（角色与库同名）：连接串与镜像自愈脚本（WORKSPACE_DB）共用
         assertThat(WorkspaceNaming.databaseName(WorkspaceId.of("42"))).isEqualTo("ws42");
     }
+
+    @Test
+    void given_workspace_id_when_snapshot_name_then_deterministic() {
+        // 快照容器名（#92）：主容器「ws-42-dev」的快照变体「ws-42-snap-{viewId}」，
+        // 前缀供销毁级联按名扫清在途查看会话
+        assertThat(WorkspaceNaming.snapshotContainerName(WorkspaceId.of("42"), "view-7"))
+                .isEqualTo("ws-42-snap-view-7");
+        assertThat(WorkspaceNaming.snapshotContainerPrefix(WorkspaceId.of("42")))
+                .isEqualTo("ws-42-snap-");
+    }
 }

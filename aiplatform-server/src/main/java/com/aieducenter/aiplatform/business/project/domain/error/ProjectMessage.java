@@ -60,7 +60,13 @@ public enum ProjectMessage implements CodeMessage {
     PERMISSION_ANSWER_STALE(409, "PRJ_027", "该确认已失效（运行已收口或平台已重启），请刷新查看最新状态"),
 
     /** 版本详情守卫（#91）：ref 不是成版 commit（含非 hash 形态——用户可控入参不进 shell）。 */
-    VERSION_NOT_FOUND(404, "PRJ_028", "版本不存在");
+    VERSION_NOT_FOUND(404, "PRJ_028", "版本不存在"),
+
+    /** 查看当时并发上限（#92）：同项目并发快照会话数达上限（ADR 0007 建议 ≤2）。 */
+    VERSION_VIEW_LIMIT(409, "PRJ_029", "同时查看的版本过多，请先关闭一个再查看"),
+
+    /** 查看会话关闭守卫（#92）：viewId 不在在途会话内（已关闭/平台重启丢账）。 */
+    VERSION_VIEW_NOT_FOUND(404, "PRJ_030", "该查看会话不存在或已关闭");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

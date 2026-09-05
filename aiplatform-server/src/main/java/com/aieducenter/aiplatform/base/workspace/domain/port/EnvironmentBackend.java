@@ -7,6 +7,7 @@ import com.cartisan.core.stereotype.PortType;
 
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
@@ -16,10 +17,11 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * 不塞业务语义。后端可替换：本地 Docker（Docker CLI 子进程）→ 上云 TKE/远端
  * （配置切换适配器，接口不动）。
  *
- * <p>本片实现四条：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
- * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→卷级联清理）/
- * exec（容器内跑命令取结果）/ exposePort（预览 URL）。snapshot+restore、
- * attachResource 按需随各自切片扩。</p>
+ * <p>本片实现六条：createWorkspace（单容器 all-in-one 沙箱：容器入口脚本自愈起
+ * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→快照→卷
+ * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
+ * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
+ * 用完即销毁）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
  */
 @Port(PortType.CLIENT)
 public interface EnvironmentBackend {
@@ -58,4 +60,28 @@ public interface EnvironmentBackend {
      * 事实，不是环境镜像。
      */
     byte[] packSource(WorkspaceHandle handle);
+
+    /**
+     * 起「查看当时」快照容器（#92，ADR 0007 解路二）：同镜像、同工作区卷挂
+     * {@code :ro}、入口脚本旁路、独立随机预览端口；平台经 exec 确定性驱动——
+     * 复制 PGDATA 到容器本地 → 清 pid → 起 pg → 起 redis → 检出 {@code ref}
+     * 当时代码到容器本地 → 起应用（DATABASE_URL 指容器内 localhost）。数据只落
+     * 副本、卷只读，主容器零扰动；快照应用起服后返回句柄（预览端口映射已落定）。
+     *
+     * @param ref 成版 commit hash（hex，调用方已校验存在性；本层只做命令引用）
+     */
+    SnapshotHandle startSnapshot(WorkspaceHandle mainHandle, String viewId, String ref);
+
+    /**
+     * 销毁快照容器（#92）：{@code docker rm -f}，无销毁协调（副本随容器可写层
+     * 消失，卷内零残留）；幂等——容器已不在时为 no-op。
+     */
+    void stopSnapshot(SnapshotHandle snapshot);
+
+    /**
+     * 清扫全部孤儿快照容器（#92 启动自愈）：快照容器是临时视图、不承载持久状态，
+     * 平台重启后注册表丢账、在途查看会话即孤儿——启动期按命名扫清所有
+     * {@code ws-*-snap-*} 容器，不留常驻孤儿（「不留孤儿容器」验收的兜底面）。
+     */
+    void sweepSnapshotContainers();
 }

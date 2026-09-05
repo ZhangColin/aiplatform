@@ -18,10 +18,12 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceVersions;
 import com.cartisan.core.exception.ApplicationException;
 
 
@@ -253,6 +255,82 @@ class DockerEnvironmentBackendTest {
         assertResourcesGone(workspaceId);
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_committed_versions_when_start_snapshot_then_serves_that_version_with_current_data() {
+        requireDockerDaemon();
+        WorkspaceId workspaceId = WorkspaceId.generate();
+        provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
+        String db = "ws" + workspaceId.value();
+
+        // 摆可跑小系统（server.js 读自身目录 index.html）→ 成版 v1
+        execIn(provision.handle(), "cat > /workspace/server.js <<'SNAP_EOF'\n"
+                + "const http=require('http');const fs=require('fs');const path=require('path');\n"
+                + "http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
+                + "res.end(fs.readFileSync(path.join(__dirname,'index.html')));}).listen(8081,'0.0.0.0');\n"
+                + "SNAP_EOF");
+        execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");
+        String hash1 = commit(provision.handle(), "首次生成了系统", "111");
+
+        // 改到 v2 → 成版 v2（主容器现态是 v2）
+        execIn(provision.handle(), "printf '<html>v2</html>' > /workspace/index.html");
+        String hash2 = commit(provision.handle(), "更新了系统", "222");
+        assertThat(hash2).isNotEqualTo(hash1);
+
+        // 主容器起服 v2（照 run 执行体约定：8081 后台常驻）
+        execIn(provision.handle(),
+                "cd /workspace && nohup node server.js >/dev/null 2>&1 & echo started");
+
+        // 现在数据：主库写标记行（快照应带现在数据）
+        assertThat(psql(provision.handle().containerName(), db,
+                "CREATE TABLE IF NOT EXISTS snap_marker(v int); INSERT INTO snap_marker VALUES (42);")
+                .exitCode()).isZero();
+
+        // 起 v1 快照
+        SnapshotHandle snap = backend.startSnapshot(provision.handle(), "view-1", hash1);
+        try {
+            // 当时系统可操作：快照内 8081 服务 v1，主容器仍服务 v2
+            assertThat(curl(snap.containerName()).stdout().trim())
+                    .as("快照应服务当时代码 v1").isEqualTo("<html>v1</html>");
+            assertThat(curl(provision.handle().containerName()).stdout().trim())
+                    .as("主容器不受快照影响仍服务 v2").isEqualTo("<html>v2</html>");
+            // 数据是现在数据：快照 pg 能读到主库刚写入的标记行
+            assertThat(psql(snap.containerName(), db, "SELECT count(*) FROM snap_marker")
+                    .stdout().trim()).as("快照 pg 应带现在数据").isEqualTo("1");
+            // 主容器零扰动：主 pg 仍健在（同卷双 PG 不炸）
+            assertThat(docker("exec", provision.handle().containerName(),
+                    "pg_isready", "-h", "localhost", "-U", "postgres").exitCode())
+                    .as("主容器 pg 不受快照影响").isZero();
+        } finally {
+            backend.stopSnapshot(snap);
+        }
+        // 用完即销毁：快照容器已不在、主容器仍在（卷内无孤儿快照）
+        assertThat(docker("inspect", snap.containerName()).exitCode())
+                .as("快照容器应已销毁").isNotZero();
+        assertThat(docker("inspect", provision.handle().containerName()).exitCode())
+                .as("主容器仍健在").isZero();
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_active_snapshot_when_workspace_destroyed_then_snapshot_cascade_removed() {
+        requireDockerDaemon();
+        WorkspaceId workspaceId = WorkspaceId.generate();
+        provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
+        execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");
+        String hash1 = commit(provision.handle(), "首次生成了系统", "111");
+
+        SnapshotHandle snap = backend.startSnapshot(provision.handle(), "view-1", hash1);
+        assertThat(docker("inspect", snap.containerName()).exitCode())
+                .as("快照容器应已起").isZero();
+
+        // 主容器销毁 → 快照容器随级联销毁（同卷 ro 挂载，卷删除前必清）
+        backend.destroyWorkspace(provision.handle());
+        provision = null;
+        assertThat(docker("inspect", snap.containerName()).exitCode())
+                .as("快照容器应随主容器销毁级联清除").isNotZero();
+    }
+
     // ---------- 直连 docker CLI 的验证工具（真实状态为准） ----------
 
     /** 宿主侧 tar 清单（macOS/Linux 自带 tar）：解开包内容做事实核对。 */
@@ -281,6 +359,26 @@ class DockerEnvironmentBackendTest {
     /** 容器内 shell 执行（与后端 execIn 同形，断言用）。 */
     private static ExecResult execIn(WorkspaceHandle handle, String command) {
         return docker("exec", handle.containerName(), "sh", "-c", command);
+    }
+
+    /** 容器内 8081 应用正文（快照/主容器通吃）。 */
+    private static ExecResult curl(String containerName) {
+        return docker("exec", containerName, "sh", "-c", "curl -s http://localhost:8081");
+    }
+
+    /** 容器内 psql（trust 认证、回环连接，root 直连 postgres 角色）。 */
+    private static ExecResult psql(String containerName, String db, String sql) {
+        return docker("exec", containerName, "sh", "-c",
+                "psql -h localhost -U postgres -d " + db + " -tAc '" + sql + "'");
+    }
+
+    /** 幂等 init + 成版提交（照 WorkspaceVersions 纯函数——exclude 挡住 data/pg 重物）。 */
+    private static String commit(WorkspaceHandle handle, String summary, String runId) {
+        ExecResult ensured = execIn(handle, WorkspaceVersions.ensureRepoCommand());
+        assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
+        ExecResult committed = execIn(handle, WorkspaceVersions.commitCommand(summary, runId));
+        assertThat(committed.exitCode()).as("成版提交应成功：%s", committed.stderr()).isZero();
+        return committed.stdout().trim();
     }
 
     private static boolean dockerAvailable() {

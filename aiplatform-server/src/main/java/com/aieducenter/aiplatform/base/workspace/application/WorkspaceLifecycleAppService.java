@@ -23,6 +23,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
@@ -163,6 +164,31 @@ public class WorkspaceLifecycleAppService {
     public byte[] packSource(String workspaceId) {
         Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
         return environmentBackend.packSource(workspace.toHandle());
+    }
+
+    /**
+     * 起「查看当时」快照容器（#92）：置备中隐式等待就绪（#62）后交给环境后端按
+     * ADR 0007 解路二起快照（同卷 :ro + 入口旁路 + 数据副本 + 检出当时代码起应用）。
+     * 返回快照句柄（容器名 + 预览端口），编排层据此映射预览 URL 与在途注册表。
+     */
+    public SnapshotHandle startSnapshot(String workspaceId, String viewId, String ref) {
+        Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
+        return environmentBackend.startSnapshot(workspace.toHandle(), viewId, ref);
+    }
+
+    /**
+     * 销毁快照容器（#92）：{@code docker rm -f}（副本随容器可写层消失），幂等。
+     */
+    public void stopSnapshot(SnapshotHandle snapshot) {
+        environmentBackend.stopSnapshot(snapshot);
+    }
+
+    /**
+     * 清扫孤儿快照容器（#92 启动自愈）：平台重启后注册表丢账，在途查看会话即
+     * 孤儿——启动期扫清全部 {@code ws-*-snap-*} 容器（「不留孤儿容器」兜底面）。
+     */
+    public void sweepSnapshotContainers() {
+        environmentBackend.sweepSnapshotContainers();
     }
 
     /**

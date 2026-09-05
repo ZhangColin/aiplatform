@@ -4,7 +4,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,8 +29,10 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.aieducenter.aiplatform.business.project.application.ProjectVersionAppService;
+import com.aieducenter.aiplatform.business.project.application.VersionSnapshotAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
@@ -46,6 +50,9 @@ class ProjectVersionControllerTest {
 
     @MockitoBean
     private ProjectVersionAppService versionAppService;
+
+    @MockitoBean
+    private VersionSnapshotAppService snapshotAppService;
 
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(
@@ -102,6 +109,46 @@ class ProjectVersionControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("版本不存在"));
+    }
+
+    @Test
+    void given_valid_ref_when_start_view_then_view_id_and_preview_url() throws Exception {
+        when(snapshotAppService.startView(any(), anyString())).thenReturn(
+                new VersionViewStartResponse("view-1", "http://localhost:30001/"));
+
+        performAsUser(post("/api/projects/100/versions/a1a1a1a1/view"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.viewId").value("view-1"))
+                .andExpect(jsonPath("$.data.previewUrl").value("http://localhost:30001/"));
+    }
+
+    @Test
+    void given_active_view_when_stop_view_then_ok() throws Exception {
+        performAsUser(delete("/api/projects/100/versions/a1a1a1a1/view/view-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    void given_unknown_view_when_stop_view_then_404() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_VIEW_NOT_FOUND))
+                .when(snapshotAppService).stopView(any(), anyString());
+
+        performAsUser(delete("/api/projects/100/versions/a1a1a1a1/view/gone"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("该查看会话不存在或已关闭"));
+    }
+
+    @Test
+    void given_view_limit_when_start_view_then_409() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.VERSION_VIEW_LIMIT))
+                .when(snapshotAppService).startView(any(), anyString());
+
+        performAsUser(post("/api/projects/100/versions/a1a1a1a1/view"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.message").value("同时查看的版本过多，请先关闭一个再查看"));
     }
 
     static class ExceptionAdviceConfig {

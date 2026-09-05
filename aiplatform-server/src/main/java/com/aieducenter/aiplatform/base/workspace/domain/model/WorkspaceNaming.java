@@ -29,6 +29,16 @@ public final class WorkspaceNaming {
         return "ws" + workspaceId.value();
     }
 
+    /** 快照容器名（#92 查看会话）：主容器名「ws-{id}-dev」的快照变体「ws-{id}-snap-{viewId}」。 */
+    public static String snapshotContainerName(WorkspaceId workspaceId, String viewId) {
+        return "ws-" + workspaceId.value() + "-snap-" + viewId;
+    }
+
+    /** 快照容器名前缀（#92 销毁级联）：主容器销毁时按此前缀扫清在途查看会话。 */
+    public static String snapshotContainerPrefix(WorkspaceId workspaceId) {
+        return "ws-" + workspaceId.value() + "-snap-";
+    }
+
     private static String suffixOf(EnvKind kind) {
         return switch (kind) {
             case DEV -> "-dev";

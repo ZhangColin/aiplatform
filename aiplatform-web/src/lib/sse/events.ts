@@ -120,9 +120,9 @@ export type PlatformAgentEvent =
          * 智能体配置键（引擎信息归一：业务侧 AgentProfile 稳定键——main 主智能体
          * 对话轮 / executor 编码 run；无配置语境的一次性调用不携带）——呈现形态
          * 的登记锚：executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有
-         * 主智能体一座）。
+         * 主智能体一座）。字面量联合即后端正本键值的镜像（AgentProfile.key()）。
          */
-        agent?: string;
+        agent?: "main" | "executor";
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }

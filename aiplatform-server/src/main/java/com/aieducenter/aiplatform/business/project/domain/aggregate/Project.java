@@ -157,6 +157,15 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         }
     }
 
+    /**
+     * owner 的智能体会话寻址 userId（cat_agent_state 槽位 (userId, sessionId) 的
+     * userId 腿）：owner 未落的占位形（测试/无会话上下文）容忍 null——与各编排
+     * 处自行展开的三元同义，收拢为聚合单点。
+     */
+    public String ownerUserId() {
+        return ownerAccountId != null ? ownerAccountId.toString() : null;
+    }
+
     @PrePersist
     void prePersist() {
         if (id == null) {

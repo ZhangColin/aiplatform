@@ -112,8 +112,7 @@ class CoderRunAttempts {
                     AgentProfile.EXECUTOR.systemPrompt(),
                     AgentProfile.EXECUTOR.chatModelString(),
                     SESSION_PREFIX + projectId,
-                    project.getOwnerAccountId() != null
-                            ? project.getOwnerAccountId().toString() : null,
+                    project.ownerUserId(),
                     new UsageContext(Long.toString(projectId),
                             UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.EXECUTOR),
                                     SESSION_PREFIX + projectId)),

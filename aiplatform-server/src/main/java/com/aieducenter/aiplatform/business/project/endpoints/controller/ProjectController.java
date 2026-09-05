@@ -131,9 +131,10 @@ public class ProjectController {
                     + "咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
                     + "回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。"
                     + "空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；"
-                    + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）与"
-                    + "挂起问答待答 409 PRJ_024（指路作答）仅意见类输入触发——"
-                    + "咨询与兜底随时可答；项目不存在 404 PRJ_001")
+                    + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；"
+                    + "挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑"
+                    + "（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚"
+                    + "的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001")
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(

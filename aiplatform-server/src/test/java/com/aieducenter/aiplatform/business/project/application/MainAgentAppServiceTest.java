@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 import cn.hutool.core.collection.CollUtil;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -38,6 +39,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -104,6 +106,22 @@ class MainAgentAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_projects");
+    }
+
+    @BeforeEach
+    void defaultAgentReplies() {
+        // 轮落定点读 converse/resume 返回维护挂起问答会合锚——默认回复形状兜底
+        // （个别用例自带脚本后打桩覆盖之，Mockito 后桩胜出）。同测重打桩时 when()
+        // 的 matcher 空参调用会触发旧 answer——null 直接过，不当真调用（同
+        // DispatchAppServiceTest.givenClassification 先例）
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return command != null ? new AgentReply(command.runId(), "好的") : null;
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation -> {
+            AgentResume resume = invocation.getArgument(0);
+            return resume != null ? new AgentReply(resume.runId(), "好的") : null;
+        });
     }
 
     private void givenSessionExecutorRunsInline() {
@@ -403,7 +421,7 @@ class MainAgentAppServiceTest {
                     invocation.getArgument(1);
             sink.accept(new com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent(
                     "text", new java.util.LinkedHashMap<>(Map.of("runId", "run-x"))));
-            return null;
+            return new AgentReply(((AgentCommand) invocation.getArgument(0)).runId(), "好的");
         }).when(agentClient).converse(any(), any());
 
         appService.runOpinionTurn(projectId, "做一个官网");
@@ -517,6 +535,77 @@ class MainAgentAppServiceTest {
         assertThat(after.getPrdProducedAt()).isEqualTo(project.getPrdProducedAt());
         assertThat(after.getGeneratedAt()).isEqualTo(project.getGeneratedAt());
         assertThat(after.getArchivedAt()).isNull();
+    }
+
+    @Test
+    void given_suspended_question_when_inquiry_arrives_in_render_race_then_rerouted_as_answer_resume() {
+        // 灵魂用例（#86 复审：渲染竞态收敛——错误气泡对对话体验不可接受）：意见轮
+        // 以 ask_user 挂起（挂起事件已发、前端问答卡未及呈现的窗口）里经派发口到达
+        // 的咨询不炸对话——转作答复续跑：同挂起 run 与 engineRef/工具面、咨询文本
+        // 即答复文本，与作答通道完全同路；续跑收口（正常回复）后锚清，后续咨询回
+        // 正常答询轮（新 converse）
+        Long projectId = persistedGeneratedProject("9706");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) { // 意见轮：以 ask_user 挂起
+                return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                        "reply-77", true, List.of(Map.of("id", "tc-9", "name", "ask_user"))));
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+        when(agentClient.resume(any(), any())).thenAnswer(invocation ->
+                new AgentReply(((AgentResume) invocation.getArgument(0)).runId(), "进展顺利"));
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true)   // 意见轮收口观测：挂起在即 → 不派、锚保留
+                .thenReturn(false); // 答复续跑收口观测：无挂起 → 派修正（锚含咨询文本并入）
+
+        MainAgentAppService.MainAgentRun opinion = appService.runOpinionTurn(projectId,
+                "把系统的主色调改成绿色");
+        MainAgentAppService.MainAgentRun inquiry = appService.answerInquiry(
+                projectRepository.findById(projectId).orElseThrow(), "现在进展如何？");
+        assertThat(inquiry.runId()).isEqualTo(opinion.runId()); // 响应锚 = 挂起 run（续跑同 run 收口）
+
+        // 转答而非新 converse：唯一 main- converse 是意见轮本身（第二条是收口自动派的修正）
+        ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
+        verify(agentClient).resume(resume.capture(), any());
+        assertThat(resume.getValue().runId()).isEqualTo(opinion.runId());
+        assertThat(resume.getValue().sessionId()).isEqualTo("main-" + projectId);
+        assertThat(resume.getValue().replyId()).isEqualTo("reply-77");
+        assertThat(resume.getValue().resumeText()).isEqualTo("现在进展如何？");
+        assertThat(resume.getValue().confirmResults()).hasSize(1);
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues()).extracting(AgentCommand::sessionId)
+                .containsExactly("main-" + projectId, "coder-" + projectId);
+
+        // 续跑收口（正常回复）清锚：后续咨询回正常答询轮（新 captor——capture() 跨
+        // verify 累积，复用旧 captor 会读到重复段）
+        MainAgentAppService.MainAgentRun next = appService.answerInquiry(
+                projectRepository.findById(projectId).orElseThrow(), "谢谢，没事了");
+        ArgumentCaptor<AgentCommand> third = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(third.capture(), any());
+        assertThat(third.getAllValues().get(2).sessionId()).isEqualTo("main-" + projectId);
+        assertThat(third.getAllValues().get(2).runId()).isEqualTo(next.runId());
+    }
+
+    @Test
+    void given_pending_question_without_anchor_when_inquiry_then_prj_024_restart_edge() {
+        // 丢锚重启边角：挂起仍在（状态库 ASKING）但本进程没有挂起事实（run 无表丢
+        // runId，无法代答）——同步 409 指路作答，好过异步错误气泡；拒绝即零提交零事件
+        Long projectId = persistedProject("9707");
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> appService.answerInquiry(
+                projectRepository.findById(projectId).orElseThrow(), "现在进展如何？"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
+        verify(agentClient, never()).converse(any(), any());
+        verify(agentClient, never()).resume(any(), any());
+        verify(sessionExecutor, never()).submit(any(), any());
     }
 
     // ---------- 链必达收口（#43：主智能体无派发权，平台意见轮收口观测自动派修正） ----------

@@ -267,22 +267,21 @@ class DispatchAppServiceTest {
     // ---------- 守卫后移矩阵（#51：订单冻结 / 挂起问答只拦意见） ----------
 
     @Test
-    void given_pending_question_when_inquiry_then_answered() {
-        // 挂起问答期间咨询照常作答（守卫后移——409 指路对咨询语义错误；答询轮无守卫，
-        // 同会话直答。引擎对挂起会话新 converse 的拒绝仅在问答卡未及呈现的窄竞态）
+    void given_pending_question_without_anchor_when_inquiry_then_prj_024_restart_edge() {
+        // 挂起问答期间咨询的处置（#86 复审收敛）：正常竞态（挂起事实在本进程）由
+        // MainAgentAppService 转作答复续跑（与作答通道同路，见其灵魂用例）；本测
+        // 脚本化丢锚重启边角——挂起仍在但本进程无锚（run 无表丢 runId），同步 409
+        // 指路作答（好过异步错误气泡），分类先烧一次 flash 轻调用（接受）
         Long projectId = persistedProject("9808");
-        givenSessionExecutorRunsInline();
-        givenClassification("INQUIRY", "系统访问地址是 http://localhost:32168/。");
+        givenClassification("INQUIRY", "不该到");
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
-                .thenReturn(true); // 会话挂起在即（答询轮不查守卫）
+                .thenReturn(true); // 会话挂起在即、锚已丢（重启边角）
 
-        DispatchAppService.DispatchRun run = appService.dispatch(projectId, "我后台的地址是什么？");
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
-        // 分类 + 答询两跳即全部：意见轨道未触（第三跳会是 main- 意见轮 + 守卫 409）
-        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("main-" + projectId);
-        assertThat(run.runId()).isEqualTo(command.getAllValues().get(1).runId());
+        assertThatThrownBy(() -> appService.dispatch(projectId, "我后台的地址是什么？"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.QUESTION_PENDING.message());
+        verify(agentClient, times(1)).converse(any(), any()); // 仅分类调用
+        verify(sessionExecutor, never()).submit(any(), any());
     }
 
     @Test

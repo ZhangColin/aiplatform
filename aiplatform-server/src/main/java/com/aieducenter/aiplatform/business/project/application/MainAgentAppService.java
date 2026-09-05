@@ -10,8 +10,10 @@ import org.springframework.stereotype.Service;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
+import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
@@ -41,9 +43,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>车道语义（入口三分类归 {@link DispatchAppService}，本服务只收分岔后的
  * 轮）</b>：咨询零产物短路——{@link #answerInquiry} 同会话直答，不锚意见、不派
- * 更新 run、不受守卫（订单冻结 / 挂起问答只拦意见链）；挂起问答期间对话区输入
- * 即作答（前端问答卡态），咨询轮撞上偶发在途提问挂起（问答卡未及呈现的窄竞态）
- * 会被引擎拒绝、以 error 事件如实呈现，重试即兜底——单会话的已接受取舍。</p>
+ * 更新 run、不受守卫（订单冻结 / 挂起问答只拦意见链）。挂起问答期间对话区输入
+ * 即作答（CONTEXT.md「挂起问答」）：问答卡已呈现时前端直发作答通道；<b>渲染
+ * 竞态窗口</b>（挂起事件已发、卡片未及呈现）里经派发口到达的咨询经
+ * {@link #suspendedQuestions} 会合锚<b>转作答复续跑</b>——同一挂起 run 与工具面、
+ * 咨询文本即答复文本，与作答通道完全同路（模型按协议消化非答复文本，可答可
+ * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
+ * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
  * <p><b>链必达收口（#43）</b>：主智能体无派发权——更新 run 的派发不在模型手里，
  * 平台在意见轮落定后观测收口（无挂起问答且项目已生成）即自动派更新 run（交接物
@@ -81,6 +87,19 @@ public class MainAgentAppService {
      * 兜底）。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由 PRD 承载）。
      */
     private final Map<String, String> opinionExchanges = new ConcurrentHashMap<>();
+
+    /**
+     * 挂起问答的会合锚（sessionId → 本进程内最近一次 ask_user 挂起事实）：轮落定
+     * 点维护（{@link #opinionTurn} 的 converse 与 {@link #answerQuestion} 的 resume
+     * 返回处——问答挂起即落锚、收口或再挂起即覆盖/清除，随会话执行器串行无并发
+     * 写）。用途：答询轮撞挂起（渲染竞态窗口）转作答复续跑——锚携带挂起 run 与
+     * engineRef（run 无表，重启即丢——丢锚回落 409 指路口径）。
+     */
+    private final Map<String, SuspendedQuestion> suspendedQuestions = new ConcurrentHashMap<>();
+
+    /** 一次 ask_user 挂起的会合事实（转答复续跑的入参重建源）。 */
+    private record SuspendedQuestion(String runId, AgentSuspension suspension) {
+    }
 
     public MainAgentAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
@@ -148,10 +167,29 @@ public class MainAgentAppService {
      * {@code main-{projectId}} 会话直答——不锚意见、不派更新 run、不受订单冻结与
      * 挂起问答守卫（只拦意见链）。异步提交（runId 随响应回，回答经 SSE 到达）。
      * 项目事实由派发入口守卫后的聚合携带（owner / 工作区寻址不入前端信）。
+     *
+     * <p><b>渲染竞态收敛</b>：挂起问答期间对话区输入即作答——问答卡已呈现时前端
+     * 直发作答通道；卡片未及呈现的窗口里经派发口到达的咨询经 {@link
+     * #suspendedQuestions} 转作答复续跑（同挂起 run 与工具面，咨询文本即答复文本）
+     * ——同一输入无论卡片渲染快慢行为一致，不出错误气泡。丢锚重启边角（挂起仍在
+     * 但 runId 已失）同步 409 PRJ_024 指路作答。</p>
      */
     public MainAgentRun answerInquiry(Project project, String question) {
         Long projectId = project.getId();
-        String sessionId = SESSION_PREFIX + projectId;
+        String sessionId = sessionIdOf(projectId);
+        SuspendedQuestion pending = suspendedQuestions.get(sessionId);
+        if (pending != null) {
+            MainAgentAppService.log.info("[main] 项目 {} 答询撞挂起问答（渲染竞态窗口），转作答复续跑（runId={}）",
+                    projectId, pending.runId());
+            answerQuestion(projectId, pending.runId(), pending.suspension().engineRef(),
+                    pending.suspension().toolCalls(), question);
+            return new MainAgentRun(pending.runId());
+        }
+        if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+            // 丢锚重启边角：挂起仍在但本进程没有挂起事实（runId 已失，无法代答）
+            // ——同步 409 指路作答，好过异步错误气泡
+            throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
+        }
         String runId = EventsAppService.newRunId();
         AgentCommand command = mainCommand(project, runId, question);
         // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
@@ -172,13 +210,12 @@ public class MainAgentAppService {
     public void answerQuestion(Long projectId, String runId, String replyId,
             List<Map<String, Object>> pendingToolCalls, String answerText) {
         Project project = requireUpdatableProject(projectId);
-        String sessionId = SESSION_PREFIX + projectId;
-        Map<String, Object> correlation = correlationOf(projectId);
+        String sessionId = sessionIdOf(projectId);
 
         AgentResume resume = new AgentResume(
                 runId,
                 sessionId,
-                ownerUserIdOf(project),
+                project.ownerUserId(),
                 Long.toString(project.getWorkspaceId()),
                 AgentProfile.MAIN.chatModelString(),
                 AgentProfile.MAIN.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
@@ -194,12 +231,13 @@ public class MainAgentAppService {
         Consumer<AgentEvent> sink = eventBridge.sink(projectId);
         sessionExecutor.submit(sessionId, () -> {
             try {
-                agentClient.resume(resume, sink);
+                settleSuspendedQuestion(sessionId, runId, agentClient.resume(resume, sink));
             }
             catch (RuntimeException e) {
                 // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
                 // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
                 opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
                 throw e;
             }
             dispatchUpdateOnTurnClose(projectId, sessionId, runId);
@@ -214,7 +252,7 @@ public class MainAgentAppService {
 
     private MainAgentRun opinionTurn(Long projectId, String prompt) {
         Project project = requireUpdatableProject(projectId);
-        String sessionId = SESSION_PREFIX + projectId;
+        String sessionId = sessionIdOf(projectId);
         requireNoPendingQuestion(project, sessionId);
 
         String runId = EventsAppService.newRunId();
@@ -229,12 +267,14 @@ public class MainAgentAppService {
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             try {
-                agentClient.converse(command, eventBridge.sink(projectId));
+                settleSuspendedQuestion(sessionId, runId,
+                        agentClient.converse(command, eventBridge.sink(projectId)));
             }
             catch (RuntimeException e) {
                 // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
                 // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
                 opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
                 throw e;
             }
             dispatchUpdateOnTurnClose(projectId, sessionId, runId);
@@ -242,23 +282,41 @@ public class MainAgentAppService {
         return new MainAgentRun(runId);
     }
 
+    /**
+     * 轮落定点的挂起问答会合锚维护：问答挂起（软终点）即落锚（渲染竞态窗口里
+     * 答询轮转作答复续跑的入参源）；权限类挂起/正常收口即清锚（无可答之问）。
+     */
+    private void settleSuspendedQuestion(String sessionId, String runId, AgentReply reply) {
+        if (reply.suspension() != null && !reply.suspension().permission()) {
+            suspendedQuestions.put(sessionId, new SuspendedQuestion(runId, reply.suspension()));
+        }
+        else {
+            suspendedQuestions.remove(sessionId);
+        }
+    }
+
     /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         Long projectId = project.getId();
-        String sessionId = SESSION_PREFIX + projectId;
+        String sessionId = sessionIdOf(projectId);
         return new AgentCommand(
                 runId,
                 prompt,
                 AgentProfile.MAIN.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 AgentProfile.MAIN.chatModelString(),
                 sessionId,
-                ownerUserIdOf(project),
+                project.ownerUserId(),
                 usageContextOf(projectId, sessionId),
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId),
                 null,
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true);
+    }
+
+    /** 会话标识派生（projectId → main-{projectId} 稳定绑定）。 */
+    private static String sessionIdOf(Long projectId) {
+        return SESSION_PREFIX + projectId;
     }
 
     /**
@@ -276,7 +334,7 @@ public class MainAgentAppService {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
             if (project == null
-                    || agentClient.hasAskingToolCall(ownerUserIdOf(project), sessionId)) {
+                    || agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
                 return;
             }
             String workspaceId = Long.toString(project.getWorkspaceId());
@@ -349,14 +407,8 @@ public class MainAgentAppService {
      * 指路作答。作答（resume）在途、ASKING 尚未清库的偶发拦截为已接受竞态边角。
      * 守卫先于命令提交，拒绝即零事件。 */
     private void requireNoPendingQuestion(Project project, String sessionId) {
-        if (agentClient.hasAskingToolCall(ownerUserIdOf(project), sessionId)) {
+        if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
             throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
         }
-    }
-
-    /** owner 的会话寻址 userId（cat_agent_state 槽位 (userId, sessionId) 的 userId 腿）。 */
-    private static String ownerUserIdOf(Project project) {
-        return project.getOwnerAccountId() != null
-                ? project.getOwnerAccountId().toString() : null;
     }
 }

@@ -363,16 +363,21 @@ export const useChatStore = create<ChatState>((set) => ({
 
   raiseQuestion: (projectId, runId, question) =>
     updateChat(set, projectId, (chat) => {
-      // 问答卡只出自主智能体（对话面 run；执行体无 ask_user）——runId 锚定
-      if (runId === undefined || !chat.chatRunIds.includes(runId)) return chat;
-      if (chat.seenEventIds.includes(question.id)) return chat;
+      if (runId === undefined) return chat;
+      // 问答卡只出自主智能体（执行体无 ask_user）——question-raised 即对话面 run 的
+      // 充分证据。run-start 可能因连接竞态漏收（SSE 连接晚于 run-start 发射），此时
+      // runId 未登记：就地登记不丢卡（水合虽也能补登记，竞态窗口内不兜底）。
+      const registered = chat.chatRunIds.includes(runId)
+        ? chat
+        : { ...chat, chatRunIds: pushCapped(chat.chatRunIds, runId) };
+      if (registered.seenEventIds.includes(question.id)) return registered;
       // 水合已建同锚卡（挂起问答卡由库重建）——事件回声不双卡
-      const hydrated = chat.messages.some(
+      const hydrated = registered.messages.some(
         (message) =>
           message.kind === "question" && !message.answered && message.engineRef === question.engineRef,
       );
-      if (hydrated) return chat;
-      const seen = { ...chat, seenEventIds: pushCapped(chat.seenEventIds, question.id) };
+      if (hydrated) return registered;
+      const seen = { ...registered, seenEventIds: pushCapped(registered.seenEventIds, question.id) };
       // 旧未答问题被新问题取代（一轮一问）：转已答不再可交互
       const messages = seen.messages.map((message) =>
         message.kind === "question" && !message.answered

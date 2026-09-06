@@ -131,11 +131,10 @@ describe("chat store · 对话区对话累积（#19，#86 单会话收敛）", (
     ]);
   });
 
-  it("未登记 run 的 text / 问答 / finish 不进对话（runId 锚定；编码 run 的解说不进对话）", () => {
+  it("未登记 run 的 text / finish 不进对话（runId 锚定；编码 run 的解说不进对话）", () => {
     playMainTurn("p1", "run-1", "需求");
 
     useChatStore.getState().appendAgentDelta("p1", "run-9", "写代码中", "run-9:3");
-    useChatStore.getState().raiseQuestion("p1", "run-9", question("run-9:5"));
     useChatStore.getState().finishTurn("p1", "run-9");
     useChatStore.getState().appendAgentDelta("p2", "run-2", "串台", "run-2:1");
 
@@ -369,6 +368,20 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     ]);
 
     expect(pendingQuestionOf(useChatStore.getState(), "p1")).toBeUndefined();
+  });
+
+  it("run-start 漏收（连接竞态）：question-raised 就地登记 run 成卡，不丢", () => {
+    const s = useChatStore.getState();
+    // 页面加载时水合只拿到用户发言（问答卡尚未落库）；run-start 因 SSE 连接晚于
+    // 发射已漏收（未 noteChatRun）
+    s.hydrate("p1", [entry(1, "user", { text: "做个官网" })]);
+
+    // 仅 question-raised 到达（无 noteChatRun 前置）——就地登记 run 并成卡
+    s.raiseQuestion("p1", "run-1", question("run-1:5"));
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.chatRunIds).toContain("run-1");
+    expect(pendingQuestionOf(useChatStore.getState(), "p1")?.question).toBe("面向谁?");
   });
 
   it("增量水合接管 live 片段（run 整体替换幂等）：闭史原位替换乐观气泡与流式段，不双条", () => {

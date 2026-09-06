@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -11,6 +12,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
@@ -115,16 +117,21 @@ public class DispatchAppService {
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）
      */
-    public DispatchRun dispatch(Long projectId, String prompt) {
+    public DispatchRun dispatch(Long projectId, String prompt, List<AnnotationAttachment> attachments) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {
             case OPINION -> new DispatchRun(
-                    mainAgentAppService.runOpinionTurn(projectId, prompt).runId());
+                    mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
             case INQUIRY -> new DispatchRun(
-                    mainAgentAppService.answerInquiry(project, prompt).runId());
-            case FALLBACK -> guideReply(project, prompt, classified.orderIntent());
+                    mainAgentAppService.answerInquiry(project, prompt, attachments).runId());
+            case FALLBACK -> guideReply(project, prompt, classified.orderIntent(), attachments);
         };
+    }
+
+    /** 无圈注附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
+    public DispatchRun dispatch(Long projectId, String prompt) {
+        return dispatch(projectId, prompt, AnnotationAttachment.NONE);
     }
 
     /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
@@ -148,7 +155,8 @@ public class DispatchAppService {
      * 兜底轻引导：发 {@code guide-reply} 事件（零产物路径的全部事件）即收口——不起
      * run、不提交会话、不动任何产物。runId 为派发锚。
      */
-    private DispatchRun guideReply(Project project, String prompt, boolean orderIntent) {
+    private DispatchRun guideReply(Project project, String prompt, boolean orderIntent,
+            List<AnnotationAttachment> attachments) {
         String runId = EventsAppService.newRunId();
         String text = orderIntent
                 ? (project.getGeneratedAt() != null
@@ -156,8 +164,8 @@ public class DispatchAppService {
                 : GUIDE_GENERIC_TEXT;
         eventBridge.emitGuideReply(project.getId(), runId, prompt, GUIDE_LABEL, text);
         // 对话史落库（#89）：轻引导也是对话面——用户发言 + 定型文案两行（事件已发，
-        // 补写失败只记日志）
-        conversationHistory.recordGuide(project.getId(), runId, prompt, text);
+        // 补写失败只记日志）；圈注附件随发言同落
+        conversationHistory.recordGuide(project.getId(), runId, prompt, text, attachments);
         log.info("[dispatch] 项目 {} 兜底引导（{}）", project.getId(),
                 orderIntent ? "下单意图" : "泛引导");
         return new DispatchRun(runId);

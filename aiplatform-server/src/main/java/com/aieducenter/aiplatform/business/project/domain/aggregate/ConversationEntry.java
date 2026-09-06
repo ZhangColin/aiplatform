@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
+import java.util.List;
 import java.util.Map;
 
 import jakarta.persistence.Column;
@@ -65,6 +66,12 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     @Column(name = "closing", columnDefinition = "jsonb", updatable = false)
     private Map<String, Object> closing;
 
+    /** kind=user 的圈注附件（#97 随发言发送的消息附件部件，JSONB 数组——刷新/
+     * 回访后消息回显可重建圈注 chip）；其余 kind 恒 NULL。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "attachments", columnDefinition = "jsonb", updatable = false)
+    private List<Map<String, Object>> attachments;
+
     /** kind=question 的已答位（作答即置位——全表唯一 UPDATE 面）。 */
     @Column(name = "answered")
     private Boolean answered;
@@ -73,48 +80,60 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     }
 
     private ConversationEntry(Long projectId, String runId, ConversationEntryKind kind,
-            String text, Map<String, Object> question, Map<String, Object> closing) {
+            String text, Map<String, Object> question, Map<String, Object> closing,
+            List<Map<String, Object>> attachments) {
         this.projectId = projectId;
         this.runId = runId;
         this.kind = kind;
         this.text = text;
         this.question = question;
         this.closing = closing;
+        this.attachments = attachments;
         this.answered = kind == ConversationEntryKind.QUESTION ? Boolean.FALSE : null;
     }
 
-    /** 用户发言条目（提交守卫全过后同步落）。 */
+    /** 用户发言条目（提交守卫全过后同步落；attachments = 圈注附件原始 JSON，可空）。 */
+    public static ConversationEntry userUtterance(Long projectId, String runId, String text,
+            List<Map<String, Object>> attachments) {
+        return new ConversationEntry(projectId, runId, ConversationEntryKind.USER, text, null, null,
+                attachments);
+    }
+
+    /** 用户发言条目（无附件——纯文字发言）。 */
     public static ConversationEntry userUtterance(Long projectId, String runId, String text) {
-        return new ConversationEntry(projectId, runId, ConversationEntryKind.USER, text, null, null);
+        return userUtterance(projectId, runId, text, null);
     }
 
     /** 智能体回复条目（轮收口 / 问答挂起时按段落库——段序即对话序）。 */
     public static ConversationEntry agentReply(Long projectId, String runId, String text) {
-        return new ConversationEntry(projectId, runId, ConversationEntryKind.AGENT, text, null, null);
+        return new ConversationEntry(projectId, runId, ConversationEntryKind.AGENT, text, null,
+                null, null);
     }
 
     /** 问答卡条目（question-raised 事件 payload 原样——刷新后可重建可作答）。 */
     public static ConversationEntry question(Long projectId, String runId,
             Map<String, Object> payload) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.QUESTION, null,
-                payload, null);
+                payload, null, null);
     }
 
     /** 问答作答条目。 */
     public static ConversationEntry answer(Long projectId, String runId, String text) {
-        return new ConversationEntry(projectId, runId, ConversationEntryKind.ANSWER, text, null, null);
+        return new ConversationEntry(projectId, runId, ConversationEntryKind.ANSWER, text, null,
+                null, null);
     }
 
     /** 收尾卡条目（#88 closing 载荷原样）。 */
     public static ConversationEntry closing(Long projectId, String runId,
             Map<String, Object> closing) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.CLOSING, null, null,
-                closing);
+                closing, null);
     }
 
     /** 平台轻引导条目（兜底分支定型文案）。 */
     public static ConversationEntry guide(Long projectId, String runId, String text) {
-        return new ConversationEntry(projectId, runId, ConversationEntryKind.GUIDE, text, null, null);
+        return new ConversationEntry(projectId, runId, ConversationEntryKind.GUIDE, text, null,
+                null, null);
     }
 
     /** 问答卡作答置位（幂等——已答不再置）。 */

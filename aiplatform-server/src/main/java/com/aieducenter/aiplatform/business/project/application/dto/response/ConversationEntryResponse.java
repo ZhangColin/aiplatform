@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import com.aieducenter.aiplatform.business.project.domain.aggregate.ConversationEntry;
@@ -8,7 +9,8 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Conversation
 /**
  * 对话史条目读面（#89 水合载荷）：kind 为 Integer code（§3.6.1 边界枚举统一 code
  * ——{@code ConversationEntryKind} 1=user 2=agent 3=question 4=answer 5=closing
- * 6=guide），question / closing 为事件载荷 JSON 原样。
+ * 6=guide），question / closing 为事件载荷 JSON 原样；attachments（#97 圈注 B 档）
+ * = 用户发言随带的圈注附件 JSON 数组（消息回显重建圈注 chip 用）。
  */
 public record ConversationEntryResponse(
         Long id,
@@ -17,6 +19,7 @@ public record ConversationEntryResponse(
         String text,
         Map<String, Object> question,
         Map<String, Object> closing,
+        List<Map<String, Object>> attachments,
         boolean answered,
         LocalDateTime at) {
 
@@ -29,6 +32,7 @@ public record ConversationEntryResponse(
                 entry.getText(),
                 entry.getQuestion(),
                 entry.getClosing(),
+                entry.getAttachments(),
                 Boolean.TRUE.equals(entry.getAnswered()),
                 entry.getCreatedAt());
     }

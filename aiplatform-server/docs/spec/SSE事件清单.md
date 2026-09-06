@@ -79,7 +79,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `part-action` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `toolCallId` `toolName` `state` `label` | 工具动作部件（动作卡）：**开始/进行中/完成/失败全生命周期**——动作一开始即出事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ `started`（模型发起工具调用，参数在途）/ `running`（参数落定、工具执行中）/ `completed`（结果成功）/ `failed`（结果出错/被拒/中断——动作层状态，run 层唯一失败终态仍是 run-failed）。`label` = 动作对象短语（人话行，无时态——时态由 state 表达；started 时参数在途为通用对象如「编写【代码文件】」，running 起解析参数为具体对象如「编写【订单管理】」，终态复述不闪换）。播报工具为封闭表：write_file / edit_file / command——读类工具不进部件（对客户是噪音） |
 | `part-step` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `step` | 步骤分组部件：`step` 为流段内序号（1 起，模型调用边界），呈现为「第 N 步」分组头；问答续跑为新流段重新起算 |
 | `part-check` | `projectId` `runId` `sessionId` `state` | 自检播报部件（[#85](https://github.com/ZhangColin/aiplatform/issues/85)：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的呈现——**平台侧产出**（不经引擎部件映射表，收口判据是平台事实：生成 = 8081 探活、更新 = finish_edit 收口事实），核验开始发 `checking`、落定发 `passed`/`failed`。静默重试同构口径（#84）：尝试间核验未过**不发 `failed`**——部件停在 `checking`（重试信号不外泄，重复 `checking` 幂等）；`failed` 仅在末次尝试未过（超限转终态）时发，与 `run-failed` 同窗口到达。状态终值（passed/failed）= 探活结果，可被收尾统计消费（#88 轮末统计行） |
-| `part-attachment` | —— | **契约预留**（无生产方，[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地时启用）：消息附件部件——圈注锚随消息发送的载荷位，schema 见[下节](#消息附件部件锚载荷-schema预留97) |
+| `part-attachment` | —— | **消息附件部件**（[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地）：圈注锚随用户发言发送的载荷位——指认是对话输入的增强不是替代，<b>不随 run 过程流发射</b>：随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发（渲染进主智能体 prompt 精确读取），并随用户发言落对话史 JSONB（`prj_conversation_entries.attachments`）、刷新回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip（非截图）。schema 见[下节](#消息附件部件锚载荷-schema97) |
 
 > **来源归属（#95 委派位）**：委派子智能体（如自测）转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-text`/`part-action`/`part-step`）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source；`part-check` 为平台侧产出，也不带。
 
@@ -120,7 +120,7 @@ closing: {
 - **版本锚定（#91）**：`closing.version`（可缺省）= 收口自动成版的 commit hash——版本正本 = 容器内 git log（无便利表），Run-Id trailer 联接收尾卡与版本；版本详情 API 复用 `closing` 载荷锚定收尾卡。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
-#### 消息附件部件锚载荷 schema（预留，#97）
+#### 消息附件部件锚载荷 schema（#97）
 
 圈注（#73 决议）三能力——点选锚定 / 画笔圈选 / 区块评论——的条目收进发送框附件区，随下一句自然语言发送；载荷只定要点：**结构化定位 + 标注类型 + 可选评语**（不走截图识图——模糊锚定指错位置反噬信任）。锚为注入脚本回传的结构化 DOM 锚（选择器/文本引用），字段 schema 随本票定形：
 
@@ -136,7 +136,7 @@ annotation:
 ```
 
 - 指认是对话输入的**增强不是替代**：附件部件与自然语言同句发送、被主智能体精确读取（结构化定位而非猜图）；
-- 生产方与消费面（消息回显/落库随对话史）随 #97 落地，本节只锁载荷 schema。
+- **落地口径（#97）**：附件部件随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发——渲染成主智能体 prompt 自然语言段精确读取（见 `AnnotationPrompt`），并随用户发言落对话史（`prj_conversation_entries.attachments` JSONB），刷新/回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip；注入脚本（`docker/workspace/annotation.js`）由 `serve.js` 对 HTML 响应内联注入、经 postMessage 回传结构化锚。
 
 #### 引擎透传事件（开放集合）
 

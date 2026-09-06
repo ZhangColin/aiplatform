@@ -6,8 +6,11 @@ import {
   ChevronDown,
   FileText,
   Image as ImageIcon,
+  MessageSquarePlus,
   Mic,
+  MousePointer2,
   Paperclip,
+  Pencil,
   Sparkles,
   Upload,
   X,
@@ -26,6 +29,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import { formatFileSize } from "@/lib/projects/files";
+import { annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
+import type { AnnotationItem } from "@/lib/store/annotation";
 import { PLATFORM_MODES } from "@/lib/modes";
 
 /**
@@ -61,6 +66,13 @@ function AttachmentIcon({ name, type }: { name: string; type?: string }) {
   );
 }
 
+/** 圈注条目图标（按标注类型分流，与预览工具条同源）。 */
+function AnnotationKindIcon({ kind }: { kind: AnnotationKind }) {
+  if (kind === "circle") return <Pencil className="size-3.5" />;
+  if (kind === "comment") return <MessageSquarePlus className="size-3.5" />;
+  return <MousePointer2 className="size-3.5" />;
+}
+
 export function Composer({
   hero = false,
   value,
@@ -69,6 +81,9 @@ export function Composer({
   submitPending = false,
   disabled = false,
   attachmentsEnabled = true,
+  annotations,
+  onAnnotationRemove,
+  onAnnotationNoteChange,
   inputRef,
   placeholder = "说说你想做什么…",
 }: {
@@ -76,14 +91,20 @@ export function Composer({
   hero?: boolean;
   value: string;
   onValueChange: (text: string) => void;
-  /** 发送：文本 + 当次附件（发出后组件内附件清空，输入归调用侧）。 */
-  onSubmit: (text: string, attachments: ComposerAttachment[]) => void;
+  /** 发送：文本 + 当次文件附件 + 圈注附件（发出后组件内文件附件清空，输入归调用侧）。 */
+  onSubmit: (text: string, attachments: ComposerAttachment[], annotations: AnnotationItem[]) => void;
   /** 提交进行中（发送键转 Spinner 且禁用）。 */
   submitPending?: boolean;
   /** 整体禁用（项目页锁定态：输入与发送停用）。 */
   disabled?: boolean;
   /** 附件入口（回形针 + chip 行）：调用侧无上传管道时置 false 隐去——不邀请会被丢弃的操作。 */
   attachmentsEnabled?: boolean;
+  /** 圈注附件（#97 预览回传的标注条目，归 store 持态）：随附件 chip 行呈现、可删改。 */
+  annotations?: AnnotationItem[];
+  /** 圈注删除（发送前可删）。 */
+  onAnnotationRemove?: (id: string) => void;
+  /** 圈注评语修改（发送前可改）。 */
+  onAnnotationNoteChange?: (id: string, note: string) => void;
   /** 输入框外接 ref（项目页：问题到达自动聚焦）。 */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
@@ -110,7 +131,7 @@ export function Composer({
 
   function submit() {
     if (!canSubmit) return;
-    onSubmit(value, attachments);
+    onSubmit(value, attachments, annotations ?? []);
     setAttachments([]);
   }
 
@@ -180,6 +201,37 @@ export function Composer({
                 className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
                 onClick={() => removeAttachment(m.id)}
                 aria-label={`移除${m.name}`}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {annotations && annotations.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {annotations.map((a) => (
+            <span
+              key={a.id}
+              className="flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1 pl-2 pr-1 text-xs text-foreground/80"
+            >
+              <span className="text-muted-foreground">
+                <AnnotationKindIcon kind={a.kind} />
+              </span>
+              <span className="max-w-40 truncate">{annotationSummary(a)}</span>
+              <input
+                value={a.note}
+                onChange={(e) => onAnnotationNoteChange?.(a.id, e.target.value)}
+                placeholder="评语（可选）"
+                aria-label="圈注评语"
+                className="w-24 shrink-0 rounded border-0 bg-transparent px-1 py-0.5 text-xs outline-none placeholder:text-muted-foreground/50 focus:bg-background"
+              />
+              <button
+                type="button"
+                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                onClick={() => onAnnotationRemove?.(a.id)}
+                aria-label="移除圈注"
               >
                 <X className="size-3" />
               </button>

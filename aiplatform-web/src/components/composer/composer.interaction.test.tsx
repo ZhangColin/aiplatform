@@ -44,7 +44,7 @@ describe("Composer · 输入与提交", () => {
     expect(change).toHaveBeenCalledWith("做餐厅点单");
 
     fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
-    expect(submit).toHaveBeenCalledWith("帮我的花店做个能下单的小程序", []);
+    expect(submit).toHaveBeenCalledWith("帮我的花店做个能下单的小程序", [], []);
   });
 
   it("空输入 Enter 不触发、Shift+Enter 换行不触发", () => {
@@ -65,7 +65,7 @@ describe("Composer · 输入与提交", () => {
     setup({ value: "做瑜伽馆预约页" });
     expect(sendButton().disabled).toBe(false);
     fireEvent.click(sendButton());
-    expect(submit).toHaveBeenCalledWith("做瑜伽馆预约页", []);
+    expect(submit).toHaveBeenCalledWith("做瑜伽馆预约页", [], []);
   });
 
   it("submitPending 期间发送键禁用（防重复提交）", () => {
@@ -99,7 +99,7 @@ describe("Composer · 附件 chip 行与物料区", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
     expect(submit).toHaveBeenCalledWith("给花店做小程序", [
       expect.objectContaining({ name: "门店照片.png" }),
-    ]);
+    ], []);
     // 附件随消息发出后清空（输入归调用侧受控管理）
     expect(screen.queryByText("门店照片.png")).toBeNull();
   });

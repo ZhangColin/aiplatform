@@ -8,10 +8,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.aieducenter.aiplatform.business.project.domain.enums.ConversationEntryKind;
@@ -40,6 +43,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConversationHistoryAppService {
 
+    /** 圈注附件 → JSONB 数组的序列化器（对话史落库用，静态无状态）。 */
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     private final ConversationEntryRepository entries;
     private final ProjectRepository projectRepository;
 
@@ -51,10 +57,33 @@ public class ConversationHistoryAppService {
 
     /**
      * 用户发言落库（意见 / 咨询 / 建项目开场需求——提交守卫全过后、异步轮提交前
-     * 同步写；失败上抛撤回 REST 面）。
+     * 同步写；失败上抛撤回 REST 面）。attachments = 随发言发送的圈注附件（可空/
+     * 空表——纯文字发言），落库为 JSONB 数组供刷新回显重建圈注 chip。
      */
+    public void recordUserUtterance(Long projectId, String runId, String text,
+            List<AnnotationAttachment> attachments) {
+        entries.save(ConversationEntry.userUtterance(projectId, runId, text,
+                toJsonMaps(attachments)));
+    }
+
+    /** 用户发言落库（无附件——纯文字发言）。 */
     public void recordUserUtterance(Long projectId, String runId, String text) {
-        entries.save(ConversationEntry.userUtterance(projectId, runId, text));
+        recordUserUtterance(projectId, runId, text, null);
+    }
+
+    /** 圈注附件 → 原始 JSON 数组（空/全非圈注返回 null——不入库空数组）。 */
+    private static List<Map<String, Object>> toJsonMaps(List<AnnotationAttachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return null;
+        }
+        List<AnnotationAttachment> annotations = attachments.stream()
+                .filter(AnnotationAttachment::hasAnnotation)
+                .toList();
+        if (annotations.isEmpty()) {
+            return null;
+        }
+        return JSON.convertValue(annotations, new TypeReference<>() {
+        });
     }
 
     /**
@@ -103,11 +132,13 @@ public class ConversationHistoryAppService {
 
     /**
      * 平台轻引导落库（兜底分支零产物路径：用户发言 + 定型文案两行——对话完整）。
-     * 事件已发射后的补写：失败只记日志。
+     * 事件已发射后的补写：失败只记日志。attachments = 随发言发送的圈注附件（可空）。
      */
-    public void recordGuide(Long projectId, String runId, String prompt, String text) {
+    public void recordGuide(Long projectId, String runId, String prompt, String text,
+            List<AnnotationAttachment> attachments) {
         quietly(() -> {
-            entries.save(ConversationEntry.userUtterance(projectId, runId, prompt));
+            entries.save(ConversationEntry.userUtterance(projectId, runId, prompt,
+                    toJsonMaps(attachments)));
             entries.save(ConversationEntry.guide(projectId, runId, text));
         });
     }

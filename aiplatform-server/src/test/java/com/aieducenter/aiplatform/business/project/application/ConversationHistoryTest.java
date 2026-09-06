@@ -35,6 +35,10 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationAnchor;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationBody;
+import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationRegion;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -197,6 +201,32 @@ class ConversationHistoryTest {
         assertThat(history.get(5).closing().get("files")).asInstanceOf(
                         InstanceOfAssertFactories.LIST)
                 .containsExactly(Map.of("path", "/src/App.jsx", "added", 40, "removed", 0));
+    }
+
+    @Test
+    void given_utterance_with_annotations_when_read_then_attachments_round_trip() {
+        // #97 圈注落库：用户发言随带的圈注附件落 JSONB、读口按附件数组回放——
+        // 刷新/回访后消息回显可重建圈注 chip（结构化定位，非截图）
+        Long projectId = persistedGeneratedProject("9802");
+        AnnotationAttachment select = new AnnotationAttachment("annotation",
+                new AnnotationBody("select",
+                        new AnnotationAnchor("button.submit", "提交订单", null), ""));
+        AnnotationAttachment circle = new AnnotationAttachment("annotation",
+                new AnnotationBody("circle",
+                        new AnnotationAnchor(null, null, new AnnotationRegion(120, 340, 300, 80)),
+                        "改这里"));
+
+        conversationHistory.recordUserUtterance(projectId, "run-anno", "把这里改成红色",
+                List.of(select, circle));
+
+        List<ConversationEntryResponse> history = conversationHistory.read(projectId);
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).attachments()).hasSize(2);
+        assertThat(history.get(0).attachments().get(0)).containsEntry("attachmentType", "annotation");
+        assertThat(history.get(0).attachments().get(1).get("annotation"))
+                .asInstanceOf(InstanceOfAssertFactories.MAP)
+                .containsEntry("kind", "circle")
+                .containsEntry("note", "改这里");
     }
 
     @Test

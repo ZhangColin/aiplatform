@@ -34,6 +34,7 @@ export function toHydratedEntries(raw: ConversationEntryResponse[]): HydratedEnt
       text: entry.text ?? undefined,
       question: entry.question ?? undefined,
       closing: entry.closing ?? undefined,
+      attachments: entry.attachments ?? undefined,
       answered: entry.answered === true,
     }];
   });

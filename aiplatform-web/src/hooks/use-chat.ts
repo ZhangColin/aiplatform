@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { errorText } from "@/lib/api/api-error";
+import type { AnnotationAttachmentCommand } from "@/lib/preview/annotation";
 import { useChatStore } from "@/lib/store/chat";
 
 /**
@@ -13,7 +14,16 @@ import { useChatStore } from "@/lib/store/chat";
  * 乐观更新都在 chat store（成功路径 REST/SSE 自愈；失败撤回气泡、问题卡重开）。
  */
 
-type PostMessageCommand = components["schemas"]["PostMessageCommand"];
+/**
+ * 发言命令（#97 起携带圈注附件）。形状 = swagger `PostMessageCommand`（content +
+ * attachments），因 schema.d.ts 需 `pnpm gen:api`（活体 server）重新生成方含
+ * attachments 字段，此处以本地类型镜像契约；下次 gen:api 后应改回
+ * `components["schemas"]["PostMessageCommand"]`。
+ */
+type PostMessageCommand = {
+  content: string;
+  attachments?: AnnotationAttachmentCommand[];
+};
 type AnswerQuestionCommand = components["schemas"]["AnswerQuestionCommand"];
 type InterviewTurnResponse = components["schemas"]["InterviewTurnResponse"];
 
@@ -21,10 +31,14 @@ export function usePostMessage(projectId: string) {
   return useMutation({
     mutationFn: (command: PostMessageCommand) =>
       api.post<InterviewTurnResponse>(`/projects/${projectId}/messages`, command),
-    onMutate: ({ content }) => {
-      // 乐观落用户气泡 + 起轮；runId 回来即入对话登记（run-start 回声不再补气泡）
+    onMutate: ({ content, attachments }) => {
+      // 乐观落用户气泡（含圈注 chip）+ 起轮；runId 回来即入对话登记
       const chat = useChatStore.getState();
-      const messageId = chat.appendUserMessage(projectId, content);
+      const messageId = chat.appendUserMessage(
+        projectId,
+        content,
+        attachments?.map((a) => a.annotation) ?? [],
+      );
       chat.startTurn(projectId);
       return { messageId };
     },

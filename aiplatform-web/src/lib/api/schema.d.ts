@@ -1128,6 +1128,9 @@ export interface components {
             closing?: {
                 [key: string]: Record<string, never>;
             };
+            attachments?: {
+                [key: string]: Record<string, never>;
+            }[];
             answered?: boolean;
             /** Format: date-time */
             at?: string;

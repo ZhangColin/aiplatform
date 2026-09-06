@@ -8,7 +8,7 @@ import {
   Smartphone,
   TriangleAlert,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -18,7 +18,14 @@ import {
 } from "@/lib/store/generation";
 import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
 import { cn } from "@/lib/utils";
+import {
+  encodeAnnotate,
+  parseAnchorEvent,
+  parseExitEvent,
+  type AnnotationKind,
+} from "@/lib/preview/annotation";
 import { TROUBLE_NOTICE, previewActive, systemPanelPhase } from "@/lib/preview/state";
+import { useAnnotationStore } from "@/lib/store/annotation";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
 import { PreviewToolbar } from "./preview-toolbar";
@@ -73,6 +80,39 @@ export function SystemPanel({
   const active = previewActive(coderStatus, generatedAt);
   const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
+  // 圈注标注态（#97）：非常驻——activeTool 非空即标注态，对 iframe 发 postMessage
+  // 进出；预览跨源（容器暴露端口），回传锚校验 origin = 预览源（防伪锚）
+  const [activeTool, setActiveTool] = useState<AnnotationKind | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const addAnnotation = useAnnotationStore((s) => s.add);
+  const previewOrigin = url ? previewOriginOf(url) : undefined;
+
+  // 标注态进出：activeTool 变化 → 对 iframe 发 postMessage（目标 = 预览源，非通配）
+  useEffect(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win || !previewOrigin) return;
+    win.postMessage(
+      encodeAnnotate(activeTool ? "enter" : "exit", activeTool ?? undefined),
+      previewOrigin,
+    );
+  }, [activeTool, previewOrigin]);
+
+  // 收预览回传的圈注锚：校验 origin（防伪锚）→ 解析成功入发送框附件区；
+  // 注入脚本 Esc 退出 → 收起标注态
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (!previewOrigin || event.origin !== previewOrigin) return;
+      const anchor = parseAnchorEvent(event.data);
+      if (anchor) {
+        addAnnotation(projectId, anchor);
+        return;
+      }
+      if (parseExitEvent(event.data)) setActiveTool(null);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [projectId, previewOrigin, addAnnotation]);
+
   const phase = systemPanelPhase({
     coderStatus,
     generatedAt,
@@ -87,6 +127,9 @@ export function SystemPanel({
     <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
   );
   const refix = <RestartFixButton projectId={projectId} />;
+  /** 工具点选：同键再点即退出（非常驻），异键切换。 */
+  const toggleTool = (tool: AnnotationKind) =>
+    setActiveTool((cur) => (cur === tool ? null : tool));
 
   return (
     // 平铺无圆角（#79 成果区口径）：与对话列同墙同地，不再套浮起卡片
@@ -190,9 +233,17 @@ export function SystemPanel({
                     （同 URL 也强制重建 iframe），设备切换不动 key */}
                 <iframe
                   key={previewFrameKey(url, epoch + refreshTick)}
+                  ref={iframeRef}
                   src={url}
                   title="系统预览"
                   className="h-full w-full border-0 bg-white"
+                  onLoad={() => {
+                    // iframe 重挂后注入脚本状态清零——标注态仍激活则重发 enter
+                    const win = iframeRef.current?.contentWindow;
+                    if (win && previewOrigin && activeTool) {
+                      win.postMessage(encodeAnnotate("enter", activeTool), previewOrigin);
+                    }
+                  }}
                 />
               </div>
             </div>
@@ -223,8 +274,15 @@ export function SystemPanel({
             </PanelHint>
           )}
         </div>
-        {/* 底部浮动工具条（形态位占位）：有真页面才出场，四件全置灰待启用 */}
-        {pageLive ? <PreviewToolbar /> : null}
+        {/* 底部浮动工具条（#97 圈注落地）：有真页面才出场——三能力可点击进标注态，
+            改字留灰；标注态可退出 */}
+        {pageLive ? (
+          <PreviewToolbar
+            activeTool={activeTool}
+            onToolToggle={toggleTool}
+            onExit={() => setActiveTool(null)}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -246,4 +304,13 @@ function PanelHint({ children }: { children: ReactNode }) {
  */
 export function previewFrameKey(url: string, reload: number): string {
   return `${url}#${reload}`;
+}
+
+/** 预览 URL → 源（postMessage 目标 origin + 回传 origin 校验的同一事实）。 */
+function previewOriginOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
 }

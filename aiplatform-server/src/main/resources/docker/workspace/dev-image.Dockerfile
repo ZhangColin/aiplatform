@@ -20,3 +20,6 @@ CMD ["sleep", "infinity"]
 
 # 极简静态文件服务器：demo 预览示意（环境抽象 exposePort 能力）
 COPY serve.js /opt/serve.js
+
+# 平台预览标注脚本（#97 圈注 B 档）：serve.js 对 HTML 响应内联注入的资产
+COPY annotation.js /opt/annotation.js

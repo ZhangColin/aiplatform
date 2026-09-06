@@ -224,14 +224,14 @@ class ProjectControllerTest {
         // id 升序（写入序 = 对话序）
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
                 new ConversationEntryResponse(1L, 1, "run-1", "做一个官网",
-                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
+                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
                 new ConversationEntryResponse(2L, 3, "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
-                        null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
                 new ConversationEntryResponse(3L, 5, "run-2", null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
-                        false, LocalDateTime.of(2026, 9, 5, 10, 9))));
+                        null, false, LocalDateTime.of(2026, 9, 5, 10, 9))));
 
         performAsUser(get("/api/projects/100/conversation"))
                 .andExpect(status().isOk())
@@ -561,7 +561,7 @@ class ProjectControllerTest {
     @Test
     void given_message_when_post_then_run_id_returned() throws Exception {
         // #47 入口三分类：/messages 走派发入口（runId = 所派运行，分支归应用层测试）
-        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户"))
+        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null))
                 .thenReturn(new DispatchAppService.DispatchRun("run-9"));
 
         performAsUser(post("/api/projects/100/messages")
@@ -582,13 +582,13 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
                 .andExpect(status().isBadRequest());
-        verify(dispatchAppService, never()).dispatch(any(), any());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any());
     }
 
     @Test
     void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
         // 归档即指令区关闭（只读终态）
-        when(dispatchAppService.dispatch(100L, "再改改"))
+        when(dispatchAppService.dispatch(100L, "再改改", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
 
         performAsUser(post("/api/projects/100/messages")
@@ -604,7 +604,7 @@ class ProjectControllerTest {
         // 挂起问答守卫的 REST 契约（#40 / ADR-0005）：问答待答期间 /messages 同步
         // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
         // 行为由应用层守卫测试驱动）
-        when(dispatchAppService.dispatch(100L, "测试：请继续"))
+        when(dispatchAppService.dispatch(100L, "测试：请继续", null))
                 .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
 
         performAsUser(post("/api/projects/100/messages")
@@ -617,7 +617,7 @@ class ProjectControllerTest {
 
     @Test
     void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
-        when(dispatchAppService.dispatch(404L, "你好"))
+        when(dispatchAppService.dispatch(404L, "你好", null))
                 .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
 
         performAsUser(post("/api/projects/404/messages")

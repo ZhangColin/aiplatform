@@ -143,7 +143,8 @@ public class ProjectController {
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
-                dispatchAppService.dispatch(parseId(id), command.content()).runId()));
+                dispatchAppService.dispatch(parseId(id), command.content(), command.attachments())
+                        .runId()));
     }
 
     @PostMapping("/{id}/questions/{qid}/answer")

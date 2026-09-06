@@ -114,7 +114,7 @@ describe("CommandArea · Enter 发送路由（#19 状态机）", () => {
     expect(postMutate).not.toHaveBeenCalled();
 
     fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
-    expect(postMutate).toHaveBeenCalledWith({ content: "加个会员功能" });
+    expect(postMutate).toHaveBeenCalledWith({ content: "加个会员功能", attachments: [] });
     expect(answerMutate).not.toHaveBeenCalled();
 
     fireEvent.change(inputOf(), { target: { value: "   " } }); // 空白输入

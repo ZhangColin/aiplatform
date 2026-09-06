@@ -3,7 +3,7 @@
 import { Check, FileText, Inbox, Lock, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Composer } from "@/components/composer/composer";
+import { Composer, type ComposerAttachment } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,7 +11,14 @@ import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
+import {
+  annotationLabel,
+  annotationSummary,
+  renderAnnotationsText,
+  toAttachmentCommand,
+} from "@/lib/preview/annotation";
 import type { LockRow } from "@/lib/orders/lock";
+import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
@@ -21,6 +28,7 @@ import { QuestionCard } from "./question-card";
 import { WorkMessage } from "./work-message";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_ANNOTATIONS: AnnotationItem[] = [];
 
 /** 常驻文案（#79 初版）：随访谈/迭代阶段化，告诉用户「现在在哪、下一步能做什么」。 */
 const STAGE_HINTS = {
@@ -75,6 +83,8 @@ export function CommandArea({
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
+  // 圈注条目（#97）：预览回传的标注，随发送框附件区呈现、发送前可删改，发送即清
+  const annotations = useAnnotationStore((s) => s.annotations[projectId] ?? EMPTY_ANNOTATIONS);
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
@@ -127,15 +137,26 @@ export function CommandArea({
     setSelection([]);
   }
 
-  /** Composer 提交（Enter / 发送键同一入口；对话流暂无附件管道，入口已隐）。 */
-  function submit(text: string) {
+  /** Composer 提交（Enter / 发送键同一入口）：圈注附件随发言同句发送（#97 增强）。 */
+  function submit(text: string, _attachments: ComposerAttachment[], annotations: AnnotationItem[]) {
     if (!text.trim() || disabled || sending) return;
     if (pending) {
-      const merged = composeAnswer(selection, text.trim());
+      // 作答通道无附件位：圈注渲染进答复文本（主智能体可读），随答复同发即清
+      const annotationText = renderAnnotationsText(annotations);
+      const merged = composeAnswer(
+        selection,
+        text.trim() + (annotationText ? `\n【圈注】${annotationText}` : ""),
+      );
       if (!merged) return;
       answer(merged);
+      useAnnotationStore.getState().clear(projectId);
     } else {
-      postMessage.mutate({ content: text.trim() });
+      postMessage.mutate({
+        content: text.trim(),
+        attachments: annotations.map(toAttachmentCommand),
+      });
+      // 发送即清（圈注随消息发出，不再滞留）
+      useAnnotationStore.getState().clear(projectId);
     }
     setInput("");
   }
@@ -203,6 +224,11 @@ export function CommandArea({
           submitPending={sending}
           disabled={disabled}
           attachmentsEnabled={false}
+          annotations={annotations}
+          onAnnotationRemove={(id) => useAnnotationStore.getState().remove(projectId, id)}
+          onAnnotationNoteChange={(id, note) =>
+            useAnnotationStore.getState().updateNote(projectId, id, note)
+          }
           inputRef={inputRef}
           placeholder={placeholder}
         />
@@ -240,6 +266,18 @@ function MessageRow({ message, children, projectId }: { message: ChatMessage; ch
       <div className="flex w-full justify-end">
         <Bubble variant="tinted" align="end">
           <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
+          {message.annotations && message.annotations.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap justify-end gap-1">
+              {message.annotations.map((a, i) => (
+                <span
+                  key={i}
+                  className="flex items-center gap-1 rounded-md border bg-background/60 px-1.5 py-0.5 text-xs text-foreground/70"
+                >
+                  {annotationLabel(a.kind)}·{annotationSummary(a)}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </Bubble>
       </div>
     );

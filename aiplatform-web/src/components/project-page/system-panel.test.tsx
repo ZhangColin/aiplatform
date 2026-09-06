@@ -296,13 +296,17 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("light-lock");
   });
 
-  it("页面在时工具条形态位出场：四件全置灰标注待启用（圈选归圈注票，改字未来增强）", () => {
+  it("页面在时工具条出场：三能力可点（圈注 #97 落地），改字留灰待启用", () => {
     const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
 
-    for (const label of ["选择组件", "直接改文字", "画笔圈选", "评论"]) {
-      const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}（待启用）"[^>]*>`))![0];
-      expect(tag).toContain("disabled");
+    // 三能力（点选/圈选/评论）可点击进标注态；改字为未来增强留灰
+    for (const label of ["选择组件", "画笔圈选", "评论"]) {
+      const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))![0];
+      expect(tag).not.toContain("disabled");
     }
-    expect(html).toContain("待启用");
+    const textTag = html.match(new RegExp(`<button[^>]*aria-label="直接改文字（待启用）"[^>]*>`))![0];
+    expect(textTag).toContain("disabled");
+    // 正常预览态出「圈一下」提示（非常驻标注态入口）
+    expect(html).toContain("圈一下");
   });
 });

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { parseQuestion, type RaisedQuestion } from "@/lib/chat/qa";
+import { parseAnnotationAttachment, type AnnotationDraft } from "@/lib/preview/annotation";
 import { asRecord } from "@/lib/utils";
 
 /**
@@ -62,11 +63,20 @@ export type HydratedEntry = {
   text?: string | null;
   question?: Record<string, unknown> | null;
   closing?: Record<string, unknown> | null;
+  /** 圈注附件（#97 随用户发言落库，JSON 数组；消息回显重建圈注 chip 用）。 */
+  attachments?: Record<string, unknown>[] | null;
   answered: boolean;
 };
 
 export type ChatMessage =
-  | { kind: "user"; id: string; text: string; runId?: string }
+  | {
+      /** 用户发言；annotations = 随发言发送的圈注条目（#97 回显 chip）。 */
+      kind: "user";
+      id: string;
+      text: string;
+      runId?: string;
+      annotations?: AnnotationDraft[];
+    }
   | {
       /** 智能体话语与平台轻引导；runId 锚增量合并（同 run 才拼接）。label 仅
        *  平台轻引导携带（「平台」——智能体话语无标签）。 */
@@ -155,8 +165,9 @@ export type ChatState = {
   /** 对话史水合（#89）：库条目增量应用（新 run 原位退位 live 片段，开放轮跳过）。 */
   hydrate: (projectId: string, entries: HydratedEntry[]) => void;
   // ---- 发送侧（hooks） ----
-  /** 乐观落用户气泡（返回消息 id；失败经 {@link removeMessage} 撤回）。 */
-  appendUserMessage: (projectId: string, text: string) => string;
+  /** 乐观落用户气泡（返回消息 id；失败经 {@link removeMessage} 撤回）。annotations
+   *  = 随发言发送的圈注条目（#97 回显 chip）。 */
+  appendUserMessage: (projectId: string, text: string, annotations?: AnnotationDraft[]) => string;
   /** 作答落定：用户气泡 + 问题卡转已答 + 轮进行中。 */
   submitAnswer: (projectId: string, text: string, runId: string) => string;
   /** 发言起轮（智能体将回复；run-start 回声会被去重）。 */
@@ -247,7 +258,13 @@ function hydratedMessage(entry: HydratedEntry): ChatMessage | null {
   switch (entry.kind) {
     case "user":
     case "answer":
-      return { kind: "user", id: `h${entry.id}`, text: entry.text ?? "", runId };
+      return {
+        kind: "user",
+        id: `h${entry.id}`,
+        text: entry.text ?? "",
+        runId,
+        annotations: parseHydratedAnnotations(entry.attachments),
+      };
     case "agent":
       return { kind: "agent", id: `h${entry.id}`, text: entry.text ?? "", runId };
     case "guide":
@@ -272,6 +289,17 @@ function hydratedMessage(entry: HydratedEntry): ChatMessage | null {
     default:
       return null;
   }
+}
+
+/** 对话史附件数组 → 圈注条目（#97 容错收窄：非圈注/坏形状条目丢弃）。 */
+function parseHydratedAnnotations(
+  attachments: Record<string, unknown>[] | null | undefined,
+): AnnotationDraft[] {
+  if (!attachments) return [];
+  return attachments.flatMap((raw) => {
+    const draft = parseAnnotationAttachment(raw);
+    return draft ? [draft] : [];
+  });
 }
 
 /** 末条目即开放轮尾（流式中发言/作答，或挂起未答问答卡）——该 run 的 live 尾巴权威。 */
@@ -484,10 +512,10 @@ export const useChatStore = create<ChatState>((set) => ({
       return { ...chat, messages };
     }),
 
-  appendUserMessage: (projectId, text) => {
+  appendUserMessage: (projectId, text, annotations = []) => {
     const id = localId();
     updateChat(set, projectId, (chat) =>
-      appendMessage(chat, { kind: "user", id, text }),
+      appendMessage(chat, { kind: "user", id, text, annotations }),
     );
     return id;
   },

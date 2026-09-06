@@ -23,9 +23,9 @@ describe("StartGenerationCard / StartSystemButton · 开始做系统入口（#22
       <StartGenerationCard projectId="p1" eligible={true} onGenerated={() => {}} />,
     );
 
-    expect(html).toContain("需求整理好了，可以开始做系统");
+    expect(html).toContain("差不多清楚了，剩下的交给我");
     expect(html).toContain("开始做系统");
-    expect(html).toContain("不影响先做，随时可以再提");
+    expect(html).toContain("你想起来随时说");
   });
 
   it("不 eligible（未产出 PRD / 已生成 / 生成中）：卡片不渲染", () => {

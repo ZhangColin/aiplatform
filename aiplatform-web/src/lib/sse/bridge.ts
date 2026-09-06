@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import { parseQuestion } from "@/lib/chat/qa";
 import { asRecord } from "@/lib/utils";
 import { queryKeys } from "@/lib/api/keys";
-import { useAgentRunsStore } from "@/lib/store/agent-runs";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
@@ -26,9 +25,9 @@ import {
  *   store 或即时呈现——本文件是 store 唯一事件写入方；订单态变化 toast 是即时
  *   呈现例外，#30）——通知由站点级常开连接消费（SseProvider），项目页的智能体
  *   事件连接不重复分发（族内分工，防双连接双处理）；
- * - 智能体事件族 = 事件 → agent-runs store（运行注册表）+ chat store（对话面）
- *   + generation store（生成面）+ 工作消息 store（生长中的工作消息）分发；编码
- *   run 收口的失效也在此（generated_at 落库后详情重拉，正确性走 REST）。
+ * - 智能体事件族 = 事件 → chat store（对话面）+ generation store（生成面）+
+ *   工作消息 store（生长中的工作消息）分发；编码 run 收口的失效也在此
+ *   （generated_at 落库后详情重拉，正确性走 REST）。
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
@@ -109,10 +108,10 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
 }
 
 /**
- * 智能体事件 → agent-runs store + chat store + generation store + 工作消息 store
- * 分发（事件 id = SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键
- * （引擎信息归一）——呈现形态的登记锚都在此：executor 起工作消息、main 进对话面
- * （#86 单会话收敛：对话只有主智能体一座，无角色分支）。
+ * 智能体事件 → chat store + generation store + 工作消息 store 分发（事件 id =
+ * SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键（引擎信息归一）
+ * ——呈现形态的登记锚都在此：executor 起工作消息、main 进对话面（#86 单会话
+ * 收敛：对话只有主智能体一座，无角色分支）。
  */
 export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);
@@ -120,7 +119,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   // 单端点单流上通知族与智能体事件族混载：本分发口只消费智能体事件族——
   // 通知族由站点级常开连接的 dispatchNotificationEvent 消费（防双连接双处理）
   if (asNotificationEvent(envelope)) return;
-  const runs = useAgentRunsStore.getState();
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
   const work = useWorkMessageStore.getState();
@@ -132,8 +130,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     switch (platform.type) {
       case "run-start": {
         const { payload } = platform;
-        // 运行注册表（LIVE 脉冲锚）：新 runId 重开（同项目驱逐旧 run）
-        runs.startRun({ runId: payload.runId, projectId: payload.projectId, at });
         // 配置键 = 呈现形态的登记锚（引擎信息归一，#82 起 run-start 唯一携带）：
         // executor → 编码 run（生成面登记 + 工作消息起锚）；main → 对话面 run
         // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
@@ -148,10 +144,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "question-raised": {
         const { payload } = platform;
-        runs.setRunStatus(
-          { runId: payload.runId, projectId: payload.projectId, at },
-          "questioning",
-        );
         const question = parseQuestion(event.id, payload);
         if (question) chat.raiseQuestion(payload.projectId, payload.runId, question);
         return;
@@ -159,11 +151,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       // ---- 权限确认（#83 作答通道分家）：确认卡长在工作消息流，与问答卡分形态 ----
       case "permission-required": {
         const { payload } = platform;
-        // 等用户 ≠ 终态（同问答挂起语义）；作答后 permission-resolved 回 running
-        runs.setRunStatus(
-          { runId: payload.runId, projectId: payload.projectId, at },
-          "questioning",
-        );
         work.notePart(
           payload.projectId,
           { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
@@ -177,12 +164,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "permission-resolved": {
         const { payload } = platform;
-        // run 续跑进行中（批准的动作卡随后完成 / 拒绝的动作卡随后失败）；终态仍归
-        // run-finish / run-failed
-        runs.setRunStatus(
-          { runId: payload.runId, projectId: payload.projectId, at },
-          "running",
-        );
         work.resolvePermission(
           payload.projectId,
           payload.engineRef,
@@ -197,7 +178,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // run 层唯一失败终态仍归 run-failed
         if (isCoderRun(generation, payload.projectId, payload.runId)) return;
         // 对话轮失败（非重试族）：对话面收轮 + 失败气泡；生成面不写状态（#84）
-        runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
         chat.noteTurnError(payload.projectId, payload.runId, payload.message, event.id);
         // 受理卡落定不死转（#87）：受理轮炸——中断提示已是兜底呈现，卡不悬转
         chat.settleAcceptance(payload.projectId, payload.runId);
@@ -208,7 +188,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 「重新发起/重新修改」只认本事件；无 executor 登记的 runId 忽略（事件序
         // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
-        runs.setRunStatus({ runId: payload.runId, projectId: payload.projectId, at }, "error");
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId);
         }
@@ -218,10 +197,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "run-finish": {
         const { payload } = platform;
-        runs.setRunStatus(
-          { runId: payload.runId, projectId: payload.projectId, at },
-          "finished",
-        );
         chat.finishTurn(payload.projectId, payload.runId);
         // 受理卡落定（#87）：受理轮收口（受理完成——追问挂起轮不发本事件，挂起
         // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接

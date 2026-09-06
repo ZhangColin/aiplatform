@@ -1,7 +1,6 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useAgentRunsStore } from "@/lib/store/agent-runs";
 import { useChatStore } from "@/lib/store/chat";
 import {
   PREVIEW_REFRESH_MIN_INTERVAL_MS,
@@ -214,92 +213,8 @@ describe("bridge · preview-updated → 逐修改刷新（#49）", () => {
   });
 });
 
-describe("bridge · 智能体事件 → 运行注册表（agent-runs，顶栏 LIVE 锚）", () => {
-  beforeEach(() => {
-    useAgentRunsStore.setState({ runs: {}, order: [] });
-  });
-
-  /** 事件工厂：带信封 ts（起跑锚的时间源）。 */
-  function agentEvent(
-    type: string,
-    payload: Record<string, unknown>,
-    id = "run1:1",
-    ts = "",
-  ): SseEvent {
-    return { id, data: JSON.stringify({ type, payload, ts }) };
-  }
-
-  it("run-start 建 run（startedAt = 信封 ts）；question → questioning；run-finish → finished；run-failed → error", () => {
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "实现表单", model: "m1" }, "run1:1", "2026-09-05T06:00:00Z"),
-    );
-    expect(useAgentRunsStore.getState().runs["run1"]).toMatchObject({
-      projectId: "p1",
-      status: "running",
-      startedAt: Date.parse("2026-09-05T06:00:00Z"),
-    });
-
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("question-raised", { projectId: "p1", runId: "run1", summary: "选哪个配色" }, "run1:5"),
-    );
-    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning");
-
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-finish", { projectId: "p1", runId: "run1", sessionId: "s1", finish: "end" }, "run1:9"),
-    );
-    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("finished");
-
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-start", { projectId: "p1", runId: "run2" }, "run2:1"),
-    );
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-failed", { projectId: "p1", runId: "run2" }, "run2:2"),
-    );
-    expect(useAgentRunsStore.getState().runs["run2"].status).toBe("error");
-  });
-
-  it("error 事件无 run-start 前置 → 补建 stub（起跑即死也可见——重放补发面）", () => {
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent(
-        "error",
-        {
-          projectId: "p1",
-          runId: "run1",
-          message: "Failed to create model: Environment variable DEEPSEEK_API_KEY is required",
-        },
-        "run1:1",
-      ),
-    );
-
-    expect(useAgentRunsStore.getState().runs["run1"]).toMatchObject({
-      projectId: "p1",
-      status: "error",
-    });
-  });
-
-  it("run-start 重放（同 runId）不重开：LIVE 计时锚稳定", () => {
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-start", { projectId: "p1", runId: "run1" }, "run1:1", "2026-09-05T06:00:00Z"),
-    );
-    dispatchAgentEvent(
-      agentQc,
-      agentEvent("run-start", { projectId: "p1", runId: "run1" }, "run1:1", "2026-09-05T06:00:00Z"),
-    );
-
-    expect(useAgentRunsStore.getState().runs["run1"].startedAt).toBe(Date.parse("2026-09-05T06:00:00Z"));
-  });
-});
-
 describe("bridge · 智能体事件 → chat store（对话面，#19）", () => {
   beforeEach(() => {
-    useAgentRunsStore.setState({ runs: {}, order: [] });
     useChatStore.setState({ chats: {} });
     useGenerationStore.setState({ generations: {} });
     useWorkMessageStore.setState({ works: {} });
@@ -447,7 +362,6 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
       summary: "rm -rf data",
       state: "pending",
     });
-    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning");
   });
 
   it("error / run-finish（对话 run）→ 收轮 + 中断提示", () => {
@@ -519,7 +433,6 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
 
 describe("bridge · 智能体事件 → generation store（生成面，#22）", () => {
   beforeEach(() => {
-    useAgentRunsStore.setState({ runs: {}, order: [] });
     useChatStore.setState({ chats: {} });
     useGenerationStore.setState({ generations: {} });
     useWorkMessageStore.setState({ works: {} });
@@ -575,11 +488,10 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     });
 
     // 防御位：编码 run 的 error 事件（服务端投影失守的事件序异常）也不闪任何
-    // 错误 UI——对话面不写失败气泡、生成面不写错误态、运行注册表不转 error
+    // 错误 UI——对话面不写失败气泡、生成面不写错误态
     dispatchAgentEvent(agentQc, agentEvent("error", { projectId: "p1", runId: "run1", message: "模型调用失败" }, "run1:8"));
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("running");
     expect(useChatStore.getState().chats["p1"]?.messages ?? []).toHaveLength(0);
-    expect(useAgentRunsStore.getState().runs["run1"]?.status).toBe("running");
 
     // 唯一失败终态：run-failed 到达才转 error——工作消息定格、部件留驻
     dispatchAgentEvent(agentQc, agentEvent("run-failed", { projectId: "p1", runId: "run1" }, "run1:9"));
@@ -634,7 +546,6 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
       expect(() => dispatchAgentEvent(agentQc, agentEvent(type, payload as Record<string, unknown>))).not.toThrow();
     }
 
-    expect(useAgentRunsStore.getState().runs).toEqual({});
     expect(useChatStore.getState().chats).toEqual({});
     expect(useGenerationStore.getState().generations).toEqual({});
     expect(useWorkMessageStore.getState().works).toEqual({});
@@ -643,7 +554,6 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
 
 describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切新）", () => {
   beforeEach(() => {
-    useAgentRunsStore.setState({ runs: {}, order: [] });
     useChatStore.setState({ chats: {} });
     useGenerationStore.setState({ generations: {} });
     useWorkMessageStore.setState({ works: {} });
@@ -873,7 +783,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
         at: Date.parse(at(5)),
       },
     ]);
-    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("questioning"); // 等用户 ≠ 终态
 
     // 作答落定（批准）：确认卡转已批终态 + run 回 running（续跑中；终态仍归 run-finish/failed）
     dispatchAgentEvent(agentQc, agentEvent(
@@ -884,7 +793,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ));
     expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
       .toMatchObject({ kind: "permission", state: "approved" });
-    expect(useAgentRunsStore.getState().runs["run1"].status).toBe("running");
 
     // 重放（断线重连先收缓冲）：required+resolved 双达确认卡不回退成待答（事件 id 去重 + 同值幂等）
     dispatchAgentEvent(agentQc, agentEvent(
@@ -994,7 +902,6 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
 
 describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#88）", () => {
   beforeEach(() => {
-    useAgentRunsStore.setState({ runs: {}, order: [] });
     useChatStore.setState({ chats: {} });
     useGenerationStore.setState({ generations: {} });
     useWorkMessageStore.setState({ works: {} });

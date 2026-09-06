@@ -27,7 +27,7 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
  * 代码不播、无进度条/百分比；run 开始即出现（空部件也出「正在做」头部），
  * 成功收口定格为收尾卡（#88：closing 在场即凝聚物呈现，过程部件已退场），
  * 失败定格（run-failed）流水留驻。
- * 计时 tick 归组件局部（UI 关注，非流状态——同 run-elapsed 先例）。
+ * 计时 tick 归组件局部（UI 关注，非流状态，不写流 store）。
  */
 export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId: string }) {
   const growing = !work.frozen;

@@ -31,11 +31,10 @@ export function StartGenerationCard({
       <div className="w-full max-w-sm space-y-3 rounded-xl border bg-muted/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Rocket className="size-4 shrink-0 text-primary" />
-          需求整理好了，可以开始做系统
+          差不多清楚了，剩下的交给我
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          接下来平台会把你的系统做出来，做好后可以直接在这里操作试用。还有没聊清的事项
-          也不影响先做，随时可以再提。
+          搭好之后你直接在这儿点开就能试用。有还没聊清的地方也不影响，你想起来随时说。
         </p>
         <StartButtonInner
           pending={generate.isPending}

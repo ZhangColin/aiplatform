@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dispatchAgentEvent, dispatchNotificationEvent } from "@/lib/sse/bridge";
 import type { SseEvent } from "@/lib/sse/connection";
-import { useAgentRunsStore } from "@/lib/store/agent-runs";
 import { useChatStore } from "@/lib/store/chat";
 import {
   coderStatusOf,
@@ -66,7 +65,6 @@ describe("预览渐进 b 档（#90）· 脚本化 run 全程", () => {
   beforeEach(() => {
     queryClient = new QueryClient();
     eventSeq = 0;
-    useAgentRunsStore.setState({ runs: {}, order: [] });
     useChatStore.setState({ chats: {} });
     useGenerationStore.setState({ generations: {} });
     useWorkMessageStore.setState({ works: {} });

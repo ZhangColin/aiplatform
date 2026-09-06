@@ -112,7 +112,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     // 主入口 = 对话流内卡片（系统范式空态同步一句提示）
-    expect(html).toContain("需求整理好了，可以开始做系统");
+    expect(html).toContain("差不多清楚了，剩下的交给我");
     expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
   });
 

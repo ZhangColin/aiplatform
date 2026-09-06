@@ -14,7 +14,6 @@ type SseStatusState = {
 /**
  * SSE 传输层状态（ADR 0003）：connection.ts 唯一写入方；
  * 读方 = 项目页 agent 流指示器 + 门控轮询（useSseFallbackPolling）。
- * 与 agent-runs（运行注册表）分家的理由见 ADR Considered Options「store 合一 vs 分两个」。
  */
 export const useSseStatusStore = create<SseStatusState>((set) => ({
   statuses: { notification: "offline", agent: "offline" },

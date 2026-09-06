@@ -18,7 +18,7 @@ import { CommandArea } from "./command-area";
 import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea, useOutputsTabs } from "./outputs-area";
 import { StartGenerationCard, StartSystemButton } from "./start-generation";
-import { ProjectPageRunStatus, ProjectPageShell } from "./project-page-shell";
+import { ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
 
@@ -151,7 +151,6 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           </span>
         )
       }
-      running={<ProjectPageRunStatus projectId={projectId} />}
       chat={
         <CommandArea
           projectId={projectId}

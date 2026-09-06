@@ -69,7 +69,12 @@ export function QuestionCard({
               className="flex-wrap"
             >
               {question.options.map((label) => (
-                <ToggleGroupItem key={label} value={label} aria-label={label} className="whitespace-normal">
+                <ToggleGroupItem
+                  key={label}
+                  value={label}
+                  aria-label={label}
+                  className="whitespace-normal data-pressed:border-primary data-pressed:bg-primary/10 data-pressed:text-primary"
+                >
                   <Check className="size-3.5 opacity-30 group-data-pressed/toggle:opacity-100" />
                   {label}
                 </ToggleGroupItem>

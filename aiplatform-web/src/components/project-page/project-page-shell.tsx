@@ -11,10 +11,6 @@ import {
 } from "@/components/ui/resizable";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { latestProjectRun, useAgentRunsStore } from "@/lib/store/agent-runs";
-import { formatElapsed } from "@/lib/utils/time";
-
-import { isRunInFlight, useRunElapsed } from "./run-elapsed";
 
 /**
  * 项目页框架（issue #17 单站壳 → #79 对话主角式定稿）：顶栏 + resizable 双槽
@@ -26,8 +22,6 @@ import { isRunInFlight, useRunElapsed } from "./run-elapsed";
 export type ProjectPageShellProps = {
   /** 顶栏内容：项目名等。 */
   header: React.ReactNode;
-  /** 顶栏运行状态（ml-auto 处）：LIVE 脉冲 + 计时（进行中才渲染）。 */
-  running: React.ReactNode;
   /** 左：对话区（居中当主角）。 */
   chat: React.ReactNode;
   /** 右：成果区（缺省 = 闲聊期，对话区占满全宽）。 */
@@ -48,7 +42,6 @@ export type ProjectPageShellProps = {
 
 export function ProjectPageShell({
   header,
-  running,
   chat,
   outputs,
   outputsOpen = false,
@@ -64,7 +57,6 @@ export function ProjectPageShell({
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         {header}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {running}
           {outputsExists && !outputsOpen ? (
             <Button
               size="sm"
@@ -126,31 +118,5 @@ export function ProjectPageShell({
         </>
       )}
     </SidebarInset>
-  );
-}
-
-/**
- * 顶栏运行状态（「关了浏览器也在跑」的锚点，LIVE 真绑定·本会话口径）：
- * 直读运行注册表当前项目最近 run（latestProjectRun）。进行中（running /
- * questioning）才渲染 LIVE 脉冲 + 计时（锚 run.startedAt，tick 归 useRunElapsed
- * 局部）；无 run / 已终态（finished / error）整块不渲染——信号保守但不撒谎。
- */
-export function ProjectPageRunStatus({ projectId }: { projectId: string }) {
-  const run = useAgentRunsStore((s) => latestProjectRun(s, projectId));
-  const inFlight = isRunInFlight(run);
-  const elapsed = useRunElapsed(inFlight ? run : undefined);
-  if (!inFlight || !run) return null;
-
-  return (
-    <span className="flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1">
-      <span className="relative flex size-2">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-60" />
-        <span className="relative inline-flex size-2 rounded-full bg-red-500" />
-      </span>
-      <span className="text-xs font-semibold text-red-600 dark:text-red-400">LIVE</span>
-      <span className="font-mono text-xs tabular-nums text-red-600 dark:text-red-400">
-        {formatElapsed(elapsed)}
-      </span>
-    </span>
   );
 }

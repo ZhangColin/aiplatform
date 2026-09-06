@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -16,10 +17,11 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
 
 /**
  * 按配置的工具集装配（#86 角色预设收敛为配置——职能是配置不是结构）：
- * 主智能体 = {ask_user, savePrd}（追问挂起源 + PRD 落盘/修订事实登记——需求侧
- * 判定的观测面）+ 只读三件 {list_workspace_files, read_workspace_file,
- * query_project_facts}（答询查证），仅随只读工作区注册（#86 对话姿态：内核
- * 文件/shell 工具已关，写面结构性不存在——PRD 写入走 savePrd 自带通道）；
+ * 主智能体 = {ask_user, savePrd, saveBuildPlan}（追问挂起源 + PRD 落盘/修订事实
+ * 登记——需求侧判定的观测面 + 切片计划事实登记——生成编排的切片输入）+ 只读三件
+ * {list_workspace_files, read_workspace_file, query_project_facts}（答询查证），
+ * 仅随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关，写面结构性不存在——
+ * PRD 写入走 savePrd 自带通道）；
  * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面）
  * + {command}（#83 需确认的命令工具）；无配置语境 / 本地兜底工作区 = 空集。
  */
@@ -28,29 +30,31 @@ class ProfileToolkitSupplierTest {
     private final PrdArtifactAdapter prdArtifacts = mock(PrdArtifactAdapter.class);
     private final FinishEditFacts finishFacts = new FinishEditFacts();
     private final PrdRevisionFacts prdRevisions = new PrdRevisionFacts();
+    private final BuildPlanFacts buildPlanFacts = new BuildPlanFacts();
     private final ProjectRepository projectRepository = mock(ProjectRepository.class);
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
-        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+        return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService);
     }
 
     @Test
-    void given_main_on_read_only_workspace_when_toolkit_then_dialog_and_prd_and_read_trio() {
-        // #86 并轨后的主智能体资产：访谈/判定工具 + 答询查证只读三件同面（单会话
-        // 连续——追问、答询、受理意见不换工具面）；savePrd 锚定项目（经
-        // PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口在平台代码）
+    void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_buildplan_and_read_trio() {
+        // #86 并轨后的主智能体资产：访谈/判定工具 + 切片计划（saveBuildPlan）+
+        // 答询查证只读三件同面（单会话连续——追问、答询、受理意见不换工具面）；
+        // savePrd 锚定项目（经 PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口
+        // 在平台代码）
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"));
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
-                AskUserTool.NAME, SavePrdTool.NAME,
+                AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME);
         for (String name : toolkit.getToolNames()) {
-            // 只读三件全 readOnly；ask_user 是挂起源（无写面）；savePrd 是唯一
-            // 写面（PRD 产出是访谈协议的预期终点）
+            // 只读三件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
+            // savePrd 是唯一写面（PRD 产出是访谈协议的预期终点）
             if (!SavePrdTool.NAME.equals(name)) {
                 assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();
             }

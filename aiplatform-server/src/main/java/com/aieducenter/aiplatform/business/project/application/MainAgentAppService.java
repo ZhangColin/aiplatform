@@ -87,6 +87,7 @@ public class MainAgentAppService {
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
     private final PrdRevisionFacts prdRevisions;
+    private final BuildPlanFacts buildPlanFacts;
     private final ConversationHistoryAppService conversationHistory;
 
     /**
@@ -116,7 +117,7 @@ public class MainAgentAppService {
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
             GenerationAppService generationAppService, PrdRevisionFacts prdRevisions,
-            ConversationHistoryAppService conversationHistory) {
+            BuildPlanFacts buildPlanFacts, ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -126,6 +127,7 @@ public class MainAgentAppService {
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
         this.prdRevisions = prdRevisions;
+        this.buildPlanFacts = buildPlanFacts;
         this.conversationHistory = conversationHistory;
     }
 
@@ -317,6 +319,7 @@ public class MainAgentAppService {
             // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的 savePrd 事实残留不进
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
+            buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
                         conversationHistory.recorder(projectId, eventBridge.sink(projectId));
@@ -399,11 +402,14 @@ public class MainAgentAppService {
             }
             if (project.getGeneratedAt() == null) {
                 // 未生成：PRD 已产出即平台自动派首次生成（生成无门，#101）；未产出
-                // PRD 静默止于对话（访谈期常态：生成前意见链终点）
+                // PRD 静默止于对话（访谈期常态：生成前意见链终点）。切片计划（saveBuildPlan
+                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话），无计划
+                // 时由 GenerationAppService 退化为最小两段
+                BuildPlan plan = buildPlanFacts.consume(workspaceId);
                 clearTurnAnchors(sessionId, workspaceId);
                 if (project.getPrdProducedAt() != null) {
                     GenerationAppService.GenerationRun run =
-                            generationAppService.dispatchGenerationOnTurnClose(projectId);
+                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan);
                     if (run != null) {
                         log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
                                 projectId, run.runId());
@@ -443,6 +449,7 @@ public class MainAgentAppService {
     private void clearTurnAnchors(String sessionId, String workspaceId) {
         opinionExchanges.remove(sessionId);
         prdRevisions.clear(workspaceId);
+        buildPlanFacts.clear(workspaceId);
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；

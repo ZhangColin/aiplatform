@@ -93,6 +93,12 @@ class MainAgentAppServiceTest {
     private PrdRevisionFacts prdRevisions;
 
     @Autowired
+    private BuildPlanFacts buildPlanFacts;
+
+    @Autowired
+    private GenerationAppService generationAppService;
+
+    @Autowired
     private CodingRunTrack codingRunTrack;
 
     @MockitoBean
@@ -904,6 +910,47 @@ class MainAgentAppServiceTest {
         assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(generation.agentKey()).isEqualTo("executor");
         assertThat(generation.prompt()).isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
+    }
+
+    @Test
+    void given_main_produces_build_plan_when_turn_closes_then_plan_handed_to_generation() {
+        // 灵魂用例（#103 交接物来源）：主智能体产出 PRD 后顺带产出切片计划
+        // （saveBuildPlan 事实）——收口派发把切片计划随生成交接给 GenerationAppService
+        // （planOf 可取到），判定以工具调用事实为准、不解析自由文本
+        Long projectId = persistedPrdProject("9729");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+                return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
+            }
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.runOpinionTurn(projectId, "做一个电商系统");
+
+        assertThat(generationAppService.planOf(projectId))
+                .isEqualTo(new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+    }
+
+    @Test
+    void given_main_no_build_plan_when_turn_closes_then_generation_falls_back_to_minimal_plan() {
+        // 无计划兜底（#103 守卫取舍）：主智能体产出 PRD 但未产出切片计划——退化为
+        // 最小两段（阶段 0 先起服由平台固定前置，计划含一段全量切片），不守卫不派
+        // （倒退 #101 生成无门）
+        Long projectId = persistedPrdProject("9730");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        assertThat(generationAppService.planOf(projectId))
+                .isEqualTo(BuildPlan.minimalFallback());
     }
 
     @Test

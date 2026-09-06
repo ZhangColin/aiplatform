@@ -1,5 +1,8 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
@@ -106,6 +109,15 @@ public class GenerationAppService {
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
 
+    /**
+     * 生成交接物的切片计划（projectId → 构建计划）：收口派发时落定（显式计划优先，
+     * 无则退化为最小两段），生成轨道（#104 先起服 + 逐片多 run）据此顺序执行。进程
+     * 内事实（run 无表口径）：重启即清。不沿用旧计划——主智能体重提意见会修订 PRD，
+     * 旧切片计划相对已修订的 PRD 是过期结构（退化为最小两段，由 #104 决定是否及如何
+     * 跨重新发起保留计划）。
+     */
+    private final Map<Long, BuildPlan> generationPlans = new ConcurrentHashMap<>();
+
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -131,7 +143,7 @@ public class GenerationAppService {
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
-        return dispatchGeneration(project, /* rejectInFlight= */ true);
+        return dispatchGeneration(project, /* rejectInFlight= */ true, /* plan= */ null);
     }
 
     /**
@@ -143,15 +155,17 @@ public class GenerationAppService {
      * 重复生成）；按钮路径在途拒绝 PRJ_017。run-failed 后项目仍「未生成」，用户
      * 重提一句即经本入口再触发，不自动重试（防空烧 token）。
      *
+     * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 主智能体未产出
+     *             切片计划，退化为最小两段——{@link BuildPlan#minimalFallback}）
      * @return 派发的 run 标识；在途（生成进行中）静默跳过返回 null——调用方据此
      *         区分「已派」与「跳过」，不误报派发事实
      * @throws ApplicationException 守卫组同 {@link #startGeneration}（收口观测处
      *                              已判定过未归档 / 未生成 / PRD 已产出，此处守卫
      *                              兜其余竞态调用面）
      */
-    public GenerationRun dispatchGenerationOnTurnClose(Long projectId) {
+    public GenerationRun dispatchGenerationOnTurnClose(Long projectId, BuildPlan plan) {
         Project project = requireGeneratableProject(projectId);
-        return dispatchGeneration(project, /* rejectInFlight= */ false);
+        return dispatchGeneration(project, /* rejectInFlight= */ false, plan);
     }
 
     /**
@@ -160,7 +174,7 @@ public class GenerationAppService {
      * 跳过（返回 null 即「未派」，调用方不关心）。资产就位失败如实上抛并释放在途
      * 标记（环境故障口径，生成不起跑）。
      */
-    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight) {
+    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight, BuildPlan plan) {
         Long projectId = project.getId();
         if (!codingRunTrack.begin(projectId)) {
             if (rejectInFlight) {
@@ -175,6 +189,11 @@ public class GenerationAppService {
             codingRunTrack.end(projectId);
             throw e;
         }
+        // 切片计划交接物（ADR 0009）：显式传入的计划优先（收口派发），无计划退化为
+        // 最小两段（阶段 0 先起服由平台固定前置，本计划含一段全量切片——守卫不派会
+        // 倒退 #101 生成无门）。交接物落定供生成轨道（#104）读取。
+        BuildPlan resolved = plan != null ? plan : BuildPlan.minimalFallback();
+        generationPlans.put(projectId, resolved);
 
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
@@ -186,6 +205,11 @@ public class GenerationAppService {
             }
         });
         return new GenerationRun(firstRunId);
+    }
+
+    /** 生成交接物的切片计划探针（#104 生成轨道消费；测试断言交接物落定）。 */
+    BuildPlan planOf(Long projectId) {
+        return generationPlans.get(projectId);
     }
 
     /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */

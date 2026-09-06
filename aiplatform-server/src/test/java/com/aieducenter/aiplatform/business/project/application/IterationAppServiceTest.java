@@ -102,7 +102,7 @@ class IterationAppServiceTest {
     @MockitoBean
     private KnowledgePort knowledgePort;
 
-    /** 工作区 exec（#49 步骤边界探活的脚本化缝；既有修正用例不触 exec 不受影响）。 */
+    /** 工作区 exec（#91 版本锚定成版探针的脚本化缝——commit hash 回填 closing）。 */
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
@@ -864,41 +864,6 @@ class IterationAppServiceTest {
         assertThat(merged.rounds()).hasSize(2)
                 .extracting(IterationAppService.FixHandoff.Round::prdRevisionSummary)
                 .containsOnlyNulls();
-    }
-
-    // ---------- 逐修改刷新（#49：修正与生成同一口径，刷新挂在共用尝试环） ----------
-
-    @Test
-    void given_fix_run_live_steps_and_probe_ok_when_fix_then_preview_updated_notification() {
-        Long projectId = persistedGeneratedProject("9913");
-        List<Runnable> tracks = givenTrackQueued();
-        when(workspaceLifecycleAppService.exec(any(), any()))
-                .thenReturn(new ExecResultResponse("", "", 0));
-        // 脚本化边界：直播步骤序列（step1 起跑边界 + step2 完整修改落定）经捕获的
-        // sink 推入 + finish_edit 收口事实——修正 run 的探活装饰在生成侧同一链上
-        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
-            AgentCommand command = invocation.getArgument(0);
-            Consumer<AgentEvent> sink = invocation.getArgument(1);
-            sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
-                    EventsAppService.RUN_FIELD, command.runId(),
-                    AgentEventTypes.PART_STEP_FIELD, 1)));
-            sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
-                    EventsAppService.RUN_FIELD, command.runId(),
-                    AgentEventTypes.PART_STEP_FIELD, 2)));
-            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
-            return new AgentReply(command.runId(), "修正完成");
-        });
-
-        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
-        tracks.remove(0).run();
-
-        // 完整修改落定的步骤边界（step≥2）→ 平台侧探活通过 → 刷新通知（step1 不算）
-        verify(eventsAppService, timeout(5000))
-                .publishNotification(eq(ProjectEventTypes.PREVIEW_UPDATED), argThat(payload ->
-                        projectId.toString().equals(
-                                payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
-        // run 正常收口、轨道收工（刷新装饰不改变修正收口行为）
-        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     @Test

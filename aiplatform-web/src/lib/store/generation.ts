@@ -11,15 +11,10 @@ import { create } from "zustand";
  * 刷新后由断线补发窗口重建（#89：重连补发，新连接不补发——生成中回页可续看状态）。重试静默（#84）：中间
  * 失败不出事件，run 失败（run-failed）为唯一失败终态。</p>
  *
- * <p><b>预览重挂纪元</b>：两路信号共一套机制——编码 run 收口（run-finish，事件
- * id 去重防重放重复计）与逐修改刷新（preview-updated 通知，#49——平台侧已按
- * 「步骤完成 + 探活通过」门控，前端只做节流：秒级最小间隔内的连续通知合并丢弃，
- * 最终态由收口纪元兜底）各自 +1，SystemPanel 以 url+epoch 为 iframe key。通知
- * 族永不补发，preview-updated 无需事件 id 去重。</p>
+ * <p><b>预览重挂纪元</b>：编码 run 收口（run-finish，事件 id 去重防重放重复计）
+ * +1，SystemPanel 以 url+epoch 为 iframe key——刷新单元 = 切片收口（#106 单一化，
+ * 无逐修改刷新）。</p>
  */
-
-/** 逐修改刷新的最小重载间隔（秒级，防闪烁；正步间隔远大于此，合并只在尖峰生效）。 */
-export const PREVIEW_REFRESH_MIN_INTERVAL_MS = 3000;
 
 /** 编码 run 状态（生成面视角；重试静默进行，不设中间态）。 */
 export type CoderRunStatus = "running" | "finished" | "error";
@@ -33,8 +28,6 @@ type ProjectGeneration = {
   previewEpoch: number;
   /** 已计过纪元的 run-finish 事件 id（重放去重锚，有界）。 */
   seenFinishEventIds: string[];
-  /** 上次逐修改刷新计纪元的时点（节流窗锚，桥传入）。 */
-  previewReloadAt?: number;
 };
 
 export type GenerationState = {
@@ -50,11 +43,6 @@ export type GenerationState = {
    * 恢复出口零闪现。
    */
   noteCoderFailed: (projectId: string) => void;
-  /**
-   * 预览内容前移（#49 preview-updated 通知）：节流后计预览纪元——间隔内的连续
-   * 通知合并丢弃（不闪烁），重载由下一次出窗通知或收口纪元兜底。
-   */
-  notePreviewUpdated: (projectId: string, now: number) => void;
 };
 
 /** runId 登记集软上限（agent 流重放缓冲 ~1000 事件）。 */
@@ -130,19 +118,6 @@ export const useGenerationStore = create<GenerationState>((set) => ({
     updateGeneration(set, projectId, (generation) =>
       generation.coderStatus === "error" ? generation : { ...generation, coderStatus: "error" },
     ),
-
-  notePreviewUpdated: (projectId, now) =>
-    updateGeneration(set, projectId, (generation) => {
-      // 节流：距上次刷新不足最小间隔即合并丢弃（连续通知不闪烁；平台侧已按
-      // 「步骤完成且探活通过」门控，出窗后下一次通知或收口纪元会带来最新内容）
-      if (
-        generation.previewReloadAt !== undefined &&
-        now - generation.previewReloadAt < PREVIEW_REFRESH_MIN_INTERVAL_MS
-      ) {
-        return generation;
-      }
-      return { ...generation, previewEpoch: generation.previewEpoch + 1, previewReloadAt: now };
-    }),
 }));
 
 /** 编码 run 判定（bridge 侧用：登记过的 runId 即编码 run）。 */

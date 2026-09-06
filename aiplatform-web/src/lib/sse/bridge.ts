@@ -41,9 +41,6 @@ const NOTIFICATION_INVALIDATIONS = {
   // WRITERS）；不在此失效 projects 前缀——preview() 每次成功仍会发本事件，失效即
   // 重拉预览查询 → 又成功 → 又发事件——自反馈死循环（写缓存非失效，不重拉 preview）
   "preview-ready": [],
-  // 逐修改刷新（#49）：内容在 iframe 背后的沙箱应用里、REST 域无变化可失效，
-  // URL 不变——重载走 generation store 预览纪元（见载荷展示注册表），非失效
-  "preview-updated": [],
   "workspace-destroyed": [queryKeys.projects.all],
   // PRD 内容与更新时间在 documents 域；projects 详情的 prdProducedAt 是成果区
   // 长出判据，写出瞬间一并重拉
@@ -80,12 +77,6 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
     queryClient.setQueryData(queryKeys.projects.preview(event.payload.projectId), {
       url: event.payload.url,
     });
-  },
-  // 逐修改刷新（#49）：「内容前移了一步」是瞬时信号，REST 重查拿不到（预览
-  // URL 不变、轮询已停）——写 generation store 计预览纪元（节流在 store 内）
-  "preview-updated": (event) => {
-    if (event.type !== "preview-updated") return;
-    useGenerationStore.getState().notePreviewUpdated(event.payload.projectId, Date.now());
   },
   // 订单态变化 toast（spec：点击直达项目页）：状态文案归纯函数单点
   // （lib/orders/status），导航用整页跳（桥在 React 外，无 router 上下文——

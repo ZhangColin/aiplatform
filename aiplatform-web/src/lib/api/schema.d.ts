@@ -645,7 +645,7 @@ export interface paths {
          *
          *     | type | 族 | payload 字段 |
          *     |---|---|---|
-         *     | workspace-created / preview-ready / preview-updated / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
+         *     | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
          *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
          *     | error | 智能体·生命周期 | runId, message |
          *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |

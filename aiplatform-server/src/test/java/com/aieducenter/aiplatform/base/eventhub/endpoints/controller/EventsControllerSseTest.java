@@ -33,7 +33,6 @@ import org.springframework.http.MediaType;
 import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSessionStore;
-import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 
@@ -220,27 +219,6 @@ class EventsControllerSseTest {
         assertThat(siteWide.nextNonCommentLine()).isEqualTo("id:p-site:1");   // 只有通知族
         siteWide.skipEventBody();
         assertThat(siteWide.nextNonCommentLine(1500)).isNull();
-    }
-
-    @Test
-    void given_preview_updated_when_publish_then_wire_event_contract() throws Exception {
-        // #49 逐修改刷新通知：最小载荷（projectId，不带 url——预览地址经 REST 取得
-        // 且不变），信封与信址随通道统一契约（id {projectId}:{seq} / event:event /
-        // payload 内禁 type 键 / ts ISO-8601）
-        SseClient client = connect("?projectId=p-step");
-
-        appService.publishNotification(ProjectEventTypes.PREVIEW_UPDATED,
-                Map.of("projectId", "p-step"));
-
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:p-step:1");
-        assertThat(client.nextNonCommentLine()).isEqualTo("event:event");
-        String dataLine = client.nextNonCommentLine();
-        assertThat(dataLine).startsWith("data:");
-        JsonNode envelope = objectMapper.readTree(dataLine.substring("data:".length()));
-        assertThat(envelope.get("type").asText()).isEqualTo("preview-updated");
-        assertThat(envelope.get("payload").get("projectId").asText()).isEqualTo("p-step");
-        assertThat(envelope.get("payload").has("type")).isFalse();
-        Instant.parse(envelope.get("ts").asText()); // ISO-8601 可解析（非法即抛）
     }
 
     @Test

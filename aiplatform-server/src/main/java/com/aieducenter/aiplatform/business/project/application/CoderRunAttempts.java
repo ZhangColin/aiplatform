@@ -49,8 +49,7 @@ import lombok.extern.slf4j.Slf4j;
  * {@code coder-{projectId}} 会话（重试续同会话——已落盘成果保留，同工作区不丢
  * 数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、项目工作区、
  * 流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试不重检索不重
- * 块）。流桥挂步骤边界探活装饰（#49 逐修改刷新：part-step 边界 → 探活 →
- * preview-updated 通知）。</p>
+ * 块）。</p>
  *
  * <p><b>权限确认挂起（#83）</b>：run 内需批准的工具操作（危险命令）以
  * {@code permission-required} 事件呈现确认卡后流软终点——本环在挂起点驻留
@@ -100,21 +99,19 @@ class CoderRunAttempts {
     private final AgentEventBridge eventBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final GenerationProperties properties;
-    private final StepBoundaryPreviewRefresh previewRefresh;
     private final RunPermissionAppService permissions;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
-            GenerationProperties properties, StepBoundaryPreviewRefresh previewRefresh,
+            GenerationProperties properties,
             RunPermissionAppService permissions, ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
-        this.previewRefresh = previewRefresh;
         this.permissions = permissions;
         this.conversationHistory = conversationHistory;
         this.versions = versions;
@@ -164,11 +161,8 @@ class CoderRunAttempts {
                     AgentProfile.EXECUTOR.key(),
                     /* workspaceReadOnly= */ false);
             try {
-                // 逐修改刷新（#49）：事件桥 sink 外包步骤边界探活装饰——part-step 边界
-                // （完整修改落定）→ 平台侧探活 → 通过才发 preview-updated 通知
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
-                        previewRefresh.decorate(
-                                projectId, project.getWorkspaceId(), eventBridge.sink(projectId)));
+                        eventBridge.sink(projectId));
                 // run-finish 押后到收口判据落定（#84 假完成不闪收口）：converse 正常
                 // 返回 ≠ 收口（判据在 onSuccess——8081 核验 / finish_edit 事实），判据
                 // 不过即该次尝试失败走重试——中场 run-finish 若出用户面，工作消息定格

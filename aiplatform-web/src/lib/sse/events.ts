@@ -44,15 +44,6 @@ export type NotificationEvent =
       };
     }
   | { type: "preview-ready"; payload: { projectId: string; url: string } }
-  | {
-      /**
-       * 预览内容前移一步（#49 逐修改刷新）：编码 run 每完成一次完整修改（步骤分组
-       * 边界）且平台侧探活通过后发射——前端节流重载预览（秒级最小间隔）；
-       * 不带 url（预览地址经 REST 取得且不变）。
-       */
-      type: "preview-updated";
-      payload: { projectId: string };
-    }
   | { type: "workspace-destroyed"; payload: { projectId: string } }
   | {
       /** 工作区文档产物写出/修订落定；v1 唯一写入方 = 主智能体的 savePrd。 */
@@ -81,7 +72,6 @@ export type NotificationEvent =
 const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
   "workspace-created",
   "preview-ready",
-  "preview-updated",
   "workspace-destroyed",
   "document-updated",
   "project-renamed",

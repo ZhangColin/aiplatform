@@ -298,9 +298,9 @@ function PanelHint({ children }: { children: ReactNode }) {
 }
 
 /**
- * 预览 iframe 的重挂 key：url + 重载序号——序号汇三路信号（编码 run 收口
- * run-finish；逐修改刷新 preview-updated 通知经 store 节流；手动刷新的本地节拍
- * #80，调用点求和传入），同 URL 也强制重建 iframe（预览刷新的唯一机制）。
+ * 预览 iframe 的重挂 key：url + 重载序号——序号汇两路信号（切片收口 run-finish
+ * 纪元；手动刷新的本地节拍 #80，调用点求和传入），同 URL 也强制重建 iframe
+ * （预览刷新的唯一机制）。
  */
 export function previewFrameKey(url: string, reload: number): string {
   return `${url}#${reload}`;

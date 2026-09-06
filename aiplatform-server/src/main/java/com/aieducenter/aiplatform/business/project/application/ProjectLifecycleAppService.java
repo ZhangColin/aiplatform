@@ -175,9 +175,10 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 预览（#45 渐进口径）：端口映射置备时已落定、URL 确定，此处探活工作区应用
-     * 端口——通过（run 执行体已起服）→ SSE {@code preview-ready} → 返回 URL；
-     * 未就绪 → 503 WSP_012（待期非故障），前端 run 开始即轮询续探、通过瞬间上页面。
+     * 预览（#45 渐进口径；#105 URL 事件驱动）：端口映射置备时已落定、URL 确定，
+     * 此处探活工作区应用端口——通过（run 执行体已起服）→ SSE {@code preview-ready}
+     * → 返回 URL；未就绪 → 503 WSP_012（待期非故障）。preview-ready 现亦由切片收口
+     * 发射（双源、幂等），前端消费写预览查询缓存、免轮询。
      */
     public ProjectPreviewResponse preview(Long projectId) {
         Project project = requireProject(projectId);

@@ -10,7 +10,7 @@ public final class ProjectEventTypes {
     /** 工作区记录已建（容器后台置备中，建项目副作用落定后；非「容器就绪」）。 */
     public static final String WORKSPACE_CREATED = "workspace-created";
 
-    /** 预览已就绪（端口真实暴露后的 SSE 呈现）。 */
+    /** 预览已就绪（#105 URL 事件驱动：切片收口与 REST preview 成功后发射——前端消费写预览查询缓存）。 */
     public static final String PREVIEW_READY = "preview-ready";
 
     /**

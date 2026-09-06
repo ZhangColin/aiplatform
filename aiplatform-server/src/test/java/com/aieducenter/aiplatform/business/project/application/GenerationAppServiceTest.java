@@ -17,6 +17,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -136,6 +137,9 @@ class GenerationAppServiceTest {
     private void givenAgentsMdWriteSucceeds() {
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        // 切片收口推 URL（#105）：探活通过后取预览 URL（成功路径的统一桩）
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
     }
 
     /**
@@ -177,6 +181,23 @@ class GenerationAppServiceTest {
                 assertThat(cmd.sessionId()).isEqualTo("coder-" + projectId));
         // 每场 run 各自的首试 runId 互不相同（阶段 0 首 run 身份 + 切片逐片新 runId）
         assertThat(all).extracting(AgentCommand::runId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void given_slice_closes_when_generate_then_preview_ready_pushed_with_url() {
+        // #105 URL 事件驱动：切片收口（阶段 0 + 每片，8081 探活通过后）推
+        // preview-ready(URL)——前端 bridge 写预览查询缓存，免 3s 轮询拿 URL
+        Long projectId = persistedProject("9820");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录")));
+
+        // 阶段 0 + 1 片 = 2 次收口，各推一次 preview-ready（projectId + url）
+        verify(eventsAppService, times(2)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
+                eq(Map.of("projectId", projectId.toString(), "url", "http://localhost:30080")));
     }
 
     @Test

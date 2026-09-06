@@ -37,9 +37,9 @@ import {
  */
 const NOTIFICATION_INVALIDATIONS = {
   "workspace-created": [queryKeys.projects.all],
-  // 预览地址由 REST 响应自身携带、无需失效；preview() 每次成功都会发射本事件，
-  // 若在此失效 projects 前缀会重拉预览查询 → 又成功 → 又发事件——自反馈死循环
-  // （#45 门禁解除后轮询从 run 开始，循环必被踩中，故显式空登）
+  // 预览地址由切片收口事件推 URL（#105 载荷写入口，见下方 NOTIFICATION_PAYLOAD_
+  // WRITERS）；不在此失效 projects 前缀——preview() 每次成功仍会发本事件，失效即
+  // 重拉预览查询 → 又成功 → 又发事件——自反馈死循环（写缓存非失效，不重拉 preview）
   "preview-ready": [],
   // 逐修改刷新（#49）：内容在 iframe 背后的沙箱应用里、REST 域无变化可失效，
   // URL 不变——重载走 generation store 预览纪元（见载荷展示注册表），非失效
@@ -56,13 +56,14 @@ const NOTIFICATION_INVALIDATIONS = {
 
 /**
  * 载荷展示白名单（ADR 0003 修订例外，#20 修订回路）：仅这些事件把 **REST 重查
- * 拿不到的载荷** 写入轻量 store 页内呈现；其余事件一律只失效。桥仍是 store
- * 唯一事件写入方；正确性以 REST 重查为准。注册表按 type 键派发，写入方内的
+ * 拿不到的载荷** 写入轻量 store 页内呈现，或把**免轮询拿到的载荷**（#105
+ * preview-ready 的 URL）写进查询缓存；其余事件一律只失效。桥仍是 store 唯一
+ * 事件写入方；正确性以 REST 重查为准。注册表按 type 键派发，写入方内的
  * 判别守卫仅为编译期收窄（键即类型，不会走错分支——关联联合的调用点无法
  * 类型化到键，守卫不是运行时逻辑）。
  */
 const NOTIFICATION_PAYLOAD_WRITERS: Partial<
-  Record<NotificationEvent["type"], (event: NotificationEvent) => void>
+  Record<NotificationEvent["type"], (event: NotificationEvent, queryClient: QueryClient) => void>
 > = {
   // 「这次写入是不是修订」重查拿不到（prd_produced_at 首产/修订同刷新）——
   // 按到达序在 store 里分岔（首产登记 seen、此后置 pending 出胶囊）
@@ -70,6 +71,15 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
     if (event.type !== "document-updated") return;
     if (event.payload.documentType !== "PRD") return;
     usePrdNoticesStore.getState().notePrdWritten(event.payload.projectId);
+  },
+  // 预览 URL 事件驱动拿取（#105）：切片收口推 URL 直接写预览查询缓存——免 3s
+  // 轮询；写缓存非失效，不会重拉 preview 再发事件（消自反馈循环顾虑）。缺省该
+  // 写入方 = 空登忽略（旧口径），现在 URL 由事件推送而非 REST 副作用唯一来源
+  "preview-ready": (event, queryClient) => {
+    if (event.type !== "preview-ready") return;
+    queryClient.setQueryData(queryKeys.projects.preview(event.payload.projectId), {
+      url: event.payload.url,
+    });
   },
   // 逐修改刷新（#49）：「内容前移了一步」是瞬时信号，REST 重查拿不到（预览
   // URL 不变、轮询已停）——写 generation store 计预览纪元（节流在 store 内）
@@ -104,7 +114,7 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
   for (const queryKey of NOTIFICATION_INVALIDATIONS[notification.type]) {
     void queryClient.invalidateQueries({ queryKey });
   }
-  NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification);
+  NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification, queryClient);
 }
 
 /**

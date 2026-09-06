@@ -34,7 +34,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | type | payload 字段 | 示例 |
 |---|---|---|
 | `workspace-created` | `projectId` `projectName` `container` `projectType` | `{"projectId":"a1b2c3d4","projectName":"官网 demo","container":"aiplatform-dev-a1b2c3d4","projectType":"WEBSITE"}` |
-| `preview-ready` | `projectId` `url` | `{"projectId":"a1b2c3d4","url":"http://localhost:30080"}` |
+| `preview-ready` | `projectId` `url` | `{"projectId":"a1b2c3d4","url":"http://localhost:30080"}`（预览 URL 就绪推送（[#105](https://github.com/ZhangColin/aiplatform/issues/105)）：由**切片收口**（生成轨道阶段 0 与逐片收口、8081 探活通过后）发射，REST `GET /preview` 成功后仍发射（双源、幂等）；前端 bridge 消费写预览查询缓存（`setQueryData` 写 URL），3s 轮询降级为 SSE 断线兜底——免轮询、事件驱动拿 URL） |
 | `workspace-destroyed` | `projectId` | `{"projectId":"a1b2c3d4"}` |
 | `preview-updated` | `projectId` | `{"projectId":"a1b2c3d4"}`（预览内容前移一步的刷新通知（[#49](https://github.com/ZhangColin/aiplatform/issues/49) 新增，渐进预览·逐修改刷新）：编码 run 每完成一次完整修改（刷新单元 = 步骤分组边界 `part-step`，`step≥2` 才算——第 1 个部件是起跑边界尚无完整修改；最后一步完成由 `run-finish` 收口重挂兜底）→ 平台侧探活工作区应用端口（8081，与生成收口核验同判据）——**探活通过才发射**，未通过不发射（前端保最后好状态）。前端收事件节流重载预览（秒级最小间隔，连续通知不闪烁）；不携带 `url`（预览地址经 REST 探活取得且不变）。生成与修正同一口径；通知族不补发——漏发由下一步或收口刷新自然兜底） |
 | `document-updated` | `projectId` `documentType` | `{"projectId":"a1b2c3d4","documentType":"PRD"}`（工作区文档产物写出/修订落定后广播；v1 唯一写入方 = 主智能体的 savePrd（[#49](https://github.com/ZhangColin/aiplatform-server/issues/49)），每次执行必发；前端按**失效为主**模式消费——invalidate 文档域 + 对话区提示胶囊，内容经 `GET /api/projects/{id}/prd` 重拉。[#41](https://github.com/ZhangColin/aiplatform-server/issues/41) 新增） |

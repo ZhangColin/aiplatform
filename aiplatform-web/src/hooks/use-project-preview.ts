@@ -7,16 +7,15 @@ import { useSseFallbackPolling } from "@/lib/sse/provider";
 
 type ProjectPreviewResponse = components["schemas"]["ProjectPreviewResponse"];
 
-/** 无应用期间的探活续轮间隔（#45：后端探活通过才返回 URL，未就绪 503 WSP_012）。 */
-const PROBE_INTERVAL_MS = 3000;
-
 /**
- * 系统预览地址（#22 片2-1 → #45 门禁解除）：GET /api/projects/{id}/preview——
- * 后端探活工作区应用端口，通过（run 执行体已在 8081 起服）才返回 URL，未就绪
- * 503 WSP_012。run 开始即可调用（enabled 归 SystemPanel 的门禁推导）；未取到
- * URL 期间秒级续探、取到即停（此后刷新由 generation store 预览纪元驱动 iframe
- * 重挂——run 收口与逐修改刷新 #49 两路信号共一套机制）。不自动重试：WSP_012
- * 是待期不是故障，重试退避只会拖慢轮询节拍。
+ * 系统预览地址（#22 片2-1 → #45 门禁解除；#105 URL 事件驱动）：GET
+ * /api/projects/{id}/preview——后端探活工作区应用端口，通过（run 执行体已在 8081
+ * 起服）才返回 URL，未就绪 503 WSP_012。URL 由切片收口的 preview-ready 事件
+ * 推送（bridge setQueryData 写预览查询缓存），本 query 不再无条件 3s 轮询——
+ * 轮询降级为 SSE 断线兜底：连接健康不空转（等事件推 URL），断线才按门控间隔
+ * 重拉补齐（错过的事件靠重连广谱 invalidate 与兜底轮询兜住）。此后刷新由
+ * generation store 预览纪元驱动 iframe 重挂（run 收口信号）。不自动重试：
+ * WSP_012 是待期不是故障。
  */
 export function useProjectPreview(projectId: string, active: boolean) {
   const fallbackPolling = useSseFallbackPolling("notification");
@@ -26,6 +25,6 @@ export function useProjectPreview(projectId: string, active: boolean) {
       api.get<ProjectPreviewResponse>(`/projects/${projectId}/preview`, { signal }),
     enabled: active,
     retry: false,
-    refetchInterval: (query) => (query.state.data?.url ? fallbackPolling : PROBE_INTERVAL_MS),
+    refetchInterval: fallbackPolling,
   });
 }

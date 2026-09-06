@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -135,6 +136,7 @@ public class GenerationAppService {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final CoderRunAttempts coderRunAttempts;
     private final AgentEventBridge eventBridge;
+    private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
 
     /**
@@ -150,12 +152,13 @@ public class GenerationAppService {
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
-            CodingRunTrack codingRunTrack) {
+            EventsAppService eventsAppService, CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.coderRunAttempts = coderRunAttempts;
         this.eventBridge = eventBridge;
+        this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
     }
 
@@ -299,6 +302,7 @@ public class GenerationAppService {
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project,
             boolean markGenerated, String summary) {
         requireReachable(project);
+        emitPreviewReady(project);
         if (markGenerated) {
             markGenerated(project.getId());
         }
@@ -313,6 +317,28 @@ public class GenerationAppService {
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(CLOSING_PROBE));
         if (result.exitCode() != 0) {
             throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
+        }
+    }
+
+    /**
+     * 切片收口推 URL（#105 URL 事件驱动推送）：8081 已在容器内探活通过（执行体已起服），
+     * 此处经 exposePreview 取平台侧可访问的预览 URL 并推 {@code preview-ready}（载荷
+     * projectId + url）——前端 bridge 消费写预览查询缓存，免 3s 轮询拿 URL。整个推送
+     * 是「让 UI 活」的面、不承担正确性：URL 取不到或通知发射失败只记日志不断流——
+     * 收口判据仍只有容器内 8081 探活（#104），URL 推送失败不反噬 run；前端兜底靠
+     * run-finish 失效重拉 REST preview 补 URL。
+     */
+    private void emitPreviewReady(Project project) {
+        try {
+            URI url = workspaceLifecycleAppService.exposePreview(
+                    Long.toString(project.getWorkspaceId()));
+            eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
+                    ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
+                    ProjectEventTypes.URL_FIELD, url.toString()));
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} preview-ready 推送失败（UI 面，不断流）：{}",
+                    project.getId(), e.getMessage());
         }
     }
 

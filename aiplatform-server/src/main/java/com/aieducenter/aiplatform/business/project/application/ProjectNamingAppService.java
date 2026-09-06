@@ -56,6 +56,12 @@ public class ProjectNamingAppService implements DisposableBean {
     /** 净化时剥的包裹字符（成对引号/加粗星号/结尾标点——模型偶发包裹，结构性清理）。 */
     private static final String WRAPPERS = "「」『』“”‘’\"'`*。．.！!？?~～";
 
+    /** 句读（命名协议只输出 4-12 字裸名）：含任一即整句/反问而非名字，弃用保占位。 */
+    private static final String SENTENCE_PUNCTUATION = "，,、。.！!？?：:；;";
+
+    /** 反问澄清关键词（模型对模糊需求偶发「我还需要一些关键信息」式反问）：含任一弃用。 */
+    private static final String[] CLARIFICATION_MARKERS = {"还需要", "比如", "例如", "请问"};
+
     private final AgentscopeAgentClient agentClient;
     private final ProjectRepository projectRepository;
     private final EventsAppService eventsAppService;
@@ -182,6 +188,18 @@ public class ProjectNamingAppService implements DisposableBean {
         line = line.substring(start, end).trim();
         if (line.isEmpty() || line.length() > Project.NAME_MAX_LENGTH) {
             return null; // 超限弃用不截断（红线同源；上限单一事实源在聚合）
+        }
+        // 反问/整句拦截：命名模型对模糊需求偶发反问澄清（如「我还需要一些关键信息，
+        // 比如：」）——含句读或反问关键词即非裸名，弃用保占位（红线：不回退截取）
+        for (int i = 0; i < line.length(); i++) {
+            if (SENTENCE_PUNCTUATION.indexOf(line.charAt(i)) >= 0) {
+                return null;
+            }
+        }
+        for (String marker : CLARIFICATION_MARKERS) {
+            if (line.contains(marker)) {
+                return null;
+            }
         }
         return line;
     }

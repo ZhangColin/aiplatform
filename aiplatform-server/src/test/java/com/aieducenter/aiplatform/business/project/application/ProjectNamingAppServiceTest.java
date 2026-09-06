@@ -105,6 +105,22 @@ class ProjectNamingAppServiceTest {
     }
 
     @Test
+    void given_clarifying_reply_when_name_async_then_placeholder_kept() {
+        // 命名模型对模糊需求偶发反问澄清（「我还需要一些关键信息，比如：」）——
+        // 含句读/反问关键词即非名字，弃用保占位（红线：不回退 requirement 截取）
+        Project project = placeholderProject();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n",
+                        "要为官网起一个贴切的名字，我还需要一些关键信息，比如："));
+        ProjectNamingAppService service = service();
+
+        service.nameAsync(52L, "我要给公司做一个官网");
+
+        verify(projectRepository, never()).save(any());
+        assertThat(project.getName()).isEqualTo(Project.PLACEHOLDER_NAME);
+    }
+
+    @Test
     void given_blank_requirement_when_name_async_then_no_converse() {
         // 空需求无输入可依：不发起轻调用（占位即终态，改名端点可改）
         ProjectNamingAppService service = service();

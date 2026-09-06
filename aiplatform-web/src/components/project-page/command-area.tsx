@@ -57,7 +57,6 @@ export function CommandArea({
   lock,
   stage = "interview",
   onSeePrd,
-  generationCard,
 }: {
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
@@ -66,8 +65,6 @@ export function CommandArea({
   stage?: keyof typeof STAGE_HINTS;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
-  /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
-  generationCard?: ReactNode;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -176,7 +173,6 @@ export function CommandArea({
           </MessageRow>
         ))}
         {work ? <WorkMessage work={work} projectId={projectId} /> : null}
-        {!disabled && generationCard ? generationCard : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

@@ -292,7 +292,7 @@ class ProjectControllerTest {
 
     @Test
     void given_project_when_generate_then_run_id_returned() throws Exception {
-        // 「开始做系统」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        // 「重新发起」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
         when(generationAppService.startGeneration(100L)).thenReturn(
                 new GenerationAppService.GenerationRun("run-gen-1"));
 
@@ -324,7 +324,7 @@ class ProjectControllerTest {
         performAsUser(post("/api/projects/100/generate"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409))
-                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD 再开始做系统"));
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD，系统会随后自动生成"));
     }
 
     @Test

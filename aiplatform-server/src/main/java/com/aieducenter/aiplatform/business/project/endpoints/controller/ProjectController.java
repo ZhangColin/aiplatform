@@ -54,8 +54,8 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
- * 派发）/ 问答卡作答 / 权限确认卡作答 / 开始做系统（生成）→ 重新修改（修正超限
- * 终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
+ * 派发）/ 问答卡作答 / 权限确认卡作答 / 重新发起生成（失败兜底）→ 重新修改（修正
+ * 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
  * 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
@@ -178,21 +178,23 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/generate")
-    @Operation(summary = "开始做系统（触发首次生成）",
-            description = "纯动作无门——PRD 已产出即可发起（待定项未清也可）。平台先把工作区"
-                    + "布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体"
-                    + "（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统"
-                    + "并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识"
-                    + "（挂 /api/events?runId= 的锚），过程事件经 SSE"
-                    + "（run-start agent=executor 起工作消息）。失败自动静默重试有限次"
+    @Operation(summary = "重新发起首次生成（失败兜底）",
+            description = "生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成"
+                    + " run，本端点退为失败兜底——run-failed 后项目仍「未生成」，系统面板"
+                    + "「重新发起」重发此端点再触发。纯动作无门——PRD 已产出即可发起"
+                    + "（待定项未清也可）。平台先把工作区布局资产就位（AGENTS.md 平台约定"
+                    + "幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope"
+                    + " 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即"
+                    + "返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经"
+                    + " SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次"
                     + "（app.generation.max-attempts，默认 3 次含首试，中间失败不出"
                     + "用户面事件），超限转终态发 run-failed 收口事件"
                     + "（前端「重新发起」出口只认本事件——run 失败为唯一失败终态）、"
                     + "由用户重新发起兜底。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
-                    + "PRD 从未产出 409 PRJ_018（前端入口本就以 PRD 产出为呈现条件，"
-                    + "本守卫拦直连调用）；项目不存在 404 PRJ_001")
+                    + "PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；"
+                    + "项目不存在 404 PRJ_001")
     public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 generationAppService.startGeneration(parseId(id)).runId()));

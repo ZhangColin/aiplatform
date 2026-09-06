@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,11 +30,8 @@ import { PrdDoc } from "./prd-doc";
  */
 export function FilesPanel({
   projectId,
-  actions,
 }: {
   projectId: string;
-  /** 头部操作条（「开始做系统」等动作槽，#22 文件模式入口）。 */
-  actions?: ReactNode;
 }) {
   const files = useProjectFiles(projectId);
   const [selectedByUser, setSelectedByUser] = useState<string | null>(null);
@@ -76,13 +73,12 @@ export function FilesPanel({
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         {selected === PRD_PATH ? (
-          <PrdDoc projectId={projectId} actions={actions} />
+          <PrdDoc projectId={projectId} />
         ) : selected !== null ? (
           <FileView
             projectId={projectId}
             path={selected}
             size={entries.find((file) => file.path === selected)?.size}
-            actions={actions}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
@@ -180,12 +176,10 @@ function FileView({
   projectId,
   path,
   size,
-  actions,
 }: {
   projectId: string;
   path: string;
   size: number | undefined;
-  actions?: ReactNode;
 }) {
   const entry = useProjectFileContent(projectId, path);
   return (
@@ -196,7 +190,6 @@ function FileView({
         {size !== undefined ? (
           <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(size)}</span>
         ) : null}
-        {actions ? <div className="ml-auto shrink-0">{actions}</div> : null}
       </header>
       <ScrollArea className="min-h-0 flex-1">
         {entry.isPending ? (

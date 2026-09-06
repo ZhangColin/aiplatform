@@ -9,9 +9,10 @@ import { useGenerationStore } from "@/lib/store/generation";
 type GenerationStartResponse = components["schemas"]["GenerationStartResponse"];
 
 /**
- * 开始做系统（#22 片2-1）：POST /api/projects/{id}/generate——纯动作无门（待定项
- * 未清也可点）。成功即乐观登记生成在途（SSE run-start 随后到，
- * 重放/回声幂等），过程与收口以 SSE + REST 重查为准。
+ * 重新发起（生成失败兜底，#101 生成无门后「开始做系统」按钮退役）：POST
+ * /api/projects/{id}/generate——纯动作无门（待定项未清也可点）。成功即乐观登记
+ * 生成在途（SSE run-start 随后到，重放/回声幂等），过程与收口以 SSE + REST 重查
+ * 为准。正常流生成由平台在意见轮收口自动发起，本 mutation 只服务失败态兜底。
  */
 export function useGenerate(projectId: string) {
   return useMutation({

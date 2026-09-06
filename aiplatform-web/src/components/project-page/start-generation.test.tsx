@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { StartGenerationCard, StartSystemButton } from "./start-generation";
+import { StartSystemButton } from "./start-generation";
 
-// 开始做系统动作两形态（#22）：对话流内卡片（解释性入口）与紧凑按钮（文件模式
-// 操作条 / 失败重发）。eligibility 归装配层，本组件只认 eligible——不 eligible
-// 不渲染。mutation 面 mock 掉（SSR 断言呈现，不跑点击）。
+// 重新发起（生成失败兜底，#101 生成无门自动发起后「开始做系统」按钮退役）：系统
+// 面板失败态的人工兜底入口——run-failed 后重发 POST /generate 再触发（异常态，非
+// 常驻门）。正常流不再出现任何「开始做系统」按钮。mutation 面 mock 掉（SSR 断言
+// 呈现，不跑点击）。
 vi.mock("@/hooks/use-generate", () => ({
   useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
@@ -17,26 +18,17 @@ function withProvider(children: React.ReactElement) {
   );
 }
 
-describe("StartGenerationCard / StartSystemButton · 开始做系统入口（#22）", () => {
-  it("eligible：对话流卡片出解释文案 + 动作按钮（纯动作无门的话术）", () => {
+describe("StartSystemButton · 重新发起兜底（#101）", () => {
+  it("失败态兜底按钮出「重新发起」（异常态出口，非常驻门）", () => {
     const html = withProvider(
-      <StartGenerationCard projectId="p1" eligible={true} onGenerated={() => {}} />,
+      <StartSystemButton projectId="p1" onGenerated={() => {}} />,
     );
 
-    expect(html).toContain("差不多清楚了，剩下的交给我");
-    expect(html).toContain("开始做系统");
-    expect(html).toContain("你想起来随时说");
-  });
-
-  it("不 eligible（未产出 PRD / 已生成 / 生成中）：卡片不渲染", () => {
-    const html = withProvider(
-      <StartGenerationCard projectId="p1" eligible={false} onGenerated={() => {}} />,
-    );
-
+    expect(html).toContain("重新发起");
     expect(html).not.toContain("开始做系统");
   });
 
-  it("紧凑形态：按钮文案可换（失败重发「重新发起」）", () => {
+  it("按钮文案可换（调用方显式指定 label）", () => {
     const html = withProvider(
       <StartSystemButton projectId="p1" onGenerated={() => {}} label="重新发起" />,
     );

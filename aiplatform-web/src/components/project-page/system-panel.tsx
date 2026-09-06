@@ -270,7 +270,7 @@ export function SystemPanel({
           ) : (
             <PanelHint>
               <Monitor className="size-5 text-muted-foreground" />
-              <p>开始做系统后，这里会出现可以操作的你的系统</p>
+              <p>系统生成后，这里会出现可以操作的你的系统</p>
             </PanelHint>
           )}
         </div>

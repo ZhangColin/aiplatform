@@ -7,49 +7,16 @@ import { Spinner } from "@/components/ui/spinner";
 import { useGenerate } from "@/hooks/use-generate";
 
 /**
- * 开始做系统（#22）：同一动作的两个呈现形态——对话流内卡片（解释性入口）
- * 与紧凑按钮（文件模式操作条 / 系统模式失败重发）。纯动作无门：待定项未清也可
- * 点；eligibility（PRD 已产出 && 未生成 && 不在生成中）归装配层（ProjectPageView）
- * 单点判定，本组件只管动作与进行中态。发起成功即回调 onGenerated（场景层切
- * 成果区系统模式，mobile 跳成果区页签）。
+ * 重新发起（生成失败兜底，#101 生成无门自动发起后「开始做系统」按钮退役）：系统
+ * 面板失败态的人工兜底入口——run-failed 后首次生成时点未落位、项目仍「未生成」，
+ * 重发 POST /generate 再触发（异常态，非常驻门，与「重新修改」兜底同构）。生成
+ * 正常流全自动，不出现任何常驻按钮。发起成功即回调 onGenerated（场景层切成果区
+ * 系统模式呈现等待态）。
  */
-export function StartGenerationCard({
-  projectId,
-  eligible,
-  onGenerated,
-}: {
-  projectId: string;
-  eligible: boolean;
-  /** 发起成功回调（切系统模式呈现等待态）。 */
-  onGenerated: () => void;
-}) {
-  const generate = useGenerate(projectId);
-  if (!eligible) return null;
-
-  return (
-    <div className="flex w-full justify-start">
-      <div className="w-full max-w-sm space-y-3 rounded-xl border bg-muted/40 p-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Rocket className="size-4 shrink-0 text-primary" />
-          差不多清楚了，剩下的交给我
-        </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          搭好之后你直接在这儿点开就能试用。有还没聊清的地方也不影响，你想起来随时说。
-        </p>
-        <StartButtonInner
-          pending={generate.isPending}
-          onClick={() => generate.mutate(undefined, { onSuccess: onGenerated })}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** 紧凑形态（文件模式操作条 / 系统模式失败重发共用）。 */
 export function StartSystemButton({
   projectId,
   onGenerated,
-  label = "开始做系统",
+  label = "重新发起",
 }: {
   projectId: string;
   onGenerated: () => void;
@@ -57,26 +24,12 @@ export function StartSystemButton({
 }) {
   const generate = useGenerate(projectId);
   return (
-    <StartButtonInner
-      pending={generate.isPending}
+    <Button
+      size="sm"
+      disabled={generate.isPending}
       onClick={() => generate.mutate(undefined, { onSuccess: onGenerated })}
-      label={label}
-    />
-  );
-}
-
-function StartButtonInner({
-  pending,
-  onClick,
-  label = "开始做系统",
-}: {
-  pending: boolean;
-  onClick: () => void;
-  label?: string;
-}) {
-  return (
-    <Button size="sm" disabled={pending} onClick={onClick}>
-      {pending ? <Spinner /> : <Rocket className="size-4" />}
+    >
+      {generate.isPending ? <Spinner /> : <Rocket className="size-4" />}
       {label}
     </Button>
   );

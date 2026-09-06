@@ -52,12 +52,15 @@ import lombok.extern.slf4j.Slf4j;
  * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
  * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
- * <p><b>链必达收口（#43）</b>：主智能体无派发权——更新 run 的派发不在模型手里，
- * 平台在意见轮落定后观测收口（无挂起问答且项目已生成）即自动派更新 run（交接物
- * = 用户意见原文 + 需求侧判定结果——PRD 改没改、改了什么，见
- * {@link #dispatchUpdateOnTurnClose}）。判定结果从工具调用事实观测
- * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未生成止于
- * 对话、归档拒、在途排队合并，归 {@link IterationAppService}）。</p>
+ * <p><b>链必达收口（#43，#101 生成无门自动发起）</b>：主智能体无派发权——生成与
+ * 更新 run 的派发都不在模型手里，平台在意见轮落定后观测收口（无挂起问答）即按
+ * 项目态自动派发：已生成派更新 run（交接物 = 用户意见原文 + 需求侧判定结果——
+ * PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、未生成但已产出 PRD 派
+ * 首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}）、未
+ * 产出 PRD 止于对话（访谈期常态）。判定结果从工具调用事实观测
+ * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD
+ * 止于对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
+ * {@link GenerationAppService}）。</p>
  *
  * <p><b>事件桥与对话史（#89）</b>：过程事件经 {@link EventsAppService}（eventhub
  * 唯一 SSE 管道）发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射
@@ -82,6 +85,7 @@ public class MainAgentAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
+    private final GenerationAppService generationAppService;
     private final PrdRevisionFacts prdRevisions;
     private final ConversationHistoryAppService conversationHistory;
 
@@ -111,7 +115,8 @@ public class MainAgentAppService {
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
-            PrdRevisionFacts prdRevisions, ConversationHistoryAppService conversationHistory) {
+            GenerationAppService generationAppService, PrdRevisionFacts prdRevisions,
+            ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
@@ -119,6 +124,7 @@ public class MainAgentAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
+        this.generationAppService = generationAppService;
         this.prdRevisions = prdRevisions;
         this.conversationHistory = conversationHistory;
     }
@@ -270,7 +276,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchUpdateOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId);
         });
     }
 
@@ -325,7 +331,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchUpdateOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId);
         });
         return new MainAgentRun(runId);
     }
@@ -368,17 +374,18 @@ public class MainAgentAppService {
     }
 
     /**
-     * 链必达收口观测（#43）：意见轮落定（对话轮收口或问答续跑收口）后观测链的
-     * 走向——会话有挂起问答 = 本轮未收口（答复后续跑再判，意见锚保留）；未生成
-     * = 静默止于对话（访谈期常态：生成前意见链终点）；收口前归档 = 竞态守卫，
-     * 静默不派。三者皆过即平台自动派更新 run（交接物 = {@link #opinionExchanges}
-     * 中的意见原文及追问答复 + {@link #prdRevisions} 中的 PRD 修订事实——本轮
-     * savePrd 调用的 summary 终值，无调用事实即 null「未修订」）。主智能体无派发
-     * 权：模型存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发
-     * 失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——用户
-     * 重提即兜底。
+     * 链必达收口观测（#43，#101 生成无门自动发起）：意见轮落定（对话轮收口或
+     * 问答续跑收口）后观测链的走向——会话有挂起问答 = 本轮未收口（答复后续跑再判，
+     * 意见锚保留）；收口前归档 = 竞态守卫，静默不派。落定即按项目态自动派发：
+     * 已生成派更新 run（交接物 = {@link #opinionExchanges} 中的意见原文及追问答复
+     * + {@link #prdRevisions} 中的 PRD 修订事实——本轮 savePrd 调用的 summary 终值，
+     * 无调用事实即 null「未修订」）；未生成但已产出 PRD 派首次生成 run（生成无门，
+     * 意见锚与修订事实同「收口即消费」清掉——生成读的是工作区 PRD 正本，不进
+     * 交接物）；未产出 PRD 止于对话（访谈期常态）。主智能体无派发权：模型存没存
+     * PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发失败不炸对话
+     * 轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——用户重提即兜底。
      */
-    private void dispatchUpdateOnTurnClose(Long projectId, String sessionId, String runId) {
+    private void dispatchOnTurnClose(Long projectId, String sessionId, String runId) {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
             if (project == null
@@ -386,9 +393,22 @@ public class MainAgentAppService {
                 return;
             }
             String workspaceId = Long.toString(project.getWorkspaceId());
-            if (project.getGeneratedAt() == null || project.getArchivedAt() != null) {
-                opinionExchanges.remove(sessionId); // 收口即消费：锚不留过轮
-                prdRevisions.clear(workspaceId); // 修订事实同锚口径：不留过轮
+            if (project.getArchivedAt() != null) {
+                clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
+                return;
+            }
+            if (project.getGeneratedAt() == null) {
+                // 未生成：PRD 已产出即平台自动派首次生成（生成无门，#101）；未产出
+                // PRD 静默止于对话（访谈期常态：生成前意见链终点）
+                clearTurnAnchors(sessionId, workspaceId);
+                if (project.getPrdProducedAt() != null) {
+                    GenerationAppService.GenerationRun run =
+                            generationAppService.dispatchGenerationOnTurnClose(projectId);
+                    if (run != null) {
+                        log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
+                                projectId, run.runId());
+                    }
+                }
                 return;
             }
             String task = opinionExchanges.remove(sessionId);
@@ -403,9 +423,9 @@ public class MainAgentAppService {
                     prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
         }
         catch (RuntimeException e) {
-            // 派发失败（#51 → #82 失败家族归位）：意见锚已消费（不恢复）、不自动
-            // 重试，用户重提即兜底——失败信号归 error 事件（dispatch-failed 阶段族
-            // 已退役），对话面如实呈现不静默
+            // 派发失败（#51 → #82 失败家族归位；#101 起同 catch 接生成与更新两路）：
+            // 意见锚已消费（不恢复）、不自动重试，用户重提即兜底——失败信号归 error
+            // 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
             try {
                 eventBridge.emitError(projectId, runId, "意见派发失败，请重新发送");
             }
@@ -413,9 +433,16 @@ public class MainAgentAppService {
                 log.warn("[main-close] 项目 {} 派发失败事件发射失败：{}", projectId,
                         emitFailure.toString());
             }
-            log.warn("[main-close] 项目 {} 更新 run 自动派发失败（用户重提即兜底）：{}",
+            log.warn("[main-close] 项目 {} 收口自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }
+    }
+
+    /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /
+     * 未生成派生成前的三条静默路径共用（生成读的是工作区 PRD 正本，不进交接物）。 */
+    private void clearTurnAnchors(String sessionId, String workspaceId) {
+        opinionExchanges.remove(sessionId);
+        prdRevisions.clear(workspaceId);
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；

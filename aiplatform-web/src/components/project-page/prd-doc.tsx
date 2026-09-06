@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -20,11 +20,8 @@ import { formatRelativeTime } from "@/lib/utils/time";
  */
 export function PrdDoc({
   projectId,
-  actions,
 }: {
   projectId: string;
-  /** 头部操作条槽（「开始做系统」等，文件树模式沿用）。 */
-  actions?: ReactNode;
 }) {
   const prd = usePrd(projectId);
   const hasUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
@@ -51,7 +48,6 @@ export function PrdDoc({
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <h2 className="text-base font-semibold">需求文档</h2>
               {hasUpdate ? <Badge variant="secondary">已更新</Badge> : null}
-              {actions ? <div className="ml-auto">{actions}</div> : null}
             </div>
             <p className="text-xs text-muted-foreground">
               {prd.data

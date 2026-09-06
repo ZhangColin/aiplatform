@@ -34,8 +34,6 @@ export type ParadigmCtx = {
   projectArchived?: boolean;
   /** 发起生成成功回调（切系统范式呈现等待态），归装配层。 */
   onGenerated: () => void;
-  /** 文件范式操作条动作（「开始做系统」，不 eligible 时为 null）。 */
-  generationAction?: ReactNode;
 };
 
 export type Paradigm = {
@@ -79,7 +77,7 @@ export const PARADIGMS: Paradigm[] = [
     icon: <Folder className="size-3.5" />,
     defaultOn: false,
     blurb: "交付文件树，点开看内容",
-    render: (ctx) => <FilesPanel projectId={ctx.projectId} actions={ctx.generationAction} />,
+    render: (ctx) => <FilesPanel projectId={ctx.projectId} />,
   },
   {
     id: "data",

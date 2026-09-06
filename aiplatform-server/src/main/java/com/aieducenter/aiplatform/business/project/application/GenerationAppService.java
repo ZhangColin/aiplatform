@@ -20,14 +20,17 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 生成编排（#22 片2-1）：「开始做系统」→ 编码 run。run 执行体与主智能体同构
- * （AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝极薄），
- * 仅资产与工具不同：会话 {@code coder-{projectId}}、配置 = 平台技术约定 +
- * 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
+ * 生成编排（#22 片2-1；#101 生成无门自动发起——「开始做系统」按钮退役，生成
+ * 触发权归平台）：主智能体产出 PRD 后意见轮收口即自动派首次生成 run
+ * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与失败
+ * 「重新发起」兜底走同一编排（{@link #startGeneration}）。run 执行体与主智能体
+ * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
+ * 极薄），仅资产与工具不同：会话 {@code coder-{projectId}}、配置 = 平台技术约定
+ * + 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
  * 内核自带）。
  *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
- * 未生成过）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
+ * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
  * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡 + 步骤分组）随全部智能体
  * 事件流产出（parts 契约，前端长成工作消息）。</p>
@@ -117,8 +120,9 @@ public class GenerationAppService {
     }
 
     /**
-     * 开始做系统（触发首次生成）：守卫 → AGENTS.md 资产就位 → 异步提交编码 run
-     * （首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
+     * 触发首次生成的显式入口（#101 生成无门后为失败「重新发起」兜底：POST /generate
+     * 端点与收口自动派发共用同一编排）：守卫 → AGENTS.md 资产就位 → 异步提交编码
+     * run（首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_017 已生成或生成在途（重复发起）；
@@ -127,8 +131,43 @@ public class GenerationAppService {
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
+        return dispatchGeneration(project, /* rejectInFlight= */ true);
+    }
+
+    /**
+     * 意见轮收口自动派首次生成（#101 生成无门自动发起）：主智能体产出 PRD 后，
+     * 平台在意见轮收口处观测「未生成 && 已产出 PRD」即自动派首次生成 run，用户
+     * 无需确认或点击。守卫沿用 {@link #startGeneration}（存在 / 未归档 / 未生成过
+     * / PRD 已产出——{@link #requireGeneratableProject} 单点），差异只在在途口径：
+     * 生成进行中静默跳过（不派不报错——此时用户新意见照旧随对话收口，不触发
+     * 重复生成）；按钮路径在途拒绝 PRJ_017。run-failed 后项目仍「未生成」，用户
+     * 重提一句即经本入口再触发，不自动重试（防空烧 token）。
+     *
+     * @return 派发的 run 标识；在途（生成进行中）静默跳过返回 null——调用方据此
+     *         区分「已派」与「跳过」，不误报派发事实
+     * @throws ApplicationException 守卫组同 {@link #startGeneration}（收口观测处
+     *                              已判定过未归档 / 未生成 / PRD 已产出，此处守卫
+     *                              兜其余竞态调用面）
+     */
+    public GenerationRun dispatchGenerationOnTurnClose(Long projectId) {
+        Project project = requireGeneratableProject(projectId);
+        return dispatchGeneration(project, /* rejectInFlight= */ false);
+    }
+
+    /**
+     * 首次生成派发（显式与收口自动两入口共用）：AGENTS.md 资产就位 → 异步提交
+     * 编码 run。在途口径按调用方分岔——按钮路径拒绝 PRJ_017、收口自动路径静默
+     * 跳过（返回 null 即「未派」，调用方不关心）。资产就位失败如实上抛并释放在途
+     * 标记（环境故障口径，生成不起跑）。
+     */
+    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight) {
+        Long projectId = project.getId();
         if (!codingRunTrack.begin(projectId)) {
-            throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+            if (rejectInFlight) {
+                throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+            }
+            log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过", projectId);
+            return null;
         }
         try {
             placeConventionsAsset(project);

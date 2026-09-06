@@ -17,7 +17,6 @@ import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 import { CommandArea } from "./command-area";
 import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea, useOutputsTabs } from "./outputs-area";
-import { StartGenerationCard, StartSystemButton } from "./start-generation";
 import { ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
@@ -30,9 +29,9 @@ import { lockRowOf } from "@/lib/orders/lock";
  *
  * <p>成果区开合与 tab 簇归此持有：有成果自动滑出一次（含回访/刷新）、发起
  * 生成/编码 run 起跑自动开并切「系统」、下单成功自动挂「订单」、「去看看」
- * 挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。「开始做系统」
- * eligibility 单点在此判定（PRD 已产出 && 未生成 && 不在生成中——纯动作无门，
- * 待定项未清也可点）；对话流内卡片与文件范式操作条同一动作。「确认下单」
+ * 挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。生成无门自动发起
+ * （#101）：主智能体产出 PRD 后平台自动派首次生成 run，无需「开始做系统」按钮
+ * ——本层不再装配任何生成入口（失败态「重新发起」兜底归系统面板）。「确认下单」
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
  * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂顶栏右上角按钮、锁定式
  * 矩阵行在此判定（lockRowOf 单点）注入对话区与订单范式。本组件是 agent 流通道
@@ -119,11 +118,6 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   // 闲聊期（尚无产物）：对话区占满全宽；PRD 产出后长出成果区（呼出式 + 双页签）
   const chatOnly = !detail?.prdProducedAt;
 
-  // 「开始做系统」eligibility（单点）：PRD 已产出 && 未生成过 && 不在生成中
-  //（超限终态 error 时按钮回来 = 人工兜底重新发起）；归档终态全只读不再发起
-  const generationEligible =
-    !!detail?.prdProducedAt && !detail?.generatedAt && !generating && !detail?.archived;
-
   // 「确认下单」可见性（单点，#26 规则 + #28 订单事实接出）：随首次生成完成
   // 常驻、零迭代可点；仅无未终结订单时显示
   const showConfirmOrder = confirmOrderVisible({
@@ -164,13 +158,6 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           lock={lock}
           stage={chatOnly ? "interview" : "iterate"}
           onSeePrd={() => openOutputsTo("docs")}
-          generationCard={
-            <StartGenerationCard
-              projectId={projectId}
-              eligible={generationEligible}
-              onGenerated={() => openOutputsTo("system")}
-            />
-          }
         />
       }
       outputs={
@@ -184,9 +171,6 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
               orderCardId,
               projectArchived: !!detail?.archived,
               onGenerated: () => openOutputsTo("system"),
-              generationAction: generationEligible ? (
-                <StartSystemButton projectId={projectId} onGenerated={() => openOutputsTo("system")} />
-              ) : null,
             }}
             onClose={() => setOutputsOpen(false)}
           />

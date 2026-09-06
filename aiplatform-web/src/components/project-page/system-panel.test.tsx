@@ -108,7 +108,7 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     const html = renderPanel({});
 
     expect(html).toContain("你的系统");
-    expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
+    expect(html).toContain("系统生成后，这里会出现可以操作的你的系统");
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("正在接通系统");
   });

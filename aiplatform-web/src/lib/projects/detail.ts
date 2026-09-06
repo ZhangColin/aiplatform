@@ -14,7 +14,7 @@ export type ProjectDetail = {
   createdAt?: string;
   /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，对话区占满全宽）。 */
   prdProducedAt?: string | null;
-  /** 首次生成时点（run 成功收口单向置位；缺省 = 未生成过——「开始做系统」可发起）。 */
+  /** 首次生成时点（run 成功收口单向置位；缺省 = 未生成过——生成自动发起或失败重发）。 */
   generatedAt?: string | null;
   /** 未终结订单事实（#28：订单存在即冻结迭代——锁定式矩阵与「确认下单」可见性的输入）。 */
   activeOrder?: ActiveOrderFact | null;

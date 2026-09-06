@@ -106,14 +106,16 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).not.toContain('data-tree-file'); // 文件范式未挂载（按需）
   });
 
-  it("PRD 已产出且未生成（#22）：对话流卡片入口「开始做系统」+ 系统范式空态呼应", () => {
+  it("PRD 已产出且未生成（#101 生成无门）：不再渲染「开始做系统」卡片，系统范式空态留引导占位", () => {
     seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
-    // 主入口 = 对话流内卡片（系统范式空态同步一句提示）
-    expect(html).toContain("差不多清楚了，剩下的交给我");
-    expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
+    // 生成无门自动发起：主智能体产出 PRD 后平台自动派生成，正常流不再出现任何
+    // 「开始做系统」按钮/卡片；系统范式空态只留一句引导占位（生成自动发起即被取代）
+    expect(html).not.toContain("差不多清楚了，剩下的交给我");
+    expect(html).not.toContain("开始做系统");
+    expect(html).toContain("系统生成后，这里会出现可以操作的你的系统");
   });
 
   it("闲聊期（PRD 未产出）：不出现「开始做系统」入口（无事可做）", () => {

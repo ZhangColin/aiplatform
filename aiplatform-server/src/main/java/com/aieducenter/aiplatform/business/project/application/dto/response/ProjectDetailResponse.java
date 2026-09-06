@@ -22,7 +22,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param prdProducedAt  PRD 产出时点（成果区长出判据；NULL = 闲聊期——对话区占满
  *                       全宽、成果区未长）
  * @param generatedAt    首次生成时点（run 成功收口单向置位；NULL = 未生成过——
- *                       「开始做系统」可发起、「确认下单」不可见的推导口径）
+ *                       生成自动发起或失败重发、「确认下单」不可见的推导口径）
  * @param activeOrder    未终结订单摘要（#28：无 = null——锁定式矩阵的推导输入，
  *                      订单存在即冻结迭代；跨 BC 软引用）
  * @param latestOrder    最近一张订单摘要（任意状态，#30：归档终态项目页的

@@ -46,6 +46,8 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -90,6 +92,9 @@ class MainAgentAppServiceTest {
     @Autowired
     private PrdRevisionFacts prdRevisions;
 
+    @Autowired
+    private CodingRunTrack codingRunTrack;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -101,6 +106,9 @@ class MainAgentAppServiceTest {
 
     @MockitoBean
     private KnowledgePort knowledgePort;
+
+    @MockitoBean
+    private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     @AfterEach
     void tearDown() {
@@ -866,14 +874,55 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_not_generated_project_when_opinion_turn_closes_then_stops_at_conversation() {
-        // 守卫沿用：未生成止于对话（访谈期收口是常态路径，静默不派——不是异常）
+    void given_prd_not_produced_and_not_generated_when_opinion_turn_closes_then_stops_at_conversation() {
+        // 守卫收紧（#101）：未生成且未产出 PRD 止于对话（访谈期收口是常态路径，
+        // 静默不派——不是异常）；PRD 产出前不触发任何生成
         Long projectId = persistedProject("9721");
         givenSessionExecutorRunsInline();
 
         appService.runOpinionTurn(projectId, "把主色调改成绿色");
 
         verify(agentClient, times(1)).converse(any(), any());
+    }
+
+    @Test
+    void given_prd_produced_not_generated_when_opinion_turn_closes_then_generation_dispatched() {
+        // 灵魂用例（#101 生成无门自动发起）：主智能体产出 PRD 后意见轮收口，平台
+        // 自动派首次生成 run（无需「开始做系统」按钮、无需模型调任何派发工具）——
+        // 收口后第二条 converse 落在 coder 会话、携执行体配置与生成任务 prompt
+        Long projectId = persistedPrdProject("9727");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        AgentCommand generation = command.getAllValues().get(1);
+        assertThat(generation.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
+        assertThat(generation.agentKey()).isEqualTo("executor");
+        assertThat(generation.prompt()).isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
+    }
+
+    @Test
+    void given_generation_in_flight_when_opinion_turn_closes_then_dispatch_skipped() {
+        // 场景矩阵（#101 在途守卫）：生成进行中，意见轮收口静默跳过（不派不报错）——
+        // 已产出 PRD 但已有生成在途（共用件在途标记 begin 已占位），收口不派第二场
+        // 生成，用户新意见照旧随对话收口
+        Long projectId = persistedPrdProject("9728");
+        givenSessionExecutorRunsInline();
+        codingRunTrack.begin(projectId); // 模拟生成在途
+        try {
+            appService.runOpinionTurn(projectId, "做一个官网");
+
+            // 在途：只有主智能体一轮 converse，不派第二次生成
+            verify(agentClient, times(1)).converse(any(), any());
+        }
+        finally {
+            codingRunTrack.end(projectId);
+        }
     }
 
     @Test
@@ -1097,6 +1146,14 @@ class MainAgentAppServiceTest {
         Project project = projectRepository.save(Project.create("访谈项目", null,
                 Long.parseLong(workspaceId), OWNER));
         return project.getId();
+    }
+
+    /** PRD 已产出、未生成的项目（#101 生成无门：收口自动派首次生成的前置事实）。 */
+    private Long persistedPrdProject(String workspaceId) {
+        Project project = projectRepository.save(Project.create("访谈项目", null,
+                Long.parseLong(workspaceId), OWNER));
+        project.markPrdProduced();
+        return projectRepository.save(project).getId();
     }
 
     private Long persistedArchivedProject(String workspaceId) {

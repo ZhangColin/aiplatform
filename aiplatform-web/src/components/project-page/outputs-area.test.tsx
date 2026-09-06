@@ -54,7 +54,7 @@ describe("OutputsArea · 呼出式 tab 簇（#79 范式注册表）", () => {
     expect(html.slice(selectedAt, selectedAt + 800)).toContain("系统");
     expect((html.match(/role="tab"/g) ?? []).length).toBe(2);
     // 系统 tab 激活 → SystemPanel 空态提示（未生成）
-    expect(html).toContain("开始做系统后，这里会出现可以操作的你的系统");
+    expect(html).toContain("系统生成后，这里会出现可以操作的你的系统");
   });
 
   it("「+ 新标签页」与收起键就位（tab 条即标题条）", () => {

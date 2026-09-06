@@ -77,12 +77,15 @@ public class EventsController {
             | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
             | error | 智能体·生命周期 | runId, message |
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
-            | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+            | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
+            | permission-required | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（#83 权限确认挂起：确认卡——summary=命令文本、data.toolCalls=待确认工具最小面） |
+            | permission-resolved | 智能体·生命周期 | runId, engineRef, approved（#83 权限确认落定：确认卡转已批/已拒） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
             | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
             | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
             | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
             | part-step | 智能体·部件 | step（1 起序号） |
+            | part-check | 智能体·部件 | state（checking/passed/failed——#85 自检播报：平台侧产出，不经引擎部件映射） |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
 
             名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。""")

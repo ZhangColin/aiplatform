@@ -436,6 +436,9 @@ class EventsControllerSseTest {
         assertThat(apiDocs).contains("workspace-created"); // 通知族名册精简表
         assertThat(apiDocs).contains("run-start");   // 智能体事件族名册精简表
         assertThat(apiDocs).contains("projectId");
+        assertThat(apiDocs).contains("permission-required"); // #83 权限确认拆分补行（镜像对齐）
+        assertThat(apiDocs).contains("permission-resolved");
+        assertThat(apiDocs).contains("part-check");          // #85 自检播报补行（镜像对齐）
     }
 
     /** 已读过 id 行后读完整事件（event 行 + data 行）并解析信封。 */

@@ -73,7 +73,11 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final String PG_BIN = "/usr/lib/postgresql/15/bin";
 
     private final SecureRandom random = new SecureRandom();
+    // 探活必须锁定 HTTP/1.1：默认 HTTP/2 会对明文 HTTP 发 `Upgrade: h2c`，而
+    // 工作区真实应用（next dev 等）见到 upgrade 头直接断连不回 HTTP/1.1 响应，
+    // 探活方收到「header parser received no bytes」误判未就绪（预览恒 503）。
     private final HttpClient http = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(2))
             .build();
 

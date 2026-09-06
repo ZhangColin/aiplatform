@@ -186,6 +186,36 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_app_rejects_http2_upgrade_when_expose_port_then_probe_still_succeeds_on_http11() {
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+        // 复现真实应用（next dev）行为：见到 Upgrade: h2c 直接断连、不回 HTTP/1.1
+        // 响应——若探活走默认 HTTP/2（发 Upgrade: h2c）会得到「header parser
+        // received no bytes」而误判未就绪（预览恒 503）。探活锁 HTTP/1.1 后应通过。
+        assertThat(execIn(provision.handle(), "cat > /workspace/server.js <<'PROBE_EOF'\n"
+                + "const http=require('http');\n"
+                + "http.createServer((req,res)=>{\n"
+                + "  if(req.headers.upgrade){req.socket.destroy();return;}\n"
+                + "  res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});res.end('ok');\n"
+                + "}).listen(8081,'0.0.0.0');\n"
+                + "PROBE_EOF").exitCode())
+                .as("复现 next dev 断连行为的探针服务器应可落位")
+                .isZero();
+        assertThat(execIn(provision.handle(),
+                "cd /workspace && nohup node server.js >/dev/null 2>&1 & echo started").exitCode())
+                .isZero();
+
+        // 探活通过即返回 URL（未就绪会抛 WSP_012）——本用例的回归断言就是「不抛」
+        URI url = backend.exposePort(provision.handle(), EnvironmentBackend.DEV_APP_CONTAINER_PORT);
+
+        assertThat(url.toString())
+                .isEqualTo("http://localhost:" + provision.handle().previewPort() + "/");
+        // 真实可访问（curl 走 HTTP/1.1，不触发 upgrade 断连）
+        assertThat(curl(provision.handle().containerName()).stdout().trim()).isEqualTo("ok");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_workspace_with_source_when_pack_source_then_real_tarball_without_secrets_or_data() throws Exception {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);

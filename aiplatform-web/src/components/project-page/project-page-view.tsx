@@ -34,7 +34,7 @@ import { lockRowOf } from "@/lib/orders/lock";
  * eligibility 单点在此判定（PRD 已产出 && 未生成 && 不在生成中——纯动作无门，
  * 待定项未清也可点）；对话流内卡片与文件范式操作条同一动作。「确认下单」
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
- * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂输入条按钮、锁定式
+ * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂顶栏右上角按钮、锁定式
  * 矩阵行在此判定（lockRowOf 单点）注入对话区与订单范式。本组件是 agent 流通道
  * 首个挂载方（ADR 0003「项目页 mount 建连、unmount 即断」）；断流超 ~10s 发
  * 一次 toast（呈现最小化约定：恢复不刷屏）。顶栏 LIVE 真绑定：项目建立即自动
@@ -151,6 +151,13 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           </span>
         )
       }
+      headerActions={
+        showConfirmOrder ? (
+          <ConfirmOrderButton
+            onConfirm={() => placeOrder.mutate(undefined, { onSuccess: () => openOutputsTo("order") })}
+          />
+        ) : null
+      }
       chat={
         <CommandArea
           projectId={projectId}
@@ -163,13 +170,6 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
               eligible={generationEligible}
               onGenerated={() => openOutputsTo("system")}
             />
-          }
-          confirmOrder={
-            showConfirmOrder ? (
-              <ConfirmOrderButton
-                onConfirm={() => placeOrder.mutate(undefined, { onSuccess: () => openOutputsTo("order") })}
-              />
-            ) : null
           }
         />
       }

@@ -22,6 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export type ProjectPageShellProps = {
   /** 顶栏内容：项目名等。 */
   header: React.ReactNode;
+  /** 顶栏右侧操作区（「确认下单」等），渲染于「成果」呼出键之前。 */
+  headerActions?: React.ReactNode;
   /** 左：对话区（居中当主角）。 */
   chat: React.ReactNode;
   /** 右：成果区（缺省 = 闲聊期，对话区占满全宽）。 */
@@ -42,6 +44,7 @@ export type ProjectPageShellProps = {
 
 export function ProjectPageShell({
   header,
+  headerActions,
   chat,
   outputs,
   outputsOpen = false,
@@ -57,6 +60,7 @@ export function ProjectPageShell({
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         {header}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {headerActions}
           {outputsExists && !outputsOpen ? (
             <Button
               size="sm"

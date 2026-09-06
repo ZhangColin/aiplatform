@@ -221,33 +221,14 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
       <CommandArea
         projectId="p1"
         lock={lockRowOf({ activeOrder: { id: "o1", status: 1, statusName: "待报价" } })}
-        confirmOrder={<button type="button">确认下单</button>}
       />,
     );
     expect(locked).toContain("订单处理中——如需继续修改，请取消订单");
     expect(locked).toContain("disabled");
-    // 锁定期间「确认下单」与 PRD 胶囊一并退场（订单已存在/迭代已冻结）
-    expect(locked).not.toContain("确认下单</button>");
+    // 锁定期间 PRD 胶囊退场（订单已存在/迭代已冻结）
     expect(locked).not.toContain("去看看");
   });
 
-  it("「确认下单」槽（#26）：注入即渲染于输入条上方；归档（disabled）不渲染", () => {
-    seedChat([{ kind: "user", id: "u1", text: "这个系统不错" }]);
-
-    const injected = renderToStaticMarkup(
-      <CommandArea projectId="p1" confirmOrder={<button type="button">确认下单</button>} />,
-    );
-    expect(injected).toContain("确认下单");
-
-    const archived = renderToStaticMarkup(
-      <CommandArea
-        projectId="p1"
-        lock={lockRowOf({ archived: true })}
-        confirmOrder={<button type="button">确认下单</button>}
-      />,
-    );
-    expect(archived).not.toContain("确认下单");
-  });
 });
 
 describe("CommandArea · 常驻文案与共享发送框（#79）", () => {

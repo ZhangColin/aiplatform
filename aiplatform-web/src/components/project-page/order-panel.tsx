@@ -54,7 +54,7 @@ export function OrderPanel({
       </PanelPlaceholder>
     ) : (
       <PanelPlaceholder icon={<PackageCheck />} title="还没有订单">
-        对系统满意时，在左侧点「确认下单」，订单会在这里呈现
+        对系统满意时，点右上角「确认下单」，订单会在这里呈现
       </PanelPlaceholder>
     );
   }

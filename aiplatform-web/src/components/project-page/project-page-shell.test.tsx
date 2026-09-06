@@ -8,6 +8,25 @@ import { ProjectPageShell } from "./project-page-shell";
 // 项目页壳（#79 对话主角式定稿）：对话居中 + 呼出式成果区（resizable 双槽、
 // 收起态顶栏出「成果」键）+ <lg 双页签退化。只断言结构，栏宽 / 槽位内容归场景插槽。
 describe("ProjectPageShell", () => {
+  it("headerActions：注入即渲染于顶栏右侧、在「成果」呼出键之前", () => {
+    const html = renderToStaticMarkup(
+      <SidebarProvider>
+        <ProjectPageShell
+          header={<span>项目甲</span>}
+          headerActions={<button type="button">确认下单</button>}
+          chat={<span>对话区</span>}
+          outputs={<span>成果区</span>}
+          outputsOpen={false}
+          onOutputsOpen={() => {}}
+          mobileTabs={["对话", "成果"]}
+        />
+      </SidebarProvider>,
+    );
+
+    expect(html).toContain("确认下单");
+    expect(html.indexOf("确认下单")).toBeLessThan(html.indexOf("展开成果区"));
+  });
+
   it("成果区滑出（outputsOpen）：resizable 双槽——对话列 + 成果列都在", () => {
     const html = renderToStaticMarkup(
       <SidebarProvider>

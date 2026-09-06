@@ -48,8 +48,7 @@ const STAGE_HINTS = {
  * 收口定格。发送框 = 共享 Composer（首页/项目页同一
  * 组件，#76）；Enter 路由：有待答问题时即当前问题的答复（可与已勾选合并），
  * 否则即新发言。输入条上方挂「PRD 有更新 · 去看看」胶囊（点击认领并回调
- * 场景层跳成果区）；「确认下单」随首次生成完成常驻输入
- * 条上方（#26）。输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
+ * 场景层跳成果区）。输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
  * 输入并出锁定提示，closed（归档终态）关闭。对话史 = chat store（SSE 桥喂，
  * 重放可重建近期轮）。
  */
@@ -59,7 +58,6 @@ export function CommandArea({
   stage = "interview",
   onSeePrd,
   generationCard,
-  confirmOrder,
 }: {
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
@@ -70,8 +68,6 @@ export function CommandArea({
   onSeePrd?: () => void;
   /** 对话流内卡片槽（「开始做系统」，#22）——装配层判定 eligibility 后注入。 */
   generationCard?: ReactNode;
-  /** 输入条上方常驻槽（「确认下单」，#26）——装配层判定可见性后注入。 */
-  confirmOrder?: ReactNode;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -210,7 +206,6 @@ export function CommandArea({
             </Button>
           </div>
         ) : null}
-        {!disabled && confirmOrder ? confirmOrder : null}
         {disabled && lock?.chatHint ? (
           <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             <Lock className="size-3.5 shrink-0" />

@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -129,14 +130,16 @@ class StepBoundaryPreviewRefreshTest {
 
         appService.startGeneration(projectId);
 
-        // 刷新信号 = 步骤边界且 step≥2（step1 是起跑边界无完整修改）：恰两次通知，
-        // 探活通过后发射（异步专职线程，timeout 收敛）
-        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(2))
+        // 刷新信号 = 步骤边界且 step≥2（step1 是起跑边界无完整修改）：阶段 0 + 切片
+        // 两场 run 各 2 次完整修改落定 → 恰 4 次通知，探活通过后发射（异步专职线程，
+        // timeout 收敛）
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(4))
                 .publishNotification(eq(ProjectEventTypes.PREVIEW_UPDATED), argThat(payload ->
                         projectId.toString().equals(
                                 payload.get(ProjectEventTypes.PROJECT_ID_FIELD))));
         // 事件原样透传不因装饰丢事件：part-step 照发智能体事件族（含 projectId 注入）
-        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(3))
+        // ——两场 run 各 3 步 = 6 条
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(6))
                 .publishAgentEvent(eq(AgentEventTypes.PART_STEP), argThat(payload ->
                         projectId.toString().equals(
                                 payload.get(EventsAppService.PROJECT_FIELD))));
@@ -175,14 +178,15 @@ class StepBoundaryPreviewRefreshTest {
     void given_probe_throws_when_generate_then_no_notification_and_run_unharmed() {
         Long projectId = persistedProject("9822");
         givenSessionExecutorRunsInline();
-        // 探针期 curl 抛环境异常（容器抖动等），两针都打过且抛过后收口核验转成功桩
-        // ——隔离「探活异常」与「收口核验」，断言炸点只在探活轨道
+        // 探针期 curl 抛环境异常（容器抖动等）：每场 run（阶段 0 / 切片）的 2 针探活
+        // 先抛（异步、异常被吞），converse 等本场 2 针抛完再返回——此后本场收口核验走
+        // 成功桩。逐场隔离「探活异常」与「收口核验」，断言炸点只在探活轨道
         AtomicBoolean probesThrow = new AtomicBoolean(true);
-        CountDownLatch probesObserved = new CountDownLatch(2);
+        AtomicReference<CountDownLatch> currentLatch = new AtomicReference<>();
         when(workspaceLifecycleAppService.exec(anyString(), any())).thenAnswer(invocation -> {
             WorkspaceExecCommand cmd = invocation.getArgument(1);
             if (cmd.command().contains("curl") && probesThrow.get()) {
-                probesObserved.countDown();
+                currentLatch.get().countDown();
                 throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
             }
             return new ExecResultResponse("", "", 0);
@@ -190,13 +194,17 @@ class StepBoundaryPreviewRefreshTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
+            // 本场探活重开抛（上一场收口核验已转成功桩，逐场隔离）
+            CountDownLatch probesObserved = new CountDownLatch(2);
+            currentLatch.set(probesObserved);
+            probesThrow.set(true);
             sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
                     EventsAppService.RUN_FIELD, command.runId(),
                     AgentEventTypes.PART_STEP_FIELD, 2)));
             sink.accept(new AgentEvent(AgentEventTypes.PART_STEP, Map.of(
                     EventsAppService.RUN_FIELD, command.runId(),
                     AgentEventTypes.PART_STEP_FIELD, 3)));
-            // 等两针都执行过（都抛了）再收口——此后收口核验走成功桩
+            // 等本场两针都执行过（都抛了）再收口——此后本场收口核验走成功桩
             assertThat(await(probesObserved)).isTrue();
             probesThrow.set(false);
             return new AgentReply(command.runId(), "系统已生成");
@@ -205,8 +213,8 @@ class StepBoundaryPreviewRefreshTest {
         appService.startGeneration(projectId);
 
         // 探活异常不发射通知、不炸编码 run：事件照发、run 成功收口、generated_at 落位
-        // （两针已在 converse 内确认执行完毕——异常被吞，此后无发射路径，never 确定）
-        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(2))
+        // （阶段 0 + 切片各 2 步 = 4 条；异常被吞，此后无发射路径，never 确定）
+        verify(eventsAppService, timeout(PROBE_SETTLE_MS).times(4))
                 .publishAgentEvent(eq(AgentEventTypes.PART_STEP), anyMap());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT generated_at FROM prj_projects WHERE id = ?",

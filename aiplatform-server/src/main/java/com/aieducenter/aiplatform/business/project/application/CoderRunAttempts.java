@@ -80,9 +80,12 @@ class CoderRunAttempts {
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote) {
 
-        /** 生成轮判定：PRD 未动、系统产出（首次）。 */
-        static ClosingJudgment generation() {
-            return new ClosingJudgment(false, null, true, null);
+        /**
+         * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
+         * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
+         */
+        static ClosingJudgment generation(String note) {
+            return new ClosingJudgment(false, null, true, note);
         }
     }
 
@@ -321,10 +324,12 @@ class CoderRunAttempts {
         return new AgentEvent(finish.type(), payload);
     }
 
-    /** 摘要（判定事实的合并叙事——文档与系统不分侧，四类收口各一句）。 */
+    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成轨道按段叙事。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
         if (GENERATE_LABEL.equals(what)) {
-            return "首次生成了系统";
+            // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片，来自
+            // {@link ClosingJudgment#generation(String)} 的 note——恒非空）
+            return judgment.systemNote();
         }
         if (judgment.prdChanged() && judgment.systemChanged()) {
             return "修订了需求文档，并更新了系统";

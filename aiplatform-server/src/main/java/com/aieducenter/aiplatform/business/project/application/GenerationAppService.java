@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -24,13 +25,21 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 生成编排（#22 片2-1；#101 生成无门自动发起——「开始做系统」按钮退役，生成
- * 触发权归平台）：主智能体产出 PRD 后意见轮收口即自动派首次生成 run
+ * 触发权归平台；#104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
+ * 主智能体产出 PRD 后意见轮收口即自动派首次生成轨
  * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与失败
  * 「重新发起」兜底走同一编排（{@link #startGeneration}）。run 执行体与主智能体
  * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
  * 极薄），仅资产与工具不同：会话 {@code coder-{projectId}}、配置 = 平台技术约定
  * + 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
  * 内核自带）。
+ *
+ * <p><b>生成轨道（#104）</b>：按切片计划（{@link BuildPlan}，主智能体产出的有序
+ * 纵向切片）顺序多 run——阶段 0（先起服白底页）固定前置，此后逐片长出。每片收口
+ * 判据 = 8081 可达（平台侧检查点） + 成版 + run-finish（收口扩载；「端到端可操作」
+ * 由片内 self-test 兜）。失败语义：某片超限转终态即发 {@code run-failed} 收口、
+ * 不自动跳下一片；{@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间
+ * 片不落位）。</p>
  *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
@@ -48,9 +57,9 @@ import lombok.extern.slf4j.Slf4j;
  * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
  *
  * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
- * 已落盘成果保留）：中间失败不出用户面事件；超限转终态失败即发 {@code run-failed}
+ * 已落盘成果保留）：中间失败不出用户面事件；每片超限转终态失败即发 {@code run-failed}
  * 收口事件（#56，run 失败为唯一失败终态），由用户重新发起兜底（generated_at
- * 不落位 = 按钮口径仍在）。run
+ * 不落位 = 按钮口径仍在）。最后一片
  * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——「确认下单」
  * 可见性口径）。</p>
  */
@@ -59,20 +68,39 @@ import lombok.extern.slf4j.Slf4j;
 public class GenerationAppService {
 
     /**
-     * 生成任务 prompt（首试下发）：读 PRD 自主实现 + 先起服后增量长（#44 渐进
-     * 预览前提，与配置/工作区约定同口径）+ 收口判据（8081 可访问）。
+     * 阶段 0 prompt（先起服，#104 生成轨道首段）：读 PRD 了解整体目标，先把应用
+     * 以最小可运行形态跑上 8081（白底骨架页即可），收口即白底页——先于任何切片，
+     * 解决「全程 503」的早可见（与工作区约定 / EXECUTOR 配置同口径）。
      */
-    static final String GENERATE_RUN_PROMPT =
-            "开始做系统：请完整阅读工作区 docs/PRD.md（需求正本，「功能清单」是实现的"
-                    + "直接依据），先把应用以可运行形态跑上 8081 端口（后台常驻，最小骨架"
-                    + "即可），再按功能清单增量长出页面与功能——带数据库、预置可演示的"
-                    + "初始数据，收口前用 curl 确认 8081 可访问。";
+    static final String STAGE0_RUN_PROMPT =
+            "系统初始化（先起服）：请完整阅读工作区 docs/PRD.md（需求正本）了解整体目标，"
+                    + "先把应用以最小可运行形态跑上 8081 端口（后台常驻，白底骨架页即可，"
+                    + "暂不实现业务功能），收口前用 curl 确认 8081 可访问。";
 
-    /** 重试续作 prompt：同工作区不丢数据——已落盘成果保留，从中断处继续。 */
-    static final String RETRY_RUN_PROMPT =
-            "上一次尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
-                    + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续把系统做完，"
-                    + "直至 docs/PRD.md 功能清单实现、服务在 8081 端口可访问。";
+    /**
+     * 重试续作 prompt（#104 分段口径）：同工作区不丢数据——已落盘成果保留，从中断处
+     * 续完<b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段由平台顺序派 run 决定，
+     * 重试不替执行体跨到下一片（「做一点展示一点」的完整性优先）。segmentDesc 即本段
+     * 的任务描述（与首试 prompt 同口径）。
+     */
+    static String retryRunPrompt(String segmentDesc) {
+        return "上一次尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
+                + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续完成本段任务"
+                + "（" + segmentDesc + "），收口前确认 8081 端口服务在跑、curl 可访问。";
+    }
+
+    /**
+     * 切片 prompt（#104 生成轨道逐段长出）：第 {@code index}/{@code total} 片，在
+     * 现有系统上增量实现「用户能 X」这一纵向切片（前端→后端→落库端到端走通、用户
+     * 可操作），系统其余部分保持可用。切片计划由主智能体产出（每片一句用户语言），
+     * 平台只顺序执行、不解析自由文本（ADR 0009）。
+     */
+    static String sliceRunPrompt(int index, int total, String slice) {
+        return "系统增量（切片 " + index + "/" + total + "）：请在现有系统上增量实现"
+                + "这一纵向切片——「" + slice + "」（前端到后端、数据落库端到端走通，"
+                + "用户可操作），保持系统其余部分可用，收口前确认 8081 端口服务在跑、"
+                + "curl 可访问。";
+    }
 
     /**
      * AGENTS.md 平台约定正文（工作区布局资产，#22 就位）：工作区物理约定的正本
@@ -198,7 +226,7 @@ public class GenerationAppService {
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
             try {
-                runAttemptsWithRetry(project, firstRunId);
+                runGenerationTrack(project, firstRunId);
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -219,40 +247,73 @@ public class GenerationAppService {
     // ---------- 内部 ----------
 
     /**
-     * 尝试环（异步轨道内，共用件 {@link CoderRunAttempts}）：生成首试 prompt =
-     * GENERATE_RUN_PROMPT、重试换轨 RETRY_RUN_PROMPT；成功收口（converse 无异常
-     * + 8081 可达，#35 核验在 {@link #markGeneratedIfReachable}）即 markGenerated
-     * 收场（首次生成时点单向落位）。超限转终态即发 {@code run-failed} 收口事件
-     * （#56：生成轨道超限即真终态——前端「重新发起」出口只认本事件）。
+     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段）：复用 {@link CoderRunAttempts}
+     * 的「轨道顺序多 run」模式（同 {@link IterationAppService#runFixTrack}）——阶段 0
+     * （先起服白底页）固定前置（首试 runId = 用户面首 run 身份，随响应回），此后按切片
+     * 计划顺序逐片派 run（每片新 runId）。每片收口判据 = 8081 可达（{@link #requireReachable}
+     * 核验）+ 成版 + run-finish（收口扩载，端到端可操作由片内 self-test 兜）；最后一片
+     * 收口才落 {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed}
+     * 收口（锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。
      */
-    private void runAttemptsWithRetry(Project project, String firstRunId) {
-        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, firstRunId,
-                new CoderRunAttempts.Prompts(GENERATE_RUN_PROMPT, RETRY_RUN_PROMPT),
-                runId -> {
-                    markGeneratedIfReachable(project);
-                    // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体
-                    // 先行写出）、系统产出（8081 探活收口事实）
-                    return CoderRunAttempts.ClosingJudgment.generation();
-                }, CoderRunAttempts.GENERATE_LABEL);
-        if (!result.succeeded()) {
-            // run-failed 锚 = 该场 run 的用户面标识（首试 runId，#84 重试不换新锚）
-            eventBridge.emitRunFailed(project.getId(), firstRunId);
+    private void runGenerationTrack(Project project, String firstRunId) {
+        Long projectId = project.getId();
+        BuildPlan plan = planOf(projectId);
+        List<String> slices = plan.slices();
+        // 阶段 0（先起服）：最小可运行形态上 8081，收口即白底页，先于任何切片
+        CoderRunAttempts.RunResult stage0 = coderRunAttempts.run(project, firstRunId,
+                new CoderRunAttempts.Prompts(STAGE0_RUN_PROMPT,
+                        retryRunPrompt("先起服：应用以最小可运行形态跑上 8081")),
+                runId -> closeGenerationStage(project, false, "起服了系统骨架"),
+                CoderRunAttempts.GENERATE_LABEL);
+        if (!stage0.succeeded()) {
+            eventBridge.emitRunFailed(projectId, firstRunId);
+            return;
+        }
+        // 切片逐段：按切片计划顺序派 run，每片收口 = 8081 可达 + 成版 + run-finish；
+        // 某片失败不自动跳下一片（完整性优先，失败片要可见地修复——用户重提兜底）
+        for (int index = 0; index < slices.size(); index++) {
+            String slice = slices.get(index);
+            String runId = EventsAppService.newRunId();
+            boolean last = index == slices.size() - 1;
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+                    new CoderRunAttempts.Prompts(
+                            sliceRunPrompt(index + 1, slices.size(), slice),
+                            retryRunPrompt("实现切片「" + slice + "」")),
+                    attemptRunId -> closeGenerationStage(project, last,
+                            "完成切片：" + slice),
+                    CoderRunAttempts.GENERATE_LABEL);
+            if (!result.succeeded()) {
+                eventBridge.emitRunFailed(projectId, runId);
+                return;
+            }
         }
     }
 
     /**
-     * 生成成功收场（#35）：先核验收口判据（8081 可达）再落 generated_at——converse
-     * 无异常不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，
-     * 被共用件尝试环当作该次尝试失败（走重试/终态路径，generated_at 不落位 = 项目
-     * 不被空壳锁死、重新发起出口仍在）。
+     * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达才收口——converse 无异常
+     * 不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
+     * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 self-test 兜
+     * （收口扩载 selfTest 统计），平台侧不新增探针。最后一片收口才落 {@code generated_at}
+     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）。
      */
-    private void markGeneratedIfReachable(Project project) {
+    private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project,
+            boolean markGenerated, String summary) {
+        requireReachable(project);
+        if (markGenerated) {
+            markGenerated(project.getId());
+        }
+        // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
+        // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
+        return CoderRunAttempts.ClosingJudgment.generation(summary);
+    }
+
+    /** 8081 可达核验（#35 收口判据探针）：不可达即抛异常（驱动尝试环重试/终态）。 */
+    private void requireReachable(Project project) {
         ExecResultResponse result = workspaceLifecycleAppService.exec(
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(CLOSING_PROBE));
         if (result.exitCode() != 0) {
             throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
         }
-        markGenerated(project.getId());
     }
 
     /** 首次生成时点落位：重载置位（单向），失败记日志不炸异步轨道（run 已成功）。 */

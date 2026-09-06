@@ -895,7 +895,8 @@ class MainAgentAppServiceTest {
     void given_prd_produced_not_generated_when_opinion_turn_closes_then_generation_dispatched() {
         // 灵魂用例（#101 生成无门自动发起）：主智能体产出 PRD 后意见轮收口，平台
         // 自动派首次生成 run（无需「开始做系统」按钮、无需模型调任何派发工具）——
-        // 收口后第二条 converse 落在 coder 会话、携执行体配置与生成任务 prompt
+        // 收口后第二条 converse 落在 coder 会话、携执行体配置与生成任务 prompt（#104
+        // 生成轨道首 run = 阶段 0 先起服）
         Long projectId = persistedPrdProject("9727");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
@@ -904,12 +905,12 @@ class MainAgentAppServiceTest {
         appService.runOpinionTurn(projectId, "做一个官网");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
+        verify(agentClient, times(3)).converse(command.capture(), any());
         AgentCommand generation = command.getAllValues().get(1);
         assertThat(generation.sessionId()).isEqualTo("coder-" + projectId);
         assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(generation.agentKey()).isEqualTo("executor");
-        assertThat(generation.prompt()).isEqualTo(GenerationAppService.GENERATE_RUN_PROMPT);
+        assertThat(generation.prompt()).isEqualTo(GenerationAppService.STAGE0_RUN_PROMPT);
     }
 
     @Test

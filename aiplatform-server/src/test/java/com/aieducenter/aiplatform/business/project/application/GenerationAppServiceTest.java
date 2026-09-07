@@ -334,7 +334,10 @@ class GenerationAppServiceTest {
                                 && cmd.command().contains("8081")
                                 // #44 起服节奏约定进工作区正本（尽早起、增量长）
                                 && cmd.command().contains("一开工就跑起来")
-                                && cmd.command().contains("增量长出页面与功能")));
+                                && cmd.command().contains("增量长出页面与功能")
+                                // #113 基座技术栈节进工作区正本（不换栈、不重选型）
+                                && cmd.command().contains("基座技术栈")
+                                && cmd.command().contains("不换栈、不重选型")));
         order.verify(agentClient).converse(any(), any());
     }
 

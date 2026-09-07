@@ -32,6 +32,8 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.isViewable("data")).isFalse();
         assertThat(ProjectFiles.isViewable(".platform/logs/run.log")).isFalse();
         assertThat(ProjectFiles.isViewable("node_modules/react/index.js")).isFalse();
+        assertThat(ProjectFiles.isViewable(".pnpm-store/v10/files/x")).isFalse(); // pnpm 依赖缓存
+        assertThat(ProjectFiles.isViewable(".next/trace")).isFalse(); // 基座 Next 构建产物
         assertThat(ProjectFiles.isViewable(".env")).isFalse();
     }
 
@@ -51,7 +53,8 @@ class ProjectFilesTest {
         // find 从源头剪枝（不进 node_modules 巨树）：根级非交付目录 -path 锚定
         // prune、根级 .env 排除（与源码包 tar 同口径）、%P 相对路径、%s 字节大小
         assertThat(ProjectFiles.listCommand()).isEqualTo(
-                "find /workspace \\( -path /workspace/node_modules -o -path /workspace/data"
+                "find /workspace \\( -path /workspace/node_modules -o -path /workspace/.pnpm-store"
+                        + " -o -path /workspace/.next -o -path /workspace/data"
                         + " -o -path /workspace/.platform -o -path /workspace/agents"
                         + " -o -path /workspace/.git \\) -prune -o -type f"
                         + " ! -path /workspace/.env -printf '%s\\t%P\\n'");

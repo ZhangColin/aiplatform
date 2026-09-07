@@ -109,6 +109,31 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_created_workspace_when_baseline_seeded_then_skeleton_page_serves_on_8081() {
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 基座模板就位（#113 只断外部行为，不探镜像内部层结构）：开箱即有基座工程
+        // package.json + 预装依赖 node_modules——阶段 0 免选型/免 install 的前提
+        assertThat(execIn(provision.handle(), "test -f /workspace/package.json").exitCode())
+                .as("基座工程 package.json 应已就位").isZero();
+        assertThat(execIn(provision.handle(), "test -d /workspace/node_modules").exitCode())
+                .as("基座依赖应已预装（node_modules 就位）").isZero();
+
+        // 照 run 执行体约定起服（pnpm dev 后台常驻 8081）；next dev 首次编译慢，轮询
+        assertThat(execIn(provision.handle(),
+                "cd /workspace && nohup pnpm dev >/tmp/app.log 2>&1 & echo started").exitCode())
+                .as("基座应用应可自起").isZero();
+        awaitServing(provision.handle().containerName());
+
+        // 白底骨架页（阶段 0 收口即此形态）：curl 8081 有响应且是基座首页
+        ExecResult served = curl(provision.handle().containerName());
+        assertThat(served.exitCode()).as("8081 应可访问").isZero();
+        assertThat(served.stdout()).as("骨架页应含基座首页文案").contains("系统");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_created_workspace_when_container_destroyed_and_rebuilt_then_data_survives() {
         requireDockerDaemon();
         WorkspaceId workspaceId = WorkspaceId.generate();
@@ -394,6 +419,23 @@ class DockerEnvironmentBackendTest {
     /** 容器内 8081 应用正文（快照/主容器通吃）。 */
     private static ExecResult curl(String containerName) {
         return docker("exec", containerName, "sh", "-c", "curl -s http://localhost:8081");
+    }
+
+    /** 轮询容器内 8081 直至有 HTTP 响应（next dev 首次编译慢，最长约 2 分钟）。 */
+    private static void awaitServing(String containerName) {
+        long deadline = System.currentTimeMillis() + 120_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (curl(containerName).exitCode() == 0) {
+                return;
+            }
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("等待应用起服被中断", e);
+            }
+        }
+        throw new AssertionError("基座应用未在期限内于 8081 起服");
     }
 
     /** 容器内 psql（trust 认证、回环连接，root 直连 postgres 角色）。 */

@@ -12,7 +12,23 @@ RUN apt-get update \
         postgresql-15 postgresql-client-15 redis-server git \
     && rm -rf /var/lib/apt/lists/*
 
-# 工作区自愈入口：布局骨架 + 容器内 pg/redis 幂等起服务后 exec 交还启动命令
+# pnpm（基座工程包管理器，#113）：依赖在镜像构建期装好，工作区初始化 = 模板就位，
+# 非项目内现场 install
+RUN npm install -g pnpm@10
+
+# 基座工程模板（#113 / ADR-0013）：固定技术栈（TypeScript / Next.js / React 19 /
+# pnpm / shadcn / PostgreSQL / Redis）的只读正本。构建期 pnpm install 把依赖装进
+# 镜像层；工作区初始化时由 init-workspace.sh 首次就位复制到 /workspace，生成 run
+# 在基座上增量生长、跳过选型与初始化。
+# store-dir 钉在 /workspace/.pnpm-store：/workspace 是独立卷（独立文件系统），
+# pnpm 在卷上会自动改用项目内 store；若构建期走默认全局 store（/root/.local），
+# 复制就位后 node_modules 的 storeDir 记录与运行时不一致，执行体 pnpm add（长尾
+# 依赖 / shadcn add）会报 UNEXPECTED_STORE。预先对齐 storeDir，就位后 pnpm add
+# 只增量下载新依赖、不复装全部。
+COPY baseline/ /opt/baseline/
+RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store
+
+# 工作区自愈入口：布局骨架 + 基座模板就位 + 容器内 pg/redis 幂等起服务后 exec 交还启动命令
 COPY init-workspace.sh /opt/init-workspace.sh
 RUN chmod +x /opt/init-workspace.sh
 ENTRYPOINT ["/opt/init-workspace.sh"]

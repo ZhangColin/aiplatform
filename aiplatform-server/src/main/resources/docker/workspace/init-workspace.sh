@@ -18,6 +18,13 @@ REDIS_PORT=6379
 mkdir -p "$WS_ROOT/docs" "$PG_DATA" "$WS_ROOT/.platform/skills" \
   "$WS_ROOT/.platform/rules" "$WS_ROOT/.platform/logs"
 
+# 1.5) 基座模板就位（幂等，#113 / ADR-0013）：镜像内置基座工程（依赖构建期已装进
+#    node_modules）首次复制到工作区根——判据 = 工作区尚无 package.json（新建卷首次）。
+#    已有应用代码（重建自愈 / 生成进行中）则不覆盖。
+if [ ! -f "$WS_ROOT/package.json" ]; then
+  cp -a /opt/baseline/. "$WS_ROOT"/
+fi
+
 # 2) pg：数据进卷（PGDATA=/workspace/data/pg）；未初始化则 initdb。
 #    trust 认证——pg 只监听容器内回环、不映射对外端口，客户端只有同容器进程。
 if [ ! -s "$PG_DATA/PG_VERSION" ]; then

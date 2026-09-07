@@ -2,11 +2,13 @@ package com.aieducenter.aiplatform.base.workspace.infrastructure.docker;
 
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.List;
@@ -56,7 +58,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    private static final String DEV_IMAGE = "aiplatform/dev:0.7";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.8";
 
     private static final int PORT_MIN = 20000;
     private static final int PORT_MAX = 45000;
@@ -327,7 +329,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         }
     }
 
-    /** dev 镜像缺失时从 classpath 资源现场构建（首次约 1 分钟，之后走缓存）。 */
+    /** dev 镜像缺失时从 classpath 资源现场构建（首次含 pnpm install 较重，之后走缓存）。 */
     private void ensureDevImage() {
         if (runCapture("docker", "image", "inspect", DEV_IMAGE).exitCode() == 0) {
             return;
@@ -338,6 +340,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             copyResource("docker/workspace/init-workspace.sh", dir.resolve("init-workspace.sh"));
             copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
             copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
+            copyResourceTree("docker/workspace/baseline", dir.resolve("baseline"));
             run("docker", "build", "-t", DEV_IMAGE, dir.toString());
         } catch (ApplicationException e) {
             throw e;
@@ -353,6 +356,34 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 throw new IllegalStateException("找不到资源 " + resource);
             }
             Files.copy(in, target);
+        }
+    }
+
+    /**
+     * 递归复制 classpath 目录（基座模板就位到镜像 build context）：开发/测试场景下
+     * classpath 落在 target/classes 文件系统目录（file: 协议），直接 {@code Files.walk}
+     * 递归复制；jar 打包形态（生产）镜像由部署流程预置，现场构建不覆盖该路径。
+     */
+    private void copyResourceTree(String resourceDir, Path targetDir) throws Exception {
+        URL url = getClass().getClassLoader().getResource(resourceDir);
+        if (url == null) {
+            throw new IllegalStateException("找不到资源目录 " + resourceDir);
+        }
+        if (!"file".equals(url.getProtocol())) {
+            throw new IllegalStateException("基座模板须以文件系统 classpath 提供（开发场景）: "
+                    + resourceDir);
+        }
+        Path src = Path.of(url.toURI());
+        try (Stream<Path> walk = Files.walk(src)) {
+            for (Path entry : walk.toList()) {
+                Path relative = src.relativize(entry);
+                Path target = targetDir.resolve(relative.toString());
+                if (Files.isDirectory(entry)) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.copy(entry, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
         }
     }
 
@@ -402,7 +433,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /** 检出当时代码 + 依赖复用 + 连接串：{@code git archive} 读 .git（ro 卷）把该
      *  commit 树解到容器本地（不碰 .git 索引、不互踩主工作树）；node_modules 复用
-     *  主容器（ro 卷 symlink——历史代码的依赖不入版，v1 复用当前依赖）；.env 写
+     *  主容器（复制而非 symlink——Next 16 Turbopack 拒「项目根外 symlink」，历史代码
+     *  的依赖不入版、v1 复用当前依赖；与复制 PGDATA 同量级的容器本地副本）；.env 写
      *  副本本地（DATABASE_URL 指容器内 localhost，应用侧零适配）。 */
     private String snapshotCheckoutCommand(String ref, String databaseUrl) {
         String nodeModules = WorkspaceLayout.absolute("node_modules");
@@ -410,7 +442,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 + " && git -C " + WorkspaceLayout.ROOT + " archive '" + ref
                 + "' | tar -x -C " + SNAPSHOT_ROOT
                 + " && if test -d " + nodeModules + " && ! test -e " + SNAPSHOT_ROOT
-                + "/node_modules; then ln -s " + nodeModules + " " + SNAPSHOT_ROOT
+                + "/node_modules; then cp -a " + nodeModules + " " + SNAPSHOT_ROOT
                 + "/node_modules; fi"
                 + " && printf 'DATABASE_URL=" + databaseUrl
                 + "\\nREDIS_URL=redis://localhost:6379\\n' > " + SNAPSHOT_ROOT + "/.env";

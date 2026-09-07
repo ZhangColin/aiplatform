@@ -1,0 +1,15 @@
+# 依赖（镜像构建期预装，可重建）
+node_modules
+
+# pnpm 依赖缓存（store-dir 落卷，可重建）
+.pnpm-store
+
+# Next 构建产物（可重建）
+.next
+
+# 平台注入机密（DATABASE_URL / REDIS_URL）
+.env
+
+# 应用数据与平台产物（卷内持久，非交付物）
+data
+.platform

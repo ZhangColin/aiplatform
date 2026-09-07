@@ -80,13 +80,15 @@ public final class WorkspaceLayout {
     /**
      * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物
      * （{@link #PLATFORM_DIR}）、子智能体工作区（{@link #AGENTS_DIR}，#95 委派位
-     * 隔离根——交付目录无子智能体脏写）、可重建依赖（node_modules）与版本元数据
-     * （.git）不是交付物——源码包打包、平台文件树只读端点与版本层 .gitignore（#91）
-     * 共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由版本层 git 管道
-     * 产出，不入源码包/文件树/版本跟踪（git 自排除，入名单为三者口径统一）。
+     * 隔离根——交付目录无子智能体脏写）、可重建依赖（node_modules）与 pnpm 依赖
+     * 缓存（.pnpm-store，#113 基座 store-dir 落卷）、Next 构建产物（.next）与版本
+     * 元数据（.git）不是交付物——源码包打包、平台文件树只读端点与版本层
+     * .gitignore（#91）共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由
+     * 版本层 git 管道产出，不入源码包/文件树/版本跟踪（git 自排除，入名单为三者
+     * 口径统一）。
      */
     public static final List<String> NON_DELIVERABLE_DIRS = List.of(
-            "node_modules", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, GIT_DIR);
+            "node_modules", ".pnpm-store", ".next", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, GIT_DIR);
 
     private WorkspaceLayout() {
     }

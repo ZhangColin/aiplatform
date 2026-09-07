@@ -17,6 +17,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -105,6 +109,17 @@ class IterationAppServiceTest {
     /** 工作区 exec（#91 版本锚定成版探针的脚本化缝——commit hash 回填 closing）。 */
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
+    /** 时钟（#112 权限确认超时的测试缝——替换 TimeConfig 单点，快进断言超时不真等）。 */
+    @MockitoBean
+    private Clock clock;
+
+    private final MutableClock mutableClock = new MutableClock(Instant.parse("2026-09-07T00:00:00Z"));
+
+    @BeforeEach
+    void stubClock() {
+        when(clock.instant()).thenAnswer(invocation -> mutableClock.instant());
+    }
 
     @AfterEach
     void tearDown() {
@@ -314,6 +329,50 @@ class IterationAppServiceTest {
         assertThat(resume.getValue().resumeText()).contains("拒绝");
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PERMISSION_RESOLVED), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+    }
+
+    @Test
+    void given_permission_suspension_when_timeout_then_run_failed_without_retry()
+            throws InterruptedException {
+        // #112 超时收口（端到端·轨道级）：需批准操作挂起 → 时钟越过 10 分钟 → 超时默认
+        // 拒绝——发 permission-timed-out（确认卡「已超时」）+ run-failed 收口，
+        // 不复用静默重试（converse 恰一次、resume 零次——重试同上下文同命令必然再挂）
+        Long projectId = persistedGeneratedProject("9914");
+        List<Runnable> tracks = givenTrackQueued();
+        String engineRef = "reply-perm-timeout";
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_REQUIRED,
+                    new LinkedHashMap<>(Map.of(
+                            "runId", command.runId(),
+                            AgentEventTypes.WAIT_ENGINE_REF_FIELD, engineRef,
+                            AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
+                            AgentEventTypes.WAIT_DATA_FIELD, Map.of("toolCalls", List.of(
+                                    Map.of("id", "tc-9", "name", "command",
+                                            "input", Map.of("command", "rm -rf /workspace/data"))))))));
+            return new AgentReply(command.runId(), "需要确认", new AgentSuspension(
+                    engineRef, false, List.of(Map.of(
+                            "id", "tc-9", "name", "command",
+                            "input", Map.of("command", "rm -rf /workspace/data")))));
+        });
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId, "清理临时数据目录", null);
+        Thread worker = new Thread(tracks.remove(0));
+        worker.start();
+        verify(eventsAppService, timeout(5000))
+                .publishAgentEvent(eq(AgentEventTypes.PERMISSION_REQUIRED), any());
+
+        // 快进时钟越过 10 分钟上限 → 超时默认拒绝（不真等 10 分钟）
+        mutableClock.advance(Duration.ofMinutes(11));
+        worker.join(5000);
+
+        // 确认卡「已超时」定格事件 + run-failed 收口（不复用静默重试）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PERMISSION_TIMED_OUT), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+        // 不复用静默重试：converse 恰一次（无第二次尝试）、resume 零次（不续跑同命令）
+        verify(agentClient, times(1)).converse(any(), any());
+        verify(agentClient, never()).resume(any(), any());
     }
 
     @Test

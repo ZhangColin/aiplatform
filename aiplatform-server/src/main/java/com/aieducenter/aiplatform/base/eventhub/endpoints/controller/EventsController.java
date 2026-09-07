@@ -80,6 +80,7 @@ public class EventsController {
             | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
             | permission-required | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（#83 权限确认挂起：确认卡——summary=命令文本、data.toolCalls=待确认工具最小面） |
             | permission-resolved | 智能体·生命周期 | runId, engineRef, approved（#83 权限确认落定：确认卡转已批/已拒） |
+            | permission-timed-out | 智能体·生命周期 | runId, engineRef（#112 权限确认超时：确认卡转「已超时」——随后 run-failed 收口） |
             | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
             | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
             | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |

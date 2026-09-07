@@ -155,6 +155,16 @@ describe("WorkMessage · 确认卡（#83 权限确认：长在工作消息流，
     expect(html).toContain("未作答");
     expect(html).not.toContain(">批准</");
   });
+
+  it("超时：转「已超时」定格 + 播报「等待批准超时，本轮已停止」（按钮退场、不可作答）", () => {
+    const html = renderWithClient(
+      work({ frozen: true, frozenAt: 60_000, parts: [permission({ state: "timedout" })] }),
+    );
+
+    expect(html).toContain("已超时");
+    expect(html).toContain("等待批准超时，本轮已停止");
+    expect(html).not.toContain(">批准</");
+  });
 });
 
 describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/❌」）", () => {

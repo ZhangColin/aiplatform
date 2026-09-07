@@ -757,6 +757,35 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       .toMatchObject({ kind: "permission", state: "approved" });
   });
 
+  it("permission-timed-out → 确认卡转「已超时」定格（#112 超时默认拒绝，不可作答）", () => {
+    const t0 = "2026-09-05T06:00:00.000Z";
+    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "做系统", model: "m", agent: "executor" },
+      "run1:1",
+      at(0),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-required",
+      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
+        data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
+      "run1:5",
+      at(5),
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "permission-timed-out",
+      { projectId: "p1", runId: "run1", engineRef: "reply-9" },
+      "run1:9",
+      at(12),
+    ));
+
+    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
+      .toMatchObject({ kind: "permission", state: "timedout" });
+  });
+
   it("run-failed 也定格（run 失败是唯一失败终态，恢复出口在生成面）", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     dispatchAgentEvent(agentQc, agentEvent(

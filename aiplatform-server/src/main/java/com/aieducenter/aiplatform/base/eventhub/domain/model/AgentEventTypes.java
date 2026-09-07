@@ -88,6 +88,15 @@ public final class AgentEventTypes {
     public static final String PERMISSION_APPROVED_FIELD = "approved";
 
     /**
+     * 权限确认超时落定（#112 权限确认 10 分钟超时默认拒绝）：轨道驻留等作答超时即
+     * 发射——确认卡转「已超时」终态（不可作答，按钮退场），随后轨道直接
+     * {@link #RUN_FAILED} 收口（不复用静默重试）。payload 带 runId/engineRef；
+     * 与 {@link #PERMISSION_RESOLVED} 同族不同语义：本事件非作答（无批准位），
+     * 超时即拒绝——破坏性命令永不默认放行。
+     */
+    public static final String PERMISSION_TIMED_OUT = "permission-timed-out";
+
+    /**
      * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与
      * 终态账（恢复出口的重派依据）同事实点，排队合并续派的中途超限不是终态、不发；
      * 生成轨道超限即终态。runId = 该场 run 的<b>用户面标识</b>（首试 runId——#84

@@ -8,18 +8,19 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -46,8 +47,15 @@ class RunPermissionAppServiceTest {
     @Mock
     private ProjectRepository projectRepository;
 
-    @InjectMocks
+    /** 可拨动时钟（#112 测试缝——超时断言快进 10 分钟，不真等）。 */
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-09-07T00:00:00Z"));
+
     private RunPermissionAppService appService;
+
+    @BeforeEach
+    void initService() {
+        appService = new RunPermissionAppService(eventBridge, projectRepository, clock);
+    }
 
     private void givenProjectExists() {
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(Mockito.mock(Project.class)));
@@ -103,7 +111,7 @@ class RunPermissionAppServiceTest {
     @Test
     void given_awaiting_run_when_answer_then_resolved_event_then_waiter_wakes_with_decision() throws Exception {
         givenProjectExists();
-        AtomicBoolean wokeWith = new AtomicBoolean(true);
+        AtomicReference<RunPermissionAppService.Decision> wokeWith = new AtomicReference<>();
         Thread parked = new Thread(() -> wokeWith.set(appService.await("reply-9", "run-7")));
         parked.start();
         awaitRegistered("reply-9");
@@ -111,7 +119,7 @@ class RunPermissionAppServiceTest {
         appService.answer(PROJECT_ID, "run-7", "reply-9", false);
 
         parked.join(5000);
-        assertThat(wokeWith.get()).isFalse();
+        assertThat(wokeWith.get()).isEqualTo(RunPermissionAppService.Decision.DENIED);
         // 先发落定事件（确认卡转终态），事件带批准位与批复锚
         ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> engineRef = ArgumentCaptor.forClass(String.class);
@@ -171,5 +179,28 @@ class RunPermissionAppServiceTest {
         // 恰一次：落定事件只发一条（permission-resolved 双发会让确认卡终态漂移）
         verify(eventBridge, Mockito.times(1))
                 .emitPermissionResolved(eq(PROJECT_ID), eq("run-3"), eq("reply-3"), eq(true));
+    }
+
+    @Test
+    void given_waiting_run_when_timeout_then_default_deny_and_card_frozen() throws Exception {
+        // #112 超时默认拒绝：等作答越 10 分钟上限 → 三态落定 TIMED_OUT（只断言外部
+        // 行为——拒绝结果与确认卡定格，不断言锁/线程实现）；超时不发 permission-
+        // resolved（非作答）；会合点随超时清——作答侧再查即过期（确认卡定格不可再点）
+        givenProjectExists();
+        AtomicReference<RunPermissionAppService.Decision> wokeWith = new AtomicReference<>();
+        Thread parked = new Thread(() -> wokeWith.set(appService.await("reply-t", "run-t")));
+        parked.start();
+        awaitRegistered("reply-t");
+
+        clock.advance(Duration.ofMinutes(11));
+        parked.join(5000);
+
+        assertThat(parked.isAlive()).isFalse();
+        assertThat(wokeWith.get()).isEqualTo(RunPermissionAppService.Decision.TIMED_OUT);
+        verify(eventBridge, Mockito.never())
+                .emitPermissionResolved(any(), any(), any(), anyBoolean());
+        assertThatThrownBy(() -> appService.answer(PROJECT_ID, "run-t", "reply-t", true))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PERMISSION_ANSWER_STALE.message());
     }
 }

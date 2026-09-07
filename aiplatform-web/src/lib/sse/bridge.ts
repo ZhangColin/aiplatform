@@ -172,6 +172,13 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
+      case "permission-timed-out": {
+        // 权限确认超时（#112）：确认卡转「已超时」定格（不可作答，按钮退场）——
+        // run-failed 随后到达定格整条工作消息
+        const { payload } = platform;
+        work.resolvePermission(payload.projectId, payload.engineRef, "timedout");
+        return;
+      }
       case "error": {
         const { payload } = platform;
         // 编码 run 的 error = 事件序异常（#84：尝试环内中间错误不出用户面事件流，

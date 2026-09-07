@@ -31,8 +31,8 @@ export type WorkActionState = "started" | "running" | "completed" | "failed";
 /** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
 export type WorkCheckState = "checking" | "passed" | "failed";
 
-/** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态）。 */
-export type WorkPermissionState = "pending" | "approved" | "denied";
+/** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态；#112 超时 → timedout）。 */
+export type WorkPermissionState = "pending" | "approved" | "denied" | "timedout";
 
 /** 终态判定（completed / failed——时长定格、文案换终态色）。 */
 function isTerminalState(state: WorkActionState): boolean {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileCode2, Hammer, ShieldCheck, ShieldQuestion, SquareTerminal, X } from "lucide-react";
+import { Check, Clock, FileCode2, Hammer, ShieldCheck, ShieldQuestion, SquareTerminal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -158,7 +158,9 @@ function CheckRow({
  * 权限确认卡（#83，长在工作消息流内——与对话区问答卡分形态）：待批准操作摘要
  * （命令文本，等宽）+ 拒绝/批准两个动作，作答即续跑（乐观转终态，permission-
  * resolved 事件幂等双达；失败回滚重开）。已批/已拒转徽标定格；run 收口截断的
- * 待答卡如实呈现「未作答」（按钮退场——过期卡作答会被服务端 409 指路刷新）。
+ * 待答卡如实呈现「未作答」（按钮退场——过期卡作答会被服务端 409 指路刷新）；
+ * 超时（#112）转「已超时」定格并播报「等待批准超时，本轮已停止」（不可作答，
+ * 按钮退场）。
  */
 function PermissionRow({
   part,
@@ -192,6 +194,10 @@ function PermissionRow({
           <span className="ml-auto flex items-center gap-1 text-xs text-destructive">
             <X className="size-3.5" strokeWidth={3} /> 已拒绝
           </span>
+        ) : part.state === "timedout" ? (
+          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="size-3.5" /> 已超时
+          </span>
         ) : frozen ? (
           <span className="ml-auto text-xs text-muted-foreground">未作答</span>
         ) : null}
@@ -199,6 +205,9 @@ function PermissionRow({
       <p className="mt-1.5 break-all rounded bg-muted px-2 py-1.5 font-mono text-xs leading-relaxed">
         {part.summary}
       </p>
+      {part.state === "timedout" ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">等待批准超时，本轮已停止</p>
+      ) : null}
       {interactive ? (
         <div className="mt-2 flex justify-end gap-2">
           <Button

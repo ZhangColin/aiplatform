@@ -114,8 +114,8 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("permission-required / permission-resolved 按正本收窄（#83 事件拆分）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「智能体事件族」permission-required / permission-resolved 行
+  it("permission-required / permission-resolved / permission-timed-out 按正本收窄（#83/#112）；平台 type 不落入透传口", () => {
+    // 期望值来自正本「智能体事件族」permission-required / permission-resolved / permission-timed-out 行
     const required = parseSseEnvelope(
       JSON.stringify({
         type: "permission-required",
@@ -141,6 +141,19 @@ describe("智能体事件族收窄", () => {
       payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9", approved: false },
     });
     expect(asPassthroughAgentEvent(resolved!)).toBeNull();
+
+    const timedOut = parseSseEnvelope(
+      JSON.stringify({
+        type: "permission-timed-out",
+        payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9" },
+        ts: "",
+      }),
+    );
+    expect(asPlatformAgentEvent(timedOut!)).toMatchObject({
+      type: "permission-timed-out",
+      payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9" },
+    });
+    expect(asPassthroughAgentEvent(timedOut!)).toBeNull();
   });
 
   it("run-failed 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {

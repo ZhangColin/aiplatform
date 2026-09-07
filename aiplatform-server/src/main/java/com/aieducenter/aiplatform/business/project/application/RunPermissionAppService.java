@@ -1,8 +1,14 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.springframework.stereotype.Service;
 
@@ -33,15 +39,37 @@ public class RunPermissionAppService {
     private record Wait(String runId, CompletableFuture<Boolean> decision) {
     }
 
+    /**
+     * 权限确认超时（#112）：10 分钟未作答即默认拒绝（破坏性命令永不默认放行），
+     * 等待纳入 run 墙钟口径。恒量（非配置——实施期定的落点，与生成超时同处
+     * {@code app.generation} 前缀下的「超时」不同属：本项是权限作答的等待上限）。
+     */
+    static final Duration PERMISSION_TIMEOUT = Duration.ofMinutes(10);
+
+    /** 超时轮询片（#112 时钟注入可测：以短片轮询重读注入时钟，避免真等 10 分钟）。 */
+    private static final Duration PERMISSION_WAIT_POLL = Duration.ofMillis(250);
+
+    /** 一次权限确认挂起的落定（#112 三态：批准 / 拒绝 / 超时——超时即默认拒绝）。 */
+    enum Decision {
+        /** 批准（续跑放行执行）。 */
+        APPROVED,
+        /** 拒绝（引擎写 DENIED 结果回模型，改道或自行收口）。 */
+        DENIED,
+        /** 超时（默认拒绝——轨道直接 run-failed 收口，不复用静默重试）。 */
+        TIMED_OUT,
+    }
+
     private final Map<String, Wait> waiting = new ConcurrentHashMap<>();
 
     private final AgentEventBridge eventBridge;
     private final ProjectRepository projectRepository;
+    private final Clock clock;
 
     public RunPermissionAppService(AgentEventBridge eventBridge,
-            ProjectRepository projectRepository) {
+            ProjectRepository projectRepository, Clock clock) {
         this.eventBridge = eventBridge;
         this.projectRepository = projectRepository;
+        this.clock = clock;
     }
 
     /**
@@ -76,24 +104,41 @@ public class RunPermissionAppService {
     }
 
     /**
-     * 轨道侧驻留（权限确认挂起处调用）：阻塞至作答到达，返回批准位。中断视同拒绝
-     * （进程关闭即此路径——轨道随执行器终止，无需精细处理）；future 无其他异常面
-     * （complete 只在作答路径，无异常完成）。
+     * 轨道侧驻留（权限确认挂起处调用）：阻塞至作答落定或超时，返回三态落定。
+     * 超时（#112）＝时钟越过 {@link #PERMISSION_TIMEOUT} 上限——默认拒绝
+     * （破坏性命令永不默认放行）、会合点随 finally 清（作答侧再查即过期 PRJ_027，
+     * 确认卡定格不可再点）。中断视同拒绝（进程关闭即此路径——轨道随执行器终止，
+     * 无需精细处理）；future 无其他异常面（complete 只在作答路径，无异常完成）。
      */
-    boolean await(String engineRef, String runId) {
+    Decision await(String engineRef, String runId) {
         CompletableFuture<Boolean> decision = new CompletableFuture<>();
+        // 截止先于会合点登记：isAwaiting 探针变真即保证 deadline 已定格（测试快进时钟
+        // 不会再推迟截止——时钟注入可测的确定性前提）
+        Instant deadline = clock.instant().plus(PERMISSION_TIMEOUT);
         waiting.put(engineRef, new Wait(runId, decision));
         try {
-            return decision.get();
+            while (clock.instant().isBefore(deadline)) {
+                try {
+                    Boolean approved = decision.get(PERMISSION_WAIT_POLL.toMillis(),
+                            TimeUnit.MILLISECONDS);
+                    return approved ? Decision.APPROVED : Decision.DENIED;
+                }
+                catch (TimeoutException poll) {
+                    // 轮询片到、未落定：重读注入时钟——测试快进时钟越过 deadline 即判超时
+                }
+            }
+            log.info("[permission] 权限确认等待超时（engineRef={}，run={} 未作答），默认拒绝",
+                    engineRef, runId);
+            return Decision.TIMED_OUT;
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return false;
+            return Decision.DENIED;
         }
-        catch (java.util.concurrent.ExecutionException e) {
+        catch (ExecutionException e) {
             // 不可达防御：future 只在作答路径正常 complete，无异常完成面
             log.warn("[permission] 权限等待异常完成（engineRef={}）：{}", engineRef, e.toString());
-            return false;
+            return Decision.DENIED;
         }
         finally {
             waiting.remove(engineRef);

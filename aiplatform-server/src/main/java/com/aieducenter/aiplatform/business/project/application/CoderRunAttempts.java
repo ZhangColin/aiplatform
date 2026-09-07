@@ -92,8 +92,17 @@ class CoderRunAttempts {
     /**
      * 一场编码 run 的收场事实：成败（终态收口事件 run-failed 的用户面锚 = 调用方
      * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）。
+     * 权限确认超时（#112）同样以失败收场——直接 run-failed（不进静默重试），与
+     * 重试超限同锚同事件；如实原因经「已超时」确认卡事件表达（见 settlePermissions）。
      */
     record RunResult(boolean succeeded) {
+    }
+
+    /** 权限确认超时信号（#112）：中断尝试环、直接 run-failed 收口——不复用静默重试。 */
+    private static final class PermissionTimeoutException extends RuntimeException {
+        PermissionTimeoutException(String engineRef) {
+            super("权限确认超时（engineRef=" + engineRef + "）");
+        }
     }
 
     /**
@@ -257,6 +266,11 @@ class CoderRunAttempts {
                     projection.accept(withClosing(pendingFinish.get(), closing));
                 }
                 return new RunResult(true);
+            }
+            catch (PermissionTimeoutException e) {
+                // 权限确认超时（#112）：直接 run-failed 收口，不进静默重试（重试同上下文
+                // 同命令必然再挂）——如实原因经「已超时」确认卡事件表达
+                return new RunResult(false);
             }
             catch (RuntimeException e) {
                 if (!attemptAccounted) {
@@ -467,8 +481,10 @@ class CoderRunAttempts {
     /**
      * 权限确认驻留与续跑（#83）：挂起（软终点）即等作答——批准/拒绝以 ConfirmResult
      * 续跑同 run（命令全要素同构，恢复私货从本环命令原样携带），续跑可再挂起
-     * （一 run 多确认点）。问答挂起在编码 run 不可达（执行体无 ask_user 工具），
-     * 防御即失败（走尝试环重试，最终 run-failed——不静默错频道）。
+     * （一 run 多确认点）。超时（#112）＝作答等待越 10 分钟上限——默认拒绝、发
+     * 「已超时」定格事件后上抛 {@link PermissionTimeoutException} 驱动 run 直接
+     * run-failed 收口（不复用静默重试）。问答挂起在编码 run 不可达（执行体无
+     * ask_user 工具），防御即失败（走尝试环重试，最终 run-failed——不静默错频道）。
      *
      * @param userRunId 用户面 run 身份（首试 runId，#84）——挂起会合与作答校验的
      *                  锚，与投影后事件同锚（前端按所见 runId 作答）
@@ -482,8 +498,18 @@ class CoderRunAttempts {
             AtomicReference<StageDurations> durations) {
         while (reply.suspension() != null && reply.suspension().permission()) {
             AgentSuspension suspension = reply.suspension();
-            boolean approved = permissions.await(suspension.engineRef(), userRunId);
-            reply = agentClient.resume(permissionResume(command, suspension, approved), sink);
+            RunPermissionAppService.Decision decision = permissions.await(suspension.engineRef(), userRunId);
+            if (decision == RunPermissionAppService.Decision.TIMED_OUT) {
+                // 超时（#112）：默认拒绝、不续跑。先发确认卡「已超时」定格事件
+                // （前端转已超时态、按钮退场——不可作答），再上抛超时信号驱动
+                // run 直接 run-failed 收口（不复用静默重试，重试同上下文必再挂）
+                sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_TIMED_OUT, Map.of(
+                        AgentEventTypes.RUN_FIELD, userRunId,
+                        AgentEventTypes.WAIT_ENGINE_REF_FIELD, suspension.engineRef())));
+                throw new PermissionTimeoutException(suspension.engineRef());
+            }
+            reply = agentClient.resume(permissionResume(command, suspension,
+                    decision == RunPermissionAppService.Decision.APPROVED), sink);
             changes.addAll(reply.changes());
             durations.accumulateAndGet(reply.durations(), StageDurations::plus);
         }

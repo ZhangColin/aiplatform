@@ -187,12 +187,23 @@ export type PlatformAgentEvent =
     }
   | {
       /**
+       * 权限确认超时落定（#112）：等作答越 10 分钟上限即发射——确认卡转「已超时」
+       * 终态（不可作答，按钮退场），随后轨道直接 run-failed 收口（不复用静默重试）。
+       * 与 permission-resolved 同族不同语义：本事件非作答（无批准位），超时即拒绝
+       * ——破坏性命令永不默认放行。
+       */
+      type: "permission-timed-out";
+      payload: AgentPayload & { engineRef: string };
+    }
+  | {
+      /**
        * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射（修正轨道与
        * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` = 该场
        * run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚、不新发
        * run-start，中间尝试的内部 runId 不出用户面）。恢复出口（重新发起 /
        * 重新修改）只认本事件——run 失败为唯一失败终态，重试全程静默（中间错误
-       * 不出用户面）。
+       * 不出用户面）。权限确认超时（#112）同为失败终态——如实原因经
+       * `permission-timed-out`（确认卡「已超时」）表达。
        */
       type: "run-failed";
       payload: AgentPayload;
@@ -264,6 +275,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "question-raised",
   "permission-required",
   "permission-resolved",
+  "permission-timed-out",
   "run-failed",
   "guide-reply",
   "acceptance-start",

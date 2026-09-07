@@ -113,11 +113,31 @@ closing: {
   version:     "a1b2c3d4e5f6..."   # 可缺省——版本锚定（#91）：收口自动成版的 commit hash
                                    # （容器内 git，主题 = 摘要、Run-Id trailer 锚定收尾卡）；
                                    # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响
+  durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
+                                   # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
+    llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）
+    toolsMs: {                     #   工具执行（参数落定→结果落定的纯执行窗，按工具名分桶；
+                                   #   agent_spawn 委派调用除名——跨距 ≈ 自测窗，入桶即双计）
+      write_file: 3000,
+      command: { install: 61000, dev: 800, test: 2400, other: 500 }
+                                   #   command 按命令归组（依赖安装 / dev server / 测试 / 其他，
+                                   #   粗分组首版，只携带出现过的组）
+    },
+    selfTestMs: 9000,              #   自测子智能体委派窗（首末 source=self-test 事件跨距；无自测 = 0）
+    closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
+    attempts: [                    #   逐尝试分布（静默重试代价可归因）——attempt / durationMs
+      { attempt: 1, durationMs: 61000, llmMs: 52000, toolsMs: {...}, selfTestMs: 9000 }
+    ]                              #   （尝试墙钟）+ 该尝试三桶；中段崩的尝试桶为零
+                                   #   （阶段耗时事实随异常弃置）、墙钟照记
+    # 一致性口径：桶计 + 未归因差值（平台管道 / 权限作答等待 / 判据未过的核验）≈ durationMs——
+    # 量级不符即埋点有洞（缝测守卫）；closingMs 含成版而 durationMs 窗口不含（小正偏差）
+  }
 }
 ```
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 自检通过（part-check passed 先行）——前端过程明细（解说段/动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
 - **版本锚定（#91）**：`closing.version`（可缺省）= 收口自动成版的 commit hash——版本正本 = 容器内 git log（无便利表），Run-Id trailer 联接收尾卡与版本；版本详情 API 复用 `closing` 载荷锚定收尾卡。
+- **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 自测 / 收口尾序 + 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
 #### 消息附件部件锚载荷 schema（#97）

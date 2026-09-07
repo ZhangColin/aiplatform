@@ -39,6 +39,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.StageDurations;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -83,6 +84,10 @@ class GenerationAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /** 对话史读口（#111 收口扩载落库断言——SSE 扩载与落库同载荷的读回校验）。 */
+    @Autowired
+    private ConversationHistoryAppService conversationHistory;
 
     @MockitoBean
     private AgentscopeAgentClient agentClient;
@@ -528,6 +533,139 @@ class GenerationAppServiceTest {
         // 去重后 3 条自测命令（st-1 的 started/completed 两态只记一条）
         assertThat((Map<String, Object>) sliceClosing.get(AgentEventTypes.SELF_TEST_FIELD))
                 .containsEntry(AgentEventTypes.SELF_TEST_TOTAL_FIELD, 3);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_scripted_durations_when_closes_then_closing_carries_duration_breakdown() {
+        // #111 收口扩载·阶段耗时分布：四桶齐备（llmMs / toolsMs 按工具名分桶·command
+        // 按命令归组嵌套 / selfTestMs 委派窗 / closingMs 收口尾序）+ 逐尝试分布；agent_spawn
+        // 委派调用除名（跨距 ≈ 自测窗，入桶即双计）；SSE 扩载与对话史落库同载荷；
+        // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）
+        Long projectId = persistedProject("9818");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成", null, List.of(),
+                    new StageDurations(5, Map.of("write_file", 2L, "agent_spawn", 9L),
+                            Map.of("install", 3L), Map.of("self-test", 1L)));
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
+
+        // 阶段 0 + 1 片 = 2 场收口；断言切片的收尾卡
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> breakdown =
+                (Map<String, Object>) closing.get("durationBreakdown");
+        assertThat(breakdown).isNotNull()
+                .containsEntry("llmMs", 5L)
+                .containsEntry("selfTestMs", 1L);
+        Map<String, Object> toolsMs = (Map<String, Object>) breakdown.get("toolsMs");
+        assertThat(toolsMs)
+                .containsEntry("write_file", 2L)
+                .doesNotContainKey("agent_spawn"); // 委派调用除名（防与自测窗双计）
+        assertThat((Map<String, Object>) toolsMs.get("command"))
+                .containsExactly(Map.entry("install", 3L));
+        long closingMs = ((Number) breakdown.get("closingMs")).longValue();
+        assertThat(closingMs).isGreaterThanOrEqualTo(0L);
+        // 逐尝试分布：单次成功尝试（首试）
+        assertThat((List<Map<String, Object>>) breakdown.get("attempts")).singleElement()
+                .satisfies(attempt -> {
+                    assertThat(attempt).containsEntry("attempt", 1);
+                    assertThat(attempt).containsEntry("llmMs", 5L);
+                    assertThat(attempt).containsEntry("selfTestMs", 1L);
+                    assertThat((Map<String, Object>) attempt.get("toolsMs"))
+                            .containsEntry("write_file", 2L)
+                            .doesNotContainKey("agent_spawn");
+                    assertThat(((Number) attempt.get("durationMs")).longValue())
+                            .isGreaterThanOrEqualTo(0L);
+                });
+        // 一致性守卫：桶计 ≈ durationMs（量级守卫——纳秒/微秒单位混淆即超容差；
+        // 正常全 mock 内联管道为毫秒级，2s 容差只放行管道抖动）
+        long bucketSum = 5L + 2L + 3L + 1L + closingMs;
+        long durationMs = ((Number) closing.get("durationMs")).longValue();
+        assertThat(Math.abs(bucketSum - durationMs)).isLessThan(2_000L);
+
+        // 对话史落库同载荷（#89 腿）：读口回放带 durationBreakdown（JSONB 回读数值窄化，
+        // 按 Number 断言）
+        Map<String, Object> persisted = conversationHistory.read(projectId).stream()
+                .filter(entry -> entry.closing() != null)
+                .reduce((first, second) -> second).orElseThrow().closing();
+        Map<String, Object> persistedBreakdown =
+                (Map<String, Object>) persisted.get("durationBreakdown");
+        assertThat(persistedBreakdown).isNotNull()
+                .containsKey("llmMs").containsKey("toolsMs").containsKey("selfTestMs")
+                .containsKey("closingMs").containsKey("attempts");
+        assertThat(((Number) persistedBreakdown.get("llmMs")).longValue()).isEqualTo(5L);
+        assertThat((Map<String, Object>) persistedBreakdown.get("toolsMs"))
+                .containsKey("command")
+                .doesNotContainKey("agent_spawn");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_first_attempt_fails_when_retry_then_breakdown_carries_each_attempt() {
+        // #111 静默重试代价可归因：每次尝试各自带分布——中段失败的尝试带墙钟与零桶
+        //（事实随异常弃置，口径见 StageDurationFacts）、成功尝试带完整桶
+        Long projectId = persistedProject("9819");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("首次尝试中断"))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "系统已生成", null, List.of(),
+                            new StageDurations(7, Map.of(), Map.of("test", 4L), Map.of()));
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "切片完成");
+                });
+
+        appService.startGeneration(projectId);
+
+        // 阶段 0 首试中段崩 → 重试成功：其收尾卡的 attempts 恰两条
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> stage0Closing =
+                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> breakdown =
+                (Map<String, Object>) stage0Closing.get("durationBreakdown");
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) breakdown.get("attempts");
+        assertThat(attempts).hasSize(2);
+        assertThat(attempts.get(0))
+                .containsEntry("attempt", 1)
+                .containsEntry("llmMs", 0L)
+                .containsEntry("selfTestMs", 0L);
+        assertThat((Map<String, Object>) attempts.get(0).get("toolsMs")).isEmpty();
+        assertThat(((Number) attempts.get(0).get("durationMs")).longValue())
+                .isGreaterThanOrEqualTo(0L);
+        assertThat(attempts.get(1))
+                .containsEntry("attempt", 2)
+                .containsEntry("llmMs", 7L);
+        assertThat((Map<String, Object>) attempts.get(1).get("toolsMs"))
+                .containsExactly(Map.entry("command", Map.of("test", 4L)));
+        // run 级四桶 = 跨尝试合计（首试零桶 + 重试桶）
+        assertThat(breakdown).containsEntry("llmMs", 7L);
+        assertThat((Map<String, Object>) breakdown.get("toolsMs"))
+                .containsExactly(Map.entry("command", Map.of("test", 4L)));
     }
 
     // ---------- 守卫 ----------

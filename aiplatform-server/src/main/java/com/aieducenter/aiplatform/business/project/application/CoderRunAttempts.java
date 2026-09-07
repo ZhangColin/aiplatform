@@ -21,6 +21,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.StageDurations;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -95,6 +96,16 @@ class CoderRunAttempts {
     record RunResult(boolean succeeded) {
     }
 
+    /**
+     * 一次尝试的耗时账（#111 阶段耗时分布）：尝试序号 + 尝试墙钟 + 该尝试跨流段
+     * （converse + 续跑）合并的阶段耗时事实。墙钟口径：成功/判据未过的尝试 =
+     * converse 起跑 → 续跑落定（核验前——核验起计收口尾序桶，判据未过的核验时间
+     * 未归因，探活类量级小）；中段崩的尝试 = 起跑到异常点（含全部在途），桶为零
+     * （阶段耗时事实随异常弃置——观察面口径见 StageDurationFacts）。
+     */
+    private record AttemptDuration(int attempt, long wallMs, StageDurations durations) {
+    }
+
     private final AgentscopeAgentClient agentClient;
     private final AgentEventBridge eventBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
@@ -126,7 +137,9 @@ class CoderRunAttempts {
      * <p><b>收口扩载（#88）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
      * 载荷——摘要（判定事实的合并叙事）/ 判定行（onSuccess 返回的权威事实）/ 变更
      * 清单（{@link AgentReply#changes()} 的文件级观察，跨尝试同路径合并）/ 轮末
-     * 统计（时长 = 首试起跑到收口）。咨询/纯追问轮不经本环，run-finish 无扩载
+     * 统计（时长 = 首试起跑到收口）/ 阶段耗时分布（#111 durationBreakdown——
+     * {@link AgentReply#durations()} 的阶段耗时事实跨尝试汇总 + 收口尾序掐表，
+     * 平台分析口径、前端不渲染）。咨询/纯追问轮不经本环，run-finish 无扩载
      * （无收尾卡）。</p>
      *
      * @param what       日志标签（generate / fix）
@@ -143,7 +156,14 @@ class CoderRunAttempts {
         int maxAttempts = properties.getMaxAttempts();
         Instant runStartedAt = Instant.now();
         List<FileChange> runChanges = new ArrayList<>();
+        // 阶段耗时分布（#111）：每次尝试各起一账——尝试墙钟 + 跨流段合并的阶段耗时
+        // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）
+        List<AttemptDuration> attemptDurations = new ArrayList<>();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            Instant attemptStartedAt = Instant.now();
+            AtomicReference<StageDurations> durations =
+                    new AtomicReference<>(StageDurations.zero());
+            boolean attemptAccounted = false;
             String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
             AgentCommand command = new AgentCommand(
                     attemptRunId,
@@ -184,9 +204,16 @@ class CoderRunAttempts {
                 };
                 List<FileChange> attemptChanges = new ArrayList<>();
                 AgentReply reply = agentClient.converse(command, sink);
+                durations.accumulateAndGet(reply.durations(), StageDurations::plus);
                 attemptChanges.addAll(reply.changes());
-                settlePermissions(command, reply, sink, firstRunId, attemptChanges);
+                settlePermissions(command, reply, sink, firstRunId, attemptChanges, durations);
                 runChanges.addAll(attemptChanges);
+                // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
+                // 核验/收口段抛错不重记（attemptAccounted 守卫）
+                attemptDurations.add(new AttemptDuration(attempt,
+                        Duration.between(attemptStartedAt, Instant.now()).toMillis(),
+                        durations.get()));
+                attemptAccounted = true;
                 // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 修正
                 // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
                 // 「检查中」、落定出结果，位于被押后的 run-finish 之前（收口前播报）。
@@ -195,6 +222,7 @@ class CoderRunAttempts {
                 //（超限转终态）时出，与轨道层 run-failed 同窗口。状态终值 = 探活结果，
                 // 随智能体事件族进重放缓冲，可被收尾统计消费（#88 轮末统计行）
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
+                Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 成版）
                 ClosingJudgment judgment;
                 try {
                     judgment = onSuccess.apply(attemptRunId);
@@ -218,6 +246,10 @@ class CoderRunAttempts {
                     if (versionHash != null) {
                         closing.put(CLOSING_VERSION_FIELD, versionHash);
                     }
+                    // 阶段耗时分布（#111）：收口尾序止表于成版（落库自指不可测——载荷
+                    // 先于落库定型，量级极小忽略）；四桶齐备 + 逐尝试分布
+                    closing.put(CLOSING_BREAKDOWN_FIELD, durationBreakdown(attemptDurations,
+                            Duration.between(closingStartedAt, Instant.now()).toMillis()));
                     // 对话史落库（#89 收尾卡腿）：先落库后发 run-finish——事件即触发
                     // 前端对话史域失效重拉（水合按 run 整体接管 live 片段），次序反转
                     // 会让重拉撞上未落库的空窗（code-review #89）
@@ -227,6 +259,13 @@ class CoderRunAttempts {
                 return new RunResult(true);
             }
             catch (RuntimeException e) {
+                if (!attemptAccounted) {
+                    // 中段失败（converse/续跑抛错）：阶段耗时事实随异常弃置——尝试账
+                    // 带墙钟与零桶（事实观察面的口径：失败段不携出，见 StageDurationFacts）
+                    attemptDurations.add(new AttemptDuration(attempt,
+                            Duration.between(attemptStartedAt, Instant.now()).toMillis(),
+                            durations.get()));
+                }
                 log.warn("[{}] 项目 {} 第 {}/{} 次尝试失败（attemptRunId={}）：{}",
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
             }
@@ -244,6 +283,19 @@ class CoderRunAttempts {
 
     /** 收口扩载载荷的版本键（#91 收口自动成版回填的 commit hash；成版失败缺省）。 */
     static final String CLOSING_VERSION_FIELD = "version";
+
+    /**
+     * 收口扩载的阶段耗时分布键（#111）：{@code { llmMs, toolsMs, selfTestMs,
+     * closingMs, attempts[] }}——平台分析口径（时长优化归因用），前端不渲染
+     * （收尾卡呈现不变，只有「用时」durationMs）。
+     */
+    static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
+
+    /**
+     * 委派工具注册名（harness 子智能体发起面）：其执行跨距 ≈ 被委执子智能体的事件
+     * 窗——工具桶除名防双计（自测时长由 selfTestMs 桶承载）。
+     */
+    private static final String AGENT_SPAWN_TOOL = "agent_spawn";
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
@@ -272,6 +324,65 @@ class CoderRunAttempts {
             closing.put(AgentEventTypes.SELF_TEST_FIELD, selfTest);
         }
         return closing;
+    }
+
+    /**
+     * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
+     * = 按工具名分桶·command 按命令归组嵌套 / 自测 = self-test 委派窗 / 收口尾序 =
+     * 探活 + 成版）+ 逐尝试分布（静默重试代价可归因——每次尝试的墙钟与桶各自带）。
+     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、权限作答等待、判据
+     * 未过的核验等）= durationMs；closingMs 含成版而 durationMs 窗口不含（小正
+     * 偏差）——量级不符即埋点有洞（缝测守卫）。
+     */
+    private static Map<String, Object> durationBreakdown(List<AttemptDuration> attempts,
+            long closingMs) {
+        StageDurations total = attempts.stream()
+                .map(AttemptDuration::durations)
+                .reduce(StageDurations.zero(), StageDurations::plus);
+        Map<String, Object> breakdown = new LinkedHashMap<>();
+        breakdown.put("llmMs", total.llmMs());
+        breakdown.put("toolsMs", toolsPayload(total));
+        breakdown.put("selfTestMs", selfTestMs(total));
+        breakdown.put("closingMs", closingMs);
+        breakdown.put("attempts", attempts.stream()
+                .map(CoderRunAttempts::attemptPayload)
+                .toList());
+        return breakdown;
+    }
+
+    /** 逐尝试分布条目：尝试序号 + 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）。 */
+    private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("attempt", attempt.attempt());
+        payload.put("durationMs", attempt.wallMs());
+        payload.put("llmMs", attempt.durations().llmMs());
+        payload.put("toolsMs", toolsPayload(attempt.durations()));
+        payload.put("selfTestMs", selfTestMs(attempt.durations()));
+        return payload;
+    }
+
+    /**
+     * 工具桶载荷：按工具名分桶（{@link #AGENT_SPAWN_TOOL} 委派调用除名——其跨距 ≈
+     * 子智能体事件窗，入桶即与自测桶双计）；command 工具以命令归组对象嵌套
+     * （install / dev / test / other——只携带出现过的组）。
+     */
+    private static Map<String, Object> toolsPayload(StageDurations durations) {
+        Map<String, Object> tools = new LinkedHashMap<>();
+        durations.toolsMs().forEach((toolName, ms) -> {
+            if (!AGENT_SPAWN_TOOL.equals(toolName)) {
+                tools.put(toolName, ms);
+            }
+        });
+        if (!durations.commandMs().isEmpty()) {
+            tools.put("command", new LinkedHashMap<>(durations.commandMs()));
+        }
+        return tools;
+    }
+
+    /** 自测桶 = self-test 委派窗（无自测 = 0——四桶齐备，缺省出 0 不缺席）。 */
+    private static long selfTestMs(StageDurations durations) {
+        return durations.subagentMs()
+                .getOrDefault(ProfileSubagentSupplier.SELF_TEST_NAME, 0L);
     }
 
     /**
@@ -362,15 +473,19 @@ class CoderRunAttempts {
      * @param userRunId 用户面 run 身份（首试 runId，#84）——挂起会合与作答校验的
      *                  锚，与投影后事件同锚（前端按所见 runId 作答）
      * @param changes  本尝试的文件变更观察累积口（#88 收口扩载——续跑段的变更
-     *                  与首段同场，随 attempt 一并计入）
+     *                 与首段同场，随 attempt 一并计入）
+     * @param durations 本尝试的阶段耗时观察累积口（#111——续跑段的事实与首段
+     *                  跨段合并）
      */
     private AgentReply settlePermissions(AgentCommand command, AgentReply reply,
-            Consumer<AgentEvent> sink, String userRunId, List<FileChange> changes) {
+            Consumer<AgentEvent> sink, String userRunId, List<FileChange> changes,
+            AtomicReference<StageDurations> durations) {
         while (reply.suspension() != null && reply.suspension().permission()) {
             AgentSuspension suspension = reply.suspension();
             boolean approved = permissions.await(suspension.engineRef(), userRunId);
             reply = agentClient.resume(permissionResume(command, suspension, approved), sink);
             changes.addAll(reply.changes());
+            durations.accumulateAndGet(reply.durations(), StageDurations::plus);
         }
         if (reply.suspension() != null) {
             throw new IllegalStateException(

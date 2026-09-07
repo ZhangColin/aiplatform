@@ -106,6 +106,11 @@ class AgentscopeAgentClientTest {
                 .thenReturn(Flux.fromIterable(List.of(events)));
     }
 
+    /** 确定性时间戳（#111 耗时事实断言用）：引擎事件 createdAt 注入形。 */
+    private static String ts(long epochMilli) {
+        return Instant.ofEpochMilli(epochMilli).toString();
+    }
+
     @Test
     void given_streaming_text_deltas_when_converse_then_lifecycle_and_text_frames_in_order() {
         givenStream(
@@ -434,6 +439,41 @@ class AgentscopeAgentClientTest {
                         .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test"))
                 .anySatisfy(f -> assertThat(f.payload())
                         .doesNotContainKey(AgentEventTypes.SOURCE_FIELD));
+    }
+
+    /**
+     * 阶段耗时事实随回复携出（#111 收口扩载 durationBreakdown 的观察面接线）：计时源 =
+     * 引擎事件 createdAt（构造注入——确定性断言）——执行体模型调用配对进 llmMs、工具执行
+     * 窗按工具名分桶（command 按命令归组）、委派事件记 source 委派窗。
+     */
+    @Test
+    void given_scripted_events_when_converse_then_reply_carries_stage_durations() {
+        givenStream(
+                new ModelCallStartEvent("evt-1", ts(1_000), "reply-1"),
+                new ModelCallEndEvent("evt-2", ts(1_300), "reply-1", null),
+                new ToolCallDeltaEvent("evt-3", ts(1_300), "reply-1", "tc-1", "command",
+                        "{\"command\":\"npm install\"}"),
+                new ToolCallEndEvent("evt-4", ts(1_310), "reply-1", "tc-1", "command"),
+                new ToolResultEndEvent("evt-5", ts(2_000), "reply-1", "tc-1", "command",
+                        ToolResultState.SUCCESS),
+                new ToolCallEndEvent("evt-6", ts(2_000), "reply-1", "tc-2", "write_file"),
+                new ToolResultEndEvent("evt-7", ts(2_050), "reply-1", "tc-2", "write_file",
+                        ToolResultState.SUCCESS),
+                new ModelCallStartEvent("evt-8", ts(2_100), "sub-1")
+                        .withSource("platform-agent/self-test"),
+                new ModelCallEndEvent("evt-9", ts(2_400), "sub-1", null)
+                        .withSource("platform-agent/self-test"));
+
+        AgentReply reply = client.converse(command(null, null), event -> {
+        });
+
+        assertThat(reply.durations().llmMs()).isEqualTo(300);
+        assertThat(reply.durations().toolsMs())
+                .containsExactly(Map.entry("write_file", 50L));
+        assertThat(reply.durations().commandMs())
+                .containsExactly(Map.entry("install", 690L));
+        assertThat(reply.durations().subagentMs())
+                .containsExactly(Map.entry("self-test", 300L));
     }
 
     /** run-start 并入角色键（引擎信息归一）：带角色命令携带、无角色不携带——前端工作消息/对话面的锚定判据。 */

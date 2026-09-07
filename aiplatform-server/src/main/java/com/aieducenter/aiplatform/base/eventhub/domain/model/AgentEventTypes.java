@@ -39,7 +39,8 @@ public final class AgentEventTypes {
     /**
      * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
      * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
-     * selfTest?{total}（#96）, version?（#91） }——对话史落库（#89）与版本锚定
+     * selfTest?{total}（#96）, version?（#91）, durationBreakdown（#111 阶段耗时
+     * 分布——平台分析口径，前端不渲染） }——对话史落库（#89）与版本锚定
      * （#91）复用同一载荷。判定与清单以平台可观测事实为准（工具调用/探活），
      * 不由模型自报。
      */

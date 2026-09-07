@@ -134,7 +134,7 @@ public class AgentscopeAgentClient {
                     + result.error().getMessage(), result.error());
         }
         return new AgentReply(command.runId(), result.text(), result.suspension(),
-                result.changes());
+                result.changes(), result.durations());
     }
 
     /**
@@ -174,7 +174,7 @@ public class AgentscopeAgentClient {
                     + result.error().getMessage(), result.error());
         }
         return new AgentReply(resume.runId(), result.text(), result.suspension(),
-                result.changes());
+                result.changes(), result.durations());
     }
 
     /**
@@ -230,15 +230,17 @@ public class AgentscopeAgentClient {
     // ---------- 内部 ----------
 
     /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败；
-     *  changes = 本流段成功的文件变更事实——#88 收口扩载的观察面）。 */
+     *  changes = 本流段成功的文件变更事实、durations = 本流段的阶段耗时事实——
+     *  #88/#111 收口扩载的观察面；失败段两观察面都弃置——上流抛异常，事实随弃）。 */
     private record TurnResult(String text, AgentSuspension suspension, Throwable error,
-            List<FileChange> changes) {
+            List<FileChange> changes, StageDurations durations) {
     }
 
     /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表 +
-     * 文件变更事实观察面）。 */
+     * 文件变更事实观察面 + 阶段耗时事实观察面）。 */
     private record PreparedTurn(ModelRef modelRef, HarnessAgent agent, RuntimeContext ctx,
-            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges) {
+            AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges,
+            StageDurationFacts durations) {
     }
 
     /**
@@ -290,7 +292,7 @@ public class AgentscopeAgentClient {
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
-                new FileChangeFacts());
+                new FileChangeFacts(), new StageDurationFacts());
     }
 
     /**
@@ -311,7 +313,7 @@ public class AgentscopeAgentClient {
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                            prepared.fileChanges(),
+                            prepared.fileChanges(), prepared.durations(),
                             sink, text, usage, finish, suspended, suspendedQuestion))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
@@ -320,16 +322,18 @@ public class AgentscopeAgentClient {
             if (suspension == null) {
                 sink.accept(AgentscopeEventMapper.runFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
-                return new TurnResult(text.toString(), null, null, prepared.fileChanges().changes());
+                return new TurnResult(text.toString(), null, null, prepared.fileChanges().changes(),
+                        prepared.durations().snapshot());
             }
             return new TurnResult(text.toString(), new AgentSuspension(
                     suspension.getReplyId(), suspendedQuestion.get(),
-                    toolCallFace(suspension)), null, prepared.fileChanges().changes());
+                    toolCallFace(suspension)), null, prepared.fileChanges().changes(),
+                    prepared.durations().snapshot());
         }
         catch (Exception e) {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
-            return new TurnResult(text.toString(), null, e, List.of());
+            return new TurnResult(text.toString(), null, e, List.of(), StageDurations.zero());
         }
 
         finally {
@@ -361,9 +365,13 @@ public class AgentscopeAgentClient {
 
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
             AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges,
+            StageDurationFacts durations,
             Consumer<AgentEvent> sink, StringBuilder text, AtomicReference<TokenUsage> usage,
             AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspended,
             AtomicReference<Boolean> suspendedQuestion) {
+        // 阶段耗时事实（#111 收口扩载）：全事件单入口（计时源 = 事件 createdAt）——
+        // 与文件变更事实同族的并行观察（事实观察，非呈现）
+        durations.onEvent(event);
         if (event instanceof TextBlockDeltaEvent delta) {
             text.append(delta.getDelta());
         }

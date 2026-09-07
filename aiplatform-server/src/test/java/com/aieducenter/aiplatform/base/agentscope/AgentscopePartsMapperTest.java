@@ -23,10 +23,11 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 
 /**
  * {@link AgentscopePartsMapper} 单点映射表（#77 parts 契约的唯一生产方）：AgentScope
- * 事件 → 消息部件事件（part-text / part-action / part-step）。口径：动作卡全生命
+ * 事件 → 消息部件事件（part-text / part-action）。口径：动作卡全生命
  * 周期（开始即出事件——工具调用发起即 started，参数落定 running，结果返回
  * completed/failed，同一 toolCallId 锚定）；解说切段与直播同内核；思考与读类
- * 工具不进部件。每事件 payload 盖 runId/sessionId/engine + 部件字段（扁平，无 data 键）。
+ * 工具不进部件。步骤分组已退役（#115）：ModelCallStartEvent 不再产 part-step。
+ * 每事件 payload 盖 runId/sessionId/engine + 部件字段（扁平，无 data 键）。
  */
 class AgentscopePartsMapperTest {
 
@@ -144,16 +145,11 @@ class AgentscopePartsMapperTest {
     class StepsAndBoundaries {
 
         @Test
-        void given_model_call_starts_when_counting_then_steps_from_one() {
-            List<AgentEvent> first = mapper.map(new ModelCallStartEvent("reply-1"));
-            List<AgentEvent> second = mapper.map(new ModelCallStartEvent("reply-2"));
-
-            assertThat(first).singleElement().satisfies(part -> {
-                assertThat(part.type()).isEqualTo(AgentEventTypes.PART_STEP);
-                assertThat(part.payload()).containsEntry(AgentEventTypes.PART_STEP_FIELD, 1);
-            });
-            assertThat(second).singleElement().satisfies(part ->
-                    assertThat(part.payload()).containsEntry(AgentEventTypes.PART_STEP_FIELD, 2));
+        void given_model_call_starts_when_mapped_then_no_part_step() {
+            // 步骤分组已退役（#115）：ModelCallStartEvent 不再产 part-step——
+            // 步骤序号对用户零信息，部件按序竖排
+            assertThat(mapper.map(new ModelCallStartEvent("reply-1"))).isEmpty();
+            assertThat(mapper.map(new ModelCallStartEvent("reply-2"))).isEmpty();
         }
 
         @Test
@@ -164,8 +160,9 @@ class AgentscopePartsMapperTest {
             assertThat(types(atAction)).containsExactly(
                     AgentEventTypes.PART_TEXT, AgentEventTypes.PART_ACTION);
 
+            // 步骤分组退役：模型调用开始不再产部件（也不触发叙事切段）
             List<AgentEvent> atStep = mapper.map(new ModelCallStartEvent("reply-2"));
-            assertThat(types(atStep)).containsExactly(AgentEventTypes.PART_STEP);
+            assertThat(atStep).isEmpty();
         }
 
         @Test
@@ -196,7 +193,7 @@ class AgentscopePartsMapperTest {
     @Test
     void given_real_shaped_sequence_when_mapped_then_ordered_parts() {
         List<AgentEvent> all = List.of();
-        all = concat(all, mapper.map(new ModelCallStartEvent("reply-1")));
+        all = concat(all, mapper.map(new ModelCallStartEvent("reply-1"))); // 步骤边界：已退役，不出部件
         all = concat(all, mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在准备演示数据。")));
         all = concat(all, mapper.map(new ToolCallStartEvent("r", "tc-1", "write_file")));
         all = concat(all, mapper.map(new ToolCallDeltaEvent("r", "tc-1", "write_file",
@@ -208,7 +205,6 @@ class AgentscopePartsMapperTest {
         all = concat(all, mapper.drain());
 
         assertThat(all).extracting(AgentEvent::type).containsExactly(
-                AgentEventTypes.PART_STEP,
                 AgentEventTypes.PART_TEXT,
                 AgentEventTypes.PART_ACTION,
                 AgentEventTypes.PART_ACTION,

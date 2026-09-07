@@ -21,12 +21,11 @@ beforeEach(() => {
 });
 
 describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
-  it("startWork（run-start role=CODER）即出现：空部件的生长中消息，startedAt 落锚", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1", 1000);
+  it("startWork（run-start role=CODER）即出现：空部件的生长中消息", () => {
+    useWorkMessageStore.getState().startWork("p1", "r1");
 
     expect(work()).toEqual({
       runId: "r1",
-      startedAt: 1000,
       frozen: false,
       parts: [],
       seenEventIds: [],
@@ -34,21 +33,20 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
   });
 
   it("同 runId 幂等（重放）：不清已长部件；新 runId（重试下一尝试/新一轮）重开", () => {
-    useWorkMessageStore.getState().startWork("p1", "r1", 1000);
+    useWorkMessageStore.getState().startWork("p1", "r1");
     useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "开始" });
 
-    useWorkMessageStore.getState().startWork("p1", "r1", 9999);
+    useWorkMessageStore.getState().startWork("p1", "r1");
     expect(work()?.parts).toHaveLength(1);
 
-    useWorkMessageStore.getState().startWork("p1", "r2", 20000);
+    useWorkMessageStore.getState().startWork("p1", "r2");
     expect(work()?.runId).toBe("r2");
     expect(work()?.parts).toEqual([]);
   });
 
-  it("部件序列投影（步骤 → 解说 → 动作 → 解说）：到达序即呈现序", () => {
+  it("部件序列投影（解说 → 动作 → 解说）：到达序即呈现序", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
-    notePart("p1", ref({ eventId: "r1:1" }), { kind: "step", step: 1 });
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "正在编写订单管理页面。" });
     notePart("p1", ref({ eventId: "r1:3", at: 1000 }), {
       kind: "action",
@@ -60,14 +58,14 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     notePart("p1", ref({ eventId: "r1:5" }), { kind: "text", text: "订单管理完成" });
 
     const kinds = work()?.parts.map((part) => part.kind);
-    expect(kinds).toEqual(["step", "text", "action", "text"]);
+    expect(kinds).toEqual(["text", "action", "text"]);
   });
 });
 
 describe("work-message store · 动作卡全生命周期（toolCallId 锚定原位更新）", () => {
-  it("started → running → completed：同一行原位换装（React key 不变），label running 起具体，终态落时长", () => {
+  it("started → running → completed：同一行原位换装（React key 不变），label running 起具体", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     const action = {
       kind: "action",
       toolCallId: "tc-1",
@@ -84,13 +82,11 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
     expect(card.id).toBe("r1:3"); // 首见事件 id 为键，状态更新不改键
     expect(card.state).toBe("completed");
     expect(card.label).toBe("编写【订单管理】");
-    expect(card.startedAt).toBe(1_000);
-    expect(card.endedAt).toBe(5_300); // 时长 = 4.3s
   });
 
-  it("failed 终态：endedAt 落定（动作层状态，与 run 终态无关）", () => {
+  it("failed 终态：state 落 failed（动作层状态，与 run 终态无关）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2", at: 2_000 }), {
       kind: "action",
       toolCallId: "tc-9",
@@ -108,12 +104,11 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
 
     const card = work()?.parts[0] as Extract<WorkPart, { kind: "action" }>;
     expect(card.state).toBe("failed");
-    expect(card.endedAt).toBe(9_000);
   });
 
   it("多个动作并行（不同 toolCallId）各自成行、各自更新", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2", at: 100 }), {
       kind: "action",
       toolCallId: "tc-1",
@@ -152,7 +147,6 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
     });
 
     expect(work()?.runId).toBe("r9");
-    expect(work()?.startedAt).toBe(5_000); // 补建锚取首部件 ts
     expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(1);
   });
 
@@ -167,7 +161,7 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
 
   it("有锚 + 异 runId 的对话部件：锚定消息不受扰（不重开不进件）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "编码解说" });
 
     notePart("p1", ref({ eventId: "b1:2", sessionId: "main-p1", runId: "rb" }), { kind: "text", text: "对话轮插话" });
@@ -178,7 +172,7 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
 
   it("生长中锚 + 异 runId 的编码部件（迟到/重放残段）：忽略不闪空（重锚只在无锚或已定格时）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r2", 0);
+    startWork("p1", "r2");
     notePart("p1", ref({ eventId: "r2:2", runId: "r2" }), { kind: "text", text: "当前尝试解说" });
 
     // 上一尝试 r1 的残段（同 coder 会话、异 runId）迟到：不清当前锚
@@ -190,15 +184,14 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
 
   it("已定格锚 + 异 runId 的编码部件（新 run 的 run-start 被缓冲淘汰）：重锚新 run", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "上一轮解说" });
-    freezeWork("p1", "r1", 10_000);
+    freezeWork("p1", "r1");
 
     notePart("p1", ref({ eventId: "r2:5", runId: "r2", at: 50_000 }), { kind: "text", text: "新一轮解说" });
 
     expect(work()?.runId).toBe("r2");
     expect(work()?.frozen).toBe(false);
-    expect(work()?.startedAt).toBe(50_000);
     expect(work()?.parts).toHaveLength(1);
   });
 });
@@ -206,7 +199,7 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
 describe("work-message store · 重放幂等与定格", () => {
   it("部件事件按 SSE id 只收一次（挂载重连重收缓冲不双长）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     const input = { kind: "text", text: "同一段" } as const;
 
     notePart("p1", ref({ eventId: "r1:2" }), input);
@@ -215,9 +208,9 @@ describe("work-message store · 重放幂等与定格", () => {
     expect(work()?.parts).toHaveLength(1);
   });
 
-  it("freezeWork（run-finish / run-failed）定格：部件不再进、frozenAt 落；重放再定格幂等", () => {
+  it("freezeWork（run-finish / run-failed）定格：部件不再进；重放再定格幂等", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2", at: 100 }), {
       kind: "action",
       toolCallId: "tc-1",
@@ -226,20 +219,19 @@ describe("work-message store · 重放幂等与定格", () => {
       label: "编写【订单管理】",
     });
 
-    freezeWork("p1", "r1", 8_000);
+    freezeWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:3", at: 9_000 }), { kind: "text", text: "迟到部件" });
-    freezeWork("p1", "r1", 9_500);
+    freezeWork("p1", "r1");
 
     expect(work()?.frozen).toBe(true);
-    expect(work()?.frozenAt).toBe(8_000); // 首次定格为准
     expect(work()?.parts).toHaveLength(1);
   });
 
   it("freezeWork 非锚定 run（对话轮收口）忽略", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
 
-    freezeWork("p1", "rb", 100);
+    freezeWork("p1", "rb");
 
     expect(work()?.frozen).toBe(false);
   });
@@ -254,7 +246,7 @@ describe("work-message store · 确认卡（#83 权限确认：长在工作消�
 
   it("permission-required 部件入消息（pending 态、engineRef/summary 随卡）；重放按事件 id 去重", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     const input = { kind: "permission", engineRef: "reply-1", summary: "rm -rf /workspace/data" } as const;
 
     notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), input);
@@ -273,7 +265,7 @@ describe("work-message store · 确认卡（#83 权限确认：长在工作消�
 
   it("resolvePermission 落定（permission-resolved 事件与作答乐观更新双写口）：同值幂等、异值以事件为准", () => {
     const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "permission",
       engineRef: "reply-1",
@@ -290,7 +282,7 @@ describe("work-message store · 确认卡（#83 权限确认：长在工作消�
 
   it("resolvePermission 未知 engineRef（重放缺口/异项目）忽略；无锚项目忽略", () => {
     const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "permission",
       engineRef: "reply-1",
@@ -311,12 +303,12 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     );
   }
 
-  it("checking → passed：同一行原位换装（React key 不变），起跑锚取首条 checking、落定记 endedAt", () => {
+  it("checking → passed：同一行原位换装（React key 不变）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
 
     notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
-    expect(checkPart()).toEqual({ kind: "check", id: "r1:8", state: "checking", startedAt: 8_000 });
+    expect(checkPart()).toEqual({ kind: "check", id: "r1:8", state: "checking" });
 
     notePart("p1", ref({ eventId: "r1:9", at: 9_500 }), { kind: "check", state: "passed" });
     expect(work()?.parts).toHaveLength(1);
@@ -324,14 +316,12 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
       kind: "check",
       id: "r1:8", // 原位更新不改键
       state: "passed",
-      startedAt: 8_000,
-      endedAt: 9_500, // 落定时间戳（探活结果留痕，收尾卡统计行随 #88 消费）
     });
   });
 
-  it("静默重试口径：重复 checking 幂等（不闪换、起跑锚不重置、部件引用不变）", () => {
+  it("静默重试口径：重复 checking 幂等（不闪换、部件引用不变）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
     const partsBefore = work()?.parts;
 
@@ -340,25 +330,24 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     notePart("p1", ref({ eventId: "r1:12", at: 20_000 }), { kind: "check", state: "checking" });
 
     expect(work()?.parts).toBe(partsBefore); // 部件引用不变
-    expect(checkPart()?.startedAt).toBe(8_000);
   });
 
   it("末次核验未过：checking → failed（与 run-failed 同窗口，❌ 定格留驻）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
 
     notePart("p1", ref({ eventId: "r1:9", at: 9_000 }), { kind: "check", state: "failed" });
-    freezeWork("p1", "r1", 9_100);
+    freezeWork("p1", "r1");
 
-    expect(checkPart()).toMatchObject({ state: "failed", endedAt: 9_000 });
+    expect(checkPart()).toMatchObject({ state: "failed" });
     expect(work()?.frozen).toBe(true);
   });
 
   it("定格后自检事件不进（重放/迟到防御）；未锚定对话会话的 part-check 不建工作消息", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
-    freezeWork("p1", "r1", 5_000);
+    startWork("p1", "r1");
+    freezeWork("p1", "r1");
 
     notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "checking" });
     expect(work()?.parts).toEqual([]);
@@ -385,7 +374,7 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
 
   it("freezeWork 携 closing：过程部件清空、去重簿记同清（明细不常驻——收尾卡本体长在 chat store 对话流）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
     notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), {
       kind: "action",
@@ -395,13 +384,11 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
       label: "编写【订单管理】",
     });
 
-    freezeWork("p1", "r1", 183_420, closing);
+    freezeWork("p1", "r1", closing);
 
     expect(work()).toEqual({
       runId: "r1",
-      startedAt: 0,
       frozen: true,
-      frozenAt: 183_420,
       parts: [],
       seenEventIds: [],
     });
@@ -409,36 +396,35 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
 
   it("无 closing 定格（run-failed）：流水留驻（恢复出口归生成面）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
 
-    freezeWork("p1", "r1", 9_000);
+    freezeWork("p1", "r1");
 
     expect(work()?.parts).toHaveLength(1);
   });
 
   it("已定格再收 closing（补发序防御）：忽略；非锚定 run 的 closing 忽略", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
-    freezeWork("p1", "r1", 5_000);
+    startWork("p1", "r1");
+    freezeWork("p1", "r1");
 
-    freezeWork("p1", "r1", 6_000, closing);
-    expect(work()?.frozenAt).toBe(5_000);
+    freezeWork("p1", "r1", closing);
+    expect(work()?.frozen).toBe(true); // 已定格，再收 closing 幂等（首次定格为准）
 
-    freezeWork("p1", "r9", 7_000, closing);
+    freezeWork("p1", "r9", closing);
     expect(work()?.runId).toBe("r1");
   });
 
   it("下一场编码 run 重开：旧消息退场（历史收尾卡的常驻位 = chat store 对话流，#89）", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
-    freezeWork("p1", "r1", 5_000, closing);
+    startWork("p1", "r1");
+    freezeWork("p1", "r1", closing);
 
-    startWork("p1", "r2", 20_000);
+    startWork("p1", "r2");
 
     expect(work()).toEqual({
       runId: "r2",
-      startedAt: 20_000,
       frozen: false,
       parts: [],
       seenEventIds: [],
@@ -447,9 +433,9 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
 
   it("source 归属（#95 委派位）：子智能体部件带 source，执行体缺省（分角色播的依据）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1", 0);
+    startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "执行体解说" });
-    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), { kind: "step", step: 1 });
+    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), { kind: "text", text: "自测逐项通过" });
     notePart("p1", ref({ eventId: "r1:3", source: "self-test" }), {
       kind: "action",
       toolCallId: "tc-1",
@@ -460,10 +446,10 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
 
     const parts = work()!.parts;
     const text = parts[0] as Extract<WorkPart, { kind: "text" }>;
-    const step = parts[1] as Extract<WorkPart, { kind: "step" }>;
+    const subagentText = parts[1] as Extract<WorkPart, { kind: "text" }>;
     const action = parts[2] as Extract<WorkPart, { kind: "action" }>;
     expect(text.source).toBeUndefined();
-    expect(step.source).toBe("self-test");
+    expect(subagentText.source).toBe("self-test");
     expect(action.source).toBe("self-test");
   });
 });

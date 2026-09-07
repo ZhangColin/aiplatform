@@ -39,7 +39,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂构建/工作区解析
  * ——同样经 error 事件表达，异步轨道起跑失败不零事件死寂）；同一事件流恒经
  * {@link AgentscopePartsMapper} 产消息部件事件（part-*，parts 契约：动作卡全生命
- * 周期 + 解说/步骤分组，收口/挂起事件前出解说尾段）；模型调用事件（ReAct 每迭代
+ * 周期 + 解说段，收口/挂起事件前出解说尾段）；模型调用事件（ReAct 每迭代
  * 一条 ModelCallEnd）五桶累积，对话结束（含失败轮，已耗 token 如实计量）按命令的
  * usageContext 上报恰一条 UsageEvent（幂等键 agent-usage-{runId}[-{replyId}]，
  * engine=agentscope；归属为空不发明、零用量不报）。

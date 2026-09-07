@@ -43,8 +43,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * ② 8081 首次探活可达发生在 run 进行中（早于 run-finish 事件）；③ 首达时点不晚于
  * run 时长的九成——防旧形态回归的粗线（写完全部代码才起服的旧行为典型落在
  * 95%+ 时点；短 run 分母小、探活节流 ±2s 抖动，不贴更紧的线）；④ 首达之后至少
- * 还有两个直播步骤事件——实质判据（一步≈一次完整修改，起服后仍有两次完整修改
- * 在跑，「起服→curl 验证→收口」的假渐进过不了）。</p>
+ * 还有两个完成动作事件（#115 步骤分组退役，改以 completed 动作部件计完整修改——
+ * 一个完成动作≈一次完整修改，起服后仍有两次完整修改在跑，「起服→curl 验证→收口」
+ * 的假渐进过不了）。</p>
  *
  * <p>PRD 直接预置到工作区（等价 savePrd 的写文件 + 置已产出两步——冒烟聚焦编码
  * run 行为，主智能体访谈链路另有 IterationChainSmokeTest 覆盖）。生成有自动重试：单次
@@ -226,11 +227,11 @@ class GenerationEarlyServiceSmokeTest {
                         msBetween(startNanos, firstReachNanos), msBetween(startNanos, finish.atNanos()))
                 .isLessThanOrEqualTo(runNanos * 9 / 10);
 
-        // 5) 判据④：首达之后至少还有两个直播步骤事件（一步≈一次完整修改——起服
-        //    后仍有两次完整修改在跑，排除「起服→curl 验证→收口」的假渐进）
+        // 5) 判据④：首达之后至少还有两个完成动作部件（一个完成动作≈一次完整修改——
+        //    起服后仍有两次完整修改在跑，排除「起服→curl 验证→收口」的假渐进）
         assertThat(frames.stream().skip(framesAtReach)
-                .filter(f -> AgentEventTypes.PART_STEP.equals(f.type())).count())
-                .as("首达之后应仍有至少两个步骤部件到达（增量演进在发生）").isGreaterThanOrEqualTo(2);
+                .filter(GenerationEarlyServiceSmokeTest::isCompletedAction).count())
+                .as("首达之后应仍有至少两个完成动作部件到达（增量演进在发生）").isGreaterThanOrEqualTo(2);
     }
 
     // ---------- 编排件 ----------
@@ -258,8 +259,8 @@ class GenerationEarlyServiceSmokeTest {
     }
 
     /**
-     * 事件时间线（诊断正本）：run 生命周期 + 步骤/动作部件逐条带相对时戳，
-     * 首达时点插标记行——起服前后各步骤在干嘛一目了然；解说段/引擎透传
+     * 事件时间线（诊断正本）：run 生命周期 + 动作部件逐条带相对时戳，
+     * 首达时点插标记行——起服前后各动作在干嘛一目了然；解说段/引擎透传
      * 逐段太密不进时间线。
      */
     private String frameTimeline(long startNanos, Long firstReachNanos) {
@@ -273,7 +274,6 @@ class GenerationEarlyServiceSmokeTest {
             }
             if (AgentEventTypes.RUN_START.equals(f.type()) || AgentEventTypes.RUN_FINISH.equals(f.type())
                     || AgentEventTypes.ERROR.equals(f.type())
-                    || AgentEventTypes.PART_STEP.equals(f.type())
                     || AgentEventTypes.PART_ACTION.equals(f.type())) {
                 timeline.append(String.format("%8.1fs %s %s%n",
                         (f.atNanos() - startNanos) / 1e9, f.type(),
@@ -290,6 +290,13 @@ class GenerationEarlyServiceSmokeTest {
     /** 两时点间隔的毫秒数（断言描述与时间线共用）。 */
     private static long msBetween(long fromNanos, long toNanos) {
         return (toNanos - fromNanos) / 1_000_000;
+    }
+
+    /** 完成动作部件判定（#115 步骤分组退役后，「完整修改」计 completed 动作）。 */
+    private static boolean isCompletedAction(Frame f) {
+        return AgentEventTypes.PART_ACTION.equals(f.type())
+                && AgentEventTypes.PART_ACTION_STATE_COMPLETED.equals(
+                        f.payload().get(AgentEventTypes.PART_ACTION_STATE_FIELD));
     }
 
     /** 有界轮询直到条件成立（null / false / 空串 = 未达成继续等；超时红）。 */

@@ -1,10 +1,8 @@
 "use client";
 
 import { Check, Clock, FileCode2, Hammer, ShieldCheck, ShieldQuestion, SquareTerminal, X } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerPermission } from "@/hooks/use-answer-permission";
@@ -21,28 +19,19 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
 /**
  * 生长中的工作消息（#81 事件模型迁移，形态同 #68 原型已验证形）：对话区内一条
  * 随部件逐段生长的消息——解说文本部件（智能体用户语言解说）+ 单行动作状态卡
- * （图标 + 对象 + 进行中/完成/失败 + 时长）+ 步骤分组头（「第 N 步」）+ 权限
- * 确认卡（#83：需批准的工具操作，批准/拒绝即续跑——与问答卡分形态）+ 自检播报
- * 行（#85：收口判据核验「正在检查系统 → ✅/❌」）。思考与
- * 代码不播、无进度条/百分比；run 开始即出现（空部件也出「正在做」头部），
- * 成功收口定格为收尾卡（#88：closing 在场即凝聚物呈现，过程部件已退场），
- * 失败定格（run-failed）流水留驻。
- * 计时 tick 归组件局部（UI 关注，非流状态，不写流 store）。
+ * （图标 + 对象 + 进行中/完成/失败）+ 权限确认卡（#83：需批准的工具操作，批准/
+ * 拒绝即续跑——与问答卡分形态）+ 自检播报行（#85：收口判据核验「正在检查系统 →
+ * ✅/❌」）。思考与代码不播、无进度条/百分比；run 开始即出现（空部件也出「正在做」
+ * 头部），成功收口定格为收尾卡（#88：closing 在场即凝聚物呈现，过程部件已退场），
+ * 失败定格（run-failed）流水留驻。步骤分组与过程耗时已退役（#115：无「第 N 步」
+ * 分组头、无动作耗时与头部总时长——部件按序竖排）。
  */
 export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId: string }) {
   const growing = !work.frozen;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!growing) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [growing, work.runId]);
 
   // 成功收口（closing 携带，#89）：收尾卡归对话流常驻（chat store）、过程部件已
   // 退场——本消息空壳不占位；run-failed 定格流水留驻（恢复出口）
   if (work.frozen && work.parts.length === 0) return null;
-  // 未终态动作的时长冻结锚：定格时刻（定格后不再随 tick 走）
-  const tickStop = work.frozen ? (work.frozenAt ?? now) : now;
 
   return (
     // 无角色标签（界面只有一个「它」）；生长中带轻浮层感，定格回落为普通卡片
@@ -56,9 +45,6 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
         <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
           <WorkingDot />
           正在做
-          <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-            {formatElapsed(now - work.startedAt)}
-          </span>
         </div>
       ) : null}
       {work.parts.map((part) => (
@@ -66,7 +52,6 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
           key={part.id}
           part={part}
           frozen={work.frozen}
-          tickStop={tickStop}
           projectId={projectId}
           runId={work.runId}
         />
@@ -80,30 +65,20 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
   );
 }
 
-/** 部件呈现：解说 = 正文段；步骤 = 分组头；权限确认 = 确认卡；自检 = 一句话播报行；动作 = 单行状态卡。 */
+/** 部件呈现：解说 = 正文段；权限确认 = 确认卡；自检 = 一句话播报行；动作 = 单行状态卡。 */
 function WorkPartRow({
   part,
   frozen,
-  tickStop,
   projectId,
   runId,
 }: {
   part: WorkPart;
   frozen: boolean;
-  tickStop: number;
   projectId: string;
   runId: string;
 }) {
   if (part.kind === "text") {
     return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
-  }
-  if (part.kind === "step") {
-    return (
-      <div className="mb-1 mt-3 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-        第 {part.step} 步
-        <Separator className="flex-1" />
-      </div>
-    );
   }
   if (part.kind === "permission") {
     return <PermissionRow part={part} frozen={frozen} projectId={projectId} runId={runId} />;
@@ -111,7 +86,7 @@ function WorkPartRow({
   if (part.kind === "check") {
     return <CheckRow part={part} frozen={frozen} />;
   }
-  return <ActionRow part={part} frozen={frozen} tickStop={tickStop} />;
+  return <ActionRow part={part} frozen={frozen} />;
 }
 
 /**
@@ -236,18 +211,16 @@ function PermissionRow({
 }
 
 /**
- * 单行动作状态卡：图标 + 对象短语 + 状态（进行中转圈 / 完成打勾带时长 / 失败
- * 「没做成」带时长——试了多久如实可读）。定格后未终态的动作（run 收口截断的
- * 少数）不再转圈——时长停在定格时刻、不带终态标。
+ * 单行动作状态卡：图标 + 对象短语 + 状态（进行中转圈 / 完成打勾 / 失败「没做成」）。
+ * 过程耗时已退役（#115：不显示动作时长）。定格后未终态的动作（run 收口截断的
+ * 少数）不再转圈——如实留「进行中」字样不带终态标。
  */
 function ActionRow({
   part,
   frozen,
-  tickStop,
 }: {
   part: Extract<WorkPart, { kind: "action" }>;
   frozen: boolean;
-  tickStop: number;
 }) {
   const terminal = part.state === "completed" || part.state === "failed";
   return (
@@ -261,17 +234,13 @@ function ActionRow({
       {part.state === "completed" ? (
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <Check className="size-3.5 text-green-600" strokeWidth={3} />
-          {formatDuration((part.endedAt ?? tickStop) - part.startedAt)}
         </span>
       ) : part.state === "failed" ? (
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
-          <X className="size-3.5" strokeWidth={3} /> 没做成{" "}
-          {formatDuration((part.endedAt ?? tickStop) - part.startedAt)}
+          <X className="size-3.5" strokeWidth={3} /> 没做成
         </span>
       ) : frozen ? (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {formatDuration(tickStop - part.startedAt)}
-        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">进行中</span>
       ) : (
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <Spinner className="size-3" /> 进行中
@@ -305,15 +274,9 @@ function TypingDots() {
   );
 }
 
-/** 动作时长（用户语言，整秒）：「5 秒」「1 分 03 秒」。 */
+/** 收尾卡「用时」（用户语言，整秒）：「5 秒」「1 分 03 秒」。 */
 export function formatDuration(ms: number): string {
   const sec = Math.max(0, Math.round(ms / 1000));
   if (sec < 60) return `${sec} 秒`;
   return `${Math.floor(sec / 60)} 分 ${String(sec % 60).padStart(2, "0")} 秒`;
-}
-
-/** 头部总时长（等宽对齐）：m:ss。 */
-export function formatElapsed(ms: number): string {
-  const sec = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 }

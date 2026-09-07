@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import io.agentscope.core.event.ModelCallStartEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
@@ -32,12 +31,12 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
  *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed</td>
- *   <tr><td>ModelCallStart（步骤计数）</td><td>{@code part-step}</td><td>step（1 起序号）</td>
  * </table>
  *
  * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
- * 需要扩表。步骤与动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
- * 调用方 {@link #drain()} 出尾段（幂等）。</p>
+ * 需要扩表。动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
+ * 调用方 {@link #drain()} 出尾段（幂等）。步骤分组已退役（#115：步骤序号对
+ * 用户零信息，部件按序竖排）。</p>
  */
 final class AgentscopePartsMapper {
 
@@ -50,9 +49,6 @@ final class AgentscopePartsMapper {
 
     /** 动作对象锚（toolCallId → 动作短语）：running 起为具体对象，终态复述同一对象。 */
     private final Map<String, String> actionLabels = new HashMap<>();
-
-    /** 步骤序号（模型调用边界计数，1 起；实例随流段生命周期，续跑新段重新起算）。 */
-    private int steps;
 
     AgentscopePartsMapper(String runId, String sessionId, String engine) {
         this.runId = runId;
@@ -75,13 +71,6 @@ final class AgentscopePartsMapper {
             return List.of();
         }
         List<AgentEvent> parts = new ArrayList<>();
-        if (event instanceof ModelCallStartEvent) {
-            drainNarrationInto(parts);
-            steps += 1;
-            parts.add(frame(AgentEventTypes.PART_STEP,
-                    AgentEventTypes.PART_STEP_FIELD, steps, source));
-            return parts;
-        }
         if (event instanceof ToolCallStartEvent start) {
             drainNarrationInto(parts);
             actionPart(parts, start.getToolCallName(), start.getToolCallId(),

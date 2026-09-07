@@ -85,7 +85,6 @@ public class EventsController {
             | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
             | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
             | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
-            | part-step | 智能体·部件 | step（1 起序号） |
             | part-check | 智能体·部件 | state（checking/passed/failed——#85 自检播报：平台侧产出，不经引擎部件映射） |
             | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
 

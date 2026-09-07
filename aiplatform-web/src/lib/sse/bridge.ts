@@ -123,7 +123,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
   const work = useWorkMessageStore.getState();
-  // 信封 ts 是部件时长与起跑锚的唯一时间源（重放保留原值，客户端到达时序不可用）
+  // 信封 ts 保留（#115：过程耗时已下线不作展示——ts 仅供确认卡挂起锚与断线补发
+  // 排序；重放保留原值，客户端到达时序不可用）
   const at = eventTime(envelope.ts);
 
   const platform = asPlatformAgentEvent(envelope);
@@ -136,7 +137,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
-          work.startWork(payload.projectId, payload.runId, at);
+          work.startWork(payload.projectId, payload.runId);
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
@@ -200,7 +201,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           generation.noteCoderFailed(payload.projectId);
         }
         // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）
-        work.freezeWork(payload.projectId, payload.runId, at);
+        work.freezeWork(payload.projectId, payload.runId);
         return;
       }
       case "run-finish": {
@@ -212,7 +213,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88/#89
         // 收尾卡权威事实归对话流，过程部件退场，非锚定 run 的收口在 store 内忽略）
         const closing = toWorkClosing(payload.closing);
-        work.freezeWork(payload.projectId, payload.runId, at, closing);
+        work.freezeWork(payload.projectId, payload.runId, closing);
         if (closing) {
           chat.appendClosing(payload.projectId, payload.runId, closing, event.id);
         }
@@ -274,16 +275,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             state: payload.state,
             label: payload.label,
           },
-        );
-        return;
-      }
-      case "part-step": {
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
-            source: payload.source },
-          { kind: "step", step: payload.step },
         );
         return;
       }

@@ -420,7 +420,6 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     const sequence: [string, Record<string, unknown>][] = [
       ["run-start", { ...base, prompt: "做系统", model: "m", agent: "executor" }],
-      ["part-step", { ...base, step: 1 }],
       ["part-text", { ...base, text: "先搭骨架" }],
       ["part-action", { ...base, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【首页】" }],
     ];
@@ -442,7 +441,7 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.frozen).toBe(true);
-    expect(work?.parts).toHaveLength(3);
+    expect(work?.parts).toHaveLength(2);
   });
 
   it("run-finish 重放（同事件 id）不重复计预览纪元", () => {
@@ -518,7 +517,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
    * when_converse_then_part_events_full_lifecycle）：同一剧本的部件序列 →
    * 前端工作消息部件结构——双侧同源于契约正本（SSE事件清单·消息部件事件节）。
    */
-  it("编码 run 全部件序：步骤分组 → 解说 → 动作 started/running/completed → 解说 → 收口定格", () => {
+  it("编码 run 全部件序：解说 → 动作 started/running/completed → 解说 → 收口定格", () => {
     const t0 = "2026-09-05T06:00:00.000Z";
     const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
@@ -529,7 +528,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       "run1:1",
       at(0),
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-step", { ...base, step: 1 }, "run1:2", at(1)));
     dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "正在编写订单管理页面。" }, "run1:3", at(2)));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-action",
@@ -560,9 +558,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.runId).toBe("run1");
     expect(work?.frozen).toBe(true); // 收口定格
-    expect(work?.frozenAt).toBe(Date.parse(at(10)));
     expect(work?.parts).toEqual([
-      { kind: "step", id: "run1:2", step: 1 },
       { kind: "text", id: "run1:3", text: "正在编写订单管理页面。" },
       {
         kind: "action",
@@ -571,8 +567,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
         toolName: "write_file",
         state: "completed",
         label: "编写【订单管理】", // running 起具体对象，终态复述不闪换
-        startedAt: Date.parse(at(3)),
-        endedAt: Date.parse(at(8)), // 时长 5 秒（信封 ts 差）
       },
       { kind: "text", id: "run1:7", text: "订单管理完成" },
     ]);
@@ -608,8 +602,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
         kind: "check",
         id: "run1:3", // 首见 checking 事件 id——原位换装不改键
         state: "passed",
-        startedAt: Date.parse(at(8)),
-        endedAt: Date.parse(at(9)),
       },
     ]);
   });
@@ -661,7 +653,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
   });
 
-  it("动作失败态（镜面服务端 given_tool_error_result…）：工具结果 error → part-action failed → 部件定格 failed 带时长", () => {
+  it("动作失败态（镜面服务端 given_tool_error_result…）：工具结果 error → part-action failed → 部件定格 failed", () => {
     const t0 = "2026-09-05T06:00:00.000Z";
     const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
@@ -692,8 +684,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       toolCallId: "tc-9",
       state: "failed",
       label: "执行【安装依赖】",
-      startedAt: Date.parse(at(2)),
-      endedAt: Date.parse(at(7)), // 失败也落时长（5 秒）
     });
   });
 

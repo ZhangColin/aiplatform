@@ -163,8 +163,7 @@ class AgentscopeAgentClientTest {
                         || type.equals("run-created") || type.equals("run-retrying")
                         || type.equals("fix-unchanged") || type.equals("dispatch-stage"));
         assertThat(frames.stream().map(AgentEvent::type))
-                .contains(AgentEventTypes.PART_STEP, AgentEventTypes.PART_TEXT,
-                        AgentEventTypes.PART_ACTION);
+                .contains(AgentEventTypes.PART_TEXT, AgentEventTypes.PART_ACTION);
     }
 
     @Test
@@ -320,10 +319,10 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
 
-        // 部件序列：步骤分组 → 解说段 → 动作 started（参数在途，通用对象）→
-        // 动作 running（参数落定，具体对象）→ 动作 completed → 解说尾段 → 收口
+        // 部件序列（步骤分组已退役 #115：ModelCallStart 不产 part-step）：
+        // 解说段 → 动作 started（参数在途，通用对象）→ 动作 running（参数落定，
+        // 具体对象）→ 动作 completed → 解说尾段 → 收口
         assertThat(frames.stream().map(AgentEvent::type)).containsSubsequence(
-                AgentEventTypes.PART_STEP,
                 AgentEventTypes.PART_TEXT,
                 AgentEventTypes.PART_ACTION,
                 AgentEventTypes.PART_ACTION,
@@ -351,11 +350,6 @@ class AgentscopeAgentClientTest {
                 AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】");
         assertThat(actions.get(2).payload()).containsEntry(
                 AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】");
-        // 步骤分组部件 = 1 起序号
-        assertThat(frames.stream()
-                .filter(f -> AgentEventTypes.PART_STEP.equals(f.type()))
-                .findFirst().orElseThrow().payload())
-                .containsEntry(AgentEventTypes.PART_STEP_FIELD, 1);
     }
 
     /** 动作失败态：工具结果 error → part-action state=failed（动作层状态，非 run 终态）。 */

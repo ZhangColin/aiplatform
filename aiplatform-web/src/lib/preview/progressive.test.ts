@@ -94,7 +94,6 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
     expect(watch(phaseNow())).toEqual({ kind: "hint", text: "正在初始化" });
 
     // 步骤占位随工作消息部件推进：解说自述到场即换（「正在创建首页」）
-    dispatchAgentEvent(queryClient, agentEvent("part-step", { ...stage0, step: 1 }));
     dispatchAgentEvent(queryClient, agentEvent("part-text", { ...stage0, text: "正在创建首页。" }));
     expect(watch(phaseNow())).toEqual({ kind: "hint", text: "正在创建首页。" });
 
@@ -153,7 +152,6 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
     // run 中页面档保持不倒退（直挂的真页面不被遮罩/替换）；刷新只由收口驱动——
     // run 中纪元不推进
     dispatchAgentEvent(queryClient, agentEvent("part-text", { ...coder, text: "正在调整全站配色。" }));
-    dispatchAgentEvent(queryClient, agentEvent("part-step", { ...coder, step: 2 }));
     expect(epochNow()).toBe(0);
     expect(phaseNow(facts).kind).toBe("page");
 

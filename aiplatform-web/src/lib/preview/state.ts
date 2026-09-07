@@ -55,8 +55,8 @@ export function previewActive(
 
 /**
  * 占位步骤提示信号（起源 = 工作消息部件）：解说自述优先、
- * 动作对象短语兜底；步骤分组段非用户语言不参与。自述取最新一段并压过其后的动作
- * 行——提示停在解说口径（「正在创建首页」），不随逐文件动作跳变。
+ * 动作对象短语兜底。自述取最新一段并压过其后的动作行——提示停在解说口径
+ * （「正在创建首页」），不随逐文件动作跳变。
  */
 export function workHintOf(parts: readonly WorkPart[]): string | undefined {
   let action: string | undefined;

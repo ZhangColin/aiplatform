@@ -26,9 +26,7 @@ const seg = {
     toolName: "write_file",
     state: "completed",
     label: action,
-    startedAt: 0,
   }),
-  step: (id: string, step: number): WorkPart => ({ kind: "step", id, step }),
 };
 
 describe("previewActive · 门禁解除（#45）", () => {
@@ -79,12 +77,6 @@ describe("workHintOf · 占位步骤提示信号（解说自述优先、动作�
       seg.action("a2", "编写【style.css】"),
     ];
     expect(workHintOf(segments)).toBe("正在创建首页");
-  });
-
-  it("步骤分隔段不参与（非用户语言）", () => {
-    const segments = [seg.text("t1", "正在创建首页"), seg.step("s1", 2)];
-    expect(workHintOf(segments)).toBe("正在创建首页");
-    expect(workHintOf([seg.step("s1", 1)])).toBeUndefined();
   });
 });
 

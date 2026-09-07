@@ -57,7 +57,6 @@ const seg = {
     toolName: "write_file",
     state: "completed",
     label: action,
-    startedAt: 0,
   }),
 };
 

@@ -168,7 +168,8 @@ public final class AgentEventTypes {
 
     // ---------- 消息部件（parts 契约，词根 = agentscope 原生 part 族） ----------
     // 消息 = 有序部件集合：run 进行中 = 一条生长中的工作消息（解说文本部件 + 工具
-    // 动作部件 + 步骤分组），收口定格。由 base.agentscope 的部件映射表产出。
+    // 动作部件），收口定格。由 base.agentscope 的部件映射表产出。步骤分组已退役
+    // （#115：步骤序号对用户零信息，部件按序竖排）。
 
     /** 解说文本部件：text 为完整段非增量（服务端逐段成型，段切分内核共用）。 */
     public static final String PART_TEXT = "part-text";
@@ -205,12 +206,6 @@ public final class AgentEventTypes {
 
     /** part-action 的动作对象短语键（人话行，无时态——时态由 state 表达）。 */
     public static final String PART_ACTION_LABEL_FIELD = "label";
-
-    /** 步骤分组部件：run 内步骤序号（模型调用边界，1 起；问答续跑为新流段重新起算）。 */
-    public static final String PART_STEP = "part-step";
-
-    /** part-step 的步骤序号键（1 起）。 */
-    public static final String PART_STEP_FIELD = "step";
 
     /**
      * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的

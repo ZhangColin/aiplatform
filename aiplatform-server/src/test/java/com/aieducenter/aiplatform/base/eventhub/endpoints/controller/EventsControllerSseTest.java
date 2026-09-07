@@ -289,14 +289,12 @@ class EventsControllerSseTest {
     /**
      * 断线补发窗口的部件序（parts 契约，#23 生成环②衣钵）：编码 run 进行中断线——
      * 重连后断线窗口内的部件事件按原序原 id 补达（续看进行中 run）；别项目不泄漏。
+     * 步骤分组已退役（#115）：窗口序无 part-step，部件按序竖排。
      */
     @Test
     void given_part_events_before_reconnect_when_subscribe_by_project_then_window_in_order()
             throws Exception {
         // 断线窗口内的当前 run 事件（部件 + 引擎透传真实形态）
-        appService.publishAgentEvent("part-step", Map.of(
-                "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
-                "engine", "agentscope", "step", 1));
         appService.publishAgentEvent("part-text", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
                 "engine", "agentscope", "text", "正在准备演示数据。"));
@@ -313,16 +311,11 @@ class EventsControllerSseTest {
 
         // 补发按发射序、id 取 runId 流（部件与透传同一 id 空间）；别项目被过滤
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:1");
-        JsonNode stepEvent = nextFrameEnvelope(client);
-        assertThat(stepEvent.get("type").asText()).isEqualTo("part-step");
-        assertThat(stepEvent.get("payload").get("step").asInt()).isEqualTo(1);
-
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:2");
         JsonNode narration = nextFrameEnvelope(client);
         assertThat(narration.get("type").asText()).isEqualTo("part-text");
         assertThat(narration.get("payload").get("text").asText()).isEqualTo("正在准备演示数据。");
 
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:3");
+        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-live:2");
         JsonNode action = nextFrameEnvelope(client);
         assertThat(action.get("type").asText()).isEqualTo("part-action");
         assertThat(action.get("payload").get("label").asText()).isEqualTo("编写【订单管理】");
@@ -361,16 +354,13 @@ class EventsControllerSseTest {
 
     /**
      * 消息部件线格式（parts 契约）：动作卡全生命周期（started → running →
-     * completed）+ 步骤分组过线验收——统一信封、id {runId}:{seq}、payload 扁平
-     * （内禁 type 键名、无 data 键）。
+     * completed）过线验收——统一信封、id {runId}:{seq}、payload 扁平
+     * （内禁 type 键名、无 data 键）。步骤分组已退役（#115）：部件序无 part-step。
      */
     @Test
     void given_part_events_when_publish_then_lifecycle_on_the_wire() throws Exception {
         SseClient client = connect("?projectId=77");
 
-        appService.publishAgentEvent("part-step", Map.of(
-                "projectId", "77", "runId", "run-parts", "sessionId", "coder-77",
-                "engine", "agentscope", "step", 1));
         String[][] lifecycle = {
                 {"started", "编写【代码文件】"},
                 {"running", "编写【订单管理】"},
@@ -383,13 +373,7 @@ class EventsControllerSseTest {
                     "state", action[0], "label", action[1]));
         }
 
-        assertThat(client.nextNonCommentLine()).isEqualTo("id:run-parts:1");
-        JsonNode step = nextFrameEnvelope(client);
-        assertThat(step.get("type").asText()).isEqualTo("part-step");
-        assertThat(step.get("payload").get("step").asInt()).isEqualTo(1);
-        Instant.parse(step.get("ts").asText()); // ISO-8601 可解析（非法即抛）
-
-        int seq = 1;
+        int seq = 0;
         for (String[] action : lifecycle) {
             assertThat(client.nextNonCommentLine()).isEqualTo("id:run-parts:" + ++seq);
             JsonNode envelope = nextFrameEnvelope(client);
@@ -399,6 +383,7 @@ class EventsControllerSseTest {
             assertThat(envelope.get("payload").get("label").asText()).isEqualTo(action[1]);
             assertThat(envelope.get("payload").has("type")).isFalse(); // payload 内禁 type 键名
             assertThat(envelope.get("payload").has("data")).isFalse(); // 部件载荷扁平，无 data 键
+            Instant.parse(envelope.get("ts").asText()); // ISO-8601 可解析（非法即抛）
         }
     }
 

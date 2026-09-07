@@ -251,10 +251,6 @@ describe("智能体事件族收窄", () => {
       },
     },
     {
-      type: "part-step",
-      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", engine: "agentscope", step: 1 },
-    },
-    {
       // 自检播报（#85）：平台侧产出（不经引擎映射表——无 engine 字段）
       type: "part-check",
       payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", state: "checking" },

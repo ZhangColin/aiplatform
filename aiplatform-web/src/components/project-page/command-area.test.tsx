@@ -167,7 +167,7 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(archived).toContain("disabled");
   });
 
-  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——解说 + 步骤分组 + 动作卡）", () => {
+  it("编码 run 进行中：对话流末尾出工作消息（#81 生长中——解说 + 动作卡）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色" },
       { kind: "agent", id: "b1", text: "已接住意见，开始处理。" },
@@ -175,10 +175,8 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     seed.works = {
       p1: {
         runId: "run-1",
-        startedAt: 1_000,
         frozen: false,
         parts: [
-          { kind: "step", id: "run-1:2", step: 1 },
           { kind: "text", id: "run-1:3", text: "正在调整全局配色。" },
           {
             kind: "action",
@@ -187,7 +185,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
             toolName: "edit_file",
             state: "running",
             label: "修改【全局样式】",
-            startedAt: 1_000,
           },
         ],
       },
@@ -196,7 +193,6 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
 
     expect(html).toContain("正在做");
-    expect(html).toContain("第 1 步");
     expect(html).toContain("正在调整全局配色。");
     expect(html).toContain("修改【全局样式】");
     expect(html).toContain("进行中");

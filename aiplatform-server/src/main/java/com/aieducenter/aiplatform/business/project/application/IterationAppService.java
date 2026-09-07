@@ -27,9 +27,9 @@ import lombok.extern.slf4j.Slf4j;
  * + PRD 路径引用（{@link ProjectArtifacts#PRD}，不注全文——执行体重读约定见
  * 配置），结构化拼装入 {@link FixHandoff} 随修正 run 下发（排队合并时逐轮
  * 配对全保留——各轮「意见 → 修订说明」一一对应，未修订轮显式占位，#55）。
- * 修正 run 与生成同机制（复用 {@code coder-{projectId}} 会话与同工作区——run
- * 执行体带着建系统的全部上下文继续干活；知识命中前置注入 / 失败静默重试 / 计量
- * 全走共用尝试环 {@link CoderRunAttempts}）。
+ * 修正 run 与生成同机制（每次新会话（#114 更新 run 每次新会话）与同工作区——
+ * run 执行体在迭代链上上下文有界；知识命中前置注入 / 失败静默重试 / 计量全走
+ * 共用尝试环 {@link CoderRunAttempts}）。
  *
  * <p><b>收口以 finish_edit 工具事实为准</b>（#46）：执行体判定本轮要不要动系统
  * ——动则修改后报 changed=true+改了什么，不动（纯文档性修订、系统现状已满足等）也
@@ -59,13 +59,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class IterationAppService {
 
-    /** 重试续作 prompt：修正轨的重试口径（同工作区不丢数据，续同 coder 会话）。 */
+    /** 重试续作 prompt：修正轨的重试口径（同工作区不丢数据，续本 run 会话）。 */
     static final String FIX_RETRY_RUN_PROMPT =
             "上一次修正尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
                     + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续完成本轮修正，"
                     + "直至修正落实、服务在 8081 端口可访问，最后调用 finish_edit 工具收口"
                     + "（动了系统传 changed=true 并说明改了什么；判定无需改动也必须调用，"
                     + "传 changed=false 并说明原因）。";
+
+    /** 修正轨会话寻址（#114 更新 run 每次新会话）：runId 逐场换新 → 会话逐场换新，重试续本 run 会话。 */
+    static String fixSession(Long projectId, String runId) {
+        return CoderRunAttempts.SESSION_PREFIX + projectId + "-fix-" + runId;
+    }
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
@@ -114,7 +119,7 @@ public class IterationAppService {
 
     /**
      * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接物（交接物沿用、
-     * 同 coder 会话续上下文），新 runId 随响应回——与新 run 的链路锚（同
+     * 每次新会话，#114），新 runId 随响应回——与新 run 的链路锚（同
      * {@code /generate} 口径），重派事实落日志可追溯。仅终态可达：修正在途（进行
      * 中/排队中）PRJ_025；无终态账（未派过修正/已成功收工/重启丢账）PRJ_026；
      * 归档/未生成守卫同 {@link #startFixRun}。
@@ -226,8 +231,10 @@ public class IterationAppService {
                 // 循环内再赋值的局部不进 lambda：本场交接物取逐轮快照（判定行随场）
                 FixHandoff currentHandoff = handoff;
                 CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+                        fixSession(projectId, runId),
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
-                        attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff), "fix");
+                        attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff),
+                        "fix", true);
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (codingRunTrack) {

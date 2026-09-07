@@ -124,8 +124,9 @@ class IterationChainSmokeTest {
             jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", mainSessionId);
         }
         if (coderSessionId != null) {
-            jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", coderSessionId);
-            jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", coderSessionId);
+            // #114 每 run 换会话：按 coder-{projectId} 前缀清（fix-* 全会话）
+            jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id LIKE ?", coderSessionId + "%");
+            jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id LIKE ?", coderSessionId + "%");
         }
         if (projectId != null) {
             knowledgeAppService.purgeByProject(projectId);

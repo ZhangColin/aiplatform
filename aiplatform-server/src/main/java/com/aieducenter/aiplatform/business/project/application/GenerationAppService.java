@@ -1,6 +1,8 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,7 +33,8 @@ import lombok.extern.slf4j.Slf4j;
  * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与失败
  * 「重新发起」兜底走同一编排（{@link #startGeneration}）。run 执行体与主智能体
  * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
- * 极薄），仅资产与工具不同：会话 {@code coder-{projectId}}、配置 = 平台技术约定
+ * 极薄），仅资产与工具不同：会话每片/每 run 换新（#114 会话有界——每片新会话
+ * {@code coder-{projectId}-slice-{n}}，重试续本片会话）、配置 = 平台技术约定
  * + 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
  * 内核自带）。
  *
@@ -50,14 +53,15 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
  * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
- * 指令）；检索失败降级空注入、run 照旧下发。一次下发一次注入——重试续同 coder
- * 会话（注入块已在会话历史），不重检索不重注入。</p>
+ * 指令）；检索失败降级空注入、run 照旧下发。一次切入一次注入（#114 生成链首片）——
+ * 只在阶段 0 注入、切片不重注入（注入口径不膨胀）；单 run 内重试续本片会话（注入
+ * 块已在会话历史），不重检索不重注入。</p>
  *
  * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
  * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
  * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
  *
- * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续在同一 coder 会话，
+ * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续本片会话，
  * 已落盘成果保留）：中间失败不出用户面事件；每片超限转终态失败即发 {@code run-failed}
  * 收口事件（#56，run 失败为唯一失败终态），由用户重新发起兜底（generated_at
  * 不落位 = 按钮口径仍在）。最后一片
@@ -103,6 +107,74 @@ public class GenerationAppService {
                 + "这一纵向切片——「" + slice + "」（前端到后端、数据落库端到端走通，"
                 + "用户可操作），保持系统其余部分可用，收口前确认 8081 端口服务在跑、"
                 + "curl 可访问。";
+    }
+
+    /**
+     * 交接摘要产出约定（#114 片间交接）：每片/阶段 0 收口前，执行体自产交接摘要
+     * 作为最后一段话——平台取其收口终文（{@link CoderRunAttempts.RunResult#closingText}）
+     * 落 .platform/ 并注入下一片 prompt。三要素（做了什么/关键文件/下一片须知）由
+     * prompt 约定，平台不解析自由文本（不自造摘要机制，ADR 0012）。
+     */
+    static final String HANDOFF_PRODUCTION =
+            "\n收口前，用你最后一段话输出本片交接摘要（供下一片执行体接手），包含三要素："
+                    + "① 本片做了什么；② 关键文件（新增或修改的关键文件路径）；③ 下一片须知"
+                    + "（下一片执行体需要知道的关键上下文、未完成事项或注意事项）。";
+
+    /** 切片计划轨迹（#114 每片新会话后执行体自见全局）：全量有序清单，本片位置由切片任务自述。 */
+    static String planTrajectory(BuildPlan plan) {
+        StringBuilder trajectory = new StringBuilder("整体切片计划（按实现顺序）：");
+        for (int i = 0; i < plan.slices().size(); i++) {
+            trajectory.append('\n').append(i + 1).append(". ").append(plan.slices().get(i));
+        }
+        return trajectory.toString();
+    }
+
+    /** 前片交接摘要注入块（#114 片间交接）：下一片 prompt 直接携带前片终文。 */
+    static String previousHandoffBlock(String previousHandoff) {
+        return "上一片交接摘要（前片执行体所留，供你接手）：\n" + previousHandoff;
+    }
+
+    /**
+     * 片级上下文（#114 每片新会话）：首试与重试共用——重试可能落在空会话（首试
+     * converse 在引擎建会话前就失败，#84 静默重试恰覆盖此路径），故重试不能依赖
+     * 「会话历史自持前片摘要」，须自足携带同一份上下文。拼装 = PRD 引用 + 切片
+     * 计划轨迹 + 前片交接摘要 + 交接摘要产出约定。
+     */
+    static String segmentContext(BuildPlan plan, String previousHandoff) {
+        StringBuilder context = new StringBuilder("\n\n")
+                .append("先重读工作区 docs/PRD.md（需求正本）了解整体目标。")
+                .append("\n").append(planTrajectory(plan));
+        if (previousHandoff != null) {
+            context.append("\n\n").append(previousHandoffBlock(previousHandoff));
+        }
+        return context.append(HANDOFF_PRODUCTION).toString();
+    }
+
+    /** 阶段 0 首试 prompt（#114）：起服任务 + 片级上下文。 */
+    static String stage0Prompt(BuildPlan plan) {
+        return STAGE0_RUN_PROMPT + segmentContext(plan, null);
+    }
+
+    /** 切片首试 prompt（#114）：切片任务 + 片级上下文。 */
+    static String slicePrompt(BuildPlan plan, int index, String previousHandoff) {
+        String slice = plan.slices().get(index);
+        return sliceRunPrompt(index + 1, plan.slices().size(), slice)
+                + segmentContext(plan, previousHandoff);
+    }
+
+    /** 生成轨重试续作 prompt（#114）：续作任务 + 片级上下文（与首试同上下文）。 */
+    static String generationRetryPrompt(BuildPlan plan, String segmentDesc, String previousHandoff) {
+        return retryRunPrompt(segmentDesc) + segmentContext(plan, previousHandoff);
+    }
+
+    /** 生成轨会话寻址（#114 每片新会话）：段号 0 = 阶段 0，1..N = 切片，重试续本段会话。 */
+    static String sliceSession(Long projectId, int segment) {
+        return CoderRunAttempts.SESSION_PREFIX + projectId + "-slice-" + segment;
+    }
+
+    /** 交接摘要落盘路径（#114 .platform/ 平台产物目录，不进用户 git 成版）：段号对应切片序。 */
+    static String handoffFile(int segment) {
+        return WorkspaceLayout.PLATFORM_DIR + "/slice-handoff-" + segment + ".md";
     }
 
     /**
@@ -268,33 +340,68 @@ public class GenerationAppService {
         Long projectId = project.getId();
         BuildPlan plan = planOf(projectId);
         List<String> slices = plan.slices();
-        // 阶段 0（先起服）：最小可运行形态上 8081，收口即白底页，先于任何切片
+        // 阶段 0（先起服）：最小可运行形态上 8081，收口即白底页，先于任何切片；会话
+        // = slice-0（#114 每片新会话）。知识命中前置注入只在生成链首片（阶段 0）——
+        // 一次切入一次注入，切片不重注入（注入口径不膨胀）
         CoderRunAttempts.RunResult stage0 = coderRunAttempts.run(project, firstRunId,
-                new CoderRunAttempts.Prompts(STAGE0_RUN_PROMPT,
-                        retryRunPrompt("先起服：应用以最小可运行形态跑上 8081")),
+                sliceSession(projectId, 0),
+                new CoderRunAttempts.Prompts(stage0Prompt(plan),
+                        generationRetryPrompt(plan, "先起服：应用以最小可运行形态跑上 8081", null)),
                 runId -> closeGenerationStage(project, false, "起服了系统骨架"),
-                CoderRunAttempts.GENERATE_LABEL);
+                CoderRunAttempts.GENERATE_LABEL, true);
         if (!stage0.succeeded()) {
             eventBridge.emitRunFailed(projectId, firstRunId);
             return;
         }
-        // 切片逐段：按切片计划顺序派 run，每片收口 = 8081 可达 + 成版 + run-finish；
-        // 某片失败不自动跳下一片（完整性优先，失败片要可见地修复——用户重提兜底）
+        // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
+        String previousHandoff = stage0.closingText();
+        placeSliceHandoff(project, 0, previousHandoff);
+        // 切片逐段：按切片计划顺序派 run（每片新会话 slice-{index+1}），每片收口 =
+        // 8081 可达 + 成版 + run-finish；某片失败不自动跳下一片（完整性优先，失败片
+        // 要可见地修复——用户重提兜底）。重试续本片会话（同 sliceSession 不换）
         for (int index = 0; index < slices.size(); index++) {
             String slice = slices.get(index);
             String runId = EventsAppService.newRunId();
             boolean last = index == slices.size() - 1;
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+                    sliceSession(projectId, index + 1),
                     new CoderRunAttempts.Prompts(
-                            sliceRunPrompt(index + 1, slices.size(), slice),
-                            retryRunPrompt("实现切片「" + slice + "」")),
+                            slicePrompt(plan, index, previousHandoff),
+                            generationRetryPrompt(plan, "实现切片「" + slice + "」", previousHandoff)),
                     attemptRunId -> closeGenerationStage(project, last,
                             "完成切片：" + slice),
-                    CoderRunAttempts.GENERATE_LABEL);
+                    CoderRunAttempts.GENERATE_LABEL, false);
             if (!result.succeeded()) {
                 eventBridge.emitRunFailed(projectId, runId);
                 return;
             }
+            previousHandoff = result.closingText();
+            placeSliceHandoff(project, index + 1, previousHandoff);
+        }
+    }
+
+    /**
+     * 交接摘要落盘（#114 片间交接）：前片收口终文写工作区 .platform/slice-handoff-{n}.md
+     * （平台产物目录，不进用户 git 成版，与 #107 同向）。正文经 base64 传参防 shell
+     * 元字符（执行体终文非平台常量）；失败只记日志不断流——交接摘要的注入走内存终文
+     * （{@link CoderRunAttempts.RunResult#closingText}），落盘是透明面不承担正确性。
+     */
+    private void placeSliceHandoff(Project project, int segment, String content) {
+        try {
+            String encoded = Base64.getEncoder()
+                    .encodeToString(content.getBytes(StandardCharsets.UTF_8));
+            String command = "printf '%s' '" + encoded + "' | base64 -d > '"
+                    + WorkspaceLayout.absolute(handoffFile(segment)) + "'";
+            ExecResultResponse result = workspaceLifecycleAppService.exec(
+                    Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(command));
+            if (result.exitCode() != 0) {
+                log.warn("[generate] 项目 {} 交接摘要落盘失败（透明面，不断流）：{}",
+                        project.getId(), result.stderr());
+            }
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 交接摘要落盘失败（透明面，不断流）：{}",
+                    project.getId(), e.getMessage());
         }
     }
 

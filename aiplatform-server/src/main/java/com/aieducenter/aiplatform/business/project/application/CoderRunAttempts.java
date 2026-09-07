@@ -46,11 +46,11 @@ import lombok.extern.slf4j.Slf4j;
  * 续派的中途超限不是终态，本层不判），用户侧兜底——生成重新发起 / 修正恢复出口
  * 重派或再提意见（#48）。
  *
- * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}）、
- * {@code coder-{projectId}} 会话（重试续同会话——已落盘成果保留，同工作区不丢
- * 数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、项目工作区、
- * 流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试不重检索不重
- * 块）。</p>
+ * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}）、会话寻址由
+ * 轨道层拼装传入（#114 每片/每 run 换会话——重试续本会话，已落盘成果保留，同
+ * 工作区不丢数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、
+ * 项目工作区、流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试
+ * 不重检索不重块）。</p>
  *
  * <p><b>权限确认挂起（#83）</b>：run 内需批准的工具操作（危险命令）以
  * {@code permission-required} 事件呈现确认卡后流软终点——本环在挂起点驻留
@@ -64,7 +64,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class CoderRunAttempts {
 
-    /** 编码会话标识派生前缀（projectId → coder-{projectId}，稳定绑定勿动）。 */
+    /** 编码会话标识派生前缀（projectId → coder-{projectId}；#114 每片/每 run 换会话，会话寻址规则归各轨道拼装）。 */
     public static final String SESSION_PREFIX = "coder-";
 
     /** 一场编码 run 的 prompt 对（首试 + 重试续作轨）。 */
@@ -91,11 +91,14 @@ class CoderRunAttempts {
 
     /**
      * 一场编码 run 的收场事实：成败（终态收口事件 run-failed 的用户面锚 = 调用方
-     * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）。
-     * 权限确认超时（#112）同样以失败收场——直接 run-failed（不进静默重试），与
-     * 重试超限同锚同事件；如实原因经「已超时」确认卡事件表达（见 settlePermissions）。
+     * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）+ 收口
+     * 时的执行体终文（{@code closingText}，成功收口才非 null——生成轨把它当交接
+     * 摘要用，#114 片间交接：前片执行体自产的「做了什么/关键文件/下一片须知」即其
+     * 收口终文；修正轨不用）。权限确认超时（#112）同样以失败收场——直接 run-failed
+     * （不进静默重试），与重试超限同锚同事件；如实原因经「已超时」确认卡事件表达
+     * （见 settlePermissions）。
      */
-    record RunResult(boolean succeeded) {
+    record RunResult(boolean succeeded, String closingText) {
     }
 
     /** 权限确认超时信号（#112）：中断尝试环、直接 run-failed 收口——不复用静默重试。 */
@@ -151,17 +154,24 @@ class CoderRunAttempts {
      * 平台分析口径、前端不渲染）。咨询/纯追问轮不经本环，run-finish 无扩载
      * （无收尾卡）。</p>
      *
-     * @param what       日志标签（generate / fix）
-     * @param firstRunId 首试 runId（调用方预生成随响应回 = 用户面 run 身份，全程
-     *                   不变；重试尝试的内部 runId 不出用户面——经投影归一）
-     * @return           收场事实（成败）；超限转终态后的兜底归轨道层——终态收口
-     *                   事件 run-failed 锚首试 runId，与生成重新发起 / 修正恢复
-     *                   出口（#48/#56）衔接
+     * @param what           日志标签（generate / fix）
+     * @param firstRunId     首试 runId（调用方预生成随响应回 = 用户面 run 身份，全程
+     *                       不变；重试尝试的内部 runId 不出用户面——经投影归一）
+     * @param sessionId      本场 run 的会话寻址（#114 每片/每 run 换会话——重试续
+     *                       本会话，会话标识由轨道层按寻址规则拼装传入，不再固定
+     *                       {@code coder-{projectId}}）
+     * @param injectKnowledge 是否做知识命中前置注入（#24/#114「一次切入一次注入」：
+     *                       生成链只在首片注入，切片与重试不注入；修正每场各注入
+     *                       一次——注入只进首试 prompt，重试不重检索不重块）
+     * @return               收场事实（成败 + 收口终文）；超限转终态后的兜底归轨道层
+     *                       ——终态收口事件 run-failed 锚首试 runId，与生成重新发起 /
+     *                       修正恢复出口（#48/#56）衔接
      */
-    RunResult run(Project project, String firstRunId, Prompts prompts,
-            Function<String, ClosingJudgment> onSuccess, String what) {
+    RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
+            Function<String, ClosingJudgment> onSuccess, String what, boolean injectKnowledge) {
         Long projectId = project.getId();
-        String knowledgePrefix = knowledgeAppService.dispatchInjection(prompts.first());
+        String knowledgePrefix = injectKnowledge
+                ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
         int maxAttempts = properties.getMaxAttempts();
         Instant runStartedAt = Instant.now();
         List<FileChange> runChanges = new ArrayList<>();
@@ -179,11 +189,11 @@ class CoderRunAttempts {
                     attempt == 1 ? knowledgePrefix + prompts.first() : prompts.retry(),
                     AgentProfile.EXECUTOR.systemPrompt(),
                     AgentProfile.EXECUTOR.chatModelString(),
-                    SESSION_PREFIX + projectId,
+                    sessionId,
                     project.ownerUserId(),
                     new UsageContext(Long.toString(projectId),
                             UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.EXECUTOR),
-                                    SESSION_PREFIX + projectId)),
+                                    sessionId)),
                     Long.toString(project.getWorkspaceId()),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),
@@ -215,7 +225,9 @@ class CoderRunAttempts {
                 AgentReply reply = agentClient.converse(command, sink);
                 durations.accumulateAndGet(reply.durations(), StageDurations::plus);
                 attemptChanges.addAll(reply.changes());
-                settlePermissions(command, reply, sink, firstRunId, attemptChanges, durations);
+                // 权限续跑段终文并入本场 reply（#114 交接摘要取收口终文——续跑后的最终
+                // 文本才是执行体留给下一片的交接，取 converse 原文本会漏续跑段）
+                reply = settlePermissions(command, reply, sink, firstRunId, attemptChanges, durations);
                 runChanges.addAll(attemptChanges);
                 // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
                 // 核验/收口段抛错不重记（attemptAccounted 守卫）
@@ -265,12 +277,12 @@ class CoderRunAttempts {
                     conversationHistory.recordClosing(projectId, firstRunId, closing);
                     projection.accept(withClosing(pendingFinish.get(), closing));
                 }
-                return new RunResult(true);
+                return new RunResult(true, reply.text());
             }
             catch (PermissionTimeoutException e) {
                 // 权限确认超时（#112）：直接 run-failed 收口，不进静默重试（重试同上下文
                 // 同命令必然再挂）——如实原因经「已超时」确认卡事件表达
-                return new RunResult(false);
+                return new RunResult(false, null);
             }
             catch (RuntimeException e) {
                 if (!attemptAccounted) {
@@ -286,7 +298,7 @@ class CoderRunAttempts {
         }
         log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成重新发起/修正恢复出口）",
                 what, projectId, maxAttempts);
-        return new RunResult(false);
+        return new RunResult(false, null);
     }
 
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */

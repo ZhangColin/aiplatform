@@ -272,13 +272,16 @@ class MainAgentAppServiceTest {
         appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
 
         // 会话恒定：主智能体的三轮 converse（开场 / 咨询 / 意见）与一次 resume 全在
-        // main-{projectId}；修正 run（开场意见自答后收口派 + 意见轮收口派）走 coder-
+        // main-{projectId}；修正 run（开场意见自答后收口派 + 意见轮收口派）各走新会话
+        // coder-{projectId}-fix-{runId}（#114）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(5)).converse(command.capture(), any());
         List<AgentCommand> all = command.getAllValues();
         assertThat(all).extracting(AgentCommand::sessionId)
-                .containsExactly("main-" + projectId, "coder-" + projectId,
-                        "main-" + projectId, "main-" + projectId, "coder-" + projectId);
+                .containsExactly("main-" + projectId,
+                        IterationAppService.fixSession(projectId, all.get(1).runId()),
+                        "main-" + projectId, "main-" + projectId,
+                        IterationAppService.fixSession(projectId, all.get(4).runId()));
         ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
         verify(agentClient).resume(resume.capture(), any());
         assertThat(resume.getValue().sessionId()).isEqualTo("main-" + projectId);
@@ -594,7 +597,9 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues()).extracting(AgentCommand::sessionId)
-                .containsExactly("main-" + projectId, "coder-" + projectId);
+                .containsExactly("main-" + projectId,
+                        IterationAppService.fixSession(projectId,
+                                command.getAllValues().get(1).runId()));
 
         // 续跑收口（正常回复）清锚：后续咨询回正常答询轮（新 captor——capture() 跨
         // verify 累积，复用旧 captor 会读到重复段）
@@ -639,7 +644,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand fix = command.getAllValues().get(1);
-        assertThat(fix.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(fix.sessionId()).isEqualTo(IterationAppService.fixSession(projectId, fix.runId()));
         assertThat(fix.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 handoff("把系统的主色调改成绿色", null)));
@@ -907,10 +912,11 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(command.capture(), any());
         AgentCommand generation = command.getAllValues().get(1);
-        assertThat(generation.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(generation.sessionId()).isEqualTo(GenerationAppService.sliceSession(projectId, 0));
         assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(generation.agentKey()).isEqualTo("executor");
-        assertThat(generation.prompt()).isEqualTo(GenerationAppService.STAGE0_RUN_PROMPT);
+        assertThat(generation.prompt()).isEqualTo(
+                GenerationAppService.stage0Prompt(BuildPlan.minimalFallback()));
     }
 
     @Test

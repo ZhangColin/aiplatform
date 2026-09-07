@@ -63,8 +63,9 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 迭代编排（#26 验收 + #46 结束工具收口）：修正 run 与生成同机制（coder-{projectId}
- * 会话稳定绑定 + 同工作区 + EXECUTOR 配置 + live + 计量 dims + 知识命中前置注入 +
+ * 迭代编排（#26 验收 + #46 结束工具收口）：修正 run 与生成同机制（每场新会话
+ * coder-{projectId}-fix-{runId}（#114）+ 同工作区 + EXECUTOR 配置 + live + 计量 dims
+ * + 知识命中前置注入 +
  * 失败自动静默重试——run 失败为唯一失败终态）；run 在途时新任务排队（不即派）、当前 run 收口后
  * 合并为一场修正续派（排队意见不丢、不逐条烧 run）；收口以 finish_edit 工具事实
  * 为准（未调用=未正常收口按重试/终态；changed=false 发「未动系统+原因」事件，
@@ -162,7 +163,7 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_generated_project_when_fix_then_command_reuses_coder_session_and_workspace() {
+    void given_generated_project_when_fix_then_command_uses_new_fix_session_and_workspace() {
         Long projectId = persistedGeneratedProject("9900");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
@@ -175,17 +176,19 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         AgentCommand value = command.getValue();
-        // 修正 run 全要素：复用 coder 会话与同工作区（run 执行体带建系统上下文继续）+
-        // EXECUTOR 配置 + owner + 计量 dims + 流关联（与生成同机制）
+        // 修正 run 全要素：每场新会话（#114 fix-{runId}）与同工作区 + EXECUTOR 配置 +
+        // owner + 计量 dims + 流关联（与生成同机制）
         assertThat(value.runId()).isEqualTo(dispatch.runId());
         assertThat(value.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 singleHandoff("把预约列表按时间倒序排列", null)));
-        assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(value.sessionId()).isEqualTo(
+                IterationAppService.fixSession(projectId, dispatch.runId()));
         assertThat(value.workspaceId()).isEqualTo("9900");
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
-                UsageDims.kindOf(AgentProfile.EXECUTOR), "coder-" + projectId));
+                UsageDims.kindOf(AgentProfile.EXECUTOR),
+                IterationAppService.fixSession(projectId, dispatch.runId())));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（前端编码 run 判定锚）
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), any());
@@ -230,7 +233,9 @@ class IterationAppServiceTest {
                         List.of(new IterationAppService.FixHandoff.Round("按钮改蓝色", null),
                                 new IterationAppService.FixHandoff.Round("加导出", null)))))
                 .contains("1. 意见原文：按钮改蓝色").contains("2. 意见原文：加导出");
-        assertThat(runs.get(1).sessionId()).isEqualTo("coder-" + projectId);
+        // 排队合并续派是另一场 run：新会话（#114）与新 runId（不续首场会话）
+        assertThat(runs.get(1).sessionId()).isEqualTo(
+                IterationAppService.fixSession(projectId, runs.get(1).runId()));
         assertThat(runs.get(1).runId()).isNotEqualTo(first.runId());
         // 轨道收工（队列空）：在途释放——下一场意见可再起跑
         assertThat(appService.startFixRun(projectId, "再来一轮", null).queued()).isFalse();
@@ -295,7 +300,8 @@ class IterationAppServiceTest {
         verify(agentClient).resume(resume.capture(), any());
         assertThat(resume.getValue().runId()).isEqualTo(dispatch.runId());
         assertThat(resume.getValue().replyId()).isEqualTo("reply-perm-approve");
-        assertThat(resume.getValue().sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(resume.getValue().sessionId()).isEqualTo(
+                IterationAppService.fixSession(projectId, dispatch.runId()));
         assertThat(resume.getValue().confirmResults()).hasSize(1);
         assertThat(resume.getValue().confirmResults().get(0).isConfirmed()).isTrue();
         assertThat(resume.getValue().confirmResults().get(0).getToolCall().getName()).isEqualTo("command");
@@ -986,7 +992,8 @@ class IterationAppServiceTest {
                 .isEqualTo(IterationAppService.fixRunPrompt(
                         singleHandoff("把主色调改成绿色", "按意见把主色调改为绿")));
         assertThat(redispatch.runId()).isEqualTo(restart.runId());
-        assertThat(redispatch.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(redispatch.sessionId()).isEqualTo(
+                IterationAppService.fixSession(projectId, restart.runId()));
         // 恢复轮成功收工：终态账清（成功后无恢复面，再恢复即 409）+ 轨道释放（下一场可起跑）
         assertThatThrownBy(() -> appService.restartFixRun(projectId))
                 .isInstanceOf(ApplicationException.class)

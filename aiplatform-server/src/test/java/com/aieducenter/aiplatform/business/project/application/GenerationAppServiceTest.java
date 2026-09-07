@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -165,27 +166,110 @@ class GenerationAppServiceTest {
 
     @Test
     void given_two_slice_plan_when_generate_then_stage0_then_slices_in_order() {
-        // 灵魂用例（#104 轨道顺序）：阶段 0（先起服）固定前置，其后按切片计划顺序逐片
-        // 派 run——首 run = 阶段 0 起服 prompt、随后逐片切片 prompt，全落 coder 会话
+        // 灵魂用例（#104 轨道顺序 + #114 每片新会话）：阶段 0（先起服）固定前置，其后
+        // 按切片计划顺序逐片派 run——首 run = 阶段 0 起服 prompt、随后逐片切片 prompt；
+        // 每片换新会话（slice-0/slice-1/slice-2），前片交接摘要（收口终文）注入下一片
         Long projectId = persistedProject("9800");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         List<AgentCommand> all = commands.getAllValues();
         assertThat(all).extracting(AgentCommand::prompt).containsExactly(
-                GenerationAppService.STAGE0_RUN_PROMPT,
-                GenerationAppService.sliceRunPrompt(1, 2, "用户能注册登录"),
-                GenerationAppService.sliceRunPrompt(2, 2, "用户能下单支付"));
-        assertThat(all).allSatisfy(cmd ->
-                assertThat(cmd.sessionId()).isEqualTo("coder-" + projectId));
+                GenerationAppService.stage0Prompt(plan),
+                GenerationAppService.slicePrompt(plan, 0, "完成"),
+                GenerationAppService.slicePrompt(plan, 1, "完成"));
+        // 每片新会话寻址（#114）：阶段 0 = slice-0、切片逐片 slice-{index+1}
+        assertThat(all).extracting(AgentCommand::sessionId).containsExactly(
+                GenerationAppService.sliceSession(projectId, 0),
+                GenerationAppService.sliceSession(projectId, 1),
+                GenerationAppService.sliceSession(projectId, 2));
         // 每场 run 各自的首试 runId 互不相同（阶段 0 首 run 身份 + 切片逐片新 runId）
         assertThat(all).extracting(AgentCommand::runId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void given_slice_retries_when_generate_then_retry_same_slice_session_and_handoff_injected() {
+        // #114 重试续本片会话 + 片间交接：阶段 0 成功、切片 1 首试失败后重试成功、切片 2
+        // 成功——重试续切片 1 会话（不换新）；前片收口终文注入下一片（切片 2 的 prompt
+        // 带切片 1 的交接、切片 1 的 prompt 带阶段 0 的交接）
+        Long projectId = persistedProject("9830");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("切片1中断"))
+                .thenReturn(new AgentReply("run-s1", "切片1交接"))
+                .thenReturn(new AgentReply("run-s2", "切片2交接"));
+
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        // 每片新会话 + 同片重试续本片会话：slice-0 / slice-1 / slice-1（重试）/ slice-2
+        assertThat(all).extracting(AgentCommand::sessionId).containsExactly(
+                GenerationAppService.sliceSession(projectId, 0),
+                GenerationAppService.sliceSession(projectId, 1),
+                GenerationAppService.sliceSession(projectId, 1),
+                GenerationAppService.sliceSession(projectId, 2));
+        // 前片交接注入下一片：切片 1 首试带阶段 0 交接、切片 2 带切片 1 交接
+        assertThat(all.get(1).prompt()).contains("阶段0交接");
+        assertThat(all.get(3).prompt()).contains("切片1交接");
+        // 重试 prompt 自足（#114 重试可能落在空会话）：同样携带前片交接与产出约定
+        assertThat(all.get(2).prompt()).contains("阶段0交接")
+                .contains(GenerationAppService.HANDOFF_PRODUCTION);
+    }
+
+    @Test
+    void given_knowledge_hits_when_generate_slices_then_knowledge_injected_only_stage0() {
+        // #114 一次切入一次注入（生成链首片）：知识命中前置注入只在阶段 0，切片不重
+        // 检索不重注入（注入口径不膨胀——每片新会话后若逐片注入即膨胀）
+        Long projectId = persistedProject("9831");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        givenKnowledgeHits();
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 阶段 0 + 2 片共 3 场 run，只有阶段 0 检索一次知识
+        verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        assertThat(all.get(0).prompt()).startsWith("【平台知识库·相似历史需求】");
+        assertThat(all.get(1).prompt()).doesNotContain("【平台知识库");
+        assertThat(all.get(2).prompt()).doesNotContain("【平台知识库");
+    }
+
+    @Test
+    void given_slices_when_generate_then_handoff_landed_in_platform_dir() {
+        // #114 User Story 3：交接摘要落 .platform/ 平台产物目录（不进用户 git 成版，
+        // 与 #107 同向）——阶段 0 + 每片各落一份 slice-handoff-{段号}.md
+        Long projectId = persistedProject("9832");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("交接内容");
+
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
+
+        ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(2)).exec(eq("9832"), execs.capture());
+        List<String> handoffWrites = execs.getAllValues().stream()
+                .map(WorkspaceExecCommand::command)
+                .filter(cmd -> cmd.contains("/workspace/.platform/slice-handoff-"))
+                .toList();
+        assertThat(handoffWrites).hasSize(2);
+        assertThat(handoffWrites.get(0)).contains("slice-handoff-0.md");
+        assertThat(handoffWrites.get(1)).contains("slice-handoff-1.md");
     }
 
     @Test
@@ -301,8 +385,9 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand value = command.getAllValues().get(0); // 阶段 0 首 run
         assertThat(value.runId()).isEqualTo(run.runId());
-        assertThat(value.prompt()).isEqualTo(GenerationAppService.STAGE0_RUN_PROMPT);
-        assertThat(value.sessionId()).isEqualTo("coder-" + projectId);
+        assertThat(value.prompt()).isEqualTo(GenerationAppService.stage0Prompt(
+                BuildPlan.minimalFallback()));
+        assertThat(value.sessionId()).isEqualTo(GenerationAppService.sliceSession(projectId, 0));
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
@@ -311,7 +396,8 @@ class GenerationAppServiceTest {
         assertThat(value.workspaceId()).isEqualTo("9805");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
-                UsageDims.kindOf(AgentProfile.EXECUTOR), "coder-" + projectId));
+                UsageDims.kindOf(AgentProfile.EXECUTOR),
+                GenerationAppService.sliceSession(projectId, 0)));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（工作消息锚）
     }
@@ -352,13 +438,15 @@ class GenerationAppServiceTest {
 
         appService.startGeneration(projectId);
 
-        verify(knowledgePort).retrieve(eq(GenerationAppService.STAGE0_RUN_PROMPT), eq(5));
+        verify(knowledgePort).retrieve(
+                eq(GenerationAppService.stage0Prompt(BuildPlan.minimalFallback())), eq(5));
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())
                 .startsWith("【平台知识库·相似历史需求】")
                 .contains("宠物医院预约平台").contains("非用户的确认信息")
-                .endsWith("————\n\n" + GenerationAppService.STAGE0_RUN_PROMPT);
+                .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
+                        BuildPlan.minimalFallback()));
     }
 
     @Test
@@ -376,7 +464,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())
-                .isEqualTo(GenerationAppService.STAGE0_RUN_PROMPT);
+                .isEqualTo(GenerationAppService.stage0Prompt(BuildPlan.minimalFallback()));
     }
 
     @Test
@@ -400,12 +488,15 @@ class GenerationAppServiceTest {
         List<AgentCommand> attempts = command.getAllValues();
         assertThat(attempts.get(0).runId()).isEqualTo(run.runId()); // 阶段 0 首试 = 首 run 身份
         assertThat(attempts.get(0).prompt())
-                .endsWith("————\n\n" + GenerationAppService.STAGE0_RUN_PROMPT);
+                .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
+                        BuildPlan.minimalFallback()));
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId()); // 重试内部 runId
         assertThat(attempts.get(1).prompt()).isEqualTo(
-                GenerationAppService.retryRunPrompt("先起服：应用以最小可运行形态跑上 8081"));
+                GenerationAppService.generationRetryPrompt(BuildPlan.minimalFallback(),
+                        "先起服：应用以最小可运行形态跑上 8081", null));
         assertThat(attempts.get(2).prompt())
-                .endsWith(GenerationAppService.sliceRunPrompt(1, 1, "用户能使用 PRD 描述的全部功能"));
+                .isEqualTo(GenerationAppService.slicePrompt(BuildPlan.minimalFallback(), 0,
+                        "系统已生成"));
 
         // 静默重试（#82/#84）：无重试信号、无逐次 error（run 失败为唯一失败终态）
         verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());

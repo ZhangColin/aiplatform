@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
-import { WorkMessage, formatDuration } from "./work-message";
+import { WorkMessage, formatDuration, segmentWorkParts } from "./work-message";
 
 function work(overrides: Partial<WorkSnapshot> = {}): WorkSnapshot {
   return {
@@ -232,5 +232,131 @@ describe("收尾卡「用时」格式（用户语言，整秒）", () => {
     expect(formatDuration(4_300)).toBe("4 秒");
     expect(formatDuration(63_000)).toBe("1 分 03 秒");
     expect(formatDuration(-5_000)).toBe("0 秒"); // 时钟回拨防御
+  });
+});
+
+describe("segmentWorkParts · 动作组折叠投影（#116：纯呈现聚合，事件模型不动）", () => {
+  it("连续动作聚合为一组；非动作部件各自成段、把动作组切开（解说 ↔ 动作组交替）", () => {
+    const segments = segmentWorkParts([
+      { kind: "text", id: "1", text: "开始写。" },
+      action({ id: "2", toolCallId: "t1", label: "编写【A】" }),
+      action({ id: "3", toolCallId: "t2", label: "执行【B】" }),
+      { kind: "text", id: "4", text: "写好了。" },
+      action({ id: "5", toolCallId: "t3", label: "编写【C】" }),
+    ]);
+
+    expect(segments.map((s) => s.kind)).toEqual(["single", "actions", "single", "single"]);
+    const group = segments[1];
+    expect(group.kind).toBe("actions");
+    if (group.kind === "actions") {
+      expect(group.actions.map((a) => a.toolCallId)).toEqual(["t1", "t2"]);
+    }
+  });
+
+  it("单动作不聚合（无折叠语义）：回落 single 段", () => {
+    const segments = segmentWorkParts([action({ id: "1", toolCallId: "t1" })]);
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0].kind).toBe("single");
+  });
+
+  it("确认卡/自检同样切开动作组（非动作部件均独段，不参与聚合）", () => {
+    const segments = segmentWorkParts([
+      action({ id: "1", toolCallId: "t1" }),
+      permission({ id: "2" }),
+      action({ id: "3", toolCallId: "t2" }),
+      { kind: "check", id: "4", state: "checking" },
+      action({ id: "5", toolCallId: "t3" }),
+    ]);
+
+    expect(segments.map((s) => s.kind)).toEqual(["single", "single", "single", "single", "single"]);
+  });
+
+  it("空部件序列 → 无段", () => {
+    expect(segmentWorkParts([])).toEqual([]);
+  });
+});
+
+describe("WorkMessage · 动作组折叠行（#116）", () => {
+  it("连续动作默认折叠为一行（「N 个动作」），单条动作标签不播（控噪）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
+            action({ id: "a2", toolCallId: "t2", toolName: "command", label: "执行【B】" }),
+          ],
+        })}
+        projectId="p1"
+      />,
+    );
+
+    expect(html).toContain("2 个动作");
+    expect(html).not.toContain("编写【A】");
+    expect(html).not.toContain("执行【B】");
+  });
+
+  it("解说段 ↔ 动作组交替：文本段不参与聚合、照常竖流", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            { kind: "text", id: "t1", text: "开始写订单页。" },
+            action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
+            action({ id: "a2", toolCallId: "t2", label: "执行【B】" }),
+            { kind: "text", id: "t2", text: "写好了。" },
+          ],
+        })}
+        projectId="p1"
+      />,
+    );
+
+    expect(html).toContain("开始写订单页。");
+    expect(html).toContain("2 个动作");
+    expect(html).toContain("写好了。");
+  });
+
+  it("单动作不折叠：直接单行状态卡（无「个动作」）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1" })] })} projectId="p1" />,
+    );
+
+    expect(html).toContain("编写【订单管理】");
+    expect(html).not.toContain("个动作");
+  });
+
+  it("确认卡/自检等非动作部件形态不受聚合影响（切开动作组）", () => {
+    const html = renderWithClient(
+      work({
+        parts: [
+          action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
+          permission(),
+          action({ id: "a2", toolCallId: "t2", label: "执行【B】" }),
+        ],
+      }),
+    );
+
+    expect(html).toContain("需要您的确认");
+    expect(html).toContain("编写【A】"); // 确认卡两侧动作各为单动作、不聚合
+    expect(html).toContain("执行【B】");
+    expect(html).not.toContain("个动作");
+  });
+
+  it("自检播报行不受聚合影响：动作组折叠 + 自检行照常竖流", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
+            action({ id: "a2", toolCallId: "t2", label: "执行【B】" }),
+            { kind: "check", id: "c1", state: "checking" },
+          ],
+        })}
+        projectId="p1"
+      />,
+    );
+
+    expect(html).toContain("2 个动作");
+    expect(html).toContain("正在检查系统");
   });
 });

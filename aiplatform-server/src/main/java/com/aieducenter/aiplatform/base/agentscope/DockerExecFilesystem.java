@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
 
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.harness.agent.filesystem.AbstractFilesystem;
 import io.agentscope.harness.agent.filesystem.model.EditResult;
@@ -33,8 +34,11 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 项目沙箱工作区文件面 + 命令面：{@link AbstractSandboxFilesystem} 的 docker exec
- * 实现——全部文件操作与 shell 执行落在既有沙箱容器的 {@code /workspace}（Docker
- * 常开口径），写入即进源码包（平台文件树只读端点同视图），不新建容器、不改容器拓扑。
+ * 实现——文件操作与 shell 执行落在既有沙箱容器的 {@code /workspace}（Docker 常开
+ * 口径），写入即进源码包（平台文件树只读端点同视图），不新建容器、不改容器拓扑；
+ * 唯一例外是框架压缩链的内部状态（{@code memory/}、{@code agents/<id>/sessions/}、
+ * {@code large_tool_results/}）重映射进工作区卷内的非交付目录（见 {@link #STATE_ROOT}，
+ * #107）。
  *
  * <p><b>sandbox 接口是 run 执行体的命脉</b>：HarnessAgent 只在 AbstractFilesystem
  * 实现为 {@link AbstractSandboxFilesystem} 时注册 ShellExecuteTool——只实现文件面
@@ -61,6 +65,18 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     private static final int SHELL_DEFAULT_TIMEOUT_SECONDS = 120;
     /** shell 输出上限（字符）：超出截断置 truncated（防超长输出打爆模型上下文）。 */
     private static final int SHELL_OUTPUT_LIMIT = 100_000;
+
+    /**
+     * 框架内部状态根（工作区卷内、非交付目录）：框架压缩链 memory/、
+     * agents/&lt;id&gt;/sessions/、large_tool_results/ 的重映射落点（#107）——
+     * 落在 {@code .platform/}（平台产物目录，首段在 NON_DELIVERABLE_DIRS），不进 git
+     * 包、不污染交付面、文件树只读端点不可见；仍在 /workspace 持久卷内，跨容器重建
+     * 不丢（会话正本另有 cat_agent_state，此处仅压缩链运行时落盘）。flush/offload/
+     * eviction 机制全保留、信息不丢。
+     */
+    private static final String STATE_ROOT =
+            AgentWorkspace.ProjectDev.CONTAINER_ROOT + "/" + WorkspaceLayout.PLATFORM_DIR
+                    + "/agentscope-state";
 
     private final ExecCommand exec;
     private final String id;
@@ -415,7 +431,11 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
                         + " or write to a new path.");
     }
 
-    /** 输入路径（工作区锚定形）→ 容器绝对路径；非法（含 ..）返回 null。根（"/" 或 "."）即容器工作区根本身。 */
+    /**
+     * 输入路径（工作区锚定形）→ 容器绝对路径；非法（含 ..）返回 null。根（"/" 或 "."）
+     * 即容器工作区根本身。框架内部状态路径（见 {@link #isFrameworkStatePath}）重映射进
+     * 非交付目录（{@link #STATE_ROOT}）。
+     */
     private String containerPathOrNull(String path) {
         if (path == null || path.isBlank()) {
             return null;
@@ -427,9 +447,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
             return null;
         }
         String rel = normalizeInputPath(path);
-        return rel.equals(".")
-                ? AgentWorkspace.ProjectDev.CONTAINER_ROOT
-                : AgentWorkspace.ProjectDev.CONTAINER_ROOT + "/" + rel;
+        String root = isFrameworkStatePath(rel) ? STATE_ROOT : AgentWorkspace.ProjectDev.CONTAINER_ROOT;
+        return rel.equals(".") ? root : root + "/" + rel;
     }
 
     private String containerPathOrThrow(String path) {
@@ -444,6 +463,29 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     private static String normalizeInputPath(String path) {
         String stripped = path.startsWith("/") ? path.substring(1) : path;
         return stripped.isEmpty() ? "." : stripped;
+    }
+
+    /**
+     * 判定工作区锚定路径是否属框架内部状态（重映射进非交付目录 {@link #STATE_ROOT}）：
+     * 压缩链三处落点——flushBeforeCompact 的 {@code memory/}、offloadBeforeCompact 的
+     * {@code agents/<id>/sessions/}、ToolResultEviction 的 {@code large_tool_results/}
+     * （#107）。子智能体 ISOLATED 工作区 {@code agents/<name>/workspace/}
+     * 是交付面，不在此列。
+     */
+    private static boolean isFrameworkStatePath(String rel) {
+        if (isOrUnder(rel, "memory") || isOrUnder(rel, "large_tool_results")) {
+            return true;
+        }
+        if (!rel.startsWith("agents/")) {
+            return false;
+        }
+        String[] segments = rel.split("/");
+        return segments.length >= 3 && "sessions".equals(segments[2]);
+    }
+
+    /** 路径等于 {@code dir} 或在其下（{@code dir/...}），用于顶层目录前缀判定。 */
+    private static boolean isOrUnder(String rel, String dir) {
+        return rel.equals(dir) || rel.startsWith(dir + "/");
     }
 
     private static String parentOf(String containerPath) {

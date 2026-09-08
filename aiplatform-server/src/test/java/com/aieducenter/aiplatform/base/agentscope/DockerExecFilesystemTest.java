@@ -313,6 +313,59 @@ class DockerExecFilesystemTest {
         assertThat(exec.ran("cat > '/workspace/docs/it'\\''s.md'")).isTrue();
     }
 
+    // ---------- 框架内部状态重映射（#107 / ADR-0012） ----------
+
+    @Test
+    void given_memory_flush_path_when_written_then_remapped_into_platform_state() {
+        exec.responder = c -> ok("");
+
+        fs.write(RuntimeContext.empty(), "memory/2026-09-08.md", "记忆条目");
+
+        assertThat(exec.ran("cat > '/workspace/.platform/agentscope-state/memory/2026-09-08.md'")).isTrue();
+        assertThat(exec.ran("/workspace/memory")).isFalse();
+    }
+
+    @Test
+    void given_offload_session_path_when_uploaded_then_remapped_into_platform_state() {
+        exec.responder = c -> ok("");
+
+        fs.uploadFiles(RuntimeContext.empty(),
+                List.of(Map.entry("agents/main/sessions/s1.jsonl", new byte[]{1})));
+
+        assertThat(exec.ran("cat > '/workspace/.platform/agentscope-state/agents/main/sessions/s1.jsonl'")).isTrue();
+        assertThat(exec.ran("/workspace/agents/main/sessions")).isFalse();
+    }
+
+    @Test
+    void given_eviction_path_when_written_then_remapped_into_platform_state() {
+        exec.responder = c -> ok("");
+
+        fs.write(RuntimeContext.empty(), "large_tool_results/main/call_1-hash", "超大输出");
+
+        assertThat(exec.ran("cat > '/workspace/.platform/agentscope-state/large_tool_results/main/call_1-hash'")).isTrue();
+        assertThat(exec.ran("/workspace/large_tool_results")).isFalse();
+    }
+
+    @Test
+    void given_subagent_isolated_workspace_when_written_then_stays_in_workspace() {
+        exec.responder = c -> ok("");
+
+        fs.uploadFiles(RuntimeContext.empty(),
+                List.of(Map.entry("agents/selfTest/workspace/app.js", new byte[]{2})));
+
+        assertThat(exec.ran("cat > '/workspace/agents/selfTest/workspace/app.js'")).isTrue();
+        assertThat(exec.ran("/workspace/.platform/agentscope-state/agents")).isFalse();
+    }
+
+    @Test
+    void given_state_path_read_when_invoked_then_same_remapped_root() {
+        exec.responder = c -> ok("已有记忆");
+
+        fs.read(RuntimeContext.empty(), "memory/2026-09-08.md", 0, 0);
+
+        assertThat(exec.ran("test -f '/workspace/.platform/agentscope-state/memory/2026-09-08.md'")).isTrue();
+    }
+
     // ---------- shell 执行面（sandbox 接口，run 执行体命令通道） ----------
 
     @Test

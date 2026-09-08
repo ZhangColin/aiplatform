@@ -93,8 +93,18 @@ class AgentCommandTest {
     @Test
     void given_canonical_form_when_construct_then_workspace_read_only_kept() {
         AgentCommand command = new AgentCommand("run-1", "咨询", null, null, "s-1", null,
-                null, "42", Map.of(), null, "ASSISTANT", true);
+                null, "42", Map.of(), null, "ASSISTANT", true, null);
 
         assertThat(command.workspaceReadOnly()).isTrue(); // 主智能体对话姿态：写面结构性关闭
+    }
+
+    /** #118 工作消息头部标题：heading 可空透传（底座不解释）。 */
+    @Test
+    void given_heading_when_construct_then_kept() {
+        RunHeading heading = RunHeading.slice("商品浏览", 2, 5);
+        AgentCommand command = new AgentCommand("run-1", "做系统", null, null, "s-1", null,
+                null, null, Map.of(), null, "executor", false, heading);
+
+        assertThat(command.heading()).isEqualTo(heading);
     }
 }

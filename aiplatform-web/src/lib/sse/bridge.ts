@@ -137,7 +137,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
-          work.startWork(payload.projectId, payload.runId);
+          work.startWork(payload.projectId, payload.runId, payload.slice);
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);

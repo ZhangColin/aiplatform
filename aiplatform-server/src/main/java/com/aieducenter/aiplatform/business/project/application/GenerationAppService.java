@@ -13,6 +13,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
@@ -83,6 +84,12 @@ public class GenerationAppService {
                     + "工作区已内置可运行的基座工程（TypeScript / Next.js / pnpm，依赖已预装），"
                     + "无需选型或初始化——直接在基座上把应用以最小可运行形态跑上 8081 端口"
                     + "（后台常驻，白底骨架页即可，暂不实现业务功能），收口前用 curl 确认 8081 可访问。";
+
+    /**
+     * 阶段 0 工作消息头部标题（#118）：非切片（先起服的固定水平工序）——只出标题、
+     * 无「（n/N）」进度（切片计划只含纵向切片，阶段 0 不在其列）。
+     */
+    static final String STAGE0_TITLE = "系统初始化";
 
     /**
      * 重试续作 prompt（#104 分段口径）：同工作区不丢数据——已落盘成果保留，从中断处
@@ -348,7 +355,8 @@ public class GenerationAppService {
                 new CoderRunAttempts.Prompts(stage0Prompt(plan),
                         generationRetryPrompt(plan, "先起服：应用以最小可运行形态跑上 8081", null)),
                 runId -> closeGenerationStage(project, false, "起服了系统骨架"),
-                CoderRunAttempts.GENERATE_LABEL, true);
+                CoderRunAttempts.GENERATE_LABEL, true,
+                RunHeading.titled(STAGE0_TITLE));
         if (!stage0.succeeded()) {
             eventBridge.emitRunFailed(projectId, firstRunId);
             return;
@@ -370,7 +378,8 @@ public class GenerationAppService {
                             generationRetryPrompt(plan, "实现切片「" + slice + "」", previousHandoff)),
                     attemptRunId -> closeGenerationStage(project, last,
                             "完成切片：" + slice),
-                    CoderRunAttempts.GENERATE_LABEL, false);
+                    CoderRunAttempts.GENERATE_LABEL, false,
+                    RunHeading.slice(slice, index + 1, slices.size()));
             if (!result.succeeded()) {
                 eventBridge.emitRunFailed(projectId, runId);
                 return;

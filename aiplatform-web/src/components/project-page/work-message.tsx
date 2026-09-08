@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerPermission } from "@/hooks/use-answer-permission";
-import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
+import type { WorkPart, WorkSlice, WorkSnapshot } from "@/lib/store/work-message";
 
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / command；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -80,7 +80,7 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
       {growing ? (
         <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
           <WorkingDot />
-          正在做
+          {workHeading(work.slice)}
         </div>
       ) : null}
       {segmentWorkParts(work.parts).map((segment) =>
@@ -340,6 +340,15 @@ function ActionGroup({
       ) : null}
     </div>
   );
+}
+
+/** 工作消息头部文案（#118）：切片标题 + 生成轨道进度；无切片信息回落「正在做」。 */
+function workHeading(slice?: WorkSlice): string {
+  if (!slice?.title) return "正在做";
+  if (slice.index != null && slice.total != null) {
+    return `${slice.title}（${slice.index}/${slice.total}）`;
+  }
+  return slice.title;
 }
 
 /** 进行中脉冲点（形态同 #68 原型工作消息头部）。 */

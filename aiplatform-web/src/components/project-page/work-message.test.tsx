@@ -124,6 +124,47 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
   });
 });
 
+describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
+  it("生成轨道切片：头部「{切片标题}（{index}/{total}）」——取代「正在做」内部视角", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({ slice: { title: "商品浏览", index: 2, total: 5 } })}
+        projectId="p1"
+      />,
+    );
+
+    expect(html).toContain("商品浏览（2/5）");
+    expect(html).not.toContain("正在做");
+  });
+
+  it("阶段 0 / 更新 run：头部只出用户语言标题（无「（n/N）」进度）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ slice: { title: "系统更新" } })} projectId="p1" />,
+    );
+
+    expect(html).toContain("系统更新");
+    expect(html).not.toContain("（");
+  });
+
+  it("无 slice（run-start 被淘汰的补建路径 / 主智能体轮）：回落「正在做」", () => {
+    const html = renderToStaticMarkup(<WorkMessage work={work()} projectId="p1" />);
+
+    expect(html).toContain("正在做");
+  });
+
+  it("定格留驻：头部退场（标题是生长指示，收尾卡叙事承接切片标题）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({ frozen: true, slice: { title: "商品浏览", index: 2, total: 5 }, parts: [{ kind: "text", id: "1", text: "写好了。" }] })}
+        projectId="p1"
+      />,
+    );
+
+    expect(html).not.toContain("商品浏览（2/5）");
+    expect(html).toContain("写好了。");
+  });
+});
+
 describe("WorkMessage · 确认卡（#83 权限确认：长在工作消息流，与问答卡分形态）", () => {
   it("待答：警示色调确认卡——命令摘要（等宽）+ 拒绝/批准两个动作", () => {
     const html = renderWithClient(work({ parts: [permission()] }));

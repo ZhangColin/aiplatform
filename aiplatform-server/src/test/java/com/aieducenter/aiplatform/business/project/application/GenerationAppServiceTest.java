@@ -40,6 +40,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.agentscope.StageDurations;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -191,6 +192,27 @@ class GenerationAppServiceTest {
                 GenerationAppService.sliceSession(projectId, 2));
         // 每场 run 各自的首试 runId 互不相同（阶段 0 首 run 身份 + 切片逐片新 runId）
         assertThat(all).extracting(AgentCommand::runId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void given_slices_when_generate_then_commands_carry_work_message_heading() {
+        // #118 工作消息头部标题：阶段 0 携「系统初始化」（无进度——非切片），切片携
+        // 用户语言标题 + 1-based 进度（index/total）——run-start 的 slice 字段呈现源，
+        // 前端头部「{标题}（{index}/{total}）」的编发侧事实
+        Long projectId = persistedProject("9821");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::heading).containsExactly(
+                RunHeading.titled(GenerationAppService.STAGE0_TITLE),
+                RunHeading.slice("用户能注册登录", 1, 2),
+                RunHeading.slice("用户能下单支付", 2, 2));
     }
 
     @Test

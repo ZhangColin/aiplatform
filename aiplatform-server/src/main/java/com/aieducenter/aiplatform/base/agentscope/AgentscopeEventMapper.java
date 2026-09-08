@@ -256,10 +256,11 @@ final class AgentscopeEventMapper {
     /**
      * run 开始事件：引擎信息归一——engine/model 之外携带智能体配置键
      * {@code agent}（业务侧 AgentCommand 的配置键，可空不携带；前端工作消息/
-     * 对话面的锚定判据）。
+     * 对话面的锚定判据）与工作消息头部标题 {@code slice}（#118：标题 + 生成轨道
+     * 切片进度，可空不携带——前端工作消息头部呈现源，无则回落「正在做」）。
      */
     static AgentEvent runStart(String runId, String prompt, String model, String engine,
-            String agentKey) {
+            String agentKey, RunHeading heading) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put("prompt", prompt);
@@ -268,7 +269,23 @@ final class AgentscopeEventMapper {
         if (agentKey != null && !agentKey.isBlank()) {
             payload.put(AgentEventTypes.AGENT_FIELD, agentKey);
         }
+        if (heading != null && heading.title() != null && !heading.title().isBlank()) {
+            payload.put(AgentEventTypes.SLICE_FIELD, slicePayload(heading));
+        }
         return new AgentEvent(AgentEventTypes.RUN_START, payload);
+    }
+
+    /** slice 载荷（#118）：title 恒在场；index/total 仅生成轨道切片携带（缺省不携带）。 */
+    private static Map<String, Object> slicePayload(RunHeading heading) {
+        Map<String, Object> slice = new LinkedHashMap<>();
+        slice.put("title", heading.title());
+        if (heading.index() != null) {
+            slice.put("index", heading.index());
+        }
+        if (heading.total() != null) {
+            slice.put("total", heading.total());
+        }
+        return slice;
     }
 
     static AgentEvent runFinish(String runId, String sessionId, String finish, String engine) {

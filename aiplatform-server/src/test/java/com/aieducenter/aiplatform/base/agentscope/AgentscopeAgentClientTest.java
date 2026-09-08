@@ -213,7 +213,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "ASSISTANT", true), event -> {
+                null, "42", Map.of(), null, "ASSISTANT", true, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -241,7 +241,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "main", false), event -> {
+                null, "42", Map.of(), null, "main", false, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -477,7 +477,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false), frames::add);
+                null, null, Map.of(), null, "CODER", false, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -487,6 +487,21 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> plain = new ArrayList<>();
         client.converse(command(null, null), plain::add);
         assertThat(plain.get(0).payload()).doesNotContainKey("agent");
+    }
+
+    /** #118 工作消息头部标题：命令带 heading → run-start 携 slice（title + index/total）。 */
+    @Test
+    void given_heading_when_converse_then_run_start_carries_slice() {
+        givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
+                null, null, Map.of(), null, "CODER", false,
+                RunHeading.slice("商品浏览", 2, 5)), frames::add);
+
+        assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
+        assertThat(frames.get(0).payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
+                Map.of("title", "商品浏览", "index", 2, "total", 5));
     }
 
     @Test

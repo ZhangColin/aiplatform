@@ -272,7 +272,8 @@ public class AgentscopeAgentClient {
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
         PreparedTurn prepared = prepareFor(TurnSpec.of(command));
         sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
-                prepared.modelRef().toModelString(), ENGINE, command.agentKey()));
+                prepared.modelRef().toModelString(), ENGINE, command.agentKey(),
+                command.heading()));
         return prepared;
     }
 

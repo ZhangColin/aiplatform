@@ -653,6 +653,32 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
   });
 
+  it("run-start(executor) 携 slice（#118）：工作消息落切片标题与进度（头部「{title}（{index}/{total}）」呈现源）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "run1", prompt: "做系统", model: "m", agent: "executor",
+        slice: { title: "商品浏览", index: 2, total: 5 } },
+      "run1:1",
+    ));
+
+    expect(useWorkMessageStore.getState().works["p1"]?.slice).toEqual({
+      title: "商品浏览",
+      index: 2,
+      total: 5,
+    });
+  });
+
+  it("更新 run 的 run-start（#118）：slice 只携用户语言标题（无 index/total，无进度）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "run1", prompt: "系统更新", model: "m", agent: "executor",
+        slice: { title: "系统更新" } },
+      "run1:1",
+    ));
+
+    expect(useWorkMessageStore.getState().works["p1"]?.slice).toEqual({ title: "系统更新" });
+  });
+
   it("动作失败态（镜面服务端 given_tool_error_result…）：工具结果 error → part-action failed → 部件定格 failed", () => {
     const t0 = "2026-09-05T06:00:00.000Z";
     const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();

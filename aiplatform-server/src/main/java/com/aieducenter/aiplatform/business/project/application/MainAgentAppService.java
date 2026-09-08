@@ -368,7 +368,8 @@ public class MainAgentAppService {
                 correlationOf(projectId),
                 null,
                 AgentProfile.MAIN.key(),
-                /* workspaceReadOnly= */ true);
+                /* workspaceReadOnly= */ true,
+                /* heading= */ null);
     }
 
     /** 会话标识派生（projectId → main-{projectId} 稳定绑定）。 */

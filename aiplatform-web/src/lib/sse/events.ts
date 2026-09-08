@@ -137,6 +137,18 @@ export type PlatformAgentEvent =
          * 主智能体一座）。字面量联合即后端正本键值的镜像（AgentProfile.key()）。
          */
         agent?: "main" | "executor";
+        /**
+         * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成轨道 = 切片
+         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」），`index`/`total`
+         * 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」）；阶段 0
+         * 与更新 run 只携 title（无进度）；主智能体对话轮 / 一次性调用不携带
+         * （前端回落「正在做」）。
+         */
+        slice?: {
+          title: string;
+          index?: number;
+          total?: number;
+        };
       };
     }
   | { type: "error"; payload: AgentPayload & { message: string } }

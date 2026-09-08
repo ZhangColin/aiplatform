@@ -21,6 +21,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.agentscope.StageDurations;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
@@ -163,12 +164,16 @@ class CoderRunAttempts {
      * @param injectKnowledge 是否做知识命中前置注入（#24/#114「一次切入一次注入」：
      *                       生成链只在首片注入，切片与重试不注入；修正每场各注入
      *                       一次——注入只进首试 prompt，重试不重检索不重块）
+     * @param heading        工作消息头部标题（#118：标题 + 生成轨道切片进度；可空
+     *                       ——主智能体对话轮不经本环）——随 run-start 的 slice 字段
+     *                       透出，首试与重试同值（重试 run-start 被投影滤掉，不碍）
      * @return               收场事实（成败 + 收口终文）；超限转终态后的兜底归轨道层
      *                       ——终态收口事件 run-failed 锚首试 runId，与生成重新发起 /
      *                       修正恢复出口（#48/#56）衔接
      */
     RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
-            Function<String, ClosingJudgment> onSuccess, String what, boolean injectKnowledge) {
+            Function<String, ClosingJudgment> onSuccess, String what, boolean injectKnowledge,
+            RunHeading heading) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
                 ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
@@ -198,7 +203,8 @@ class CoderRunAttempts {
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),
                     AgentProfile.EXECUTOR.key(),
-                    /* workspaceReadOnly= */ false);
+                    /* workspaceReadOnly= */ false,
+                    heading);
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(projectId));

@@ -36,6 +36,17 @@ export type WorkCheckState = "checking" | "passed" | "failed";
 /** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态；#112 超时 → timedout）。 */
 export type WorkPermissionState = "pending" | "approved" | "denied" | "timedout";
 
+/**
+ * 工作消息头部切片进度（run-start 扩载 #118）：`title` 为用户语言标题（生成轨道
+ * = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」）；`index`/`total`
+ * 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」），缺省即无进度。
+ */
+export type WorkSlice = {
+  title: string;
+  index?: number;
+  total?: number;
+};
+
 /** 工作消息部件（part-* 事件 + 权限确认事件的投影）。 */
 export type WorkPart =
   | { kind: "text"; id: string; source?: string; text: string }
@@ -111,6 +122,8 @@ type ProjectWork = {
   parts: WorkPart[];
   /** 已收部件事件的 SSE id（重放去重锚，有界）。 */
   seenEventIds: string[];
+  /** 工作消息头部切片进度（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
+  slice?: WorkSlice;
 };
 
 /** 工作消息呈现快照（ProjectWork 去重放簿记——UI 消费面单一来源）。 */
@@ -118,8 +131,9 @@ export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
 
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
-  /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等。 */
-  startWork: (projectId: string, runId: string) => void;
+  /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等；携
+   * 工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）。 */
+  startWork: (projectId: string, runId: string, slice?: WorkSlice) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
   /**
@@ -240,11 +254,11 @@ function updateWork(
 export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   works: {},
 
-  startWork: (projectId, runId) =>
+  startWork: (projectId, runId, slice) =>
     updateWork(set, projectId, (work) => {
       // 同 runId 幂等（重放）：已长部件保留，不重开
       if (work?.runId === runId) return work;
-      return { runId, frozen: false, parts: [], seenEventIds: [] };
+      return { runId, frozen: false, parts: [], seenEventIds: [], slice };
     }),
 
   notePart: (projectId, ref, input) =>

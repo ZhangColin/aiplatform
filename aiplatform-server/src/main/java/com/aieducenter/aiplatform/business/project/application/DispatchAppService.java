@@ -194,7 +194,8 @@ public class DispatchAppService {
                 Map.of(),
                 CLASSIFY_TIMEOUT,
                 null,
-                /* workspaceReadOnly= */ false);
+                /* workspaceReadOnly= */ false,
+                /* heading= */ null);
         try {
             AgentReply reply = agentClient.converse(command, event -> {
             });

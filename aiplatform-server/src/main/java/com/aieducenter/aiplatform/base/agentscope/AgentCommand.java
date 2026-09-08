@@ -19,7 +19,10 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * 底座不解释），按配置发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；
  * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
  * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
- * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）。</p>
+ * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）；
+ * {@code heading} 可空——工作消息头部标题（#118：用户语言标题 + 生成轨道切片
+ * 进度），底座不解释，随 run-start 载荷透出（{@code slice} 字段，前端工作消息
+ * 头部呈现源）。</p>
  */
 public record AgentCommand(
         String runId,
@@ -33,7 +36,8 @@ public record AgentCommand(
         Map<String, Object> streamCorrelation,
         Duration timeout,
         String agentKey,
-        boolean workspaceReadOnly) {
+        boolean workspaceReadOnly,
+        RunHeading heading) {
 
     /** 无逐轮超时的兼容形（取内核配置默认）：无配置语境的一次性本地会话调用面
      * （取名等）不变——空工具面。 */
@@ -41,7 +45,7 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, null, false);
+                usageContext, workspaceId, streamCorrelation, null, null, false, null);
     }
 
     /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
@@ -49,7 +53,7 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, agentKey, false);
+                usageContext, workspaceId, streamCorrelation, null, agentKey, false, null);
     }
 
     public AgentCommand {

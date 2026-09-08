@@ -74,7 +74,7 @@ public class EventsController {
             | type | 族 | payload 字段 |
             |---|---|---|
             | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
-            | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
+            | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title + 生成轨道切片 index/total） |
             | error | 智能体·生命周期 | runId, message |
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
             | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |

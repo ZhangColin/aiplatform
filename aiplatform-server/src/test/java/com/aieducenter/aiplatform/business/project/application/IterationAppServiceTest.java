@@ -47,6 +47,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -191,6 +192,8 @@ class IterationAppServiceTest {
                 IterationAppService.fixSession(projectId, dispatch.runId())));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（前端编码 run 判定锚）
+        // #118 工作消息头部标题：更新 run 携平台生成的用户语言标题（无切片进度）
+        assertThat(value.heading()).isEqualTo(RunHeading.titled(IterationAppService.FIX_TITLE));
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), any());
     }
 

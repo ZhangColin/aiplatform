@@ -126,6 +126,14 @@ public final class AgentEventTypes {
     /** 智能体配置键（AgentProfile 稳定键，如 main/executor；run-start 携带）。 */
     public static final String AGENT_FIELD = "agent";
 
+    /**
+     * run-start 的切片/里程碑标题扩载键（#118）：值为对象 {@code { title, index?, total? }}
+     * ——工作消息头部主文案 + 生成轨道切片进度。生成轨道切片携带 title + index/total
+     * （1-based 序号）；阶段 0 与更新 run 只携带 title（用户语言标题，无进度）。可缺省
+     * ——无标题语境（主智能体对话轮 / 一次性调用）不携带，前端回落「正在做」。
+     */
+    public static final String SLICE_FIELD = "slice";
+
     /** 承接运行的智能体栈名（单栈 agentscope；各事件 payload 同键携带）。 */
     public static final String ENGINE_FIELD = "engine";
 

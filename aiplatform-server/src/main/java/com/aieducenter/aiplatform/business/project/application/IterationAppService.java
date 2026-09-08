@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -71,6 +72,13 @@ public class IterationAppService {
     static String fixSession(Long projectId, String runId) {
         return CoderRunAttempts.SESSION_PREFIX + projectId + "-fix-" + runId;
     }
+
+    /**
+     * 更新 run 工作消息头部标题（#118）：平台生成（标题来源实施时定——判定跟职责走：
+     * 更新 run 的收口判定归 finish_edit 事实、标题不做自由文本解析），用户语言
+     * 「系统更新」（对应用户面「更新」词条），无切片进度。
+     */
+    static final String FIX_TITLE = "系统更新";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
@@ -234,7 +242,7 @@ public class IterationAppService {
                         fixSession(projectId, runId),
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff), FIX_RETRY_RUN_PROMPT),
                         attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff),
-                        "fix", true);
+                        "fix", true, RunHeading.titled(FIX_TITLE));
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (codingRunTrack) {

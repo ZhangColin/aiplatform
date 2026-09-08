@@ -110,7 +110,7 @@ class AgentscopeEventMapperTest {
         @Test
         void given_run_start_when_built_then_carries_prompt_and_model() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写个 PRD", "deepseek:m-1",
-                    ENGINE, null);
+                    ENGINE, null, null);
 
             assertThat(frame.type()).isEqualTo(AgentEventTypes.RUN_START);
             assertThat(frame.payload()).containsOnly(
@@ -124,9 +124,38 @@ class AgentscopeEventMapperTest {
         @Test
         void given_run_start_with_agent_key_when_built_then_carries_agent_key() {
             AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "deepseek:m-1",
-                    ENGINE, "CODER");
+                    ENGINE, "CODER", null);
 
             assertThat(frame.payload()).containsEntry("agent", "CODER");
+        }
+
+        /** #118 工作消息头部标题：无 heading 不携带 slice 键（主智能体对话轮 / 一次性调用）。 */
+        @Test
+        void given_run_start_without_heading_when_built_then_no_slice_field() {
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "写 PRD", "m", ENGINE,
+                    "main", null);
+
+            assertThat(frame.payload()).doesNotContainKey(AgentEventTypes.SLICE_FIELD);
+        }
+
+        /** #118 生成轨道切片：slice 携 title + index/total（工作消息头部「{title}（{index}/{total}）」）。 */
+        @Test
+        void given_run_start_with_slice_heading_when_built_then_carries_slice_progress() {
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "m", ENGINE,
+                    "executor", RunHeading.slice("商品浏览", 2, 5));
+
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
+                    Map.of("title", "商品浏览", "index", 2, "total", 5));
+        }
+
+        /** #118 阶段 0 / 更新 run：slice 只携 title、无 index/total（头部无进度）。 */
+        @Test
+        void given_run_start_with_title_only_heading_when_built_then_slice_without_progress() {
+            AgentEvent frame = AgentscopeEventMapper.runStart(RUN_ID, "做系统", "m", ENGINE,
+                    "executor", RunHeading.titled("系统更新"));
+
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
+                    Map.of("title", "系统更新"));
         }
 
         @Test

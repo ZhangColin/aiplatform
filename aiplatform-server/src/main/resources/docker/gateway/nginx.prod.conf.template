@@ -1,0 +1,50 @@
+# 平台预览网关（#129，prod profile）：与 dev 同一份路由/注入块（gateway-route.conf，
+# 由 443 server 块 include），只差 base 域名与 TLS——一条通配 server 块把
+# *.preview.{domain} 子域路由到对应工作区容器 ws-{id}:8081，零 per-app 配置、零
+# reload；resolver 指向 Docker 内置 DNS（127.0.0.11），按容器名解析。TLS 终止用
+# wildcard 证书 *.preview.{domain}（certbot dns-01，见 docs/guide/预览网关.md）。
+#
+# 用法（${PREVIEW_DOMAIN} 是唯一模板变量，envsubst 只替换它、放行 nginx 自身
+# $host/$upstream/$wsid 等变量）：
+#   PREVIEW_DOMAIN=preview.example.com \
+#     envsubst '${PREVIEW_DOMAIN}' < nginx.prod.conf.template > nginx.conf
+#
+# 注意：server_name 正则里 ${PREVIEW_DOMAIN} 的点未转义（`.` 匹配任意字符）——前置
+# [0-9]+ 与结尾 $ 锚定下对路由无实害（真正的路由决策是容器名 DNS 解析），故不为此
+# 引入转义机械。
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+
+    # Docker 内置 DNS：网关按容器名 ws-{id} 解析到工作区容器 IP（同网 previewnet）
+    resolver 127.0.0.11 valid=30s ipv6=off;
+
+    # 80 → https 强制跳转（TLS 终止在上层 server 块；预览流量走平台边缘、独立 origin）
+    server {
+        listen 80;
+        server_name ~^(?<wsid>[0-9]+)\.${PREVIEW_DOMAIN}$;
+        return 301 https://$host$request_uri;
+    }
+
+    # TLS 终止 + 子域路由：捕获 workspaceId → ws-{id}:8081（路由/注入块与 dev 同源）
+    server {
+        listen 443 ssl;
+        server_name ~^(?<wsid>[0-9]+)\.${PREVIEW_DOMAIN}$;
+
+        # wildcard 证书（certbot dns-01 签 *.preview.{domain}；cert-name 固定
+        # preview-gateway 使 live 路径稳定，续期见 docs/guide/预览网关.md）
+        ssl_certificate /etc/letsencrypt/live/preview-gateway/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/preview-gateway/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        include gateway-route.conf;
+    }
+}

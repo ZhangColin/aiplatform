@@ -40,12 +40,12 @@ public final class WorkspaceNaming {
     }
 
     /**
-     * 预览 URL（#128 网关化）：workspaceId 子域 + 预览基域名的纯函数——
-     * 开发 {@code http://{id}.localhost/}（scheme 恒 http，dev 关 TLS）。生产
-     * {@code https://{id}.preview.{domain}/} 需把 scheme 参数化（随 profile 供给），
-     * 留作生产切片扩展——#128 只落 dev，不做投机参数。
+     * 预览 URL（#128 网关化、#129 生产化）：workspaceId 子域 + scheme + 预览基域名的
+     * 纯函数——开发 {@code http://{id}.localhost/}（关 TLS），生产
+     * {@code https://{id}.preview.{domain}/}（wildcard 证书 TLS 终止）。scheme 随
+     * profile 供给（{@code app.workspace.preview-scheme}），非写死 http。
      */
-    public static String previewUrl(WorkspaceId workspaceId, String previewBase) {
-        return "http://" + workspaceId.value() + "." + previewBase + "/";
+    public static String previewUrl(WorkspaceId workspaceId, String scheme, String previewBase) {
+        return scheme + "://" + workspaceId.value() + "." + previewBase + "/";
     }
 }

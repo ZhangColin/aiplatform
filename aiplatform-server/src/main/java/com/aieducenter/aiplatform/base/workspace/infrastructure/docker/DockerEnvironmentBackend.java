@@ -88,6 +88,10 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     @Value("${app.workspace.preview-base:localhost}")
     private String previewBase = "localhost";
 
+    /** 预览 URL scheme（#129）：开发 http（关 TLS），生产 https（wildcard 证书）。 */
+    @Value("${app.workspace.preview-scheme:http}")
+    private String previewScheme = "http";
+
     @Override
     public WorkspaceProvision createWorkspace(WorkspaceId workspaceId, EnvKind kind) {
         if (kind != EnvKind.DEV) {
@@ -190,7 +194,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         // 把应用跑在容器端口（#44 尽早起服），平台不再代起静态兜底服务。探活走容器内
         // 回环（curl localhost:8081，收口判据不变），通过才返回 URL（调用方以此作
         // 「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，前端轮询续探），不做长阻塞。
-        URI url = URI.create(WorkspaceNaming.previewUrl(handle.workspaceId(), previewBase));
+        URI url = URI.create(WorkspaceNaming.previewUrl(handle.workspaceId(), previewScheme, previewBase));
         waitForAppServingInContainer(handle.containerName(), containerPort,
                 "工作区应用端口 " + handle.containerName(),
                 PREVIEW_PROBE_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);

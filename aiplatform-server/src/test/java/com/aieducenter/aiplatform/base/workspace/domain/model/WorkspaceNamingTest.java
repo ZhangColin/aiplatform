@@ -32,11 +32,11 @@ class WorkspaceNamingTest {
 
     @Test
     void given_workspace_id_and_base_when_preview_url_then_subdomain() {
-        // 预览 URL = 子域（开发基域名 localhost；生产换 preview.{domain}）
-        assertThat(WorkspaceNaming.previewUrl(WorkspaceId.of("42"), "localhost"))
+        // 预览 URL = scheme + 子域（开发 http://{id}.localhost；生产 https://{id}.preview.{domain}）
+        assertThat(WorkspaceNaming.previewUrl(WorkspaceId.of("42"), "http", "localhost"))
                 .isEqualTo("http://42.localhost/");
-        assertThat(WorkspaceNaming.previewUrl(WorkspaceId.of("42"), "preview.example.com"))
-                .isEqualTo("http://42.preview.example.com/");
+        assertThat(WorkspaceNaming.previewUrl(WorkspaceId.of("42"), "https", "preview.example.com"))
+                .isEqualTo("https://42.preview.example.com/");
     }
 
     @Test

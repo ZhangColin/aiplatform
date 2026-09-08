@@ -52,4 +52,23 @@ class WorkspacePropertiesTest {
 
         assertThat(bound.getPreviewBase()).isEqualTo("preview.example.com");
     }
+
+    /** #129 预览 scheme 默认 http（开发关 TLS）。 */
+    @Test
+    void given_default_properties_when_get_preview_scheme_then_http() {
+        assertThat(new WorkspaceProperties().getPreviewScheme()).isEqualTo("http");
+    }
+
+    /** 配置键真绑定（app.workspace.preview-scheme）。 */
+    @Test
+    void given_config_key_when_bind_then_preview_scheme_wired() {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(
+                Map.of("app.workspace.preview-scheme", "https"));
+
+        WorkspaceProperties bound = new Binder(source)
+                .bind("app.workspace", Bindable.ofInstance(new WorkspaceProperties()))
+                .get();
+
+        assertThat(bound.getPreviewScheme()).isEqualTo("https");
+    }
 }

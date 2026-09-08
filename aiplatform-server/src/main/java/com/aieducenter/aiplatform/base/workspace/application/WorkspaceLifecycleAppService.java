@@ -170,7 +170,7 @@ public class WorkspaceLifecycleAppService {
     public URI previewUrl(String workspaceId) {
         Workspace workspace = requireWorkspace(workspaceId);
         return URI.create(WorkspaceNaming.previewUrl(workspace.workspaceId(),
-                properties.getPreviewBase()));
+                properties.getPreviewScheme(), properties.getPreviewBase()));
     }
 
     /**

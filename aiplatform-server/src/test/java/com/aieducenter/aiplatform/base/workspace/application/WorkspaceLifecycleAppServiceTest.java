@@ -304,6 +304,16 @@ class WorkspaceLifecycleAppServiceTest {
     }
 
     @Test
+    void given_seeded_workspace_when_preview_url_then_subdomain_from_properties() {
+        // 预览 URL 纯派生（不探活、不发事件）：scheme + 基域名来自配置（默认 http + localhost）
+        workspaceRepository.save(Workspace.register(devProvision("106")));
+
+        URI url = appService.previewUrl("106");
+
+        assertThat(url).isEqualTo(URI.create("http://106.localhost/"));
+    }
+
+    @Test
     void given_seeded_workspace_when_destroy_then_backend_cascade_then_records_deleted_and_event() {
         workspaceRepository.save(Workspace.register(devProvision("105")));
 

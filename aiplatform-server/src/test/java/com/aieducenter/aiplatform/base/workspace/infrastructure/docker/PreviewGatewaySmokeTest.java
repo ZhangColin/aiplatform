@@ -71,6 +71,7 @@ class PreviewGatewaySmokeTest {
         Path dir = Files.createTempDirectory("aiplatform-gateway");
         try {
             copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
+            copyResource("docker/gateway/gateway-route.conf", dir.resolve("gateway-route.conf"));
             copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
@@ -79,6 +80,7 @@ class PreviewGatewaySmokeTest {
                     "--network", WorkspaceNaming.PREVIEW_NETWORK,
                     "-p", gatewayPort + ":80",
                     "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
+                    "-v", dir.resolve("gateway-route.conf") + ":/etc/nginx/gateway-route.conf:ro",
                     "-v", dir.resolve("annotation.js") + ":/etc/nginx/annotation.js:ro",
                     GATEWAY_IMAGE);
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();

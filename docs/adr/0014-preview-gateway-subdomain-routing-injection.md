@@ -19,8 +19,8 @@
 - 容器命名：裸 `ws-{id}`（去 kind 后缀——网关按子域 `{id}` 反查容器名 `ws-{id}`，名字必须与子域一一对应），进共享网络 `previewnet`，不再 `-p` 随机映射宿主端口。
 - 路由：`server_name ~^(?<wsid>[0-9]+)\.localhost$` 通配正则捕获 workspaceId；`resolver 127.0.0.11` 指向 Docker 内置 DNS；变量 `proxy_pass http://ws-$wsid:8081`。一条 server 块吃所有项目，零 per-app 配置、零 reload。
 - 注入：`sub_filter` 把标注脚本引用注入 HTML（`</head>` → `<script src="/.aiplatform/annotation.js"></script></head>`），脚本资产由网关自持（`location = /.aiplatform/annotation.js`），不进用户源码、不在容器内。上游 `Accept-Encoding` 置空保证 sub_filter 命中未压缩 HTML。
-- 后端改造：工作区容器不再随机映射端口；预览 URL 是 workspaceId 子域（`{id}.{base}`，base = 开发 `localhost` / 生产 `preview.{domain}`）的纯函数，不落库（`preview_port` 列随概念出局删除）。应用仍监听 8081，收口判据（容器内 8081 探活）不变。本片只落 dev：`previewUrl` 恒拼 `http://`，生产 `https` 需把 scheme 参数化（未来切片扩展，现不做投机参数）。
-- 开发/生产同构：同一份 nginx 配置（路由/注入块不变）；开发 base `*.localhost`、关 TLS；生产 base `*.preview.{domain}` + wildcard 证书（certbot dns-01，TLS 终止）。nginx 侧同构，后端 URL 的 scheme 差异见上一条。
+- 后端改造：工作区容器不再随机映射端口；预览 URL 是 workspaceId 子域（`{id}.{base}`，base = 开发 `localhost` / 生产 `preview.{domain}`）的纯函数，不落库（`preview_port` 列随概念出局删除）。应用仍监听 8081，收口判据（容器内 8081 探活）不变。本片只落 dev：`previewUrl` 恒拼 `http://`，生产 `https` 需把 scheme 参数化（未来切片扩展，现不做投机参数）——#129 已把 scheme 参数化落位（`app.workspace.preview-scheme`，默认 http / prod https）。
+- 开发/生产同构：同一份 nginx 配置（路由/注入块不变）；开发 base `*.localhost`、关 TLS；生产 base `*.preview.{domain}` + wildcard 证书（certbot dns-01，TLS 终止）。nginx 侧同构，后端 URL 的 scheme 差异见上一条——#129 已补齐 prod 侧（`nginx.prod.conf.template` + 生产 URL https）。
 
 ## 范围
 
@@ -36,4 +36,4 @@ Traefik 作为可替换备选——因 `preview.url` 对前端不透明，换网
 - 圈注脚本网关注入后，主 Next.js 应用的圈注真功能接通（「指哪说哪」成立）。
 - 预览流量走平台边缘、子域独立 origin——用户生成代码碰不到平台后端（安全边界）。
 - 生产证书一张 wildcard 覆盖所有项目（非每项目一签）。
-- 交付物：nginx 网关配置（`src/main/resources/docker/gateway/nginx.conf`）+ 部署指南（`docs/guide/`）。
+- 交付物：nginx 网关配置（`src/main/resources/docker/gateway/nginx.conf` dev + `nginx.prod.conf.template` prod，路由/注入块单源在 `gateway-route.conf`）+ 部署指南（`docs/guide/`）。

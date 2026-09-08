@@ -47,15 +47,16 @@ const BAR_BUTTON_CLASS =
  * 接受）。空态两档（推导归 lib/preview/state 纯函数，本组件只呈现）：无应用 =
  * 占位随工作消息部件推进的步骤提示（解说自述优先、动作对象
  * 兜底，无信号「正在初始化」）；
- * 有应用且 run 中 = 保留页面 +「更新中」轻提示（生长期与修正期同一套）。跨会话
+ * 有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联，不再浮
+ * 叠在预览上）；失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话
  * 与重试不闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为
  * key，手动刷新的本地节拍并入同 key）；超限终态给人工兜底入口——从未生成
  * 「重新发起」、修正轮「重新修改」，正常态全无。
  *
- * <p>浏览器条（#80）：地址胶囊（真地址，诚实口径）+ 桌面/手机宽度切换（样式
- * 切换不重挂 iframe——用户的系统不因换设备丢状态）+ 手动刷新（强制重挂）+
- * 新窗口打开（/preview/:id 独立页）。舞台浅色锁定：预览里的系统是用户产物，
- * 永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
+ * <p>浏览器条（#80）：地址胶囊（真地址，诚实口径）+ 更新中轻状态内联（#124）+
+ * 桌面/手机宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+
+ * 手动刷新（强制重挂）+ 新窗口打开（/preview/:id 独立页）。舞台浅色锁定：预览
+ * 里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
  */
 export function SystemPanel({
   projectId,
@@ -121,12 +122,20 @@ export function SystemPanel({
     parts,
   });
   const pageLive = phase.kind === "page" && !!url;
-  // 超限终态的人工兜底入口（页面轻提示与占位终态两处共用）：从未生成「重新发起」、
+  // 页面档两类提示（#124 移出遮挡）：进行中 = 浏览器条内联轻状态（不叠预览）、
+  // 失败 = 非悬浮顶部占位细条（占自己高度、把预览下推）
+  const notice = phase.kind === "page" ? phase.notice : undefined;
+  const updatingNotice = notice && !notice.failed ? notice : undefined;
+  const failedNotice = notice?.failed ? notice : undefined;
+  // 超限终态的人工兜底入口（页面失败细条与占位终态两处共用）：从未生成「重新发起」、
   // 修正轮「重新修改」（#48，重派终态那场的交接物）
   const restart = (
     <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
   );
   const refix = <RestartFixButton projectId={projectId} />;
+  /** 失败态兜底入口选择（失败细条与占位终态两处共用，#48）：restart = 重新发起 / refix = 重新修改。 */
+  const recoveryAction = (recovery?: "restart" | "refix") =>
+    recovery === "restart" ? restart : recovery === "refix" ? refix : null;
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
@@ -146,6 +155,13 @@ export function SystemPanel({
         >
           <RotateCw className="size-3.5" />
         </button>
+        {updatingNotice ? (
+          // 更新中轻状态（#124）：收进浏览器条内联——spinner + 文案，不再悬浮叠预览
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
+            <span className="truncate">{updatingNotice.text}</span>
+          </span>
+        ) : null}
         <span className="mx-auto flex w-full max-w-md min-w-0 items-center justify-center truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
           {active ? (url ?? "正在接通系统…") : "你的系统"}
         </span>
@@ -186,32 +202,19 @@ export function SystemPanel({
       </div>
 
       {/* 内容区 */}
-      <div className="relative min-h-0 flex-1">
-        {phase.kind === "page" && phase.notice ? (
-          // 进行中轻提示（一套话术面：进行中「更新中」/ 重试 / 失败）——预览全程
-          // 保持可见，中间态不闪断
-          <div
-            className={cn(
-              "absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 border-b px-3 py-1.5 text-xs backdrop-blur",
-              phase.notice.failed
-                ? "bg-destructive/10 text-destructive"
-                : "bg-background/95 text-muted-foreground",
-            )}
-          >
-            {phase.notice.failed ? (
-              <TriangleAlert className="size-3.5 shrink-0" />
-            ) : (
-              <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
-            )}
-            {phase.notice.text}
-            {phase.notice.recovery === "restart" ? restart : null}
-            {phase.notice.recovery === "refix" ? refix : null}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {failedNotice ? (
+          // 失败态细条（#124）：非悬浮顶部占位——占自己高度、把预览下推，不叠预览
+          <div className="flex shrink-0 items-center justify-center gap-2 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+            <TriangleAlert className="size-3.5 shrink-0" />
+            {failedNotice.text}
+            {recoveryAction(failedNotice.recovery)}
           </div>
         ) : null}
         {/* 舞台浅色锁定（#80）：预览里的系统是用户产物，html.dark 也翻转不了；
-            空态提示也落锁内——视口即浅色，如同真浏览器的空白页（轻提示与工具条
-            是浮在视口上的平台件，归锁外随平台走） */}
-        <div className="light-lock h-full min-h-0 bg-background text-foreground">
+            空态提示也落锁内——视口即浅色，如同真浏览器的空白页（失败细条与工具条
+            是平台件，归锁外随平台走——细条占位下推、工具条浮在视口） */}
+        <div className="light-lock min-h-0 flex-1 bg-background text-foreground">
           {pageLive ? (
             // 双层壳同构（仅样式差异）：设备切换不重挂 iframe——宽度是布局变化
             // 不是页面重建，用户的系统不丢状态
@@ -256,8 +259,7 @@ export function SystemPanel({
             <PanelHint>
               <TriangleAlert className="size-5 text-destructive" />
               <p>{phase.text}</p>
-              {phase.recovery === "restart" ? restart : null}
-              {phase.recovery === "refix" ? refix : null}
+              {recoveryAction(phase.recovery)}
             </PanelHint>
           ) : phase.kind === "connecting" ? (
             <PanelHint>

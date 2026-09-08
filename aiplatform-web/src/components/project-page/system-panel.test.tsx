@@ -309,3 +309,50 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("圈一下");
   });
 });
+
+/** 取包裹某段文案最近的一个 div/span 开标签（断言提示画在非悬浮元素里，#124）。 */
+function wrapperOpenTag(html: string, text: string): string {
+  const before = html.slice(0, html.indexOf(text));
+  const tags = before.match(/<(div|span)\b[^>]*>/g) ?? [];
+  return tags[tags.length - 1] ?? "";
+}
+
+describe("SystemPanel · #124 更新提示移出遮挡", () => {
+  it("run 中页面可见：「更新中」内联在浏览器条，不再悬浮叠预览", () => {
+    const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
+
+    expect(html).toContain("正在更新系统，完成后自动刷新");
+    // 画在浏览器条内联：提示在地址胶囊之前（旧悬浮遮罩在地址之后的内容区）
+    expect(html.indexOf("正在更新系统，完成后自动刷新")).toBeLessThan(
+      html.indexOf("http://localhost:42659"),
+    );
+    // 非悬浮：提示元素不是 absolute 定位（旧：absolute inset-x-0 top-0 遮罩）
+    expect(wrapperOpenTag(html, "正在更新系统，完成后自动刷新")).not.toContain("absolute");
+  });
+
+  it("页面可见且超限终态：失败提示为非悬浮顶部占位细条（占自己高度、下推预览）", () => {
+    const html = renderPanel({
+      generatedAt: "2026-08-31T08:00:00Z",
+      coderStatus: "error",
+      url: "http://localhost:42659",
+    });
+
+    expect(html).toContain("修正遇到了问题");
+    expect(html).toContain("重新修改");
+    // 非悬浮：失败细条不是 absolute 定位（旧：absolute 遮罩叠在预览上）
+    expect(wrapperOpenTag(html, "修正遇到了问题")).not.toContain("absolute");
+  });
+
+  it("页面可见且从未生成：失败细条带「重新发起」入口（非「重新修改」）", () => {
+    const html = renderPanel({
+      generatedAt: null,
+      coderStatus: "error",
+      url: "http://localhost:42659",
+    });
+
+    expect(html).toContain("生成遇到了问题");
+    expect(html).toContain("重新发起");
+    expect(html).not.toContain("重新修改");
+    expect(wrapperOpenTag(html, "生成遇到了问题")).not.toContain("absolute");
+  });
+});

@@ -39,6 +39,23 @@ public class AgentscopeProperties {
      */
     private Integer maxIters;
 
+    /**
+     * 压缩触发阈值（token 数，显式值）。框架动态缺省 = contextWindow(1M) - reserved(20k)
+     * ≈ 980K，形同虚设——压缩在真正溢出前不触发；且框架 token 估算（2.5 字符/token）
+     * 对中文系统性低估 1.25–2.5×（中文实际 1–2 字符/token），主智能体（中文对话）
+     * 尤甚。取 400K：按最坏低估比 2.5× 折算 est 400K ≈ 真实 1M，正好在
+     * context_length_exceeded 硬上限前触发（streamEvents 路径天然受益，「炸后下轮」
+     * 因下一轮先压缩再跑而自愈，#108 / ADR-0012）。null = 回框架动态缺省。
+     */
+    private Integer compactionTriggerTokens = 400_000;
+
+    /**
+     * 压缩（摘要）专用模型串（provider:modelId，压缩模型档位）。缺省取 flash 便宜档——
+     * 执行体（pro）会话的压缩不再烧 pro；主智能体本就 flash，同档无成本差但显式化
+     * （ADR-0012：框架缺省值转平台显式配置）。null/空 = 回框架缺省（用主模型）。
+     */
+    private String compactionModel = "deepseek:deepseek-v4-flash";
+
     public String getAgentName() {
         return agentName;
     }
@@ -85,5 +102,21 @@ public class AgentscopeProperties {
 
     public void setMaxIters(Integer maxIters) {
         this.maxIters = maxIters;
+    }
+
+    public Integer getCompactionTriggerTokens() {
+        return compactionTriggerTokens;
+    }
+
+    public void setCompactionTriggerTokens(Integer compactionTriggerTokens) {
+        this.compactionTriggerTokens = compactionTriggerTokens;
+    }
+
+    public String getCompactionModel() {
+        return compactionModel;
+    }
+
+    public void setCompactionModel(String compactionModel) {
+        this.compactionModel = compactionModel;
     }
 }

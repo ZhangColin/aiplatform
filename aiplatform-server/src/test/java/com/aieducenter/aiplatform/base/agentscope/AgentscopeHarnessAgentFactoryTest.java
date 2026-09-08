@@ -10,6 +10,7 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -180,6 +181,8 @@ class AgentscopeHarnessAgentFactoryTest {
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
+        // 压缩接线守护（#108）：工厂显式配 compactionConfig → 压缩中间件非空（非 disableCompaction）
+        assertThat(agent.getCompactionHook()).isNotNull();
     }
 
     /**
@@ -214,5 +217,35 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
 
         assertThat(readOnly.getSubagentAgentManager()).isNull();
+    }
+
+    /**
+     * 压缩显式配置（#108 / ADR-0012）：触发阈值 400K + flash 档（取值与依据见
+     * AgentscopeProperties）。模型解析需 API key（ModelRegistry 建 deepseek 模型读
+     * DEEPSEEK_API_KEY），无 key 跳过。
+     */
+    @Test
+    void given_default_properties_when_compaction_config_then_explicit_threshold_and_flash_model() {
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过模型解析断言");
+
+        CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
+                new AgentscopeProperties());
+
+        assertThat(config.getTriggerTokens()).isEqualTo(400_000);
+        assertThat(config.getModel()).isNotNull();
+        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-flash");
+    }
+
+    @Test
+    void given_blank_compaction_model_when_compaction_config_then_no_model_override() {
+        // 压缩模型档为空串 = 回框架缺省（用主模型）；触发阈值照常显式——无 API key 也可断言
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setCompactionModel("");
+
+        CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(properties);
+
+        assertThat(config.getTriggerTokens()).isEqualTo(400_000);
+        assertThat(config.getModel()).isNull();
     }
 }

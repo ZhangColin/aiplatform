@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
@@ -56,8 +57,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentSubagentSupplier subagentSupplier, AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
-                        name, sysPrompt, modelString, workspace, agentKey,
-                        properties.getMaxIters()));
+                        name, sysPrompt, modelString, workspace, agentKey, properties));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -94,7 +94,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier,
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
-            String agentKey, Integer maxIters) {
+            String agentKey, AgentscopeProperties properties) {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
@@ -112,9 +112,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 携带（框架 ISOLATED 工作区布局），工厂不另建机制
         subagentSupplier.subagentsFor(agentKey, workspace)
                 .forEach(builder::subagent);
-        if (maxIters != null) {
-            builder.maxIters(maxIters);
+        if (properties.getMaxIters() != null) {
+            builder.maxIters(properties.getMaxIters());
         }
+        // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩模型档，让压缩在
+        // context_length_exceeded 前触发——取值与依据见 AgentscopeProperties。
+        builder.compaction(compactionConfig(properties));
         switch (workspace) {
             case AgentWorkspace.Local local -> {
                 if (local.root() != null) {
@@ -152,5 +155,22 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .abstractFilesystem(new DockerExecFilesystem(containerName))
                 .disableMemoryHooks()
                 .disableMemoryTools();
+    }
+
+    /**
+     * 压缩配置装配：把配置的触发阈值 + 压缩模型档落到 {@link CompactionConfig}，空值
+     * 回框架缺省（保留量/裁剪亦走框架缺省）——取值与依据见 {@link AgentscopeProperties}
+     * （#108 / ADR-0012）。
+     */
+    static CompactionConfig compactionConfig(AgentscopeProperties properties) {
+        CompactionConfig.Builder config = CompactionConfig.builder();
+        if (properties.getCompactionTriggerTokens() != null) {
+            config.triggerTokens(properties.getCompactionTriggerTokens());
+        }
+        String compactionModel = properties.getCompactionModel();
+        if (compactionModel != null && !compactionModel.isBlank()) {
+            config.model(compactionModel);
+        }
+        return config.build();
     }
 }

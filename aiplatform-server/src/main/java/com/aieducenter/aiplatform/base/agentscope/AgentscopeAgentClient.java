@@ -11,7 +11,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.ConfirmResult;
-import io.agentscope.core.event.ModelCallEndEvent;
 import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallDeltaEvent;
@@ -27,8 +26,6 @@ import io.agentscope.harness.agent.HarnessAgent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
-import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
-import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 
@@ -39,10 +36,11 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 收口，runId 锚定；runTurn 前的前段失败——模型解析/agent 工厂构建/工作区解析
  * ——同样经 error 事件表达，异步轨道起跑失败不零事件死寂）；同一事件流恒经
  * {@link AgentscopePartsMapper} 产消息部件事件（part-*，parts 契约：动作卡全生命
- * 周期 + 解说段，收口/挂起事件前出解说尾段）；模型调用事件（ReAct 每迭代
- * 一条 ModelCallEnd）五桶累积，对话结束（含失败轮，已耗 token 如实计量）按命令的
- * usageContext 上报恰一条 UsageEvent（幂等键 agent-usage-{runId}[-{replyId}]，
- * engine=agentscope；归属为空不发明、零用量不报）。
+ * 周期 + 解说段，收口/挂起事件前出解说尾段）；用量计量走模型边界（#109）——主模型
+ * 与压缩模型经 {@link MeteredModel} 包装、每次 {@code stream()} 收口直报
+ * {@link UsageEventSink}（主循环每迭代 + 压缩摘要 + 记忆抽取全收口，取代只认
+ * ModelCallEndEvent 的旧单一来源；含失败轮，已耗 token 如实计量），本轮计量上下文
+ * 经 {@link MeteringScope} ThreadLocal 挂/摘（归属为空不发明、零用量不报）。
  *
  * <p><b>挂起与续跑（作答机制，#83 通道分家）</b>：AgentScope 的确认挂起
  * （RequireUserConfirmEvent——ask_user 提问或需批准的工具操作）= 本轮流软终点——
@@ -142,8 +140,8 @@ public class AgentscopeAgentClient {
      * ConfirmResult（用户答复/批准/拒绝）经同一 (userId, sessionId) 恢复上下文
      * 续跑——不重发 run-start（run 已开场），可再挂起（question-raised /
      * permission-required 再发）或正常收口（run-finish）。计量幂等键带 replyId
-     * 后缀（挂起轮已报过 agent-usage-{runId}）。挂起轮软终点以返回值
-     * {@link AgentReply#suspension()} 表达。
+     * 短后缀（挂起轮已报过 agent-usage-{runId}；短形见 {@link #shortReplyKey}）。
+     * 挂起轮软终点以返回值 {@link AgentReply#suspension()} 表达。
      */
     public AgentReply resume(AgentResume resume, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
@@ -166,7 +164,7 @@ public class AgentscopeAgentClient {
                 .build();
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
-                USAGE_EVENT_PREFIX + resume.runId() + "-" + resume.replyId(),
+                USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), null, sink);
         if (result.error() != null) {
             throw new IllegalStateException("智能体续跑失败（runId=" + resume.runId()
@@ -299,23 +297,30 @@ public class AgentscopeAgentClient {
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐个映射发射，挂起
      * （RequireUserConfirm）按分诊发 question-raised / permission-required 后流终止
-     * 且不发 run-finish；正常收口发 run-finish；异常发 error 事件。用量无论成败
-     * 如实上报（幂等键由调用方给）；超时取逐轮指定（可空 = 内核配置默认）。
+     * 且不发 run-finish；正常收口发 run-finish；异常发 error 事件。用量由模型边界
+     * 直报（本方法只挂/摘 {@link MeteringScope} 计量上下文，幂等键前缀由调用方给）；
+     * 超时取逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
             Consumer<AgentEvent> sink) {
         StringBuilder text = new StringBuilder();
-        AtomicReference<TokenUsage> usage = new AtomicReference<>(TokenUsage.ZERO);
         AtomicReference<String> finish = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
         AtomicReference<Boolean> suspendedQuestion = new AtomicReference<>();
         AgentscopeEventMapper mapper = prepared.mapper();
+        // 模型边界计量（#109）：本轮用量由 MeteredModel 在每次 stream() 收口直报，
+        // 此处只挂当前轮计量上下文（ThreadLocal）——主循环/压缩/记忆抽取共用同一模型
+        // 实例、据此归入本轮；无 usageContext 不挂（不上报，底座不发明归属）
+        if (usageContext != null) {
+            MeteringScope.enter(new MeteringScope(runId, prepared.ctx().getSessionId(),
+                    usageContext, clock, usageEventSink, usageIdempotencyKey));
+        }
         try {
             prepared.agent().streamEvents(messages, prepared.ctx())
                     .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
                             prepared.fileChanges(), prepared.durations(),
-                            sink, text, usage, finish, suspended, suspendedQuestion))
+                            sink, text, finish, suspended, suspendedQuestion))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
             drainParts(prepared.parts(), sink);
@@ -338,8 +343,7 @@ public class AgentscopeAgentClient {
         }
 
         finally {
-            reportUsage(usageIdempotencyKey, usage.get(), runId,
-                    prepared.ctx().getSessionId(), prepared.modelRef(), usageContext);
+            MeteringScope.exit();
         }
     }
 
@@ -367,7 +371,7 @@ public class AgentscopeAgentClient {
     private void handleEvent(io.agentscope.core.event.AgentEvent event,
             AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges,
             StageDurationFacts durations,
-            Consumer<AgentEvent> sink, StringBuilder text, AtomicReference<TokenUsage> usage,
+            Consumer<AgentEvent> sink, StringBuilder text,
             AtomicReference<String> finish, AtomicReference<RequireUserConfirmEvent> suspended,
             AtomicReference<Boolean> suspendedQuestion) {
         // 阶段耗时事实（#111 收口扩载）：全事件单入口（计时源 = 事件 createdAt）——
@@ -375,9 +379,6 @@ public class AgentscopeAgentClient {
         durations.onEvent(event);
         if (event instanceof TextBlockDeltaEvent delta) {
             text.append(delta.getDelta());
-        }
-        else if (event instanceof ModelCallEndEvent end) {
-            usage.updateAndGet(total -> total.plus(AgentscopeUsageMapper.toTokenUsage(end.getUsage())));
         }
         else if (event instanceof RequireUserConfirmEvent confirm) {
             // 挂起：先出部件解说尾段（确认/问答卡前不留解说尾巴）再按分诊发挂起事件
@@ -419,21 +420,14 @@ public class AgentscopeAgentClient {
         parts.drain().forEach(sink);
     }
 
-    private void reportUsage(String idempotencyKey, TokenUsage total, String runId,
-            String sessionId, ModelRef modelRef, UsageContext usageContext) {
-        if (usageContext == null || total.total() <= 0) {
-            return;
-        }
-        usageEventSink.report(new UsageEvent(
-                idempotencyKey,
-                clock.instant(),
-                usageContext.subject(),
-                runId,
-                sessionId,
-                modelRef.provider(),
-                modelRef.modelId(),
-                usageContext.dims(),
-                total));
+    /**
+     * resume 幂等键的 replyId 短形（截前 8 字符）：{@code met_usage_events.event_id}
+     * 列限 64——replyId 是引擎 32 位 UUID 十六进制，完整拼进 resume 键再叠逐调用序号
+     * 会超长；截前 8 位足以区分同 run 的少数续跑轮次（replyId 为随机十六进制，前
+     * 8 位 ~32bit 熵、轮次极少，碰撞可忽略）。短串（测试形 "reply-9"）原样返回。
+     */
+    static String shortReplyKey(String replyId) {
+        return replyId != null && replyId.length() > 8 ? replyId.substring(0, 8) : replyId;
     }
 
     private static String toJson(Map<String, Object> input) {

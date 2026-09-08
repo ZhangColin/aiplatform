@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
+import io.agentscope.core.model.ModelRegistry;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
@@ -98,7 +99,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
-                .model(modelString)
+                // 模型边界计量（#109）：主模型经 MeteredModel 包装——主循环每次
+                // 迭代的 stream() 收口报用量（取代只认 ModelCallEndEvent 的旧源）
+                .model(MeteredModel.wrap(ModelRegistry.resolve(modelString), modelString))
                 .stateStore(stateStore)
                 .toolkit(toolkitSupplier.toolkitFor(agentKey, workspace))
                 // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
@@ -123,6 +126,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 if (local.root() != null) {
                     builder.workspace(local.root());
                 }
+                // 记忆钩子关闭（#109）：MemoryFlushMiddleware 的 fire-and-forget flush
+                // 跑 boundedElastic 线程、看不到本轮计量 ThreadLocal——其 model.stream
+                // 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact 同步承担（已计量），
+                // 关此周期 flush 不丢抽取；亦与项目工作区同口径（记忆不进包）。
+                builder.disableMemoryHooks();
             }
             case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName())
                     // #83 权限确认触发面：内核 shell 退位——执行体的命令走业务侧
@@ -160,7 +168,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     /**
      * 压缩配置装配：把配置的触发阈值 + 压缩模型档落到 {@link CompactionConfig}，空值
      * 回框架缺省（保留量/裁剪亦走框架缺省）——取值与依据见 {@link AgentscopeProperties}
-     * （#108 / ADR-0012）。
+     * （#108 / ADR-0012）。压缩（摘要）模型同样经 {@link MeteredModel} 包装（#109）：
+     * 压缩链的摘要与 flushBeforeCompact 记忆抽取共用该模型实例直调 stream()，包装
+     * 后用量归入当前轮计量（flash 档与主模型 pro 档各自归位）。
      */
     static CompactionConfig compactionConfig(AgentscopeProperties properties) {
         CompactionConfig.Builder config = CompactionConfig.builder();
@@ -169,7 +179,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         }
         String compactionModel = properties.getCompactionModel();
         if (compactionModel != null && !compactionModel.isBlank()) {
-            config.model(compactionModel);
+            config.model(MeteredModel.wrap(ModelRegistry.resolve(compactionModel), compactionModel));
         }
         return config.build();
     }

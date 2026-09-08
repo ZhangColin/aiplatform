@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -40,6 +39,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,8 +51,9 @@ import reactor.core.publisher.Flux;
 
 /**
  * {@link AgentscopeAgentClient}：事件序（run-start → 过程事件 →
- * run-finish / error）、文本增量汇聚、RuntimeContext 组装、模型调用事件 →
- * UsageEvent 恰一条、workspaceId → 项目 dev 工作区、挂起语义与 resume。
+ * run-finish / error）、文本增量汇聚、RuntimeContext 组装、计量上下文挂/摘
+ * （#109 模型边界计量，用量由 {@link MeteredModel} 直报）、workspaceId → 项目
+ * dev 工作区、挂起语义与 resume。
  */
 @ExtendWith(MockitoExtension.class)
 class AgentscopeAgentClientTest {
@@ -73,9 +74,6 @@ class AgentscopeAgentClientTest {
 
     @Mock
     private io.agentscope.core.state.AgentStateStore stateStore;
-
-    @Captor
-    private ArgumentCaptor<UsageEvent> usageCaptor;
 
     @Captor
     private ArgumentCaptor<RuntimeContext> contextCaptor;
@@ -249,49 +247,51 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_multiple_model_call_ends_when_converse_then_usage_summed_and_reported_once() {
-        givenStream(
-                new ModelCallEndEvent("r-1", new ChatUsage(100, 40, 20, 0.5)),
-                new TextBlockDeltaEvent("r-1", "b-1", "答"),
-                new ModelCallEndEvent("r-1", new ChatUsage(60, 10, 0, 0.2)));
+    void given_usage_context_when_converse_then_metering_scope_entered_and_cleared() {
+        // #109 模型边界计量：本轮计量上下文（ThreadLocal）在 streamEvents 期间挂起、
+        // 收口摘除——主循环/压缩/记忆抽取共用同一模型实例据此归入本轮
+        AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
+        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
+            duringStream.set(MeteringScope.current());
+            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+        });
 
         client.converse(command("deepseek:deepseek-chat",
                         new UsageContext("prj-1", Map.of("agentKind", "ba"))),
                 event -> {
                 });
 
-        verify(usageEventSink).report(usageCaptor.capture());
-        UsageEvent event = usageCaptor.getValue();
-        assertThat(event.eventId()).isEqualTo("agent-usage-run-1");
-        assertThat(event.ts()).isEqualTo(Instant.parse("2026-08-25T10:00:00Z"));
-        assertThat(event.subject()).isEqualTo("prj-1");
-        assertThat(event.runId()).isEqualTo("run-1");
-        assertThat(event.sessionId()).isEqualTo("s-1");
-        assertThat(event.provider()).isEqualTo("deepseek");
-        assertThat(event.model()).isEqualTo("deepseek-chat");
-        assertThat(event.dims()).containsEntry("agentKind", "ba");
-        assertThat(event.tokens().input()).isEqualTo(140);
-        assertThat(event.tokens().output()).isEqualTo(50);
-        assertThat(event.tokens().cacheRead()).isEqualTo(20);
-        assertThat(event.tokens().total()).isPositive();
+        assertThat(duringStream.get()).isNotNull();
+        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test
-    void given_no_usage_context_when_converse_then_metering_skipped() {
-        givenStream(new ModelCallEndEvent("r-1", new ChatUsage(10, 5, 0, 0.1)));
+    void given_no_usage_context_when_converse_then_no_metering_scope() {
+        // 无 usageContext 不挂计量上下文（底座不发明归属——不报用量）
+        AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
+        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
+            duringStream.set(MeteringScope.current());
+            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+        });
 
         client.converse(command(null, null), event -> {
         });
 
-        verifyNoInteractions(usageEventSink);
+        assertThat(duringStream.get()).isNull();
     }
 
     @Test
-    void given_no_model_call_end_when_converse_then_zero_usage_not_reported() {
-        givenStream(new TextBlockDeltaEvent("r-1", "b-1", "空"));
+    void given_model_call_end_when_converse_then_no_metering_from_events() {
+        // 旧单一来源退役（#109）：ModelCallEndEvent 不再触发用量上报——改为模型边界
+        // 计量（MeteredModel 每次 stream() 收口直报）
+        givenStream(new ModelCallEndEvent("r-1", new ChatUsage(100, 40, 20, 0.5)));
 
-        client.converse(command(null, new UsageContext("prj-1", Map.of())), event -> {
-        });
+        client.converse(command("deepseek:deepseek-chat",
+                        new UsageContext("prj-1", Map.of())),
+                event -> {
+                });
 
         verifyNoInteractions(usageEventSink);
     }
@@ -541,21 +541,19 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_stream_error_after_model_call_when_converse_then_consumed_usage_still_reported() {
+    void given_stream_error_when_converse_then_metering_scope_cleared() {
+        // 失败轮也摘计量上下文（finally）——不残留跨轮污染；失败轮已耗 token 由
+        // MeteredModel 在 stream() 收口如实计量（见 MeteredModelTest）
         when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
-                .thenReturn(Flux.concat(
-                        Flux.just(new ModelCallEndEvent("r-1", new ChatUsage(100, 40, 0, 0.5))),
-                        Flux.error(new RuntimeException("mid-stream boom"))));
+                .thenReturn(Flux.error(new RuntimeException("mid-stream boom")));
 
         assertThatThrownBy(() -> client.converse(
                         command(null, new UsageContext("prj-1", Map.of())), event -> {
                         }))
                 .isInstanceOf(IllegalStateException.class);
 
-        verify(usageEventSink).report(usageCaptor.capture());
-        assertThat(usageCaptor.getValue().tokens().input()).isEqualTo(100);
-        assertThat(usageCaptor.getValue().tokens().output()).isEqualTo(40);
+        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test
@@ -734,6 +732,15 @@ class AgentscopeAgentClientTest {
         when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
                 .thenReturn(List.of());
         assertThat(client.hasAskingToolCall("alice", "s-1")).isFalse();
+    }
+
+    @Test
+    void given_long_reply_id_when_shortened_then_idempotency_key_fits_column_limit() {
+        // #109 模型边界计量：resume 幂等键 = agent-usage-{runId}-{replyId 短形}-{seq}，
+        // replyId（引擎 32 位 UUID 十六进制）截前 8 位防超 event_id 列限 64；短串原样
+        assertThat(AgentscopeAgentClient.shortReplyKey(
+                "0123456789abcdef0123456789abcdef")).isEqualTo("01234567");
+        assertThat(AgentscopeAgentClient.shortReplyKey("reply-9")).isEqualTo("reply-9");
     }
 
     private static Msg toolUseMessage(ToolCallState state) {

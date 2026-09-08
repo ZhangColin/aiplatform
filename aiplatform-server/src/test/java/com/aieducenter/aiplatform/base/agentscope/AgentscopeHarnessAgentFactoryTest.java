@@ -234,6 +234,8 @@ class AgentscopeHarnessAgentFactoryTest {
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
         assertThat(config.getModel()).isNotNull();
+        // #109 模型边界计量：压缩（摘要）模型经 MeteredModel 包装（getModelName 委托穿透）
+        assertThat(config.getModel()).isInstanceOf(MeteredModel.class);
         assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-flash");
     }
 

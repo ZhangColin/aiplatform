@@ -12,7 +12,8 @@
  *       AgentEventTypes，映射表单点 AgentscopeEventMapper）</li>
  *   <li>会话恢复：AgentState 落 PostgreSQL（cat_agent_state 承载全部智能体会话，
  *       (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑</li>
- *   <li>对话级用量埋点（模型调用事件 → UsageEvent，run 结束上报恰一条）</li>
+ *   <li>用量埋点（模型边界计量 #109：每次 {@code stream()} 收口 → UsageEvent，
+ *       主循环 + 压缩摘要 + 记忆抽取全收口，取代只认 ModelCallEndEvent 的旧源）</li>
  *   <li>会话级任务执行器（同会话一次一轮串行、跨会话并行）</li>
  *   <li>工具集 SPI（AgentToolkitSupplier）：智能体资产（ask_user / savePrd 等业务
  *       工具）归业务侧注入，本包不供工具</li>

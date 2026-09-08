@@ -78,6 +78,47 @@ export function previewTrouble(error: unknown): boolean {
   return error != null && !isPreviewNotServing(error);
 }
 
+/**
+ * 地址栏 goto 解析（#125 地址胶囊改可编辑跳转）：把用户输入解析为应用 origin 内
+ * 的目标地址——路径拼接（相对/绝对路径归到 origin 根）、同源绝对 URL 放行、
+ * 跨源绝对 URL 拒绝（返回 undefined，不跳出沙箱预览）。baseUrl 无有效层级 origin
+ * （about:blank 等不透明 origin、或无法解析）也返回 undefined（无可导航 origin）。
+ */
+export function resolvePreviewAddress(baseUrl: string, input: string): string | undefined {
+  const origin = tryOrigin(baseUrl);
+  if (!origin) return undefined;
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+
+  // 带 scheme 的绝对 URL：只放行同源，跨源拒绝
+  const absolute = tryUrl(trimmed);
+  if (absolute) return absolute.origin === origin ? absolute.href : undefined;
+
+  // 其余视作应用内路径：拼到 origin 根，再校验未逃逸（协议相对 //host 等会换 origin）
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  const resolved = new URL(path, origin);
+  return resolved.origin === origin ? resolved.href : undefined;
+}
+
+/** URL → origin；解析失败或非层级 origin（不透明 origin 串为 "null"）返回 undefined。 */
+function tryOrigin(raw: string): string | undefined {
+  try {
+    const origin = new URL(raw).origin;
+    return origin === "null" ? undefined : origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 绝对 URL（带 scheme）才解析成功；相对输入抛错 → undefined。 */
+function tryUrl(raw: string): URL | undefined {
+  try {
+    return new URL(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 /** 系统面板呈现档位的唯一推导入口。 */
 export function systemPanelPhase(input: {
   coderStatus?: CoderRunStatus;

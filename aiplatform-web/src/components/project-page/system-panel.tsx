@@ -24,7 +24,12 @@ import {
   parseExitEvent,
   type AnnotationKind,
 } from "@/lib/preview/annotation";
-import { TROUBLE_NOTICE, previewActive, systemPanelPhase } from "@/lib/preview/state";
+import {
+  TROUBLE_NOTICE,
+  previewActive,
+  resolvePreviewAddress,
+  systemPanelPhase,
+} from "@/lib/preview/state";
 import { useAnnotationStore } from "@/lib/store/annotation";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
@@ -53,10 +58,11 @@ const BAR_BUTTON_CLASS =
  * key，手动刷新的本地节拍并入同 key）；超限终态给人工兜底入口——从未生成
  * 「重新发起」、修正轮「重新修改」，正常态全无。
  *
- * <p>浏览器条（#80）：地址胶囊（真地址，诚实口径）+ 更新中轻状态内联（#124）+
- * 桌面/手机宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+
- * 手动刷新（强制重挂）+ 新窗口打开（/preview/:id 独立页）。舞台浅色锁定：预览
- * 里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
+ * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
+ * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
+ * 宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+ 手动刷新
+ * （强制重挂、清导航回 base）+ 新窗口打开（/preview/:id 独立页）。舞台浅色锁定：
+ * 预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
  */
 export function SystemPanel({
   projectId,
@@ -81,6 +87,12 @@ export function SystemPanel({
   const active = previewActive(coderStatus, generatedAt);
   const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
+  // 地址栏 goto（#125）：navigatedUrl = 用户导航覆盖（解析后落在 origin 内），未导航
+  // 回落到 url；addressDraft = 输入草稿（null = 未在输入，回显当前地址——SSR 无 effect 也
+  // 能正确出地址）。iframe 源取 frameUrl，导航/刷新驱动重挂。
+  const [navigatedUrl, setNavigatedUrl] = useState<string | undefined>(undefined);
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const frameUrl = navigatedUrl ?? url ?? "";
   // 圈注标注态（#97）：非常驻——activeTool 非空即标注态，对 iframe 发 postMessage
   // 进出；预览跨源（容器暴露端口），回传锚校验 origin = 预览源（防伪锚）
   const [activeTool, setActiveTool] = useState<AnnotationKind | null>(null);
@@ -139,16 +151,28 @@ export function SystemPanel({
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
+  /** 地址提交（#125）：解析草稿 → origin 内命中则导航（跨源/空/无 origin 拒绝，回显当前）。 */
+  const submitAddress = () => {
+    if (!url) return;
+    const target = resolvePreviewAddress(url, addressDraft ?? "");
+    if (target) setNavigatedUrl(target);
+    setAddressDraft(null); // 命中：navigatedUrl 驱动 frameUrl 回显新地址；拒绝：回显当前地址
+  };
 
   return (
     // 平铺无圆角（#79 成果区口径）：与对话列同墙同地，不再套浮起卡片
     <div className="flex h-full min-h-0 flex-col">
-      {/* 浏览器条（#80）：刷新 + 地址胶囊 + 设备切换 + 新窗口 */}
+      {/* 浏览器条（#80）：刷新 + 地址框 + 设备切换 + 新窗口 */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-muted/60 px-3">
         <button
           type="button"
           disabled={!pageLive}
-          onClick={() => setRefreshTick((t) => t + 1)}
+          onClick={() => {
+            // 刷新 = 回到应用 base 地址重挂（清导航覆盖与草稿）
+            setNavigatedUrl(undefined);
+            setAddressDraft(null);
+            setRefreshTick((t) => t + 1);
+          }}
           title="刷新预览"
           aria-label="刷新预览"
           className={BAR_BUTTON_CLASS}
@@ -162,9 +186,24 @@ export function SystemPanel({
             <span className="truncate">{updatingNotice.text}</span>
           </span>
         ) : null}
-        <span className="mx-auto flex w-full max-w-md min-w-0 items-center justify-center truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
-          {active ? (url ?? "正在接通系统…") : "你的系统"}
-        </span>
+        <form
+          className="mx-auto flex w-full max-w-md min-w-0 items-center"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitAddress();
+          }}
+        >
+          <input
+            type="text"
+            value={addressDraft ?? frameUrl}
+            onChange={(e) => setAddressDraft(e.target.value)}
+            disabled={!pageLive}
+            aria-label="预览地址"
+            title="输入应用内路径跳转"
+            placeholder={active ? "正在接通系统…" : "你的系统"}
+            className="w-full truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60"
+          />
+        </form>
         <ToggleGroup
           value={[device]}
           onValueChange={(v) => {
@@ -235,9 +274,9 @@ export function SystemPanel({
                 {/* key 含预览纪元 + 手动刷新节拍：run 完成信号或手动刷新驱动重挂
                     （同 URL 也强制重建 iframe），设备切换不动 key */}
                 <iframe
-                  key={previewFrameKey(url, epoch + refreshTick)}
+                  key={previewFrameKey(frameUrl, epoch + refreshTick)}
                   ref={iframeRef}
-                  src={url}
+                  src={frameUrl}
                   title="系统预览"
                   className="h-full w-full border-0 bg-white"
                   onLoad={() => {

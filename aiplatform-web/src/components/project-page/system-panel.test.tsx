@@ -270,23 +270,36 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
 
   // ---------- #80 浏览器条 / 浅色锁定 / 工具条形态位 ----------
 
-  it("浏览器条三件就位（页面在时）：手动刷新、桌面/手机切换、新窗口打开；地址胶囊出真地址", () => {
+  it("浏览器条三件就位（页面在时）：手动刷新、桌面/手机切换、新窗口打开；地址框出真地址", () => {
     const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
 
     for (const label of ["刷新预览", "桌面预览", "手机预览", "在新窗口打开预览"]) {
       expect(html).toContain(`aria-label="${label}"`);
     }
-    // 胶囊出真地址（诚实口径，不演装饰域名）
-    expect(html.match(/http:\/\/localhost:42659/g)).toHaveLength(2); // 胶囊 + iframe src
+    // 地址框出真地址（诚实口径，不演装饰域名）：输入框 value + iframe src 两处
+    expect(html.match(/http:\/\/localhost:42659/g)).toHaveLength(2);
   });
 
-  it("无页面时刷新与新窗口不可点、工具条不出场（可点击的仅真实现的能力）", () => {
+  it("地址框可聚焦编辑（#125）：页面在时为可编辑 text input，回显真地址", () => {
+    const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
+
+    const inputTag = html.match(/<input[^>]*aria-label="预览地址"[^>]*>/)![0];
+    expect(inputTag).toContain('type="text"');
+    expect(inputTag).toContain('value="http://localhost:42659"');
+    expect(inputTag).not.toContain("readonly");
+    expect(inputTag).not.toContain('disabled=""');
+  });
+
+  it("无页面时刷新与新窗口不可点、地址框不可编辑、工具条不出场（可点击的仅真实现的能力）", () => {
     const html = renderPanel({ coderStatus: "running" });
 
     for (const label of ["刷新预览", "在新窗口打开预览"]) {
       const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))![0];
       expect(tag).toContain("disabled");
     }
+    // 无应用 origin 可解析 → 地址框禁用（不可聚焦编辑）
+    const inputTag = html.match(/<input[^>]*aria-label="预览地址"[^>]*>/)![0];
+    expect(inputTag).toContain('disabled=""');
     expect(html).not.toContain("待启用");
   });
 

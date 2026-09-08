@@ -1,11 +1,16 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useGenerationStore } from "@/lib/store/generation";
 
 import { SystemPanel } from "./system-panel";
+
+/** happy-dom 环境注入的 window.happyDOM（关 iframe 页面加载用，避免真实网络请求）。 */
+type HappyDOMWindow = Window & {
+  happyDOM: { settings: { disableIframePageLoading: boolean } };
+};
 
 /**
  * 系统面板浏览器条交互契约（#80 验收锚）：桌面/手机宽度切换不重挂 iframe
@@ -14,10 +19,13 @@ import { SystemPanel } from "./system-panel";
  * 先例（happy-dom 逐文件例外）；断言用原生属性。数据口 mock 掉；假地址用
  * about:blank——happy-dom 会真去 fetch iframe 的 src，真地址会发网络请求。
  */
+// 预览地址读口换可摆变量：默认 about:blank（happy-dom 不真去 fetch），
+// 导航类用例切真实 origin 以测路径解析（配合 disableIframePageLoading 关掉 iframe 加载）。
+let previewUrl = "about:blank";
 vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: (_projectId: string, active: boolean) =>
     active
-      ? { data: { url: "about:blank" }, error: undefined, isPending: false, isError: false }
+      ? { data: { url: previewUrl }, error: undefined, isPending: false, isError: false }
       : { data: undefined, error: undefined, isPending: false, isError: false },
 }));
 
@@ -45,6 +53,8 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useGenerationStore.setState({ generations: {} });
+  previewUrl = "about:blank";
+  (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = false;
 });
 
 describe("SystemPanel · 设备宽度切换（#80）", () => {
@@ -91,5 +101,52 @@ describe("SystemPanel · 新窗口打开（#80）", () => {
     fireEvent.click(screen.getByRole("button", { name: "在新窗口打开预览" }));
 
     expect(openSpy).toHaveBeenCalledWith("/preview/p1", "_blank", "noopener");
+  });
+});
+
+describe("SystemPanel · 地址栏 goto（#125）", () => {
+  it("地址框可聚焦编辑：输入可改值", () => {
+    renderPanel();
+
+    const input = screen.getByRole("textbox", { name: "预览地址" });
+    fireEvent.change(input, { target: { value: "/login" } });
+
+    expect((input as HTMLInputElement).value).toBe("/login");
+  });
+
+  describe("真实 origin 下（http://localhost:42659）", () => {
+    beforeEach(() => {
+      previewUrl = "http://localhost:42659";
+      // 关掉 happy-dom 的 iframe 页面加载（真地址不真发请求）——它仍会经 process.stderr
+      // 打一条「Iframe page loading is disabled」告警，这里一并吞掉（仅导航用例，scoped）
+      (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    });
+
+    it("提交路径 → 导航到应用 origin 内对应页（iframe 换新地址、地址框回显）", () => {
+      const { frame } = renderPanel();
+      expect(frame()!.getAttribute("src")).toBe("http://localhost:42659");
+
+      const input = screen.getByRole("textbox", { name: "预览地址" });
+      fireEvent.change(input, { target: { value: "/login" } });
+      fireEvent.submit(input.closest("form")!);
+
+      expect(frame()!.getAttribute("src")).toBe("http://localhost:42659/login");
+      expect(
+        (screen.getByRole("textbox", { name: "预览地址" }) as HTMLInputElement).value,
+      ).toBe("http://localhost:42659/login");
+    });
+
+    it("跨源输入拒绝：不跳出沙箱预览（iframe src 不变、地址框回显当前）", () => {
+      const { frame } = renderPanel();
+      const input = screen.getByRole("textbox", { name: "预览地址" });
+      fireEvent.change(input, { target: { value: "https://evil.com" } });
+      fireEvent.submit(input.closest("form")!);
+
+      expect(frame()!.getAttribute("src")).toBe("http://localhost:42659");
+      expect(
+        (screen.getByRole("textbox", { name: "预览地址" }) as HTMLInputElement).value,
+      ).toBe("http://localhost:42659");
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
   previewTrouble,
   workHintOf,
   previewActive,
+  resolvePreviewAddress,
   systemPanelPhase,
 } from "./state";
 
@@ -261,6 +262,42 @@ describe("previewTrouble · 真故障判定（#80 新窗口独立页与面板共
     expect(previewTrouble(notServingError())).toBe(false);
     expect(previewTrouble(new ApiError({ status: 500, code: "WSP_002", message: "x" }))).toBe(true);
     expect(previewTrouble(new Error("network"))).toBe(true);
+  });
+});
+
+describe("resolvePreviewAddress · 地址栏 goto 解析（#125）", () => {
+  const base = "http://localhost:42659";
+
+  it("路径拼接：绝对路径归到应用 origin 根", () => {
+    expect(resolvePreviewAddress(base, "/login")).toBe("http://localhost:42659/login");
+    expect(resolvePreviewAddress(base, "/")).toBe("http://localhost:42659/");
+  });
+
+  it("路径拼接：无前导斜杠的相对路径同样归到 origin 根，前后空白剔除", () => {
+    expect(resolvePreviewAddress(base, "login")).toBe("http://localhost:42659/login");
+    expect(resolvePreviewAddress(base, "  /admin  ")).toBe("http://localhost:42659/admin");
+  });
+
+  it("同源 URL：接受（保留原路径）", () => {
+    expect(resolvePreviewAddress(base, "http://localhost:42659/foo/bar")).toBe(
+      "http://localhost:42659/foo/bar",
+    );
+    expect(resolvePreviewAddress(base, "http://localhost:42659")).toBe("http://localhost:42659/");
+  });
+
+  it("跨源 URL：拒绝（返回 undefined，不跳出沙箱预览）", () => {
+    expect(resolvePreviewAddress(base, "https://evil.com")).toBeUndefined();
+    // 同主机异 scheme（http↔https）也是跨源
+    expect(resolvePreviewAddress(base, "https://localhost:42659/foo")).toBeUndefined();
+    // 协议相对（//host）会逃逸 origin——同样拒绝
+    expect(resolvePreviewAddress(base, "//evil.com")).toBeUndefined();
+  });
+
+  it("空输入 / base 无有效层级 origin：拒绝（无可导航 origin）", () => {
+    expect(resolvePreviewAddress(base, "")).toBeUndefined();
+    expect(resolvePreviewAddress(base, "   ")).toBeUndefined();
+    // about:blank 是不透明 origin（串 "null"），无 origin 可拼
+    expect(resolvePreviewAddress("about:blank", "/login")).toBeUndefined();
   });
 });
 

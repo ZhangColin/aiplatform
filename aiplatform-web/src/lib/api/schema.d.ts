@@ -795,8 +795,6 @@ export interface components {
             kindName?: string;
             containerName?: string;
             networkName?: string;
-            /** Format: int32 */
-            previewPort?: number;
             /** @description 1=置备中, 2=就绪, 3=失败 */
             status?: number;
             statusName?: string;

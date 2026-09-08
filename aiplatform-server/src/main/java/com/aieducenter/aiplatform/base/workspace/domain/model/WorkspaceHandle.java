@@ -8,25 +8,23 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
  * {@link WorkspaceLayout} 布局常量表共同构成 run 执行体/平台对沙箱的全部约定。
  *
  * <p>与库记录同形（{@code wsp_workspaces} 持久化后可随时重建），服务重启接回
- * = 从记录还原本句柄。previewPort 仅 dev 环境有意义（预览宿主端口），runtime
- * 环境为 0。networkName 是单容器化前的专属网络命名残留（物理网络已不再创建），
- * 仅作库记录形态保留。</p>
+ * = 从记录还原本句柄。预览网关化（#128）后不再有随机宿主端口——预览 URL 是
+ * workspaceId 子域（{@link WorkspaceNaming#previewUrl}），句柄不承载端口；
+ * networkName 即共享预览网络 {@link WorkspaceNaming#PREVIEW_NETWORK}。</p>
  */
 public record WorkspaceHandle(
         WorkspaceId workspaceId,
         EnvKind kind,
         String containerName,
-        String networkName,
-        int previewPort) {
+        String networkName) {
 
     public static WorkspaceHandle dev(WorkspaceId workspaceId, String containerName,
-                                      String networkName, int previewPort) {
-        return new WorkspaceHandle(workspaceId, EnvKind.DEV, containerName, networkName,
-                previewPort);
+                                      String networkName) {
+        return new WorkspaceHandle(workspaceId, EnvKind.DEV, containerName, networkName);
     }
 
     public static WorkspaceHandle runtime(WorkspaceId workspaceId, EnvKind kind,
                                           String containerName, String networkName) {
-        return new WorkspaceHandle(workspaceId, kind, containerName, networkName, 0);
+        return new WorkspaceHandle(workspaceId, kind, containerName, networkName);
     }
 }

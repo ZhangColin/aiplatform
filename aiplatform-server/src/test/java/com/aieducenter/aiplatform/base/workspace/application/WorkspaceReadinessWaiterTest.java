@@ -56,7 +56,7 @@ class WorkspaceReadinessWaiterTest {
         Workspace result = waiter(Duration.ofSeconds(1), Duration.ofMillis(1)).awaitReady(pending);
 
         assertThat(result.getStatus()).isEqualTo(ProvisioningStatus.READY);
-        assertThat(result.getPreviewPort()).isEqualTo(20001);
+        assertThat(result.getContainerName()).isEqualTo("ws-42");
     }
 
     @Test
@@ -125,7 +125,7 @@ class WorkspaceReadinessWaiterTest {
 
     private WorkspaceProvision devProvision(WorkspaceId id) {
         WorkspaceHandle handle = WorkspaceHandle.dev(id,
-                "ws-" + id.value() + "-dev", "net-" + id.value(), 20001);
+                "ws-" + id.value(), "previewnet");
         return new WorkspaceProvision(handle, List.of());
     }
 

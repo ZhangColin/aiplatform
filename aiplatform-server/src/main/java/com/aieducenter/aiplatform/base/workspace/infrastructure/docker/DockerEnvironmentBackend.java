@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.cartisan.core.exception.ApplicationException;
@@ -83,22 +84,26 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             .connectTimeout(Duration.ofSeconds(2))
             .build();
 
+    /** 预览基域名（#128）：URL 子域 {@code {id}.{previewBase}} 的基域名，开发 localhost。 */
+    @Value("${app.workspace.preview-base:localhost}")
+    private String previewBase = "localhost";
+
     @Override
     public WorkspaceProvision createWorkspace(WorkspaceId workspaceId, EnvKind kind) {
         if (kind != EnvKind.DEV) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_KIND_NOT_SUPPORTED);
         }
-        String containerName = WorkspaceNaming.containerName(workspaceId, EnvKind.DEV);
+        String containerName = WorkspaceNaming.containerName(workspaceId);
         // 幂等预清：移除同名残留容器（卷保留——重建即自愈，卷内数据原样续用）
         runSilently("docker", "rm", "-f", containerName);
         try {
             runSilently("docker", "volume", "create", volumeOf(containerName));
             ensureDevImage();
-            int previewPort = startDevContainer(workspaceId, containerName);
+            ensurePreviewNetwork();
+            startDevContainer(workspaceId, containerName);
             List<ProvisionedResource> resources = settleMiddleware(workspaceId, containerName);
             return WorkspaceProvision.of(
-                    WorkspaceHandle.dev(workspaceId, containerName, WorkspaceNaming.networkName(workspaceId),
-                            previewPort),
+                    WorkspaceHandle.dev(workspaceId, containerName, WorkspaceNaming.PREVIEW_NETWORK),
                     resources.toArray(new ProvisionedResource[0]));
         } catch (RuntimeException e) {
             // 置备中途失败：已落定的容器/卷无人回收即泄漏（#57），按命名约定级联回滚
@@ -180,13 +185,14 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     @Override
     public URI exposePort(WorkspaceHandle handle, int containerPort) {
-        // 渐进预览（#45）：端口映射在置备时已落定，URL 确定；这里只做探活——
-        // run 执行体按约定自己把应用跑在容器端口（#44 尽早起服），平台不再代起
-        // 静态兜底服务（用户会看到工作区文件列表的中间态，已出局）。探活通过才
-        // 返回 URL（调用方以此作「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，
-        // 前端轮询续探），不做长阻塞等待。
-        URI url = URI.create("http://localhost:" + handle.previewPort() + "/");
-        waitForAppServing(url, "工作区应用端口 " + handle.containerName(),
+        // 渐进预览（#45 + #128 网关化）：URL 是 workspaceId 子域（确定、不透明——经
+        // 平台 nginx 网关路由到 ws-{id}:8081），这里只做探活——run 执行体按约定自己
+        // 把应用跑在容器端口（#44 尽早起服），平台不再代起静态兜底服务。探活走容器内
+        // 回环（curl localhost:8081，收口判据不变），通过才返回 URL（调用方以此作
+        // 「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，前端轮询续探），不做长阻塞。
+        URI url = URI.create(WorkspaceNaming.previewUrl(handle.workspaceId(), previewBase));
+        waitForAppServingInContainer(handle.containerName(), containerPort,
+                "工作区应用端口 " + handle.containerName(),
                 PREVIEW_PROBE_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
         return url;
     }
@@ -265,24 +271,22 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 "printf '%s' '" + env + "' > " + WorkspaceLayout.absolute(WorkspaceLayout.ENV_FILE));
     }
 
-    private int startDevContainer(WorkspaceId workspaceId, String containerName) {
-        for (int attempt = 0; attempt < PORT_ATTEMPTS; attempt++) {
-            int previewPort = randomPort();
-            ExecResult r = runCapture("docker", "run", "-d", "--name", containerName,
-                    "-p", previewPort + ":" + EnvironmentBackend.DEV_APP_CONTAINER_PORT,
-                    "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
-                    "-w", WorkspaceLayout.ROOT,
-                    // 归位修复（ADR 0001）：pg 数据进卷（容器内回环，无其他对外端口）
-                    "-e", "PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR),
-                    "-e", "WORKSPACE_DB=" + WorkspaceNaming.databaseName(workspaceId),
-                    DEV_IMAGE, "sleep", "infinity");
-            if (r.exitCode() == 0) {
-                return previewPort;
-            }
-            // 端口被占等失败：清掉半启动容器再试
-            runSilently("docker", "rm", "-f", containerName);
-        }
-        throw new ApplicationException(WorkspaceMessage.PORT_ALLOCATION_FAILED);
+    private void startDevContainer(WorkspaceId workspaceId, String containerName) {
+        // #128 网关化：不再随机映射宿主端口——进共享预览网络（previewnet），网关按
+        // 容器名 ws-{id} DNS 路由（resolver 127.0.0.11），应用仍监听容器内 8081。
+        run("docker", "run", "-d", "--name", containerName,
+                "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
+                "-w", WorkspaceLayout.ROOT,
+                // 归位修复（ADR 0001）：pg 数据进卷（容器内回环，无对外端口）
+                "-e", "PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR),
+                "-e", "WORKSPACE_DB=" + WorkspaceNaming.databaseName(workspaceId),
+                DEV_IMAGE, "sleep", "infinity");
+    }
+
+    /** 共享预览网络（#128）：幂等创建（已存在时 docker 返回非 0，静默忽略）。 */
+    private void ensurePreviewNetwork() {
+        runSilently("docker", "network", "create", WorkspaceNaming.PREVIEW_NETWORK);
     }
 
     /** 轮询命令探针直至成功或超时（中间件/服务就绪等待）。 */
@@ -327,6 +331,23 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "等待资源就绪被中断");
         }
+    }
+
+    /**
+     * 容器内探活应用端口（#128 网关化：宿主无端口映射，探活走容器回环 curl——
+     * 收口判据「容器内 8081 探活」不变）。curl 退出码 0 = 收到 HTTP 响应（任何状态码
+     * 都算已监听），短窗未就绪按 {@code onTimeout} 口径抛。
+     */
+    private void waitForAppServingInContainer(String containerName, int port, String target,
+            Duration timeout, WorkspaceMessage onTimeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (execIn(containerName, "curl -s -o /dev/null http://localhost:" + port).ok()) {
+                return;
+            }
+            sleep();
+        }
+        throw new ApplicationException(onTimeout, "等待 " + target + " 就绪超时");
     }
 
     /** dev 镜像缺失时从 classpath 资源现场构建（首次含 pnpm install 较重，之后走缓存）。 */

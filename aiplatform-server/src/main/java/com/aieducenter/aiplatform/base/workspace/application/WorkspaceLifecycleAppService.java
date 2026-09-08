@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
@@ -52,6 +53,7 @@ public class WorkspaceLifecycleAppService {
     private final WorkspaceMapper workspaceMapper;
     private final WorkspaceProvisionAppService provisioner;
     private final WorkspaceReadinessWaiter readinessWaiter;
+    private final WorkspaceProperties properties;
 
     public WorkspaceLifecycleAppService(EnvironmentBackend environmentBackend,
                                         WorkspaceRepository workspaceRepository,
@@ -59,7 +61,8 @@ public class WorkspaceLifecycleAppService {
                                         ApplicationEventPublisher eventPublisher,
                                         WorkspaceMapper workspaceMapper,
                                         WorkspaceProvisionAppService provisioner,
-                                        WorkspaceReadinessWaiter readinessWaiter) {
+                                        WorkspaceReadinessWaiter readinessWaiter,
+                                        WorkspaceProperties properties) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
         this.transactionTemplate = transactionTemplate;
@@ -67,6 +70,7 @@ public class WorkspaceLifecycleAppService {
         this.workspaceMapper = workspaceMapper;
         this.provisioner = provisioner;
         this.readinessWaiter = readinessWaiter;
+        this.properties = properties;
     }
 
     /**
@@ -155,6 +159,18 @@ public class WorkspaceLifecycleAppService {
         transactionTemplate.executeWithoutResult(status -> eventPublisher.publishApplicationEvent(
                 PreviewReady.of(workspace.workspaceId(), url)));
         return url;
+    }
+
+    /**
+     * 预览 URL（不探活，纯派生，#128 网关化）：workspaceId 子域——「答地址不等于答在线」
+     * 的事实查询面（{@code ProjectFactsTool} 答「我后台的地址」）用，不触发探活与
+     * PreviewReady 事件。URL 形状与 {@link #exposePreview} 返回同源（同一
+     * {@link WorkspaceNaming#previewUrl} 纯函数）。
+     */
+    public URI previewUrl(String workspaceId) {
+        Workspace workspace = requireWorkspace(workspaceId);
+        return URI.create(WorkspaceNaming.previewUrl(workspace.workspaceId(),
+                properties.getPreviewBase()));
     }
 
     /**

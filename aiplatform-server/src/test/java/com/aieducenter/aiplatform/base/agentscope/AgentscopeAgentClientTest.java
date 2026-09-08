@@ -191,7 +191,7 @@ class AgentscopeAgentClientTest {
     @Test
     void given_workspace_id_when_converse_then_project_dev_workspace_resolved() {
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
+                WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
         client.converse(new AgentCommand("run-9", "写 PRD", null, null, "s-9", "alice",
@@ -199,7 +199,7 @@ class AgentscopeAgentClientTest {
                 });
 
         verify(factory).obtain(eq("platform-agent"), any(), eq("deepseek:deepseek-v4-flash"),
-                eq(new AgentWorkspace.ProjectDev("42", "ws-42-dev")), any());
+                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), any());
     }
 
     @Test
@@ -207,7 +207,7 @@ class AgentscopeAgentClientTest {
         // #86 主智能体对话姿态：workspaceReadOnly 开 → 同一容器解析为只读面（工厂据此
         // 关内核文件/shell 工具——写面结构性关闭）
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
+                WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
@@ -215,7 +215,7 @@ class AgentscopeAgentClientTest {
                 });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev")), eq("ASSISTANT"));
+                eq(new AgentWorkspace.ProjectReadOnly("42", "ws-42")), eq("ASSISTANT"));
     }
 
     @Test
@@ -235,7 +235,7 @@ class AgentscopeAgentClientTest {
         // #43 工具面按配置发放：命令的配置键穿透到 agent 工厂构建——主智能体与执行
         // 智能体同一工作区、不同角色 → 不同工具面的寻址腿
         when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 0));
+                WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
@@ -243,7 +243,7 @@ class AgentscopeAgentClientTest {
                 });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.ProjectDev("42", "ws-42-dev")), eq("main"));
+                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), eq("main"));
     }
 
     @Test

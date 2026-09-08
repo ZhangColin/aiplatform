@@ -1,9 +1,6 @@
 package com.aieducenter.aiplatform.base.workspace.infrastructure.docker;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -22,6 +19,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceVersions;
 import com.cartisan.core.exception.ApplicationException;
@@ -30,7 +28,6 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -66,12 +63,17 @@ class DockerEnvironmentBackendTest {
         WorkspaceHandle handle = provision.handle();
         String id = workspaceId.value();
         assertThat(handle.kind()).isEqualTo(EnvKind.DEV);
-        assertThat(handle.containerName()).isEqualTo("ws-" + id + "-dev");
-        // 单容器 all-in-one（ADR 0001）：dev 容器真实存活，pg/redis 容器与专属网络从未存在
+        assertThat(handle.containerName()).isEqualTo("ws-" + id);
+        // 单容器 all-in-one（ADR 0001）：dev 容器真实存活，pg/redis 容器从未存在
         assertThat(docker("inspect", "-f", "{{.State.Running}}", handle.containerName())
                 .stdout().trim()).isEqualTo("true");
-        List.of("pg-" + id, "rd-" + id, "net-" + id).forEach(name ->
+        List.of("pg-" + id, "rd-" + id).forEach(name ->
                 assertThat(docker("inspect", name).exitCode()).as("不应存在 %s", name).isNotZero());
+        // #128 网关化：容器进共享预览网络、无随机宿主端口映射（网关按容器名 DNS 路由）
+        assertThat(docker("inspect", "-f", "{{.HostConfig.NetworkMode}}", handle.containerName())
+                .stdout().trim()).isEqualTo(WorkspaceNaming.PREVIEW_NETWORK);
+        assertThat(docker("port", handle.containerName()).stdout().trim())
+                .as("工作区容器不应有宿主端口映射").isEmpty();
 
         // 布局定盘（WorkspaceLayout 常量表）物理落位：docs / data/pg / .platform 三目录
         WorkspaceLayout.SKELETON_DIRS.forEach(dir ->
@@ -201,12 +203,12 @@ class DockerEnvironmentBackendTest {
 
         URI url = backend.exposePort(provision.handle(), EnvironmentBackend.DEV_APP_CONTAINER_PORT);
 
-        assertThat(url.toString()).isEqualTo("http://localhost:" + provision.handle().previewPort() + "/");
-        // 真实可访问（任何状态码都算已监听；空 workspace 挂 index 缺失返回 404）
-        assertThatCode(() -> HttpClient.newHttpClient().send(
-                        HttpRequest.newBuilder(url).GET().build(),
-                        HttpResponse.BodyHandlers.discarding()))
-                .doesNotThrowAnyException();
+        // #128：URL 是子域（网关按 Host 路由，非宿主端口映射）；探活走容器内 curl 通过才返回
+        assertThat(url.toString())
+                .isEqualTo("http://" + provision.handle().workspaceId().value() + ".localhost/");
+        // 应用真实可访问（容器内回环 8081——exposePort 的探活口径，不经过宿主端口）
+        assertThat(curl(provision.handle().containerName()).exitCode())
+                .as("容器内 8081 应可访问").isZero();
     }
 
     @Test
@@ -215,8 +217,8 @@ class DockerEnvironmentBackendTest {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
         // 复现真实应用（next dev）行为：见到 Upgrade: h2c 直接断连、不回 HTTP/1.1
-        // 响应——若探活走默认 HTTP/2（发 Upgrade: h2c）会得到「header parser
-        // received no bytes」而误判未就绪（预览恒 503）。探活锁 HTTP/1.1 后应通过。
+        // 响应——若探活走 HTTP/2 会误判未就绪。探活走容器内 curl（HTTP/1.1、不发
+        // upgrade 头）后应通过。
         assertThat(execIn(provision.handle(), "cat > /workspace/server.js <<'PROBE_EOF'\n"
                 + "const http=require('http');\n"
                 + "http.createServer((req,res)=>{\n"
@@ -234,7 +236,7 @@ class DockerEnvironmentBackendTest {
         URI url = backend.exposePort(provision.handle(), EnvironmentBackend.DEV_APP_CONTAINER_PORT);
 
         assertThat(url.toString())
-                .isEqualTo("http://localhost:" + provision.handle().previewPort() + "/");
+                .isEqualTo("http://" + provision.handle().workspaceId().value() + ".localhost/");
         // 真实可访问（curl 走 HTTP/1.1，不触发 upgrade 断连）
         assertThat(curl(provision.handle().containerName()).stdout().trim()).isEqualTo("ok");
     }
@@ -465,7 +467,7 @@ class DockerEnvironmentBackendTest {
     /** 断言按命名约定派生的容器/卷均已不存在（inspect 非 0 = 已清）。 */
     private static void assertResourcesGone(WorkspaceId workspaceId) {
         String id = workspaceId.value();
-        List.of("ws-" + id + "-dev", "vol-ws-" + id + "-dev").forEach(name -> {
+        List.of("ws-" + id, "vol-ws-" + id).forEach(name -> {
             if (name.startsWith("vol-")) {
                 assertThat(docker("volume", "inspect", name).exitCode()).isNotZero();
             } else {

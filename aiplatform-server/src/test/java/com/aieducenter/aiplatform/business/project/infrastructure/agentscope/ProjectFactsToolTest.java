@@ -4,14 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
-import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
-import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -22,9 +21,9 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 /**
- * 项目事实查询工具（主智能体答询资产）：事实清单拼装——系统访问地址以预览端口映射
- * 为准（「我后台的地址」的正答）、未产出/未生成如实呈现（不装样子）；工作区
- * 句柄解析失败如实报「暂不可知」（不编造地址）；工具面 readOnly。
+ * 项目事实查询工具（主智能体答询资产）：事实清单拼装——系统访问地址以预览子域为准
+ * （「我后台的地址」的正答）、未产出/未生成如实呈现（不装样子）；工作区
+ * URL 解析失败如实报「暂不可知」（不编造地址）；工具面 readOnly。
  */
 class ProjectFactsToolTest {
 
@@ -45,15 +44,15 @@ class ProjectFactsToolTest {
         project.markPrdProduced();
         project.markGenerated();
         when(projectRepository.findByWorkspaceId(42L)).thenReturn(Optional.of(project));
-        when(workspaceLifecycleAppService.handleOf("42")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("42"), "ws-42-dev", "net-42", 32168));
+        when(workspaceLifecycleAppService.previewUrl("42"))
+                .thenReturn(URI.create("http://42.localhost/"));
 
         ToolResultBlock result = call(tool());
 
         assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
         String facts = resultText(result);
         assertThat(facts).contains("品牌官网").contains("进行中")
-                .contains("http://localhost:32168/")
+                .contains("http://42.localhost/")
                 .contains("系统首次生成时间");
     }
 
@@ -62,8 +61,8 @@ class ProjectFactsToolTest {
         // 未产出/未生成如实呈现（「查不到就答不知，不编造」的事实面）
         when(projectRepository.findByWorkspaceId(43L)).thenReturn(Optional.of(
                 Project.create("新项目", null, 43L, 77L)));
-        when(workspaceLifecycleAppService.handleOf("43")).thenReturn(WorkspaceHandle.dev(
-                WorkspaceId.of("43"), "ws-43-dev", "net-43", 32169));
+        when(workspaceLifecycleAppService.previewUrl("43"))
+                .thenReturn(URI.create("http://43.localhost/"));
 
         String facts = resultText(call(toolOf("43")));
 
@@ -74,7 +73,7 @@ class ProjectFactsToolTest {
     void given_handle_failure_when_call_then_url_stated_unknown_not_fabricated() {
         when(projectRepository.findByWorkspaceId(44L)).thenReturn(Optional.of(
                 Project.create("环境异常项目", null, 44L, 77L)));
-        when(workspaceLifecycleAppService.handleOf("44"))
+        when(workspaceLifecycleAppService.previewUrl("44"))
                 .thenThrow(new IllegalStateException("工作区不在"));
 
         String facts = resultText(call(toolOf("44")));

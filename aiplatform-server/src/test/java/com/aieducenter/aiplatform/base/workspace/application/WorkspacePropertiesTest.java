@@ -33,4 +33,23 @@ class WorkspacePropertiesTest {
 
         assertThat(bound.getProvisionMaxAttempts()).isEqualTo(5);
     }
+
+    /** #128 预览基域名默认 localhost（开发子域 {id}.localhost）。 */
+    @Test
+    void given_default_properties_when_get_preview_base_then_localhost() {
+        assertThat(new WorkspaceProperties().getPreviewBase()).isEqualTo("localhost");
+    }
+
+    /** 配置键真绑定（app.workspace.preview-base）。 */
+    @Test
+    void given_config_key_when_bind_then_preview_base_wired() {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(
+                Map.of("app.workspace.preview-base", "preview.example.com"));
+
+        WorkspaceProperties bound = new Binder(source)
+                .bind("app.workspace", Bindable.ofInstance(new WorkspaceProperties()))
+                .get();
+
+        assertThat(bound.getPreviewBase()).isEqualTo("preview.example.com");
+    }
 }

@@ -80,14 +80,13 @@ public class ProjectFactsTool extends ToolBase {
         return facts.toString();
     }
 
-    /** 预览地址（端口映射置备时已落定，URL 确定；不探活——答地址不等于答在线）。 */
+    /** 预览地址（#128 网关化：workspaceId 子域，不探活——答地址不等于答在线）。 */
     private String previewUrl() {
         try {
-            return "http://localhost:" + workspaceLifecycleAppService
-                    .handleOf(workspaceId).previewPort() + "/";
+            return workspaceLifecycleAppService.previewUrl(workspaceId).toString();
         }
         catch (RuntimeException e) {
-            // 工作区句柄解析失败（环境异常面）：如实报「暂不可知」，不编造地址
+            // 工作区解析失败（环境异常面）：如实报「暂不可知」，不编造地址
             return "暂不可知（工作区状态异常）";
         }
     }

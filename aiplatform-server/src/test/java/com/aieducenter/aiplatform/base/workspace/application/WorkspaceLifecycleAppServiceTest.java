@@ -91,12 +91,11 @@ class WorkspaceLifecycleAppServiceTest {
     void given_dev_command_when_create_then_provisioning_record_created_event_and_provision_enqueued() {
         WorkspaceResponse response = appService.create(new CreateWorkspaceCommand(EnvKind.DEV));
 
-        // 创建即返回 PROVISIONING 记录：端口 0、资源清单空、确定性命名已落位
+        // 创建即返回 PROVISIONING 记录：资源清单空、确定性命名已落位
         assertThat(response.status()).isEqualTo(ProvisioningStatus.PROVISIONING);
-        assertThat(response.previewPort()).isZero();
         assertThat(response.resources()).isEmpty();
-        assertThat(response.containerName()).isEqualTo("ws-" + response.workspaceId() + "-dev");
-        assertThat(response.networkName()).isEqualTo("net-" + response.workspaceId());
+        assertThat(response.containerName()).isEqualTo("ws-" + response.workspaceId());
+        assertThat(response.networkName()).isEqualTo("previewnet");
         // 库记录真实落定（独立连接可见 = 已提交）：PROVISIONING 态
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT provisioning_status FROM wsp_workspaces WHERE id = ?", Integer.class,
@@ -130,8 +129,8 @@ class WorkspaceLifecycleAppServiceTest {
 
         WorkspaceResponse response = appService.get("102");
 
-        assertThat(response.containerName()).isEqualTo("ws-100-dev");
-        assertThat(response.networkName()).isEqualTo("net-100");
+        assertThat(response.containerName()).isEqualTo("ws-100");
+        assertThat(response.networkName()).isEqualTo("previewnet");
         assertThat(response.status()).isEqualTo(ProvisioningStatus.READY);
         assertThat(response.resources()).hasSize(2);
     }
@@ -166,8 +165,8 @@ class WorkspaceLifecycleAppServiceTest {
         // 句柄从库记录重建（重启接回的执行面）：不是 create 时的那份内存对象
         ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
         verify(environmentBackend).exec(handle.capture(), eq("echo hi"));
-        assertThat(handle.getValue().containerName()).isEqualTo("ws-100-dev");
-        assertThat(handle.getValue().previewPort()).isEqualTo(20001);
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
+        assertThat(handle.getValue().networkName()).isEqualTo("previewnet");
     }
 
     @Test
@@ -178,15 +177,14 @@ class WorkspaceLifecycleAppServiceTest {
     }
 
     @Test
-    void given_pending_workspace_when_handleOf_then_deterministic_names_and_zero_ports() {
+    void given_pending_workspace_when_handleOf_then_deterministic_names() {
         workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("106"), EnvKind.DEV));
 
         WorkspaceHandle handle = appService.handleOf("106");
 
-        // 置备中句柄可取：确定性命名 + 端口 0（主智能体对话只消费 containerName，无需等待）
-        assertThat(handle.containerName()).isEqualTo("ws-106-dev");
-        assertThat(handle.networkName()).isEqualTo("net-106");
-        assertThat(handle.previewPort()).isZero();
+        // 置备中句柄可取：确定性命名（主智能体对话只消费 containerName，无需等待）
+        assertThat(handle.containerName()).isEqualTo("ws-106");
+        assertThat(handle.networkName()).isEqualTo("previewnet");
     }
 
     @Test
@@ -212,10 +210,10 @@ class WorkspaceLifecycleAppServiceTest {
         flipper.join();
 
         assertThat(response.stdout()).isEqualTo("hi");
-        // exec 用的是就绪后回填真实端口的句柄（非置备中端口 0）
+        // exec 在就绪后放行（隐式等待 READY）：句柄从记录重建，容器名 = 记录命名
         ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
         verify(environmentBackend).exec(handle.capture(), eq("echo hi"));
-        assertThat(handle.getValue().previewPort()).isEqualTo(20001);
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-106");
     }
 
     @Test
@@ -280,7 +278,7 @@ class WorkspaceLifecycleAppServiceTest {
         assertThat(bytes).containsExactly(tarball);
         ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
         verify(environmentBackend).packSource(handle.capture());
-        assertThat(handle.getValue().containerName()).isEqualTo("ws-100-dev");
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
     }
 
     @Test
@@ -294,14 +292,14 @@ class WorkspaceLifecycleAppServiceTest {
     void given_seeded_workspace_when_expose_preview_then_url_and_ready_event_after_commit() {
         workspaceRepository.save(Workspace.register(devProvision("104")));
         when(environmentBackend.exposePort(any(), eq(8081)))
-                .thenReturn(URI.create("http://localhost:20001/"));
+                .thenReturn(URI.create("http://104.localhost/"));
 
         URI url = appService.exposePreview("104");
 
-        assertThat(url).isEqualTo(URI.create("http://localhost:20001/"));
+        assertThat(url).isEqualTo(URI.create("http://104.localhost/"));
         assertThat(eventRecorder.previewReady()).hasSize(1);
         assertThat(eventRecorder.previewReady().get(0).url())
-                .isEqualTo(URI.create("http://localhost:20001/"));
+                .isEqualTo(URI.create("http://104.localhost/"));
         assertThat(eventRecorder.previewReady().get(0).workspaceId().value()).isEqualTo("104");
     }
 
@@ -313,7 +311,7 @@ class WorkspaceLifecycleAppServiceTest {
 
         ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
         verify(environmentBackend).destroyWorkspace(handle.capture());
-        assertThat(handle.getValue().containerName()).isEqualTo("ws-100-dev");
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 105", Integer.class))
                 .isEqualTo(0);
@@ -417,12 +415,12 @@ class WorkspaceLifecycleAppServiceTest {
 
     private WorkspaceProvision devProvision(String workspaceId) {
         WorkspaceHandle handle = WorkspaceHandle.dev(WorkspaceId.of(workspaceId),
-                "ws-100-dev", "net-100", 20001);
+                "ws-100", "previewnet");
         // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
         return new WorkspaceProvision(handle, List.of(
-                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "ws-100-dev", 0,
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "ws-100", 0,
                         "postgresql://ws100@localhost:5432/ws100"),
-                new ProvisionedResource(MiddlewareKind.REDIS, "ws-100-dev", 0,
+                new ProvisionedResource(MiddlewareKind.REDIS, "ws-100", 0,
                         "redis://localhost:6379")));
     }
 }

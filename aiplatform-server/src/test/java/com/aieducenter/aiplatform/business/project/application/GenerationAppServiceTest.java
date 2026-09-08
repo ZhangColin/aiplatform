@@ -216,6 +216,18 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_generation_prompts_when_narration_convention_then_anchor_present() {
+        // #119 解说密实化：阶段 0 与切片 run prompt 都含「先解说后动手」约定（与执行体
+        // systemPrompt 的解说协议同向）——生成轨道每工作段先解说后动手，不靠模型自觉
+        assertThat(GenerationAppService.STAGE0_RUN_PROMPT)
+                .contains("先解说后动手");
+        assertThat(GenerationAppService.sliceRunPrompt(1, 2, "用户能注册登录"))
+                .contains("先解说后动手");
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("先解说后动手");
+    }
+
+    @Test
     void given_slice_retries_when_generate_then_retry_same_slice_session_and_handoff_injected() {
         // #114 重试续本片会话 + 片间交接：阶段 0 成功、切片 1 首试失败后重试成功、切片 2
         // 成功——重试续切片 1 会话（不换新）；前片收口终文注入下一片（切片 2 的 prompt

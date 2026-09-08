@@ -44,6 +44,7 @@ class AgentProfileTest {
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("finish_edit")
                 .contains("self-test") // #96 自检段委派自测子智能体
-                .contains("agent_spawn");
+                .contains("agent_spawn")
+                .contains("先解说后动手"); // #119 解说密实化：每工作段先解说后动手
     }
 }

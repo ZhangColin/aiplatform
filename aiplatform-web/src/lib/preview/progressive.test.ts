@@ -117,7 +117,7 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
     // run 中无重挂（刷新只由切片收口驱动）：纪元停在上一收口
     expect(epochNow()).toBe(1);
 
-    // 切片 1 收口：纪元 +1 重挂定格最新态，进行中轻提示退场；过程部件随收尾卡凝聚清空
+    // 切片 1 收口：纪元 +1 重挂定格最新态，进行中轻提示退场；工作消息定格留驻（#117 不清空）
     dispatchAgentEvent(queryClient, agentEvent("run-finish", {
       ...slice1,
       finish: "end",
@@ -131,7 +131,7 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
     }));
     expect(epochNow()).toBe(2);
     expect(watch(phaseNow({ url: PREVIEW_URL, generatedAt: GENERATED_AT }))).toEqual({ kind: "page" });
-    expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(0);
+    expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(1); // 定格留驻（#117 不清空）
 
     // AC1 无空屏：起跑后每一拍都有内容档（hint 文案恒非空 / page 直挂）
     expect(seen.every(hasContent)).toBe(true);

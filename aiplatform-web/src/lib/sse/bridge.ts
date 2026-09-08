@@ -211,9 +211,10 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 期间卡保持受理中）；更新 run 随收口自动派发，工作消息即视觉衔接
         chat.settleAcceptance(payload.projectId, payload.runId);
         // 工作消息定格（run 收口 = 消息定格；编码 run 真收口携 closing——#88/#89
-        // 收尾卡权威事实归对话流，过程部件退场，非锚定 run 的收口在 store 内忽略）
+        // 收尾卡权威事实归对话流随后入流，工作消息原地定格留驻 #117，非锚定 run
+        // 的收口在 store 内忽略）
         const closing = toWorkClosing(payload.closing);
-        work.freezeWork(payload.projectId, payload.runId, closing);
+        work.freezeWork(payload.projectId, payload.runId);
         if (closing) {
           chat.appendClosing(payload.projectId, payload.runId, closing, event.id);
         }

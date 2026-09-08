@@ -51,6 +51,20 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
+// 收尾卡版本控件（#92/#93）的请求面：服务端直读种子渲染，无 QueryClient 可挂——
+// 收尾卡用例只断言呈现序，版本动作不发请求
+vi.mock("@/hooks/use-version", () => ({
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
+  useStartVersionView: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    data: undefined,
+    reset: vi.fn(),
+  }),
+  useStopVersionView: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {
   return {
     kind: "question",
@@ -196,6 +210,38 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("正在调整全局配色。");
     expect(html).toContain("修改【全局样式】");
     expect(html).toContain("进行中");
+  });
+
+  it("编码 run 收口定格留驻（#117）：工作消息在收尾卡之前入流（过程上文、结果下卡）", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把主色调改成绿色" },
+      {
+        kind: "closing",
+        id: "run-1:9",
+        runId: "run-1",
+        closing: {
+          summary: "主色调已改为绿色",
+          prdChanged: false,
+          systemChanged: true,
+          files: [],
+          durationMs: 5000,
+        },
+      },
+    ]);
+    seed.works = {
+      p1: {
+        runId: "run-1",
+        frozen: true,
+        parts: [{ kind: "text", id: "run-1:3", text: "正在调整全站配色。" }],
+      },
+    };
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("正在调整全站配色。");
+    expect(html).toContain("本轮完成");
+    // 定格的工作消息上承意见、下启收尾卡——过程在上、结果卡在下
+    expect(html.indexOf("正在调整全站配色。")).toBeLessThan(html.indexOf("本轮完成"));
   });
 
   it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {

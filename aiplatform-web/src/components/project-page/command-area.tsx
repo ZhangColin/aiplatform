@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, FileText, Inbox, Lock, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Composer, type ComposerAttachment } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -71,8 +71,16 @@ export function CommandArea({
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
-  // 收口定格留驻（凝聚物收尾卡归后续票）
+  // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）
   const work = useWorkMessageStore((s) => s.works[projectId]);
+  // 工作消息插入锚（#117「过程上文、结果下卡」）：定格留驻的工作消息插在本 run
+  // 收尾卡之前——上承本轮意见、下启收尾卡；-1 = 无本 run 收尾卡（生长中 /
+  // run-failed），留对话流末尾。
+  const workAnchorIndex = work
+    ? messages.findIndex(
+        (message) => message.kind === "closing" && message.runId === work.runId,
+      )
+    : -1;
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
@@ -159,20 +167,25 @@ export function CommandArea({
     <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[stage]}</p>
-        {messages.map((message) => (
-          <MessageRow key={message.id} message={message} projectId={projectId}>
-            {message.kind === "question" ? (
-              <QuestionCard
-                question={message}
-                interactive={message === pending}
-                selection={selection}
-                onSelectionChange={setSelection}
-                onAnswer={answer}
-              />
+        {messages.map((message, index) => (
+          <Fragment key={message.id}>
+            {work && index === workAnchorIndex ? (
+              <WorkMessage work={work} projectId={projectId} />
             ) : null}
-          </MessageRow>
+            <MessageRow message={message} projectId={projectId}>
+              {message.kind === "question" ? (
+                <QuestionCard
+                  question={message}
+                  interactive={message === pending}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                  onAnswer={answer}
+                />
+              ) : null}
+            </MessageRow>
+          </Fragment>
         ))}
-        {work ? <WorkMessage work={work} projectId={projectId} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} projectId={projectId} /> : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

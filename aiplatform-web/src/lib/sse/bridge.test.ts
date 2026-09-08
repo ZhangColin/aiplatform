@@ -896,10 +896,10 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
    * 镜面服务端断言（IterationAppServiceTest·given_scripted_update_round_when_fix_
    * closes_then_run_finish_carries_authoritative_closing）：编码 run 真收口的
    * run-finish 携 closing——收尾卡归对话流（#89：chat store 常驻、live 到达经
-   * appendClosing），工作消息过程部件退场（判定行不由前端推导）；对话史域失效
-   * （水合增量接管）。
+   * appendClosing），工作消息原地定格留驻（#117：部件保留、不再清空——「过程上文、
+   * 结果下卡」，判定行不由前端推导）；对话史域失效（水合增量接管）。
    */
-  it("编码 run 收口携 closing：收尾卡落对话流、过程明细清空、对话史域失效（#89）", () => {
+  it("编码 run 收口携 closing：收尾卡落对话流、工作消息定格留驻、对话史域失效（#89/#117）", () => {
     const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",
@@ -916,7 +916,7 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.frozen).toBe(true);
-    expect(work?.parts).toEqual([]); // 凝聚物退场
+    expect(work?.parts).toHaveLength(2); // 工作消息定格留驻（#117 不再清空）
     // 收尾卡归对话流（#89）：chat store 常驻（live 到达，id = 事件 id 去重锚）
     const messages = useChatStore.getState().chats["p1"]?.messages ?? [];
     const card = messages.find((message) => message.kind === "closing");

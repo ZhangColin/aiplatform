@@ -361,18 +361,8 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
   });
 });
 
-describe("work-message store · 定格收口（#88/#89：收尾卡归对话流，本 store 只管部件退场）", () => {
-  const closing = {
-    summary: "修订了需求文档，并更新了系统",
-    prdChanged: true,
-    prdNote: "配送范围改为全国",
-    systemChanged: true,
-    systemNote: "下单页新增配送范围说明",
-    files: [{ path: "/src/App.jsx", added: 4, removed: 0 }],
-    durationMs: 183_420,
-  };
-
-  it("freezeWork 携 closing：过程部件清空、去重簿记同清（明细不常驻——收尾卡本体长在 chat store 对话流）", () => {
+describe("work-message store · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
+  it("freezeWork 定格留驻：部件保留、只读、不再生长（成功收口不再清空——「过程上文、结果下卡」）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
@@ -384,42 +374,43 @@ describe("work-message store · 定格收口（#88/#89：收尾卡归对话流�
       label: "编写【订单管理】",
     });
 
-    freezeWork("p1", "r1", closing);
+    freezeWork("p1", "r1");
 
-    expect(work()).toEqual({
-      runId: "r1",
-      frozen: true,
-      parts: [],
-      seenEventIds: [],
-    });
+    expect(work()?.frozen).toBe(true);
+    expect(work()?.parts).toHaveLength(2); // 部件保留，不清空（#117 语义反转）
+
+    // 定格后不再生长：迟到部件不进（后续事件不追加部件）
+    notePart("p1", ref({ eventId: "r1:9" }), { kind: "text", text: "迟到部件" });
+    expect(work()?.parts).toHaveLength(2);
   });
 
-  it("无 closing 定格（run-failed）：流水留驻（恢复出口归生成面）", () => {
+  it("无 closing 定格（run-failed）：流水留驻（恢复出口归生成面）——现状回归", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
 
     freezeWork("p1", "r1");
 
+    expect(work()?.frozen).toBe(true);
     expect(work()?.parts).toHaveLength(1);
   });
 
-  it("已定格再收 closing（补发序防御）：忽略；非锚定 run 的 closing 忽略", () => {
+  it("已定格再收 freezeWork（补发序防御）：幂等忽略；非锚定 run 忽略", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     freezeWork("p1", "r1");
 
-    freezeWork("p1", "r1", closing);
-    expect(work()?.frozen).toBe(true); // 已定格，再收 closing 幂等（首次定格为准）
+    freezeWork("p1", "r1");
+    expect(work()?.frozen).toBe(true); // 已定格，再收幂等（首次定格为准）
 
-    freezeWork("p1", "r9", closing);
+    freezeWork("p1", "r9");
     expect(work()?.runId).toBe("r1");
   });
 
   it("下一场编码 run 重开：旧消息退场（历史收尾卡的常驻位 = chat store 对话流，#89）", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    freezeWork("p1", "r1", closing);
+    freezeWork("p1", "r1");
 
     startWork("p1", "r2");
 

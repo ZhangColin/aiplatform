@@ -29,9 +29,10 @@ const VISIBLE_FILES = 5;
  * 的卡）——四要素全出服务端权威事实（run-finish 的 closing 扩载）：摘要（判定
  * 事实的合并叙事）/ 判定行（PRD/系统改没改 + 原因——不由前端推导，旧「编辑无
  * 变化」推导口径已移除）/ 变更清单（文件级，+N −M 行数）/ 轮末统计（时长/文件
- * 数/变更行数 + 自检通过——closing 在场 ⟺ 收口判据核验通过）。过程明细已随
- * 定格退场（凝聚物）；「查看当时 / 回滚到此」版本控件（#92/#93）随 closing.version
- * 成版锚点呈现（成版失败缺 version 键则不出，版本动作无锚不可用）。
+ * 数/变更行数 + 自检通过——closing 在场 ⟺ 收口判据核验通过）。工作消息定格留驻
+ * （#117：过程明细仍留工作消息、不落库，本卡紧随入流）；「查看当时 / 回滚到此」
+ * 版本控件（#92/#93）随 closing.version 成版锚点呈现（成版失败缺 version 键则不
+ * 出，版本动作无锚不可用）。
  */
 export function ClosingCard({ closing, projectId }: { closing: WorkClosing; projectId: string }) {
   const [filesOpen, setFilesOpen] = useState(false);

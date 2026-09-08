@@ -57,16 +57,16 @@ export function segmentWorkParts(parts: WorkPart[]): WorkSegment[] {
  * 连续动作默认折叠成一行、展开见单条动作状态）+ 权限确认卡（#83：需批准的工具
  * 操作，批准/拒绝即续跑——与问答卡分形态）+ 自检播报行（#85：收口判据核验「正在
  * 检查系统 → ✅/❌」）。思考与代码不播、无进度条/百分比；run 开始即出现（空部件
- * 也出「正在做」头部），成功收口定格为收尾卡（#88：closing 在场即凝聚物呈现，过程
- * 部件已退场），失败定格（run-failed）流水留驻。步骤分组与过程耗时已退役（#115：
- * 无「第 N 步」分组头、无动作耗时与头部总时长——部件按序竖排，「解说短段 ↔ 动作
- * 组」交替竖流）。
+ * 也出「正在做」头部），成功收口原地定格留驻（#117：部件保留、只读，收尾卡随后
+ * 入流——「过程上文、结果下卡」），失败定格（run-failed）流水留驻。步骤分组与过程
+ * 耗时已退役（#115：无「第 N 步」分组头、无动作耗时与头部总时长——部件按序竖排，
+ * 「解说短段 ↔ 动作组」交替竖流）。
  */
 export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId: string }) {
   const growing = !work.frozen;
 
-  // 成功收口（closing 携带，#89）：收尾卡归对话流常驻（chat store）、过程部件已
-  // 退场——本消息空壳不占位；run-failed 定格流水留驻（恢复出口）
+  // 定格空壳不占位（run 零部件的退化态）：成功收口/run-failed 后部件均留驻
+  // （#117），仅当本 run 从无部件时才整卡退场
   if (work.frozen && work.parts.length === 0) return null;
 
   return (

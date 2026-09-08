@@ -208,8 +208,8 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
   });
 });
 
-describe("WorkMessage · 定格收口（#88/#89：收尾卡归对话流，过程明细退场）", () => {
-  it("成功收口（closing 携带）：过程部件已退场（store 职责清空）——空壳不占位（收尾卡长在对话流）", () => {
+describe("WorkMessage · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
+  it("定格空壳（run 零部件的退化态）：不渲染空壳（收尾卡长在对话流）", () => {
     const html = renderToStaticMarkup(
       <WorkMessage work={work({ frozen: true, parts: [] })} projectId="p1" />,
     );
@@ -219,7 +219,7 @@ describe("WorkMessage · 定格收口（#88/#89：收尾卡归对话流，过程
     expect(html).not.toContain("本轮完成"); // 卡本体归 chat store（CommandArea 渲染）
   });
 
-  it("失败定格（run-failed 无 closing）：流水留驻、不出收尾卡", () => {
+  it("失败定格（run-failed）：流水留驻、不出收尾卡", () => {
     const html = renderWithClient(work({ frozen: true, parts: [action()] }));
 
     expect(html).not.toContain("本轮完成");

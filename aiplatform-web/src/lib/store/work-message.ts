@@ -7,13 +7,14 @@ import { create } from "zustand";
  *
  * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
  * run-failed 定格（不再生长）。成功收口（run-finish 携 closing，#88/#89
- * 收尾卡归对话流常驻）——closing 在场即过程部件清空（明细不常驻，收尾卡即凝聚物，
- * 卡本体长在 chat store：live 经 appendClosing、回访经对话史水合）；run-failed 定格
- * 流水留驻（恢复出口归生成面）；下一场编码 run（新 runId = 新一轮）重开新消息、
- * 旧消息不保留。静默重试不出用户面（#84：run-start 一场恰一次、用户面 run 身份
- * = 首试 runId 全程不变）——生长中重来新 runId 属事件序异常（防御位忽略，不清锚
- * 闪空消息）。思考与代码不进部件（服务端口径），本 store 无进度条语义。步骤分组
- * 与过程耗时已退役（#115：部件按序竖排，不维护 startedAt/endedAt 等展示时间戳）。</p>
+ * 收尾卡归对话流常驻）——工作消息<b>原地定格留驻</b>（#117：部件保留、只读、不再
+ * 生长，成功收口不再清空，收尾卡随后入流形成「过程上文、结果下卡」纵序；过程明细
+ * 仍不落库，刷新/回访后明细不现、收尾卡照常水合——定格留驻只管当次会话呈现）；
+ * run-failed 定格流水留驻（恢复出口归生成面）；下一场编码 run（新 runId = 新一轮）
+ * 重开新消息、旧消息不保留。静默重试不出用户面（#84：run-start 一场恰一次、用户面
+ * run 身份 = 首试 runId 全程不变）——生长中重来新 runId 属事件序异常（防御位忽略，
+ * 不清锚闪空消息）。思考与代码不进部件（服务端口径），本 store 无进度条语义。步骤
+ * 分组与过程耗时已退役（#115：部件按序竖排，不维护 startedAt/endedAt 等展示时间戳）。</p>
  *
  * <p><b>锚定判定</b>：部件事件全事件流恒挂（主智能体对话轮也产部件）——工作消息
  * 只锚编码 run。锚由 run-start(agent=executor) 落；断线补发窗口淘汰了 run-start 时
@@ -128,12 +129,13 @@ export type WorkMessageState = {
    */
   resolvePermission: (projectId: string, engineRef: string, state: WorkPermissionState) => void;
   /**
-   * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。携 closing
-   * （#88：编码 run 真收口）即过程部件清空（明细不常驻——收尾卡即凝聚物，卡本体
-   * 归 chat store 对话流，#89）；无 closing（run-failed / 对话轮收口）流水留驻或
-   * 本就为空。
+   * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。工作消息
+   * 原地定格留驻（#117）：部件保留、只读、不再生长，成功收口（收尾卡归 chat
+   * store 对话流、随后入流）不再清空——「过程上文、结果下卡」；run-failed 同样
+   * 留驻（现状）。定格即终态，去重簿记随消息保留（定格后 notePart 早退，不再
+   * 消费）。
    */
-  freezeWork: (projectId: string, runId: string, closing?: unknown) => void;
+  freezeWork: (projectId: string, runId: string) => void;
 };
 
 /** 部件数软上限（重放缓冲 ~1000 事件的投影，内存有界）。 */
@@ -275,14 +277,12 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
       return { ...work, parts };
     }),
 
-  freezeWork: (projectId, runId, closing) =>
+  freezeWork: (projectId, runId) =>
     updateWork(set, projectId, (work) => {
       if (work?.runId !== runId || work.frozen) return work;
-      // 收尾卡在场即凝聚物（#88/#89）：过程部件清空（明细不常驻——卡本体归 chat
-      // store 对话流），去重簿记同清；无 closing 流水留驻
-      return closing
-        ? { ...work, frozen: true, parts: [], seenEventIds: [] }
-        : { ...work, frozen: true };
+      // 原地定格留驻（#117）：部件保留、只读、不再生长（成功收口不再清空——收尾卡
+      // 归 chat store 随后入流；run-failed 同样留驻），去重簿记随消息保留
+      return { ...work, frozen: true };
     }),
 }));
 

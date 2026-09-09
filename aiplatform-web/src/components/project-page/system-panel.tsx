@@ -61,7 +61,7 @@ const BAR_BUTTON_CLASS =
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
  * 宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+ 手动刷新
- * （强制重挂、清导航回 base）+ 新窗口打开（/preview/:id 独立页）。舞台浅色锁定：
+ * （强制重挂、清导航回 base）+ 新窗口打开（window.open 应用真实地址，#126）。舞台浅色锁定：
  * 预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
  */
 export function SystemPanel({
@@ -231,7 +231,7 @@ export function SystemPanel({
         <button
           type="button"
           disabled={!pageLive}
-          onClick={() => window.open(`/preview/${projectId}`, "_blank", "noopener")}
+          onClick={() => window.open(url, "_blank", "noopener")}
           title="在新窗口打开预览"
           aria-label="在新窗口打开预览"
           className={BAR_BUTTON_CLASS}

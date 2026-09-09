@@ -18,7 +18,7 @@ import type { WorkPart } from "@/lib/store/work-message";
 /** run 进行中、页面已可见的统一轻提示（生成长出与修正同一套，#45 合并）。 */
 export const UPDATING_NOTICE = "正在更新系统，完成后自动刷新";
 
-/** 预览真故障（非未就绪）的打不开口径（系统面板与新窗口独立页共用，#80）。 */
+/** 预览真故障（非未就绪）的打不开口径（#80）。 */
 export const TROUBLE_NOTICE = "预览暂时打不开，稍后会自动重试";
 
 /** 后端「预览应用尚未就绪」错误码（WSP_012，503——轮询继续，非故障）。 */
@@ -73,7 +73,7 @@ export function isPreviewNotServing(error: unknown): boolean {
   return error instanceof ApiError && error.code === PREVIEW_NOT_SERVING_CODE;
 }
 
-/** 预览查询 error 是否真故障（有错且非未就绪；系统面板与新窗口独立页共用，#80）。 */
+/** 预览查询 error 是否真故障（有错且非未就绪；#80）。 */
 export function previewTrouble(error: unknown): boolean {
   return error != null && !isPreviewNotServing(error);
 }

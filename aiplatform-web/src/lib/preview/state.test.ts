@@ -256,7 +256,7 @@ describe("isPreviewNotServing · 探活未就绪判定", () => {
   });
 });
 
-describe("previewTrouble · 真故障判定（#80 新窗口独立页与面板共用）", () => {
+describe("previewTrouble · 真故障判定（#80）", () => {
   it("无错与未就绪（WSP_012）不是真故障；其他错误才是", () => {
     expect(previewTrouble(undefined)).toBe(false);
     expect(previewTrouble(notServingError())).toBe(false);

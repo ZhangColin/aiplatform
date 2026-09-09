@@ -15,7 +15,7 @@ type HappyDOMWindow = Window & {
 /**
  * 系统面板浏览器条交互契约（#80 验收锚）：桌面/手机宽度切换不重挂 iframe
  * （用户的系统不因换设备丢状态）、手动刷新强制重挂（本地节拍并入预览纪元）、
- * 新窗口打开独立预览页（/preview/:id，noopener）。沿 outputs-area.interaction
+ * 新窗口打开应用真实地址（window.open(url)，noopener，#126）。沿 outputs-area.interaction
  * 先例（happy-dom 逐文件例外）；断言用原生属性。数据口 mock 掉；假地址用
  * about:blank——happy-dom 会真去 fetch iframe 的 src，真地址会发网络请求。
  */
@@ -93,14 +93,18 @@ describe("SystemPanel · 手动刷新（#80）", () => {
   });
 });
 
-describe("SystemPanel · 新窗口打开（#80）", () => {
-  it("点新窗口开独立预览页（/preview/:id，noopener）", () => {
+describe("SystemPanel · 新窗口打开（#126）", () => {
+  it("点新窗口开应用真实地址（window.open(url)，noopener）", () => {
+    previewUrl = "http://localhost:42659";
+    // 关掉 happy-dom 的 iframe 页面加载（真地址不真发请求）
+    (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: "在新窗口打开预览" }));
 
-    expect(openSpy).toHaveBeenCalledWith("/preview/p1", "_blank", "noopener");
+    expect(openSpy).toHaveBeenCalledWith("http://localhost:42659", "_blank", "noopener");
   });
 });
 

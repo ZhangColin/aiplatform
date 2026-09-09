@@ -1,0 +1,6 @@
+# 测试库隔离（ADR-0015 / issue #132）：test profile 只翻数据源 URL 到独立测试库
+# aiplatform_test，其余（含凭据 postgres/truth）继承 local 的覆盖。URL 可经环境
+# 变量覆盖——未来 CI 用 TEST_DB_URL 指向 CI 置备的 PG service，测试代码零改动。
+spring:
+  datasource:
+    url: ${TEST_DB_URL:jdbc:postgresql://localhost:5432/aiplatform_test}

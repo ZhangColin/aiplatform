@@ -14,11 +14,11 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
@@ -32,7 +32,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 收口）。环境后端起快照的物理面由 {@code DockerEnvironmentBackendTest} 活体覆盖，
  * 本测试只验编排缝。
  */
-@SpringBootTest
+@IntegrationTest
 class VersionSnapshotAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

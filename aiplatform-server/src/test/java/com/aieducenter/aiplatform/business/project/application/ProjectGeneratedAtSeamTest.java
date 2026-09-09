@@ -5,9 +5,9 @@ import java.sql.Timestamp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 库内真实行为上验证——置位、持久化、再置位不刷新（聚合置位语义的单测见
  * {@code ProjectTest}）。生成编排（何时调用 markGenerated）归生成环（#22）接线。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectGeneratedAtSeamTest {
 
     @Autowired

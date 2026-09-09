@@ -16,7 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -24,6 +23,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import org.assertj.core.api.InstanceOfAssertFactories;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
@@ -52,7 +52,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 发言与作答在提交侧同步落（轮未跑也已在库）；失败轮只留用户发言（智能体回复
  * 不落——重提即兜底）；过程明细（解说段/动作卡流水）不在对话史。
  */
-@SpringBootTest
+@IntegrationTest
 class ConversationHistoryTest {
 
     private static final long OWNER = 3897654321098765432L;

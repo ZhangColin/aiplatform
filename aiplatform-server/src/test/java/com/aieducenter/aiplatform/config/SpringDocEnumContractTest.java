@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,6 +16,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.cartisan.core.domain.BaseEnum;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.aieducenter.aiplatform.IntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code type=integer}，防「无枚举出现」的空转通过。BaseEnum 清单经类路径
  * 扫描收集——新增 BC 枚举自动纳入，不随漂移。
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
 class SpringDocEnumContractTest {
 

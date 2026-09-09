@@ -2,9 +2,9 @@ package com.aieducenter.aiplatform.base.workspace.application;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
  * docker 副作用——副作用全部在事务提交后、后台线程内落定（「能对话」与「环境就绪」
  * 解耦的自然推论：记录先于副作用存在）。失败原样抛出。
  */
-@SpringBootTest
+@IntegrationTest
 class WorkspaceCreateRollbackTest {
 
     @Autowired

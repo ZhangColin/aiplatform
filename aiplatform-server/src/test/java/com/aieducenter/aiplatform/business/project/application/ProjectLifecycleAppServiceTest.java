@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -17,6 +16,7 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.CartisanException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
  * 聚合不变量。Docker 链路在 WorkspaceLifecycleAppServiceTest（mock 工作区服务，
  * 聚焦编排）。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectLifecycleAppServiceTest {
 
     @Autowired

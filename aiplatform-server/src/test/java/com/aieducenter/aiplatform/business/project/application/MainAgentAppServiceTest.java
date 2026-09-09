@@ -29,12 +29,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
@@ -72,7 +72,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * （#55）——交接物各轮「意见 → 修订说明」一一对应、未修订轮显式占位（配对由
  * 平台拼装锚定，不靠清单位置对齐）。
  */
-@SpringBootTest
+@IntegrationTest
 class MainAgentAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

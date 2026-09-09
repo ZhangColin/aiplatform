@@ -11,9 +11,9 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 入库/检索/清理的编排与 SQL 行为在 {@code KnowledgeAppServiceTest}（mock embed）
  * 已覆盖。启动方式见 docs/guide/本机依赖启动.md。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class KnowledgePortSemanticTest {
 
     private static final String EMBED_HEALTH_URL = "http://127.0.0.1:9091/health";

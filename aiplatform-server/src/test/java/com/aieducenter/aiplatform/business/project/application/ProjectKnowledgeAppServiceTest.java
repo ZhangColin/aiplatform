@@ -5,10 +5,10 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
@@ -27,7 +27,7 @@ import static org.mockito.Mockito.when;
  * 知识命中注入块（命中拼装 / 空命中 / 检索失败降级）。端口 mock——入库/
  * 检索的 SQL 与降级语义见 KnowledgeAppServiceTest。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectKnowledgeAppServiceTest {
 
     @Autowired

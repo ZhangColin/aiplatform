@@ -6,12 +6,12 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
  * 编排与 SQL 行为；HTTP 降级见 FastembedEmbeddingClientTest，真 embed 语义命中见
  * KnowledgePortSemanticTest）。以库内真实状态为准（B0 §5.2）。
  */
-@SpringBootTest
+@IntegrationTest
 class KnowledgeAppServiceTest {
 
     /** 向量维数（与 knw_chunks.embedding 列一致）。 */

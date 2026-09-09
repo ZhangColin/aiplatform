@@ -22,12 +22,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
@@ -50,7 +50,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 分类（拒绝即零调用零事件）；订单冻结 / 挂起问答只拦意见（分类后拦——咨询与
  * 兜底随时可答）。
  */
-@SpringBootTest
+@IntegrationTest
 class DispatchAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

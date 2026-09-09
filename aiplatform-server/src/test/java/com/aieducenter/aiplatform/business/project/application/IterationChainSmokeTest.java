@@ -20,10 +20,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -51,7 +51,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 系统的主色调改成绿色」→ 断言三件事：PRD 更新（含绿）、修正 run 自动起跑并
  * 收口、服务页面换色（蓝主色字面量消失）。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class IterationChainSmokeTest {
 
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(180);

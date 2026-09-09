@@ -34,12 +34,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
@@ -76,7 +76,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 对应、未修订轮显式占位不串位——#53 判定全保留的口径不变，载体从两清单
  * 位置对齐收严为结构化成对）；守卫组（不存在 / 已归档 / 未生成）。
  */
-@SpringBootTest
+@IntegrationTest
 class IterationAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

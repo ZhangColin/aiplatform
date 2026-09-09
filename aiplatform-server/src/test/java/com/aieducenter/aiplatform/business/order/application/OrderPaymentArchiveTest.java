@@ -10,13 +10,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
  * ——「归档失败 ≠ 未支付」）；③知识沉淀降级面（embedding 故障 → 支付/归档照常、
  * 沉淀跳过不回滚）。
  */
-@SpringBootTest
+@IntegrationTest
 class OrderPaymentArchiveTest {
 
     private static final long PROJECT_ID = 900200L;

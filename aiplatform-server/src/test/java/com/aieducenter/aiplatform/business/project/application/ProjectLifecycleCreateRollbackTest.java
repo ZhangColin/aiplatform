@@ -2,9 +2,9 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
  * 建项目落库失败的回滚面（照片1b workspace 的兜底形态）：库记录失败时回收
  * 已落定的工作区物理资源，不留孤儿容器；失败原样抛出，不发 SSE、不开主智能体对话。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectLifecycleCreateRollbackTest {
 
     @Autowired

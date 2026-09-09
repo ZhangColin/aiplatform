@@ -7,9 +7,9 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepository;
@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>上下文启动即播种（ApplicationRunner），本类以库内真实行为为准。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class PriceEntrySeederTest {
 
     @Autowired

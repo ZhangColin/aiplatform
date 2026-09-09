@@ -14,12 +14,12 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
@@ -36,7 +36,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 列表非错误）、版本详情锚定收尾卡（Run-Id 联接对话史 closing 条目）；ref 为
  * 用户可控入参——非 hash 形态 404 且不触工作区（shell 注入防线）。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectVersionAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

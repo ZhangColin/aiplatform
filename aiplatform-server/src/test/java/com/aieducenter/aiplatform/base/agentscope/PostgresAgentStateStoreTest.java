@@ -7,10 +7,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import io.agentscope.core.state.State;
+
+import com.aieducenter.aiplatform.IntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * PostgreSQL 槽位寻址——(userId, sessionId) 隔离、单值往返、列表增量 append 与
  * 变更全量重写、会话删除、跨实例（模拟重启）读回。
  */
-@SpringBootTest
+@IntegrationTest
 class PostgresAgentStateStoreTest {
 
     /** 测试用 State 载体（AgentScope 推荐 record 形态）。 */

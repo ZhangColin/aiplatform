@@ -8,7 +8,6 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -16,6 +15,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
  * 价目留痕、现值取最新行、quotedAt 不刷新）；#37/#39 支付原子化（支付/归档拆
  * 两事务、归档失败留已支付）归 {@link OrderPaymentArchiveTest}。
  */
-@SpringBootTest
+@IntegrationTest
 class OrderAppServiceTest {
 
     private static final long PROJECT_ID = 900100L;

@@ -29,12 +29,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
@@ -67,7 +67,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 派 run——轨道顺序派 N run、阶段 0 先于切片、每片收口发 run-finish（收口扩载）、
  * 失败不跳片（某片超限转终态 run-failed、generated_at 落最后一片收口）。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class GenerationAppServiceTest {
 
     private static final long OWNER = 3897654321098765432L;

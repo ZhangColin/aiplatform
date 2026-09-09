@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +16,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
@@ -55,7 +55,7 @@ import static org.mockito.Mockito.when;
  * {@code @TransactionalEventListener(AFTER_COMMIT)} 测试监听器捕获；Docker 真实链路见
  * DockerEnvironmentBackendTest。
  */
-@SpringBootTest
+@IntegrationTest
 @Import(WorkspaceLifecycleAppServiceTest.EventRecorder.class)
 class WorkspaceLifecycleAppServiceTest {
 

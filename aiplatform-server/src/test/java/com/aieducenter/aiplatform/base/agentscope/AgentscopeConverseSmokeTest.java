@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
@@ -21,7 +22,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -35,7 +35,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * 真内核接线。workspace 经临时目录隔离；AgentState 落 PG（#48），冒烟槽位
  * 每轮清理。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class AgentscopeConverseSmokeTest {
 
     @TempDir

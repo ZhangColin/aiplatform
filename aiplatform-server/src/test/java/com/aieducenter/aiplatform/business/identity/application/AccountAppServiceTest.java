@@ -6,9 +6,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountResponse;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 账号查询：全量清单（建档顺序、字符串 id）。
  */
-@SpringBootTest
+@IntegrationTest
 class AccountAppServiceTest {
 
     @Autowired

@@ -6,12 +6,12 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 经端口全链路（{@code MeteringLocalAdapter} → 应用服务 → 落库/原生 SQL 聚合），
  * 以库内真实行为为准（B0 §5.2：副作用以真实状态为准，非事件自述）。
  */
-@SpringBootTest
+@IntegrationTest
 class MeteringAppServiceTest {
 
     private static final Instant T1 = Instant.parse("2026-08-01T00:00:00Z");

@@ -19,10 +19,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -44,7 +44,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
  * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=main）。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class MainAgentSessionSmokeTest {
 
     private static final Duration TURN_DEADLINE = Duration.ofSeconds(150);

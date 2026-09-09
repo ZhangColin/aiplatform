@@ -7,12 +7,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.verify;
  * （提交后发射）；修订再执行只前进（时间戳刷新、事件每执行必发）；工作区
  * 无项目 → PRJ_001 不发事件。
  */
-@SpringBootTest
+@IntegrationTest
 class PrdArtifactAdapterTest {
 
     @Autowired

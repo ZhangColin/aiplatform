@@ -16,10 +16,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -52,7 +52,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * 尝试的中间失败静默续试不算失败，退出条件只认 run-finish，超时红
  * 并附事件序诊断。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class GenerationEarlyServiceSmokeTest {
 
     /** 真模型从 PRD 生成的期限（含装依赖/建库/起服全流程）。 */

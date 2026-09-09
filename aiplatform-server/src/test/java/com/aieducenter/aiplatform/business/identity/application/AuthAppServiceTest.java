@@ -9,9 +9,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.identity.application.AuthAppService.LoginCompletion;
 import com.aieducenter.aiplatform.business.identity.application.AuthAppService.LoginRedirect;
 import com.aieducenter.aiplatform.business.identity.application.AuthAppService.LogoutCompletion;
@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
  * 建档 upsert（同 sub 不重复建档、显示名变更更新）、会话建立与登出时序（先取 hint
  * 再删会话）。sub 每次运行随机，避免历史数据撞唯一索引。
  */
-@SpringBootTest(properties = {
+@IntegrationTest(properties = {
         "sso.issuer=http://identity.localhost:10001",
         "sso.client-id=test-client",
         "sso.client-secret=test-secret",

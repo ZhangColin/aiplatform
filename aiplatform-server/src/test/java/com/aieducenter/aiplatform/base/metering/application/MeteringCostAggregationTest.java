@@ -8,9 +8,9 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>单价/事件 fixture 用独立 provider {@code testprov}——与启动种子行（deepseek
  * 现役模型）不撞，种子行不在本类断言面内（种子验收见 {@code PriceEntrySeederTest}）。</p>
  */
-@SpringBootTest
+@IntegrationTest
 class MeteringCostAggregationTest {
 
     private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");

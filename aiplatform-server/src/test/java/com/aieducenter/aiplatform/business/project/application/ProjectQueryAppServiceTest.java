@@ -9,12 +9,12 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.metering.application.MeteringAppService;
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
@@ -54,7 +54,7 @@ import static org.mockito.Mockito.when;
  * usage = 总量 + 平台成本（币种分桶 + 未配价标注）+ 分模型 + 分角色；PRD 直读
  * 工作区（文件是事实源）。
  */
-@SpringBootTest
+@IntegrationTest
 class ProjectQueryAppServiceTest {
 
     @Autowired

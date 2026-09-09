@@ -18,13 +18,16 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from fastembed import TextEmbedding
 
 PORT = int(os.environ.get("EMBED_PORT", "9091"))
+# 稳定缓存目录（fastembed 缺省落在系统临时目录 $TMPDIR，重启/清临时文件即丢；
+# 落到 ~/.cache 下稳定，可用 FASTEMBED_CACHE_DIR 覆盖）
+CACHE_DIR = os.environ.get("FASTEMBED_CACHE_DIR", os.path.expanduser("~/.cache/fastembed"))
 _model = None
 
 
 def model():
     global _model
     if _model is None:
-        _model = TextEmbedding("BAAI/bge-small-zh-v1.5")
+        _model = TextEmbedding("BAAI/bge-small-zh-v1.5", cache_dir=CACHE_DIR)
     return _model
 
 

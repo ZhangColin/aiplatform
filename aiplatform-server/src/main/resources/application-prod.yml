@@ -13,7 +13,7 @@ logging.level.root: INFO
 
 # 预览网关（#129 生产化）：预览 URL 换 https + 生产基域名 {id}.preview.{domain}——
 # 同一份 nginx 网关配置（nginx.prod.conf.template，TLS 终止 + wildcard 证书），见
-# docs/guide/预览网关.md。PREVIEW_BASE 部署时供给（无默认，缺省启动即 fail-fast）。
+# docs/guide/生产部署.md。PREVIEW_BASE 部署时供给（无默认，缺省启动即 fail-fast）。
 app:
   embedding:
     url: ${EMBEDDING_URL}

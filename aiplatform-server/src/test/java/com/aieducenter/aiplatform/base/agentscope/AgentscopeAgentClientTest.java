@@ -31,6 +31,7 @@ import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatUsage;
+import io.agentscope.core.state.AgentState;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.time.Clock;
 import java.time.Duration;
@@ -39,6 +40,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -717,20 +719,24 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_history_states_when_has_asking_tool_call_then_reflects_pending() {
-        // 挂起判定谓词（issue #40 守卫事实源）：memory_messages（引擎
-        // StateBackedMemory 持久化的会话史）中存在 ASKING 态 ToolUseBlock
+        // 挂起判定谓词（issue #40 守卫事实源）：agent_state（2.0.1 内核以整个
+        // AgentState 的 context 承载消息）中存在 ASKING 态 ToolUseBlock
         // = 会话有挂起问答
-        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
-                .thenReturn(List.of(toolUseMessage(ToolCallState.ASKING)));
+        when(stateStore.get("alice", "s-1", "agent_state", AgentState.class))
+                .thenReturn(Optional.of(AgentState.builder()
+                        .context(List.of(toolUseMessage(ToolCallState.ASKING)))
+                        .build()));
         assertThat(client.hasAskingToolCall("alice", "s-1")).isTrue();
 
         // 已收口（FINISHED）的问答不算挂起；空史（会话从未挂起）同 false
-        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
-                .thenReturn(List.of(toolUseMessage(ToolCallState.FINISHED)));
+        when(stateStore.get("alice", "s-1", "agent_state", AgentState.class))
+                .thenReturn(Optional.of(AgentState.builder()
+                        .context(List.of(toolUseMessage(ToolCallState.FINISHED)))
+                        .build()));
         assertThat(client.hasAskingToolCall("alice", "s-1")).isFalse();
 
-        when(stateStore.getList("alice", "s-1", "memory_messages", Msg.class))
-                .thenReturn(List.of());
+        when(stateStore.get("alice", "s-1", "agent_state", AgentState.class))
+                .thenReturn(Optional.empty());
         assertThat(client.hasAskingToolCall("alice", "s-1")).isFalse();
     }
 

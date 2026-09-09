@@ -21,6 +21,7 @@ import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -76,8 +77,8 @@ public class AgentscopeAgentClient {
     public static final String ANSWER_METADATA_KEY = "answer";
 
     private static final String USAGE_EVENT_PREFIX = "agent-usage-";
-    /** 会话史状态键（引擎 StateBackedMemory 持久化键同源——agentscope 未出公共常量）。 */
-    private static final String MEMORY_MESSAGES_KEY = "memory_messages";
+    /** 会话状态键（2.0.1 内核把整个 AgentState 含消息 context 存此键——agentscope 未出公共常量）。 */
+    private static final String AGENT_STATE_KEY = "agent_state";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final AgentscopeHarnessAgentFactory factory;
@@ -197,14 +198,17 @@ public class AgentscopeAgentClient {
     }
 
     /**
-     * 挂起问答判定（#40 守卫事实源）：会话持久化史（cat_agent_state 的
-     * {@code memory_messages}）中存在 ASKING 态工具块 = 该会话有挂起问答（run
-     * 软终点待答）。业务编排在新 converse 提交前于请求路径同步调用（异步轨道上
-     * 引擎虽也会拒，但 REST 已返 200）；作答复在途、ASKING 尚未清库的偶发误报
-     * 为已接受的竞态边角（ADR-0005）。
+     * 挂起问答判定（#40 守卫事实源）：会话持久化状态（cat_agent_state 的
+     * {@code agent_state} 键，2.0.1 内核以整个 AgentState 的 context 承载消息）
+     * 中存在 ASKING 态工具块 = 该会话有挂起问答（run 软终点待答）。业务编排在新
+     * converse 提交前于请求路径同步调用（异步轨道上引擎虽也会拒，但 REST 已返
+     * 200）；作答复在途、ASKING 尚未清库的偶发误报为已接受的竞态边角（ADR-0005）。
      */
     public boolean hasAskingToolCall(String userId, String sessionId) {
-        return stateStore.getList(userId, sessionId, MEMORY_MESSAGES_KEY, Msg.class).stream()
+        return stateStore.get(userId, sessionId, AGENT_STATE_KEY, AgentState.class)
+                .map(AgentState::getContext)
+                .orElseGet(List::of)
+                .stream()
                 .flatMap(msg -> msg.getContentBlocks(ToolUseBlock.class).stream())
                 .anyMatch(block -> block.getState() == ToolCallState.ASKING);
     }

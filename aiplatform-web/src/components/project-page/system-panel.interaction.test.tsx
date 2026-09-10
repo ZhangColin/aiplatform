@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useGenerationStore } from "@/lib/store/generation";
+import { useAnnotationStore } from "@/lib/store/annotation";
 
 import { SystemPanel } from "./system-panel";
 
@@ -47,6 +48,15 @@ function renderPanel() {
     </QueryClientProvider>,
   );
   return { frame: () => utils.container.querySelector("iframe")!, ...utils };
+}
+
+/** 预览地址换真实 origin（路径解析 / postMessage origin 校验用），并关掉 happy-dom
+ *  的 iframe 页面加载（真地址不真发请求）——它仍会经 process.stderr 打一条「Iframe
+ *  page loading is disabled」告警，一并吞掉（用真实 origin 的 describe 共用）。 */
+function useRealPreviewOrigin() {
+  previewUrl = "http://localhost:42659";
+  (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
+  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 }
 
 afterEach(() => {
@@ -119,13 +129,7 @@ describe("SystemPanel · 地址栏 goto（#125）", () => {
   });
 
   describe("真实 origin 下（http://localhost:42659）", () => {
-    beforeEach(() => {
-      previewUrl = "http://localhost:42659";
-      // 关掉 happy-dom 的 iframe 页面加载（真地址不真发请求）——它仍会经 process.stderr
-      // 打一条「Iframe page loading is disabled」告警，这里一并吞掉（仅导航用例，scoped）
-      (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
-      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    });
+    beforeEach(useRealPreviewOrigin);
 
     it("提交路径 → 导航到应用 origin 内对应页（iframe 换新地址、地址框回显）", () => {
       const { frame } = renderPanel();
@@ -156,11 +160,7 @@ describe("SystemPanel · 地址栏 goto（#125）", () => {
 });
 
 describe("SystemPanel · 圈注工具条激活态可辨（#135）", () => {
-  beforeEach(() => {
-    previewUrl = "http://localhost:42659";
-    (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
-    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  });
+  beforeEach(useRealPreviewOrigin);
 
   it("激活键 aria-pressed + 实底高亮，未激活键不亮——当前模式一眼可辨", () => {
     renderPanel();
@@ -189,11 +189,7 @@ describe("SystemPanel · 圈注工具条激活态可辨（#135）", () => {
 });
 
 describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
-  beforeEach(() => {
-    previewUrl = "http://localhost:42659";
-    (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
-    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  });
+  beforeEach(useRealPreviewOrigin);
 
   /** 激活标注态的可观测面：工具条换出「退出标注」键；退出后回「圈一下」。 */
   function expectActive(active: boolean) {
@@ -244,5 +240,63 @@ describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
     fireEvent.click(screen.getByRole("button", { name: "退出标注" }));
 
     expectActive(false);
+  });
+});
+
+describe("SystemPanel · 圈注锚回收（#136：区域锚进发送框附件区）", () => {
+  beforeEach(useRealPreviewOrigin);
+
+  afterEach(() => {
+    useAnnotationStore.setState({ annotations: {} }); // store 全局共享，逐用例归零
+  });
+
+  /** 子窗真实锚信封（注入脚本 postEnvelope 的产物形状；origin = 预览源）。 */
+  function postAnchor(data: unknown, origin: string) {
+    window.dispatchEvent(new MessageEvent("message", { data, origin }));
+  }
+
+  it("子窗圈选区域锚信封 → 入圈注 store（发送框附件区 chip 的物料源，随下一句发送）", () => {
+    renderPanel();
+
+    act(() => {
+      postAnchor(
+        {
+          __aiplatform__: true,
+          type: "anchor",
+          payload: {
+            kind: "circle",
+            anchor: { region: { x: 12, y: 34, width: 120, height: 56 } },
+            note: "",
+          },
+        },
+        "http://localhost:42659",
+      );
+    });
+
+    expect(useAnnotationStore.getState().annotations.p1).toEqual([
+      {
+        id: expect.any(String),
+        kind: "circle",
+        anchor: { region: { x: 12, y: 34, width: 120, height: 56 } },
+        note: "",
+      },
+    ]);
+  });
+
+  it("跨源锚信封拒收：origin ≠ 预览源不入附件区（防伪锚）", () => {
+    renderPanel();
+
+    act(() => {
+      postAnchor(
+        {
+          __aiplatform__: true,
+          type: "anchor",
+          payload: { kind: "circle", anchor: { region: { x: 0, y: 0, width: 9, height: 9 } }, note: "" },
+        },
+        "http://evil.example",
+      );
+    });
+
+    expect(useAnnotationStore.getState().annotations.p1).toBeUndefined();
   });
 });

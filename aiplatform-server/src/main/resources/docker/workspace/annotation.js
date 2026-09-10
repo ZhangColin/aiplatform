@@ -15,6 +15,8 @@
  *          | { __aiplatform__: true, type: "exit" }（Esc 退出，#134：顶层信封，
  *             不包进锚 payload——父窗解析器查顶层）
  * 回传目标 = 呼出消息的 event.origin（父窗源），不做通配广播。
+ * 遮罩显隐 = 内联样式在 enter/exit 直切（#136：出生内联 display:none 曾压过
+ * 样式表 .active 规则致遮罩从未显示、圈选出生即失效——显隐不再借道样式表）。
  */
 (function () {
   if (window.__aiplatformAnnotation) return;
@@ -23,6 +25,7 @@
   var parentOrigin = null;
   var activeTool = null; // "select" | "circle" | "comment" | null
   var overlay = null;
+  var dragBox = null; // 圈选拖拽框（遮罩子元素，--ax/--ay/--aw/--ah 定位）
   var hint = null;
   var hoverEl = null;
   var dragStart = null;
@@ -131,15 +134,22 @@
   }
 
   function onPointerDown(event) {
-    if (activeTool !== "circle") return;
     dragStart = { x: event.clientX, y: event.clientY };
+    // 起手收掉上一场的完成矩形（本监听只在圈选态挂载，无工具守卫可言）
+    dragBox.style.display = "none";
     event.preventDefault();
     event.stopPropagation();
+    // 指针捕获：拖出 iframe 边界（视口外）pointerup 仍送回遮罩收尾，事件不丢
     if (overlay.setPointerCapture) {
-      overlay.setPointerCapture(event.pointerId);
+      try {
+        overlay.setPointerCapture(event.pointerId);
+      } catch (e) {
+        // 捕获失败（罕见：指针已失效）退化为视口内收尾，拖拽照常
+      }
     }
     overlay.addEventListener("pointermove", onPointerMove);
     overlay.addEventListener("pointerup", onPointerUp);
+    overlay.addEventListener("pointercancel", onPointerCancel);
   }
 
   function onPointerMove(event) {
@@ -149,16 +159,15 @@
     overlay.style.setProperty("--ay", rect.y + "px");
     overlay.style.setProperty("--aw", rect.w + "px");
     overlay.style.setProperty("--ah", rect.h + "px");
-    overlay.classList.add("drawing");
+    // 首次移动起显示实时矩形（出生隐藏——静止时无 0×0 边框残点）
+    dragBox.style.display = "block";
   }
 
   function onPointerUp(event) {
-    overlay.removeEventListener("pointermove", onPointerMove);
-    overlay.removeEventListener("pointerup", onPointerUp);
-    if (dragStart) {
-      var region = regionOf(dragStart, { x: event.clientX, y: event.clientY });
-      dragStart = null;
-      overlay.classList.remove("drawing");
+    var start = dragStart;
+    detachDrag();
+    if (start) {
+      var region = regionOf(start, { x: event.clientX, y: event.clientY });
       if (region.width > 2 || region.height > 2) {
         // 区域中心补 DOM 参照（选择器/文本）——圈选锚不只数字，主智能体可精确读取
         // 「圈住哪个元素」：elementFromPoint 需先让遮罩退出命中测试（防取到遮罩自身）
@@ -170,7 +179,22 @@
         }
         post({ kind: "circle", anchor: anchor, note: "" });
       }
+      // 完成矩形保留呈现（对应刚进附件区的 chip）；exit / 下次拖拽收掉
     }
+  }
+
+  // 系统取消指针（触屏被滚动接管等）：拖拽作废——不留未完成矩形的残影、不发锚
+  function onPointerCancel() {
+    detachDrag();
+    dragBox.style.display = "none";
+  }
+
+  /** 拆拖拽三监听、清起点（onPointerUp 先取起点再收，锚照发；其余调用方 = 弃拖拽）。 */
+  function detachDrag() {
+    overlay.removeEventListener("pointermove", onPointerMove);
+    overlay.removeEventListener("pointerup", onPointerUp);
+    overlay.removeEventListener("pointercancel", onPointerCancel);
+    dragStart = null;
   }
 
   // 区域中心的顶层元素（视口坐标命中测试；遮罩临时 pointer-events:none 让位）
@@ -196,20 +220,31 @@
   function enter(tool) {
     activeTool = tool;
     ensureOverlay();
-    overlay.classList.add("active");
-    overlay.setAttribute("data-tool", tool);
+    // 异工具直切（父窗不发 exit）清场：在途拖拽作废（迟到的 pointer 不发锚）、
+    // 上一场的完成矩形不带到新模式
+    detachDrag();
+    dragBox.style.display = "none";
+    // 显隐唯一正路 = 内联直切（#136 根因修复）：出生内联 display:none 一路压过
+    // 样式表 .active{display:block}（内联恒胜样式表，层叠必败）——遮罩从未显示，
+    // 圈选拖拽落在真实页面上触发原生选择，出生即失效。显隐不再借道样式表类名。
+    overlay.style.display = "block";
     // 点选/评论：遮罩不拦点击（透传给下层元素，document 捕获取 target）；
     // 圈选：遮罩拦指针（拖拽画框）——同一遮罩按工具分指针语义
     overlay.style.pointerEvents = tool === "circle" ? "auto" : "none";
+    overlay.removeEventListener("pointerdown", onPointerDown);
+    if (tool === "circle") {
+      overlay.addEventListener("pointerdown", onPointerDown);
+    }
     showHint(tool);
     document.addEventListener("click", onDocumentClick, true);
-    overlay.addEventListener("pointerdown", onPointerDown);
   }
 
   function exit() {
     activeTool = null;
     if (overlay) {
-      overlay.classList.remove("active", "drawing");
+      detachDrag(); // 拖拽中退出（Esc/父窗 exit）也收干净：迟到的 pointer 不再发锚
+      dragBox.style.display = "none";
+      overlay.style.display = "none";
       overlay.removeEventListener("pointerdown", onPointerDown);
     }
     document.removeEventListener("click", onDocumentClick, true);
@@ -223,37 +258,36 @@
     if (overlay) return;
     overlay = document.createElement("div");
     overlay.setAttribute("data-aiplatform-annotation", "overlay");
+    // user-select/touch-action：拖拽面不吃页面原生文本选择、触屏不被滚动接管
     overlay.style.cssText =
       "position:fixed;inset:0;z-index:2147483647;" +
       "background:rgba(59,130,246,0.08);" +
-      "display:none;cursor:crosshair;";
-    // 圈选拖拽框：由 --ax/--ay/--aw/--ah 定位（pointermove 写变量）
-    var box = document.createElement("div");
-    box.style.cssText =
+      "display:none;cursor:crosshair;user-select:none;touch-action:none;";
+    // 圈选拖拽框：由 --ax/--ay/--aw/--ah 定位（pointermove 写变量）；
+    // 出生隐藏，首次移动起显示（静止时无 0×0 边框残点）
+    dragBox = document.createElement("div");
+    dragBox.setAttribute("data-aiplatform-box", "");
+    dragBox.style.cssText =
       "position:absolute;left:var(--ax,0);top:var(--ay,0);width:var(--aw,0);height:var(--ah,0);" +
-      "border:2px solid rgb(59,130,246);background:rgba(59,130,246,0.15);";
-    overlay.appendChild(box);
+      "border:2px solid rgb(59,130,246);background:rgba(59,130,246,0.15);display:none;";
+    overlay.appendChild(dragBox);
     document.documentElement.appendChild(overlay);
-    // 通过 CSS 注入的显示态：active 时显示遮罩；圈选工具才显示拖拽框
-    var style = document.createElement("style");
-    style.textContent =
-      "[data-aiplatform-annotation='overlay'].active{display:block}" +
-      "[data-aiplatform-annotation='overlay']:not([data-tool='circle']) [data-aiplatform-box]{display:none}";
-    document.documentElement.appendChild(style);
-    box.setAttribute("data-aiplatform-box", "");
   }
 
   function showHint(tool) {
     if (hint) hint.remove();
     hint = document.createElement("div");
+    hint.setAttribute("data-aiplatform-annotation", "hint");
     var text = tool === "circle"
       ? "拖拽框选要改的区域"
       : tool === "comment"
         ? "点击要评论的位置"
         : "点击要指认的元素";
     hint.textContent = text + "（Esc 退出）";
+    // pointer-events:none：提示浮条不挡拖拽起点/点选目标（事件穿到遮罩/页面）
     hint.style.cssText =
       "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483647;" +
+      "pointer-events:none;" +
       "background:rgb(17,24,39);color:#fff;font-size:13px;line-height:1;" +
       "padding:8px 14px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,0.2);";
     document.documentElement.appendChild(hint);

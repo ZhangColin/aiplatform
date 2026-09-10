@@ -9,8 +9,15 @@ import type { HydratedEntry } from "@/lib/store/chat";
  * 为事件载荷 JSON 原样，收窄归消费端）。
  */
 
-/** 对话史条目响应（swagger ConversationEntryResponse 信封解包后的形状）。 */
-export type ConversationEntryResponse = components["schemas"]["ConversationEntryResponse"];
+/**
+ * 对话史条目响应（swagger ConversationEntryResponse 信封解包后的形状）。id 为
+ * string ——后端全局 Long→String 序列化防 JS 精度丢失（2026-09-10 回归锚：schema
+ * 生成的 `number` 与运行时漂移，勿据其写 typeof 守卫）。
+ */
+export type ConversationEntryResponse = Omit<
+  components["schemas"]["ConversationEntryResponse"],
+  "id"
+> & { id?: string | number };
 
 /** kind Integer code → 消费口径（正本 = ConversationEntryKind；1=user 2=agent 3=question 4=answer 5=closing 6=guide）。 */
 const ENTRY_KINDS: Record<number, HydratedEntry["kind"]> = {
@@ -25,10 +32,10 @@ const ENTRY_KINDS: Record<number, HydratedEntry["kind"]> = {
 /** 响应 → 水合载荷（kind 由 Integer code 收窄；未知 code 条目弃守——契约演进的容错面）。 */
 export function toHydratedEntries(raw: ConversationEntryResponse[]): HydratedEntry[] {
   return raw.flatMap((entry) => {
-    const kind = typeof entry?.id === "number" ? ENTRY_KINDS[entry.kind ?? -1] : undefined;
+    const kind = entry?.id != null ? ENTRY_KINDS[entry.kind ?? -1] : undefined;
     if (kind === undefined) return [];
     return [{
-      id: entry.id as number,
+      id: String(entry.id),
       kind,
       runId: entry.runId ?? undefined,
       text: entry.text ?? undefined,

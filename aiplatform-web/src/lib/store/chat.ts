@@ -55,8 +55,8 @@ export type WorkClosing = {
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
 export type HydratedEntry = {
-  /** 库写入序（对话序正本）。 */
-  id: number;
+  /** 库写入序（对话序正本）。string——后端全局 Long→String 序列化（防精度丢失）。 */
+  id: string;
   kind: "user" | "agent" | "question" | "answer" | "closing" | "guide";
   runId?: string | null;
   text?: string | null;

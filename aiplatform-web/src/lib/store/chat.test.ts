@@ -300,7 +300,7 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     kind: "user" | "agent" | "question" | "answer" | "closing" | "guide",
     overrides: Record<string, unknown> = {},
     runId = `run-${Math.ceil(id / 2)}`,
-  ) => ({ id, kind, runId, answered: false, ...overrides });
+  ) => ({ id: String(id), kind, runId, answered: false, ...overrides });
 
   it("空库条目水合：消息序 = 写入序（发言 → 回复 → 问答卡 → 作答 → 收尾卡 → 轻引导），作答渲染同用户气泡", () => {
     useChatStore.getState().hydrate("p1", [

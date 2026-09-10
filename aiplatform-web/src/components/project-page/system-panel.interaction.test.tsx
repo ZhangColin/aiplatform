@@ -155,6 +155,39 @@ describe("SystemPanel · 地址栏 goto（#125）", () => {
   });
 });
 
+describe("SystemPanel · 圈注工具条激活态可辨（#135）", () => {
+  beforeEach(() => {
+    previewUrl = "http://localhost:42659";
+    (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  it("激活键 aria-pressed + 实底高亮，未激活键不亮——当前模式一眼可辨", () => {
+    renderPanel();
+    const select = screen.getByRole("button", { name: "选择" }) as HTMLButtonElement;
+    const circle = screen.getByRole("button", { name: "圈选" }) as HTMLButtonElement;
+
+    fireEvent.click(select);
+
+    expect(select.getAttribute("aria-pressed")).toBe("true");
+    expect(select.className).toContain("bg-primary");
+    expect(select.className).toContain("text-primary-foreground");
+    expect(circle.getAttribute("aria-pressed")).toBe("false");
+    expect(circle.className).not.toContain("bg-primary");
+  });
+
+  it("置灰键（改字/评论）不可点：点了不进标注态", () => {
+    renderPanel();
+    const comment = screen.getByRole("button", { name: "评论（待启用）" }) as HTMLButtonElement;
+    expect(comment.disabled).toBe(true);
+
+    fireEvent.click(comment);
+
+    expect(screen.queryByRole("button", { name: "退出标注" })).toBeNull();
+    expect(screen.getByText("圈一下")).toBeTruthy();
+  });
+});
+
 describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
   beforeEach(() => {
     previewUrl = "http://localhost:42659";
@@ -175,7 +208,7 @@ describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
 
   it("预览内 Esc：子窗退出信封 → 工具条激活态熄灭（父窗模式归位）", () => {
     renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: "选择组件" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
     expectActive(true);
 
     // 子窗真实退出信封（顶层 type:"exit"，注入脚本 Esc 回传；origin = 预览源）。
@@ -194,7 +227,7 @@ describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
 
   it("再点当前工具键：退出标注态（不回归）", () => {
     renderPanel();
-    const tool = screen.getByRole("button", { name: "选择组件" });
+    const tool = screen.getByRole("button", { name: "选择" });
     fireEvent.click(tool);
     expectActive(true);
 
@@ -205,7 +238,7 @@ describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
 
   it("点「退出标注」按钮：退出标注态（不回归）", () => {
     renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: "选择组件" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
     expectActive(true);
 
     fireEvent.click(screen.getByRole("button", { name: "退出标注" }));

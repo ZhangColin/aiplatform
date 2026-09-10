@@ -230,9 +230,6 @@ export function CommandArea({
           attachmentsEnabled={false}
           annotations={annotations}
           onAnnotationRemove={(id) => useAnnotationStore.getState().remove(projectId, id)}
-          onAnnotationNoteChange={(id, note) =>
-            useAnnotationStore.getState().updateNote(projectId, id, note)
-          }
           inputRef={inputRef}
           placeholder={placeholder}
         />
@@ -277,7 +274,7 @@ function MessageRow({ message, children, projectId }: { message: ChatMessage; ch
                   key={i}
                   className="flex items-center gap-1 rounded-md border bg-background/60 px-1.5 py-0.5 text-xs text-foreground/70"
                 >
-                  {annotationLabel(a.kind)}·{annotationSummary(a)}
+                  {i + 1}·{annotationLabel(a.kind)}·{annotationSummary(a)}
                 </span>
               ))}
             </div>

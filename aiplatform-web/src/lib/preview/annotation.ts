@@ -12,7 +12,8 @@
  * event.origin 等于预览 URL 的 origin（防伪锚）。
  */
 
-/** 标注类型（点选锚定 / 画笔圈选 / 区块评论——三能力）。 */
+/** 标注类型（工具条四键中启用的两键：select = 选择·点选锚定 / circle = 圈选·拖框圈区域；
+ * comment 仅历史兼容——UI 不再产生新评论圈注，落库旧件只读回显）。 */
 export type AnnotationKind = "select" | "circle" | "comment";
 
 /** 圈选矩形（页面级坐标，circle 专用；选择器可缺省）。 */
@@ -112,15 +113,16 @@ export function toAttachmentCommand(item: AnnotationDraft): AnnotationAttachment
   };
 }
 
-/** 标注类型 → 用户面标签（点选 / 圈选 / 评论）。 */
+/** 标注类型 → 用户面标签（与工具条四键口径一致：选择 / 圈选 / 评论）。 */
 export function annotationLabel(kind: AnnotationKind): string {
-  return kind === "select" ? "点选" : kind === "circle" ? "圈选" : "评论";
+  return kind === "select" ? "选择" : kind === "circle" ? "圈选" : "评论";
 }
 
-/** 圈注条目 → 文本行（问答作答时随答复文本一起送达——作答通道无附件位，渲染进文本）。 */
+/** 圈注条目 → 文本行（问答作答时随答复文本一起送达——作答通道无附件位，渲染进
+ * 文本；逐条编号与发言通道 AnnotationPrompt 同构，「第 N 条」指代对得上）。 */
 export function renderAnnotationsText(items: AnnotationDraft[]): string {
   if (!items.length) return "";
-  return items.map((a) => `${annotationLabel(a.kind)}：${annotationSummary(a)}`).join("；");
+  return items.map((a, i) => `${i + 1}. ${annotationLabel(a.kind)}：${annotationSummary(a)}`).join("；");
 }
 
 /** 圈注条目的可读摘要（附件 chip 呈现用：元素文本 / 选择器 / 矩形区域）。 */

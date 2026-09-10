@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useAnnotationStore } from "./annotation";
 
 /**
- * 圈注条目 store（#97 圈注 B 档）：按项目累积「发送前」的圈注条目（预览回传锚 →
- * 发送框附件区），发送前可删改（remove / updateNote）、发送即清（clear）。
+ * 圈注条目 store（#97 圈注 B 档，#135 撤评语改）：按项目累积「发送前」的圈注条目
+ * （预览回传锚 → 发送框附件区，chip 为序号 + 类型 + 摘要），发送前可删（remove）、
+ * 发送即清（clear）。
  */
 describe("圈注条目 store", () => {
   beforeEach(() => {
@@ -35,15 +36,6 @@ describe("圈注条目 store", () => {
     useAnnotationStore.getState().remove("p1", id);
 
     expect(useAnnotationStore.getState().annotations.p1).toHaveLength(0);
-  });
-
-  it("updateNote：发送前改评语（按 id 原位更新）", () => {
-    useAnnotationStore.getState().add("p1", draft);
-    const id = useAnnotationStore.getState().annotations.p1[0].id;
-
-    useAnnotationStore.getState().updateNote("p1", id, "改成红色");
-
-    expect(useAnnotationStore.getState().annotations.p1[0].note).toBe("改成红色");
   });
 
   it("clear：发送即清（附件随消息发出不滞留）", () => {

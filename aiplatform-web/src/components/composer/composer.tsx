@@ -10,8 +10,8 @@ import {
   Mic,
   MousePointer2,
   Paperclip,
-  Pencil,
   Sparkles,
+  SquareDashed,
   Upload,
   X,
 } from "lucide-react";
@@ -29,7 +29,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import { formatFileSize } from "@/lib/projects/files";
-import { annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
+import { annotationLabel, annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
 import type { AnnotationItem } from "@/lib/store/annotation";
 import { PLATFORM_MODES } from "@/lib/modes";
 
@@ -66,9 +66,9 @@ function AttachmentIcon({ name, type }: { name: string; type?: string }) {
   );
 }
 
-/** 圈注条目图标（按标注类型分流，与预览工具条同源）。 */
+/** 圈注条目图标（按标注类型分流，与预览工具条同源：选择/圈选/评论·历史兼容）。 */
 function AnnotationKindIcon({ kind }: { kind: AnnotationKind }) {
-  if (kind === "circle") return <Pencil className="size-3.5" />;
+  if (kind === "circle") return <SquareDashed className="size-3.5" />;
   if (kind === "comment") return <MessageSquarePlus className="size-3.5" />;
   return <MousePointer2 className="size-3.5" />;
 }
@@ -83,7 +83,6 @@ export function Composer({
   attachmentsEnabled = true,
   annotations,
   onAnnotationRemove,
-  onAnnotationNoteChange,
   inputRef,
   placeholder = "说说你想做什么…",
 }: {
@@ -99,12 +98,11 @@ export function Composer({
   disabled?: boolean;
   /** 附件入口（回形针 + chip 行）：调用侧无上传管道时置 false 隐去——不邀请会被丢弃的操作。 */
   attachmentsEnabled?: boolean;
-  /** 圈注附件（#97 预览回传的标注条目，归 store 持态）：随附件 chip 行呈现、可删改。 */
+  /** 圈注附件（#97 预览回传的标注条目，归 store 持态）：随附件 chip 行呈现（序号 +
+   * 类型 + 摘要，多条指代靠序号——描述写主输入框）、发送前可删。 */
   annotations?: AnnotationItem[];
   /** 圈注删除（发送前可删）。 */
   onAnnotationRemove?: (id: string) => void;
-  /** 圈注评语修改（发送前可改）。 */
-  onAnnotationNoteChange?: (id: string, note: string) => void;
   /** 输入框外接 ref（项目页：问题到达自动聚焦）。 */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
@@ -211,7 +209,7 @@ export function Composer({
 
       {annotations && annotations.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {annotations.map((a) => (
+          {annotations.map((a, i) => (
             <span
               key={a.id}
               className="flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1 pl-2 pr-1 text-xs text-foreground/80"
@@ -219,14 +217,11 @@ export function Composer({
               <span className="text-muted-foreground">
                 <AnnotationKindIcon kind={a.kind} />
               </span>
+              {/* 序号 + 类型 + 摘要（#135）：多条圈注靠序号指代，主输入框写「第 1 条…」 */}
+              <span className="shrink-0 font-medium text-primary">
+                {i + 1}·{annotationLabel(a.kind)}
+              </span>
               <span className="max-w-40 truncate">{annotationSummary(a)}</span>
-              <input
-                value={a.note}
-                onChange={(e) => onAnnotationNoteChange?.(a.id, e.target.value)}
-                placeholder="评语（可选）"
-                aria-label="圈注评语"
-                className="w-24 shrink-0 rounded border-0 bg-transparent px-1 py-0.5 text-xs outline-none placeholder:text-muted-foreground/50 focus:bg-background"
-              />
               <button
                 type="button"
                 className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"

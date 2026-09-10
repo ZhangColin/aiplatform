@@ -12,10 +12,12 @@ import com.aieducenter.aiplatform.business.project.application.dto.command.Annot
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationRegion;
 
 /**
- * 圈注锚载荷 → 主智能体 prompt 的渲染（#97 圈注 B 档，纯函数）：三能力（点选 /
- * 圈选 / 评论）各渲染成主智能体可精确读取的自然语言段；宽容——非圈注附件丢弃、
- * 空锚/缺字段不抛、未知 kind 回落「圈注」。契约字段形状与 SSE 事件清单
- * 「消息附件部件锚载荷 schema」同源。
+ * 圈注锚载荷 → 主智能体 prompt 的渲染（#97 圈注 B 档，纯函数）：标注类型（选择 /
+ * 圈选；评论仅历史兼容）各渲染成主智能体可精确读取的自然语言段，逐条编号（用户
+ * 以「第 N 条」指代——chip 序号与本渲染同构）；宽容——非圈注附件丢弃、空锚/缺
+ * 字段不抛、未知 kind 回落「圈注」。无评语的条目不渲染评语段（#135 起 UI 不再
+ * 产生评语，历史带评语件照常回显）。契约字段形状与 SSE 事件清单「消息附件部件
+ * 锚载荷 schema」同源。
  */
 class AnnotationPromptTest {
 
@@ -27,7 +29,8 @@ class AnnotationPromptTest {
         String suffix = AnnotationPrompt.renderSuffix(List.of(attachment));
 
         assertThat(suffix).contains("【圈注（用户在预览上指认的位置）】");
-        assertThat(suffix).contains("1. 点选：选择器 `button.submit-btn`，文本「提交订单」");
+        assertThat(suffix).contains("1. 选择：选择器 `button.submit-btn`，文本「提交订单」");
+        assertThat(suffix).doesNotContain("评语"); // 无评语段省略
     }
 
     @Test
@@ -75,7 +78,7 @@ class AnnotationPromptTest {
 
         String suffix = AnnotationPrompt.renderSuffix(List.of(select, circle));
 
-        assertThat(suffix).contains("1. 点选：选择器 `button.a`，文本「甲」");
+        assertThat(suffix).contains("1. 选择：选择器 `button.a`，文本「甲」");
         assertThat(suffix).contains("2. 圈选：页面区域 (x=1, y=2, 宽=3, 高=4)");
     }
 
@@ -93,7 +96,7 @@ class AnnotationPromptTest {
 
         String suffix = AnnotationPrompt.renderSuffix(List.of(other, select));
 
-        assertThat(suffix).contains("1. 点选：选择器 `button.a`，文本「甲」");
+        assertThat(suffix).contains("1. 选择：选择器 `button.a`，文本「甲」");
         assertThat(suffix).doesNotContain("file");
     }
 

@@ -3,16 +3,19 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "./composer";
+import type { AnnotationItem } from "@/lib/store/annotation";
 
 /**
  * 共享发送框（#76 首页/项目页同一组件）的交互契约：受控输入 + Enter 提交
  * （Shift+Enter 换行、输入法组词不触发）+ 附件 chip 增删 + 类型下拉（v1 仅
- * 「做系统」可选）+ 圆形发送键启停。沿 command-area.interaction 先例
- * （happy-dom 逐文件例外）；断言用原生属性（本仓无 jest-dom）。
+ * 「做系统」可选）+ 圆形发送键启停 + 圈注 chip 形态（#135 序号 + 类型 + 摘要、
+ * 撤评语输入框）。沿 command-area.interaction 先例（happy-dom 逐文件例外）；
+ * 断言用原生属性（本仓无 jest-dom）。
  */
 
 const submit = vi.fn();
 const change = vi.fn();
+const removeAnnotation = vi.fn();
 
 function setup({ value = "" }: { value?: string } = {}) {
   render(
@@ -33,6 +36,7 @@ function sendButton(): HTMLButtonElement {
 beforeEach(() => {
   submit.mockClear();
   change.mockClear();
+  removeAnnotation.mockClear();
 });
 afterEach(() => cleanup());
 
@@ -143,5 +147,59 @@ describe("Composer · 类型下拉", () => {
     expect(screen.getByRole("menuitem", { name: /写文档/ }).getAttribute("aria-disabled")).toBe(
       "true",
     );
+  });
+});
+
+describe("Composer · 圈注 chip 行（#135 序号化）", () => {
+  const annotations: AnnotationItem[] = [
+    { id: "an1", kind: "select", anchor: { selector: "button.submit", text: "提交订单" }, note: "" },
+    {
+      id: "an2",
+      kind: "circle",
+      anchor: { region: { x: 100, y: 200, width: 300, height: 80 } },
+      note: "",
+    },
+  ];
+
+  function setupWithAnnotations() {
+    render(
+      <Composer
+        value="第 1 条改颜色"
+        onValueChange={change}
+        onSubmit={submit}
+        annotations={annotations}
+        onAnnotationRemove={removeAnnotation}
+        placeholder="一句话说说你想做什么"
+      />,
+    );
+  }
+
+  it("chip 形态 = 序号 + 类型 + 摘要（多条靠序号指代），无评语输入框", () => {
+    setupWithAnnotations();
+
+    expect(screen.getByText("1·选择")).toBeTruthy();
+    expect(screen.getByText("提交订单")).toBeTruthy();
+    expect(screen.getByText("2·圈选")).toBeTruthy();
+    expect(screen.getByText("区域 (100, 200) 300×80")).toBeTruthy();
+    // 评语输入框已撤（描述统一写主输入框）
+    expect(screen.queryByLabelText("圈注评语")).toBeNull();
+    expect(screen.queryByPlaceholderText("评语（可选）")).toBeNull();
+  });
+
+  it("chip 可删：X 移除对应圈注（指认错了能修正）", () => {
+    setupWithAnnotations();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "移除圈注" })[1]);
+
+    expect(removeAnnotation).toHaveBeenCalledWith("an2");
+  });
+
+  it("圈注随下一句发送：onSubmit 第三参带走条目", () => {
+    setupWithAnnotations();
+    const input = screen.getByPlaceholderText("一句话说说你想做什么");
+
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    expect(submit).toHaveBeenCalledWith("第 1 条改颜色", [], annotations);
   });
 });

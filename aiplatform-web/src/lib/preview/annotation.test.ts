@@ -100,8 +100,8 @@ describe("圈注载荷（对话史水合 / 发送映射）", () => {
     });
   });
 
-  it("标注类型 → 用户面标签", () => {
-    expect(annotationLabel("select")).toBe("点选");
+  it("标注类型 → 用户面标签（与工具条四键口径一致：选择 / 圈选；评论仅历史兼容）", () => {
+    expect(annotationLabel("select")).toBe("选择");
     expect(annotationLabel("circle")).toBe("圈选");
     expect(annotationLabel("comment")).toBe("评论");
   });
@@ -127,13 +127,13 @@ describe("圈注载荷（对话史水合 / 发送映射）", () => {
     ).toBe("区域 (100, 200) 300×80 · 订单卡片");
   });
 
-  it("圈注条目 → 文本行（作答通道渲染进答复文本）", () => {
+  it("圈注条目 → 文本行（作答通道渲染进答复文本；逐条编号与发言通道同构，「第 N 条」对上）", () => {
     expect(
       renderAnnotationsText([
         { kind: "select", anchor: { text: "提交订单" }, note: "" },
         { kind: "comment", anchor: { text: "横幅" }, note: "改成红色" },
       ]),
-    ).toBe("点选：提交订单；评论：横幅");
+    ).toBe("1. 选择：提交订单；2. 评论：横幅");
     expect(renderAnnotationsText([])).toBe("");
   });
 

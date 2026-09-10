@@ -8,16 +8,17 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 圈注附件（#97 圈注 B 档）：随对话区发言发送的消息附件部件——用户在预览上指认
- * 位置的结构化锚（点选 / 圈选 / 评论三能力），随下一句自然语言一起发送、被主智能
- * 体精确读取（结构化定位而非猜图）。载荷形状与 SSE 事件清单「消息附件部件锚载荷
- * schema」同源（附件种类 attachmentType + 标注体 annotation）。
+ * 位置的结构化锚（选择 / 圈选两键；评论仅历史兼容——#135 起 UI 不再产生），随
+ * 下一句自然语言一起发送、被主智能体精确读取（结构化定位而非猜图）。载荷形状与
+ * SSE 事件清单「消息附件部件锚载荷 schema」同源（附件种类 attachmentType + 标
+ * 注体 annotation）。
  *
  * <p>指认是对话输入的<b>增强不是替代</b>：附件部件与自然语言同句发送，字段只定
- * 要点——结构化定位（anchor）+ 标注类型（kind）+ 可选评语（note）。多条圈注 =
- * 多个附件部件可叠加。</p>
+ * 要点——结构化定位（anchor）+ 标注类型（kind）；note（评语）历史兼容、UI 不再
+ * 产生。多条圈注 = 多个附件部件可叠加。</p>
  *
  * @param attachmentType 附件种类（v1 唯一 = {@code "annotation"}，后续上传物料等另立）
- * @param annotation     标注体（类型 + 结构化锚 + 可选评语）
+ * @param annotation     标注体（类型 + 结构化锚 + note 历史兼容）
  */
 public record AnnotationAttachment(
 
@@ -38,7 +39,8 @@ public record AnnotationAttachment(
         return ATTACHMENT_TYPE_ANNOTATION.equals(attachmentType) && annotation != null;
     }
 
-    /** 标注体：类型（点选锚定 / 画笔圈选 / 区块评论）+ 结构化锚 + 可选评语。 */
+    /** 标注体：类型（选择=点选锚定 / 圈选=拖框圈区域；评论仅历史兼容——#135 起
+     *  UI 不再产生）+ 结构化锚 + note（评语历史兼容，UI 不再产生）。 */
     public record AnnotationBody(
 
             @NotBlank(message = "标注类型不能为空")

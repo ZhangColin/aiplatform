@@ -241,8 +241,8 @@ public final class AgentEventTypes {
 
     /**
      * 消息附件部件（契约预留，#97 圈注）：圈注锚随消息发送的载荷位——结构化定位
-     * + 标注类型 + 可选评语，锚载荷 schema 随 SSE事件清单定形。本票只占契约位，
-     * 无生产方（圈注管道随 #97 落地）。
+     * + 标注类型（note 评语历史兼容，UI 不再产生——#135），锚载荷 schema 随
+     * SSE事件清单定形。本票只占契约位，无生产方（圈注管道随 #97 落地）。
      */
     public static final String PART_ATTACHMENT = "part-attachment";
 

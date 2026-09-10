@@ -1,16 +1,18 @@
 "use client";
 
-import { MessageSquarePlus, MousePointer2, Pencil, Type, X } from "lucide-react";
+import { MessageSquarePlus, MousePointer2, SquareDashed, Type, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { AnnotationKind } from "@/lib/preview/annotation";
 
 /**
- * 预览底部浮动工具条（#80 形态位占位 → #97 圈注落地）：三能力——点选（选择组件）/
- * 画笔圈选 / 评论——真实现、可点击，点击即呼出标注态（非常驻：再点同键或「退出」
- * 即退出，不影响正常预览浏览）；「直接改文字」为未来增强备案，保持置灰。工具条是
- * 平台件（主题随平台走），浮在浅色锁定的舞台上。activeTool 归装配层持态（system-
- * panel 据此对 iframe 发 postMessage 进出标注态）。
+ * 预览底部浮动工具条（#80 形态位占位 → #97 圈注落地 → #135 四键终稿，对齐
+ * Lovable preview toolbar）：四键全留——**选择 / 圈选** 启用（点击进入标注态，
+ * 非常驻：再点同键或「退出」即退出，切键直接换模式），**改字 / 评论** 置灰待
+ * 启用（只留形态位，均为未来增强）。label 与 CONTEXT.md 词条口径一致（选择 /
+ * 改字 / 圈选 / 评论）；激活态实底高亮 + aria-pressed，当前模式一眼可辨。工具条
+ * 是平台件（主题随平台走），浮在浅色锁定的舞台上。activeTool 归装配层持态
+ * （system-panel 据此对 iframe 发 postMessage 进出标注态）。
  */
 export function PreviewToolbar({
   activeTool,
@@ -29,31 +31,18 @@ export function PreviewToolbar({
       <div className="pointer-events-auto flex items-center gap-0.5 rounded-full border bg-background/95 px-1.5 py-1 shadow-lg backdrop-blur">
         <ToolButton
           icon={MousePointer2}
-          label="选择组件"
+          label="选择"
           active={activeTool === "select"}
           onClick={() => onToolToggle?.("select")}
         />
+        <DisabledToolButton icon={Type} label="改字（待启用）" title="改字（未来增强）" />
         <ToolButton
-          icon={Pencil}
-          label="画笔圈选"
+          icon={SquareDashed}
+          label="圈选"
           active={activeTool === "circle"}
           onClick={() => onToolToggle?.("circle")}
         />
-        <ToolButton
-          icon={MessageSquarePlus}
-          label="评论"
-          active={activeTool === "comment"}
-          onClick={() => onToolToggle?.("comment")}
-        />
-        <button
-          type="button"
-          disabled
-          aria-label="直接改文字（待启用）"
-          title="直接改文字（未来增强）"
-          className="cursor-not-allowed rounded-full p-2 text-muted-foreground/40"
-        >
-          <Type className="size-3.5" />
-        </button>
+        <DisabledToolButton icon={MessageSquarePlus} label="评论（待启用）" title="评论（未来增强）" />
         <span className="mx-0.5 h-4 w-px bg-border" />
         {activeTool ? (
           <button
@@ -89,13 +78,38 @@ function ToolButton({
       type="button"
       onClick={onClick}
       aria-label={label}
+      aria-pressed={active}
       title={label}
       className={cn(
         "rounded-full p-2 transition-colors",
+        // 激活态实底高亮（#135 强化）：与未激活的 muted 一眼可辨
         active
-          ? "bg-primary/15 text-primary"
+          ? "bg-primary text-primary-foreground shadow-sm"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
+    >
+      <Icon className="size-3.5" />
+    </button>
+  );
+}
+
+/** 置灰形态位（改字 / 评论）：能力占位不可点——有这个位、现在不能用。 */
+function DisabledToolButton({
+  icon: Icon,
+  label,
+  title,
+}: {
+  icon: typeof MousePointer2;
+  label: string;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled
+      aria-label={label}
+      title={title}
+      className="cursor-not-allowed rounded-full p-2 text-muted-foreground/40"
     >
       <Icon className="size-3.5" />
     </button>

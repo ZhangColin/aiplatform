@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useGenerationStore } from "@/lib/store/generation";
@@ -152,5 +152,64 @@ describe("SystemPanel · 地址栏 goto（#125）", () => {
         (screen.getByRole("textbox", { name: "预览地址" }) as HTMLInputElement).value,
       ).toBe("http://localhost:42659");
     });
+  });
+});
+
+describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
+  beforeEach(() => {
+    previewUrl = "http://localhost:42659";
+    (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = true;
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  /** 激活标注态的可观测面：工具条换出「退出标注」键；退出后回「圈一下」。 */
+  function expectActive(active: boolean) {
+    const exitButton = screen.queryByRole("button", { name: "退出标注" });
+    if (active) {
+      expect(exitButton).toBeTruthy();
+    } else {
+      expect(exitButton).toBeNull();
+      expect(screen.getByText("圈一下")).toBeTruthy();
+    }
+  }
+
+  it("预览内 Esc：子窗退出信封 → 工具条激活态熄灭（父窗模式归位）", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "选择组件" }));
+    expectActive(true);
+
+    // 子窗真实退出信封（顶层 type:"exit"，注入脚本 Esc 回传；origin = 预览源）。
+    // 原生事件不走 fireEvent，须 act 包裹让 React 同步冲刷 setActiveTool
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { __aiplatform__: true, type: "exit" },
+          origin: "http://localhost:42659",
+        }),
+      );
+    });
+
+    expectActive(false);
+  });
+
+  it("再点当前工具键：退出标注态（不回归）", () => {
+    renderPanel();
+    const tool = screen.getByRole("button", { name: "选择组件" });
+    fireEvent.click(tool);
+    expectActive(true);
+
+    fireEvent.click(tool);
+
+    expectActive(false);
+  });
+
+  it("点「退出标注」按钮：退出标注态（不回归）", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "选择组件" }));
+    expectActive(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "退出标注" }));
+
+    expectActive(false);
   });
 });

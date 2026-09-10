@@ -61,8 +61,13 @@ describe("圈注协议解析（postMessage 锚）", () => {
     ).toBeNull(); // 未知 kind
   });
 
-  it("退出信号（注入脚本 Esc 退出）识别", () => {
-    expect(parseExitEvent({ __exit__: true })).toBe(true);
+  it("退出信封（注入脚本 Esc 退出）识别：顶层 { __aiplatform__, type: 'exit' }", () => {
+    expect(parseExitEvent({ __aiplatform__: true, type: "exit" })).toBe(true);
+    // #134 前的错位形状：退出信号包进锚信封 payload、父窗查顶层——信号必被丢弃（回归锚）
+    expect(
+      parseExitEvent({ __aiplatform__: true, type: "anchor", payload: { __exit__: true } }),
+    ).toBe(false);
+    expect(parseExitEvent({ type: "exit" })).toBe(false); // 缺 __aiplatform__ 印记
     expect(parseExitEvent({ type: "anchor" })).toBe(false);
   });
 });

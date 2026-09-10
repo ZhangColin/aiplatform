@@ -12,6 +12,8 @@
  *             anchor: { selector, text } | { region: {x,y,width,height},
  *                      selector?, text? },
  *             note: "" } }
+ *          | { __aiplatform__: true, type: "exit" }（Esc 退出，#134：顶层信封，
+ *             不包进锚 payload——父窗解析器查顶层）
  * 回传目标 = 呼出消息的 event.origin（父窗源），不做通配广播。
  */
 (function () {
@@ -25,13 +27,22 @@
   var hoverEl = null;
   var dragStart = null;
 
-  function post(payload) {
+  // 信封出口（锚/退出共用）：回传目标 = 呼出消息的 event.origin——postMessage 各
+  // 路径都在标注态内（activeTool 守卫），而 activeTool 只在 enter() 置位、彼时
+  // parentOrigin 必已赋值，故不做 "*" 通配兜底（真到不了这里的广播是契约违约）
+  function postEnvelope(envelope) {
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage(
-        { __aiplatform__: true, type: "anchor", payload: payload },
-        parentOrigin || "*",
-      );
+      window.parent.postMessage(envelope, parentOrigin);
     }
+  }
+
+  function post(payload) {
+    postEnvelope({ __aiplatform__: true, type: "anchor", payload: payload });
+  }
+
+  // Esc 退出信封：顶层 { type: "exit" }（#134——不包进锚 payload，父窗解析器查顶层）
+  function postExit() {
+    postEnvelope({ __aiplatform__: true, type: "exit" });
   }
 
   // 稳定 CSS 选择器：优先 #id，否则沿祖先拼 tag[.class] 路径（截到 body/id 为止）；
@@ -262,7 +273,7 @@
   // Esc 退出（键盘在 iframe 内聚焦时可用；父窗侧的退出按钮是主路径）
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && activeTool) {
-      post({ __exit__: true });
+      postExit();
       exit();
     }
   });

@@ -25,7 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * （同 previewnet 网、挂网关配置与标注脚本资产），断言 {@code {id}.localhost} 能路由
  * 到应用、HTML 响应含网关注入的标注脚本引用、标注脚本资产由网关自持可访问（内容是
  * 平台 annotation.js——postMessage 协议成立）。圈注 postMessage 的真实回传由前端
- * {@code annotation.test.ts} 作回归保障（双侧契约同源，见 ADR-0014）。
+ * {@code annotation.contract.test.ts}（装载本脚本单源的契约测试）作回归保障
+ * （双侧契约同源，见 ADR-0014）。
  * daemon 不在则跳过（CI 无 docker 时不红）。
  */
 class PreviewGatewaySmokeTest {

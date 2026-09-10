@@ -6,7 +6,8 @@
  *
  * 协议（postMessage data 皆为信封 { __aiplatform__: true, type, ... }）：
  *   父 → 子：{ type: "annotate", mode: "enter"|"exit", tool: "select"|"circle"|"comment" }
- *   子 → 父：{ type: "anchor", payload: { kind, anchor, note } }
+ *   子 → 父：{ type: "anchor", payload: { kind, anchor, note } }（锚）|
+ *            { type: "exit" }（Esc 退出，#134：顶层信封，不包进锚 payload）
  * 回传目标 = 呼出消息的 origin（注入脚本据 event.origin 回传）；父侧校验
  * event.origin 等于预览 URL 的 origin（防伪锚）。
  */
@@ -63,9 +64,11 @@ function parseAnnotationBody(body: Record<string, unknown> | null | undefined): 
   return { kind, anchor, note };
 }
 
-/** 子 → 父的退出信号（注入脚本 Esc 退出时发 { __exit__: true }）。 */
+/** 子 → 父的退出信封（注入脚本 Esc 退出时发顶层 { __aiplatform__, type: "exit" }）。 */
 export function parseExitEvent(data: unknown): boolean {
-  return !!data && typeof data === "object" && (data as Record<string, unknown>).__exit__ === true;
+  if (!data || typeof data !== "object") return false;
+  const record = data as Record<string, unknown>;
+  return record.__aiplatform__ === true && record.type === "exit";
 }
 
 /** 锚载荷容错解析：选择器/文本至少其一、或矩形在，才成立；否则 null。 */

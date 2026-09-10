@@ -364,7 +364,6 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             copyResource("docker/workspace/dev-image.Dockerfile", dir.resolve("Dockerfile"));
             copyResource("docker/workspace/init-workspace.sh", dir.resolve("init-workspace.sh"));
             copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
-            copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             copyResourceTree("docker/workspace/baseline", dir.resolve("baseline"));
             run("docker", "build", "-t", DEV_IMAGE, dir.toString());
         } catch (ApplicationException e) {

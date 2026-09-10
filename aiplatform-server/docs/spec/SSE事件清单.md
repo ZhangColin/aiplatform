@@ -156,7 +156,7 @@ annotation:
 ```
 
 - 指认是对话输入的**增强不是替代**：附件部件与自然语言同句发送、被主智能体精确读取（结构化定位而非猜图）；
-- **落地口径（#97）**：附件部件随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发——渲染成主智能体 prompt 自然语言段精确读取（见 `AnnotationPrompt`），并随用户发言落对话史（`prj_conversation_entries.attachments` JSONB），刷新/回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip；注入脚本（`docker/workspace/annotation.js`）由 `serve.js` 对 HTML 响应内联注入、经 postMessage 回传结构化锚。
+- **落地口径（#97，#138 注入口径收口）**：附件部件随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发——渲染成主智能体 prompt 自然语言段精确读取（见 `AnnotationPrompt`），并随用户发言落对话史（`prj_conversation_entries.attachments` JSONB），刷新/回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip；注入脚本（`docker/workspace/annotation.js`）由预览网关 `sub_filter` 注入 HTML（ADR-0014 单源——serve.js 旧内联注入路径已删）、经 postMessage 回传结构化锚。
 
 #### 引擎透传事件（开放集合）
 

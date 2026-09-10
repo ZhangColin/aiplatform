@@ -44,7 +44,8 @@ const PARENT_ORIGIN = "http://localhost:3333";
 /** 记录脚本对父窗发出的全部 postMessage（data + 目标 origin）。 */
 const posted: { data: unknown; origin: string }[] = [];
 
-// 装载真实脚本（IIFE 往全局挂监听；自带防重入守卫，模块级执行一次）。
+// 装载真实脚本（IIFE 往全局挂监听；#138 起脚本自身无防重入守卫——唯一注入口=
+// 网关 sub_filter，无同文档双执行向量；本测试模块级装载一次即不重复挂监听）。
 // window.parent 覆写为记录器：脚本 post() 的唯一出口，即子→父可观测面。
 Object.defineProperty(window, "parent", {
   value: { postMessage: (data: unknown, origin: string) => posted.push({ data, origin }) },

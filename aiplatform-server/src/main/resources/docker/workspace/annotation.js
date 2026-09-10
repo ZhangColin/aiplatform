@@ -1,7 +1,9 @@
 /**
  * 平台预览标注脚本（#97 圈注 B 档 → #137 标注态交互层重构）：由预览网关注入
- * 用户系统页面（ADR-0014 单源），在预览 iframe 内跑——非常驻：不进标注态时对
- * 页面零干扰（无监听、无遮罩）。父窗（平台前端）经 postMessage 呼出/退出标注
+ * 用户系统页面（ADR-0014 单源，#138 serve.js 旧注入路径已删——sub_filter_once
+ * 单次替换，无同文档双执行向量，故不设防重入 guard），在预览 iframe 内跑——
+ * 非常驻：不进标注态时对页面零干扰（无监听、无遮罩）。
+ * 父窗（平台前端）经 postMessage 呼出/退出标注
  * 态并指定工具，本脚本进入**标注态 = 页面冻结**：遮罩拦下全部指针事件，点击
  * 只用于拾取、不触发页面自身操作（禁用控件同样可指认：选择≠操作）；悬停出
  * outline 高亮 + 元素徽章；光标统一 crosshair。结构化 DOM 锚回传父窗（跨源
@@ -30,9 +32,6 @@
  * 自身、随滚动自然跟随）+ 鼠标旁徽章（data-slot 组件名 → 标签名）。
  */
 (function () {
-  if (window.__aiplatformAnnotation) return;
-  window.__aiplatformAnnotation = true;
-
   var parentOrigin = null;
   var activeTool = null; // "select" | "circle" | null
   var overlay = null;

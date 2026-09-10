@@ -34,8 +34,7 @@ RUN chmod +x /opt/init-workspace.sh
 ENTRYPOINT ["/opt/init-workspace.sh"]
 CMD ["sleep", "infinity"]
 
-# 极简静态文件服务器：demo 预览示意（环境抽象 exposePort 能力）
+# 极简静态文件服务器：demo 预览示意（环境抽象 exposePort 能力；快照「查看当时」
+# 静态兜底 + 集成测试探针）。纯静态职责——预览注入由网关 sub_filter 单源承担
+# （ADR-0014，#138 删旧内联注入路径），标注脚本资产不进镜像。
 COPY serve.js /opt/serve.js
-
-# 平台预览标注脚本（#97 圈注 B 档）：serve.js 对 HTML 响应内联注入的资产
-COPY annotation.js /opt/annotation.js

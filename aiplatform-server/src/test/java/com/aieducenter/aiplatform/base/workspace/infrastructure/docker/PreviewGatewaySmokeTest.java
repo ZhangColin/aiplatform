@@ -27,6 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 平台 annotation.js——postMessage 协议成立）。圈注 postMessage 的真实回传由前端
  * {@code annotation.contract.test.ts}（装载本脚本单源的契约测试）作回归保障
  * （双侧契约同源，见 ADR-0014）。
+ * #138 注入单源口径收口：加验镜像不携带标注脚本副本、serve.js 纯静态透传（容器内
+ * 真实起服，HTML 与磁盘逐字节一致）、网关注入恰一次（无双注入——防重入 guard 已随
+ * 单源删除）。
  * daemon 不在则跳过（CI 无 docker 时不红）。
  */
 class PreviewGatewaySmokeTest {
@@ -90,12 +93,15 @@ class PreviewGatewaySmokeTest {
                     GATEWAY_IMAGE);
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
 
-            // 路由：{id}.localhost → ws-{id}:8081；HTML 含网关注入的标注脚本引用
+            // 路由：{id}.localhost → ws-{id}:8081；HTML 含网关注入的标注脚本引用，
+            // 且恰一次（#138 单源口径：旧 serve.js 内联注入路径已删，无双注入向量）
             ExecResult routed = awaitGatewayServing(gatewayPort, id);
             assertThat(routed.exitCode()).as("网关应路由到工作区应用").isZero();
             assertThat(routed.stdout())
                     .contains("hello gateway")
                     .contains("data-aiplatform=\"annotation\"");
+            assertThat(countOccurrences(routed.stdout(), "data-aiplatform=\"annotation\""))
+                    .as("网关注入应恰一次（无双注入）").isEqualTo(1);
 
             // 标注脚本资产由网关自持、可访问，内容是平台 annotation.js（postMessage 协议）
             ExecResult script = curlHost(gatewayPort, id + ".localhost", "/.aiplatform/annotation.js");
@@ -108,6 +114,20 @@ class PreviewGatewaySmokeTest {
             ExecResult ws = curlWsUpgrade(gatewayPort, id + ".localhost", "/_next/hmr");
             assertThat(ws.stdout()).as("网关应透传 WebSocket 升级头（101，exit=%s）", ws.exitCode())
                     .contains("101");
+
+            // #138 注入单源：镜像不携带标注脚本副本（旧 serve.js 内联注入的资产位）
+            assertThat(execIn(handle, "test ! -f /opt/annotation.js && echo CLEAN").stdout())
+                    .as("镜像内不应再携带标注脚本副本").contains("CLEAN");
+
+            // #138 serve.js 纯静态职责：容器内真实起服，HTML 响应与磁盘逐字节一致
+            // （旧路径在此插入 data-aiplatform 注入标签；快照「查看当时」兜底同路径）
+            String pureHtml = "<html><head><title>pure</title></head><body>static only</body></html>";
+            execIn(handle, "mkdir -p /tmp/pure && printf '%s' '" + pureHtml + "' > /tmp/pure/index.html"
+                    + " && nohup node /opt/serve.js /tmp/pure 8099 >/dev/null 2>&1 & echo started");
+            ExecResult pure = execIn(handle,
+                    "curl -s --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8099/");
+            assertThat(pure.exitCode()).as("serve.js 应起服可探（exit=%s）", pure.exitCode()).isZero();
+            assertThat(pure.stdout()).as("serve.js 应逐字节透传（无注入）").isEqualTo(pureHtml);
         } finally {
             try (var walk = Files.walk(dir)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
@@ -134,6 +154,14 @@ class PreviewGatewaySmokeTest {
     }
 
     // ---------- 直连 docker CLI / curl 的验证工具（真实状态为准） ----------
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i != -1; i = haystack.indexOf(needle, i + 1)) {
+            count++;
+        }
+        return count;
+    }
 
     private static ExecResult curlHost(int port, String host, String path) {
         return run("curl", "-s", "-H", "Host: " + host, "http://127.0.0.1:" + port + path);

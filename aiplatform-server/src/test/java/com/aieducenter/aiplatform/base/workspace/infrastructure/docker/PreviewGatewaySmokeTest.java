@@ -57,13 +57,17 @@ class PreviewGatewaySmokeTest {
         WorkspaceHandle handle = provision.handle();
         String id = handle.workspaceId().value();
 
-        // 摆一个不含任何注入的静态页 + 极简 node 服务（8081 起服）——响应里的注入只能来自网关
+        // 摆一个不含任何注入的静态页 + 极简 node 服务（8081 起服）——响应里的注入只能来自网关。
+        // upgrade 处理回裸 101：供网关 WebSocket 透传断言（升级头到达上游才有 101）
         execIn(handle, "printf '<html><head><title>probe</title></head><body>hello gateway</body></html>'"
                 + " > /workspace/index.html");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
                 + "const http=require('http');const fs=require('fs');\n"
-                + "http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
-                + "res.end(fs.readFileSync('/workspace/index.html'));}).listen(8081,'0.0.0.0');\n"
+                + "const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
+                + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
+                + "server.on('upgrade',(req,socket)=>{socket.write('HTTP/1.1 101 Switching Protocols\\r\\n"
+                + "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n');});\n"
+                + "server.listen(8081,'0.0.0.0');\n"
                 + "GW_EOF");
         execIn(handle, "cd /workspace && nohup node server.js >/dev/null 2>&1 & echo started");
 
@@ -96,6 +100,13 @@ class PreviewGatewaySmokeTest {
             ExecResult script = curlHost(gatewayPort, id + ".localhost", "/.aiplatform/annotation.js");
             assertThat(script.exitCode()).isZero();
             assertThat(script.stdout()).contains("__aiplatform__").contains("postMessage");
+
+            // WebSocket 升级透传（next dev 的 /_next/hmr）：nginx 默认剥 hop-by-hop 头
+            // 且以 HTTP/1.0 转发，升级头到不了上游——浏览器侧 HMR 连接 failed 无限重试。
+            // 断言升级请求经网关原样到达上游（上游回 101；头被剥则沦为普通 GET 回 200）
+            ExecResult ws = curlWsUpgrade(gatewayPort, id + ".localhost", "/_next/hmr");
+            assertThat(ws.stdout()).as("网关应透传 WebSocket 升级头（101，exit=%s）", ws.exitCode())
+                    .contains("101");
         } finally {
             try (var walk = Files.walk(dir)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
@@ -125,6 +136,18 @@ class PreviewGatewaySmokeTest {
 
     private static ExecResult curlHost(int port, String host, String path) {
         return run("curl", "-s", "-H", "Host: " + host, "http://127.0.0.1:" + port + path);
+    }
+
+    /** 以 WebSocket 升级头探网关（只断状态行，101 后连接悬住由 --max-time 收口，退出码 28 属预期）。 */
+    private static ExecResult curlWsUpgrade(int port, String host, String path) {
+        return run("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3",
+                "--http1.1",
+                "-H", "Host: " + host,
+                "-H", "Connection: Upgrade",
+                "-H", "Upgrade: websocket",
+                "-H", "Sec-WebSocket-Version: 13",
+                "-H", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                "http://127.0.0.1:" + port + path);
     }
 
     private static ExecResult execIn(WorkspaceHandle handle, String command) {

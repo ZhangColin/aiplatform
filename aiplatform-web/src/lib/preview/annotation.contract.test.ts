@@ -20,6 +20,12 @@ import { encodeAnnotate, parseAnchorEvent, parseExitEvent } from "./annotation";
  * 指针命中面），DOM 参照（selector/text）依赖真实命中测试、happy-dom 恒缺，
  * 圈选锚以 region 为硬判据。
  *
+ * #137 标注态反馈与冻结：拾取改 pointerdown 层（遮罩全拦 + preventDefault，
+ * 点击不再穿透页面）——DOM 参照同因 happy-dom 命中测试恒缺，以
+ * elementFromPoint 桩供给命中元素（浏览器命中是环境设施，脚本围绕它的行为
+ * 才是被测对象）；hover 高亮/徽章以遮罩 mousemove 驱动、断言画在目标元素
+ * 自身（随滚动自然跟随的机制面）。
+ *
  * DOM 环境用 happy-dom（仓库逐文件 pragma 例外先例；票面「jsdom」泛指 DOM 仿真）。
  * 父→子方向直接用 encodeAnnotate 的产物驱动（父窗编码器 ↔ 脚本监听同缝收口）；
  * 子→父方向覆写 window.parent 记录 postMessage（脚本对父窗的全部可观测输出）。
@@ -51,7 +57,7 @@ function sendToChild(message: unknown) {
   window.dispatchEvent(new MessageEvent("message", { data: message, origin: PARENT_ORIGIN }));
 }
 
-/** 页面元素上的真实 click 冒泡（点选拾取路径）。 */
+/** 页面元素上的真实 click 冒泡（穿透路径——#137 起标注态不应再拾取）。 */
 function clickOn(el: Element) {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 }
@@ -61,21 +67,44 @@ function pressEsc() {
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 }
 
+/** 悬停徽章（#137：遮罩子元素，随遮罩显隐）。 */
+function findBadge(): HTMLElement {
+  const el = findOverlay().querySelector("[data-aiplatform-annotation='badge']");
+  expect(el).toBeTruthy();
+  return el as HTMLElement;
+}
+
+/**
+ * 命中测试桩：happy-dom 的 elementFromPoint 恒 null（无布局），pointerdown 拾取
+ * 与 hover 反馈（#137）都经它命中——桩供给命中元素，被测对象是脚本围绕命中的
+ * 行为（拾取/高亮/徽章），浏览器命中本身是环境设施。beforeEach restore 归零。
+ */
+function stubHitTest(el: Element | null) {
+  vi.spyOn(document, "elementFromPoint").mockImplementation(() => el);
+}
+
+/** 遮罩上的真实 mousemove（hover 反馈驱动面）。 */
+function moveOn(el: Element, x: number, y: number) {
+  el.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true }));
+}
+
 beforeEach(() => {
   sendToChild(encodeAnnotate("exit")); // 脚本状态跨用例常驻（监听挂全局），显式归零到未标注态
   posted.length = 0;
   document.body.innerHTML = "";
+  vi.restoreAllMocks(); // elementFromPoint 桩逐用例重置（命中元素由各用例自备）
 });
 
 describe("圈注契约 · 真实注入脚本 ↔ 父窗解析器（#134）", () => {
-  it("点选工具点击元素：发出锚信封，父窗解析器原样解析（双侧一致）", () => {
+  it("点选拾取发出锚信封，父窗解析器原样解析（双侧一致）——pointerdown 层（#137）", () => {
     const btn = document.createElement("button");
     btn.id = "submit";
     btn.textContent = "提交订单";
     document.body.appendChild(btn);
+    stubHitTest(btn);
 
     sendToChild(encodeAnnotate("enter", "select"));
-    clickOn(btn);
+    pointerOn(findOverlay(), "pointerdown", 10, 20);
 
     expect(posted).toHaveLength(1);
     expect(parseAnchorEvent(posted[0].data)).toEqual({
@@ -97,14 +126,16 @@ describe("圈注契约 · 真实注入脚本 ↔ 父窗解析器（#134）", () 
     expect(posted[0].origin).toBe(PARENT_ORIGIN); // 回传目标 = 呼出 origin，不通配
   });
 
-  it("Esc 退出后脚本停发：再点元素无新信封", () => {
+  it("Esc 退出后脚本停发：标注态外的按压（含页面自身 click）无新信封", () => {
     const btn = document.createElement("button");
     btn.textContent = "提交订单";
     document.body.appendChild(btn);
+    stubHitTest(btn);
     sendToChild(encodeAnnotate("enter", "select"));
     pressEsc();
     posted.length = 0;
 
+    pointerOn(findOverlay(), "pointerdown", 10, 20);
     clickOn(btn);
 
     expect(posted).toHaveLength(0);
@@ -114,9 +145,11 @@ describe("圈注契约 · 真实注入脚本 ↔ 父窗解析器（#134）", () 
     const btn = document.createElement("button");
     btn.textContent = "提交订单";
     document.body.appendChild(btn);
+    stubHitTest(btn);
     sendToChild(encodeAnnotate("enter", "select"));
 
     sendToChild(encodeAnnotate("exit"));
+    pointerOn(findOverlay(), "pointerdown", 10, 20);
     clickOn(btn);
 
     expect(posted).toHaveLength(0);
@@ -253,5 +286,155 @@ describe("圈注契约 · 圈选拖框（#136：遮罩显隐内联直切起死�
     pointerOn(overlay, "pointerup", 200, 200); // 迟到的松手不发锚
     pointerOn(overlay, "pointermove", 300, 300);
     expect(posted).toHaveLength(1);
+  });
+});
+
+describe("圈注契约 · 标注态反馈与冻结（#137：pointerdown 全拦截 + hover 徽章 + 禁用控件）", () => {
+  it("切入选择：遮罩即拦指针（全部工具 pointer-events:auto），光标统一 crosshair 不随页面走", () => {
+    sendToChild(encodeAnnotate("enter", "select"));
+    const overlay = findOverlay();
+
+    expect(overlay.style.pointerEvents).toBe("auto"); // 选择模式同样遮罩拦截——拾取走命中测试
+    expect(getComputedStyle(overlay).cursor).toBe("crosshair"); // 命中面在遮罩，页面自身 cursor 不再生效
+  });
+
+  it("标注态交互不穿透：pointerdown 被拦（preventDefault）、页面监听（按压/点击/悬停轨迹）不被触发，拾取即锚", () => {
+    const btn = document.createElement("button");
+    btn.id = "submit";
+    btn.textContent = "提交订单";
+    document.body.appendChild(btn);
+    stubHitTest(btn);
+    const spies = ["pointerdown", "click", "mousemove", "mouseover"].map((type) => {
+      const spy = vi.fn();
+      document.addEventListener(type, spy);
+      return [type, spy] as const;
+    });
+
+    sendToChild(encodeAnnotate("enter", "select"));
+    const overlay = findOverlay();
+    const down = pointerOn(overlay, "pointerdown", 10, 20);
+    // 余波同压：拾取后的原生 click、悬停期的 mousemove/mouseover 落在遮罩上
+    // 冒泡，也不放行到页面 document 冒泡监听（委托式监听吃不到标注态交互）
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    moveOn(overlay, 30, 40);
+    overlay.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+
+    expect(down.defaultPrevented).toBe(true); // 默认行为（focus 漂移/原生选择起点）被压掉
+    for (const [, spy] of spies) expect(spy).not.toHaveBeenCalled(); // stopPropagation：document 不收到
+    expect(posted).toHaveLength(1); // 按压本身就是拾取——一次动作两份语义不并存
+    expect(parseAnchorEvent(posted[0].data)?.anchor).toEqual({ selector: "#submit", text: "提交订单" });
+    for (const [type, spy] of spies) document.removeEventListener(type, spy);
+  });
+
+  it("禁用控件可指认并回传锚（浏览器不派发 click 的死角，pointerdown+命中测试打通）", () => {
+    const btn = document.createElement("button");
+    btn.id = "save";
+    btn.disabled = true;
+    btn.textContent = "保存草稿";
+    document.body.appendChild(btn);
+    stubHitTest(btn);
+
+    sendToChild(encodeAnnotate("enter", "select"));
+    pointerOn(findOverlay(), "pointerdown", 10, 20);
+
+    expect(posted).toHaveLength(1);
+    expect(parseAnchorEvent(posted[0].data)).toEqual({
+      kind: "select",
+      anchor: { selector: "#save", text: "保存草稿" },
+      note: "",
+    });
+  });
+
+  it("按压落空（命中背景）不发锚不炸场", () => {
+    stubHitTest(null);
+    sendToChild(encodeAnnotate("enter", "select"));
+    pointerOn(findOverlay(), "pointerdown", 10, 20);
+
+    expect(posted).toHaveLength(0);
+  });
+
+  it("悬停出高亮与徽章：outline 画在目标元素自身（随滚动自然跟随），徽章贴鼠标且不挡命中", () => {
+    const card = document.createElement("div");
+    card.setAttribute("data-slot", "card");
+    card.textContent = "订单卡片";
+    document.body.appendChild(card);
+    stubHitTest(card);
+
+    sendToChild(encodeAnnotate("enter", "select"));
+    moveOn(findOverlay(), 40, 60);
+
+    expect(card.style.outline).toContain("rgb(59, 130, 246)"); // 高亮画在元素自身＝跟随滚动的机制面
+    expect(card.style.outlineOffset).toBe("-2px");
+    const badge = findBadge();
+    expect(getComputedStyle(badge).display).toBe("block");
+    expect(badge.style.pointerEvents).toBe("none"); // 徽章不吃命中（不挡下一次拾取/拖拽）
+    expect(badge.textContent).toBe("card"); // data-slot 组件名优先
+  });
+
+  it("徽章文案优先级：data-slot 组件名 → 标签名（无组件痕迹时）", () => {
+    const trigger = document.createElement("button");
+    trigger.setAttribute("data-slot", "dialog-trigger");
+    const nav = document.createElement("nav");
+    document.body.append(trigger, nav);
+
+    sendToChild(encodeAnnotate("enter", "select"));
+    stubHitTest(trigger);
+    moveOn(findOverlay(), 40, 60);
+    expect(findBadge().textContent).toBe("dialog-trigger");
+
+    stubHitTest(nav); // 命中换元素：徽章换文案、前元素高亮还原
+    moveOn(findOverlay(), 80, 90);
+    expect(findBadge().textContent).toBe("nav");
+    expect(trigger.style.outline).toBe(""); // 行内 outline 还原（不吃页面自身样式）
+    expect(nav.style.outline).toContain("rgb(59, 130, 246)");
+  });
+
+  it("鼠标离开视口（遮罩 mouseleave）：高亮与徽章收场", () => {
+    const card = document.createElement("div");
+    card.textContent = "订单卡片";
+    document.body.appendChild(card);
+    stubHitTest(card);
+    sendToChild(encodeAnnotate("enter", "select"));
+    moveOn(findOverlay(), 40, 60);
+    expect(findBadge().style.display).toBe("block");
+
+    findOverlay().dispatchEvent(new MouseEvent("mouseleave"));
+
+    expect(card.style.outline).toBe("");
+    expect(findBadge().style.display).toBe("none");
+  });
+
+  it("退出标注态：高亮还原、徽章随遮罩隐藏，页面交还操作权", () => {
+    const card = document.createElement("div");
+    card.textContent = "订单卡片";
+    document.body.appendChild(card);
+    stubHitTest(card);
+    sendToChild(encodeAnnotate("enter", "select"));
+    moveOn(findOverlay(), 40, 60);
+
+    sendToChild(encodeAnnotate("exit"));
+
+    expect(card.style.outline).toBe("");
+    expect(getComputedStyle(findBadge()).display).toBe("none");
+    expect(getComputedStyle(findOverlay()).display).toBe("none");
+  });
+
+  it("圈选拖拽中悬停反馈让位（拖框是当下反馈），收尾后 hover 恢复", () => {
+    const card = document.createElement("div");
+    card.textContent = "订单卡片";
+    document.body.appendChild(card);
+    stubHitTest(card);
+    sendToChild(encodeAnnotate("enter", "circle"));
+    const overlay = findOverlay();
+
+    pointerOn(overlay, "pointerdown", 100, 100); // 起拖即收悬停场
+    moveOn(overlay, 150, 150);
+    expect(findBadge().style.display).toBe("none"); // 拖拽中不更新悬停
+
+    pointerOn(overlay, "pointerup", 150, 150);
+    expect(posted).toHaveLength(1); // 区域锚照发
+    moveOn(overlay, 160, 160); // 收尾后 hover 反馈恢复
+    expect(findBadge().style.display).toBe("block");
+    expect(card.style.outline).toContain("rgb(59, 130, 246)");
   });
 });

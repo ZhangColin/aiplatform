@@ -5,8 +5,11 @@
  * 「消息附件部件锚载荷 schema」同源。
  *
  * 协议（postMessage data 皆为信封 { __aiplatform__: true, type, ... }）：
- *   父 → 子：{ type: "annotate", mode: "enter"|"exit", tool: "select"|"circle"|"comment" }
- *   子 → 父：{ type: "anchor", payload: { kind, anchor, note } }（锚）|
+ *   父 → 子：{ type: "annotate", mode: "enter"|"exit", tool: "select"|"circle" }
+ *     （#135 起工具条只余两键可点，comment 不再下发；注入脚本对异 tool 值不进
+ *      标注态）
+ *   子 → 父：{ type: "anchor", payload: { kind, anchor, note } }（锚，#137 起
+ *            拾取在遮罩 pointerdown 层完成——页面冻结、禁用控件可指认）|
  *            { type: "exit" }（Esc 退出，#134：顶层信封，不包进锚 payload）
  * 回传目标 = 呼出消息的 origin（注入脚本据 event.origin 回传）；父侧校验
  * event.origin 等于预览 URL 的 origin（防伪锚）。

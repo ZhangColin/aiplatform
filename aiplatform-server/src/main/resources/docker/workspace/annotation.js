@@ -11,8 +11,8 @@
  *
  * 协议（双侧契约，与 aiplatform-web src/lib/preview/annotation.ts 同源）：
  *   父 → 子：{ __aiplatform__: true, type: "annotate", mode: "enter"|"exit",
- *             tool: "select"|"circle" }（#135 起评论键置灰，工具只余两键；
- *             其余工具值不进标注态）
+ *             tool: "select"|"circle" }（工具只余两键——评论键已撤、词条备案
+ *             未来增强；其余工具值不进标注态）
  *   子 → 父：{ __aiplatform__: true, type: "anchor", payload: {
  *             kind: "select"|"circle",
  *             anchor: { selector, text } | { region: {x,y,width,height},

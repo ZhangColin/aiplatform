@@ -15,8 +15,9 @@
  * event.origin 等于预览 URL 的 origin（防伪锚）。
  */
 
-/** 标注类型（工具条四键中启用的两键：select = 选择·点选锚定 / circle = 圈选·拖框圈区域；
- * comment 仅历史兼容——UI 不再产生新评论圈注，落库旧件只读回显）。 */
+/** 标注类型（工具条两键：select = 选择·点选锚定 / circle = 圈选·拖框圈区域；
+ * comment 仅历史兼容——UI 不再产生新评论圈注（评论键已撤，词条备案未来增强），
+ * 落库旧件只读回显）。 */
 export type AnnotationKind = "select" | "circle" | "comment";
 
 /** 圈选矩形（页面级坐标，circle 专用；选择器可缺省）。 */

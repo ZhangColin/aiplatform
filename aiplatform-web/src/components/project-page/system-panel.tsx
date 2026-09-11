@@ -110,6 +110,19 @@ export function SystemPanel({
     );
   }, [activeTool, previewOrigin]);
 
+  // 父窗侧 Esc 退出：键盘焦点在父窗是常态（点工具条进标注态后不点预览；且 #137
+  // 拾取 pointerdown 的 preventDefault 也压焦点进 iframe），keydown 不跨帧——
+  // 注入脚本的 Esc 监听收不到，父窗补位同键退出。焦点真在 iframe 时 keydown 落
+  // 子窗 document，本监听不触发（事件不跨帧，两侧无双重触发），子窗走退出信封路
+  useEffect(() => {
+    if (!activeTool) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setActiveTool(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [activeTool]);
+
   // 收预览回传的圈注锚：校验 origin（防伪锚）→ 解析成功入发送框附件区；
   // 注入脚本 Esc 退出 → 收起标注态
   useEffect(() => {
@@ -315,8 +328,8 @@ export function SystemPanel({
             </PanelHint>
           )}
         </div>
-        {/* 底部浮动工具条（#97 圈注落地）：有真页面才出场——三能力可点击进标注态，
-            改字留灰；标注态可退出 */}
+        {/* 底部浮动工具条（#97 圈注落地）：有真页面才出场——选择/圈选进标注态
+            （改字/评论形态位已撤，词条备案）；标注态可退出（含父窗 Esc） */}
         {pageLive ? (
           <PreviewToolbar
             activeTool={activeTool}

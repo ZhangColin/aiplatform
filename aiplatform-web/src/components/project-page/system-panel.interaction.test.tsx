@@ -176,19 +176,16 @@ describe("SystemPanel · 圈注工具条激活态可辨（#135）", () => {
     expect(circle.className).not.toContain("bg-primary");
   });
 
-  it("置灰键（改字/评论）不可点：点了不进标注态", () => {
+  it("改字/评论置灰键不在场（形态位已撤）：无待启用键可点，标注态入口只有选择/圈选", () => {
     renderPanel();
-    const comment = screen.getByRole("button", { name: "评论（待启用）" }) as HTMLButtonElement;
-    expect(comment.disabled).toBe(true);
 
-    fireEvent.click(comment);
-
-    expect(screen.queryByRole("button", { name: "退出标注" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "改字（待启用）" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "评论（待启用）" })).toBeNull();
     expect(screen.getByText("圈一下")).toBeTruthy();
   });
 });
 
-describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
+describe("SystemPanel · 圈注标注态退出四路（#134 三路 + 父窗 Esc 补位）", () => {
   beforeEach(useRealPreviewOrigin);
 
   /** 激活标注态的可观测面：工具条换出「退出标注」键；退出后回「圈一下」。 */
@@ -217,6 +214,18 @@ describe("SystemPanel · 圈注标注态退出三路（#134）", () => {
         }),
       );
     });
+
+    expectActive(false);
+  });
+
+  it("父窗内按 Esc：退出标注态——键盘焦点在父窗的常态（点工具条进标注态后不点预览，keydown 不达 iframe）", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "选择" }));
+    expectActive(true);
+
+    // 点工具条按钮进标注态，焦点留在父窗 document：Esc 的 keydown 只落父窗，
+    // 跨帧不进 iframe（注入脚本的 Esc 监听收不到）——父窗侧键盘监听补位退出
+    fireEvent.keyDown(document, { key: "Escape" });
 
     expectActive(false);
   });

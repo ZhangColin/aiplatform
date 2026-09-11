@@ -308,18 +308,16 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + 空态两档
     expect(html).toContain("light-lock");
   });
 
-  it("页面在时工具条出场：四键两启用两置灰（#135 终稿），label 与词条口径一致", () => {
+  it("页面在时工具条出场：两键启用（选择/圈选），改字/评论置灰键不在场（词条备案的未来增强）", () => {
     const html = renderPanel({ coderStatus: "running", url: "http://localhost:42659" });
 
-    // 选择/圈选可点进标注态；改字/评论置灰待启用（能力位，不再可点）
+    // 选择/圈选可点进标注态；改字/评论形态位已撤——能力留词条备案，键不在场
     for (const label of ["选择", "圈选"]) {
       const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))![0];
       expect(tag).not.toContain("disabled");
     }
-    for (const label of ["改字（待启用）", "评论（待启用）"]) {
-      const tag = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))![0];
-      expect(tag).toContain("disabled");
-    }
+    expect(html).not.toContain("改字（待启用）");
+    expect(html).not.toContain("评论（待启用）");
     // 「画笔圈选」旧 label 消亡（词条入 Avoid）
     expect(html).not.toContain("画笔圈选");
     // 正常预览态出「圈一下」提示（非常驻标注态入口）

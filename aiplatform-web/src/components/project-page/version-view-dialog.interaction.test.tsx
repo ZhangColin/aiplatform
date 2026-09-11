@@ -103,40 +103,41 @@ describe("VersionViewDialog · 新窗口打开（#140）", () => {
   });
 });
 
-describe("VersionViewDialog · 标题轮次语境（#140：锚 = 该轮收口时刻可见）", () => {
-  it("本轮用户发言在场：标题「<摘要>那轮结束时的系统」", () => {
-    renderDialog({ roundPrompt: "帮我把首页改成蓝色" });
+describe("VersionViewDialog · 标题轮次语境（#142：序号 + 收尾摘要，双源恒在场）", () => {
+  it("双源在场：标题「第 N 轮结束时的系统——<收尾摘要>」", () => {
+    renderDialog({ round: 3, summary: "修好了下单按钮的报错" });
 
-    expect(screen.getByText("「帮我把首页改成蓝色」那轮结束时的系统")).toBeTruthy();
+    expect(screen.getByText("第 3 轮结束时的系统——修好了下单按钮的报错")).toBeTruthy();
   });
 
-  it("发言缺场（无 runId / 被软上限裁剪）：回落无引语境式样", () => {
-    renderDialog({ roundPrompt: undefined });
+  it("摘要缺场（防御——summary 是收尾权威事实，常态恒在）：仅序数也可分辨", () => {
+    renderDialog({ round: 5 });
 
-    expect(screen.getByText("那轮结束时的系统")).toBeTruthy();
+    expect(screen.getByText("第 5 轮结束时的系统")).toBeTruthy();
   });
 
   it("起服中：快照未就绪仍先出标题与在途提示", () => {
-    renderDialog({ pending: true, previewUrl: undefined, roundPrompt: "修下单按钮" });
+    renderDialog({ pending: true, previewUrl: undefined, round: 2, summary: "加了购物车" });
 
-    expect(screen.getByText("「修下单按钮」那轮结束时的系统")).toBeTruthy();
+    expect(screen.getByText("第 2 轮结束时的系统——加了购物车")).toBeTruthy();
     expect(screen.getByText("正在准备当时系统…")).toBeTruthy();
     expect(screen.queryByTitle("当时系统快照")).toBeNull();
   });
 });
 
 describe("viewThenTitle · 标题式样纯函数", () => {
-  it("多行发言折成单行（标题一行）", () => {
-    expect(viewThenTitle("第一行\n第二行")).toBe("「第一行 第二行」那轮结束时的系统");
+  it("多行摘要折成单行（标题一行）", () => {
+    expect(viewThenTitle(1, "第一行\n第二行")).toBe("第 1 轮结束时的系统——第一行 第二行");
   });
 
-  it("长发言截断加省略号（最简一行，不吞标题）", () => {
+  it("长摘要截断加省略号（最简一行，不吞标题）", () => {
     const long = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十";
-    expect(viewThenTitle(long)).toBe("「一二三四五六七八九十一二三四五六七八九十…」那轮结束时的系统");
+    expect(viewThenTitle(7, long)).toBe("第 7 轮结束时的系统——一二三四五六七八九十一二三四五六七八九十…");
   });
 
-  it("空白 / 缺场回落无引语境式样", () => {
-    expect(viewThenTitle(undefined)).toBe("那轮结束时的系统");
-    expect(viewThenTitle("   ")).toBe("那轮结束时的系统");
+  it("序数缺场（防御回落，#142 前的裸式样）；摘要空白不挂尾", () => {
+    expect(viewThenTitle(undefined, "修下单按钮")).toBe("那轮结束时的系统——修下单按钮");
+    expect(viewThenTitle(3, "   ")).toBe("第 3 轮结束时的系统");
+    expect(viewThenTitle(undefined, undefined)).toBe("那轮结束时的系统");
   });
 });

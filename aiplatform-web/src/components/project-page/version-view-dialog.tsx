@@ -20,8 +20,9 @@ import { cn } from "@/lib/utils";
  * 后胜出，即「弹窗像手机屏幕」的根因；须同档 sm:max-w-* 压掉）；②浏览器条两件
  * 套——桌面/手机宽度切换（同 SystemPanel #80 口径：样式切换不重挂 iframe，快照
  * 不因换设备丢状态）+ 新窗口打开（window.open 快照真实地址；弹窗仍是快照宿主，
- * 关窗即销毁，新标签页随之失效——不引入保活）；③标题带轮次语境（锚 = 该轮收口
- * 时刻可见，不加 commit hash 等重版本信息）。</p>
+ * 关窗即销毁，新标签页随之失效——不引入保活）；③标题带轮次语境——#142 换源为
+ * 轮次序数 + 收尾摘要（双源恒在场、多弹窗可分辨；原「本轮用户发言」尽力而为
+ * 管线退役，见 viewThenTitle 注释）。</p>
  */
 
 /** 设备宽度档：同 SystemPanel 的预览口径（手机档 = 390px 手机框居中，桌面档全幅）。 */
@@ -31,20 +32,22 @@ type ViewDevice = "desktop" | "mobile";
 const BAR_BUTTON_CLASS =
   "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
-/** 标题里轮次语境摘要的字数上限（最简一行——超长截断）。 */
-const TITLE_PROMPT_MAX = 20;
+/** 标题里收尾摘要的字数上限（最简一行——超长截断）。 */
+const TITLE_SUMMARY_MAX = 20;
 
 /**
- * 标题式样（#140）：「<该轮用户消息摘要>那轮结束时的系统」。摘要 = 本轮首条
- * 可寻回的用户消息（常态开场意见；开场被软上限裁掉可能落到同轮作答，见
- * command-area 的 roundPromptOf）。折成单行、超长截断；该轮用户消息全缺
- * （无 runId 锚 / 被裁）回落无引语境式样，不猜轮次。
+ * 标题式样（#142 换源）：「第 N 轮结束时的系统——<收尾摘要截断>」。语境双源
+ * 恒在场——序数 = 对话流收尾卡序数（装配层数出）、摘要 = closing.summary（#88
+ * 服务端权威事实，收尾卡正文同源）。#140 的「本轮用户发言摘要」尽力而为管线
+ * （roundPromptOf，无 runId 锚/被软上限裁即缺场，走查实测全回落不可分辨）已
+ * 随本片退役；序数缺场（防御）回落裸式样。
  */
-export function viewThenTitle(roundPrompt?: string): string {
-  const flat = roundPrompt?.trim().replace(/\s+/g, " ");
-  if (!flat) return "那轮结束时的系统";
-  const brief = flat.length > TITLE_PROMPT_MAX ? `${flat.slice(0, TITLE_PROMPT_MAX)}…` : flat;
-  return `「${brief}」那轮结束时的系统`;
+export function viewThenTitle(round?: number, summary?: string): string {
+  const base = round && round > 0 ? `第 ${round} 轮结束时的系统` : "那轮结束时的系统";
+  const flat = summary?.trim().replace(/\s+/g, " ");
+  if (!flat) return base;
+  const brief = flat.length > TITLE_SUMMARY_MAX ? `${flat.slice(0, TITLE_SUMMARY_MAX)}…` : flat;
+  return `${base}——${brief}`;
 }
 
 export function VersionViewDialog({
@@ -53,15 +56,18 @@ export function VersionViewDialog({
   pending,
   error,
   previewUrl,
-  roundPrompt,
+  round,
+  summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pending: boolean;
   error: boolean;
   previewUrl?: string;
-  /** 本轮首条可寻回的用户消息（标题语境源，装配层按收尾卡 runId 查对话流；可缺场）。 */
-  roundPrompt?: string;
+  /** 轮次序数（标题语境源一：对话流收尾卡序数，装配层数出；防御可缺场）。 */
+  round?: number;
+  /** 收尾摘要（标题语境源二：closing.summary 服务端权威事实，恒在场）。 */
+  summary?: string;
 }) {
   const [device, setDevice] = useState<ViewDevice>("desktop");
 
@@ -70,7 +76,7 @@ export function VersionViewDialog({
       {/* sm:max-w-[1600px] 同档压掉基座 sm:max-w-sm（见组件注释①）；w/h 吃满屏 */}
       <DialogContent className="flex h-[90vh] w-[94vw] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1600px]">
         <DialogHeader className="flex-row items-center gap-2 border-b px-4 py-3 pr-12">
-          <DialogTitle className="min-w-0 flex-1 truncate">{viewThenTitle(roundPrompt)}</DialogTitle>
+          <DialogTitle className="min-w-0 flex-1 truncate">{viewThenTitle(round, summary)}</DialogTitle>
           <ToggleGroup
             value={[device]}
             onValueChange={(v) => {

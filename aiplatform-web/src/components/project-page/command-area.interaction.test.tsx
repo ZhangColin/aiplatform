@@ -156,8 +156,8 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
   });
 });
 
-describe("CommandArea · 查看当时标题轮次语境（#140 整链：发言 → 收尾卡 → 弹窗标题）", () => {
-  it("收尾卡点「查看当时」：弹窗标题带本轮用户发言（同 runId 首条用户消息）", () => {
+describe("CommandArea · 查看当时标题轮次语境（#142 整链：对话流 → 收尾卡序数/摘要 → 弹窗标题）", () => {
+  it("收尾卡点「查看当时」：标题带轮次序数与收尾摘要（第 N 个收尾卡 = 第 N 轮）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色", runId: "run-1" },
       {
@@ -178,6 +178,6 @@ describe("CommandArea · 查看当时标题轮次语境（#140 整链：发言 �
 
     fireEvent.click(screen.getByRole("button", { name: "查看当时" }));
 
-    expect(screen.getByText("「把主色调改成绿色」那轮结束时的系统")).toBeTruthy();
+    expect(screen.getByText("第 1 轮结束时的系统——主色调已改为绿色")).toBeTruthy();
   });
 });

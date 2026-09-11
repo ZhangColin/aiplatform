@@ -172,7 +172,7 @@ export function CommandArea({
             {work && index === workAnchorIndex ? (
               <WorkMessage work={work} projectId={projectId} />
             ) : null}
-            <MessageRow message={message} projectId={projectId} roundPrompt={roundPromptOf(messages, message)}>
+            <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)}>
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
@@ -239,22 +239,24 @@ export function CommandArea({
 }
 
 /**
- * 收尾卡的轮次语境（#140 标题源）：同 runId 首条用户消息（常态 = 开场意见/
- * 兜底引导 prompt，先于作答）。开场被对话史软上限裁掉而同轮作答幸存时，会取到
- * 作答文本——作答亦是该轮用户消息，语境仍成立，不为长史边缘加锚定。无 runId
- * 锚或该轮用户消息全缺才缺场，「查看当时」弹窗回落无引语境式样。
+ * 收尾卡的轮次序数（#142 标题语境源一）：对话流（写入序即对话序）中第 N 个
+ * 收尾卡 = 第 N 轮，客户端数出、零新数据。序数即用户在对话里感知的「第几轮」，
+ * 与成版是否成功无关（成版失败轮无「查看当时」入口，但占序数——对话轮与版本
+ * 轮不对齐时以对话为准）。#140 的「同 runId 首条用户消息」尽力而为管线（无锚/
+ * 被裁即缺场，走查实测全回落不可分辨）已随 #142 退役。
  */
-function roundPromptOf(messages: ChatMessage[], message: ChatMessage): string | undefined {
-  if (message.kind !== "closing" || !message.runId) return undefined;
-  const opener = messages.find(
-    (m): m is Extract<ChatMessage, { kind: "user" }> =>
-      m.kind === "user" && m.runId === message.runId,
-  );
-  return opener?.text;
+function closingRoundOf(messages: ChatMessage[], message: ChatMessage): number | undefined {
+  if (message.kind !== "closing") return undefined;
+  let round = 0;
+  for (const m of messages) {
+    if (m.kind === "closing") round += 1;
+    if (m === message) return round;
+  }
+  return undefined;
 }
 
 /** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/受理动作卡/错误提示/平台引导左对齐。 */
-function MessageRow({ message, children, projectId, roundPrompt }: { message: ChatMessage; children?: ReactNode; projectId: string; roundPrompt?: string }) {
+function MessageRow({ message, children, projectId, round }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
@@ -265,7 +267,7 @@ function MessageRow({ message, children, projectId, roundPrompt }: { message: Ch
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
     return (
       <div className="flex w-full justify-start">
-        <ClosingCard closing={message.closing} projectId={projectId} roundPrompt={roundPrompt} />
+        <ClosingCard closing={message.closing} projectId={projectId} round={round} />
       </div>
     );
   }

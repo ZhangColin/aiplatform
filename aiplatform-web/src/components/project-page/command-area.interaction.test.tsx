@@ -38,6 +38,20 @@ vi.mock("@/hooks/use-chat", () => ({
   useAnswerQuestion: () => ({ isPending: false, mutate: answerMutate }),
 }));
 
+// 收尾卡版本动作请求面（仅「查看当时」链路用例消费）：起快照直读就绪态
+// （data 即回 previewUrl），请求面归 use-version 与后端测试
+vi.mock("@/hooks/use-version", () => ({
+  useStartVersionView: () => ({
+    isPending: false,
+    isError: false,
+    data: { viewId: "v1", previewUrl: "about:blank" },
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useStopVersionView: () => ({ mutate: vi.fn(), isPending: false }),
+  useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 function pendingQuestion(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {
   return {
     kind: "question",
@@ -139,5 +153,31 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
     expect(usePrdNoticesStore.getState().pending.p1).toBeUndefined();
     expect(seePrd).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: /PRD 有更新/ })).toBeNull();
+  });
+});
+
+describe("CommandArea · 查看当时标题轮次语境（#140 整链：发言 → 收尾卡 → 弹窗标题）", () => {
+  it("收尾卡点「查看当时」：弹窗标题带本轮用户发言（同 runId 首条用户消息）", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把主色调改成绿色", runId: "run-1" },
+      {
+        kind: "closing",
+        id: "c1",
+        runId: "run-1",
+        closing: {
+          summary: "主色调已改为绿色",
+          prdChanged: false,
+          systemChanged: true,
+          files: [],
+          durationMs: 5000,
+          version: "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        },
+      },
+    ]);
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "查看当时" }));
+
+    expect(screen.getByText("「把主色调改成绿色」那轮结束时的系统")).toBeTruthy();
   });
 });

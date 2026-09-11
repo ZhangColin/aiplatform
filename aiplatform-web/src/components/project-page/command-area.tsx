@@ -172,7 +172,7 @@ export function CommandArea({
             {work && index === workAnchorIndex ? (
               <WorkMessage work={work} projectId={projectId} />
             ) : null}
-            <MessageRow message={message} projectId={projectId}>
+            <MessageRow message={message} projectId={projectId} roundPrompt={roundPromptOf(messages, message)}>
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
@@ -238,8 +238,23 @@ export function CommandArea({
   );
 }
 
+/**
+ * 收尾卡的轮次语境（#140 标题源）：同 runId 首条用户消息（常态 = 开场意见/
+ * 兜底引导 prompt，先于作答）。开场被对话史软上限裁掉而同轮作答幸存时，会取到
+ * 作答文本——作答亦是该轮用户消息，语境仍成立，不为长史边缘加锚定。无 runId
+ * 锚或该轮用户消息全缺才缺场，「查看当时」弹窗回落无引语境式样。
+ */
+function roundPromptOf(messages: ChatMessage[], message: ChatMessage): string | undefined {
+  if (message.kind !== "closing" || !message.runId) return undefined;
+  const opener = messages.find(
+    (m): m is Extract<ChatMessage, { kind: "user" }> =>
+      m.kind === "user" && m.runId === message.runId,
+  );
+  return opener?.text;
+}
+
 /** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/受理动作卡/错误提示/平台引导左对齐。 */
-function MessageRow({ message, children, projectId }: { message: ChatMessage; children?: ReactNode; projectId: string }) {
+function MessageRow({ message, children, projectId, roundPrompt }: { message: ChatMessage; children?: ReactNode; projectId: string; roundPrompt?: string }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
@@ -250,7 +265,7 @@ function MessageRow({ message, children, projectId }: { message: ChatMessage; ch
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）
     return (
       <div className="flex w-full justify-start">
-        <ClosingCard closing={message.closing} projectId={projectId} />
+        <ClosingCard closing={message.closing} projectId={projectId} roundPrompt={roundPrompt} />
       </div>
     );
   }

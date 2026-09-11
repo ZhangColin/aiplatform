@@ -34,7 +34,16 @@ const VISIBLE_FILES = 5;
  * 版本控件（#92/#93）随 closing.version 成版锚点呈现（成版失败缺 version 键则不
  * 出，版本动作无锚不可用）。
  */
-export function ClosingCard({ closing, projectId }: { closing: WorkClosing; projectId: string }) {
+export function ClosingCard({
+  closing,
+  projectId,
+  roundPrompt,
+}: {
+  closing: WorkClosing;
+  projectId: string;
+  /** 本轮首条可寻回的用户消息（#140「查看当时」标题语境源，装配层按收尾卡 runId 查；可缺场）。 */
+  roundPrompt?: string;
+}) {
   const [filesOpen, setFilesOpen] = useState(false);
   const files = closing.files;
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
@@ -208,6 +217,7 @@ export function ClosingCard({ closing, projectId }: { closing: WorkClosing; proj
             pending={startView.isPending}
             error={startView.isError}
             previewUrl={startView.data?.previewUrl}
+            roundPrompt={roundPrompt}
           />
 
           <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>

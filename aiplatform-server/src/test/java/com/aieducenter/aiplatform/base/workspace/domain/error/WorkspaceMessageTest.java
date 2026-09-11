@@ -15,8 +15,7 @@ class WorkspaceMessageTest {
         assertThat(WorkspaceMessage.WORKSPACE_NOT_FOUND.httpStatus()).isEqualTo(404);
         assertThat(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.code()).isEqualTo("WSP_002");
         assertThat(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.httpStatus()).isEqualTo(500);
-        assertThat(WorkspaceMessage.PORT_ALLOCATION_FAILED.code()).isEqualTo("WSP_003");
-        assertThat(WorkspaceMessage.PORT_ALLOCATION_FAILED.httpStatus()).isEqualTo(500);
+        // WSP_003（宿主端口分配失败）已随 #141 快照网关化退役——全平台无宿主端口映射
         assertThat(WorkspaceMessage.WORKSPACE_ID_INVALID.code()).isEqualTo("WSP_004");
         assertThat(WorkspaceMessage.WORKSPACE_ID_INVALID.httpStatus()).isEqualTo(400);
         assertThat(WorkspaceMessage.WORKSPACE_FIELDS_INCOMPLETE.code()).isEqualTo("WSP_005");

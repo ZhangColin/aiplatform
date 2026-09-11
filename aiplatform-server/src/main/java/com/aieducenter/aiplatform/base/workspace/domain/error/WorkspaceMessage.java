@@ -11,8 +11,6 @@ public enum WorkspaceMessage implements CodeMessage {
 
     ENVIRONMENT_OPERATION_FAILED(500, "WSP_002", "环境后端操作失败"),
 
-    PORT_ALLOCATION_FAILED(500, "WSP_003", "无法为工作区分配宿主机端口"),
-
     WORKSPACE_ID_INVALID(400, "WSP_004", "工作区标识不合法"),
 
     WORKSPACE_FIELDS_INCOMPLETE(400, "WSP_005", "工作区字段不完整"),

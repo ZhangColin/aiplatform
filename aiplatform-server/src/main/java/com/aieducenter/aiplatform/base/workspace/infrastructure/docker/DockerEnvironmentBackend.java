@@ -3,13 +3,9 @@ package com.aieducenter.aiplatform.base.workspace.infrastructure.docker;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -44,7 +40,8 @@ import lombok.extern.slf4j.Slf4j;
  * TKE 适配器，端口不动）。
  *
  * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
- * 应用运行时 + pg/redis 中间件同容器，预览端口映射置备时落定——应用服务由编码
+ * 应用运行时 + pg/redis 中间件同容器，预览经共享网络网关子域路由（#128/#141，
+ * 无宿主端口映射）——应用服务由编码
  * 智能体按约定自起（#44），平台不代起静态兜底（#45）；run 执行体经平台进程内
  * AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。{@code /workspace}
  * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
@@ -61,9 +58,6 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     private static final String DEV_IMAGE = "aiplatform/dev:0.8";
 
-    private static final int PORT_MIN = 20000;
-    private static final int PORT_MAX = 45000;
-    private static final int PORT_ATTEMPTS = 10;
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
     private static final Duration PREVIEW_PROBE_TIMEOUT = Duration.ofSeconds(2);
@@ -74,15 +68,6 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final String SNAPSHOT_DATA = "/tmp/snapdata";
     /** 容器内 pg 二进制目录（与 init-workspace.sh 同源——镜像 postgresql-15）。 */
     private static final String PG_BIN = "/usr/lib/postgresql/15/bin";
-
-    private final SecureRandom random = new SecureRandom();
-    // 探活必须锁定 HTTP/1.1：默认 HTTP/2 会对明文 HTTP 发 `Upgrade: h2c`，而
-    // 工作区真实应用（next dev 等）见到 upgrade 头直接断连不回 HTTP/1.1 响应，
-    // 探活方收到「header parser received no bytes」误判未就绪（预览恒 503）。
-    private final HttpClient http = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofSeconds(2))
-            .build();
 
     /** 预览基域名（#128）：URL 子域 {@code {id}.{previewBase}} 的基域名，开发 localhost。 */
     @Value("${app.workspace.preview-base:localhost}")
@@ -206,18 +191,22 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         String snapName = WorkspaceNaming.snapshotContainerName(mainHandle.workspaceId(), viewId);
         String dbName = WorkspaceNaming.databaseName(mainHandle.workspaceId());
         String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
-        int previewPort = startSnapshotContainer(mainHandle, snapName);
+        startSnapshotContainer(mainHandle, snapName, viewId);
         try {
             // 确定性启动序列（ADR 0007 配方）：复制 PGDATA → 清 pid → 起 pg → 起 redis
             // → 检出当时代码 → 起应用。全部容器本地落点，卷只读、主容器零扰动。
             runIn(snapName, snapshotDataCommand());
             runIn(snapName, snapshotCheckoutCommand(ref, databaseUrl));
             runIn(snapName, snapshotAppStartCommand(databaseUrl));
-            URI url = URI.create("http://localhost:" + previewPort + "/");
-            waitForAppServing(url, "快照应用 " + snapName, RESOURCE_READY_TIMEOUT,
+            // #141 网关化：无宿主端口映射，探活走容器内回环（与主预览 exposePort 同款
+            // 收口判据）；长窗 + 环境故障口径不变（快照起服是同步等待，非前端轮询）
+            waitForAppServingInContainer(snapName, EnvironmentBackend.DEV_APP_CONTAINER_PORT,
+                    "快照应用 " + snapName, RESOURCE_READY_TIMEOUT,
                     WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
+            URI url = URI.create(
+                    WorkspaceNaming.snapshotPreviewUrl(viewId, previewScheme, previewBase));
             log.info("[snapshot] {} 快照就绪（ref={}，预览 {}）", snapName, ref, url);
-            return new SnapshotHandle(snapName, previewPort);
+            return new SnapshotHandle(snapName, url);
         } catch (RuntimeException e) {
             // 快照起服失败：销毁半启动容器，不留孤儿（副本随容器可写层消失）
             runSilently("docker", "rm", "-f", snapName);
@@ -304,27 +293,6 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         }
         throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                 "等待 " + target + " 就绪超时");
-    }
-
-    /** 轮询 URL 直至有 HTTP 响应（任何状态码都算已监听）或超时——应用真实可访问才
-     *  返回；超时口径由 {@code onTimeout} 定（预览短窗 WSP_012 待期、快照长窗环境
-     *  故障）。 */
-    private void waitForAppServing(URI url, String target, Duration timeout,
-            WorkspaceMessage onTimeout) {
-        long deadline = System.currentTimeMillis() + timeout.toMillis();
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                HttpRequest request = HttpRequest.newBuilder(url)
-                        .timeout(Duration.ofSeconds(2))
-                        .GET().build();
-                http.send(request, HttpResponse.BodyHandlers.discarding());
-                return;
-            } catch (Exception ignored) {
-                // 未就绪，继续等
-            }
-            sleep();
-        }
-        throw new ApplicationException(onTimeout, "等待 " + target + " 就绪超时");
     }
 
     private void sleep() {
@@ -414,23 +382,18 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     // ---------- 快照容器内部（#92 ADR 0007 解路二） ----------
 
     /** 起快照容器：同镜像 + 同工作区卷挂 :ro + 入口脚本旁路（--entrypoint sleep）
-     *  + 独立随机预览端口。主容器 pg 在活体卷上照跑，快照侧永不直接对共享 PGDATA
-     *  起库（E0 教训）。 */
-    private int startSnapshotContainer(WorkspaceHandle mainHandle, String snapName) {
-        for (int attempt = 0; attempt < PORT_ATTEMPTS; attempt++) {
-            int previewPort = randomPort();
-            ExecResult r = runCapture("docker", "run", "-d", "--name", snapName,
-                    "--entrypoint", "sleep",
-                    "-p", previewPort + ":" + EnvironmentBackend.DEV_APP_CONTAINER_PORT,
-                    "-v", volumeOf(mainHandle.containerName()) + ":" + WorkspaceLayout.ROOT + ":ro",
-                    "-w", WorkspaceLayout.ROOT,
-                    DEV_IMAGE, "infinity");
-            if (r.exitCode() == 0) {
-                return previewPort;
-            }
-            runSilently("docker", "rm", "-f", snapName);
-        }
-        throw new ApplicationException(WorkspaceMessage.PORT_ALLOCATION_FAILED);
+     *  + 进 previewnet 挂网络别名 {@code snap-{viewId}}（#141 网关化：网关按
+     *  「snap-{viewId} 子域 → 别名」DNS 路由；容器名保留 ws-{id}- 前缀供级联清理，
+     *  无宿主端口映射——失败即环境故障上抛，无端口冲突重试面）。主容器 pg 在活体
+     *  卷上照跑，快照侧永不直接对共享 PGDATA 起库（E0 教训）。 */
+    private void startSnapshotContainer(WorkspaceHandle mainHandle, String snapName, String viewId) {
+        run("docker", "run", "-d", "--name", snapName,
+                "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                "--network-alias", WorkspaceNaming.snapshotNetworkAlias(viewId),
+                "--entrypoint", "sleep",
+                "-v", volumeOf(mainHandle.containerName()) + ":" + WorkspaceLayout.ROOT + ":ro",
+                "-w", WorkspaceLayout.ROOT,
+                DEV_IMAGE, "infinity");
     }
 
     /** 快照容器内 shell 执行（启动序列各步）；退出码非 0 即环境故障，如实上抛。 */
@@ -494,10 +457,6 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     // ---------- CLI 工具 ----------
-
-    private int randomPort() {
-        return PORT_MIN + random.nextInt(PORT_MAX - PORT_MIN);
-    }
 
     private void run(String... cmd) {
         ExecResult r = runCapture(cmd);

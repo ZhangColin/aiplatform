@@ -343,9 +343,19 @@ class DockerEnvironmentBackendTest {
                 "CREATE TABLE IF NOT EXISTS snap_marker(v int); INSERT INTO snap_marker VALUES (42);")
                 .exitCode()).isZero();
 
-        // 起 v1 快照
-        SnapshotHandle snap = backend.startSnapshot(provision.handle(), "view-1", hash1);
+        // 起 v1 快照（viewId 取 TSID 数字形——与 EventsAppService.newRunId 同款）
+        String viewId = "483920104737";
+        SnapshotHandle snap = backend.startSnapshot(provision.handle(), viewId, hash1);
         try {
+            // #141 网关化：进 previewnet、别名与子域一一对应、无宿主端口映射
+            assertThat(docker("inspect", "-f", "{{.HostConfig.NetworkMode}}", snap.containerName())
+                    .stdout().trim()).isEqualTo(WorkspaceNaming.PREVIEW_NETWORK);
+            assertThat(docker("port", snap.containerName()).stdout().trim())
+                    .as("快照容器不应有宿主端口映射").isEmpty();
+            assertThat(docker("exec", provision.handle().containerName(), "getent", "hosts",
+                    WorkspaceNaming.snapshotNetworkAlias(viewId)).exitCode())
+                    .as("previewnet 内应可按别名 DNS 解析快照容器").isZero();
+
             // 当时系统可操作：快照内 8081 服务 v1，主容器仍服务 v2
             assertThat(curl(snap.containerName()).stdout().trim())
                     .as("快照应服务当时代码 v1").isEqualTo("<html>v1</html>");
@@ -377,7 +387,7 @@ class DockerEnvironmentBackendTest {
         execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");
         String hash1 = commit(provision.handle(), "首次生成了系统", "111");
 
-        SnapshotHandle snap = backend.startSnapshot(provision.handle(), "view-1", hash1);
+        SnapshotHandle snap = backend.startSnapshot(provision.handle(), "483920104737", hash1);
         assertThat(docker("inspect", snap.containerName()).exitCode())
                 .as("快照容器应已起").isZero();
 

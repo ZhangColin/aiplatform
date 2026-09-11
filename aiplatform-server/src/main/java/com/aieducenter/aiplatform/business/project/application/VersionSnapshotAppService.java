@@ -72,8 +72,8 @@ public class VersionSnapshotAppService {
         SnapshotHandle snapshot = workspaceLifecycleAppService.startSnapshot(
                 Long.toString(project.getWorkspaceId()), viewId, ref);
         active.put(viewId, snapshot);
-        return new VersionViewStartResponse(viewId,
-                "http://localhost:" + snapshot.previewPort() + "/");
+        // 预览 URL 由环境后端拼（#141 网关子域，与主预览 exposePort 同构），本层透传
+        return new VersionViewStartResponse(viewId, snapshot.previewUrl().toString());
     }
 
     /**

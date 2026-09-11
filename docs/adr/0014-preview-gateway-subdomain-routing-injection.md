@@ -24,7 +24,7 @@
 
 ## 范围
 
-本片只覆盖主工作区容器（dev 预览）。「查看当时」快照容器（#92）是独立临时视图，仍走各自随机端口（`SnapshotHandle.previewPort`），不纳入网关注入——非本片范围。
+本片只覆盖主工作区容器（dev 预览）。「查看当时」快照容器（#92）是独立临时视图，仍走各自随机端口（`SnapshotHandle.previewPort`），不纳入网关注入——非本片范围。（#141 已补齐：快照容器一并网关化——`snap-{viewId}` 单层子域路由，走网关但不注入，「只逛不换」口径不变。）
 
 ## 未来演进（备案，带触发器）
 
@@ -36,4 +36,4 @@ Traefik 作为可替换备选——因 `preview.url` 对前端不透明，换网
 - 圈注脚本网关注入后，主 Next.js 应用的圈注真功能接通（「指哪说哪」成立）。
 - 预览流量走平台边缘、子域独立 origin——用户生成代码碰不到平台后端（安全边界）。
 - 生产证书一张 wildcard 覆盖所有项目（非每项目一签）。
-- 交付物：nginx 网关配置（`src/main/resources/docker/gateway/nginx.conf` dev + `nginx.prod.conf.template` prod，路由/注入块单源在 `gateway-route.conf`）+ 部署指南（`docs/guide/`）。
+- 交付物：nginx 网关配置（`src/main/resources/docker/gateway/nginx.conf` dev + `nginx.prod.conf.template` prod，路由/注入块单源在 `gateway-route.conf`）+ 部署指南（`docs/guide/`）。（#141 拆为 `gateway-proxy.conf` 代理块 + `gateway-inject.conf` 注入块——快照路由只吃代理块，两个正交维度各自单源。）

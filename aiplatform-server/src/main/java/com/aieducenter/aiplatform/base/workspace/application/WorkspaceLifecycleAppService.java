@@ -185,7 +185,8 @@ public class WorkspaceLifecycleAppService {
     /**
      * 起「查看当时」快照容器（#92）：置备中隐式等待就绪（#62）后交给环境后端按
      * ADR 0007 解路二起快照（同卷 :ro + 入口旁路 + 数据副本 + 检出当时代码起应用）。
-     * 返回快照句柄（容器名 + 预览端口），编排层据此映射预览 URL 与在途注册表。
+     * 返回快照句柄（容器名 + 预览 URL——#141 网关子域，环境后端拼好），编排层据此
+     * 透传入口与登记在途注册表。
      */
     public SnapshotHandle startSnapshot(String workspaceId, String viewId, String ref) {
         Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));

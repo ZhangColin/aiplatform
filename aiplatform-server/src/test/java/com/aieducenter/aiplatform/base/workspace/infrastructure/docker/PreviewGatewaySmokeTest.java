@@ -13,10 +13,12 @@ import org.junit.jupiter.api.Assumptions;
 
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceVersions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -31,6 +33,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 真实起服，HTML 与磁盘逐字节一致）、网关注入恰一次（无双注入——防重入 guard 已随
  * 单源删除）。
  * daemon 不在则跳过（CI 无 docker 时不红）。
+ * #141 快照网关化：加验 {@code snap-{viewId}.localhost} 经网关路由到快照容器
+ * （别名 DNS）——当时代码可逛、且 HTML <b>不含</b>注入标签（「只逛不换」ADR 0007
+ * 口径的网关侧收口：快照 server 块不 include 注入块）、句柄 previewUrl 与路由同源。
  */
 class PreviewGatewaySmokeTest {
 
@@ -79,16 +84,18 @@ class PreviewGatewaySmokeTest {
         Path dir = Files.createTempDirectory("aiplatform-gateway");
         try {
             copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
-            copyResource("docker/gateway/gateway-route.conf", dir.resolve("gateway-route.conf"));
+            copyResource("docker/gateway/gateway-proxy.conf", dir.resolve("gateway-proxy.conf"));
+            copyResource("docker/gateway/gateway-inject.conf", dir.resolve("gateway-inject.conf"));
             copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
-            // 网关与工作区同 previewnet 网（按容器名 DNS 解析 ws-{id}），宿主端口映射供测试探活
+            // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活
             ExecResult started = docker("run", "-d", "--name", gatewayContainer,
                     "--network", WorkspaceNaming.PREVIEW_NETWORK,
                     "-p", gatewayPort + ":80",
                     "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
-                    "-v", dir.resolve("gateway-route.conf") + ":/etc/nginx/gateway-route.conf:ro",
+                    "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
+                    "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
                     "-v", dir.resolve("annotation.js") + ":/etc/nginx/annotation.js:ro",
                     GATEWAY_IMAGE);
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
@@ -128,6 +135,27 @@ class PreviewGatewaySmokeTest {
                     "curl -s --retry 10 --retry-delay 1 --retry-connrefused http://localhost:8099/");
             assertThat(pure.exitCode()).as("serve.js 应起服可探（exit=%s）", pure.exitCode()).isZero();
             assertThat(pure.stdout()).as("serve.js 应逐字节透传（无注入）").isEqualTo(pureHtml);
+
+            // #141 快照路由：成版当前态 → 起快照（真实 startSnapshot，容器进 previewnet
+            // 挂别名）→ snap-{viewId}.localhost 经网关路由到快照容器——只逛不换：HTML
+            // 不含注入标签（快照 server 块不 include 注入块），句柄 URL 与路由同源
+            String viewId = "483920104737";
+            String hash = commit(handle, "首次生成了系统", "111");
+            SnapshotHandle snap = backend.startSnapshot(handle, viewId, hash);
+            try {
+                assertThat(snap.previewUrl().toString())
+                        .isEqualTo("http://snap-" + viewId + ".localhost/");
+                ExecResult snapRouted = curlHost(gatewayPort, "snap-" + viewId + ".localhost", "/");
+                assertThat(snapRouted.exitCode())
+                        .as("网关应路由快照子域（exit=%s）%s", snapRouted.exitCode(), snapRouted.stderr())
+                        .isZero();
+                assertThat(snapRouted.stdout())
+                        .as("快照应服务当时代码且不注入圈注（只逛不换）")
+                        .contains("hello gateway")
+                        .doesNotContain("data-aiplatform");
+            } finally {
+                backend.stopSnapshot(snap);
+            }
         } finally {
             try (var walk = Files.walk(dir)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
@@ -181,6 +209,15 @@ class PreviewGatewaySmokeTest {
 
     private static ExecResult execIn(WorkspaceHandle handle, String command) {
         return docker("exec", handle.containerName(), "sh", "-c", command);
+    }
+
+    /** 幂等 init + 成版提交（照 WorkspaceVersions 纯函数——快照检出的 ref 来源）。 */
+    private static String commit(WorkspaceHandle handle, String summary, String runId) {
+        ExecResult ensured = execIn(handle, WorkspaceVersions.ensureRepoCommand());
+        assertThat(ensured.exitCode()).as("仓库初始化应成功：%s", ensured.stderr()).isZero();
+        ExecResult committed = execIn(handle, WorkspaceVersions.commitCommand(summary, runId));
+        assertThat(committed.exitCode()).as("成版提交应成功：%s", committed.stderr()).isZero();
+        return committed.stdout().trim();
     }
 
     private static ExecResult docker(String... args) {

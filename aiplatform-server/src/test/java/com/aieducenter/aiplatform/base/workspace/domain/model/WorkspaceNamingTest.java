@@ -48,4 +48,23 @@ class WorkspaceNamingTest {
         assertThat(WorkspaceNaming.snapshotContainerPrefix(WorkspaceId.of("42")))
                 .isEqualTo("ws-42-snap-");
     }
+
+    @Test
+    void given_view_id_when_snapshot_alias_then_subdomain_label() {
+        // #141 网关化：previewnet 内 DNS 别名 snap-{viewId} 与子域 label 一一对应——
+        // 容器名带 ws-{id}- 前缀供级联清理（不改名），别名桥接「子域 → 容器」路由
+        assertThat(WorkspaceNaming.snapshotNetworkAlias("483920104737"))
+                .isEqualTo("snap-483920104737");
+    }
+
+    @Test
+    void given_view_id_and_base_when_snapshot_preview_url_then_snap_subdomain() {
+        // 快照预览 URL（#141）= scheme + snap-{viewId} 单层子域：开发
+        // http://snap-{id}.localhost；生产 https://snap-{id}.preview.{domain}——单层
+        // 落在主预览已有 *.preview.{domain} 通配 DNS/证书内（无需二层通配）
+        assertThat(WorkspaceNaming.snapshotPreviewUrl("483920104737", "http", "localhost"))
+                .isEqualTo("http://snap-483920104737.localhost/");
+        assertThat(WorkspaceNaming.snapshotPreviewUrl("483920104737", "https", "preview.example.com"))
+                .isEqualTo("https://snap-483920104737.preview.example.com/");
+    }
 }

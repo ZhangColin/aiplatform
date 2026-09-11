@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.net.URI;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -64,12 +65,13 @@ class VersionSnapshotAppServiceTest {
         long projectId = 1001L;
         stubWorkspace(projectId);
         when(workspaceLifecycleAppService.startSnapshot(eq(WORKSPACE_ID), anyString(), eq(HASH)))
-                .thenReturn(new SnapshotHandle("ws-9900-snap-1", 30001));
+                .thenReturn(new SnapshotHandle("ws-9900-snap-1", URI.create("http://snap-9900.localhost/")));
 
         VersionViewStartResponse resp = service.startView(projectId, HASH);
 
         assertThat(resp.viewId()).isNotBlank();
-        assertThat(resp.previewUrl()).isEqualTo("http://localhost:30001/");
+        // #141：预览 URL 是环境后端拼好的网关子域（本层透传，不再拼 localhost:端口）
+        assertThat(resp.previewUrl()).isEqualTo("http://snap-9900.localhost/");
         verify(versionAppService).requireVersion(any(Project.class), eq(HASH));
     }
 
@@ -91,8 +93,8 @@ class VersionSnapshotAppServiceTest {
         long projectId = 1003L;
         stubWorkspace(projectId);
         when(workspaceLifecycleAppService.startSnapshot(eq(WORKSPACE_ID), anyString(), eq(HASH)))
-                .thenReturn(new SnapshotHandle("ws-9900-snap-1", 30001),
-                        new SnapshotHandle("ws-9900-snap-2", 30002));
+                .thenReturn(new SnapshotHandle("ws-9900-snap-1", URI.create("http://snap-1.localhost/")),
+                        new SnapshotHandle("ws-9900-snap-2", URI.create("http://snap-2.localhost/")));
 
         service.startView(projectId, HASH);
         service.startView(projectId, HASH);
@@ -106,7 +108,7 @@ class VersionSnapshotAppServiceTest {
     void given_active_view_when_stop_then_snapshot_destroyed() {
         long projectId = 1004L;
         stubWorkspace(projectId);
-        SnapshotHandle handle = new SnapshotHandle("ws-9900-snap-1", 30001);
+        SnapshotHandle handle = new SnapshotHandle("ws-9900-snap-1", URI.create("http://snap-1.localhost/"));
         when(workspaceLifecycleAppService.startSnapshot(eq(WORKSPACE_ID), anyString(), eq(HASH)))
                 .thenReturn(handle);
 

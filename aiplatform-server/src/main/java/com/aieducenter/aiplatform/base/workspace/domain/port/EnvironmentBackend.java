@@ -63,10 +63,11 @@ public interface EnvironmentBackend {
 
     /**
      * 起「查看当时」快照容器（#92，ADR 0007 解路二）：同镜像、同工作区卷挂
-     * {@code :ro}、入口脚本旁路、独立随机预览端口；平台经 exec 确定性驱动——
-     * 复制 PGDATA 到容器本地 → 清 pid → 起 pg → 起 redis → 检出 {@code ref}
-     * 当时代码到容器本地 → 起应用（DATABASE_URL 指容器内 localhost）。数据只落
-     * 副本、卷只读，主容器零扰动；快照应用起服后返回句柄（预览端口映射已落定）。
+     * {@code :ro}、入口脚本旁路；平台经 exec 确定性驱动——复制 PGDATA 到容器本地
+     * → 清 pid → 起 pg → 起 redis → 检出 {@code ref} 当时代码到容器本地 → 起应用
+     * （DATABASE_URL 指容器内 localhost）。数据只落副本、卷只读，主容器零扰动。
+     * #141 网关化：进 previewnet（别名 {@code snap-{viewId}}、无宿主端口映射），
+     * 探活走容器内回环，起服后返回句柄（含网关子域预览 URL）。
      *
      * @param ref 成版 commit hash（hex，调用方已校验存在性；本层只做命令引用）
      */

@@ -28,6 +28,8 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Back
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeProjectSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -40,18 +42,20 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
  * 排除会话拦截（机机调用无用户会话）。清单＝状态三档单选＋创建时间区间＋账号
  * （externalId 入参服务端换算）＋项目 id 精确（用户报障贴链接场景），排序
  * id 倒序定死不开放；详情带订单引用（activeOrder/latestOrder 照用户面先例，
- * 与订单域互链）。深读三组（#162）口径照用户面 per-project 端点：对话史（全量
- * 同序）、PRD（未产出 404 照搬）、版本列表＋详情（正本＝容器内 git log、详情
- * 锚定收尾卡＋rollbackFrom）——同源委托既有应用服务（不复用 BFF 会话端点、不
- * 复制读逻辑，口径由构造不漂移）。归档项目全状态照读（清单缺省含），已删项目
- * 真删无墓碑——任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、
- * 清单过滤参数 PRJ_014、PRD 未产出 PRJ_015、版本不存在 PRJ_028），环境故障
- * WSP_002 照订单源码包先例跨前缀透传。只写操作不进本域（v1 只读）。
+ * 与订单域互链）。深读三组（#162）＋文件区（#163）口径照用户面 per-project
+ * 端点：对话史（全量同序）、PRD（未产出 404 照搬）、版本列表＋详情（正本＝
+ * 容器内 git log、详情锚定收尾卡＋rollbackFrom）、文件树＋文件内容（拒机密/
+ * 逃逸、1MiB 上限、非文本拒——补未下单项目的代码排障缺口，文件区挂项目不挂
+ * 订单）——同源委托既有应用服务（不复用 BFF 会话端点、不复制读逻辑，口径由
+ * 构造不漂移）。归档项目全状态照读（清单缺省含），已删项目真删无墓碑——
+ * 任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、清单过滤参数
+ * PRJ_014、PRD 未产出 PRJ_015、版本不存在 PRJ_028、文件区守卫 PRJ_020~023），
+ * 环境故障 WSP_002 照订单源码包先例跨前缀透传。只写操作不进本域（v1 只读）。
  */
 @RestController
 @RequestMapping("/api/backoffice/projects")
 @RequireSignature
-@Tag(name = "Backoffice Projects", description = "后台项目：清单检索 / 详情带订单引用 / 对话史 / PRD / 版本列表与详情（机机签名，只读）")
+@Tag(name = "Backoffice Projects", description = "后台项目：清单检索 / 详情带订单引用 / 对话史 / PRD / 版本列表与详情 / 文件区只读（机机签名，只读）")
 public class BackofficeProjectController {
 
     private final BackofficeProjectAppService appService;
@@ -165,6 +169,35 @@ public class BackofficeProjectController {
     public ApiResponse<VersionDetailResponse> versionDetail(@PathVariable String id,
             @PathVariable String ref) {
         return ApiResponse.ok(versionAppService.detail(ProjectIds.parse(id), ref));
+    }
+
+    @GetMapping("/{id}/files")
+    @Operation(summary = "文件树（后台面，交付文件只读浏览）",
+            description = "口径照用户面文件树读口（同源委托同一应用服务——守卫由构造不漂移）："
+                    + "交付文件视图 = 项目 dev 工作区剔除非交付物（data/、.platform/、"
+                    + "node_modules/ 与 .env——与源码包同口径）后的文件清单 "
+                    + "[{path, size}]，path 为工作区相对路径、按路径稳定排序，只列文件"
+                    + "（目录由调用方按路径段合成）。直读工作区实时状态。文件区挂项目"
+                    + "不挂订单——未下单项目可浏览（源码包只挂订单的排障缺口在此补上，"
+                    + "代码级排障不依赖成交）。归档项目照读（工作区保留）。"
+                    + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
+    @ErrorCodes({"PRJ_001", "WSP_002"})
+    public ApiResponse<ProjectFilesResponse> files(@PathVariable String id) {
+        return ApiResponse.ok(projectQueryAppService.files(ProjectIds.parse(id)));
+    }
+
+    @GetMapping("/{id}/files/content")
+    @Operation(summary = "文本文件内容（后台面，点看）",
+            description = "口径照用户面文件内容读口：path = 工作区相对路径（文件树条目原样回传），"
+                    + "只收文本且限大小——非交付物/机密（根级 .env）/逃逸路径 400 PRJ_020"
+                    + "（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线"
+                    + "查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 "
+                    + "NUL）400 PRJ_023。未下单项目照读（排障不依赖成交）。"
+                    + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
+    @ErrorCodes({"PRJ_001", "PRJ_020", "PRJ_021", "PRJ_022", "PRJ_023", "WSP_002"})
+    public ApiResponse<ProjectFileContentResponse> fileContent(@PathVariable String id,
+            @RequestParam String path) {
+        return ApiResponse.ok(projectQueryAppService.fileContent(ProjectIds.parse(id), path));
     }
 
     /**

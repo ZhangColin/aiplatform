@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,32 +21,52 @@ import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.business.project.application.BackofficeProjectAppService;
+import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.ProjectVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeProjectSummaryResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 /**
- * 后台项目 REST 面（#159 项目域只读，机机签名）：cartisan-openapi 五头 HMAC
+ * 后台项目 REST 面（#159/#162 项目域只读，机机签名）：cartisan-openapi 五头 HMAC
  * （X-Api-Key/X-Timestamp/X-Nonce/X-Body-Digest/X-Sign），类级
  * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
  * 排除会话拦截（机机调用无用户会话）。清单＝状态三档单选＋创建时间区间＋账号
  * （externalId 入参服务端换算）＋项目 id 精确（用户报障贴链接场景），排序
  * id 倒序定死不开放；详情带订单引用（activeOrder/latestOrder 照用户面先例，
- * 与订单域互链）。归档项目全状态照读（清单缺省含），已删项目真删无墓碑——
- * 任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、清单过滤参数
- * PRJ_014）。
+ * 与订单域互链）。深读三组（#162）口径照用户面 per-project 端点：对话史（全量
+ * 同序）、PRD（未产出 404 照搬）、版本列表＋详情（正本＝容器内 git log、详情
+ * 锚定收尾卡＋rollbackFrom）——同源委托既有应用服务（不复用 BFF 会话端点、不
+ * 复制读逻辑，口径由构造不漂移）。归档项目全状态照读（清单缺省含），已删项目
+ * 真删无墓碑——任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、
+ * 清单过滤参数 PRJ_014、PRD 未产出 PRJ_015、版本不存在 PRJ_028），环境故障
+ * WSP_002 照订单源码包先例跨前缀透传。只写操作不进本域（v1 只读）。
  */
 @RestController
 @RequestMapping("/api/backoffice/projects")
 @RequireSignature
-@Tag(name = "Backoffice Projects", description = "后台项目：清单检索 / 详情带订单引用（机机签名，只读）")
+@Tag(name = "Backoffice Projects", description = "后台项目：清单检索 / 详情带订单引用 / 对话史 / PRD / 版本列表与详情（机机签名，只读）")
 public class BackofficeProjectController {
 
     private final BackofficeProjectAppService appService;
+    private final ConversationHistoryAppService conversationHistoryAppService;
+    private final ProjectQueryAppService projectQueryAppService;
+    private final ProjectVersionAppService versionAppService;
 
-    public BackofficeProjectController(BackofficeProjectAppService appService) {
+    public BackofficeProjectController(BackofficeProjectAppService appService,
+            ConversationHistoryAppService conversationHistoryAppService,
+            ProjectQueryAppService projectQueryAppService,
+            ProjectVersionAppService versionAppService) {
         this.appService = appService;
+        this.conversationHistoryAppService = conversationHistoryAppService;
+        this.projectQueryAppService = projectQueryAppService;
+        this.versionAppService = versionAppService;
     }
 
     @GetMapping
@@ -88,6 +109,62 @@ public class BackofficeProjectController {
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<BackofficeProjectDetailResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(ProjectIds.parse(id)));
+    }
+
+    @GetMapping("/{id}/conversation")
+    @Operation(summary = "对话史（后台面，全量同序）",
+            description = "口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）："
+                    + "用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，"
+                    + "按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）"
+                    + "不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent "
+                    + "3=question 4=answer 5=closing 6=guide）；question = question-raised "
+                    + "事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口"
+                    + "扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）"
+                    + "——排障时了解用户与系统的交互过程。需要机机签名；"
+                    + "项目不存在 404 PRJ_001")
+    @ErrorCodes({"PRJ_001"})
+    public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
+        return ApiResponse.ok(conversationHistoryAppService.read(ProjectIds.parse(id)));
+    }
+
+    @GetMapping("/{id}/prd")
+    @Operation(summary = "PRD 读（后台面，工作区直读）",
+            description = "口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，"
+                    + "v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，"
+                    + "ISO-8601 秒精度）——了解交付物内容。未产出（工作区无该文件）"
+                    + "404 PRJ_015，与项目不存在的 PRJ_001 区分。归档项目照读"
+                    + "（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）"
+                    + "500 WSP_002")
+    @ErrorCodes({"PRJ_001", "PRJ_015", "WSP_002"})
+    public ApiResponse<PrdResponse> prd(@PathVariable String id) {
+        return ApiResponse.ok(projectQueryAppService.prd(ProjectIds.parse(id)));
+    }
+
+    @GetMapping("/{id}/versions")
+    @Operation(summary = "版本列表（后台面，新→旧）",
+            description = "口径照用户面版本读口：git log 即版本序列（正本＝容器内 git log 直读，"
+                    + "无库表）——每轮编码 run 收口自动成版（commit 主题 = 收口摘要、"
+                    + "Run-Id trailer 锚定收尾卡）；回滚版本 runId 空、rollbackFrom 锚定"
+                    + "源版本。排序新→旧定死；零版本（尚无收口）= 空列表非错误。"
+                    + "「上周五还好好的」按版本锚点回看的入口。归档项目照读。"
+                    + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
+    @ErrorCodes({"PRJ_001", "WSP_002"})
+    public ApiResponse<List<VersionResponse>> versions(@PathVariable String id) {
+        return ApiResponse.ok(versionAppService.list(ProjectIds.parse(id)));
+    }
+
+    @GetMapping("/{id}/versions/{ref}")
+    @Operation(summary = "版本详情（后台面，锚定收尾卡）",
+            description = "口径照用户面版本详情：版本元数据（hash / 摘要 / 锚定 run / 成版时刻）＋"
+                    + "收尾卡载荷（Run-Id 联接对话史 closing 条目，#88 同载荷复用；收尾卡"
+                    + "缺位时 closing 为 null）＋rollbackFrom（回滚版本锚定源版本、runId 空；"
+                    + "run 版本反之）。ref = commit hash（hex 40 位）——非 hash 形态"
+                    + "404 PRJ_028 且不触工作区（shell 注入防线）。归档项目照读。"
+                    + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
+    @ErrorCodes({"PRJ_001", "PRJ_028", "WSP_002"})
+    public ApiResponse<VersionDetailResponse> versionDetail(@PathVariable String id,
+            @PathVariable String ref) {
+        return ApiResponse.ok(versionAppService.detail(ProjectIds.parse(id), ref));
     }
 
     /**

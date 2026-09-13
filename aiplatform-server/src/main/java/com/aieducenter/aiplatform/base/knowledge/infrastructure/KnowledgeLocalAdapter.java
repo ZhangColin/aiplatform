@@ -10,6 +10,7 @@ import com.cartisan.core.stereotype.PortType;
 import com.aieducenter.aiplatform.base.knowledge.application.KnowledgeAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
 /**
@@ -35,6 +36,16 @@ public class KnowledgeLocalAdapter implements KnowledgePort {
     @Override
     public List<KnowledgeHit> retrieve(String query, int topK) {
         return knowledgeAppService.retrieve(query, topK);
+    }
+
+    @Override
+    public void disable(String kind, String sourceRef, Operator operator) {
+        knowledgeAppService.disable(kind, sourceRef, operator);
+    }
+
+    @Override
+    public void enable(String kind, String sourceRef, Operator operator) {
+        knowledgeAppService.enable(kind, sourceRef, operator);
     }
 
     @Override

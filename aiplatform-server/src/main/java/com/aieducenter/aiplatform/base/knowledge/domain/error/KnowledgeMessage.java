@@ -13,7 +13,11 @@ public enum KnowledgeMessage implements CodeMessage {
 
     KNOWLEDGE_TOP_K_INVALID(400, "KNW_003", "topK 必须为正数"),
 
-    KNOWLEDGE_PROJECT_ID_REQUIRED(400, "KNW_004", "projectId 不能为空");
+    KNOWLEDGE_PROJECT_ID_REQUIRED(400, "KNW_004", "projectId 不能为空"),
+
+    KNOWLEDGE_MATERIAL_NOT_FOUND(404, "KNW_005", "知识素材不存在"),
+
+    KNOWLEDGE_OPERATOR_REQUIRED(400, "KNW_006", "操作者不能为空");
 
     private final int httpStatus;
     private final String code;

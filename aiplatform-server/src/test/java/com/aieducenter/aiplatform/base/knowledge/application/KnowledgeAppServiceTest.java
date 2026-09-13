@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.knowledge.application;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 
@@ -12,8 +13,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.IntegrationTest;
+import com.aieducenter.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 
@@ -49,6 +52,7 @@ class KnowledgeAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM knw_chunks");
+        jdbcTemplate.update("DELETE FROM knw_materials");
     }
 
     @Test
@@ -251,7 +255,155 @@ class KnowledgeAppServiceTest {
                 .hasMessageContaining("projectId 不能为空");
     }
 
+    // ---------- 素材状态：停用⇄启用可逆开关＋检索状态过滤（#153） ----------
+
+    @Test
+    void given_disabled_material_when_retrieve_then_excluded_and_peer_still_hits() {
+        // 同 kind 不同 source_ref 的两份 PRD（沉淀幂等键的真实形态）；query 与 A 同向、与 B 半同向
+        when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("密码加密方案"), null), vector(1, 1));
+        indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD", List.of("登录超时治理"), null), vector(1, 0.5f));
+        assertThat(knowledgePort.retrieve("密码加密", 5)).hasSize(2);   // 停用前：皆命中
+
+        knowledgePort.disable("PRD", PROJ_A, OPERATOR);
+
+        // 停用素材的块整体退出命中，未停用素材照常进位
+        assertThat(knowledgePort.retrieve("密码加密", 5))
+                .extracting(KnowledgeHit::sourceProjectName)
+                .containsExactly("物流系统");
+    }
+
+    @Test
+    void given_disabled_then_enabled_when_retrieve_then_hits_restored() {
+        when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("密码加密方案"), null), vector(1, 1));
+
+        knowledgePort.disable("PRD", PROJ_A, OPERATOR);
+        assertThat(knowledgePort.retrieve("密码加密", 5)).isEmpty();
+
+        knowledgePort.enable("PRD", PROJ_A, OPERATOR);
+
+        assertThat(knowledgePort.retrieve("密码加密", 5))
+                .extracting(KnowledgeHit::chunk).containsExactly("密码加密方案");
+    }
+
+    @Test
+    void given_reingest_after_disable_when_index_then_status_survives_and_registry_single_row() {
+        KnowledgeSpec first = spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("旧需求"), null);
+        KnowledgeSpec second = spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("新需求"), null);
+        when(embeddingClient.embed(first.chunks())).thenReturn(List.of(hot(0)));
+        when(embeddingClient.embed(second.chunks())).thenReturn(List.of(hot(1)));
+        when(embeddingClient.embed(List.of("新需求"))).thenReturn(List.of(hot(1)));
+        knowledgePort.index(first);
+        knowledgePort.disable("PRD", PROJ_A, OPERATOR);
+        Object materialId = jdbcTemplate.queryForObject(
+                "SELECT id FROM knw_materials", Object.class);
+        Timestamp firstSunkAt = jdbcTemplate.queryForObject(
+                "SELECT created_at FROM knw_materials", Timestamp.class);
+
+        knowledgePort.index(second);   // 重沉淀（重试归档再触发）：幂等换块
+
+        // 登记表单行、状态仍停用、操作者/id/首沉淀时间保留——被治理素材重沉淀不复活
+        assertThat(registryCount()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT id FROM knw_materials", Object.class)).isEqualTo(materialId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT created_at FROM knw_materials", Timestamp.class)).isEqualTo(firstSunkAt);
+        assertThat(registryStatus()).isEqualTo(MaterialStatus.DISABLED.getCode());
+        assertThat(registryField("operator_id")).isEqualTo("42");
+        assertThat(registryField("operator_name")).isEqualTo("运营张三");
+        assertThat(knowledgePort.retrieve("新需求", 5)).isEmpty();
+
+        knowledgePort.enable("PRD", PROJ_A, OPERATOR);
+
+        assertThat(knowledgePort.retrieve("新需求", 5))
+                .extracting(KnowledgeHit::chunk).containsExactly("新需求");
+    }
+
+    @Test
+    void given_purge_by_project_when_material_disabled_then_registry_cascaded_too() {
+        // 级联照删含已停用素材：登记行与块一并清理，未涉及项目不受扰
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("需求"), null), hot(0));
+        indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD", List.of("缺陷"), null), hot(1));
+        knowledgePort.disable("PRD", PROJ_A, OPERATOR);
+
+        knowledgePort.purgeByProject(PROJ_A);
+
+        assertThat(registryCount()).isEqualTo(1);
+        assertThat(registryField("project_id")).isEqualTo(PROJ_B);
+        assertThat(count()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT project_id FROM knw_chunks", String.class)).isEqualTo(PROJ_B);
+    }
+
+    @Test
+    void given_index_when_registry_row_written_then_identity_and_display_fields_present() {
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("需求"), null), hot(0));
+
+        assertThat(registryCount()).isEqualTo(1);
+        assertThat(registryField("kind")).isEqualTo("PRD");
+        assertThat(registryField("source_ref")).isEqualTo(PROJ_A);
+        assertThat(registryField("project_name")).isEqualTo("电商系统");
+        assertThat(registryField("title")).isEqualTo("PRD");
+        assertThat(registryField("status")).isEqualTo("1");   // MaterialStatus.ENABLED code
+        assertThat(registryField("operator_id")).isNull();   // 未治理过无操作者
+    }
+
+    @Test
+    void given_already_disabled_when_disable_again_then_ok_without_error() {
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD", List.of("需求"), null), hot(0));
+
+        knowledgePort.disable("PRD", PROJ_A, OPERATOR);
+        knowledgePort.disable("PRD", PROJ_A, new Operator("43", "运营李四"));   // 幂等：可重复治理
+
+        assertThat(registryStatus()).isEqualTo(MaterialStatus.DISABLED.getCode());
+        assertThat(registryField("operator_id")).isEqualTo("43");   // 留最近管理动作操作者
+    }
+
+    @Test
+    void given_unknown_material_when_disable_then_rejected() {
+        assertThatThrownBy(() -> knowledgePort.disable("PRD", "nobody", OPERATOR))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("知识素材不存在");
+        assertThatThrownBy(() -> knowledgePort.enable("PRD", "nobody", OPERATOR))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("知识素材不存在");
+    }
+
+    @Test
+    void given_blank_identity_or_operator_when_disable_then_rejected() {
+        assertThatThrownBy(() -> knowledgePort.disable(" ", PROJ_A, OPERATOR))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("知识素材字段不完整");
+        assertThatThrownBy(() -> knowledgePort.disable("PRD", " ", OPERATOR))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("知识素材字段不完整");
+        assertThatThrownBy(() -> knowledgePort.disable("PRD", PROJ_A, new Operator(" ", "运营张三")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("操作者不能为空");
+        assertThatThrownBy(() -> knowledgePort.enable("PRD", PROJ_A, new Operator("42", null)))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("操作者不能为空");
+    }
+
     // ---------- fixture ----------
+
+    /** 治理操作者（admin 侧管理员标识，非平台用户——#151 口径）。 */
+    private static final Operator OPERATOR = new Operator("42", "运营张三");
+
+    private int registryCount() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knw_materials", Integer.class);
+    }
+
+    private int registryStatus() {
+        return jdbcTemplate.queryForObject("SELECT status FROM knw_materials", Integer.class);
+    }
+
+    /** 登记表唯一行的字段直读（用例保证单行时使用）。 */
+    private String registryField(String column) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + column + " FROM knw_materials", String.class);
+    }
 
     private KnowledgeSpec spec(String kind, String sourceRef, String projectId, String projectName,
                                String title, List<String> chunks, Map<String, Object> meta) {

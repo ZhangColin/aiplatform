@@ -8,14 +8,17 @@ import com.cartisan.core.exception.ApplicationException;
 
 import lombok.extern.slf4j.Slf4j;
 
+import com.aieducenter.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.aieducenter.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
-import com.aieducenter.aiplatform.base.knowledge.domain.repository.ChunkStore;
+import com.aieducenter.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
 /**
- * 知识用例（票 #17）：入库（幂等删后插）/ 检索（全局余弦相似）/ 项目级联清理。
+ * 知识用例（票 #17）：入库（幂等删后插）/ 检索（全局余弦相似）/ 项目级联清理；
+ * 素材状态（#153）：停用⇄启用可逆开关，停用素材的块退出检索命中。
  *
  * <p>降级次序刻意「先向量化、后替换」：embedding 不可用时旧块原样保留（只记日志
  * 跳过，不删不插——丢失容忍，A5 §1），检索降级为空列表；外部 HTTP 调用也因此在
@@ -27,11 +30,11 @@ import com.aieducenter.aiplatform.base.knowledge.domain.repository.ChunkStore;
 public class KnowledgeAppService {
 
     private final EmbeddingClient embeddingClient;
-    private final ChunkStore chunkStore;
+    private final KnowledgeStore knowledgeStore;
 
-    public KnowledgeAppService(EmbeddingClient embeddingClient, ChunkStore chunkStore) {
+    public KnowledgeAppService(EmbeddingClient embeddingClient, KnowledgeStore knowledgeStore) {
         this.embeddingClient = embeddingClient;
-        this.chunkStore = chunkStore;
+        this.knowledgeStore = knowledgeStore;
     }
 
     /**
@@ -51,7 +54,7 @@ public class KnowledgeAppService {
                     spec.chunks().size(), vectors.size(), spec.kind(), spec.sourceRef());
             return;
         }
-        chunkStore.replace(spec, vectors);
+        knowledgeStore.replace(spec, vectors);
     }
 
     /**
@@ -69,7 +72,35 @@ public class KnowledgeAppService {
             log.warn("embedding 服务不可用，检索降级为空结果：query 长度={}", query.length());
             return List.of();
         }
-        return chunkStore.findSimilar(vectors.get(0), topK);
+        return knowledgeStore.findSimilar(vectors.get(0), topK);
+    }
+
+    /**
+     * 停用素材（#153）：全部块退出命中、落操作者；可逆（{@link #enable} 再启用恢复）。
+     * 重复停用幂等（无守卫拒绝，操作者留最近一次）。
+     */
+    public void disable(String kind, String sourceRef, Operator operator) {
+        setStatus(kind, sourceRef, MaterialStatus.DISABLED, operator);
+    }
+
+    /**
+     * 启用素材：恢复参与命中、落操作者。重复启用幂等。
+     */
+    public void enable(String kind, String sourceRef, Operator operator) {
+        setStatus(kind, sourceRef, MaterialStatus.ENABLED, operator);
+    }
+
+    /** 身份必填校验共用：幂等键两肢即素材定位，缺任一即字段不完整。 */
+    private void setStatus(String kind, String sourceRef, MaterialStatus status, Operator operator) {
+        if (isBlank(kind) || isBlank(sourceRef)) {
+            throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_SPEC_FIELDS_INCOMPLETE);
+        }
+        if (operator == null || isBlank(operator.id()) || isBlank(operator.name())) {
+            throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_OPERATOR_REQUIRED);
+        }
+        if (!knowledgeStore.setStatus(kind, sourceRef, status, operator)) {
+            throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND);
+        }
     }
 
     /**
@@ -79,7 +110,7 @@ public class KnowledgeAppService {
         if (isBlank(projectId)) {
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_PROJECT_ID_REQUIRED);
         }
-        chunkStore.deleteByProject(projectId);
+        knowledgeStore.deleteByProject(projectId);
     }
 
     /** 结构性校验（调用方编程错误，上抛）：定位与展示字段必填；chunks 只查非 null。 */

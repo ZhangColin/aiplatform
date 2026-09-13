@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
@@ -30,6 +31,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.Backof
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 
 /**
  * 后台订单 REST 面（#29 交易环②，机机签名）：cartisan-openapi 五头 HMAC
@@ -68,7 +70,8 @@ public class BackofficeOrderController {
 
     @GetMapping("/{id}")
     @Operation(summary = "订单详情（后台面）",
-            description = "报价依据全量：状态、金额+最新备注、PRD 快照正文（下单冻结）、项目名、"
+            description = "报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，"
+                    + "每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、"
                     + "下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001")
     @ErrorCodes({"ORD_001"})
     public ApiResponse<BackofficeOrderDetailResponse> detail(@PathVariable String id) {
@@ -94,13 +97,26 @@ public class BackofficeOrderController {
     @Operation(summary = "提交报价（已报价态重复提交 = 改价）",
             description = "待报价态首次提交 = 报价（→已报价）；已报价态重复提交 = 改价（状态不变，"
                     + "append-only 价目行留痕、订单现值取最新行，改价历史用户面可见）。"
+                    + "X-User-Id/X-User-Name 透传头自动落痕价目行（缺头落空，#155）。"
                     + "限未支付态：已支付/已终结 409 ORD_007；金额非正 400 ORD_008；"
                     + "备注超长 400 ORD_009。需要机机签名")
     @ErrorCodes({"ORD_001", "ORD_007", "ORD_008", "ORD_009"})
     public ApiResponse<OrderResponse> quote(@PathVariable String id,
                                             @RequestBody SubmitQuoteCommand command) {
         return ApiResponse.ok(appService.submitQuote(OrderIds.parseOrder(id),
-                command.amount(), command.note()));
+                command.amount(), command.note(), currentOperator()));
+    }
+
+    /**
+     * 当前操作者（#155）：{@code X-User-Id}/{@code X-User-Name} 透传头经
+     * RequestContext 读出落痕（admin 侧管理员标识，签名面明示信任、不校验真实
+     * 性）；缺头/无上下文为 {@code null}——落空口径，价目行操作者两列落 NULL。
+     * Id 两形转换在此一次完成（上下文 Long → 外域标识字符串，存储不混型）。
+     */
+    private static Operator currentOperator() {
+        Long userId = RequestContext.getUserId();
+        return new Operator(userId == null ? null : Long.toString(userId),
+                RequestContext.getUserName());
     }
 
     /**

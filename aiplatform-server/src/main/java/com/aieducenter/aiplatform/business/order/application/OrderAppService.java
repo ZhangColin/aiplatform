@@ -14,6 +14,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderR
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectKnowledgeAppService;
@@ -130,17 +131,17 @@ public class OrderAppService {
     /**
      * 提交报价（#29 后台动作，机机面经 BackofficeOrderController 进入）：待报价态
      * 首次调用 = 报价，已报价态重复调用 = 改价——聚合内一次事务同时落价目行
-     * （append-only）与订单现值。事务取舍同 {@link #cancel}：单聚合保存（级联
-     * 追加价目行）由仓储自带事务保证。通知只在状态真变化（首次报价）时发射——
-     * 改价不换状态不发。
+     * （append-only，操作者随行落痕，#155）与订单现值。事务取舍同
+     * {@link #cancel}：单聚合保存（级联追加价目行）由仓储自带事务保证。通知只在
+     * 状态真变化（首次报价）时发射——改价不换状态不发。
      *
      * @throws ApplicationException ORD_001 订单不存在；ORD_008 金额无效；
      *                              ORD_009 备注超长；ORD_007 已支付或已终结
      */
-    public OrderResponse submitQuote(Long orderId, Long amount, String note) {
+    public OrderResponse submitQuote(Long orderId, Long amount, String note, Operator operator) {
         Order order = requireOrder(orderId);
         boolean firstQuote = order.getStatus() == OrderStatus.PENDING_QUOTE;
-        order.quote(amount, note);
+        order.quote(amount, note, operator);
         OrderResponse response = OrderResponse.of(orderRepository.save(order));
         if (firstQuote) {
             publishStatusChanged(order);

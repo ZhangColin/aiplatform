@@ -256,7 +256,7 @@ class OrderPaymentArchiveTest {
     /** 落一张已报价订单（place → submitQuote，全走真链路）。 */
     private String quotedOrder() {
         String orderId = appService.place(PROJECT_ID).id();
-        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价");
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
         return orderId;
     }
 

@@ -14,11 +14,17 @@ import lombok.Getter;
 import com.cartisan.core.domain.DomainEntity;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
+
 /**
  * 订单价目行（{@code ord_price_entries}，Order 聚合内实体）：首次报价与每次改价
  * 各一行，<b>append-only 只插不改写</b>——全列 {@code updatable = false}，聚合外
  * 无任何修改入口；订单当前金额 = 最新一条价目行。时间戳由库列默认值补齐
  * （updated_at 不映射），业务时间 createdAt 随行落。
+ *
+ * <p>操作者两列（#155）：报价/改价动作的 admin 侧管理员标识随行落痕（Id 供
+ * 关联、Name 供直读）；存量行与无操作者头的新行均为 {@code null}（落空口径，
+ * 读面呈现为空）。</p>
  */
 @Entity
 @Table(name = "ord_price_entries")
@@ -42,6 +48,14 @@ public class OrderPriceEntry implements DomainEntity<OrderPriceEntry, Long> {
     @Column(name = "note", updatable = false, length = 1000)
     private String note;
 
+    /** 操作者标识（admin 侧 TSID 十进制字符串；存量行/无头落 NULL，#155）。 */
+    @Column(name = "operator_id", updatable = false, length = 64)
+    private String operatorId;
+
+    /** 操作者昵称（直读展示；存量行/无头落 NULL，#155）。 */
+    @Column(name = "operator_name", updatable = false, length = 200)
+    private String operatorName;
+
     /** 报价/改价时间（业务时间）。 */
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -50,14 +64,19 @@ public class OrderPriceEntry implements DomainEntity<OrderPriceEntry, Long> {
     }
 
     /**
-     * 记一价目行（报价/改价各一行）：业务时间随行落，其余生命周期列由库默认补齐。
-     * 只经 {@code Order.quote} 调用（聚合内追加，外部无直接写入口）。
+     * 记一价目行（报价/改价各一行）：业务时间与操作者随行落，其余生命周期列由库
+     * 默认补齐。操作者可空（{@code null} = 存量/无头落空口径）。只经
+     * {@code Order.quote} 调用（聚合内追加，外部无直接写入口）。
      */
-    public static OrderPriceEntry record(Long amount, String currency, String note) {
+    public static OrderPriceEntry record(Long amount, String currency, String note, Operator operator) {
         OrderPriceEntry entry = new OrderPriceEntry();
         entry.amount = amount;
         entry.currency = currency;
         entry.note = note;
+        if (operator != null) {
+            entry.operatorId = operator.id();
+            entry.operatorName = operator.name();
+        }
         entry.createdAt = LocalDateTime.now();
         return entry;
     }

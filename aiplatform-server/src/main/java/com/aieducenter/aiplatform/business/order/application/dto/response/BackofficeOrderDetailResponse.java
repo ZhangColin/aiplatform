@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.order.application.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -8,7 +9,7 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 /**
  * 后台订单详情（#29 交易环②，/api/backoffice/orders/{id}）：报价依据的全量
  * 事实——PRD 快照正文（下单冻结）、项目名、下单用户昵称、金额与最新备注、
- * 全部状态时点。
+ * 价目历史（#155 append-only 全量，新 → 旧）、全部状态时点。
  *
  * @param id               订单标识（TSID 十进制字符串）
  * @param projectId        所属项目标识
@@ -19,6 +20,8 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
  * @param amount           当前总价（分；待报价 NULL）
  * @param currency         币种（v1 恒 CNY；待报价 NULL）
  * @param note             当前后台备注（最新价目行；待报价 NULL）
+ * @param priceEntries     价目历史（新 → 旧，append-only 全量；带操作者，存量行
+ *                         操作者为空；待报价空表）
  * @param prdSnapshot      下单时 PRD 全文快照（交易标的，只插不改）
  * @param createdAt        下单时间
  * @param quotedAt         首次报价时点（改价不刷新；待报价 NULL）
@@ -36,6 +39,7 @@ public record BackofficeOrderDetailResponse(
         Long amount,
         String currency,
         String note,
+        List<BackofficePriceEntryResponse> priceEntries,
         String prdSnapshot,
         LocalDateTime createdAt,
         LocalDateTime quotedAt,
@@ -57,6 +61,9 @@ public record BackofficeOrderDetailResponse(
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),
+                order.priceHistoryNewestFirst().stream()
+                        .map(BackofficePriceEntryResponse::of)
+                        .toList(),
                 order.getPrdSnapshot(),
                 order.getCreatedAt(),
                 order.getQuotedAt(),

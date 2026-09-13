@@ -8,6 +8,7 @@ import com.cartisan.core.exception.DomainException;
 
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -72,6 +73,24 @@ class OrderTest {
         }
     }
 
+    // ---------- #155：报价操作者随价目行落痕（append-only 追加序不变） ----------
+
+    @Test
+    void given_operator_when_quote_then_entry_carries_operator_and_null_stays_empty() {
+        Order order = pendingQuoteOrder();
+
+        order.quote(128000L, "首版报价", null); // 无操作者（落空口径）
+        order.quote(99000L, "改价", new Operator("700100", " 运营·小刘 "));
+
+        // 纯域无持久化（id 未生），按追加序断言（新→旧排序归持久化层测试）：
+        // 改价行带操作者（空白已归一），首报行操作者为空
+        assertThat(order.getPriceEntries()).hasSize(2);
+        assertThat(order.getPriceEntries().get(0).getOperatorId()).isNull();
+        assertThat(order.getPriceEntries().get(0).getOperatorName()).isNull();
+        assertThat(order.getPriceEntries().get(1).getOperatorId()).isEqualTo("700100");
+        assertThat(order.getPriceEntries().get(1).getOperatorName()).isEqualTo("运营·小刘");
+    }
+
     // ---------- 夹具（经公共入口驱动到目标态，不绕私有状态） ----------
 
     private static Order pendingQuoteOrder() {
@@ -80,7 +99,7 @@ class OrderTest {
 
     private static Order quotedOrder() {
         Order order = pendingQuoteOrder();
-        order.quote(128000L, "首版报价");
+        order.quote(128000L, "首版报价", null);
         return order;
     }
 

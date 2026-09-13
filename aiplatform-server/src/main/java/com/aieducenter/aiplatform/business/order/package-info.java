@@ -22,7 +22,8 @@
  *
  * <h3>包结构</h3>
  * <ul>
- *   <li>domain：Order 聚合（价目留痕随单）、OrderPriceEntry 实体、OrderStatus
+ *   <li>domain：Order 聚合（价目留痕随单）、OrderPriceEntry 实体（操作者两列
+ *       落痕，#155）、Operator 值对象（admin 侧操作者，落空口径）、OrderStatus
  *       枚举、仓储接口、PaymentPort（真实支付切换边界）、错误码</li>
  *   <li>application：OrderAppService（下单/详情/取消/报价与改价/mock 支付——
  *       支付原子落「已支付」→ 归档独立步骤（订单 + 项目），提交后知识沉淀 + 订单态

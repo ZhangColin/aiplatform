@@ -20,6 +20,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderR
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -243,7 +244,8 @@ class OrderAppServiceTest {
         stubProject(ProjectStatus.IN_PROGRESS);
         String orderId = appService.place(PROJECT_ID).id();
 
-        OrderResponse quoted = appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价：含三个页面");
+        OrderResponse quoted = appService.submitQuote(Long.parseLong(orderId), 128000L,
+                "首版报价：含三个页面", new Operator("700100", "运营·小刘"));
 
         assertThat(quoted.status()).isEqualTo(OrderStatus.QUOTED);
         assertThat(quoted.amount()).isEqualTo(128000L);
@@ -251,7 +253,7 @@ class OrderAppServiceTest {
         assertThat(quoted.note()).isEqualTo("首版报价：含三个页面");
         assertThat(quoted.quotedAt()).isNotNull();
         assertThat(quoted.priceEntries()).hasSize(1);
-        // 库内事实：订单现值 + 价目行各就各位
+        // 库内事实：订单现值 + 价目行各就各位（操作者随行落痕，#155）
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT status, amount, currency, quoted_at FROM ord_orders WHERE id = ?",
                 Long.parseLong(orderId));
@@ -260,10 +262,13 @@ class OrderAppServiceTest {
         assertThat(row.get("currency")).isEqualTo(Order.CURRENCY_CNY);
         assertThat(row.get("quoted_at")).isNotNull();
         Map<String, Object> entry = jdbcTemplate.queryForMap(
-                "SELECT amount, currency, note FROM ord_price_entries WHERE order_id = ?",
+                "SELECT amount, currency, note, operator_id, operator_name "
+                        + "FROM ord_price_entries WHERE order_id = ?",
                 Long.parseLong(orderId));
         assertThat(entry.get("amount")).isEqualTo(128000L);
         assertThat(entry.get("note")).isEqualTo("首版报价：含三个页面");
+        assertThat(entry.get("operator_id")).isEqualTo("700100");
+        assertThat(entry.get("operator_name")).isEqualTo("运营·小刘");
     }
 
     @Test
@@ -272,10 +277,10 @@ class OrderAppServiceTest {
         // quotedAt 不刷新（改价时点留痕在价目行）
         stubProject(ProjectStatus.IN_PROGRESS);
         String orderId = appService.place(PROJECT_ID).id();
-        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价");
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
         LocalDateTime quotedAt = appService.detail(Long.parseLong(orderId)).quotedAt();
 
-        OrderResponse repriced = appService.submitQuote(Long.parseLong(orderId), 99000L, "调整：去掉导入功能");
+        OrderResponse repriced = appService.submitQuote(Long.parseLong(orderId), 99000L, "调整：去掉导入功能", null);
 
         assertThat(repriced.status()).isEqualTo(OrderStatus.QUOTED); // 改价不换状态
         assertThat(repriced.amount()).isEqualTo(99000L);
@@ -309,7 +314,7 @@ class OrderAppServiceTest {
             jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
                     status.getCode(), Long.parseLong(orderId));
 
-            assertThatThrownBy(() -> appService.submitQuote(Long.parseLong(orderId), 1000L, "迟到的报价"))
+            assertThatThrownBy(() -> appService.submitQuote(Long.parseLong(orderId), 1000L, "迟到的报价", null))
                     .isInstanceOf(DomainException.class)
                     .hasMessageContaining(OrderMessage.ORDER_QUOTE_NOT_ALLOWED.message());
             assertThat(jdbcTemplate.queryForObject(
@@ -325,13 +330,13 @@ class OrderAppServiceTest {
         String orderId = appService.place(PROJECT_ID).id();
         long id = Long.parseLong(orderId);
 
-        assertThatThrownBy(() -> appService.submitQuote(id, 0L, "零元"))
+        assertThatThrownBy(() -> appService.submitQuote(id, 0L, "零元", null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(OrderMessage.ORDER_QUOTE_AMOUNT_INVALID.message());
-        assertThatThrownBy(() -> appService.submitQuote(id, -5L, "负数"))
+        assertThatThrownBy(() -> appService.submitQuote(id, -5L, "负数", null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(OrderMessage.ORDER_QUOTE_AMOUNT_INVALID.message());
-        assertThatThrownBy(() -> appService.submitQuote(id, 1000L, "长".repeat(Order.QUOTE_NOTE_MAX_LENGTH + 1)))
+        assertThatThrownBy(() -> appService.submitQuote(id, 1000L, "长".repeat(Order.QUOTE_NOTE_MAX_LENGTH + 1), null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(OrderMessage.ORDER_QUOTE_NOTE_TOO_LONG.message());
 
@@ -344,7 +349,7 @@ class OrderAppServiceTest {
 
     @Test
     void given_missing_order_when_submit_quote_then_not_found() {
-        assertThatThrownBy(() -> appService.submitQuote(900999L, 1000L, "无此单"))
+        assertThatThrownBy(() -> appService.submitQuote(900999L, 1000L, "无此单", null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
     }

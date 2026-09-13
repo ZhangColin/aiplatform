@@ -30,15 +30,19 @@ import com.aieducenter.aiplatform.business.order.application.BackofficeOrderAppS
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderDetailResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderSummaryResponse;
+import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficePriceEntryResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.PriceEntryResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.config.WebMvcConfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -113,6 +117,14 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.status").value(2))
                 .andExpect(jsonPath("$.data.amount").value("128000"))
                 .andExpect(jsonPath("$.data.note").value("首版报价"))
+                // #155 价目历史：新 → 旧，新条目带操作者、存量条目操作者为空
+                .andExpect(jsonPath("$.data.priceEntries.length()").value(2))
+                .andExpect(jsonPath("$.data.priceEntries[0].amount").value("99000"))
+                .andExpect(jsonPath("$.data.priceEntries[0].operatorId").value("700100"))
+                .andExpect(jsonPath("$.data.priceEntries[0].operatorName").value("运营·小刘"))
+                .andExpect(jsonPath("$.data.priceEntries[1].amount").value("128000"))
+                .andExpect(jsonPath("$.data.priceEntries[1].operatorId").value(nullValue()))
+                .andExpect(jsonPath("$.data.priceEntries[1].operatorName").value(nullValue()))
                 .andExpect(jsonPath("$.data.prdSnapshot").value(PRD))
                 .andExpect(jsonPath("$.data.quotedAt").value("2026-09-01T10:00:00"));
     }
@@ -133,7 +145,7 @@ class BackofficeOrderControllerTest {
 
     @Test
     void given_signed_request_when_post_quote_then_reprice_response() throws Exception {
-        when(appService.submitQuote(900L, 99000L, "调整：去掉导入功能"))
+        when(appService.submitQuote(eq(900L), eq(99000L), eq("调整：去掉导入功能"), any(Operator.class)))
                 .thenReturn(quotedOrder());
 
         String body = "{\"amount\":99000,\"note\":\"调整：去掉导入功能\"}";
@@ -149,7 +161,9 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.priceEntries[0].amount").value("99000"))
                 .andExpect(jsonPath("$.data.priceEntries[1].amount").value("128000"));
 
-        verify(appService).submitQuote(900L, 99000L, "调整：去掉导入功能");
+        // 操作者随请求透传进应用服务（MVC 切片无 RequestContext 绑定 → 落空形 null）
+        verify(appService).submitQuote(eq(900L), eq(99000L), eq("调整：去掉导入功能"),
+                eq(new Operator(null, null)));
     }
 
     // ---------- 签名闸：反例（验收：无签名/错签被拒） ----------
@@ -184,7 +198,7 @@ class BackofficeOrderControllerTest {
     @Test
     void given_valid_signature_when_quote_paid_order_then_409_ord007() throws Exception {
         // 签名合法而业务被拒：聚合守卫 DomainException → 全局处理器 → 409 ORD_007
-        when(appService.submitQuote(900L, 1000L, "迟到"))
+        when(appService.submitQuote(eq(900L), eq(1000L), eq("迟到"), any(Operator.class)))
                 .thenThrow(new DomainException(OrderMessage.ORDER_QUOTE_NOT_ALLOWED));
 
         String body = "{\"amount\":1000,\"note\":\"迟到\"}";
@@ -224,7 +238,13 @@ class BackofficeOrderControllerTest {
 
     private static BackofficeOrderDetailResponse backofficeDetail() {
         return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "文野",
-                OrderStatus.QUOTED, "已报价", 128000L, "CNY", "首版报价", PRD,
+                OrderStatus.QUOTED, "已报价", 128000L, "CNY", "首版报价",
+                List.of(
+                        new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
+                                "700100", "运营·小刘", LocalDateTime.of(2026, 9, 1, 11, 0)),
+                        new BackofficePriceEntryResponse("901", 128000L, "CNY", "首版报价",
+                                null, null, LocalDateTime.of(2026, 9, 1, 10, 0))),
+                PRD,
                 LocalDateTime.of(2026, 9, 1, 9, 0), LocalDateTime.of(2026, 9, 1, 10, 0),
                 null, null, null);
     }

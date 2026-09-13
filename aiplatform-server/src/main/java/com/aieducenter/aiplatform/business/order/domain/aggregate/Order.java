@@ -26,6 +26,7 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.aiplatform.business.order.domain.entity.OrderPriceEntry;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 
 /**
  * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即拷贝 PRD 全文
@@ -154,13 +155,15 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
      * 提交报价（后台动作）：待报价态首次调用 = 报价（待报价 → 已报价，落
      * {@code quotedAt}）；已报价态重复调用 = 改价（状态不变，{@code quotedAt}
      * 不刷新——改价时点留痕在价目行）。两者统一限未支付态：已支付/已终结拒绝
-     * （ORD_007）。每次调用追加一条价目行（append-only），当前金额与币种取
-     * 最新价目行——聚合内单事务保证「留痕行」与「订单现值」一致。
+     * （ORD_007）。每次调用追加一条价目行（append-only，操作者随行落痕），
+     * 当前金额与币种取最新价目行——聚合内单事务保证「留痕行」与「订单现值」
+     * 一致。
      *
-     * @param amount 总价（分，正数；非法抛 ORD_008）
-     * @param note   报价备注（后台文本；可空，超长抛 ORD_009）
+     * @param amount   总价（分，正数；非法抛 ORD_008）
+     * @param note     报价备注（后台文本；可空，超长抛 ORD_009）
+     * @param operator 操作者（#155 随行落痕；{@code null} = 无头落空口径）
      */
-    public void quote(Long amount, String note) {
+    public void quote(Long amount, String note, Operator operator) {
         if (amount == null || amount <= 0) {
             throw new DomainException(OrderMessage.ORDER_QUOTE_AMOUNT_INVALID);
         }
@@ -176,7 +179,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         }
         this.amount = amount;
         this.currency = CURRENCY_CNY;
-        this.priceEntries.add(OrderPriceEntry.record(amount, CURRENCY_CNY, note));
+        this.priceEntries.add(OrderPriceEntry.record(amount, CURRENCY_CNY, note, operator));
     }
 
     /**

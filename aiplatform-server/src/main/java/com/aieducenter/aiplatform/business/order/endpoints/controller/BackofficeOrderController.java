@@ -1,8 +1,12 @@
 package com.aieducenter.aiplatform.business.order.endpoints.controller;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -39,12 +43,12 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
  * 排除会话拦截（机机调用无用户会话）。前端无任何后台操作入口，联调走
  * scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
- * 报价守卫 ORD_007/008/009）。
+ * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010）。
  */
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：清单 / 详情 / 源码包 / 报价（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -56,16 +60,31 @@ public class BackofficeOrderController {
     }
 
     @GetMapping
-    @Operation(summary = "订单清单（按状态过滤，分页）",
-            description = "报价工作清单：新单在前（TSID 倒序）。page 1 基（缺省 1）、size 缺省 20（上界 100）；"
-                    + "status 可选（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消），"
-                    + "缺省拉全量。需要机机签名（五头 HMAC），无签名 401")
+    @Operation(summary = "订单清单（四维检索，分页）",
+            description = "运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）："
+                    + "① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 "
+                    + "2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，"
+                    + "同名重复参数（status=1&status=2）只有末值入签，勿用；"
+                    + "② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，"
+                    + "如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，"
+                    + "换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，"
+                    + "查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。"
+                    + "page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。"
+                    + "过滤参数绑定失败（非法 code/时间/分页值）400 ORD_010。"
+                    + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"ORD_010"})
     public ApiResponse<PageResponse<BackofficeOrderSummaryResponse>> orders(
-            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) List<OrderStatus> status,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime createdFrom,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime createdTo,
+            @RequestParam(required = false) String externalId,
+            @RequestParam(required = false) String orderId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(queryAppService.orders(status, page, size));
+        return ApiResponse.ok(queryAppService.orders(status, createdFrom, createdTo,
+                externalId, orderId, page, size));
     }
 
     @GetMapping("/{id}")
@@ -120,13 +139,14 @@ public class BackofficeOrderController {
     }
 
     /**
-     * status/page/size 绑定失败的兜底：非法 code/非数值在本层就是 400，映射回
-     * ORD_010 保持错误码前缀口径（本 controller 唯一可绑定枚举参数是 status，
-     * 兜底不越界——同 ProjectController PRJ_014 形制）。
+     * 清单参数绑定失败的兜底：非法状态 code/时间/分页值在本层就是 400，映射回
+     * ORD_010 保持错误码前缀口径（#156 扩四维后本 controller 可绑定参数是
+     * status/createdFrom/createdTo/page/size，统一「无效的订单过滤参数」——
+     * 同 ProjectController PRJ_014 形制）。
      */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ApiResponse<Void>> handleStatusMismatch() {
+    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
         return ResponseEntity.badRequest()
-                .body(ApiResponse.error(OrderMessage.ORDER_STATUS_FILTER_UNKNOWN));
+                .body(ApiResponse.error(OrderMessage.ORDER_FILTER_UNKNOWN));
     }
 }

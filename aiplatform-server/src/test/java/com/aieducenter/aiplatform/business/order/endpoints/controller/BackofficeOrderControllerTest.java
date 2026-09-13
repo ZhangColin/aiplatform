@@ -88,7 +88,8 @@ class BackofficeOrderControllerTest {
             throws Exception {
         // 无用户会话（不注 RequestContext）+ 合法签名 → 放行：会话拦截排除 +
         // 机机签名接管的组合行为在此活体验证
-        when(queryAppService.orders(OrderStatus.PENDING_QUOTE, 1, 20)).thenReturn(
+        when(queryAppService.orders(List.of(OrderStatus.PENDING_QUOTE), null, null,
+                null, null, 1, 20)).thenReturn(
                 new PageResponse<>(List.of(summary()), 1, 1, 20));
 
         mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders")
@@ -99,10 +100,43 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.items.length()").value(1))
                 .andExpect(jsonPath("$.data.items[0].id").value("900"))
                 .andExpect(jsonPath("$.data.items[0].projectName").value("宠物店官网"))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value("文野"))
                 .andExpect(jsonPath("$.data.items[0].status").value(1))
                 .andExpect(jsonPath("$.data.total").value("1")) // Long 全局序列化为字符串
                 .andExpect(jsonPath("$.data.page").value(1))
                 .andExpect(jsonPath("$.data.size").value(20));
+    }
+
+    // ---------- #156：四维检索的参数契约 ----------
+
+    @Test
+    void given_signed_request_when_status_comma_multi_and_time_range_then_bound_and_forwarded()
+            throws Exception {
+        // 逗号分隔多选是唯一签名安全的 status 形态（协议按参数名去重，重复参数
+        // 只签末值）；时间区间 ISO-8601。两者绑定后原样进应用服务
+        when(queryAppService.orders(List.of(OrderStatus.PENDING_QUOTE, OrderStatus.CANCELLED),
+                LocalDateTime.of(2026, 9, 1, 0, 0), LocalDateTime.of(2026, 9, 30, 23, 59, 59),
+                "sub-user-1", "900", 1, 20)).thenReturn(
+                new PageResponse<>(List.of(summary()), 1, 1, 20));
+
+        String pathWithQuery = "/api/backoffice/orders?status=1,5"
+                + "&createdFrom=2026-09-01T00:00:00&createdTo=2026-09-30T23:59:59"
+                + "&externalId=sub-user-1&orderId=900&page=1&size=20";
+        mockMvc.perform(BackofficeSignatures.signed(get(pathWithQuery), pathWithQuery, null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.items.length()").value(1));
+    }
+
+    @Test
+    void given_signed_malformed_time_range_when_get_orders_then_400_ord010() throws Exception {
+        // 时间绑定失败同 ORD_010（消息已泛化为「无效的订单过滤参数」）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("createdFrom", "not-a-time"),
+                        "/api/backoffice/orders?createdFrom=not-a-time", null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
+        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), anyInt(), anyInt());
     }
 
     @Test
@@ -224,14 +258,14 @@ class BackofficeOrderControllerTest {
                         "/api/backoffice/orders?status=99", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
-                        .value(OrderMessage.ORDER_STATUS_FILTER_UNKNOWN.message()));
-        verify(queryAppService, never()).orders(any(), anyInt(), anyInt());
+                        .value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
+        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), anyInt(), anyInt());
     }
 
     // ---------- 夹具 ----------
 
     private static BackofficeOrderSummaryResponse summary() {
-        return new BackofficeOrderSummaryResponse("900", "100", "宠物店官网",
+        return new BackofficeOrderSummaryResponse("900", "100", "宠物店官网", "文野",
                 OrderStatus.PENDING_QUOTE, "待报价", null, null,
                 LocalDateTime.of(2026, 9, 1, 9, 0), null);
     }

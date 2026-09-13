@@ -55,7 +55,7 @@ class BackofficeSeamContractTest {
             throws Exception {
         AtomicReference<Long> seenUserId = new AtomicReference<>();
         AtomicReference<String> seenUserName = new AtomicReference<>();
-        when(queryAppService.orders(null, 1, 20)).thenAnswer(invocation -> {
+        when(queryAppService.orders(null, null, null, null, null, 1, 20)).thenAnswer(invocation -> {
             seenUserId.set(RequestContext.getUserId());
             seenUserName.set(RequestContext.getUserName());
             return new PageResponse<>(List.of(), 0, 1, 20);

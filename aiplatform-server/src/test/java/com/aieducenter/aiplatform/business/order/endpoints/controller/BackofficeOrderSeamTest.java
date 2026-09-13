@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.order.endpoints.controller;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -13,8 +14,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.cartisan.core.context.RequestContext;
+
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
+import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
+import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
@@ -24,6 +29,8 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,6 +49,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>#155 操作者留痕在本类一链钉死：带 {@code X-User-Id}/{@code X-User-Name}
  * 的签名报价 → 价目行库列落值 → 详情价目历史呈现（新条目带操作者、无头/存量
  * 条目操作者为空）。</p>
+ *
+ * <p>#156 四维检索＋owner 显示名在本类钉死：状态多选（空选/单选/组合/全选）、
+ * 创建时间区间（含端点边界）、externalId 换算过滤（未命中＝空清单）、订单号
+ * 精确、行带 ownerDisplayName（账号缺档为 null）、分页上界截断与越界——过滤
+ * 走数据库查询路径（真库 WHERE 生效即为证）。</p>
  */
 @BackofficeSeamTest
 class BackofficeOrderSeamTest {
@@ -62,6 +74,9 @@ class BackofficeOrderSeamTest {
     private OrderAppService appService;
 
     @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @MockitoBean
@@ -70,6 +85,7 @@ class BackofficeOrderSeamTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM idn_accounts");
     }
 
     @Test
@@ -225,6 +241,207 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.priceEntries[1].operatorName").value(nullValue()));
     }
 
+    // ---------- #156：四维检索＋owner 显示名（真库 WHERE 生效即为证） ----------
+
+    @Test
+    void given_orders_across_statuses_when_filter_by_comma_multi_then_only_matching_rows()
+            throws Exception {
+        // 三态在库：待报价 / 已报价（真报价链） / 已取消（真取消链）
+        OrderResponse pending = placeOrder(910101L);
+        OrderResponse quoted = placeOrder(910102L);
+        appService.submitQuote(Long.parseLong(quoted.id()), 99000L, null, null);
+        OrderResponse cancelled = placeOrder(910103L);
+        appService.cancel(Long.parseLong(cancelled.id()));
+
+        // 组合多选 1,5：待报价＋已取消可见、已报价排除
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("status", "1,5"),
+                        "/api/backoffice/orders?status=1,5", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id",
+                        containsInAnyOrder(pending.id(), cancelled.id())))
+                .andExpect(jsonPath("$.data.total").value("2"));
+
+        // 单选 1：仅待报价
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("status", "1"),
+                        "/api/backoffice/orders?status=1", null))
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(pending.id())))
+                .andExpect(jsonPath("$.data.total").value("1"));
+
+        // 全选 1,2,3,4,5 ＝ 全量（IN 全集不丢行）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("status", "1,2,3,4,5"),
+                        "/api/backoffice/orders?status=1,2,3,4,5", null))
+                .andExpect(jsonPath("$.data.items[*].id",
+                        containsInAnyOrder(pending.id(), quoted.id(), cancelled.id())))
+                .andExpect(jsonPath("$.data.total").value("3"));
+
+        // 空选（无参）＝全量
+        mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders"),
+                        "/api/backoffice/orders", null))
+                .andExpect(jsonPath("$.data.items", hasSize(3)))
+                .andExpect(jsonPath("$.data.total").value("3"));
+    }
+
+    @Test
+    void given_orders_created_at_known_times_when_filter_by_range_then_endpoints_inclusive()
+            throws Exception {
+        OrderResponse first = placeOrder(910201L);
+        OrderResponse second = placeOrder(910202L);
+        LocalDateTime firstAt = createdAtOf(first.id());
+        LocalDateTime secondAt = createdAtOf(second.id());
+        // 边界断言依赖两单时点可分（两笔完整事务隔开，PG 微秒精度下必然成立）；
+        // 假设显式化，环境异常时明确失败而非 jsonPath 疑难杂症
+        assertThat(secondAt).isAfter(firstAt);
+
+        // createdFrom＝较早单的时点（下界含端点）：两单都在
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("createdFrom", firstAt.toString()),
+                        "/api/backoffice/orders?createdFrom=" + firstAt, null))
+                .andExpect(jsonPath("$.data.items", hasSize(2)))
+                .andExpect(jsonPath("$.data.total").value("2"));
+
+        // createdTo＝较早单的时点（上界含端点）：仅较早单（较晚单被上界排除）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("createdTo", firstAt.toString()),
+                        "/api/backoffice/orders?createdTo=" + firstAt, null))
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(first.id())))
+                .andExpect(jsonPath("$.data.total").value("1"));
+
+        // 闭区间 [首单时点, 次单时点]：两单都在（两端点都含）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("createdFrom", firstAt.toString())
+                                .queryParam("createdTo", secondAt.toString()),
+                        "/api/backoffice/orders?createdFrom=" + firstAt
+                                + "&createdTo=" + secondAt, null))
+                .andExpect(jsonPath("$.data.items", hasSize(2)))
+                .andExpect(jsonPath("$.data.total").value("2"));
+
+        // 下界抬到次单时点：仅次单（首单严格早于下界被排除）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("createdFrom", secondAt.toString()),
+                        "/api/backoffice/orders?createdFrom=" + secondAt, null))
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(second.id())))
+                .andExpect(jsonPath("$.data.total").value("1"));
+    }
+
+    @Test
+    void given_order_placed_by_known_account_when_filter_by_external_id_then_row_with_owner_name()
+            throws Exception {
+        // 真账号 + 该账号会话上下文里下单（ownerAccountId 落值）+ 一笔无主单
+        Account owner = accountRepository.save(Account.register("sub-156-a", "运营查档·李四"));
+        OrderResponse owned = placeOrderAs(910301L, owner.getId());
+        OrderResponse anonymous = placeOrder(910302L);
+
+        // externalId 命中：只有该账号的单，行带显示名（运营不用二次查档）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("externalId", "sub-156-a"),
+                        "/api/backoffice/orders?externalId=sub-156-a", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(owned.id())))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value("运营查档·李四"))
+                .andExpect(jsonPath("$.data.total").value("1"));
+
+        // 全量行：有主单带名、无主单容缺 null（下单账号可空，不炸）。
+        // TSID 倒序＝新单在前：匿名单后下在前（items[0] 无名）、有主单在后
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders"), "/api/backoffice/orders", null))
+                .andExpect(jsonPath("$.data.items", hasSize(2)))
+                .andExpect(jsonPath("$.data.items[*].id",
+                        containsInAnyOrder(owned.id(), anonymous.id())))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value(nullValue()))
+                .andExpect(jsonPath("$.data.items[1].ownerDisplayName").value("运营查档·李四"));
+
+        // externalId 未命中（用户在我方无建档）＝无单可检：如实空清单，非错误
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("externalId", "sub-never-registered"),
+                        "/api/backoffice/orders?externalId=sub-never-registered", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.total").value("0"));
+
+        // 账号已删：externalId 换算必落空 → 过滤面同「未建档」语义＝空清单；
+        // 订单本身是交易记录仍可见（不带账号维度看），取名容缺 ownerDisplayName
+        // 落 null 不炸（有主单悬空引用＋无主单，两行皆 null）
+        accountRepository.deleteById(owner.getId());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("externalId", "sub-156-a"),
+                        "/api/backoffice/orders?externalId=sub-156-a", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.total").value("0"));
+        mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders"),
+                        "/api/backoffice/orders", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id",
+                        containsInAnyOrder(owned.id(), anonymous.id())))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value(nullValue()))
+                .andExpect(jsonPath("$.data.items[1].ownerDisplayName").value(nullValue()));
+    }
+
+    @Test
+    void given_orders_when_filter_by_order_id_then_exact_hit_and_misses_are_empty()
+            throws Exception {
+        OrderResponse order = placeOrder(910401L);
+        placeOrder(910402L);
+
+        // 订单号精确命中：单行
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("orderId", order.id()),
+                        "/api/backoffice/orders?orderId=" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(order.id())))
+                .andExpect(jsonPath("$.data.total").value("1"));
+
+        // 查无此号：空清单
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("orderId", "123"),
+                        "/api/backoffice/orders?orderId=123", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.total").value("0"));
+
+        // 非数值订单号（过滤值非寻址语义）：不可能命中任何 TSID → 空清单，不 500
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("orderId", "not-a-tsid"),
+                        "/api/backoffice/orders?orderId=not-a-tsid", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.total").value("0"));
+    }
+
+    @Test
+    void given_101_orders_when_page_bounds_then_size_capped_and_far_page_empty() throws Exception {
+        // 101 单 > size 上界 100：上界截断可证（items 恰 100、total 仍 101）
+        for (long projectId = 910500L; projectId < 910500L + 101; projectId++) {
+            placeOrder(projectId);
+        }
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("size", "500").queryParam("page", "1"),
+                        "/api/backoffice/orders?size=500&page=1", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items", hasSize(100)))
+                .andExpect(jsonPath("$.data.size").value(100))
+                .andExpect(jsonPath("$.data.total").value("101"));
+
+        // page 越界：空页不炸、total 原样回（分页元数据完整）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders")
+                                .queryParam("size", "20").queryParam("page", "99"),
+                        "/api/backoffice/orders?size=20&page=99", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.page").value(99))
+                .andExpect(jsonPath("$.data.total").value("101"));
+    }
+
     // -------- 夹具 --------
 
     /** 详情读面跨 BC 取项目名（软引用）：统一 stub，缺档为 null 也成立。 */
@@ -235,12 +452,36 @@ class BackofficeOrderSeamTest {
 
     /** 经真应用服务下单（真库写入、快照冻结），返回带 TSID 的订单回执 */
     private OrderResponse placeOrder() {
-        when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
-                Long.toString(PROJECT_ID), "seam 测试项目", ProjectType.WEBSITE, "官网", "9100",
+        return placeOrder(PROJECT_ID);
+    }
+
+    /** 指定项目的下单夹具（多单场景各用独立项目——同项目至多一个未终结单）。 */
+    private OrderResponse placeOrder(long projectId) {
+        when(projectQueryAppService.detail(projectId)).thenReturn(new ProjectDetailResponse(
+                Long.toString(projectId), "seam 测试项目", ProjectType.WEBSITE, "官网", "9100",
                 ProjectStatus.IN_PROGRESS, ProjectStatus.IN_PROGRESS.getName(), false,
                 LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null));
-        when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
-                Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-13T01:00:00Z")));
-        return appService.place(PROJECT_ID);
+        when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
+                Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z")));
+        return appService.place(projectId);
+    }
+
+    /** 以指定账号为下单人（RequestContext 会话内下单，ownerAccountId 落值）。 */
+    private OrderResponse placeOrderAs(long projectId, Long accountId) throws Exception {
+        // 8 位构造位参中 userId 居第 5 位（requestId/clientIp/callerAppId/callerAppName
+        // 之后），位参标注防错读
+        return RequestContext.runFor(
+                new RequestContext(null, null, null, null, /* userId */ accountId,
+                        null, null, null),
+                () -> placeOrder(projectId));
+    }
+
+    /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */
+    private LocalDateTime createdAtOf(String orderId) {
+        Timestamp createdAt = jdbcTemplate.queryForObject(
+                "SELECT created_at FROM ord_orders WHERE id = ?",
+                Timestamp.class, Long.parseLong(orderId));
+        assertThat(createdAt).isNotNull();
+        return createdAt.toLocalDateTime();
     }
 }

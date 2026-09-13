@@ -4,8 +4,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -41,9 +39,6 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
      * createdAt 同拍按 id 破平（TSID 时间有序）。
      */
     Optional<Order> findFirstByProjectIdOrderByCreatedAtDescIdDesc(Long projectId);
-
-    /** 后台按状态分页拉单（报价工作清单；排序由调用面定死——新单在前）。 */
-    Page<Order> findByStatus(OrderStatus status, Pageable pageable);
 
     /**
      * 带价目历史的单笔查询：响应拼装（用户面详情/报价返回值要读价目集合）在

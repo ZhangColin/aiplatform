@@ -26,6 +26,13 @@ import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
  * {@code X-User-Id}/{@code X-User-Name}（cartisan RequestContextFilter 会透传机机
  * 调用的头；v1 用户面全部以 BFF 会话为准，伪造头不得残留进上下文/审计字段）。</p>
  *
+ * <p>豁免 {@code /api/backoffice/**}（#152）：机机签名面由 cartisan-openapi 五头
+ * HMAC 担保调用应用，操作者透传头在该面内明示信任（#149 口径：签名担保调用应用、
+ * 不担保操作者本人）——本过滤器整段跳过，cartisan RequestContextFilter 绑定的
+ * 头原样穿链。操作者＝admin 侧管理员标识（TSID＋昵称，{@code X-User-Id} Long＋
+ * {@code X-User-Name}），<b>非本平台用户</b>，落库/读数不得与 accountId/externalId
+ * 混读；会话 cookie 即便捎带也不参与该面装配。用户面洗头行为不变。</p>
+ *
  * <p>顺序：紧跟 cartisan RequestContextFilter（{@code MIN_VALUE}，绑定 requestId/
  * clientIp 与 ScopedValue 骨架）之后；本过滤器内用 {@code withUser} 嵌套重绑，
  * 保留 requestId/clientIp。{@code /api/**} 的强制拦截不在本层（filter 抛的异常进不了
@@ -41,6 +48,13 @@ public class BffSessionContextFilter extends OncePerRequestFilter implements Ord
     /** cartisan RequestContextFilter = MIN_VALUE；本过滤器紧随其后 */
     public static final int FILTER_ORDER = Ordered.HIGHEST_PRECEDENCE + 100;
 
+    /**
+     * 后台机机面路径前缀（#152 豁免）：该前缀不经会话装配与洗头。裸 URI 前缀
+     * 比较，口径对齐 WebMvcConfig 的 {@code /api/backoffice/**} 拦截排除——
+     * 若引入 context-path 或裸前缀端点，两处闸口须同步调整。
+     */
+    public static final String BACKOFFICE_PATH_PREFIX = "/api/backoffice/";
+
     /** cartisan 过滤器缺席（窄测试上下文等）时的兜底骨架上下文 */
     private static final RequestContext BARE =
             new RequestContext(null, null, null, null, null, null, null, null);
@@ -54,6 +68,11 @@ public class BffSessionContextFilter extends OncePerRequestFilter implements Ord
     @Override
     public int getOrder() {
         return FILTER_ORDER;
+    }
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getRequestURI().startsWith(BACKOFFICE_PATH_PREFIX);
     }
 
     @Override

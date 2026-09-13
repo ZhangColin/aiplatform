@@ -100,17 +100,58 @@ class BffSessionContextFilterTest {
 
         RequestContext forged = new RequestContext("req-1", "127.0.0.1", null, null,
                 999L, "attacker", null, null);
-        RequestContext.run(forged, () -> {
+        runUnderContext(forged, request);
+
+        assertThat(captured.userId).isNull();
+        assertThat(captured.userName).isNull();
+        assertThat(captured.requestId).isEqualTo("req-1"); // 非用户字段保留
+    }
+
+    @Test
+    void given_backoffice_path_when_filter_then_skipped_operator_headers_stand() throws Exception {
+        // #152：/api/backoffice/** 豁免会话上下文装配——操作者透传头（cartisan
+        // RequestContextFilter 绑定，签名面内明示信任）不经本过滤器洗刷
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/backoffice/orders");
+        request.addHeader("X-User-Id", "700100");
+        request.addHeader("X-User-Name", "运营·小刘");
+
+        runUnderContext(new RequestContext("req-1", "127.0.0.1", null, null,
+                700100L, "运营·小刘", null, null), request);
+
+        assertThat(captured.userId).isEqualTo(700100L);
+        assertThat(captured.userName).isEqualTo("运营·小刘");
+    }
+
+    @Test
+    void given_backoffice_path_with_stray_session_cookie_when_filter_then_headers_still_stand()
+            throws Exception {
+        // 签名面以透传头为准：即便请求捎带了用户会话 cookie 也不参与装配
+        // （机机调用无会话，cookie 只可能是串味——头明示信任、会话不越权）
+        sessionStore.put("sid-1", session(42L, "张三"));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/backoffice/orders");
+        request.addHeader("X-User-Id", "700100");
+        request.addHeader("X-User-Name", "运营·小刘");
+        request.setCookies(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-1"));
+
+        runUnderContext(new RequestContext("req-1", "127.0.0.1", null, null,
+                700100L, "运营·小刘", null, null), request);
+
+        assertThat(captured.userId).isEqualTo(700100L);
+        assertThat(captured.userName).isEqualTo("运营·小刘");
+    }
+
+    // -------- 测试工具 --------
+
+    /** 在给定上下文（模拟 cartisan RequestContextFilter 先行绑定）下跑过滤器并捕获下游视界 */
+    private void runUnderContext(RequestContext context, MockHttpServletRequest request)
+            throws Exception {
+        RequestContext.run(context, () -> {
             try {
                 runAndCapture(request);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
-
-        assertThat(captured.userId).isNull();
-        assertThat(captured.userName).isNull();
-        assertThat(captured.requestId).isEqualTo("req-1"); // 非用户字段保留
     }
 
     @Test

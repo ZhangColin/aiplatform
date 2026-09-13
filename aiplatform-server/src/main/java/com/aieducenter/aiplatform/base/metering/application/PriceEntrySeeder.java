@@ -16,8 +16,8 @@ import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepository;
 
 /**
- * 单价启动种子（A6 §1 维护入口之一：v1 = 手工 SQL + 本种子；维护 API 挂 fog
- * 「管理后台」）。现役模型 = demo 配置档位 deepseek-v4-pro / deepseek-v4-flash
+ * 单价启动种子（A6 §1 维护入口之一：v1 = 手工 SQL + 本种子；管理写口已上线
+ * #160，本种子退役挂 #165）。现役模型 = demo 配置档位 deepseek-v4-pro / deepseek-v4-flash
  * （business AgentProfile），DeepSeek 无缓存写/推理独立口径 → 每模型三行
  * （input / cache_read / output）。
  *
@@ -65,7 +65,8 @@ public class PriceEntrySeeder implements ApplicationRunner {
                 continue; // 已有行（含手工维护/已关行）→ 种子不插手
             }
             priceEntryRepository.save(PriceEntry.open(row.provider(), row.model(),
-                    row.tokenKind(), new BigDecimal(row.unitPrice()), USD, SEED_EFFECTIVE_FROM));
+                    row.tokenKind(), new BigDecimal(row.unitPrice()), USD, SEED_EFFECTIVE_FROM,
+                    null));
             inserted++;
         }
         log.info("[metering] 单价种子完成：新插 {} 行 / 共 {} 行候选（已有行跳过）", inserted, SEED.size());

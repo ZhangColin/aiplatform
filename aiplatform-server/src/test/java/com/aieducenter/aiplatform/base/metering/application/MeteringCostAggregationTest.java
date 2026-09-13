@@ -65,11 +65,11 @@ class MeteringCostAggregationTest {
     void given_price_change_when_events_straddle_boundary_then_each_priced_at_its_time() {
         // 改价 = 关旧行开新行：$1/1M 生效 [T0, T2)，$2/1M 自 T2 起
         PriceEntry oldRow = priceEntryRepository.save(PriceEntry.open(PROVIDER, "m1",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
         oldRow.close(T2);
         priceEntryRepository.save(oldRow);
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m1",
-                TokenKind.INPUT, new BigDecimal("0.000002"), "USD", T2));
+                TokenKind.INPUT, new BigDecimal("0.000002"), "USD", T2, null));
 
         report("evt-before", T1, "m1", new TokenUsage(1000, 0, 0, 0, 0));  // 旧价时段
         report("evt-after", T3, "m1", new TokenUsage(1000, 0, 0, 0, 0));   // 新价时段
@@ -102,7 +102,7 @@ class MeteringCostAggregationTest {
     void given_partial_price_when_query_then_priced_parts_bucketed_rest_marked_unpriced() {
         // 只有 input 有价：output/cache_write 有量无价
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-part",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
         report("evt-part", T1, "m-part", new TokenUsage(1000, 500, 0, 7, 0));
 
         UsageSummary summary = usageQueryPort.bySubject(SUBJ, null, null);
@@ -117,9 +117,9 @@ class MeteringCostAggregationTest {
     @Test
     void given_multi_currency_when_query_then_buckets_not_merged() {
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-usd",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-cny",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "CNY", T0));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "CNY", T0, null));
         report("evt-usd", T1, "m-usd", new TokenUsage(1000, 0, 0, 0, 0));
         report("evt-cny", T1, "m-cny", new TokenUsage(1000, 0, 0, 0, 0));
 
@@ -134,7 +134,7 @@ class MeteringCostAggregationTest {
     @Test
     void given_window_when_query_then_cost_and_unpriced_scoped_to_window() {
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m1",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T0, null));
         report("evt-in", T1, "m1", new TokenUsage(1000, 0, 0, 0, 0));     // 窗口内
         report("evt-out", T3, "m-none", new TokenUsage(100, 0, 0, 0, 0)); // 窗口外（无价模型）
 
@@ -153,7 +153,7 @@ class MeteringCostAggregationTest {
         // 五档各配各价（含 cache_write/reasoning——Anthropic/OpenAI 口径的档位也要能计价）
         for (TokenKind kind : TokenKind.values()) {
             priceEntryRepository.save(PriceEntry.open(PROVIDER, "m-all", kind,
-                    new BigDecimal("0.000001"), "USD", T0));
+                    new BigDecimal("0.000001"), "USD", T0, null));
         }
         report("evt-all", T1, "m-all", new TokenUsage(1000, 500, 200, 100, 50));
 
@@ -168,7 +168,7 @@ class MeteringCostAggregationTest {
     void given_event_before_price_effective_when_query_then_unpriced_for_gap_period() {
         // 单价自 T2 起生效：T1 的事件落在生效区间之前（改价不溯及）
         priceEntryRepository.save(PriceEntry.open(PROVIDER, "m1",
-                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T2));
+                TokenKind.INPUT, new BigDecimal("0.000001"), "USD", T2, null));
         report("evt-early", T1, "m1", new TokenUsage(1000, 0, 0, 0, 0));
         report("evt-late", T3, "m1", new TokenUsage(1000, 0, 0, 0, 0));
 

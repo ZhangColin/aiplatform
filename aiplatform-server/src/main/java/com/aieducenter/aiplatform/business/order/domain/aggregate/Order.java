@@ -34,7 +34,8 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * 金额单位分（Long）、v1 恒 CNY，随报价落值。projectId 跨上下文软引用
  * （prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户查）。
  *
- * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代）、{@link #quote}
+ * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代；运营取消
+ * {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，#157）、{@link #quote}
  * （报价/改价，已报价态重复调用 = 改价）、{@link #pay}（待支付 → 已支付，落
  * {@code paidAt}/{@code paymentNo}）与 {@link #archive}（已支付 → 已归档，落
  * {@code archivedAt}——归档为支付后的独立步骤，编排归应用层，#37/#39）；终态判定
@@ -54,6 +55,9 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
 
     /** 报价备注上限（与 {@code ord_price_entries.note} 列宽对齐）。 */
     public static final int QUOTE_NOTE_MAX_LENGTH = 1000;
+
+    /** 取消原因上限（与 {@code ord_orders.cancel_reason} 列宽对齐，#157）。 */
+    public static final int CANCEL_REASON_MAX_LENGTH = 1000;
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
@@ -96,6 +100,21 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 取消时点（未支付态取消即回迭代）。 */
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;
+
+    /**
+     * 取消原因（#157 运营取消必填留痕）：运营内部口径，不呈现任何用户面读面；
+     * 用户取消（{@link #cancel}）恒 NULL。
+     */
+    @Column(name = "cancel_reason", length = CANCEL_REASON_MAX_LENGTH)
+    private String cancelReason;
+
+    /** 取消操作者 id（admin 侧管理员 TSID；用户取消/缺透传头落 NULL，#157）。 */
+    @Column(name = "cancel_operator_id", length = 64)
+    private String cancelOperatorId;
+
+    /** 取消操作者名（直读展示；口径同价目行 operator，#157）。 */
+    @Column(name = "cancel_operator_name", length = 200)
+    private String cancelOperatorName;
 
     /** 支付流水号（mock 平台内生成；真实接入为渠道单号）。 */
     @Column(name = "payment_no", length = 100)
@@ -149,6 +168,29 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         }
         this.status = OrderStatus.CANCELLED;
         this.cancelledAt = LocalDateTime.now();
+    }
+
+    /**
+     * 运营取消（#157 后台写口）：状态语义与用户取消完全一致——守卫复用
+     * {@link #cancel}（仅待报价/已报价可达，已支付/已终结 ORD_005，不增设状态机
+     * 回边），差异仅在必填取消原因＋操作者落痕。原因＝运营内部口径（不呈现用户
+     * 面读面）；操作者两列口径同 {@link #quote}（{@code null} = 无头落空）。
+     * 输入校验在状态守卫之前（同 {@link #quote} 形制）。
+     *
+     * @param reason   取消原因（必填；空白抛 ORD_013，超长抛 ORD_014）
+     * @param operator 操作者（缺头落空口径，{@code null} 落 NULL 两列）
+     */
+    public void cancelByBackoffice(String reason, Operator operator) {
+        if (reason == null || reason.isBlank()) {
+            throw new DomainException(OrderMessage.ORDER_CANCEL_REASON_REQUIRED);
+        }
+        if (reason.length() > CANCEL_REASON_MAX_LENGTH) {
+            throw new DomainException(OrderMessage.ORDER_CANCEL_REASON_TOO_LONG);
+        }
+        cancel();
+        this.cancelReason = reason;
+        this.cancelOperatorId = operator == null ? null : operator.id();
+        this.cancelOperatorName = operator == null ? null : operator.name();
     }
 
     /**

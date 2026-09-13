@@ -22,6 +22,7 @@ import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -54,6 +55,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 创建时间区间（含端点边界）、externalId 换算过滤（未命中＝空清单）、订单号
  * 精确、行带 ownerDisplayName（账号缺档为 null）、分页上界截断与越界——过滤
  * 走数据库查询路径（真库 WHERE 生效即为证）。</p>
+ *
+ * <p>#157 运营取消写口在本类一链钉死：已报价单带原因＋操作者头签名取消 →
+ * 订单落已取消＋库列留痕（JdbcTemplate）→ 后台详情呈现留痕 → 同项目再下单
+ * 成功（解冻回迭代）；待报价无头取消留原因落空操作者；已支付/已归档/已取消
+ * 被 ORD_005 拦；缺/空白/超长原因被 ORD_013/014 拒。用户面读面不携带原因归
+ * {@code OrderAppServiceTest} 钉死。</p>
  */
 @BackofficeSeamTest
 class BackofficeOrderSeamTest {
@@ -239,6 +246,130 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.priceEntries[1].amount").value("128000"))
                 .andExpect(jsonPath("$.data.priceEntries[1].operatorId").value(nullValue()))
                 .andExpect(jsonPath("$.data.priceEntries[1].operatorName").value(nullValue()));
+    }
+
+    // ---------- #157：运营取消写口（原因必填＋操作者留痕＋解冻再下单） ----------
+
+    @Test
+    void given_quoted_order_when_signed_cancel_with_reason_and_operator_then_unfrozen_and_replaceable()
+            throws Exception {
+        // 一链：已报价单运营取消（带原因＋操作者头）→ 订单落已取消 → 库列留痕 →
+        // 后台详情呈现留痕 → 同项目再下单成功（解冻回迭代）
+        OrderResponse order = placeOrder();
+        appService.submitQuote(Long.parseLong(order.id()), 128000L, "首版报价", null);
+        stubProjectName();
+        String cancelPath = "/api/backoffice/orders/" + order.id() + "/cancel";
+        String body = "{\"reason\":\"用户改需求，终止报价流程\"}";
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post(cancelPath).contentType(MediaType.APPLICATION_JSON).content(body),
+                        cancelPath, body)
+                        .header("X-User-Id", OPERATOR_ID_STR)
+                        .header("X-User-Name", OPERATOR_NAME))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(5))
+                .andExpect(jsonPath("$.data.cancelledAt").isNotEmpty());
+
+        // 库内留痕（JdbcTemplate 断言）：状态迁移＋取消时点＋原因＋操作者两列
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, cancelled_at, cancel_reason, cancel_operator_id, "
+                        + "cancel_operator_name FROM ord_orders WHERE id = ?",
+                Long.parseLong(order.id()));
+        assertThat(row.get("status")).isEqualTo(OrderStatus.CANCELLED.getCode());
+        assertThat(row.get("cancelled_at")).isNotNull();
+        assertThat(row.get("cancel_reason")).isEqualTo("用户改需求，终止报价流程");
+        assertThat(row.get("cancel_operator_id")).isEqualTo(OPERATOR_ID_STR);
+        assertThat(row.get("cancel_operator_name")).isEqualTo(OPERATOR_NAME);
+
+        // 后台详情呈现留痕（运营内部读面可见；用户面不携带由 OrderAppServiceTest 钉死）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id()),
+                        "/api/backoffice/orders/" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(5))
+                .andExpect(jsonPath("$.data.cancelReason").value("用户改需求，终止报价流程"))
+                .andExpect(jsonPath("$.data.cancelOperatorId").value(OPERATOR_ID_STR))
+                .andExpect(jsonPath("$.data.cancelOperatorName").value(OPERATOR_NAME));
+
+        // 项目解冻：同项目再下单成功（旧单已终态，未终结唯一索引不再占位）
+        OrderResponse reordered = placeOrder();
+        assertThat(reordered.id()).isNotEqualTo(order.id());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM ord_orders WHERE project_id = ? AND id != ?",
+                Integer.class, PROJECT_ID, Long.parseLong(order.id()))).isEqualTo(1);
+    }
+
+    @Test
+    void given_pending_order_when_signed_cancel_without_operator_headers_then_reason_only()
+            throws Exception {
+        // 待报价可达（无需先报价）；v0 形制无操作者头 → 原因照留、操作者落空
+        OrderResponse order = placeOrder();
+        String cancelPath = "/api/backoffice/orders/" + order.id() + "/cancel";
+        String body = "{\"reason\":\"拒单：需求超出交付范围\"}";
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post(cancelPath).contentType(MediaType.APPLICATION_JSON).content(body),
+                        cancelPath, body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(5));
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT cancel_reason, cancel_operator_id, cancel_operator_name "
+                        + "FROM ord_orders WHERE id = ?",
+                Long.parseLong(order.id()));
+        assertThat(row.get("cancel_reason")).isEqualTo("拒单：需求超出交付范围");
+        assertThat(row.get("cancel_operator_id")).isNull();
+        assertThat(row.get("cancel_operator_name")).isNull();
+    }
+
+    @Test
+    void given_paid_archived_or_cancelled_order_when_signed_cancel_then_409_ord005()
+            throws Exception {
+        // 非未支付态被既有守卫拦（ORD_005，无新增状态机回边）；逐态钉死，各用独立
+        // 项目（已支付非终态，占未终结名额）
+        long[] projectIds = {910601L, 910602L, 910603L};
+        OrderStatus[] states = {OrderStatus.PAID, OrderStatus.ARCHIVED, OrderStatus.CANCELLED};
+        for (int i = 0; i < states.length; i++) {
+            OrderResponse order = placeOrder(projectIds[i]);
+            jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
+                    states[i].getCode(), Long.parseLong(order.id()));
+            String cancelPath = "/api/backoffice/orders/" + order.id() + "/cancel";
+            String body = "{\"reason\":\"迟到\"}";
+
+            mockMvc.perform(BackofficeSignatures.signed(
+                            post(cancelPath).contentType(MediaType.APPLICATION_JSON).content(body),
+                            cancelPath, body))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.message").value("订单已支付或已终结，无法取消"));
+
+            // 状态不被破坏，留痕不落半截
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT status FROM ord_orders WHERE id = ?", Integer.class,
+                    Long.parseLong(order.id()))).isEqualTo(states[i].getCode());
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT cancel_reason FROM ord_orders WHERE id = ?", String.class,
+                    Long.parseLong(order.id()))).isNull();
+        }
+    }
+
+    @Test
+    void given_missing_blank_or_overlong_reason_when_signed_cancel_then_400() throws Exception {
+        // 原因必填（ORD_013）与超长（ORD_014）：聚合守卫经全局处理器映射；订单不动
+        OrderResponse order = placeOrder();
+        String cancelPath = "/api/backoffice/orders/" + order.id() + "/cancel";
+        String overlong = "{\"reason\":\"" + "长".repeat(1001) + "\"}";
+
+        for (String body : new String[] {"{}", "{\"reason\":\"\"}", "{\"reason\":\" \"}", overlong}) {
+            mockMvc.perform(BackofficeSignatures.signed(
+                            post(cancelPath).contentType(MediaType.APPLICATION_JSON).content(body),
+                            cancelPath, body))
+                    .andExpect(status().isBadRequest());
+        }
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, cancel_reason FROM ord_orders WHERE id = ?",
+                Long.parseLong(order.id())))
+                .containsEntry("status", OrderStatus.PENDING_QUOTE.getCode())
+                .containsEntry("cancel_reason", null);
     }
 
     // ---------- #156：四维检索＋owner 显示名（真库 WHERE 生效即为证） ----------

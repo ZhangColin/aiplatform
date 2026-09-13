@@ -29,6 +29,7 @@ import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.business.order.application.BackofficeOrderAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
+import com.aieducenter.aiplatform.business.order.application.dto.command.CancelOrderCommand;
 import com.aieducenter.aiplatform.business.order.application.dto.command.SubmitQuoteCommand;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderDetailResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderSummaryResponse;
@@ -43,12 +44,12 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
  * 排除会话拦截（机机调用无用户会话）。前端无任何后台操作入口，联调走
  * scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
- * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010）。
+ * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010、运营取消 ORD_005/013/014）。
  */
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价 / 运营取消（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -126,10 +127,26 @@ public class BackofficeOrderController {
                 command.amount(), command.note(), currentOperator()));
     }
 
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "运营取消订单（未支付态）",
+            description = "语义与用户取消完全一致：订单落已取消、项目解冻回迭代、用户可继续对话与"
+                    + "再次下单。取消原因必填——运营内部口径留档，不呈现任何用户面读面，"
+                    + "后台订单详情可见。X-User-Id/X-User-Name 透传头自动落痕订单行"
+                    + "（缺头落空，#157）。限未支付态：已支付/已归档/已取消 409 ORD_005"
+                    + "（退款/售后另议）；原因缺失 400 ORD_013；原因超长（至多 1000 字）"
+                    + "400 ORD_014。需要机机签名")
+    @ErrorCodes({"ORD_001", "ORD_005", "ORD_013", "ORD_014"})
+    public ApiResponse<OrderResponse> cancel(@PathVariable String id,
+                                             @RequestBody CancelOrderCommand command) {
+        return ApiResponse.ok(appService.cancelByBackoffice(OrderIds.parseOrder(id),
+                command.reason(), currentOperator()));
+    }
+
     /**
      * 当前操作者（#155）：{@code X-User-Id}/{@code X-User-Name} 透传头经
      * RequestContext 读出落痕（admin 侧管理员标识，签名面明示信任、不校验真实
-     * 性）；缺头/无上下文为 {@code null}——落空口径，价目行操作者两列落 NULL。
+     * 性）；缺头/无上下文为 {@code null}——落空口径，价目行（#155）/订单取消
+     * 行（#157）操作者两列落 NULL。
      * Id 两形转换在此一次完成（上下文 Long → 外域标识字符串，存储不混型）。
      */
     private static Operator currentOperator() {

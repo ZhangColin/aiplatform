@@ -129,6 +129,23 @@ public class OrderAppService {
     }
 
     /**
+     * 运营取消订单（#157 后台写口，经 BackofficeOrderController 进入）：状态
+     * 语义与用户取消 {@link #cancel} 完全一致（守卫 ORD_005、通知同发、解冻
+     * 回迭代可再下单），差异仅在必填取消原因＋操作者留痕落订单行（运营内部
+     * 口径，不呈现用户面读面）。事务取舍同 {@link #cancel}。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_005 已支付或已终结；
+     *                              ORD_013 原因缺失；ORD_014 原因超长
+     */
+    public OrderResponse cancelByBackoffice(Long orderId, String reason, Operator operator) {
+        Order order = requireOrder(orderId);
+        order.cancelByBackoffice(reason, operator);
+        OrderResponse response = OrderResponse.of(orderRepository.save(order));
+        publishStatusChanged(order);
+        return response;
+    }
+
+    /**
      * 提交报价（#29 后台动作，机机面经 BackofficeOrderController 进入）：待报价态
      * 首次调用 = 报价，已报价态重复调用 = 改价——聚合内一次事务同时落价目行
      * （append-only，操作者随行落痕，#155）与订单现值。事务取舍同

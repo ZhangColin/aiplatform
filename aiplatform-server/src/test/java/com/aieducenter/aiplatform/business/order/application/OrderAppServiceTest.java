@@ -14,6 +14,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
@@ -39,7 +40,8 @@ import static org.mockito.Mockito.when;
  * 状态机（未支付态可达/已支付与终态拒绝）、快照冻结（PRD 后续修订不回写）、
  * 详情与取消后再下新单（新单新快照）；#29 交易环②接出报价/改价（append-only
  * 价目留痕、现值取最新行、quotedAt 不刷新）；#37/#39 支付原子化（支付/归档拆
- * 两事务、归档失败留已支付）归 {@link OrderPaymentArchiveTest}。
+ * 两事务、归档失败留已支付）归 {@link OrderPaymentArchiveTest}；#157 运营取消
+ * 落痕两列＋用户面读面不携带原因在此钉死。
  */
 @IntegrationTest
 class OrderAppServiceTest {
@@ -55,6 +57,10 @@ class OrderAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /** 用户面响应形序列化（上下文内配置，含 JSR310 时间模块）。 */
+    @Autowired
+    private ObjectMapper objectMapper;
 
     /** 跨 BC 软引用的项目读面：mock 掉 docker/工作区依赖，聚焦订单缝。 */
     @MockitoBean
@@ -210,6 +216,42 @@ class OrderAppServiceTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT prd_snapshot FROM ord_orders WHERE id = ?", String.class,
                 Long.parseLong(second.id()))).isEqualTo(revisedPrd);
+    }
+
+    // ---------- #157：运营取消——必填原因＋操作者留痕落订单行 ----------
+
+    @Test
+    void given_placed_order_when_cancel_by_backoffice_then_trace_columns_persisted() {
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+
+        OrderResponse cancelled = appService.cancelByBackoffice(Long.parseLong(orderId),
+                "用户改需求，终止报价流程", new Operator("700100", "运营·小刘"));
+
+        assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELLED);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, cancelled_at, cancel_reason, cancel_operator_id, "
+                        + "cancel_operator_name FROM ord_orders WHERE id = ?",
+                Long.parseLong(orderId));
+        assertThat(row.get("status")).isEqualTo(OrderStatus.CANCELLED.getCode());
+        assertThat(row.get("cancelled_at")).isNotNull();
+        assertThat(row.get("cancel_reason")).isEqualTo("用户改需求，终止报价流程");
+        assertThat(row.get("cancel_operator_id")).isEqualTo("700100");
+        assertThat(row.get("cancel_operator_name")).isEqualTo("运营·小刘");
+    }
+
+    @Test
+    void given_backoffice_cancelled_order_when_user_detail_then_reason_not_exposed()
+            throws Exception {
+        // 取消原因＝运营内部口径，不呈现用户面读面：用户面详情（OrderResponse）
+        // 序列化全文既无字段名也无原因文本——防未来误加字段回流用户面
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.cancelByBackoffice(Long.parseLong(orderId), "内部口径：用户辱骂运营", null);
+
+        OrderResponse detail = appService.detail(Long.parseLong(orderId));
+        String json = objectMapper.writeValueAsString(detail);
+        assertThat(json).doesNotContain("cancelReason").doesNotContain("内部口径");
     }
 
     @Test

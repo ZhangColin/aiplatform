@@ -27,7 +27,8 @@
  *       枚举、仓储接口、PaymentPort（真实支付切换边界）、错误码</li>
  *   <li>application：OrderAppService（下单/详情/取消/报价与改价/mock 支付——
  *       支付原子落「已支付」→ 归档独立步骤（订单 + 项目），提交后知识沉淀 + 订单态
- *       变化通知两发）+
+ *       变化通知两发；运营取消 cancelByBackoffice 同守卫带必填原因＋操作者留痕，
+ *       #157）+
  *       OrderQueryAppService（未终结订单读面——项目详情/列表嵌入与冻结守卫的
  *       供给方 + 最近订单嵌入）+ BackofficeOrderAppService（后台三读端点：清单/
  *       详情/源码包；跨 BC 项目名/用户昵称/打包经 project、identity 应用层软引用）

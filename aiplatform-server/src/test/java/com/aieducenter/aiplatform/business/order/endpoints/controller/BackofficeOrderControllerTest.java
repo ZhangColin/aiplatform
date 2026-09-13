@@ -53,8 +53,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 后台订单机机面 REST 契约（#29 交易环②）：四端点形状 + cartisan-openapi 五头
- * HMAC 签名闸全链（真 Filter + 真 Interceptor + 真签名计算；凭据源与 nonce 存储用
+ * 后台订单机机面 REST 契约（#29 交易环②，#157 扩取消写口）：五端点形状 +
+ * cartisan-openapi 五头 HMAC 签名闸全链（真 Filter + 真 Interceptor + 真签名计算；凭据源与 nonce 存储用
  * {@link BackofficeSignatureTestConfig}、签名头计算用 {@link BackofficeSignatures}
  * ——均 #152 seam 测试件，全上下文走法见 {@code BackofficeSeamContractTest}）
  * ——无签名/错签/过期时间戳逐一拒绝；该前缀已排除会话拦截（无用户上下文的签名
@@ -200,6 +200,27 @@ class BackofficeOrderControllerTest {
                 eq(new Operator(null, null)));
     }
 
+    @Test
+    void given_signed_request_when_post_cancel_then_cancelled_response() throws Exception {
+        // #157 运营取消：命令体携必填原因，透传头操作者经 RequestContext 落空形
+        // （MVC 切片无绑定 → null）转交应用服务
+        when(appService.cancelByBackoffice(eq(900L), eq("用户改需求，终止报价流程"),
+                any(Operator.class)))
+                .thenReturn(cancelledOrder());
+
+        String body = "{\"reason\":\"用户改需求，终止报价流程\"}";
+        mockMvc.perform(BackofficeSignatures.signed(post("/api/backoffice/orders/900/cancel")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body),
+                        "/api/backoffice/orders/900/cancel", body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(5))
+                .andExpect(jsonPath("$.data.cancelledAt").value("2026-09-01T12:00:00"));
+
+        verify(appService).cancelByBackoffice(eq(900L), eq("用户改需求，终止报价流程"),
+                eq(new Operator(null, null)));
+    }
+
     // ---------- 签名闸：反例（验收：无签名/错签被拒） ----------
 
     @Test
@@ -280,7 +301,7 @@ class BackofficeOrderControllerTest {
                                 null, null, LocalDateTime.of(2026, 9, 1, 10, 0))),
                 PRD,
                 LocalDateTime.of(2026, 9, 1, 9, 0), LocalDateTime.of(2026, 9, 1, 10, 0),
-                null, null, null);
+                null, null, null, null, null, null);
     }
 
     private static OrderResponse quotedOrder() {
@@ -292,6 +313,16 @@ class BackofficeOrderControllerTest {
                         new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                                 LocalDateTime.of(2026, 9, 1, 10, 0))),
                 LocalDateTime.of(2026, 9, 1, 9, 0), null, null, null);
+    }
+
+    /** #157 取消回执：用户面同构（无取消原因——运营内部口径不进用户面响应形）。 */
+    private static OrderResponse cancelledOrder() {
+        return new OrderResponse("900", "100", OrderStatus.CANCELLED, "已取消",
+                128000L, "CNY", "首版报价", LocalDateTime.of(2026, 9, 1, 10, 0),
+                List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
+                        LocalDateTime.of(2026, 9, 1, 10, 0))),
+                LocalDateTime.of(2026, 9, 1, 9, 0), LocalDateTime.of(2026, 9, 1, 12, 0),
+                null, null);
     }
 
     /** MVC 切片不含 cartisan-web autoconfig，手动注册其全局异常处理器。 */

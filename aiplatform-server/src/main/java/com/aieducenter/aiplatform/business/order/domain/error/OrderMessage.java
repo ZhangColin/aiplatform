@@ -29,7 +29,11 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_PAY_NOT_ALLOWED(409, "ORD_011", "订单非待支付状态，无法支付"),
 
-    ORDER_ARCHIVE_NOT_ALLOWED(409, "ORD_012", "订单非已支付状态，无法归档");
+    ORDER_ARCHIVE_NOT_ALLOWED(409, "ORD_012", "订单非已支付状态，无法归档"),
+
+    ORDER_CANCEL_REASON_REQUIRED(400, "ORD_013", "取消原因必填（运营取消须填写原因）"),
+
+    ORDER_CANCEL_REASON_TOO_LONG(400, "ORD_014", "取消原因超长（至多 1000 字）");
 
     private final int httpStatus;
     private final String code;

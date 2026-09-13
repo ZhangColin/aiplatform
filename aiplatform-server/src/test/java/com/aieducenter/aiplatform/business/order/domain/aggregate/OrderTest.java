@@ -16,7 +16,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * 订单聚合状态机（#37/#39 支付原子化）：{@link Order#pay}（待支付 → 已支付，落
  * paidAt/paymentNo）与 {@link Order#archive}（已支付 → 已归档，落 archivedAt）的
- * 转移与守卫——「已支付」为真实落库中间态，归档是支付后的独立步骤。
+ * 转移与守卫——「已支付」为真实落库中间态，归档是支付后的独立步骤。运营取消
+ * （{@link Order#cancelByBackoffice}，#157）在此钉守卫与留痕：状态守卫复用
+ * {@link Order#cancel}（ORD_005），差异仅在必填原因（ORD_013/014）＋操作者两列。
  */
 class OrderTest {
 
@@ -71,6 +73,52 @@ class OrderTest {
                     .isInstanceOf(DomainException.class)
                     .hasMessageContaining(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED.message());
         }
+    }
+
+    // ---------- #157：运营取消——必填原因＋操作者落痕（守卫与用户取消同构） ----------
+
+    @Test
+    void given_unpaid_order_when_cancel_by_backoffice_then_cancelled_with_trace() {
+        // 待报价/已报价两未支付态都可达，落原因＋操作者＋取消时点
+        for (Order order : List.of(pendingQuoteOrder(), quotedOrder())) {
+            order.cancelByBackoffice("用户改需求，终止报价流程",
+                    new Operator("700100", "运营·小刘"));
+
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(order.getCancelledAt()).isNotNull();
+            assertThat(order.getCancelReason()).isEqualTo("用户改需求，终止报价流程");
+            assertThat(order.getCancelOperatorId()).isEqualTo("700100");
+            assertThat(order.getCancelOperatorName()).isEqualTo("运营·小刘");
+        }
+    }
+
+    @Test
+    void given_non_unpaid_order_when_cancel_by_backoffice_then_rejected() {
+        // 守卫与用户取消同一处（cancel()）：已支付/已归档/已取消一律 ORD_005
+        for (Order order : List.of(paidOrder(), archivedOrder(), cancelledOrder())) {
+            assertThatThrownBy(() -> order.cancelByBackoffice("迟到", null))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_CANCEL_NOT_ALLOWED.message());
+            assertThat(order.getCancelReason()).isNull(); // 留痕不落半截
+        }
+    }
+
+    @Test
+    void given_blank_reason_when_cancel_by_backoffice_then_rejected() {
+        for (String reason : new String[] {null, "", " "}) {
+            assertThatThrownBy(() -> pendingQuoteOrder().cancelByBackoffice(reason, null))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_CANCEL_REASON_REQUIRED.message());
+        }
+    }
+
+    @Test
+    void given_overlong_reason_when_cancel_by_backoffice_then_rejected() {
+        String overlong = "长".repeat(Order.CANCEL_REASON_MAX_LENGTH + 1);
+
+        assertThatThrownBy(() -> pendingQuoteOrder().cancelByBackoffice(overlong, null))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_CANCEL_REASON_TOO_LONG.message());
     }
 
     // ---------- #155：报价操作者随价目行落痕（append-only 追加序不变） ----------

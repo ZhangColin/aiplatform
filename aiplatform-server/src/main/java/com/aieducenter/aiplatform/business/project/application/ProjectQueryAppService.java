@@ -3,9 +3,6 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
-import java.util.Comparator;
-import java.util.Currency;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -123,10 +120,7 @@ public class ProjectQueryAppService {
     public ProjectUsageResponse usage(Long projectId) {
         loadProject(projectId);
         UsageSummary summary = usageQueryPort.bySubject(Long.toString(projectId), null, null);
-        Map<String, BigDecimal> cost = summary.cost().entrySet().stream()
-                .sorted(Map.Entry.comparingByKey(Comparator.comparing(Currency::getCurrencyCode)))
-                .collect(Collectors.toMap(entry -> entry.getKey().getCurrencyCode(),
-                        Map.Entry::getValue, (left, right) -> left, LinkedHashMap::new));
+        Map<String, BigDecimal> cost = summary.costByCurrencyCode();
         List<ProjectUsageResponse.UnpricedUsage> unpriced = summary.unpriced().stream()
                 .map(usage -> new ProjectUsageResponse.UnpricedUsage(usage.provider(),
                         usage.model(), usage.tokenKind(), usage.tokenKind().getName()))

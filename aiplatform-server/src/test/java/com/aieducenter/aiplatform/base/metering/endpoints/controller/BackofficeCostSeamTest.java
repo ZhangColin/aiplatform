@@ -276,7 +276,7 @@ class BackofficeCostSeamTest {
                 .andExpect(jsonPath("$.data.items").isEmpty());
     }
 
-    // ---------- 参数负例：非 ISO-8601 Instant → 400 METER_011 ----------
+    // ---------- 参数负例：非 ISO-8601 Instant → 400 METER_011（#164 消息泛化） ----------
 
     @Test
     void given_bad_window_param_when_query_then_400_meter_011() throws Exception {
@@ -285,7 +285,7 @@ class BackofficeCostSeamTest {
                         get("/api/backoffice/costs/overview").queryParam("from", "not-a-date"),
                         overviewPath, null))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的成本查询时间窗参数"));
+                .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
 
         String unpricedPath = "/api/backoffice/costs/unpriced?to=2026-09-32T00:00:00Z";
         mockMvc.perform(BackofficeSignatures.signed(
@@ -293,7 +293,7 @@ class BackofficeCostSeamTest {
                                 .queryParam("to", "2026-09-32T00:00:00Z"),
                         unpricedPath, null))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的成本查询时间窗参数"));
+                .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
     }
 
     // ---------- 夹具 ----------

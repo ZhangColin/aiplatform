@@ -103,12 +103,16 @@ public class BackofficeProjectController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "项目详情（后台面，带订单引用）",
+    @Operation(summary = "项目详情（后台面，带订单引用＋成本指针）",
             description = "清单字段全量＋归属账号显示名（缺档/无主为 null）＋订单引用（与订单域"
                     + "互链）：activeOrder＝未终结订单摘要（有值即冻结迭代，1=待报价 "
                     + "2=已报价），latestOrder＝最近一张任意状态订单（支付归档后 "
                     + "activeOrder 转空、本字段承接完整记录取单面；从未下单两者皆空）"
-                    + "——照用户面先例。归档项目照读（工作区保留）；已删项目不可见"
+                    + "——照用户面先例。costSummary＝成本汇总指针（项目全量口径："
+                    + "总成本按币种分桶直读不折算＋unpriced 有无标记——true 时成本"
+                    + "不完整；无用量＝空 cost＋false 明确空态；明细下钻走成本域"
+                    + "端点 /api/backoffice/costs/projects/{id}，同数据源）。"
+                    + "归档项目照读（工作区保留）；已删项目不可见"
                     + "（真删无墓碑）。需要机机签名；项目不存在 404 PRJ_001")
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<BackofficeProjectDetailResponse> detail(@PathVariable String id) {

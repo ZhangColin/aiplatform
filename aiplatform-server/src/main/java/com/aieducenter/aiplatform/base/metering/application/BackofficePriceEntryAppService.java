@@ -23,6 +23,7 @@ import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
 import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
 import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepository;
+import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台单价表管理写口（#160 成本运营）：行清单读（含历史行）＋原子改价（单调用
@@ -39,9 +40,6 @@ import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepo
 @Service
 public class BackofficePriceEntryAppService {
 
-    /** 页大小上界（防一次性拉穿；单价表全量行数量级很小）。 */
-    private static final int MAX_PAGE_SIZE = 100;
-
     private final PriceEntryRepository priceEntryRepository;
 
     public BackofficePriceEntryAppService(PriceEntryRepository priceEntryRepository) {
@@ -56,8 +54,8 @@ public class BackofficePriceEntryAppService {
     @Transactional(readOnly = true)
     public PageResponse<UnitPriceEntryResponse> entries(String provider, String model,
                                                         int page, int size) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safePage = BackofficePages.clampPage(page);
+        int safeSize = BackofficePages.clampSize(size);
 
         BackofficePriceEntryQuery query = new BackofficePriceEntryQuery(provider, model);
         Specification<PriceEntry> specification = ConditionSpecifications.fromAnnotation(query);

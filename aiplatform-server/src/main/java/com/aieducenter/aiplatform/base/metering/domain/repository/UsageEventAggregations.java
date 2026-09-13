@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.aieducenter.aiplatform.base.metering.domain.model.GlobalUsageSummary;
+import com.aieducenter.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.aieducenter.aiplatform.base.metering.domain.model.UnpricedTierUsage;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 
@@ -35,4 +36,12 @@ public interface UsageEventAggregations {
      * 无价分量；已配价档位与无用量档位不出现。空窗返回空清单。
      */
     List<UnpricedTierUsage> aggregateUnpricedTiers(Instant from, Instant to);
+
+    /**
+     * 窗口内有用量的事件按 subject 分组的成本汇总（#164 项目成本清单）：每
+     * subject 总量 + 平台成本（币种分桶）+ 全未配价标记（无任何已配价分量）。
+     * 用量驱动——无用量 subject 不出现（空窗返回空清单）；subject 不透明，
+     * 排序/分页归应用层。
+     */
+    List<SubjectCostSummary> aggregateSubjectCosts(Instant from, Instant to);
 }

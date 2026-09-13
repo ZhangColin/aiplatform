@@ -27,7 +27,7 @@ public enum MeteringMessage implements CodeMessage {
 
     PRICE_ENTRY_CURRENCY_UNKNOWN(400, "METER_010", "单价币种非 ISO 4217 代码"),
 
-    COST_WINDOW_INVALID(400, "METER_011", "无效的成本查询时间窗参数");
+    COST_WINDOW_INVALID(400, "METER_011", "无效的成本查询参数");
 
     private final int httpStatus;
     private final String code;

@@ -1,7 +1,6 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -16,6 +15,8 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
 import com.cartisan.web.response.PageResponse;
 
+import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
+import com.aieducenter.aiplatform.base.metering.domain.port.UsageQueryPort;
 import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.query.BackofficeProjectQuery;
@@ -25,34 +26,36 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台项目读面（#159 项目域，/api/backoffice/projects 机机签名的两读端点）：
  * 清单（三档单选＋创建时间区间＋账号＋项目 id 精确）/ 详情（带订单引用照用户面
- * activeOrder/latestOrder 先例）。检索走数据库查询路径（Specification）——用户面
- * findAll 内存过滤不适用于后台新增维度。归档项目全状态照读（清单缺省含）；已删
- * 项目真删无墓碑，任何读面自然不可见。
+ * activeOrder/latestOrder 先例；#164 补成本汇总指针）。检索走数据库查询路径
+ * （Specification）——用户面 findAll 内存过滤不适用于后台新增维度。归档项目
+ * 全状态照读（清单缺省含）；已删项目真删无墓碑，任何读面自然不可见。
  *
  * <p>跨 BC 事实（订单引用/externalId 换算/账号取名）经 order/identity 应用层软
  * 引用——与 {@link ProjectQueryAppService} → OrderQueryAppService 同向，不与
- * order 写面（order → project）成环。</p>
+ * order 写面（order → project）成环；成本指针经 metering 读端口（business →
+ * base 允许方向）。</p>
  */
 @Service
 public class BackofficeProjectAppService {
 
-    /** 页大小上界（防一次性拉穿；监管清单一屏用不到更大）。 */
-    private static final int MAX_PAGE_SIZE = 100;
-
     private final ProjectRepository projectRepository;
     private final OrderQueryAppService orderQueryAppService;
     private final AccountAppService accountAppService;
+    private final UsageQueryPort usageQueryPort;
 
     public BackofficeProjectAppService(ProjectRepository projectRepository,
                                        OrderQueryAppService orderQueryAppService,
-                                       AccountAppService accountAppService) {
+                                       AccountAppService accountAppService,
+                                       UsageQueryPort usageQueryPort) {
         this.projectRepository = projectRepository;
         this.orderQueryAppService = orderQueryAppService;
         this.accountAppService = accountAppService;
+        this.usageQueryPort = usageQueryPort;
     }
 
     /**
@@ -74,19 +77,19 @@ public class BackofficeProjectAppService {
                                                                    String externalId,
                                                                    String projectId,
                                                                    int page, int size) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safePage = BackofficePages.clampPage(page);
+        int safeSize = BackofficePages.clampSize(size);
 
         Long ownerAccountId = null;
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return emptyPage(safePage, safeSize);
+                return BackofficePages.emptyPage(safePage, safeSize);
             }
         }
         Long parsedProjectId = parseProjectId(projectId);
         if (projectId != null && !projectId.isBlank() && parsedProjectId == null) {
-            return emptyPage(safePage, safeSize);
+            return BackofficePages.emptyPage(safePage, safeSize);
         }
 
         BackofficeProjectQuery condition = new BackofficeProjectQuery(
@@ -127,10 +130,6 @@ public class BackofficeProjectAppService {
         }
     }
 
-    private static PageResponse<BackofficeProjectSummaryResponse> emptyPage(int page, int size) {
-        return new PageResponse<>(List.of(), 0, page, size);
-    }
-
     /**
      * 状态三档单选 → archivedAt 派生谓词：ACTIVE（1）＝未归档（IS NULL）、
      * ARCHIVED（3）＝已归档（IS NOT NULL）、缺省＝全量（无附加条件）。注解机制
@@ -150,17 +149,22 @@ public class BackofficeProjectAppService {
     /**
      * 后台项目详情：清单字段全量＋归属账号显示名＋订单引用（activeOrder＝未终结
      * 订单摘要，有值即冻结迭代；latestOrder＝最近一张任意状态订单，支付归档后
-     * 承接「完整记录」取单面）。归属账号显示名软引用容缺（null 呈现）——项目是
-     * 交付载体，不因账号档缺失而 404（同清单口径）。
+     * 承接「完整记录」取单面）＋成本汇总指针（项目全量口径，明细下钻走成本域
+     * 端点）。归属账号显示名软引用容缺（null 呈现）——项目是交付载体，不因
+     * 账号档缺失而 404（同清单口径）。
      *
      * @throws ApplicationException PRJ_001 项目不存在（含已删项目——真删无墓碑）
      */
+    @Transactional(readOnly = true)
     public BackofficeProjectDetailResponse detail(Long projectId) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+        UsageSummary usage = usageQueryPort.bySubject(Long.toString(projectId), null, null);
         return BackofficeProjectDetailResponse.of(project,
                 accountAppService.displayNameOf(project.getOwnerAccountId()),
                 orderQueryAppService.activeOrderOf(projectId).orElse(null),
-                orderQueryAppService.latestOrderOf(projectId).orElse(null));
+                orderQueryAppService.latestOrderOf(projectId).orElse(null),
+                new BackofficeProjectDetailResponse.CostSummary(
+                        usage.costByCurrencyCode(), !usage.unpriced().isEmpty()));
     }
 }

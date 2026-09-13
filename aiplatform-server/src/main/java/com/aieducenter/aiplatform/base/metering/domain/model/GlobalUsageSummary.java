@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.base.metering.domain.model;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Currency;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,6 +36,19 @@ public record GlobalUsageSummary(
                 : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
+    }
+
+    /**
+     * cost 的币种码键化视图（Currency → ISO 码串）：REST 响应拼装的共享单点
+     * （呈现安全形态归读模型，消费侧不再各自键化）。键序＝ISO 币种码字典序
+     * 显式排定（与聚合 SQL 的 ORDER BY currency 一致，且不依赖来源 map 序）。
+     */
+    public Map<String, BigDecimal> costByCurrencyCode() {
+        Map<String, BigDecimal> codes = new LinkedHashMap<>();
+        cost.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.comparing(Currency::getCurrencyCode)))
+                .forEach(entry -> codes.put(entry.getKey().getCurrencyCode(), entry.getValue()));
+        return Collections.unmodifiableMap(codes);
     }
 
     /**

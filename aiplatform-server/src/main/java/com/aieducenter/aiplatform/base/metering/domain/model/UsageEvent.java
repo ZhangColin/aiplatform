@@ -24,4 +24,10 @@ public record UsageEvent(
         String model,
         Map<String, String> dims,
         TokenUsage tokens) {
+
+    /**
+     * 维度键：智能体种类（dims 协议词表之一——写侧终态口径成分，读侧分智能体
+     * 分桶按此过滤；键名非用户输入，内联常量不占位）。
+     */
+    public static final String DIM_KEY_AGENT_KIND = "agentKind";
 }

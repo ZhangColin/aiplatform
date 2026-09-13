@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名四端点的三读端点）：
@@ -39,9 +40,6 @@ import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppSe
  */
 @Service
 public class BackofficeOrderAppService {
-
-    /** 页大小上界（防一次性拉穿；报价清单一屏用不到更大）。 */
-    private static final int MAX_PAGE_SIZE = 100;
 
     private final OrderRepository orderRepository;
     private final ProjectQueryAppService projectQueryAppService;
@@ -76,19 +74,19 @@ public class BackofficeOrderAppService {
                                                                String externalId,
                                                                String orderId,
                                                                int page, int size) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safePage = BackofficePages.clampPage(page);
+        int safeSize = BackofficePages.clampSize(size);
 
         Long ownerAccountId = null;
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return emptyPage(safePage, safeSize);
+                return BackofficePages.emptyPage(safePage, safeSize);
             }
         }
         Long parsedOrderId = parseOrderId(orderId);
         if (orderId != null && !orderId.isBlank() && parsedOrderId == null) {
-            return emptyPage(safePage, safeSize);
+            return BackofficePages.emptyPage(safePage, safeSize);
         }
 
         BackofficeOrderQuery query = new BackofficeOrderQuery(
@@ -128,10 +126,6 @@ public class BackofficeOrderAppService {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    private static PageResponse<BackofficeOrderSummaryResponse> emptyPage(int page, int size) {
-        return new PageResponse<>(List.of(), 0, page, size);
     }
 
     /**

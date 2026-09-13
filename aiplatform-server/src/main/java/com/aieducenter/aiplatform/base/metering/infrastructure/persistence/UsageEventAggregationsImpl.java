@@ -20,8 +20,10 @@ import com.cartisan.core.domain.BaseEnum;
 
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.GlobalUsageSummary;
+import com.aieducenter.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.base.metering.domain.model.UnpricedTierUsage;
+import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 import com.aieducenter.aiplatform.base.metering.domain.repository.UsageEventAggregations;
 
@@ -71,13 +73,6 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
     private static final String PRICE_MATCH =
             "p.provider = e.provider AND p.model = e.model AND p.token_kind = part.kind"
                     + " AND e.ts >= p.effective_from AND (p.effective_to IS NULL OR e.ts < p.effective_to)";
-
-    /**
-     * 分智能体聚合的维度键：dims 业务维度透传（写侧终态口径 projectId + agentKind
-     * + sessionId，键名是底座协议词表的一部分——见 {@code UsageEvent}；非用户输入，
-     * 内联常量不占位）。
-     */
-    private static final String DIM_KEY_AGENT_KIND = "agentKind";
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -133,7 +128,8 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                 "SELECT kv.dim_value, " + TOKEN_SUMS
                         + " FROM met_usage_events e CROSS JOIN LATERAL jsonb_each_text(e.dims)"
                         + " AS kv(dim_key, dim_value)"
-                        + whereOf(dimArgs, null, from, to, "kv.dim_key = '" + DIM_KEY_AGENT_KIND + "'")
+                        + whereOf(dimArgs, null, from, to,
+                        "kv.dim_key = '" + UsageEvent.DIM_KEY_AGENT_KIND + "'")
                         + " GROUP BY kv.dim_value ORDER BY kv.dim_value",
                 dimArgs.toArray(), (rs, rowNum) -> new GlobalUsageSummary.AgentKindUsage(
                         rs.getString(1), readTokens(rs, 2)));
@@ -155,6 +151,48 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                 args.toArray(), (rs, rowNum) -> new UnpricedTierUsage(
                         rs.getString(1), rs.getString(2),
                         BaseEnum.requireByCode(TokenKind.class, rs.getInt(3)), rs.getLong(4)));
+    }
+
+    @Override
+    public List<SubjectCostSummary> aggregateSubjectCosts(Instant from, Instant to) {
+        // 两查合并：① subject 总量（无 LATERAL 展开——五档列直 SUM，不受展开扇出
+        // 影响）；② subject × 币种成本分桶（costBuckets 的分组细化一维）。两查
+        // 同窗同事务，subject 集 ② ⊆ ①（成本行由窗口内事件驱动）。
+        List<Object> totalArgs = CollUtil.newArrayList();
+        Map<String, TokenUsage> totals = jdbcTemplate.query(
+                "SELECT e.subject, " + TOKEN_SUMS + " FROM met_usage_events e"
+                        + whereOf(totalArgs, null, from, to)
+                        + " GROUP BY e.subject",
+                totalArgs.toArray(), rs -> {
+                    Map<String, TokenUsage> bySubject = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        bySubject.put(rs.getString(1), readTokens(rs, 2));
+                    }
+                    return bySubject;
+                });
+        List<Object> costArgs = CollUtil.newArrayList();
+        Map<String, Map<Currency, BigDecimal>> costBySubject = jdbcTemplate.query(
+                "SELECT e.subject, p.currency, SUM(part.tokens * p.unit_price)"
+                        + " FROM met_usage_events e"
+                        + " CROSS JOIN LATERAL (VALUES " + KIND_VALUES + ") AS part(kind, tokens)"
+                        + " JOIN met_price_entries p ON " + PRICE_MATCH
+                        + whereOf(costArgs, null, from, to, "part.tokens > 0")
+                        + " GROUP BY e.subject, p.currency ORDER BY e.subject, p.currency",
+                costArgs.toArray(), rs -> {
+                    Map<String, Map<Currency, BigDecimal>> bySubject = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        bySubject.computeIfAbsent(rs.getString(1), key -> new LinkedHashMap<>())
+                                .put(Currency.getInstance(rs.getString(2)), rs.getBigDecimal(3));
+                    }
+                    return bySubject;
+                });
+        return totals.entrySet().stream()
+                .map(entry -> {
+                    Map<Currency, BigDecimal> cost = costBySubject.getOrDefault(entry.getKey(), Map.of());
+                    // 全未配价＝窗口内有用量但无任何已配价分量（成本分桶为空）
+                    return new SubjectCostSummary(entry.getKey(), entry.getValue(), cost, cost.isEmpty());
+                })
+                .toList();
     }
 
     /** 总量查询（按 subject/全局两口径共用，差异全在 where）。 */

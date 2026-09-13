@@ -180,10 +180,10 @@ class ProjectControllerTest {
         performAsUser(get("/api/projects").param("status", "99"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("无效的项目列表状态过滤参数"));
+                .andExpect(jsonPath("$.message").value("无效的项目过滤参数"));
         performAsUser(get("/api/projects").param("status", "active"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的项目列表状态过滤参数"));
+                .andExpect(jsonPath("$.message").value("无效的项目过滤参数"));
         verify(queryAppService, never()).list(any());
     }
 

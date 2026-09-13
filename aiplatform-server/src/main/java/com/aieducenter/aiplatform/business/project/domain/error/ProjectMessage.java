@@ -21,7 +21,8 @@ public enum ProjectMessage implements CodeMessage {
 
     PROJECT_ALREADY_ARCHIVED(409, "PRJ_013", "项目已归档（归档是单向终点）"),
 
-    PROJECT_FILTER_UNKNOWN(400, "PRJ_014", "无效的项目列表状态过滤参数"),
+    // 文案随 #159 后台清单扩维泛化（原「无效的项目列表状态过滤参数」——code 不变契约不动，同 ORD_010 先例）
+    PROJECT_FILTER_UNKNOWN(400, "PRJ_014", "无效的项目过滤参数"),
 
     /** PRD 读端点的「未产出」口径（工作区无 docs/PRD.md）——区别于项目不存在的 PRJ_001。 */
     PRD_NOT_PRODUCED(404, "PRJ_015", "PRD 尚未产出"),

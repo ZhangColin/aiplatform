@@ -36,9 +36,9 @@ import lombok.extern.slf4j.Slf4j;
  * 事务保证；约束撞错的吸收（catch 后翻译）要求 save 的事务已独立结束，不处在
  * 外层事务中（同 MeteringAppService.report 形制）。唯 {@link #pay} 用
  * {@link TransactionTemplate} 收两个短事务——①支付原子独立落「已支付」；②归档
- * 独立事务，失败留「已支付」不抹支付事实（#37/#39）；知识沉淀与 SSE 在事务提交
- * 后（#5 决议：「支付成功归档动作之后」；沉淀降级不炸——embedding 不可用不允许
- * 回滚已成功的支付）。</p>
+ * 独立事务，失败留「已支付」不抹支付事实（#37/#39；卡单补偿归 {@link #retryArchive}
+ * #158 后台手动写口）；知识沉淀与 SSE 在事务提交后（#5 决议：「支付成功归档
+ * 动作之后」；沉淀降级不炸——embedding 不可用不允许回滚已成功的支付）。</p>
  */
 @Service
 @Slf4j
@@ -174,8 +174,9 @@ public class OrderAppService {
      * 归档失败 catch 留「已支付」不抹支付事实（补偿归后续批次）。通知两发：
      * 支付落定发「已支付」、归档落定发「已归档」，归档失败只发前者；通知以库内
      * 真值为准（归档事务回滚不还原内存对象，失败路径不得误发「已归档」）。知识
-     * 沉淀在归档后 best-effort（取归档时最新版 PRD 入库，唯一沉淀触发点；内部
-     * 降级不炸，丢失容忍）。
+     * 沉淀在归档后 best-effort（取归档时最新版 PRD 入库；沉淀跟随归档成功——本
+     * 支付链与 {@link #retryArchive} 重试归档皆触发，收尾共用 {@link #settleArchive}；
+     * 内部降级不炸，丢失容忍）。
      *
      * @return 订单（归档成功 = 已归档终态；归档失败 = 已支付中间态，paidAt/
      *         paymentNo 已落、archivedAt 未落）
@@ -206,9 +207,40 @@ public class OrderAppService {
             log.warn("订单 {} 支付成功但归档失败（留已支付，补偿归后续批次）：{}",
                     orderId, e.getMessage());
         }
+        return settleArchive(orderId, projectId);
+    }
 
-        // 通知以库内真值为准（归档事务回滚不还原内存对象）：重读库定真——已归档才
-        // 发「已归档」并触发沉淀
+    /**
+     * 重试归档（#158 后台写口，经 BackofficeOrderController 进入）：对「已支付但
+     * 归档失败」的卡单手动补归档。归档事务与 {@link #pay} 的②同款（订单＋项目一
+     * 事务，守卫复用：非已支付 ORD_012、项目重复归档 PRJ_013），差异在失败处置
+     * ——无支付事实可保，异常原样上抛（运营须看见拦截原因，不留静默半成态；与
+     * pay 的 catch 留已支付有意不同）。成功收尾同款 {@link #settleArchive}：重读
+     * 库定真，已归档发「已归档」通知并触发知识沉淀（沉淀跟随归档成功——支付链
+     * 与本口皆触发）。操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
+     * 不做自动 Scheduled 补偿（隐藏状态机，v1 单量不值当）。
+     *
+     * @return 订单（已归档终态）
+     * @throws ApplicationException ORD_001 订单不存在；ORD_012 非已支付状态（聚合
+     *                              守卫，含重复触发）；PRJ_013 项目重复归档
+     */
+    public OrderResponse retryArchive(Long orderId, Operator operator) {
+        Order order = requireOrder(orderId);
+        Long projectId = order.getProjectId();
+        transactionTemplate.executeWithoutResult(status -> {
+            order.archiveByBackoffice(operator);
+            orderRepository.save(order);
+            projectLifecycleAppService.archive(projectId);
+        });
+        return settleArchive(orderId, projectId);
+    }
+
+    /**
+     * 归档收尾（#158 起支付链与重试归档共用）：重读库定真——归档事务回滚不还原
+     * 内存对象，通知与沉淀以库内真值为准（已归档才发「已归档」通知并触发知识
+     * 沉淀；沉淀 best-effort，降级不炸的既有口径不变）。
+     */
+    private OrderResponse settleArchive(Long orderId, Long projectId) {
         Order persisted = requireOrder(orderId);
         if (persisted.getStatus() == OrderStatus.ARCHIVED) {
             publishStatusChanged(persisted); // 归档落定发「已归档」

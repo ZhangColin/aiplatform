@@ -27,6 +27,9 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
  * @param quotedAt         首次报价时点（改价不刷新；待报价 NULL）
  * @param paidAt           支付成功时点（未支付 NULL）
  * @param archivedAt       归档时点（未归档 NULL）
+ * @param archiveOperatorId   重试归档操作者 id（#158，admin 侧管理员 TSID——
+ *                            支付链自动归档/缺透传头为 null）
+ * @param archiveOperatorName 重试归档操作者名（直读；口径同取消留痕两列）
  * @param cancelledAt      取消时点（未取消 NULL）
  * @param cancelReason       取消原因（#157 运营取消必填留痕，运营内部口径——
  *                           用户面读面不携带；用户取消/未取消为 null）
@@ -50,6 +53,8 @@ public record BackofficeOrderDetailResponse(
         LocalDateTime quotedAt,
         LocalDateTime paidAt,
         LocalDateTime archivedAt,
+        String archiveOperatorId,
+        String archiveOperatorName,
         LocalDateTime cancelledAt,
         String cancelReason,
         String cancelOperatorId,
@@ -77,6 +82,8 @@ public record BackofficeOrderDetailResponse(
                 order.getQuotedAt(),
                 order.getPaidAt(),
                 order.getArchivedAt(),
+                order.getArchiveOperatorId(),
+                order.getArchiveOperatorName(),
                 order.getCancelledAt(),
                 order.getCancelReason(),
                 order.getCancelOperatorId(),

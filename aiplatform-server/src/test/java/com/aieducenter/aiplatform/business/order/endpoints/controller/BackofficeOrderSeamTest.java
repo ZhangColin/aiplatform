@@ -15,24 +15,33 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.cartisan.core.context.RequestContext;
+import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
+import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
+import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
+import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -61,12 +70,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 成功（解冻回迭代）；待报价无头取消留原因落空操作者；已支付/已归档/已取消
  * 被 ORD_005 拦；缺/空白/超长原因被 ORD_013/014 拒。用户面读面不携带原因归
  * {@code OrderAppServiceTest} 钉死。</p>
+ *
+ * <p>#158 重试归档写口在本类一链钉死：支付链归档失败造卡单（已支付未归档、
+ * 无沉淀）→ 带操作者头签名重试归档 → 订单落已归档＋库列留痕 → 项目归档联动
+ * → 知识块落库（sinkPrd 补调生效，素材登记同落）→ 后台详情呈现留痕 → 再触发
+ * 被守卫拦（幂等、素材不重复）；待报价/已报价被 ORD_012 拦、联动不被触达。</p>
  */
 @BackofficeSeamTest
 class BackofficeOrderSeamTest {
 
     private static final long PROJECT_ID = 900100L;
     private static final String PRD = "# PRD\n\n需求背景：后台 seam。";
+
+    /** #158 卡单补偿链专用项目（沉淀断言面，与其他测试互不沾）。 */
+    private static final long STUCK_PROJECT_ID = 910701L;
+    /** #158 守卫负例专用项目（非已支付态触发被拦）。 */
+    private static final long GUARD_PROJECT_ID = 910702L;
 
     /** 操作者测试身份：admin 侧管理员的 TSID＋昵称样例（同契约测试口径）。 */
     private static final long OPERATOR_ID = 700100L;
@@ -89,10 +108,23 @@ class BackofficeOrderSeamTest {
     @MockitoBean
     private ProjectQueryAppService projectQueryAppService;
 
+    /** 跨 BC 唯一写交叉：项目归档联动（#158 卡单的造法＝支付链上让它抛错）。 */
+    @MockitoBean
+    private ProjectLifecycleAppService projectLifecycleAppService;
+
+    /** embedding 端口：mock 供给 512 维向量（沉淀入库的真向量面，本机 fastembed 不属测试依赖）。 */
+    @MockitoBean
+    private EmbeddingClient embeddingClient;
+
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM idn_accounts");
+        // 知识块/素材登记按项目清（#158 沉淀断言面；knw 表仅卡单补偿链写入）
+        jdbcTemplate.update("DELETE FROM knw_chunks WHERE project_id = ?",
+                Long.toString(STUCK_PROJECT_ID));
+        jdbcTemplate.update("DELETE FROM knw_materials WHERE project_id = ?",
+                Long.toString(STUCK_PROJECT_ID));
     }
 
     @Test
@@ -573,12 +605,127 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.total").value("101"));
     }
 
+    // ---------- #158：重试归档写口（支付链造卡单 → 签名重试 → 全链一链断言） ----------
+
+    @Test
+    void given_stuck_paid_order_when_signed_retry_archive_then_full_chain_completes()
+            throws Exception {
+        // 一链：已报价单支付（项目归档联动失败）→ 卡单（已支付未归档、无沉淀）→
+        // 带操作者头签名重试归档 → 订单落已归档＋库列留痕（JdbcTemplate）→ 项目
+        // 归档联动 → 知识块落库（sinkPrd 补调生效）→ 后台详情呈现留痕 → 再触发
+        // 被守卫拦（幂等，素材不重复）
+        OrderResponse order = placeOrder(STUCK_PROJECT_ID);
+        appService.submitQuote(Long.parseLong(order.id()), 128000L, "首版报价", null);
+        when(projectQueryAppService.namesOf(List.of(STUCK_PROJECT_ID)))
+                .thenReturn(Map.of(STUCK_PROJECT_ID, "卡单补偿项目")); // 沉淀取名面
+        stubEmbeddingOk();
+        when(projectLifecycleAppService.archive(anyLong()))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .thenReturn(null); // 首调（支付链）失败造卡单，次调（重试）恢复
+        appService.pay(Long.parseLong(order.id()));
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, archived_at FROM ord_orders WHERE id = ?",
+                Long.parseLong(order.id())))
+                .containsEntry("status", OrderStatus.PAID.getCode())
+                .containsEntry("archived_at", null); // 卡单事实：已支付、未归档
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(STUCK_PROJECT_ID))).isZero(); // 归档未成，沉淀未触
+
+        String retryPath = "/api/backoffice/orders/" + order.id() + "/retry-archive";
+        mockMvc.perform(BackofficeSignatures.signed(post(retryPath), retryPath, null)
+                        .header("X-User-Id", OPERATOR_ID_STR)
+                        .header("X-User-Name", OPERATOR_NAME))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(4))
+                .andExpect(jsonPath("$.data.archivedAt").isNotEmpty());
+
+        // 库内事实（JdbcTemplate 断言）：状态迁移＋归档时点＋操作者两列
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, archived_at, archive_operator_id, archive_operator_name "
+                        + "FROM ord_orders WHERE id = ?",
+                Long.parseLong(order.id()));
+        assertThat(row.get("status")).isEqualTo(OrderStatus.ARCHIVED.getCode());
+        assertThat(row.get("archived_at")).isNotNull();
+        assertThat(row.get("archive_operator_id")).isEqualTo(OPERATOR_ID_STR);
+        assertThat(row.get("archive_operator_name")).isEqualTo(OPERATOR_NAME);
+        // 项目归档联动两触：支付链一次（失败）＋重试一次（成功）
+        verify(projectLifecycleAppService, times(2)).archive(STUCK_PROJECT_ID);
+        // 知识块落库（sinkPrd 补调生效）：kind=PRD、幂等键=projectId；素材登记行同落
+        List<Map<String, Object>> chunks = jdbcTemplate.queryForList(
+                "SELECT kind, source_ref FROM knw_chunks WHERE project_id = ?",
+                Long.toString(STUCK_PROJECT_ID));
+        assertThat(chunks).isNotEmpty();
+        assertThat(chunks.get(0)).containsEntry("kind", "PRD")
+                .containsEntry("source_ref", Long.toString(STUCK_PROJECT_ID));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM knw_materials WHERE project_id = ?", Integer.class,
+                Long.toString(STUCK_PROJECT_ID))).isEqualTo(1);
+
+        // 后台详情呈现留痕（运营内部读面；用户面 OrderResponse 不含归档操作者字段）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id()),
+                        "/api/backoffice/orders/" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(4))
+                .andExpect(jsonPath("$.data.archiveOperatorId").value(OPERATOR_ID_STR))
+                .andExpect(jsonPath("$.data.archiveOperatorName").value(OPERATOR_NAME));
+
+        // 幂等（守卫保证）：再触发被 ORD_012 拦、素材不重复
+        mockMvc.perform(BackofficeSignatures.signed(post(retryPath), retryPath, null)
+                        .header("X-User-Id", OPERATOR_ID_STR)
+                        .header("X-User-Name", OPERATOR_NAME))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("订单非已支付状态，无法归档"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(STUCK_PROJECT_ID))).isEqualTo(chunks.size());
+    }
+
+    @Test
+    void given_pending_or_quoted_order_when_signed_retry_archive_then_409_ord012()
+            throws Exception {
+        // 非已支付态触发被守卫拦：项目归档联动未被触达、留痕不落半截（逐态独立项目）
+        long[] projectIds = {GUARD_PROJECT_ID, 910703L};
+        OrderStatus[] states = {OrderStatus.PENDING_QUOTE, OrderStatus.QUOTED};
+        for (int i = 0; i < states.length; i++) {
+            OrderResponse order = placeOrder(projectIds[i]);
+            if (states[i] == OrderStatus.QUOTED) {
+                appService.submitQuote(Long.parseLong(order.id()), 99000L, null, null);
+            }
+            String retryPath = "/api/backoffice/orders/" + order.id() + "/retry-archive";
+
+            mockMvc.perform(BackofficeSignatures.signed(post(retryPath), retryPath, null))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.message").value("订单非已支付状态，无法归档"));
+
+            assertThat(jdbcTemplate.queryForMap(
+                    "SELECT status, archive_operator_id FROM ord_orders WHERE id = ?",
+                    Long.parseLong(order.id())))
+                    .containsEntry("status", states[i].getCode()) // 状态不被破坏
+                    .containsEntry("archive_operator_id", null); // 留痕不落半截
+        }
+        verify(projectLifecycleAppService, never()).archive(anyLong());
+    }
+
     // -------- 夹具 --------
 
     /** 详情读面跨 BC 取项目名（软引用）：统一 stub，缺档为 null 也成立。 */
     private void stubProjectName() {
         when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))
                 .thenReturn(Map.of(PROJECT_ID, "seam 测试项目"));
+    }
+
+    /** embedding 正常供给：每块一个 512 维向量（同 {@code OrderPaymentArchiveTest} 形制）。 */
+    private void stubEmbeddingOk() {
+        when(embeddingClient.embed(anyList())).thenAnswer(invocation -> {
+            List<String> chunks = invocation.getArgument(0);
+            return chunks.stream().map(chunk -> {
+                float[] vector = new float[512];
+                vector[0] = chunk.hashCode() % 97 / 97f; // 确定性伪向量（仅入库，不验相似）
+                return vector;
+            }).toList();
+        });
     }
 
     /** 经真应用服务下单（真库写入、快照冻结），返回带 TSID 的订单回执 */

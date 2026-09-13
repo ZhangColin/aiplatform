@@ -38,7 +38,8 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，#157）、{@link #quote}
  * （报价/改价，已报价态重复调用 = 改价）、{@link #pay}（待支付 → 已支付，落
  * {@code paidAt}/{@code paymentNo}）与 {@link #archive}（已支付 → 已归档，落
- * {@code archivedAt}——归档为支付后的独立步骤，编排归应用层，#37/#39）；终态判定
+ * {@code archivedAt}——归档为支付后的独立步骤，编排归应用层，#37/#39；运营重试
+ * 归档 {@link #archiveByBackoffice} 同守卫带操作者留痕，#158）；终态判定
  * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用预检与
  * 库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一索引，
  * 聚合不做跨行查重。改价留痕在 {@link OrderPriceEntry}（append-only，
@@ -96,6 +97,14 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 归档时点（支付后独立归档步骤落定）。 */
     @Column(name = "archived_at")
     private LocalDateTime archivedAt;
+
+    /** 重试归档操作者 id（admin 侧管理员 TSID；支付链自动归档/缺透传头落 NULL，#158）。 */
+    @Column(name = "archive_operator_id", length = 64)
+    private String archiveOperatorId;
+
+    /** 重试归档操作者名（直读展示；口径同取消留痕两列，#158）。 */
+    @Column(name = "archive_operator_name", length = 200)
+    private String archiveOperatorName;
 
     /** 取消时点（未支付态取消即回迭代）。 */
     @Column(name = "cancelled_at")
@@ -261,6 +270,20 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         }
         this.status = OrderStatus.ARCHIVED;
         this.archivedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 运营重试归档（#158 后台写口）：状态语义与支付链自动归档完全一致——守卫
+     * 复用 {@link #archive}（仅已支付可达，ORD_012，不增设状态机回边），差异仅
+     * 在操作者落痕（谁补的卡单）。操作者两列口径同 {@link #cancelByBackoffice}
+     * （{@code null} = 无头落空）；支付链自动归档（{@link #archive}）两列恒 NULL。
+     *
+     * @param operator 操作者（缺头落空口径，{@code null} 落 NULL 两列）
+     */
+    public void archiveByBackoffice(Operator operator) {
+        archive(); // 守卫复用：非已支付 ORD_012，留痕不落半截
+        this.archiveOperatorId = operator == null ? null : operator.id();
+        this.archiveOperatorName = operator == null ? null : operator.name();
     }
 
     /**

@@ -44,12 +44,13 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
  * 排除会话拦截（机机调用无用户会话）。前端无任何后台操作入口，联调走
  * scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
- * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010、运营取消 ORD_005/013/014）。
+ * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010、运营取消 ORD_005/013/014、
+ * 重试归档 ORD_012——项目已归档 PRJ_013 为跨 BC 既有码透传）。
  */
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价 / 运营取消（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价 / 运营取消 / 重试归档（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -142,11 +143,24 @@ public class BackofficeOrderController {
                 command.reason(), currentOperator()));
     }
 
+    @PostMapping("/{id}/retry-archive")
+    @Operation(summary = "重试归档（已支付未归档的卡单补归档）",
+            description = "对支付成功但归档失败的卡单手动补完结：一事务内订单落已归档"
+                    + "＋项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD "
+                    + "入知识库，best-effort 不炸主流程）。幂等由既有守卫保证——"
+                    + "重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013"
+                    + "（不产生重复素材）。X-User-Id/X-User-Name 透传头自动落痕订单行"
+                    + "（缺头落空，#158；支付链自动归档操作者为空）。需要机机签名")
+    @ErrorCodes({"ORD_001", "ORD_012", "PRJ_013"})
+    public ApiResponse<OrderResponse> retryArchive(@PathVariable String id) {
+        return ApiResponse.ok(appService.retryArchive(OrderIds.parseOrder(id), currentOperator()));
+    }
+
     /**
      * 当前操作者（#155）：{@code X-User-Id}/{@code X-User-Name} 透传头经
      * RequestContext 读出落痕（admin 侧管理员标识，签名面明示信任、不校验真实
      * 性）；缺头/无上下文为 {@code null}——落空口径，价目行（#155）/订单取消
-     * 行（#157）操作者两列落 NULL。
+     * 行（#157）/订单归档行（#158）操作者两列落 NULL。
      * Id 两形转换在此一次完成（上下文 Long → 外域标识字符串，存储不混型）。
      */
     private static Operator currentOperator() {

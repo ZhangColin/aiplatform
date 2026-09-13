@@ -160,7 +160,10 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.priceEntries[1].operatorId").value(nullValue()))
                 .andExpect(jsonPath("$.data.priceEntries[1].operatorName").value(nullValue()))
                 .andExpect(jsonPath("$.data.prdSnapshot").value(PRD))
-                .andExpect(jsonPath("$.data.quotedAt").value("2026-09-01T10:00:00"));
+                .andExpect(jsonPath("$.data.quotedAt").value("2026-09-01T10:00:00"))
+                // #158 归档操作者：未归档/支付链自动归档为空（字段位与取消留痕对称）
+                .andExpect(jsonPath("$.data.archiveOperatorId").value(nullValue()))
+                .andExpect(jsonPath("$.data.archiveOperatorName").value(nullValue()));
     }
 
     @Test
@@ -219,6 +222,36 @@ class BackofficeOrderControllerTest {
 
         verify(appService).cancelByBackoffice(eq(900L), eq("用户改需求，终止报价流程"),
                 eq(new Operator(null, null)));
+    }
+
+    @Test
+    void given_signed_request_when_post_retry_archive_then_archived_response() throws Exception {
+        // #158 重试归档：无命令体（守卫即幂等），透传头操作者经 RequestContext 落空形
+        // （MVC 切片无绑定 → null）转交应用服务
+        when(appService.retryArchive(eq(900L), any(Operator.class)))
+                .thenReturn(archivedOrder());
+
+        mockMvc.perform(BackofficeSignatures.signed(post("/api/backoffice/orders/900/retry-archive"),
+                        "/api/backoffice/orders/900/retry-archive", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(4))
+                .andExpect(jsonPath("$.data.archivedAt").value("2026-09-01T13:00:00"));
+
+        verify(appService).retryArchive(eq(900L), eq(new Operator(null, null)));
+    }
+
+    @Test
+    void given_valid_signature_when_retry_archive_non_paid_order_then_409_ord012() throws Exception {
+        // 签名合法而业务被拒：聚合守卫 DomainException → 全局处理器 → 409 ORD_012
+        // （幂等由守卫保证：重复触发/非已支付态同拦）
+        when(appService.retryArchive(eq(900L), any(Operator.class)))
+                .thenThrow(new DomainException(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED));
+
+        mockMvc.perform(BackofficeSignatures.signed(post("/api/backoffice/orders/900/retry-archive"),
+                        "/api/backoffice/orders/900/retry-archive", null))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message")
+                        .value(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED.message()));
     }
 
     // ---------- 签名闸：反例（验收：无签名/错签被拒） ----------
@@ -301,7 +334,7 @@ class BackofficeOrderControllerTest {
                                 null, null, LocalDateTime.of(2026, 9, 1, 10, 0))),
                 PRD,
                 LocalDateTime.of(2026, 9, 1, 9, 0), LocalDateTime.of(2026, 9, 1, 10, 0),
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 
     private static OrderResponse quotedOrder() {
@@ -323,6 +356,16 @@ class BackofficeOrderControllerTest {
                         LocalDateTime.of(2026, 9, 1, 10, 0))),
                 LocalDateTime.of(2026, 9, 1, 9, 0), LocalDateTime.of(2026, 9, 1, 12, 0),
                 null, null);
+    }
+
+    /** #158 重试归档回执：用户面同构（归档操作者不进用户面响应形）。 */
+    private static OrderResponse archivedOrder() {
+        return new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
+                128000L, "CNY", "首版报价", LocalDateTime.of(2026, 9, 1, 10, 0),
+                List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
+                        LocalDateTime.of(2026, 9, 1, 10, 0))),
+                LocalDateTime.of(2026, 9, 1, 9, 0), null, LocalDateTime.of(2026, 9, 1, 11, 0),
+                LocalDateTime.of(2026, 9, 1, 13, 0));
     }
 
     /** MVC 切片不含 cartisan-web autoconfig，手动注册其全局异常处理器。 */

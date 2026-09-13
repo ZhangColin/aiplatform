@@ -22,6 +22,7 @@ import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -37,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,7 +50,9 @@ import static org.mockito.Mockito.when;
  * archivedAt 后落，通知序 待报价/已报价/已支付/已归档）；②归档失败面（项目归档
  * 抛 PRJ_013 → 订单留「已支付」、payment_no 已落、项目未归档、无「已归档」通知
  * ——「归档失败 ≠ 未支付」）；③知识沉淀降级面（embedding 故障 → 支付/归档照常、
- * 沉淀跳过不回滚）。
+ * 沉淀跳过不回滚）。#158 重试归档（卡单补偿）在此钉补偿语义：沉淀跟随归档成功
+ * （重试路径补调 sinkPrd）、守卫幂等（非已支付 ORD_012、项目重复归档 PRJ_013
+ * 原样上抛）、操作者留痕、失败不落半截。
  */
 @IntegrationTest
 class OrderPaymentArchiveTest {
@@ -103,9 +107,10 @@ class OrderPaymentArchiveTest {
 
     @AfterEach
     void tearDown() {
-        // ord_price_entries 随 FK 级联；知识块按项目清（沉淀断言面）
+        // ord_price_entries 随 FK 级联；知识块/素材登记按项目清（沉淀断言面，#158 起两表）
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM knw_chunks WHERE project_id = ?", Long.toString(PROJECT_ID));
+        jdbcTemplate.update("DELETE FROM knw_materials WHERE project_id = ?", Long.toString(PROJECT_ID));
     }
 
     @Test
@@ -116,14 +121,17 @@ class OrderPaymentArchiveTest {
         OrderResponse paid = appService.pay(Long.parseLong(orderId));
 
         // 订单事实（库内为准）：先已支付、后归档——paidAt 先落、archivedAt 后落、
-        // mock 流水号落值（分两步，非一跳）
+        // mock 流水号落值（分两步，非一跳）；支付链自动归档无人工触发，操作者两列空
         Map<String, Object> row = jdbcTemplate.queryForMap(
-                "SELECT status, paid_at, archived_at, payment_no FROM ord_orders WHERE id = ?",
+                "SELECT status, paid_at, archived_at, payment_no, archive_operator_id, "
+                        + "archive_operator_name FROM ord_orders WHERE id = ?",
                 Long.parseLong(orderId));
         assertThat(row.get("status")).isEqualTo(OrderStatus.ARCHIVED.getCode());
         assertThat(row.get("paid_at")).isNotNull();
         assertThat(row.get("archived_at")).isNotNull();
         assertThat((String) row.get("payment_no")).startsWith("MOCK-");
+        assertThat(row.get("archive_operator_id")).isNull(); // 自动归档无操作者（#158 对照面）
+        assertThat(row.get("archive_operator_name")).isNull();
         assertThat(paid.status()).isEqualTo(OrderStatus.ARCHIVED);
         assertThat(paid.paidAt()).isNotNull();
         assertThat(paid.archivedAt()).isNotNull();
@@ -247,6 +255,160 @@ class OrderPaymentArchiveTest {
     @Test
     void given_missing_order_when_pay_then_not_found() {
         assertThatThrownBy(() -> appService.pay(900999L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
+    }
+
+    // ---------- #158：重试归档——卡单补偿（沉淀跟随归档成功） ----------
+
+    @Test
+    void given_stuck_paid_order_when_retry_archive_then_archived_project_sunk_and_traced() {
+        // 一链：支付链归档失败造卡单（已支付未归档、无沉淀）→ 重试归档（带操作者）→
+        // 订单落已归档＋操作者留痕 → 项目归档联动 → 知识块落库（sinkPrd 补调生效）→
+        // 补发「已归档」通知
+        stubEmbeddingOk();
+        String orderId = quotedOrder();
+        when(projectLifecycleAppService.archive(anyLong()))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .thenReturn(null); // 首调（支付链）失败留卡单，次调（重试）恢复
+        appService.pay(Long.parseLong(orderId));
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, archived_at FROM ord_orders WHERE id = ?", Long.parseLong(orderId)))
+                .containsEntry("status", OrderStatus.PAID.getCode())
+                .containsEntry("archived_at", null); // 卡单事实：已支付、未归档
+
+        OrderResponse archived = appService.retryArchive(Long.parseLong(orderId),
+                new Operator("700100", "运营·小刘"));
+
+        assertThat(archived.status()).isEqualTo(OrderStatus.ARCHIVED);
+        assertThat(archived.archivedAt()).isNotNull();
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT status, archived_at, archive_operator_id, archive_operator_name "
+                        + "FROM ord_orders WHERE id = ?",
+                Long.parseLong(orderId));
+        assertThat(row.get("status")).isEqualTo(OrderStatus.ARCHIVED.getCode());
+        assertThat(row.get("archived_at")).isNotNull();
+        assertThat(row.get("archive_operator_id")).isEqualTo("700100");
+        assertThat(row.get("archive_operator_name")).isEqualTo("运营·小刘");
+        // 项目归档联动两触：支付链一次（失败）＋重试一次（成功）
+        verify(projectLifecycleAppService, times(2)).archive(PROJECT_ID);
+        // 知识块落库（sinkPrd 补调生效）：kind=PRD、幂等键=projectId，素材登记行同落
+        List<Map<String, Object>> chunks = jdbcTemplate.queryForList(
+                "SELECT kind, source_ref FROM knw_chunks WHERE project_id = ?",
+                Long.toString(PROJECT_ID));
+        assertThat(chunks).isNotEmpty();
+        assertThat(chunks.get(0)).containsEntry("kind", "PRD")
+                .containsEntry("source_ref", Long.toString(PROJECT_ID));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_materials WHERE project_id = ?", Integer.class,
+                Long.toString(PROJECT_ID))).isEqualTo(1);
+        // 通知口径：支付链三发（无「已归档」）＋重试补发「已归档」——补偿闭环
+        assertThat(publishedStatuses()).containsExactly(
+                OrderStatus.PENDING_QUOTE.getCode(),
+                OrderStatus.QUOTED.getCode(),
+                OrderStatus.PAID.getCode(),
+                OrderStatus.ARCHIVED.getCode());
+    }
+
+    @Test
+    void given_non_paid_order_when_retry_archive_then_rejected_without_side_effects() {
+        // 守卫幂等（幂等由守卫保证）：待报价/已报价/已归档/已取消均非已支付，逐态钉死；
+        // 归档联动不被触达、留痕不落半截
+        for (OrderStatus status : List.of(OrderStatus.PENDING_QUOTE, OrderStatus.QUOTED,
+                OrderStatus.ARCHIVED, OrderStatus.CANCELLED)) {
+            String orderId = appService.place(PROJECT_ID).id();
+            jdbcTemplate.update("UPDATE ord_orders SET status = ? WHERE id = ?",
+                    status.getCode(), Long.parseLong(orderId));
+
+            assertThatThrownBy(() -> appService.retryArchive(Long.parseLong(orderId),
+                    new Operator("700100", "运营·小刘")))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED.message());
+            assertThat(jdbcTemplate.queryForMap(
+                    "SELECT status, archive_operator_id FROM ord_orders WHERE id = ?",
+                    Long.parseLong(orderId)))
+                    .containsEntry("status", status.getCode()) // 状态不被破坏
+                    .containsEntry("archive_operator_id", null); // 留痕不落半截
+            verify(projectLifecycleAppService, never()).archive(anyLong());
+            jdbcTemplate.update("DELETE FROM ord_orders"); // 清场再验下一态
+        }
+    }
+
+    @Test
+    void given_project_already_archived_when_retry_archive_then_propagated_and_no_material() {
+        // 项目重复归档被既有错误码拦截（PRJ_013）：无支付事实可保，异常原样上抛——
+        // 运营须看见拦截原因，不留静默半成态；订单留已支付、无沉淀
+        stubEmbeddingOk();
+        String orderId = quotedOrder();
+        when(projectLifecycleAppService.archive(anyLong()))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
+        appService.pay(Long.parseLong(orderId)); // 卡单
+
+        assertThatThrownBy(() -> appService.retryArchive(Long.parseLong(orderId),
+                new Operator("700100", "运营·小刘")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+
+        assertThat(jdbcTemplate.queryForMap(
+                "SELECT status, archived_at, archive_operator_id FROM ord_orders WHERE id = ?",
+                Long.parseLong(orderId)))
+                .containsEntry("status", OrderStatus.PAID.getCode())
+                .containsEntry("archived_at", null)
+                .containsEntry("archive_operator_id", null); // 归档事务回滚，订单整行不动
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(PROJECT_ID))).isZero();
+    }
+
+    @Test
+    void given_embedding_down_when_retry_archive_then_archive_succeeds_and_sink_degrades() {
+        // 沉淀降级面（既有口径不变）：embedding 故障 → 重试归档照常完结、沉淀跳过不炸
+        String orderId = quotedOrder();
+        when(projectLifecycleAppService.archive(anyLong()))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .thenReturn(null);
+        appService.pay(Long.parseLong(orderId)); // 卡单
+        when(embeddingClient.embed(anyList())).thenThrow(new IllegalStateException("fastembed down"));
+
+        OrderResponse archived = appService.retryArchive(Long.parseLong(orderId),
+                new Operator("700100", "运营·小刘"));
+
+        assertThat(archived.status()).isEqualTo(OrderStatus.ARCHIVED); // 主流程不受拖累
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ord_orders WHERE id = ?", Integer.class,
+                Long.parseLong(orderId))).isEqualTo(OrderStatus.ARCHIVED.getCode());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(PROJECT_ID))).isZero(); // 沉淀跳过（丢失容忍）
+    }
+
+    @Test
+    void given_retried_order_when_retry_archive_again_then_rejected_and_materials_unchanged() {
+        // 重复触发（误触/双击竞态的后到者）：守卫拦 ORD_012，不产生重复素材
+        stubEmbeddingOk();
+        String orderId = quotedOrder();
+        when(projectLifecycleAppService.archive(anyLong()))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .thenReturn(null);
+        appService.pay(Long.parseLong(orderId)); // 卡单
+        appService.retryArchive(Long.parseLong(orderId), new Operator("700100", "运营·小刘"));
+        int chunkCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(PROJECT_ID));
+
+        assertThatThrownBy(() -> appService.retryArchive(Long.parseLong(orderId),
+                new Operator("700100", "运营·小刘")))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED.message());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_chunks WHERE project_id = ?", Integer.class,
+                Long.toString(PROJECT_ID))).isEqualTo(chunkCount); // 素材不重复
+    }
+
+    @Test
+    void given_missing_order_when_retry_archive_then_not_found() {
+        assertThatThrownBy(() -> appService.retryArchive(900999L, null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
     }

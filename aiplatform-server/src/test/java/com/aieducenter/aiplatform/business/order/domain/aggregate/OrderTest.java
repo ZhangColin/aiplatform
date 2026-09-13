@@ -17,8 +17,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 订单聚合状态机（#37/#39 支付原子化）：{@link Order#pay}（待支付 → 已支付，落
  * paidAt/paymentNo）与 {@link Order#archive}（已支付 → 已归档，落 archivedAt）的
  * 转移与守卫——「已支付」为真实落库中间态，归档是支付后的独立步骤。运营取消
- * （{@link Order#cancelByBackoffice}，#157）在此钉守卫与留痕：状态守卫复用
- * {@link Order#cancel}（ORD_005），差异仅在必填原因（ORD_013/014）＋操作者两列。
+ * （{@link Order#cancelByBackoffice}，#157）与运营重试归档
+ * （{@link Order#archiveByBackoffice}，#158）在此钉守卫与留痕：状态守卫各复用
+ * {@link Order#cancel}（ORD_005）/ {@link Order#archive}（ORD_012），差异仅在
+ * 必填原因（取消，ORD_013/014）＋操作者两列（支付链自动归档/用户取消恒空）。
  */
 class OrderTest {
 
@@ -119,6 +121,54 @@ class OrderTest {
         assertThatThrownBy(() -> pendingQuoteOrder().cancelByBackoffice(overlong, null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(OrderMessage.ORDER_CANCEL_REASON_TOO_LONG.message());
+    }
+
+    // ---------- #158：运营重试归档——操作者落痕（守卫与支付链自动归档同构） ----------
+
+    @Test
+    void given_paid_order_when_archive_by_backoffice_then_archived_with_trace() {
+        Order order = paidOrder();
+
+        order.archiveByBackoffice(new Operator("700100", "运营·小刘"));
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.ARCHIVED);
+        assertThat(order.getArchivedAt()).isNotNull();
+        assertThat(order.getArchiveOperatorId()).isEqualTo("700100");
+        assertThat(order.getArchiveOperatorName()).isEqualTo("运营·小刘");
+    }
+
+    @Test
+    void given_paid_order_when_payment_chain_archive_then_operator_columns_stay_null() {
+        // 支付链自动归档走 archive()（无人工触发）：留痕两列恒空——落空口径结构性保证
+        Order order = paidOrder();
+
+        order.archive();
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.ARCHIVED);
+        assertThat(order.getArchiveOperatorId()).isNull();
+        assertThat(order.getArchiveOperatorName()).isNull();
+    }
+
+    @Test
+    void given_non_paid_order_when_archive_by_backoffice_then_rejected() {
+        // 守卫与支付链自动归档同一处（archive()）：非已支付一律 ORD_012，留痕不落半截
+        for (Order order : List.of(pendingQuoteOrder(), quotedOrder(), archivedOrder(), cancelledOrder())) {
+            assertThatThrownBy(() -> order.archiveByBackoffice(new Operator("700100", "运营·小刘")))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_ARCHIVE_NOT_ALLOWED.message());
+            assertThat(order.getArchiveOperatorId()).isNull();
+        }
+    }
+
+    @Test
+    void given_missing_operator_headers_when_archive_by_backoffice_then_null_trace() {
+        Order order = paidOrder();
+
+        order.archiveByBackoffice(null); // 缺透传头 → 落空口径
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.ARCHIVED);
+        assertThat(order.getArchiveOperatorId()).isNull();
+        assertThat(order.getArchiveOperatorName()).isNull();
     }
 
     // ---------- #155：报价操作者随价目行落痕（append-only 追加序不变） ----------

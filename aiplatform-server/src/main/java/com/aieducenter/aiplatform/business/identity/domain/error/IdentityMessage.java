@@ -7,7 +7,8 @@ import com.cartisan.core.exception.CodeMessage;
  *
  * <p>认证流程错误（换 token / 验签失败）不直接以 REST 错误暴露——callback 统一
  * 302 回 {@code /?error=exchange_failed}，具体原因（本枚举 code）只进日志（照
- * identity demo 姿态，不漏内部细节给前端）。</p>
+ * identity demo 姿态，不漏内部细节给前端）。例外：后台查询读口（IDN_004）REST
+ * 直出，属机机签名面契约的一部分。</p>
  */
 public enum IdentityMessage implements CodeMessage {
 
@@ -15,7 +16,9 @@ public enum IdentityMessage implements CodeMessage {
 
     ID_TOKEN_REJECTED(401, "IDN_002", "id_token 校验未通过（验签 / iss / aud / exp / nonce）"),
 
-    TOKEN_EXCHANGE_FAILED(502, "IDN_003", "identity 令牌端点调用失败");
+    TOKEN_EXCHANGE_FAILED(502, "IDN_003", "identity 令牌端点调用失败"),
+
+    ACCOUNT_NOT_FOUND(404, "IDN_004", "账号不存在");
 
     private final int httpStatus;
     private final String code;

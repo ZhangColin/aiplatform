@@ -34,15 +34,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * #160 单价表管理写口在 {@code #152} seam 上全绿：真过滤链（签名闸/会话豁免/
+ * 单价表管理写口在 {@code #152} seam 上全绿：真过滤链（签名闸/会话豁免/
  * 强制拦截器）＋真应用服务＋aiplatform_test 真库。单价夹具用独立 provider
- * {@code backoffice-prov}——与启动种子行（deepseek 现役模型）不撞，种子行不在
- * 本类断言面内。
+ * {@code backoffice-prov}，与启动种子无关（种子已随 #165 退役——初始化走
+ * 幂等签名脚本，本类断言面不受其影响）。
  *
- * <p>#160 三操作＋校验＋留痕在本类一链钉死：</p>
+ * <p>#160 三操作＋#165 开行＋校验＋留痕在本类一链钉死：</p>
  * <ul>
  * <li><b>行清单</b>：含现行与历史行、provider/model 过滤、生效起点倒序、
  * 分页与非法分页值 METER_009；</li>
+ * <li><b>开行</b>（#165 种子脚本通道）：空键首行可开、effectiveFrom 可回溯
+ * （种子敞口 2026-01-01 覆盖存量事件）；重叠校验同改价口径；</li>
  * <li><b>原子改价</b>：关行＋开新行同事务落库（JdbcTemplate）——重叠/守卫负例
  * 下两行都不动；未来生效起点经聚合口径验证（窗口前旧价、窗口后新价）；
  * 操作者两列落新行（无头落空）；</li>
@@ -170,6 +172,138 @@ class BackofficePriceEntrySeamTest {
                         "/api/backoffice/price-entries?provider=" + PROVIDER + "&page=abc", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("无效的单价行过滤参数"));
+    }
+
+    // ---------- 开行（#165：空键首行——种子脚本通道） ----------
+
+    @Test
+    void given_no_row_for_key_when_signed_open_with_operator_then_row_persisted()
+            throws Exception {
+        // 空键首行：写口唯一化到管理 API 后唯一的初始插入通道（种子脚本经此开行）。
+        // effectiveFrom 可回溯——种子口径 2026-01-01 敞口覆盖存量事件
+        String body = "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-o1\",\"tokenKind\":1,"
+                + "\"unitPrice\":0.00000132,\"currency\":\"USD\","
+                + "\"effectiveFrom\":\"2026-01-01T00:00:00Z\"}";
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(body),
+                        "/api/backoffice/price-entries", body)
+                        .header("X-User-Id", OPERATOR_ID)
+                        .header("X-User-Name", OPERATOR_NAME))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.provider").value(PROVIDER))
+                .andExpect(jsonPath("$.data.model").value("m-o1"))
+                .andExpect(jsonPath("$.data.tokenKind").value(1))
+                .andExpect(jsonPath("$.data.unitPrice").value("0.00000132"))
+                .andExpect(jsonPath("$.data.currency").value("USD"))
+                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-01-01T00:00:00Z"))
+                .andExpect(jsonPath("$.data.effectiveTo").value(nullValue()))
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID))
+                .andExpect(jsonPath("$.data.operatorName").value(OPERATOR_NAME));
+
+        // 库内事实（JdbcTemplate）：敞口行落库、操作者两列落值
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT unit_price, effective_from, effective_to, operator_id, operator_name "
+                        + "FROM met_price_entries WHERE provider = ? AND model = ?",
+                PROVIDER, "m-o1");
+        assertThat((BigDecimal) row.get("unit_price"))
+                .isEqualByComparingTo(new BigDecimal("0.00000132"));
+        assertThat(((Timestamp) row.get("effective_from")).toInstant())
+                .isEqualTo(Instant.parse("2026-01-01T00:00:00Z"));
+        assertThat(row.get("effective_to")).isNull();
+        assertThat(row.get("operator_id")).isEqualTo(OPERATOR_ID);
+        assertThat(row.get("operator_name")).isEqualTo(OPERATOR_NAME);
+    }
+
+    @Test
+    void given_open_without_operator_headers_then_operator_null() throws Exception {
+        // 无头落空口径（同改价）：种子脚本不传操作者头 → 种入行操作者两列 NULL
+        String body = "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-o2\",\"tokenKind\":3,"
+                + "\"unitPrice\":0.000000014,\"currency\":\"USD\"}"; // 无 effectiveFrom＝即时
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(body),
+                        "/api/backoffice/price-entries", body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.effectiveFrom").isNotEmpty())
+                .andExpect(jsonPath("$.data.operatorId").value(nullValue()));
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT effective_from, operator_id, operator_name FROM met_price_entries "
+                        + "WHERE provider = ? AND model = ?",
+                PROVIDER, "m-o2");
+        assertThat(((Timestamp) row.get("effective_from")).toInstant())
+                .isBetween(Instant.now().minusSeconds(60), Instant.now().plusSeconds(60));
+        assertThat(row.get("operator_id")).isNull();
+        assertThat(row.get("operator_name")).isNull();
+    }
+
+    @Test
+    void given_existing_rows_when_open_then_overlap_guarded_and_boundary_allowed()
+            throws Exception {
+        // 同起点：F＝既有行起点 → 409 METER_008，不落行
+        plantOpenRow("m-o3", T0, "0.000001");
+        String sameStart = openBody("m-o3", 1, "0.000002", "2026-07-01T00:00:00Z");
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(sameStart),
+                        "/api/backoffice/price-entries", sameStart))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("同匹配键生效区间重叠（跨区间或同起点）"));
+        assertThat(rowCountOfKey("m-o3")).isEqualTo(1);
+
+        // 跨区间：F 落既有敞口区间内 → 409，不落行
+        String crossOverlap = openBody("m-o3", 1, "0.000002", "2026-09-01T00:00:00Z");
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(crossOverlap),
+                        "/api/backoffice/price-entries", crossOverlap))
+                .andExpect(status().isConflict());
+        assertThat(rowCountOfKey("m-o3")).isEqualTo(1);
+
+        // 边界：关停后自停用边界点重开（[T0,T2) 关行后开 [T2,∞)）→ 合法，无缝无叠
+        plantClosedRow("m-o4", T0, T2, "0.000001");
+        String resume = openBody("m-o4", 1, "0.000002", "2026-08-01T00:00:00Z");
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(resume),
+                        "/api/backoffice/price-entries", resume))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-08-01T00:00:00Z"));
+        assertThat(rowCountOfKey("m-o4")).isEqualTo(2);
+
+        // 反向越界：F 早于既有已关行终点 → 409（与 [T0,T2) 相交）
+        String backtrack = openBody("m-o4", 1, "0.000003", "2026-07-15T00:00:00Z");
+        mockMvc.perform(BackofficeSignatures.signed(
+                        post("/api/backoffice/price-entries")
+                                .contentType(MediaType.APPLICATION_JSON).content(backtrack),
+                        "/api/backoffice/price-entries", backtrack))
+                .andExpect(status().isConflict());
+        assertThat(rowCountOfKey("m-o4")).isEqualTo(2);
+    }
+
+    @Test
+    void given_invalid_open_input_then_400() throws Exception {
+        // 字段不完整／负单价／非 ISO 币种：400 METER_004 / METER_010（聚合守卫）；
+        // 非法 tokenKind code：绑定失败 400。全部不落行
+        for (String body : new String[] {
+                "{}",
+                "{\"provider\":\"" + PROVIDER + "\"}", // 缺 model/档位/单价/币种
+                "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-g2\",\"tokenKind\":1,"
+                        + "\"unitPrice\":-0.000001,\"currency\":\"USD\"}",
+                "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-g2\",\"tokenKind\":1,"
+                        + "\"unitPrice\":0.000001,\"currency\":\"MONOPOLY\"}",
+                "{\"provider\":\"" + PROVIDER + "\",\"model\":\"m-g2\",\"tokenKind\":99,"
+                        + "\"unitPrice\":0.000001,\"currency\":\"USD\"}"}) {
+            mockMvc.perform(BackofficeSignatures.signed(
+                            post("/api/backoffice/price-entries")
+                                    .contentType(MediaType.APPLICATION_JSON).content(body),
+                            "/api/backoffice/price-entries", body))
+                    .andExpect(status().isBadRequest());
+        }
+        assertThat(rowCountOfKey("m-g2")).isEqualTo(0);
     }
 
     // ---------- 原子改价：happy path＋留痕＋落空 ----------
@@ -472,6 +606,13 @@ class BackofficePriceEntrySeamTest {
     private PriceEntry plantOpenRow(String model, Instant from, String unitPrice) {
         return priceEntryRepository.save(PriceEntry.open(PROVIDER, model, TokenKind.INPUT,
                 new BigDecimal(unitPrice), "USD", from, null));
+    }
+
+    /** 开行请求体（provider 固定夹具值）。 */
+    private String openBody(String model, int tokenKind, String unitPrice, String effectiveFrom) {
+        return "{\"provider\":\"" + PROVIDER + "\",\"model\":\"" + model + "\",\"tokenKind\":"
+                + tokenKind + ",\"unitPrice\":" + unitPrice + ",\"currency\":\"USD\","
+                + "\"effectiveFrom\":\"" + effectiveFrom + "\"}";
     }
 
     /** 库植已关行（历史行形制）：[from, to)。 */

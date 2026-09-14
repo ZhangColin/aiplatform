@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 成本不漂移）；缺价分量 null（unpriced 标注，不伪装 0、不阻断查询）；币种分桶
  * 不相加。经端口全链路（sink → 落库 → 原生 SQL 换算），事件与单价行走真实库。
  *
- * <p>单价/事件 fixture 用独立 provider {@code testprov}——与启动种子行（deepseek
- * 现役模型）不撞，种子行不在本类断言面内（种子验收见 {@code PriceEntrySeederTest}）。</p>
+ * <p>单价/事件 fixture 用独立 provider {@code testprov}，与他类测试互不沾
+ * （启动种子已随 #165 退役，单价行一律测试自持夹具供给）。</p>
  */
 @IntegrationTest
 class MeteringCostAggregationTest {

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# #29 后台机机面联调脚本：模拟后台报价/改价走 /api/backoffice/* 四端点
-# （cartisan-openapi 五头 HMAC：X-Api-Key/X-Timestamp/X-Nonce/X-Body-Digest/
-# X-Sign）。前端无任何后台操作入口——后台动作一律经本脚本（#13 spec 口径）。
+# #29 后台机机面联调脚本：模拟后台报价/改价走 /api/backoffice/* 四端点。
+# 前端无任何后台操作入口——后台动作一律经签名脚本（#13 spec 口径）。
 #
 # 用法：
 #   ./scripts/backoffice-quote.sh list [status] [page] [size]
@@ -17,95 +16,12 @@
 #   ./scripts/backoffice-quote.sh reject-demo
 #       拒签演示：无签名 / 错签 / 过期时间戳 → 逐一 401
 #
-# 凭据：BACKOFFICE_API_KEY / BACKOFFICE_API_SECRET 环境变量（或仓库根 .env.local，
-# 不进仓库）。key 缺省 admin-console（app-registry 启动 seed 的预置应用）；secret
-# 未提供时从本机 app-registry bootstrap 端点现取（网络边界即信任边界，本机依赖
-# 启动见 docs/guide/本机依赖启动.md）。
+# 签名/凭据/展示公共件在 backoffice-signed-http.sh（与单价种子脚本共用一套
+# 签名实现，防双份漂移）。
 # ============================================================================
 set -euo pipefail
 
-BACKEND="${AIPLATFORM_BACKEND:-http://localhost:8888}"
-APP_REGISTRY="${APP_REGISTRY:-http://localhost:8088}"
-API_KEY="${BACKOFFICE_API_KEY:-admin-console}"
-
-if [[ -z "${BACKOFFICE_API_SECRET:-}" ]] && [[ -f .env.local ]]; then
-  set -a; source .env.local; set +a
-fi
-
-step() { printf '\n==> %s\n' "$*"; }
-
-# ---------------------------------------------------------------------------
-# 签名（python3：SHA-256 body 摘要 + HMAC-SHA256，stringToSign 与
-# SignatureVerificationFilter 同构——键名字典序 k=v&…，query 参数计入）。
-# 参数：secret pathWithQuery bodyFile timestampOverride
-# 输出：五行 "Header: value"
-# ---------------------------------------------------------------------------
-sign_headers() {
-  local secret="$1" path_with_query="$2" body_file="${3:-}" ts_override="${4:-}"
-  python3 - "$API_KEY" "$secret" "$path_with_query" "$body_file" "$ts_override" <<'PY'
-import hashlib, hmac, sys, time, uuid
-
-api_key, secret, path_with_query, body_file, ts_override = sys.argv[1:6]
-ts = int(ts_override or time.time())
-nonce = uuid.uuid4().hex
-body = open(body_file, "rb").read() if body_file else b""
-digest = hashlib.sha256(body).hexdigest()
-
-params = {"apiKey": api_key, "bodyDigest": digest, "nonce": nonce, "timestamp": str(ts)}
-q = path_with_query.find("?")
-if q >= 0:
-    for pair in path_with_query[q + 1:].split("&"):
-        kv = pair.split("=", 2)
-        if len(kv) == 2:
-            params[kv[0]] = kv[1]
-string_to_sign = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-sign = hmac.new(secret.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
-for k, v in [("X-Api-Key", api_key), ("X-Timestamp", str(ts)), ("X-Nonce", nonce),
-             ("X-Body-Digest", digest), ("X-Sign", sign)]:
-    print(f"{k}: {v}")
-PY
-}
-
-# 调用四端点之一。参数：method pathWithQuery bodyFile [secretOverride tsOverride]
-# 头参数经 set -- 组装为位置参数（bash 3.2 无空数组展开，positional 即可；引号
-# 由 "$@" 整体保留）。
-signed_call() {
-  local method="$1" path_with_query="$2" body_file="${3:-}" \
-        secret="${4:-$BACKOFFICE_API_SECRET}" ts_override="${5:-}"
-  local headers line
-  headers=$(sign_headers "$secret" "$path_with_query" "$body_file" "$ts_override")
-
-  set --
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && set -- "$@" -H "$line"
-  done <<< "$headers"
-
-  if [[ -n "$body_file" ]]; then
-    set -- "$@" --data-binary "@$body_file" -H "Content-Type: application/json"
-  fi
-
-  curl -sS -w '\n%{http_code}' -X "$method" "$@" "$BACKEND$path_with_query"
-}
-
-show_response() {
-  # body\nstatus → 分离展示（状态非 2xx 时高亮）
-  local resp="$1"
-  local status="${resp##*$'\n'}"
-  local body="${resp%$'\n'*}"
-  printf '%s\n' "$body" | python3 -m json.tool 2>/dev/null || printf '%s\n' "$body"
-  printf 'HTTP %s\n' "$status"
-  [[ "$status" == 2* ]]
-}
-
-resolve_secret() {
-  if [[ -n "${BACKOFFICE_API_SECRET:-}" ]]; then
-    return
-  fi
-  step "未设 BACKOFFICE_API_SECRET，从本机 app-registry bootstrap 端点现取（key=${API_KEY}）"
-  BACKOFFICE_API_SECRET=$(curl -sS "$APP_REGISTRY/api/app-registry/api-keys/${API_KEY}" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["data"]["apiSecret"])')
-  : "${BACKOFFICE_API_SECRET:?取不到 apiSecret（app-registry 未启动？或显式设 BACKOFFICE_API_SECRET）}"
-}
+source "$(dirname "$0")/backoffice-signed-http.sh"
 
 require_order_id() {
   [[ "${1:-}" =~ ^[0-9]+$ ]] || { echo "用法：$0 $2 <orderId>（TSID 十进制数字）" >&2; exit 2; }

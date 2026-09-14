@@ -21,6 +21,7 @@ import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.metering.application.BackofficePriceEntryAppService;
+import com.aieducenter.aiplatform.base.metering.application.dto.command.OpenPriceEntryCommand;
 import com.aieducenter.aiplatform.base.metering.application.dto.command.RepricePriceEntryCommand;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPriceEntryRepriceResponse;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPriceEntryResponse;
@@ -28,16 +29,18 @@ import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
 
 /**
- * 后台单价表 REST 面（#160 成本运营，机机签名）：单价表＝平台成本换算用单价
- * 数据（模型 × token 档位 × 币种 × 生效区间）。cartisan-openapi 五头 HMAC，类级
- * {@code @RequireSignature} 强制闸；该前缀经 WebMvcConfig 排除会话拦截。错误码
- * 前缀 METER_（行不存在 METER_006、非当前行 METER_007、区间重叠 METER_008、
- * 过滤参数 METER_009、字段/币种 METER_004/010、关行时点 METER_005）。
+ * 后台单价表 REST 面（#160 成本运营＋#165 写口唯一化，机机签名）：单价表＝平台
+ * 成本换算用单价数据（模型 × token 档位 × 币种 × 生效区间）。cartisan-openapi
+ * 五头 HMAC，类级 {@code @RequireSignature} 强制闸；该前缀经 WebMvcConfig 排除
+ * 会话拦截。错误码前缀 METER_（行不存在 METER_006、非当前行 METER_007、区间
+ * 重叠 METER_008、过滤参数 METER_009、字段/币种 METER_004/010、关行时点
+ * METER_005）。启动 Seeder 已随 #165 退役——单价表写路径全部收在本面（初始化
+ * 经开行端点＋幂等签名脚本）。
  */
 @RestController
 @RequestMapping("/api/backoffice/price-entries")
 @RequireSignature
-@Tag(name = "Backoffice Price Entries", description = "后台单价表：行清单 / 原子改价 / 停用（机机签名）")
+@Tag(name = "Backoffice Price Entries", description = "后台单价表：行清单 / 开行 / 原子改价 / 停用（机机签名）")
 public class BackofficePriceEntryController {
 
     private final BackofficePriceEntryAppService appService;
@@ -52,7 +55,7 @@ public class BackofficePriceEntryController {
                     + "（新段在前，同起点 id 倒序稳定）。provider/model 均为匹配键成分＝"
                     + "精确等值过滤、均可缺省（缺省＝全量行）；effectiveTo 为 null 即"
                     + "当前行。行带操作者两列（该行最近管理动作——开行或停用；存量行/"
-                    + "种子行/无头落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。"
+                    + "无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。"
                     + "过滤参数绑定失败（非法分页值）400 METER_009。"
                     + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"METER_009"})
@@ -62,6 +65,24 @@ public class BackofficePriceEntryController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(appService.entries(provider, model, page, size));
+    }
+
+    @PostMapping
+    @Operation(summary = "开行（空键首行——种子脚本通道）",
+            description = "对指定匹配键（provider × model × tokenKind）新开一行敞口"
+                    + "区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子"
+                    + "数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行"
+                    + "即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口"
+                    + "覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补"
+                    + "同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer"
+                    + " code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning）。"
+                    + "X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本"
+                    + "即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217"
+                    + " 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。"
+                    + "需要机机签名")
+    @ErrorCodes({"METER_004", "METER_008", "METER_010"})
+    public ApiResponse<UnitPriceEntryResponse> open(@RequestBody OpenPriceEntryCommand command) {
+        return ApiResponse.ok(appService.open(command, currentOperator()));
     }
 
     @PostMapping("/{id}/reprice")

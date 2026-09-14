@@ -30,12 +30,13 @@ import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
  * 匹配列只插入不写，唯 {@code effectiveTo} 可落（关行）；事件按 ts 落
  * {@code [effectiveFrom, effectiveTo)} 区间匹配单价，历史成本不漂移。生效区间
  * 不得重叠——唯一约束只防同起点，重叠校验在管理写口服务端补（#160，已知维护
- * 事故口）。v1 维护入口 = 后台管理 API（#160）+ 启动种子（{@code
- * PriceEntrySeeder}，退役挂 #165）。</p>
+ * 事故口）。维护入口唯一＝后台管理 API（#160 改价/停用＋#165 开行；启动种子
+ * 已随 #165 退役，初始化经幂等签名脚本走开行端点）。</p>
  *
  * <p><b>操作者两列（#160）</b>＝该行最近一次管理动作的操作者：开行者随行落
  * （改价动作的操作者落在所开新行，被关旧行保留原开行者）；停用动作的操作者
- * 落在被关行（停用不接新行，被关行是唯一落点）。存量行与种子行为 null。</p>
+ * 落在被关行（停用不接新行，被关行是唯一落点）。存量行与无头请求（含种子
+ * 脚本种入行）为 null。</p>
  */
 @Entity
 @Table(name = "met_price_entries")

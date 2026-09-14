@@ -23,7 +23,7 @@ import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
  * @param currency       币种（ISO 4217）
  * @param effectiveFrom  生效起点（含）
  * @param effectiveTo    生效终点（不含；null = 当前行）
- * @param operatorId     操作者标识（该行最近管理动作——开行或停用；存量行/种子行/无头为 null）
+ * @param operatorId     操作者标识（该行最近管理动作——开行或停用；存量行/无头请求——含种子脚本种入行——为 null）
  * @param operatorName   操作者昵称（直读展示；同上落空口径）
  */
 public record UnitPriceEntryResponse(

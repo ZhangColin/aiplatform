@@ -15,20 +15,24 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
 import com.cartisan.web.response.PageResponse;
 
+import com.aieducenter.aiplatform.base.metering.application.dto.command.OpenPriceEntryCommand;
 import com.aieducenter.aiplatform.base.metering.application.dto.command.RepricePriceEntryCommand;
 import com.aieducenter.aiplatform.base.metering.application.dto.query.BackofficePriceEntryQuery;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPriceEntryRepriceResponse;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPriceEntryResponse;
 import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
+import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
 import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepository;
 import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
- * 后台单价表管理写口（#160 成本运营）：行清单读（含历史行）＋原子改价（单调用
- * 关当前行＋开新行，可预发布未来起点）＋停用（即时关行不接新行，此后用量进
- * unpriced）。
+ * 后台单价表管理写口（#160 成本运营＋#165 写口唯一化）：行清单读（含历史行）＋
+ * 开行（空键首行，种子脚本通道）＋原子改价（单调用关当前行＋开新行，可预发布
+ * 未来起点）＋停用（即时关行不接新行，此后用量进 unpriced）。单价表全部写路径
+ * 收敛于本服务——启动 Seeder 已随 #165 退役（启动零写），初始化走幂等签名脚本
+ * 经开行端点种入。
  *
  * <p><b>重叠校验</b>（已知维护事故口封口）：表上唯一约束只防同起点、不防跨区间
  * 重叠——换算 SQL 按 ts 区间匹配，重叠行会重复计费。本服务在同键全行上服务端
@@ -71,6 +75,29 @@ public class BackofficePriceEntryAppService {
     }
 
     /**
+     * 开行（空键首行，#165 种子脚本通道）：对指定匹配键新开一行敞口区间。字段
+     * 合法性由聚合守卫先行裁决（METER_004/METER_010），再过同键区间重叠校验
+     * （改价同款口径，METER_008）。{@code effectiveFrom} 可回溯（种子敞口
+     * 2026-01-01 覆盖存量事件）、可未来（预发布），缺省即时；操作者随行落
+     * （种子脚本不传操作者头 → 落空，同存量行口径）。
+     *
+     * @throws ApplicationException METER_004 字段不完整/单价负数；METER_010 币种
+     *                              非 ISO 4217；METER_008 生效区间重叠
+     */
+    @Transactional
+    public UnitPriceEntryResponse open(OpenPriceEntryCommand command, Operator operator) {
+        Instant effectiveFrom = command.effectiveFrom() == null
+                ? Instant.now() : command.effectiveFrom();
+        PriceEntry opened = PriceEntry.open(command.provider(), command.model(),
+                command.tokenKind(), command.unitPrice(), command.currency(), effectiveFrom,
+                operator);
+        assertIntervalFree(command.provider(), command.model(), command.tokenKind(),
+                effectiveFrom, null);
+        priceEntryRepository.save(opened);
+        return UnitPriceEntryResponse.of(opened);
+    }
+
+    /**
      * 原子改价（单调用关当前行＋开新行，同事务）：新行沿用被关行匹配键，单价/
      * 币种取命令；{@code effectiveFrom} 可指定（含未来＝预发布，对齐供应商凌晨
      * 调价），缺省即时。中途任一守卫失败两行都不动（事务回滚）。
@@ -87,7 +114,8 @@ public class BackofficePriceEntryAppService {
         Instant effectiveFrom = command.effectiveFrom() == null
                 ? Instant.now() : command.effectiveFrom();
 
-        assertIntervalFree(current, effectiveFrom);
+        assertIntervalFree(current.getProvider(), current.getModel(), current.getTokenKind(),
+                effectiveFrom, current.getId());
 
         current.close(effectiveFrom); // METER_005 起点倒挂 / METER_007 非当前行
         PriceEntry opened = PriceEntry.open(current.getProvider(), current.getModel(),
@@ -121,17 +149,19 @@ public class BackofficePriceEntryAppService {
 
     /**
      * 同键区间校验：拟开区间 {@code [F, ∞)} 与既有行两查——同起点（含被关行
-     * 自身：关行不改写起点，直插撞唯一约束）与跨区间重叠（除被关行外，任一行
-     * 敞口或终点晚于 F 即重叠——半开区间 [a, b) 与 [F, ∞) 相交当且仅当 F &lt; b）。
+     * 自身：关行不改写起点，直插撞唯一约束）与跨区间重叠（除改价被关行外，任一
+     * 行敞口或终点晚于 F 即重叠——半开区间 [a, b) 与 [F, ∞) 相交当且仅当
+     * {@code F < b}）。{@code excludedId} 为改价被关行（开行传 null＝全行计入）。
      */
-    private void assertIntervalFree(PriceEntry closing, Instant effectiveFrom) {
+    private void assertIntervalFree(String provider, String model, TokenKind tokenKind,
+                                    Instant effectiveFrom, Long excludedId) {
         List<PriceEntry> rows = priceEntryRepository.findByProviderAndModelAndTokenKindOrderByEffectiveFromAsc(
-                closing.getProvider(), closing.getModel(), closing.getTokenKind());
+                provider, model, tokenKind);
         for (PriceEntry row : rows) {
             if (effectiveFrom.equals(row.getEffectiveFrom())) {
                 throw new ApplicationException(MeteringMessage.PRICE_ENTRY_INTERVAL_OVERLAPPED);
             }
-            if (!row.getId().equals(closing.getId())
+            if (!row.getId().equals(excludedId)
                     && (row.getEffectiveTo() == null || effectiveFrom.isBefore(row.getEffectiveTo()))) {
                 throw new ApplicationException(MeteringMessage.PRICE_ENTRY_INTERVAL_OVERLAPPED);
             }

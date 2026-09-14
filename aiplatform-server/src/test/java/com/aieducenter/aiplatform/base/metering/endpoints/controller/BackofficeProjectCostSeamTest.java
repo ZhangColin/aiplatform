@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * #164 平台成本读面②在 {@code #152} seam 上全绿：真过滤链（签名闸/会话豁免/
  * 强制拦截器）＋真应用服务＋aiplatform_test 真库。单价夹具用独立 provider
- * {@code backoffice-projcost}（与启动种子行、他类测试互不沾）；清单是全局聚合，
+ * {@code backoffice-projcost}（与他类测试互不沾）；清单是全局聚合，
  * met_usage_events 全表前后各清一次（同 BackofficeCostSeamTest 形制）。
  *
  * <p>#164 验收口径逐条钉死：</p>
@@ -56,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @BackofficeSeamTest
 class BackofficeProjectCostSeamTest {
 
-    /** 夹具 provider：与种子行、他类测试互不沾。 */
+    /** 夹具 provider：与他类测试互不沾。 */
     private static final String PROVIDER = "backoffice-projcost";
 
     /** 夹具时间锚：T0…T4 逐日，窗口边界以这些整点切。 */
@@ -88,7 +88,7 @@ class BackofficeProjectCostSeamTest {
     @AfterEach
     void cleanFixtures() {
         // 清单是全局聚合（断言面是全表和数）：事件表前后全清；单价行只清本类
-        // provider（种子行不动）；项目夹具全清（本类自建，跨域咬合用）
+        // provider（他类测试的单价夹具不动）；项目夹具全清（本类自建，跨域咬合用）
         jdbcTemplate.update("DELETE FROM met_usage_events");
         jdbcTemplate.update("DELETE FROM met_price_entries WHERE provider = ?", PROVIDER);
         jdbcTemplate.update("DELETE FROM prj_projects");

@@ -29,8 +29,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * #161 平台成本读面①在 {@code #152} seam 上全绿：真过滤链（签名闸/会话豁免/
  * 强制拦截器）＋真应用服务＋aiplatform_test 真库。单价夹具用独立 provider
- * {@code backoffice-cost}——与启动种子行（deepseek 现役模型）不撞，种子行不在
- * 本类断言面内。
+ * {@code backoffice-cost}，与他类测试互不沾（启动种子已随 #165 退役，单价行
+ * 一律测试自持夹具供给）。
  *
  * <p>总览/unpriced 是<b>全局聚合</b>（无 subject 过滤），本类对 met_usage_events
  * 全表清理（先例：MeteringCostAggregationTest teardown 同款）——任何残留事件
@@ -49,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @BackofficeSeamTest
 class BackofficeCostSeamTest {
 
-    /** 夹具 provider/subjects：与种子行、他类测试互不沾。 */
+    /** 夹具 provider/subjects：与他类测试互不沾。 */
     private static final String PROVIDER = "backoffice-cost";
     private static final String SUBJ_A = "cost-subj-a";
     private static final String SUBJ_B = "cost-subj-b";
@@ -77,7 +77,7 @@ class BackofficeCostSeamTest {
     @AfterEach
     void cleanUsageEvents() {
         // 全局聚合的断言面是全表和数：事件表前后全清（单价行只清本类 provider，
-        // 启动种子行不动——他类测试在断言）
+        // 他类测试的单价夹具不动）
         jdbcTemplate.update("DELETE FROM met_usage_events");
         jdbcTemplate.update("DELETE FROM met_price_entries WHERE provider = ?", PROVIDER);
     }

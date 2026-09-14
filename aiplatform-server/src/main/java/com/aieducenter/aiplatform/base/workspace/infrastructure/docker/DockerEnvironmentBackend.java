@@ -22,6 +22,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.stereotype.Adapter;
 import com.cartisan.core.stereotype.PortType;
 
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -197,11 +198,50 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     @Override
     public boolean isContainerRunning(WorkspaceHandle handle) {
-        // 实态探查（#170 触发判据）：inspect 非 0 = 不存在；State.Running=false = 停止/
-        // 被杀。探查异常不抛——视同不在，由唤醒编排幂等重建收敛（意图/实态分离，ADR-0016）。
+        // 实态探查（#170 触发判据）收敛到 containerState 的同一 inspect：只有
+        // RUNNING 才 true——不存在、停止、被杀、探查失败一律 false（唤醒编排幂等
+        // 重建收敛，意图/实态分离 ADR-0016）。
+        return containerState(handle) == ContainerState.RUNNING;
+    }
+
+    @Override
+    public ContainerState containerState(WorkspaceHandle handle) {
+        // 实态一瞥（#173 观测面）：inspect 非 0 时按 stderr 区分「容器不在」
+        // （No such object，真实 docker 的对象缺失回执）与探查失败（daemon 不可达
+        // 等 → UNKNOWN）——观测面如实分示。只读探查，不抛。
         ExecResult inspected = runCapture("docker", "inspect",
                 "-f", "{{.State.Running}}", handle.containerName());
-        return inspected.exitCode() == 0 && "true".equals(inspected.stdout().trim());
+        if (inspected.exitCode() == 0) {
+            return "true".equals(inspected.stdout().trim())
+                    ? ContainerState.RUNNING : ContainerState.STOPPED;
+        }
+        return inspected.stderr().contains("No such object")
+                ? ContainerState.ABSENT : ContainerState.UNKNOWN;
+    }
+
+    @Override
+    public Long volumeSizeBytes(WorkspaceHandle handle) {
+        // 卷用量（#173）：先确认卷在（docker run -v 对缺失卷会自动创建——只读
+        // 探查不能有 resurrect 副作用），再旁路容器 du 全卷（--entrypoint du，
+        // 同 packVolume 的旁路形制，卷静默直读）。du -sb 字节直读；任何失败
+        // （卷不在/du 失败/解析不出）一律 null：观测容缺不抛。
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            return null;
+        }
+        ExecResult sized = runCapture("docker", "run", "--rm",
+                "--entrypoint", "du",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE, "-sb", WorkspaceLayout.ROOT);
+        if (sized.exitCode() != 0) {
+            return null;
+        }
+        try {
+            // du 输出形如「2064384\t/workspace」——首个空白分隔字段即字节总数
+            return Long.parseLong(sized.stdout().trim().split("\\s+")[0]);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

@@ -29,7 +29,10 @@ public enum WorkspaceMessage implements CodeMessage {
     PREVIEW_NOT_SERVING(503, "WSP_012", "预览应用尚未就绪"),
 
     /** #170 唤醒待期：沙箱置备/唤醒/应用拉起进行中（系统启动中）——非终态口径。 */
-    WORKSPACE_STARTING(503, "WSP_013", "系统启动中");
+    WORKSPACE_STARTING(503, "WSP_013", "系统启动中"),
+
+    /** #173 后台观测面：清单过滤参数绑定失败（非法期望态/实态 code、分页值）。 */
+    WORKSPACE_FILTER_INVALID(400, "WSP_014", "无效的工作区过滤参数");
 
     private final int httpStatus;
     private final String code;

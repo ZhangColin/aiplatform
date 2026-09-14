@@ -6,6 +6,7 @@ import java.util.Collection;
 import com.cartisan.core.stereotype.Port;
 import com.cartisan.core.stereotype.PortType;
 
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
@@ -24,7 +25,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
  * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
  * 用完即销毁）。#170 唤醒底座补两条：isContainerRunning（容器实态探查——唤醒
- * 触发判据）/ startApp（8081 应用拉起——平台职责）。#171 休眠器补一条：
+ * 触发判据）/ startApp（8081 应用拉起——平台职责）。#173 观测面补两条：
+ * containerState（实态一瞥）/ volumeSizeBytes（卷用量）。#171 休眠器补一条：
  * hibernate（删容器保卷——唤醒走既有幂等重建）。#172 封存与深度唤醒补三条：
  * packVolume（卷瘦身快照打包）/ restoreVolume（封存包回卷）/ deleteVolume
  * （封存后删卷）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
@@ -66,6 +68,23 @@ public interface EnvironmentBackend {
      * 幂等重建收敛）。
      */
     boolean isContainerRunning(WorkspaceHandle handle);
+
+    /**
+     * 容器实态一瞥（#173 观测面）：运行中/已停止/无容器/探查失败（未知）——比
+     * {@link #isContainerRunning} 细一档：后者服务唤醒判定（失败视同不在的收敛
+     * 口径），本方法服务人看（如实分示——探查失败与容器不在区分，docker 宕不
+     * 伪装成全员漂移）。只读探查，不抛。
+     */
+    ContainerState containerState(WorkspaceHandle handle);
+
+    /**
+     * 卷用量探查（#173 观测面，字节）：旁路容器 du 全卷——含可重建缓存（存储
+     * 大头），与封存包口径（{@link #packVolume} 排缓存）有意不同：运营要看的是
+     * 实际占用。卷不在（封存已删/外部漂移）与探查失败一律返回 null（观测容缺，
+     * 不抛）。先确认卷在再起旁路容器（{@code docker run -v} 对缺失卷会自动创建
+     * ——只读探查不能有 resurrect 副作用）。
+     */
+    Long volumeSizeBytes(WorkspaceHandle handle);
 
     /**
      * 休眠（#171，ADR-0016 删容器保卷）：删掉沙箱容器、完整保留卷（数据不动）——

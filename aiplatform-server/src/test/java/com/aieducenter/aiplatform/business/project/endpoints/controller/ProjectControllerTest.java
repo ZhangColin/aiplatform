@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -25,7 +24,6 @@ import com.cartisan.core.exception.DomainException;
 import com.cartisan.web.config.BaseEnumConverter;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
-import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
@@ -409,9 +407,6 @@ class ProjectControllerTest {
     void given_usage_when_get_then_aggregations_returned() throws Exception {
         TokenUsage tokens = new TokenUsage(100, 200, 30, 0, 0);
         when(queryAppService.usage(100L)).thenReturn(new ProjectUsageResponse("100", tokens,
-                Map.of("USD", new BigDecimal("0.003")),
-                List.of(new ProjectUsageResponse.UnpricedUsage("testprov", "m-none",
-                        TokenKind.INPUT, TokenKind.INPUT.getName())),
                 List.of(new ProjectUsageResponse.ModelUsage("deepseek", "deepseek-v4-pro",
                         tokens)),
                 List.of(new ProjectUsageResponse.AgentKindUsage("executor", "run 执行体",
@@ -421,11 +416,9 @@ class ProjectControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.projectId").value("100"))
                 .andExpect(jsonPath("$.data.total.input").value(100))
-                // 平台成本：币种分桶（键 = 币种码）
-                .andExpect(jsonPath("$.data.cost.USD").value(0.003))
-                // 未配价标注：档位 Integer code + 名称随附
-                .andExpect(jsonPath("$.data.unpriced[0].tokenKind").value(1))
-                .andExpect(jsonPath("$.data.unpriced[0].tokenKindName").value("输入"))
+                // 平台成本归运营口径（#167）：用户面响应不再含 cost/unpriced 字段
+                .andExpect(jsonPath("$.data.cost").doesNotExist())
+                .andExpect(jsonPath("$.data.unpriced").doesNotExist())
                 .andExpect(jsonPath("$.data.byModel[0].model").value("deepseek-v4-pro"))
                 .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("executor"))
                 .andExpect(jsonPath("$.data.byAgentKind[0].agentKindLabel").value("run 执行体"));

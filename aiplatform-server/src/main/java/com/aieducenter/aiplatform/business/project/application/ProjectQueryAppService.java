@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.application;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -111,20 +110,15 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 项目用量：经计量查询端口按 subject=projectId 聚合——总量 + 平台成本
-     * （币种分桶 + 未配价标注）+ 分模型 + 分智能体（dims.agentKind 过滤，写侧
-     * {@link UsageDims} 同键）。
+     * 项目用量：经计量查询端口按 subject=projectId 聚合——总量 + 分模型 +
+     * 分智能体（dims.agentKind 过滤，写侧 {@link UsageDims} 同键）。
+     * 平台成本不进用户面（#167 收口：成本归运营口径，后台成本读面已就位）。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
     public ProjectUsageResponse usage(Long projectId) {
         loadProject(projectId);
         UsageSummary summary = usageQueryPort.bySubject(Long.toString(projectId), null, null);
-        Map<String, BigDecimal> cost = summary.costByCurrencyCode();
-        List<ProjectUsageResponse.UnpricedUsage> unpriced = summary.unpriced().stream()
-                .map(usage -> new ProjectUsageResponse.UnpricedUsage(usage.provider(),
-                        usage.model(), usage.tokenKind(), usage.tokenKind().getName()))
-                .toList();
         List<ProjectUsageResponse.ModelUsage> byModel = summary.byModel().stream()
                 .map(model -> new ProjectUsageResponse.ModelUsage(
                         model.provider(), model.model(), model.tokens()))
@@ -135,8 +129,8 @@ public class ProjectQueryAppService {
                         AgentProfile.byKey(dim.dimValue()).map(AgentProfile::getName).orElse(null),
                         dim.tokens()))
                 .toList();
-        return new ProjectUsageResponse(Long.toString(projectId), summary.total(), cost,
-                unpriced, byModel, byAgentKind);
+        return new ProjectUsageResponse(Long.toString(projectId), summary.total(),
+                byModel, byAgentKind);
     }
 
     /**

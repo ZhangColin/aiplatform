@@ -1,43 +1,28 @@
 package com.aieducenter.aiplatform.business.project.application.dto.response;
 
-import java.math.BigDecimal;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
-import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 
 /**
- * 项目用量响应：总量 + 平台成本 + 分模型 + 分智能体聚合。
+ * 项目用量响应：总量 + 分模型 + 分智能体聚合。
  *
- * <p><b>平台成本口径</b>（零商业概念）：{@code cost} = token 用量 × 事件时点生效
- * 单价的机械乘法，按币种分桶不折算（键 = ISO 4217 币种码），无加价/售价；
- * {@code unpriced} = 有 token 用量但事件时点无生效单价的 (provider, model, 档位)——
- * 其分量不进 cost（不伪装 0），前端据此示「未配价」。</p>
+ * <p>平台成本不进用户面（#167 收口：成本归运营口径）——计量域聚合仍含
+ * cost/unpriced，由后台成本读面（BackofficeCost / BackofficeProject）承接。</p>
  *
  * @param projectId   项目标识（subject）
  * @param total       总量（五档分列）
- * @param cost        平台成本（币种分桶；全未配价/无事件时为空 Map）
- * @param unpriced    未配价标注（cost 不含这些分量）
  * @param byModel     分模型聚合（provider + model 为单价表匹配键）
  * @param byAgentKind 分智能体聚合（dims.agentKind 维度；智能体种类为稳定键 + 展示名）
  */
 public record ProjectUsageResponse(
         String projectId,
         TokenUsage total,
-        Map<String, BigDecimal> cost,
-        List<UnpricedUsage> unpriced,
         List<ModelUsage> byModel,
         List<AgentKindUsage> byAgentKind
 ) {
 
     public ProjectUsageResponse {
-        // 保序拷贝：cost 键序 = 服务层排定的币种码序（API 输出确定性）
-        cost = cost == null ? Map.of()
-                : Collections.unmodifiableMap(new LinkedHashMap<>(cost));
-        unpriced = unpriced == null ? List.of() : List.copyOf(unpriced);
         byModel = byModel == null ? List.of() : List.copyOf(byModel);
         byAgentKind = byAgentKind == null ? List.of() : List.copyOf(byAgentKind);
     }
@@ -53,12 +38,5 @@ public record ProjectUsageResponse(
      * 非主链角色的用途标记（如 naming）agentKindLabel 为 null）。
      */
     public record AgentKindUsage(String agentKind, String agentKindLabel, TokenUsage tokens) {
-    }
-
-    /**
-     * 未配价标注项（tokenKind 为 Integer code + tokenKindName 随附，#34 收敛房规）。
-     */
-    public record UnpricedUsage(String provider, String model, TokenKind tokenKind,
-                                String tokenKindName) {
     }
 }

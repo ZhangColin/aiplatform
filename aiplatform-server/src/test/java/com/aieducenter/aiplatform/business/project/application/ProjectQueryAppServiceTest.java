@@ -51,7 +51,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 项目读侧：详情与列表的派生状态（归档 > 进行中）+ 状态过滤（active/archived）；
- * usage = 总量 + 平台成本（币种分桶 + 未配价标注）+ 分模型 + 分角色；PRD 直读
+ * usage = 总量 + 分模型 + 分角色（平台成本归运营口径不进用户面）；PRD 直读
  * 工作区（文件是事实源）。
  */
 @IntegrationTest
@@ -254,9 +254,10 @@ class ProjectQueryAppServiceTest {
     // ---------- usage ----------
 
     @Test
-    void given_usage_events_when_usage_then_total_cost_unpriced_by_model_by_agent_kind() {
+    void given_usage_events_when_usage_then_total_by_model_by_agent_kind() {
         Long projectId = persistedProject(8201L, "用量项目").getId();
         TokenUsage tokens = new TokenUsage(100, 200, 30, 0, 0);
+        // 端口聚合仍含 cost/unpriced（运营面消费）——用户面映射应丢弃不炸（#167）
         when(meteringAppService.bySubject(eq(projectId.toString()), any(), any()))
                 .thenReturn(new UsageSummary(projectId.toString(), null, null, tokens,
                         Map.of(Currency.getInstance("USD"), new BigDecimal("0.003"),
@@ -276,14 +277,6 @@ class ProjectQueryAppServiceTest {
 
         assertThat(response.projectId()).isEqualTo(projectId.toString());
         assertThat(response.total()).isEqualTo(tokens); // 总量
-        // 平台成本：Currency → 币种码字符串键，按键序稳定（CNY < USD）
-        assertThat(response.cost().keySet()).containsExactly("CNY", "USD");
-        assertThat(response.cost().get("USD")).isEqualByComparingTo(new BigDecimal("0.003"));
-        assertThat(response.cost().get("CNY")).isEqualByComparingTo(new BigDecimal("1.5"));
-        // 未配价标注：档位枚举 + 展示名随附
-        assertThat(response.unpriced()).containsExactly(
-                new ProjectUsageResponse.UnpricedUsage("testprov", "m-none",
-                        TokenKind.INPUT, "输入"));
         assertThat(response.byModel()).hasSize(1); // 分模型
         assertThat(response.byModel().get(0).model()).isEqualTo("deepseek-v4-pro");
         // 分智能体 = dims.agentKind 维度（主链配置带展示名，辅助标记/naming label 为
@@ -306,8 +299,6 @@ class ProjectQueryAppServiceTest {
         ProjectUsageResponse response = appService.usage(projectId);
 
         assertThat(response.total().input()).isZero(); // 无事件全零而非错误（端口契约）
-        assertThat(response.cost()).isEmpty();
-        assertThat(response.unpriced()).isEmpty();
         assertThat(response.byModel()).isEmpty();
         assertThat(response.byAgentKind()).isEmpty();
     }

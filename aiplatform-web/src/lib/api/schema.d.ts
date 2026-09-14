@@ -442,8 +442,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目用量（总量 + 平台成本 + 分模型 + 分智能体）
-         * @description 经计量查询端口按 subject=projectId 聚合。cost 为平台成本口径（token × 事件时点生效单价的机械乘法，币种分桶不折算，无加价/售价）；unpriced 标注有用量但未配单价的档位（其分量不含于 cost，不伪装 0）；byAgentKind 按 dims.agentKind 聚合
+         * 项目用量（总量 + 分模型 + 分智能体）
+         * @description 经计量查询端口按 subject=projectId 聚合，byAgentKind 按 dims.agentKind 聚合。平台成本不进用户面（成本归运营口径，读面在后台成本端点）
          */
         get: operations["usage"];
         put?: never;
@@ -1025,10 +1025,6 @@ export interface components {
         ProjectUsageResponse: {
             projectId?: string;
             total?: components["schemas"]["TokenUsage"];
-            cost?: {
-                [key: string]: number;
-            };
-            unpriced?: components["schemas"]["UnpricedUsage"][];
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
         };
@@ -1043,13 +1039,6 @@ export interface components {
             cacheWrite?: number;
             /** Format: int64 */
             reasoning?: number;
-        };
-        UnpricedUsage: {
-            provider?: string;
-            model?: string;
-            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理 */
-            tokenKind?: number;
-            tokenKindName?: string;
         };
         ApiResponseProjectPreviewResponse: {
             /** Format: int32 */

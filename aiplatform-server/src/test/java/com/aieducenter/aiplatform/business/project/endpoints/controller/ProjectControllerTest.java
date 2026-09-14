@@ -205,7 +205,7 @@ class ProjectControllerTest {
 
         performAsUser(get("/api/projects/404"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
     }
 
@@ -252,7 +252,7 @@ class ProjectControllerTest {
 
         performAsUser(get("/api/projects/404/conversation"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
     }
 
@@ -284,7 +284,7 @@ class ProjectControllerTest {
 
         performAsUser(post("/api/projects/100/archive"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4013))
                 .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
     }
 
@@ -309,7 +309,7 @@ class ProjectControllerTest {
 
         performAsUser(post("/api/projects/100/generate"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4017))
                 .andExpect(jsonPath("$.message").value("系统已生成或正在生成中，请勿重复发起"));
     }
 
@@ -321,7 +321,7 @@ class ProjectControllerTest {
 
         performAsUser(post("/api/projects/100/generate"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4018))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD，系统会随后自动生成"));
     }
 
@@ -347,7 +347,7 @@ class ProjectControllerTest {
 
         performAsUser(post("/api/projects/100/fix-runs/restart"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4026))
                 .andExpect(jsonPath("$.message").value("没有可恢复的修正，请在对话区重新提意见"));
     }
 
@@ -387,7 +387,7 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\" \"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.code").value(4005))
                 .andExpect(jsonPath("$.message").value("项目名不能为空白"));
     }
 
@@ -469,7 +469,7 @@ class ProjectControllerTest {
 
         performAsUser(get("/api/projects/100/prd"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4015))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
     }
 
@@ -588,7 +588,7 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"再改改\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4013))
                 .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
     }
 
@@ -604,7 +604,7 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"测试：请继续\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4024))
                 .andExpect(jsonPath("$.message").value("当前有问题待答复，请对问答卡作答后再发送新消息"));
     }
 
@@ -662,7 +662,7 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"runId\":\"run-42\",\"approved\":false}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4027))
                 .andExpect(jsonPath("$.message").value(
                         ProjectMessage.PERMISSION_ANSWER_STALE.message()));
     }

@@ -24,7 +24,9 @@ export function usePrd(projectId: string | undefined) {
       api
         .get<PrdResponse>(`/projects/${projectId}/prd`, { signal })
         .catch((error: unknown) => {
-          if (error instanceof ApiError && error.code === "PRJ_015") return null;
+          // PRJ_015 数字业务码（4015＝域码 PRJ=4×1000＋序号，ErrorCodePrefix）：信封
+          // code 是数字（#169），旧字符串比对是死分支、未产出曾误炸面板。
+          if (error instanceof ApiError && error.code === 4015) return null;
           throw error;
         }),
     enabled: projectId !== undefined,

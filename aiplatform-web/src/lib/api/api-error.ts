@@ -7,8 +7,12 @@ export type FieldError = {
 
 /** 信封 / 错误共有的元字段（ADR 0002）。 */
 export type ApiEnvelopeMeta = {
-  /** 后端业务错误码，如 PRJ_001。 */
-  code?: string;
+  /**
+   * 信封 code：数字业务码＝域码×1000＋序号（WSP_012→1012、PRJ_015→4015，正本
+   * aiplatform-server ErrorCodePrefix，#169）。与 HTTP 状态独立——判定认业务码，
+   * 勿拿 status 当业务语义（auth 等非业务码面仍是 httpStatus 数字）。
+   */
+  code?: number;
   /** 后端中文 message，可直接 toast（sonner 全局出口）。 */
   message?: string;
   errors?: FieldError[];
@@ -24,7 +28,7 @@ export type ApiErrorInit = ApiEnvelopeMeta & {
 /** 后端错误统一形态：薄 client 在非 2xx 时抛出，业务层只 catch 这一种。ADR 0002。 */
 export class ApiError extends Error {
   readonly status: number;
-  readonly code?: string;
+  readonly code?: number;
   readonly errors?: FieldError[];
   readonly requestId?: string;
 

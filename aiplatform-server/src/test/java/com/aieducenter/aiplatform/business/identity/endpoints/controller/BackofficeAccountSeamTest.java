@@ -73,7 +73,7 @@ class BackofficeAccountSeamTest {
                         get("/api/backoffice/accounts/sub-nonexistent"),
                         "/api/backoffice/accounts/sub-nonexistent", null))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(6004))
                 .andExpect(jsonPath("$.message").value("账号不存在"))
                 .andExpect(jsonPath("$.data").value(nullValue())); // 不返回半空档案
     }

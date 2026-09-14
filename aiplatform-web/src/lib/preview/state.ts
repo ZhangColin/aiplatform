@@ -21,8 +21,11 @@ export const UPDATING_NOTICE = "正在更新系统，完成后自动刷新";
 /** 预览真故障（非未就绪）的打不开口径（#80）。 */
 export const TROUBLE_NOTICE = "预览暂时打不开，稍后会自动重试";
 
-/** 后端「预览应用尚未就绪」错误码（WSP_012，503——轮询继续，非故障）。 */
-const PREVIEW_NOT_SERVING_CODE = "WSP_012";
+/**
+ * 后端「预览应用尚未就绪」的数字业务码（WSP_012 → 1012＝域码 WSP=1×1000＋序号，
+ * 见 aiplatform-server ErrorCodePrefix）：HTTP 503 只是状态，判定认业务码。
+ */
+const PREVIEW_NOT_SERVING_CODE = 1012;
 
 /** 页面/占位上的进行中轻提示（一套：进行中 / 重试 / 失败）。 */
 export type PanelNotice = {
@@ -68,7 +71,10 @@ export function workHintOf(parts: readonly WorkPart[]): string | undefined {
   return action;
 }
 
-/** 预览查询 error 是否「应用尚未就绪」（WSP_012——视同待期，轮询继续）。 */
+/**
+ * 预览查询 error 是否「应用尚未就绪」（WSP_012→1012——视同待期，轮询继续）。
+ * 判定只认数字业务码、不认 HTTP 状态（503 是传输层事实，语义归业务码）。
+ */
 export function isPreviewNotServing(error: unknown): boolean {
   return error instanceof ApiError && error.code === PREVIEW_NOT_SERVING_CODE;
 }

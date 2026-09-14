@@ -110,7 +110,7 @@ class WorkspaceControllerTest {
         performAsUser(get("/api/workspaces/404"))
                 .andExpect(status().isNotFound())
                 // 统一信封：code = HTTP 语义状态，message = 错误文案（WSP_001 前缀在 WorkspaceMessage 注册）
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(1001))
                 .andExpect(jsonPath("$.message").value("工作区不存在"));
     }
 
@@ -134,7 +134,7 @@ class WorkspaceControllerTest {
 
         performAsUser(post("/api/workspaces/100/retry"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.code").value(1009))
                 .andExpect(jsonPath("$.message").value("工作区置备状态不合法"));
     }
 

@@ -12,7 +12,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.config.WebMvcConfig;
+import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -54,6 +56,11 @@ class WebBaselineTest {
         public ApiResponse<String> ok() {
             return ApiResponse.ok("hello");
         }
+
+        @GetMapping("/test/baseline/business-error")
+        public ApiResponse<String> businessError() {
+            throw new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING);
+        }
     }
 
     @Test
@@ -93,6 +100,18 @@ class WebBaselineTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("Success"))
                 .andExpect(jsonPath("$.data").value("hello"));
+    }
+
+    @Test
+    void given_business_error_when_thrown_then_envelope_carries_numeric_business_code() throws Exception {
+        // #169（2026-09-14 预览误报事故回归）：ApplicationException 的信封 code 必须是
+        // 数字业务码（WSP_012→1012）而非 httpStatus——前端以此区分「待期」与「真故障」。
+        // 若退回 httpStatus 装码（cartisan 默认），此处 code 变 503，前端判定链路即断。
+        mockMvc.perform(get("/test/baseline/business-error"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(1012))
+                .andExpect(jsonPath("$.message").value("预览应用尚未就绪"))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     @Test

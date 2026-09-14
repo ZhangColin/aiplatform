@@ -96,7 +96,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(get("/api/projects/-1/versions"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4001))
                 .andExpect(jsonPath("$.message").value("项目不存在"));
     }
 
@@ -107,7 +107,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(get("/api/projects/100/versions/beefbeef"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4028))
                 .andExpect(jsonPath("$.message").value("版本不存在"));
     }
 
@@ -136,7 +136,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(delete("/api/projects/100/versions/a1a1a1a1/view/gone"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4030))
                 .andExpect(jsonPath("$.message").value("该查看会话不存在或已关闭"));
     }
 
@@ -147,7 +147,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/view"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4029))
                 .andExpect(jsonPath("$.message").value("同时查看的版本过多，请先关闭一个再查看"));
     }
 
@@ -171,7 +171,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(post("/api/projects/100/versions/beefbeef/rollback"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.code").value(4028))
                 .andExpect(jsonPath("$.message").value("版本不存在"));
     }
 
@@ -182,7 +182,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4031))
                 .andExpect(jsonPath("$.message").value("系统正在更新，请稍后再回滚"));
     }
 
@@ -193,7 +193,7 @@ class ProjectVersionControllerTest {
 
         performAsUser(post("/api/projects/100/versions/a1a1a1a1/rollback"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(4032))
                 .andExpect(jsonPath("$.message").value("系统有未完成的改动，请稍后再回滚"));
     }
 

@@ -13,9 +13,9 @@ import {
   systemPanelPhase,
 } from "./state";
 
-/** 探活未就绪的后端错误（WSP_012，503）。 */
+/** 探活未就绪的后端错误（WSP_012 → 数字业务码 1012，HTTP 503）。 */
 function notServingError() {
-  return new ApiError({ status: 503, code: "WSP_012", message: "预览应用尚未就绪" });
+  return new ApiError({ status: 503, code: 1012, message: "预览应用尚未就绪" });
 }
 
 const seg = {
@@ -235,7 +235,7 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     const phase = systemPanelPhase({
       coderStatus: undefined,
       generatedAt: "2026-09-01T08:00:00Z",
-      error: new ApiError({ status: 500, code: "WSP_002", message: "环境后端操作失败" }),
+      error: new ApiError({ status: 500, code: 1002, message: "环境后端操作失败" }),
       parts: [],
     });
     expect(phase).toEqual({ kind: "connecting", trouble: true });
@@ -243,13 +243,22 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
 });
 
 describe("isPreviewNotServing · 探活未就绪判定", () => {
-  it("WSP_012 = 未就绪（视同待期继续轮询）", () => {
+  it("WSP_012（数字业务码 1012）= 未就绪（视同待期继续轮询）", () => {
     expect(isPreviewNotServing(notServingError())).toBe(true);
+  });
+
+  // 回归（预览误报「暂时打不开」，#169）：信封 code 曾装 httpStatus（数字 503）、
+  // 业务码不上线，字符串比对死分支把待期误判真故障。判定只认数字业务码——
+  // httpStatus 形态（code=503）不算未就绪，避免语义混回传输层。
+  it("信封退回 httpStatus 装码（code=503）不判未就绪——判定认业务码不认状态", () => {
+    expect(
+      isPreviewNotServing(new ApiError({ status: 503, code: 503, message: "预览应用尚未就绪" })),
+    ).toBe(false);
   });
 
   it("其他 ApiError 与网络错误不是未就绪", () => {
     expect(
-      isPreviewNotServing(new ApiError({ status: 500, code: "WSP_002", message: "x" })),
+      isPreviewNotServing(new ApiError({ status: 500, code: 1002, message: "x" })),
     ).toBe(false);
     expect(isPreviewNotServing(new Error("network"))).toBe(false);
     expect(isPreviewNotServing(undefined)).toBe(false);
@@ -260,7 +269,7 @@ describe("previewTrouble · 真故障判定（#80）", () => {
   it("无错与未就绪（WSP_012）不是真故障；其他错误才是", () => {
     expect(previewTrouble(undefined)).toBe(false);
     expect(previewTrouble(notServingError())).toBe(false);
-    expect(previewTrouble(new ApiError({ status: 500, code: "WSP_002", message: "x" }))).toBe(true);
+    expect(previewTrouble(new ApiError({ status: 500, code: 1002, message: "x" }))).toBe(true);
     expect(previewTrouble(new Error("network"))).toBe(true);
   });
 });

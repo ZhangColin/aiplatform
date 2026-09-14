@@ -77,7 +77,7 @@ class OrderControllerTest {
 
         performAsUser(post("/api/projects/100/orders"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(5003))
                 .andExpect(jsonPath("$.message")
                         .value(OrderMessage.ORDER_ALREADY_ACTIVE.message()));
     }
@@ -149,7 +149,7 @@ class OrderControllerTest {
 
         performAsUser(post("/api/orders/900/cancel"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(5005))
                 .andExpect(jsonPath("$.message")
                         .value(OrderMessage.ORDER_CANCEL_NOT_ALLOWED.message()));
     }
@@ -193,7 +193,7 @@ class OrderControllerTest {
 
         performAsUser(post("/api/orders/900/payment"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.code").value(5011))
                 .andExpect(jsonPath("$.message")
                         .value(OrderMessage.ORDER_PAY_NOT_ALLOWED.message()));
     }

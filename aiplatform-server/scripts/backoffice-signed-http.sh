@@ -82,6 +82,34 @@ signed_call() {
   curl -sS -w '\n%{http_code}' -X "$method" "$@" "$BACKEND$path_with_query"
 }
 
+# 带额外头的调用变体（#175）：签名只覆盖五头＋query，透传头（X-User-Id/
+# X-User-Name 等）不参与 HMAC、直接追加。参数：method pathWithQuery bodyFile
+# 额外头…（无 body 传空串；额外头形如 "X-User-Id: 123" 整串一个参数）。
+signed_call_extra() {
+  local method="$1" path_with_query="$2" body_file="${3:-}"
+  shift 3 || shift $#
+  # 额外头先落数组：下方 while 装头会 set -- 重写位置参数，届时 for in "$@"
+  # 迭代的已是签名头而非额外头（实测二次追加）。非空数组展开 bash 3.2 可用
+  # （空数组展开才踩 set -u；无额外头请走 signed_call，不进本函数）。
+  local -a extras=("$@")
+  local headers line
+  headers=$(sign_headers "$BACKOFFICE_API_SECRET" "$path_with_query" "$body_file")
+
+  set --
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && set -- "$@" -H "$line"
+  done <<< "$headers"
+  local extra_header
+  for extra_header in "${extras[@]}"; do
+    set -- "$@" -H "$extra_header"
+  done
+  if [[ -n "$body_file" ]]; then
+    set -- "$@" --data-binary "@$body_file" -H "Content-Type: application/json"
+  fi
+
+  curl -sS -w '\n%{http_code}' -X "$method" "$@" "$BACKEND$path_with_query"
+}
+
 show_response() {
   # body\nstatus → 分离展示（状态非 2xx 时高亮）
   local resp="$1"

@@ -21,11 +21,20 @@ export const UPDATING_NOTICE = "正在更新系统，完成后自动刷新";
 /** 预览真故障（非未就绪）的打不开口径（#80）。 */
 export const TROUBLE_NOTICE = "预览暂时打不开，稍后会自动重试";
 
+/** 恢复期用户可感知口径（CONTEXT.md「休眠」：可感知的只有「系统启动中」，#170）。 */
+export const STARTING_NOTICE = "系统启动中";
+
 /**
  * 后端「预览应用尚未就绪」的数字业务码（WSP_012 → 1012＝域码 WSP=1×1000＋序号，
  * 见 aiplatform-server ErrorCodePrefix）：HTTP 503 只是状态，判定认业务码。
  */
 const PREVIEW_NOT_SERVING_CODE = 1012;
+
+/**
+ * 后端「系统启动中」的数字业务码（WSP_013 → 1013，#170 唤醒待期）：沙箱置备/
+ * 唤醒重建/应用拉起进行中——触碰项目自动恢复，轮询续探，与 1012 同为待期非故障。
+ */
+const WORKSPACE_STARTING_CODE = 1013;
 
 /** 页面/占位上的进行中轻提示（一套：进行中 / 重试 / 失败）。 */
 export type PanelNotice = {
@@ -72,11 +81,14 @@ export function workHintOf(parts: readonly WorkPart[]): string | undefined {
 }
 
 /**
- * 预览查询 error 是否「应用尚未就绪」（WSP_012→1012——视同待期，轮询继续）。
- * 判定只认数字业务码、不认 HTTP 状态（503 是传输层事实，语义归业务码）。
+ * 预览查询 error 是否「待期」（WSP_012 未就绪 / WSP_013 系统启动中——轮询继续，
+ * 非 trouble）。判定只认数字业务码、不认 HTTP 状态（503 是传输层事实，语义归业务码）。
  */
 export function isPreviewNotServing(error: unknown): boolean {
-  return error instanceof ApiError && error.code === PREVIEW_NOT_SERVING_CODE;
+  return (
+    error instanceof ApiError &&
+    (error.code === PREVIEW_NOT_SERVING_CODE || error.code === WORKSPACE_STARTING_CODE)
+  );
 }
 
 /** 预览查询 error 是否真故障（有错且非未就绪；#80）。 */

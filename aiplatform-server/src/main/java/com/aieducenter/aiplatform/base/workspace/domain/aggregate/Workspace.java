@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.workspace.domain.aggregate;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Set;
 
@@ -20,6 +21,7 @@ import com.cartisan.core.stereotype.Aggregate;
 import com.cartisan.data.jpa.domain.Auditable;
 
 import com.aieducenter.aiplatform.base.workspace.domain.entity.MiddlewareResource;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -70,6 +72,17 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
     @Column(name = "provision_error")
     private String provisionError;
 
+    /**
+     * 期望态（ADR-0016 意图/实态分离）：DB 只记意图，不镜像 docker 实态——
+     * 变更方是休眠器/封存（后续票），唤醒编排以容器实态探查为准，不读它决策。
+     */
+    @Column(name = "desired_state", nullable = false)
+    private DesiredState desiredState = DesiredState.RUNNING;
+
+    /** 最近触碰（#170）：项目域 API 每次触碰拨动，闲置计时（#171 休眠器）的输入。 */
+    @Column(name = "last_touch_at", nullable = false)
+    private LocalDateTime lastTouchAt;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "workspace_id", nullable = false)
     private final Set<MiddlewareResource> resources = CollUtil.newLinkedHashSet();
@@ -88,6 +101,8 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         this.containerName = containerName;
         this.networkName = networkName;
         this.status = status;
+        // 创建即活跃：last-touch 起点与记录同生（NOT NULL 列，构造内落定）
+        this.lastTouchAt = LocalDateTime.now();
     }
 
     /**
@@ -179,6 +194,33 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         this.provisionError = null;
         this.status = ProvisioningStatus.PROVISIONING;
         return this;
+    }
+
+    /**
+     * 唤醒迁移（#170，READY/FAILED → PROVISIONING）：容器实态已缺失/被杀（#168 型
+     * 漂移）时回置备中，走幂等重建路径（删容器保卷、卷内数据原样续用）收敛回 READY。
+     * 与 {@link #retry()} 同形但入口不同：retry 是置备失败的手动重试，rewake 是触碰
+     * 自愈的自动迁移。PROVISIONING 已在途，无需也无权再迁移。旧资源清单随迁移清出
+     * （orphanRemoval 在本事务内先删旧行），complete 事务随后干净回填——否则同事务
+     * 先插后删撞 uq_wsp_resources_workspace_kind（唤醒是首次「带旧行 complete」的
+     * 路径，活体验收 #170 实证）。
+     */
+    public Workspace rewake() {
+        if (status != ProvisioningStatus.READY && status != ProvisioningStatus.FAILED) {
+            throw new DomainException(WorkspaceMessage.WORKSPACE_STATE_INVALID);
+        }
+        this.provisionError = null;
+        this.resources.clear();
+        this.status = ProvisioningStatus.PROVISIONING;
+        return this;
+    }
+
+    /**
+     * 拨动 last-touch（#170）：项目域 API 每次触碰调用；时刻由调用方传入（纯迁移，
+     * 时钟归应用层），闲置计时（#171）以本字段为输入。
+     */
+    public void markTouched(LocalDateTime at) {
+        this.lastTouchAt = at;
     }
 
     /**

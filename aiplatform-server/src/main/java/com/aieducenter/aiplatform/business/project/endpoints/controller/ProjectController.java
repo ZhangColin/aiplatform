@@ -22,6 +22,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
@@ -313,11 +314,14 @@ public class ProjectController {
 
     @GetMapping("/{id}/preview")
     @Operation(summary = "预览（工作区端口暴露）",
-            description = "端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（run 执行体"
-                    + "按约定自起 8081 服务，#44/#45），探活通过才返回可访问 URL（localhost）并"
-                    + "SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。"
-                    + "应用未起服 = 503 WSP_012 待期（非故障），前端 run 开始即轮询续探；"
-                    + "平台不代起静态兜底服务，无应用期间不出文件列表中间态")
+            description = "端口映射置备时已落定、URL 确定；本端点探活工作区应用端口，探活通过才"
+                    + "返回可访问 URL（localhost）并 SSE preview-ready——前端以此作「应用可访问」"
+                    + "判据，通过瞬间切真页面。三档待期/故障口径（#170 唤醒底座）：置备/唤醒"
+                    + "进行中 = 503 WSP_013「系统启动中」（容器缺失被触碰自动重建，前端轮询"
+                    + "续探）；已生成项目应用未起服（容器在而应用死）= 平台拉起后同按 WSP_013"
+                    + "待期（8081 应用拉起是平台职责）；未生成项目 = 503 WSP_012 原口径"
+                    + "（未生成态，不拉起、无静态兜底，无应用期间不出文件列表中间态）")
+    @ErrorCodes({"PRJ_001", "WSP_012", "WSP_013", "WSP_010"})
     public ApiResponse<ProjectPreviewResponse> preview(@PathVariable String id) {
         return ApiResponse.ok(appService.preview(parseId(id)));
     }

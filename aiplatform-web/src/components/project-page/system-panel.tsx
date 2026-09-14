@@ -25,6 +25,7 @@ import {
   type AnnotationKind,
 } from "@/lib/preview/annotation";
 import {
+  STARTING_NOTICE,
   TROUBLE_NOTICE,
   previewActive,
   resolvePreviewAddress,
@@ -318,7 +319,10 @@ export function SystemPanel({
               {phase.trouble ? (
                 <span className="text-destructive">{TROUBLE_NOTICE}</span>
               ) : (
-                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                <>
+                  <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                  <p>{STARTING_NOTICE}</p>
+                </>
               )}
             </PanelHint>
           ) : (

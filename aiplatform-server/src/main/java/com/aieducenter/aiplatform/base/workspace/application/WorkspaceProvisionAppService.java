@@ -158,6 +158,22 @@ public class WorkspaceProvisionAppService implements DisposableBean {
         }
     }
 
+    /**
+     * 唤醒用同步置备（#170）：与后台置备同一 attempt 循环与失败收口（重试上限→
+     * markFailed，可再触发），但不占置备池——由唤醒编排的执行器驱动、编排尾段
+     * （应用拉起/预览事件）紧随其后。在途哨兵照常登记：销毁竞争时 destroy 经
+     * {@link #cancel(WorkspaceId)} 协调（与置备任务同一取消检查点，不留孤儿资源）。
+     */
+    public void provisionForWake(WorkspaceId workspaceId, EnvKind kind) {
+        InFlightProvision flight = new InFlightProvision();
+        inFlight.put(workspaceId, flight);
+        try {
+            provisionTask(workspaceId, kind, flight);
+        } finally {
+            inFlight.remove(workspaceId, flight);
+        }
+    }
+
     @Override
     public void destroy() {
         if (ownedExecutor != null) {

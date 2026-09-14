@@ -1,11 +1,14 @@
 package com.aieducenter.aiplatform.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import com.aieducenter.aiplatform.business.identity.endpoints.interceptor.ApiAuthInterceptor;
+import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
+import com.aieducenter.aiplatform.business.project.endpoints.interceptor.ProjectTouchInterceptor;
 
 /**
  * Web MVC 全局配置（片0，A2 增补鉴权拦截）。
@@ -18,11 +21,22 @@ import com.aieducenter.aiplatform.business.identity.endpoints.interceptor.ApiAut
  * （/auth/**、/v3/api-docs/**、/swagger-ui/**、actuator）不在 /api 下，天然放行。
  * {@code /api/backoffice/**}（#29 后台机机面）排除会话拦截——鉴权由
  * cartisan-openapi 五头 HMAC 签名闸接管（控制器类级 {@code @RequireSignature}，
- * 无签名/错签 401）。拦截器无状态直接 new（窄测试上下文扫本包时无需
+ * 无签名/错签 401）。鉴权拦截器无状态直接 new（窄测试上下文扫本包时无需
  * identity BC 的 bean）。</p>
+ *
+ * <p>#170 唤醒触发面：{@code /api/projects/**} 追加触碰拦截（鉴权之后）——拨
+ * last-touch + 异步探查沙箱实态，容器缺失/被杀自动唤醒（用户可见面只有待期
+ * 「系统启动中」）。项目编排 bean 经 {@link ObjectProvider} 延迟解析：@WebMvcTest
+ * 窄切片（不含 project BC）无此 bean 时跳过注册，切片语义本就不含触碰自愈。</p>
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
+
+    private final ObjectProvider<ProjectLifecycleAppService> projectLifecycleAppService;
+
+    public WebMvcConfig(ObjectProvider<ProjectLifecycleAppService> projectLifecycleAppService) {
+        this.projectLifecycleAppService = projectLifecycleAppService;
+    }
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
@@ -34,5 +48,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new ApiAuthInterceptor())
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/backoffice/**");
+        ProjectLifecycleAppService lifecycle = projectLifecycleAppService.getIfAvailable();
+        if (lifecycle != null) {
+            registry.addInterceptor(new ProjectTouchInterceptor(lifecycle))
+                    .addPathPatterns("/api/projects/**");
+        }
     }
 }

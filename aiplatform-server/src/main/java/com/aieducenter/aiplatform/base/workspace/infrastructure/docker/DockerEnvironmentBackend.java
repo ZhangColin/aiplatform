@@ -41,9 +41,10 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
  * 应用运行时 + pg/redis 中间件同容器，预览经共享网络网关子域路由（#128/#141，
- * 无宿主端口映射）——应用服务由编码
- * 智能体按约定自起（#44），平台不代起静态兜底（#45）；run 执行体经平台进程内
- * AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。{@code /workspace}
+ * 无宿主端口映射）——应用首起归 run 执行体（#44「一开工就跑起来」），死而复起
+ * 归平台 {@link #startApp}（#170，收口 #168；无静态兜底——#45 口径不变）；run
+ * 执行体经平台进程内 AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。
+ * {@code /workspace}
  * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
  * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}），容器无状态、销毁重建不丢数据。
  * 连接串写入
@@ -61,6 +62,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
     private static final Duration PREVIEW_PROBE_TIMEOUT = Duration.ofSeconds(2);
+    /** 应用拉起探活长窗（#170）：pnpm/npm 冷链路起服远超预览短窗，唤醒任务内同步等待。 */
+    private static final Duration APP_START_TIMEOUT = Duration.ofSeconds(60);
 
     /** 快照容器（#92）的容器本地落点：副本随容器可写层消失，不进卷。 */
     private static final String SNAPSHOT_ROOT = "/tmp/snap";
@@ -187,6 +190,61 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
+    public boolean isContainerRunning(WorkspaceHandle handle) {
+        // 实态探查（#170 触发判据）：inspect 非 0 = 不存在；State.Running=false = 停止/
+        // 被杀。探查异常不抛——视同不在，由唤醒编排幂等重建收敛（意图/实态分离，ADR-0016）。
+        ExecResult inspected = runCapture("docker", "inspect",
+                "-f", "{{.State.Running}}", handle.containerName());
+        return inspected.exitCode() == 0 && "true".equals(inspected.stdout().trim());
+    }
+
+    @Override
+    public void startApp(WorkspaceHandle handle) {
+        // 8081 应用拉起（#170 平台职责，收口 #168 缺口）：run 执行体 exec 常驻的应用
+        // 进程不随容器自愈（入口脚本只自愈 pg/redis），容器重建/重启后由本方法拉回。
+        // 幂等：已在服直接返回；无起服入口（stdout 无 started 哨兵）不拉不等待——
+        // 从未生成工作区恢复到未生成态，不空耗探活窗。
+        if (appServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT)) {
+            return;
+        }
+        ExecResult started = runCapture("docker", "exec", handle.containerName(),
+                "sh", "-c", appStartCommand());
+        if (started.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "拉起工作区应用失败: " + started.stderr());
+        }
+        if (!started.stdout().contains(STARTED_SENTINEL)) {
+            log.info("[workspace] {} 无起服入口（server.js/package.json 均无），不拉应用",
+                    handle.containerName());
+            return;
+        }
+        waitForAppServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT,
+                "工作区应用 " + handle.containerName(),
+                APP_START_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
+    }
+
+    /** 起服哨兵（appStartCommand 拉起分支的 stdout 回执；无入口分支不输出）。 */
+    private static final String STARTED_SENTINEL = "started";
+
+    /**
+     * 容器内起服命令（与快照 {@link #snapshotAppStartCommand} 同款判据链的主容器版）：
+     * server.js → node server.js；package.json → npm start；无入口静默退出（exit 0、
+     * 不输出 started 哨兵——调用方以此区分「拉了等起服」与「无入口不拉」。注意 shell
+     * 优先级：{@code &} 是命令分隔符会把整段后台化，哨兵必须经 {@code { …& } &&} 前台
+     * 条件执行，否则 exit 0 后哨兵仍输出）。差异：不注入 DATABASE_URL/REDIS_URL
+     * （主容器 .env 在位、应用自读，#45 口径平台不代起静态兜底，故无 serve.js 兜底
+     * 分支）、日志落卷内 .app.log。
+     */
+    private String appStartCommand() {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && if test -f server.js; then APP='node server.js';"
+                + " elif test -f package.json; then APP='npm start';"
+                + " else exit 0; fi"
+                + " && { nohup sh -c \"$APP\" > .app.log 2>&1 & }"
+                + " && echo started";
+    }
+
+    @Override
     public SnapshotHandle startSnapshot(WorkspaceHandle mainHandle, String viewId, String ref) {
         String snapName = WorkspaceNaming.snapshotContainerName(mainHandle.workspaceId(), viewId);
         String dbName = WorkspaceNaming.databaseName(mainHandle.workspaceId());
@@ -306,6 +364,12 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "等待资源就绪被中断");
         }
+    }
+
+    /** 单发容器内探活（#170 startApp 幂等前置）：不轮询不抛，只在服与否。 */
+    private boolean appServingInContainer(String containerName, int port) {
+        return execIn(containerName,
+                "curl -s -o /dev/null http://localhost:" + port).ok();
     }
 
     /**

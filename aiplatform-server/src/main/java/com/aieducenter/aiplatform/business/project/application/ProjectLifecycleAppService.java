@@ -13,6 +13,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
@@ -175,19 +176,52 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 预览（#45 渐进口径；#105 URL 事件驱动）：端口映射置备时已落定、URL 确定，
-     * 此处探活工作区应用端口——通过（run 执行体已起服）→ SSE {@code preview-ready}
-     * → 返回 URL；未就绪 → 503 WSP_012（待期非故障）。preview-ready 现亦由切片收口
-     * 发射（双源、幂等），前端消费写预览查询缓存、免轮询。
+     * 预览（#45 渐进口径；#105 URL 事件驱动；#170 唤醒待期）：探活工作区应用端口
+     * ——通过（run 执行体已起服）→ SSE {@code preview-ready} → 返回 URL；置备/唤醒
+     * 进行中 → 503 WSP_013（系统启动中，前端轮询续探）；已生成项目的应用未起服
+     * （WSP_012，容器在而应用死——#168 残留场景）→ 触发平台拉起（8081 应用拉起自此
+     * 是平台职责）后同样按 WSP_013 待期；未生成项目保持 WSP_012 原口径（未生成态，
+     * 不拉起、无静态兜底）。
      */
     public ProjectPreviewResponse preview(Long projectId) {
         Project project = requireProject(projectId);
-        URI url = workspaceLifecycleAppService
-                .exposePreview(Long.toString(project.getWorkspaceId()));
+        URI url;
+        try {
+            url = workspaceLifecycleAppService
+                    .exposePreview(Long.toString(project.getWorkspaceId()));
+        } catch (ApplicationException e) {
+            if (e.getCodeMessage() == WorkspaceMessage.PREVIEW_NOT_SERVING
+                    && project.getGeneratedAt() != null) {
+                // 已生成项目的应用死而复起：平台拉起（互斥异步）+ 待期口径
+                workspaceLifecycleAppService.requestAppStart(
+                        Long.toString(project.getWorkspaceId()));
+                throw new ApplicationException(WorkspaceMessage.WORKSPACE_STARTING);
+            }
+            throw e;
+        }
         eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 ProjectEventTypes.URL_FIELD, url.toString()));
         return new ProjectPreviewResponse(url.toString());
+    }
+
+    /**
+     * 项目域触碰（#170 唤醒触发面）：拨工作区 last-touch + 异步探查沙箱实态——容器
+     * 缺失/被杀则自动唤醒重建（已生成项目连带应用拉起）至预览可用。REST 拦截器对
+     * {@code /api/projects/**} 每请求调用；尽力而为（失败不阻断业务请求，下次触碰再试），
+     * 非项目域不触发。
+     */
+    public void touchProject(Long projectId) {
+        try {
+            Project project = projectRepository.findById(projectId).orElse(null);
+            if (project == null) {
+                return;
+            }
+            workspaceLifecycleAppService.touch(Long.toString(project.getWorkspaceId()),
+                    project.getGeneratedAt() != null);
+        } catch (RuntimeException e) {
+            log.warn("项目 {} 触碰自愈未成（不阻断请求，下次触碰再试）", projectId, e);
+        }
     }
 
     // ---------- 内部 ----------

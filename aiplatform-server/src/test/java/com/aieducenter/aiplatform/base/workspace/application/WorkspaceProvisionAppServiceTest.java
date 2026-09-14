@@ -234,6 +234,43 @@ class WorkspaceProvisionAppServiceTest {
         verifyNoInteractions(environmentBackend);
     }
 
+    // ---------- 唤醒同步置备（#170：唤醒编排驱动，与后台置备同一收敛与取消协调） ----------
+
+    @Test
+    void given_rewoken_workspace_when_provision_for_wake_then_converges_and_inflight_cleared() {
+        WorkspaceId id = WorkspaceId.of("42");
+        Workspace rewoken = Workspace.registerPending(id, EnvKind.DEV);
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(rewoken));
+        when(environmentBackend.createWorkspace(id, EnvKind.DEV)).thenReturn(devProvision(id));
+
+        provisioner().provisionForWake(id, EnvKind.DEV);
+
+        // 同一收敛：成功 complete 转 READY（重试/失败上限与后台置备同款）
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        verify(workspaceRepository).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(ProvisioningStatus.READY);
+        // 在途登记已清：收尾 cancel 不等待、无副作用（销毁协调窗口闭合）
+        assertThatCode(() -> provisioner().cancel(id)).doesNotThrowAnyException();
+        verify(environmentBackend, never()).destroyWorkspace(any(WorkspaceHandle.class));
+    }
+
+    @Test
+    void given_persistent_backend_failure_when_provision_for_wake_then_failed_after_retries() {
+        WorkspaceId id = WorkspaceId.of("42");
+        when(workspaceRepository.findById(42L))
+                .thenReturn(Optional.of(Workspace.registerPending(id, EnvKind.DEV)));
+        when(environmentBackend.createWorkspace(id, EnvKind.DEV))
+                .thenThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED));
+
+        provisioner().provisionForWake(id, EnvKind.DEV);
+
+        // 唤醒失败按置备同款重试上限落 FAILED（可再触发：下次触碰 rewake 重来）
+        verify(environmentBackend, times(3)).createWorkspace(id, EnvKind.DEV);
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        verify(workspaceRepository).save(saved.capture());
+        assertThat(saved.getValue().getStatus()).isEqualTo(ProvisioningStatus.FAILED);
+    }
+
     // ---------- 测试数据 ----------
 
     private WorkspaceProvisionAppService provisioner() {

@@ -21,7 +21,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→快照→卷
  * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
  * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
- * 用完即销毁）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
+ * 用完即销毁）。#170 唤醒底座补两条：isContainerRunning（容器实态探查——唤醒
+ * 触发判据）/ startApp（8081 应用拉起——平台职责）。restore（#93 回滚）与
+ * attachResource 按需随各自切片扩。</p>
  */
 @Port(PortType.CLIENT)
 public interface EnvironmentBackend {
@@ -47,11 +49,28 @@ public interface EnvironmentBackend {
 
     /**
      * 暴露容器端口为可访问的预览 URL（本地 = Docker 端口映射；线上 = Ingress/负载均衡）。
-     * 渐进预览口径（#45）：映射置备时已落定、URL 确定，本调用只做探活——应用服务
-     * 由 run 执行体按约定自起（#44），平台不代起静态兜底；探活通过才返回 URL
-     * （调用方以此作「应用可访问」判据），短窗未就绪抛 WSP_012（待期，非故障）。
+     * 渐进预览口径（#45）：映射置备时已落定、URL 确定，本调用只做探活——应用首起
+     * 归 run 执行体（#44「一开工就跑起来」），死而复起归 {@link #startApp}（#170 平台
+     * 职责）；探活通过才返回 URL（调用方以此作「应用可访问」判据），短窗未就绪抛
+     * WSP_012（待期，非故障）。
      */
     URI exposePort(WorkspaceHandle handle, int containerPort);
+
+    /**
+     * 容器实态探查（#170 唤醒触发判据）：容器在且 Running 才 true——不存在、已停止、
+     * 被杀（#168 型漂移）一律 false。只读探查，不抛（探查失败视同不在，由唤醒编排
+     * 幂等重建收敛）。
+     */
+    boolean isContainerRunning(WorkspaceHandle handle);
+
+    /**
+     * 拉起工作区应用进程至 8081 起服（#170：8081 应用拉起自此是平台职责——run 执行体
+     * exec 常驻的应用进程容器重启后无人拉，#168 遗留缺口由唤醒编排统一收口）。
+     * 幂等：已在服直接返回；起服入口与快照同款判据（server.js → node server.js、
+     * package.json → npm start），无入口则不拉（恢复到未生成态）。阻塞直至起服或
+     * 长窗超时（抛 WSP_012），调用方在自愈异步任务内执行。
+     */
+    void startApp(WorkspaceHandle handle);
 
     /**
      * 打包工作区源码为 tar.gz 字节流（「取走工作区内容」的能力面：调用方拿去做

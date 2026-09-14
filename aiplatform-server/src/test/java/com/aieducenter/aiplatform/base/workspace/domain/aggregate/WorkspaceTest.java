@@ -1,10 +1,13 @@
 package com.aieducenter.aiplatform.base.workspace.domain.aggregate;
 
+import java.time.LocalDateTime;
+
 import org.junit.jupiter.api.Test;
 
 import com.cartisan.core.exception.DomainException;
 
 import com.aieducenter.aiplatform.base.workspace.domain.entity.MiddlewareResource;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -253,5 +256,61 @@ class WorkspaceTest {
                 WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
 
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
+    }
+
+    // ---------- 期望态与 last-touch（#170 唤醒底座：字段一次建好，休眠/封存后续票消费） ----------
+
+    @Test
+    void given_pending_workspace_when_created_then_desired_running_and_touched() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
+        assertThat(workspace.getLastTouchAt()).isNotNull();
+    }
+
+    @Test
+    void given_workspace_when_mark_touched_then_last_touch_moves_to_given_time() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        LocalDateTime touchedAt = LocalDateTime.of(2026, 9, 14, 12, 0);
+
+        workspace.markTouched(touchedAt);
+
+        assertThat(workspace.getLastTouchAt()).isEqualTo(touchedAt);
+    }
+
+    // ---------- 唤醒迁移（#170：READY/FAILED → PROVISIONING，走幂等重建路径） ----------
+
+    @Test
+    void given_ready_workspace_when_rewake_then_provisioning() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        workspace.complete(WorkspaceProvision.of(
+                WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
+
+        workspace.rewake();
+
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
+        // 旧资源清单随迁移清出（orphanRemoval 先删，complete 干净回填——同事务先插
+        // 后删会撞 uq_wsp_resources_workspace_kind，活体验收 #170 实证）
+        assertThat(workspace.getResources()).isEmpty();
+    }
+
+    @Test
+    void given_failed_workspace_when_rewake_then_provisioning_and_error_cleared() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败");
+
+        workspace.rewake();
+
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
+        assertThat(workspace.getProvisionError()).isNull();
+    }
+
+    @Test
+    void given_provisioning_workspace_when_rewake_then_rejected() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+
+        assertThatThrownBy(workspace::rewake)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("置备状态不合法");
     }
 }

@@ -247,6 +247,23 @@ describe("isPreviewNotServing · 探活未就绪判定", () => {
     expect(isPreviewNotServing(notServingError())).toBe(true);
   });
 
+  it("WSP_013（数字业务码 1013，#170 唤醒待期）= 系统启动中（视同待期，非 trouble）", () => {
+    expect(
+      isPreviewNotServing(
+        new ApiError({ status: 503, code: 1013, message: "系统启动中" }),
+      ),
+    ).toBe(true);
+    // 启动中归 connecting（系统启动中），不进 trouble 打不开口径
+    expect(
+      systemPanelPhase({
+        coderStatus: undefined,
+        generatedAt: "2026-09-01T08:00:00Z",
+        error: new ApiError({ status: 503, code: 1013, message: "系统启动中" }),
+        parts: [],
+      }),
+    ).toEqual({ kind: "connecting", trouble: false });
+  });
+
   // 回归（预览误报「暂时打不开」，#169）：信封 code 曾装 httpStatus（数字 503）、
   // 业务码不上线，字符串比对死分支把待期误判真故障。判定只认数字业务码——
   // httpStatus 形态（code=503）不算未就绪，避免语义混回传输层。

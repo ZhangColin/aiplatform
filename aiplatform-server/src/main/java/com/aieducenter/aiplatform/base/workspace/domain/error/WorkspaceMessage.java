@@ -26,7 +26,10 @@ public enum WorkspaceMessage implements CodeMessage {
     WORKSPACE_PROVISION_TIMEOUT(500, "WSP_011", "环境置备等待超时，请稍后重试"),
 
     /** #45 渐进预览：应用未起服是待期不是故障——前端轮询续探，非终态口径。 */
-    PREVIEW_NOT_SERVING(503, "WSP_012", "预览应用尚未就绪");
+    PREVIEW_NOT_SERVING(503, "WSP_012", "预览应用尚未就绪"),
+
+    /** #170 唤醒待期：沙箱置备/唤醒/应用拉起进行中（系统启动中）——非终态口径。 */
+    WORKSPACE_STARTING(503, "WSP_013", "系统启动中");
 
     private final int httpStatus;
     private final String code;

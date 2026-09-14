@@ -7,15 +7,20 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.mockito.ArgumentCaptor;
 
 import com.cartisan.core.exception.ApplicationException;
 
@@ -121,6 +126,55 @@ class VersionSnapshotAppServiceTest {
     @Test
     void given_unknown_view_id_when_stop_then_404() {
         assertThatThrownBy(() -> service.stopView(1005L, "unknown-view"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.VERSION_VIEW_NOT_FOUND.message());
+    }
+
+    // ---------- 闲置快照清扫（#171：快照也是容器，同样是被扫的浪费源） ----------
+
+    @Test
+    void given_fresh_view_session_when_sweep_then_snapshot_kept() {
+        long projectId = 1006L;
+        stubWorkspace(projectId);
+        SnapshotHandle handle = new SnapshotHandle("ws-9900-snap-1", URI.create("http://snap-1.localhost/"));
+        when(workspaceLifecycleAppService.startSnapshot(eq(WORKSPACE_ID), anyString(), eq(HASH)))
+                .thenReturn(handle);
+        service.startView(projectId, HASH);
+
+        // 会话起服后 10 分钟（阈值 60m 内）：在用快照不受影响（进保留集，孤儿清扫不碰）
+        LocalDateTime tenMinutesLater = LocalDateTime.now().plusMinutes(10);
+        int swept = service.sweepIdleViews(tenMinutesLater, Duration.ofMinutes(60));
+
+        assertThat(swept).isZero();
+        verify(workspaceLifecycleAppService, never()).stopSnapshot(any(SnapshotHandle.class));
+        ArgumentCaptor<Set<String>> keep = ArgumentCaptor.forClass(Set.class);
+        verify(workspaceLifecycleAppService).sweepOrphanSnapshots(keep.capture());
+        // 在用会话进保留集（单例注册表跨用例累积，只锚本会话在内）
+        assertThat(keep.getValue()).contains("ws-9900-snap-1");
+    }
+
+    @Test
+    void given_stale_view_session_when_sweep_then_snapshot_destroyed_and_registry_cleared() {
+        long projectId = 1007L;
+        stubWorkspace(projectId);
+        // 句柄名与先行用例区分（单例注册表累积下，等值句柄的销毁次数会并账）
+        SnapshotHandle handle = new SnapshotHandle("ws-9900-snap-7", URI.create("http://snap-7.localhost/"));
+        when(workspaceLifecycleAppService.startSnapshot(eq(WORKSPACE_ID), anyString(), eq(HASH)))
+                .thenReturn(handle);
+        String viewId = service.startView(projectId, HASH).viewId();
+
+        // 起服后 2 小时无人关闭（阈值 60m）：清扫销毁 + 注册表清出（后续关闭变 404 幂等）。
+        // 服务是单例、注册表跨用例累积，清扫数不定（同轮凡逾期皆扫）——只锚本会话的销毁
+        LocalDateTime twoHoursLater = LocalDateTime.now().plusHours(2);
+        int swept = service.sweepIdleViews(twoHoursLater, Duration.ofMinutes(60));
+
+        assertThat(swept).isGreaterThanOrEqualTo(1);
+        verify(workspaceLifecycleAppService, times(1)).stopSnapshot(handle);
+        // 本会话已出注册表 → 不进保留集（孤儿兜底可回收其容器）
+        ArgumentCaptor<Set<String>> keep = ArgumentCaptor.forClass(Set.class);
+        verify(workspaceLifecycleAppService).sweepOrphanSnapshots(keep.capture());
+        assertThat(keep.getValue()).doesNotContain("ws-9900-snap-7");
+        assertThatThrownBy(() -> service.stopView(projectId, viewId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.VERSION_VIEW_NOT_FOUND.message());
     }

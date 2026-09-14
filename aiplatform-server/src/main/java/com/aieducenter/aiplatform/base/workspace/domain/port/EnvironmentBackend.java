@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.base.workspace.domain.port;
 
 import java.net.URI;
+import java.util.Collection;
 
 import com.cartisan.core.stereotype.Port;
 import com.cartisan.core.stereotype.PortType;
@@ -22,7 +23,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
  * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
  * 用完即销毁）。#170 唤醒底座补两条：isContainerRunning（容器实态探查——唤醒
- * 触发判据）/ startApp（8081 应用拉起——平台职责）。restore（#93 回滚）与
+ * 触发判据）/ startApp（8081 应用拉起——平台职责）。#171 休眠器补一条：
+ * hibernate（删容器保卷——唤醒走既有幂等重建）。restore（#93 回滚）与
  * attachResource 按需随各自切片扩。</p>
  */
 @Port(PortType.CLIENT)
@@ -62,6 +64,13 @@ public interface EnvironmentBackend {
      * 幂等重建收敛）。
      */
     boolean isContainerRunning(WorkspaceHandle handle);
+
+    /**
+     * 休眠（#171，ADR-0016 删容器保卷）：删掉沙箱容器、完整保留卷（数据不动）——
+     * 唤醒走既有幂等重建路径。幂等（容器已不在 no-op）、尽力而为（失败不抛——
+     * 意图落库与否归编排方，删失败则下轮扫描收敛）。
+     */
+    void hibernate(WorkspaceHandle handle);
 
     /**
      * 拉起工作区应用进程至 8081 起服（#170：8081 应用拉起自此是平台职责——run 执行体
@@ -104,4 +113,11 @@ public interface EnvironmentBackend {
      * {@code ws-*-snap-*} 容器，不留常驻孤儿（「不留孤儿容器」验收的兜底面）。
      */
     void sweepSnapshotContainers();
+
+    /**
+     * 清扫保留集之外的快照容器（#171 运行期孤儿兜底）：孤儿清扫原只在启动期跑，
+     * 运行期同样有漏网——关窗销毁删失败、注册表丢账等——保留集（在用会话容器名）
+     * 之外按命名扫清。返回清扫数。
+     */
+    int sweepSnapshotContainersExcept(Collection<String> keepContainerNames);
 }

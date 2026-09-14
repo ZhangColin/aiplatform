@@ -313,4 +313,54 @@ class WorkspaceTest {
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining("置备状态不合法");
     }
+
+    // ---------- 休眠迁移（#171，ADR-0016：意图/实态分离——DB 只记意图） ----------
+
+    @Test
+    void given_running_workspace_when_hibernate_then_desired_hibernated_status_untouched() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        workspace.complete(WorkspaceProvision.of(
+                WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
+
+        workspace.hibernate();
+
+        // 休眠只落意图：置备态保持 READY（记录反映上次置备成功；容器实态由探查为准）
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.HIBERNATED);
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
+    }
+
+    @Test
+    void given_hibernated_workspace_when_hibernate_again_then_rejected() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV).hibernate();
+
+        assertThatThrownBy(workspace::hibernate)
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("置备状态不合法");
+    }
+
+    @Test
+    void given_hibernated_workspace_when_mark_touched_then_desired_back_to_running() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV).hibernate();
+
+        workspace.markTouched(LocalDateTime.of(2026, 9, 14, 12, 0));
+
+        // 触碰即意图运行（#171）：用户活跃 = 想要沙箱在跑——否则扫描器会按休眠意图
+        // 把唤醒回来的容器再删掉
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
+        assertThat(workspace.getLastTouchAt()).isEqualTo(LocalDateTime.of(2026, 9, 14, 12, 0));
+    }
+
+    @Test
+    void given_hibernated_workspace_when_rewake_then_desired_back_to_running() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        workspace.complete(WorkspaceProvision.of(
+                WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
+        workspace.hibernate();
+
+        workspace.rewake();
+
+        // 唤醒迁移回运行意图（扫描器驱动的漂移收敛不经过触碰，意图须随迁移回正）
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
+    }
 }

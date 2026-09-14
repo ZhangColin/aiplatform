@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.workspace.application;
 
+import java.time.Duration;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,29 @@ class WorkspacePropertiesTest {
     @Test
     void given_default_properties_when_get_provision_max_attempts_then_3() {
         assertThat(new WorkspaceProperties().getProvisionMaxAttempts()).isEqualTo(3);
+    }
+
+    /** #171 闲置休眠阈值默认 60 分钟、休眠器默认开启。 */
+    @Test
+    void given_default_properties_when_hibernation_then_60m_and_enabled() {
+        WorkspaceProperties properties = new WorkspaceProperties();
+        assertThat(properties.getIdleThreshold()).isEqualTo(Duration.ofMinutes(60));
+        assertThat(properties.isHibernationEnabled()).isTrue();
+    }
+
+    /** 配置键真绑定（app.workspace.idle-threshold / hibernation-enabled）。 */
+    @Test
+    void given_config_keys_when_bind_then_hibernation_wired() {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(Map.of(
+                "app.workspace.idle-threshold", "30m",
+                "app.workspace.hibernation-enabled", "false"));
+
+        WorkspaceProperties bound = new Binder(source)
+                .bind("app.workspace", Bindable.ofInstance(new WorkspaceProperties()))
+                .get();
+
+        assertThat(bound.getIdleThreshold()).isEqualTo(Duration.ofMinutes(30));
+        assertThat(bound.isHibernationEnabled()).isFalse();
     }
 
     /** 配置键真绑定（app.workspace.provision-max-attempts）。 */

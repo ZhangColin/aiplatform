@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.workspace.application;
 
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -286,6 +287,14 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
     }
 
     /**
+     * 清扫保留集之外的快照容器（#171 运行期孤儿兜底，休眠扫描顺带）：保留集 =
+     * 在用查看会话的容器名，集外快照容器扫清——孤儿清扫不再只在启动期跑。
+     */
+    public int sweepOrphanSnapshots(Collection<String> keepContainerNames) {
+        return environmentBackend.sweepSnapshotContainersExcept(keepContainerNames);
+    }
+
+    /**
      * 销毁工作区：先取消在途后台置备（#64，置备中销毁不留孤儿——任务完成
      * createWorkspace 后见取消即回收刚落定资源），再物理级联清理（容器→网络→卷，
      * 后端尽力而为），记录删除的事务内发 WorkspaceDestroyed（AFTER_COMMIT）。物理
@@ -365,6 +374,18 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
             log.warn("[workspace] {} 触碰自愈未成（尽力而为，下次触碰再试）", id.value(), e);
         } finally {
             healing.remove(id);
+        }
+    }
+
+    /**
+     * 漂移收敛入口（#171 休眠器每轮调用）：与触碰自愈同一实态探查/唤醒路径，但不拨
+     * last-touch——「DB 记 ready、容器实死」（#168）不再依赖用户触碰才收敛。提交
+     * 异步自愈（与触碰共用 {@code healing} 互斥与执行池——唤醒重建分钟级，同步执行
+     * 会拖住扫描轮的节奏）；互斥在途则本轮让路，下轮再看。
+     */
+    public void healDrift(WorkspaceId id, boolean startAppOnWake) {
+        if (healing.add(id)) {
+            healExecutor.execute(() -> healIfNeeded(id, startAppOnWake));   // finally 释放互斥
         }
     }
 

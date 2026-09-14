@@ -4,3 +4,10 @@
 spring:
   datasource:
     url: ${TEST_DB_URL:jdbc:postgresql://localhost:5432/aiplatform_test}
+
+# #171 · 闲置休眠器在测试 profile 整轮关闭：启动对账与定时扫描不扰测试库
+# （休眠扫描的验收走直调——WorkspaceHibernationIntegrationTest /
+# WorkspaceHibernationLiveTest）。
+app:
+  workspace:
+    hibernation-enabled: false

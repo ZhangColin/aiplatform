@@ -204,6 +204,9 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
      * （orphanRemoval 在本事务内先删旧行），complete 事务随后干净回填——否则同事务
      * 先插后删撞 uq_wsp_resources_workspace_kind（唤醒是首次「带旧行 complete」的
      * 路径，活体验收 #170 实证）。
+     *
+     * <p>#171 起连带把期望态拨回运行：唤醒（无论触碰还是扫描器漂移收敛触发）即
+     * 意图运行——否则休眠意图残留会让扫描器把重建回来的容器按意图再删。</p>
      */
     public Workspace rewake() {
         if (status != ProvisioningStatus.READY && status != ProvisioningStatus.FAILED) {
@@ -212,15 +215,35 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
         this.provisionError = null;
         this.resources.clear();
         this.status = ProvisioningStatus.PROVISIONING;
+        this.desiredState = DesiredState.RUNNING;
+        return this;
+    }
+
+    /**
+     * 休眠迁移（#171，ADR-0016 删容器保卷）：意图置休眠——删容器的物理动作归环境
+     * 后端（调用方先删容器后落意图，删失败则意图不翻、下轮重试），置备态保持原样
+     * （记录反映上次置备成功；容器实态以探查为准）。仅期望运行可休眠（重复休眠是
+     * 编排错误；封存态迁移归 #172）。
+     */
+    public Workspace hibernate() {
+        if (desiredState != DesiredState.RUNNING) {
+            throw new DomainException(WorkspaceMessage.WORKSPACE_STATE_INVALID);
+        }
+        this.desiredState = DesiredState.HIBERNATED;
         return this;
     }
 
     /**
      * 拨动 last-touch（#170）：项目域 API 每次触碰调用；时刻由调用方传入（纯迁移，
-     * 时钟归应用层），闲置计时（#171）以本字段为输入。
+     * 时钟归应用层），闲置计时（#171 休眠器）以本字段为输入。触碰即活跃——期望态
+     * 若为休眠则一并拨回运行（用户在用 = 想要沙箱在跑）；封存态不翻（卷已删，
+     * 深度唤醒归 #172）。
      */
     public void markTouched(LocalDateTime at) {
         this.lastTouchAt = at;
+        if (desiredState == DesiredState.HIBERNATED) {
+            this.desiredState = DesiredState.RUNNING;
+        }
     }
 
     /**

@@ -66,8 +66,14 @@ app:
     compaction-model: deepseek:deepseek-v4-flash
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
+  # #171 · 闲置休眠（ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照
+  # 查看会话同一阈值）、扫描间隔（Duration 形如 5m，@Scheduled 消费）与开关
+  # （test profile 关闭——集成测试直调扫描，定时器不扰测试库）。
   workspace:
     provision-max-attempts: 3
+    idle-threshold: 60m
+    hibernation-scan-interval: 5m
+    hibernation-enabled: true
   # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
   # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
   # 用户重新发起兜底（#22 重试次数/超时值实施期定）。

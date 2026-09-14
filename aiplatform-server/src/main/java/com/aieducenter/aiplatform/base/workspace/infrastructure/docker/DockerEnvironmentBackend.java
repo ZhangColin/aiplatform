@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -199,6 +200,14 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
+    public void hibernate(WorkspaceHandle handle) {
+        // 休眠 = 删容器保卷（#171，ADR-0016 单一语义）：只动容器，卷原样——唤醒走
+        // 既有幂等重建路径（createWorkspace 对同名残留先清后建、卷续用）。幂等 +
+        // 尽力而为：容器已不在 no-op，删失败不抛（意图未落库则下轮扫描重试）
+        runSilently("docker", "rm", "-f", handle.containerName());
+    }
+
+    @Override
     public void startApp(WorkspaceHandle handle) {
         // 8081 应用拉起（#170 平台职责，收口 #168 缺口）：run 执行体 exec 常驻的应用
         // 进程不随容器自愈（入口脚本只自愈 pg/redis），容器重建/重启后由本方法拉回。
@@ -282,6 +291,23 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         // 启动自愈（#92）：快照容器是临时视图，平台重启后注册表丢账——按命名扫清全部
         // ws-*-snap-* 孤儿（含跨工作区），不留常驻孤儿
         removeContainersByNameFilter("-snap-");
+    }
+
+    @Override
+    public int sweepSnapshotContainersExcept(Collection<String> keepContainerNames) {
+        // 运行期孤儿兜底（#171）：孤儿清扫原只在启动期跑，运行期同样有漏网（关窗
+        // 销毁删失败、注册表丢账）——保留集（在用会话）之外按命名扫清
+        ExecResult listed = runCapture("docker", "ps", "-a", "--filter",
+                "name=-snap-", "--format", "{{.Names}}");
+        int removed = 0;
+        for (String name : listed.stdout().lines().map(String::trim)
+                .filter(n -> !n.isEmpty()).toList()) {
+            if (!keepContainerNames.contains(name)) {
+                runSilently("docker", "rm", "-f", name);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     // ---------- dev 环境内部 ----------

@@ -267,7 +267,10 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private void startDevContainer(WorkspaceId workspaceId, String containerName) {
         // #128 网关化：不再随机映射宿主端口——进共享预览网络（previewnet），网关按
         // 容器名 ws-{id} DNS 路由（resolver 127.0.0.11），应用仍监听容器内 8081。
+        // restart unless-stopped：Docker 守护进程重启/容器被杀后自动拉起（卷在、入口
+        // 脚本幂等自愈），用户显式 stop 不拉——否则预览随宿主重启死透且无自愈。
         run("docker", "run", "-d", "--name", containerName,
+                "--restart", "unless-stopped",
                 "--network", WorkspaceNaming.PREVIEW_NETWORK,
                 "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
                 "-w", WorkspaceLayout.ROOT,

@@ -114,6 +114,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/versions/{ref}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 查看当时（起快照容器）
+         * @description 起该版本（ref = commit hash）的运行态快照容器：同卷只读 + 数据副本 + 检出当时代码起应用，返回 viewId 与快照预览 URL；逛完经 DELETE 关闭销毁。版本不存在 404 PRJ_028；同项目并发查看达上限 409 PRJ_029；环境故障 WSP_002
+         */
+        post: operations["startView"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/versions/{ref}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 回滚到此（追加新版本）
+         * @description 把系统代码复位到该版本（ref = commit hash）、追加为新版本——历史只追加不改写（rebase/force 零使用）、只回代码不回数据；回滚后迭代照常（下一轮 run基于回滚后代码）。返回追加出的新版本（runId 空、rollbackFrom 锚定源版本）。版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；环境故障 WSP_002
+         */
+        post: operations["rollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{projectId}/orders": {
         parameters: {
             query?: never;
@@ -314,6 +354,115 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/price-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单价行清单（含历史行，分页）
+         * @description 现行与历史行全量（价史全貌），排序服务端定死＝生效起点倒序（新段在前，同起点 id 倒序稳定）。provider/model 均为匹配键成分＝精确等值过滤、均可缺省（缺省＝全量行）；effectiveTo 为 null 即当前行。行带操作者两列（该行最近管理动作——开行或停用；存量行/无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法分页值）400 METER_009。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 METER_009 — 无效的单价行过滤参数
+         */
+        get: operations["entries"];
+        put?: never;
+        /**
+         * 开行（空键首行——种子脚本通道）
+         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         *
+         *     错误码：
+         *     - 400 METER_004 — 单价行字段不完整
+         *     - 409 METER_008 — 同匹配键生效区间重叠（跨区间或同起点）
+         *     - 400 METER_010 — 单价币种非 ISO 4217 代码
+         */
+        post: operations["open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/price-entries/{id}/reprice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 原子改价（单调用关当前行＋开新行）
+         * @description 同事务两步：被关行落 effectiveTo＝新起点（保留其原开行操作者，不被改写），新行沿用匹配键、单价/币种取命令、敞口生效。effectiveFrom 可指定（ISO-8601 Instant，如 2026-09-14T16:00:00Z）——含未来时点＝预发布（对齐供应商凌晨调价，窗口前旧价仍生效）；缺省＝即时。服务端补同键生效区间重叠校验（唯一约束只防同起点、不防跨区间重叠——重叠行会重复计费）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空，#160）。中途任一守卫失败两行都不动。行不存在 404 METER_006；字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；起点早于被关行起点 400 METER_005；目标非当前行 409 METER_007；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         *
+         *     错误码：
+         *     - 400 METER_004 — 单价行字段不完整
+         *     - 400 METER_005 — 关行时点非法（空或早于生效起点）
+         *     - 404 METER_006 — 单价行不存在
+         *     - 409 METER_007 — 单价行非当前行（已关行不可改价或停用）
+         *     - 409 METER_008 — 同匹配键生效区间重叠（跨区间或同起点）
+         *     - 400 METER_010 — 单价币种非 ISO 4217 代码
+         */
+        post: operations["reprice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/price-entries/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 停用（即时生效，关行不接新行）
+         * @description 关当前行（effectiveTo＝现在），不开新行——此后该匹配键用量进 unpriced（缺价不伪装 0、不阻断聚合）。对未生效的预发布行停用＝钳到自身起点成空区间（从未生效）。X-User-Id/X-User-Name 透传头自动落痕被关行（停用不接新行，被关行是唯一落点；缺头落空，#160）。行不存在 404 METER_006；目标非当前行 409 METER_007。需要机机签名
+         *
+         *     错误码：
+         *     - 404 METER_006 — 单价行不存在
+         *     - 409 METER_007 — 单价行非当前行（已关行不可改价或停用）
+         */
+        post: operations["deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}/retry-archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重试归档（已支付未归档的卡单补归档）
+         * @description 对支付成功但归档失败的卡单手动补完结：一事务内订单落已归档＋项目归档，成功后补发「已归档」通知并触发知识沉淀（成交 PRD 入知识库，best-effort 不炸主流程）。幂等由既有守卫保证——重复触发/非已支付态 409 ORD_012；项目已归档 409 PRJ_013（不产生重复素材）。X-User-Id/X-User-Name 透传头自动落痕订单行（缺头落空，#158；支付链自动归档操作者为空）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 409 ORD_012 — 订单非已支付状态，无法归档
+         *     - 409 PRJ_013 — 项目已归档（归档是单向终点）
+         */
+        post: operations["retryArchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/orders/{id}/quote": {
         parameters: {
             query?: never;
@@ -325,7 +474,7 @@ export interface paths {
         put?: never;
         /**
          * 提交报价（已报价态重复提交 = 改价）
-         * @description 待报价态首次提交 = 报价（→已报价）；已报价态重复提交 = 改价（状态不变，append-only 价目行留痕、订单现值取最新行，改价历史用户面可见）。限未支付态：已支付/已终结 409 ORD_007；金额非正 400 ORD_008；备注超长 400 ORD_009。需要机机签名
+         * @description 待报价态首次提交 = 报价（→已报价）；已报价态重复提交 = 改价（状态不变，append-only 价目行留痕、订单现值取最新行，改价历史用户面可见）。X-User-Id/X-User-Name 透传头自动落痕价目行（缺头落空，#155）。限未支付态：已支付/已终结 409 ORD_007；金额非正 400 ORD_008；备注超长 400 ORD_009。需要机机签名
          *
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
@@ -334,6 +483,80 @@ export interface paths {
          *     - 400 ORD_009 — 报价备注超长（至多 1000 字）
          */
         post: operations["quote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 运营取消订单（未支付态）
+         * @description 语义与用户取消完全一致：订单落已取消、项目解冻回迭代、用户可继续对话与再次下单。取消原因必填——运营内部口径留档，不呈现任何用户面读面，后台订单详情可见。X-User-Id/X-User-Name 透传头自动落痕订单行（缺头落空，#157）。限未支付态：已支付/已归档/已取消 409 ORD_005（退款/售后另议）；原因缺失 400 ORD_013；原因超长（至多 1000 字）400 ORD_014。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 409 ORD_005 — 订单已支付或已终结，无法取消
+         *     - 400 ORD_013 — 取消原因必填（运营取消须填写原因）
+         *     - 400 ORD_014 — 取消原因超长（至多 1000 字）
+         */
+        post: operations["cancel_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/materials/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 启用素材（恢复命中）
+         * @description 停用的可逆侧：素材全部块恢复参与生成命中。X-User-Id/X-User-Name 透传头自动落痕素材级（缺头 400 KNW_006，口径同 disable）。重复启用幂等。素材不存在（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         *     - 400 KNW_006 — 操作者不能为空
+         */
+        post: operations["enable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/materials/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 停用素材（可逆开关）
+         * @description 素材全部块退出生成命中（检索状态过滤 #153 机制面恒开），重沉淀不复活（登记状态跨幂等替换存活）；拿不准的内容先摘除、误伤可经 enable 恢复。X-User-Id/X-User-Name 透传头自动落痕素材级（最近管理动作操作者）——缺头 400 KNW_006：知识治理动作必留痕，与单价表缺头落空有意不同（单价表有种子脚本无头通道，知识治理无此通道）。重复停用幂等（操作者留最近一次）。素材不存在（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         *     - 400 KNW_006 — 操作者不能为空
+         */
+        post: operations["disable"];
         delete?: never;
         options?: never;
         head?: never;
@@ -405,6 +628,46 @@ export interface paths {
          * @description 级联清理：容器 → 卷（pg 数据在卷内）→ 库记录。
          */
         delete: operations["destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 版本列表（新→旧）
+         * @description git log 即版本序列（无便利表）：每轮编码 run 收口自动成版（commit 主题 = 收口摘要、Run-Id trailer 锚定收尾卡）。零版本（尚无收口）= 空列表非错误。项目不存在 404 PRJ_001；环境故障 WSP_002
+         */
+        get: operations["list_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/versions/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 版本详情（锚定收尾卡）
+         * @description 版本元数据（hash / 摘要 / 锚定 run / 成版时刻）+ 收尾卡载荷（Run-Id 联接对话史 closing 条目；收尾卡缺位时 closing 为 null）。ref = commit hash（hex）——非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001
+         */
+        get: operations["detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -563,7 +826,7 @@ export interface paths {
         };
         /**
          * 对话史（对话面全量，#89 前端水合源）
-         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 小写名分岔；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
+         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
          */
         get: operations["conversation"];
         put?: never;
@@ -585,7 +848,7 @@ export interface paths {
          * 订单详情（用户面）
          * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
          */
-        get: operations["detail"];
+        get: operations["detail_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -646,20 +909,218 @@ export interface paths {
          *     | type | 族 | payload 字段 |
          *     |---|---|---|
          *     | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
-         *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键） |
+         *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title + 生成轨道切片 index/total） |
          *     | error | 智能体·生命周期 | runId, message |
          *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
-         *     | question-raised | 智能体·生命周期 | runId, sessionId, kind, summary, engineRef, data（问答卡投影与待确认工具清单） |
+         *     | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
+         *     | permission-required | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（#83 权限确认挂起：确认卡——summary=命令文本、data.toolCalls=待确认工具最小面） |
+         *     | permission-resolved | 智能体·生命周期 | runId, engineRef, approved（#83 权限确认落定：确认卡转已批/已拒） |
+         *     | permission-timed-out | 智能体·生命周期 | runId, engineRef（#112 权限确认超时：确认卡转「已超时」——随后 run-failed 收口） |
          *     | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
          *     | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
          *     | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
          *     | part-action | 智能体·部件 | toolCallId, toolName, state（started/running/completed/failed）, label |
-         *     | part-step | 智能体·部件 | step（1 起序号） |
+         *     | part-check | 智能体·部件 | state（checking/passed/failed——#85 自检播报：平台侧产出，不经引擎部件映射） |
          *     | text / reasoning / patch / tool / step-start / step-finish | 引擎透传 | … + `data`（引擎 part 原样） |
          *
          *     名册正本与字段细则：docs/spec/SSE事件清单.md（新增顶层 type 先进清单再上线）。
          */
         get: operations["subscribe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目清单（四维检索，分页）
+         * @description 监管工作清单：新项目在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态三档单选，Integer code（1=进行中 3=已归档；缺省＝全部，归档项目缺省含——照用户面状态过滤先例，与订单清单状态多选有意不同）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId 项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。已删项目不可见（真删无墓碑）。过滤参数绑定失败（非法 code/时间/分页值）400 PRJ_014。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 PRJ_014 — 无效的项目过滤参数
+         */
+        get: operations["projects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目详情（后台面，带订单引用＋成本指针）
+         * @description 清单字段全量＋归属账号显示名（缺档/无主为 null）＋订单引用（与订单域互链）：activeOrder＝未终结订单摘要（有值即冻结迭代，1=待报价 2=已报价），latestOrder＝最近一张任意状态订单（支付归档后 activeOrder 转空、本字段承接完整记录取单面；从未下单两者皆空）——照用户面先例。costSummary＝成本汇总指针（项目全量口径：总成本按币种分桶直读不折算＋unpriced 有无标记——true 时成本不完整；无用量＝空 cost＋false 明确空态；明细下钻走成本域端点 /api/backoffice/costs/projects/{id}，同数据源）。归档项目照读（工作区保留）；已删项目不可见（真删无墓碑）。需要机机签名；项目不存在 404 PRJ_001
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        get: operations["detail_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 版本列表（后台面，新→旧）
+         * @description 口径照用户面版本读口：git log 即版本序列（正本＝容器内 git log 直读，无库表）——每轮编码 run 收口自动成版（commit 主题 = 收口摘要、Run-Id trailer 锚定收尾卡）；回滚版本 runId 空、rollbackFrom 锚定源版本。排序新→旧定死；零版本（尚无收口）= 空列表非错误。「上周五还好好的」按版本锚点回看的入口。归档项目照读。需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/versions/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 版本详情（后台面，锚定收尾卡）
+         * @description 口径照用户面版本详情：版本元数据（hash / 摘要 / 锚定 run / 成版时刻）＋收尾卡载荷（Run-Id 联接对话史 closing 条目，#88 同载荷复用；收尾卡缺位时 closing 为 null）＋rollbackFrom（回滚版本锚定源版本、runId 空；run 版本反之）。ref = commit hash（hex 40 位）——非 hash 形态404 PRJ_028 且不触工作区（shell 注入防线）。归档项目照读。需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 404 PRJ_028 — 版本不存在
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["versionDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/prd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PRD 读（后台面，工作区直读）
+         * @description 口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，ISO-8601 秒精度）——了解交付物内容。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分。归档项目照读（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）500 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 404 PRJ_015 — PRD 尚未产出
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["prd_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 文件树（后台面，交付文件只读浏览）
+         * @description 口径照用户面文件树读口（同源委托同一应用服务——守卫由构造不漂移）：交付文件视图 = 项目 dev 工作区剔除非交付物（data/、.platform/、node_modules/ 与 .env——与源码包同口径）后的文件清单 [{path, size}]，path 为工作区相对路径、按路径稳定排序，只列文件（目录由调用方按路径段合成）。直读工作区实时状态。文件区挂项目不挂订单——未下单项目可浏览（源码包只挂订单的排障缺口在此补上，代码级排障不依赖成交）。归档项目照读（工作区保留）。需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["files_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 文本文件内容（后台面，点看）
+         * @description 口径照用户面文件内容读口：path = 工作区相对路径（文件树条目原样回传），只收文本且限大小——非交付物/机密（根级 .env）/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 NUL）400 PRJ_023。未下单项目照读（排障不依赖成交）。需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 400 PRJ_020 — 该文件不在可浏览范围
+         *     - 404 PRJ_021 — 文件不存在
+         *     - 400 PRJ_022 — 文件太大，暂不支持在线查看
+         *     - 400 PRJ_023 — 该文件不是文本文件，暂不支持在线查看
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["fileContent_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 对话史（后台面，全量同序）
+         * @description 口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）；question = question-raised 事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）——排障时了解用户与系统的交互过程。需要机机签名；项目不存在 404 PRJ_001
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        get: operations["conversation_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -676,11 +1137,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 订单清单（按状态过滤，分页）
-         * @description 报价工作清单：新单在前（TSID 倒序）。page 1 基（缺省 1）、size 缺省 20（上界 100）；status 可选（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消），缺省拉全量。需要机机签名（五头 HMAC），无签名 401
+         * 订单清单（四维检索，分页）
+         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败（非法 code/时间/分页值）400 ORD_010。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 ORD_010 — 无效的订单状态过滤参数
+         *     - 400 ORD_010 — 无效的订单过滤参数
          */
         get: operations["orders"];
         put?: never;
@@ -700,12 +1161,12 @@ export interface paths {
         };
         /**
          * 订单详情（后台面）
-         * @description 报价依据全量：状态、金额+最新备注、PRD 快照正文（下单冻结）、项目名、下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001
+         * @description 报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001
          *
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_1"];
+        get: operations["detail_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -738,6 +1199,174 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/materials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识素材清单（三过滤维度，分页）
+         * @description 治理工作清单：新沉淀在前。三维度可组合、均可缺省（缺省＝全量）：① status 状态单选，Integer code（1=启用 2=停用；缺省＝全部——与订单清单状态多选有意不同，照项目面状态单选先例）；② sunkFrom/sunkTo 沉淀时间区间（首沉淀时间，闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）；③ projectId 来源项目 id 精确（登记面字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法状态 code/时间/分页值）400 KNW_007。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 KNW_007 — 无效的知识素材过滤参数
+         */
+        get: operations["materials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/materials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 知识素材详情（元数据＋PRD 全文）
+         * @description 读内容判治理：元数据（素材类型/来源项目引用/沉淀时间（首沉淀，重沉淀与治理动作不改）/状态/最近管理动作操作者）＋素材全文＝块按 seq 以空行拼接（段落级重组：超长单段硬切的切点呈现为段落断，内容无损）。来源项目引用容缺直读登记面（不校验项目存在，缺档不炸）。素材不存在（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         */
+        get: operations["detail_4"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除素材（治理移除，不可逆）
+         * @description 治理移除素材登记行与全部块、不动来源项目（管理删除与项目删除级联正交）；清单/详情/检索均不可见。无行可留、不留痕（全局审计流水不建——admin 侧自有操作日志）。回执＝删除前终态（确认移除了什么）。素材不存在（含畸形 id、重复删除）404 KNW_005。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_005 — 知识素材不存在
+         */
+        delete: operations["delete_1"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/costs/unpriced": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * unpriced 全局警示（用量驱动）
+         * @description 窗口内有 token 用量且事件时点无生效单价的 (provider, model, 档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价时只计无价部分）。用量驱动：已配价档位与无用量档位不出现，静态配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 METER_011 — 无效的成本查询参数
+         */
+        get: operations["unpriced"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/costs/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目成本清单（窗口聚合，成本降序分页）
+         * @description 运营扫一眼谁费钱：窗口内有 token 用量的各项目成本汇总——总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）。排序服务端定死：成本降序（排序标量＝币种桶金额直加，单价表单币种时＝精确），全未配价项目（有用量但无任何已配价分量，成本标量缺失）排后且 allUnpriced=true 标注，同序按 projectId 升序稳定。用量驱动：无用量项目不出现在清单（空窗＝空清单 200）；已删项目的历史花费照列（成本观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省。查询参数（含分页）绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 METER_011 — 无效的成本查询参数
+         */
+        get: operations["projectCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/costs/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单项目成本下钻（byModel/byAgentKind 分解）
+         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值，展示名归 admin 侧映射；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 METER_011 — 无效的成本查询参数
+         */
+        get: operations["projectCostDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/costs/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 平台成本全局总览（时间窗）
+         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor，展示名归 admin 侧映射），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 METER_011 — 无效的成本查询参数
+         */
+        get: operations["overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/accounts/{externalId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 账号极简档案（按 externalId）
+         * @description 监管场景确认用户身份正身：externalId＝OIDC sub＝identity 账户 Id。返回我方留存四字段原样（id/externalId/displayName/createdAt，id 为 TSID 十进制字符串）；无 identity 富化（联系方式/封禁等归 identity/admin 侧）。需要机机签名（五头 HMAC）；externalId 未命中 404 IDN_004
+         *
+         *     错误码：
+         *     - 404 IDN_004 — 账号不存在
+         */
+        get: operations["profile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts": {
         parameters: {
             query?: never;
@@ -753,6 +1382,26 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/versions/{ref}/view/{viewId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 关闭查看会话（销毁快照容器）
+         * @description 销毁 viewId 对应的快照容器（副本随容器可写层消失，工作区零变化）。ref 仅为 URL 对称占位（寻址锚是 viewId）；会话不存在 404 PRJ_030
+         */
+        delete: operations["stopView"];
         options?: never;
         head?: never;
         patch?: never;
@@ -863,6 +1512,34 @@ export interface components {
             activeOrder?: components["schemas"]["OrderBriefResponse"];
             latestOrder?: components["schemas"]["OrderBriefResponse"];
         };
+        ApiResponseVersionViewStartResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["VersionViewStartResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        VersionViewStartResponse: {
+            viewId?: string;
+            previewUrl?: string;
+        };
+        ApiResponseVersionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["VersionResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        VersionResponse: {
+            commitHash?: string;
+            subject?: string;
+            runId?: string;
+            rollbackFrom?: string;
+            /** Format: date-time */
+            committedAt?: string;
+        };
         ApiResponseOrderResponse: {
             /** Format: int32 */
             code?: number;
@@ -938,8 +1615,33 @@ export interface components {
             runId: string;
             approved: boolean;
         };
+        AnnotationAnchor: {
+            selector?: string;
+            text?: string;
+            region?: components["schemas"]["AnnotationRegion"];
+        };
+        AnnotationAttachment: {
+            attachmentType: string;
+            annotation?: components["schemas"]["AnnotationBody"];
+        };
+        AnnotationBody: {
+            kind: string;
+            anchor?: components["schemas"]["AnnotationAnchor"];
+            note?: string;
+        };
+        AnnotationRegion: {
+            /** Format: double */
+            x?: number;
+            /** Format: double */
+            y?: number;
+            /** Format: double */
+            width?: number;
+            /** Format: double */
+            height?: number;
+        };
         PostMessageCommand: {
             content: string;
+            attachments?: components["schemas"]["AnnotationAttachment"][];
         };
         ApiResponseInterviewTurnResponse: {
             /** Format: int32 */
@@ -974,10 +1676,87 @@ export interface components {
         FixRestartResponse: {
             runId?: string;
         };
+        OpenPriceEntryCommand: {
+            provider?: string;
+            model?: string;
+            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理 */
+            tokenKind?: number;
+            unitPrice?: number;
+            currency?: string;
+            /** Format: date-time */
+            effectiveFrom?: string;
+        };
+        ApiResponseUnitPriceEntryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["UnitPriceEntryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        UnitPriceEntryResponse: {
+            id?: string;
+            provider?: string;
+            model?: string;
+            /** Format: int32 */
+            tokenKind?: number;
+            tokenKindName?: string;
+            unitPrice?: string;
+            currency?: string;
+            /** Format: date-time */
+            effectiveFrom?: string;
+            /** Format: date-time */
+            effectiveTo?: string;
+            operatorId?: string;
+            operatorName?: string;
+        };
+        RepricePriceEntryCommand: {
+            unitPrice?: number;
+            currency?: string;
+            /** Format: date-time */
+            effectiveFrom?: string;
+        };
+        ApiResponseUnitPriceEntryRepriceResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["UnitPriceEntryRepriceResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        UnitPriceEntryRepriceResponse: {
+            closed?: components["schemas"]["UnitPriceEntryResponse"];
+            opened?: components["schemas"]["UnitPriceEntryResponse"];
+        };
         SubmitQuoteCommand: {
             /** Format: int64 */
             amount?: number;
             note?: string;
+        };
+        CancelOrderCommand: {
+            reason?: string;
+        };
+        ApiResponseBackofficeMaterialSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeMaterialSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeMaterialSummaryResponse: {
+            id?: string;
+            kind?: string;
+            projectId?: string;
+            projectName?: string;
+            title?: string;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            sunkAt?: string;
+            operatorId?: string;
+            operatorName?: string;
         };
         ApiResponseListProjectResponse: {
             /** Format: int32 */
@@ -1003,6 +1782,33 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
             activeOrder?: components["schemas"]["OrderBriefResponse"];
+        };
+        ApiResponseListVersionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["VersionResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        ApiResponseVersionDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["VersionDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        VersionDetailResponse: {
+            commitHash?: string;
+            subject?: string;
+            runId?: string;
+            rollbackFrom?: string;
+            /** Format: date-time */
+            committedAt?: string;
+            closing?: {
+                [key: string]: Record<string, never>;
+            };
         };
         AgentKindUsage: {
             agentKind?: string;
@@ -1147,6 +1953,94 @@ export interface components {
             /** Format: int64 */
             timeout?: number;
         };
+        ApiResponsePageResponseBackofficeProjectSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeProjectSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeProjectSummaryResponse: {
+            id?: string;
+            name?: string;
+            ownerDisplayName?: string;
+            /** @description 1=官网, 2=电商 */
+            type?: number;
+            typeName?: string;
+            /** @description 1=进行中, 3=已归档 */
+            status?: number;
+            statusName?: string;
+            archived?: boolean;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        PageResponseBackofficeProjectSummaryResponse: {
+            items?: components["schemas"]["BackofficeProjectSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeProjectDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeProjectDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeProjectDetailResponse: {
+            id?: string;
+            name?: string;
+            ownerDisplayName?: string;
+            workspaceId?: string;
+            /** @description 1=官网, 2=电商 */
+            type?: number;
+            typeName?: string;
+            /** @description 1=进行中, 3=已归档 */
+            status?: number;
+            statusName?: string;
+            archived?: boolean;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
+            prdProducedAt?: string;
+            /** Format: date-time */
+            generatedAt?: string;
+            activeOrder?: components["schemas"]["OrderBriefResponse"];
+            latestOrder?: components["schemas"]["OrderBriefResponse"];
+            costSummary?: components["schemas"]["CostSummary"];
+        };
+        CostSummary: {
+            cost?: {
+                [key: string]: number;
+            };
+            unpriced?: boolean;
+        };
+        ApiResponsePageResponseUnitPriceEntryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseUnitPriceEntryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PageResponseUnitPriceEntryResponse: {
+            items?: components["schemas"]["UnitPriceEntryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
         ApiResponsePageResponseBackofficeOrderSummaryResponse: {
             /** Format: int32 */
             code?: number;
@@ -1159,6 +2053,7 @@ export interface components {
             id?: string;
             projectId?: string;
             projectName?: string;
+            ownerDisplayName?: string;
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
             statusName?: string;
@@ -1199,6 +2094,7 @@ export interface components {
             amount?: number;
             currency?: string;
             note?: string;
+            priceEntries?: components["schemas"]["BackofficePriceEntryResponse"][];
             prdSnapshot?: string;
             /** Format: date-time */
             createdAt?: string;
@@ -1208,8 +2104,170 @@ export interface components {
             paidAt?: string;
             /** Format: date-time */
             archivedAt?: string;
+            archiveOperatorId?: string;
+            archiveOperatorName?: string;
             /** Format: date-time */
             cancelledAt?: string;
+            cancelReason?: string;
+            cancelOperatorId?: string;
+            cancelOperatorName?: string;
+        };
+        BackofficePriceEntryResponse: {
+            id?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            note?: string;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        ApiResponsePageResponseBackofficeMaterialSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeMaterialSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PageResponseBackofficeMaterialSummaryResponse: {
+            items?: components["schemas"]["BackofficeMaterialSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeMaterialDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeMaterialDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeMaterialDetailResponse: {
+            id?: string;
+            kind?: string;
+            projectId?: string;
+            projectName?: string;
+            title?: string;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            sunkAt?: string;
+            operatorId?: string;
+            operatorName?: string;
+            content?: string;
+        };
+        ApiResponseBackofficeUnpricedUsageResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeUnpricedUsageResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeUnpricedUsageResponse: {
+            /** Format: date-time */
+            from?: string;
+            /** Format: date-time */
+            to?: string;
+            items?: components["schemas"]["UnpricedTier"][];
+        };
+        UnpricedTier: {
+            provider?: string;
+            model?: string;
+            /** Format: int32 */
+            tokenKind?: number;
+            tokenKindName?: string;
+            /** Format: int64 */
+            tokens?: number;
+        };
+        ApiResponsePageResponseBackofficeProjectCostResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeProjectCostResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeProjectCostResponse: {
+            projectId?: string;
+            total?: components["schemas"]["TokenUsage"];
+            cost?: {
+                [key: string]: number;
+            };
+            allUnpriced?: boolean;
+        };
+        PageResponseBackofficeProjectCostResponse: {
+            items?: components["schemas"]["BackofficeProjectCostResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeProjectCostDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeProjectCostDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeProjectCostDetailResponse: {
+            projectId?: string;
+            /** Format: date-time */
+            from?: string;
+            /** Format: date-time */
+            to?: string;
+            total?: components["schemas"]["TokenUsage"];
+            cost?: {
+                [key: string]: number;
+            };
+            unpriced?: components["schemas"]["UnpricedTier"][];
+            byModel?: components["schemas"]["ModelUsage"][];
+            byAgentKind?: components["schemas"]["AgentKindUsage"][];
+        };
+        ApiResponseBackofficeCostOverviewResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeCostOverviewResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeCostOverviewResponse: {
+            /** Format: date-time */
+            from?: string;
+            /** Format: date-time */
+            to?: string;
+            total?: components["schemas"]["TokenUsage"];
+            cost?: {
+                [key: string]: number;
+            };
+            byModel?: components["schemas"]["ModelUsage"][];
+            byAgentKind?: components["schemas"]["AgentKindUsage"][];
+        };
+        ApiResponseBackofficeAccountProfileResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeAccountProfileResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeAccountProfileResponse: {
+            id?: string;
+            externalId?: string;
+            displayName?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         AccountResponse: {
             accountId?: string;
@@ -1368,6 +2426,52 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectCreatedResponse"];
+                };
+            };
+        };
+    };
+    startView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVersionViewStartResponse"];
+                };
+            };
+        };
+    };
+    rollback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVersionResponse"];
                 };
             };
         };
@@ -1610,6 +2714,125 @@ export interface operations {
             };
         };
     };
+    entries: {
+        parameters: {
+            query?: {
+                provider?: string;
+                model?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseUnitPriceEntryResponse"];
+                };
+            };
+        };
+    };
+    open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenPriceEntryCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUnitPriceEntryResponse"];
+                };
+            };
+        };
+    };
+    reprice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepricePriceEntryCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUnitPriceEntryRepriceResponse"];
+                };
+            };
+        };
+    };
+    deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUnitPriceEntryResponse"];
+                };
+            };
+        };
+    };
+    retryArchive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
     quote: {
         parameters: {
             query?: never;
@@ -1632,6 +2855,76 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    cancel_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelOrderCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    enable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeMaterialSummaryResponse"];
+                };
+            };
+        };
+    };
+    disable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeMaterialSummaryResponse"];
                 };
             };
         };
@@ -1722,6 +3015,51 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    list_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListVersionResponse"];
+                };
+            };
+        };
+    };
+    detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVersionDetailResponse"];
                 };
             };
         };
@@ -1926,7 +3264,7 @@ export interface operations {
             };
         };
     };
-    detail: {
+    detail_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -1996,10 +3334,199 @@ export interface operations {
             };
         };
     };
-    orders: {
+    projects: {
         parameters: {
             query?: {
                 status?: number;
+                createdFrom?: string;
+                createdTo?: string;
+                externalId?: string;
+                projectId?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeProjectSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeProjectDetailResponse"];
+                };
+            };
+        };
+    };
+    versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListVersionResponse"];
+                };
+            };
+        };
+    };
+    versionDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVersionDetailResponse"];
+                };
+            };
+        };
+    };
+    prd_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePrdResponse"];
+                };
+            };
+        };
+    };
+    files_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectFilesResponse"];
+                };
+            };
+        };
+    };
+    fileContent_1: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectFileContentResponse"];
+                };
+            };
+        };
+    };
+    conversation_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListConversationEntryResponse"];
+                };
+            };
+        };
+    };
+    orders: {
+        parameters: {
+            query?: {
+                status?: number[];
+                createdFrom?: string;
+                createdTo?: string;
+                externalId?: string;
+                orderId?: string;
                 page?: number;
                 size?: number;
             };
@@ -2020,7 +3547,7 @@ export interface operations {
             };
         };
     };
-    detail_1: {
+    detail_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -2064,6 +3591,195 @@ export interface operations {
             };
         };
     };
+    materials: {
+        parameters: {
+            query?: {
+                status?: number;
+                sunkFrom?: string;
+                sunkTo?: string;
+                projectId?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeMaterialSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_4: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeMaterialDetailResponse"];
+                };
+            };
+        };
+    };
+    delete_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeMaterialSummaryResponse"];
+                };
+            };
+        };
+    };
+    unpriced: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeUnpricedUsageResponse"];
+                };
+            };
+        };
+    };
+    projectCosts: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeProjectCostResponse"];
+                };
+            };
+        };
+    };
+    projectCostDetail: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeProjectCostDetailResponse"];
+                };
+            };
+        };
+    };
+    overview: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeCostOverviewResponse"];
+                };
+            };
+        };
+    };
+    profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                externalId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeAccountProfileResponse"];
+                };
+            };
+        };
+    };
     accounts: {
         parameters: {
             query?: never;
@@ -2080,6 +3796,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListAccountResponse"];
+                };
+            };
+        };
+    };
+    stopView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+                ref: string;
+                viewId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
         };

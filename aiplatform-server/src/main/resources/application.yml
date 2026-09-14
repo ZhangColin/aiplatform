@@ -69,11 +69,17 @@ app:
   # #171 · 闲置休眠（ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照
   # 查看会话同一阈值）、扫描间隔（Duration 形如 5m，@Scheduled 消费）与开关
   # （test profile 关闭——集成测试直调扫描，定时器不扰测试库）。
+  # #172 · 封存与深度唤醒：封存阈值（休眠满此即自动封存——整卷打包含库存平台
+  # 本地磁盘后删卷）、封存包目录（生产应挂独立卷/盘；换对象存储时此配置退役、
+  # 端口接口不动）与就绪等待超时（深度唤醒分钟级——解包＋依赖重装，3 分钟不够）。
   workspace:
     provision-max-attempts: 3
     idle-threshold: 60m
     hibernation-scan-interval: 5m
     hibernation-enabled: true
+    seal-threshold: 30d
+    seal-archive-dir: seal-archives
+    readiness-timeout: 10m
   # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
   # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
   # 用户重新发起兜底（#22 重试次数/超时值实施期定）。

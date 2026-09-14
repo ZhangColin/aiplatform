@@ -90,6 +90,16 @@ public final class WorkspaceLayout {
     public static final List<String> NON_DELIVERABLE_DIRS = List.of(
             "node_modules", ".pnpm-store", ".next", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, GIT_DIR);
 
+    /**
+     * 可重建缓存名单（#172 封存单一事实）：封存打包（整卷 tar）唯一排除的目录——
+     * 依赖（node_modules）、pnpm 依赖缓存（.pnpm-store）、Next 构建产物（.next），
+     * 均可由「深度唤醒后重装依赖 / dev 模式即时构建」重建；数据库（{@link #PG_DATA_DIR}）
+     * 与全部用户产物随包。是 {@link #NON_DELIVERABLE_DIRS} 的真子集（交付口径更严：
+     * 数据/平台产物不交付但必须随封存包保全）。
+     */
+    public static final List<String> REBUILDABLE_CACHE_DIRS = List.of(
+            "node_modules", ".pnpm-store", ".next");
+
     private WorkspaceLayout() {
     }
 

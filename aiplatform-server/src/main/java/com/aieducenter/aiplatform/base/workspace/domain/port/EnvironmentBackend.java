@@ -11,6 +11,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 
 /**
@@ -24,8 +25,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
  * 用完即销毁）。#170 唤醒底座补两条：isContainerRunning（容器实态探查——唤醒
  * 触发判据）/ startApp（8081 应用拉起——平台职责）。#171 休眠器补一条：
- * hibernate（删容器保卷——唤醒走既有幂等重建）。restore（#93 回滚）与
- * attachResource 按需随各自切片扩。</p>
+ * hibernate（删容器保卷——唤醒走既有幂等重建）。#172 封存与深度唤醒补三条：
+ * packVolume（卷瘦身快照打包）/ restoreVolume（封存包回卷）/ deleteVolume
+ * （封存后删卷）。restore（#93 回滚）与 attachResource 按需随各自切片扩。</p>
  */
 @Port(PortType.CLIENT)
 public interface EnvironmentBackend {
@@ -71,6 +73,33 @@ public interface EnvironmentBackend {
      * 意图落库与否归编排方，删失败则下轮扫描收敛）。
      */
     void hibernate(WorkspaceHandle handle);
+
+    /**
+     * 卷瘦身快照打包（#172 封存前半，ADR-0016）：整卷 tar.gz 字节流——仅排除
+     * {@link WorkspaceLayout#REBUILDABLE_CACHE_DIRS 可重建缓存}，数据库（PGDATA）
+     * 与全部用户产物随包（与 {@link #packSource} 的交付口径不同：机密/数据不排）。
+     * 经临时旁路容器读卷（入口旁路，不起中间件）。卷不在（已删/外部漂移）返回
+     * null——调用方按「无包可记」收敛；打包失败抛（意图不翻，下轮重试）。
+     * 只在休眠态（容器已删、卷静默）上调用——活卷上的 pg 一致性无保障。
+     */
+    byte[] packVolume(WorkspaceHandle handle);
+
+    /**
+     * 封存包回卷（#172 深度唤醒前半）：重建卷（先删后建——残留/上次失败半解包
+     * 干净落位）并解包封存内容、顺手清 PGDATA 陈旧 postmaster.pid（封存自
+     * {@code docker rm -f} 的静默卷打包而来，pid 必陈旧；容器 PID 命名空间更迭后
+     * 同号进程可能占位，pg 会拒起）。解包失败抛（意图不动，下次触碰再试）。
+     * 须在重建容器（createWorkspace）之前调用——卷就位后入口脚本对既有 PGDATA
+     * 幂等自愈，数据完整恢复。
+     */
+    void restoreVolume(WorkspaceHandle handle, byte[] archive);
+
+    /**
+     * 删卷（#172 封存后半）：封存包安全落盘后回收卷存储。卷不在为 no-op 返回
+     * false；删失败（如仍被容器占用）也返回 false——调用方以返回值观测、下轮
+     * 扫描收敛，不抛。
+     */
+    boolean deleteVolume(WorkspaceHandle handle);
 
     /**
      * 拉起工作区应用进程至 8081 起服（#170：8081 应用拉起自此是平台职责——run 执行体

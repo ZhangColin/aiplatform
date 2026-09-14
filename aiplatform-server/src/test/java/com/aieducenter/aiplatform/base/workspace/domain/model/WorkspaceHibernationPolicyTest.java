@@ -75,4 +75,43 @@ class WorkspaceHibernationPolicyTest {
         assertThat(WorkspaceHibernationPolicy.shouldHibernate(workspace.getLastTouchAt(),
                 NOW, false, workspace.getDesiredState(), THRESHOLD)).isTrue();
     }
+
+    // ---------- 封存判定（#172） ----------
+
+    private static final Duration SEAL_THRESHOLD = Duration.ofDays(30);
+
+    /** 休眠满期：闲置逾「闲置阈值＋封存阈值」且期望休眠 → 封存。 */
+    @Test
+    void given_hibernated_beyond_seal_threshold_when_should_seal_then_true() {
+        assertThat(WorkspaceHibernationPolicy.shouldSeal(
+                NOW.minus(THRESHOLD).minus(SEAL_THRESHOLD).minusSeconds(1),
+                NOW, false, DesiredState.HIBERNATED, THRESHOLD, SEAL_THRESHOLD)).isTrue();
+    }
+
+    /** 恰好达阈值 = 未满期（严格超过口径与闲置一致）。 */
+    @Test
+    void given_hibernated_exactly_at_seal_threshold_when_should_seal_then_false() {
+        assertThat(WorkspaceHibernationPolicy.shouldSeal(
+                NOW.minus(THRESHOLD).minus(SEAL_THRESHOLD),
+                NOW, false, DesiredState.HIBERNATED, THRESHOLD, SEAL_THRESHOLD)).isFalse();
+    }
+
+    /** 封存只发生在休眠态上：运行/封存的期望态绝不封存。 */
+    @Test
+    void given_running_or_sealed_desired_state_when_should_seal_then_false() {
+        assertThat(WorkspaceHibernationPolicy.shouldSeal(
+                NOW.minusDays(60), NOW, false, DesiredState.RUNNING, THRESHOLD, SEAL_THRESHOLD))
+                .isFalse();
+        assertThat(WorkspaceHibernationPolicy.shouldSeal(
+                NOW.minusDays(60), NOW, false, DesiredState.SEALED, THRESHOLD, SEAL_THRESHOLD))
+                .isFalse();
+    }
+
+    /** run 在途恒活跃——已休眠满期也不动手（封存绝不对活跃项目动手）。 */
+    @Test
+    void given_run_in_flight_when_should_seal_then_false() {
+        assertThat(WorkspaceHibernationPolicy.shouldSeal(
+                NOW.minusDays(60), NOW, true, DesiredState.HIBERNATED,
+                THRESHOLD, SEAL_THRESHOLD)).isFalse();
+    }
 }

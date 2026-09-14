@@ -29,10 +29,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkspaceReadinessWaiter {
 
-    /** 置备等待超时（docker 置备最坏 ≈ 镜像首构 1min + pg/redis 各 30s 就绪，留余量）。 */
-    private static final Duration TIMEOUT = Duration.ofMinutes(3);
-
-    /** 就绪轮询间隔（与 docker 后端资源探针同频）。 */
+    /**
+     * 就绪轮询间隔（与 docker 后端资源探针同频）。超时不再写死：深度唤醒是分钟级
+     * （解包 + 依赖重装，#172），上界走配置 {@code app.workspace.readiness-timeout}
+     * （默认 10 分钟）。
+     */
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
     private final WorkspaceRepository workspaceRepository;
@@ -40,11 +41,12 @@ public class WorkspaceReadinessWaiter {
     private final Duration pollInterval;
 
     @Autowired
-    public WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository) {
-        this(workspaceRepository, TIMEOUT, POLL_INTERVAL);
+    public WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
+            WorkspaceProperties properties) {
+        this(workspaceRepository, properties.getReadinessTimeout(), POLL_INTERVAL);
     }
 
-    /** 测试构造：注入短超时/间隔以验收收敛（生产走 3min/500ms）。 */
+    /** 测试构造：注入短超时/间隔以验收收敛（生产走 readiness-timeout 配置/500ms）。 */
     WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
                              Duration timeout, Duration pollInterval) {
         this.workspaceRepository = workspaceRepository;

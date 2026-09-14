@@ -12,6 +12,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
@@ -362,5 +363,87 @@ class WorkspaceTest {
         // 唤醒迁移回运行意图（扫描器驱动的漂移收敛不经过触碰，意图须随迁移回正）
         assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
+    }
+
+    // ---------- 封存迁移（#172，ADR-0016：删卷换包，意图+封存元数据） ----------
+
+    @Test
+    void given_hibernated_workspace_when_seal_then_desired_sealed_and_metadata_recorded() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        workspace.complete(WorkspaceProvision.of(
+                WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
+        workspace.hibernate();
+        LocalDateTime sealedAt = LocalDateTime.of(2026, 9, 15, 12, 0);
+        SealPackage pkg = new SealPackage("/seal/ws-42.tar.gz", 2048L);
+
+        workspace.seal(pkg, sealedAt);
+
+        // 意图置封存 + 元数据落位；置备态保持 READY（记录反映上次置备成功）
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.SEALED);
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
+        assertThat(workspace.getSealedAt()).isEqualTo(sealedAt);
+        assertThat(workspace.getArchivePath()).isEqualTo("/seal/ws-42.tar.gz");
+        assertThat(workspace.getArchiveSizeBytes()).isEqualTo(2048L);
+    }
+
+    @Test
+    void given_running_or_sealed_workspace_when_seal_then_rejected() {
+        Workspace running = Workspace.registerPending(ID, EnvKind.DEV);
+        LocalDateTime at = LocalDateTime.of(2026, 9, 15, 12, 0);
+        SealPackage pkg = new SealPackage("/seal/ws-42.tar.gz", 1L);
+
+        // 封存只发生在休眠态上：运行中/封存中动手是编排错误
+        assertThatThrownBy(() -> running.seal(pkg, at))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("置备状态不合法");
+        Workspace sealed = Workspace.registerPending(ID, EnvKind.DEV).hibernate()
+                .seal(pkg, at);
+        assertThatThrownBy(() -> sealed.seal(pkg, at))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("置备状态不合法");
+    }
+
+    @Test
+    void given_hibernated_workspace_when_seal_without_package_then_null_metadata() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV).hibernate();
+
+        // 无包可记（卷已失的外部漂移）：意图照收敛，元数据为空——深度唤醒按空卷重建
+        workspace.seal(null, LocalDateTime.of(2026, 9, 15, 12, 0));
+
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.SEALED);
+        assertThat(workspace.getArchivePath()).isNull();
+        assertThat(workspace.getArchiveSizeBytes()).isNull();
+    }
+
+    @Test
+    void given_sealed_workspace_when_mark_touched_then_stays_sealed() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV).hibernate()
+                .seal(new SealPackage("/seal/ws-42.tar.gz", 1L),
+                        LocalDateTime.of(2026, 9, 15, 12, 0));
+
+        workspace.markTouched(LocalDateTime.of(2026, 9, 15, 13, 0));
+
+        // 封存态触碰不翻意图（卷已删）：出槽唯一经深度唤醒的 rewake——触碰只负责
+        // 触发自愈任务，意图翻转归唤醒编排
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.SEALED);
+        assertThat(workspace.getLastTouchAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 13, 0));
+    }
+
+    @Test
+    void given_sealed_workspace_when_rewake_then_deep_wake_path_and_running_intent() {
+        Workspace workspace = Workspace.registerPending(ID, EnvKind.DEV);
+        workspace.complete(WorkspaceProvision.of(
+                WorkspaceHandle.dev(ID, "ws-42", "previewnet")));
+        workspace.hibernate();
+        workspace.seal(new SealPackage("/seal/ws-42.tar.gz", 1L),
+                LocalDateTime.of(2026, 9, 15, 12, 0));
+
+        workspace.rewake();
+
+        // 深度唤醒的意图迁移：封存 → 运行 + PROVISIONING（走幂等重建，解包先行归编排）
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.PROVISIONING);
+        // 封存元数据不回清：描述盘上包的事实（再封存覆盖时刷新，项目删除时清理）
+        assertThat(workspace.getArchivePath()).isEqualTo("/seal/ws-42.tar.gz");
     }
 }

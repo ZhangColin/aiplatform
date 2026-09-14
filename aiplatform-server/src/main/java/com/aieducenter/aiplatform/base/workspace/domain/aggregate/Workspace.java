@@ -25,6 +25,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
@@ -74,7 +75,8 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
 
     /**
      * 期望态（ADR-0016 意图/实态分离）：DB 只记意图，不镜像 docker 实态——
-     * 变更方是休眠器/封存（后续票），唤醒编排以容器实态探查为准，不读它决策。
+     * 变更方是休眠器（{@link #hibernate()}）与封存（{@link #seal}），唤醒编排以
+     * 容器实态探查为准，不读它决策。
      */
     @Column(name = "desired_state", nullable = false)
     private DesiredState desiredState = DesiredState.RUNNING;
@@ -82,6 +84,21 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
     /** 最近触碰（#170）：项目域 API 每次触碰拨动，闲置计时（#171 休眠器）的输入。 */
     @Column(name = "last_touch_at", nullable = false)
     private LocalDateTime lastTouchAt;
+
+    /**
+     * 封存时刻（#172）：最近一次封存落定的时间；未封存为 null。深度唤醒不回清
+     * （连同下两列描述盘上封存包的事实，重复封存覆盖旧包时一并刷新）。
+     */
+    @Column(name = "sealed_at")
+    private LocalDateTime sealedAt;
+
+    /** 封存包路径（#172）：平台存储内的绝对寻址键（本地磁盘 v1）；未封存为 null。 */
+    @Column(name = "archive_path")
+    private String archivePath;
+
+    /** 封存包大小（#172，字节）；未封存为 null。 */
+    @Column(name = "archive_size_bytes")
+    private Long archiveSizeBytes;
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "workspace_id", nullable = false)
@@ -234,10 +251,28 @@ public class Workspace extends Auditable implements AggregateRoot<Workspace, Lon
     }
 
     /**
+     * 封存迁移（#172，ADR-0016 删卷换包）：意图置封存 + 封存包元数据落库——调用方
+     * 先把整卷打成封存包存进平台存储、后落本意图（包未落定则意图不翻，下轮扫描重试）。
+     * 仅休眠可封存（封存是休眠态的深回收：运行中/唤醒中动手是编排错误；重复封存走
+     * 「唤醒→再休眠→再封存」周期，包侧由确定性命名覆盖旧包）。{@code pkg} 为 null =
+     * 无包可记（卷已失——外部漂移的收敛形态，深度唤醒按空卷重建）。
+     */
+    public Workspace seal(SealPackage pkg, LocalDateTime at) {
+        if (desiredState != DesiredState.HIBERNATED) {
+            throw new DomainException(WorkspaceMessage.WORKSPACE_STATE_INVALID);
+        }
+        this.desiredState = DesiredState.SEALED;
+        this.sealedAt = at;
+        this.archivePath = pkg != null ? pkg.path() : null;
+        this.archiveSizeBytes = pkg != null ? pkg.sizeBytes() : null;
+        return this;
+    }
+
+    /**
      * 拨动 last-touch（#170）：项目域 API 每次触碰调用；时刻由调用方传入（纯迁移，
      * 时钟归应用层），闲置计时（#171 休眠器）以本字段为输入。触碰即活跃——期望态
      * 若为休眠则一并拨回运行（用户在用 = 想要沙箱在跑）；封存态不翻（卷已删，
-     * 深度唤醒归 #172）。
+     * 翻转会骗过封存判定的重走——封存出槽唯一经深度唤醒的 {@link #rewake()}）。
      */
     public void markTouched(LocalDateTime at) {
         this.lastTouchAt = at;

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
@@ -15,6 +16,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.aieducenter.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
 
@@ -51,6 +53,12 @@ class WorkspaceHibernationLiveTest {
     @Autowired
     private WorkspaceProperties properties;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private SealPackageStore sealPackageStore;
+
     private WorkspaceId workspaceId;
 
     @AfterEach
@@ -82,7 +90,8 @@ class WorkspaceHibernationLiveTest {
         workspaceRepository.save(workspace);
 
         int acted = new WorkspaceHibernationAppService(
-                backend, workspaceRepository, lifecycle, properties)
+                backend, workspaceRepository, lifecycle, sealPackageStore,
+                transactionTemplate, properties)
                 .scanOnce(Map.of(), LocalDateTime.now());
 
         // 容器被删、卷保留、期望态置休眠（置备态保持 READY——实态以探查为准）

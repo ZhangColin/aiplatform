@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -63,8 +64,12 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
     private static final Duration PREVIEW_PROBE_TIMEOUT = Duration.ofSeconds(2);
-    /** 应用拉起探活长窗（#170）：pnpm/npm 冷链路起服远超预览短窗，唤醒任务内同步等待。 */
-    private static final Duration APP_START_TIMEOUT = Duration.ofSeconds(60);
+    /**
+     * 应用拉起探活长窗（#170；#172 调大）：拉起含依赖重装（深度唤醒解包排除
+     * node_modules 后 {@code pnpm install} 是分钟级冷链路），10 分钟上限——健康路径
+     * 首个探活成功即返回，长窗只在最坏情况兜底。
+     */
+    private static final Duration APP_START_TIMEOUT = Duration.ofMinutes(10);
 
     /** 快照容器（#92）的容器本地落点：副本随容器可写层消失，不进卷。 */
     private static final String SNAPSHOT_ROOT = "/tmp/snap";
@@ -208,6 +213,70 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
+    public byte[] packVolume(WorkspaceHandle handle) {
+        // 卷瘦身快照（#172 封存前半）：临时旁路容器（入口旁路——不起中间件，卷静默
+        // 读取）tar 流式写 stdout。排除清单单一事实 = WorkspaceLayout.REBUILDABLE_CACHE_DIRS
+        // （交付口径的 packSource 更严——机密/数据不进交付包，但数据必须随封存包）。
+        // 注意 exclude 逐项独立 argv：本命令不经 shell（docker run 直达 tar），空格拼接
+        // 的单 argv 会被 tar 当成一个选项值、排除全部失效（packSource 经 sh -c 无此坑）。
+        // tar 以 root 跑：uid/gid 入包，解包端（同为 root）原样恢复属主——PGDATA 的
+        // postgres 属主是解包后 pg 能起的前提。
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            // 卷不在（已删/外部漂移）：无包可记——调用方按空包收敛意图
+            log.warn("[workspace] {} 打包时卷不在（已删/外部漂移），无包可记",
+                    handle.workspaceId().value());
+            return null;
+        }
+        List<String> cmd = new ArrayList<>(List.of("docker", "run", "--rm",
+                "--entrypoint", "tar",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE,
+                "czf", "-"));
+        WorkspaceLayout.REBUILDABLE_CACHE_DIRS.forEach(
+                name -> cmd.add("--exclude=./" + name));
+        cmd.addAll(List.of("-C", WorkspaceLayout.ROOT, "."));
+        ByteExec packed = runCaptureBinary(null, cmd.toArray(new String[0]));
+        if (packed.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "封存打包失败: " + packed.stderr());
+        }
+        return packed.stdout();
+    }
+
+    @Override
+    public void restoreVolume(WorkspaceHandle handle, byte[] archive) {
+        // 封存包回卷（#172 深度唤醒前半）：先删后建（残留/上次失败的半解包干净落位）
+        // → 临时旁路容器从 stdin 解包 + 清 PGDATA 陈旧 pid（封存自 rm -f 的静默卷来，
+        // pid 指向旧容器命名空间的进程号，新容器内同号进程可能占位致 pg 拒起）。
+        // 须先于 createWorkspace：卷就位后入口脚本对既有 PGDATA 幂等自愈。
+        String volume = volumeOf(handle.containerName());
+        runSilently("docker", "volume", "rm", volume);
+        run("docker", "volume", "create", volume);
+        String stalePid = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR) + "/postmaster.pid";
+        String command = "tar xzf - -C " + WorkspaceLayout.ROOT + " && rm -f " + stalePid;
+        ByteExec restored = runCaptureBinary(archive, "docker", "run", "--rm", "-i",
+                "--entrypoint", "sh",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE, "-c", command);
+        if (restored.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "封存包回卷失败: " + restored.stderr());
+        }
+    }
+
+    @Override
+    public boolean deleteVolume(WorkspaceHandle handle) {
+        // 删卷（#172 封存后半，封存包安全落盘后）：卷不在 no-op；删失败（容器占用等）
+        // 返回 false——调用方下轮扫描收敛，不抛
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            return false;
+        }
+        return runCapture("docker", "volume", "rm", volume).exitCode() == 0;
+    }
+
+    @Override
     public void startApp(WorkspaceHandle handle) {
         // 8081 应用拉起（#170 平台职责，收口 #168 缺口）：run 执行体 exec 常驻的应用
         // 进程不随容器自愈（入口脚本只自愈 pg/redis），容器重建/重启后由本方法拉回。
@@ -237,15 +306,18 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
      * 容器内起服命令（与快照 {@link #snapshotAppStartCommand} 同款判据链的主容器版）：
-     * server.js → node server.js；package.json → npm start；无入口静默退出（exit 0、
-     * 不输出 started 哨兵——调用方以此区分「拉了等起服」与「无入口不拉」。注意 shell
-     * 优先级：{@code &} 是命令分隔符会把整段后台化，哨兵必须经 {@code { …& } &&} 前台
-     * 条件执行，否则 exit 0 后哨兵仍输出）。差异：不注入 DATABASE_URL/REDIS_URL
-     * （主容器 .env 在位、应用自读，#45 口径平台不代起静态兜底，故无 serve.js 兜底
-     * 分支）、日志落卷内 .app.log。
+     * 先按需重装依赖（#172 深度唤醒：封存包排除 node_modules，解包后缺失则
+     * {@code pnpm install}——基座包管理器与 store-dir 约定见镜像 Dockerfile，锁文件
+     * 随包、装完与判据链同窗等待）；再 server.js → node server.js；package.json →
+     * npm start；无入口静默退出（exit 0、不输出 started 哨兵——调用方以此区分
+     * 「拉了等起服」与「无入口不拉」。注意 shell 优先级：{@code &} 是命令分隔符会把
+     * 整段后台化，哨兵必须经 {@code { …& } &&} 前台条件执行，否则 exit 0 后哨兵仍
+     * 输出）。差异：不注入 DATABASE_URL/REDIS_URL（主容器 .env 在位、应用自读，
+     * #45 口径平台不代起静态兜底，故无 serve.js 兜底分支）、日志落卷内 .app.log。
      */
     private String appStartCommand() {
         return "cd " + WorkspaceLayout.ROOT
+                + " && if test -f package.json && ! test -d node_modules; then pnpm install; fi"
                 + " && if test -f server.js; then APP='node server.js';"
                 + " elif test -f package.json; then APP='npm start';"
                 + " else exit 0; fi"
@@ -574,5 +646,38 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         } catch (Exception e) {
             return new ExecResult("", String.valueOf(e.getMessage()), 1);
         }
+    }
+
+    /**
+     * 字节流命令 seam（#172 封存打包/回卷，与 {@link #runCapture} 同一假面面）：
+     * stdin 可喂字节（解包）、stdout 取字节（打包）——gzip 二进制经 String 往返会
+     * 损坏，字节命令不走 {@code runCapture}。stderr 异步读防管道写满死锁（同
+     * {@link #packSource} 的教训）。异常（进程起不来等）按 exit 1 + stderr 记因，
+     * 不抛——与 {@code runCapture} 的容错形态一致。
+     */
+    protected ByteExec runCaptureBinary(byte[] stdin, String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).start();
+            CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(p.getErrorStream().readAllBytes());
+                } catch (Exception readFailure) {
+                    return String.valueOf(readFailure.getMessage());
+                }
+            });
+            if (stdin != null) {
+                p.getOutputStream().write(stdin);
+            }
+            p.getOutputStream().close();
+            byte[] stdout = p.getInputStream().readAllBytes();
+            int code = p.waitFor();
+            return new ByteExec(stdout, stderr.join(), code);
+        } catch (Exception e) {
+            return new ByteExec(new byte[0], String.valueOf(e.getMessage()), 1);
+        }
+    }
+
+    /** 字节流命令结果（{@link #runCaptureBinary} 的返回形；测试假面可编）。 */
+    public record ByteExec(byte[] stdout, String stderr, int exitCode) {
     }
 }

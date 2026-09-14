@@ -1,5 +1,7 @@
 package com.aieducenter.aiplatform.base.workspace.application;
 
+import java.io.FileNotFoundException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -24,19 +26,23 @@ import com.cartisan.event.ApplicationEventPublisher;
 import com.aieducenter.aiplatform.base.workspace.application.event.PreviewReady;
 import com.aieducenter.aiplatform.base.workspace.application.mapper.WorkspaceMapper;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+import com.aieducenter.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -82,6 +88,9 @@ class WorkspaceWakeupOrchestrationTest {
 
     @Mock
     private WorkspaceReadinessWaiter readinessWaiter;
+
+    @Mock
+    private SealPackageStore sealPackageStore;
 
     @Mock
     private WorkspaceProperties properties;
@@ -284,6 +293,103 @@ class WorkspaceWakeupOrchestrationTest {
                 .isEqualTo(WorkspaceMessage.WORKSPACE_PROVISION_FAILED);
     }
 
+    // ---------- 深度唤醒（#172：封存态触碰 = 解包回卷 + 同一重建路径） ----------
+
+    @Test
+    void given_sealed_with_package_when_touch_then_restored_before_rebuild_and_app_started() {
+        // 载入序列：touch 探查 →（任务内）heal 探查 → rewake 事务重取 → 收敛后重取
+        // （四个独立实例：rewake 会原地迁移状态，共享实例会让收敛后重取读到 PROVISIONING）
+        stubLoads(sealedWorkspace(), sealedWorkspace(), sealedWorkspace(), sealedWorkspace());
+        when(workspaceRepository.save(any(Workspace.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(sealPackageStore.open("/seal/ws-42.tar.gz")).thenReturn("archive".getBytes());
+        when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
+                .thenReturn(URI.create("http://42.localhost/"));
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).touch("42", true);
+        executor.runQueued();
+
+        // 深度唤醒全链：解包回卷（物理先行）→ rewake → 重建 → 应用拉起（含依赖重装）
+        verify(environmentBackend).restoreVolume(any(WorkspaceHandle.class),
+                eq("archive".getBytes()));
+        var inOrder = org.mockito.Mockito.inOrder(environmentBackend, provisioner);
+        inOrder.verify(environmentBackend).restoreVolume(any(WorkspaceHandle.class), any());
+        inOrder.verify(provisioner).provisionForWake(ID, EnvKind.DEV);
+        verify(environmentBackend).startApp(any(WorkspaceHandle.class));
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        verify(workspaceRepository, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues().get(1).getDesiredState())
+                .isEqualTo(DesiredState.RUNNING);
+        // 包不删（再封存覆盖锚 + 删除项目的清理锚），元数据保留
+        verify(sealPackageStore, never()).delete(any());
+    }
+
+    @Test
+    void given_sealed_without_package_when_touch_then_plain_wake_on_fresh_volume() {
+        // 无包可记（卷已失）形态：期望封存、元数据为空（四个独立实例，同上）
+        stubLoads(bareSealedWorkspace(), bareSealedWorkspace(),
+                bareSealedWorkspace(), bareSealedWorkspace());
+        when(workspaceRepository.save(any(Workspace.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
+                .thenThrow(new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING));
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).touch("42", true);
+        executor.runQueued();
+
+        // 无包记录：按空卷普通唤醒（不解包），意图照翻运行
+        verify(environmentBackend, never()).restoreVolume(any(), any());
+        verify(provisioner).provisionForWake(ID, EnvKind.DEV);
+    }
+
+    @Test
+    void given_sealed_with_unreadable_package_when_touch_then_stays_sealed() {
+        Workspace sealed = sealedWorkspace();
+        stubLoads(sealed, sealed);
+        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(sealPackageStore.open("/seal/ws-42.tar.gz"))
+                .thenThrow(new UncheckedIOException(
+                        new FileNotFoundException("/seal/ws-42.tar.gz")));
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).touch("42", true);
+        executor.runQueued();
+
+        // 包不可读：保持封存态待人工介入（不以空卷顶替数据丢失），不重建不拉应用
+        verify(environmentBackend, never()).restoreVolume(any(), any());
+        verify(provisioner, never()).provisionForWake(any(), any());
+        verify(environmentBackend, never()).startApp(any(WorkspaceHandle.class));
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        verify(workspaceRepository, times(1)).save(saved.capture());   // 只有 touch 的拨动
+        assertThat(saved.getValue().getDesiredState())
+                .isEqualTo(DesiredState.SEALED);
+    }
+
+    @Test
+    void given_restore_fails_when_touch_then_sealed_intent_kept_for_retry() {
+        Workspace sealed = sealedWorkspace();
+        stubLoads(sealed, sealed);
+        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(sealPackageStore.open("/seal/ws-42.tar.gz")).thenReturn("archive".getBytes());
+        doThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED))
+                .when(environmentBackend).restoreVolume(any(WorkspaceHandle.class), any());
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).touch("42", true);
+        executor.runQueued();   // 解包失败被 healIfNeeded 吞掉（尽力而为）
+
+        // 解包失败：意图不动（仍封存），下次触碰/下轮扫描再试
+        verify(provisioner, never()).provisionForWake(any(), any());
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        verify(workspaceRepository, times(1)).save(saved.capture());
+        assertThat(saved.getValue().getDesiredState())
+                .isEqualTo(DesiredState.SEALED);
+    }
+
     // ---------- 测试数据 ----------
 
     private final AtomicInteger loads = new AtomicInteger();
@@ -302,9 +408,25 @@ class WorkspaceWakeupOrchestrationTest {
         return pending;
     }
 
+    /** 已封存工作区：READY 置备态 + 期望封存 + 包元数据（深度唤醒的输入形态）。 */
+    private Workspace sealedWorkspace() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(LocalDateTime.now().minusDays(31));
+        workspace.hibernate();
+        return workspace.seal(new SealPackage("/seal/ws-42.tar.gz", 128L), LocalDateTime.now());
+    }
+
+    /** 无包封存工作区：期望封存、元数据为空（卷已失的外部漂移收敛形态）。 */
+    private Workspace bareSealedWorkspace() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(LocalDateTime.now().minusDays(31));
+        workspace.hibernate();
+        return workspace.seal(null, LocalDateTime.now());
+    }
+
     private WorkspaceLifecycleAppService newService(Executor executor) {
         return new WorkspaceLifecycleAppService(environmentBackend, workspaceRepository,
                 transactionTemplate, eventPublisher, workspaceMapper, provisioner,
-                readinessWaiter, properties, executor);
+                readinessWaiter, properties, sealPackageStore, executor);
     }
 }

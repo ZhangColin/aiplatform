@@ -3,26 +3,35 @@ package com.aieducenter.aiplatform.base.workspace.application;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+import com.aieducenter.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,15 +39,20 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 休眠扫描编排（#171，ADR-0016）：纯 Mockito 直测——扫描器每轮「先休眠判定、再探
- * 实态收敛」的分支次序与副作用（删容器保卷 + 意图落库）。真库 + Docker CLI 假面
- * seam 的链路见 {@code WorkspaceHibernationIntegrationTest}，真 daemon 的数据保全
- * 见 {@code WorkspaceHibernationLiveTest}。
+ * 休眠/封存扫描编排（#171/#172，ADR-0016）：纯 Mockito 直测——扫描器每轮「先休眠
+ * 判定、再封存判定、再探实态收敛」的分支次序与副作用（删容器保卷 + 意图落库；
+ * 封存 = 打包→落盘→意图→删卷的独占任务）。真库 + Docker CLI 假面 seam 的链路见
+ * {@code WorkspaceHibernationIntegrationTest}，真 daemon 的数据保全见
+ * {@code WorkspaceHibernationLiveTest}/{@code WorkspaceSealLiveTest}。
  */
 @ExtendWith(MockitoExtension.class)
 class WorkspaceHibernationAppServiceTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 14, 12, 0);
+
+    /** 封存假包（save 的回执形状）。 */
+    private static final SealPackage PACKAGE =
+            new SealPackage("/tmp/seal/ws-42.tar.gz", 1024L);
 
     @Mock
     private EnvironmentBackend environmentBackend;
@@ -48,6 +62,22 @@ class WorkspaceHibernationAppServiceTest {
 
     @Mock
     private WorkspaceLifecycleAppService lifecycle;
+
+    @Mock
+    private SealPackageStore sealPackageStore;
+
+    /** TransactionTemplate 测试替身：回调真跑（无事务管理器——编排逻辑不感知）。 */
+    private final TransactionTemplate transactionTemplate = new TransactionTemplate() {
+        @Override
+        public <T> T execute(TransactionCallback<T> callback) {
+            return callback.doInTransaction(null);
+        }
+
+        @Override
+        public void executeWithoutResult(Consumer<TransactionStatus> action) {
+            action.accept(null);
+        }
+    };
 
     /** 闲置判定入参全显式给定（阈值 60m；触碰拨到 2 小时前 = 闲置，10 分钟前 = 活跃）。 */
     private final WorkspaceProperties properties = new WorkspaceProperties();
@@ -177,6 +207,149 @@ class WorkspaceHibernationAppServiceTest {
         verify(workspaceRepository, never()).save(any(Workspace.class));
     }
 
+    // ---------- 封存（#172） ----------
+
+    @Test
+    void given_hibernated_over_seal_threshold_when_scan_then_sealed_package_saved_volume_deleted() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusDays(31));   // 闲置 31 天：休眠满期（60m + 30d 之上）
+        workspace.hibernate();   // 先拨时刻后落休眠（markTouched 会把休眠意图翻回运行）
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(workspace));
+        when(workspaceRepository.save(any(Workspace.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(environmentBackend.packVolume(any(WorkspaceHandle.class)))
+                .thenReturn(new byte[] {1, 2, 3});
+        when(sealPackageStore.save(any(WorkspaceId.class), any())).thenReturn(PACKAGE);
+        when(environmentBackend.deleteVolume(any(WorkspaceHandle.class))).thenReturn(true);
+        runExclusivelySynchronously();
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 封存全链：打包 → 落盘 → 意图+元数据落库 → 删卷（次序断言）
+        assertThat(acted).isEqualTo(1);
+        var inOrder = inOrder(environmentBackend, sealPackageStore, workspaceRepository);
+        // 打包前置自愈：休眠删容器曾静默失败时先幂等删容器（静默卷打包的前置）
+        inOrder.verify(environmentBackend).hibernate(workspace.toHandle());
+        inOrder.verify(environmentBackend).packVolume(workspace.toHandle());
+        inOrder.verify(sealPackageStore).save(workspace.workspaceId(), new byte[] {1, 2, 3});
+        ArgumentCaptor<Workspace> saved = ArgumentCaptor.forClass(Workspace.class);
+        inOrder.verify(workspaceRepository).save(saved.capture());
+        inOrder.verify(environmentBackend).deleteVolume(workspace.toHandle());
+        assertThat(saved.getValue().getDesiredState()).isEqualTo(DesiredState.SEALED);
+        assertThat(saved.getValue().getArchivePath()).isEqualTo(PACKAGE.path());
+        assertThat(saved.getValue().getArchiveSizeBytes()).isEqualTo(PACKAGE.sizeBytes());
+        assertThat(saved.getValue().getSealedAt()).isNotNull();
+    }
+
+    @Test
+    void given_hibernated_but_under_seal_threshold_when_scan_then_not_sealed() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusDays(10));   // 闲置 10 天：休眠未满期
+        workspace.hibernate();
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 未满期不动：不打包、不删卷、不落库
+        assertThat(acted).isZero();
+        verify(environmentBackend, never()).packVolume(any(WorkspaceHandle.class));
+        verify(environmentBackend, never()).deleteVolume(any(WorkspaceHandle.class));
+        verify(workspaceRepository, never()).save(any(Workspace.class));
+    }
+
+    @Test
+    void given_hibernated_over_threshold_but_run_in_flight_when_scan_then_not_sealed() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusDays(40));
+        workspace.hibernate();
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+
+        newService().scanOnce(Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
+
+        // run 在途恒活跃：休眠/封存都不动手（封存绝不对活跃项目动手）
+        verify(lifecycle, never()).runExclusively(any(), any());
+        verify(environmentBackend, never()).packVolume(any(WorkspaceHandle.class));
+    }
+
+    @Test
+    void given_pack_failure_when_seal_then_intent_not_flipped() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusDays(31));
+        workspace.hibernate();
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(workspace));
+        when(environmentBackend.packVolume(any(WorkspaceHandle.class)))
+                .thenThrow(new RuntimeException("daemon down"));
+        runExclusivelySynchronously();
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // 打包失败：不落盘、不落库（意图保持休眠，下轮重试）、不删卷
+        verify(sealPackageStore, never()).save(any(), any());
+        verify(workspaceRepository, never()).save(any(Workspace.class));
+        verify(environmentBackend, never()).deleteVolume(any(WorkspaceHandle.class));
+    }
+
+    @Test
+    void given_record_deleted_during_seal_when_commit_then_just_saved_package_cleaned() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusDays(31));
+        workspace.hibernate();
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        // 首读在（起封存）→ 事务内重取已删（销毁竞争）
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(workspace), Optional.empty());
+        when(environmentBackend.packVolume(any(WorkspaceHandle.class)))
+                .thenReturn(new byte[] {1});
+        when(sealPackageStore.save(any(WorkspaceId.class), any())).thenReturn(PACKAGE);
+        runExclusivelySynchronously();
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // 记录已删：刚落的包随手清（不留孤儿），不再动物理面
+        verify(sealPackageStore).delete(PACKAGE.path());
+        verify(environmentBackend, never()).deleteVolume(any(WorkspaceHandle.class));
+    }
+
+    @Test
+    void given_sealed_with_leftover_volume_when_scan_then_volume_converged() {
+        Workspace workspace = readyWorkspace();
+        workspace.hibernate();
+        workspace.seal(PACKAGE, NOW);
+        workspace.markTouched(NOW.minusDays(40));
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(workspace));
+        when(environmentBackend.deleteVolume(any(WorkspaceHandle.class))).thenReturn(true);
+        runExclusivelySynchronously();
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 期望封存而卷仍在：删卷向意图收敛（独占任务内重取——与深度唤醒互斥；
+        // 占卷的容器一并清）；意图已对不落库、不计数（静默卫生）
+        assertThat(acted).isZero();
+        verify(environmentBackend).deleteVolume(workspace.toHandle());
+        verify(environmentBackend).hibernate(workspace.toHandle());
+        verify(workspaceRepository, never()).save(any(Workspace.class));
+    }
+
+    @Test
+    void given_sealed_residue_task_when_deep_wake_landed_first_then_no_delete() {
+        Workspace sealed = readyWorkspace();
+        sealed.hibernate();
+        sealed.seal(PACKAGE, NOW);
+        when(workspaceRepository.findAll()).thenReturn(List.of(sealed));
+        // 任务内重取：让路期间已被深度唤醒（期望态翻运行）——卷是刚解包回来的
+        Workspace woken = readyWorkspace();
+        woken.markTouched(NOW);
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(woken));
+        runExclusivelySynchronously();
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // 已出封存意图：绝不删卷（交错删卷 = 深度唤醒数据丢失，收敛任务重取防之）
+        verify(environmentBackend, never()).deleteVolume(any(WorkspaceHandle.class));
+    }
+
     // ---------- 测试数据 ----------
 
     private Workspace readyWorkspace() {
@@ -188,6 +361,15 @@ class WorkspaceHibernationAppServiceTest {
 
     private WorkspaceHibernationAppService newService() {
         return new WorkspaceHibernationAppService(
-                environmentBackend, workspaceRepository, lifecycle, properties);
+                environmentBackend, workspaceRepository, lifecycle, sealPackageStore,
+                transactionTemplate, properties);
+    }
+
+    /** 独占提交直通（测试不异步）：封存任务同步跑，副作用次序可断言。 */
+    private void runExclusivelySynchronously() {
+        doAnswer(inv -> {
+            ((Runnable) inv.getArgument(1)).run();
+            return null;
+        }).when(lifecycle).runExclusively(any(WorkspaceId.class), any());
     }
 }

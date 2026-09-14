@@ -32,6 +32,7 @@ import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceCrea
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
 import com.aieducenter.aiplatform.base.workspace.application.mapper.WorkspaceMapper;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -41,6 +42,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+import com.aieducenter.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -58,7 +60,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>唤醒自愈（#170，ADR-0016）：项目域 API 触碰（{@link #touch}）异步探查容器实态，
  * 缺失/被杀（#168 型漂移；休眠后触碰同路径）则幂等重建至预览可用——重建归置备器
  * 同款收敛（重试上限→FAILED、可再触发），8081 应用拉起归 {@link EnvironmentBackend#startApp}
- * （平台职责），成活以探活 + PreviewReady 收口（前端 SSE 刷新锚）。</p>
+ * （平台职责），成活以探活 + PreviewReady 收口（前端 SSE 刷新锚）。封存态触碰走
+ * 深度唤醒（#172）：解包回卷 → 同一重建路径 → 应用拉起连带依赖重装，分钟级；
+ * {@link #runExclusively} 是封存/唤醒共用的每工作区重活互斥面。</p>
  */
 @Service
 @Slf4j
@@ -75,11 +79,12 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
     private final WorkspaceProvisionAppService provisioner;
     private final WorkspaceReadinessWaiter readinessWaiter;
     private final WorkspaceProperties properties;
+    private final SealPackageStore sealPackageStore;
 
     /**
-     * 自愈互斥登记（#170）：同一工作区同时至多一个在途任务（实态探查/幂等重建/应用
-     * 拉起共用一面）——并发触碰只触发一次。进程内语义；跨进程由 PROVISIONING 态
-     * 与幂等重建兜底。
+     * 重活互斥登记（#170 起，#172 扩为封存共用面）：同一工作区同时至多一个在途
+     * 任务（实态探查/幂等重建/应用拉起/封存打包共用一面）——并发触碰只触发一次、
+     * 封存与唤醒互斥。进程内语义；跨进程由 PROVISIONING 态与幂等重建兜底。
      */
     private final Set<WorkspaceId> healing = ConcurrentHashMap.newKeySet();
 
@@ -97,9 +102,10 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
                                         WorkspaceMapper workspaceMapper,
                                         WorkspaceProvisionAppService provisioner,
                                         WorkspaceReadinessWaiter readinessWaiter,
-                                        WorkspaceProperties properties) {
+                                        WorkspaceProperties properties,
+                                        SealPackageStore sealPackageStore) {
         this(environmentBackend, workspaceRepository, transactionTemplate, eventPublisher,
-                workspaceMapper, provisioner, readinessWaiter, properties,
+                workspaceMapper, provisioner, readinessWaiter, properties, sealPackageStore,
                 new ThreadPoolExecutor(HEAL_THREADS, HEAL_THREADS,
                         0L, TimeUnit.MILLISECONDS,
                         new LinkedBlockingQueue<>(),
@@ -115,6 +121,7 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
                                  WorkspaceProvisionAppService provisioner,
                                  WorkspaceReadinessWaiter readinessWaiter,
                                  WorkspaceProperties properties,
+                                 SealPackageStore sealPackageStore,
                                  Executor healExecutor) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
@@ -124,6 +131,7 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
         this.provisioner = provisioner;
         this.readinessWaiter = readinessWaiter;
         this.properties = properties;
+        this.sealPackageStore = sealPackageStore;
         this.healExecutor = healExecutor;
         this.ownedHealExecutor = null;
     }
@@ -297,14 +305,24 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
     /**
      * 销毁工作区：先取消在途后台置备（#64，置备中销毁不留孤儿——任务完成
      * createWorkspace 后见取消即回收刚落定资源），再物理级联清理（容器→网络→卷，
-     * 后端尽力而为），记录删除的事务内发 WorkspaceDestroyed（AFTER_COMMIT）。物理
-     * 清理失败不阻断记录删除——Docker 侧残留以真实状态为准，可重建句柄后重试销毁。
+     * 后端尽力而为）＋封存包一并清理（#172：深度唤醒不删包——包是「最近一次封存」
+     * 的事实与覆盖锚，删除项目才是它的终点），记录删除的事务内发 WorkspaceDestroyed
+     * （AFTER_COMMIT）。物理清理失败不阻断记录删除——Docker 侧残留以真实状态为准，
+     * 可重建句柄后重试销毁。删记录的事务内重取一次包路径兜底清包：封存提交若与本
+     * 方法取记录交错（取到的旧副本尚无包路径），按旧副本删会漏包留磁盘孤儿。
      */
     public void destroy(String workspaceId) {
         Workspace workspace = requireWorkspace(workspaceId);
         provisioner.cancel(workspace.workspaceId());
         environmentBackend.destroyWorkspace(workspace.toHandle());
+        if (workspace.getArchivePath() != null) {
+            sealPackageStore.delete(workspace.getArchivePath());
+        }
         transactionTemplate.executeWithoutResult(status -> {
+            // 事务内重取：封存与销毁交错时以最新记录清包（尽力而为不抛，不阻断删除）
+            workspaceRepository.findById(workspace.workspaceId().id())
+                    .map(Workspace::getArchivePath)
+                    .ifPresent(path -> sealPackageStore.delete(path));
             workspaceRepository.delete(workspace);
             eventPublisher.publishApplicationEvent(
                     WorkspaceDestroyed.of(workspace.workspaceId()));
@@ -328,10 +346,8 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
         if (workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
             return;   // 首次置备/唤醒已在途
         }
-        WorkspaceId id = workspace.workspaceId();
-        if (healing.add(id)) {
-            healExecutor.execute(() -> healIfNeeded(id, startAppOnWake));
-        }
+        runExclusively(workspace.workspaceId(),
+                () -> healIfNeeded(workspace.workspaceId(), startAppOnWake));
     }
 
     /**
@@ -345,18 +361,14 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
             return;
         }
         WorkspaceId id = workspace.workspaceId();
-        if (healing.add(id)) {
-            healExecutor.execute(() -> {
-                try {
-                    environmentBackend.startApp(workspace.toHandle());
-                    exposePreview(workspaceId);
-                } catch (RuntimeException e) {
-                    log.warn("[workspace] {} 应用拉起未成（下次触碰/探活再试）", id.value(), e);
-                } finally {
-                    healing.remove(id);
-                }
-            });
-        }
+        runExclusively(id, () -> {
+            try {
+                environmentBackend.startApp(workspace.toHandle());
+                exposePreview(workspaceId);
+            } catch (RuntimeException e) {
+                log.warn("[workspace] {} 应用拉起未成（下次触碰/探活再试）", id.value(), e);
+            }
+        });
     }
 
     /** 自愈任务：实态探查 → 不健康才唤醒重建（唤醒含应用拉起与预览事件收口）。 */
@@ -372,8 +384,6 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
             wakeUp(workspace, startAppOnWake);
         } catch (RuntimeException e) {
             log.warn("[workspace] {} 触碰自愈未成（尽力而为，下次触碰再试）", id.value(), e);
-        } finally {
-            healing.remove(id);
         }
     }
 
@@ -384,8 +394,24 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
      * 会拖住扫描轮的节奏）；互斥在途则本轮让路，下轮再看。
      */
     public void healDrift(WorkspaceId id, boolean startAppOnWake) {
+        runExclusively(id, () -> healIfNeeded(id, startAppOnWake));
+    }
+
+    /**
+     * 独占提交（#172 起，封存与唤醒/删除互斥的共用面）：同一工作区同时至多一个
+     * 在途重活（实态探查/幂等重建/应用拉起/封存打包/深度唤醒解包）。在途则让路
+     * 不排队（调用方下轮扫描/下次触碰再试），finally 释放互斥——任务体自身异常
+     * 语义归任务（自愈吞、封存记日志）。
+     */
+    public void runExclusively(WorkspaceId id, Runnable task) {
         if (healing.add(id)) {
-            healExecutor.execute(() -> healIfNeeded(id, startAppOnWake));   // finally 释放互斥
+            healExecutor.execute(() -> {
+                try {
+                    task.run();
+                } finally {
+                    healing.remove(id);
+                }
+            });
         }
     }
 
@@ -393,11 +419,23 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
      * 唤醒（ADR-0016 醒 = 既有幂等重建路径）：rewake 落 PROVISIONING → 同步重置备
      * （置备器同款重试上限，全败落 FAILED、可再触发）→ 已生成项目拉起 8081 应用
      * → 探活发 PreviewReady。未生成工作区探活必败（WSP_012 预期口径），吞掉。
+     *
+     * <p>封存态走深度唤醒（#172）：先解包回卷（物理先行——失败则意图不动，保持
+     * 封存态下次触碰再试），后续与普通唤醒同一重建路径；应用拉起连带依赖重装
+     * （解包排除了 node_modules），分钟级。</p>
      */
     private void wakeUp(Workspace workspace, boolean startAppOnWake) {
         WorkspaceId id = workspace.workspaceId();
-        log.info("[workspace] {} 容器缺失/被杀，唤醒：幂等重建（卷保留，数据不动）",
-                id.value());
+        if (workspace.getDesiredState() == DesiredState.SEALED) {
+            if (!restoreSealedVolume(workspace)) {
+                return;   // 包不可读：保持封存态（数据完整性优先，不以空卷顶替），待人工介入
+            }
+            log.info("[workspace] {} 封存态触碰，深度唤醒：解包回卷 + 幂等重建（分钟级）",
+                    id.value());
+        } else {
+            log.info("[workspace] {} 容器缺失/被杀，唤醒：幂等重建（卷保留，数据不动）",
+                    id.value());
+        }
         Workspace rewoken = transactionTemplate.execute(status -> {
             // 事务内重取防复活：销毁竞争下记录已删则不迁移（孤儿资源归销毁级联+置备取消协调）
             Workspace fresh = workspaceRepository.findById(id.id()).orElse(null);
@@ -420,6 +458,32 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
             // 未生成工作区预期未起服（WSP_012）；已生成的应用问题由预览面自愈续试
             log.debug("[workspace] {} 唤醒后预览探活未过：{}", id.value(), e.getMessage());
         }
+    }
+
+    /**
+     * 封存包解包回卷（#172 深度唤醒前半，物理先行）：重建卷并解包——成功后随后的
+     * 幂等重建（createWorkspace）对既有卷自愈，数据完整恢复。返回 false = 无可用包
+     * （无路径 = 外部漂移的空包收敛形态，按空卷重建；包不可读 = 保持封存态待人工
+     * 介入——「系统与数据完整恢复」是契约，静默换空卷等于掩埋数据丢失）；解包失败
+     * 上抛（healIfNeeded 吞掉记日志，意图不动下次再试）。
+     */
+    private boolean restoreSealedVolume(Workspace workspace) {
+        String archivePath = workspace.getArchivePath();
+        if (archivePath == null) {
+            log.warn("[workspace] {} 封存态无封存包记录（卷已失的外部漂移），按空卷重建",
+                    workspace.workspaceId().value());
+            return true;
+        }
+        byte[] archive;
+        try {
+            archive = sealPackageStore.open(archivePath);
+        } catch (RuntimeException e) {
+            log.error("[workspace] {} 封存包不可读（{}），保持封存态待人工介入",
+                    workspace.workspaceId().value(), archivePath, e);
+            return false;
+        }
+        environmentBackend.restoreVolume(workspace.toHandle(), archive);
+        return true;
     }
 
     private Workspace requireWorkspace(String workspaceId) {

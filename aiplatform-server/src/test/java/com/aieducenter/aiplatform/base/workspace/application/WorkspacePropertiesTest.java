@@ -95,4 +95,30 @@ class WorkspacePropertiesTest {
 
         assertThat(bound.getPreviewScheme()).isEqualTo("https");
     }
+
+    /** #172 封存默认值：阈值 30 天、目录 seal-archives、就绪等待 10 分钟。 */
+    @Test
+    void given_default_properties_when_seal_then_30d_default_dir_and_10m_readiness() {
+        WorkspaceProperties properties = new WorkspaceProperties();
+        assertThat(properties.getSealThreshold()).isEqualTo(Duration.ofDays(30));
+        assertThat(properties.getSealArchiveDir()).isEqualTo("seal-archives");
+        assertThat(properties.getReadinessTimeout()).isEqualTo(Duration.ofMinutes(10));
+    }
+
+    /** 配置键真绑定（app.workspace.seal-threshold / seal-archive-dir / readiness-timeout）。 */
+    @Test
+    void given_config_keys_when_bind_then_seal_wired() {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(Map.of(
+                "app.workspace.seal-threshold", "7d",
+                "app.workspace.seal-archive-dir", "/data/seal",
+                "app.workspace.readiness-timeout", "20m"));
+
+        WorkspaceProperties bound = new Binder(source)
+                .bind("app.workspace", Bindable.ofInstance(new WorkspaceProperties()))
+                .get();
+
+        assertThat(bound.getSealThreshold()).isEqualTo(Duration.ofDays(7));
+        assertThat(bound.getSealArchiveDir()).isEqualTo("/data/seal");
+        assertThat(bound.getReadinessTimeout()).isEqualTo(Duration.ofMinutes(20));
+    }
 }

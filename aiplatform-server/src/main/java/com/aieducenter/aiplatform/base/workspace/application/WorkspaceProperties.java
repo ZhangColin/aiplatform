@@ -13,7 +13,9 @@ import org.springframework.stereotype.Component;
  * 开发 {@code http} + {@code localhost}，生产 {@code https} + {@code preview.{domain}}。
  * 闲置休眠（#171，ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照查看
  * 会话同一阈值）与休眠器开关（测试 profile 关闭——集成测试直调 scanOnce，不让
- * 定时器与启动对账扰库）。
+ * 定时器与启动对账扰库）。封存（#172）：封存阈值（休眠满此即封存）与封存包目录
+ * （本地磁盘 v1，换对象存储时目录配置退役、接口不动）；就绪等待超时（深度唤醒
+ * 分钟级，3 分钟不够装依赖安装）。
  */
 @Component
 @ConfigurationProperties(prefix = "app.workspace")
@@ -33,6 +35,21 @@ public class WorkspaceProperties {
 
     /** 休眠器开关（#171，默认开；test profile 关——扫描直调，定时器不扰测试库）。 */
     private boolean hibernationEnabled = true;
+
+    /** 封存阈值（#172，默认 30 天）：休眠满此即自动封存（删卷换包）。 */
+    private Duration sealThreshold = Duration.ofDays(30);
+
+    /**
+     * 封存包目录（#172，默认 {@code seal-archives} 工作目录下）：本地磁盘 v1 的
+     * 存放根；生产应挂独立卷/盘。
+     */
+    private String sealArchiveDir = "seal-archives";
+
+    /**
+     * 就绪等待超时（#172，默认 10 分钟）：置备中工作区执行需要环境的能力前的
+     * 轮询上界——深度唤醒是分钟级（解包 + 依赖重装），旧 3 分钟不够。
+     */
+    private Duration readinessTimeout = Duration.ofMinutes(10);
 
     public int getProvisionMaxAttempts() {
         return provisionMaxAttempts;
@@ -72,5 +89,29 @@ public class WorkspaceProperties {
 
     public void setHibernationEnabled(boolean hibernationEnabled) {
         this.hibernationEnabled = hibernationEnabled;
+    }
+
+    public Duration getSealThreshold() {
+        return sealThreshold;
+    }
+
+    public void setSealThreshold(Duration sealThreshold) {
+        this.sealThreshold = sealThreshold;
+    }
+
+    public String getSealArchiveDir() {
+        return sealArchiveDir;
+    }
+
+    public void setSealArchiveDir(String sealArchiveDir) {
+        this.sealArchiveDir = sealArchiveDir;
+    }
+
+    public Duration getReadinessTimeout() {
+        return readinessTimeout;
+    }
+
+    public void setReadinessTimeout(Duration readinessTimeout) {
+        this.readinessTimeout = readinessTimeout;
     }
 }

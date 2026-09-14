@@ -17,7 +17,9 @@ public enum KnowledgeMessage implements CodeMessage {
 
     KNOWLEDGE_MATERIAL_NOT_FOUND(404, "KNW_005", "知识素材不存在"),
 
-    KNOWLEDGE_OPERATOR_REQUIRED(400, "KNW_006", "操作者不能为空");
+    KNOWLEDGE_OPERATOR_REQUIRED(400, "KNW_006", "操作者不能为空"),
+
+    KNOWLEDGE_MATERIAL_FILTER_INVALID(400, "KNW_007", "无效的知识素材过滤参数");
 
     private final int httpStatus;
     private final String code;

@@ -1,8 +1,14 @@
 package com.aieducenter.aiplatform.base.knowledge.infrastructure.persistence;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import cn.hutool.core.collection.CollUtil;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -10,11 +16,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cartisan.core.domain.BaseEnum;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.aieducenter.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialRecord;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 import com.aieducenter.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
@@ -54,6 +63,11 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
             WHERE m.status = 1
             ORDER BY c.embedding <=> ?::vector LIMIT ?
             """;
+
+    /** 登记行读列（素材清单/详情/回执共形；顺序即 {@link #materialOf} 下标）。 */
+    private static final String MATERIAL_COLUMNS =
+            "id, kind, source_ref, project_id, project_name, title, status, operator_id, "
+                    + "operator_name, created_at";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -113,6 +127,96 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
     public void deleteByProject(String projectId) {
         jdbcTemplate.update("DELETE FROM knw_chunks WHERE project_id = ?", projectId);
         jdbcTemplate.update("DELETE FROM knw_materials WHERE project_id = ?", projectId);
+    }
+
+    @Override
+    public MaterialRecord findMaterial(long id) {
+        List<MaterialRecord> rows = jdbcTemplate.query(
+                "SELECT " + MATERIAL_COLUMNS + " FROM knw_materials WHERE id = ?",
+                (rs, rowNum) -> materialOf(rs), id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /**
+     * 素材清单检索（#166）：动态条件拼接（null 维不参与过滤），全量计数与当页行
+     * 两查共用同一 where/args（同 {@code UsageEventAggregationsImpl} 时间窗先例）。
+     * 沉淀时间＝created_at（首沉淀，管理面正口径），闭区间含两端。
+     */
+    @Override
+    public MaterialSearchResult searchMaterials(MaterialStatus status, Instant sunkFrom,
+                                                Instant sunkTo, String projectId, int offset,
+                                                int limit) {
+        List<String> conditions = CollUtil.newArrayList();
+        List<Object> args = CollUtil.newArrayList();
+        if (status != null) {
+            conditions.add("status = ?");
+            args.add(status.getCode());
+        }
+        if (sunkFrom != null) {
+            conditions.add("created_at >= ?");
+            args.add(Timestamp.from(sunkFrom));
+        }
+        if (sunkTo != null) {
+            conditions.add("created_at <= ?");
+            args.add(Timestamp.from(sunkTo));
+        }
+        if (projectId != null && !projectId.isBlank()) {
+            conditions.add("project_id = ?");
+            args.add(projectId);
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+
+        Long total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_materials" + where, Long.class, args.toArray());
+        args.add(limit);
+        args.add(offset);
+        List<MaterialRecord> items = jdbcTemplate.query(
+                "SELECT " + MATERIAL_COLUMNS + " FROM knw_materials" + where
+                        + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (rs, rowNum) -> materialOf(rs), args.toArray());
+        return new MaterialSearchResult(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public List<String> chunksOf(String kind, String sourceRef) {
+        return jdbcTemplate.query(
+                "SELECT chunk FROM knw_chunks WHERE kind = ? AND source_ref = ? ORDER BY seq",
+                (rs, rowNum) -> rs.getString(1), kind, sourceRef);
+    }
+
+    /**
+     * 治理删除（#166）：块表以 (kind, source_ref) 为柄（无素材 id 列）——先取身份
+     * 再两删，同事务保证「块与登记行同生共死」；素材不存在不动任何行。
+     */
+    @Override
+    @Transactional
+    public boolean deleteMaterial(long id) {
+        List<Object[]> identity = jdbcTemplate.query(
+                "SELECT kind, source_ref FROM knw_materials WHERE id = ?",
+                (rs, rowNum) -> new Object[]{rs.getString(1), rs.getString(2)}, id);
+        if (identity.isEmpty()) {
+            return false;
+        }
+        Object[] keys = identity.get(0);
+        jdbcTemplate.update("DELETE FROM knw_chunks WHERE kind = ? AND source_ref = ?",
+                keys[0], keys[1]);
+        jdbcTemplate.update("DELETE FROM knw_materials WHERE id = ?", id);
+        return true;
+    }
+
+    /** 登记行 → 读模型（列序＝{@link #MATERIAL_COLUMNS}）。 */
+    private static MaterialRecord materialOf(ResultSet rs) throws SQLException {
+        return new MaterialRecord(
+                rs.getLong(1),
+                rs.getString(2),
+                rs.getString(3),
+                rs.getString(4),
+                rs.getString(5),
+                rs.getString(6),
+                BaseEnum.requireByCode(MaterialStatus.class, rs.getInt(7)),
+                rs.getTimestamp(10).toInstant(),
+                rs.getString(8),
+                rs.getString(9));
     }
 
     /** float[] → pgvector 字面量 {@code [v1,v2,...]}（余弦距离 {@code <=>} 的入参形态）。 */

@@ -1,10 +1,13 @@
 package com.aieducenter.aiplatform.base.knowledge.domain.repository;
 
+import java.time.Instant;
 import java.util.List;
 
 import com.aieducenter.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialRecord;
+import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 
 /**
@@ -41,4 +44,32 @@ public interface KnowledgeStore {
      * 按项目清理登记行与全部知识块（级联清理入口，A5 §5；照删含已停用素材）。
      */
     void deleteByProject(String projectId);
+
+    /**
+     * 登记行按 id 直读（#166 管理端点寻址：素材 id 即 URL 柄）。
+     *
+     * @return 查无返回 null，由调用方定 404 语义
+     */
+    MaterialRecord findMaterial(long id);
+
+    /**
+     * 素材清单检索（#166 管理读面，登记表单表查询）：状态单选（null＝全部）＋
+     * 沉淀时间闭区间（null 侧不限）＋来源项目 id 精确（null/空白＝不过滤），
+     * 排序沉淀时间倒序、id 倒序稳定；SQL 侧分页（offset/limit 由调用方换算）。
+     */
+    MaterialSearchResult searchMaterials(MaterialStatus status, Instant sunkFrom, Instant sunkTo,
+                                         String projectId, int offset, int limit);
+
+    /**
+     * 素材块文本按 seq 升序（#166 详情全文拼装入料）。
+     */
+    List<String> chunksOf(String kind, String sourceRef);
+
+    /**
+     * 治理删除素材（#166）：登记行与全部块同事务移除、不动来源项目（与
+     * {@link #deleteByProject} 项目级联正交）。无行可留、不留痕。
+     *
+     * @return 素材不存在返回 false，由调用方定 404 语义
+     */
+    boolean deleteMaterial(long id);
 }

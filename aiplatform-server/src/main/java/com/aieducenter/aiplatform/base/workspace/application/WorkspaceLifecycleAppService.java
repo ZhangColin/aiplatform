@@ -25,6 +25,7 @@ import com.cartisan.event.ApplicationEventPublisher;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceContentPackage;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ProvisionFailedWorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.application.event.PreviewReady;
@@ -269,6 +270,46 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
     }
 
     /**
+     * 项目文件包（#174 后台下载）：封存态直取封存包（卷已删，包是唯一事实——
+     * 整卷口径，含数据/机密）；未封存即时导出源码包（交付口径，同
+     * {@link #packSource} 内核——订单源码包流程不动）。未封存而容器缺失（休眠/
+     * 漂移）先同步唤醒重建再打包（下载触碰即唤醒，与项目 API 触碰同语义；不拨
+     * last-touch、不拉应用——打包只要容器，取完闲置扫描自然收回）。封存态无包
+     * 记录或包不可读抛 WSP_016（不静默换路径——包是封存数据的唯一载体）。
+     */
+    public WorkspaceContentPackage contentPackageOf(String workspaceId) {
+        Workspace workspace = requireWorkspace(workspaceId);
+        if (workspace.getDesiredState() == DesiredState.SEALED) {
+            return new WorkspaceContentPackage(openSealArchive(workspace), true);
+        }
+        if (workspace.getStatus() != ProvisioningStatus.PROVISIONING
+                && !environmentBackend.isContainerRunning(workspace.toHandle())) {
+            // 容器缺失（休眠/漂移）：同步唤醒重建（互斥在途让路——他人任务收敛中，
+            // 交由下方 packSource 的就绪等待接管）
+            runExclusivelyBlocking(workspace.workspaceId(),
+                    () -> wakeUp(workspace, false));
+        }
+        return new WorkspaceContentPackage(packSource(workspaceId), false);
+    }
+
+    /** 取封存包字节：无记录/不可读统一 WSP_016（外层 IO 异常归一为域错误）。 */
+    private byte[] openSealArchive(Workspace workspace) {
+        String archivePath = workspace.getArchivePath();
+        if (archivePath == null) {
+            log.warn("[workspace] {} 封存态无封存包记录（外部漂移），下载拒（不以空产物顶替）",
+                    workspace.workspaceId().value());
+            throw new ApplicationException(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE);
+        }
+        try {
+            return sealPackageStore.open(archivePath);
+        } catch (RuntimeException e) {
+            log.error("[workspace] {} 封存包不可读（{}），下载拒",
+                    workspace.workspaceId().value(), archivePath, e);
+            throw new ApplicationException(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE);
+        }
+    }
+
+    /**
      * 起「查看当时」快照容器（#92）：置备中隐式等待就绪（#62）后交给环境后端按
      * ADR 0007 解路二起快照（同卷 :ro + 入口旁路 + 数据副本 + 检出当时代码起应用）。
      * 返回快照句柄（容器名 + 预览 URL——#141 网关子域，环境后端拼好），编排层据此
@@ -416,6 +457,24 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
     }
 
     /**
+     * 同步独占执行（#174 后台动作面）：与 {@link #runExclusively} 同一张互斥面，
+     * 但任务在<b>当前线程</b>内执行（管理动作要同步等结果）。在途返回 false
+     * （不排队——调用方如实回「忙」），获锁执行返回 true，finally 释放——任务体
+     * 异常原样上抛（语义归调用方）。
+     */
+    public boolean runExclusivelyBlocking(WorkspaceId id, Runnable task) {
+        if (!healing.add(id)) {
+            return false;
+        }
+        try {
+            task.run();
+            return true;
+        } finally {
+            healing.remove(id);
+        }
+    }
+
+    /**
      * 唤醒（ADR-0016 醒 = 既有幂等重建路径）：rewake 落 PROVISIONING → 同步重置备
      * （置备器同款重试上限，全败落 FAILED、可再触发）→ 已生成项目拉起 8081 应用
      * → 探活发 PreviewReady。未生成工作区探活必败（WSP_012 预期口径），吞掉。
@@ -423,8 +482,11 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
      * <p>封存态走深度唤醒（#172）：先解包回卷（物理先行——失败则意图不动，保持
      * 封存态下次触碰再试），后续与普通唤醒同一重建路径；应用拉起连带依赖重装
      * （解包排除了 node_modules），分钟级。</p>
+     *
+     * <p>包内可见（#174）：后台动作面（{@link WorkspaceActionAppService}）在同一
+     * 进程内直接驱动本收敛内核（同步等结果），不复制编排。</p>
      */
-    private void wakeUp(Workspace workspace, boolean startAppOnWake) {
+    void wakeUp(Workspace workspace, boolean startAppOnWake) {
         WorkspaceId id = workspace.workspaceId();
         if (workspace.getDesiredState() == DesiredState.SEALED) {
             if (!restoreSealedVolume(workspace)) {

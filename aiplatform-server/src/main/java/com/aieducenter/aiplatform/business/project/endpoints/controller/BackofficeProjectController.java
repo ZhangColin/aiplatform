@@ -5,7 +5,11 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Back
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
@@ -202,6 +207,26 @@ public class BackofficeProjectController {
     public ApiResponse<ProjectFileContentResponse> fileContent(@PathVariable String id,
             @RequestParam String path) {
         return ApiResponse.ok(projectQueryAppService.fileContent(ProjectIds.parse(id), path));
+    }
+
+    @GetMapping("/{id}/files/package")
+    @Operation(summary = "项目文件包（tar.gz 二进制流，#174）",
+            description = "取走项目工作区内容：已封存项目直取封存包（整卷口径——含数据库"
+                    + "与机密，卷已删、包是唯一事实，文件名 {id}-archive.tar.gz）；"
+                    + "未封存项目即时导出源码包（交付口径：排 node_modules/.env 等，"
+                    + "与订单源码包同一导出实现——订单流程不动，文件名 {id}-source.tar.gz）。"
+                    + "沙箱休眠中会先同步唤醒重建再打包（分钟内）；归档项目照取"
+                    + "（工作区保留）。项目不存在 404 PRJ_001；封存态无包记录/包不可读"
+                    + "404 WSP_016（1016）；环境故障 500 WSP_002。需要机机签名")
+    @ErrorCodes({"PRJ_001", "WSP_016", "WSP_002"})
+    public ResponseEntity<ByteArrayResource> filesPackage(@PathVariable String id) {
+        Long projectId = ProjectIds.parse(id);
+        ProjectFilesPackage pkg = projectQueryAppService.filesPackage(projectId);
+        String filename = projectId + (pkg.fromSealArchive() ? "-archive.tar.gz" : "-source.tar.gz");
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/gzip"));
+        headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
+        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(pkg.content()));
     }
 
     /**

@@ -14,6 +14,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageQueryPort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceContentPackage;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
@@ -23,6 +24,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
@@ -191,6 +193,23 @@ public class ProjectQueryAppService {
                 .map(entry -> new ProjectFilesResponse.FileEntry(entry.path(), entry.size()))
                 .toList();
         return new ProjectFilesResponse(projectId.toString(), entries);
+    }
+
+    /**
+     * 项目文件包（#174 后台下载）：已封存项目直取封存包（整卷口径——卷已删，
+     * 包是唯一事实）；未封存项目即时导出源码包（交付口径，与订单源码包同一
+     * packSource 内核——订单流程不动）。沙箱休眠中会先同步唤醒重建再打包
+     * （分钟内）。事务注解取舍同 {@link #prd}（docker 副作用不进事务）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；WSP_016 封存包不存在或
+     *                              不可读；WSP_002 环境故障
+     */
+    public ProjectFilesPackage filesPackage(Long projectId) {
+        Project project = loadProject(projectId);
+        WorkspaceContentPackage contentPackage = workspaceLifecycleAppService.contentPackageOf(
+                Long.toString(project.getWorkspaceId()));
+        return new ProjectFilesPackage(projectId.toString(), contentPackage.content(),
+                contentPackage.fromSealArchive());
     }
 
     /**

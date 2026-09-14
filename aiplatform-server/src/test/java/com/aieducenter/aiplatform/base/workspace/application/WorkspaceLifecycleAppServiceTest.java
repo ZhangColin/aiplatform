@@ -1,11 +1,15 @@
 package com.aieducenter.aiplatform.base.workspace.application;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,13 +29,18 @@ import com.aieducenter.aiplatform.base.workspace.application.event.PreviewReady;
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceCreated;
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceContentPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
+import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
@@ -42,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -419,6 +429,97 @@ class WorkspaceLifecycleAppServiceTest {
             workspacesAtCreatedDelivery = -1;
             workspacesAtDestroyedDelivery = -1;
         }
+    }
+
+    // ---------- 项目文件包（#174 后台下载：封存直取包 / 未封存即时导出） ----------
+
+    @Test
+    void given_sealed_workspace_when_content_package_then_seal_package_bytes_no_docker()
+            throws Exception {
+        byte[] archive = "整卷封存内容".getBytes();
+        Workspace workspace = seedWorkspace(DesiredState.SEALED, writePackage(archive));
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        // 封存态直取封存包：字节原样、零 docker 探查/打包（卷已删，包是唯一事实）
+        assertThat(result.content()).isEqualTo(archive);
+        assertThat(result.fromSealArchive()).isTrue();
+        verify(environmentBackend, never()).isContainerRunning(any());
+        verify(environmentBackend, never()).packSource(any());
+    }
+
+    @Test
+    void given_sealed_workspace_without_package_record_when_content_package_then_wsp_016() {
+        Workspace workspace = seedWorkspace(DesiredState.SEALED, null);
+
+        assertThatThrownBy(() -> appService.contentPackageOf(workspace.workspaceId().value()))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessage(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE.message());
+        verify(environmentBackend, never()).packSource(any());
+    }
+
+    @Test
+    void given_hibernated_workspace_when_content_package_then_woken_then_source_packed() {
+        Workspace workspace = seedWorkspace(DesiredState.HIBERNATED, null);
+        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(false);
+        // 唤醒重建的置备内核：补齐 complete 收口（真实置备器的行为形状）
+        doAnswer(invocation -> {
+            WorkspaceId id = invocation.getArgument(0);
+            workspaceRepository.findById(id.id()).ifPresent(fresh ->
+                    workspaceRepository.save(fresh.complete(
+                            WorkspaceProvision.of(fresh.toHandle()))));
+            return null;
+        }).when(provisioner).provisionForWake(any(WorkspaceId.class), eq(EnvKind.DEV));
+        byte[] source = "源码包内容".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        // 容器缺失（休眠）：先同步唤醒重建（不拉应用——打包只要容器不要 8081），后打包
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner).provisionForWake(workspace.workspaceId(), EnvKind.DEV);
+        verify(environmentBackend, never()).startApp(any());
+    }
+
+    @Test
+    void given_running_workspace_when_content_package_then_packed_without_wake() {
+        Workspace workspace = seedWorkspace(DesiredState.RUNNING, null);
+        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(true);
+        byte[] source = "在线源码".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner, never()).provisionForWake(any(), any());
+    }
+
+    // ---------- 项目文件包 fixture ----------
+
+    @TempDir
+    private Path packageDir;
+
+    /** 落一行期望态就位的工作区（READY 起点；SEALED 需带包元数据）。 */
+    private Workspace seedWorkspace(DesiredState desired, SealPackage sealed) {
+        WorkspaceId id = WorkspaceId.generate();
+        Workspace workspace = Workspace.dev(id, WorkspaceNaming.containerName(id),
+                WorkspaceNaming.PREVIEW_NETWORK);
+        if (desired == DesiredState.HIBERNATED) {
+            workspace.hibernate();
+        } else if (desired == DesiredState.SEALED) {
+            workspace.hibernate();
+            workspace.seal(sealed, LocalDateTime.of(2026, 9, 15, 10, 0));
+        }
+        return workspaceRepository.save(workspace);
+    }
+
+    /** 落一个真实封存包文件，返回其元数据（路径指向临时目录）。 */
+    private SealPackage writePackage(byte[] content) throws Exception {
+        Path file = packageDir.resolve("pkg-" + System.nanoTime() + ".tar.gz");
+        Files.write(file, content);
+        return new SealPackage(file.toString(), content.length);
     }
 
     // ---------- 供给 fixture（containerName 固定，便于唯一约束冲突构造） ----------

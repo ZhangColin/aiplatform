@@ -32,7 +32,16 @@ public enum WorkspaceMessage implements CodeMessage {
     WORKSPACE_STARTING(503, "WSP_013", "系统启动中"),
 
     /** #173 后台观测面：清单过滤参数绑定失败（非法期望态/实态 code、分页值）。 */
-    WORKSPACE_FILTER_INVALID(400, "WSP_014", "无效的工作区过滤参数");
+    WORKSPACE_FILTER_INVALID(400, "WSP_014", "无效的工作区过滤参数"),
+
+    /** #174 后台动作面：run 在途拒——管理员操作资源面，不打断用户正在进行的生成。 */
+    WORKSPACE_ACTION_RUN_IN_FLIGHT(409, "WSP_015", "编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）"),
+
+    /** #174 后台下载面：封存态直取封存包，而包无记录或不可读（深度唤醒同因拒）。 */
+    WORKSPACE_SEAL_PACKAGE_UNAVAILABLE(404, "WSP_016", "封存包不存在或不可读"),
+
+    /** #174 后台动作面：触碰自愈/扫描封存等收敛任务在途，独占互斥让路（不排队）。 */
+    WORKSPACE_ACTION_BUSY(409, "WSP_017", "沙箱有进行中的收敛任务，请稍后再试");
 
     private final int httpStatus;
     private final String code;

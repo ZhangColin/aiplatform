@@ -170,7 +170,8 @@ public class WorkspaceHibernationAppService {
     /**
      * 封存任务（独占面内执行，#172）：重取防让路期间状态已变 → 打包 → 落盘 →
      * 意图+元数据落库（销毁竞争下记录已删则清刚落的包）→ 删卷。单条异常记日志
-     * （互斥由提交面释放），下轮扫描重试。
+     * （互斥由提交面释放），下轮扫描重试。管理端同序入口见
+     * {@code WorkspaceActionAppService#seal}（失败语义不同有意各自成文）。
      */
     private void sealNow(WorkspaceId id) {
         try {

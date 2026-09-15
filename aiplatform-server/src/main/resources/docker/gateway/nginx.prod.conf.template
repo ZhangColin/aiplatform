@@ -4,7 +4,8 @@
 # reload；resolver 指向 Docker 内置 DNS（127.0.0.11），按容器名解析。TLS 终止用
 # wildcard 证书 *.preview.{domain}（certbot dns-01，见 docs/guide/生产部署.md）。
 # 快照路由（#141）同 dev：snap-{viewId} 单层子域落在同一张 wildcard 覆盖内（无需
-# 二层通配证书），只 include 代理块（只逛不换，不注入）。
+# 二层通配证书），只 include 代理块（只逛不换，不注入）。代理块（#180 A 片起）兼管
+# 上游不可达自恢复提示页（error_page 502/504，含在块内单源）。
 #
 # 用法（${PREVIEW_DOMAIN} 是唯一模板变量，envsubst 只替换它、放行 nginx 自身
 # $host/$upstream/$wsid 等变量）：
@@ -25,8 +26,10 @@ http {
     default_type application/octet-stream;
     sendfile on;
 
-    # Docker 内置 DNS：网关按容器名/别名解析（ws-{id} 容器名、snap-{viewId} 快照别名）
-    resolver 127.0.0.11 valid=30s ipv6=off;
+    # Docker 内置 DNS：网关按容器名/别名解析（ws-{id} 容器名、snap-{viewId} 快照别名）。
+    # valid=5s（#180）：唤醒/重建换新容器 IP 后最迟 5s 重解析，消掉「后端已就绪、
+    # 网关仍路由已删旧 IP」的 502 窗口（旧值 30s）；解析频度升高对预览流量量级无实害
+    resolver 127.0.0.11 valid=5s ipv6=off;
 
     # WebSocket 升级透传配合变量（gateway-proxy.conf 消费）：硬编码
     # Connection "upgrade" 会污染全部普通请求，map 只在真带 Upgrade 头时置位

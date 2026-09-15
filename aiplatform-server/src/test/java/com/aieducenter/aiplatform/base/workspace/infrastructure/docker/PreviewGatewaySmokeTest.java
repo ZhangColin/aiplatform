@@ -36,6 +36,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * #141 快照网关化：加验 {@code snap-{viewId}.localhost} 经网关路由到快照容器
  * （别名 DNS）——当时代码可逛、且 HTML <b>不含</b>注入标签（「只逛不换」ADR 0007
  * 口径的网关侧收口：快照 server 块不 include 注入块）、句柄 previewUrl 与路由同源。
+ * #180 A 片自恢复页：上游不可达（死子域/杀起服）时网关回平台风格提示页（文案
+ * 命中、no-store、自恢复脚本随页下发、状态码仍 5xx），主预览与快照子域同口径；
+ * 上游起服恢复后同一子域经网关 200（恢复条件在网关缝可观测）；应用自身回的
+ * 5xx 原样透传不被提示页替换（不开响应拦截）。自恢复脚本的浏览器轮询→重载
+ * 行为不在自动化射程，走 #184 亲手联调。
  */
 class PreviewGatewaySmokeTest {
 
@@ -67,12 +72,16 @@ class PreviewGatewaySmokeTest {
         String id = handle.workspaceId().value();
 
         // 摆一个不含任何注入的静态页 + 极简 node 服务（8081 起服）——响应里的注入只能来自网关。
-        // upgrade 处理回裸 101：供网关 WebSocket 透传断言（升级头到达上游才有 101）
+        // upgrade 处理回裸 101：供网关 WebSocket 透传断言（升级头到达上游才有 101）。
+        // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）
         execIn(handle, "printf '<html><head><title>probe</title></head><body>hello gateway</body></html>'"
                 + " > /workspace/index.html");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
                 + "const http=require('http');const fs=require('fs');\n"
-                + "const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
+                + "const server=http.createServer((req,res)=>{"
+                + "if(req.url==='/__app-boom'){res.writeHead(503,{'Content-Type':'text/plain'});"
+                + "res.end('app-level failure');return;}\n"
+                + "res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
                 + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
                 + "server.on('upgrade',(req,socket)=>{socket.write('HTTP/1.1 101 Switching Protocols\\r\\n"
                 + "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n');});\n"
@@ -86,6 +95,7 @@ class PreviewGatewaySmokeTest {
             copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
             copyResource("docker/gateway/gateway-proxy.conf", dir.resolve("gateway-proxy.conf"));
             copyResource("docker/gateway/gateway-inject.conf", dir.resolve("gateway-inject.conf"));
+            copyResource("docker/gateway/unavailable.html", dir.resolve("unavailable.html"));
             copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
@@ -96,6 +106,7 @@ class PreviewGatewaySmokeTest {
                     "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
                     "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
                     "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
+                    "-v", dir.resolve("unavailable.html") + ":/etc/nginx/unavailable.html:ro",
                     "-v", dir.resolve("annotation.js") + ":/etc/nginx/annotation.js:ro",
                     GATEWAY_IMAGE);
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
@@ -121,6 +132,20 @@ class PreviewGatewaySmokeTest {
             ExecResult ws = curlWsUpgrade(gatewayPort, id + ".localhost", "/_next/hmr");
             assertThat(ws.stdout()).as("网关应透传 WebSocket 升级头（101，exit=%s）", ws.exitCode())
                     .contains("101");
+
+            // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
+            // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域
+            // 同口径（提示页在共享的代理块，主预览/快照/两 profile 一并生效）
+            assertUnavailablePage(curlFull(gatewayPort, "987654321012.localhost", "/"), "死主预览子域");
+            assertUnavailablePage(curlFull(gatewayPort, "snap-987654321012.localhost", "/"), "死快照子域");
+
+            // #180 A 片：应用自身的 5xx 原样透传、不被提示页替换（网关不开响应拦截）
+            ExecResult appBoom = curlFull(gatewayPort, id + ".localhost", "/__app-boom");
+            assertThat(statusCodeOf(appBoom.stdout())).as("应用自身 503 应原样透传").isEqualTo(503);
+            assertThat(appBoom.stdout())
+                    .as("应用错误响应不被提示页替换")
+                    .contains("app-level failure")
+                    .doesNotContain("系统暂不可用");
 
             // #138 注入单源：镜像不携带标注脚本副本（旧 serve.js 内联注入的资产位）
             assertThat(execIn(handle, "test ! -f /opt/annotation.js && echo CLEAN").stdout())
@@ -156,6 +181,16 @@ class PreviewGatewaySmokeTest {
             } finally {
                 backend.stopSnapshot(snap);
             }
+
+            // #180 A 片恢复弧：杀上游起服 → 同一活子域经网关回 5xx＋提示页
+            // （连接拒绝也走 error_page）；重启起服 → 同子域恢复 200——恢复条件
+            // 在网关缝可观测（自恢复脚本等的正是这个由 5xx 翻非 5xx 的时刻）
+            execIn(handle, "pkill -f 'node server.js' || true");
+            ExecResult down = await5xx(gatewayPort, id + ".localhost", "/");
+            assertUnavailablePage(down, "杀起服后的活子域");
+            execIn(handle, "cd /workspace && nohup node server.js >/dev/null 2>&1 & echo started");
+            ExecResult recovered = awaitBodyContains(gatewayPort, id + ".localhost", "/", "hello gateway");
+            assertThat(recovered.stdout()).as("上游恢复后同子域应经网关回真页面").contains("hello gateway");
         } finally {
             try (var walk = Files.walk(dir)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
@@ -181,6 +216,66 @@ class PreviewGatewaySmokeTest {
         return curlHost(port, id + ".localhost", "/");
     }
 
+    /**
+     * #180 A 片：断言响应是自恢复提示页——状态码仍 5xx、双行文案命中、no-store、
+     * 自恢复脚本随页下发（{@code curlFull} 的原始输出：状态行＋头＋正文一并验）。
+     */
+    private static void assertUnavailablePage(ExecResult raw, String what) {
+        assertThat(raw.exitCode()).as("%s：curl 应完成（exit=%s）", what, raw.exitCode()).isZero();
+        String response = raw.stdout();
+        assertThat(statusCodeOf(response)).as("%s：状态码应仍为 5xx", what).isBetween(500, 599);
+        assertThat(response)
+                .as("%s：应回平台风格自恢复提示页", what)
+                .contains("系统暂不可用，可能正在启动或休眠中")
+                .contains("请稍后重试，或联系项目所有者")
+                .contains("data-aiplatform=\"recovery\"")
+                // 提示页是平台页面、不是用户系统，不注入圈注脚本（nginx 自产错误页
+                // 与上游 HTML 同过 text/html 过滤链，代理块内已覆写 sub_filter 防注入）
+                .doesNotContain("data-aiplatform=\"annotation\"");
+        assertThat(response.toLowerCase())
+                .as("%s：提示页应带 no-store", what)
+                .contains("cache-control: no-store");
+    }
+
+    /** {@code curl -i} 原始输出的状态行（{@code HTTP/1.1 502 Bad Gateway}）→ 状态码。 */
+    private static int statusCodeOf(String rawResponse) {
+        return Integer.parseInt(rawResponse.trim().split("\\s+")[1]);
+    }
+
+    /** 轮询直至状态码 5xx（杀起服 → 连接拒绝 → 502 的转换留 5s 余量防抖动）。 */
+    private static ExecResult await5xx(int port, String host, String path) {
+        long deadline = System.currentTimeMillis() + 5_000;
+        ExecResult last = curlFull(port, host, path);
+        while (System.currentTimeMillis() < deadline
+                && (last.exitCode() != 0 || statusCodeOf(last.stdout()) < 500)) {
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("等待状态码被中断", e);
+            }
+            last = curlFull(port, host, path);
+        }
+        return last;
+    }
+
+    /** 轮询直至响应体含期望片段（恢复后起服有窗口期，单发会假红）。 */
+    private static ExecResult awaitBodyContains(int port, String host, String path, String needle) {
+        long deadline = System.currentTimeMillis() + 30_000;
+        ExecResult last = curlHost(port, host, path);
+        while (System.currentTimeMillis() < deadline
+                && (last.exitCode() != 0 || !last.stdout().contains(needle))) {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("等待恢复被中断", e);
+            }
+            last = curlHost(port, host, path);
+        }
+        return last;
+    }
+
     // ---------- 直连 docker CLI / curl 的验证工具（真实状态为准） ----------
 
     private static int countOccurrences(String haystack, String needle) {
@@ -193,6 +288,11 @@ class PreviewGatewaySmokeTest {
 
     private static ExecResult curlHost(int port, String host, String path) {
         return run("curl", "-s", "-H", "Host: " + host, "http://127.0.0.1:" + port + path);
+    }
+
+    /** 同 {@link #curlHost}，但带 {@code -i}：状态行/响应头/正文一并落 stdout（错误页断言要读头与状态码）。 */
+    private static ExecResult curlFull(int port, String host, String path) {
+        return run("curl", "-s", "-i", "-H", "Host: " + host, "http://127.0.0.1:" + port + path);
     }
 
     /** 以 WebSocket 升级头探网关（只断状态行，101 后连接悬住由 --max-time 收口，退出码 28 属预期）。 */

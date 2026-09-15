@@ -22,12 +22,14 @@ type HappyDOMWindow = Window & {
  */
 // 预览地址读口换可摆变量：默认 about:blank（happy-dom 不真去 fetch），
 // 导航类用例切真实 origin 以测路径解析（配合 disableIframePageLoading 关掉 iframe 加载）。
+// refetch 走可摆 mock（#182 三入口「先 refetch 后加载」顺序断言的观测缝）。
 let previewUrl = "about:blank";
+const refetchMock = vi.fn();
 vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: (_projectId: string, active: boolean) =>
     active
-      ? { data: { url: previewUrl }, error: undefined, isPending: false, isError: false }
-      : { data: undefined, error: undefined, isPending: false, isError: false },
+      ? { data: { url: previewUrl }, error: undefined, isPending: false, isError: false, refetch: refetchMock }
+      : { data: undefined, error: undefined, isPending: false, isError: false, refetch: refetchMock },
 }));
 
 vi.mock("@/hooks/use-generate", () => ({
@@ -62,6 +64,7 @@ function useRealPreviewOrigin() {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  refetchMock.mockReset();
   useGenerationStore.setState({ generations: {} });
   previewUrl = "about:blank";
   (window as unknown as HappyDOMWindow).happyDOM.settings.disableIframePageLoading = false;
@@ -155,6 +158,74 @@ describe("SystemPanel · 地址栏 goto（#125）", () => {
       expect(
         (screen.getByRole("textbox", { name: "预览地址" }) as HTMLInputElement).value,
       ).toBe("http://localhost:42659");
+    });
+  });
+});
+
+describe("SystemPanel · 三入口触碰先行（#182，#180 B 片）", () => {
+  /**
+   * 顺序断言口径：refetch mock 被调瞬间抓现场（当时还在场的 iframe 节点 / 当时的
+   * src）——touch 发生在加载生效之前；原加载动作照常由事后的 DOM / spy 断言。
+   * 运行中无感 = refetch 不被等待：加载动作与点击同步发生（同一次 fireEvent 内完成）。
+   */
+
+  it("刷新按钮：先 refetch 预览查询，再重挂 iframe", () => {
+    let frameAtTouch: HTMLIFrameElement | null = null;
+    refetchMock.mockImplementation(() => {
+      frameAtTouch = document.querySelector("iframe");
+    });
+    const { frame } = renderPanel();
+    const before = frame();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新预览" }));
+
+    expect(refetchMock).toHaveBeenCalledTimes(1);
+    expect(frameAtTouch).toBe(before); // touch 时旧 iframe 仍在场：先于重挂生效
+    expect(frame()).not.toBe(before); // 原加载动作照常：强制重挂
+  });
+
+  it("新窗口打开：先 refetch 预览查询，再 window.open（同一次点击内，无等待）", () => {
+    useRealPreviewOrigin();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "在新窗口打开预览" }));
+
+    expect(refetchMock).toHaveBeenCalledTimes(1);
+    // 调用序硬断言：refetch 先于 window.open
+    expect(refetchMock.mock.invocationCallOrder[0]).toBeLessThan(
+      openSpy.mock.invocationCallOrder[0],
+    );
+    expect(openSpy).toHaveBeenCalledWith("http://localhost:42659", "_blank", "noopener");
+  });
+
+  describe("地址栏 goto · 真实 origin 下（http://localhost:42659）", () => {
+    beforeEach(useRealPreviewOrigin);
+
+    it("提交命中：先 refetch 预览查询，再导航（iframe 换新地址）", () => {
+      let srcAtTouch: string | null = null;
+      refetchMock.mockImplementation(() => {
+        srcAtTouch = document.querySelector("iframe")?.getAttribute("src") ?? null;
+      });
+      const { frame } = renderPanel();
+      const input = screen.getByRole("textbox", { name: "预览地址" });
+      fireEvent.change(input, { target: { value: "/login" } });
+
+      fireEvent.submit(input.closest("form")!);
+
+      expect(refetchMock).toHaveBeenCalledTimes(1);
+      expect(srcAtTouch).toBe("http://localhost:42659"); // touch 时仍在旧地址：先于导航生效
+      expect(frame()!.getAttribute("src")).toBe("http://localhost:42659/login"); // 导航照常
+    });
+
+    it("跨源输入拒绝：不导航也不触碰（拒绝不是加载动作）", () => {
+      const { frame } = renderPanel();
+      const input = screen.getByRole("textbox", { name: "预览地址" });
+      fireEvent.change(input, { target: { value: "https://evil.com" } });
+      fireEvent.submit(input.closest("form")!);
+
+      expect(refetchMock).not.toHaveBeenCalled();
+      expect(frame()!.getAttribute("src")).toBe("http://localhost:42659");
     });
   });
 });

@@ -62,8 +62,10 @@ const BAR_BUTTON_CLASS =
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
  * 宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+ 手动刷新
- * （强制重挂、清导航回 base）+ 新窗口打开（window.open 应用真实地址，#126）。舞台浅色锁定：
- * 预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
+ * （强制重挂、清导航回 base）+ 新窗口打开（window.open 应用真实地址，#126）。刷新/
+ * goto/新窗口三入口触碰先行（#182）：用户主动（重）加载预览先 refetch 预览查询（经
+ * 后端触碰拦截器异步唤醒休眠沙箱）再执行原动作，运行中无感、对话提交与网关零改动。
+ * 舞台浅色锁定：预览里的系统是用户产物，永不随平台 Light/Dark 翻转（.light-lock 钉浅色档）。</p>
  */
 export function SystemPanel({
   projectId,
@@ -165,11 +167,23 @@ export function SystemPanel({
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
+  /**
+   * 三入口触碰先行（#182 预览停机体验 B 片）：刷新 / 地址栏 goto / 新窗口打开——
+   * 用户主动（重）加载预览的动作统一先 refetch 预览查询（GET /projects/{id}/preview
+   * 经后端触碰拦截器拨 last-touch，休眠沙箱异步唤醒；唤醒触发面 = 项目 API，网关
+   * 永不唤醒），再执行原加载动作。不等待返回：运行中行为与现状一致（无多余等待），
+   * 休眠中加载动作即刻落到网关自恢复页（#181），touch 已先行、上游恢复即自动回页。
+   */
+  const touchThenLoad = (load: () => void) => {
+    void preview.refetch();
+    load();
+  };
   /** 地址提交（#125）：解析草稿 → origin 内命中则导航（跨源/空/无 origin 拒绝，回显当前）。 */
   const submitAddress = () => {
     if (!url) return;
     const target = resolvePreviewAddress(url, addressDraft ?? "");
-    if (target) setNavigatedUrl(target);
+    // 命中 = 一次加载动作：触碰先行（#182）；拒绝不是加载动作，不触碰
+    if (target) touchThenLoad(() => setNavigatedUrl(target));
     setAddressDraft(null); // 命中：navigatedUrl 驱动 frameUrl 回显新地址；拒绝：回显当前地址
   };
 
@@ -181,12 +195,14 @@ export function SystemPanel({
         <button
           type="button"
           disabled={!pageLive}
-          onClick={() => {
-            // 刷新 = 回到应用 base 地址重挂（清导航覆盖与草稿）
-            setNavigatedUrl(undefined);
-            setAddressDraft(null);
-            setRefreshTick((t) => t + 1);
-          }}
+          onClick={() =>
+            // 刷新 = 回到应用 base 地址重挂（清导航覆盖与草稿）；触碰先行（#182）
+            touchThenLoad(() => {
+              setNavigatedUrl(undefined);
+              setAddressDraft(null);
+              setRefreshTick((t) => t + 1);
+            })
+          }
           title="刷新预览"
           aria-label="刷新预览"
           className={BAR_BUTTON_CLASS}
@@ -245,7 +261,7 @@ export function SystemPanel({
         <button
           type="button"
           disabled={!pageLive}
-          onClick={() => window.open(url, "_blank", "noopener")}
+          onClick={() => touchThenLoad(() => window.open(url, "_blank", "noopener"))}
           title="在新窗口打开预览"
           aria-label="在新窗口打开预览"
           className={BAR_BUTTON_CLASS}

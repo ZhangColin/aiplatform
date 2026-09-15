@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.base.metering.endpoints.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +18,7 @@ import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -62,9 +64,8 @@ public class BackofficePriceEntryController {
     public ApiResponse<PageResponse<UnitPriceEntryResponse>> entries(
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String model,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(appService.entries(provider, model, page, size));
+            Pagination pagination) {
+        return ApiResponse.ok(appService.entries(provider, model, pagination));
     }
 
     @PostMapping
@@ -146,11 +147,16 @@ public class BackofficePriceEntryController {
     }
 
     /**
-     * 清单参数绑定失败的兜底：非法分页值在本层就是 400，映射回 METER_009 保持
-     * 错误码前缀口径（同 BackofficeOrderController ORD_010 形制——本 controller
-     * 可绑定参数是 page/size）。
+     * 清单参数绑定失败的兜底：非数值分页值（{@link Pagination} record 构造绑定
+     * 失败走 BindException 族，含 MethodArgumentNotValidException）在本层就是
+     * 400，映射回 METER_009 保持错误码前缀口径（可绑定参数是 provider/model/
+     * page/size，统一「无效的单价行过滤参数」——同 BackofficeOrderController
+     * ORD_010 形制；provider/model 为 String，TypeMismatch 档现不可达，留作
+     * 后续过滤维度加类型化标量时即复活，与兄弟 controller 同形制；本类三个
+     * 写口命令体无 bean 校验注解，BindException 落点不会与 @Valid 校验信封
+     * 抢道）。
      */
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
     public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(MeteringMessage.PRICE_ENTRY_FILTER_UNKNOWN));

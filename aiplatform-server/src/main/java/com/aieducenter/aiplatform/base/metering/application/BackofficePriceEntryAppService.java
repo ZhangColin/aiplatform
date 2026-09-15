@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -13,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.metering.application.dto.command.OpenPriceEntryCommand;
@@ -25,7 +25,6 @@ import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
 import com.aieducenter.aiplatform.base.metering.domain.repository.PriceEntryRepository;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台单价表管理写口（#160 成本运营＋#165 写口唯一化）：行清单读（含历史行）＋
@@ -52,26 +51,20 @@ public class BackofficePriceEntryAppService {
 
     /**
      * 后台单价行清单（含现行与历史行）：provider/model 精确过滤（可缺省＝全量），
-     * 排序服务端定死＝生效起点倒序（价史新段在前）、id 倒序稳定同起点。page 1
-     * 基，缺省第 1 页 20 条，size 上界 100。
+     * 排序服务端定死＝生效起点倒序（价史新段在前）、id 倒序稳定同起点。分页钳制/
+     * 换算全部来自框架 {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边），
+     * 客户端 sort 被 withSort 覆盖静默忽略。
      */
     @Transactional(readOnly = true)
     public PageResponse<UnitPriceEntryResponse> entries(String provider, String model,
-                                                        int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
-
+                                                        Pagination pagination) {
         BackofficePriceEntryQuery query = new BackofficePriceEntryQuery(provider, model);
         Specification<PriceEntry> specification = ConditionSpecifications.fromAnnotation(query);
-        Pageable pageable = PageRequest.of(safePage - 1, safeSize,
-                Sort.by(Sort.Direction.DESC, "effectiveFrom").and(
+        Pageable pageable = pagination.toPageRequest()
+                .withSort(Sort.by(Sort.Direction.DESC, "effectiveFrom").and(
                         Sort.by(Sort.Direction.DESC, "id")));
         Page<PriceEntry> result = priceEntryRepository.findAll(specification, pageable);
-        return new PageResponse<>(
-                result.getContent().stream().map(UnitPriceEntryResponse::of).toList(),
-                result.getTotalElements(),
-                safePage,
-                safeSize);
+        return PageResponse.of(result.map(UnitPriceEntryResponse::of));
     }
 
     /**

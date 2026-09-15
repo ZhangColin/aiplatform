@@ -117,13 +117,33 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         cascadeCleanup(handle.workspaceId(), handle.containerName());
     }
 
-    /** 级联清理：容器 → 快照容器 → 卷（pg 数据在卷内，随卷走）；全部尽力而为。 */
+    /**
+     * 级联清理：容器 → 快照容器 → 卷（pg 数据在卷内，随卷走）；尽力而为但不静默
+     * （#179）：真失败 warn 带 stderr——删失败的资源无 DB 行、永远不在 #171 扫描
+     * 面内，零留痕＝孤儿永久不可见（收敛靠 clean-ws-residue.sh 手工，直至触发器响）。
+     */
     private void cascadeCleanup(WorkspaceId workspaceId, String containerName) {
-        runSilently("docker", "rm", "-f", containerName);
+        logCleanupFailure("删容器 " + containerName,
+                runCapture("docker", "rm", "-f", containerName));
         // 快照容器级联（#92）：主容器销毁/重建时在途查看会话随之销毁——同卷 ro 挂载
         // 必在卷删除前清，否则 docker volume rm 因「卷仍被使用」失败留孤儿
         removeSnapshotContainers(workspaceId);
-        runSilently("docker", "volume", "rm", volumeOf(containerName));
+        logCleanupFailure("删卷 " + volumeOf(containerName),
+                runCapture("docker", "volume", "rm", volumeOf(containerName)));
+    }
+
+    /**
+     * 销毁清理单步留痕：非 0 退出按回执区分——「对象已不在」（no such container/
+     * volume 的幂等 no-op；大小写不敏感，同 containerState 判据——Docker Desktop
+     * 29 回小写）静默，其余失败（daemon 不可达等）warn。
+     */
+    private void logCleanupFailure(String what, ExecResult result) {
+        if (result.exitCode() == 0
+                || result.stderr().toLowerCase().contains("no such")) {
+            return;
+        }
+        log.warn("[workspace] 销毁清理{}未成（孤儿风险，手工收敛）：{}",
+                what, result.stderr().trim());
     }
 
     /** 按命名前缀扫清快照容器（幂等；无在途会话时 no-op）。 */

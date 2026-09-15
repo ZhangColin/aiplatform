@@ -103,7 +103,7 @@ main() {
       cmd_quote "$oid" "$amount" "$*"
       ;;
     package) cmd_package "${2:-}" "${3:-}" ;;
-    *)       echo "未知子命令：$cmd（list / detail / quote / package / reject-demo）" >&2; exit 2 ;;
+    *)       echo "未知子命令：${cmd}（list / detail / quote / package / reject-demo）" >&2; exit 2 ;;
   esac
 }
 

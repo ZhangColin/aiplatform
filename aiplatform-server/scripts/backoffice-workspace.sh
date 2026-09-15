@@ -73,14 +73,18 @@ cmd_ws_of() {
 cmd_action() {
   local verb="$1"; shift
   require_ws_id "$1" "$verb"
-  step "POST /api/backoffice/workspaces/$1/$verb（同步等结果，深度唤醒分钟级）"
+  local path="/api/backoffice/workspaces/$1/$verb"
+  # ${path}（ 必须花括号：macOS bash 3.2 把紧跟全角字符的变量名吞前导字节（set -u 报 unbound）
+  step "POST ${path}（同步等结果，深度唤醒分钟级）"
   local extra=()
   [[ -n "${OPERATOR_ID:-}" ]] && extra+=(-H "X-User-Id: $OPERATOR_ID")
   [[ -n "${OPERATOR_NAME:-}" ]] && extra+=(-H "X-User-Name: $OPERATOR_NAME")
   if (( ${#extra[@]} )); then
-    show_response "$(signed_call_extra POST "/api/backoffice/workspaces/$1/$verb" "${extra[@]}")"
+    # 第三参是 body_file 约定（同 signed_call）：动作 POST 无 body，显式空串占位，
+    # 额外头从第四参起（首版漏占位，$3 吞掉首对 -H → curl --data-binary @-H）
+    show_response "$(signed_call_extra POST "$path" "" "${extra[@]}")"
   else
-    show_response "$(signed_call POST "/api/backoffice/workspaces/$1/$verb")"
+    show_response "$(signed_call POST "$path")"
   fi
 }
 
@@ -89,7 +93,7 @@ cmd_package() {
   local out="${2:-/tmp/$1-$(date +%Y%m%d%H%M%S).tar.gz}"
   # projectId 先落 local——下方 set -- 装头循环会清位置参数（quote.sh cmd_package 同因）
   local project_id="$1"
-  step "GET /api/backoffice/projects/$project_id/files/package → $out（休眠中会先同步唤醒）"
+  step "GET /api/backoffice/projects/$project_id/files/package → ${out}（休眠中会先同步唤醒）"
 
   local headers line header_file
   headers=$(sign_headers "$BACKOFFICE_API_SECRET" "/api/backoffice/projects/$project_id/files/package")
@@ -110,7 +114,7 @@ cmd_package() {
     grep -i 'content-disposition' "$header_file" || true
     rm -f "$header_file"
   else
-    echo "HTTP $http_code（错误信封如下；1016=封存包不可读、1015=run 在途拒）"
+    echo "HTTP ${http_code}（错误信封如下；1016=封存包不可读、1015=run 在途拒）"
     cat "$out"; rm -f "$out" "$header_file"
     exit 1
   fi

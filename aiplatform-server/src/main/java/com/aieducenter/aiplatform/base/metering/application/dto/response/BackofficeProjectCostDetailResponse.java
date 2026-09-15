@@ -16,7 +16,8 @@ import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
  * <p>成本换算同全局总览：token × 事件时点生效单价现算（历史成本不随改价漂移）；
  * 无生效单价的分量不进 cost（不伪装 0），其 (provider, model, 档位) 集合在
  * {@code unpriced} 如实呈现。{@code byAgentKind} 取事件 dims.agentKind 原值
- * （写侧终态口径，展示名归 admin 侧映射），无维度的事件不参与该分桶。subject
+ * （写侧终态口径）+ agentKindName 中文名随行（#186），无维度的事件不参与该
+ * 分桶。subject
  * 不透明：无用量（或 id 非法）返回全零 total 与空结构，不是错误。</p>
  *
  * @param projectId   项目标识（计量 subject 原值回显）
@@ -26,7 +27,7 @@ import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
  * @param cost        平台成本（币种分桶；全未配价/无事件时为空 Map）
  * @param unpriced    未配价标注清单（provider/model/档位码序；与 cost 互补不重叠）
  * @param byModel     分模型聚合（provider + model 为单价表匹配键）
- * @param byAgentKind 分智能体聚合（dims.agentKind 原值）
+ * @param byAgentKind 分智能体聚合（dims.agentKind 原值 + agentKindName 中文名随行）
  */
 public record BackofficeProjectCostDetailResponse(
         String projectId,
@@ -67,9 +68,10 @@ public record BackofficeProjectCostDetailResponse(
     }
 
     /**
-     * 分智能体聚合项（agentKind = dims 透传原值，展示名归 admin 侧映射，
-     * 底座不解释）。
+     * 分智能体聚合项（agentKind = dims 透传原值；agentKindName 中文名随行——
+     * #186 枚举出口配 *Name，经 {@code AgentKindNames} 端口回解正本
+     * AgentProfile，辅助标记为 null）。
      */
-    public record AgentKindUsage(String agentKind, TokenUsage tokens) {
+    public record AgentKindUsage(String agentKind, String agentKindName, TokenUsage tokens) {
     }
 }

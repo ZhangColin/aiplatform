@@ -19,6 +19,7 @@ import com.aieducenter.aiplatform.base.metering.domain.model.SubjectCostSummary;
 import com.aieducenter.aiplatform.base.metering.domain.model.UnpricedTierUsage;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
+import com.aieducenter.aiplatform.base.metering.domain.port.AgentKindNames;
 import com.aieducenter.aiplatform.base.metering.domain.repository.UsageEventAggregations;
 import com.aieducenter.aiplatform.web.BackofficePages;
 
@@ -43,9 +44,12 @@ public class BackofficeCostAppService {
             .thenComparing(SubjectCostSummary::subject);
 
     private final UsageEventAggregations usageEventAggregations;
+    private final AgentKindNames agentKindNames;
 
-    public BackofficeCostAppService(UsageEventAggregations usageEventAggregations) {
+    public BackofficeCostAppService(UsageEventAggregations usageEventAggregations,
+            AgentKindNames agentKindNames) {
         this.usageEventAggregations = usageEventAggregations;
+        this.agentKindNames = agentKindNames;
     }
 
     /**
@@ -65,7 +69,8 @@ public class BackofficeCostAppService {
                         .toList(),
                 summary.byAgentKind().stream()
                         .map(kind -> new BackofficeCostOverviewResponse.AgentKindUsage(
-                                kind.agentKind(), kind.tokens()))
+                                kind.agentKind(), agentKindNames.displayNameOf(kind.agentKind()),
+                                kind.tokens()))
                         .toList());
     }
 
@@ -133,7 +138,8 @@ public class BackofficeCostAppService {
                 summary.byDims().stream()
                         .filter(dim -> UsageEvent.DIM_KEY_AGENT_KIND.equals(dim.dimKey()))
                         .map(dim -> new BackofficeProjectCostDetailResponse.AgentKindUsage(
-                                dim.dimValue(), dim.tokens()))
+                                dim.dimValue(), agentKindNames.displayNameOf(dim.dimValue()),
+                                dim.tokens()))
                         .toList());
     }
 

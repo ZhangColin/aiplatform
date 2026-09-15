@@ -228,7 +228,8 @@ public class ProjectController {
             description = "对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / "
                     + "平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）"
                     + "不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question "
-                    + "4=answer 5=closing 6=guide）；question = question-raised 事件"
+                    + "4=answer 5=closing 6=guide）+ kindName 中文名随行（#186：枚举出口配 "
+                    + "*Name，消费端零映射）；question = question-raised 事件"
                     + "载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = "
                     + "run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读"
                     + "（对话区只读终态）；项目不存在 404 PRJ_001")

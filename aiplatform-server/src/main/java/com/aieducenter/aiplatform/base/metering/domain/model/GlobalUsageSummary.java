@@ -52,7 +52,8 @@ public record GlobalUsageSummary(
     }
 
     /**
-     * 分智能体聚合项（agentKind = dims 透传原值；展示名归业务读侧映射，底座不解释）。
+     * 分智能体聚合项（agentKind = dims 透传原值；聚合不带展示名，读面经
+     * {@code AgentKindNames} 端口回解随行——#186）。
      */
     public record AgentKindUsage(String agentKind, TokenUsage tokens) {
     }

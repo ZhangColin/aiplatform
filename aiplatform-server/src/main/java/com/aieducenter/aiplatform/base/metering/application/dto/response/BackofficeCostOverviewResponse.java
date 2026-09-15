@@ -21,7 +21,8 @@ import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
  * @param total       总量（五档分列，全平台跨项目）
  * @param cost        平台成本（币种分桶；全未配价/无事件时为空 Map）
  * @param byModel     分模型聚合（provider + model 为单价表匹配键）
- * @param byAgentKind 分智能体聚合（dims.agentKind 原值；无维度的事件不参与该分桶）
+ * @param byAgentKind 分智能体聚合（dims.agentKind 原值 + agentKindName 中文名随行；
+ *                    无维度的事件不参与该分桶）
  */
 public record BackofficeCostOverviewResponse(
         Instant from,
@@ -48,8 +49,9 @@ public record BackofficeCostOverviewResponse(
 
     /**
      * 分智能体聚合项（agentKind = dims 透传原值，写侧终态口径 main/executor，
-     * 非主链用途标记照原样；展示名归 admin 侧映射，底座不解释）。
+     * 非主链用途标记照原样；agentKindName 中文名随行——#186 枚举出口配 *Name，
+     * 经 {@code AgentKindNames} 端口回解正本 AgentProfile，辅助标记为 null）。
      */
-    public record AgentKindUsage(String agentKind, TokenUsage tokens) {
+    public record AgentKindUsage(String agentKind, String agentKindName, TokenUsage tokens) {
     }
 }

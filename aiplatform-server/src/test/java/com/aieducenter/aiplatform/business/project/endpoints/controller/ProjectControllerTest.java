@@ -221,12 +221,12 @@ class ProjectControllerTest {
         // code——1=user 3=question 5=closing）、question/closing 载荷原样、
         // id 升序（写入序 = 对话序）
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
-                new ConversationEntryResponse(1L, 1, "run-1", "做一个官网",
+                new ConversationEntryResponse(1L, 1, "用户发言", "run-1", "做一个官网",
                         null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
-                new ConversationEntryResponse(2L, 3, "run-1", null,
+                new ConversationEntryResponse(2L, 3, "问答卡", "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
                         null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "run-2", null, null,
+                new ConversationEntryResponse(3L, 5, "收尾卡", "run-2", null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
                         null, false, LocalDateTime.of(2026, 9, 5, 10, 9))));
@@ -236,6 +236,7 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.length()").value(3))
                 .andExpect(jsonPath("$.data[0].kind").value(1))
+                .andExpect(jsonPath("$.data[0].kindName").value("用户发言"))
                 .andExpect(jsonPath("$.data[0].text").value("做一个官网"))
                 .andExpect(jsonPath("$.data[1].kind").value(3))
                 .andExpect(jsonPath("$.data[1].answered").value(false))

@@ -174,6 +174,9 @@ class ConversationHistoryTest {
         List<ConversationEntryResponse> history = conversationHistory.read(projectId);
         assertThat(history).extracting(ConversationEntryResponse::kind)
                 .containsExactly(1, 2, 3, 4, 2, 5); // user/agent/question/answer/agent/closing
+        // kindName 中文名随行（#186 平台房规：枚举出口配 *Name，消费端零映射）
+        assertThat(history).extracting(ConversationEntryResponse::kindName)
+                .containsExactly("用户发言", "智能体回复", "问答卡", "问答作答", "智能体回复", "收尾卡");
         // 用户发言（提交侧同步落，runId = 对话轮锚）
         assertThat(history.get(0).text()).isEqualTo("给宠物医院做预约系统");
         assertThat(history.get(0).runId()).isNotBlank();

@@ -228,11 +228,14 @@ class BackofficeProjectCostSeamTest {
                 .andExpect(jsonPath("$.data.byModel[0].tokens.output").value(300))
                 .andExpect(jsonPath("$.data.byModel[1].model").value("m-usd"))
                 .andExpect(jsonPath("$.data.byModel[1].tokens.input").value(1750))
-                // 分智能体（dims.agentKind 原值、码序；无维度事件不参与）
+                // 分智能体（dims.agentKind 原值、码序；无维度事件不参与）；
+                // agentKindName 中文名随行（#186，口径同全局总览）
                 .andExpect(jsonPath("$.data.byAgentKind", hasSize(2)))
                 .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("executor"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindName").value("run 执行体"))
                 .andExpect(jsonPath("$.data.byAgentKind[0].tokens.input").value(500))
                 .andExpect(jsonPath("$.data.byAgentKind[1].agentKind").value("main"))
+                .andExpect(jsonPath("$.data.byAgentKind[1].agentKindName").value("主智能体"))
                 .andExpect(jsonPath("$.data.byAgentKind[1].tokens.input").value(1000));
 
         // 时间窗半开边界：[T2, T4) 不含 T1 事件 → 空态（窗口内无该 subject 用量）

@@ -128,8 +128,7 @@ public class ProjectQueryAppService {
         List<ProjectUsageResponse.AgentKindUsage> byAgentKind = summary.byDims().stream()
                 .filter(dim -> UsageDims.KEY_AGENT_KIND.equals(dim.dimKey()))
                 .map(dim -> new ProjectUsageResponse.AgentKindUsage(dim.dimValue(),
-                        AgentProfile.byKey(dim.dimValue()).map(AgentProfile::getName).orElse(null),
-                        dim.tokens()))
+                        AgentProfile.displayNameOf(dim.dimValue()), dim.tokens()))
                 .toList();
         return new ProjectUsageResponse(Long.toString(projectId), summary.total(),
                 byModel, byAgentKind);

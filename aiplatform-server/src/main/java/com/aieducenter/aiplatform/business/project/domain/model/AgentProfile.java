@@ -196,4 +196,13 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
             return Optional.empty();
         }
     }
+
+    /**
+     * 稳定键 → 展示名（byKey 回解单点：用户面 agentKindLabel 与后台成本
+     * agentKindName 共用，#186）；非主链用途标记（naming/classify 等非登记
+     * 配置）返回 null——消费端落「—」桶。
+     */
+    public static String displayNameOf(String key) {
+        return byKey(key).map(AgentProfile::getName).orElse(null);
+    }
 }

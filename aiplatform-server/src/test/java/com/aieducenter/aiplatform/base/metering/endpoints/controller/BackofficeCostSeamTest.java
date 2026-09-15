@@ -114,11 +114,15 @@ class BackofficeCostSeamTest {
                 .andExpect(jsonPath("$.data.byModel[0].tokens.input").value(1000))
                 .andExpect(jsonPath("$.data.byModel[1].model").value("m-usd"))
                 .andExpect(jsonPath("$.data.byModel[1].tokens.input").value(4000))
-                // 分智能体（dims.agentKind 原值、码序）：无维度事件不参与该分桶
+                // 分智能体（dims.agentKind 原值、码序）：无维度事件不参与该分桶；
+                // agentKindName 中文名随行（#186：主链经 AgentProfile 回解——端口反转，
+                // base 不依赖 business；后台直读零映射）
                 .andExpect(jsonPath("$.data.byAgentKind", hasSize(2)))
                 .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("executor"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindName").value("run 执行体"))
                 .andExpect(jsonPath("$.data.byAgentKind[0].tokens.input").value(1000))
                 .andExpect(jsonPath("$.data.byAgentKind[1].agentKind").value("main"))
+                .andExpect(jsonPath("$.data.byAgentKind[1].agentKindName").value("主智能体"))
                 .andExpect(jsonPath("$.data.byAgentKind[1].tokens.input").value(1000));
     }
 
@@ -176,6 +180,23 @@ class BackofficeCostSeamTest {
                         get("/api/backoffice/costs/unpriced"), "/api/backoffice/costs/unpriced", null))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items").isEmpty());
+    }
+
+    // ---------- byAgentKind 展示名（#186）：主链带名、辅助标记 null ----------
+
+    @Test
+    void given_auxiliary_agent_kind_when_overview_then_agent_kind_name_null()
+            throws Exception {
+        // naming/classify 是一次性辅助用途标记（非 AgentProfile 登记的主链智能体）：
+        // agentKindName 为 null——消费端落「—」桶（照用户面 agentKindLabel 先例口径）
+        report("evt-naming", T1, SUBJ_A, "m-none", Map.of("agentKind", "naming"), 100);
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/costs/overview"), "/api/backoffice/costs/overview", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.byAgentKind", hasSize(1)))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("naming"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindName").value(nullValue()));
     }
 
     // ---------- 混合场景：部分有价部分无价，cost 与 unpriced 互补不重叠 ----------

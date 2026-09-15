@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -14,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
@@ -26,7 +26,6 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名四端点的三读端点）：
@@ -59,13 +58,14 @@ public class BackofficeOrderAppService {
     /**
      * 后台订单清单（四维检索，新单在前）：状态多选（空选＝全量）、创建时间区间
      * （含两端）、下单账号（externalId 入参，服务端换算 accountId）、订单号精确。
-     * 过滤在数据库侧完成（Specification），不入内存全量。page 1 基（ADR-0001
-     * 分页口径），缺省第 1 页 20 条；排序定死 id 倒序（TSID 时间有序 = 下单新
-     * 在前），不开放客户端排序。
+     * 过滤在数据库侧完成（Specification），不入内存全量。分页钳制/换算全部来自
+     * 框架 {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边）；排序定死
+     * id 倒序（TSID 时间有序 = 下单新在前），客户端 sort 被 withSort 覆盖静默
+     * 忽略，不开放客户端排序。
      *
      * <p>externalId 换算不到（用户在我方无建档）与非数值订单号都如实返回空清单
-     * （200、total 0）——两者都是检索维度上的「无命中」，不是错误；用户没登录过
-     * 平台＝确实无单可检。</p>
+     * （200、total 0，页码原样回显）——两者都是检索维度上的「无命中」，不是错误；
+     * 用户没登录过平台＝确实无单可检。</p>
      */
     @Transactional(readOnly = true)
     public PageResponse<BackofficeOrderSummaryResponse> orders(List<OrderStatus> statuses,
@@ -73,42 +73,33 @@ public class BackofficeOrderAppService {
                                                                LocalDateTime createdTo,
                                                                String externalId,
                                                                String orderId,
-                                                               int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
-
+                                                               Pagination pagination) {
         Long ownerAccountId = null;
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return BackofficePages.emptyPage(safePage, safeSize);
+                return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
             }
         }
         Long parsedOrderId = parseOrderId(orderId);
         if (orderId != null && !orderId.isBlank() && parsedOrderId == null) {
-            return BackofficePages.emptyPage(safePage, safeSize);
+            return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
         }
 
         BackofficeOrderQuery query = new BackofficeOrderQuery(
                 statuses, createdFrom, createdTo, ownerAccountId, parsedOrderId);
         Specification<Order> specification = ConditionSpecifications.fromAnnotation(query);
-        Pageable pageable = PageRequest.of(safePage - 1, safeSize,
-                Sort.by(Sort.Direction.DESC, "id"));
+        Pageable pageable = pagination.toPageRequest()
+                .withSort(Sort.by(Sort.Direction.DESC, "id"));
         Page<Order> result = orderRepository.findAll(specification, pageable);
         Map<Long, String> projectNames = projectQueryAppService.namesOf(
                 result.getContent().stream().map(Order::getProjectId).toList());
         Map<Long, String> ownerNames = accountAppService.displayNamesOf(
                 result.getContent().stream().map(Order::getOwnerAccountId).toList());
-        return new PageResponse<>(
-                result.getContent().stream()
-                        .map(order -> BackofficeOrderSummaryResponse.of(order,
-                                projectNames.get(order.getProjectId()),
-                                order.getOwnerAccountId() == null ? null
-                                        : ownerNames.get(order.getOwnerAccountId())))
-                        .toList(),
-                result.getTotalElements(),
-                safePage,
-                safeSize);
+        return PageResponse.of(result.map(order -> BackofficeOrderSummaryResponse.of(order,
+                projectNames.get(order.getProjectId()),
+                order.getOwnerAccountId() == null ? null
+                        : ownerNames.get(order.getOwnerAccountId()))));
     }
 
     /**

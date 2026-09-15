@@ -9,6 +9,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.cartisan.core.context.RequestContext;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.business.order.application.BackofficeOrderAppService;
@@ -55,7 +56,8 @@ class BackofficeSeamContractTest {
             throws Exception {
         AtomicReference<Long> seenUserId = new AtomicReference<>();
         AtomicReference<String> seenUserName = new AtomicReference<>();
-        when(queryAppService.orders(null, null, null, null, null, 1, 20)).thenAnswer(invocation -> {
+        when(queryAppService.orders(null, null, null, null, null,
+                new Pagination(1, 20, null))).thenAnswer(invocation -> {
             seenUserId.set(RequestContext.getUserId());
             seenUserName.set(RequestContext.getUserName());
             return new PageResponse<>(List.of(), 0, 1, 20);

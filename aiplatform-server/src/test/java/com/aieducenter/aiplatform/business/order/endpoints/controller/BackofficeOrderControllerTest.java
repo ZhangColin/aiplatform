@@ -22,6 +22,7 @@ import com.cartisan.openapi.config.CartisanOpenapiAutoConfiguration;
 import com.cartisan.web.config.BaseEnumConverter;
 import com.cartisan.web.config.JacksonConfiguration;
 import com.cartisan.web.exception.GlobalExceptionHandler;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatureTestConfig;
@@ -41,7 +42,6 @@ import com.aieducenter.aiplatform.config.WebMvcConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -89,7 +89,7 @@ class BackofficeOrderControllerTest {
         // 无用户会话（不注 RequestContext）+ 合法签名 → 放行：会话拦截排除 +
         // 机机签名接管的组合行为在此活体验证
         when(queryAppService.orders(List.of(OrderStatus.PENDING_QUOTE), null, null,
-                null, null, 1, 20)).thenReturn(
+                null, null, new Pagination(1, 20, null))).thenReturn(
                 new PageResponse<>(List.of(summary()), 1, 1, 20));
 
         mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders")
@@ -116,7 +116,7 @@ class BackofficeOrderControllerTest {
         // 只签末值）；时间区间 ISO-8601。两者绑定后原样进应用服务
         when(queryAppService.orders(List.of(OrderStatus.PENDING_QUOTE, OrderStatus.CANCELLED),
                 LocalDateTime.of(2026, 9, 1, 0, 0), LocalDateTime.of(2026, 9, 30, 23, 59, 59),
-                "sub-user-1", "900", 1, 20)).thenReturn(
+                "sub-user-1", "900", new Pagination(1, 20, null))).thenReturn(
                 new PageResponse<>(List.of(summary()), 1, 1, 20));
 
         String pathWithQuery = "/api/backoffice/orders?status=1,5"
@@ -136,7 +136,7 @@ class BackofficeOrderControllerTest {
                         "/api/backoffice/orders?createdFrom=not-a-time", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
-        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -313,7 +313,7 @@ class BackofficeOrderControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
                         .value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
-        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), anyInt(), anyInt());
+        verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), any());
     }
 
     // ---------- 夹具 ----------

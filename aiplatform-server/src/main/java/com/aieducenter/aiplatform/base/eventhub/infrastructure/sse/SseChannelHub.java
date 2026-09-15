@@ -67,6 +67,9 @@ public class SseChannelHub {
 
     public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
 
+    /** shutdown 有界等待在途心跳一轮的上限（常态内存发送为微秒级，远用不满）。 */
+    private static final long SHUTDOWN_AWAIT_SECONDS = 5;
+
     private final SseSender sender;
     private final Clock clock;
     private final Map<String, ChannelState> channels = new ConcurrentHashMap<>();
@@ -341,11 +344,20 @@ public class SseChannelHub {
     }
 
     /**
-     * 停止心跳并释放线程（容器关闭时调用；幂等）。
+     * 停止心跳并释放线程（容器关闭时调用；幂等）。有界等待在途一轮收尾——常态下
+     * 返回即不再有进行中的发送（「关停后静默」可被立即断言）；超时仅记 warn 返回，
+     * 不无限拖住容器关停。
      */
     @PreDestroy
     public void shutdown() {
         heartbeatExecutor.shutdownNow();
+        try {
+            if (!heartbeatExecutor.awaitTermination(SHUTDOWN_AWAIT_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("sse-heartbeat 心跳线程 {}s 内未终止", SHUTDOWN_AWAIT_SECONDS);
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static Map<String, Object> payloadOf(SseServerEvent frame) {

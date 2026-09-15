@@ -16,6 +16,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -28,6 +29,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 /**
  * SSE 传输内核（ADR-0001：emitter 管理 / 心跳 / 过滤订阅 / 信封与 id 分配 /
@@ -57,6 +59,27 @@ class SseChannelHubTest {
                 Clock.fixed(FIXED_TS, ZoneOffset.UTC), heartbeatInterval);
         hubs.add(hub);
         return hub;
+    }
+
+    /**
+     * 有界轮询等待（10ms 粒度、5s 上限）：固定睡眠在负载下会饿死心跳线程的调度
+     * （全量套件即假红来源），改为等条件成立——deadline 兜底防死挂。
+     */
+    private static void awaitUntil(String what, BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() >= deadline) {
+                fail("5s 内未等到：" + what);
+            }
+            Thread.sleep(10);
+        }
+    }
+
+    /** 探测一次广播是否已不对该 emitter 产生发送尝试（逐出已生效的外部可见判据）。 */
+    private boolean probeNoAttempt(SseChannelHub hub, SseEmitter emitter) {
+        int before = sender.attemptsFor(emitter);
+        hub.broadcast(NOTIFICATION, "p0", "probe-evicted", Map.of("projectId", "p0"));
+        return sender.attemptsFor(emitter) == before;
     }
 
     @Test
@@ -196,9 +219,12 @@ class SseChannelHubTest {
         SseEmitter broken = hub.subscribe(NOTIFICATION, payload -> true);
         sender.breakEmitter(broken);
 
-        Thread.sleep(200);
-        int attemptsAfterHeartbeatFailures = sender.attemptsFor(broken);
+        // 等失败心跳的逐出外部可见（免计时竞态）：attempts≥2 后探测广播不再产生发送
+        // 尝试；探测若撞在途逐出只会自己送出同一次失败发送，收敛同一终态
+        awaitUntil("心跳失败逐出订阅", () -> sender.attemptsFor(broken) >= 2
+                && probeNoAttempt(hub, broken));
 
+        int attemptsAfterHeartbeatFailures = sender.attemptsFor(broken);
         hub.broadcast(NOTIFICATION, "p1", "workspace-created", Map.of("projectId", "p1"));
 
         assertThat(attemptsAfterHeartbeatFailures).isGreaterThanOrEqualTo(2); // 初始 ping + ≥1 轮失败心跳
@@ -210,12 +236,9 @@ class SseChannelHubTest {
         SseChannelHub hub = newHub(Duration.ofMillis(50));
         SseEmitter emitter = hub.subscribe(NOTIFICATION, payload -> true);
 
-        Thread.sleep(400);
-
-        long pings = sender.framesOf(emitter).stream()
+        awaitUntil("周期心跳持续到达", () -> sender.framesOf(emitter).stream()
                 .filter(frame -> "ping".equals(frame.comment()))
-                .count();
-        assertThat(pings).isGreaterThanOrEqualTo(2);
+                .count() >= 2);
     }
 
     @Test
@@ -223,8 +246,8 @@ class SseChannelHubTest {
         SseChannelHub hub = newHub(Duration.ofMillis(50));
         SseEmitter emitter = hub.subscribe(NOTIFICATION, payload -> true);
 
-        Thread.sleep(200);
-        hub.shutdown();
+        awaitUntil("关停前心跳进行中", () -> sender.framesOf(emitter).size() >= 2);
+        hub.shutdown(); // 有界等待在途一轮：返回即无进行中发送，读数不竞态
         int pingsAtShutdown = sender.framesOf(emitter).size();
 
         Thread.sleep(200);

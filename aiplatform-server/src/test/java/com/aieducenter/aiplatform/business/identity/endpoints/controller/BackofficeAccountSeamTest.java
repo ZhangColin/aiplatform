@@ -1,7 +1,11 @@
 package com.aieducenter.aiplatform.business.identity.endpoints.controller;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 
+import org.hamcrest.Description;
+import org.hamcrest.Matcher;
+import org.hamcrest.TypeSafeMatcher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,9 +55,12 @@ class BackofficeAccountSeamTest {
     @Test
     void given_persisted_account_when_signed_profile_then_four_fields_verbatim() throws Exception {
         Account account = accountRepository.save(Account.register(EXTERNAL_ID, "运营查档·张三"));
-        // 建档时点以库内值为准（响应读自同一库，精确对照即「原样」）
-        LocalDateTime createdAt = accountRepository.findById(account.getId()).orElseThrow()
-                .getCreatedAt();
+        // 建档时点固定尾零微秒（#177 回归锁）：LocalDateTime.toString() 保留 (.114420)、
+        // Jackson ISO 序列化裁尾零 (.11442)，原文比对必假红——断言按解析后的值对照
+        // （日期部分无载荷，now() 只取当天）
+        LocalDateTime createdAt = LocalDateTime.now().withNano(114_420_000);
+        jdbcTemplate.update("UPDATE idn_accounts SET created_at = ? WHERE external_id = ?",
+                Timestamp.valueOf(createdAt), EXTERNAL_ID);
 
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/accounts/" + EXTERNAL_ID),
@@ -63,7 +70,22 @@ class BackofficeAccountSeamTest {
                 .andExpect(jsonPath("$.data.id").value(account.getId().toString()))
                 .andExpect(jsonPath("$.data.externalId").value(EXTERNAL_ID))
                 .andExpect(jsonPath("$.data.displayName").value("运营查档·张三"))
-                .andExpect(jsonPath("$.data.createdAt").value(createdAt.toString()));
+                .andExpect(jsonPath("$.data.createdAt").value(parsedEqualTo(createdAt)));
+    }
+
+    /** createdAt 断言匹配器：两侧各归一化到 LocalDateTime 再比较，不受 ISO 裁尾零影响（#177）。 */
+    private static Matcher<String> parsedEqualTo(LocalDateTime expected) {
+        return new TypeSafeMatcher<>() {
+            @Override
+            protected boolean matchesSafely(String actual) {
+                return LocalDateTime.parse(actual).isEqual(expected);
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("解析后等于 ").appendValue(expected);
+            }
+        };
     }
 
     @Test

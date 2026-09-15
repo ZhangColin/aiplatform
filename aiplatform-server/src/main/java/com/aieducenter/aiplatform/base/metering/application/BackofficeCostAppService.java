@@ -8,6 +8,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.metering.application.dto.response.BackofficeCostOverviewResponse;
@@ -21,7 +22,6 @@ import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 import com.aieducenter.aiplatform.base.metering.domain.port.AgentKindNames;
 import com.aieducenter.aiplatform.base.metering.domain.repository.UsageEventAggregations;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台平台成本读面（#161/#164 成本运营）：全局总览 + unpriced 全局警示 + 项目
@@ -96,22 +96,25 @@ public class BackofficeCostAppService {
      * 下各语句各自快照——并发上报的极端时序可致行内 total 与 cost 瞬时不自洽，
      * 监控读面可接受，同 {@link MeteringAppService#bySubject} 先例口径）。
      * 排序标量＝币种桶金额直加（单价表单币种时＝精确排序；混币种仅定序用，
-     * 呈现仍分桶直读不折算）；同标量按 subject 升序稳定。
+     * 呈现仍分桶直读不折算）；同标量按 subject 升序稳定。分页钳制/换算全部
+     * 来自框架 {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边），内存
+     * 排序不动、切页直出 offset()/limit()，页码原样回显零手写算术。
      */
     @Transactional(readOnly = true)
     public PageResponse<BackofficeProjectCostResponse> projectCosts(Instant from, Instant to,
-                                                                    int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
+                                                                    Pagination pagination) {
         List<BackofficeProjectCostResponse> rows = usageEventAggregations
                 .aggregateSubjectCosts(from, to).stream()
                 .sorted(ROW_ORDER)
                 .map(summary -> new BackofficeProjectCostResponse(summary.subject(),
                         summary.total(), summary.costByCurrencyCode(), summary.allUnpriced()))
                 .toList();
-        int fromIndex = Math.min((safePage - 1) * safeSize, rows.size());
-        int toIndex = Math.min(fromIndex + safeSize, rows.size());
-        return new PageResponse<>(rows.subList(fromIndex, toIndex), rows.size(), safePage, safeSize);
+        // offset() 出 long，先与 rows.size() 取 min 再收窄——min 结果被行数上界
+        // 封顶，收窄无损；超尾页（含极端大页码 long 承载）落 rows.size()＝空页
+        int fromIndex = (int) Math.min(pagination.offset(), rows.size());
+        int toIndex = Math.min(fromIndex + pagination.limit(), rows.size());
+        return new PageResponse<>(rows.subList(fromIndex, toIndex), rows.size(),
+                pagination.page(), pagination.size());
     }
 
     /**

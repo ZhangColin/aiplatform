@@ -5,6 +5,7 @@ import java.time.Instant;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +16,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -103,9 +105,8 @@ public class BackofficeCostController {
     public ApiResponse<PageResponse<BackofficeProjectCostResponse>> projectCosts(
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(appService.projectCosts(from, to, page, size));
+            Pagination pagination) {
+        return ApiResponse.ok(appService.projectCosts(from, to, pagination));
     }
 
     @GetMapping("/projects/{projectId}")
@@ -130,12 +131,15 @@ public class BackofficeCostController {
     }
 
     /**
-     * 查询参数绑定失败的兜底：from/to 非 ISO-8601 Instant、page/size 非数值在本层
-     * 就是 400，映射回 METER_011 保持错误码前缀口径（同 BackofficeOrderController
-     * ORD_010 形制；#164 可绑定参数扩分页后消息泛化，code 不变契约不动——
-     * 同 #159 PRJ_014 先例）。
+     * 查询参数绑定失败的兜底：from/to 非 ISO-8601 Instant（标量参数，类型不匹配）
+     * 与非数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
+     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 METER_011 保持
+     * 错误码前缀口径（同 BackofficeOrderController ORD_010 形制；#164 可绑定
+     * 参数含分页、消息泛化「无效的成本查询参数」，code 不变契约不动——同 #159
+     * PRJ_014 先例；本类四个读口无命令体、零 bean 校验注解，BindException 落点
+     * 不会与 @Valid 校验信封抢道）。
      */
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
     public ResponseEntity<ApiResponse<Void>> handleQueryMismatch() {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(MeteringMessage.COST_WINDOW_INVALID));

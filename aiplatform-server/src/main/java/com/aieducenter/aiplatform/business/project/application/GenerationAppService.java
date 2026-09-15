@@ -215,9 +215,10 @@ public class GenerationAppService {
      * 收口判据核验探针（#35）：converse 无异常不构成成功——run 执行体可能道歉式
      * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 EXECUTOR systemPrompt
      * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
-     * 端口有 HTTP 应答（连接拒绝即非 0）。
+     * 端口有 HTTP 应答（连接拒绝即非 0）；{@code --max-time} 上限（#183）——收口
+     * 线程不被无响应对端挂死。
      */
-    static final String CLOSING_PROBE = "curl -s -o /dev/null http://localhost:8081";
+    static final String CLOSING_PROBE = "curl -s --max-time 2 -o /dev/null http://localhost:8081";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;

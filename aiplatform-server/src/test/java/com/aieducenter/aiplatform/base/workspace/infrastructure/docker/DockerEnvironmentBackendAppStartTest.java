@@ -49,7 +49,7 @@ class DockerEnvironmentBackendAppStartTest {
                         : new ExecResult(String.valueOf(inspectRunning), "", 0);
             }
             String joined = String.join(" ", cmd);
-            if (joined.contains("curl -s -o /dev/null http://localhost:8081")) {
+            if (joined.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081")) {
                 boolean ok = serving.isEmpty() || serving.remove(0);
                 return new ExecResult("", "", ok ? 0 : 1);
             }
@@ -62,7 +62,7 @@ class DockerEnvironmentBackendAppStartTest {
         /** 探活（curl）调用次数——无入口分支只应有前置单发 1 次，无等待轮询。 */
         long probeCount() {
             return commands.stream()
-                    .filter(c -> c.contains("curl -s -o /dev/null http://localhost:8081"))
+                    .filter(c -> c.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081"))
                     .count();
         }
     }

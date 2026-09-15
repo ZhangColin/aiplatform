@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -118,6 +119,15 @@ class WorkspaceHibernationIntegrationTest {
         // 容器删、卷零删（保卷——整轮不发 docker volume rm）
         assertThat(backend.removedContainer("ws-" + id.value())).isTrue();
         assertThat(backend.removedVolume("ws-" + id.value())).isFalse();
+        // 优雅关库先于删容器（#183）：运行中容器先 pg_ctl fast 停，唤醒不再经历
+        // WAL 崩溃恢复
+        int pgStopIndex = IntStream.range(0, backend.commands.size())
+                .filter(i -> backend.commands.get(i).contains("pg_ctl"))
+                .findFirst().orElse(-1);
+        assertThat(pgStopIndex).isGreaterThanOrEqualTo(0);
+        assertThat(backend.commands.get(pgStopIndex)).contains("-m fast");
+        assertThat(pgStopIndex)
+                .isLessThan(backend.commands.indexOf("docker rm -f ws-" + id.value()));
         // 意图落库：期望态休眠、置备态保持 READY（记录反映上次置备成功）
         Workspace workspace = workspaceRepository.findById(id.id()).orElseThrow();
         assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.HIBERNATED);

@@ -247,9 +247,31 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     @Override
     public void hibernate(WorkspaceHandle handle) {
         // 休眠 = 删容器保卷（#171，ADR-0016 单一语义）：只动容器，卷原样——唤醒走
-        // 既有幂等重建路径（createWorkspace 对同名残留先清后建、卷续用）。幂等 +
-        // 尽力而为：容器已不在 no-op，删失败不抛（意图未落库则下轮扫描重试）
+        // 既有幂等重建路径（createWorkspace 对同名残留先清后建、卷续用）。删前对
+        // 运行中容器优雅关库（#183：卷内 PGDATA 干净落定，唤醒不再经历 WAL 崩溃
+        // 恢复）；已死/不在容器无多余动作。幂等 + 尽力而为：容器已不在 no-op，
+        // 删失败不抛（意图未落库则下轮扫描重试）
+        if (containerState(handle) == ContainerState.RUNNING) {
+            stopPostgresFast(handle.containerName());
+        }
         runSilently("docker", "rm", "-f", handle.containerName());
+    }
+
+    /**
+     * 容器内 pg 优雅关停（#183，fast 模式）：断开连接、回滚未竟事务、checkpoint
+     * 落定——秒级完成。redis 无恢复语义不动。pg_ctl 拒 root 运行，经 su postgres；
+     * {@code -t 30} 有界等待（挂死防线——休眠跑在扫描线程上），超时/失败只记日志：
+     * 兜底仍是随后的 {@code rm -f}（SIGKILL，等价旧行为的崩溃恢复）。
+     */
+    private void stopPostgresFast(String containerName) {
+        String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
+        ExecResult stopped = runCapture("docker", "exec", containerName,
+                "su", "postgres", "-c",
+                PG_BIN + "/pg_ctl -D " + pgData + " -m fast -w -t 30 stop");
+        if (stopped.exitCode() != 0) {
+            log.warn("[workspace] {} pg 优雅关停未成（兜底 rm -f，唤醒走崩溃恢复）：{}",
+                    containerName, stopped.stderr().trim());
+        }
     }
 
     @Override
@@ -506,8 +528,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /** 单发容器内探活（#170 startApp 幂等前置）：不轮询不抛，只在服与否。 */
     private boolean appServingInContainer(String containerName, int port) {
-        return execIn(containerName,
-                "curl -s -o /dev/null http://localhost:" + port).ok();
+        return execIn(containerName, appProbeCommand(port)).ok();
     }
 
     /**
@@ -519,12 +540,22 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             Duration timeout, WorkspaceMessage onTimeout) {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            if (execIn(containerName, "curl -s -o /dev/null http://localhost:" + port).ok()) {
+            if (execIn(containerName, appProbeCommand(port)).ok()) {
                 return;
             }
             sleep();
         }
         throw new ApplicationException(onTimeout, "等待 " + target + " 就绪超时");
+    }
+
+    /**
+     * 探活 curl 命令（单发与轮询同款，#183）：{@code --max-time} 上限 = 预览短窗
+     * 时长——无响应挂死防线，单次探活不因 TCP 挂起吃掉探活窗、阻塞唤醒线程
+     * （curl 对已建连不回响应的对端默认等分钟级）。
+     */
+    private static String appProbeCommand(int port) {
+        return "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
+                + " -o /dev/null http://localhost:" + port;
     }
 
     /** dev 镜像缺失时从 classpath 资源现场构建（首次含 pnpm install 较重，之后走缓存）。 */

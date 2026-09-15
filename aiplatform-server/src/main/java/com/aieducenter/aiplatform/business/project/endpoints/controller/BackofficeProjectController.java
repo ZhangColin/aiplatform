@@ -11,6 +11,7 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,6 +22,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.ApiResponse;
 import com.cartisan.web.response.PageResponse;
 
@@ -101,10 +103,9 @@ public class BackofficeProjectController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime createdTo,
             @RequestParam(required = false) String externalId,
             @RequestParam(required = false) String projectId,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            Pagination pagination) {
         return ApiResponse.ok(appService.projects(status, createdFrom, createdTo,
-                externalId, projectId, page, size));
+                externalId, projectId, pagination));
     }
 
     @GetMapping("/{id}")
@@ -231,13 +232,15 @@ public class BackofficeProjectController {
     }
 
     /**
-     * 清单参数绑定失败的兜底：非法状态 code/时间/分页值在本层就是 400，映射回
-     * PRJ_014 保持错误码前缀口径（#159 后本 controller 可绑定参数是 status/
-     * createdFrom/createdTo/page/size，统一「无效的项目过滤参数」——同
-     * BackofficeOrderController ORD_010 形制；用户面本就只绑 status，文案
-     * 泛化对其无行为影响）。
+     * 清单参数绑定失败的兜底：非法状态 code/时间（标量参数，类型不匹配）与非
+     * 数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
+     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 PRJ_014 保持
+     * 错误码前缀口径（可绑定参数是 status/createdFrom/createdTo/page/size，
+     * 统一「无效的项目过滤参数」——同 BackofficeOrderController ORD_010 形制；
+     * 用户面本就只绑 status，文案泛化对其无行为影响；本类只读面无 bean 校验
+     * 注解端点，BindException 落点不会与 @Valid 校验信封抢道）。
      */
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
     public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.error(ProjectMessage.PROJECT_FILTER_UNKNOWN));

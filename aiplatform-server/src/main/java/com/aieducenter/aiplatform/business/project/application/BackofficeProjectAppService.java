@@ -1,10 +1,10 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
@@ -26,7 +27,6 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台项目读面（#159 项目域，/api/backoffice/projects 机机签名的两读端点）：
@@ -62,13 +62,14 @@ public class BackofficeProjectAppService {
      * 后台项目清单（新项目在前）：状态三档单选（ACTIVE/ARCHIVED，缺省＝全部、
      * 归档项目缺省含——照用户面先例，与订单多选有意不同）、创建时间区间（含
      * 两端）、归属账号（externalId 入参，服务端换算 accountId）、项目 id 精确。
-     * 过滤在数据库侧完成（Specification），不入内存全量。page 1 基（ADR-0001
-     * 分页口径），缺省第 1 页 20 条；排序定死 id 倒序（TSID 时间有序＝创建新
-     * 在前），不开放客户端排序。
+     * 过滤在数据库侧完成（Specification），不入内存全量。分页钳制/换算全部来自
+     * 框架 {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边）；排序定死
+     * id 倒序（TSID 时间有序＝创建新在前），客户端 sort 被 withSort 覆盖静默
+     * 忽略，不开放客户端排序。
      *
      * <p>externalId 换算不到（用户在我方无建档）与非数值项目 id 都如实返回空清单
-     * （200、total 0）——两者都是检索维度上的「无命中」，不是错误（同订单面
-     * 口径；详情寻址语义的 404 归 {@link #detail}）。</p>
+     * （200、total 0，页码原样回显）——两者都是检索维度上的「无命中」，不是错误
+     * （同订单面口径；详情寻址语义的 404 归 {@link #detail}）。</p>
      */
     @Transactional(readOnly = true)
     public PageResponse<BackofficeProjectSummaryResponse> projects(ProjectStatusFilter status,
@@ -76,20 +77,17 @@ public class BackofficeProjectAppService {
                                                                    LocalDateTime createdTo,
                                                                    String externalId,
                                                                    String projectId,
-                                                                   int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
-
+                                                                   Pagination pagination) {
         Long ownerAccountId = null;
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return BackofficePages.emptyPage(safePage, safeSize);
+                return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
             }
         }
         Long parsedProjectId = parseProjectId(projectId);
         if (projectId != null && !projectId.isBlank() && parsedProjectId == null) {
-            return BackofficePages.emptyPage(safePage, safeSize);
+            return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
         }
 
         BackofficeProjectQuery condition = new BackofficeProjectQuery(
@@ -97,20 +95,14 @@ public class BackofficeProjectAppService {
         Specification<Project> annotated = ConditionSpecifications.fromAnnotation(condition);
         Specification<Project> specification = Specification.where(annotated)
                 .and(archivedPredicate(status));
-        Pageable pageable = PageRequest.of(safePage - 1, safeSize,
-                Sort.by(Sort.Direction.DESC, "id"));
+        Pageable pageable = pagination.toPageRequest()
+                .withSort(Sort.by(Sort.Direction.DESC, "id"));
         Page<Project> result = projectRepository.findAll(specification, pageable);
         Map<Long, String> ownerNames = accountAppService.displayNamesOf(
                 result.getContent().stream().map(Project::getOwnerAccountId).toList());
-        return new PageResponse<>(
-                result.getContent().stream()
-                        .map(project -> BackofficeProjectSummaryResponse.of(project,
-                                project.getOwnerAccountId() == null ? null
-                                        : ownerNames.get(project.getOwnerAccountId())))
-                        .toList(),
-                result.getTotalElements(),
-                safePage,
-                safeSize);
+        return PageResponse.of(result.map(project -> BackofficeProjectSummaryResponse.of(project,
+                project.getOwnerAccountId() == null ? null
+                        : ownerNames.get(project.getOwnerAccountId()))));
     }
 
     /**

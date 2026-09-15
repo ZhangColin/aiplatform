@@ -354,6 +354,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/workspaces/{id}/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 唤醒（等就绪）
+         * @description 收敛到 READY＋（已生成项目）应用在服，同步等结果：健康即回；容器缺失/被杀（#168 型漂移）走幂等重建（卷保留、数据不动）；封存态走深度唤醒（解包回卷＋依赖重装，分钟级）。run 在途不受限（唤醒不动数据面）。响应＝动作后的观测详情（新事实）。X-User-Id/X-User-Name 透传头自动落痕动作行（缺头落空）。工作区不存在 404 WSP_001；非 DEV 400 WSP_007；封存包不可读（深度唤醒保持封存态）404 WSP_016；置备等待超时 500 WSP_011。需要机机签名
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         *     - 400 WSP_007 — 暂不支持的环境类型（Phase A 仅 DEV）
+         *     - 500 WSP_011 — 环境置备等待超时，请稍后重试
+         *     - 404 WSP_016 — 封存包不存在或不可读
+         */
+        post: operations["wake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/workspaces/{id}/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 封存（产物同自动封存）
+         * @description 动作序同闲置满期的自动封存：删容器 → 整卷打包（仅排可重建缓存，数据库与机密随包）落平台存储 → 期望态置封存＋包元数据→ 删卷（失败由扫描下轮收敛）。RUNNING 起点可用（即时深回收，不用先等休眠满期）；重复封存拒 400 WSP_009（走「唤醒→休眠→封存」周期）；置备在途拒 WSP_009；run 在途拒 409 WSP_015（卷正被 run 读写时打包＝半程数据）；收敛任务在途 409 WSP_017。响应＝动作后的观测详情（含封存包元数据）。操作者透传头落痕同唤醒。需要机机签名
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         *     - 400 WSP_007 — 暂不支持的环境类型（Phase A 仅 DEV）
+         *     - 400 WSP_009 — 工作区置备状态不合法
+         *     - 409 WSP_015 — 编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）
+         *     - 409 WSP_017 — 沙箱有进行中的收敛任务，请稍后再试
+         */
+        post: operations["seal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/workspaces/{id}/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 强制重建（rm＋幂等重建）
+         * @description #168 型「预览死了」事故的标准化处置（替代手工 docker 拉）：在跑但坏了的容器也杀（卷保留、数据不动），随后走唤醒内核同一重建路径收敛回 READY（已生成项目拉起 8081 应用）。封存态拒400 WSP_009（数据只在包里，空卷重建＝掩埋数据丢失——先唤醒）；置备在途拒 WSP_009；run 在途拒 409 WSP_015；收敛任务在途409 WSP_017；重建重试上限落 FAILED 时 500 WSP_010（可再触发）。响应＝动作后的观测详情。操作者透传头落痕同唤醒。需要机机签名
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         *     - 400 WSP_007 — 暂不支持的环境类型（Phase A 仅 DEV）
+         *     - 400 WSP_009 — 工作区置备状态不合法
+         *     - 500 WSP_010 — 环境置备失败，需要环境的能力暂不可用
+         *     - 409 WSP_015 — 编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）
+         *     - 409 WSP_017 — 沙箱有进行中的收敛任务，请稍后再试
+         */
+        post: operations["rebuild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/workspaces/{id}/hibernate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 强制休眠（立即删容器保卷）
+         * @description 管理员的即时止损口：删容器保卷、期望态置休眠——闲置计时的手动直达（不等闲置阈值）。已休眠＝幂等成功（补删残留容器）；封存态拒 400 WSP_009（卷已删，先唤醒）；置备在途拒 WSP_009；run 在途拒 409 WSP_015（管理员操作资源面，不打断用户正在进行的生成——要处置先取消 run 或等收口）；收敛任务在途（触碰自愈/扫描封存）409 WSP_017。响应＝动作后的观测详情。操作者透传头落痕同唤醒。需要机机签名
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         *     - 400 WSP_007 — 暂不支持的环境类型（Phase A 仅 DEV）
+         *     - 400 WSP_009 — 工作区置备状态不合法
+         *     - 409 WSP_015 — 编码 run 进行中，沙箱动作被拒（先取消 run 或等收口）
+         *     - 409 WSP_017 — 沙箱有进行中的收敛任务，请稍后再试
+         */
+        post: operations["hibernate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/price-entries": {
         parameters: {
             query?: never;
@@ -746,7 +854,13 @@ export interface paths {
         };
         /**
          * 预览（工作区端口暴露）
-         * @description 端口映射置备时已落定、URL 确定；本端点探活工作区应用端口（run 执行体按约定自起 8081 服务，#44/#45），探活通过才返回可访问 URL（localhost）并SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。应用未起服 = 503 WSP_012 待期（非故障），前端 run 开始即轮询续探；平台不代起静态兜底服务，无应用期间不出文件列表中间态
+         * @description 端口映射置备时已落定、URL 确定；本端点探活工作区应用端口，探活通过才返回可访问 URL（localhost）并 SSE preview-ready——前端以此作「应用可访问」判据，通过瞬间切真页面。三档待期/故障口径（#170 唤醒底座）：置备/唤醒进行中 = 503 WSP_013「系统启动中」（容器缺失被触碰自动重建，前端轮询续探）；已生成项目应用未起服（容器在而应用死）= 平台拉起后同按 WSP_013待期（8081 应用拉起是平台职责）；未生成项目 = 503 WSP_012 原口径（未生成态，不拉起、无静态兜底，无应用期间不出文件列表中间态）
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 503 WSP_012 — 预览应用尚未就绪
+         *     - 503 WSP_013 — 系统启动中
+         *     - 500 WSP_010 — 环境置备失败，需要环境的能力暂不可用
          */
         get: operations["preview"];
         put?: never;
@@ -826,7 +940,7 @@ export interface paths {
         };
         /**
          * 对话史（对话面全量，#89 前端水合源）
-         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
+         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）+ kindName 中文名随行（#186：枚举出口配 *Name，消费端零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
          */
         get: operations["conversation"];
         put?: never;
@@ -934,6 +1048,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 沙箱清单（期望态/实态过滤，分页）
+         * @description 存储观测工作清单：新沙箱在前（TSID 倒序）。两过滤维度均可缺省（缺省＝全量）、可组合：① desired 期望态单选，Integer code（1=运行 2=休眠 3=封存，DB 意图侧）；② actual 容器实态单选，Integer code（1=运行中 2=已停止 3=无容器 4=未知——docker 现场探查，实态不落库，过滤在探查后内存完成，total 如实＝筛后计数；「期望运行而实态无容器」即漂移行，actual=3 即捞漂移清单）。每行＝项目引用（无所属项目为 null）＋期望态/实态两列＋last-touch＋卷大小（旁路容器 du 全卷、含可重建缓存，字节——封存容缺 null、探查失败亦 null）＋封存信息（时刻/包大小）。page 1 基（缺省 1）、size 缺省 20（上界 100）；排序服务端定死不开放。实态与卷大小逐行现场探查（docker 子进程），页越大越慢——观测页不必贪大。过滤参数绑定失败（非法 code/分页值）400 WSP_014。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 WSP_014 — 无效的工作区过滤参数
+         */
+        get: operations["workspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 沙箱详情（全量字段＋所属项目引用）
+         * @description 清单行超集：另带置备失败原因（FAILED 态排障）、封存包寻址键、审计时间列与中间件资源清单（连接串原文，容器内回环形态）。期望态/实态/卷大小同清单口径（现场探查、封存容缺）。所属项目引用软引用容缺（null 呈现）——工作区先于项目存在。需要机机签名（五头 HMAC）；工作区不存在（含畸形 id）404 WSP_001
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         */
+        get: operations["detail_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects": {
         parameters: {
             query?: never;
@@ -971,7 +1131,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
          */
-        get: operations["detail_2"];
+        get: operations["detail_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1078,6 +1238,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/projects/{id}/files/package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 项目文件包（tar.gz 二进制流，#174）
+         * @description 取走项目工作区内容：已封存项目直取封存包（整卷口径——含数据库与机密，卷已删、包是唯一事实，文件名 {id}-archive.tar.gz）；未封存项目即时导出源码包（交付口径：排 node_modules/.env 等，与订单源码包同一导出实现——订单流程不动，文件名 {id}-source.tar.gz）。沙箱休眠中会先同步唤醒重建再打包（分钟内）；归档项目照取（工作区保留）。项目不存在 404 PRJ_001；封存态无包记录/包不可读404 WSP_016（1016）；环境故障 500 WSP_002。需要机机签名
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 404 WSP_016 — 封存包不存在或不可读
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["filesPackage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects/{id}/files/content": {
         parameters: {
             query?: never;
@@ -1115,7 +1300,7 @@ export interface paths {
         };
         /**
          * 对话史（后台面，全量同序）
-         * @description 口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）；question = question-raised 事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）——排障时了解用户与系统的交互过程。需要机机签名；项目不存在 404 PRJ_001
+         * @description 口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）+ kindName 中文名随行（#186：枚举出口配 *Name，后台直读零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）——排障时了解用户与系统的交互过程。需要机机签名；项目不存在 404 PRJ_001
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
@@ -1166,7 +1351,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_3"];
+        get: operations["detail_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1236,7 +1421,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        get: operations["detail_4"];
+        get: operations["detail_5"];
         put?: never;
         post?: never;
         /**
@@ -1307,7 +1492,7 @@ export interface paths {
         };
         /**
          * 单项目成本下钻（byModel/byAgentKind 分解）
-         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值，展示名归 admin 侧映射；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 METER_011 — 无效的成本查询参数
@@ -1330,7 +1515,7 @@ export interface paths {
         };
         /**
          * 平台成本全局总览（时间窗）
-         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor，展示名归 admin 侧映射），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor）+ agentKindName 中文名随行（#186：主链经智能体配置回解，naming/classify 等辅助标记为 null——消费端落「—」桶），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败400 METER_011。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 METER_011 — 无效的成本查询参数
@@ -1676,6 +1861,58 @@ export interface components {
         FixRestartResponse: {
             runId?: string;
         };
+        ApiResponseBackofficeWorkspaceDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeWorkspaceDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeWorkspaceDetailResponse: {
+            workspaceId?: string;
+            containerName?: string;
+            networkName?: string;
+            /** @description 1=开发, 2=测试, 3=生产 */
+            kind?: number;
+            kindName?: string;
+            /** @description 1=置备中, 2=就绪, 3=失败 */
+            status?: number;
+            statusName?: string;
+            provisionError?: string;
+            /** @description 1=运行, 2=休眠, 3=封存 */
+            desiredState?: number;
+            desiredStateName?: string;
+            /** @description 1=运行中, 2=已停止, 3=无容器, 4=未知 */
+            containerState?: number;
+            containerStateName?: string;
+            /** Format: date-time */
+            lastTouchAt?: string;
+            /** Format: int64 */
+            volumeSizeBytes?: number;
+            /** Format: date-time */
+            sealedAt?: string;
+            archivePath?: string;
+            /** Format: int64 */
+            archiveSizeBytes?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            resources?: components["schemas"]["MiddlewareResourceObservation"][];
+            project?: components["schemas"]["ProjectRef"];
+        };
+        MiddlewareResourceObservation: {
+            /** @description 1=PostgreSQL, 2=Redis */
+            kind?: number;
+            containerName?: string;
+            internalUrl?: string;
+        };
+        ProjectRef: {
+            projectId?: string;
+            name?: string;
+            archived?: boolean;
+        };
         OpenPriceEntryCommand: {
             provider?: string;
             model?: string;
@@ -1913,6 +2150,7 @@ export interface components {
             id?: number;
             /** Format: int32 */
             kind?: number;
+            kindName?: string;
             runId?: string;
             text?: string;
             question?: {
@@ -1952,6 +2190,48 @@ export interface components {
         SseEmitter: {
             /** Format: int64 */
             timeout?: number;
+        };
+        ApiResponsePageResponseBackofficeWorkspaceSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeWorkspaceSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeWorkspaceSummaryResponse: {
+            workspaceId?: string;
+            containerName?: string;
+            /** @description 1=开发, 2=测试, 3=生产 */
+            kind?: number;
+            kindName?: string;
+            /** @description 1=置备中, 2=就绪, 3=失败 */
+            status?: number;
+            statusName?: string;
+            /** @description 1=运行, 2=休眠, 3=封存 */
+            desiredState?: number;
+            desiredStateName?: string;
+            /** @description 1=运行中, 2=已停止, 3=无容器, 4=未知 */
+            containerState?: number;
+            containerStateName?: string;
+            /** Format: date-time */
+            lastTouchAt?: string;
+            /** Format: int64 */
+            volumeSizeBytes?: number;
+            /** Format: date-time */
+            sealedAt?: string;
+            /** Format: int64 */
+            archiveSizeBytes?: number;
+            project?: components["schemas"]["ProjectRef"];
+        };
+        PageResponseBackofficeWorkspaceSummaryResponse: {
+            items?: components["schemas"]["BackofficeWorkspaceSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -2714,6 +2994,94 @@ export interface operations {
             };
         };
     };
+    wake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
+    seal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
+    rebuild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
+    hibernate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
     entries: {
         parameters: {
             query?: {
@@ -2721,6 +3089,7 @@ export interface operations {
                 model?: string;
                 page?: number;
                 size?: number;
+                sort?: string[];
             };
             header?: never;
             path?: never;
@@ -3334,6 +3703,54 @@ export interface operations {
             };
         };
     };
+    workspaces: {
+        parameters: {
+            query?: {
+                desired?: number;
+                actual?: number;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeWorkspaceSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeWorkspaceDetailResponse"];
+                };
+            };
+        };
+    };
     projects: {
         parameters: {
             query?: {
@@ -3344,6 +3761,7 @@ export interface operations {
                 projectId?: string;
                 page?: number;
                 size?: number;
+                sort?: string[];
             };
             header?: never;
             path?: never;
@@ -3362,7 +3780,7 @@ export interface operations {
             };
         };
     };
-    detail_2: {
+    detail_3: {
         parameters: {
             query?: never;
             header?: never;
@@ -3473,6 +3891,28 @@ export interface operations {
             };
         };
     };
+    filesPackage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
     fileContent_1: {
         parameters: {
             query: {
@@ -3529,6 +3969,7 @@ export interface operations {
                 orderId?: string;
                 page?: number;
                 size?: number;
+                sort?: string[];
             };
             header?: never;
             path?: never;
@@ -3547,7 +3988,7 @@ export interface operations {
             };
         };
     };
-    detail_3: {
+    detail_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -3600,6 +4041,7 @@ export interface operations {
                 projectId?: string;
                 page?: number;
                 size?: number;
+                sort?: string[];
             };
             header?: never;
             path?: never;
@@ -3618,7 +4060,7 @@ export interface operations {
             };
         };
     };
-    detail_4: {
+    detail_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -3692,6 +4134,7 @@ export interface operations {
                 to?: string;
                 page?: number;
                 size?: number;
+                sort?: string[];
             };
             header?: never;
             path?: never;

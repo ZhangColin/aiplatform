@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -33,7 +34,8 @@ import lombok.extern.slf4j.Slf4j;
  * 两天」不再依赖用户触碰才有人管；③ 期望休眠而容器仍在（休眠删失败残留/外部
  * 重建）且已闲置 → 删容器向意图收敛；③′ 期望封存而卷仍在（封存删卷失败/删后
  * 外部漂移重建的残留）→ 删卷向意图收敛。活跃（阈值内触碰或 run 在途）且容器健康
- * → 无事可做。</p>
+ * → 无事可做；探查 UNKNOWN（daemon 抖动）两支皆让路、下轮再看（#176：探查失败
+ * ≠容器不在，不盲动手）。</p>
  *
  * <p>封存动作序（数据安全定序）：打包落盘 → 意图+元数据落库（事务内重取防销毁
  * 竞争复活）→ 删卷（尽力而为，失败由 ③′ 下轮收敛）。任一步失败意图不翻，下轮
@@ -121,14 +123,14 @@ public class WorkspaceHibernationAppService {
                     () -> convergeSealedResidue(workspace.workspaceId()));
             return false;
         }
-        boolean running = environmentBackend.isContainerRunning(workspace.toHandle());
-        if (!running && workspace.getDesiredState() == DesiredState.RUNNING) {
+        ContainerState state = environmentBackend.containerState(workspace.toHandle());
+        if (state.confidentlyNotRunning() && workspace.getDesiredState() == DesiredState.RUNNING) {
             log.info("[workspace] {} 期望运行而容器实死，漂移收敛唤醒",
                     workspace.workspaceId().value());
             lifecycle.healDrift(workspace.workspaceId(), fact.startAppOnWake());
             return true;
         }
-        if (running && workspace.getDesiredState() == DesiredState.HIBERNATED
+        if (state == ContainerState.RUNNING && workspace.getDesiredState() == DesiredState.HIBERNATED
                 && WorkspaceHibernationPolicy.isIdle(workspace.getLastTouchAt(), now, threshold)) {
             log.info("[workspace] {} 期望休眠而容器仍在（残留/外部重建），删容器收敛",
                     workspace.workspaceId().value());

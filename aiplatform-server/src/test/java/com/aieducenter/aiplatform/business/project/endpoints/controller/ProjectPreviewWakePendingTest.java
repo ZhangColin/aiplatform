@@ -20,6 +20,7 @@ import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSessionStore;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -112,7 +113,7 @@ class ProjectPreviewWakePendingTest {
         seedProject(true);
         workspaceRepository.save(readyWorkspace());
         // 容器在（触碰面探查不动）；应用死（探活回放）——预览面轻路径的既有形态
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenThrow(new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING));
 
@@ -127,7 +128,7 @@ class ProjectPreviewWakePendingTest {
             throws Exception {
         seedProject(false);
         workspaceRepository.save(readyWorkspace());
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenThrow(new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING));
 

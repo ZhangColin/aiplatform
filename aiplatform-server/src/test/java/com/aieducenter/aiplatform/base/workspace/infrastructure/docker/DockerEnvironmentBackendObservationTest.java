@@ -76,17 +76,14 @@ class DockerEnvironmentBackendObservationTest {
 
     @Test
     void given_no_such_object_when_container_state_then_absent() {
-        // 真实 docker 的对象缺失回执：No such object——休眠/封存后的正常态
-        ScriptedBackend backend = new ScriptedBackend() {
-            @Override
-            ExecResult script(String command) {
-                return command.startsWith("docker inspect -f")
-                        ? new ExecResult("", "Error: No such object: ws-42", 1)
-                        : super.script(command);
-            }
-        };
-
-        assertThat(backend.containerState(handle())).isEqualTo(ContainerState.ABSENT);
+        // 真实 docker 的对象缺失回执：no such object——休眠/封存后的正常态。两种
+        // 大小写形态都认：经典 CLI 回「Error: No such object」、Docker Desktop 29
+        // 回小写「error: no such object」（#176 联调实测：只认大写会把缺失全归
+        // UNKNOWN，唤醒判定整体让路不收敛）
+        assertThat(scriptedState("", "Error: No such object: ws-42", 1)
+                .containerState(handle())).isEqualTo(ContainerState.ABSENT);
+        assertThat(scriptedState("", "error: no such object: ws-42", 1)
+                .containerState(handle())).isEqualTo(ContainerState.ABSENT);
     }
 
     @Test
@@ -105,16 +102,17 @@ class DockerEnvironmentBackendObservationTest {
     }
 
     @Test
-    void given_container_states_when_is_running_then_only_running_true() {
-        // 唤醒判据收敛到同一 inspect（#170 口径不变）：四值里只有 RUNNING 为 true
+    void given_container_states_when_confidently_not_running_then_only_absent_and_stopped() {
+        // 唤醒判据（#176）：重建权只及于有回执的不在（STOPPED/ABSENT）；RUNNING 与
+        // UNKNOWN 不在其列——探查失败≠容器不在，盲重建的预清 rm -f 会杀健康容器
         assertThat(scriptedState("true\n", "", 0)
-                .isContainerRunning(handle())).isTrue();
+                .containerState(handle()).confidentlyNotRunning()).isFalse();
         assertThat(scriptedState("false\n", "", 0)
-                .isContainerRunning(handle())).isFalse();
+                .containerState(handle()).confidentlyNotRunning()).isTrue();
         assertThat(scriptedState("", "Error: No such object: ws-42", 1)
-                .isContainerRunning(handle())).isFalse();
+                .containerState(handle()).confidentlyNotRunning()).isTrue();
         assertThat(scriptedState("", "Cannot connect to the Docker daemon", 1)
-                .isContainerRunning(handle())).isFalse();
+                .containerState(handle()).confidentlyNotRunning()).isFalse();
     }
 
     private static ScriptedBackend scriptedState(String out, String err, int code) {

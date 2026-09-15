@@ -26,6 +26,7 @@ import com.cartisan.event.ApplicationEventPublisher;
 import com.aieducenter.aiplatform.base.workspace.application.event.PreviewReady;
 import com.aieducenter.aiplatform.base.workspace.application.mapper.WorkspaceMapper;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -41,6 +42,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepo
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -127,7 +129,7 @@ class WorkspaceWakeupOrchestrationTest {
         assertThat(saved.getValue().getLastTouchAt()).isAfterOrEqualTo(LocalDateTime.MIN);
         // 首次置备/唤醒已在途：不提交探查任务
         assertThat(executor.queued).isEmpty();
-        verify(environmentBackend, never()).isContainerRunning(any(WorkspaceHandle.class));
+        verify(environmentBackend, never()).containerState(any(WorkspaceHandle.class));
     }
 
     @Test
@@ -137,7 +139,7 @@ class WorkspaceWakeupOrchestrationTest {
         stubLoads(readyWorkspace(), readyWorkspace(), readyWorkspace(), readyWorkspace());
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenReturn(URI.create("http://42.localhost/"));
         QueuedExecutor executor = new QueuedExecutor();
@@ -161,7 +163,7 @@ class WorkspaceWakeupOrchestrationTest {
         stubLoads(readyWorkspace(), readyWorkspace(), readyWorkspace(), readyWorkspace());
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         // 未生成工作区唤醒后探活必败（WSP_012 预期口径——恢复到未生成态）
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenThrow(new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING));
@@ -178,7 +180,7 @@ class WorkspaceWakeupOrchestrationTest {
     @Test
     void given_container_alive_when_touch_then_no_rebuild() {
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(readyWorkspace()));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
         QueuedExecutor executor = new QueuedExecutor();
 
         newService(executor).touch("42", true);
@@ -190,9 +192,26 @@ class WorkspaceWakeupOrchestrationTest {
     }
 
     @Test
+    void given_probe_unknown_when_touch_then_no_rebuild_deferred() {
+        // #176：探查失败≠容器不在——daemon 抖动不触发盲重建（预清 rm -f 会杀可能
+        // 健康容器上的在途 run）。本轮让路，下次触碰/下轮扫描再收敛
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(readyWorkspace()));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.UNKNOWN);
+        QueuedExecutor executor = new QueuedExecutor();
+
+        newService(executor).touch("42", true);
+        executor.runQueued();
+
+        // UNKNOWN：不重建、不拉应用、不探活——同健康路径的「不动」，但下次探查可翻案
+        verify(provisioner, never()).provisionForWake(any(), any());
+        verify(environmentBackend, never()).startApp(any(WorkspaceHandle.class));
+        verify(environmentBackend, never()).exposePort(any(WorkspaceHandle.class), anyInt());
+    }
+
+    @Test
     void given_concurrent_touches_when_healing_in_flight_then_single_probe_submitted() {
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(readyWorkspace()));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
         QueuedExecutor executor = new QueuedExecutor();
 
         WorkspaceLifecycleAppService service = newService(executor);
@@ -209,7 +228,7 @@ class WorkspaceWakeupOrchestrationTest {
     @Test
     void given_probe_throws_when_touch_then_swallowed_and_mutex_released() {
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(readyWorkspace()));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class)))
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
                 .thenThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED));
         QueuedExecutor executor = new QueuedExecutor();
 
@@ -229,7 +248,7 @@ class WorkspaceWakeupOrchestrationTest {
         stubLoads(readyWorkspace(), failed);
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         QueuedExecutor executor = new QueuedExecutor();
 
         newService(executor).touch("42", true);
@@ -302,7 +321,7 @@ class WorkspaceWakeupOrchestrationTest {
         stubLoads(sealedWorkspace(), sealedWorkspace(), sealedWorkspace(), sealedWorkspace());
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         when(sealPackageStore.open("/seal/ws-42.tar.gz")).thenReturn("archive".getBytes());
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenReturn(URI.create("http://42.localhost/"));
@@ -333,7 +352,7 @@ class WorkspaceWakeupOrchestrationTest {
                 bareSealedWorkspace(), bareSealedWorkspace());
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         when(environmentBackend.exposePort(any(WorkspaceHandle.class), eq(8081)))
                 .thenThrow(new ApplicationException(WorkspaceMessage.PREVIEW_NOT_SERVING));
         QueuedExecutor executor = new QueuedExecutor();
@@ -350,7 +369,7 @@ class WorkspaceWakeupOrchestrationTest {
     void given_sealed_with_unreadable_package_when_touch_then_stays_sealed() {
         Workspace sealed = sealedWorkspace();
         stubLoads(sealed, sealed);
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         when(sealPackageStore.open("/seal/ws-42.tar.gz"))
                 .thenThrow(new UncheckedIOException(
                         new FileNotFoundException("/seal/ws-42.tar.gz")));
@@ -373,7 +392,7 @@ class WorkspaceWakeupOrchestrationTest {
     void given_restore_fails_when_touch_then_sealed_intent_kept_for_retry() {
         Workspace sealed = sealedWorkspace();
         stubLoads(sealed, sealed);
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
         when(sealPackageStore.open("/seal/ws-42.tar.gz")).thenReturn("archive".getBytes());
         doThrow(new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED))
                 .when(environmentBackend).restoreVolume(any(WorkspaceHandle.class), any());

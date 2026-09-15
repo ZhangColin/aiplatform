@@ -18,6 +18,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.WorkspaceAction;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -138,7 +139,7 @@ class WorkspaceActionAppServiceTest {
     void given_healthy_running_workspace_when_wake_then_ready_as_is_without_rebuild() {
         Workspace workspace = seeded(DesiredState.RUNNING);
         when(workspaceRepository.findById(WS_ID)).thenReturn(Optional.of(workspace));
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(true);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.RUNNING);
 
         newService().wake(Long.toString(WS_ID), false, ADMIN);
 
@@ -153,7 +154,7 @@ class WorkspaceActionAppServiceTest {
     void given_healthy_running_workspace_when_wake_generated_then_app_started() {
         Workspace workspace = seeded(DesiredState.RUNNING);
         when(workspaceRepository.findById(WS_ID)).thenReturn(Optional.of(workspace));
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(true);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.RUNNING);
 
         newService().wake(Long.toString(WS_ID), true, ADMIN);
 
@@ -168,7 +169,7 @@ class WorkspaceActionAppServiceTest {
         when(workspaceRepository.findById(WS_ID)).thenReturn(Optional.of(workspace));
         when(workspaceRepository.save(any(Workspace.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(true);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.RUNNING);
 
         newService().wake(Long.toString(WS_ID), false, ADMIN);
 
@@ -183,7 +184,7 @@ class WorkspaceActionAppServiceTest {
     void given_dead_container_when_wake_then_wakeup_kernel_driven_and_ready_awaited() {
         Workspace workspace = seeded(DesiredState.RUNNING);
         when(workspaceRepository.findById(WS_ID)).thenReturn(Optional.of(workspace));
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(false);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.ABSENT);
         when(lifecycle.runExclusivelyBlocking(eq(workspace.workspaceId()), any()))
                 .thenAnswer(invocation -> {
                     invocation.<Runnable>getArgument(1).run();
@@ -197,6 +198,22 @@ class WorkspaceActionAppServiceTest {
         verify(lifecycle).wakeUp(workspace, true);
         verify(readinessWaiter).awaitReady(any());
         verify(actionRepository).save(any(WorkspaceAction.class));
+    }
+
+    @Test
+    void given_probe_unknown_when_wake_then_refused_wsp_002_without_rebuild() {
+        // #176：探查失败≠容器不在——同步唤醒口不盲重建（预清 rm -f 会杀可能健康
+        // 容器上的在途 run），如实回 WSP_002 可重试；异步触碰路径不至此（UNKNOWN 让路）
+        Workspace workspace = seeded(DesiredState.RUNNING);
+        when(workspaceRepository.findById(WS_ID)).thenReturn(Optional.of(workspace));
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.UNKNOWN);
+
+        assertThatThrownBy(() -> newService().wake(Long.toString(WS_ID), true, ADMIN))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessage(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED.message());
+
+        verify(lifecycle, never()).wakeUp(any(), anyBoolean());
+        verify(actionRepository, never()).save(any());   // 未成动作不留痕
     }
 
     @Test

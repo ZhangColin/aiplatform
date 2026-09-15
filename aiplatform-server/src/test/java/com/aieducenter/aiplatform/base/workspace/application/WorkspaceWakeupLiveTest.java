@@ -12,6 +12,7 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -125,7 +126,7 @@ class WorkspaceWakeupLiveTest {
         } catch (Exception e) {
             throw new IllegalStateException("杀容器失败", e);
         }
-        assertThat(backend.isContainerRunning(workspace.toHandle())).isFalse();
+        assertThat(backend.containerState(workspace.toHandle())).isEqualTo(ContainerState.ABSENT);
     }
 
     private URI previewUrl() {

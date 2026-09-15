@@ -106,11 +106,6 @@ class BackofficeWorkspaceActionSeamTest {
             WorkspaceHandle handle = invocation.getArgument(0);
             return states.getOrDefault(handle.containerName(), ContainerState.UNKNOWN);
         });
-        when(environmentBackend.isContainerRunning(any())).thenAnswer(invocation -> {
-            WorkspaceHandle handle = invocation.getArgument(0);
-            return states.getOrDefault(handle.containerName(), ContainerState.ABSENT)
-                    == ContainerState.RUNNING;
-        });
         when(environmentBackend.volumeSizeBytes(any())).thenReturn(104857600L);
         when(environmentBackend.exposePort(any(), anyInt()))
                 .thenAnswer(invocation -> java.net.URI.create("https://preview.example"));

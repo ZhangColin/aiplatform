@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceCrea
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
 import com.aieducenter.aiplatform.base.workspace.application.mapper.WorkspaceMapper;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -283,9 +284,11 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
             return new WorkspaceContentPackage(openSealArchive(workspace), true);
         }
         if (workspace.getStatus() != ProvisioningStatus.PROVISIONING
-                && !environmentBackend.isContainerRunning(workspace.toHandle())) {
-            // 容器缺失（休眠/漂移）：同步唤醒重建（互斥在途让路——他人任务收敛中，
-            // 交由下方 packSource 的就绪等待接管）
+                && environmentBackend.containerState(workspace.toHandle())
+                        .confidentlyNotRunning()) {
+            // 容器缺失（休眠/漂移，#176 有把握的不在才重建）：同步唤醒重建（互斥在途
+            // 让路——他人任务收敛中，交由下方 packSource 的就绪等待接管）；UNKNOWN
+            // 不重建——预清 rm -f 会杀可能健康的容器，下次触碰/下轮扫描再收敛
             runExclusivelyBlocking(workspace.workspaceId(),
                     () -> wakeUp(workspace, false));
         }
@@ -412,15 +415,19 @@ public class WorkspaceLifecycleAppService implements DisposableBean {
         });
     }
 
-    /** 自愈任务：实态探查 → 不健康才唤醒重建（唤醒含应用拉起与预览事件收口）。 */
+    /** 自愈任务：实态探查 → 有把握的不在才唤醒重建（唤醒含应用拉起与预览事件收口）。 */
     private void healIfNeeded(WorkspaceId id, boolean startAppOnWake) {
         try {
             Workspace workspace = workspaceRepository.findById(id.id()).orElse(null);
             if (workspace == null || workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
                 return;   // 等待间隙已删除/已在途（并发收敛中）
             }
-            if (environmentBackend.isContainerRunning(workspace.toHandle())) {
+            ContainerState state = environmentBackend.containerState(workspace.toHandle());
+            if (state == ContainerState.RUNNING) {
                 return;   // 实态健康（意图/实态一致），无事可做
+            }
+            if (!state.confidentlyNotRunning()) {
+                return;   // UNKNOWN（#176）：探查失败≠容器不在，不盲重建，下次触碰/下轮扫描收敛
             }
             wakeUp(workspace, startAppOnWake);
         } catch (RuntimeException e) {

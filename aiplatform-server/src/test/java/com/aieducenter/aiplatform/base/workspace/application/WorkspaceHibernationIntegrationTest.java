@@ -58,10 +58,11 @@ class WorkspaceHibernationIntegrationTest {
         protected ExecResult runCapture(String... cmd) {
             commands.add(String.join(" ", cmd));
             if ("inspect".equals(cmd[1]) && "-f".equals(cmd[2])) {
-                // 容器实态探查：编死值；exit 1 = 不存在/被杀（与真实 docker 口径一致）
+                // 容器实态探查：编死值；缺失回执照真实 docker 文案（No such object——
+                // containerState 据此与 daemon 不可达分示，#176 假面须与真口径一致）
                 return containerRunning
                         ? new ExecResult("true\n", "", 0)
-                        : new ExecResult("", "no such container", 1);
+                        : new ExecResult("", "Error: No such object: " + cmd[cmd.length - 1], 1);
             }
             if ("volume".equals(cmd[1]) && "inspect".equals(cmd[2])) {
                 return volumePresent

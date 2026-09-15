@@ -24,8 +24,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
  * pg/redis，{@code /workspace/.env} 连接串注入）/ destroyWorkspace（容器→快照→卷
  * 级联清理）/ exec（容器内跑命令取结果）/ exposePort（预览 URL）/
  * startSnapshot + stopSnapshot（#92「查看当时」快照容器：同卷只读 + 数据副本，
- * 用完即销毁）。#170 唤醒底座补两条：isContainerRunning（容器实态探查——唤醒
- * 触发判据）/ startApp（8081 应用拉起——平台职责）。#173 观测面补两条：
+ * 用完即销毁）。#170 唤醒底座补两条：容器实态探查（唤醒触发判据，#176 起与
+ * 观测面共用 {@link #containerState} 四态直判，布尔探查已删）/ startApp（8081
+ * 应用拉起——平台职责）。#173 观测面补两条：
  * containerState（实态一瞥）/ volumeSizeBytes（卷用量）。#171 休眠器补一条：
  * hibernate（删容器保卷——唤醒走既有幂等重建）。#172 封存与深度唤醒补三条：
  * packVolume（卷瘦身快照打包）/ restoreVolume（封存包回卷）/ deleteVolume
@@ -63,17 +64,11 @@ public interface EnvironmentBackend {
     URI exposePort(WorkspaceHandle handle, int containerPort);
 
     /**
-     * 容器实态探查（#170 唤醒触发判据）：容器在且 Running 才 true——不存在、已停止、
-     * 被杀（#168 型漂移）一律 false。只读探查，不抛（探查失败视同不在，由唤醒编排
-     * 幂等重建收敛）。
-     */
-    boolean isContainerRunning(WorkspaceHandle handle);
-
-    /**
-     * 容器实态一瞥（#173 观测面）：运行中/已停止/无容器/探查失败（未知）——比
-     * {@link #isContainerRunning} 细一档：后者服务唤醒判定（失败视同不在的收敛
-     * 口径），本方法服务人看（如实分示——探查失败与容器不在区分，docker 宕不
-     * 伪装成全员漂移）。只读探查，不抛。
+     * 容器实态一瞥（唯一诚实探查，#173 观测面＋#176 唤醒判定共用）：运行中/已停止/
+     * 无容器/探查失败（未知）四态如实分示——docker 宕不伪装成全员漂移。只读探查，
+     * 不抛。判定与观测各自消费：观测面如实分示给人看；唤醒判定按
+     * {@link ContainerState#confidentlyNotRunning()} 行使重建权（UNKNOWN 让路，
+     * 下轮收敛——#176：探查失败≠容器不在，盲重建的预清 rm -f 会杀健康容器在途 run）。
      */
     ContainerState containerState(WorkspaceHandle handle);
 

@@ -38,4 +38,13 @@ public enum ContainerState implements BaseEnum<ContainerState> {
     public String getName() {
         return name;
     }
+
+    /**
+     * 有把握地不在跑（#176 唤醒判定语义）：inspect 给出明确回执的不在——ABSENT/
+     * STOPPED。唤醒重建权只及于此；UNKNOWN（探查自身失败）不在其列——盲重建的
+     * 预清 rm -f 会杀掉可能健康的容器上的在途 run，让路下轮收敛。
+     */
+    public boolean confidentlyNotRunning() {
+        return this == ABSENT || this == STOPPED;
+    }
 }

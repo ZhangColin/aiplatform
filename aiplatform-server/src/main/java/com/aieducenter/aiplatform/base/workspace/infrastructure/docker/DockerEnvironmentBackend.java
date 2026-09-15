@@ -197,25 +197,20 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     @Override
-    public boolean isContainerRunning(WorkspaceHandle handle) {
-        // 实态探查（#170 触发判据）收敛到 containerState 的同一 inspect：只有
-        // RUNNING 才 true——不存在、停止、被杀、探查失败一律 false（唤醒编排幂等
-        // 重建收敛，意图/实态分离 ADR-0016）。
-        return containerState(handle) == ContainerState.RUNNING;
-    }
-
-    @Override
     public ContainerState containerState(WorkspaceHandle handle) {
         // 实态一瞥（#173 观测面）：inspect 非 0 时按 stderr 区分「容器不在」
-        // （No such object，真实 docker 的对象缺失回执）与探查失败（daemon 不可达
-        // 等 → UNKNOWN）——观测面如实分示。只读探查，不抛。
+        // （no such object，真实 docker 的对象缺失回执）与探查失败（daemon 不可达
+        // 等 → UNKNOWN）——观测面如实分示。判据大小写不敏感：经典 CLI 回
+        // 「Error: No such object」而 Docker Desktop 29 回小写「error: no such
+        // object」，只认大写会把缺失全归 UNKNOWN（#176 联调实测）。只读探查，
+        // 不抛。
         ExecResult inspected = runCapture("docker", "inspect",
                 "-f", "{{.State.Running}}", handle.containerName());
         if (inspected.exitCode() == 0) {
             return "true".equals(inspected.stdout().trim())
                     ? ContainerState.RUNNING : ContainerState.STOPPED;
         }
-        return inspected.stderr().contains("No such object")
+        return inspected.stderr().toLowerCase().contains("no such object")
                 ? ContainerState.ABSENT : ContainerState.UNKNOWN;
     }
 

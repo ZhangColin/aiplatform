@@ -29,6 +29,7 @@ import com.aieducenter.aiplatform.base.workspace.application.event.PreviewReady;
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceCreated;
 import com.aieducenter.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
@@ -444,7 +445,7 @@ class WorkspaceLifecycleAppServiceTest {
         // 封存态直取封存包：字节原样、零 docker 探查/打包（卷已删，包是唯一事实）
         assertThat(result.content()).isEqualTo(archive);
         assertThat(result.fromSealArchive()).isTrue();
-        verify(environmentBackend, never()).isContainerRunning(any());
+        verify(environmentBackend, never()).containerState(any());
         verify(environmentBackend, never()).packSource(any());
     }
 
@@ -461,7 +462,7 @@ class WorkspaceLifecycleAppServiceTest {
     @Test
     void given_hibernated_workspace_when_content_package_then_woken_then_source_packed() {
         Workspace workspace = seedWorkspace(DesiredState.HIBERNATED, null);
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(false);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.ABSENT);
         // 唤醒重建的置备内核：补齐 complete 收口（真实置备器的行为形状）
         doAnswer(invocation -> {
             WorkspaceId id = invocation.getArgument(0);
@@ -483,9 +484,25 @@ class WorkspaceLifecycleAppServiceTest {
     }
 
     @Test
+    void given_probe_unknown_when_content_package_then_packed_without_rebuild() {
+        // #176：探查失败≠容器不在——不触发同步唤醒重建（预清 rm -f 会杀可能健康的
+        // 容器），直接打包：容器在则成，真不在则 packSource 如实失败、重试即恢复
+        Workspace workspace = seedWorkspace(DesiredState.RUNNING, null);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.UNKNOWN);
+        byte[] source = "在线源码".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner, never()).provisionForWake(any(), any());
+    }
+
+    @Test
     void given_running_workspace_when_content_package_then_packed_without_wake() {
         Workspace workspace = seedWorkspace(DesiredState.RUNNING, null);
-        when(environmentBackend.isContainerRunning(workspace.toHandle())).thenReturn(true);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.RUNNING);
         byte[] source = "在线源码".getBytes();
         when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
 

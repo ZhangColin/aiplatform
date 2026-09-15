@@ -12,6 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -135,7 +136,7 @@ class WorkspaceHibernationLiveTest {
         while (System.currentTimeMillis() < deadline) {
             Workspace current = workspaceRepository.findById(workspaceId.id()).orElse(null);
             if (current != null && current.getStatus() == ProvisioningStatus.READY
-                    && backend.isContainerRunning(current.toHandle())) {
+                    && backend.containerState(current.toHandle()) == ContainerState.RUNNING) {
                 return true;
             }
             sleep();

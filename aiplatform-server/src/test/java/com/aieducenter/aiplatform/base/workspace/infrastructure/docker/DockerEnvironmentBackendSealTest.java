@@ -41,8 +41,9 @@ class DockerEnvironmentBackendSealTest {
         protected ExecResult runCapture(String... cmd) {
             commands.add(String.join(" ", cmd));
             if ("inspect".equals(cmd[1]) && "-f".equals(cmd[2])) {
+                // 缺失回执照真实 docker 文案（No such object——#176 假面与真口径一致）
                 return containerRunning ? new ExecResult("true\n", "", 0)
-                        : new ExecResult("", "no such container", 1);
+                        : new ExecResult("", "Error: No such object: " + cmd[cmd.length - 1], 1);
             }
             if ("volume".equals(cmd[1]) && "inspect".equals(cmd[2])) {
                 return volumePresent ? new ExecResult("[{}]\n", "", 0)

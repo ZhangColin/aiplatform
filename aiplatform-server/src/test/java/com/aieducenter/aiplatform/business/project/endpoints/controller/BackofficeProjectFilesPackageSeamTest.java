@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SealPackage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
@@ -77,9 +78,10 @@ class BackofficeProjectFilesPackageSeamTest {
         sealedProject = linkProject(WS_SEALED, "封存项目");
         sealedBareProject = linkProject(WS_SEALED_BARE, "无包封存项目");
 
-        when(environmentBackend.isContainerRunning(any())).thenAnswer(invocation -> {
+        when(environmentBackend.containerState(any())).thenAnswer(invocation -> {
             WorkspaceHandle handle = invocation.getArgument(0);
-            return handle.containerName().equals(containerOf(WS_LIVE));
+            return handle.containerName().equals(containerOf(WS_LIVE))
+                    ? ContainerState.RUNNING : ContainerState.ABSENT;
         });
         when(environmentBackend.packSource(any())).thenReturn(SOURCE_BYTES);
         // 未封存沙箱若需唤醒重建：置备内核补齐供给（真实形状）

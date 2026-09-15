@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
@@ -104,7 +105,7 @@ class WorkspaceHibernationAppServiceTest {
         Workspace workspace = readyWorkspace();
         workspace.markTouched(NOW.minusMinutes(10));
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
 
         int acted = newService().scanOnce(Map.of(), NOW);
 
@@ -120,7 +121,7 @@ class WorkspaceHibernationAppServiceTest {
         Workspace workspace = readyWorkspace();
         workspace.markTouched(NOW.minusHours(8));   // 远超阈值
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
         int acted = newService().scanOnce(
                 Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
@@ -136,7 +137,7 @@ class WorkspaceHibernationAppServiceTest {
         Workspace workspace = readyWorkspace();
         workspace.markTouched(NOW.minusMinutes(5));
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
         int acted = newService().scanOnce(Map.of(), NOW);
 
@@ -152,7 +153,7 @@ class WorkspaceHibernationAppServiceTest {
         workspace.markTouched(NOW.minusHours(3));
         workspace.hibernate();   // 构造意图残留形态：HIBERNATED + 容器仍在（删失败/外部重建）
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(true);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
 
         int acted = newService().scanOnce(Map.of(), NOW);
 
@@ -167,11 +168,27 @@ class WorkspaceHibernationAppServiceTest {
         Workspace workspace = readyWorkspace();
         workspace.hibernate();
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
-        when(environmentBackend.isContainerRunning(any(WorkspaceHandle.class))).thenReturn(false);
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
         int acted = newService().scanOnce(Map.of(), NOW);
 
         // 已休眠且容器已无：正合意图，无事可做
+        assertThat(acted).isZero();
+        verifyNoInteractions(lifecycle);
+        verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
+    }
+
+    @Test
+    void given_probe_unknown_when_scan_then_both_branches_deferred() {
+        // #176：探查失败≠容器不在——重建（②）与删容器（③）两支都不走：盲动手的
+        // rm 会杀可能健康的容器上的在途 run。本轮让路，下轮探查再收敛
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusMinutes(5));   // 期望运行且活跃（ABSENT 形态会触发②）
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.UNKNOWN);
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
         assertThat(acted).isZero();
         verifyNoInteractions(lifecycle);
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
@@ -188,7 +205,7 @@ class WorkspaceHibernationAppServiceTest {
 
         // 在途置备不扰（置备线程自会收敛）；非 DEV 沙箱不入休眠面（TEST/PROD 占位）
         assertThat(acted).isZero();
-        verify(environmentBackend, never()).isContainerRunning(any(WorkspaceHandle.class));
+        verify(environmentBackend, never()).containerState(any(WorkspaceHandle.class));
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
     }
 

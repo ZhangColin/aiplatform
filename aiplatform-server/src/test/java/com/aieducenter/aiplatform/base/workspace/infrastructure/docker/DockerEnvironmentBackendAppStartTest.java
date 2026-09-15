@@ -16,21 +16,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 唤醒底座后端能力的命令面测试（#170，Docker CLI 假面 seam）：isContainerRunning /
- * startApp 的命令序列与判据——不依赖真实 daemon（真链路 createWorkspace 幂等重建在
- * {@code DockerEnvironmentBackendTest}）。假面 = 覆写 {@code runCapture} 按命令形状
- * 回放既定结果。
+ * 唤醒底座后端能力的命令面测试（#170，Docker CLI 假面 seam）：startApp 的命令
+ * 序列与判据——不依赖真实 daemon（真链路 createWorkspace 幂等重建在
+ * {@code DockerEnvironmentBackendTest}；容器实态四值映射与唤醒判定归
+ * {@code DockerEnvironmentBackendObservationTest}，#176 起判定共用同一探查）。
+ * 假面 = 覆写 {@code runCapture} 按命令形状回放既定结果。
  */
 class DockerEnvironmentBackendAppStartTest {
 
     private static final WorkspaceId ID = WorkspaceId.of("42");
     private static final WorkspaceHandle HANDLE = WorkspaceHandle.dev(ID, "ws-42", "previewnet");
 
-    /** 假面：按命令形状回放（inspect 探查 / curl 探活 / exec 拉起），余者记录。 */
+    /** 假面：按命令形状回放（curl 探活 / exec 拉起），余者记录。 */
     private static final class ScriptedBackend extends DockerEnvironmentBackend {
 
-        /** 容器 Running 探查回放值（null = 命令失败）。 */
-        Boolean inspectRunning;
         /** 探活结果序列（true=在服）；耗尽后取末值。 */
         final List<Boolean> serving = new ArrayList<>();
         /** 拉起命令 exitCode 回放。 */
@@ -43,11 +42,6 @@ class DockerEnvironmentBackendAppStartTest {
         @Override
         protected ExecResult runCapture(String... cmd) {
             commands.add(String.join(" ", cmd));
-            if (cmd.length > 1 && "inspect".equals(cmd[1])) {
-                return inspectRunning == null
-                        ? new ExecResult("", "no such object", 1)
-                        : new ExecResult(String.valueOf(inspectRunning), "", 0);
-            }
             String joined = String.join(" ", cmd);
             if (joined.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081")) {
                 boolean ok = serving.isEmpty() || serving.remove(0);
@@ -65,30 +59,6 @@ class DockerEnvironmentBackendAppStartTest {
                     .filter(c -> c.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081"))
                     .count();
         }
-    }
-
-    @Test
-    void given_container_absent_when_is_running_then_false() {
-        ScriptedBackend backend = new ScriptedBackend();
-        backend.inspectRunning = null;
-
-        assertThat(backend.isContainerRunning(HANDLE)).isFalse();
-    }
-
-    @Test
-    void given_container_stopped_when_is_running_then_false() {
-        ScriptedBackend backend = new ScriptedBackend();
-        backend.inspectRunning = false;
-
-        assertThat(backend.isContainerRunning(HANDLE)).isFalse();
-    }
-
-    @Test
-    void given_container_running_when_is_running_then_true() {
-        ScriptedBackend backend = new ScriptedBackend();
-        backend.inspectRunning = true;
-
-        assertThat(backend.isContainerRunning(HANDLE)).isTrue();
     }
 
     @Test

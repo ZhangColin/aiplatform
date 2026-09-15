@@ -75,9 +75,11 @@ public class WorkspaceActionAppService {
     /**
      * 唤醒（#174，等就绪）：收敛到 READY＋（已生成）应用在服，同步等结果。健康
      * （容器在跑）即回；封存态走深度唤醒（解包回卷＋重建，分钟级）；容器缺失/
-     * 被杀走幂等重建——内核与触碰自愈同一 {@code wakeUp}。run 在途不受限（唤醒
-     * 不动数据面）。深度唤醒包不可读时内核保持封存态（数据完整性优先），本层
-     * 如实回 WSP_016 而非伪成功。
+     * 被杀走幂等重建——内核与触碰自愈同一 {@code wakeUp}。探查 UNKNOWN（daemon
+     * 抖动）拒以 WSP_002（#176：探查失败≠容器不在，盲重建的预清 rm -f 会杀可能
+     * 健康容器上的在途 run；重试即恢复，异步触碰路径不至此——healIfNeeded 对
+     * UNKNOWN 让路）。run 在途不受限（唤醒不动数据面）。深度唤醒包不可读时内核
+     * 保持封存态（数据完整性优先），本层如实回 WSP_016 而非伪成功。
      */
     public void wake(String workspaceId, boolean startAppOnWake, Operator operator) {
         Workspace workspace = requireDev(workspaceId);
@@ -85,26 +87,16 @@ public class WorkspaceActionAppService {
         Workspace woken;
         if (workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
             woken = readinessWaiter.awaitReady(workspace);   // 首次置备/唤醒已在途：等收敛
-        } else if (workspace.getDesiredState() != DesiredState.SEALED
-                && environmentBackend.isContainerRunning(workspace.toHandle())) {
-            if (startAppOnWake) {
-                environmentBackend.startApp(workspace.toHandle());   // 幂等：已在服直回
-            }
-            if (workspace.getDesiredState() == DesiredState.HIBERNATED) {
-                // 期望休眠而实态在跑（休眠删容器失败残留/外部重建的漂移形）：对齐
-                // 意图翻运行——否则扫描器按休眠意图再删容器，唤醒被静默撤销。显式
-                // 唤醒即活跃，last-touch 一并拨动（闲置窗口重新计，同 markTouched）
-                workspace.markTouched(LocalDateTime.now());
-                woken = workspaceRepository.save(workspace);
-            } else {
-                woken = workspace;   // 实态健康（意图/实态一致）
-            }
+        } else if (workspace.getDesiredState() == DesiredState.SEALED) {
+            woken = wakeByRebuild(workspace, startAppOnWake);   // 封存态：深度唤醒（解包回卷＋重建）
         } else {
-            // 容器缺失/被杀（#168 型）或封存态：驱动唤醒内核（互斥在途则让路，
-            // 他人任务收敛中），随后等就绪
-            lifecycle.runExclusivelyBlocking(id,
-                    () -> lifecycle.wakeUp(workspace, startAppOnWake));
-            woken = readinessWaiter.awaitReady(requirePresent(id));
+            // 判定穷举四态（switch 无 default——枚举加值此点编译期即炸，判定不静默漏分支）
+            woken = switch (environmentBackend.containerState(workspace.toHandle())) {
+                case RUNNING -> healthyWake(workspace, startAppOnWake);
+                case STOPPED, ABSENT -> wakeByRebuild(workspace, startAppOnWake);
+                case UNKNOWN -> throw new ApplicationException(
+                        WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
+            };
         }
         if (woken.getDesiredState() == DesiredState.SEALED) {
             // 深度唤醒未成（封存包不可读，内核保持封存态待人工）：如实回错
@@ -221,6 +213,33 @@ public class WorkspaceActionAppService {
     }
 
     // ---------- 内部 ----------
+
+    /**
+     * 健康路径（实态在跑，意图/实态一致或休眠残留对齐）：按需幂等拉应用；期望休眠
+     * 而实态在跑（删失败残留/外部重建的漂移形）对齐意图翻运行——否则扫描器按休眠
+     * 意图再删容器，唤醒被静默撤销。显式唤醒即活跃，last-touch 一并拨动。
+     */
+    private Workspace healthyWake(Workspace workspace, boolean startAppOnWake) {
+        if (startAppOnWake) {
+            environmentBackend.startApp(workspace.toHandle());   // 幂等：已在服直回
+        }
+        if (workspace.getDesiredState() == DesiredState.HIBERNATED) {
+            workspace.markTouched(LocalDateTime.now());
+            return workspaceRepository.save(workspace);
+        }
+        return workspace;   // 实态健康（意图/实态一致）
+    }
+
+    /**
+     * 唤醒内核驱动＋等就绪（容器缺失/被杀的幂等重建与封存深度唤醒共用的收尾）：
+     * 互斥在途则让路（他人任务收敛中），随后等 READY。
+     */
+    private Workspace wakeByRebuild(Workspace workspace, boolean startAppOnWake) {
+        WorkspaceId id = workspace.workspaceId();
+        lifecycle.runExclusivelyBlocking(id,
+                () -> lifecycle.wakeUp(workspace, startAppOnWake));
+        return readinessWaiter.awaitReady(requirePresent(id));
+    }
 
     /**
      * 守卫链前段（WSP_001/007）：存在性 → DEV。run 在途（WSP_015）与状态守卫

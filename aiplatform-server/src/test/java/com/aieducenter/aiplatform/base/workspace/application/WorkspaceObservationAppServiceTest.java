@@ -13,6 +13,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceObservation;
@@ -62,7 +63,7 @@ class WorkspaceObservationAppServiceTest {
         stubStates(waking, ContainerState.ABSENT, 300L);
 
         PageResponse<WorkspaceObservation> result =
-                service.observations(null, ContainerState.ABSENT, 1, 20);
+                service.observations(null, ContainerState.ABSENT, new Pagination(1, 20, null));
 
         // total 如实＝筛后计数（2 命中），非全量（3）
         assertThat(result.total()).isEqualTo(2);
@@ -79,7 +80,7 @@ class WorkspaceObservationAppServiceTest {
         stubStates(readyWorkspace(41), ContainerState.ABSENT, 100L);
 
         PageResponse<WorkspaceObservation> result =
-                service.observations(null, ContainerState.ABSENT, 2, 20);
+                service.observations(null, ContainerState.ABSENT, new Pagination(2, 20, null));
 
         // 空页如实：200 空清单非错误，total 仍报命中数
         assertThat(result.total()).isEqualTo(1);
@@ -96,7 +97,7 @@ class WorkspaceObservationAppServiceTest {
         when(workspaceRepository.findAll(anySpec(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(alive, sealed)));
 
         PageResponse<WorkspaceObservation> result =
-                service.observations(DesiredState.RUNNING, null, 1, 20);
+                service.observations(DesiredState.RUNNING, null, new Pagination(1, 20, null));
 
         assertThat(result.total()).isEqualTo(2);
         // 封存行卷大小容缺：不探卷（卷已删），封存元数据如实呈现
@@ -110,11 +111,11 @@ class WorkspaceObservationAppServiceTest {
     void given_rogue_pagination_when_observations_then_clamped() {
         when(workspaceRepository.findAll(anySpec(), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
 
-        service.observations(null, null, 0, 500);
+        service.observations(null, null, new Pagination(0, 500, null));
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(workspaceRepository).findAll(anySpec(), pageable.capture());
-        // page 0 归 1、size 500 钳 100（BackofficePages 口径）
+        // page 0 归 1、size 500 钳 100（框架 Pagination 口径）
         assertThat(pageable.getValue().getPageNumber()).isZero();
         assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
     }

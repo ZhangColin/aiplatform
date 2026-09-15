@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceActionAppService;
@@ -46,14 +47,14 @@ public class BackofficeWorkspaceAppService {
     }
 
     /**
-     * 沙箱清单：期望态/实态过滤＋分页照观测用例口径（实态过滤在探查后内存完成）；
-     * 每行拼装所属项目引用。
+     * 沙箱清单：期望态/实态过滤＋分页照观测用例口径（实态过滤在探查后内存完成，
+     * {@link Pagination} 贯通传递零拆包）；每行拼装所属项目引用。
      */
     @Transactional(readOnly = true)
     public PageResponse<BackofficeWorkspaceSummaryResponse> workspaces(DesiredState desired,
-            ContainerState actual, int page, int size) {
+            ContainerState actual, Pagination pagination) {
         PageResponse<WorkspaceObservation> observations =
-                observationAppService.observations(desired, actual, page, size);
+                observationAppService.observations(desired, actual, pagination);
         return new PageResponse<>(
                 observations.items().stream()
                         .map(observation -> BackofficeWorkspaceSummaryResponse.of(

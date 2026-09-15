@@ -3,13 +3,13 @@ package com.aieducenter.aiplatform.base.workspace.application;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceObservation;
@@ -19,7 +19,6 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 工作区观测用例（#173 后台观测面，只读）：沙箱事实的出口——记录字段（期望态/
@@ -31,7 +30,9 @@ import com.aieducenter.aiplatform.web.BackofficePages;
  * <p>实态过滤的机制形状（意图/实态分离，ADR-0016）：实态不落库，过滤只能在探查
  * 后做——带实态过滤时全量探查期望态命中集、按实态筛、内存分页（total 如实＝筛后
  * 计数）；不带时 SQL 侧分页、只探查当页行（实态列人人要显示，探查省不掉；省的
- * 是页外行的探查）。排序 id 倒序定死（新沙箱在前），分页钳 BackofficePages。</p>
+ * 是页外行的探查）。排序 id 倒序定死（新沙箱在前），分页钳制/换算全部来自框架
+ * {@link Pagination}（SQL 侧 withSort 覆盖、内存侧直出 offset()/limit()，客户端
+ * sort 两分支都静默忽略）。</p>
  */
 @Service
 public class WorkspaceObservationAppService {
@@ -51,17 +52,14 @@ public class WorkspaceObservationAppService {
      */
     @Transactional(readOnly = true)
     public PageResponse<WorkspaceObservation> observations(DesiredState desired,
-            ContainerState actual, int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
+            ContainerState actual, Pagination pagination) {
         Specification<Workspace> desiredSpec = desired == null ? null
                 : (root, query, cb) -> cb.equal(root.get("desiredState"), desired);
         if (actual == null) {
             Page<Workspace> result = workspaceRepository.findAll(desiredSpec,
-                    PageRequest.of(safePage - 1, safeSize, Sort.by(Sort.Direction.DESC, "id")));
-            return new PageResponse<>(
-                    result.getContent().stream().map(this::observe).toList(),
-                    result.getTotalElements(), safePage, safeSize);
+                    pagination.toPageRequest()
+                            .withSort(Sort.by(Sort.Direction.DESC, "id")));
+            return PageResponse.of(result.map(this::observe));
         }
         List<ProbedState> matched = workspaceRepository.findAll(desiredSpec,
                         Sort.by(Sort.Direction.DESC, "id")).stream()
@@ -69,12 +67,13 @@ public class WorkspaceObservationAppService {
                         environmentBackend.containerState(workspace.toHandle())))
                 .filter(probed -> probed.state() == actual)
                 .toList();
-        int from = Math.min((safePage - 1) * safeSize, matched.size());
-        int to = Math.min(from + safeSize, matched.size());
+        // offset 出 long，先与命中数取 min 再收窄——结果被行数封顶无损，超尾页落空页
+        int from = (int) Math.min(pagination.offset(), matched.size());
+        int to = Math.min(from + pagination.limit(), matched.size());
         return new PageResponse<>(
                 matched.subList(from, to).stream()
                         .map(probed -> observe(probed.workspace(), probed.state())).toList(),
-                matched.size(), safePage, safeSize);
+                matched.size(), pagination.page(), pagination.size());
     }
 
     /**

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.knowledge.application.dto.response.BackofficeMaterialDetailResponse;
@@ -16,7 +17,6 @@ import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialRecord;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
 import com.aieducenter.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
-import com.aieducenter.aiplatform.web.BackofficePages;
 
 /**
  * 后台知识素材管理用例（#166 知识库管理）：清单（状态单选＋沉淀时间闭区间＋
@@ -43,18 +43,20 @@ public class BackofficeKnowledgeAppService {
 
     /**
      * 素材清单：三过滤维度可组合、均可缺省（缺省＝全量）；排序服务端定死＝沉淀
-     * 时间倒序（新沉淀在前，id 倒序稳定）；page 1 基，size 上界 100（BackofficePages）。
+     * 时间倒序（新沉淀在前，id 倒序稳定，SQL 侧不动）；分页钳制/换算全部来自
+     * 框架 {@link Pagination}（1 基、缺省 1/20、上界 100 静默贴边），页码原样
+     * 回显零手写算术。
      */
     @Transactional(readOnly = true)
     public PageResponse<BackofficeMaterialSummaryResponse> materials(MaterialStatus status,
-            Instant sunkFrom, Instant sunkTo, String projectId, int page, int size) {
-        int safePage = BackofficePages.clampPage(page);
-        int safeSize = BackofficePages.clampSize(size);
+            Instant sunkFrom, Instant sunkTo, String projectId, Pagination pagination) {
+        // offset 收窄 long→int：存储接口形参是 int，与旧 (safePage-1)*size 整型算术
+        // 同 overflow 语义，不额外设防（#191）
         MaterialSearchResult result = knowledgeStore.searchMaterials(status, sunkFrom, sunkTo,
-                blankToNull(projectId), (safePage - 1) * safeSize, safeSize);
+                blankToNull(projectId), (int) pagination.offset(), pagination.limit());
         return new PageResponse<>(
                 result.items().stream().map(BackofficeMaterialSummaryResponse::of).toList(),
-                result.total(), safePage, safeSize);
+                result.total(), pagination.page(), pagination.size());
     }
 
     /**

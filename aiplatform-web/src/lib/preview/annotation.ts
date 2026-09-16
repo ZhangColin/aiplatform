@@ -50,7 +50,7 @@ export function parseAnchorEvent(data: unknown): AnnotationDraft | null {
   return parseAnnotationBody(record.payload as Record<string, unknown>);
 }
 
-/** 附件命令载荷 → 圈注条目（对话史水合回显用；attachmentType 必须 annotation）。 */
+/** 附件命令载荷 → 圈注条目（对话史水合回显与发送乐观落条共用；attachmentType 必须 annotation）。 */
 export function parseAnnotationAttachment(raw: unknown): AnnotationDraft | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;

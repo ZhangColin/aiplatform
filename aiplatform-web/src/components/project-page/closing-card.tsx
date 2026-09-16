@@ -71,9 +71,10 @@ export function ClosingCard({
 
   function handleViewOpenChange(open: boolean) {
     if (!open) {
-      const view = startView.data;
-      if (view && version) {
-        stopView.mutate({ version, viewId: view.viewId });
+      // schema 字段可选：viewId 在场才销毁（起服结果契约上必带）
+      const viewId = startView.data?.viewId;
+      if (viewId && version) {
+        stopView.mutate({ version, viewId });
         startView.reset();
       } else {
         closePendingView.current = true;
@@ -84,8 +85,9 @@ export function ClosingCard({
 
   // 快照就绪时若窗口已关（起服中关窗）→ 立即销毁，不留孤儿
   useEffect(() => {
-    if (closePendingView.current && startView.data && version) {
-      stopView.mutate({ version, viewId: startView.data.viewId });
+    const viewId = startView.data?.viewId;
+    if (closePendingView.current && viewId && version) {
+      stopView.mutate({ version, viewId });
       startView.reset();
       closePendingView.current = false;
     }

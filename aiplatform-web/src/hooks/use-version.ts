@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api/client";
+import type { components } from "@/lib/api/schema";
 import { errorText } from "@/lib/api/api-error";
 
 /**
@@ -13,17 +14,9 @@ import { errorText } from "@/lib/api/api-error";
  */
 
 /** 查看会话起服结果（#92）：viewId 是关闭动作的寻址锚，previewUrl 是快照预览。 */
-export type VersionViewStart = {
-  viewId: string;
-  previewUrl: string;
-};
-
+type VersionViewStart = components["schemas"]["VersionViewStartResponse"];
 /** 回滚追加出的新版本（#93）：runId 空、rollbackFrom 锚定源版本。 */
-export type RolledVersion = {
-  commitHash: string;
-  subject: string;
-  rollbackFrom?: string | null;
-};
+type RolledVersion = components["schemas"]["VersionResponse"];
 
 /** 起「查看当时」快照容器。 */
 export function useStartVersionView(projectId: string) {

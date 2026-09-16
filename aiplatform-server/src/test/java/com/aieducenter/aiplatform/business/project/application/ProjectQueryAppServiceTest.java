@@ -248,7 +248,7 @@ class ProjectQueryAppServiceTest {
                 .allMatch(project -> project.status() == ProjectStatus.ARCHIVED);
     }
 
-    // 非法过滤 code 的 400 PRJ_014 口径在端点层（ProjectControllerTest 兜底测试）；
+    // 非法过滤 code 的 400（框架统一信封）口径在端点层（ProjectControllerTest 兜底测试）；
     // 枚举签名后应用层不再可能收到非法值。
 
     // ---------- usage ----------

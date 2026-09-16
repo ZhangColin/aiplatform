@@ -162,7 +162,7 @@ class BackofficeProjectContentSeamTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.message").value("项目不存在"));
         }
-        // 未知/非数值标识同口径（ProjectIds.parse 收口）
+        // 未知/非数值标识同口径（Tsid 严格式收口）
         signedGet("/api/backoffice/projects/999999999/conversation")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("项目不存在"));

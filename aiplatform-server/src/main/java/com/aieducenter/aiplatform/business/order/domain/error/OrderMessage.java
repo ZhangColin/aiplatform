@@ -25,7 +25,7 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_QUOTE_NOTE_TOO_LONG(400, "ORD_009", "报价备注超长（至多 1000 字）"),
 
-    ORDER_FILTER_UNKNOWN(400, "ORD_010", "无效的订单过滤参数"),
+    // ORD_010 曾是「无效的订单过滤参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
 
     ORDER_PAY_NOT_ALLOWED(409, "ORD_011", "订单非待支付状态，无法支付"),
 

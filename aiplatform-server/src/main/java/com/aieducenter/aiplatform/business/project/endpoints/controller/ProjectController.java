@@ -8,7 +8,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +19,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
@@ -52,6 +50,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
@@ -107,20 +106,10 @@ public class ProjectController {
     @GetMapping
     @Operation(summary = "项目列表（状态过滤）",
             description = "创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/"
-                    + "3=ARCHIVED（已归档）；缺省 all。不合法取值 400 PRJ_014")
+                    + "3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）")
     public ApiResponse<List<ProjectResponse>> list(
             @RequestParam(required = false) ProjectStatusFilter status) {
         return ApiResponse.ok(queryAppService.list(status));
-    }
-
-    /**
-     * status 绑定失败的兜底：非法 code/非数值在本层就是 400，映射回 PRJ_014
-     * 保持既有错误口径（本 controller 唯一可绑定枚举参数是 status，兜底不越界）。
-     */
-    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public ResponseEntity<ApiResponse<Void>> handleStatusMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(ProjectMessage.PROJECT_FILTER_UNKNOWN));
     }
 
     @PostMapping("/{id}/messages")
@@ -335,8 +324,8 @@ public class ProjectController {
         return ApiResponse.ok();
     }
 
-    /** 寻址解析收口（{@link ProjectIds}）。 */
+    /** 寻址解析收口（{@link Tsid}，畸形标识 → 404 PRJ_001）。 */
     private Long parseId(String id) {
-        return ProjectIds.parse(id);
+        return Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND);
     }
 }

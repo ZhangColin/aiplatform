@@ -20,6 +20,8 @@ import com.aieducenter.aiplatform.business.project.application.VersionSnapshotAp
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionViewStartResponse;
+import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 版本 REST 面（#91 版本层地基）：每轮 run 收口自动成版的只读面——版本列表
@@ -47,7 +49,7 @@ public class ProjectVersionController {
                     + "收口摘要、Run-Id trailer 锚定收尾卡）。零版本（尚无收口）= 空列表非错误。"
                     + "项目不存在 404 PRJ_001；环境故障 WSP_002")
     public ApiResponse<List<VersionResponse>> list(@PathVariable String projectId) {
-        return ApiResponse.ok(versionAppService.list(ProjectIds.parse(projectId)));
+        return ApiResponse.ok(versionAppService.list(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{ref}")
@@ -57,7 +59,7 @@ public class ProjectVersionController {
                     + "非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001")
     public ApiResponse<VersionDetailResponse> detail(@PathVariable String projectId,
             @PathVariable String ref) {
-        return ApiResponse.ok(versionAppService.detail(ProjectIds.parse(projectId), ref));
+        return ApiResponse.ok(versionAppService.detail(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @PostMapping("/{ref}/view")
@@ -67,7 +69,7 @@ public class ProjectVersionController {
                     + "版本不存在 404 PRJ_028；同项目并发查看达上限 409 PRJ_029；环境故障 WSP_002")
     public ApiResponse<VersionViewStartResponse> startView(@PathVariable String projectId,
             @PathVariable String ref) {
-        return ApiResponse.ok(snapshotAppService.startView(ProjectIds.parse(projectId), ref));
+        return ApiResponse.ok(snapshotAppService.startView(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @PostMapping("/{ref}/rollback")
@@ -78,7 +80,7 @@ public class ProjectVersionController {
                     + "版本不存在 404 PRJ_028（含非 hash 形态 ref，不触工作区）；环境故障 WSP_002")
     public ApiResponse<VersionResponse> rollback(@PathVariable String projectId,
             @PathVariable String ref) {
-        return ApiResponse.ok(versionAppService.rollback(ProjectIds.parse(projectId), ref));
+        return ApiResponse.ok(versionAppService.rollback(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @DeleteMapping("/{ref}/view/{viewId}")
@@ -87,7 +89,7 @@ public class ProjectVersionController {
                     + "ref 仅为 URL 对称占位（寻址锚是 viewId）；会话不存在 404 PRJ_030")
     public ApiResponse<Void> stopView(@PathVariable String projectId,
             @PathVariable String ref, @PathVariable String viewId) {
-        snapshotAppService.stopView(ProjectIds.parse(projectId), viewId);
+        snapshotAppService.stopView(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), viewId);
         return ApiResponse.ok();
     }
 }

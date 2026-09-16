@@ -15,12 +15,12 @@ import com.aieducenter.aiplatform.business.identity.application.BackofficeAccoun
 import com.aieducenter.aiplatform.business.identity.application.dto.response.BackofficeAccountProfileResponse;
 
 /**
- * 后台账号 REST 面（#154 账号域，机机签名）：唯一读口＝按 externalId 查极简
- * 档案（id/externalId/displayName/createdAt 原样）。externalId＝OIDC sub＝
- * identity 账户 Id，对外正身（我方 accountId 只是内部代理键）；无清单浏览、
- * 无 identity 富化——联系方式/封禁等身份管理归 identity/admin 侧。类级
- * {@code @RequireSignature} 强制闸，该前缀经 WebMvcConfig 排除会话拦截
- * （签名＝认证，无用户会话可访问）。错误码前缀 IDN_（未命中 IDN_004）。
+ * 后台账号 REST 面（#154 账号域，机机签名——五头 HMAC 强制闸，见
+ * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：唯一读口＝按
+ * externalId 查极简档案（id/externalId/displayName/createdAt 原样）。
+ * externalId＝OIDC sub＝identity 账户 Id，对外正身（我方 accountId 只是内部
+ * 代理键）；无清单浏览、无 identity 富化——联系方式/封禁等身份管理归
+ * identity/admin 侧。错误码前缀 IDN_（未命中 IDN_004）。
  */
 @RestController
 @RequestMapping("/api/backoffice/accounts")

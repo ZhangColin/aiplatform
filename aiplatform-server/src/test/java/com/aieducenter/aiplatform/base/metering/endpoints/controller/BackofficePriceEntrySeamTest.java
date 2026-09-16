@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>#160 三操作＋#165 开行＋校验＋留痕在本类一链钉死：</p>
  * <ul>
  * <li><b>行清单</b>：含现行与历史行、provider/model 过滤、生效起点倒序、
- * 分页与非法分页值 METER_009；</li>
+ * 分页与非法分页值（框架信封）；</li>
  * <li><b>开行</b>（#165 种子脚本通道）：空键首行可开、effectiveFrom 可回溯
  * （种子敞口 2026-01-01 覆盖存量事件）；重叠校验同改价口径；</li>
  * <li><b>原子改价</b>：关行＋开新行同事务落库（JdbcTemplate）——重叠/守卫负例
@@ -165,13 +165,13 @@ class BackofficePriceEntrySeamTest {
                 .andExpect(jsonPath("$.data.items", hasSize(1)))
                 .andExpect(jsonPath("$.data.page").value(2));
 
-        // 非法分页值：400 METER_009（绑定失败兜底，同 ORD_010 形制）
+        // 非法分页值：400 带字段级明细（框架统一信封）
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/price-entries")
                                 .queryParam("provider", PROVIDER).queryParam("page", "abc"),
                         "/api/backoffice/price-entries?provider=" + PROVIDER + "&page=abc", null))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的单价行过滤参数"));
+                .andExpect(jsonPath("$.message").value("Parameter validation failed"));
     }
 
     // ---------- 开行（#165：空键首行——种子脚本通道） ----------

@@ -2,16 +2,12 @@ package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.openapi.annotation.RequireSignature;
@@ -22,22 +18,20 @@ import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
-import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.application.BackofficeWorkspaceAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeWorkspaceDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeWorkspaceSummaryResponse;
 
 /**
- * 后台沙箱面 REST（#173 观测 + #174 动作，/api/backoffice/workspaces 机机签名）：
+ * 后台沙箱面 REST（#173 观测 + #174 动作，/api/backoffice/workspaces 机机签名——
+ * 五头 HMAC 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：
  * 观测（清单/详情——期望态与 docker 实态两列如实分示）＋四干预动作（唤醒等就绪/
  * 强制休眠/强制重建/封存，append-only 留痕操作者）。沙箱事实与动作归
  * base.workspace（跨 BC 走应用层），所属项目引用与 run 在途事实在本域拼装递入。
- * cartisan-openapi 五头 HMAC，类级 {@code @RequireSignature} 强制闸；该前缀经
- * WebMvcConfig 排除会话拦截。错误码前缀 WSP_（观测面的资源是工作区，前缀随资源
- * 不随宿主包）：不存在 WSP_001、过滤参数 WSP_014、run 在途拒 WSP_015、封存包
- * 不可取 WSP_016、收敛任务在途 WSP_017、状态边界 WSP_009（信封 code 为数字
- * 业务码＝域码×1000＋序号：1001/1009/1015/1016/1017）。
+ * 错误码前缀 WSP_（观测面的资源是工作区，前缀随资源不随宿主包）：不存在 WSP_001、
+ * run 在途拒 WSP_015、封存包不可取 WSP_016、收敛任务在途 WSP_017、状态边界
+ * WSP_009（信封 code 为数字业务码＝域码×1000＋序号：1001/1009/1015/1016/1017）。
  */
 @RestController
 @RequestMapping("/api/backoffice/workspaces")
@@ -64,9 +58,10 @@ public class BackofficeWorkspaceController {
                     + "探查失败亦 null）＋封存信息（时刻/包大小）。page 1 基（缺省 1）、"
                     + "size 缺省 20（上界 100）；排序服务端定死不开放。实态与卷大小逐行"
                     + "现场探查（docker 子进程），页越大越慢——观测页不必贪大。"
-                    + "过滤参数绑定失败（非法 code/分页值）400 WSP_014。"
+                    + "过滤参数绑定失败走框架统一信封：非法期望态/实态 code 400"
+                    + "（带合法取值表）、非数值分页 400（带字段明细）。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"WSP_014"})
+    @ErrorCodes({"BAD_REQUEST"})
     public ApiResponse<PageResponse<BackofficeWorkspaceSummaryResponse>> workspaces(
             @RequestParam(required = false) DesiredState desired,
             @RequestParam(required = false) ContainerState actual,
@@ -154,19 +149,5 @@ public class BackofficeWorkspaceController {
         Long userId = RequestContext.getUserId();
         return new Operator(userId == null ? null : Long.toString(userId),
                 RequestContext.getUserName());
-    }
-
-    /**
-     * 清单参数绑定失败的兜底：非法期望态/实态 code（标量参数，类型不匹配）与非
-     * 数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
-     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 WSP_014 保持
-     * 错误码前缀口径（可绑定参数是 desired/actual/page/size，统一「无效的工作区
-     * 过滤参数」——同 BackofficeOrderController ORD_010 形制；本类观测/动作口均
-     * 无命令体、零 bean 校验注解，BindException 落点不会与 @Valid 校验信封抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(WorkspaceMessage.WORKSPACE_FILTER_INVALID));
     }
 }

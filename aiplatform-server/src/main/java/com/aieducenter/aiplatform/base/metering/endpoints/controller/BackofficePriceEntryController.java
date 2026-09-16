@@ -2,9 +2,6 @@ package com.aieducenter.aiplatform.base.metering.endpoints.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -12,10 +9,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.core.context.RequestContext;
-import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.request.Pagination;
@@ -29,15 +24,15 @@ import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPri
 import com.aieducenter.aiplatform.base.metering.application.dto.response.UnitPriceEntryResponse;
 import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台单价表 REST 面（#160 成本运营＋#165 写口唯一化，机机签名）：单价表＝平台
- * 成本换算用单价数据（模型 × token 档位 × 币种 × 生效区间）。cartisan-openapi
- * 五头 HMAC，类级 {@code @RequireSignature} 强制闸；该前缀经 WebMvcConfig 排除
- * 会话拦截。错误码前缀 METER_（行不存在 METER_006、非当前行 METER_007、区间
- * 重叠 METER_008、过滤参数 METER_009、字段/币种 METER_004/010、关行时点
- * METER_005）。启动 Seeder 已随 #165 退役——单价表写路径全部收在本面（初始化
- * 经开行端点＋幂等签名脚本）。
+ * 后台单价表 REST 面（#160 成本运营＋#165 写口唯一化，机机签名——五头 HMAC
+ * 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：单价表＝
+ * 平台成本换算用单价数据（模型 × token 档位 × 币种 × 生效区间）。错误码前缀
+ * METER_（行不存在 METER_006、非当前行 METER_007、区间重叠 METER_008、字段/
+ * 币种 METER_004/010、关行时点 METER_005）。启动 Seeder 已随 #165 退役——单价
+ * 表写路径全部收在本面（初始化经开行端点＋幂等签名脚本）。
  */
 @RestController
 @RequestMapping("/api/backoffice/price-entries")
@@ -58,9 +53,9 @@ public class BackofficePriceEntryController {
                     + "精确等值过滤、均可缺省（缺省＝全量行）；effectiveTo 为 null 即"
                     + "当前行。行带操作者两列（该行最近管理动作——开行或停用；存量行/"
                     + "无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。"
-                    + "过滤参数绑定失败（非法分页值）400 METER_009。"
+                    + "过滤参数绑定失败（非法分页值）400（带字段明细，框架统一信封）。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"METER_009"})
+    @ErrorCodes({"BAD_REQUEST"})
     public ApiResponse<PageResponse<UnitPriceEntryResponse>> entries(
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String model,
@@ -102,7 +97,7 @@ public class BackofficePriceEntryController {
     @ErrorCodes({"METER_004", "METER_005", "METER_006", "METER_007", "METER_008", "METER_010"})
     public ApiResponse<UnitPriceEntryRepriceResponse> reprice(
             @PathVariable String id, @RequestBody RepricePriceEntryCommand command) {
-        return ApiResponse.ok(appService.reprice(parseEntry(id), command, currentOperator()));
+        return ApiResponse.ok(appService.reprice(Tsid.resolve(id, MeteringMessage.PRICE_ENTRY_NOT_FOUND), command, currentOperator()));
     }
 
     @PostMapping("/{id}/deactivate")
@@ -115,7 +110,7 @@ public class BackofficePriceEntryController {
                     + "需要机机签名")
     @ErrorCodes({"METER_006", "METER_007"})
     public ApiResponse<UnitPriceEntryResponse> deactivate(@PathVariable String id) {
-        return ApiResponse.ok(appService.deactivate(parseEntry(id), currentOperator()));
+        return ApiResponse.ok(appService.deactivate(Tsid.resolve(id, MeteringMessage.PRICE_ENTRY_NOT_FOUND), currentOperator()));
     }
 
     /**
@@ -128,37 +123,5 @@ public class BackofficePriceEntryController {
         Long userId = RequestContext.getUserId();
         return new Operator(userId == null ? null : Long.toString(userId),
                 RequestContext.getUserName());
-    }
-
-    /**
-     * 寻址解析：路径段（TSID 十进制字符串）→ Long。非数值/非正数即不存在的
-     * 标识，语义上同 404（与 OrderIds/parseId 口径一致）。
-     */
-    private static Long parseEntry(String entryId) {
-        try {
-            long parsed = Long.parseLong(entryId);
-            if (parsed > 0) {
-                return parsed;
-            }
-        } catch (NumberFormatException ignored) {
-            // 非数值 → 落到下方统一 404
-        }
-        throw new ApplicationException(MeteringMessage.PRICE_ENTRY_NOT_FOUND);
-    }
-
-    /**
-     * 清单参数绑定失败的兜底：非数值分页值（{@link Pagination} record 构造绑定
-     * 失败走 BindException 族，含 MethodArgumentNotValidException）在本层就是
-     * 400，映射回 METER_009 保持错误码前缀口径（可绑定参数是 provider/model/
-     * page/size，统一「无效的单价行过滤参数」——同 BackofficeOrderController
-     * ORD_010 形制；provider/model 为 String，TypeMismatch 档现不可达，留作
-     * 后续过滤维度加类型化标量时即复活，与兄弟 controller 同形制；本类三个
-     * 写口命令体无 bean 校验注解，BindException 落点不会与 @Valid 校验信封
-     * 抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(MeteringMessage.PRICE_ENTRY_FILTER_UNKNOWN));
     }
 }

@@ -19,6 +19,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 工作区观测用例（#173 后台观测面，只读）：沙箱事实的出口——记录字段（期望态/
@@ -102,18 +103,9 @@ public class WorkspaceObservationAppService {
     private record ProbedState(Workspace workspace, ContainerState state) {
     }
 
-    /** 寻址解析：非数值/非正数即不存在的标识，语义上同 404（与 lifecycle 同口径）。 */
+    /** 寻址解析（{@link Tsid} 严格式）：非数值/非正数即不存在的标识，语义上同 404。 */
     private Workspace requireWorkspace(String workspaceId) {
-        long id;
-        try {
-            id = Long.parseLong(workspaceId);
-        } catch (NumberFormatException ignored) {
-            // 非数值 → 落到下方统一 404
-            id = 0;
-        }
-        if (id <= 0) {
-            throw new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND);
-        }
+        long id = Tsid.resolve(workspaceId, WorkspaceMessage.WORKSPACE_NOT_FOUND);
         return workspaceRepository.findById(id)
                 .orElseThrow(() -> new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND));
     }

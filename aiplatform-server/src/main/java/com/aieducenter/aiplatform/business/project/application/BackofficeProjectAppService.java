@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 后台项目读面（#159 项目域，/api/backoffice/projects 机机签名的两读端点）：
@@ -84,7 +85,7 @@ public class BackofficeProjectAppService {
                 return PageResponse.empty(pagination);
             }
         }
-        Long parsedProjectId = parseProjectId(projectId);
+        Long parsedProjectId = Tsid.parseOrNull(projectId);
         if (projectId != null && !projectId.isBlank() && parsedProjectId == null) {
             return PageResponse.empty(pagination);
         }
@@ -102,23 +103,6 @@ public class BackofficeProjectAppService {
         return PageResponse.of(result.map(project -> BackofficeProjectSummaryResponse.of(project,
                 project.getOwnerAccountId() == null ? null
                         : ownerNames.get(project.getOwnerAccountId()))));
-    }
-
-    /**
-     * 项目 id 解析（lenient）：项目 id＝项目 TSID 十进制字符串，非数值/非正数
-     * 不可能命中任何存量项目 → 返 null 由调用面短路空清单（过滤值非寻址语义，
-     * 同 externalId 未命中的「无命中」口径）。
-     */
-    private static Long parseProjectId(String projectId) {
-        if (projectId == null || projectId.isBlank()) {
-            return null;
-        }
-        try {
-            long parsed = Long.parseLong(projectId.trim());
-            return parsed > 0 ? parsed : null;
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     /**

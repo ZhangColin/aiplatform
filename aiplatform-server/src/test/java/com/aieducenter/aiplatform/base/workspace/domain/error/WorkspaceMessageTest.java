@@ -24,9 +24,7 @@ class WorkspaceMessageTest {
         assertThat(WorkspaceMessage.RESOURCE_FIELDS_INCOMPLETE.httpStatus()).isEqualTo(400);
         assertThat(WorkspaceMessage.ENVIRONMENT_KIND_NOT_SUPPORTED.code()).isEqualTo("WSP_007");
         assertThat(WorkspaceMessage.ENVIRONMENT_KIND_NOT_SUPPORTED.httpStatus()).isEqualTo(400);
-        // #173 后台观测面：清单过滤参数绑定失败（非法期望态/实态 code、分页值）
-        assertThat(WorkspaceMessage.WORKSPACE_FILTER_INVALID.code()).isEqualTo("WSP_014");
-        assertThat(WorkspaceMessage.WORKSPACE_FILTER_INVALID.httpStatus()).isEqualTo(400);
+        // WSP_014（无效的工作区过滤参数）已随 #199 过滤参数绑定失败骑框架注销，码位不复用
         // #174 后台动作面：run 在途拒（409）／封存包不可取（404）／收敛任务在途拒（409）
         assertThat(WorkspaceMessage.WORKSPACE_ACTION_RUN_IN_FLIGHT.code()).isEqualTo("WSP_015");
         assertThat(WorkspaceMessage.WORKSPACE_ACTION_RUN_IN_FLIGHT.httpStatus()).isEqualTo(409);

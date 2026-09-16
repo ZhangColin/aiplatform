@@ -48,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 无主容缺 null 不炸）、项目 id 精确（查无/非数值＝空清单 200）、详情订单引用三态
  * （有未终结单 / 只有历史单 / 无单，照用户面 activeOrder/latestOrder 先例）、已删
  * 项目不可见（真删无墓碑：清单不含＋详情 404）、分页上界截断与越界、签名负例与
- * 过滤参数绑定负例（PRJ_014）。</p>
+ * 过滤参数绑定负例（框架信封）。</p>
  */
 @BackofficeSeamTest
 class BackofficeProjectSeamTest {
@@ -334,14 +334,23 @@ class BackofficeProjectSeamTest {
     }
 
     @Test
-    void given_invalid_filter_params_when_list_then_400_prj014() throws Exception {
+    void given_invalid_filter_params_when_list_then_framework_envelope() throws Exception {
         newProject("绑定负例的项目", null);
-        // 非法 code/非数值/坏时间/坏分页在本层就是 400，统一 PRJ_014
-        for (String query : new String[] {
-                "status=99", "status=active", "createdFrom=not-a-time", "size=abc", "page=0x"}) {
+        // 非法状态 code → 400 带合法取值表（框架统一信封）
+        signedGet("/api/backoffice/projects?status=99")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("status 取值 99 非法，合法取值：1=进行中, 3=已归档"));
+        signedGet("/api/backoffice/projects?status=active")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("status 取值 active 非法，合法取值：1=进行中, 3=已归档"));
+        // 时间类型不匹配 → 404（框架口径，不暴露转换细节）
+        signedGet("/api/backoffice/projects?createdFrom=not-a-time")
+                .andExpect(status().isNotFound());
+        // 非数值分页 → 400 带字段级明细
+        for (String query : new String[] {"size=abc", "page=0x"}) {
             signedGet("/api/backoffice/projects?" + query)
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.message").value("无效的项目过滤参数"));
+                    .andExpect(jsonPath("$.message").value("Parameter validation failed"));
         }
     }
 

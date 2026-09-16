@@ -5,7 +5,7 @@ import com.cartisan.core.domain.BaseEnum;
 /**
  * 项目列表状态过滤桶：跨枚举的派生谓词，非 {@link ProjectStatus} 的直接值域。
  * REST query param 以 Integer code 传递（框架 converter 按 code 绑定），不合法
- * 取值 400 PRJ_014。
+ * 取值 400（框架统一信封，带合法取值表）。
  */
 public enum ProjectStatusFilter implements BaseEnum<ProjectStatusFilter> {
 

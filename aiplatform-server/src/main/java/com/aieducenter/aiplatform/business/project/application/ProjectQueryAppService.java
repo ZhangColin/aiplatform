@@ -99,7 +99,7 @@ public class ProjectQueryAppService {
     /**
      * 项目列表（创建时间倒序）+ 状态过滤（Integer code，框架 converter 绑定）：
      * ACTIVE（未归档）/ ARCHIVED（已归档）；缺省 all。不合法 code 在端点层
-     * 400 PRJ_014，本层只收合法枚举。
+     * 400（框架统一信封，带合法取值表），本层只收合法枚举。
      */
     public List<ProjectResponse> list(ProjectStatusFilter status) {
         List<Project> projects = projectsNewestFirst();

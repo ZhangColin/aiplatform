@@ -11,8 +11,6 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.openapi.annotation.RequireSignature;
@@ -39,14 +36,13 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderR
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台订单 REST 面（#29 交易环②，机机签名）：cartisan-openapi 五头 HMAC
- * （X-Api-Key/X-Timestamp/X-Nonce/X-Body-Digest/X-Sign），类级
- * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
- * 排除会话拦截（机机调用无用户会话）。前端无任何后台操作入口，联调走
- * scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
- * 报价守卫 ORD_007/008/009、清单过滤参数 ORD_010、运营取消 ORD_005/013/014、
+ * 后台订单 REST 面（#29 交易环②，机机签名——五头 HMAC 强制闸，见
+ * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）。前端无任何后台操作
+ * 入口，联调走 scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
+ * 报价守卫 ORD_007/008/009、运营取消 ORD_005/013/014、
  * 重试归档 ORD_012——项目已归档 PRJ_013 为跨 BC 既有码透传）。
  */
 @RestController
@@ -74,9 +70,10 @@ public class BackofficeOrderController {
                     + "换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，"
                     + "查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。"
                     + "page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。"
-                    + "过滤参数绑定失败（非法 code/时间/分页值）400 ORD_010。"
+                    + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
+                    + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"ORD_010"})
+    @ErrorCodes({"BAD_REQUEST", "NOT_FOUND"})
     public ApiResponse<PageResponse<BackofficeOrderSummaryResponse>> orders(
             @RequestParam(required = false) List<OrderStatus> status,
             @RequestParam(required = false)
@@ -97,7 +94,7 @@ public class BackofficeOrderController {
                     + "下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001")
     @ErrorCodes({"ORD_001"})
     public ApiResponse<BackofficeOrderDetailResponse> detail(@PathVariable String id) {
-        return ApiResponse.ok(queryAppService.detail(OrderIds.parseOrder(id)));
+        return ApiResponse.ok(queryAppService.detail(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/source-package")
@@ -106,7 +103,7 @@ public class BackofficeOrderController {
                     + "不占订单快照。需要机机签名；订单不存在 404 ORD_001；打包失败 500 WSP_002")
     @ErrorCodes({"ORD_001", "WSP_002"})
     public ResponseEntity<ByteArrayResource> sourcePackage(@PathVariable String id) {
-        Long orderId = OrderIds.parseOrder(id);
+        Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
         byte[] bytes = queryAppService.sourcePackage(orderId);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/gzip"));
@@ -125,7 +122,7 @@ public class BackofficeOrderController {
     @ErrorCodes({"ORD_001", "ORD_007", "ORD_008", "ORD_009"})
     public ApiResponse<OrderResponse> quote(@PathVariable String id,
                                             @RequestBody SubmitQuoteCommand command) {
-        return ApiResponse.ok(appService.submitQuote(OrderIds.parseOrder(id),
+        return ApiResponse.ok(appService.submitQuote(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND),
                 command.amount(), command.note(), currentOperator()));
     }
 
@@ -140,7 +137,7 @@ public class BackofficeOrderController {
     @ErrorCodes({"ORD_001", "ORD_005", "ORD_013", "ORD_014"})
     public ApiResponse<OrderResponse> cancel(@PathVariable String id,
                                              @RequestBody CancelOrderCommand command) {
-        return ApiResponse.ok(appService.cancelByBackoffice(OrderIds.parseOrder(id),
+        return ApiResponse.ok(appService.cancelByBackoffice(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND),
                 command.reason(), currentOperator()));
     }
 
@@ -154,7 +151,7 @@ public class BackofficeOrderController {
                     + "（缺头落空，#158；支付链自动归档操作者为空）。需要机机签名")
     @ErrorCodes({"ORD_001", "ORD_012", "PRJ_013"})
     public ApiResponse<OrderResponse> retryArchive(@PathVariable String id) {
-        return ApiResponse.ok(appService.retryArchive(OrderIds.parseOrder(id), currentOperator()));
+        return ApiResponse.ok(appService.retryArchive(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND), currentOperator()));
     }
 
     /**
@@ -168,20 +165,5 @@ public class BackofficeOrderController {
         Long userId = RequestContext.getUserId();
         return new Operator(userId == null ? null : Long.toString(userId),
                 RequestContext.getUserName());
-    }
-
-    /**
-     * 清单参数绑定失败的兜底：非法状态 code/时间（标量参数，类型不匹配）与非
-     * 数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
-     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 ORD_010 保持
-     * 错误码前缀口径（可绑定参数是 status/createdFrom/createdTo/page/size，
-     * 统一「无效的订单过滤参数」——同 ProjectController PRJ_014 形制；本类两个
-     * 写口命令体无 bean 校验注解，BindException 落点不会与 @Valid 校验信封
-     * 抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(OrderMessage.ORDER_FILTER_UNKNOWN));
     }
 }

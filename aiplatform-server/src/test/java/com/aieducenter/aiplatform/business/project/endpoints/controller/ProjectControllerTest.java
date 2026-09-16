@@ -173,15 +173,15 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_unknown_filter_when_list_then_prj_014_as_400() throws Exception {
-        // 非法取值（未知 code / 非数值）在绑定层即 400 PRJ_014，应用服务不被触达
+    void given_unknown_filter_when_list_then_400_with_legal_values() throws Exception {
+        // 非法取值（未知 code / 非数值）在绑定层即 400（框架统一信封：带合法取值表），应用服务不被触达
         performAsUser(get("/api/projects").param("status", "99"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
-                .andExpect(jsonPath("$.message").value("无效的项目过滤参数"));
+                .andExpect(jsonPath("$.message").value("status 取值 99 非法，合法取值：1=进行中, 3=已归档"));
         performAsUser(get("/api/projects").param("status", "active"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的项目过滤参数"));
+                .andExpect(jsonPath("$.message").value("status 取值 active 非法，合法取值：1=进行中, 3=已归档"));
         verify(queryAppService, never()).list(any());
     }
 

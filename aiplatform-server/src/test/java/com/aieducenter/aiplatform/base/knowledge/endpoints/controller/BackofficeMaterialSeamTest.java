@@ -46,7 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>#166 四面一链钉死：</p>
  * <ul>
  * <li><b>清单</b>：三过滤维度（状态单选含缺省全部/沉淀时间闭区间/来源项目 id
- * 精确）＋沉淀时间倒序＋分页行走与越界空页＋非法参数 KNW_007；</li>
+ * 精确）＋沉淀时间倒序＋分页行走与越界空页＋非法参数（框架信封）；</li>
  * <li><b>详情</b>：元数据＋PRD 全文块按 seq 以空行拼接＋来源项目缺档容缺不炸
  * ＋未寻址/畸形 id 404；</li>
  * <li><b>停用⇄启用</b>（端到端）：端点操作 → 检索命中变化（停用素材退出、启用
@@ -185,14 +185,15 @@ class BackofficeMaterialSeamTest {
                 .andExpect(jsonPath("$.data.items").isEmpty())
                 .andExpect(jsonPath("$.data.total").value("3"));
 
-        // 非法参数：非法状态 code / 非法时间 / 非法分页值 → 400 KNW_007
+        // 非法参数：非法状态 code → 400 带合法取值表；非法时间 → 404；非法分页 → 400 带字段明细
         signedGet("/api/backoffice/materials?status=99")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的知识素材过滤参数"));
+                .andExpect(jsonPath("$.message").value("status 取值 99 非法，合法取值：1=启用, 2=停用"));
         signedGet("/api/backoffice/materials?sunkFrom=not-a-time")
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isNotFound());
         signedGet("/api/backoffice/materials?page=abc")
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Parameter validation failed"));
     }
 
     // ---------- 详情：元数据＋全文块序＋容缺＋404 ----------

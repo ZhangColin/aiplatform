@@ -99,7 +99,7 @@ export interface paths {
         };
         /**
          * 项目列表（状态过滤）
-         * @description 创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400 PRJ_014
+         * @description 创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
          */
         get: operations["list"];
         put?: never;
@@ -471,10 +471,10 @@ export interface paths {
         };
         /**
          * 单价行清单（含历史行，分页）
-         * @description 现行与历史行全量（价史全貌），排序服务端定死＝生效起点倒序（新段在前，同起点 id 倒序稳定）。provider/model 均为匹配键成分＝精确等值过滤、均可缺省（缺省＝全量行）；effectiveTo 为 null 即当前行。行带操作者两列（该行最近管理动作——开行或停用；存量行/无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法分页值）400 METER_009。需要机机签名（五头 HMAC），无签名 401
+         * @description 现行与历史行全量（价史全貌），排序服务端定死＝生效起点倒序（新段在前，同起点 id 倒序稳定）。provider/model 均为匹配键成分＝精确等值过滤、均可缺省（缺省＝全量行）；effectiveTo 为 null 即当前行。行带操作者两列（该行最近管理动作——开行或停用；存量行/无头请求——含种子脚本种入行——落 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法分页值）400（带字段明细，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 METER_009 — 无效的单价行过滤参数
+         *     - 400 BAD_REQUEST — Invalid request
          */
         get: operations["entries"];
         put?: never;
@@ -1057,10 +1057,10 @@ export interface paths {
         };
         /**
          * 沙箱清单（期望态/实态过滤，分页）
-         * @description 存储观测工作清单：新沙箱在前（TSID 倒序）。两过滤维度均可缺省（缺省＝全量）、可组合：① desired 期望态单选，Integer code（1=运行 2=休眠 3=封存，DB 意图侧）；② actual 容器实态单选，Integer code（1=运行中 2=已停止 3=无容器 4=未知——docker 现场探查，实态不落库，过滤在探查后内存完成，total 如实＝筛后计数；「期望运行而实态无容器」即漂移行，actual=3 即捞漂移清单）。每行＝项目引用（无所属项目为 null）＋期望态/实态两列＋last-touch＋卷大小（旁路容器 du 全卷、含可重建缓存，字节——封存容缺 null、探查失败亦 null）＋封存信息（时刻/包大小）。page 1 基（缺省 1）、size 缺省 20（上界 100）；排序服务端定死不开放。实态与卷大小逐行现场探查（docker 子进程），页越大越慢——观测页不必贪大。过滤参数绑定失败（非法 code/分页值）400 WSP_014。需要机机签名（五头 HMAC），无签名 401
+         * @description 存储观测工作清单：新沙箱在前（TSID 倒序）。两过滤维度均可缺省（缺省＝全量）、可组合：① desired 期望态单选，Integer code（1=运行 2=休眠 3=封存，DB 意图侧）；② actual 容器实态单选，Integer code（1=运行中 2=已停止 3=无容器 4=未知——docker 现场探查，实态不落库，过滤在探查后内存完成，total 如实＝筛后计数；「期望运行而实态无容器」即漂移行，actual=3 即捞漂移清单）。每行＝项目引用（无所属项目为 null）＋期望态/实态两列＋last-touch＋卷大小（旁路容器 du 全卷、含可重建缓存，字节——封存容缺 null、探查失败亦 null）＋封存信息（时刻/包大小）。page 1 基（缺省 1）、size 缺省 20（上界 100）；排序服务端定死不开放。实态与卷大小逐行现场探查（docker 子进程），页越大越慢——观测页不必贪大。过滤参数绑定失败走框架统一信封：非法期望态/实态 code 400（带合法取值表）、非数值分页 400（带字段明细）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 WSP_014 — 无效的工作区过滤参数
+         *     - 400 BAD_REQUEST — Invalid request
          */
         get: operations["workspaces"];
         put?: never;
@@ -1103,10 +1103,11 @@ export interface paths {
         };
         /**
          * 项目清单（四维检索，分页）
-         * @description 监管工作清单：新项目在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态三档单选，Integer code（1=进行中 3=已归档；缺省＝全部，归档项目缺省含——照用户面状态过滤先例，与订单清单状态多选有意不同）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId 项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。已删项目不可见（真删无墓碑）。过滤参数绑定失败（非法 code/时间/分页值）400 PRJ_014。需要机机签名（五头 HMAC），无签名 401
+         * @description 监管工作清单：新项目在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态三档单选，Integer code（1=进行中 3=已归档；缺省＝全部，归档项目缺省含——照用户面状态过滤先例，与订单清单状态多选有意不同）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId 项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。已删项目不可见（真删无墓碑）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 PRJ_014 — 无效的项目过滤参数
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["projects"];
         put?: never;
@@ -1323,10 +1324,11 @@ export interface paths {
         };
         /**
          * 订单清单（四维检索，分页）
-         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败（非法 code/时间/分页值）400 ORD_010。需要机机签名（五头 HMAC），无签名 401
+         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 ORD_010 — 无效的订单过滤参数
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["orders"];
         put?: never;
@@ -1393,10 +1395,11 @@ export interface paths {
         };
         /**
          * 知识素材清单（三过滤维度，分页）
-         * @description 治理工作清单：新沉淀在前。三维度可组合、均可缺省（缺省＝全量）：① status 状态单选，Integer code（1=启用 2=停用；缺省＝全部——与订单清单状态多选有意不同，照项目面状态单选先例）；② sunkFrom/sunkTo 沉淀时间区间（首沉淀时间，闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）；③ projectId 来源项目 id 精确（登记面字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败（非法状态 code/时间/分页值）400 KNW_007。需要机机签名（五头 HMAC），无签名 401
+         * @description 治理工作清单：新沉淀在前。三维度可组合、均可缺省（缺省＝全量）：① status 状态单选，Integer code（1=启用 2=停用；缺省＝全部——与订单清单状态多选有意不同，照项目面状态单选先例）；② sunkFrom/sunkTo 沉淀时间区间（首沉淀时间，闭区间含两端，ISO-8601 Instant，如 2026-09-01T00:00:00Z）；③ projectId 来源项目 id 精确（登记面字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 KNW_007 — 无效的知识素材过滤参数
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["materials"];
         put?: never;
@@ -1446,10 +1449,10 @@ export interface paths {
         };
         /**
          * unpriced 全局警示（用量驱动）
-         * @description 窗口内有 token 用量且事件时点无生效单价的 (provider, model, 档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价时只计无价部分）。用量驱动：已配价档位与无用量档位不出现，静态配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 窗口内有 token 用量且事件时点无生效单价的 (provider, model, 档位) 按档位汇总 token（只计无价分量——同档位部分有价部分无价时只计无价部分）。用量驱动：已配价档位与无用量档位不出现，静态配价缺口清单不做（无用量＝无实际损失）；据此发现漏配价并及时补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 METER_011 — 无效的成本查询参数
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["unpriced"];
         put?: never;
@@ -1469,10 +1472,11 @@ export interface paths {
         };
         /**
          * 项目成本清单（窗口聚合，成本降序分页）
-         * @description 运营扫一眼谁费钱：窗口内有 token 用量的各项目成本汇总——总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）。排序服务端定死：成本降序（排序标量＝币种桶金额直加，单价表单币种时＝精确），全未配价项目（有用量但无任何已配价分量，成本标量缺失）排后且 allUnpriced=true 标注，同序按 projectId 升序稳定。用量驱动：无用量项目不出现在清单（空窗＝空清单 200）；已删项目的历史花费照列（成本观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省。查询参数（含分页）绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 运营扫一眼谁费钱：窗口内有 token 用量的各项目成本汇总——总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）。排序服务端定死：成本降序（排序标量＝币种桶金额直加，单价表单币种时＝精确），全未配价项目（有用量但无任何已配价分量，成本标量缺失）排后且 allUnpriced=true 标注，同序按 projectId 升序稳定。用量驱动：无用量项目不出现在清单（空窗＝空清单 200）；已删项目的历史花费照列（成本观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省。查询参数（含分页）绑定失败走框架统一信封：非 ISO-8601 时间 404（类型不匹配）、非数值分页 400（带字段明细）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 METER_011 — 无效的成本查询参数
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["projectCosts"];
         put?: never;
@@ -1492,10 +1496,10 @@ export interface paths {
         };
         /**
          * 单项目成本下钻（byModel/byAgentKind 分解）
-         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 单项目成本构成分解，复用 bySubject 聚合口径（与全局总览/项目清单同一换算规则）：总量 + 平台成本（币种分桶直读不折算）+ 未配价标注清单（窗口内有用量且时点无生效价的 provider/model/档位，与 cost 互补不重叠）+ 分模型 + 分智能体（dims.agentKind 原值 + agentKindName 中文名随行——#186，口径同全局总览；无维度事件不参与该分桶）。projectId = 计量 subject 原值（写侧口径 projectId 十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 METER_011 — 无效的成本查询参数
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["projectCostDetail"];
         put?: never;
@@ -1515,10 +1519,10 @@ export interface paths {
         };
         /**
          * 平台成本全局总览（时间窗）
-         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor）+ agentKindName 中文名随行（#186：主链经智能体配置回解，naming/classify 等辅助标记为 null——消费端落「—」桶），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败400 METER_011。需要机机签名（五头 HMAC），无签名 401
+         * @description 全平台跨项目观测模型开销构成：总量 + 平台成本（token × 事件时点生效单价，币种分桶直读不折算、键 = ISO 4217 币种码）+ 分模型+ 分智能体。与报价脱钩——纯平台付出金额，无建议售价推导；改价不溯及（历史事件按当时价，成本不漂移）。无生效单价的分量不进 cost（不伪装 0），未配价观测走 unpriced 端点。byAgentKind 取事件 dims.agentKind 原值（写侧终态口径 main/executor）+ agentKindName 中文名随行（#186：主链经智能体配置回解，naming/classify 等辅助标记为 null——消费端落「—」桶），无维度的事件不参与该分桶（总量/byModel 照含）。from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
-         *     - 400 METER_011 — 无效的成本查询参数
+         *     - 404 NOT_FOUND — Resource not found
          */
         get: operations["overview"];
         put?: never;

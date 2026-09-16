@@ -129,13 +129,13 @@ class BackofficeOrderControllerTest {
     }
 
     @Test
-    void given_signed_malformed_time_range_when_get_orders_then_400_ord010() throws Exception {
-        // 时间绑定失败同 ORD_010（消息已泛化为「无效的订单过滤参数」）
+    void given_signed_malformed_time_range_when_get_orders_then_404_type_mismatch() throws Exception {
+        // 时间类型不匹配按框架口径 404（BaseCodeMessage.NOT_FOUND，不暴露转换细节）
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/orders").queryParam("createdFrom", "not-a-time"),
                         "/api/backoffice/orders?createdFrom=not-a-time", null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Resource not found"));
         verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), any());
     }
 
@@ -306,13 +306,13 @@ class BackofficeOrderControllerTest {
     }
 
     @Test
-    void given_signed_unknown_status_when_get_orders_then_400_ord010() throws Exception {
-        // 非法状态 code 在绑定层即 400 ORD_010，应用服务不被触达
+    void given_signed_unknown_status_when_get_orders_then_400_with_legal_values() throws Exception {
+        // 非法状态 code 在绑定层即 400（框架统一信封：带合法取值表），应用服务不被触达
         mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders").queryParam("status", "99"),
                         "/api/backoffice/orders?status=99", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
-                        .value(OrderMessage.ORDER_FILTER_UNKNOWN.message()));
+                        .value("status 取值 99 非法，合法取值：1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消"));
         verify(queryAppService, never()).orders(any(), any(), any(), any(), any(), any());
     }
 

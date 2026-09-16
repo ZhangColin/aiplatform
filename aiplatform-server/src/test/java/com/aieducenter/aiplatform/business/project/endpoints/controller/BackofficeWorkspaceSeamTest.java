@@ -199,16 +199,16 @@ class BackofficeWorkspaceSeamTest {
     }
 
     @Test
-    void given_illegal_filter_code_when_list_then_wsp_014() throws Exception {
+    void given_illegal_filter_code_when_list_then_framework_envelope() throws Exception {
         signedGet("/api/backoffice/workspaces?desired=99")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的工作区过滤参数"));
+                .andExpect(jsonPath("$.message").value("desired 取值 99 非法，合法取值：1=运行, 2=休眠, 3=封存"));
         signedGet("/api/backoffice/workspaces?actual=not-a-code")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的工作区过滤参数"));
+                .andExpect(jsonPath("$.message").value("actual 取值 not-a-code 非法，合法取值：1=运行中, 2=已停止, 3=无容器, 4=未知"));
         signedGet("/api/backoffice/workspaces?page=abc")
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的工作区过滤参数"));
+                .andExpect(jsonPath("$.message").value("Parameter validation failed"));
     }
 
     // ---------- 详情 ----------

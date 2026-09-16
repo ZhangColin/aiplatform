@@ -23,11 +23,11 @@ public enum MeteringMessage implements CodeMessage {
 
     PRICE_ENTRY_INTERVAL_OVERLAPPED(409, "METER_008", "同匹配键生效区间重叠（跨区间或同起点）"),
 
-    PRICE_ENTRY_FILTER_UNKNOWN(400, "METER_009", "无效的单价行过滤参数"),
+    // METER_009 曾是「无效的单价行过滤参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
 
-    PRICE_ENTRY_CURRENCY_UNKNOWN(400, "METER_010", "单价币种非 ISO 4217 代码"),
+    PRICE_ENTRY_CURRENCY_UNKNOWN(400, "METER_010", "单价币种非 ISO 4217 代码");
 
-    COST_WINDOW_INVALID(400, "METER_011", "无效的成本查询参数");
+    // METER_011 曾是「无效的成本查询参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
 
     private final int httpStatus;
     private final String code;

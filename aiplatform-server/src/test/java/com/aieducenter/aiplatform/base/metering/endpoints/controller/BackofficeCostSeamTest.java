@@ -43,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>unpriced 警示</b>：用量驱动（窗口内有用量且时点无价才报）、按档位汇总
  * token（只计无价分量）、已配价档位不出现、窗口外用量不报；</li>
  * <li><b>空窗口/无数据</b>：全零 total＋空分桶＋空清单不炸；</li>
- * <li><b>参数负例</b>：from/to 非 ISO-8601 Instant 400 METER_011。</li>
+ * <li><b>参数负例</b>：from/to 非 ISO-8601 Instant 404（类型不匹配，框架信封）。</li>
  * </ul>
  */
 @BackofficeSeamTest
@@ -297,24 +297,22 @@ class BackofficeCostSeamTest {
                 .andExpect(jsonPath("$.data.items").isEmpty());
     }
 
-    // ---------- 参数负例：非 ISO-8601 Instant → 400 METER_011（#164 消息泛化） ----------
+    // ---------- 参数负例：非 ISO-8601 Instant → 404（类型不匹配，框架口径） ----------
 
     @Test
-    void given_bad_window_param_when_query_then_400_meter_011() throws Exception {
+    void given_bad_window_param_when_query_then_404_type_mismatch() throws Exception {
         String overviewPath = "/api/backoffice/costs/overview?from=not-a-date";
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/costs/overview").queryParam("from", "not-a-date"),
                         overviewPath, null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
+                .andExpect(status().isNotFound());
 
         String unpricedPath = "/api/backoffice/costs/unpriced?to=2026-09-32T00:00:00Z";
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/costs/unpriced")
                                 .queryParam("to", "2026-09-32T00:00:00Z"),
                         unpricedPath, null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
+                .andExpect(status().isNotFound());
     }
 
     // ---------- 夹具 ----------

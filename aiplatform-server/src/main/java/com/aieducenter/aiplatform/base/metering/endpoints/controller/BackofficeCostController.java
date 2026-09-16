@@ -4,15 +4,11 @@ import java.time.Instant;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
@@ -25,16 +21,13 @@ import com.aieducenter.aiplatform.base.metering.application.dto.response.Backoff
 import com.aieducenter.aiplatform.base.metering.application.dto.response.BackofficeProjectCostDetailResponse;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.BackofficeProjectCostResponse;
 import com.aieducenter.aiplatform.base.metering.application.dto.response.BackofficeUnpricedUsageResponse;
-import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
 
 /**
- * 后台平台成本观测 REST 面（#161/#164 成本运营，机机签名）：全局总览 + unpriced
- * 全局警示 + 项目成本清单 + 单项目下钻。纯平台 token 成本观测——与报价脱钩
- * （无建议售价推导）、按币种分桶直读不折算；采集无订单维度（subject =
- * projectId），按订单成本不做（订单→成本经项目）。cartisan-openapi 五头 HMAC，
- * 类级 {@code @RequireSignature} 强制闸；该前缀经 WebMvcConfig 排除会话拦截。
- * 错误码前缀 METER_（查询参数 METER_011——#164 起可绑定参数含分页，消息泛化
- * 「无效的成本查询参数」，code 不变契约不动）。
+ * 后台平台成本观测 REST 面（#161/#164 成本运营，机机签名——五头 HMAC 强制闸，
+ * 见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：全局总览 +
+ * unpriced 全局警示 + 项目成本清单 + 单项目下钻。纯平台 token 成本观测——与报价
+ * 脱钩（无建议售价推导）、按币种分桶直读不折算；采集无订单维度（subject =
+ * projectId），按订单成本不做（订单→成本经项目）。
  */
 @RestController
 @RequestMapping("/api/backoffice/costs")
@@ -62,8 +55,8 @@ public class BackofficeCostController {
                     + "from/to 时间窗半开区间 [from, to)（ISO-8601 Instant，UTC 带 Z，"
                     + "如 2026-09-01T00:00:00Z），均可缺省（缺省＝该侧不限）；空窗/"
                     + "无数据返回全零 total 与空分桶，不是错误。查询参数绑定失败"
-                    + "400 METER_011。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"METER_011"})
+                    + "（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"NOT_FOUND"})
     public ApiResponse<BackofficeCostOverviewResponse> overview(
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to) {
@@ -79,8 +72,8 @@ public class BackofficeCostController {
                     + "补价（补价只影响此后事件，历史成本不漂移）。from/to 时间窗半开"
                     + "区间 [from, to)（ISO-8601 Instant，UTC 带 Z），均可缺省（缺省＝"
                     + "该侧不限）；空窗/无未配价用量返回空 items，不是错误。查询参数"
-                    + "绑定失败 400 METER_011。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"METER_011"})
+                    + "绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"NOT_FOUND"})
     public ApiResponse<BackofficeUnpricedUsageResponse> unpriced(
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to) {
@@ -99,9 +92,10 @@ public class BackofficeCostController {
                     + "观测不抹历史，行 projectId 不解释存在性，项目名归 admin 侧按"
                     + "id 互查）。page 1 基（缺省 1）、size 缺省 20（上界 100）。"
                     + "from/to 时间窗半开区间 [from, to)（ISO-8601 Instant），均可"
-                    + "缺省。查询参数（含分页）绑定失败 400 METER_011。"
+                    + "缺省。查询参数（含分页）绑定失败走框架统一信封：非 ISO-8601 时间 404"
+                    + "（类型不匹配）、非数值分页 400（带字段明细）。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"METER_011"})
+    @ErrorCodes({"BAD_REQUEST", "NOT_FOUND"})
     public ApiResponse<PageResponse<BackofficeProjectCostResponse>> projectCosts(
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
@@ -120,28 +114,13 @@ public class BackofficeCostController {
                     + "十进制串，底座不解释存在性）：无用量/查无此号返回全零 total 与"
                     + "空结构（明确空态，非错误、不 404）。from/to 时间窗半开区间"
                     + " [from, to)（ISO-8601 Instant），均可缺省（缺省＝项目全量）。"
-                    + "查询参数绑定失败 400 METER_011。"
+                    + "查询参数绑定失败（非 ISO-8601 时间）404（类型不匹配，框架统一信封）。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"METER_011"})
+    @ErrorCodes({"NOT_FOUND"})
     public ApiResponse<BackofficeProjectCostDetailResponse> projectCostDetail(
             @PathVariable String projectId,
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to) {
         return ApiResponse.ok(appService.projectCostDetail(projectId, from, to));
-    }
-
-    /**
-     * 查询参数绑定失败的兜底：from/to 非 ISO-8601 Instant（标量参数，类型不匹配）
-     * 与非数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
-     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 METER_011 保持
-     * 错误码前缀口径（同 BackofficeOrderController ORD_010 形制；#164 可绑定
-     * 参数含分页、消息泛化「无效的成本查询参数」，code 不变契约不动——同 #159
-     * PRJ_014 先例；本类四个读口无命令体、零 bean 校验注解，BindException 落点
-     * 不会与 @Valid 校验信封抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleQueryMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(MeteringMessage.COST_WINDOW_INVALID));
     }
 }

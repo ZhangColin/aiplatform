@@ -49,8 +49,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>项目详情内嵌成本指针</b>（跨项目域与 metering 咬合）：真项目＋真用量
  * 事件下，detail.costSummary 与成本下钻端点同数值（同数据源 bySubject）；无
  * 用量项目＝空 cost＋false 明确空态；</li>
- * <li><b>参数负例</b>：from/to 非 ISO-8601 Instant、分页非数值 400 METER_011
- * （#164 消息泛化「无效的成本查询参数」）。</li>
+ * <li><b>参数负例</b>：from/to 非 ISO-8601 Instant 404（类型不匹配）、分页非数值
+ * 400 带字段明细（框架统一信封）。</li>
  * </ul>
  */
 @BackofficeSeamTest
@@ -295,19 +295,21 @@ class BackofficeProjectCostSeamTest {
                 .andExpect(jsonPath("$.data.costSummary.unpriced").value(false));
     }
 
-    // ---------- 参数负例：坏窗口/坏分页 → 400 METER_011（消息泛化） ----------
+    // ---------- 参数负例：坏窗口 → 404（类型不匹配）、坏分页 → 400（字段明细，框架口径） ----------
 
     @Test
-    void given_bad_params_when_cost_project_endpoints_then_400_meter_011() throws Exception {
-        for (String query : new String[] {"from=not-a-date", "to=2026-09-32T00:00:00Z",
-                "size=abc", "page=0x"}) {
+    void given_bad_params_when_cost_project_endpoints_then_framework_envelope() throws Exception {
+        for (String query : new String[] {"from=not-a-date", "to=2026-09-32T00:00:00Z"}) {
+            signedGet("/api/backoffice/costs/projects?" + query)
+                    .andExpect(status().isNotFound());
+        }
+        for (String query : new String[] {"size=abc", "page=0x"}) {
             signedGet("/api/backoffice/costs/projects?" + query)
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
+                    .andExpect(jsonPath("$.message").value("Parameter validation failed"));
         }
         signedGet("/api/backoffice/costs/projects/pc-x?to=not-a-date")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("无效的成本查询参数"));
+                .andExpect(status().isNotFound());
     }
 
     // ---------- 夹具 ----------

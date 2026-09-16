@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名四端点的三读端点）：
@@ -81,7 +82,7 @@ public class BackofficeOrderAppService {
                 return PageResponse.empty(pagination);
             }
         }
-        Long parsedOrderId = parseOrderId(orderId);
+        Long parsedOrderId = Tsid.parseOrNull(orderId);
         if (orderId != null && !orderId.isBlank() && parsedOrderId == null) {
             return PageResponse.empty(pagination);
         }
@@ -100,23 +101,6 @@ public class BackofficeOrderAppService {
                 projectNames.get(order.getProjectId()),
                 order.getOwnerAccountId() == null ? null
                         : ownerNames.get(order.getOwnerAccountId()))));
-    }
-
-    /**
-     * 订单号解析（lenient）：订单号＝订单 TSID 十进制字符串，非数值/非正数不可
-     * 能命中任何存量单 → 返 null 由调用面短路空清单（寻址语义的 404 不适用于
-     * 过滤值，同 externalId 未命中的「无命中」口径）。
-     */
-    private static Long parseOrderId(String orderId) {
-        if (orderId == null || orderId.isBlank()) {
-            return null;
-        }
-        try {
-            long parsed = Long.parseLong(orderId.trim());
-            return parsed > 0 ? parsed : null;
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     /**

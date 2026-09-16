@@ -4,20 +4,15 @@ import java.time.Instant;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.core.context.RequestContext;
-import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.request.Pagination;
@@ -30,14 +25,14 @@ import com.aieducenter.aiplatform.base.knowledge.application.dto.response.Backof
 import com.aieducenter.aiplatform.base.knowledge.domain.enums.MaterialStatus;
 import com.aieducenter.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.Operator;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台知识素材管理 REST 面（#166 知识库管理，机机签名）：管理单元＝素材＝
+ * 后台知识素材管理 REST 面（#166 知识库管理，机机签名——五头 HMAC 强制闸，见
+ * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：管理单元＝素材＝
  * 项目 × 素材类型（v1 即一个项目的 PRD，非块）——清单 / 详情 / 停用⇄启用 /
  * 删除。内容面零写（不编辑、不手动新增，沉淀唯一触发点不动），治理手段＝
- * 停用/删除。cartisan-openapi 五头 HMAC，类级 {@code @RequireSignature} 强制闸；
- * 该前缀经 WebMvcConfig 排除会话拦截。错误码前缀 KNW_（端点面本票启用：素材
- * 不存在 KNW_005、操作者缺 KNW_006、过滤参数 KNW_007）。
+ * 停用/删除。错误码前缀 KNW_（素材不存在 KNW_005、操作者缺 KNW_006）。
  */
 @RestController
 @RequestMapping("/api/backoffice/materials")
@@ -61,9 +56,10 @@ public class BackofficeMaterialController {
                     + "字符串，查无＝空清单 200）。不做内容模糊与账号维度。排序服务端"
                     + "定死＝沉淀时间倒序（id 倒序稳定）。行带最近管理动作操作者"
                     + "（未治理过为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100）。"
-                    + "过滤参数绑定失败（非法状态 code/时间/分页值）400 KNW_007。"
+                    + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
+                    + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"KNW_007"})
+    @ErrorCodes({"BAD_REQUEST", "NOT_FOUND"})
     public ApiResponse<PageResponse<BackofficeMaterialSummaryResponse>> materials(
             @RequestParam(required = false) MaterialStatus status,
             @RequestParam(required = false) Instant sunkFrom,
@@ -83,7 +79,7 @@ public class BackofficeMaterialController {
                     + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"KNW_005"})
     public ApiResponse<BackofficeMaterialDetailResponse> detail(@PathVariable String id) {
-        return ApiResponse.ok(appService.detail(parseMaterial(id)));
+        return ApiResponse.ok(appService.detail(Tsid.resolve(id, KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND)));
     }
 
     @PostMapping("/{id}/disable")
@@ -97,7 +93,7 @@ public class BackofficeMaterialController {
                     + "（含畸形 id）404 KNW_005。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"KNW_005", "KNW_006"})
     public ApiResponse<BackofficeMaterialSummaryResponse> disable(@PathVariable String id) {
-        return ApiResponse.ok(appService.disable(parseMaterial(id), currentOperator()));
+        return ApiResponse.ok(appService.disable(Tsid.resolve(id, KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND), currentOperator()));
     }
 
     @PostMapping("/{id}/enable")
@@ -108,7 +104,7 @@ public class BackofficeMaterialController {
                     + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"KNW_005", "KNW_006"})
     public ApiResponse<BackofficeMaterialSummaryResponse> enable(@PathVariable String id) {
-        return ApiResponse.ok(appService.enable(parseMaterial(id), currentOperator()));
+        return ApiResponse.ok(appService.enable(Tsid.resolve(id, KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND), currentOperator()));
     }
 
     @DeleteMapping("/{id}")
@@ -120,7 +116,7 @@ public class BackofficeMaterialController {
                     + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"KNW_005"})
     public ApiResponse<BackofficeMaterialSummaryResponse> delete(@PathVariable String id) {
-        return ApiResponse.ok(appService.delete(parseMaterial(id)));
+        return ApiResponse.ok(appService.delete(Tsid.resolve(id, KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND)));
     }
 
     /**
@@ -133,36 +129,5 @@ public class BackofficeMaterialController {
         Long userId = RequestContext.getUserId();
         return new Operator(userId == null ? null : Long.toString(userId),
                 RequestContext.getUserName());
-    }
-
-    /**
-     * 寻址解析：路径段（TSID 十进制字符串）→ long。非数值/非正数即不存在的
-     * 标识，语义上同 404（与 ProjectIds/parseEntry 口径一致）。
-     */
-    private static long parseMaterial(String materialId) {
-        try {
-            long parsed = Long.parseLong(materialId);
-            if (parsed > 0) {
-                return parsed;
-            }
-        } catch (NumberFormatException ignored) {
-            // 非数值 → 落到下方统一 404
-        }
-        throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_MATERIAL_NOT_FOUND);
-    }
-
-    /**
-     * 清单参数绑定失败的兜底：非法状态 code/时间（标量参数，类型不匹配）与非
-     * 数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
-     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 KNW_007 保持
-     * 错误码前缀口径（可绑定参数是 status/sunkFrom/sunkTo/projectId/page/size，
-     * 统一「无效的素材过滤参数」——同 BackofficeOrderController ORD_010 形制；
-     * 本类三个写口无命令体、零 bean 校验注解，BindException 落点不会与 @Valid
-     * 校验信封抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(KnowledgeMessage.KNOWLEDGE_MATERIAL_FILTER_INVALID));
     }
 }

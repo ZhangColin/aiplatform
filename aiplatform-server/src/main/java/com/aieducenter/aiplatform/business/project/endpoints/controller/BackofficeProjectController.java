@@ -11,14 +11,11 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
@@ -41,23 +38,22 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Vers
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台项目 REST 面（#159/#162 项目域只读，机机签名）：cartisan-openapi 五头 HMAC
- * （X-Api-Key/X-Timestamp/X-Nonce/X-Body-Digest/X-Sign），类级
- * {@code @RequireSignature} 强制闸——无签名/错签 401；该前缀经 WebMvcConfig
- * 排除会话拦截（机机调用无用户会话）。清单＝状态三档单选＋创建时间区间＋账号
- * （externalId 入参服务端换算）＋项目 id 精确（用户报障贴链接场景），排序
- * id 倒序定死不开放；详情带订单引用（activeOrder/latestOrder 照用户面先例，
- * 与订单域互链）。深读三组（#162）＋文件区（#163）口径照用户面 per-project
- * 端点：对话史（全量同序）、PRD（未产出 404 照搬）、版本列表＋详情（正本＝
- * 容器内 git log、详情锚定收尾卡＋rollbackFrom）、文件树＋文件内容（拒机密/
- * 逃逸、1MiB 上限、非文本拒——补未下单项目的代码排障缺口，文件区挂项目不挂
- * 订单）——同源委托既有应用服务（不复用 BFF 会话端点、不复制读逻辑，口径由
- * 构造不漂移）。归档项目全状态照读（清单缺省含），已删项目真删无墓碑——
- * 任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、清单过滤参数
- * PRJ_014、PRD 未产出 PRJ_015、版本不存在 PRJ_028、文件区守卫 PRJ_020~023），
- * 环境故障 WSP_002 照订单源码包先例跨前缀透传。只写操作不进本域（v1 只读）。
+ * 后台项目 REST 面（#159/#162 项目域只读，机机签名——五头 HMAC 强制闸，见
+ * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）。清单＝状态三档单选＋
+ * 创建时间区间＋账号（externalId 入参服务端换算）＋项目 id 精确（用户报障贴
+ * 链接场景），排序 id 倒序定死不开放；详情带订单引用（activeOrder/latestOrder
+ * 照用户面先例，与订单域互链）。深读三组（#162）＋文件区（#163）口径照用户面
+ * per-project 端点：对话史（全量同序）、PRD（未产出 404 照搬）、版本列表＋详情
+ * （正本＝容器内 git log、详情锚定收尾卡＋rollbackFrom）、文件树＋文件内容
+ * （拒机密/逃逸、1MiB 上限、非文本拒——补未下单项目的代码排障缺口，文件区挂
+ * 项目不挂订单）——同源委托既有应用服务（不复用 BFF 会话端点、不复制读逻辑，
+ * 口径由构造不漂移）。归档项目全状态照读（清单缺省含），已删项目真删无墓碑——
+ * 任何后台读面自然不可见。错误码前缀 PRJ_（项目不存在 PRJ_001、PRD 未产出
+ * PRJ_015、版本不存在 PRJ_028、文件区守卫 PRJ_020~023），环境故障 WSP_002 照
+ * 订单源码包先例跨前缀透传。只写操作不进本域（v1 只读）。
  */
 @RestController
 @RequestMapping("/api/backoffice/projects")
@@ -92,9 +88,10 @@ public class BackofficeProjectController {
                     + "空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。"
                     + "不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），"
                     + "排序服务端定死不开放。已删项目不可见（真删无墓碑）。"
-                    + "过滤参数绑定失败（非法 code/时间/分页值）400 PRJ_014。"
+                    + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
+                    + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
                     + "需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"PRJ_014"})
+    @ErrorCodes({"BAD_REQUEST", "NOT_FOUND"})
     public ApiResponse<PageResponse<BackofficeProjectSummaryResponse>> projects(
             @RequestParam(required = false) ProjectStatusFilter status,
             @RequestParam(required = false)
@@ -122,7 +119,7 @@ public class BackofficeProjectController {
                     + "（真删无墓碑）。需要机机签名；项目不存在 404 PRJ_001")
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<BackofficeProjectDetailResponse> detail(@PathVariable String id) {
-        return ApiResponse.ok(appService.detail(ProjectIds.parse(id)));
+        return ApiResponse.ok(appService.detail(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/conversation")
@@ -139,7 +136,7 @@ public class BackofficeProjectController {
                     + "项目不存在 404 PRJ_001")
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
-        return ApiResponse.ok(conversationHistoryAppService.read(ProjectIds.parse(id)));
+        return ApiResponse.ok(conversationHistoryAppService.read(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/prd")
@@ -152,7 +149,7 @@ public class BackofficeProjectController {
                     + "500 WSP_002")
     @ErrorCodes({"PRJ_001", "PRJ_015", "WSP_002"})
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
-        return ApiResponse.ok(projectQueryAppService.prd(ProjectIds.parse(id)));
+        return ApiResponse.ok(projectQueryAppService.prd(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/versions")
@@ -165,7 +162,7 @@ public class BackofficeProjectController {
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "WSP_002"})
     public ApiResponse<List<VersionResponse>> versions(@PathVariable String id) {
-        return ApiResponse.ok(versionAppService.list(ProjectIds.parse(id)));
+        return ApiResponse.ok(versionAppService.list(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/versions/{ref}")
@@ -179,7 +176,7 @@ public class BackofficeProjectController {
     @ErrorCodes({"PRJ_001", "PRJ_028", "WSP_002"})
     public ApiResponse<VersionDetailResponse> versionDetail(@PathVariable String id,
             @PathVariable String ref) {
-        return ApiResponse.ok(versionAppService.detail(ProjectIds.parse(id), ref));
+        return ApiResponse.ok(versionAppService.detail(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND), ref));
     }
 
     @GetMapping("/{id}/files")
@@ -194,7 +191,7 @@ public class BackofficeProjectController {
                     + "需要机机签名；项目不存在 404 PRJ_001；环境故障 500 WSP_002")
     @ErrorCodes({"PRJ_001", "WSP_002"})
     public ApiResponse<ProjectFilesResponse> files(@PathVariable String id) {
-        return ApiResponse.ok(projectQueryAppService.files(ProjectIds.parse(id)));
+        return ApiResponse.ok(projectQueryAppService.files(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/{id}/files/content")
@@ -208,7 +205,7 @@ public class BackofficeProjectController {
     @ErrorCodes({"PRJ_001", "PRJ_020", "PRJ_021", "PRJ_022", "PRJ_023", "WSP_002"})
     public ApiResponse<ProjectFileContentResponse> fileContent(@PathVariable String id,
             @RequestParam String path) {
-        return ApiResponse.ok(projectQueryAppService.fileContent(ProjectIds.parse(id), path));
+        return ApiResponse.ok(projectQueryAppService.fileContent(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND), path));
     }
 
     @GetMapping("/{id}/files/package")
@@ -222,27 +219,12 @@ public class BackofficeProjectController {
                     + "404 WSP_016（1016）；环境故障 500 WSP_002。需要机机签名")
     @ErrorCodes({"PRJ_001", "WSP_016", "WSP_002"})
     public ResponseEntity<ByteArrayResource> filesPackage(@PathVariable String id) {
-        Long projectId = ProjectIds.parse(id);
+        Long projectId = Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND);
         ProjectFilesPackage pkg = projectQueryAppService.filesPackage(projectId);
         String filename = projectId + (pkg.fromSealArchive() ? "-archive.tar.gz" : "-source.tar.gz");
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/gzip"));
         headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
         return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(pkg.content()));
-    }
-
-    /**
-     * 清单参数绑定失败的兜底：非法状态 code/时间（标量参数，类型不匹配）与非
-     * 数值分页值（{@link Pagination} record 构造绑定失败走 BindException 族，
-     * 含 MethodArgumentNotValidException）在本层就是 400，映射回 PRJ_014 保持
-     * 错误码前缀口径（可绑定参数是 status/createdFrom/createdTo/page/size，
-     * 统一「无效的项目过滤参数」——同 BackofficeOrderController ORD_010 形制；
-     * 用户面本就只绑 status，文案泛化对其无行为影响；本类只读面无 bean 校验
-     * 注解端点，BindException 落点不会与 @Valid 校验信封抢道）。
-     */
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, BindException.class})
-    public ResponseEntity<ApiResponse<Void>> handleFilterMismatch() {
-        return ResponseEntity.badRequest()
-                .body(ApiResponse.error(ProjectMessage.PROJECT_FILTER_UNKNOWN));
     }
 }

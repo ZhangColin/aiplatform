@@ -12,6 +12,9 @@ import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付）：确认下单（纯按钮零输入
@@ -39,7 +42,7 @@ public class OrderController {
                     + "（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。"
                     + "项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004")
     public ApiResponse<OrderResponse> place(@PathVariable String projectId) {
-        return ApiResponse.ok(appService.place(OrderIds.parseProject(projectId)));
+        return ApiResponse.ok(appService.place(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @GetMapping("/api/orders/{id}")
@@ -49,7 +52,7 @@ public class OrderController {
                     + "+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。"
                     + "订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> detail(@PathVariable String id) {
-        return ApiResponse.ok(appService.detail(OrderIds.parseOrder(id)));
+        return ApiResponse.ok(appService.detail(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 
     @PostMapping("/api/orders/{id}/payment")
@@ -62,7 +65,7 @@ public class OrderController {
                     + "非待支付 409 ORD_011；订单不存在 404 ORD_001；项目已被手动归档 409 PRJ_013"
                     + "（事务回滚，订单留待支付态）")
     public ApiResponse<OrderResponse> pay(@PathVariable String id) {
-        return ApiResponse.ok(appService.pay(OrderIds.parseOrder(id)));
+        return ApiResponse.ok(appService.pay(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 
     @PostMapping("/api/orders/{id}/cancel")
@@ -71,6 +74,6 @@ public class OrderController {
                     + "同项目可再下新单（新单重新冻结下单时快照）。已支付或已终结 409 ORD_005；"
                     + "订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> cancel(@PathVariable String id) {
-        return ApiResponse.ok(appService.cancel(OrderIds.parseOrder(id)));
+        return ApiResponse.ok(appService.cancel(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 }

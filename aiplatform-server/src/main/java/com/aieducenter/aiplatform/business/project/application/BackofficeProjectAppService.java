@@ -1,7 +1,6 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
@@ -82,12 +81,12 @@ public class BackofficeProjectAppService {
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
+                return PageResponse.empty(pagination);
             }
         }
         Long parsedProjectId = parseProjectId(projectId);
         if (projectId != null && !projectId.isBlank() && parsedProjectId == null) {
-            return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
+            return PageResponse.empty(pagination);
         }
 
         BackofficeProjectQuery condition = new BackofficeProjectQuery(

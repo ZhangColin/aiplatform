@@ -78,12 +78,12 @@ public class BackofficeOrderAppService {
         if (externalId != null && !externalId.isBlank()) {
             ownerAccountId = accountAppService.accountIdOf(externalId).orElse(null);
             if (ownerAccountId == null) {
-                return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
+                return PageResponse.empty(pagination);
             }
         }
         Long parsedOrderId = parseOrderId(orderId);
         if (orderId != null && !orderId.isBlank() && parsedOrderId == null) {
-            return new PageResponse<>(List.of(), 0, pagination.page(), pagination.size());
+            return PageResponse.empty(pagination);
         }
 
         BackofficeOrderQuery query = new BackofficeOrderQuery(

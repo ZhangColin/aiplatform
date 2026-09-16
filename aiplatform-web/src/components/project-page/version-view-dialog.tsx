@@ -1,12 +1,18 @@
 "use client";
 
-import { ExternalLink, Monitor, Smartphone } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { cn } from "@/lib/utils";
+
+import {
+  BAR_BUTTON_CLASS,
+  DeviceFrame,
+  DeviceToggle,
+  LIGHT_LOCK_STAGE_CLASS,
+  type PreviewDevice,
+} from "./device-frame";
 
 /**
  * 「查看当时」快照预览弹窗（#92/#93 + #140 体验补齐）：把快照容器预览嵌进
@@ -18,20 +24,13 @@ import { cn } from "@/lib/utils";
  * <p>#140 三补齐：①弹窗吃满屏幕宽高（基座 DialogContent 自带 sm:max-w-sm，384px
  * ≈ 手机宽——传入 max-w-* 与它分属不同 variant、tw-merge 不互斥，sm 档 CSS 序在
  * 后胜出，即「弹窗像手机屏幕」的根因；须同档 sm:max-w-* 压掉）；②浏览器条两件
- * 套——桌面/手机宽度切换（同 SystemPanel #80 口径：样式切换不重挂 iframe，快照
- * 不因换设备丢状态）+ 新窗口打开（window.open 快照真实地址；弹窗仍是快照宿主，
- * 关窗即销毁，新标签页随之失效——不引入保活）；③标题带轮次语境——#142 换源为
- * 轮次序数 + 收尾摘要（双源恒在场、多弹窗可分辨；原「本轮用户发言」尽力而为
- * 管线退役，见 viewThenTitle 注释）。</p>
+ * 套——桌面/手机宽度切换（样式切换不重挂 iframe，快照不因换设备丢状态；#201 起
+ * 与系统 tab 同一件，外壳/切换/舞台口径归 ./device-frame 单源——浅色锁定文字色
+ * 随单源归正，以系统 tab 为正本）+ 新窗口打开（window.open 快照真实地址；弹窗仍
+ * 是快照宿主，关窗即销毁，新标签页随之失效——不引入保活）；③标题带轮次语境——
+ * #142 换源为轮次序数 + 收尾摘要（双源恒在场、多弹窗可分辨；原「本轮用户发言」
+ * 尽力而为管线退役，见 viewThenTitle 注释）。</p>
  */
-
-/** 设备宽度档：同 SystemPanel 的预览口径（手机档 = 390px 手机框居中，桌面档全幅）。 */
-type ViewDevice = "desktop" | "mobile";
-
-/** 浏览器条图标键样式：无地址可开时置灰（同 SystemPanel 的 BAR_BUTTON_CLASS）。 */
-const BAR_BUTTON_CLASS =
-  "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
-
 /** 标题里收尾摘要的字数上限（最简一行——超长截断）。 */
 const TITLE_SUMMARY_MAX = 20;
 
@@ -69,7 +68,7 @@ export function VersionViewDialog({
   /** 收尾摘要（标题语境源二：closing.summary 服务端权威事实，恒在场）。 */
   summary?: string;
 }) {
-  const [device, setDevice] = useState<ViewDevice>("desktop");
+  const [device, setDevice] = useState<PreviewDevice>("desktop");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -77,30 +76,11 @@ export function VersionViewDialog({
       <DialogContent className="flex h-[90vh] w-[94vw] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1600px]">
         <DialogHeader className="flex-row items-center gap-2 border-b px-4 py-3 pr-12">
           <DialogTitle className="min-w-0 flex-1 truncate">{viewThenTitle(round, summary)}</DialogTitle>
-          <ToggleGroup
-            value={[device]}
-            onValueChange={(v) => {
-              // 本地 ToggleGroup 包装非泛型，值域在此收窄（空选不落地——总有一档）
-              if (v.length > 0) setDevice(v[0] as ViewDevice);
-            }}
-            className="shrink-0 gap-0"
-            aria-label="预览设备宽度"
-          >
-            <ToggleGroupItem
-              value="desktop"
-              aria-label="桌面预览"
-              className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
-            >
-              <Monitor className="size-3.5" />
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="mobile"
-              aria-label="手机预览"
-              className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
-            >
-              <Smartphone className="size-3.5" />
-            </ToggleGroupItem>
-          </ToggleGroup>
+          <DeviceToggle device={device} onDeviceChange={setDevice} />
+          {/* 与系统 tab 新窗口钮不同身、不进共享件（#201 钉住）：系统 tab 三入口带
+              #182 触碰先行（refetch 预览查询经后端触碰拦截器唤醒休眠沙箱）；本弹窗
+              不补——快照会话闲置计时锚死起服时刻（startedAt），项目触碰不保活快照，
+              触碰先行对快照零效果。 */}
           <button
             type="button"
             disabled={!previewUrl}
@@ -113,38 +93,29 @@ export function VersionViewDialog({
           </button>
         </DialogHeader>
 
-        {/* 舞台浅色锁定（同 SystemPanel 口径）：快照里的系统是用户产物，不随平台翻转 */}
-        <div className="light-lock min-h-0 flex-1 bg-background">
-          {pending ? (
+        {/* 舞台浅色锁定（#80 口径，#201 起随 ./device-frame 单源归正——抄本曾抄漏
+            文字色）：快照里的系统是用户产物，不随平台翻转；在途/失败提示同落锁内 */}
+        {pending ? (
+          <div className={LIGHT_LOCK_STAGE_CLASS}>
             <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
               <Spinner />
               正在准备当时系统…
             </div>
-          ) : error ? (
+          </div>
+        ) : error ? (
+          <div className={LIGHT_LOCK_STAGE_CLASS}>
             <div className="flex h-full items-center justify-center text-sm text-destructive">
               快照起服失败，请关闭后重试
             </div>
-          ) : previewUrl ? (
-            // 双层壳同构 SystemPanel（仅样式差异）：设备切换不重挂 iframe
-            <div
-              className={cn(
-                "h-full overflow-hidden",
-                device === "mobile" && "flex justify-center bg-muted p-4",
-              )}
-            >
-              <div
-                className={cn(
-                  "h-full",
-                  device === "mobile"
-                    ? "w-[390px] shrink-0 overflow-hidden rounded-2xl border shadow-sm"
-                    : "w-full",
-                )}
-              >
-                <iframe src={previewUrl} title="当时系统快照" className="h-full w-full border-0 bg-white" />
-              </div>
-            </div>
-          ) : null}
-        </div>
+          </div>
+        ) : previewUrl ? (
+          <DeviceFrame device={device}>
+            <iframe src={previewUrl} title="当时系统快照" className="h-full w-full border-0 bg-white" />
+          </DeviceFrame>
+        ) : (
+          // 三态俱缺（防御）：空舞台占位，同原恒在场舞台口径
+          <div className={LIGHT_LOCK_STAGE_CLASS} />
+        )}
       </DialogContent>
     </Dialog>
   );

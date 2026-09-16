@@ -1,23 +1,14 @@
 "use client";
 
-import {
-  ExternalLink,
-  LoaderCircle,
-  Monitor,
-  RotateCw,
-  Smartphone,
-  TriangleAlert,
-} from "lucide-react";
+import { ExternalLink, LoaderCircle, Monitor, RotateCw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   previewEpochOf,
   useGenerationStore,
   type CoderRunStatus,
 } from "@/lib/store/generation";
 import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
-import { cn } from "@/lib/utils";
 import {
   encodeAnnotate,
   parseAnchorEvent,
@@ -34,16 +25,16 @@ import {
 import { useAnnotationStore } from "@/lib/store/annotation";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
+import {
+  BAR_BUTTON_CLASS,
+  DeviceFrame,
+  DeviceToggle,
+  LIGHT_LOCK_STAGE_CLASS,
+  type PreviewDevice,
+} from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
 import { RestartFixButton } from "./restart-fix";
 import { StartSystemButton } from "./start-generation";
-
-/** 预览设备宽度档（#80 浏览器条）：手机档 = 390px 手机框居中，桌面档全幅。 */
-type PreviewDevice = "desktop" | "mobile";
-
-/** 浏览器条图标键（刷新 / 新窗口）共用样式：无页面可点时置灰。 */
-const BAR_BUTTON_CLASS =
-  "shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 修正
@@ -61,7 +52,8 @@ const BAR_BUTTON_CLASS =
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
- * 宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态）+ 手动刷新
+ * 宽度切换（样式切换不重挂 iframe——用户的系统不因换设备丢状态；外壳与切换控件
+ * #201 起归 ./device-frame 两件套单源）+ 手动刷新
  * （强制重挂、清导航回 base）+ 新窗口打开（window.open 应用真实地址，#126）。刷新/
  * goto/新窗口三入口触碰先行（#182）：用户主动（重）加载预览先 refetch 预览查询（经
  * 后端触碰拦截器异步唤醒休眠沙箱）再执行原动作，运行中无感、对话提交与网关零改动。
@@ -234,30 +226,7 @@ export function SystemPanel({
             className="w-full truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60"
           />
         </form>
-        <ToggleGroup
-          value={[device]}
-          onValueChange={(v) => {
-            // 本地 ToggleGroup 包装非泛型，值域在此收窄（空选不落地——总有一档）
-            if (v.length > 0) setDevice(v[0] as PreviewDevice);
-          }}
-          className="shrink-0 gap-0"
-          aria-label="预览设备宽度"
-        >
-          <ToggleGroupItem
-            value="desktop"
-            aria-label="桌面预览"
-            className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
-          >
-            <Monitor className="size-3.5" />
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="mobile"
-            aria-label="手机预览"
-            className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
-          >
-            <Smartphone className="size-3.5" />
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <DeviceToggle device={device} onDeviceChange={setDevice} />
         <button
           type="button"
           disabled={!pageLive}
@@ -280,74 +249,61 @@ export function SystemPanel({
             {recoveryAction(failedNotice.recovery)}
           </div>
         ) : null}
-        {/* 舞台浅色锁定（#80）：预览里的系统是用户产物，html.dark 也翻转不了；
+        {/* 舞台浅色锁定（#80 口径，#201 起归 ./device-frame 单源：DeviceFrame 含舞台，
+            空态相直接用舞台口径常量）：预览里的系统是用户产物，html.dark 也翻转不了；
             空态提示也落锁内——视口即浅色，如同真浏览器的空白页（失败细条与工具条
             是平台件，归锁外随平台走——细条占位下推、工具条浮在视口） */}
-        <div className="light-lock min-h-0 flex-1 bg-background text-foreground">
-          {pageLive ? (
-            // 双层壳同构（仅样式差异）：设备切换不重挂 iframe——宽度是布局变化
-            // 不是页面重建，用户的系统不丢状态
-            <div
-              className={cn(
-                "h-full overflow-hidden",
-                device === "mobile" && "flex justify-center bg-muted p-4",
-              )}
-            >
-              <div
-                className={cn(
-                  "h-full",
-                  device === "mobile"
-                    ? "w-[390px] shrink-0 overflow-hidden rounded-2xl border shadow-sm"
-                    : "w-full",
+        {pageLive ? (
+          <DeviceFrame device={device}>
+            {/* key 含预览纪元 + 手动刷新节拍：run 完成信号或手动刷新驱动重挂
+                （同 URL 也强制重建 iframe），设备切换不动 key */}
+            <iframe
+              key={previewFrameKey(frameUrl, epoch + refreshTick)}
+              ref={iframeRef}
+              src={frameUrl}
+              title="系统预览"
+              className="h-full w-full border-0 bg-white"
+              onLoad={() => {
+                // iframe 重挂后注入脚本状态清零——标注态仍激活则重发 enter
+                const win = iframeRef.current?.contentWindow;
+                if (win && previewOrigin && activeTool) {
+                  win.postMessage(encodeAnnotate("enter", activeTool), previewOrigin);
+                }
+              }}
+            />
+          </DeviceFrame>
+        ) : (
+          <div className={LIGHT_LOCK_STAGE_CLASS}>
+            {phase.kind === "hint" ? (
+              <PanelHint>
+                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                <p className="max-w-full truncate">{phase.text}</p>
+              </PanelHint>
+            ) : phase.kind === "failed" ? (
+              <PanelHint>
+                <TriangleAlert className="size-5 text-destructive" />
+                <p>{phase.text}</p>
+                {recoveryAction(phase.recovery)}
+              </PanelHint>
+            ) : phase.kind === "connecting" ? (
+              <PanelHint>
+                {phase.trouble ? (
+                  <span className="text-destructive">{TROUBLE_NOTICE}</span>
+                ) : (
+                  <>
+                    <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                    <p>{STARTING_NOTICE}</p>
+                  </>
                 )}
-              >
-                {/* key 含预览纪元 + 手动刷新节拍：run 完成信号或手动刷新驱动重挂
-                    （同 URL 也强制重建 iframe），设备切换不动 key */}
-                <iframe
-                  key={previewFrameKey(frameUrl, epoch + refreshTick)}
-                  ref={iframeRef}
-                  src={frameUrl}
-                  title="系统预览"
-                  className="h-full w-full border-0 bg-white"
-                  onLoad={() => {
-                    // iframe 重挂后注入脚本状态清零——标注态仍激活则重发 enter
-                    const win = iframeRef.current?.contentWindow;
-                    if (win && previewOrigin && activeTool) {
-                      win.postMessage(encodeAnnotate("enter", activeTool), previewOrigin);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          ) : phase.kind === "hint" ? (
-            <PanelHint>
-              <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-              <p className="max-w-full truncate">{phase.text}</p>
-            </PanelHint>
-          ) : phase.kind === "failed" ? (
-            <PanelHint>
-              <TriangleAlert className="size-5 text-destructive" />
-              <p>{phase.text}</p>
-              {recoveryAction(phase.recovery)}
-            </PanelHint>
-          ) : phase.kind === "connecting" ? (
-            <PanelHint>
-              {phase.trouble ? (
-                <span className="text-destructive">{TROUBLE_NOTICE}</span>
-              ) : (
-                <>
-                  <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                  <p>{STARTING_NOTICE}</p>
-                </>
-              )}
-            </PanelHint>
-          ) : (
-            <PanelHint>
-              <Monitor className="size-5 text-muted-foreground" />
-              <p>系统生成后，这里会出现可以操作的你的系统</p>
-            </PanelHint>
-          )}
-        </div>
+              </PanelHint>
+            ) : (
+              <PanelHint>
+                <Monitor className="size-5 text-muted-foreground" />
+                <p>系统生成后，这里会出现可以操作的你的系统</p>
+              </PanelHint>
+            )}
+          </div>
+        )}
         {/* 底部浮动工具条（#97 圈注落地）：有真页面才出场——选择/圈选进标注态
             （改字/评论形态位已撤，词条备案）；标注态可退出（含父窗 Esc） */}
         {pageLive ? (

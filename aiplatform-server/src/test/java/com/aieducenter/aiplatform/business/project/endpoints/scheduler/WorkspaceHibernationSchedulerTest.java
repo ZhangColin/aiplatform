@@ -28,13 +28,13 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 休眠扫描驱动器（#171）：组合方测试——项目域事实（run 在途 / 已生成）随扫描递入
- * base.workspace（不反向依赖）、归档项目同一判定（无特殊分支）、闲置快照同一轮
- * 清扫。@Scheduled 装配以反射断言 + 应用服务直调验证（不等真实定时）。
+ * 休眠扫描组合根（#171 → #197 正名）：组合根测试——项目域事实（run 在途 / 已生成）
+ * 随扫描递入 base.workspace（不反向依赖）、归档项目同一判定（无特殊分支）、闲置
+ * 快照同一轮清扫。总开关已内移 base 扫描入口，本层不再读开关（关闭与否是 base
+ * 扫描的内政）。@Scheduled 装配以反射断言 + 应用服务直调验证（不等真实定时）。
  */
 @ExtendWith(MockitoExtension.class)
 class WorkspaceHibernationSchedulerTest {
@@ -86,16 +86,6 @@ class WorkspaceHibernationSchedulerTest {
         verify(hibernationAppService).scanOnce(anyMap(), any(LocalDateTime.class));
         verify(snapshotAppService).sweepIdleViews(any(LocalDateTime.class),
                 eq(Duration.ofMinutes(60)));
-    }
-
-    @Test
-    void given_hibernation_disabled_when_scan_round_then_noop() {
-        properties.setHibernationEnabled(false);   // test profile 同款关法
-
-        newScheduler().scanRound();
-
-        // 关闭即整轮不动作：不触 DB、不探 docker（测试库不被定时器扰动）
-        verifyNoInteractions(hibernationAppService, snapshotAppService, projectRepository);
     }
 
     @Test

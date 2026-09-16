@@ -12,8 +12,9 @@ import org.springframework.stereotype.Component;
  * #129 生产化）——预览 URL 子域 {@code {scheme}://{id}.{previewBase}} 的两个正交维度：
  * 开发 {@code http} + {@code localhost}，生产 {@code https} + {@code preview.{domain}}。
  * 闲置休眠（#171，ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照查看
- * 会话同一阈值）与休眠器开关（测试 profile 关闭——集成测试直调 scanOnce，不让
- * 定时器与启动对账扰库）。封存（#172）：封存阈值（休眠满此即封存）与封存包目录
+ * 会话同一阈值——#197 钉「同一闲置口径」）与休眠器开关（#197 内移：休眠扫描入口
+ * 自持，业务侧调度器不再跨域读此开关；test profile 关闭——休眠扫描静默不扰测试库，
+ * 快照清扫与之无关、随轮照跑）。封存（#172）：封存阈值（休眠满此即封存）与封存包目录
  * （本地磁盘 v1，换对象存储时目录配置退役、接口不动）；就绪等待超时（深度唤醒
  * 分钟级，3 分钟不够装依赖安装）。
  */
@@ -33,7 +34,7 @@ public class WorkspaceProperties {
     /** 闲置休眠阈值（#171，默认 60 分钟）：last-touch 逾此即休眠。 */
     private Duration idleThreshold = Duration.ofMinutes(60);
 
-    /** 休眠器开关（#171，默认开；test profile 关——扫描直调，定时器不扰测试库）。 */
+    /** 休眠器开关（#171，默认开；#197 内移——休眠扫描入口自持，test profile 关休眠扫描）。 */
     private boolean hibernationEnabled = true;
 
     /** 封存阈值（#172，默认 30 天）：休眠满此即自动封存（删卷换包）。 */

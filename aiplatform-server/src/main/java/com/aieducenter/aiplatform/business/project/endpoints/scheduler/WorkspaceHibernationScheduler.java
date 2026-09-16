@@ -20,16 +20,18 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 闲置休眠驱动器（#171，ADR-0016，全库首个 @Scheduled）：定时扫描闲置 DEV 沙箱
- * 休眠 + 顺带清扫闲置快照查看会话。组合方在本层——休眠编排归 base.workspace
- * （只依赖环境后端端口与 DB 状态），「run 在途/已生成」的项目域事实由本层随扫描
- * 递入（base 不反向依赖 business）。
+ * 闲置休眠扫描组合根（#171，ADR-0016，#197 正名；全库首个 @Scheduled）：业务侧
+ * 把「run 在途/已生成」的项目域事实随扫描递入 base.workspace 的休眠扫描（base
+ * 不反向依赖 business），并同轮顺带清扫闲置快照查看会话。休眠编排与总开关均归
+ * base.workspace 自持（只依赖环境后端端口与 DB 状态）；本层留任业务侧是合法组合
+ * 根（run 在途事实与「查看当时」会话注册表都在业务侧，分区规则只禁反向依赖），
+ * 不跨域读 base 的休眠开关——开关已内移休眠扫描入口
+ * （{@link WorkspaceHibernationAppService#scanOnce} 自持），快照清扫与之无关、随轮照跑。
  *
  * <p>节奏：默认每 5 分钟一轮（{@code app.workspace.hibernation-scan-interval}，
  * Duration 形如 {@code 5m}）；启动期对账一次（{@link ApplicationRunner}，首轮
  * scheduled 延迟一个间隔——启动扫描与定时轮不叠跑）。单实例部署不加锁，每轮
- * 全量幂等收敛；测试 profile 以 {@code app.workspace.hibernation-enabled=false}
- * 整轮关闭（集成测试直调扫描，定时器不扰测试库）。</p>
+ * 全量幂等收敛。</p>
  */
 @Component
 @Slf4j
@@ -63,12 +65,11 @@ public class WorkspaceHibernationScheduler implements ApplicationRunner {
     @Scheduled(fixedDelayString = "${app.workspace.hibernation-scan-interval:5m}",
             initialDelayString = "${app.workspace.hibernation-scan-interval:5m}")
     public void scanRound() {
-        if (!workspaceProperties.isHibernationEnabled()) {
-            return;
-        }
         LocalDateTime now = LocalDateTime.now();
         try {
             int hibernated = hibernationAppService.scanOnce(scanFacts(), now);
+            // 同一闲置口径（#197 钉住）：快照查看会话与工作区休眠共用同一阈值——
+            // 刻意跨包共享，换阈值两处同动，不为快照另立口径
             int swept = snapshotAppService.sweepIdleViews(now, workspaceProperties.getIdleThreshold());
             if (hibernated > 0 || swept > 0) {
                 log.info("[hibernation] 扫描轮收口：休眠 {} 工作区、清扫 {} 快照（会话/孤儿）",

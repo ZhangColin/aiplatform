@@ -75,8 +75,14 @@ public class WorkspaceHibernationAppService {
     /**
      * 单轮扫描（定时器与启动对账直调；测试直调不等真实定时）：遍历全部工作区逐个
      * 收敛，返回动作数（观测/日志用）。单条异常不炸整轮（尽力而为，下轮再试）。
+     * 总开关（{@link WorkspaceProperties#isHibernationEnabled()}）由本入口自持
+     * （#197）：关闭即静默返回——业务侧调度器不再跨域读此开关，只把消费方事实
+     * 随扫描递入。
      */
     public int scanOnce(Map<Long, WorkspaceScanFact> facts, LocalDateTime now) {
+        if (!properties.isHibernationEnabled()) {
+            return 0;   // 总开关关闭（#197 内移）
+        }
         Duration threshold = properties.getIdleThreshold();
         Duration sealThreshold = properties.getSealThreshold();
         int acted = 0;

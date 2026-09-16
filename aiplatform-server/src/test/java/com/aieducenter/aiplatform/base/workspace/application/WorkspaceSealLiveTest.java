@@ -120,7 +120,7 @@ class WorkspaceSealLiveTest {
 
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore(),
-                transactionTemplate, properties).scanOnce(Map.of(), LocalDateTime.now());
+                transactionTemplate, scanProperties()).scanOnce(Map.of(), LocalDateTime.now());
 
         // 封存落定（收敛模块互斥面异步执行——扫描提交、任务收敛，轮询等落地）：
         // 包落盘（数据库随包、三大缓存排除）+ 卷删除 + 期望态置封存
@@ -160,6 +160,11 @@ class WorkspaceSealLiveTest {
     }
 
     // ---------- 活体编排 ----------
+
+    /** 活体直调扫描要真扫：autowired properties 在 test profile 开关为关，换默认开启的新实例。 */
+    private WorkspaceProperties scanProperties() {
+        return new WorkspaceProperties();   // hibernationEnabled 默认 true
+    }
 
     /**
      * 等封存收敛：期望态置封存 + 卷删除（删卷在意图落库之后，一并在窗内等到）。

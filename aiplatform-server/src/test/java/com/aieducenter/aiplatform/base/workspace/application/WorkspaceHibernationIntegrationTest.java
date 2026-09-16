@@ -32,6 +32,12 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.aieducenter.aiplatform.base.workspace.infrastructure.archive.LocalDiskSealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
+import com.aieducenter.aiplatform.business.project.application.CodingRunTrack;
+import com.aieducenter.aiplatform.business.project.application.VersionSnapshotAppService;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
+import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.business.project.endpoints.scheduler.WorkspaceHibernationScheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -39,7 +45,8 @@ import static org.mockito.Mockito.mock;
 /**
  * 休眠/封存链路集成验收（#171/#172 AC，真库 + Docker CLI 假面 seam）：编排、落库、
  * 封存包文件全真，只有 docker 命令子进程是假面（{@code runCapture}/{@code runCaptureBinary}
- * 覆写——命令形状与退出码可编，tar 命令同收口断言）。真 daemon 的「删容器保卷、
+ * 覆写——命令形状与退出码可编，tar 命令同收口断言；{@code startApp} 覆写只记
+ * 「已生成项目拉应用」命中哪台容器，作归档正交的断言锚）。真 daemon 的「删容器保卷、
  * 封存→深度唤醒数据完整」验收见 {@code WorkspaceHibernationLiveTest}/
  * {@code WorkspaceSealLiveTest}。
  */
@@ -53,6 +60,7 @@ class WorkspaceHibernationIntegrationTest {
         volatile boolean containerRunning = true;
         volatile boolean volumePresent = true;
         volatile byte[] packResult = "fake-archive".getBytes();
+        volatile String startedContainer = null;
 
         @Override
         protected ExecResult runCapture(String... cmd) {
@@ -78,6 +86,12 @@ class WorkspaceHibernationIntegrationTest {
             return new ByteExec(packResult, "", 0);
         }
 
+        /** 已生成项目唤醒后拉应用（startAppOnWake 落点）——归档正交断言锚，只记容器名不真拉。 */
+        @Override
+        public void startApp(WorkspaceHandle handle) {
+            startedContainer = handle.containerName();
+        }
+
         boolean removedContainer(String containerName) {
             return commands.contains("docker rm -f " + containerName);
         }
@@ -96,15 +110,23 @@ class WorkspaceHibernationIntegrationTest {
     @Autowired
     private WorkspaceProperties properties;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
     @TempDir
     private Path archiveDir;
 
     private final List<WorkspaceId> seeded = new ArrayList<>();
 
+    private final List<Project> seededProjects = new ArrayList<>();
+
     @AfterEach
     void cleanup() {
         for (WorkspaceId id : seeded) {
             workspaceRepository.findById(id.id()).ifPresent(workspaceRepository::delete);
+        }
+        for (Project project : seededProjects) {
+            projectRepository.delete(project);
         }
     }
 
@@ -289,6 +311,33 @@ class WorkspaceHibernationIntegrationTest {
         assertThat(workspaceRepository.findById(id.id())).isEmpty();
     }
 
+    // ---------- 归档正交（#197，ADR-0016） ----------
+
+    @Test
+    void given_archived_generated_project_with_dead_container_when_scan_round_then_converged() {
+        FakeDockerCli backend = new FakeDockerCli();
+        backend.containerRunning = false;   // 容器实死（#168 型漂移）
+        // 活跃工作区（阈值内触碰）——闲置会走休眠，漂移收敛要非闲置才到「实死重建」支
+        WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusMinutes(5));
+
+        // 归档 + 已生成项目挂同名工作区：归档与休眠正交——归档项目不筛、同一判定
+        Project archived = Project.create("已归档项目", ProjectType.WEBSITE, id.id(), null);
+        archived.markGenerated();
+        archived.archive();
+        projectRepository.save(archived);
+        seededProjects.add(archived);
+
+        newScheduler(backend).scanRound();
+
+        // 已归档项目的工作区同样被收敛（重建回 READY）：期望运行保持、状态回 READY
+        Workspace workspace = workspaceRepository.findById(id.id()).orElseThrow();
+        assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
+        assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
+        // 归档不筛的落点：已生成项目唤醒后拉应用（startAppOnWake=true，不因归档筛成 ABSENT）——
+        // 锚「拉应用命中本工作区容器」而非「任一容器」，防他测试残留误置真
+        assertThat(backend.startedContainer).isEqualTo(workspace.getContainerName());
+    }
+
     // ---------- 装配 ----------
 
     private int containerRunIndex(FakeDockerCli backend) {
@@ -299,9 +348,11 @@ class WorkspaceHibernationIntegrationTest {
 
     /** 假面后端 + 真库/真事务/真编排（含真置备器——假面 CLI 全成功下重建全程可跑）。 */
     private WorkspaceHibernationAppService newHibernationService(FakeDockerCli backend) {
+        // 总开关在 scanOnce 自持（#197）：autowired properties 在 test profile 开关为关，
+        // 直调扫描要真扫——用默认开启（hibernationEnabled 默认 true）的新实例
         return new WorkspaceHibernationAppService(
                 backend, workspaceRepository, newConvergenceService(backend),
-                sealPackageStore(), transactionTemplate, properties);
+                sealPackageStore(), transactionTemplate, new WorkspaceProperties());
     }
 
     /** 收敛模块真实例（直通执行器：提交即跑，次序可断言）。 */
@@ -330,6 +381,16 @@ class WorkspaceHibernationIntegrationTest {
                 mock(ApplicationEventPublisher.class), mock(WorkspaceMapper.class),
                 provisioner, mock(WorkspaceReadinessWaiter.class), properties,
                 sealPackageStore(), newConvergenceService(backend));
+    }
+
+    /** 组合根真实例（真库 + 假面 docker + 真收敛；快照清扫假面——归档正交只验休眠侧）。 */
+    private WorkspaceHibernationScheduler newScheduler(FakeDockerCli backend) {
+        return new WorkspaceHibernationScheduler(
+                newHibernationService(backend),
+                mock(VersionSnapshotAppService.class),
+                new CodingRunTrack(),
+                projectRepository,
+                new WorkspaceProperties());
     }
 
     /** 种一棵 READY 工作区（真库），last-touch 拨到给定时刻。 */

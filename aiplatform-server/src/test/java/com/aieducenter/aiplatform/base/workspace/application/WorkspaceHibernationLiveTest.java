@@ -92,7 +92,7 @@ class WorkspaceHibernationLiveTest {
 
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore,
-                transactionTemplate, properties)
+                transactionTemplate, scanProperties())
                 .scanOnce(Map.of(), LocalDateTime.now());
 
         // 容器被删、卷保留、期望态置休眠（置备态保持 READY——实态以探查为准）
@@ -118,6 +118,11 @@ class WorkspaceHibernationLiveTest {
     }
 
     // ---------- 活体编排 ----------
+
+    /** 活体直调扫描要真扫：autowired properties 在 test profile 开关为关，换默认开启的新实例。 */
+    private WorkspaceProperties scanProperties() {
+        return new WorkspaceProperties();   // hibernationEnabled 默认 true
+    }
 
     private Workspace provisionReadyWorkspace() {
         workspaceId = WorkspaceId.generate();

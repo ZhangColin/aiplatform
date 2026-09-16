@@ -195,6 +195,17 @@ class WorkspaceHibernationAppServiceTest {
     }
 
     @Test
+    void given_hibernation_disabled_when_scan_once_then_noop() {
+        properties.setHibernationEnabled(false);   // 总开关内移（#197）：扫描入口自持
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 关闭即整轮静默：不触库、不探 docker、不收敛
+        assertThat(acted).isZero();
+        verifyNoInteractions(workspaceRepository, environmentBackend, convergence);
+    }
+
+    @Test
     void given_provisioning_or_non_dev_when_scan_then_skipped_without_probe() {
         Workspace provisioning = Workspace.registerPending(WorkspaceId.of("43"), EnvKind.DEV);
         Workspace runtime = Workspace.runtime(WorkspaceId.of("44"), EnvKind.TEST,

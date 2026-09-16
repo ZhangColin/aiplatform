@@ -9,11 +9,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
@@ -48,6 +51,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectLifecycleAppService {
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
     private final MainAgentAppService mainAgentAppService;
     private final ProjectRepository projectRepository;
     private final ProjectQueryAppService queryAppService;
@@ -58,6 +62,7 @@ public class ProjectLifecycleAppService {
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
+                                      WorkspaceConvergenceAppService workspaceConvergenceAppService,
                                       MainAgentAppService mainAgentAppService,
                                       ProjectRepository projectRepository,
                                       ProjectQueryAppService queryAppService,
@@ -67,6 +72,7 @@ public class ProjectLifecycleAppService {
                                       ConversationHistoryAppService conversationHistory,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.workspaceConvergenceAppService = workspaceConvergenceAppService;
         this.mainAgentAppService = mainAgentAppService;
         this.projectRepository = projectRepository;
         this.queryAppService = queryAppService;
@@ -193,8 +199,8 @@ public class ProjectLifecycleAppService {
             if (e.getCodeMessage() == WorkspaceMessage.PREVIEW_NOT_SERVING
                     && project.getGeneratedAt() != null) {
                 // 已生成项目的应用死而复起：平台拉起（互斥异步）+ 待期口径
-                workspaceLifecycleAppService.requestAppStart(
-                        Long.toString(project.getWorkspaceId()));
+                workspaceConvergenceAppService.requestAppStart(
+                        new WorkspaceId(project.getWorkspaceId()));
                 throw new ApplicationException(WorkspaceMessage.WORKSPACE_STARTING);
             }
             throw e;
@@ -206,10 +212,10 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 项目域触碰（#170 唤醒触发面）：拨工作区 last-touch + 异步探查沙箱实态——容器
-     * 缺失/被杀则自动唤醒重建（已生成项目连带应用拉起）至预览可用。REST 拦截器对
-     * {@code /api/projects/**} 每请求调用；尽力而为（失败不阻断业务请求，下次触碰再试），
-     * 非项目域不触发。
+     * 项目域触碰（#170 唤醒触发面；#196 起收敛判定归收敛模块 TOUCH 面）：拨工作区
+     * last-touch + 异步探查沙箱实态——容器缺失/被杀则自动唤醒重建（已生成项目连带
+     * 应用拉起）至预览可用。REST 拦截器对 {@code /api/projects/**} 每请求调用；尽力
+     * 而为（失败不阻断业务请求，下次触碰再试），非项目域不触发。
      */
     public void touchProject(Long projectId) {
         try {
@@ -217,7 +223,8 @@ public class ProjectLifecycleAppService {
             if (project == null) {
                 return;
             }
-            workspaceLifecycleAppService.touch(Long.toString(project.getWorkspaceId()),
+            workspaceConvergenceAppService.convergeAsync(
+                    new WorkspaceId(project.getWorkspaceId()), ConvergenceFace.TOUCH,
                     project.getGeneratedAt() != null);
         } catch (RuntimeException e) {
             log.warn("项目 {} 触碰自愈未成（不阻断请求，下次触碰再试）", projectId, e);

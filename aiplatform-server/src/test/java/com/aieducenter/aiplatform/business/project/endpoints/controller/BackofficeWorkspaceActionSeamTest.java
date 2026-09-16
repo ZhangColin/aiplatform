@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -144,6 +145,21 @@ class BackofficeWorkspaceActionSeamTest {
 
         // 唤醒也是写口：动作行落库（who/what）
         assertActionRow(WS_ASLEEP, 1, OPERATOR_ID, OPERATOR_NAME);
+        // ADMIN 面收敛动作（重建）落定后拨针（#196）：闲置钟从旧锚拨到当下——
+        // 深度唤醒分钟级成本后不该「醒完秒睡」
+        assertThat(lastTouchOf(WS_ASLEEP)).isAfter(OLD_TOUCH);
+    }
+
+    @Test
+    void given_healthy_workspace_when_signed_wake_then_last_touch_not_moved()
+            throws Exception {
+        signedPost(actionPath(WS_RUNNING, "wake"), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.containerState").value(1));
+
+        // 探查发现本就健康（意图/实态一致）：不动作不拨针（#196 拨针口径 DB 层断言）
+        assertThat(lastTouchOf(WS_RUNNING)).isEqualTo(OLD_TOUCH);
+        assertActionRow(WS_RUNNING, 1, OPERATOR_ID, OPERATOR_NAME);   // 健康唤醒也留痕
     }
 
     @Test
@@ -312,11 +328,15 @@ class BackofficeWorkspaceActionSeamTest {
                 WorkspaceNaming.PREVIEW_NETWORK);
     }
 
-    /** 落一行工作区（READY 起点，按需迁移到休眠/封存意图）。 */
+    /** 拨针断言锚：种子的 last-touch 统一拨到旧时刻（拨了晚于它，没拨仍等于它）。 */
+    private static final LocalDateTime OLD_TOUCH = LocalDateTime.of(2026, 9, 1, 8, 0);
+
+    /** 落一行工作区（READY 起点，按需迁移到休眠/封存意图；last-touch 拨旧作断言锚）。 */
     private void seedWorkspace(long id, DesiredState desired, SealPackage sealed) {
         WorkspaceId workspaceId = workspaceIdOf(id);
         Workspace workspace = Workspace.dev(workspaceId,
                 WorkspaceNaming.containerName(workspaceId), WorkspaceNaming.PREVIEW_NETWORK);
+        workspace.markTouched(OLD_TOUCH);   // 先于意图迁移（markTouched 会把休眠意图翻回运行）
         if (desired == DesiredState.HIBERNATED) {
             workspace.hibernate();
         } else if (desired == DesiredState.SEALED) {
@@ -324,6 +344,14 @@ class BackofficeWorkspaceActionSeamTest {
             workspace.seal(sealed, LocalDateTime.of(2026, 9, 15, 10, 0));
         }
         workspaceRepository.save(workspace);
+    }
+
+    /** 库内 last-touch（JdbcTemplate 级——拨针口径的 DB 层断言，#196 票 AC）。 */
+    private LocalDateTime lastTouchOf(long workspaceId) {
+        Timestamp ts = jdbcTemplate.queryForObject(
+                "SELECT last_touch_at FROM wsp_workspaces WHERE id = ?",
+                Timestamp.class, workspaceId);
+        return ts.toLocalDateTime();
     }
 
     /** 工作区名下建项目（软引用无 FK），返回已保存实体供进一步迁移。 */

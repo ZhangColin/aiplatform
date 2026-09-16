@@ -28,14 +28,14 @@ import lombok.extern.slf4j.Slf4j;
  * <p>分支次序（先判意图再探实态）：① 闲置判定过 → 休眠（删容器 + 意图落库，
  * {@link WorkspaceHibernationPolicy} 纯函数）；①′ 休眠满期（闲置逾「闲置阈值＋
  * 封存阈值」）→ 封存（#172：整卷打成封存包存平台存储后删卷、意图置封存——与
- * 唤醒/删除互斥，经 {@link WorkspaceLifecycleAppService#runExclusively} 独占提交，
- * 不拖扫描轮节奏）；② 期望运行而容器实死（#168 型漂移）
- * → {@link WorkspaceLifecycleAppService#healDrift} 唤醒收敛——「DB 记 ready、实死
- * 两天」不再依赖用户触碰才有人管；③ 期望休眠而容器仍在（休眠删失败残留/外部
- * 重建）且已闲置 → 删容器向意图收敛；③′ 期望封存而卷仍在（封存删卷失败/删后
- * 外部漂移重建的残留）→ 删卷向意图收敛。活跃（阈值内触碰或 run 在途）且容器健康
- * → 无事可做；探查 UNKNOWN（daemon 抖动）两支皆让路、下轮再看（#176：探查失败
- * ≠容器不在，不盲动手）。</p>
+ * 唤醒/删除互斥，经收敛模块独占提交（{@link WorkspaceConvergenceAppService} 包内
+ * 互斥面），不拖扫描轮节奏）；② 期望运行而容器实死（#168 型漂移）
+ * → 收敛模块 SCAN 面异步收敛（{@link WorkspaceConvergenceAppService#convergeAsync}）——
+ * 「DB 记 ready、实死两天」不再依赖用户触碰才有人管；③ 期望休眠而容器仍在
+ * （休眠删失败残留/外部重建）且已闲置 → 删容器向意图收敛；③′ 期望封存而卷仍在
+ * （封存删卷失败/删后外部漂移重建的残留）→ 删卷向意图收敛。活跃（阈值内触碰或
+ * run 在途）且容器健康 → 无事可做；探查 UNKNOWN（daemon 抖动）两支皆让路、下轮
+ * 再看（#176：探查失败≠容器不在，不盲动手）。</p>
  *
  * <p>封存动作序（数据安全定序）：打包落盘 → 意图+元数据落库（事务内重取防销毁
  * 竞争复活）→ 删卷（尽力而为，失败由 ③′ 下轮收敛）。任一步失败意图不翻，下轮
@@ -53,20 +53,20 @@ public class WorkspaceHibernationAppService {
 
     private final EnvironmentBackend environmentBackend;
     private final WorkspaceRepository workspaceRepository;
-    private final WorkspaceLifecycleAppService lifecycle;
+    private final WorkspaceConvergenceAppService convergence;
     private final SealPackageStore sealPackageStore;
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceProperties properties;
 
     public WorkspaceHibernationAppService(EnvironmentBackend environmentBackend,
             WorkspaceRepository workspaceRepository,
-            WorkspaceLifecycleAppService lifecycle,
+            WorkspaceConvergenceAppService convergence,
             SealPackageStore sealPackageStore,
             TransactionTemplate transactionTemplate,
             WorkspaceProperties properties) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
-        this.lifecycle = lifecycle;
+        this.convergence = convergence;
         this.sealPackageStore = sealPackageStore;
         this.transactionTemplate = transactionTemplate;
         this.properties = properties;
@@ -110,7 +110,7 @@ public class WorkspaceHibernationAppService {
                 fact.runInFlight(), workspace.getDesiredState(), threshold, sealThreshold)) {
             log.info("[workspace] {} 休眠满期，封存：打包落盘 → 意图置封存 → 删卷",
                     workspace.workspaceId().value());
-            lifecycle.runExclusively(workspace.workspaceId(),
+            convergence.runExclusively(workspace.workspaceId(),
                     () -> sealNow(workspace.workspaceId()));
             return true;
         }
@@ -119,7 +119,7 @@ public class WorkspaceHibernationAppService {
             // 提交——与深度唤醒互斥（唤醒在途则本轮让路；任务内重取防与唤醒交错，
             // 否则可能删掉刚解包回卷的卷），外部重建的容器一并清（占卷容器让删卷
             // 永远失败）。不计数：收敛是静默卫生，acted 保持「休眠/封存动作」口径
-            lifecycle.runExclusively(workspace.workspaceId(),
+            convergence.runExclusively(workspace.workspaceId(),
                     () -> convergeSealedResidue(workspace.workspaceId()));
             return false;
         }
@@ -127,7 +127,8 @@ public class WorkspaceHibernationAppService {
         if (state.confidentlyNotRunning() && workspace.getDesiredState() == DesiredState.RUNNING) {
             log.info("[workspace] {} 期望运行而容器实死，漂移收敛唤醒",
                     workspace.workspaceId().value());
-            lifecycle.healDrift(workspace.workspaceId(), fact.startAppOnWake());
+            convergence.convergeAsync(workspace.workspaceId(), ConvergenceFace.SCAN,
+                    fact.startAppOnWake());
             return true;
         }
         if (state == ContainerState.RUNNING && workspace.getDesiredState() == DesiredState.HIBERNATED

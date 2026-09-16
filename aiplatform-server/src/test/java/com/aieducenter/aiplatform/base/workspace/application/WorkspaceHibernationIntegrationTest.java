@@ -167,6 +167,9 @@ class WorkspaceHibernationIntegrationTest {
         Workspace workspace = workspaceRepository.findById(id.id()).orElseThrow();
         assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
+        // SCAN 面不拨针（DB 层断言）：平台内部自愈不是活跃信号，闲置钟保持 8 小时前
+        assertThat(workspace.getLastTouchAt())
+                .isBefore(LocalDateTime.now().minusHours(7));
     }
 
     // ---------- 封存与深度唤醒（#172 AC） ----------
@@ -205,7 +208,7 @@ class WorkspaceHibernationIntegrationTest {
         backend.containerRunning = false;   // 封存态：容器必不在
         WorkspaceId id = seedSealedWorkspace("restored-by-deep-wake".getBytes());
 
-        newLifecycleService(backend).touch(id.value(), true);
+        newConvergenceService(backend).convergeAsync(id, ConvergenceFace.TOUCH, true);
 
         // 解包回卷命令收口：重建卷（rm→create）+ 旁路容器 stdin 解包 + 清陈旧 pid
         String restore = String.join(" ", backend.binaryCommands);
@@ -223,6 +226,9 @@ class WorkspaceHibernationIntegrationTest {
         assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.RUNNING);
         assertThat(workspace.getStatus()).isEqualTo(ProvisioningStatus.READY);
         assertThat(Path.of(workspace.getArchivePath())).exists();
+        // TOUCH 面入口无条件拨针（DB 层断言）：last-touch 从 31 天前拨到当下
+        assertThat(workspace.getLastTouchAt())
+                .isAfter(LocalDateTime.now().minusMinutes(1));
     }
 
     @Test
@@ -233,7 +239,7 @@ class WorkspaceHibernationIntegrationTest {
         Files.deleteIfExists(Path.of(workspaceRepository.findById(id.id()).orElseThrow()
                 .getArchivePath()));
 
-        newLifecycleService(backend).touch(id.value(), true);
+        newConvergenceService(backend).convergeAsync(id, ConvergenceFace.TOUCH, true);
 
         Workspace workspace = workspaceRepository.findById(id.id()).orElseThrow();
         assertThat(workspace.getDesiredState()).isEqualTo(DesiredState.SEALED);
@@ -245,12 +251,12 @@ class WorkspaceHibernationIntegrationTest {
         FakeDockerCli backend = new FakeDockerCli();
         backend.containerRunning = false;
         WorkspaceId id = seedHibernatedWorkspace(LocalDateTime.now().minusDays(31));
-        WorkspaceLifecycleAppService lifecycle = newLifecycleService(backend);
+        WorkspaceConvergenceAppService convergence = newConvergenceService(backend);
 
         newHibernationService(backend).scanOnce(Map.of(), LocalDateTime.now());   // 第一次封存
         String firstPath = workspaceRepository.findById(id.id()).orElseThrow().getArchivePath();
 
-        lifecycle.touch(id.value(), true);   // 深度唤醒（包保留）
+        convergence.convergeAsync(id, ConvergenceFace.TOUCH, true);   // 深度唤醒（包保留）
         assertThat(workspaceRepository.findById(id.id()).orElseThrow().getDesiredState())
                 .isEqualTo(DesiredState.RUNNING);
 
@@ -294,8 +300,19 @@ class WorkspaceHibernationIntegrationTest {
     /** 假面后端 + 真库/真事务/真编排（含真置备器——假面 CLI 全成功下重建全程可跑）。 */
     private WorkspaceHibernationAppService newHibernationService(FakeDockerCli backend) {
         return new WorkspaceHibernationAppService(
-                backend, workspaceRepository, newLifecycleService(backend),
+                backend, workspaceRepository, newConvergenceService(backend),
                 sealPackageStore(), transactionTemplate, properties);
+    }
+
+    /** 收敛模块真实例（直通执行器：提交即跑，次序可断言）。 */
+    private WorkspaceConvergenceAppService newConvergenceService(FakeDockerCli backend) {
+        WorkspaceProvisionAppService provisioner = new WorkspaceProvisionAppService(
+                backend, workspaceRepository, 1, Runnable::run);
+        return new WorkspaceConvergenceAppService(
+                backend, workspaceRepository, transactionTemplate,
+                mock(ApplicationEventPublisher.class),
+                provisioner, mock(WorkspaceReadinessWaiter.class),
+                sealPackageStore(), Runnable::run);
     }
 
     /** 封存包存储走真实现（临时目录）——包落盘/覆盖/清理是本片验收物。 */
@@ -312,7 +329,7 @@ class WorkspaceHibernationIntegrationTest {
                 backend, workspaceRepository, transactionTemplate,
                 mock(ApplicationEventPublisher.class), mock(WorkspaceMapper.class),
                 provisioner, mock(WorkspaceReadinessWaiter.class), properties,
-                sealPackageStore(), Runnable::run);
+                sealPackageStore(), newConvergenceService(backend));
     }
 
     /** 种一棵 READY 工作区（真库），last-touch 拨到给定时刻。 */

@@ -13,8 +13,11 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.event.ApplicationEventPublisher;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -31,14 +34,18 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 项目预览与触碰的项目域编排（#170）：WSP_012 已生成 → 平台拉起 + 转 WSP_013 待期；
- * 未生成 → 原口径透传；touchProject 委派工作区触碰且尽力而为（异常吞掉）。
+ * 项目预览与触碰的项目域编排（#170；#196 起触碰/拉起委派收敛模块）：WSP_012 已生成
+ * → 平台拉起 + 转 WSP_013 待期；未生成 → 原口径透传；touchProject 走收敛模块
+ * TOUCH 面且尽力而为（异常吞掉）。
  */
 @ExtendWith(MockitoExtension.class)
 class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
+    @Mock
+    private WorkspaceConvergenceAppService workspaceConvergenceAppService;
 
     @Mock
     private MainAgentAppService mainAgentAppService;
@@ -79,7 +86,7 @@ class ProjectLifecycleAppServiceTouchTest {
                 .extracting(e -> ((ApplicationException) e).getCodeMessage())
                 // 已生成项目的应用死而复起：平台拉起（8081 应用拉起是平台职责）+ 待期口径
                 .isEqualTo(WorkspaceMessage.WORKSPACE_STARTING);
-        verify(workspaceLifecycleAppService).requestAppStart("900");
+        verify(workspaceConvergenceAppService).requestAppStart(new WorkspaceId(900L));
     }
 
     @Test
@@ -94,7 +101,7 @@ class ProjectLifecycleAppServiceTouchTest {
                 .isInstanceOf(ApplicationException.class)
                 .extracting(e -> ((ApplicationException) e).getCodeMessage())
                 .isEqualTo(WorkspaceMessage.PREVIEW_NOT_SERVING);
-        verify(workspaceLifecycleAppService, never())
+        verify(workspaceConvergenceAppService, never())
                 .requestAppStart(any());
     }
 
@@ -110,7 +117,7 @@ class ProjectLifecycleAppServiceTouchTest {
                 .isInstanceOf(ApplicationException.class)
                 .extracting(e -> ((ApplicationException) e).getCodeMessage())
                 .isEqualTo(WorkspaceMessage.WORKSPACE_STARTING);
-        verify(workspaceLifecycleAppService, never())
+        verify(workspaceConvergenceAppService, never())
                 .requestAppStart(any());
     }
 
@@ -128,13 +135,14 @@ class ProjectLifecycleAppServiceTouchTest {
     }
 
     @Test
-    void given_existing_project_when_touch_project_then_workspace_touched_with_generated_flag() {
+    void given_existing_project_when_touch_project_then_touch_face_converged_with_generated_flag() {
         when(projectRepository.findById(100L)).thenReturn(Optional.of(project(true)));
 
         service().touchProject(100L);
 
-        // 拨 last-touch + 自愈探查，已生成连带应用拉起意图
-        verify(workspaceLifecycleAppService).touch("900", true);
+        // 收敛模块 TOUCH 面：拨 last-touch + 自愈探查，已生成连带应用拉起意图
+        verify(workspaceConvergenceAppService).convergeAsync(
+                new WorkspaceId(900L), ConvergenceFace.TOUCH, true);
     }
 
     @Test
@@ -143,18 +151,20 @@ class ProjectLifecycleAppServiceTouchTest {
 
         service().touchProject(100L);   // 项目不存在：静默返回（触发面尽力而为）
 
-        verifyNoInteractions(workspaceLifecycleAppService);
+        verifyNoInteractions(workspaceConvergenceAppService);
     }
 
     @Test
     void given_workspace_touch_throws_when_touch_project_then_swallowed() {
         when(projectRepository.findById(100L)).thenReturn(Optional.of(project(false)));
         doThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND))
-                .when(workspaceLifecycleAppService).touch("900", false);
+                .when(workspaceConvergenceAppService).convergeAsync(
+                        new WorkspaceId(900L), ConvergenceFace.TOUCH, false);
 
         service().touchProject(100L);   // 触碰失败不阻断业务请求
 
-        verify(workspaceLifecycleAppService).touch("900", false);
+        verify(workspaceConvergenceAppService).convergeAsync(
+                new WorkspaceId(900L), ConvergenceFace.TOUCH, false);
     }
 
     // ---------- 测试数据 ----------
@@ -169,7 +179,8 @@ class ProjectLifecycleAppServiceTouchTest {
 
     private ProjectLifecycleAppService service() {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
-                mainAgentAppService, projectRepository, queryAppService, eventsAppService,
-                knowledgeAppService, namingService, conversationHistory, transactionTemplate);
+                workspaceConvergenceAppService, mainAgentAppService, projectRepository,
+                queryAppService, eventsAppService, knowledgeAppService, namingService,
+                conversationHistory, transactionTemplate);
     }
 }

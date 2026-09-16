@@ -40,7 +40,7 @@ class WorkspaceHibernationLiveTest {
             "printf hibernate-probe > /workspace/.hibernate-probe";
 
     @Autowired
-    private WorkspaceLifecycleAppService lifecycle;
+    private WorkspaceConvergenceAppService convergence;
 
     @Autowired
     private WorkspaceProvisionAppService provisioner;
@@ -91,7 +91,7 @@ class WorkspaceHibernationLiveTest {
         workspaceRepository.save(workspace);
 
         int acted = new WorkspaceHibernationAppService(
-                backend, workspaceRepository, lifecycle, sealPackageStore,
+                backend, workspaceRepository, convergence, sealPackageStore,
                 transactionTemplate, properties)
                 .scanOnce(Map.of(), LocalDateTime.now());
 
@@ -107,8 +107,8 @@ class WorkspaceHibernationLiveTest {
         // 旁路直读卷（入口旁路容器）：休眠态下卷内数据原样可读
         assertThat(volumeProbe(containerName)).isEqualTo("hibernate-probe");
 
-        // 唤醒（项目 API 触碰同路径）：重建 + 卷内数据原样还在
-        lifecycle.touch(workspaceId.value(), false);
+        // 唤醒（项目 API 触碰同路径，收敛模块 TOUCH 面）：重建 + 卷内数据原样还在
+        convergence.convergeAsync(workspaceId, ConvergenceFace.TOUCH, false);
         assertThat(awaitWoken())
                 .as("触碰休眠工作区：幂等重建（容器回来 + READY）").isTrue();
         Workspace woken = workspaceRepository.findById(workspaceId.id()).orElseThrow();

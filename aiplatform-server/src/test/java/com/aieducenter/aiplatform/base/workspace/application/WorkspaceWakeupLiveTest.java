@@ -43,6 +43,9 @@ class WorkspaceWakeupLiveTest {
     private WorkspaceLifecycleAppService lifecycle;
 
     @Autowired
+    private WorkspaceConvergenceAppService convergence;
+
+    @Autowired
     private WorkspaceProvisionAppService provisioner;
 
     @Autowired
@@ -83,7 +86,7 @@ class WorkspaceWakeupLiveTest {
         killContainer(workspace);
 
         // 触碰（项目域 API 面的收口调用）：立即返回（异步自愈启动）
-        lifecycle.touch(workspaceId.value(), true);
+        convergence.convergeAsync(workspaceId, ConvergenceFace.TOUCH, true);
 
         // 收敛：容器重建 + 应用拉起 + 探活通过 → 预览可用（全程待期后自然恢复）
         assertThat(awaitPreviewServing())
@@ -101,7 +104,7 @@ class WorkspaceWakeupLiveTest {
         // 从未生成形态：卷内无起服入口；唤醒不拉应用（startAppOnWake=false 路径）
         killContainer(workspace);
 
-        lifecycle.touch(workspaceId.value(), false);
+        convergence.convergeAsync(workspaceId, ConvergenceFace.TOUCH, false);
 
         // 容器回来（READY），预览保持未生成口径（WSP_012，无应用可拉）
         assertThat(awaitWorkspaceReady()).isTrue();

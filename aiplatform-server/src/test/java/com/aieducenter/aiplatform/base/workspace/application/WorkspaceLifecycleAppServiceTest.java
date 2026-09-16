@@ -315,6 +315,29 @@ class WorkspaceLifecycleAppServiceTest {
     }
 
     @Test
+    void given_provisioning_workspace_when_expose_preview_then_starting_pending() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("107"), EnvKind.DEV));
+
+        // 置备/唤醒进行中：立即待期（WSP_013 系统启动中），不阻塞请求线程长等
+        assertThatThrownBy(() -> appService.exposePreview("107"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting(e -> ((ApplicationException) e).getCodeMessage())
+                .isEqualTo(WorkspaceMessage.WORKSPACE_STARTING);
+    }
+
+    @Test
+    void given_failed_workspace_when_expose_preview_then_provision_failed() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("108"), EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败"));
+
+        // FAILED 语义保留（awaitReady 时代的 WSP_010 口径不变）
+        assertThatThrownBy(() -> appService.exposePreview("108"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting(e -> ((ApplicationException) e).getCodeMessage())
+                .isEqualTo(WorkspaceMessage.WORKSPACE_PROVISION_FAILED);
+    }
+
+    @Test
     void given_seeded_workspace_when_preview_url_then_subdomain_from_properties() {
         // 预览 URL 纯派生（不探活、不发事件）：scheme + 基域名来自配置（默认 http + localhost）
         workspaceRepository.save(Workspace.register(devProvision("106")));
@@ -461,7 +484,12 @@ class WorkspaceLifecycleAppServiceTest {
 
     @Test
     void given_hibernated_workspace_when_content_package_then_woken_then_source_packed() {
+        // 种入旧触碰时刻（DOWNLOAD 面不拨针的 DB 层断言锚；固定时刻避开精度截断）
+        LocalDateTime oldTouch = LocalDateTime.of(2026, 9, 10, 8, 0);
         Workspace workspace = seedWorkspace(DesiredState.HIBERNATED, null);
+        workspace.markTouched(oldTouch);
+        workspace.hibernate();
+        workspaceRepository.save(workspace);
         when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.ABSENT);
         // 唤醒重建的置备内核：补齐 complete 收口（真实置备器的行为形状）
         doAnswer(invocation -> {
@@ -481,6 +509,9 @@ class WorkspaceLifecycleAppServiceTest {
         assertThat(result.fromSealArchive()).isFalse();
         verify(provisioner).provisionForWake(workspace.workspaceId(), EnvKind.DEV);
         verify(environmentBackend, never()).startApp(any());
+        // DOWNLOAD 面不拨针（#196，DB 层断言）：「取完包该继续睡」不是活跃信号
+        assertThat(workspaceRepository.findById(workspace.getId()).orElseThrow()
+                .getLastTouchAt()).isEqualTo(oldTouch);
     }
 
     @Test

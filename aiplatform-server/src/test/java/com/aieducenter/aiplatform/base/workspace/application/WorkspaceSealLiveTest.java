@@ -44,7 +44,7 @@ class WorkspaceSealLiveTest {
     private static final String FILE_MARKER = "seal-probe";
 
     @Autowired
-    private WorkspaceLifecycleAppService lifecycle;
+    private WorkspaceConvergenceAppService convergence;
 
     @Autowired
     private WorkspaceProvisionAppService provisioner;
@@ -119,10 +119,10 @@ class WorkspaceSealLiveTest {
         backend.hibernate(workspace.toHandle());
 
         int acted = new WorkspaceHibernationAppService(
-                backend, workspaceRepository, lifecycle, sealPackageStore(),
+                backend, workspaceRepository, convergence, sealPackageStore(),
                 transactionTemplate, properties).scanOnce(Map.of(), LocalDateTime.now());
 
-        // 封存落定（runExclusively 异步执行——扫描提交、任务收敛，轮询等落地）：
+        // 封存落定（收敛模块互斥面异步执行——扫描提交、任务收敛，轮询等落地）：
         // 包落盘（数据库随包、三大缓存排除）+ 卷删除 + 期望态置封存
         assertThat(acted).isEqualTo(1);
         assertThat(awaitSealed(containerName)).as("扫描后封存收敛（打包→落盘→意图→删卷）").isTrue();
@@ -142,8 +142,8 @@ class WorkspaceSealLiveTest {
         assertThat(dockerExitCode("docker", "volume", "inspect", "vol-" + containerName))
                 .as("封存后卷应已删").isNotZero();
 
-        // 深度唤醒（项目 API 触碰同路径）：解包回卷 + 重建 + 依赖重装 + 应用起服
-        lifecycle.touch(workspaceId.value(), true);
+        // 深度唤醒（项目 API 触碰同路径，收敛模块 TOUCH 面）：解包回卷 + 重建 + 依赖重装 + 应用起服
+        convergence.convergeAsync(workspaceId, ConvergenceFace.TOUCH, true);
         assertThat(awaitDeepWoken(containerName))
                 .as("触碰封存工作区：深度唤醒（数据回卷 + 应用起服）").isTrue();
         Workspace woken = workspaceRepository.findById(workspaceId.id()).orElseThrow();

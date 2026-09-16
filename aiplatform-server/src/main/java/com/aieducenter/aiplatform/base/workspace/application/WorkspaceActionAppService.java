@@ -37,10 +37,10 @@ import lombok.extern.slf4j.Slf4j;
  * 互斥在途。消费方事实（run 在途/已生成拉应用）由组合方递入（照
  * {@link WorkspaceScanFact} 先例：base 不反向依赖 business）。</p>
  *
- * <p>动作同步执行、同步等结果（机机调用可长等）：唤醒/重建经
- * {@link WorkspaceReadinessWaiter} 等到 READY；互斥面与触碰自愈/扫描封存共用
- * （{@link WorkspaceLifecycleAppService#runExclusivelyBlocking} 当前线程持锁），
- * 在途不排队——如实回忙。</p>
+ * <p>动作同步执行、同步等结果（机机调用可长等）：唤醒经收敛模块
+ * （{@link WorkspaceConvergenceAppService} ADMIN 面，#196 起判定/内核/拨针归彼），
+ * 重建走 {@link WorkspaceReadinessWaiter} 等到 READY；互斥面与触碰/扫描/封存共用
+ * （收敛模块包内互斥，当前线程持锁），在途不排队——如实回忙。</p>
  */
 @Service
 @Slf4j
@@ -49,7 +49,7 @@ public class WorkspaceActionAppService {
     private final EnvironmentBackend environmentBackend;
     private final WorkspaceRepository workspaceRepository;
     private final TransactionTemplate transactionTemplate;
-    private final WorkspaceLifecycleAppService lifecycle;
+    private final WorkspaceConvergenceAppService convergence;
     private final SealPackageStore sealPackageStore;
     private final WorkspaceReadinessWaiter readinessWaiter;
     private final WorkspaceActionRepository actionRepository;
@@ -57,14 +57,14 @@ public class WorkspaceActionAppService {
     public WorkspaceActionAppService(EnvironmentBackend environmentBackend,
             WorkspaceRepository workspaceRepository,
             TransactionTemplate transactionTemplate,
-            WorkspaceLifecycleAppService lifecycle,
+            WorkspaceConvergenceAppService convergence,
             SealPackageStore sealPackageStore,
             WorkspaceReadinessWaiter readinessWaiter,
             WorkspaceActionRepository actionRepository) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
         this.transactionTemplate = transactionTemplate;
-        this.lifecycle = lifecycle;
+        this.convergence = convergence;
         this.sealPackageStore = sealPackageStore;
         this.readinessWaiter = readinessWaiter;
         this.actionRepository = actionRepository;
@@ -73,37 +73,21 @@ public class WorkspaceActionAppService {
     // ---------- 唤醒 ----------
 
     /**
-     * 唤醒（#174，等就绪）：收敛到 READY＋（已生成）应用在服，同步等结果。健康
-     * （容器在跑）即回；封存态走深度唤醒（解包回卷＋重建，分钟级）；容器缺失/
-     * 被杀走幂等重建——内核与触碰自愈同一 {@code wakeUp}。探查 UNKNOWN（daemon
-     * 抖动）拒以 WSP_002（#176：探查失败≠容器不在，盲重建的预清 rm -f 会杀可能
-     * 健康容器上的在途 run；重试即恢复，异步触碰路径不至此——healIfNeeded 对
-     * UNKNOWN 让路）。run 在途不受限（唤醒不动数据面）。深度唤醒包不可读时内核
-     * 保持封存态（数据完整性优先），本层如实回 WSP_016 而非伪成功。
+     * 唤醒（#174，等就绪；#196 起判定梯子归收敛模块 ADMIN 面）：收敛到 READY＋
+     * （已生成）应用在服，同步等结果。健康即回；封存态走深度唤醒（解包回卷＋重建，
+     * 分钟级）；容器缺失/被杀走幂等重建。探查 UNKNOWN（daemon 抖动）拒以
+     * WSP_002（#176：探查失败≠容器不在，重试即恢复）；深度唤醒包不可读时内核
+     * 保持封存态（数据完整性优先），模块如实回 WSP_016 而非伪成功；收敛动作
+     * （对齐/重建/深度唤醒）落定后拨 last-touch（醒完秒睡缺口）。run 在途不受限
+     * （唤醒不动数据面）。成功落痕（WAKE），未成动作不留痕。
      */
     public void wake(String workspaceId, boolean startAppOnWake, Operator operator) {
         Workspace workspace = requireDev(workspaceId);
-        WorkspaceId id = workspace.workspaceId();
-        Workspace woken;
-        if (workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
-            woken = readinessWaiter.awaitReady(workspace);   // 首次置备/唤醒已在途：等收敛
-        } else if (workspace.getDesiredState() == DesiredState.SEALED) {
-            woken = wakeByRebuild(workspace, startAppOnWake);   // 封存态：深度唤醒（解包回卷＋重建）
-        } else {
-            // 判定穷举四态（switch 无 default——枚举加值此点编译期即炸，判定不静默漏分支）
-            woken = switch (environmentBackend.containerState(workspace.toHandle())) {
-                case RUNNING -> healthyWake(workspace, startAppOnWake);
-                case STOPPED, ABSENT -> wakeByRebuild(workspace, startAppOnWake);
-                case UNKNOWN -> throw new ApplicationException(
-                        WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
-            };
-        }
-        if (woken.getDesiredState() == DesiredState.SEALED) {
-            // 深度唤醒未成（封存包不可读，内核保持封存态待人工）：如实回错
-            throw new ApplicationException(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE);
-        }
-        journal(id, WorkspaceActionKind.WAKE, operator);
-        log.info("[workspace] {} 后台唤醒：已就绪（拉应用={}）", id.value(), startAppOnWake);
+        convergence.convergeBlocking(workspace.workspaceId(), ConvergenceFace.ADMIN,
+                startAppOnWake);
+        journal(workspace.workspaceId(), WorkspaceActionKind.WAKE, operator);
+        log.info("[workspace] {} 后台唤醒：已就绪（拉应用={}）",
+                workspace.workspaceId().value(), startAppOnWake);
     }
 
     /**
@@ -147,7 +131,7 @@ public class WorkspaceActionAppService {
         runGuarded(id, () -> {
             Workspace fresh = requirePresent(id);   // 重取：让路间隙状态已变则以新事实为准
             environmentBackend.hibernate(fresh.toHandle());   // rm（幂等，卷保留）
-            lifecycle.wakeUp(fresh, startAppOnWake);          // rewake→幂等重建→拉应用
+            convergence.wakeUp(fresh, startAppOnWake);        // rewake→幂等重建→拉应用
         });
         readinessWaiter.awaitReady(requirePresent(id));
         journal(id, WorkspaceActionKind.REBUILD, operator);
@@ -215,33 +199,6 @@ public class WorkspaceActionAppService {
     // ---------- 内部 ----------
 
     /**
-     * 健康路径（实态在跑，意图/实态一致或休眠残留对齐）：按需幂等拉应用；期望休眠
-     * 而实态在跑（删失败残留/外部重建的漂移形）对齐意图翻运行——否则扫描器按休眠
-     * 意图再删容器，唤醒被静默撤销。显式唤醒即活跃，last-touch 一并拨动。
-     */
-    private Workspace healthyWake(Workspace workspace, boolean startAppOnWake) {
-        if (startAppOnWake) {
-            environmentBackend.startApp(workspace.toHandle());   // 幂等：已在服直回
-        }
-        if (workspace.getDesiredState() == DesiredState.HIBERNATED) {
-            workspace.markTouched(LocalDateTime.now());
-            return workspaceRepository.save(workspace);
-        }
-        return workspace;   // 实态健康（意图/实态一致）
-    }
-
-    /**
-     * 唤醒内核驱动＋等就绪（容器缺失/被杀的幂等重建与封存深度唤醒共用的收尾）：
-     * 互斥在途则让路（他人任务收敛中），随后等 READY。
-     */
-    private Workspace wakeByRebuild(Workspace workspace, boolean startAppOnWake) {
-        WorkspaceId id = workspace.workspaceId();
-        lifecycle.runExclusivelyBlocking(id,
-                () -> lifecycle.wakeUp(workspace, startAppOnWake));
-        return readinessWaiter.awaitReady(requirePresent(id));
-    }
-
-    /**
      * 守卫链前段（WSP_001/007）：存在性 → DEV。run 在途（WSP_015）与状态守卫
      * （WSP_009）归 {@link #requireActionableState}——唤醒两者皆不受限/另有口径。
      */
@@ -269,7 +226,7 @@ public class WorkspaceActionAppService {
 
     /** 互斥面内执行重活（在途 → WSP_017 如实回忙，不排队；任务异常原样上抛）。 */
     private void runGuarded(WorkspaceId id, Runnable task) {
-        if (!lifecycle.runExclusivelyBlocking(id, task)) {
+        if (!convergence.runExclusivelyBlocking(id, task)) {
             throw new ApplicationException(WorkspaceMessage.WORKSPACE_ACTION_BUSY);
         }
     }

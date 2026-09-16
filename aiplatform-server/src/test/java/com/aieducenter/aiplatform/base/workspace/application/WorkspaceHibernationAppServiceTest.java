@@ -62,7 +62,7 @@ class WorkspaceHibernationAppServiceTest {
     private WorkspaceRepository workspaceRepository;
 
     @Mock
-    private WorkspaceLifecycleAppService lifecycle;
+    private WorkspaceConvergenceAppService convergence;
 
     @Mock
     private SealPackageStore sealPackageStore;
@@ -113,7 +113,7 @@ class WorkspaceHibernationAppServiceTest {
         assertThat(acted).isZero();
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
         verify(workspaceRepository, never()).save(any(Workspace.class));
-        verify(lifecycle, never()).healDrift(any(), eq(true));
+        verify(convergence, never()).convergeAsync(any(), any(), eq(true));
     }
 
     @Test
@@ -126,10 +126,10 @@ class WorkspaceHibernationAppServiceTest {
         int acted = newService().scanOnce(
                 Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
 
-        // run 在途恒活跃：不休眠；容器已死而期望运行 → 漂移收敛（#168 型不再无声）
+        // run 在途恒活跃：不休眠；容器已死而期望运行 → 收敛模块 SCAN 面漂移收敛（#168 型不再无声）
         assertThat(acted).isEqualTo(1);
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
-        verify(lifecycle).healDrift(workspace.workspaceId(), true);
+        verify(convergence).convergeAsync(workspace.workspaceId(), ConvergenceFace.SCAN, true);
     }
 
     @Test
@@ -143,7 +143,7 @@ class WorkspaceHibernationAppServiceTest {
 
         // 期望运行而容器实死（#168「DB 记 ready、实死两天」）：扫描轮收敛
         assertThat(acted).isEqualTo(1);
-        verify(lifecycle).healDrift(workspace.workspaceId(), false);
+        verify(convergence).convergeAsync(workspace.workspaceId(), ConvergenceFace.SCAN, false);
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
     }
 
@@ -174,7 +174,7 @@ class WorkspaceHibernationAppServiceTest {
 
         // 已休眠且容器已无：正合意图，无事可做
         assertThat(acted).isZero();
-        verifyNoInteractions(lifecycle);
+        verifyNoInteractions(convergence);
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
     }
 
@@ -190,7 +190,7 @@ class WorkspaceHibernationAppServiceTest {
         int acted = newService().scanOnce(Map.of(), NOW);
 
         assertThat(acted).isZero();
-        verifyNoInteractions(lifecycle);
+        verifyNoInteractions(convergence);
         verify(environmentBackend, never()).hibernate(any(WorkspaceHandle.class));
     }
 
@@ -285,7 +285,7 @@ class WorkspaceHibernationAppServiceTest {
         newService().scanOnce(Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
 
         // run 在途恒活跃：休眠/封存都不动手（封存绝不对活跃项目动手）
-        verify(lifecycle, never()).runExclusively(any(), any());
+        verify(convergence, never()).runExclusively(any(), any());
         verify(environmentBackend, never()).packVolume(any(WorkspaceHandle.class));
     }
 
@@ -378,7 +378,7 @@ class WorkspaceHibernationAppServiceTest {
 
     private WorkspaceHibernationAppService newService() {
         return new WorkspaceHibernationAppService(
-                environmentBackend, workspaceRepository, lifecycle, sealPackageStore,
+                environmentBackend, workspaceRepository, convergence, sealPackageStore,
                 transactionTemplate, properties);
     }
 
@@ -387,6 +387,6 @@ class WorkspaceHibernationAppServiceTest {
         doAnswer(inv -> {
             ((Runnable) inv.getArgument(1)).run();
             return null;
-        }).when(lifecycle).runExclusively(any(WorkspaceId.class), any());
+        }).when(convergence).runExclusively(any(WorkspaceId.class), any());
     }
 }

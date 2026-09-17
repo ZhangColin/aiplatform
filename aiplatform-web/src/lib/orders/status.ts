@@ -20,3 +20,6 @@ export function orderStatusToastText(status?: number, statusName?: string): stri
       return statusName ? `订单状态更新：${statusName}` : "订单状态已更新";
   }
 }
+
+/** 改价 toast 文案（#206）：与首报文案同族——信号路标不带金额，现价在项目语境内看。 */
+export const REPRICED_TOAST_TEXT = "报价已更新，请以新价为准";

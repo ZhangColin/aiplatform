@@ -67,7 +67,8 @@ export type NotificationEvent =
       /**
        * 订单状态变化（#30）：下单（status=1）/首次报价（2）/取消（5）/支付完成
        * （3）/归档（4）各发一次；改价不换状态、不发本事件（改价信号 =
-       * order-repriced）；消费 = toast（点击直达项目页）+ 失效重查。
+       * order-repriced）；消费 = 失效重查 + toast 路标（他页弹、组件内跳转；
+       * 首次报价在项目页在场不弹——失效水合报价卡入流即感知，#206 分流）。
        */
       type: "order-status-changed";
       payload: OrderPayload;
@@ -77,8 +78,8 @@ export type NotificationEvent =
        * 订单已改价（#204 改价入流，推翻「改价不换状态不发」静默）：改价落定后
        * 发射（先落「报价已更新」对话卡后发——信号触发重查时卡已在库）。载荷与
        * order-status-changed 同字段同量级（status 恒 2=已报价），不含金额与备注；
-       * 消费 = 失效重查（「报价已更新」卡入流、历史报价卡视镜显新价）；toast
-       * 分流归 #206。
+       * 消费 = 失效重查（「报价已更新」卡入流、历史报价卡视镜显新价）+ toast
+       * 路标（#206 分流：项目页在场不弹，他页「报价已更新」+ 组件内跳转）。
        */
       type: "order-repriced";
       payload: OrderPayload;

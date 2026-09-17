@@ -8,7 +8,8 @@ import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
-import { orderStatusToastText } from "@/lib/orders/status";
+import { ORDER_STATUS } from "@/lib/orders/lock";
+import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
 import type { SseEvent } from "./connection";
 import {
@@ -56,7 +57,7 @@ const NOTIFICATION_INVALIDATIONS = {
   // 订单事件失效面（#203 首报 / #204 改价同款）：订单域（详情/金额现值重拉——
   // 报价卡视镜显当前价）+ 项目域（activeOrder/archived 嵌入——锁定式矩阵与归档
   // 终态的推导输入）+ 对话史域（在场项目页的报价卡经重查水合实时入流；信号-only：
-  // 载荷不含金额，金额走订单查询）；改价 toast 分流归 #206
+  // 载荷不含金额，金额走订单查询）；toast 分流见下方载荷写入方（#206）
   "order-status-changed": ORDER_INVALIDATIONS,
   "order-repriced": ORDER_INVALIDATIONS,
 } as const satisfies Record<NotificationEvent["type"], readonly (readonly unknown[])[]>;
@@ -88,24 +89,69 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
       url: event.payload.url,
     });
   },
-  // 订单态变化 toast（spec：点击直达项目页）：状态文案归纯函数单点
-  // （lib/orders/status），导航用整页跳（桥在 React 外，无 router 上下文——
-  // 同 401 出口先例 window.location.href；点击时才跳，停留中的页面不被动导航）
+  // 订单态变化 toast（#30 + #206 分流）：状态文案归纯函数单点
+  // （lib/orders/status）。在场分流——首次报价（quoted）在项目页在场时不弹：
+  // 失效水合已让报价卡实时入流，toast 即冗余；其余状态无入流对等面，维持即时
+  // 呈现（订单卡支付/取消的成功反馈依赖本 toast，order-panel 口径）
   "order-status-changed": (event) => {
     if (event.type !== "order-status-changed") return;
+    const { projectId, status, statusName } = event.payload;
+    if (status === ORDER_STATUS.quoted && inPlaceOnProject(projectId)) return;
+    orderSignpostToast(orderStatusToastText(status, statusName), projectId);
+  },
+  // 改价 toast 路标（#204 事件语义 + #206 分流）：在场不弹——历史报价卡视镜经
+  // 订单域失效重查自然显新价；他页弹「报价已更新」（与首报文案区分，不带金额）
+  "order-repriced": (event) => {
+    if (event.type !== "order-repriced") return;
     const { projectId } = event.payload;
-    toast(orderStatusToastText(event.payload.status, event.payload.statusName), {
-      action: {
-        label: "查看项目",
-        onClick: () => {
-          // 桥在 React 外（无 router 上下文）：整页跳同 401 出口先例，点击才跳
-          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-          window.location.href = `/projects/${projectId}`;
-        },
-      },
-    });
+    if (inPlaceOnProject(projectId)) return;
+    orderSignpostToast(REPRICED_TOAST_TEXT, projectId);
   },
 };
+
+// ── React 路由上下文（#206 toast 分流的判定输入）──────────────────────────────
+
+/** 当前路由 + 组件内导航口（SseProvider 挂载时登记；桥在 React 外按需读）。 */
+export type RouteContext = {
+  pathname: string;
+  push: (path: string) => void;
+};
+
+let routeContext: RouteContext | null = null;
+
+/**
+ * 登记口（SseProvider 挂载/路由变化时写入）：桥内 toast 分流的在场判定与路标
+ * 跳转都经此读路由——桥无 React 上下文，这是 router 的唯一取用缝。未登记
+ * （早于挂载/测试）按他页在场兜底，路标回落整页跳。
+ */
+export function noteRouteContext(context: RouteContext): void {
+  routeContext = context;
+}
+
+/** 项目页地址（订单事件路标的跳转目标/在场比照）。 */
+function projectPath(projectId: string): string {
+  return `/projects/${projectId}`;
+}
+
+/** 在场判定：当前路由即该订单的项目页（精确匹配——/projects/9001 不误伤 900）。 */
+function inPlaceOnProject(projectId: string): boolean {
+  return routeContext?.pathname === projectPath(projectId);
+}
+
+/** 订单事件 toast 路标：动作走组件内跳转（router.push，无整页刷新；点击才跳）。 */
+function orderSignpostToast(text: string, projectId: string): void {
+  toast(text, {
+    action: {
+      label: "查看项目",
+      onClick: () => {
+        const target = projectPath(projectId);
+        // 未登记回落整页跳（同 401 出口先例）——生产登记先于任何事件到达
+        if (routeContext) routeContext.push(target);
+        else window.location.href = target;
+      },
+    },
+  });
+}
 
 export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEvent): void {
   const envelope = parseSseEnvelope(event.data);

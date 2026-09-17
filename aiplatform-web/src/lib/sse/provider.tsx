@@ -1,11 +1,12 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { useSseStatusStore, type SseChannel, type SseStatus } from "@/lib/store/sse-status";
 
-import { dispatchNotificationEvent } from "./bridge";
+import { dispatchNotificationEvent, noteRouteContext } from "./bridge";
 import { probeSessionAlive, SseConnection } from "./connection";
 
 /**
@@ -17,6 +18,14 @@ import { probeSessionAlive, SseConnection } from "./connection";
  */
 export function SseProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // 路由上下文登记（#206 toast 分流）：桥在 React 外读当前路由（在场判定）与
+  // push（路标组件内跳转）；声明在连接 effect 之前——登记先于任何事件到达
+  useEffect(() => {
+    noteRouteContext({ pathname, push: (path) => router.push(path) });
+  }, [pathname, router]);
 
   useEffect(() => {
     let conn: SseConnection | null = null;

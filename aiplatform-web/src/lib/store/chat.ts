@@ -117,13 +117,13 @@ export type ChatMessage =
        * 报价卡（#203 报价感知，ADR-0017 视镜语义）：平台对用户的钱事发言——
        * 载荷仅事件 + 订单引用，金额/备注/状态渲染时取订单当前态（useOrder
        * 详情查询，待报价/已报价态轮询现成），卡不冻结金额；改价追加新卡不改
-       * 旧卡（#204）。不属任何对话轮（无 runId）——live 到达不经 SSE 载荷，
-       * 由 order-status-changed 失效对话史重查后水合入流。
+       * 旧卡（#204 改价入流）。不属任何对话轮（无 runId）——live 到达不经 SSE
+       * 载荷，由 order-status-changed / order-repriced 失效对话史重查后水合入流。
        */
       kind: "quote";
       id: string;
       orderId: string;
-      /** 事件类型：quoted=报价已出（改价「报价已更新」归 #204 追加）。 */
+      /** 事件类型：quoted=报价已出 / repriced=报价已更新（#204）。 */
       event: string;
     }
   | (RaisedQuestion & { kind: "question"; answered: boolean });

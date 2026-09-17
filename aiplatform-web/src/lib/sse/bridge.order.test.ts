@@ -20,6 +20,18 @@ function orderEvent(status: number, statusName = "已报价") {
   };
 }
 
+/** 改价信号（#204）：改价不换状态（status 恒 2），载荷同 order-status-changed 量级。 */
+function repricedEvent() {
+  return {
+    id: "900:9",
+    data: JSON.stringify({
+      type: "order-repriced",
+      payload: { projectId: "900", orderId: "901", status: 2, statusName: "已报价" },
+      ts: "2026-09-01T03:00:02.000Z",
+    }),
+  };
+}
+
 function dispatch(event: { id: string; data: string }) {
   const invalidateQueries = vi.fn();
   dispatchNotificationEvent({ invalidateQueries } as never, event);
@@ -68,5 +80,15 @@ describe("bridge · order-status-changed（#30）", () => {
 
     dispatchNotificationEvent({ invalidateQueries } as never, { id: "x", data: "not-json" });
     expect(toastMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("bridge · order-repriced（#204 改价入流）", () => {
+  it("改价信号：失效 projects/orders/对话史三域——「报价已更新」卡实时入流、历史报价卡视镜显新价", () => {
+    const invalidateQueries = dispatch(repricedEvent());
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.projects.all });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.orders.all });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.conversation.all });
   });
 });

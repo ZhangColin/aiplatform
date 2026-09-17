@@ -385,13 +385,43 @@ class OrderAppServiceTest {
                 "SELECT amount, quoted_at FROM ord_orders WHERE id = ?", Long.parseLong(orderId)))
                 .containsEntry("amount", 99000L);
         assertThat(appService.detail(Long.parseLong(orderId)).quotedAt()).isEqualTo(quotedAt);
-        // #203 边界卡口：改价不写报价卡、不发事件（静默现状的显式钉死——#204 改价
-        // 事件化翻此口径：追加「报价已更新」卡 + 补发信号）
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM prj_conversation_entries WHERE quote->>'orderId' = ?",
-                Integer.class, orderId)).isEqualTo(1); // 仅首次报价那一张
-        verify(eventsAppService, times(2)) // 下单 + 首报各一发，改价未发
-                .publishNotification(eq(OrderEventTypes.ORDER_STATUS_CHANGED), any());
+    }
+
+    @Test
+    void given_quoted_order_when_reprice_then_update_card_appended_event_emitted_old_card_untouched()
+            throws Exception {
+        // #204 改价入流（推翻「改价不换状态不发」静默，ADR-0017）：改价追加「报价
+        // 已更新」卡（append-only——旧卡不改写）+ 补发 order-repriced 信号（改价不换
+        // 状态，order-status-changed 不占）；载荷维持 id/状态名量级，不含金额与备注
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
+        Map<String, Object> firstCard = jdbcTemplate.queryForMap(
+                "SELECT id, kind, run_id, quote::text AS quote FROM prj_conversation_entries "
+                        + "WHERE quote->>'orderId' = ?", orderId);
+
+        appService.submitQuote(Long.parseLong(orderId), 99000L, "调整：去掉导入功能", null);
+
+        // 两张卡按写入序：首报（quoted）原样在前、改价（repriced）追加在后
+        List<Map<String, Object>> cards = jdbcTemplate.queryForList(
+                "SELECT id, kind, run_id, quote::text AS quote FROM prj_conversation_entries "
+                        + "WHERE quote->>'orderId' = ? ORDER BY id", orderId);
+        assertThat(cards).hasSize(2);
+        assertThat(cards.get(0)).isEqualTo(firstCard); // 旧卡不改写（append-only 断言）
+        Map<String, Object> repriced = objectMapper.readValue((String) cards.get(1).get("quote"),
+                new TypeReference<>() {
+                });
+        assertThat(repriced).containsEntry("orderId", orderId).containsEntry("event", "repriced")
+                .doesNotContainKey("amount");
+        assertThat(cards.get(1).get("kind")).isEqualTo(7);
+        assertThat(cards.get(1).get("run_id")).isNull();
+        // 改价信号一发：payload 同 id/状态名量级（status 恒已报价），不含金额
+        verify(eventsAppService).publishNotification(eq(OrderEventTypes.ORDER_REPRICED),
+                argThat(payload -> orderId.equals(payload.get(OrderEventTypes.ORDER_ID_FIELD))
+                        && OrderStatus.QUOTED.getCode().equals(payload.get(OrderEventTypes.STATUS_FIELD))
+                        && !payload.containsKey("amount")));
+        verify(eventsAppService, times(2)).publishNotification(
+                eq(OrderEventTypes.ORDER_STATUS_CHANGED), any()); // 下单 + 首报各一发，改价不占
     }
 
     @Test

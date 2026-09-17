@@ -32,11 +32,11 @@ vi.mock("@/hooks/use-order", () => ({
   usePayOrder: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-function renderCard(order: Record<string, unknown> | undefined) {
+function renderCard(order: Record<string, unknown> | undefined, event = "quoted") {
   seed.order = order;
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
-      <QuoteCard orderId="901" event="quoted" onSeeOrder={() => {}} />
+      <QuoteCard orderId="901" event={event} onSeeOrder={() => {}} />
     </QueryClientProvider>,
   );
 }
@@ -58,6 +58,15 @@ describe("QuoteCard · 视镜取数与状态呈现（#203）", () => {
     expect(html).toContain("¥990");
     expect(html).toContain("调整：去掉导入功能");
     expect(html).not.toContain("¥1,280");
+  });
+
+  it("改价事件变体（#204）：标题「报价已更新」，金额与动作仍取当前态照常", () => {
+    const html = renderCard(quotedOrder, "repriced");
+
+    expect(html).toContain("报价已更新");
+    expect(html).not.toContain("报价已出");
+    expect(html).toContain("¥1,280"); // 视镜取数与首报卡同源
+    expect(html).toContain("去支付"); // 待支付态照常可支付
   });
 
   it("已支付：原地转已支付态，不残留去支付入口", () => {

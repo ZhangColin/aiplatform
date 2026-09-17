@@ -104,7 +104,7 @@ public class OrderAppService {
             }
             throw e;
         }
-        publishStatusChanged(order);
+        publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return OrderResponse.of(order);
     }
 
@@ -128,7 +128,7 @@ public class OrderAppService {
         Order order = requireOrder(orderId);
         order.cancel();
         OrderResponse response = OrderResponse.of(orderRepository.save(order));
-        publishStatusChanged(order);
+        publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return response;
     }
 
@@ -145,7 +145,7 @@ public class OrderAppService {
         Order order = requireOrder(orderId);
         order.cancelByBackoffice(reason, operator);
         OrderResponse response = OrderResponse.of(orderRepository.save(order));
-        publishStatusChanged(order);
+        publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return response;
     }
 
@@ -153,10 +153,11 @@ public class OrderAppService {
      * 提交报价（#29 后台动作，机机面经 BackofficeOrderController 进入）：待报价态
      * 首次调用 = 报价，已报价态重复调用 = 改价——聚合内一次事务同时落价目行
      * （append-only，操作者随行落痕，#155）与订单现值。事务取舍同
-     * {@link #cancel}：单聚合保存（级联追加价目行）由仓储自带事务保证。通知只在
-     * 状态真变化（首次报价）时发射——改价不换状态不发（#204 改价事件化翻此口径）。
-     * 首次报价同时落对话流报价卡（#203 视镜语义：载荷仅事件 + 订单引用，不含金额；
-     * 先落卡后发信号——信号触发前端重查时卡须已在库）。
+     * {@link #cancel}：单聚合保存（级联追加价目行）由仓储自带事务保证。首次报价
+     * 发「状态已变化」（状态真变化）+ 落「报价已出」卡；改价发 order-repriced
+     * （#204 改价入流，推翻「改价不换状态不发」的静默）+ 追加「报价已更新」卡
+     * （append-only 不改旧卡）。两路都先落卡后发信号——信号触发前端重查时卡须已在
+     * 库；卡载荷仅事件 + 订单引用，不含金额（#203 视镜语义）。
      *
      * @throws ApplicationException ORD_001 订单不存在；ORD_008 金额无效；
      *                              ORD_009 备注超长；ORD_007 已支付或已终结
@@ -169,7 +170,11 @@ public class OrderAppService {
         if (firstQuote) {
             conversationHistoryAppService.recordQuote(order.getProjectId(), order.getId(),
                     ConversationHistoryAppService.QUOTE_EVENT_QUOTED);
-            publishStatusChanged(order);
+            publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
+        } else {
+            conversationHistoryAppService.recordQuote(order.getProjectId(), order.getId(),
+                    ConversationHistoryAppService.QUOTE_EVENT_REPRICED);
+            publishNotification(OrderEventTypes.ORDER_REPRICED, order);
         }
         return response;
     }
@@ -202,7 +207,7 @@ public class OrderAppService {
             order.pay(paymentNo);
             orderRepository.save(order);
         });
-        publishStatusChanged(order); // 支付落定发「已支付」
+        publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order); // 支付落定发「已支付」
 
         // ② 归档（独立事务）：失败留已支付、日志留痕，不抹支付事实（补偿归后续批次）
         try {
@@ -251,14 +256,15 @@ public class OrderAppService {
     private OrderResponse settleArchive(Long orderId, Long projectId) {
         Order persisted = requireOrder(orderId);
         if (persisted.getStatus() == OrderStatus.ARCHIVED) {
-            publishStatusChanged(persisted); // 归档落定发「已归档」
+            publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, persisted); // 归档落定发「已归档」
             projectKnowledgeAppService.sinkPrd(projectId);
         }
         return OrderResponse.of(persisted);
     }
 
-    private void publishStatusChanged(Order order) {
-        eventsAppService.publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, Map.of(
+    /** 通知族发射（payload 两事件同形：projectId/orderId/status/statusName，不含金额）。 */
+    private void publishNotification(String eventType, Order order) {
+        eventsAppService.publishNotification(eventType, Map.of(
                 OrderEventTypes.PROJECT_ID_FIELD, order.getProjectId().toString(),
                 OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
                 OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),

@@ -10,10 +10,19 @@ public final class OrderEventTypes {
 
     /**
      * 订单状态已变化：下单（待报价）/首次报价（已报价）/取消/支付完成（已支付）/
-     * 归档（已归档）各发一次——改价不换状态不发（#37/#39：支付与归档分两发，
-     * 归档失败只发「已支付」）。payload 带 orderId + status（Integer code）。
+     * 归档（已归档）各发一次（#37/#39：支付与归档分两发，归档失败只发「已支付」）
+     * ——改价不换状态、不发本事件（改价信号 = {@link #ORDER_REPRICED}）。payload 带
+     * orderId + status（Integer code）。
      */
     public static final String ORDER_STATUS_CHANGED = "order-status-changed";
+
+    /**
+     * 订单已改价（#204 改价入流，推翻「改价不换状态不发」的静默）：已报价态改价
+     * 落定后发射。发射时序 = 先落「报价已更新」对话卡后发（信号触发前端重查时卡
+     * 须已在库，#203 同款）。payload 与 {@link #ORDER_STATUS_CHANGED} 同字段同量级
+     * （status 恒已报价），不含金额与备注。
+     */
+    public static final String ORDER_REPRICED = "order-repriced";
 
     // ---------- payload 契约键（SSE事件清单·平台通知族） ----------
 

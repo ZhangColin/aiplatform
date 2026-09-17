@@ -31,6 +31,13 @@ import {
  * 事件只让 UI 活、不承担正确性：终态事件同样只 invalidate，正确性永远走 REST。
  */
 
+/** 订单事件（order-status-changed / order-repriced）的共用失效面。 */
+const ORDER_INVALIDATIONS = [
+  queryKeys.projects.all,
+  queryKeys.orders.all,
+  queryKeys.conversation.all,
+] as const;
+
 /**
  * 通知事件 → 粗粒度失效前缀。键类型锁死为名册穷尽：正本新增 type 而
  * events.ts / 此处漏登，typecheck 即红（对接 issue 时同步维护）。
@@ -46,10 +53,12 @@ const NOTIFICATION_INVALIDATIONS = {
   // 长出判据，写出瞬间一并重拉
   "document-updated": [queryKeys.documents.all, queryKeys.projects.all],
   "project-renamed": [queryKeys.projects.all],
-  // 订单态变化：订单卡详情（状态/金额/改价历史）+ 项目域（activeOrder/archived
-  // 嵌入——锁定式矩阵与归档终态的推导输入）一并重拉；#203 起连带失效对话史域——
-  // 在场项目页的报价卡经重查水合实时入流（信号-only：载荷不含金额，金额走订单查询）
-  "order-status-changed": [queryKeys.projects.all, queryKeys.orders.all, queryKeys.conversation.all],
+  // 订单事件失效面（#203 首报 / #204 改价同款）：订单域（详情/金额现值重拉——
+  // 报价卡视镜显当前价）+ 项目域（activeOrder/archived 嵌入——锁定式矩阵与归档
+  // 终态的推导输入）+ 对话史域（在场项目页的报价卡经重查水合实时入流；信号-only：
+  // 载荷不含金额，金额走订单查询）；改价 toast 分流归 #206
+  "order-status-changed": ORDER_INVALIDATIONS,
+  "order-repriced": ORDER_INVALIDATIONS,
 } as const satisfies Record<NotificationEvent["type"], readonly (readonly unknown[])[]>;
 
 /**

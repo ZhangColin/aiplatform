@@ -483,6 +483,18 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     expect(chat?.messages[1]).toMatchObject({ kind: "quote", orderId: "901", event: "quoted" });
   });
 
+  it("改价卡追加水合（#204）：与首报卡同流共存、各保各的事件（append-only 不改旧卡）", () => {
+    useChatStore.getState().hydrate("p1", [
+      entry(1, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+      entry(2, "quote", { quote: { orderId: "901", event: "repriced" } }, null),
+    ]);
+
+    const cards = useChatStore.getState().chats["p1"]?.messages.filter((m) => m.kind === "quote") ?? [];
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({ orderId: "901", event: "quoted" });
+    expect(cards[1]).toMatchObject({ orderId: "901", event: "repriced" });
+  });
+
   it("报价卡增量到达与重水合幂等：同条目原位退位，不双卡、位置不漂", () => {
     const s = useChatStore.getState();
     s.hydrate("p1", [entry(1, "user", { text: "需求" }, "run-1")]);

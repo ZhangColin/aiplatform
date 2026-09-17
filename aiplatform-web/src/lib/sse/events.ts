@@ -33,6 +33,14 @@ export function parseSseEnvelope(raw: string): SseEnvelope | null {
 // ── 平台通知族（单端点单流上的广播族，封闭集合）──────────────────────────────
 // 字段表镜像正本「平台通知族」；正本更新时同步改这里。
 
+/** 订单事件载荷（order-status-changed / order-repriced 同形——同字段同量级，不含金额）。 */
+type OrderPayload = {
+  projectId: string;
+  orderId: string;
+  status: number;
+  statusName: string;
+};
+
 export type NotificationEvent =
   | {
       type: "workspace-created";
@@ -58,15 +66,22 @@ export type NotificationEvent =
   | {
       /**
        * 订单状态变化（#30）：下单（status=1）/首次报价（2）/取消（5）/支付完成
-       * 归档（4）各发一次，改价不发；消费 = toast（点击直达项目页）+ 失效重查。
+       * （3）/归档（4）各发一次；改价不换状态、不发本事件（改价信号 =
+       * order-repriced）；消费 = toast（点击直达项目页）+ 失效重查。
        */
       type: "order-status-changed";
-      payload: {
-        projectId: string;
-        orderId: string;
-        status: number;
-        statusName: string;
-      };
+      payload: OrderPayload;
+    }
+  | {
+      /**
+       * 订单已改价（#204 改价入流，推翻「改价不换状态不发」静默）：改价落定后
+       * 发射（先落「报价已更新」对话卡后发——信号触发重查时卡已在库）。载荷与
+       * order-status-changed 同字段同量级（status 恒 2=已报价），不含金额与备注；
+       * 消费 = 失效重查（「报价已更新」卡入流、历史报价卡视镜显新价）；toast
+       * 分流归 #206。
+       */
+      type: "order-repriced";
+      payload: OrderPayload;
     };
 
 const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
@@ -76,6 +91,7 @@ const NOTIFICATION_TYPES: ReadonlySet<string> = new Set([
   "document-updated",
   "project-renamed",
   "order-status-changed",
+  "order-repriced",
 ] satisfies Array<NotificationEvent["type"]>);
 
 /** 通知族为封闭集合：名册外 type → null（消费端按 miss 忽略）。 */

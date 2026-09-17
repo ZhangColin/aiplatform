@@ -320,7 +320,8 @@ class GenerationAppServiceTest {
 
         // 阶段 0 + 1 片 = 2 次收口，各推一次 preview-ready（projectId + url）
         verify(eventsAppService, times(2)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
-                eq(Map.of("projectId", projectId.toString(), "url", "http://localhost:30080")));
+                argThat(payload -> projectId.toString().equals(payload.get("projectId"))
+                        && "http://localhost:30080".equals(payload.get("url"))));
     }
 
     @Test

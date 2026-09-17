@@ -90,7 +90,7 @@ class AgentEventDeadSocketTest {
             // 撞窗：断连后立即广播（真机 500 的时序）
             String runId = "run-dead-" + i;
             assertThatCode(() -> appService.publishAgentEvent("run-start",
-                    Map.of("runId", runId))).doesNotThrowAnyException();
+                    Map.of("runId", runId, EventsAppService.OWNER_FIELD, "1"))).doesNotThrowAnyException();
             Thread.sleep(50);   // 给 onError 一点时间清理，进入下一轮
         }
         assertThat(anyPingReceived).isTrue();   // 循环本身有效（订阅确实建立过）
@@ -119,7 +119,8 @@ class AgentEventDeadSocketTest {
                         AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
                 assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
                 sse.kill();
-                appService.publishAgentEvent("run-start", Map.of("runId", "run-noise-" + i));
+                appService.publishAgentEvent("run-start",
+                        Map.of("runId", "run-noise-" + i, EventsAppService.OWNER_FIELD, "1"));
                 Thread.sleep(50);   // async error dispatch 是异步的，给它时间跑
             }
             captured.addAll(appender.list);
@@ -161,13 +162,15 @@ class AgentEventDeadSocketTest {
             assertThatCode(() -> {
                 Thread racer = new Thread(() -> {
                     try {
-                        appService.publishAgentEvent("run-start", Map.of("runId", runA));
+                        appService.publishAgentEvent("run-start",
+                                Map.of("runId", runA, EventsAppService.OWNER_FIELD, "1"));
                     } catch (Throwable ex) {
                         racerFailure.set(ex);
                     }
                 }, "publish-racer");
                 racer.start();
-                appService.publishAgentEvent("run-start", Map.of("runId", runB));
+                appService.publishAgentEvent("run-start",
+                        Map.of("runId", runB, EventsAppService.OWNER_FIELD, "1"));
                 racer.join(2000);
             }).doesNotThrowAnyException();
             assertThat(racerFailure.get()).as("并发 publish 线程亦不得抛").isNull();

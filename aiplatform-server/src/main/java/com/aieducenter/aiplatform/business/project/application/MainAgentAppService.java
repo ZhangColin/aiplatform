@@ -220,7 +220,7 @@ public class MainAgentAppService {
         // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
         sessionExecutor.submit(sessionId, () -> {
             ConversationHistoryAppService.TurnRecorder recorder =
-                    conversationHistory.recorder(projectId, eventBridge.sink(projectId));
+                    conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
             AgentReply reply = agentClient.converse(command, recorder);
             recorder.settle(runId, reply);
         });
@@ -264,7 +264,7 @@ public class MainAgentAppService {
                 /* workspaceReadOnly= */ true);
         appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
-                conversationHistory.recorder(projectId, eventBridge.sink(projectId));
+                conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
         sessionExecutor.submit(sessionId, () -> {
             try {
                 AgentReply reply = agentClient.resume(resume, recorder);
@@ -307,7 +307,7 @@ public class MainAgentAppService {
         // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
         // 轮走 {@link #answerInquiry}，场景矩阵均无卡
         if (project.isGenerated()) {
-            eventBridge.emitAcceptanceStarted(projectId, runId);
+            eventBridge.emitAcceptanceStarted(projectId, project.getOwnerAccountId(), runId);
         }
         AgentCommand command = mainCommand(project, runId, annotated);
         sessionExecutor.submit(sessionId, () -> {
@@ -322,7 +322,7 @@ public class MainAgentAppService {
             buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(projectId));
+                        conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
                 AgentReply reply = agentClient.converse(command, recorder);
                 settleSuspendedQuestion(sessionId, runId, reply);
                 recorder.settle(runId, reply);
@@ -434,7 +434,10 @@ public class MainAgentAppService {
             // 意见锚已消费（不恢复）、不自动重试，用户重提即兜底——失败信号归 error
             // 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
             try {
-                eventBridge.emitError(projectId, runId, "意见派发失败，请重新发送");
+                // 派发失败路径（非热）：归属重查一次取 owner——正常路径在 try 内已携聚合
+                Long ownerAccountId = projectRepository.findById(projectId)
+                        .map(Project::getOwnerAccountId).orElse(null);
+                eventBridge.emitError(projectId, ownerAccountId, runId, "意见派发失败，请重新发送");
             }
             catch (RuntimeException emitFailure) {
                 log.warn("[main-close] 项目 {} 派发失败事件发射失败：{}", projectId,

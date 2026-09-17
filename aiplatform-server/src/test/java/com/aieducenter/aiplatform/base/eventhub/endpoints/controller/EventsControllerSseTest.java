@@ -10,6 +10,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -101,6 +102,23 @@ class EventsControllerSseTest {
         return client;
     }
 
+    /** 订阅者账号（connect 自种 BffSession 的 userId = 1L）——事件归属键须与之同值才达。 */
+    private static final String OWNER_ACCOUNT_ID = "1";
+
+    /** 通知族发射（测试夹具注入归属键——真实发布点经聚合注入，本缝只验通道契约）。 */
+    private void publishNotification(String type, Map<String, Object> payload) {
+        Map<String, Object> withOwner = new LinkedHashMap<>(payload);
+        withOwner.put(EventsAppService.OWNER_FIELD, OWNER_ACCOUNT_ID);
+        appService.publishNotification(type, withOwner);
+    }
+
+    /** 智能体事件族发射（同通知族：测试夹具注入归属键）。 */
+    private void publishAgentEvent(String type, Map<String, Object> payload) {
+        Map<String, Object> withOwner = new LinkedHashMap<>(payload);
+        withOwner.put(EventsAppService.OWNER_FIELD, OWNER_ACCOUNT_ID);
+        appService.publishAgentEvent(type, withOwner);
+    }
+
     // ---------- 通道基础（心跳 / 信封 / 过滤 / fire-and-forget） ----------
 
     @Test
@@ -116,7 +134,7 @@ class EventsControllerSseTest {
     void given_notification_when_subscribed_then_contract_envelope_and_id_on_the_wire() throws Exception {
         SseClient client = connect("?projectId=p-wire");
 
-        appService.publishNotification("workspace-created", Map.of(
+        publishNotification("workspace-created", Map.of(
                 "projectId", "p-wire",
                 "projectName", "官网 demo",
                 "container", "aiplatform-dev-p-wire",
@@ -143,7 +161,7 @@ class EventsControllerSseTest {
     void given_agent_event_when_subscribed_then_id_uses_run_id_as_stream_id() throws Exception {
         SseClient client = connect("?projectId=p-agent");
 
-        appService.publishAgentEvent("run-start", Map.of(
+        publishAgentEvent("run-start", Map.of(
                 "projectId", "p-agent", "runId", "run-wire", "prompt", "写个落地页",
                 "model", "deepseek-v4-pro", "engine", "agentscope"));
 
@@ -161,9 +179,9 @@ class EventsControllerSseTest {
         // 单端点单流：同一条连接上两族事件按发射序交错到达（id 各归各的 streamId 序）
         SseClient client = connect("?projectId=p-mix");
 
-        appService.publishNotification("project-renamed", Map.of("projectId", "p-mix", "projectName", "名字"));
-        appService.publishAgentEvent("run-start", Map.of("projectId", "p-mix", "runId", "run-mix", "prompt", "x"));
-        appService.publishNotification("preview-ready", Map.of("projectId", "p-mix", "url", "http://localhost:30080"));
+        publishNotification("project-renamed", Map.of("projectId", "p-mix", "projectName", "名字"));
+        publishAgentEvent("run-start", Map.of("projectId", "p-mix", "runId", "run-mix", "prompt", "x"));
+        publishNotification("preview-ready", Map.of("projectId", "p-mix", "url", "http://localhost:30080"));
 
         assertThat(client.nextNonCommentLine()).isEqualTo("id:p-mix:1");
         client.skipEventBody();
@@ -177,8 +195,8 @@ class EventsControllerSseTest {
     void given_project_filter_when_publish_other_project_then_only_matching_received() throws Exception {
         SseClient client = connect("?projectId=p-filter");
 
-        appService.publishNotification("project-renamed", Map.of("projectId", "p-other", "projectName", "别家名字"));
-        appService.publishNotification("preview-ready",
+        publishNotification("project-renamed", Map.of("projectId", "p-other", "projectName", "别家名字"));
+        publishNotification("preview-ready",
                 Map.of("projectId", "p-filter", "url", "http://localhost:30080"));
 
         // 下一事件即订阅项目的（p-other 被过滤挡掉），id 取订阅项目流
@@ -194,8 +212,8 @@ class EventsControllerSseTest {
     void given_run_filter_when_publish_other_run_then_only_matching_received() throws Exception {
         SseClient client = connect("?runId=run-1");
 
-        appService.publishAgentEvent("run-start", Map.of("runId", "run-2", "prompt", "x"));
-        appService.publishAgentEvent("run-finish", Map.of("runId", "run-1", "finish", "end"));
+        publishAgentEvent("run-start", Map.of("runId", "run-2", "prompt", "x"));
+        publishAgentEvent("run-finish", Map.of("runId", "run-1", "finish", "end"));
 
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-1:1");
         client.skipEventBody();
@@ -207,14 +225,14 @@ class EventsControllerSseTest {
     void given_unfiltered_connection_when_agent_events_published_then_not_delivered() throws Exception {
         // 族投递规则：站点级常开连接（无过滤）只收通知族——智能体过程细节是项目内
         // 事实，不进未过滤订阅（实时与重放同规则）
-        appService.publishAgentEvent("run-start", Map.of(
+        publishAgentEvent("run-start", Map.of(
                 "projectId", "p-site", "runId", "run-site", "prompt", "x"));
 
         SseClient siteWide = connect("");
 
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "p-site", "runId", "run-site", "text", "正在准备。"));
-        appService.publishNotification("project-renamed", Map.of("projectId", "p-site", "projectName", "名字"));
+        publishNotification("project-renamed", Map.of("projectId", "p-site", "projectName", "名字"));
 
         assertThat(siteWide.nextNonCommentLine()).isEqualTo("id:p-site:1");   // 只有通知族
         siteWide.skipEventBody();
@@ -231,9 +249,9 @@ class EventsControllerSseTest {
         clients.remove(doomed);
 
         assertThatCode(() -> {
-            appService.publishNotification("workspace-destroyed", Map.of("projectId", "p-ff"));
+            publishNotification("workspace-destroyed", Map.of("projectId", "p-ff"));
             Thread.sleep(200); // 留给服务端发现断连的时间
-            appService.publishNotification("workspace-destroyed", Map.of("projectId", "p-ff"));
+            publishNotification("workspace-destroyed", Map.of("projectId", "p-ff"));
         }).doesNotThrowAnyException();
 
         assertThat(healthy.nextNonCommentLine()).isEqualTo("id:p-ff:1");
@@ -250,11 +268,11 @@ class EventsControllerSseTest {
     @Test
     void given_agent_events_before_reconnect_when_subscribe_with_anchor_then_window_replayed()
             throws Exception {
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "17", "runId", "run-anch-9", "text", "断线前已见"));
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "17", "runId", "run-anch-9", "text", "断线窗口内"));
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "18", "runId", "run-anch-10", "text", "别家项目的事件"));
 
         SseClient client = connect("?projectId=17", "run-anch-9:1");
@@ -274,14 +292,14 @@ class EventsControllerSseTest {
     @Test
     void given_agent_event_before_connect_when_subscribe_without_last_event_id_then_no_replay()
             throws Exception {
-        appService.publishAgentEvent("error", Map.of(
+        publishAgentEvent("error", Map.of(
                 "projectId", "7", "runId", "run-9",
                 "message", "Failed to create model: DEEPSEEK_API_KEY is required"));
 
         SseClient client = connect("?projectId=7");
 
         assertThat(client.nextNonCommentLine(1500)).isNull();
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "7", "runId", "run-9", "text", "实时事件照常"));
         assertThat(client.nextNonCommentLine()).isEqualTo("id:run-9:2");
     }
@@ -295,14 +313,14 @@ class EventsControllerSseTest {
     void given_part_events_before_reconnect_when_subscribe_by_project_then_window_in_order()
             throws Exception {
         // 断线窗口内的当前 run 事件（部件 + 引擎透传真实形态）
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
                 "engine", "agentscope", "text", "正在准备演示数据。"));
-        appService.publishAgentEvent("part-action", Map.of(
+        publishAgentEvent("part-action", Map.of(
                 "projectId", "23", "runId", "run-live", "sessionId", "coder-23",
                 "engine", "agentscope", "toolCallId", "tc-1", "toolName", "write_file",
                 "state", "completed", "label", "编写【订单管理】"));
-        appService.publishAgentEvent("part-text", Map.of(
+        publishAgentEvent("part-text", Map.of(
                 "projectId", "24", "runId", "run-other", "sessionId", "coder-24",
                 "engine", "agentscope", "text", "别家项目的事件"));
 
@@ -331,7 +349,7 @@ class EventsControllerSseTest {
     @Test
     void given_notification_before_reconnect_when_subscribe_then_not_replayed()
             throws Exception {
-        appService.publishNotification("workspace-created", Map.of(
+        publishNotification("workspace-created", Map.of(
                 "projectId", "19", "projectName", "官网 demo", "container", "c", "projectType", "WEBSITE"));
 
         SseClient client = connect("?projectId=19", "run-gone2:9");
@@ -343,7 +361,7 @@ class EventsControllerSseTest {
     @Test
     void given_agent_events_before_connect_when_subscribe_with_blank_last_event_id_then_no_replay()
             throws Exception {
-        appService.publishAgentEvent("run-start", Map.of("runId", "run-blank-9", "prompt", "x"));
+        publishAgentEvent("run-start", Map.of("runId", "run-blank-9", "prompt", "x"));
 
         SseClient client = connect("?runId=run-blank-9", "");
 
@@ -367,7 +385,7 @@ class EventsControllerSseTest {
                 {"completed", "编写【订单管理】"},
         };
         for (String[] action : lifecycle) {
-            appService.publishAgentEvent("part-action", Map.of(
+            publishAgentEvent("part-action", Map.of(
                     "projectId", "77", "runId", "run-parts", "sessionId", "coder-77",
                     "engine", "agentscope", "toolCallId", "tc-1", "toolName", "write_file",
                     "state", action[0], "label", action[1]));

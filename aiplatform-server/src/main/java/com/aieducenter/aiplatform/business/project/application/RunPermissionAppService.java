@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -81,7 +82,7 @@ public class RunPermissionAppService {
      *                              （过期卡/平台重启丢账——刷新查看最新状态）
      */
     public void answer(Long projectId, String runId, String engineRef, boolean approved) {
-        projectRepository.findById(projectId)
+        Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
         Wait wait = waiting.get(engineRef);
         if (wait == null || !wait.runId().equals(runId)) {
@@ -92,7 +93,7 @@ public class RunPermissionAppService {
             throw new ApplicationException(ProjectMessage.PERMISSION_ANSWER_STALE);
         }
         // 先发落定事件再唤醒：确认卡先转终态，续跑过程事件（可能随即到达）在其后
-        eventBridge.emitPermissionResolved(projectId, runId, engineRef, approved);
+        eventBridge.emitPermissionResolved(projectId, project.getOwnerAccountId(), runId, engineRef, approved);
         wait.decision().complete(approved);
         log.info("[permission] 项目 {} run {} 权限确认作答：{}（engineRef={}）",
                 projectId, runId, approved ? "批准" : "拒绝", engineRef);

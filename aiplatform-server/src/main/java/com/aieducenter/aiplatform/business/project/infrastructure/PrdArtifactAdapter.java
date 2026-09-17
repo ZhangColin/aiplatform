@@ -42,15 +42,16 @@ public class PrdArtifactAdapter {
     }
 
     public void onWritten(String workspaceId) {
-        String projectId = transactionTemplate.execute(tx -> {
-            Project project = projectRepository.findByWorkspaceId(Long.parseLong(workspaceId))
+        Project project = transactionTemplate.execute(tx -> {
+            Project loaded = projectRepository.findByWorkspaceId(Long.parseLong(workspaceId))
                     .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
-            project.markPrdProduced();
-            projectRepository.save(project);
-            return project.getId().toString();
+            loaded.markPrdProduced();
+            projectRepository.save(loaded);
+            return loaded;
         });
         eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
-                ProjectEventTypes.PROJECT_ID_FIELD, projectId,
-                ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD));
+                ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
+                ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD,
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
     }
 }

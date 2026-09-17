@@ -362,7 +362,7 @@ public class GenerationAppService {
                 CoderRunAttempts.GENERATE_LABEL, true,
                 RunHeading.titled(STAGE0_TITLE));
         if (!stage0.succeeded()) {
-            eventBridge.emitRunFailed(projectId, firstRunId);
+            eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), firstRunId);
             return;
         }
         // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
@@ -385,7 +385,7 @@ public class GenerationAppService {
                     CoderRunAttempts.GENERATE_LABEL, false,
                     RunHeading.slice(slice, index + 1, slices.size()));
             if (!result.succeeded()) {
-                eventBridge.emitRunFailed(projectId, runId);
+                eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
                 return;
             }
             previousHandoff = result.closingText();
@@ -460,7 +460,8 @@ public class GenerationAppService {
                     Long.toString(project.getWorkspaceId()));
             eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                     ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
-                    ProjectEventTypes.URL_FIELD, url.toString()));
+                    ProjectEventTypes.URL_FIELD, url.toString(),
+                    EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
         }
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} preview-ready 推送失败（UI 面，不断流）：{}",

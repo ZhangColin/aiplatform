@@ -15,10 +15,11 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 - SSE name 恒为 `event`，前端每条连接一个 listener。
 - `payload` 恒为对象，必带关联字段；**payload 内禁用 `type` 键名**。
+- **归属路由键（[ADR-0018](../adr/0018-sse-delivery-user-isolation.md)，#208）**：payload 另携 `ownerAccountId`（两族共有，字符串，与 projectId/runId 同 idiom）——发布侧从聚合注入，投递按「事件归属 == 订阅者」隔离。**路由键非内容，前端不消费**（隔离修后只见自己的 accountId）。
 - 心跳：每 15s 发注释行 `:ping`（不进 listener，仅保活）。
-- 订阅：`GET /api/events?projectId=xxx&runId=xxx`（过滤参数与 payload 关联字段同名，多参数 AND；缺省 = 只收通知族）。
-- **族投递规则**：智能体事件族只投递给带过滤（`projectId` 或 `runId`）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤订阅（站点级常开连接）只收平台通知族。
-- **Last-Event-ID 分野（#89 断线补发）**：有值（浏览器断线重连自动携带）= 断线补发——先收命中过滤的智能体缓冲事件中**锚事件之后**的窗口（见下）再进实时流；无值（缺席或空串）= 新连接（刷新/回访）= **不补发**——对话史经 REST 水合（`GET /api/projects/{id}/conversation`），平台状态以查询收敛。
+- 订阅：`GET /api/events?projectId=xxx&runId=xxx`（过滤参数与 payload 关联字段同名，多参数 AND；缺省 = 只收通知族）。订阅握手绑定登录账号；过滤参数维持纯兴趣选择——他人 projectId 的过滤订阅 = 静默空流（连接不断）。
+- **族投递规则**：智能体事件族只投递给带过滤（`projectId` 或 `runId`）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤订阅（站点级常开连接）只收平台通知族。未过滤订阅语义 = **我的全部通知**（对他人 deny-by-default）。
+- **Last-Event-ID 分野（#89 断线补发）**：有值（浏览器断线重连自动携带）= 断线补发——先收命中过滤的智能体缓冲事件中**锚事件之后**的窗口（见下）再进实时流；无值（缺席或空串）= 新连接（刷新/回访）= **不补发**——对话史经 REST 水合（`GET /api/projects/{id}/conversation`），平台状态以查询收敛。补发走与实时同一投递谓词（含归属匹配——只补本人）。
 
 ## 两族语义（合并通道不合并语义）
 

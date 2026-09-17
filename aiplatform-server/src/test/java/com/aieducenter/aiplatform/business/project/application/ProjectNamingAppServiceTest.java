@@ -189,8 +189,10 @@ class ProjectNamingAppServiceTest {
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PROJECT_RENAMED),
                 payload.capture());
-        assertThat(payload.getValue()).containsOnly(
-                Map.entry("projectId", "49"), Map.entry("projectName", "品牌官网"));
+        // owner 为路由键非内容（ADR-0018）——本缝只验内容（projectId + 项目名）
+        assertThat(payload.getValue())
+                .containsEntry("projectId", "49")
+                .containsEntry("projectName", "品牌官网");
     }
 
     @Test

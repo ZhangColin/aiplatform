@@ -269,7 +269,7 @@ public class IterationAppService {
                         // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
                         // 不发（轨道仍在途，「重新修改」零闪现）。锚 = 该场 run 的
                         // 用户面标识（首试 runId，#84 重试不换新锚）
-                        eventBridge.emitRunFailed(projectId, runId);
+                        eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
                     }
                     return;
                 }

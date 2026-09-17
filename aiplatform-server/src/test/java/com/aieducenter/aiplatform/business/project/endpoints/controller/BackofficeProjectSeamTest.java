@@ -13,6 +13,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import com.cartisan.core.context.RequestContext;
+
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
@@ -385,7 +387,15 @@ class BackofficeProjectSeamTest {
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
                 Instant.parse("2026-09-13T01:00:00Z")));
-        return orderAppService.place(projectId);
+        try {
+            // 下单绑定缺省账号会话——owner 路由键非空（发布口强制校验）
+            return RequestContext.runFor(
+                    new RequestContext(null, null, null, null, /* userId */ 900001L,
+                            null, null, null),
+                    () -> orderAppService.place(projectId));
+        } catch (Exception e) {
+            throw new RuntimeException("下单夹具绑定缺省账号失败", e);
+        }
     }
 
     /** 库内创建时点（边界断言以库值为准，不依赖应用时钟）。 */

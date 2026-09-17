@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.cartisan.core.context.RequestContext;
+
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 
 /**
@@ -42,12 +44,13 @@ public class EventsController {
     }
 
     /**
-     * 订阅事件流（两族混载）。Last-Event-ID 请求头作新连/重连分野（#89 断线补发）：
-     * 有值（浏览器断线重连自动携带）= 断线补发——先补发命中订阅过滤的智能体缓冲
-     * 事件中锚事件之后的窗口（默认 1000 条深，app.agent-events.replay-depth）再进
-     * 实时流；无值（缺席或空串）= 新连接/刷新 = 不补发——对话史经 REST 水合
-     * （GET /api/projects/{id}/conversation），重放缓冲只承担断线窗口。通知族永不
-     * 补发（不进缓冲）。
+     * 订阅事件流（两族混载）。订阅握手读取登录账号绑定归属（匿名 401 已由
+     * {@code /api/**} 拦截面保证），投递谓词叠加「事件归属 == 订阅者」匹配（ADR-0018）。
+     * Last-Event-ID 请求头作新连/重连分野（#89 断线补发）：有值（浏览器断线重连自动
+     * 携带）= 断线补发——先补发命中订阅过滤的智能体缓冲事件中锚事件之后的窗口
+     * （默认 1000 条深，app.agent-events.replay-depth）再进实时流；无值（缺席或空串）
+     * = 新连接/刷新 = 不补发——对话史经 REST 水合（GET /api/projects/{id}/conversation），
+     * 重放缓冲只承担断线窗口。通知族永不补发（不进缓冲）。
      */
     @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "订阅事件流（SSE，单端点单流）", description = """
@@ -63,17 +66,20 @@ public class EventsController {
 
             信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
             智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
-            对象、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`。
+            对象、内禁 type 键名）。payload 另携 `ownerAccountId` 归属路由键（两族共
+            有；前端不消费——路由键非内容）。心跳：每 15s 发注释行 `:ping`。
 
-            订阅：`?projectId=` / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；
-            缺省 = 只收平台通知族（智能体事件族只投递给带过滤的订阅——过程细节是项目
-            内事实）。智能体事件带 projectId（编排桥接注入）。
+            订阅：订阅握手绑定登录账号，投递按「事件归属 == 订阅者」隔离（未过滤订阅 =
+            我的全部通知；他人 projectId 过滤订阅 = 静默空流、连接不断）。`?projectId=`
+            / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；缺省 = 只收平台
+            通知族（智能体事件族只投递给带过滤的订阅——过程细节是项目内事实）。智能体
+            事件带 projectId（编排桥接注入）。
 
             名册（type → 说明，payload 除关联字段外）：
 
             | type | 族 | payload 字段 |
             |---|---|---|
-            | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed / order-repriced | 通知 | projectId（+ 各自载荷） |
+            | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed / order-repriced | 通知 | projectId（+ 各自载荷）+ ownerAccountId（路由键） |
             | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title + 生成轨道切片 index/total） |
             | error | 智能体·生命周期 | runId, message |
             | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
@@ -99,7 +105,10 @@ public class EventsController {
                     + "不补发（对话史经 REST 水合，平台状态以查询收敛）")
             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         // 新连/重连分野：空串视同无值（新连接）——浏览器只在真见过事件后才带非空值
-        return appService.subscribe(projectId, runId,
+        // 订阅握手绑定登录账号（匿名 401 已由 /api/** 拦截面保证——归属路由键，非内容）
+        String ownerAccountId = RequestContext.getUserId() == null ? null
+                : RequestContext.getUserId().toString();
+        return appService.subscribe(ownerAccountId, projectId, runId,
                 lastEventId != null && !lastEventId.isBlank() ? lastEventId : null);
     }
 

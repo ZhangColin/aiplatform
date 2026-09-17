@@ -22,6 +22,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -68,7 +69,8 @@ class PreviewReadyRelayTest {
                         URI.create("http://ws-9600.localhost"))));
 
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
-                eq(Map.of("projectId", projectId.toString(), "url", "http://ws-9600.localhost")));
+                argThat(payload -> projectId.toString().equals(payload.get("projectId"))
+                        && "http://ws-9600.localhost".equals(payload.get("url"))));
     }
 
     @Test

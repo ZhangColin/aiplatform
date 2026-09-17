@@ -728,6 +728,9 @@ class BackofficeOrderSeamTest {
         });
     }
 
+    /** 缺省下单账号（placeOrder 未显式指定账号时绑定的会话 user——owner 路由键非空）。 */
+    private static final Long DEFAULT_ACCOUNT_ID = 900001L;
+
     /** 经真应用服务下单（真库写入、快照冻结），返回带 TSID 的订单回执 */
     private OrderResponse placeOrder() {
         return placeOrder(PROJECT_ID);
@@ -735,23 +738,36 @@ class BackofficeOrderSeamTest {
 
     /** 指定项目的下单夹具（多单场景各用独立项目——同项目至多一个未终结单）。 */
     private OrderResponse placeOrder(long projectId) {
+        stubProject(projectId);
+        try {
+            return RequestContext.runFor(
+                    new RequestContext(null, null, null, null, /* userId */ DEFAULT_ACCOUNT_ID,
+                            null, null, null),
+                    () -> appService.place(projectId));
+        } catch (Exception e) {
+            throw new RuntimeException("下单夹具绑定缺省账号失败", e);
+        }
+    }
+
+    /** 以指定账号为下单人（RequestContext 会话内下单，ownerAccountId 落值）。 */
+    private OrderResponse placeOrderAs(long projectId, Long accountId) throws Exception {
+        stubProject(projectId);
+        // 8 位构造位参中 userId 居第 5 位（requestId/clientIp/callerAppId/callerAppName
+        // 之后），位参标注防错读
+        return RequestContext.runFor(
+                new RequestContext(null, null, null, null, /* userId */ accountId,
+                        null, null, null),
+                () -> appService.place(projectId));
+    }
+
+    /** 项目读面桩（detail/prd 跨 BC 软引用收口——下单冻结快照所需）。 */
+    private void stubProject(long projectId) {
         when(projectQueryAppService.detail(projectId)).thenReturn(new ProjectDetailResponse(
                 Long.toString(projectId), "seam 测试项目", ProjectType.WEBSITE, "官网", "9100",
                 ProjectStatus.IN_PROGRESS, ProjectStatus.IN_PROGRESS.getName(), false,
                 LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null));
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z")));
-        return appService.place(projectId);
-    }
-
-    /** 以指定账号为下单人（RequestContext 会话内下单，ownerAccountId 落值）。 */
-    private OrderResponse placeOrderAs(long projectId, Long accountId) throws Exception {
-        // 8 位构造位参中 userId 居第 5 位（requestId/clientIp/callerAppId/callerAppName
-        // 之后），位参标注防错读
-        return RequestContext.runFor(
-                new RequestContext(null, null, null, null, /* userId */ accountId,
-                        null, null, null),
-                () -> placeOrder(projectId));
     }
 
     /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */

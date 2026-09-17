@@ -39,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -282,7 +283,7 @@ class ProjectLifecycleAppServiceTest {
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
-                eq(Map.of("projectId", projectId.toString())));
+                argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
     }
 
     @Test
@@ -296,7 +297,7 @@ class ProjectLifecycleAppServiceTest {
         // 物理销毁失败不阻断记录删除（真删级联优先，物理残留可重试）
         verifyNoRows();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
-                eq(Map.of("projectId", projectId.toString())));
+                argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
     }
 
     @Test
@@ -319,7 +320,8 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.url()).isEqualTo("http://localhost:30080");
         // SSE preview-ready（projectId + url）
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
-                eq(Map.of("projectId", projectId.toString(), "url", "http://localhost:30080")));
+                argThat(payload -> projectId.toString().equals(payload.get("projectId"))
+                        && "http://localhost:30080".equals(payload.get("url"))));
     }
 
     // ---------- 测试数据 ----------

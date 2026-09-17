@@ -162,7 +162,8 @@ public class DispatchAppService {
                 ? (project.getGeneratedAt() != null
                         ? GUIDE_ORDER_TEXT_GENERATED : GUIDE_ORDER_TEXT_NOT_GENERATED)
                 : GUIDE_GENERIC_TEXT;
-        eventBridge.emitGuideReply(project.getId(), runId, prompt, GUIDE_LABEL, text);
+        eventBridge.emitGuideReply(project.getId(), project.getOwnerAccountId(), runId, prompt,
+                GUIDE_LABEL, text);
         // 对话史落库（#89）：轻引导也是对话面——用户发言 + 定型文案两行（事件已发，
         // 补写失败只记日志）；圈注附件随发言同落
         conversationHistory.recordGuide(project.getId(), runId, prompt, text, attachments);

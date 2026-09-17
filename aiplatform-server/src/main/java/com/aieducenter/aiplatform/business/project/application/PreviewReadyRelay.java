@@ -54,6 +54,7 @@ public class PreviewReadyRelay {
     private void publishFor(Project project, URI url) {
         eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
-                ProjectEventTypes.URL_FIELD, url.toString()));
+                ProjectEventTypes.URL_FIELD, url.toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
     }
 }

@@ -40,6 +40,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 class RunPermissionAppServiceTest {
 
     private static final long PROJECT_ID = 42L;
+    private static final long OWNER_ACCOUNT_ID = 7L;
 
     @Mock
     private AgentEventBridge eventBridge;
@@ -58,7 +59,8 @@ class RunPermissionAppServiceTest {
     }
 
     private void givenProjectExists() {
-        when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(Mockito.mock(Project.class)));
+        when(projectRepository.findById(PROJECT_ID))
+                .thenReturn(Optional.of(Project.create("权限测试", null, 900L, OWNER_ACCOUNT_ID)));
     }
 
     @Test
@@ -91,7 +93,7 @@ class RunPermissionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PERMISSION_ANSWER_STALE.message());
         // 校验拒绝不发射事件、不消耗会合点
         verify(eventBridge, Mockito.never())
-                .emitPermissionResolved(any(), any(), any(), anyBoolean());
+                .emitPermissionResolved(any(), any(), any(), any(), anyBoolean());
 
         // 正确 runId 仍可作答（会合点完好——串卡校验只拦错卡，不误伤）
         appService.answer(PROJECT_ID, "run-1", "reply-1", true);
@@ -124,7 +126,7 @@ class RunPermissionAppServiceTest {
         ArgumentCaptor<String> runId = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> engineRef = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Boolean> approved = ArgumentCaptor.forClass(Boolean.class);
-        verify(eventBridge).emitPermissionResolved(eq(PROJECT_ID), runId.capture(),
+        verify(eventBridge).emitPermissionResolved(eq(PROJECT_ID), eq(OWNER_ACCOUNT_ID), runId.capture(),
                 engineRef.capture(), approved.capture());
         assertThat(runId.getValue()).isEqualTo("run-7");
         assertThat(engineRef.getValue()).isEqualTo("reply-9");
@@ -178,7 +180,7 @@ class RunPermissionAppServiceTest {
 
         // 恰一次：落定事件只发一条（permission-resolved 双发会让确认卡终态漂移）
         verify(eventBridge, Mockito.times(1))
-                .emitPermissionResolved(eq(PROJECT_ID), eq("run-3"), eq("reply-3"), eq(true));
+                .emitPermissionResolved(eq(PROJECT_ID), eq(OWNER_ACCOUNT_ID), eq("run-3"), eq("reply-3"), eq(true));
     }
 
     @Test
@@ -198,7 +200,7 @@ class RunPermissionAppServiceTest {
         assertThat(parked.isAlive()).isFalse();
         assertThat(wokeWith.get()).isEqualTo(RunPermissionAppService.Decision.TIMED_OUT);
         verify(eventBridge, Mockito.never())
-                .emitPermissionResolved(any(), any(), any(), anyBoolean());
+                .emitPermissionResolved(any(), any(), any(), any(), anyBoolean());
         assertThatThrownBy(() -> appService.answer(PROJECT_ID, "run-t", "reply-t", true))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PERMISSION_ANSWER_STALE.message());

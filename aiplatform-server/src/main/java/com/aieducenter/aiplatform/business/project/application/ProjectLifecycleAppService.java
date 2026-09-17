@@ -104,12 +104,13 @@ public class ProjectLifecycleAppService {
             throw e;
         }
 
-        // SSE（副作用真实落定后发射，ADR-0001）
+        // SSE（副作用真实落定后发射，ADR-0001；归属路由键取自项目聚合，ADR-0018）
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_CREATED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
                 ProjectEventTypes.PROJECT_NAME_FIELD, project.getName(),
                 ProjectEventTypes.CONTAINER_FIELD, workspace.containerName(),
-                ProjectEventTypes.PROJECT_TYPE_FIELD, project.getType().name()));
+                ProjectEventTypes.PROJECT_TYPE_FIELD, project.getType().name(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
 
         // 异步 LLM 取名（占位名先落，取名后台完成落位；空 requirement 不取名）
         namingService.nameAsync(project.getId(), command.requirement());
@@ -178,7 +179,8 @@ public class ProjectLifecycleAppService {
         knowledgeAppService.purgeByProject(projectId);
         conversationHistory.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
-                ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString()));
+                ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
     }
 
     /**
@@ -207,7 +209,8 @@ public class ProjectLifecycleAppService {
         }
         eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
-                ProjectEventTypes.URL_FIELD, url.toString()));
+                ProjectEventTypes.URL_FIELD, url.toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
         return new ProjectPreviewResponse(url.toString());
     }
 

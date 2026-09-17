@@ -262,13 +262,17 @@ public class OrderAppService {
         return OrderResponse.of(persisted);
     }
 
-    /** 通知族发射（payload 两事件同形：projectId/orderId/status/statusName，不含金额）。 */
+    /**
+     * 通知族发射（payload 两事件同形：projectId/orderId/status/statusName，不含金额；
+     * 归属路由键 ownerAccountId 取自订单聚合——含后台路径，非操作者上下文，ADR-0018）。
+     */
     private void publishNotification(String eventType, Order order) {
         eventsAppService.publishNotification(eventType, Map.of(
                 OrderEventTypes.PROJECT_ID_FIELD, order.getProjectId().toString(),
                 OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
                 OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),
-                OrderEventTypes.STATUS_NAME_FIELD, order.getStatus().getName()));
+                OrderEventTypes.STATUS_NAME_FIELD, order.getStatus().getName(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId())));
     }
 
     private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {

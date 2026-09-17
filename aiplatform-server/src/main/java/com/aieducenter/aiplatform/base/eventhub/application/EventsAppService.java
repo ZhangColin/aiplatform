@@ -35,6 +35,12 @@ import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub
  * 有值（浏览器断线重连自动携带）= 断线补发（缓冲中锚事件之后的窗口），无值
  * （新连接/刷新）= 不补发（#89 起——对话史水合归 REST，重放缓冲降级为断线补发）。</p>
  *
+ * <p><b>订阅者归属隔离（ADR-0018，#208）</b>：订阅握手绑定登录账号，每事件以
+ * {@code ownerAccountId} 路由键携带归属；投递谓词统一叠加「事件归属 == 订阅者」
+ * 匹配（实时与重放同谓词），未过滤订阅语义 = 我的全部通知，他人 projectId 过滤
+ * 订阅 = 静默空流。归属由发布侧注入（本层不查库），两个发布口对归属键强制校验、
+ * 漏传发布期即炸——未来发布点结构性防漏。</p>
+ *
  * <p>发射制：业务编排层在副作用真实落定后调用（base 区不发 SSE）；事件 type
  * 名册见 docs/spec/SSE事件清单.md（代码侧引用 {@code XxxEventTypes} 常量类，
  * 禁止字符串字面量散落）。</p>
@@ -51,6 +57,13 @@ public class EventsAppService {
     /** 智能体事件族关联字段（正本 = {@link AgentEventTypes#RUN_FIELD}）。 */
     public static final String RUN_FIELD = AgentEventTypes.RUN_FIELD;
 
+    /**
+     * 归属账号路由键（ADR-0018：#208 通道按订阅者隔离）：payload 字段，与
+     * projectId/runId 同 idiom；发布侧注入、投递谓词按「事件归属 == 订阅者」匹配。
+     * 前端不消费（路由键非内容——隔离修后只见自己的 accountId）。
+     */
+    public static final String OWNER_FIELD = "ownerAccountId";
+
     private final SseChannelHub hub;
 
     public EventsAppService(SseChannelHub hub, AgentEventProperties properties) {
@@ -61,21 +74,27 @@ public class EventsAppService {
     }
 
     /**
-     * 订阅事件流（单端点单流，两族混载）。过滤参数可单用可叠用（AND），均为空 =
-     * 只收平台通知族（智能体事件族不投递给未过滤订阅）。断线补发（#89 重放缓冲
-     * 降级）：lastEventId 非空（浏览器断线重连自动携带）——先收缓冲中锚事件之后
-     * 命中过滤谓词的智能体事件（断线窗口，锚不在缓冲则整段缓冲）再进实时流；空
-     * （新连接/刷新）不补发——对话史经 REST 水合，重放缓冲只承担断线窗口、不再
-     * 承担刷新重建。补发谓词与实时谓词同一（含族投递规则），通知族不在缓冲、
-     * 天然不补发。
+     * 订阅事件流（单端点单流，两族混载）。订阅握手绑定登录账号——{@code ownerAccountId}
+     * 为订阅者身份，投递谓词叠加「事件归属 == 订阅者」匹配（ADR-0018：#208 通道
+     * 隔离，匿名 401 由 {@code /api/**} 拦截面保证）。过滤参数可单用可叠用（AND），
+     * 均为空 = 只收平台通知族（智能体事件族不投递给未过滤订阅）；过滤参数维持纯
+     * 兴趣选择——他人 projectId 的过滤订阅 = 静默空流（连接不断）。断线补发
+     * （#89 重放缓冲降级）：lastEventId 非空（浏览器断线重连自动携带）——先收缓冲
+     * 中锚事件之后命中过滤谓词的智能体事件（断线窗口，锚不在缓冲则整段缓冲）再进
+     * 实时流；空（新连接/刷新）不补发——对话史经 REST 水合，重放缓冲只承担断线
+     * 窗口、不再承担刷新重建。补发谓词与实时谓词同一（含归属与族投递规则），
+     * 通知族不在缓冲、天然不补发。
      */
-    public SseEmitter subscribe(String projectId, String runId, String lastEventId) {
-        return hub.subscribe(CHANNEL, deliveryPredicate(projectId, runId), lastEventId);
+    public SseEmitter subscribe(String ownerAccountId, String projectId, String runId,
+            String lastEventId) {
+        return hub.subscribe(CHANNEL, deliveryPredicate(ownerAccountId, projectId, runId),
+                lastEventId);
     }
 
     /**
-     * 发射一条平台通知（fire-and-forget）。payload 必带关联字段 projectId——本层
-     * fail-fast；不进重放缓冲（新连接不补发，REST 查询兜底）。
+     * 发射一条平台通知（fire-and-forget）。payload 必带关联字段 projectId 与归属路由
+     * 键 ownerAccountId——本层 fail-fast（漏传发布期即炸，未来发布点结构性防漏）；
+     * 不进重放缓冲（新连接不补发，REST 查询兜底）。
      */
     public void publishNotification(String type, Map<String, Object> payload) {
         Object projectId = payload.get(PROJECT_FIELD);
@@ -83,12 +102,14 @@ public class EventsAppService {
             throw new IllegalArgumentException(
                     "平台通知 payload 必带关联字段 " + PROJECT_FIELD + "（SSE事件清单·信封）");
         }
+        requireOwner(payload, "平台通知");
         hub.broadcastUnbuffered(CHANNEL, projectId.toString(), type, payload);
     }
 
     /**
-     * 发射一条智能体事件（fire-and-forget）。payload 必带关联字段 runId——本层
-     * fail-fast；进重放缓冲（新连接按订阅过滤补发，断线重连不补发）。
+     * 发射一条智能体事件（fire-and-forget）。payload 必带关联字段 runId 与归属路由键
+     * ownerAccountId——本层 fail-fast（漏传发布期即炸）；进重放缓冲（新连接按订阅
+     * 过滤补发，断线重连不补发）。
      */
     public void publishAgentEvent(String type, Map<String, Object> payload) {
         Object runId = payload.get(RUN_FIELD);
@@ -96,6 +117,7 @@ public class EventsAppService {
             throw new IllegalArgumentException(
                     "智能体事件 payload 必带关联字段 " + RUN_FIELD + "（SSE事件清单·信封）");
         }
+        requireOwner(payload, "智能体事件");
         hub.broadcast(CHANNEL, runId.toString(), type, payload);
     }
 
@@ -108,15 +130,41 @@ public class EventsAppService {
     }
 
     /**
-     * 投递谓词（实时与重放同源）：字段过滤 AND + 族投递规则——智能体事件族
-     * （payload 携带 runId）只投递给带过滤的订阅，未过滤订阅只收通知族。
+     * 归属路由键的载荷值（Long → 十进制字符串）：发布点从聚合取归属注入。占位形
+     * 聚合（测试/无会话上下文）owner 未落时返回空串——空串被发布口按「漏传」拒发，
+     * 也永不匹配任何真实订阅者（deny-by-default）。
+     */
+    public static String ownerPayload(Long ownerAccountId) {
+        return ownerAccountId == null ? "" : ownerAccountId.toString();
+    }
+
+    /**
+     * 投递谓词（实时与重放同源）：归属匹配（事件 owner == 订阅者，恒生效）+ 字段
+     * 过滤 AND + 族投递规则——智能体事件族（payload 携带 runId）只投递给带过滤的
+     * 订阅，未过滤订阅只收通知族。归属匹配不套 {@link #matches} 的空值跳过语义——
+     * 订阅者身份恒非空（匿名 401 拦截），事件归属漏传/空串即不达任何订阅。
      */
     private static Predicate<Map<String, Object>> deliveryPredicate(
-            String projectId, String runId) {
+            String ownerAccountId, String projectId, String runId) {
         boolean filtered = notBlank(projectId) || notBlank(runId);
-        return payload -> matches(payload, PROJECT_FIELD, projectId)
+        return payload -> sameOwner(payload, ownerAccountId)
+                && matches(payload, PROJECT_FIELD, projectId)
                 && matches(payload, RUN_FIELD, runId)
                 && (filtered || payload.get(RUN_FIELD) == null);
+    }
+
+    /** 归属匹配（路由键，恒生效）：事件 owner 与订阅者同值才投递；空/漏即 deny。 */
+    private static boolean sameOwner(Map<String, Object> payload, String ownerAccountId) {
+        return Objects.equals(String.valueOf(payload.get(OWNER_FIELD)), ownerAccountId);
+    }
+
+    /** 发布口归属键强制校验（与 projectId/runId 同级）：漏传/空串发布期即炸。 */
+    private static void requireOwner(Map<String, Object> payload, String family) {
+        Object ownerAccountId = payload.get(OWNER_FIELD);
+        if (ownerAccountId == null || ownerAccountId.toString().isBlank()) {
+            throw new IllegalArgumentException(
+                    family + " payload 必带归属路由键 " + OWNER_FIELD + "（SSE事件清单·信封）");
+        }
     }
 
     private static boolean notBlank(String value) {

@@ -7,7 +7,13 @@
  * 直接信任转型（同源本地后端）；缺字段的容错呈现归消费端。
  */
 
-/** 单端点单流统一信封：`data = {type, payload, ts}`（正本「信封」节）。 */
+/**
+ * 单端点单流统一信封：`data = {type, payload, ts}`（正本「信封」节）。
+ *
+ * 注（ADR-0018，#208 通道按订阅者隔离）：payload 另携 `ownerAccountId` 归属路由
+ * 键（两族共有）——服务端据此按「事件归属 == 订阅者」定向投递；**路由键非内容，
+ * 前端不消费**（隔离修后只见自己的 accountId），故不在下方各 payload 类型中建模。
+ */
 export type SseEnvelope = {
   type: string;
   payload: Record<string, unknown>;

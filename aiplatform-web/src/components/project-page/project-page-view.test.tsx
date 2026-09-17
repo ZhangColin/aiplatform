@@ -191,4 +191,58 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     });
     expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />)).not.toContain("确认下单");
   });
+
+  // ---------- 订单 tab 回访自动挂载（#205 三面渗透：挂载 + 状态点，不切换） ----------
+
+  /** 成果区 tablist 切片（tab 条起至「新标签页」触发器——mobile 双页签也有
+   * role=tab，全页计数会混入，切片内只数范式 tab）。 */
+  function outputsTabStrip(html: string) {
+    return html.slice(html.indexOf('aria-label="成果区"'), html.indexOf('aria-label="新标签页"'));
+  }
+
+  it("回访挂着待报价订单：订单 tab 自动挂载（簇上三枚）+ 琥珀状态点，激活面仍是「系统」", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+      activeOrder: { id: "o1", status: 1, statusName: "待报价" },
+    });
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    // 自动挂载：默认「系统」「文档」+「订单」= 三枚 tab
+    const strip = outputsTabStrip(html);
+    expect((strip.match(/role="tab"/g) ?? []).length).toBe(3);
+    // 不自动切换：唯一激活面仍是「系统」，订单面板主体未渲染（挂载≠激活）
+    expect((strip.match(/role="tab" aria-selected="true"/g) ?? []).length).toBe(1);
+    const selectedAt = strip.indexOf('role="tab" aria-selected="true"');
+    expect(strip.slice(selectedAt, selectedAt + 800)).toContain("系统");
+    expect(html).not.toContain("已收到您的订单，后台正在评估报价");
+    // 状态点：待报价 = 琥珀等待
+    expect(html).toMatch(/data-slot="order-status-dot" title="待报价" aria-hidden="true" class="[^"]*bg-amber-500/);
+  });
+
+  it("回访挂着已报价订单（待支付）：状态点转主色行动档（与路标层最强档同语言）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+      activeOrder: { id: "o1", status: 2, statusName: "已报价" },
+    });
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    expect((outputsTabStrip(html).match(/role="tab"/g) ?? []).length).toBe(3);
+    expect(html).toMatch(/data-slot="order-status-dot" title="待支付" aria-hidden="true" class="[^"]*bg-primary/);
+  });
+
+  it("无未终结订单：订单 tab 不自动挂载、无状态点", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    expect((outputsTabStrip(html).match(/role="tab"/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('data-slot="order-status-dot"');
+  });
 });

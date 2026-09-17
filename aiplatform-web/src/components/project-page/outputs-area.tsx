@@ -18,7 +18,8 @@ import { PARADIGMS, paradigmOf, type ParadigmCtx } from "./paradigms";
  * 已挂范式 tab +「+ 新标签页」（按范式注册表加挂）+ 收起键，一行即标题；
  * 主体 = 激活范式（run 过程呈现归对话区工作消息）。
  * 平铺无圆角：与对话列同墙同地。tab 状态归装配层（useOutputsTabs）：
- * 自动切换（生成→系统、下单→订单、「去看看」→文档）与手动切换同一入口。
+ * 自动切换（生成→系统、下单→订单、「去看看」→文档）与手动切换同一入口；
+ * 自动挂载不切换（回访有未终结订单挂「订单」，#205）走 attach。
  */
 
 /** 成果区 tab 簇状态（装配层持有；自动/手动切换同一入口）。 */
@@ -29,6 +30,8 @@ export type OutputsTabs = {
   activeTab: string;
   /** 挂载（若无）并激活某范式——「+ 新标签页」与自动切换共用。 */
   mount: (id: string) => void;
+  /** 仅挂载不激活（#205 回访订单 tab 自动挂载用——tab 在簇上、状态点点亮，不抢激活面）。 */
+  attach: (id: string) => void;
   /** 仅切换激活（tab 点选）。 */
   activate: (id: string) => void;
   /** 关闭某范式 tab；关的是激活范式则回退剩余首个，最后一面不可关。 */
@@ -52,6 +55,13 @@ export function useOutputsTabs(): OutputsTabs {
     }));
   }
 
+  function attach(id: string) {
+    setState(({ openTabs, activeTab }) => ({
+      openTabs: openTabs.includes(id) ? openTabs : [...openTabs, id],
+      activeTab,
+    }));
+  }
+
   function close(id: string) {
     setState(({ openTabs, activeTab }) => {
       const next = openTabs.filter((t) => t !== id);
@@ -64,6 +74,7 @@ export function useOutputsTabs(): OutputsTabs {
     openTabs: state.openTabs,
     activeTab: state.activeTab,
     mount,
+    attach,
     activate: (id) => setState((s) => ({ ...s, activeTab: id })),
     close,
   };
@@ -111,6 +122,7 @@ export function OutputsArea({
                 onClick={() => tabs.activate(id)}
               >
                 {p.icon} {p.label}
+                {p.accent?.(ctx)}
               </button>
               {tabs.openTabs.length > 1 ? (
                 <button

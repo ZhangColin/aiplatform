@@ -34,4 +34,36 @@ describe("RecentProjectCard（首页最近项目卡：四态 · 更新时间）"
     );
     expect(html).toContain("未命名项目");
   });
+
+  // ---------- 四态徽标分量（#205 三面渗透：待支付最强档、不带金额） ----------
+
+  it("待支付态徽标提至最强视觉档（primary 实底）、不带金额", () => {
+    const html = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, activeOrderStatus: 2 }} />,
+    );
+    expect(html).toContain("待支付");
+    expect(html).toContain("bg-primary text-primary-foreground");
+    expect(html).not.toContain("bg-secondary");
+    expect(html).not.toContain("¥"); // 路标层只报状态，金额进项目语境内看
+  });
+
+  it("其余三态徽标保持次级档（呈现不劣化）", () => {
+    // 进行中（无订单）
+    const inProgress = renderToStaticMarkup(<RecentProjectCard project={project} />);
+    expect(inProgress).toContain("bg-secondary");
+
+    // 待报价（activeOrderStatus=1）
+    const awaitingQuote = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, activeOrderStatus: 1 }} />,
+    );
+    expect(awaitingQuote).toContain("待报价");
+    expect(awaitingQuote).toContain("bg-secondary");
+
+    // 已归档
+    const archived = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, archived: true }} />,
+    );
+    expect(archived).toContain("已归档");
+    expect(archived).toContain("bg-secondary");
+  });
 });

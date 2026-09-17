@@ -3,6 +3,8 @@
 import { Database, FileText, Folder, Monitor, ReceiptText, Settings, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ORDER_STATUS } from "@/lib/orders/lock";
+import { cn } from "@/lib/utils";
 import type { CoderRunStatus } from "@/lib/store/generation";
 
 import { PrdDoc } from "./prd-doc";
@@ -30,6 +32,8 @@ export type ParadigmCtx = {
   coderStatus?: CoderRunStatus;
   /** 订单卡挂的单（未终结单优先；归档终态挂最近单，null = 无单 → 占位）。 */
   orderCardId?: string | null;
+  /** 未终结订单状态（#205 订单 tab 状态点输入；undefined = 无未终结单）。 */
+  activeOrderStatus?: number;
   /** 项目归档终态。 */
   projectArchived?: boolean;
   /** 发起生成成功回调（切系统范式呈现等待态），归装配层。 */
@@ -44,6 +48,8 @@ export type Paradigm = {
   blurb: string;
   /** 默认挂载？false = 仅在「+ 新标签页」里可加。 */
   defaultOn: boolean;
+  /** tab 簇上的状态点缀（ctx 派生；如订单 tab 的未终结状态点），无则不渲染。 */
+  accent?: (ctx: ParadigmCtx) => ReactNode;
   render: (ctx: ParadigmCtx) => ReactNode;
 };
 
@@ -97,6 +103,7 @@ export const PARADIGMS: Paradigm[] = [
     icon: <ReceiptText className="size-3.5" />,
     defaultOn: false,
     blurb: "下单与发布的记录",
+    accent: (ctx) => <OrderTabDot status={ctx.activeOrderStatus} />,
     render: (ctx) => <OrderPanel orderId={ctx.orderCardId} projectArchived={ctx.projectArchived} />,
   },
   {
@@ -128,4 +135,23 @@ export const PARADIGMS: Paradigm[] = [
 /** 按 id 取范式；装配层自动切换（生成→系统、下单→订单）用。 */
 export function paradigmOf(id: string): Paradigm | undefined {
   return PARADIGMS.find((p) => p.id === id);
+}
+
+/**
+ * 订单 tab 状态点（#205 三面渗透）：未终结订单在 → 点亮（tab 自动挂载后
+ * 「平台找我有事」在簇上常驻可感）——待报价 = 琥珀等待（与报价卡同族）、
+ * 待支付 = 主色行动（与路标层最强档徽标同语言）；其余状态不点灯（克制，
+ * 不催付）。状态语义由 title 承载（原生悬浮提示），点本身纯装饰。
+ */
+function OrderTabDot({ status }: { status?: number }) {
+  if (status !== ORDER_STATUS.pendingQuote && status !== ORDER_STATUS.quoted) return null;
+  const waiting = status === ORDER_STATUS.pendingQuote;
+  return (
+    <span
+      data-slot="order-status-dot"
+      title={waiting ? "待报价" : "待支付"}
+      aria-hidden="true"
+      className={cn("size-1.5 shrink-0 rounded-full", waiting ? "bg-amber-500" : "bg-primary")}
+    />
+  );
 }

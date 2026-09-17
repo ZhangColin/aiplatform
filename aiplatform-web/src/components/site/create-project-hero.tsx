@@ -8,7 +8,6 @@ import { toast } from "sonner";
 
 import { Composer } from "@/components/composer/composer";
 import { ProjectAvatar } from "@/components/project-avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { useCreateProject } from "@/hooks/use-create-project";
@@ -18,11 +17,12 @@ import {
   lastTouchedAt,
   projectStage,
   recentProjects,
-  stageLabel,
   type ProjectSummary,
 } from "@/lib/projects/list";
 import { buildCreateProjectCommand } from "@/lib/projects/create";
 import { formatRelativeTime } from "@/lib/utils/time";
+
+import { StageBadge } from "./stage-badge";
 
 /**
  * 首页 = 居中对谈入口（#72 定稿 / #76 落地）：主标 + 共享发送框（hero 加大
@@ -162,7 +162,7 @@ export function CreateProjectHero() {
   );
 }
 
-/** 最近项目卡：首字色块头像 + 项目名 + 四态 · 更新时间，点击进项目页。 */
+/** 最近项目卡：首字色块头像 + 项目名 + 四态徽标（#205 待支付最强档）· 更新时间，点击进项目页。 */
 export function RecentProjectCard({ project }: { project: ProjectSummary }) {
   const name = project.name || "未命名项目";
   return (
@@ -173,9 +173,7 @@ export function RecentProjectCard({ project }: { project: ProjectSummary }) {
       <ProjectAvatar name={name} />
       <div className="mt-2.5 truncate text-sm font-semibold">{name}</div>
       <div className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-        <Badge variant="secondary" className="px-1.5 py-0 text-xs">
-          {stageLabel(projectStage(project))}
-        </Badge>
+        <StageBadge stage={projectStage(project)} />
         <Clock3 className="size-3 shrink-0" />
         <span className="truncate">{formatRelativeTime(lastTouchedAt(project))}</span>
       </div>

@@ -28,8 +28,9 @@ import { lockRowOf } from "@/lib/orders/lock";
  * 即时切换）。闲聊期（prdProducedAt 未落）对话区占满全宽、成果区不渲染。
  *
  * <p>成果区开合与 tab 簇归此持有：有成果自动滑出一次（含回访/刷新）、发起
- * 生成/编码 run 起跑自动开并切「系统」、下单成功自动挂「订单」、「去看看」
- * 挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。生成无门自动发起
+ * 生成/编码 run 起跑自动开并切「系统」、下单成功自动挂「订单」、回访有未终结
+ * 订单自动挂「订单」不切换（#205 状态点点亮，主感知面在对话区报价卡）、
+ * 「去看看」挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。生成无门自动发起
  * （#101）：主智能体产出 PRD 后平台自动派首次生成 run，无需「开始做系统」按钮
  * ——本层不再装配任何生成入口（失败态「重新发起」兜底归系统面板）。「确认下单」
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
@@ -68,6 +69,17 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   if (generating !== seenGenerating) {
     setSeenGenerating(generating);
     if (generating) openOutputsTo("system");
+  }
+
+  // 回访有未终结订单（#205）：订单范式自动挂载——tab 在簇上、状态点点亮即可，
+  // 不激活不切页（对话区报价卡是主感知面）。锁存以「自动挂载已发生」为键（回访
+  // 水合与下单成功两处置位），此后 detail 重拉不再补挂——用户手动关闭优先。
+  // 确认下单成功后挂载并切换的既有口径不动（openOutputsTo）
+  const hasActiveOrder = !!detail?.activeOrder?.id;
+  const [seenActiveOrder, setSeenActiveOrder] = useState(false);
+  if (hasActiveOrder && !seenActiveOrder) {
+    setSeenActiveOrder(true);
+    outputsTabs.attach("order");
   }
 
   /** 开成果区并挂某范式（mobile 跳成果区页）——自动切换三入口共用的动作。 */
@@ -148,7 +160,16 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
       headerActions={
         showConfirmOrder ? (
           <ConfirmOrderButton
-            onConfirm={() => placeOrder.mutate(undefined, { onSuccess: () => openOutputsTo("order") })}
+            onConfirm={() =>
+              placeOrder.mutate(undefined, {
+                onSuccess: () => {
+                  // 本单的自动挂载（mount+切换）在此发生——记入锁存，免得 detail
+                  // 失效重拉落地时回访挂载把用户刚关掉的 tab 再挂回（#205 边角）
+                  setSeenActiveOrder(true);
+                  openOutputsTo("order");
+                },
+              })
+            }
           />
         ) : null
       }
@@ -170,6 +191,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
               generatedAt: detail?.generatedAt,
               coderStatus,
               orderCardId,
+              activeOrderStatus: detail?.activeOrder?.status,
               projectArchived: !!detail?.archived,
               onGenerated: () => openOutputsTo("system"),
             }}

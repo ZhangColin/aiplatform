@@ -25,13 +25,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArchiveProject } from "@/hooks/use-projects";
 import { errorText } from "@/lib/api/api-error";
-import { projectStage, stageLabel, type ProjectSummary } from "@/lib/projects/list";
+import { projectStage, type ProjectSummary } from "@/lib/projects/list";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/time";
 
+import { StageBadge } from "./stage-badge";
+
 /**
- * 项目列表卡（issue #21）：项目名 + 四态 + 创建/更新时间（无动态摘要行），
- * 归档走下拉菜单 + 二次确认。已归档卡灰态、无菜单。
+ * 项目列表卡（issue #21）：项目名 + 四态徽标（#205 纯文本升级，待支付最强档、
+ * 不带金额）+ 创建/更新时间（无动态摘要行），归档走下拉菜单 + 二次确认。
+ * 已归档卡灰态、无菜单。
  */
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   const router = useRouter();
@@ -84,9 +87,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="truncate text-sm text-muted-foreground">
-          {stageLabel(projectStage(project))}
-        </p>
+        <StageBadge stage={projectStage(project)} />
         <p className="text-xs text-muted-foreground/70">{timeLine(project)}</p>
       </CardContent>
 

@@ -120,3 +120,40 @@ describe("OutputsArea · 收起", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("OutputsArea · attach 挂载不激活（#205 回访订单 tab 自动挂载）", () => {
+  /** 附件层先例的最小复刻：按钮触发 attach，模拟装配层回访挂载订单 tab。 */
+  function AttachArea() {
+    const tabs = useOutputsTabs();
+    return (
+      <div>
+        <button type="button" onClick={() => tabs.attach("order")}>
+          挂订单
+        </button>
+        <OutputsArea tabs={tabs} ctx={CTX} onClose={() => {}} />
+      </div>
+    );
+  }
+
+  it("attach 把 tab 挂上簇但不抢激活面；挂载后照常可关", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AttachArea />
+      </QueryClientProvider>,
+    );
+
+    // 初始：默认两枚，激活 = 系统
+    expect(screen.getByRole("tab", { name: "系统" }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "挂订单" }));
+
+    // 挂上「订单」但不激活：仍是系统一面被选中（不自动切换——主感知面在对话区）
+    expect(screen.getAllByRole("tab", { name: "订单" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("tab", { name: "订单" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "系统" }).getAttribute("aria-selected")).toBe("true");
+
+    // 挂载后照常可关（用户手动关闭优先）
+    fireEvent.click(screen.getByRole("button", { name: "关闭订单" }));
+    expect(screen.queryByRole("tab", { name: "订单" })).toBeNull();
+  });
+});

@@ -46,6 +46,10 @@ public class ConversationHistoryAppService {
     /** 圈注附件 → JSONB 数组的序列化器（对话史落库用，静态无状态）。 */
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** 报价卡事件类型：首次报价（报价已出）；改价「报价已更新」归 #204 追加。常量
+     *  归写口持有——跨 BC 调用方（订单上下文）引用止于应用层，不下探聚合。 */
+    public static final String QUOTE_EVENT_QUOTED = "quoted";
+
     private final ConversationEntryRepository entries;
     private final ProjectRepository projectRepository;
 
@@ -141,6 +145,16 @@ public class ConversationHistoryAppService {
                     toJsonMaps(attachments)));
             entries.save(ConversationEntry.guide(projectId, runId, text));
         });
+    }
+
+    /**
+     * 报价卡落库（#203 报价感知，ADR-0017 视镜语义）：平台对用户的钱事发言——载荷
+     * 仅事件（{@code quoted}=报价已出；改价「报价已更新」归 #204）+ 订单引用，不含
+     * 金额（金额/备注/状态渲染时取订单当前态）。调用方在报价事实落定后补写——缺卡
+     * 不炸报价动作，失败只记日志（同收口侧口径）。
+     */
+    public void recordQuote(Long projectId, Long orderId, String event) {
+        quietly(() -> entries.save(ConversationEntry.quote(projectId, orderId, event)));
     }
 
     /**

@@ -17,6 +17,7 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
+import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectKnowledgeAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
@@ -51,6 +52,7 @@ public class OrderAppService {
     private final ProjectQueryAppService projectQueryAppService;
     private final ProjectLifecycleAppService projectLifecycleAppService;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
+    private final ConversationHistoryAppService conversationHistoryAppService;
     private final PaymentPort paymentPort;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
@@ -59,6 +61,7 @@ public class OrderAppService {
                            ProjectQueryAppService projectQueryAppService,
                            ProjectLifecycleAppService projectLifecycleAppService,
                            ProjectKnowledgeAppService projectKnowledgeAppService,
+                           ConversationHistoryAppService conversationHistoryAppService,
                            PaymentPort paymentPort,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
@@ -66,6 +69,7 @@ public class OrderAppService {
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
+        this.conversationHistoryAppService = conversationHistoryAppService;
         this.paymentPort = paymentPort;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
@@ -150,7 +154,9 @@ public class OrderAppService {
      * 首次调用 = 报价，已报价态重复调用 = 改价——聚合内一次事务同时落价目行
      * （append-only，操作者随行落痕，#155）与订单现值。事务取舍同
      * {@link #cancel}：单聚合保存（级联追加价目行）由仓储自带事务保证。通知只在
-     * 状态真变化（首次报价）时发射——改价不换状态不发。
+     * 状态真变化（首次报价）时发射——改价不换状态不发（#204 改价事件化翻此口径）。
+     * 首次报价同时落对话流报价卡（#203 视镜语义：载荷仅事件 + 订单引用，不含金额；
+     * 先落卡后发信号——信号触发前端重查时卡须已在库）。
      *
      * @throws ApplicationException ORD_001 订单不存在；ORD_008 金额无效；
      *                              ORD_009 备注超长；ORD_007 已支付或已终结
@@ -161,6 +167,8 @@ public class OrderAppService {
         order.quote(amount, note, operator);
         OrderResponse response = OrderResponse.of(orderRepository.save(order));
         if (firstQuote) {
+            conversationHistoryAppService.recordQuote(order.getProjectId(), order.getId(),
+                    ConversationHistoryAppService.QUOTE_EVENT_QUOTED);
             publishStatusChanged(order);
         }
         return response;

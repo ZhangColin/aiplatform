@@ -34,6 +34,12 @@ describe("bridge · order-status-changed（#30）", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.orders.all });
   });
 
+  it("首报/态变信号连带失效对话史域（#203：在场项目页报价卡经重查水合实时入流）", () => {
+    const invalidateQueries = dispatch(orderEvent(2));
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.conversation.all });
+  });
+
   it("toast 带状态文案与「查看项目」动作（点击直达项目页）", () => {
     dispatch(orderEvent(2));
 

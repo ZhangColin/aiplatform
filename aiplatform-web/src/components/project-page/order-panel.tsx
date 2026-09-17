@@ -4,16 +4,6 @@ import { Archive, ChevronRight, CircleCheck, Hourglass, PackageCheck } from "luc
 import { useState } from "react";
 import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,6 +20,7 @@ import { formatPrice } from "@/lib/orders/price";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 import { PanelPlaceholder } from "./panel-placeholder";
+import { PayConfirmDialog } from "./pay-confirm-dialog";
 
 /**
  * 订单面板（#28 交易环① + #29 交易环② + #30 交易环③，项目模式主区域）：待报价 =
@@ -156,23 +147,12 @@ function OrderCard({ orderId }: { orderId: string }) {
       {!waitingQuote ? <PriceHistory order={order} terminal={archived} /> : null}
 
       {/* mock 支付确认（v1 平台内模拟）：确认即同步成功——订单与项目一并归档 */}
-      <AlertDialog open={payOpen} onOpenChange={setPayOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认支付 {formatPrice(order.amount, order.currency) ?? ""}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              支付成功后订单与项目将一并归档，项目转入只读终态——完整记录会保留在这里，
-              源码包可随时下载；如还需修改，请先取消订单。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={onPay}>
-              确认支付
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <PayConfirmDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        price={formatPrice(order.amount, order.currency)}
+        onConfirm={onPay}
+      />
     </div>
   );
 }

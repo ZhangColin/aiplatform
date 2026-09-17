@@ -57,13 +57,15 @@ export type WorkClosing = {
 export type HydratedEntry = {
   /** 库写入序（对话序正本）。string——后端全局 Long→String 序列化（防精度丢失）。 */
   id: string;
-  kind: "user" | "agent" | "question" | "answer" | "closing" | "guide";
+  kind: "user" | "agent" | "question" | "answer" | "closing" | "guide" | "quote";
   runId?: string | null;
   text?: string | null;
   question?: Record<string, unknown> | null;
   closing?: Record<string, unknown> | null;
   /** 圈注附件（#97 随用户发言落库，JSON 数组；消息回显重建圈注 chip 用）。 */
   attachments?: Record<string, unknown>[] | null;
+  /** 报价卡载荷（#203：事件 + 订单引用，不含金额——视镜语义，ADR-0017）。 */
+  quote?: Record<string, unknown> | null;
   answered: boolean;
 };
 
@@ -110,6 +112,20 @@ export type ChatMessage =
       settled: boolean;
     }
   | { kind: "error"; id: string; text: string; runId?: string }
+  | {
+      /**
+       * 报价卡（#203 报价感知，ADR-0017 视镜语义）：平台对用户的钱事发言——
+       * 载荷仅事件 + 订单引用，金额/备注/状态渲染时取订单当前态（useOrder
+       * 详情查询，待报价/已报价态轮询现成），卡不冻结金额；改价追加新卡不改
+       * 旧卡（#204）。不属任何对话轮（无 runId）——live 到达不经 SSE 载荷，
+       * 由 order-status-changed 失效对话史重查后水合入流。
+       */
+      kind: "quote";
+      id: string;
+      orderId: string;
+      /** 事件类型：quoted=报价已出（改价「报价已更新」归 #204 追加）。 */
+      event: string;
+    }
   | (RaisedQuestion & { kind: "question"; answered: boolean });
 
 export type ProjectChat = {
@@ -161,7 +177,8 @@ export type ChatState = {
     text: string,
     eventId: string,
   ) => void;
-  /** 对话史水合（#89）：库条目增量应用（新 run 原位退位 live 片段，开放轮跳过）。 */
+  /** 对话史水合（#89）：库条目增量应用（新 run 原位退位 live 片段，开放轮跳过；
+   *  无 run 归属条目——报价卡 #203——恒应用，按库条目 id 原位退位不双卡）。 */
   hydrate: (projectId: string, entries: HydratedEntry[]) => void;
   // ---- 发送侧（hooks） ----
   /** 乐观落用户气泡（返回消息 id；失败经 {@link removeMessage} 撤回）。annotations
@@ -277,6 +294,10 @@ function hydratedMessage(entry: HydratedEntry): ChatMessage | null {
     case "closing": {
       const closing = toWorkClosing(entry.closing);
       return closing ? { kind: "closing", id: `h${entry.id}`, runId, closing } : null;
+    }
+    case "quote": {
+      const quote = toQuoteRef(entry.quote);
+      return quote ? { kind: "quote", id: `h${entry.id}`, ...quote } : null;
     }
     case "question": {
       const question = parseQuestion(`h${entry.id}`, {
@@ -450,33 +471,67 @@ export const useChatStore = create<ChatState>((set) => ({
   hydrate: (projectId, entries) =>
     updateChat(set, projectId, (chat) => {
       if (entries.length === 0) return chat;
-      // 开放轮（live 尾巴权威）条目跳过；其余 run 的库块整体接管
-      const applied = entries.filter((entry) => entry.runId && entry.runId !== chat.openRunId);
-      const runIds = [...new Set(applied.map((entry) => entry.runId))] as string[];
-      if (runIds.length === 0) return chat;
-      // 退位：被接管 run 的 live / 已水合消息原位移除（按 run 整体替换——幂等，
-      // 库块重放不双条），记最早退位位为插入位
-      let insertAt = chat.messages.length;
+      // 开放轮（live 尾巴权威）的 run 条目跳过；无 run 归属的条目（报价卡 #203——
+      // 平台对用户的独立发言，不属任何轮）恒应用；其余 run 的库块整体接管
+      const applied = entries.filter((entry) =>
+        entry.runId ? entry.runId !== chat.openRunId : true,
+      );
+      const runIds = [...new Set(applied.flatMap((entry) => (entry.runId ? [entry.runId] : [])))];
+      // 无 run 条目的退位锚 = 水合消息 id（同库条目原位退位——重水合不双卡、位置不漂）
+      const cardIds = new Set(applied.flatMap((entry) => (entry.runId ? [] : [`h${entry.id}`])));
+      if (runIds.length === 0 && cardIds.size === 0) return chat;
+      // 退位：被接管 run 的 live / 已水合消息与被重应用的无 run 卡原位移除（幂等，
+      // 库块重放不双条），run 块与无 run 卡各记最早退位位
+      let blockInsertAt = chat.messages.length;
+      let cardInsertAt = chat.messages.length;
+      const displacedCardIds = new Set<string>();
       const kept: ChatMessage[] = [];
       for (const message of chat.messages) {
-        if (message.runId && runIds.includes(message.runId)) {
-          if (kept.length < insertAt) insertAt = kept.length;
+        const messageRunId = "runId" in message ? message.runId : undefined;
+        if (messageRunId !== undefined && runIds.includes(messageRunId)) {
+          if (kept.length < blockInsertAt) blockInsertAt = kept.length;
+          continue;
+        }
+        if (cardIds.has(message.id)) {
+          displacedCardIds.add(message.id);
+          if (kept.length < cardInsertAt) cardInsertAt = kept.length;
           continue;
         }
         kept.push(message);
       }
-      // 插入位不越过开放尾巴（被接管条目必旧于开放轮——收口即清 openRunId）
-      const openIdx = kept.findIndex((message) => message.runId === chat.openRunId);
-      if (openIdx >= 0 && openIdx < insertAt) insertAt = openIdx;
-      const messages = [...kept];
-      messages.splice(
-        insertAt,
-        0,
-        ...applied.flatMap((entry) => {
-          const message = hydratedMessage(entry);
-          return message ? [message] : [];
-        }),
+      const toMessage = (entry: HydratedEntry): ChatMessage[] => {
+        const message = hydratedMessage(entry);
+        return message ? [message] : [];
+      };
+      const openIdx = kept.findIndex(
+        (message) => "runId" in message && message.runId === chat.openRunId,
       );
+      const messages = [...kept];
+      if (openIdx < 0) {
+        // 无开放尾巴：整批按写入序（库序 = 对话序）插入最早退位位
+        messages.splice(Math.min(blockInsertAt, cardInsertAt), 0, ...applied.flatMap(toMessage));
+      } else {
+        // 有开放尾巴（live 在途）：run 库块必旧于开放轮、插在尾前（原位退位口径
+        // 不变）；已水合过的无 run 卡原位刷新；新到卡必新于在面全部、落末尾——
+        // 轮收口后水合按库序归位
+        if (blockInsertAt > openIdx) blockInsertAt = openIdx;
+        const blockMessages = applied.flatMap((entry) => (entry.runId ? toMessage(entry) : []));
+        messages.splice(blockInsertAt, 0, ...blockMessages);
+        if (blockMessages.length > 0 && blockInsertAt <= cardInsertAt) {
+          cardInsertAt += blockMessages.length;
+        }
+        for (const entry of applied) {
+          if (entry.runId) continue;
+          const [message] = toMessage(entry);
+          if (!message) continue;
+          if (displacedCardIds.has(message.id)) {
+            messages.splice(Math.min(cardInsertAt, messages.length), 0, message);
+            cardInsertAt += 1;
+          } else {
+            messages.push(message);
+          }
+        }
+      }
       // 开放轮判定（#89）：末条目为流式中发言/作答或未答问答卡 → 该 run 开放
       // （后续水合跳过其条目，live 流式/挂起卡不被动塌；轮收口事件清锚后接管）
       const last = entries[entries.length - 1];
@@ -632,6 +687,19 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
     selfTest: toSelfTest(record.selfTest),
+  };
+}
+
+/**
+ * quote 载荷的容错收窄（#203 视镜语义）：载荷 = 事件 + 订单引用；缺订单引用的
+ * 条目视同无卡（不出坏卡——卡上一切事实都经订单详情查询现取，无引用即无可视镜）。
+ */
+export function toQuoteRef(raw: unknown): { orderId: string; event: string } | undefined {
+  const record = asRecord(raw);
+  if (!record || typeof record.orderId !== "string" || record.orderId === "") return undefined;
+  return {
+    orderId: record.orderId,
+    event: typeof record.event === "string" && record.event !== "" ? record.event : "quoted",
   };
 }
 

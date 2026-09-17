@@ -218,23 +218,26 @@ class ProjectControllerTest {
     @Test
     void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
         // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
-        // code——1=user 3=question 5=closing）、question/closing 载荷原样、
-        // id 升序（写入序 = 对话序）
+        // code——1=user 3=question 5=closing 7=quote）、question/closing/quote
+        // 载荷原样、id 升序（写入序 = 对话序）
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
                 new ConversationEntryResponse(1L, 1, "用户发言", "run-1", "做一个官网",
-                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
+                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
                 new ConversationEntryResponse(2L, 3, "问答卡", "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
-                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
                 new ConversationEntryResponse(3L, 5, "收尾卡", "run-2", null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
-                        null, false, LocalDateTime.of(2026, 9, 5, 10, 9))));
+                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
+                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
+                        Map.of("orderId", "900123", "event", "quoted"),
+                        false, LocalDateTime.of(2026, 9, 6, 9, 0))));
 
         performAsUser(get("/api/projects/100/conversation"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.length()").value(3))
+                .andExpect(jsonPath("$.data.length()").value(4))
                 .andExpect(jsonPath("$.data[0].kind").value(1))
                 .andExpect(jsonPath("$.data[0].kindName").value("用户发言"))
                 .andExpect(jsonPath("$.data[0].text").value("做一个官网"))
@@ -243,7 +246,12 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[1].question.engineRef").value("reply-1"))
                 .andExpect(jsonPath("$.data[2].kind").value(5))
                 .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
-                .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420));
+                .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))
+                // #203 报价卡读面：kind=7、quote 载荷原样（事件 + 订单引用，不含金额）
+                .andExpect(jsonPath("$.data[3].kind").value(7))
+                .andExpect(jsonPath("$.data[3].kindName").value("报价卡"))
+                .andExpect(jsonPath("$.data[3].quote.orderId").value("900123"))
+                .andExpect(jsonPath("$.data[3].quote.event").value("quoted"));
     }
 
     @Test

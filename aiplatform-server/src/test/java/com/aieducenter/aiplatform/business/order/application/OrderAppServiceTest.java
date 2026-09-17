@@ -14,9 +14,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.aieducenter.aiplatform.IntegrationTest;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -31,6 +33,11 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -66,9 +73,15 @@ class OrderAppServiceTest {
     @MockitoBean
     private ProjectQueryAppService projectQueryAppService;
 
+    /** 事件出口 mock：「事件发出」断言归本缝（#203 首报发信号；通知族内容断言
+     *  归 OrderPaymentArchiveTest 同款口径）。 */
+    @MockitoBean
+    private EventsAppService eventsAppService;
+
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_conversation_entries");
     }
 
     @Test
@@ -314,6 +327,33 @@ class OrderAppServiceTest {
     }
 
     @Test
+    void given_pending_quote_order_when_first_quote_then_quote_card_recorded_and_event_emitted()
+            throws Exception {
+        // #203 报价卡入对话流（视镜语义）：首次报价落报价卡（kind=7，无 run 归属，
+        // 载荷 = 订单引用 + 事件类型，不含金额——金额渲染时取订单当前态）+ 发
+        // order-status-changed 信号（载荷同样不含金额）
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = appService.place(PROJECT_ID).id();
+
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
+
+        Map<String, Object> card = jdbcTemplate.queryForMap(
+                "SELECT kind, run_id, quote::text AS quote FROM prj_conversation_entries "
+                        + "WHERE quote->>'orderId' = ?", orderId);
+        assertThat(card.get("kind")).isEqualTo(7);
+        assertThat(card.get("run_id")).isNull();
+        Map<String, Object> quote = objectMapper.readValue((String) card.get("quote"),
+                new TypeReference<>() {
+                });
+        assertThat(quote).containsEntry("orderId", orderId).containsEntry("event", "quoted")
+                .doesNotContainKey("amount");
+        verify(eventsAppService).publishNotification(eq(OrderEventTypes.ORDER_STATUS_CHANGED),
+                argThat(payload -> orderId.equals(payload.get(OrderEventTypes.ORDER_ID_FIELD))
+                        && OrderStatus.QUOTED.getCode().equals(payload.get(OrderEventTypes.STATUS_FIELD))
+                        && !payload.containsKey("amount")));
+    }
+
+    @Test
     void given_quoted_order_when_submit_quote_again_then_reprice_appends_entry_only() {
         // 改价 = append-only：旧价目行原样保留、新行追加、订单现值取最新行、
         // quotedAt 不刷新（改价时点留痕在价目行）
@@ -345,6 +385,13 @@ class OrderAppServiceTest {
                 "SELECT amount, quoted_at FROM ord_orders WHERE id = ?", Long.parseLong(orderId)))
                 .containsEntry("amount", 99000L);
         assertThat(appService.detail(Long.parseLong(orderId)).quotedAt()).isEqualTo(quotedAt);
+        // #203 边界卡口：改价不写报价卡、不发事件（静默现状的显式钉死——#204 改价
+        // 事件化翻此口径：追加「报价已更新」卡 + 补发信号）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_conversation_entries WHERE quote->>'orderId' = ?",
+                Integer.class, orderId)).isEqualTo(1); // 仅首次报价那一张
+        verify(eventsAppService, times(2)) // 下单 + 首报各一发，改价未发
+                .publishNotification(eq(OrderEventTypes.ORDER_STATUS_CHANGED), any());
     }
 
     @Test

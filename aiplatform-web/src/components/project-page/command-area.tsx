@@ -25,6 +25,7 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 
 import { ClosingCard } from "./closing-card";
 import { QuestionCard } from "./question-card";
+import { QuoteCard } from "./quote-card";
 import { WorkMessage } from "./work-message";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -57,6 +58,7 @@ export function CommandArea({
   lock,
   stage = "interview",
   onSeePrd,
+  onSeeOrder,
 }: {
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
@@ -65,6 +67,8 @@ export function CommandArea({
   stage?: keyof typeof STAGE_HINTS;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
+  /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
+  onSeeOrder?: () => void;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -172,7 +176,7 @@ export function CommandArea({
             {work && index === workAnchorIndex ? (
               <WorkMessage work={work} projectId={projectId} />
             ) : null}
-            <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)}>
+            <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
                 <QuestionCard
                   question={message}
@@ -255,13 +259,21 @@ function closingRoundOf(messages: ChatMessage[], message: ChatMessage): number |
   return undefined;
 }
 
-/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/受理动作卡/错误提示/平台引导左对齐。 */
-function MessageRow({ message, children, projectId, round }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number }) {
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/受理动作卡/错误提示/平台引导左对齐。 */
+function MessageRow({ message, children, projectId, round, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number; onSeeOrder?: () => void }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
   }
   if (message.kind === "acceptance") {
     return <AcceptanceRow message={message} />;
+  }
+  if (message.kind === "quote") {
+    // 报价卡（#203 视镜语义）：金额/备注/状态渲染时取订单当前态，卡不冻结金额
+    return (
+      <div className="flex w-full justify-start">
+        <QuoteCard orderId={message.orderId} event={message.event} onSeeOrder={onSeeOrder} />
+      </div>
+    );
   }
   if (message.kind === "closing") {
     // 收尾卡（#88 定格收口，#89 归对话流常驻——live 与水合同卡）

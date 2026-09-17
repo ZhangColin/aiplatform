@@ -12,14 +12,15 @@ import type { HydratedEntry } from "@/lib/store/chat";
 /**
  * 对话史条目响应（swagger ConversationEntryResponse 信封解包后的形状）。id 为
  * string ——后端全局 Long→String 序列化防 JS 精度丢失（2026-09-10 回归锚：schema
- * 生成的 `number` 与运行时漂移，勿据其写 typeof 守卫）。
+ * 生成的 `number` 与运行时漂移，勿据其写 typeof 守卫）。quote（#203 报价卡载荷）
+ * 在 schema 重新生成前先以本地拓宽承接（同 id 的漂移口径）。
  */
 export type ConversationEntryResponse = Omit<
   components["schemas"]["ConversationEntryResponse"],
-  "id"
-> & { id?: string | number };
+  "id" | "quote"
+> & { id?: string | number; quote?: Record<string, unknown> | null };
 
-/** kind Integer code → 消费口径（正本 = ConversationEntryKind；1=user 2=agent 3=question 4=answer 5=closing 6=guide）。 */
+/** kind Integer code → 消费口径（正本 = ConversationEntryKind；1=user 2=agent 3=question 4=answer 5=closing 6=guide 7=quote）。 */
 const ENTRY_KINDS: Record<number, HydratedEntry["kind"]> = {
   1: "user",
   2: "agent",
@@ -27,6 +28,7 @@ const ENTRY_KINDS: Record<number, HydratedEntry["kind"]> = {
   4: "answer",
   5: "closing",
   6: "guide",
+  7: "quote",
 };
 
 /** 响应 → 水合载荷（kind 由 Integer code 收窄；未知 code 条目弃守——契约演进的容错面）。 */
@@ -42,6 +44,7 @@ export function toHydratedEntries(raw: ConversationEntryResponse[]): HydratedEnt
       question: entry.question ?? undefined,
       closing: entry.closing ?? undefined,
       attachments: entry.attachments ?? undefined,
+      quote: entry.quote ?? undefined,
       answered: entry.answered === true,
     }];
   });

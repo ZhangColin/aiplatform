@@ -50,4 +50,31 @@ describe("toHydratedEntries · id 序列化为 string（2026-09-10 回归锚）"
 
     expect(toHydratedEntries(raw)).toHaveLength(0);
   });
+
+  it("报价卡 kind=7 收窄为 quote，载荷（事件 + 订单引用）透传（#203）", () => {
+    const raw = [
+      {
+        id: "200",
+        kind: 7,
+        kindName: "报价卡",
+        runId: null,
+        text: null,
+        question: null,
+        closing: null,
+        attachments: null,
+        quote: { orderId: "901", event: "quoted" },
+        answered: false,
+        at: "2026-09-17T10:00:00.000000",
+      },
+    ] as unknown as ConversationEntryResponse[];
+
+    const hydrated = toHydratedEntries(raw);
+
+    expect(hydrated).toHaveLength(1);
+    expect(hydrated[0]).toMatchObject({
+      id: "200",
+      kind: "quote",
+      quote: { orderId: "901", event: "quoted" },
+    });
+  });
 });

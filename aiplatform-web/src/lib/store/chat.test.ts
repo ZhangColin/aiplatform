@@ -297,9 +297,9 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
 
   const entry = (
     id: number,
-    kind: "user" | "agent" | "question" | "answer" | "closing" | "guide",
+    kind: "user" | "agent" | "question" | "answer" | "closing" | "guide" | "quote",
     overrides: Record<string, unknown> = {},
-    runId = `run-${Math.ceil(id / 2)}`,
+    runId: string | null = `run-${Math.ceil(id / 2)}`,
   ) => ({ id: String(id), kind, runId, answered: false, ...overrides });
 
   it("空库条目水合：消息序 = 写入序（发言 → 回复 → 问答卡 → 作答 → 收尾卡 → 轻引导），作答渲染同用户气泡", () => {
@@ -469,5 +469,73 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
 
     const cards = useChatStore.getState().chats["p1"]?.messages.filter((m) => m.kind === "question") ?? [];
     expect(cards).toHaveLength(1); // 同锚（engineRef）不双卡
+  });
+
+  it("报价卡水合（#203：无 run 归属的平台发言）：写入序即对话序——卡插在库序位", () => {
+    useChatStore.getState().hydrate("p1", [
+      entry(1, "user", { text: "做个官网" }, "run-1"),
+      entry(2, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+      entry(3, "agent", { text: "好的" }, "run-1"),
+    ]);
+
+    const chat = useChatStore.getState().chats["p1"];
+    expect(chat?.messages.map((m) => m.kind)).toEqual(["user", "quote", "agent"]);
+    expect(chat?.messages[1]).toMatchObject({ kind: "quote", orderId: "901", event: "quoted" });
+  });
+
+  it("报价卡增量到达与重水合幂等：同条目原位退位，不双卡、位置不漂", () => {
+    const s = useChatStore.getState();
+    s.hydrate("p1", [entry(1, "user", { text: "需求" }, "run-1")]);
+
+    // 报价后到达（order-status-changed 失效对话史重查 → 增量水合）
+    s.hydrate("p1", [
+      entry(1, "user", { text: "需求" }, "run-1"),
+      entry(2, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+    ]);
+    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind))
+      .toEqual(["user", "quote"]);
+
+    // 重水合（再次失效重拉）：同库条目原位退位——不双卡、位置不漂
+    s.hydrate("p1", [
+      entry(1, "user", { text: "需求" }, "run-1"),
+      entry(2, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+    ]);
+    const messages = useChatStore.getState().chats["p1"]?.messages;
+    expect(messages?.filter((m) => m.kind === "quote")).toHaveLength(1);
+    expect(messages?.map((m) => m.kind)).toEqual(["user", "quote"]);
+  });
+
+  it("开放轮在途时报价卡落末尾；轮收口后水合按库序重排", () => {
+    const s = useChatStore.getState();
+    s.appendUserMessage("p1", "改个颜色");
+    s.noteChatRun("p1", "run-1");
+    s.ingestRunStart("p1", "run-1");
+
+    // 开放轮期间报价到达：run-1 条目跳过（live 尾巴权威），报价卡不属任何轮、落末尾
+    s.hydrate("p1", [
+      entry(1, "user", { text: "改个颜色" }, "run-1"),
+      entry(2, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+    ]);
+    expect(useChatStore.getState().chats["p1"]?.messages.map((m) => m.kind))
+      .toEqual(["user", "quote"]);
+
+    // 轮收口后水合：live 片段原位退位，全量按库序重排（报价卡回到库序位）
+    s.finishTurn("p1", "run-1");
+    s.hydrate("p1", [
+      entry(1, "user", { text: "改个颜色" }, "run-1"),
+      entry(2, "quote", { quote: { orderId: "901", event: "quoted" } }, null),
+      entry(3, "agent", { text: "改好了" }, "run-1"),
+    ]);
+    const messages = useChatStore.getState().chats["p1"]?.messages;
+    expect(messages?.map((m) => m.kind)).toEqual(["user", "quote", "agent"]);
+    expect(messages?.filter((m) => m.kind === "quote")).toHaveLength(1);
+  });
+
+  it("报价卡载荷缺订单引用：容错弃守，不出坏卡", () => {
+    useChatStore.getState().hydrate("p1", [
+      entry(1, "quote", { quote: { event: "quoted" } }, null),
+    ]);
+
+    expect(useChatStore.getState().chats["p1"]?.messages ?? []).toHaveLength(0);
   });
 });

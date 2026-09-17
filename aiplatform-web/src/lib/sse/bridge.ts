@@ -47,8 +47,9 @@ const NOTIFICATION_INVALIDATIONS = {
   "document-updated": [queryKeys.documents.all, queryKeys.projects.all],
   "project-renamed": [queryKeys.projects.all],
   // 订单态变化：订单卡详情（状态/金额/改价历史）+ 项目域（activeOrder/archived
-  // 嵌入——锁定式矩阵与归档终态的推导输入）一并重拉
-  "order-status-changed": [queryKeys.projects.all, queryKeys.orders.all],
+  // 嵌入——锁定式矩阵与归档终态的推导输入）一并重拉；#203 起连带失效对话史域——
+  // 在场项目页的报价卡经重查水合实时入流（信号-only：载荷不含金额，金额走订单查询）
+  "order-status-changed": [queryKeys.projects.all, queryKeys.orders.all, queryKeys.conversation.all],
 } as const satisfies Record<NotificationEvent["type"], readonly (readonly unknown[])[]>;
 
 /**

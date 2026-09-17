@@ -26,7 +26,11 @@ public enum ConversationEntryKind implements BaseEnum<ConversationEntryKind> {
     CLOSING(5, "收尾卡"),
 
     /** 平台轻引导（兜底分支的定型文案——平台自己说话，呈现自带「平台」署名）。 */
-    GUIDE(6, "平台轻引导");
+    GUIDE(6, "平台轻引导"),
+
+    /** 报价卡（#203 报价感知：平台对用户的钱事发言——载荷仅事件 + 订单引用，
+     *  金额与状态渲染时取订单当前态，视镜非快照，ADR-0017）。 */
+    QUOTE(7, "报价卡");
 
     private final Integer code;
     private final String name;

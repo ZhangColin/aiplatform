@@ -113,4 +113,18 @@ class ProfileToolkitSupplierTest {
         assertThat(supplier().toolkitFor(AgentProfile.MAIN.key(), new AgentWorkspace.Local(null))
                 .getToolNames()).isEmpty();
     }
+
+    @Test
+    void given_main_capability_inventory_when_assembled_then_prompt_mentions_every_tool() {
+        // #216 单一事实：提示词能力清单是正本，须与工具装配一致——装配的每件业务
+        // 工具都在提示词里点名（防止装配加了工具、提示词漏描述而模型「不认」这能力）。
+        // 只验装配⊆提示词单向：提示词另点名的 load_skill_through_path 是内核技能加载
+        // 工具（随 prd-writing 技能发放，非本装配器的业务注册），反向断言会误伤内核工具
+        var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"));
+        String prompt = AgentProfile.MAIN.systemPrompt();
+        for (String name : toolkit.getToolNames()) {
+            assertThat(prompt).as("主智能体能力清单应点名工具：%s", name).contains(name);
+        }
+    }
 }

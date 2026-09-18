@@ -247,8 +247,49 @@ class MainAgentSessionSmokeTest {
 
         awaitRunEnd(run.runId());
         assertThat(toolWasInvoked("fetch_url")).as("主智能体应实际调用 fetch_url 抓取").isTrue();
-        assertThat(textOf(run.runId())).as("主智能体回复应引用抓取内容（标题 Example Domain）")
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体回复应引用抓取内容（标题 Example Domain）")
                 .containsIgnoringCase("example domain");
+        // #216 话术与实际能力一致：有 fetch_url 工具就该自己读，而非让用户手动提供内容
+        assertThat(reply).as("有 fetch_url 工具就不该让用户手动提供内容（回复：%s）", reply)
+                .doesNotContain("请手动");
+    }
+
+    /**
+     * 能力边界正本冒烟（#216）：问一个主智能体确实没有对应工具的能力（直接部署上线），
+     * 主智能体应如实自述边界（「我没有这个工具」）并给替代路径（系统构建/更新由平台
+     * 自动安排），而不是「平台没有 X 能力」式未经验证的平台断言。真跑 LLM；断言两层
+     * ——回复非空 + 不含「平台没有/不支持/不具备」平台级断言措辞（排掉最坏的自述错误：
+     * 无验证断言）。「部署」平台确有其事（run 执行体自动构建），故「平台不支持部署」即假。
+     */
+    @Test
+    @Timeout(240)
+    void given_unavailable_capability_when_asked_then_describes_boundary_without_platform_assertion() {
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("能力边界冒烟", null,
+                Long.parseLong(workspaceId), null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "你能帮我直接把做好的系统部署上线、配置服务器吗？不要提问");
+
+        awaitRunEnd(run.runId());
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体应据实作答").isNotBlank();
+        assertThat(reply).as("不应有「平台没有/不支持」式未验证断言（回复：%s）", reply)
+                .doesNotContain("平台没有")
+                .doesNotContain("平台不支持")
+                .doesNotContain("平台不具备");
+        // 替代路径：如实自述「我没有这个工具」之外，还该指向平台自动安排（构建/更新
+        // 由平台收口后发生）——「平台」即替代路径的承载方
+        assertThat(reply).as("应给出平台承载的替代路径（回复：%s）", reply).contains("平台");
     }
 
     /**

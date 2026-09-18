@@ -47,4 +47,21 @@ class AgentProfileTest {
                 .contains("agent_spawn")
                 .contains("先解说后动手"); // #119 解说密实化：每工作段先解说后动手
     }
+
+    @Test
+    void given_main_prompt_when_capability_boundary_then_discipline_and_inventory_present() {
+        // #216 能力边界正本：纪律条款（禁无验证的平台级断言 + 如实描述替代路径）+
+        // 终态能力清单（抓取/调研/问答等全部已具备能力的边界描述终稿）
+        String prompt = AgentProfile.MAIN.systemPrompt();
+        assertThat(prompt).contains("能力边界正本");
+        assertThat(prompt).contains("不得声称平台具备或缺乏"); // 禁「平台没有 X」式无验证断言
+        assertThat(prompt).contains("我没有这个工具"); // 如实自述边界
+        assertThat(prompt).contains("替代路径"); // 如实描述替代路径
+        assertThat(prompt).contains("能力清单");
+        // 外部资料能力（#213/#215 落地）是本票终态清单的净新增；其余工具名已由协议锚点
+        // 测试与「单一事实」一致性测试覆盖，此处不重复断言
+        assertThat(prompt)
+                .contains("fetch_url")
+                .contains("web_search");
+    }
 }

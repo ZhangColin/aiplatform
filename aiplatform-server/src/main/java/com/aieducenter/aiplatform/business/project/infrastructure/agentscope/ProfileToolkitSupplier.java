@@ -9,6 +9,7 @@ import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
@@ -19,9 +20,9 @@ import io.agentscope.core.tool.Toolkit;
  * 职能是配置不是结构）：{@link AgentProfile#MAIN 主智能体} = ask_user（每轮一问
  * 的挂起源）+ savePrd（PRD 落盘 + 业务登记 + 修订事实登记，#52——需求侧判定的
  * 观测面）+ saveBuildPlan（切片计划事实登记，ADR 0009——生成编排的切片输入）+
- * 只读三件（文件树 / 文件内容 / 项目事实，答询查证用），随只读工作区
- * 注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，PRD 写入走
- * savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
+ * 只读四件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url，答询查证用），
+ * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
+ * PRD 写入走 savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
  * （更新收口结束工具——「要不要动系统」的判定面，其余编码工具由 harness 内核
  * 自带）+ command（#83 需确认的命令工具——替位内核 shell，破坏性命令挂起确认
  * 卡）；其余配置 / 本地兜底工作区 / 无配置语境 = 空集（模型不可见）。
@@ -35,16 +36,19 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final BuildPlanFacts buildPlanFacts;
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final ExternalContentFetcher externalContentFetcher;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
-            ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService) {
+            ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            ExternalContentFetcher externalContentFetcher) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
         this.buildPlanFacts = buildPlanFacts;
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.externalContentFetcher = externalContentFetcher;
     }
 
     @Override
@@ -60,6 +64,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new ReadWorkspaceFileTool(ro.containerName()));
             toolkit.registerAgentTool(new ProjectFactsTool(ro.workspaceId(),
                     projectRepository, workspaceLifecycleAppService));
+            // #213 抓取闭环：贴 URL 读外部资料（只读 GET + 四条安全底线在取数口兑现）
+            toolkit.registerAgentTool(new FetchUrlTool(externalContentFetcher));
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {

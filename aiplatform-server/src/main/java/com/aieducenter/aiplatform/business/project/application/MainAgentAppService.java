@@ -40,7 +40,7 @@ import lombok.extern.slf4j.Slf4j;
  * 平台重启后同标识恢复）。工作区解析为<b>只读面</b>（主智能体永不读写沙箱代码——
  * 内核文件/shell 工具结构性关闭；PRD 写入走 savePrd 业务工具自带通道）。计量
  * （dims 终态口径 {@link UsageDims}，agentKind=main）与智能体资产（ask_user /
- * savePrd + 只读三件，按配置发放）同归本编排。</p>
+ * savePrd + 只读四件，按配置发放）同归本编排。</p>
  *
  * <p><b>车道语义（入口三分类归 {@link DispatchAppService}，本服务只收分岔后的
  * 轮）</b>：咨询零产物短路——{@link #answerInquiry} 同会话直答，不锚意见、不派

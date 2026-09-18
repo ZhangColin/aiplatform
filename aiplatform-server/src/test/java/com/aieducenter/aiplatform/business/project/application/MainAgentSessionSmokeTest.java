@@ -221,6 +221,36 @@ class MainAgentSessionSmokeTest {
         assertThat(String.valueOf(usage.get("agent_kind"))).isEqualTo("main");
     }
 
+    /**
+     * 抓取闭环冒烟（#213）：对话区贴静态 URL → 主智能体调用 fetch_url 抓取 →
+     * 回复引用其内容。真跑 LLM（example.com——RFC 2606 稳定静态页，标题
+     * 「Example Domain」）；断言两层——会话状态确有 fetch_url 调用（非模型空口
+     * 自述）+ 回复引用内容（「example domain」不在 URL 里，串台 URL 回声过不了）。
+     */
+    @Test
+    @Timeout(240)
+    void given_pasted_url_when_inquiry_then_reply_cites_fetched_content() {
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("抓取冒烟", null,
+                Long.parseLong(workspaceId), null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "读取 https://example.com 的内容，然后用一句话告诉我这个页面的标题是什么，不要再提问");
+
+        awaitRunEnd(run.runId());
+        assertThat(toolWasInvoked("fetch_url")).as("主智能体应实际调用 fetch_url 抓取").isTrue();
+        assertThat(textOf(run.runId())).as("主智能体回复应引用抓取内容（标题 Example Domain）")
+                .containsIgnoringCase("example domain");
+    }
+
     // ---------- 内部 ----------
 
     private Set<String> allRunIds() {
@@ -281,6 +311,23 @@ class MainAgentSessionSmokeTest {
             throw new AssertionError("会话状态解析失败", e);
         }
         assertThat(offenders).as("#34：tool_use input 不应含 answer 键（违规件 id）").isEmpty();
+    }
+
+    /** 会话状态里是否出现过该工具的 tool_use（真跑冒烟的铁证——工具确被调用，而非模型空口自述）。 */
+    private boolean toolWasInvoked(String toolName) {
+        try {
+            for (var msg : new ObjectMapper().readTree(sessionStateJson()).path("context")) {
+                for (var block : msg.path("content")) {
+                    if ("tool_use".equals(block.path("type").asText())
+                            && toolName.equals(block.path("name").asText())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            throw new AssertionError("会话状态解析失败", e);
+        }
+        return false;
     }
 
     /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源；#83 拆分后纯 QUESTION——kind 键已退役）。 */

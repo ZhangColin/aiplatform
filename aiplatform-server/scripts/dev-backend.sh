@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ ! -f .env.local ]; then
-  echo "缺 aiplatform-server/.env.local（SSO 七项 + DEEPSEEK_API_KEY + OPENAPI_APP_*，gitignored）" >&2
+  echo "缺 aiplatform-server/.env.local（SSO 七项 + DEEPSEEK_API_KEY + BOCHA_API_KEY + OPENAPI_APP_*，gitignored）" >&2
   exit 1
 fi
 

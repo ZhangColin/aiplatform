@@ -7,7 +7,7 @@
  *       归档、改名、删除级联、源码包、预览）</li>
  *   <li>主智能体单会话编排（#86：main-{projectId} 会话稳定绑定与恢复、追问 /
  *       答询 / 受理意见同会话、问答答复续跑；直调 base.agentscope 内核——编排缝
- *       极薄）与主智能体资产（ask_user / savePrd + 只读四件工具集 + PRD 落盘
+ *       极薄）与主智能体资产（ask_user / savePrd + 只读五件工具集 + PRD 落盘
  *       业务登记）</li>
  *   <li>智能体配置（AgentProfile：主智能体与 run 执行体两座，代码配置不落库）与
  *       PRD 读侧</li>

@@ -10,6 +10,7 @@ import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFetcher;
+import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
@@ -20,7 +21,8 @@ import io.agentscope.core.tool.Toolkit;
  * 职能是配置不是结构）：{@link AgentProfile#MAIN 主智能体} = ask_user（每轮一问
  * 的挂起源）+ savePrd（PRD 落盘 + 业务登记 + 修订事实登记，#52——需求侧判定的
  * 观测面）+ saveBuildPlan（切片计划事实登记，ADR 0009——生成编排的切片输入）+
- * 只读四件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url，答询查证用），
+ * 只读五件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url + 联网搜索
+ * web_search，答询查证与自主调研用），
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
  * PRD 写入走 savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
  * （更新收口结束工具——「要不要动系统」的判定面，其余编码工具由 harness 内核
@@ -37,11 +39,12 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final ExternalContentFetcher externalContentFetcher;
+    private final WebSearchProvider webSearchProvider;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            ExternalContentFetcher externalContentFetcher) {
+            ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -49,6 +52,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.projectRepository = projectRepository;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.externalContentFetcher = externalContentFetcher;
+        this.webSearchProvider = webSearchProvider;
     }
 
     @Override
@@ -66,6 +70,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                     projectRepository, workspaceLifecycleAppService));
             // #213 抓取闭环：贴 URL 读外部资料（只读 GET + 四条安全底线在取数口兑现）
             toolkit.registerAgentTool(new FetchUrlTool(externalContentFetcher));
+            // #215 调研闭环：自主搜索补缺口（供数方接口 + 平台配置实例化）
+            toolkit.registerAgentTool(new WebSearchTool(webSearchProvider));
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {

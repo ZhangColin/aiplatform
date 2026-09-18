@@ -13,14 +13,16 @@ import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFetcher;
+import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
  * 按配置的工具集装配（#86 角色预设收敛为配置——职能是配置不是结构）：
  * 主智能体 = {ask_user, savePrd, saveBuildPlan}（追问挂起源 + PRD 落盘/修订事实
- * 登记——需求侧判定的观测面 + 切片计划事实登记——生成编排的切片输入）+ 只读四件
- * {list_workspace_files, read_workspace_file, query_project_facts, fetch_url}（答询查证），
+ * 登记——需求侧判定的观测面 + 切片计划事实登记——生成编排的切片输入）+ 只读五件
+ * {list_workspace_files, read_workspace_file, query_project_facts, fetch_url,
+ * web_search}（答询查证 + 自主调研），
  * 仅随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关，写面结构性不存在——
  * PRD 写入走 savePrd 自带通道）；
  * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面）
@@ -36,17 +38,19 @@ class ProfileToolkitSupplierTest {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService =
             mock(WorkspaceLifecycleAppService.class);
     private final ExternalContentFetcher externalContentFetcher = mock(ExternalContentFetcher.class);
+    private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
-                projectRepository, workspaceLifecycleAppService, externalContentFetcher);
+                projectRepository, workspaceLifecycleAppService, externalContentFetcher,
+                webSearchProvider);
     }
 
     @Test
     void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_buildplan_and_read_trio() {
         // #86 并轨后的主智能体资产：访谈/判定工具 + 切片计划（saveBuildPlan）+
-        // 答询查证只读四件同面（单会话连续——追问、答询、受理意见不换工具面）；
+        // 答询查证只读五件同面（单会话连续——追问、答询、受理意见不换工具面）；
         // savePrd 锚定项目（经 PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口
         // 在平台代码）
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
@@ -54,9 +58,9 @@ class ProfileToolkitSupplierTest {
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
-                FetchUrlTool.NAME);
+                FetchUrlTool.NAME, WebSearchTool.NAME);
         for (String name : toolkit.getToolNames()) {
-            // 只读四件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
+            // 只读五件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
             // savePrd 是唯一写面（PRD 产出是访谈协议的预期终点）
             if (!SavePrdTool.NAME.equals(name)) {
                 assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();

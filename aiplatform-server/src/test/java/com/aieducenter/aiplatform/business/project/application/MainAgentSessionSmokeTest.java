@@ -251,6 +251,48 @@ class MainAgentSessionSmokeTest {
                 .containsIgnoringCase("example domain");
     }
 
+    /**
+     * 调研闭环冒烟（#215）：「参考 X 类平台」输入 → 主智能体自主判断缺口 → 调用
+     * web_search 搜索（无来源给定的调研——连「去哪找」都自主）→ 回复综合搜得内容。
+     * 真跑 LLM + 真博查（BOCHA_API_KEY 未设则本方法跳过）。搜索结果是活的、非确定性，
+     * 故只断言机制铁证三层——会话状态确有 web_search 调用 + 回复非空 + 回复无失败/
+     * 零结果措辞（搜索失败/零结果时工具如实报错，模型回复必带失败/未果措辞，排掉
+     * 「只点了工具没搜到」的假绿），不锁具体结果文案。搜后 fetch_url 抓取阅读由
+     * fetch_url 冒烟单独钉住；搜→读→再搜的多轮由装配断言（两工具同挂 MAIN）+ 提示词
+     * 协议兜底（每条工具调用即时返回，无轮次死锁结构）。
+     */
+    @Test
+    @Timeout(240)
+    void given_reference_platforms_when_inquiry_then_searches_and_synthesizes() {
+        Assumptions.assumeTrue(
+                System.getenv("BOCHA_API_KEY") != null && !System.getenv("BOCHA_API_KEY").isBlank(),
+                "BOCHA_API_KEY 未设置，跳过真博查调研冒烟");
+
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("调研冒烟", null,
+                Long.parseLong(workspaceId), null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "我想做一个 AI 建站产品，参考 Lovable、Replit 这类平台的做法，"
+                        + "请告诉我这类平台通常具备哪些核心能力，不要再提问");
+
+        awaitRunEnd(run.runId());
+        assertThat(toolWasInvoked("web_search")).as("主智能体应实际调用 web_search 自主搜索").isTrue();
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体回复应综合搜得内容（非空）").isNotBlank();
+        assertThat(reply).as("搜索不应失败或零结果（回复：%s）", reply)
+                .doesNotContain("搜索失败")
+                .doesNotContain("未搜到结果");
+    }
+
     // ---------- 内部 ----------
 
     private Set<String> allRunIds() {

@@ -95,6 +95,12 @@ app:
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
   external-content:
     max-bytes: 1048576
+  # #215 · business.project 调研闭环搜索供数器：base-url + key——换供数方 = 加适配器
+  # + 换配置，主链路零改动；key 只落环境变量 BOCHA_API_KEY（.env.local，gitignored），
+  # 不进 git。缺省空 key 时搜索如实报错（按供应商类型选适配器的开关留待第二家接入）。
+  web-search:
+    base-url: https://api.bocha.cn
+    api-key: ${BOCHA_API_KEY:}
 
 # A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
 # 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本地开发启动.md。

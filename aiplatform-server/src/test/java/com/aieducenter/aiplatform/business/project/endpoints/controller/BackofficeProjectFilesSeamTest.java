@@ -132,11 +132,13 @@ class BackofficeProjectFilesSeamTest {
             throws Exception {
         Long id = newProject("守卫项目").getId();
 
-        // 机密（根级 .env）/逃逸（.. 与绝对路径）/非交付物（data/、node_modules/）
-        // ——判定层一律 400 PRJ_020，错误口径照用户面先例。入参取裸字符路径
-        // （/ . - 均合法）：MockMvc 按 URI 模板再编码，百分号编码会破坏签名基串
+        // 机密（根级 .env）/逃逸（.. 与绝对路径）/非交付物（data/、node_modules/、
+        // external/ 外部仓库资料）——判定层一律 400 PRJ_020，错误口径照用户面先例。
+        // 入参取裸字符路径（/ . - 均合法）：MockMvc 按 URI 模板再编码，百分号编码
+        // 会破坏签名基串
         for (String path : new String[] {".env", "../escape.txt", "src/../../etc/passwd",
-                "/abs/path.js", "data/dump.json", "node_modules/vue/index.js"}) {
+                "/abs/path.js", "data/dump.json", "node_modules/vue/index.js",
+                "external/some-repo/README.md"}) {
             signedGet("/api/backoffice/projects/" + id + "/files/content?path=" + path)
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.message").value("该文件不在可浏览范围"));

@@ -55,6 +55,14 @@ public final class WorkspaceLayout {
      */
     public static final String AGENTS_DIR = "agents";
 
+    /**
+     * 外部仓库资料目录（#214 run 外部仓库惯例）：PRD 引用外部仓库时，run 起手
+     * 浅克隆（{@code --depth 1}）进此目录、执行体只读参考（README/文档/源码结构），
+     * 不合并进用户系统。进非交付目录集（不进交付源码包/文件树/版本正本），但<b>不</b>
+     * 进可重建缓存集（封存默认保全——资料目录非缓存，与数据/平台产物同口径）。
+     */
+    public static final String EXTERNAL_DIR = "external";
+
     /** 平台产物：技能资产。 */
     public static final String SKILLS_DIR = PLATFORM_DIR + "/skills";
 
@@ -71,8 +79,9 @@ public final class WorkspaceLayout {
     public static final String GIT_DIR = ".git";
 
     /**
-     * 约定二的目录面（init 骨架幂等落位的清单）：布局中的全部目录——应用代码占根
-     * 无目录约定，AGENTS.md 是文件资产非目录，都不在骨架内。
+     * 约定二的目录面（init 骨架幂等落位的清单）：随骨架落位的目录——应用代码占根
+     * 无目录约定，AGENTS.md 是文件资产非目录，都不在骨架内；external/（#214 run
+     * 起手浅克隆创建）与 agents/（#95 框架委派位创建）是运行时按需创建，不进骨架。
      */
     public static final List<String> SKELETON_DIRS = List.of(
             DOCS_DIR, PG_DATA_DIR, SKILLS_DIR, RULES_DIR, LOGS_DIR);
@@ -80,7 +89,9 @@ public final class WorkspaceLayout {
     /**
      * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物
      * （{@link #PLATFORM_DIR}）、子智能体工作区（{@link #AGENTS_DIR}，#95 委派位
-     * 隔离根——交付目录无子智能体脏写）、可重建依赖（node_modules）与 pnpm 依赖
+     * 隔离根——交付目录无子智能体脏写）、外部仓库资料目录
+     * （{@link #EXTERNAL_DIR}，#214 run 外部仓库惯例——只读参考不合并进系统，非缓存、
+     * 封存默认保全）、可重建依赖（node_modules）与 pnpm 依赖
      * 缓存（.pnpm-store，#113 基座 store-dir 落卷）、Next 构建产物（.next）与版本
      * 元数据（.git）不是交付物——源码包打包、平台文件树只读端点与版本层
      * .gitignore（#91）共用此单一事实（配合 {@link #ENV_FILE} 机密文件）。.git 由
@@ -88,7 +99,8 @@ public final class WorkspaceLayout {
      * 口径统一）。
      */
     public static final List<String> NON_DELIVERABLE_DIRS = List.of(
-            "node_modules", ".pnpm-store", ".next", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, GIT_DIR);
+            "node_modules", ".pnpm-store", ".next", DATA_DIR, PLATFORM_DIR, AGENTS_DIR, EXTERNAL_DIR,
+            GIT_DIR);
 
     /**
      * 可重建缓存名单（#172 封存单一事实）：封存打包（整卷 tar）唯一排除的目录——

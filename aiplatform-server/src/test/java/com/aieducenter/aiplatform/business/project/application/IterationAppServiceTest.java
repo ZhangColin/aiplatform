@@ -121,6 +121,11 @@ class IterationAppServiceTest {
     @BeforeEach
     void stubClock() {
         when(clock.instant()).thenAnswer(invocation -> mutableClock.instant());
+        // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
+        // 命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     @AfterEach
@@ -195,6 +200,25 @@ class IterationAppServiceTest {
         // #118 工作消息头部标题：更新 run 携平台生成的用户语言标题（无切片进度）
         assertThat(value.heading()).isEqualTo(RunHeading.titled(IterationAppService.FIX_TITLE));
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), any());
+    }
+
+    @Test
+    void given_fix_run_when_start_then_agents_md_written_before_first_converse() {
+        // #214 幂等覆写刷新既有工作区：修正 run 起手同样重写 AGENTS.md 平台约定
+        // （external/ 物理规则进既有工作区，无需重建）——先于首试 converse
+        Long projectId = persistedGeneratedProject("9930");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        InOrder order = inOrder(workspaceLifecycleAppService, agentClient);
+        order.verify(workspaceLifecycleAppService).exec(eq("9930"),
+                argThat((WorkspaceExecCommand cmd) ->
+                        cmd.command().contains("/workspace/AGENTS.md")
+                                && cmd.command().contains("external/")));
+        order.verify(agentClient).converse(any(), any());
     }
 
     @Test

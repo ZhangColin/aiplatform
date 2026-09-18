@@ -34,6 +34,7 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.isViewable("node_modules/react/index.js")).isFalse();
         assertThat(ProjectFiles.isViewable(".pnpm-store/v10/files/x")).isFalse(); // pnpm 依赖缓存
         assertThat(ProjectFiles.isViewable(".next/trace")).isFalse(); // 基座 Next 构建产物
+        assertThat(ProjectFiles.isViewable("external/some-repo/README.md")).isFalse(); // 外部仓库资料
         assertThat(ProjectFiles.isViewable(".env")).isFalse();
     }
 
@@ -56,7 +57,7 @@ class ProjectFilesTest {
                 "find /workspace \\( -path /workspace/node_modules -o -path /workspace/.pnpm-store"
                         + " -o -path /workspace/.next -o -path /workspace/data"
                         + " -o -path /workspace/.platform -o -path /workspace/agents"
-                        + " -o -path /workspace/.git \\) -prune -o -type f"
+                        + " -o -path /workspace/external -o -path /workspace/.git \\) -prune -o -type f"
                         + " ! -path /workspace/.env -printf '%s\\t%P\\n'");
     }
 

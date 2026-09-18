@@ -12,6 +12,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -86,6 +87,7 @@ public class IterationAppService {
     private final FinishEditFacts finishFacts;
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
+    private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -99,13 +101,15 @@ public class IterationAppService {
     public IterationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
             FinishEditFacts finishFacts, AgentEventBridge eventBridge,
-            CodingRunTrack codingRunTrack) {
+            CodingRunTrack codingRunTrack,
+            WorkspaceLifecycleAppService workspaceLifecycleAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
         this.finishFacts = finishFacts;
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
+        this.workspaceLifecycleAppService = workspaceLifecycleAppService;
     }
 
     /**
@@ -149,7 +153,7 @@ public class IterationAppService {
         }
         log.info("[fix] 项目 {} 恢复出口重派修正 run（runId={}，交接 {} 轮，源自超限终态）",
                 projectId, firstRunId, handoff.rounds().size());
-        submitFixTrack(project, firstRunId, handoff);
+        beginFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
     }
 
@@ -210,7 +214,7 @@ public class IterationAppService {
             }
             firstRunId = EventsAppService.newRunId();
         }
-        submitFixTrack(project, firstRunId, handoff);
+        beginFixTrack(project, firstRunId, handoff);
         return new FixDispatch(firstRunId, false);
     }
 
@@ -349,6 +353,25 @@ public class IterationAppService {
                 .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")
                 .append("不调用即本轮修正未收口。");
         return prompt.toString();
+    }
+
+    /**
+     * 修正轨道起手（AGENTS.md 资产就位 + 异步提交，{@link #dispatch} 与
+     * {@link #restartFixRun} 共用）：与生成轨同口径——AGENTS.md 平台约定幂等覆写
+     * （#214 既有工作区自动刷新新物理规则，无需重建工作区），失败即环境故障口径
+     * 如实上抛并释放在途标记（run 不起跑）。
+     */
+    private void beginFixTrack(Project project, String firstRunId, FixHandoff handoff) {
+        Long projectId = project.getId();
+        try {
+            GenerationAppService.writeConventionsAsset(workspaceLifecycleAppService, project);
+        } catch (RuntimeException e) {
+            synchronized (codingRunTrack) {
+                codingRunTrack.end(projectId);
+            }
+            throw e;
+        }
+        submitFixTrack(project, firstRunId, handoff);
     }
 
     private void submitFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {

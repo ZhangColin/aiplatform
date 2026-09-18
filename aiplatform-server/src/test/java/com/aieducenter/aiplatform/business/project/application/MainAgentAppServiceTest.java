@@ -137,6 +137,11 @@ class MainAgentAppServiceTest {
             AgentResume resume = invocation.getArgument(0);
             return resume != null ? new AgentReply(resume.runId(), "好的") : null;
         });
+        // AGENTS.md 资产就位（#214 生成/修正 run 起手幂等覆写）默认成功：只桩资产
+        // 写入命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     private void givenSessionExecutorRunsInline() {

@@ -252,7 +252,9 @@ class DockerEnvironmentBackendTest {
                         + " && mkdir -p /workspace/node_modules/leftpad"
                         + " && echo junk > /workspace/node_modules/leftpad/index.js"
                         + " && echo pgdata > /workspace/data/pg/base.fakedb"
-                        + " && echo platform > /workspace/.platform/logs/run.log");
+                        + " && echo platform > /workspace/.platform/logs/run.log"
+                        + " && mkdir -p /workspace/external/some-repo"
+                        + " && echo ref > /workspace/external/some-repo/README.md");
 
         byte[] tarball = backend.packSource(provision.handle());
 
@@ -274,6 +276,7 @@ class DockerEnvironmentBackendTest {
         assertThat(listing).doesNotContain("node_modules");
         assertThat(listing).doesNotContain("data");
         assertThat(listing).doesNotContain(".platform");
+        assertThat(listing).doesNotContain("external"); // #214 外部仓库资料不进交付包
     }
 
     @Test

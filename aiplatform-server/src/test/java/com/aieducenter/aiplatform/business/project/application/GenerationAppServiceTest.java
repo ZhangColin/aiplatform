@@ -228,6 +228,19 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_executor_protocol_when_inspect_then_external_repo_convention_anchored() {
+        // #214 外部仓库流程指令写进执行体工作协议：起手先 clone 进 external/ 再读，
+        // 物理规则指路 AGENTS.md——与工作区平台约定分工（物理规则进 AGENTS.md 正本）
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("外部仓库惯例")
+                .contains("浅克隆进工作区 external/")
+                .contains("external/")
+                .contains("只读参考")
+                .contains("不把仓库内容合并进你交付的系统")
+                .contains("见工作区 AGENTS.md");
+    }
+
+    @Test
     void given_slice_retries_when_generate_then_retry_same_slice_session_and_handoff_injected() {
         // #114 重试续本片会话 + 片间交接：阶段 0 成功、切片 1 首试失败后重试成功、切片 2
         // 成功——重试续切片 1 会话（不换新）；前片收口终文注入下一片（切片 2 的 prompt
@@ -458,7 +471,13 @@ class GenerationAppServiceTest {
                                 && cmd.command().contains("增量长出页面与功能")
                                 // #113 基座技术栈节进工作区正本（不换栈、不重选型）
                                 && cmd.command().contains("基座技术栈")
-                                && cmd.command().contains("不换栈、不重选型")));
+                                && cmd.command().contains("不换栈、不重选型")
+                                // #214 外部仓库物理规则进工作区正本（external/ 资料目录浅克隆、
+                                // 克隆带目标目录 external/<仓库名>、不进交付/版本）
+                                && cmd.command().contains("external/")
+                                && cmd.command().contains("external/<仓库名>")
+                                && cmd.command().contains("浅克隆")
+                                && cmd.command().contains("不进交付源码包")));
         order.verify(agentClient).converse(any(), any());
     }
 

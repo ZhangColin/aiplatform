@@ -22,7 +22,7 @@ class WorkspaceLayoutTest {
                         WorkspaceLayout.DOCS_DIR, WorkspaceLayout.DATA_DIR, WorkspaceLayout.PG_DATA_DIR,
                         WorkspaceLayout.PLATFORM_DIR, WorkspaceLayout.SKILLS_DIR,
                         WorkspaceLayout.RULES_DIR,
-                        WorkspaceLayout.LOGS_DIR)
+                        WorkspaceLayout.LOGS_DIR, WorkspaceLayout.EXTERNAL_DIR)
                 .forEach(path -> {
                     assertThat(path).doesNotStartWith("/");
                     assertThat(path).doesNotContain("..");
@@ -50,6 +50,17 @@ class WorkspaceLayoutTest {
                 WorkspaceLayout.DOCS_DIR, WorkspaceLayout.PG_DATA_DIR,
                 WorkspaceLayout.SKILLS_DIR, WorkspaceLayout.RULES_DIR,
                 WorkspaceLayout.LOGS_DIR);
+    }
+
+    @Test
+    void given_external_dir_when_inspect_then_non_deliverable_but_seal_preserved() {
+        // #214 外部仓库惯例：external/ 进非交付名单（交付源码包/文件树/版本层三处共用
+        // 单一事实），但不进可重建缓存集（封存默认保全——资料目录非缓存，与数据/
+        // 平台产物同口径）
+        assertThat(WorkspaceLayout.NON_DELIVERABLE_DIRS)
+                .contains(WorkspaceLayout.EXTERNAL_DIR);
+        assertThat(WorkspaceLayout.REBUILDABLE_CACHE_DIRS)
+                .doesNotContain(WorkspaceLayout.EXTERNAL_DIR);
     }
 
     @Test

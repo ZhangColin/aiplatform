@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +36,8 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationAnchor;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationBody;
@@ -84,6 +87,9 @@ class ConversationHistoryTest {
     @MockitoBean
     private KnowledgePort knowledgePort;
 
+    @MockitoBean
+    private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
@@ -101,6 +107,11 @@ class ConversationHistoryTest {
         when(agentClient.resume(any(), any())).thenAnswer(invocation ->
                 new AgentReply("r", "好的"));
         when(agentClient.hasAskingToolCall(anyString(), anyString())).thenReturn(false);
+        // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
+        // 命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                .thenReturn(new ExecResultResponse("", "", 0));
     }
 
     private void givenSessionExecutorRunsInline() {

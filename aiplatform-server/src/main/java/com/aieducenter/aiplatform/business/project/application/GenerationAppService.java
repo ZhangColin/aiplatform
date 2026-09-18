@@ -202,6 +202,7 @@ public class GenerationAppService {
             工作区开箱即是一个可运行的基座工程（镜像内置、依赖已预装），技术栈固定：TypeScript / Next.js / React 19 / pnpm / shadcn（Tailwind 4）/ PostgreSQL / Redis。在基座上增量长出系统——不换栈、不重选型、不重新搭骨架；基座覆盖不了的依赖才在工作区现场安装（pnpm add），不要引入替代性框架。
 
             - 应用代码放工作区根目录；docs/ 放文档（docs/PRD.md 是需求正本，只读）。
+            - external/ 是外部仓库资料目录：PRD 引用外部仓库时，把仓库浅克隆进 external/（git clone --depth 1 <仓库地址> external/<仓库名>），只读参考其 README/文档/源码结构、不合并进系统；此目录不进交付源码包、不在文件树显示、不进版本正本（随封存保全，非缓存）。
             - 数据库连接串读 .env 的 DATABASE_URL（平台生成、唯一注入通道，勿手改）；需要缓存用 .env 的 REDIS_URL。
             - 应用自用的文件数据必须落 data/ 目录（卷内才持久）。
             - 应用服务必须监听 0.0.0.0:8081——平台预览从该端口取流量。
@@ -304,7 +305,7 @@ public class GenerationAppService {
             return null;
         }
         try {
-            placeConventionsAsset(project);
+            writeConventionsAsset(workspaceLifecycleAppService, project);
         } catch (RuntimeException e) {
             codingRunTrack.end(projectId);
             throw e;
@@ -484,15 +485,22 @@ public class GenerationAppService {
     }
 
     /**
-     * 工作区布局资产就位：AGENTS.md 平台约定写入（幂等覆写）。heredoc 单引号定界
-     * 不做展开，正文为平台常量（无用户可控片段、无单引号）；退出码非 0 即写入
-     * 失败（环境故障口径如实上抛，生成不起跑）。
+     * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
+     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无单引号）。
      */
-    private void placeConventionsAsset(Project project) {
-        String command = "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
+    static String agentsMdWriteCommand() {
+        return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
                 + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT + "\nPLATFORM_EOF";
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(command));
+    }
+
+    /**
+     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区）：
+     * AGENTS.md 平台约定写入。退出码非 0 即写入失败（环境故障口径如实上抛，run
+     * 不起跑）。
+     */
+    static void writeConventionsAsset(WorkspaceLifecycleAppService workspace, Project project) {
+        ExecResultResponse result = workspace.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(agentsMdWriteCommand()));
         if (result.exitCode() != 0) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "AGENTS.md 平台约定写入失败: " + result.stderr());

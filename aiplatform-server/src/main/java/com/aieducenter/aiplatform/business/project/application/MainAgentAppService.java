@@ -294,16 +294,23 @@ public class MainAgentAppService {
      * 事实 → 自动派生成）。补产无果不递归再补——由 {@code GenerationAppService} 的
      * 补产账止住（同一 PRD 版本只补产一次，用户重提意见即兜底）。
      *
+     * <p><b>存量恢复（#223）</b>：往次生成早于轨道表的项目（无持久化计划但已有
+     * 收口成果）补产时携已收口成果清单（收尾卡叙事）——已完片按原文一字不改照录
+     * 进计划，平台落库时对照收尾卡精确匹配标已完片、只补缺口续跑。清单空（无存量
+     * 成果，或表内有旧片行的换锚重产——从头来是既定口径）即常规全量补产。</p>
+     *
+     * @param completedOutcomes 已收口成果清单（收尾卡 summary，按先后；空 = 常规补产）
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
      *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
      *                              （补产轮可追问——挂起即止，答复后续跑收口同链必达）
      */
-    public MainAgentRun requestBuildPlan(Long projectId) {
+    public MainAgentRun requestBuildPlan(Long projectId, List<String> completedOutcomes) {
         Project project = requireUpdatableProject(projectId);
         String sessionId = sessionIdOf(projectId);
         requireNoPendingQuestion(project, sessionId);
         String runId = EventsAppService.newRunId();
-        AgentCommand command = mainCommand(project, runId, BUILD_PLAN_REQUEST_PROMPT);
+        AgentCommand command = mainCommand(project, runId,
+                buildPlanRequestPrompt(completedOutcomes));
         sessionExecutor.submit(sessionId, () -> {
             // 同意见轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的计划事实
             // 不冒充本轮补产产出）
@@ -339,6 +346,31 @@ public class MainAgentAppService {
                     + "后端落库端到端走通，按实现的自然顺序排列，宁粗勿碎），并调用 "
                     + "saveBuildPlan 工具保存切片计划。不要修改 PRD（本请求只补产计划）。"
                     + "保存成功后，向用户简短说明已按 PRD 拟好实施计划、系统即将开始生成。";
+
+    /**
+     * 补产轮 prompt 拼装（#223 存量变体）：清单空 = 常规补产原文；有存量成果时
+     * 追加对照约定——已完片按原文一字不改照录进计划前部（平台落库按收尾卡叙事
+     * 精确匹配标已完片，措辞漂移即对照不上、按待跑重做——降级方向安全）。
+     */
+    static String buildPlanRequestPrompt(List<String> completedOutcomes) {
+        if (completedOutcomes.isEmpty()) {
+            return BUILD_PLAN_REQUEST_PROMPT;
+        }
+        StringBuilder prompt = new StringBuilder(BUILD_PLAN_REQUEST_PROMPT)
+                .append("\n\n补充事实：本项目工作区已有往次生成收口的成果（平台收尾卡")
+                .append("记录，按先后顺序）：\n");
+        for (String outcome : completedOutcomes) {
+            prompt.append("- ").append(outcome).append('\n');
+        }
+        return prompt
+                .append("拟计划时请对照这份清单：已完成的切片（上述「")
+                .append(GenerationAppService.SLICE_CLOSING_PREFIX)
+                .append("」各项）")
+                .append("在新计划中按原文一字不改照录、排在计划前部并保持上述先后顺序；")
+                .append("PRD 中尚未完成的其余部分作为待做切片排在后面——")
+                .append("平台会跳过已完成的切片、只生成待做部分。")
+                .toString();
+    }
 
     // ---------- 内部 ----------
 

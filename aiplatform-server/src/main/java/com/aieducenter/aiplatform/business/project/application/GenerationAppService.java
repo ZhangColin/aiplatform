@@ -6,8 +6,10 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -69,6 +71,13 @@ import lombok.extern.slf4j.Slf4j;
  * 断点以轨道表为准、git 收口 commit（Run-Id 锚定收尾卡）为旁证；干净重做不设
  * 默认路径——PRD 演进即计划重产从头来（用户的显式选择）。</p>
  *
+ * <p><b>存量恢复（#223，ADR-0020「存量在途项目走计划重派路径恢复」）</b>：生成
+ * 早于轨道表的在途项目（表内无片行）发起「继续生成」＝计划重派恢复——补产轮
+ * 携已收口成果清单（收尾卡叙事，要求已完片照录原文），计划落库时对照收尾卡
+ * <b>精确匹配</b>（片收口叙事逐字相等）标已完片（run 锚 = 往次收口 run），续跑只补
+ * 缺口；措辞漂移即对照不上、按待跑重做（降级方向安全：多跑不漏做）。PRD 已演进
+ * 的换锚重产（表内有旧片行）不适用存量对照——整组替换重置、从头来是既定口径。</p>
+ *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
@@ -121,6 +130,17 @@ public class GenerationAppService {
      * 阶段 0 重试续作的本段任务描述（与首试 prompt 同口径的段叙事，重试拼装用）。
      */
     static final String STAGE0_RETRY_DESC = "先起服：应用以最小可运行形态跑上 8081";
+
+    /** 阶段 0 收口叙事（收尾卡 summary；#223 存量对照的匹配键）。 */
+    static final String STAGE0_CLOSING_SUMMARY = "起服了系统骨架";
+
+    /** 切片收口叙事前缀（收尾卡 summary；#223 存量对照的匹配键）。 */
+    static final String SLICE_CLOSING_PREFIX = "完成切片：";
+
+    /** 切片收口叙事（收尾卡 summary 的拼装单点——落口与存量对照同键）。 */
+    static String sliceClosingSummary(String slice) {
+        return SLICE_CLOSING_PREFIX + slice;
+    }
 
     /**
      * 重试续作 prompt（#104 分段口径；#221 原地修——携带错误现场）：同工作区不丢
@@ -337,6 +357,7 @@ public class GenerationAppService {
     private final GenerationSegmentRepository generationSegments;
     private final TransactionTemplate transactionTemplate;
     private final MainAgentAppService mainAgentAppService;
+    private final ConversationHistoryAppService conversationHistory;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -366,7 +387,8 @@ public class GenerationAppService {
             CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
             GenerationSegmentRepository generationSegments, TransactionTemplate transactionTemplate,
-            @Lazy MainAgentAppService mainAgentAppService) {
+            @Lazy MainAgentAppService mainAgentAppService,
+            ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -377,6 +399,7 @@ public class GenerationAppService {
         this.generationSegments = generationSegments;
         this.transactionTemplate = transactionTemplate;
         this.mainAgentAppService = mainAgentAppService;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -498,20 +521,60 @@ public class GenerationAppService {
      * 不一致、计划不沿用）。短事务原子替换（旧片不残留；删后先冲刷再插——JPA 同
      * 事务冲刷序先插后删，不冲刷会撞 (project_id, ord) 唯一键）；失败如实上抛（无
      * 轨道事实不空跑生成）。落库成功清补产账（补产已兑现）。
+     *
+     * <p><b>存量首录对照标已完片（#223）</b>：表内无片行 = 往次生成早于轨道表——
+     * 补产计划落库时对照项目收尾卡（已收口成果，git 收口 commit 经 Run-Id trailer
+     * 锚定同一收尾卡）把匹配片直接置已收口（证据级精确匹配：片收口叙事与收尾卡
+     * summary 逐字相等——补产 prompt 要求已完片照录原文，措辞漂移即对照不上、按
+     * 待跑重做，降级方向安全：多跑不漏做）；表内有旧片行（PRD 已演进换锚重产）
+     * 不适用——旧片整组替换重置、从头来是既定口径。</p>
      */
     private void recordPlan(Project project, BuildPlan plan) {
         Long projectId = project.getId();
         LocalDateTime prdAnchor = project.getPrdProducedAt();
+        Map<String, String> legacyClosed = legacyClosedSummaries(projectId);
         transactionTemplate.executeWithoutResult(status -> {
             generationSegments.deleteByProjectId(projectId);
             generationSegments.flush();
-            generationSegments.save(GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor));
+            GenerationSegment stage0 = GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor);
+            markLegacyClosed(stage0, legacyClosed);
+            generationSegments.save(stage0);
             for (int index = 0; index < plan.slices().size(); index++) {
-                generationSegments.save(GenerationSegment.pending(projectId, index + 1,
-                        plan.slices().get(index), prdAnchor));
+                GenerationSegment segment = GenerationSegment.pending(projectId, index + 1,
+                        plan.slices().get(index), prdAnchor);
+                markLegacyClosed(segment, legacyClosed);
+                generationSegments.save(segment);
             }
         });
+        if (!legacyClosed.isEmpty()) {
+            log.info("[generate] 项目 {} 存量计划首录：对照收尾卡标已完片后只补缺口", projectId);
+        }
         planProductionRequests.remove(projectId);
+    }
+
+    /**
+     * 存量已完片对照标已收口（#223）：片收口叙事（阶段 0 固定句 / 完成切片句）与
+     * 收尾卡 summary 逐字相等即置已收口，run 锚 = 往次收口的用户面 run（收尾卡锚）。
+     */
+    private static void markLegacyClosed(GenerationSegment segment, Map<String, String> legacyClosed) {
+        String summary = segment.getOrd() == 0
+                ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(segment.getDescription());
+        String runId = legacyClosed.get(summary);
+        if (runId != null) {
+            segment.close(runId);
+        }
+    }
+
+    /**
+     * 存量已收口成果清单（#223 对照源，补产携载与落库标定的共用读口）：表内无片行
+     * = 往次生成早于轨道表——取项目收尾卡叙事（summary → 收口 run 锚）；表内有片行
+     * （PRD 已演进换锚重产）恒空——重产从头来是既定口径，不适用存量对照。
+     */
+    private Map<String, String> legacyClosedSummaries(Long projectId) {
+        if (!generationSegments.findByProjectIdOrderByOrdAsc(projectId).isEmpty()) {
+            return Map.of();
+        }
+        return conversationHistory.closedGenerationSummaries(projectId);
     }
 
     /**
@@ -519,6 +582,11 @@ public class GenerationAppService {
      * 切片计划——补产轮（main 会话、不记用户发言）收口即经既有链必达自动再派生成。
      * 同一 PRD 版本只补产一次（{@link #planProductionRequests} 防烧护栏）：已补产过
      * 即静默不派（返回 null），用户重提意见即兜底；PRD 演进换锚可再补产。
+     *
+     * <p><b>存量对照（#223）</b>：表内无片行 = 往次生成早于轨道表（无持久化计划但
+     * 已有收口成果）——补产 prompt 携已收口成果清单（要求已完片照录原文），补产
+     * 计划落库时 {@link #recordPlan} 据此标已完片、只补缺口；表内有旧片行（PRD 已
+     * 演进换锚）不携——重产从头来是既定口径。</p>
      */
     private GenerationRun dispatchPlanProduction(Project project) {
         Long projectId = project.getId();
@@ -530,9 +598,13 @@ public class GenerationAppService {
         // 记账先于补产提交（补产轮收口的再派要靠它止住——同步执行器下后置记账会
         // 递归失控）；补产轮起跑被守卫拒（挂起问答等）则清账——该版本仍可再补
         planProductionRequests.put(projectId, project.getPrdProducedAt());
-        log.info("[generate] 项目 {} 计划缺失，重派主智能体按 PRD 补产切片计划", projectId);
+        List<String> legacyClosedOutcomes =
+                List.copyOf(legacyClosedSummaries(projectId).keySet());
+        log.info("[generate] 项目 {} 计划缺失，重派主智能体按 PRD 补产切片计划（存量对照清单 {} 项）",
+                projectId, legacyClosedOutcomes.size());
         try {
-            return new GenerationRun(mainAgentAppService.requestBuildPlan(projectId).runId());
+            return new GenerationRun(
+                    mainAgentAppService.requestBuildPlan(projectId, legacyClosedOutcomes).runId());
         }
         catch (RuntimeException e) {
             planProductionRequests.remove(projectId);
@@ -577,14 +649,16 @@ public class GenerationAppService {
     // ---------- 内部 ----------
 
     /**
-     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段；#221 断点续跑）：断点以
-     * 轨道表为准（表中最深收口片；git 收口 commit 为旁证）——<b>续跑跳过已收口片、
-     * 只重跑失败/中断片</b>（断点后首段），起手带现状盘点（{@link #resumeInventoryBlock}）
-     * 从新会话脏续（{@link #resumeSession}），前片交接摘要取 {@code .platform/} 落盘件
-     * （{@link #readSliceHandoff}——进程重启后内存终文不在的事实源）。全场景同一
-     * 口径：重试耗尽 run-failed 后「继续生成」与中断续跑同路（不重头）；PRD 演进则
-     * 计划重产整组替换、从头再来（推倒重来是显式选择，走对话区改 PRD）。断点已过
-     * 末片（末片收口而 {@code generated_at} 落位失败的边角）直接补落位。
+     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段；#221 断点续跑；#223 存量
+     * 对照续跑）：断点以轨道表为准（表中最深收口片；git 收口 commit 为旁证）——
+     * <b>续跑跳过已收口片、只重跑失败/中断片</b>（首个未收口段起），起手带现状盘点
+     * （{@link #resumeInventoryBlock}）从新会话脏续（{@link #resumeSession}），前片
+     * 交接摘要取 {@code .platform/} 落盘件（{@link #readSliceHandoff}——进程重启后
+     * 内存终文不在的事实源）。已收口片逐段跳过（任意分布正确——存量对照标的已完
+     * 片理论上非前缀，#223）。全场景同一口径：重试耗尽 run-failed 后「继续生成」
+     * 与中断续跑同路（不重头）；PRD 演进则计划重产整组替换、从头再来（推倒重来是
+     * 显式选择，走对话区改 PRD）。片全收口（末片收口而 {@code generated_at} 落位
+     * 失败的边角、存量对照标满的空缺口）直接补落位。
      *
      * <p>每片收口判据 = 8081 可达（{@link #requireReachable} 核验）+ 成版 +
      * run-finish（收口扩载，端到端可操作由片内 self-test 兜）；最后一片收口才落
@@ -598,36 +672,52 @@ public class GenerationAppService {
         List<String> slices = plan.slices();
         List<GenerationSegment> segments =
                 generationSegments.findByProjectIdOrderByOrdAsc(projectId);
-        int breakpoint = segments.stream()
+        // 待跑段集与已收口段集（#221 断点续跑；#223 存量对照后已收口段可非前缀分布
+        // ——补产照录已完片在前只是提示词约定，平台不强求，逐段跳过已收口片对任意
+        // 分布正确）；断点段 = 首个未收口段
+        Set<Integer> closedOrds = segments.stream()
                 .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
-                .mapToInt(GenerationSegment::getOrd).max().orElse(-1);
+                .map(GenerationSegment::getOrd).collect(Collectors.toUnmodifiableSet());
+        List<Integer> openOrds = segments.stream()
+                .filter(segment -> segment.getStatus() != GenerationSegmentStatus.CLOSED)
+                .map(GenerationSegment::getOrd).toList();
         boolean resumed = segments.stream()
                 .anyMatch(segment -> segment.getStatus() != GenerationSegmentStatus.PENDING);
-        if (breakpoint >= slices.size()) {
-            // 断点已过末片：片全收口即生成完成（generated_at 落位失败的补落）
+        if (openOrds.isEmpty()) {
+            // 片全收口即生成完成（末片收口而 generated_at 落位失败的补落 + 存量对照
+            // 标满的空缺口边角，#223）
             terminalFailureScenes.remove(projectId);
             markGenerated(projectId);
             return;
         }
+        int startOrd = openOrds.get(0);
         // 续跑起手交接（#221）：断点段（失败/中断片）prompt 前置现状盘点；前片交接
-        // 摘要取 .platform/ 落盘件（内存终文随进程消失，落盘件是续跑事实源）
+        // 摘要取断点前最深收口片的 .platform/ 落盘件（内存终文随进程消失，落盘件是
+        // 续跑事实源）
         String resumePrefix = "";
         String previousHandoff = null;
         if (resumed) {
-            resumePrefix = resumeInventoryBlock(breakpoint + 1, segments,
+            resumePrefix = resumeInventoryBlock(startOrd, segments,
                     terminalFailureScenes.get(projectId));
-            if (breakpoint >= 0) {
-                previousHandoff = readSliceHandoff(project, breakpoint);
+            int handoffSource = closedOrds.stream()
+                    .filter(ord -> ord < startOrd).max(Integer::compare).orElse(-1);
+            if (handoffSource >= 0) {
+                previousHandoff = readSliceHandoff(project, handoffSource);
             }
         }
         // 轨道逐段（阶段 0 起跑时 ord=0）：断点段 = 本轨首 run（首试 runId 即用户面
-        // 首 run 身份），此后逐片新 runId；某片失败不自动跳下一片（完整性优先）
-        for (int index = breakpoint + 1; index <= slices.size(); index++) {
+        // 首 run 身份），此后逐片新 runId；某片失败不自动跳下一片（完整性优先）。
+        // 末段 = 最深待跑段（其后段已收口——存量对照的分布边角，全收口即落位）
+        int lastOrd = openOrds.get(openOrds.size() - 1);
+        for (int index = startOrd; index <= slices.size(); index++) {
             int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
+            if (closedOrds.contains(ord)) {
+                continue; // 已收口片不重做（#221 断点续跑 / #223 存量对照）
+            }
             boolean stage0 = ord == 0;
             String slice = stage0 ? null : slices.get(ord - 1);
-            boolean last = ord == slices.size();
-            boolean resumeTarget = ord == breakpoint + 1;
+            boolean last = ord == lastOrd;
+            boolean resumeTarget = ord == startOrd;
             String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
             String prefix = resumeTarget ? resumePrefix : "";
             String handoff = stage0 ? null : previousHandoff;
@@ -640,7 +730,7 @@ public class GenerationAppService {
                             prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
                             errorScene -> prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                     attemptRunId -> closeGenerationStage(project, ord, last, runId,
-                            stage0 ? "起服了系统骨架" : "完成切片：" + slice),
+                            stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice)),
                     CoderRunAttempts.GENERATE_LABEL, stage0,
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()));

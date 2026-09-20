@@ -749,6 +749,165 @@ class GenerationAppServiceTest {
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
+    // ---------- 存量恢复（#223：无表项目对照收尾卡标已完片、只补缺口） ----------
+
+    @Test
+    void given_legacy_project_with_closings_when_resume_then_marked_and_only_gap_runs() {
+        // 灵魂用例（#223 AC①）：存量在途项目（生成早于轨道表——表内无片行，已收口
+        // 成果只在收尾卡）发起「继续生成」：补产轮 prompt 携已收口成果清单（已完片
+        // 照录原文的约定）→ 补产计划落库对照标已完片（run 锚 = 往次收口的用户面
+        // run）→ 续跑只跑缺口片（断点片新会话起手现状盘点，已收口进度含存量片）
+        // → 缺口收口即 generated_at 落位
+        Long projectId = persistedProject("9860");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        // 存量收口事实（往次生成收尾卡）：阶段 0 + 两片已收口
+        conversationHistory.recordClosing(projectId, "legacy-run-0",
+                Map.of("summary", "起服了系统骨架"));
+        conversationHistory.recordClosing(projectId, "legacy-run-1",
+                Map.of("summary", "完成切片：用户能注册登录"));
+        conversationHistory.recordClosing(projectId, "legacy-run-2",
+                Map.of("summary", "完成切片：用户能下单支付"));
+        // 补产轮照录已完片原文 + 补缺口片（saveBuildPlan 事实），切片 run 正常收口
+        BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付", "用户能管理商品"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), produced);
+                return new AgentReply(command.runId(), "已对照已有成果拟好实施计划");
+            }
+            return new AgentReply(command.runId(), "缺口片完成");
+        });
+
+        GenerationAppService.GenerationRun run = appService.startGeneration(projectId);
+
+        // 补产轮（main 会话）+ 缺口片恰一场编码 run——阶段 0 与已完片不重跑
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        assertThat(run.runId()).isEqualTo(all.get(0).runId());
+        // 补产轮 prompt 携已收口成果清单 + 照录约定（对照的匹配前提）
+        assertThat(all.get(0).prompt())
+                .contains("起服了系统骨架")
+                .contains("完成切片：用户能注册登录")
+                .contains("一字不改照录");
+        // 缺口片（断点段）新会话脏续：现状盘点起手（已收口进度含存量片）+ 任务本体
+        assertThat(all.get(1).sessionId())
+                .startsWith(GenerationAppService.sliceSession(projectId, 3) + "-");
+        assertThat(all.get(1).prompt())
+                .contains("续跑现状盘点")
+                .contains("切片 1/3「用户能注册登录」")
+                .contains("切片 2/3「用户能下单支付」")
+                .contains("切片 3/3")
+                .contains("用户能管理商品");
+        // 轨道表：存量片对照标已收口（run 锚 = 往次收口 run）、缺口片本次真跑收口
+        List<Map<String, Object>> rows = segmentRows(projectId);
+        assertThat(rows).extracting(row -> row.get("status")).containsExactly(2, 2, 2, 2);
+        assertThat(rows.get(0)).containsEntry("run_id", "legacy-run-0");
+        assertThat(rows.get(1)).containsEntry("run_id", "legacy-run-1");
+        assertThat(rows.get(2)).containsEntry("run_id", "legacy-run-2");
+        assertThat(rows.get(3)).containsEntry("run_id", all.get(1).runId());
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(3);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_legacy_project_when_plan_paraphrases_then_no_match_and_full_redo() {
+        // #223 降级方向安全：补产未照录原文（切片措辞漂移）——切片对照不上即待跑
+        // 重做、不猜语义等价；对得上的照标（阶段 0 固定句不受措辞影响）——多跑不
+        // 漏做，部分对照部分跳过
+        Long projectId = persistedProject("9861");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        conversationHistory.recordClosing(projectId, "legacy-run-0",
+                Map.of("summary", "起服了系统骨架"));
+        conversationHistory.recordClosing(projectId, "legacy-run-1",
+                Map.of("summary", "完成切片：用户能注册登录"));
+        BuildPlan produced = new BuildPlan(List.of("用户能够注册并登录系统", "用户能下单支付"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), produced);
+                return new AgentReply(command.runId(), "已拟好计划");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.startGeneration(projectId);
+
+        // 补产轮 + 两片（措辞漂移的两片都真跑）= 3 次 converse；阶段 0 对照跳过
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        // 阶段 0 已收口（run 锚 = 往次收口 run）；切片 1 断点段起手（有进度可盘点）
+        assertThat(segmentRows(projectId).get(0)).containsEntry("run_id", "legacy-run-0");
+        assertThat(commands.getAllValues().get(1).sessionId())
+                .startsWith(GenerationAppService.sliceSession(projectId, 1) + "-");
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("续跑现状盘点")
+                .contains("系统初始化");
+        assertThat(commands.getAllValues().get(2).sessionId())
+                .isEqualTo(GenerationAppService.sliceSession(projectId, 2));
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_tracked_project_prd_revised_when_replan_then_no_legacy_marking() {
+        // #223 边界：存量对照只认「表内无片行」的首录——PRD 已演进的换锚重产
+        // （表内有旧片行）整组替换重置待跑、从头来是既定口径，即便新计划措辞与
+        // 旧收口叙事逐字相同也不标（阶段 0 照样真跑）
+        Long projectId = persistedProject("9862");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        // 首轮生成中断（阶段 0 收口、切片失败）——表内有片行、generated_at 未落
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("切片失败"))
+                .thenThrow(new IllegalStateException("切片失败"))
+                .thenThrow(new IllegalStateException("切片失败"));
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录")));
+        revisePrd(projectId);
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能管理商品")));
+
+        // 换锚重产不标已完片：阶段 0 真跑（烧满重试转终态失败），不是对照跳过
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(3, 1, 1);
+    }
+
+    @Test
+    void given_legacy_fully_closed_when_resume_then_backfilled_without_coder_runs() {
+        // #223 空缺口边角：补产计划与存量成果全对上（实际早已生成完、只差 generated_at
+        // 落位）——不派任何编码 run，落位直接补上（断点已过末片的存量版）
+        Long projectId = persistedProject("9863");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        conversationHistory.recordClosing(projectId, "legacy-run-0",
+                Map.of("summary", "起服了系统骨架"));
+        conversationHistory.recordClosing(projectId, "legacy-run-1",
+                Map.of("summary", "完成切片：用户能注册登录"));
+        BuildPlan produced = new BuildPlan(List.of("用户能注册登录"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), produced);
+                return new AgentReply(command.runId(), "对照已有成果，系统已全部完成");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.startGeneration(projectId);
+
+        // 仅补产轮一次 converse（main 会话）；无编码 run
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(0).sessionId())
+                .startsWith(MainAgentAppService.SESSION_PREFIX);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(1);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
     // ---------- 生成态四态投影（#222：REST 档位与「继续生成」出口的推导输入） ----------
 
     @Test

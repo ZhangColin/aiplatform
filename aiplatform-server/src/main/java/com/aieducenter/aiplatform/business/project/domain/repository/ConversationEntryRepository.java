@@ -24,6 +24,10 @@ public interface ConversationEntryRepository extends BaseRepository<Conversation
     Optional<ConversationEntry> findFirstByProjectIdAndRunIdAndKindOrderByIdDesc(
             Long projectId, String runId, ConversationEntryKind kind);
 
+    /** 项目内某类的全部条目（id 升序 = 写入序；#223 已收口成果清单的对照读口）。 */
+    List<ConversationEntry> findByProjectIdAndKindOrderByIdAsc(Long projectId,
+            ConversationEntryKind kind);
+
     /** 项目删除的级联清理入口（编排调用，同表族软引用约定）。 */
     void deleteByProjectId(Long projectId);
 }

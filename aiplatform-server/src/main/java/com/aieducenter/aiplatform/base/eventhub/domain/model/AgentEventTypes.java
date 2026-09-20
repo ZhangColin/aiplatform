@@ -74,7 +74,7 @@ public final class AgentEventTypes {
      * 生成轨道超限即终态。runId = 该场 run 的<b>用户面标识</b>（首试 runId——#84
      * 静默重试：重试不换新锚、不新发 {@link #RUN_START}，中间尝试的内部 runId
      * 不出用户面，事件序上 run-failed 前无任何失败/重试信号）。前端恢复出口
-     * （重新发起 / 重新修改）只认本事件——run 失败为唯一失败终态。
+     * （继续生成 / 重新修改）只认本事件——run 失败为唯一失败终态。
      */
     public static final String RUN_FAILED = "run-failed";
 

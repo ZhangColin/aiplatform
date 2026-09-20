@@ -19,6 +19,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.net.URI;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -283,9 +285,12 @@ class GenerationAppServiceTest {
         // 前片交接注入下一片：切片 1 首试带阶段 0 交接、切片 2 带切片 1 交接
         assertThat(all.get(1).prompt()).contains("阶段0交接");
         assertThat(all.get(3).prompt()).contains("切片1交接");
-        // 重试 prompt 自足（#114 重试可能落在空会话）：同样携带前片交接与产出约定
+        // 重试 prompt 自足（#114 重试可能落在空会话）：同样携带前片交接与产出约定；
+        // #221 原地修——重试携带错误现场（同片第二次尝试不从头重做，针对错误继续修）
         assertThat(all.get(2).prompt()).contains("阶段0交接")
-                .contains(GenerationAppService.HANDOFF_PRODUCTION);
+                .contains(GenerationAppService.HANDOFF_PRODUCTION)
+                .contains("错误现场：切片1中断")
+                .contains("不要重做");
     }
 
     @Test
@@ -618,6 +623,145 @@ class GenerationAppServiceTest {
         verify(agentClient, times(1)).converse(any(), any());
     }
 
+    // ---------- 断点续跑（#221：继续生成从断点接续，已收口片不重做） ----------
+
+    @Test
+    void given_terminal_failure_when_regenerate_then_resume_from_breakpoint_with_inventory() {
+        // 灵魂用例（#221 AC①②④⑤ 全链）：发起（阶段 0 + 切片 1 收口）→ 中断（切片 2
+        // 重试耗尽 run-failed）→ 续跑（REST 重发无交接物——计划与断点取自轨道表，
+        // 无进程内副本可依〔「按表续跑」〕；错误现场走进程内终态账，跨进程丢失即降级
+        // ——降级口径见下方纯函数用例）→ 收口（跳过已收口片、断点片新会话
+        // 起手现状盘点〔进度/中断原因+错误现场/中断前摘要〕、后续片顺序、generated_at
+        // 落位）——run-failed 后「继续生成」同走断点续跑，不重头
+        Long projectId = persistedProject("9850");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        // 中断前摘要读回：续跑起手 cat .platform/slice-handoff-1.md（断点前片交接的
+        // 落盘正本——进程重启后内存终文不在的事实源）
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().startsWith("cat '") && cmd.command().contains("slice-handoff-1.md"))))
+                .thenReturn(new ExecResultResponse("切片1交接：注册登录已端到端走通", "", 0));
+        // 发起：阶段 0 + 切片 1 成功收口，切片 2 三次尝试耗尽转终态失败
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenReturn(new AgentReply("s1", "切片1交接"))
+                .thenThrow(new IllegalStateException("切片2起服失败"))
+                .thenThrow(new IllegalStateException("切片2起服失败"))
+                .thenThrow(new IllegalStateException("切片2起服失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付", "用户能查询订单")));
+
+        // 中断定格：阶段 0 / 切片 1 已收口、切片 2 失败、切片 3 待跑；断点 = 最深收口片
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 3, 1);
+        assertThat(generatedAt(projectId)).isNull();
+
+        // 续跑（REST 路径无交接物：重打桩用 doReturn 家——when(...) 求值先参调旧 throw 桩）
+        doReturn(new AgentReply("r2", "切片2续跑完成"), new AgentReply("r3", "切片3完成"))
+                .when(agentClient).converse(any(), any());
+        GenerationAppService.GenerationRun resume = appService.startGeneration(projectId);
+
+        // 只重跑失败片与后续片：发起 5 次 + 续跑 2 次（切片 2、切片 3）——阶段 0 /
+        // 切片 1 不重跑（无其会话的新 converse）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(7)).converse(commands.capture(), any());
+        AgentCommand slice2 = commands.getAllValues().get(5);
+        AgentCommand slice3 = commands.getAllValues().get(6);
+        // 断点片新会话脏续（不复用失败旧会话 slice-2）+ 续跑首 run = 响应锚
+        assertThat(slice2.sessionId()).isEqualTo(
+                GenerationAppService.resumeSession(projectId, 2, resume.runId()))
+                .isNotEqualTo(GenerationAppService.sliceSession(projectId, 2));
+        assertThat(slice2.runId()).isEqualTo(resume.runId());
+        // 现状盘点（AC②）：已收口进度 + 中断原因（重试耗尽 + 错误现场）+ 脏续纪律；
+        // 断点片任务本体仍在（不是只有盘点）
+        assertThat(slice2.prompt())
+                .contains("续跑现状盘点")
+                .contains("系统初始化")
+                .contains("切片 1/3「用户能注册登录」")
+                .contains("自动重试耗尽后失败")
+                .contains("切片2起服失败")
+                .contains("不要重做")
+                .contains("切片 2/3")
+                .contains("用户能下单支付");
+        // 中断前摘要：前片交接经 .platform 落盘件读回注入（与片间交接同构）
+        assertThat(slice2.prompt()).contains("切片1交接：注册登录已端到端走通");
+        // 后续片正常顺序：切片 3 常规会话、无盘点前缀，交接取切片 2 续跑收口的内存终文
+        assertThat(slice3.sessionId()).isEqualTo(GenerationAppService.sliceSession(projectId, 3));
+        assertThat(slice3.prompt())
+                .doesNotContain("续跑现状盘点")
+                .contains("用户能查询订单")
+                .contains("切片2续跑完成");
+        // 收口：全片已收口、断点 = 末片、generated_at 落位（AC①）
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(3);
+        assertThat(generatedAt(projectId)).isNotNull();
+        // 全程唯一失败终态：续跑收口后不再发 run-failed
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    @Test
+    void given_interrupted_pending_segment_when_regenerate_then_resume_with_interrupt_reason() {
+        // #221 全场景脏续·非错误中断（进程重启/平台中断——片未及落终态，表中待跑；
+        // 以终态后拨回待跑模拟重启时的可观察状态）：续跑同路（跳过已收口片、断点片
+        // 新会话起手现状盘点），中断原因叙事为「中断」而非「重试耗尽」、不携错误
+        // 现场；中断前摘要读不回（落盘缺失）降级空交接不断流
+        Long projectId = persistedProject("9851");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds(); // cat 读回走缺省桩（stdout 空）→ 降级空交接
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("切片1失败"))
+                .thenThrow(new IllegalStateException("切片1失败"))
+                .thenThrow(new IllegalStateException("切片1失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 模拟中断未落终态（进程在终态落表前死亡的可观察状态）：片行拨回待跑
+        jdbcTemplate.update(
+                "UPDATE prj_generation_segments SET status = 1 WHERE project_id = ? AND ord = 1",
+                projectId);
+
+        doReturn(new AgentReply("r1", "切片1续跑完成"), new AgentReply("r2", "切片2完成"))
+                .when(agentClient).converse(any(), any());
+        appService.startGeneration(projectId);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(6)).converse(commands.capture(), any());
+        AgentCommand slice1 = commands.getAllValues().get(4);
+        assertThat(slice1.sessionId()).startsWith(GenerationAppService.sliceSession(projectId, 1) + "-");
+        assertThat(slice1.prompt())
+                .contains("续跑现状盘点")
+                .contains("中断（未及收口）")
+                .doesNotContain("自动重试耗尽")
+                .doesNotContain("错误现场")
+                // 交接降级：空交接不注「上一片交接摘要」块，计划轨迹自足
+                .doesNotContain("上一片交接摘要")
+                .contains("整体切片计划");
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_failed_segment_without_scene_when_inventory_then_reason_degrades() {
+        // #221 现状盘点纯函数·降级口径：跨进程终态失败现场丢失（进程内账不在）——
+        // 失败叙事仍在（轨道表状态是事实源）、不携「最近错误现场」；断点在阶段 0
+        // （无收口片）时进度行渲染「尚无」而非空列表
+        LocalDateTime anchor = LocalDateTime.now();
+        GenerationSegment stage0 = GenerationSegment.pending(1L, 0,
+                GenerationAppService.STAGE0_TITLE, anchor);
+        stage0.fail("run-x");
+
+        String inventory = GenerationAppService.resumeInventoryBlock(0, List.of(stage0), null);
+
+        assertThat(inventory)
+                .contains("自动重试耗尽后失败")
+                .doesNotContain("最近错误现场")
+                .contains("已收口进度：尚无");
+    }
+
     // ---------- 命令与资产 ----------
 
     @Test
@@ -751,7 +895,7 @@ class GenerationAppServiceTest {
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId()); // 重试内部 runId
         assertThat(attempts.get(1).prompt()).isEqualTo(
                 GenerationAppService.generationRetryPrompt(SINGLE_SLICE_PLAN,
-                        "先起服：应用以最小可运行形态跑上 8081", null));
+                        GenerationAppService.STAGE0_RETRY_DESC, null, "首次尝试中断"));
         assertThat(attempts.get(2).prompt())
                 .isEqualTo(GenerationAppService.slicePrompt(SINGLE_SLICE_PLAN, 0,
                         "系统已生成"));
@@ -767,8 +911,8 @@ class GenerationAppServiceTest {
     @Test
     void given_converse_ok_but_service_unreachable_when_generate_then_no_generated_at_and_reinitiate_exit() {
         // 假完成（#35）：阶段 0 converse 正常结束但 8081 不可达——核验不过不落
-        // generated_at，走既有重试/终态失败路径（阶段 0 失败不派切片），重新发起出口
-        // 仍在；重新发起（REST 路径无交接物）沿用表内现行计划（#220 PRD 锚一致即有效）
+        // generated_at，走既有重试/终态失败路径（阶段 0 失败不派切片），「继续生成」出口
+        // 仍在；重发（REST 路径无交接物）沿用表内现行计划（#220 PRD 锚一致即有效）
         Long projectId = persistedProject("9810");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds(); // AGENTS.md 写入（无 curl 字样）成功
@@ -785,12 +929,12 @@ class GenerationAppServiceTest {
         verify(eventsAppService, never()).publishAgentEvent(eq(RETIRED_RETRYING), anyMap());
         assertThat(generatedAt(projectId)).isNull();
 
-        // 项目不被空壳锁死：generated_at 未落 = 重新发起出口在——核验改可达后重发即成功
+        // 项目不被空壳锁死：generated_at 未落 = 「继续生成」出口在——核验改可达后重发即成功
         //（重发无交接物：计划取自轨道表，模拟重启后无进程内计划副本的恢复路径）
         doReturn(new ExecResultResponse("", "", 0))
                 .when(workspaceLifecycleAppService).exec(any(), any());
         appService.startGeneration(projectId);
-        // 重新发起 = 阶段 0 + 切片各一次 converse
+        // 重发（断点续跑自阶段 0 重跑）= 阶段 0 + 切片各一次 converse
         verify(agentClient, times(properties.getMaxAttempts() + 2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
     }
@@ -1104,7 +1248,7 @@ class GenerationAppServiceTest {
         doReturn(new AgentReply("run-y", "系统已生成"))
                 .when(agentClient).converse(any(), any());
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
-        // 重新发起 = 阶段 0 + 切片各一次 converse
+        // 重发 = 阶段 0 + 切片各一次 converse
         verify(agentClient, times(2)).converse(any(), any());
     }
 

@@ -38,8 +38,9 @@ import lombok.extern.slf4j.Slf4j;
  * 生成编排（#22 片2-1；#101 生成无门自动发起——「开始做系统」按钮退役，生成
  * 触发权归平台；#104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
  * 主智能体产出 PRD 后意见轮收口即自动派首次生成轨
- * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与失败
- * 「重新发起」兜底走同一编排（{@link #startGeneration}）。run 执行体与主智能体
+ * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与中断
+ * 「继续生成」兜底走同一编排（{@link #startGeneration}——重发即断点续跑，#221）。
+ * run 执行体与主智能体
  * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
  * 极薄），仅资产与工具不同：会话每片/每 run 换新（#114 会话有界——每片新会话
  * {@code coder-{projectId}-slice-{n}}，重试续本片会话）、配置 = 平台技术约定
@@ -61,6 +62,13 @@ import lombok.extern.slf4j.Slf4j;
  * 已删）——重派主智能体按 PRD 补产（{@link MainAgentAppService#requestBuildPlan}，
  * 补产轮收口自动再派生成）。</p>
  *
+ * <p><b>断点续跑（#221，ADR-0020）</b>：「继续生成」从断点接续——跳过已收口片、
+ * 只重跑失败/中断片（断点后首段），起手带现状盘点（工作区现状指引＋切片进度＋
+ * 中断原因＋中断前摘要），交接机制与片间交接同构（平台拼轨道表事实、不产自由
+ * 文本）；全场景同一脏续口径（重试耗尽 run-failed 后重发、进程重启后重发）。
+ * 断点以轨道表为准、git 收口 commit（Run-Id 锚定收尾卡）为旁证；干净重做不设
+ * 默认路径——PRD 演进即计划重产从头来（用户的显式选择）。</p>
+ *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
@@ -77,10 +85,11 @@ import lombok.extern.slf4j.Slf4j;
  * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
  * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
  *
- * <p><b>失败自动静默重试有限次</b>（同工作区不丢数据——重试续本片会话，
- * 已落盘成果保留）：中间失败不出用户面事件；每片超限转终态失败即发 {@code run-failed}
- * 收口事件（#56，run 失败为唯一失败终态），由用户重新发起兜底（generated_at
- * 不落位 = 按钮口径仍在）。最后一片
+ * <p><b>失败自动静默重试有限次＝原地修（#221）</b>（同工作区不丢数据——重试续
+ * 本片会话，已落盘成果保留；新尝试携带错误现场继续修，不重做已对的工作）：中间
+ * 失败不出用户面事件；每片超限转终态失败即发 {@code run-failed} 收口事件（#56，
+ * run 失败为唯一失败终态），由用户「继续生成」脏续兜底（断点续跑同路，不重头；
+ * generated_at 不落位 = 出口口径仍在）。最后一片
  * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——「确认下单」
  * 可见性口径）。</p>
  */
@@ -109,14 +118,22 @@ public class GenerationAppService {
     static final String STAGE0_TITLE = "系统初始化";
 
     /**
-     * 重试续作 prompt（#104 分段口径）：同工作区不丢数据——已落盘成果保留，从中断处
-     * 续完<b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段由平台顺序派 run 决定，
-     * 重试不替执行体跨到下一片（「做一点展示一点」的完整性优先）。segmentDesc 即本段
-     * 的任务描述（与首试 prompt 同口径）。
+     * 阶段 0 重试续作的本段任务描述（与首试 prompt 同口径的段叙事，重试拼装用）。
      */
-    static String retryRunPrompt(String segmentDesc) {
-        return "上一次尝试中断了，工作区内已完成的成果仍然有效。请先检查现状"
-                + "（代码、依赖、数据、8081 端口服务是否在跑），从中断处继续完成本段任务"
+    static final String STAGE0_RETRY_DESC = "先起服：应用以最小可运行形态跑上 8081";
+
+    /**
+     * 重试续作 prompt（#104 分段口径；#221 原地修——携带错误现场）：同工作区不丢
+     * 数据——已落盘成果保留、不重做已对的工作，针对上次错误在现有成果上继续修完
+     * <b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段由平台顺序派 run 决定，
+     * 重试不替执行体跨到下一片（「做一点展示一点」的完整性优先）。segmentDesc 即
+     * 本段任务描述（与首试 prompt 同口径）；errorScene = 上次尝试的错误现场
+     * （尝试环捕获的异常事实，平台不加工）。
+     */
+    static String retryRunPrompt(String segmentDesc, String errorScene) {
+        return "上一次尝试失败了（错误现场：" + errorScene + "）。工作区内已完成的成果"
+                + "仍然有效——不要重做已对的工作。请先检查现状（代码、依赖、数据、8081 "
+                + "端口服务是否在跑），针对该错误在现有成果上继续修复、完成本段任务"
                 + "（" + segmentDesc + "），收口前确认 8081 端口服务在跑、curl 可访问。";
     }
 
@@ -187,9 +204,10 @@ public class GenerationAppService {
                 + segmentContext(plan, previousHandoff);
     }
 
-    /** 生成轨重试续作 prompt（#114）：续作任务 + 片级上下文（与首试同上下文）。 */
-    static String generationRetryPrompt(BuildPlan plan, String segmentDesc, String previousHandoff) {
-        return retryRunPrompt(segmentDesc) + segmentContext(plan, previousHandoff);
+    /** 生成轨重试续作 prompt（#114；#221 重试携带错误现场）：续作任务 + 片级上下文（与首试同上下文）。 */
+    static String generationRetryPrompt(BuildPlan plan, String segmentDesc, String previousHandoff,
+            String errorScene) {
+        return retryRunPrompt(segmentDesc, errorScene) + segmentContext(plan, previousHandoff);
     }
 
     /** 生成轨会话寻址（#114 每片新会话）：段号 0 = 阶段 0，1..N = 切片，重试续本段会话。 */
@@ -197,9 +215,82 @@ public class GenerationAppService {
         return CoderRunAttempts.SESSION_PREFIX + projectId + "-slice-" + segment;
     }
 
+    /**
+     * 续跑段会话寻址（#221 脏续新会话）：断点段（失败/中断片）续跑起新会话——不续
+     * 失败旧会话（重试耗尽的旧会话带着失败循环历史，且引擎会话状态不保证跨进程在），
+     * 现状盘点即起手交接（与片间交接同构）；会话内重试照旧续本会话。runId 后缀同
+     * 修正轨 {@code fix-{runId}} 惯例——每场续跑会话唯一。
+     */
+    static String resumeSession(Long projectId, int segment, String runId) {
+        return sliceSession(projectId, segment) + "-" + runId;
+    }
+
     /** 交接摘要落盘路径（#114 .platform/ 平台产物目录，不进用户 git 成版）：段号对应切片序。 */
     static String handoffFile(int segment) {
         return WorkspaceLayout.PLATFORM_DIR + "/slice-handoff-" + segment + ".md";
+    }
+
+    /**
+     * 前片交接摘要读回（#221 续跑起手）：{@code .platform/slice-handoff-{n}.md} 是
+     * 交接摘要的落盘正本（#114 片间交接写下的透明面）——进程重启后内存终文不在，
+     * 续跑从工作区读回断点前片的交接作「中断前摘要」。读不回（未落盘/文件缺失）
+     * 降级 null：执行体重读 PRD 与计划轨迹自足（同重试落空会话的口径），不阻断续跑。
+     */
+    private String readSliceHandoff(Project project, int segment) {
+        try {
+            ExecResultResponse result = workspaceLifecycleAppService.exec(
+                    Long.toString(project.getWorkspaceId()),
+                    new WorkspaceExecCommand("cat '" + WorkspaceLayout.absolute(handoffFile(segment)) + "'"));
+            if (result.exitCode() == 0 && !result.stdout().isBlank()) {
+                return result.stdout().strip();
+            }
+            log.warn("[generate] 项目 {} 片 {} 交接摘要读回缺失（降级空交接，续跑不断流）：exitCode={}",
+                    project.getId(), segment, result.exitCode());
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 交接摘要读回失败（降级空交接，续跑不断流）：{}",
+                    project.getId(), segment, e.toString());
+        }
+        return null;
+    }
+
+    /**
+     * 续跑现状盘点块（#221 全场景脏续的起手交接，机制与片间交接同构——平台拼事实、
+     * 不产自由文本）：续跑断点段首试/重试 prompt 前置——已收口进度（轨道表事实：
+     * 阶段 0 + 逐片清单）、中断原因（失败 = 重试耗尽〔携最近错误现场〕/ 中断 =
+     * 未及收口）、脏续纪律（已收口成果不重做、已对的工作保留）。工作区现状的检查
+     * 指引与「中断前摘要」（前片交接）由任务 prompt 与 {@link #segmentContext}
+     * 携带，同片间交接口径。
+     */
+    static String resumeInventoryBlock(int startOrd, List<GenerationSegment> segments,
+            String failureScene) {
+        int totalSlices = segments.size() - 1;
+        StringBuilder progress = new StringBuilder();
+        GenerationSegment target = null;
+        for (GenerationSegment segment : segments) {
+            if (segment.getOrd() >= startOrd) {
+                target = segment; // 断点段（失败/中断片）——中断原因的叙事源
+                break;
+            }
+            if (progress.length() > 0) {
+                progress.append("、");
+            }
+            progress.append(segment.getOrd() == 0
+                    ? STAGE0_TITLE
+                    : "切片 " + segment.getOrd() + "/" + totalSlices + "「" + segment.getDescription() + "」");
+        }
+        String reason = target != null && target.getStatus() == GenerationSegmentStatus.FAILED
+                ? "上一次运行在本段自动重试耗尽后失败"
+                        + (failureScene == null ? "" : "（最近错误现场：" + failureScene + "）")
+                : "上一次运行在本段中断（未及收口）";
+        return "【续跑现状盘点】本次生成是从中断处接续，不是从头重来：\n"
+                + (progress.length() > 0
+                        ? "- 已收口进度：" + progress + "——这些段的成果都在工作区，不要重做。\n"
+                        : "- 已收口进度：尚无——前次运行未收口任何段，本次从第一段接续"
+                                + "（已做的工作若有仍在工作区）。\n")
+                + "- 中断原因：" + reason + "。\n"
+                + "- 接手本段先检查工作区现状（代码、依赖、数据、8081 端口服务是否在跑），"
+                + "保留已对的工作，从中断处继续完成本段任务。\n\n";
     }
 
     /**
@@ -256,6 +347,14 @@ public class GenerationAppService {
     private final Map<Long, LocalDateTime> planProductionRequests = new ConcurrentHashMap<>();
 
     /**
+     * 终态失败现场账（#221 续跑现状盘点的「中断原因」旁证，projectId → 最近一次
+     * 终态失败末次尝试的错误现场）：run-failed 时记下，同进程内「继续生成」的现状
+     * 盘点携带；跨进程丢失即降级为不携现场的失败叙事（轨道表状态才是事实源，本账
+     * 只是旁证）。续跑收口成功即清，再失败即覆写。
+     */
+    private final Map<Long, String> terminalFailureScenes = new ConcurrentHashMap<>();
+
+    /**
      * @param mainAgentAppService 计划补产口（{@link MainAgentAppService#requestBuildPlan}）。
      *        {@code @Lazy} 破主智能体编排与本服务的构造环：MainAgentAppService 收口派发
      *        依赖本服务（既有方向），本服务计划缺失时重派主智能体补产（#220 新增方向）
@@ -281,8 +380,9 @@ public class GenerationAppService {
     }
 
     /**
-     * 触发首次生成的显式入口（#101 生成无门后为失败「重新发起」兜底：POST /generate
-     * 端点与收口自动派发共用同一编排）：守卫 → AGENTS.md 资产就位 → 异步提交编码
+     * 触发生成的显式入口（#101 生成无门后为中断「继续生成」兜底——POST /generate
+     * 端点与收口自动派发共用同一编排；#221 断点续跑：轨道表已有收口/失败片即从
+     * 断点脏续、已收口片不重做）：守卫 → AGENTS.md 资产就位 → 异步提交编码
      * run（首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
@@ -477,68 +577,94 @@ public class GenerationAppService {
     // ---------- 内部 ----------
 
     /**
-     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段）：复用 {@link CoderRunAttempts}
-     * 的「轨道顺序多 run」模式（同 {@link IterationAppService#runFixTrack}）——阶段 0
-     * （先起服白底页）固定前置（首试 runId = 用户面首 run 身份，随响应回），此后按切片
-     * 计划顺序逐片派 run（每片新 runId）。每片收口判据 = 8081 可达（{@link #requireReachable}
-     * 核验）+ 成版 + run-finish（收口扩载，端到端可操作由片内 self-test 兜）；最后一片
-     * 收口才落 {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed}
-     * 收口（锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。
-     * 每片收口/失败状态随片落轨道表（#220）——段号口径与表 ord 一致（0 = 阶段 0）。
+     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段；#221 断点续跑）：断点以
+     * 轨道表为准（表中最深收口片；git 收口 commit 为旁证）——<b>续跑跳过已收口片、
+     * 只重跑失败/中断片</b>（断点后首段），起手带现状盘点（{@link #resumeInventoryBlock}）
+     * 从新会话脏续（{@link #resumeSession}），前片交接摘要取 {@code .platform/} 落盘件
+     * （{@link #readSliceHandoff}——进程重启后内存终文不在的事实源）。全场景同一
+     * 口径：重试耗尽 run-failed 后「继续生成」与中断续跑同路（不重头）；PRD 演进则
+     * 计划重产整组替换、从头再来（推倒重来是显式选择，走对话区改 PRD）。断点已过
+     * 末片（末片收口而 {@code generated_at} 落位失败的边角）直接补落位。
+     *
+     * <p>每片收口判据 = 8081 可达（{@link #requireReachable} 核验）+ 成版 +
+     * run-finish（收口扩载，端到端可操作由片内 self-test 兜）；最后一片收口才落
+     * {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed} 收口
+     * （锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。每片
+     * 收口/失败状态随片落轨道表（#220）。知识命中前置注入只在阶段 0 的 run（一次
+     * 切入一次注入，#114——续跑断点在阶段 0 时同注入，断点在切片则不注入）。</p>
      */
     private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan) {
         Long projectId = project.getId();
         List<String> slices = plan.slices();
-        // 阶段 0（先起服）：最小可运行形态上 8081，收口即白底页，先于任何切片；会话
-        // = slice-0（#114 每片新会话）。知识命中前置注入只在生成链首片（阶段 0）——
-        // 一次切入一次注入，切片不重注入（注入口径不膨胀）
-        CoderRunAttempts.RunResult stage0 = coderRunAttempts.run(project, firstRunId,
-                sliceSession(projectId, 0),
-                new CoderRunAttempts.Prompts(stage0Prompt(plan),
-                        generationRetryPrompt(plan, "先起服：应用以最小可运行形态跑上 8081", null)),
-                attemptRunId -> closeGenerationStage(project, 0, false, firstRunId, "起服了系统骨架"),
-                CoderRunAttempts.GENERATE_LABEL, true,
-                RunHeading.titled(STAGE0_TITLE));
-        if (!stage0.succeeded()) {
-            failSegment(projectId, 0, firstRunId);
-            eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), firstRunId);
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(projectId);
+        int breakpoint = segments.stream()
+                .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                .mapToInt(GenerationSegment::getOrd).max().orElse(-1);
+        boolean resumed = segments.stream()
+                .anyMatch(segment -> segment.getStatus() != GenerationSegmentStatus.PENDING);
+        if (breakpoint >= slices.size()) {
+            // 断点已过末片：片全收口即生成完成（generated_at 落位失败的补落）
+            terminalFailureScenes.remove(projectId);
+            markGenerated(projectId);
             return;
         }
-        // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
-        String previousHandoff = stage0.closingText();
-        placeSliceHandoff(project, 0, previousHandoff);
-        // 切片逐段：按切片计划顺序派 run（每片新会话 slice-{index+1}），每片收口 =
-        // 8081 可达 + 成版 + run-finish；某片失败不自动跳下一片（完整性优先，失败片
-        // 要可见地修复——用户重提兜底）。重试续本片会话（同 sliceSession 不换）
-        for (int index = 0; index < slices.size(); index++) {
-            String slice = slices.get(index);
-            String runId = EventsAppService.newRunId();
-            boolean last = index == slices.size() - 1;
-            int ord = index + 1; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
+        // 续跑起手交接（#221）：断点段（失败/中断片）prompt 前置现状盘点；前片交接
+        // 摘要取 .platform/ 落盘件（内存终文随进程消失，落盘件是续跑事实源）
+        String resumePrefix = "";
+        String previousHandoff = null;
+        if (resumed) {
+            resumePrefix = resumeInventoryBlock(breakpoint + 1, segments,
+                    terminalFailureScenes.get(projectId));
+            if (breakpoint >= 0) {
+                previousHandoff = readSliceHandoff(project, breakpoint);
+            }
+        }
+        // 轨道逐段（阶段 0 起跑时 ord=0）：断点段 = 本轨首 run（首试 runId 即用户面
+        // 首 run 身份），此后逐片新 runId；某片失败不自动跳下一片（完整性优先）
+        for (int index = breakpoint + 1; index <= slices.size(); index++) {
+            int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
+            boolean stage0 = ord == 0;
+            String slice = stage0 ? null : slices.get(ord - 1);
+            boolean last = ord == slices.size();
+            boolean resumeTarget = ord == breakpoint + 1;
+            String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
+            String prefix = resumeTarget ? resumePrefix : "";
+            String handoff = stage0 ? null : previousHandoff;
+            String segmentDesc = stage0 ? STAGE0_RETRY_DESC : "实现切片「" + slice + "」";
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
-                    sliceSession(projectId, ord),
+                    resumed && resumeTarget
+                            ? resumeSession(projectId, ord, runId)
+                            : sliceSession(projectId, ord),
                     new CoderRunAttempts.Prompts(
-                            slicePrompt(plan, index, previousHandoff),
-                            generationRetryPrompt(plan, "实现切片「" + slice + "」", previousHandoff)),
+                            prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
+                            errorScene -> prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                     attemptRunId -> closeGenerationStage(project, ord, last, runId,
-                            "完成切片：" + slice),
-                    CoderRunAttempts.GENERATE_LABEL, false,
-                    RunHeading.slice(slice, index + 1, slices.size()));
+                            stage0 ? "起服了系统骨架" : "完成切片：" + slice),
+                    CoderRunAttempts.GENERATE_LABEL, stage0,
+                    stage0 ? RunHeading.titled(STAGE0_TITLE)
+                            : RunHeading.slice(slice, ord, slices.size()));
             if (!result.succeeded()) {
                 failSegment(projectId, ord, runId);
+                if (result.lastError() != null) {
+                    terminalFailureScenes.put(projectId, result.lastError());
+                }
                 eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
                 return;
             }
+            // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
             previousHandoff = result.closingText();
             placeSliceHandoff(project, ord, previousHandoff);
         }
+        terminalFailureScenes.remove(projectId);
     }
 
     /**
-     * 交接摘要落盘（#114 片间交接）：前片收口终文写工作区 .platform/slice-handoff-{n}.md
-     * （平台产物目录，不进用户 git 成版，与 #107 同向）。正文经 base64 传参防 shell
-     * 元字符（执行体终文非平台常量）；失败只记日志不断流——交接摘要的注入走内存终文
-     * （{@link CoderRunAttempts.RunResult#closingText}），落盘是透明面不承担正确性。
+     * 交接摘要落盘（#114 片间交接；#221 兼续跑事实源）：前片收口终文写工作区
+     * .platform/slice-handoff-{n}.md（平台产物目录，不进用户 git 成版，与 #107 同向）。
+     * 正文经 base64 传参防 shell 元字符（执行体终文非平台常量）；失败只记日志不断流
+     * ——片间交接的注入走内存终文（{@link CoderRunAttempts.RunResult#closingText}），
+     * 续跑读回（{@link #readSliceHandoff}）读不回即降级空交接，落盘不承担正确性。
      */
     private void placeSliceHandoff(Project project, int segment, String content) {
         try {

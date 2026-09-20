@@ -295,7 +295,7 @@ class ProjectControllerTest {
 
     @Test
     void given_project_when_generate_then_run_id_returned() throws Exception {
-        // 「重新发起」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        // 「继续生成」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
         when(generationAppService.startGeneration(100L)).thenReturn(
                 new GenerationAppService.GenerationRun("run-gen-1"));
 

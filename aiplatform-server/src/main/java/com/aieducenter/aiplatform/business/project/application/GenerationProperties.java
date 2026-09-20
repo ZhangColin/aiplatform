@@ -13,8 +13,8 @@ import org.springframework.stereotype.Component;
 public class GenerationProperties {
 
     /**
-     * 生成尝试次数上界（含首试，即 N-1 次自动重试）：超限转终态失败，
-     * 由用户重新发起兜底（人工兜底入口）。
+     * 生成尝试次数上界（含首试，即 N-1 次自动重试＝原地修，#221）：超限转终态
+     * 失败，由用户「继续生成」断点续跑兜底（人工兜底入口）。
      */
     private int maxAttempts = 3;
 

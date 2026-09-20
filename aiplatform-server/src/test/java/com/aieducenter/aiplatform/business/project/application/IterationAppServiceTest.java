@@ -325,7 +325,7 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.FIX_RETRY_RUN_PROMPT);
+                .isEqualTo(IterationAppService.fixRetryPrompt("修正尝试中断"));
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
 
@@ -427,7 +427,7 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.FIX_RETRY_RUN_PROMPT);
+                .isEqualTo(IterationAppService.fixRetryPrompt("修正 run 未以 finish_edit 结束工具收口"));
         // 未正常收口按重试口径静默（#82/#84）：无 error、无重试信号（与 converse
         // 异常的重试同一口径——run 失败为唯一失败终态）
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());

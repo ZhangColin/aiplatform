@@ -12,6 +12,7 @@ import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import org.springframework.stereotype.Component;
 
@@ -43,14 +44,20 @@ import lombok.extern.slf4j.Slf4j;
  * 出自检播报 part-check「检查中 → ✅/❌」（#85）；run 失败
  * 是唯一失败终态），超限转终态失败——终态收口事件
  * {@code run-failed} 由<b>轨道层</b>在真终态落定点发射（#56：修正轨道排队合并
- * 续派的中途超限不是终态，本层不判），用户侧兜底——生成重新发起 / 修正恢复出口
- * 重派或再提意见（#48）。
+ * 续派的中途超限不是终态，本层不判），用户侧兜底——生成「继续生成」断点续跑 /
+ * 修正恢复出口重派或再提意见（#48/#221）。
  *
  * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}）、会话寻址由
  * 轨道层拼装传入（#114 每片/每 run 换会话——重试续本会话，已落盘成果保留，同
  * 工作区不丢数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、
  * 项目工作区、流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试
  * 不重检索不重块）。</p>
+ *
+ * <p><b>错误重试＝原地修（#221）</b>：失败有余量的续试不是从头重做——新尝试的
+ * prompt 由上次尝试的错误现场现拼（{@link Prompts#retry}），执行体带着错误事实
+ * 在已有成果上继续修（本片已对的工作不丢弃）。超时判死类失败随确认机制删除而
+ * 不复存在（#219）；重试耗尽转终态失败，末次错误现场随 {@link RunResult#lastError}
+ * 回传轨道层（生成轨续跑现状盘点的「中断原因」旁证）。</p>
  *
  * <p><b>破坏性命令直通（#219 透明面化）</b>：执行体命令走内核 shell 工具
  * （无确认自检——沙箱可随时销毁重建，确认机制连代码带概念已删），过程照常经
@@ -63,8 +70,12 @@ class CoderRunAttempts {
     /** 编码会话标识派生前缀（projectId → coder-{projectId}；#114 每片/每 run 换会话，会话寻址规则归各轨道拼装）。 */
     public static final String SESSION_PREFIX = "coder-";
 
-    /** 一场编码 run 的 prompt 对（首试 + 重试续作轨）。 */
-    record Prompts(String first, String retry) {
+    /**
+     * 一场编码 run 的 prompt 对（首试 + 重试续作轨）。重试 prompt 由上次尝试的
+     * <b>错误现场</b>现拼（#221 原地修——新尝试携带错误现场继续修，不丢弃本段
+     * 已对的工作；错误事实由本环捕获传入，轨道层只给拼装函数）。
+     */
+    record Prompts(String first, UnaryOperator<String> retry) {
     }
 
     /**
@@ -90,9 +101,18 @@ class CoderRunAttempts {
      * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）+ 收口
      * 时的执行体终文（{@code closingText}，成功收口才非 null——生成轨把它当交接
      * 摘要用，#114 片间交接：前片执行体自产的「做了什么/关键文件/下一片须知」即其
-     * 收口终文；修正轨不用）。
+     * 收口终文；修正轨不用）+ 末次尝试的错误现场（{@code lastError}，终态失败才
+     * 非 null——生成轨续跑现状盘点的「中断原因」旁证，#221）。
      */
-    record RunResult(boolean succeeded, String closingText) {
+    record RunResult(boolean succeeded, String closingText, String lastError) {
+
+        static RunResult ok(String closingText) {
+            return new RunResult(true, closingText, null);
+        }
+
+        static RunResult failed(String lastError) {
+            return new RunResult(false, null, lastError);
+        }
     }
 
     /**
@@ -151,8 +171,8 @@ class CoderRunAttempts {
      *                       ——主智能体对话轮不经本环）——随 run-start 的 slice 字段
      *                       透出，首试与重试同值（重试 run-start 被投影滤掉，不碍）
      * @return               收场事实（成败 + 收口终文）；超限转终态后的兜底归轨道层
-     *                       ——终态收口事件 run-failed 锚首试 runId，与生成重新发起 /
-     *                       修正恢复出口（#48/#56）衔接
+     *                       ——终态收口事件 run-failed 锚首试 runId，与生成「继续生成」续跑
+     *                       / 修正恢复出口（#48/#56/#221）衔接
      */
     RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
             Function<String, ClosingJudgment> onSuccess, String what, boolean injectKnowledge,
@@ -163,6 +183,9 @@ class CoderRunAttempts {
         int maxAttempts = properties.getMaxAttempts();
         Instant runStartedAt = Instant.now();
         List<FileChange> runChanges = new ArrayList<>();
+        // 上次尝试的错误现场（#221 原地修）：重试 prompt 的携带物——首试为 null，
+        // 每次失败刷新为该次的错误事实
+        String previousError = null;
         // 阶段耗时分布（#111）：每次尝试各起一账——尝试墙钟 + 跨流段合并的阶段耗时
         // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）
         List<AttemptDuration> attemptDurations = new ArrayList<>();
@@ -174,7 +197,8 @@ class CoderRunAttempts {
             String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
             AgentCommand command = new AgentCommand(
                     attemptRunId,
-                    attempt == 1 ? knowledgePrefix + prompts.first() : prompts.retry(),
+                    attempt == 1 ? knowledgePrefix + prompts.first()
+                            : prompts.retry().apply(previousError),
                     AgentProfile.EXECUTOR.systemPrompt(),
                     AgentProfile.EXECUTOR.chatModelString(),
                     sessionId,
@@ -271,9 +295,10 @@ class CoderRunAttempts {
                     conversationHistory.recordClosing(projectId, firstRunId, closing);
                     projection.accept(withClosing(pendingFinish.get(), closing));
                 }
-                return new RunResult(true, reply.text());
+                return RunResult.ok(reply.text());
             }
             catch (RuntimeException e) {
+                previousError = errorScene(e);
                 if (!attemptAccounted) {
                     // 中段失败（converse/续跑抛错）：阶段耗时事实随异常弃置——尝试账
                     // 带墙钟与零桶（事实观察面的口径：失败段不携出，见 StageDurationFacts）
@@ -285,9 +310,17 @@ class CoderRunAttempts {
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
             }
         }
-        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成重新发起/修正恢复出口）",
+        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成「继续生成」续跑/修正恢复出口）",
                 what, projectId, maxAttempts);
-        return new RunResult(false, null);
+        return RunResult.failed(previousError);
+    }
+
+    /**
+     * 错误现场（#221 原地修的携带物）：异常消息优先、无消息退类名——异常事实
+     * 原样携带，平台不加工不隐瞒（执行体据此定位修什么）。
+     */
+    private static String errorScene(RuntimeException e) {
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
     }
 
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */

@@ -14,7 +14,8 @@ import { create } from "zustand";
  * 重开新消息、旧消息不保留。静默重试不出用户面（#84：run-start 一场恰一次、用户面
  * run 身份 = 首试 runId 全程不变）——生长中重来新 runId 属事件序异常（防御位忽略，
  * 不清锚闪空消息）。思考与代码不进部件（服务端口径），本 store 无进度条语义。步骤
- * 分组与过程耗时已退役（#115：部件按序竖排，不维护 startedAt/endedAt 等展示时间戳）。</p>
+ * 分组与逐步耗时已退役（#115：部件按序竖排）；run 级「已运行」时钟随 #225 窄幅回归
+ * （ADR-0010 修订：startedAt/endedAt 只锚 run-start / 收口事件信封 ts，不涉逐步耗时）。</p>
  *
  * <p><b>锚定判定</b>：部件事件全事件流恒挂（主智能体对话轮也产部件）——工作消息
  * 只锚编码 run。锚由 run-start(agent=executor) 落；断线补发窗口淘汰了 run-start 时
@@ -106,6 +107,14 @@ type ProjectWork = {
   seenEventIds: string[];
   /** 工作消息头部切片进度（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
   slice?: WorkSlice;
+  /**
+   * run 级时钟起锚（#225，ADR-0010 窄修订）：run-start 事件信封 ts 的 epoch ms
+   * ——前端「已运行 mm:ss」的唯一锚（活性锚定真实事件，缺锚不渲染时钟）。run-start
+   * 被淘汰的补建路径缺省（不伪造起点）。
+   */
+  startedAt?: number;
+  /** 时钟定锚（run-finish / run-failed 事件信封 ts 的 epoch ms；首次定格为准）。 */
+  endedAt?: number;
 };
 
 /** 工作消息呈现快照（ProjectWork 去重放簿记——UI 消费面单一来源）。 */
@@ -114,8 +123,9 @@ export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
   /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等；携
-   * 工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）。 */
-  startWork: (projectId: string, runId: string, slice?: WorkSlice) => void;
+   * 工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）与 run 级时钟起锚
+   * （#225 run-start 信封 ts 的 epoch ms，缺省 = 无锚不渲染时钟）。 */
+  startWork: (projectId: string, runId: string, slice?: WorkSlice, startedAt?: number) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
   /**
@@ -123,9 +133,9 @@ export type WorkMessageState = {
    * 原地定格留驻（#117）：部件保留、只读、不再生长，成功收口（收尾卡归 chat
    * store 对话流、随后入流）不再清空——「过程上文、结果下卡」；run-failed 同样
    * 留驻（现状）。定格即终态，去重簿记随消息保留（定格后 notePart 早退，不再
-   * 消费）。
+   * 消费）。endedAt = 收口事件信封 ts（时钟定格锚，#225；重放再定格首次为准）。
    */
-  freezeWork: (projectId: string, runId: string) => void;
+  freezeWork: (projectId: string, runId: string, endedAt?: number) => void;
 };
 
 /** 部件数软上限（重放缓冲 ~1000 事件的投影，内存有界）。 */
@@ -220,11 +230,11 @@ function updateWork(
 export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   works: {},
 
-  startWork: (projectId, runId, slice) =>
+  startWork: (projectId, runId, slice, startedAt) =>
     updateWork(set, projectId, (work) => {
       // 同 runId 幂等（重放）：已长部件保留，不重开
       if (work?.runId === runId) return work;
-      return { runId, frozen: false, parts: [], seenEventIds: [], slice };
+      return { runId, frozen: false, parts: [], seenEventIds: [], slice, startedAt };
     }),
 
   notePart: (projectId, ref, input) =>
@@ -243,12 +253,13 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
       return applyPart({ ...work, seenEventIds: appendCapped(work.seenEventIds, ref.eventId) }, ref, input);
     }),
 
-  freezeWork: (projectId, runId) =>
+  freezeWork: (projectId, runId, endedAt) =>
     updateWork(set, projectId, (work) => {
       if (work?.runId !== runId || work.frozen) return work;
       // 原地定格留驻（#117）：部件保留、只读、不再生长（成功收口不再清空——收尾卡
-      // 归 chat store 随后入流；run-failed 同样留驻），去重簿记随消息保留
-      return { ...work, frozen: true };
+      // 归 chat store 随后入流；run-failed 同样留驻），去重簿记随消息保留；
+      // endedAt 时钟定锚（#225，首次定格为准——重放再定格忽略）
+      return { ...work, frozen: true, endedAt };
     }),
 }));
 

@@ -107,6 +107,14 @@ import lombok.extern.slf4j.Slf4j;
 public class GenerationAppService {
 
     /**
+     * 任务级解说约定（#225 叙说密度放宽的拼装单点，任务 prompt 统一携带；执行体
+     * systemPrompt 的协议条同向但更详——两处措辞独立维护）。
+     */
+    static final String NARRATION_CONVENTION =
+            "过程解说只在关键节点（开工、重大转向、失败、收口）用一两句平实中文说明，"
+                    + "不必每组动作都配解说。";
+
+    /**
      * 阶段 0 prompt（先起服，#104 生成轨道首段；#113 收敛为「模板就位 + 起服 +
      * curl 确认」）：读 PRD 了解整体目标，工作区已内置基座工程（依赖预装），直接
      * 在基座上把应用以最小可运行形态跑上 8081（白底骨架页即可），收口即白底页——
@@ -117,8 +125,7 @@ public class GenerationAppService {
                     + "工作区已内置可运行的基座工程（TypeScript / Next.js / pnpm，依赖已预装），"
                     + "无需选型或初始化——直接在基座上把应用以最小可运行形态跑上 8081 端口"
                     + "（后台常驻，白底骨架页即可，暂不实现业务功能），收口前用 curl 确认 8081 可访问。"
-                    + "每做一组动作（一项工作）前，先用一句平实中文说明要做什么"
-                    + "（第一人称现在时），先解说后动手。";
+                    + NARRATION_CONVENTION;
 
     /**
      * 阶段 0 工作消息头部标题（#118）：非切片（先起服的固定水平工序）——只出标题、
@@ -167,8 +174,7 @@ public class GenerationAppService {
         return "系统增量（切片 " + index + "/" + total + "）：请在现有系统上增量实现"
                 + "这一纵向切片——「" + slice + "」（前端到后端、数据落库端到端走通，"
                 + "用户可操作），保持系统其余部分可用，收口前确认 8081 端口服务在跑、"
-                + "curl 可访问。每做一组动作（一项工作）前，先用一句平实中文说明要做什么"
-                + "（第一人称现在时），先解说后动手。";
+                + "curl 可访问。" + NARRATION_CONVENTION;
     }
 
     /**
@@ -507,8 +513,7 @@ public class GenerationAppService {
         }
         List<GenerationSegment> segments =
                 generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
-        if (segments.isEmpty()
-                || !segments.get(0).getPrdProducedAt().equals(project.getPrdProducedAt())) {
+        if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
             return null;
         }
         return new BuildPlan(segments.stream().skip(1)
@@ -634,7 +639,7 @@ public class GenerationAppService {
             return -1;
         }
         return projectRepository.findById(projectId)
-                .filter(project -> segments.get(0).getPrdProducedAt().equals(project.getPrdProducedAt()))
+                .filter(project -> GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt()))
                 .map(project -> segments.stream()
                         .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
                         .mapToInt(GenerationSegment::getOrd)

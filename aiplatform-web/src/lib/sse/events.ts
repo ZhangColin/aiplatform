@@ -17,7 +17,7 @@
 export type SseEnvelope = {
   type: string;
   payload: Record<string, unknown>;
-  /** ISO-8601；消费层目前不依赖，解析时不校验。 */
+  /** ISO-8601；run 级已运行时钟（#225）以 run-start / 收口事件的 ts 为锚，其余消费不依赖，解析时不校验。 */
   ts: string;
 };
 

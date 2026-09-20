@@ -1649,6 +1649,14 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        GenerationSegmentResponse: {
+            /** Format: int32 */
+            ord?: number;
+            description?: string;
+            /** @description 1=待跑, 2=已收口, 3=失败 */
+            status?: number;
+            statusName?: string;
+        };
         OrderBriefResponse: {
             id?: string;
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
@@ -1683,6 +1691,7 @@ export interface components {
             generationStateName?: string;
             activeOrder?: components["schemas"]["OrderBriefResponse"];
             latestOrder?: components["schemas"]["OrderBriefResponse"];
+            segments?: components["schemas"]["GenerationSegmentResponse"][];
         };
         ApiResponseVersionViewStartResponse: {
             /** Format: int32 */

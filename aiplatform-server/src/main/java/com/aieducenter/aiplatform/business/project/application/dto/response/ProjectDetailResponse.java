@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
@@ -34,6 +35,10 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param latestOrder         最近一张订单摘要（任意状态，#30：归档终态项目页的
  *                            「完整记录」取单面——支付归档后 activeOrder 归空、
  *                            订单卡改挂本嵌入；从未下单 = null）
+ * @param segments            生成轨道片清单（#225 计划区只读透出，ord 升序——
+ *                            阶段 0 + 切片计划逐片；PRD 版本锚一致才有效，锚不一致
+ *                            （PRD 已演进、旧计划过期）或无片行 = null——不拿旧计划
+ *                            对进度）
  */
 public record ProjectDetailResponse(
         String id,
@@ -51,6 +56,7 @@ public record ProjectDetailResponse(
         GenerationState generationState,
         String generationStateName,
         OrderBriefResponse activeOrder,
-        OrderBriefResponse latestOrder
+        OrderBriefResponse latestOrder,
+        List<GenerationSegmentResponse> segments
 ) {
 }

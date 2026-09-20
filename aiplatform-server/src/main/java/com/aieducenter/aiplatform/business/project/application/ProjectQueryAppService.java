@@ -21,6 +21,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.command.Workspa
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -28,6 +29,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -283,7 +285,7 @@ public class ProjectQueryAppService {
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
      * + 生成态四态投影（#222）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
-     * 摘要（归档终态「完整记录」取单面，#30）。 */
+     * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
@@ -293,7 +295,26 @@ public class ProjectQueryAppService {
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
-                orderQueryAppService.latestOrderOf(project.getId()).orElse(null));
+                orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
+                segmentsOf(project));
+    }
+
+    /**
+     * 生成轨道片清单读模型（#225 计划区只读透出）：轨道表当前片集按 ord 升序映射
+     * ——现行计划（PRD 版本锚门 {@link GenerationSegment#planMatchesPrd} 单点）才
+     * 透出；锚不一致（PRD 已演进、旧计划是过期结构）或无片行返回 null（过期计划
+     * 的进度不是现行事实，不拿旧计划对进度）。
+     */
+    private List<GenerationSegmentResponse> segmentsOf(Project project) {
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
+        if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
+            return null;
+        }
+        return segments.stream()
+                .map(segment -> new GenerationSegmentResponse(segment.getOrd(),
+                        segment.getDescription(), segment.getStatus(), segment.getStatus().getName()))
+                .toList();
     }
 
     /**

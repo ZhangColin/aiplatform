@@ -238,14 +238,15 @@ class GenerationAppServiceTest {
 
     @Test
     void given_generation_prompts_when_narration_convention_then_anchor_present() {
-        // #119 解说密实化：阶段 0 与切片 run prompt 都含「先解说后动手」约定（与执行体
-        // systemPrompt 的解说协议同向）——生成轨道每工作段先解说后动手，不靠模型自觉
+        // #225 叙说密度放宽（原 #119「每工作段先解说后动手」）：阶段 0 与切片 run
+        // prompt 及执行体 systemPrompt 同向约定「关键节点才解说」（开工、重大转向、
+        // 失败、收口）——事件流不再被自述刷满，折叠不是遮羞布
         assertThat(GenerationAppService.STAGE0_RUN_PROMPT)
-                .contains("先解说后动手");
+                .contains("关键节点");
         assertThat(GenerationAppService.sliceRunPrompt(1, 2, "用户能注册登录"))
-                .contains("先解说后动手");
+                .contains("关键节点");
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
-                .contains("先解说后动手");
+                .contains("关键节点才解说");
     }
 
     @Test

@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleA
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -43,6 +44,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
+import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
@@ -365,7 +367,7 @@ class ProjectControllerTest {
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
                         LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
                         GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
-                        null, null));
+                        null, null, null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -730,19 +732,55 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.generationStateName").value("已生成"));
     }
 
+    @Test
+    void given_segments_when_detail_then_plan_list_returned() throws Exception {
+        // 生成轨道片清单透出（#225 计划区只读读模型）：ord/描述/状态 code + *Name
+        // 按库序透出；缺计划 = 字段缺席（前端不渲染计划区、不伪造计划）
+        when(queryAppService.detail(100L)).thenReturn(detailOf("100", ProjectStatus.IN_PROGRESS,
+                false, LocalDateTime.of(2026, 9, 20, 9, 0), GenerationState.GENERATING,
+                List.of(
+                        new GenerationSegmentResponse(0, "系统初始化", GenerationSegmentStatus.CLOSED,
+                                GenerationSegmentStatus.CLOSED.getName()),
+                        new GenerationSegmentResponse(1, "用户能注册登录", GenerationSegmentStatus.PENDING,
+                                GenerationSegmentStatus.PENDING.getName()))));
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments.length()").value(2))
+                .andExpect(jsonPath("$.data.segments[0].ord").value(0))
+                .andExpect(jsonPath("$.data.segments[0].description").value("系统初始化"))
+                .andExpect(jsonPath("$.data.segments[0].status").value(2))
+                .andExpect(jsonPath("$.data.segments[0].statusName").value("已收口"))
+                .andExpect(jsonPath("$.data.segments[1].status").value(1))
+                .andExpect(jsonPath("$.data.segments[1].statusName").value("待跑"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.NEVER_GENERATED));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments").value((Object) null));
+    }
+
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成、片清单缺省无）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
         return detailOf(id, status, archived, null, GenerationState.NEVER_GENERATED);
     }
 
+    /** 详情夹具（携片清单——#225 计划区透出面）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt, GenerationState generationState) {
+            LocalDateTime prdProducedAt, GenerationState generationState,
+            List<GenerationSegmentResponse> segments) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
                 LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null,
-                generationState, generationState.getName(), null, null);
+                generationState, generationState.getName(), null, null, segments);
+    }
+
+    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
+            LocalDateTime prdProducedAt, GenerationState generationState) {
+        return detailOf(id, status, archived, prdProducedAt, generationState, null);
     }
 
     /**

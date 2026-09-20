@@ -164,6 +164,13 @@ export function dispatchNotificationEvent(queryClient: QueryClient, event: SseEv
   NOTIFICATION_PAYLOAD_WRITERS[notification.type]?.(notification, queryClient);
 }
 
+/** 信封 ts → epoch ms（时钟锚，#225）；缺失/不可解析 → undefined（不伪造起点）。 */
+function epochMsOf(ts: string): number | undefined {
+  if (!ts) return undefined;
+  const ms = Date.parse(ts);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
 /**
  * 智能体事件 → chat store + generation store + 工作消息 store 分发（事件 id =
  * SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键（引擎信息归一）
@@ -190,7 +197,9 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // （登记在先、用户气泡随 ingestRunStart 落——对话史重建的判定锚）
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
-          work.startWork(payload.projectId, payload.runId, payload.slice);
+          // run 级时钟起锚（#225）：run-start 信封 ts——单一 run 起点锚
+          // （ADR-0010 窄修订），缺 ts（测试/异常信封）不落锚、时钟不渲染
+          work.startWork(payload.projectId, payload.runId, payload.slice, epochMsOf(envelope.ts));
           // 四态投影回「生成中」（#222）：起跑即失效项目域——补产轮收口再派的
           // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
@@ -229,8 +238,9 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
-        // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）
-        work.freezeWork(payload.projectId, payload.runId);
+        // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）；
+        // endedAt = 收口信封 ts（时钟定格锚，#225）
+        work.freezeWork(payload.projectId, payload.runId, epochMsOf(envelope.ts));
         return;
       }
       case "run-finish": {
@@ -243,7 +253,8 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 收尾卡权威事实归对话流随后入流，工作消息原地定格留驻 #117，非锚定 run
         // 的收口在 store 内忽略）
         const closing = toWorkClosing(payload.closing);
-        work.freezeWork(payload.projectId, payload.runId);
+        // endedAt = 收口信封 ts（时钟定格锚，#225）
+        work.freezeWork(payload.projectId, payload.runId, epochMsOf(envelope.ts));
         if (closing) {
           chat.appendClosing(payload.projectId, payload.runId, closing, event.id);
         }

@@ -437,6 +437,31 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
   });
 
+  it("run 级时钟锚（#225，ADR-0010 窄修订）：run-start 信封 ts 落 startedAt、收口信封 ts 落 endedAt；缺 ts 不落锚", () => {
+    // 信封 ts 有值的完整生命周期：起跑 → 收口，时钟锚双双落位
+    dispatchAgentEvent(
+      agentQc,
+      { id: "run1:1", data: JSON.stringify({ type: "run-start", payload: { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor", slice: { title: "用户能注册登录", index: 1, total: 3 } }, ts: "2026-09-20T09:00:00Z" }) },
+    );
+    expect(useWorkMessageStore.getState().works["p1"]?.startedAt)
+      .toBe(Date.parse("2026-09-20T09:00:00Z"));
+
+    dispatchAgentEvent(
+      agentQc,
+      { id: "run1:9", data: JSON.stringify({ type: "run-finish", payload: { projectId: "p1", runId: "run1", sessionId: "coder-p1", finish: "end" }, ts: "2026-09-20T09:06:30Z" }) },
+    );
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.endedAt).toBe(Date.parse("2026-09-20T09:06:30Z"));
+    expect(work?.slice).toEqual({ title: "用户能注册登录", index: 1, total: 3 });
+
+    // 缺 ts（测试信封 / 异常信封）：不落锚——活性锚定真实事件，不伪造起点
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p2", runId: "run2", prompt: "做系统", agent: "executor" }, "run2:1"));
+    dispatchAgentEvent(agentQc, agentEvent("run-finish", { projectId: "p2", runId: "run2", sessionId: "coder-p2", finish: "end" }, "run2:9"));
+    const noTs = useWorkMessageStore.getState().works["p2"];
+    expect(noTs?.startedAt).toBeUndefined();
+    expect(noTs?.endedAt).toBeUndefined();
+  });
+
   it("超限终态：run-failed → 状态 error（恢复出口的唯一判定锚，run 失败为唯一失败终态）", () => {
     dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor" }, "run1:1"));
 

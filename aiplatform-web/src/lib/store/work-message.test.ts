@@ -44,6 +44,26 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     expect(work()?.parts).toEqual([]);
   });
 
+  it("run 级时钟锚（#225）：startWork 落 startedAt（run-start 信封 ts）；freezeWork 落 endedAt（收口信封 ts）——定格后值不随重放漂移", () => {
+    const { startWork, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", undefined, 1_758_000_000_000);
+
+    expect(work()?.startedAt).toBe(1_758_000_000_000);
+
+    freezeWork("p1", "r1", 1_758_006_500);
+    expect(work()?.endedAt).toBe(1_758_006_500);
+
+    // 重放再定格（补发序）：endedAt 不漂移（首次定格为准）
+    freezeWork("p1", "r1", 1_758_009_900);
+    expect(work()?.endedAt).toBe(1_758_006_500);
+  });
+
+  it("时钟锚缺省（run-start 被淘汰的补建路径）：startedAt 不落、时钟不渲染的口径成立", () => {
+    useWorkMessageStore.getState().startWork("p1", "r1");
+
+    expect(work()?.startedAt).toBeUndefined();
+  });
+
   it("部件序列投影（解说 → 动作 → 解说）：到达序即呈现序", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");

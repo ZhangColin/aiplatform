@@ -178,6 +178,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           projectId={projectId}
           lock={lock}
           stage={chatOnly ? "interview" : "iterate"}
+          plan={detail?.segments}
           onSeePrd={() => openOutputsTo("docs")}
           onSeeOrder={() => openOutputsTo("order")}
         />

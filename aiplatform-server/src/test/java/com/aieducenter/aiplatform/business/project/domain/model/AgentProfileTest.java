@@ -45,7 +45,7 @@ class AgentProfileTest {
                 .contains("finish_edit")
                 .contains("self-test") // #96 自检段委派自测子智能体
                 .contains("agent_spawn")
-                .contains("先解说后动手"); // #119 解说密实化：每工作段先解说后动手
+                .contains("关键节点才解说"); // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -77,6 +78,17 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
     public static GenerationSegment pending(Long projectId, int ord, String description,
             LocalDateTime prdProducedAt) {
         return new GenerationSegment(projectId, ord, description, prdProducedAt);
+    }
+
+    /**
+     * 现行计划判定（PRD 版本锚门单点）：片集非空且锚一致（首片锚 = 落库时的项目
+     * prd_produced_at）= 现行计划；空片集或锚漂（PRD 已演进、旧计划过期）= false。
+     * 读面共用户（计划解析 resolvePlan / 断点推导 / 详情片清单透出）——比对锚取
+     * 调用方在手的库回读形。
+     */
+    public static boolean planMatchesPrd(List<GenerationSegment> segments,
+            LocalDateTime prdProducedAt) {
+        return !segments.isEmpty() && segments.get(0).getPrdProducedAt().equals(prdProducedAt);
     }
 
     /** 收口落位（幂等覆写——重派后再收口即刷新；runId = 该片的用户面 run 锚）。 */

@@ -25,6 +25,38 @@ export function generationStateOf(raw: number | undefined | null): GenerationSta
   return raw == null ? undefined : GENERATION_STATES[raw];
 }
 
+/**
+ * 生成轨道片事实（#225 计划区只读透出）：片 = 阶段 0（ord 0）+ 切片计划逐片
+ * （1..N），status =「最近一次尝试的结局」（REST 传 Integer code 1..3，此处归一
+ * 为字面量联合；未知 code 防御回落 pending——多跑向安全）。无在途派生态：「当前片」
+ * 由工作消息的 run-start 切片序号驱动，读模型不猜。
+ */
+export type GenerationSegmentFact = {
+  ord: number;
+  description: string;
+  status: "pending" | "closed" | "failed";
+};
+
+const SEGMENT_STATUSES: Record<number, GenerationSegmentFact["status"]> = {
+  1: "pending",
+  2: "closed",
+  3: "failed",
+};
+
+/** 片清单 → 消费口径（缺行/缺 ord 防御剔除；空 = 无计划）。 */
+function normalizeSegments(
+  raw: ProjectDetailResponse["segments"],
+): GenerationSegmentFact[] | null {
+  if (!raw || raw.length === 0) return null;
+  return raw
+    .filter((seg) => seg.ord != null && !!seg.description)
+    .map((seg) => ({
+      ord: seg.ord as number,
+      description: seg.description as string,
+      status: SEGMENT_STATUSES[seg.status ?? 1] ?? "pending",
+    }));
+}
+
 /** 消费口径的项目详情（缺省字段防御归一）：壳态只取骨架所需字段，随切片增补。 */
 export type ProjectDetail = {
   id: string;
@@ -42,6 +74,8 @@ export type ProjectDetail = {
   activeOrder?: ActiveOrderFact | null;
   /** 最近一张订单事实（#30：归档终态订单卡挂它出完整记录；从未下单 = null）。 */
   latestOrder?: ActiveOrderFact | null;
+  /** 生成轨道片清单（#225 计划区；null = 无现行计划——锚过期/未落库，不伪造计划）。 */
+  segments?: GenerationSegmentFact[] | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */
@@ -57,6 +91,7 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     generationState: generationStateOf(raw.generationState),
     activeOrder: normalizeActiveOrder(raw.activeOrder),
     latestOrder: normalizeActiveOrder(raw.latestOrder),
+    segments: normalizeSegments(raw.segments),
   };
 }
 

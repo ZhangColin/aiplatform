@@ -18,6 +18,7 @@ import {
   toAttachmentCommand,
 } from "@/lib/preview/annotation";
 import type { LockRow } from "@/lib/orders/lock";
+import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
@@ -57,6 +58,7 @@ export function CommandArea({
   projectId,
   lock,
   stage = "interview",
+  plan,
   onSeePrd,
   onSeeOrder,
 }: {
@@ -65,6 +67,8 @@ export function CommandArea({
   lock?: LockRow;
   /** 阶段（常驻文案两态）：缺省访谈期，PRD 产出后装配层切迭代期。 */
   stage?: keyof typeof STAGE_HINTS;
+  /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
+  plan?: GenerationSegmentFact[] | null;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
@@ -174,7 +178,7 @@ export function CommandArea({
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} />
+              <WorkMessage work={work} plan={plan} />
             ) : null}
             <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
@@ -189,7 +193,7 @@ export function CommandArea({
             </MessageRow>
           </Fragment>
         ))}
-        {work && workAnchorIndex === -1 ? <WorkMessage work={work} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={plan} /> : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

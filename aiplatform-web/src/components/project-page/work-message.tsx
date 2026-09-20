@@ -346,7 +346,8 @@ function ActionRow({
       <span className="shrink-0 text-muted-foreground">
         {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
       </span>
-      <span className={cn("min-w-0 flex-1", terminal && "text-muted-foreground")}>
+      {/* 单行截断（#228）：长命令优雅截断不换行撑高——卡片宽度恒定（#225 story8）； */}
+      <span className={cn("min-w-0 flex-1 truncate", terminal && "text-muted-foreground")}>
         {part.label}
       </span>
       {part.state === "completed" ? (

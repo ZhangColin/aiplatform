@@ -58,7 +58,7 @@ export type WorkPart =
       toolCallId: string;
       toolName: string;
       state: WorkActionState;
-      /** 动作对象短语（人话行，无时态——时态由 state 表达）。 */
+      /** 动作对象短语（人话行，无时态——时态由 state 表达；execute = 命令原文首行，#228 直播行 live tail）。 */
       label: string;
     }
   | {

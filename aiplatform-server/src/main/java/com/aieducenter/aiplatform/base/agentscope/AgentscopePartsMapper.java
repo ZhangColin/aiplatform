@@ -47,9 +47,6 @@ final class AgentscopePartsMapper {
     private final NarrationSegments narration = new NarrationSegments();
     private final ToolActionLines actions = new ToolActionLines();
 
-    /** 动作对象锚（toolCallId → 动作短语）：running 起为具体对象，终态复述同一对象。 */
-    private final Map<String, String> actionLabels = new HashMap<>();
-
     AgentscopePartsMapper(String runId, String sessionId, String engine) {
         this.runId = runId;
         this.sessionId = sessionId;
@@ -80,12 +77,15 @@ final class AgentscopePartsMapper {
         if (event instanceof ToolCallEndEvent end) {
             drainNarrationInto(parts);
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
-                    AgentEventTypes.PART_ACTION_STATE_RUNNING, true, source);
+                    AgentEventTypes.PART_ACTION_STATE_RUNNING, false, source);
             return parts;
         }
         if (event instanceof ToolResultEndEvent end) {
+            String state = resultState(end.getState());
+            // 参数累积保留至终态才取走：非终态（挂起重放 RUNNING）重算取最新——
+            // 已落定的具体对象不因参数被前点耗尽而闪回通用标签
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
-                    resultState(end.getState()), false, source);
+                    state, terminal(state), source);
             return parts;
         }
         // 其余事件（思考/读类工具/块尾/挂起等）：不出部件
@@ -110,24 +110,22 @@ final class AgentscopePartsMapper {
         return AgentEventTypes.PART_ACTION_STATE_FAILED;
     }
 
-    /** 动作部件（封闭表内工具才有；label 无时态，时态由 state 表达——非终态存档
-     *  动作对象、终态复述已锚定对象：动作卡跨状态同一行，不闪换文案）。 */
+    /** 动作态是否终态（completed / failed）。 */
+    private static boolean terminal(String state) {
+        return AgentEventTypes.PART_ACTION_STATE_COMPLETED.equals(state)
+                || AgentEventTypes.PART_ACTION_STATE_FAILED.equals(state);
+    }
+
+    /** 动作部件（封闭表内工具才有；label 无时态，时态由 state 表达——非终态从累积
+     *  参数重算取最新（在途 → 通用对象、落定 → 具体对象），终态取走参数复述同一
+     *  具体对象：动作卡跨状态同一行，不闪换文案）。 */
     private void actionPart(List<AgentEvent> parts, String toolName, String toolCallId,
             String state, boolean consumeArgs, String source) {
         Optional<String> phrase = actions.objectPhrase(nvl(toolName), nvl(toolCallId), consumeArgs);
         if (phrase.isEmpty()) {
             return;
         }
-        boolean terminal = AgentEventTypes.PART_ACTION_STATE_COMPLETED.equals(state)
-                || AgentEventTypes.PART_ACTION_STATE_FAILED.equals(state);
-        String label;
-        if (terminal) {
-            label = actionLabels.getOrDefault(nvl(toolCallId), phrase.get());
-        }
-        else {
-            label = phrase.get();
-            actionLabels.put(nvl(toolCallId), label);
-        }
+        String label = phrase.get();
         Map<String, Object> payload = new HashMap<>();
         payload.put(AgentEventTypes.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);

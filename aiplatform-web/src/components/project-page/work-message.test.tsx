@@ -139,6 +139,54 @@ describe("WorkMessage · 动作图标封闭表（#226：表键与服务端播报
   });
 });
 
+describe("WorkMessage · 命令原值滚动行（#228：当前动作行动态化）", () => {
+  it("execute 动作行逐字渲染命令原值（label 来自服务端剥壳截断后的命令原文）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({
+              toolName: "execute",
+              state: "running",
+              label: "npm test --filter auth",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("npm test --filter auth"); // 逐字渲染，不改写
+    expect(html).toContain("lucide-square-terminal"); // #226 终端图标不破
+  });
+
+  it("动作行标签单行截断样式（truncate）：长命令不换行撑高，卡片宽度恒定（#225 story8）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({
+              toolName: "execute",
+              state: "running",
+              label: "npm run build --configuration production --output-path dist/apps/web",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // 标签行带 truncate（nowrap + ellipsis）——单行优雅截断
+    expect(html).toContain("min-w-0 flex-1 truncate");
+  });
+
+  it("写文件类 label 语义不动：「编写【文件名】」照常渲染", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ state: "running" })] })} />,
+    );
+
+    expect(html).toContain("编写【订单管理】");
+  });
+});
+
 describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
   it("生成轨道切片：头部「{切片标题}（{index}/{total}）」——取代「正在做」内部视角", () => {
     const html = renderToStaticMarkup(

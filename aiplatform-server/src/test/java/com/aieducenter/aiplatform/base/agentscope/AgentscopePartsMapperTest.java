@@ -141,6 +141,124 @@ class AgentscopePartsMapperTest {
         }
     }
 
+    /**
+     * 命令原值上滚动行（#228）：execute 的 label 动态化为命令原文首行——剥
+     * `bash -c` / `sh -c` 壳与 `cd … &&` 前缀（其余裸显）、单行定宽截断；参数
+     * 在途 / 解析不出回落「运行命令」。
+     */
+    @Nested
+    class CommandLabels {
+
+        @Test
+        void given_execute_command_args_when_full_lifecycle_then_label_is_command_raw() {
+            List<AgentEvent> started = mapper.map(new ToolCallStartEvent("r", "tc-c1", "execute"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-c1", "execute",
+                    "{\"command\":\"npm test --filter auth\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-c1", "execute"));
+            List<AgentEvent> completed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-c1", "execute", ToolResultState.SUCCESS));
+
+            // started：参数在途 → 通用标签（同写文件类通用对象形态）
+            assertThat(started.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行命令");
+            // running：参数落定 → 命令原值首行（滚动行 = live tail）
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "npm test --filter auth");
+            // completed：复述已锚定命令原值，不闪回通用标签
+            assertThat(completed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "npm test --filter auth");
+        }
+
+        @Test
+        void given_command_args_in_chunks_when_accumulated_then_label_is_whole_command() {
+            mapper.map(new ToolCallStartEvent("r", "tc-c2", "execute"));
+            // 参数增量分片到达（流式 JSON），累积后解析
+            mapper.map(new ToolCallDeltaEvent("r", "tc-c2", "execute", "{\"comm"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-c2", "execute", "and\":\"pnpm build"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-c2", "execute", "\"}"));
+
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-c2", "execute"));
+
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "pnpm build");
+        }
+
+        @Test
+        void given_wrapped_commands_when_settled_then_label_stripped_to_core() {
+            assertCoreCommand("{\"command\":\"bash -c 'npm test'\"}", "npm test");
+            assertCoreCommand("{\"command\":\"sh -c \\\"npm run build\\\"\"}", "npm run build");
+            assertCoreCommand("{\"command\":\"cd /app && npm test\"}", "npm test");
+            assertCoreCommand("{\"command\":\"cd 'src/ui' && pnpm lint\"}", "pnpm lint");
+            // 双层包裹：壳内有 cd 前缀——两规则都剥
+            assertCoreCommand("{\"command\":\"bash -c \\\"cd /app && npm test\\\"\"}", "npm test");
+            // 多级 cd 链与带工作目录参数的命令：工作目录噪音全剥
+            assertCoreCommand("{\"command\":\"cd /a && cd /b && mvn verify\"}", "mvn verify");
+            // 其余连接形态裸显（不越权改写命令语义）
+            assertCoreCommand("{\"command\":\"npm install && npm test\"}", "npm install && npm test");
+        }
+
+        @Test
+        void given_multiline_command_when_settled_then_label_is_first_line_only() {
+            assertCoreCommand("{\"command\":\"npm install\\nnpm test\\n\"}", "npm install");
+        }
+
+        @Test
+        void given_overlong_command_when_settled_then_label_truncated_single_line() {
+            // 定宽（含省略号）：超出截断——事件载荷的长度界，前端行内截断样式之外的第二道界
+            String over = "y".repeat(ToolActionLines.COMMAND_LABEL_MAX + 40);
+            assertCoreCommand("{\"command\":\"" + over + "\"}",
+                    "y".repeat(ToolActionLines.COMMAND_LABEL_MAX - 1) + "…");
+            // 恰在宽度内：原样不截
+            String exact = "y".repeat(ToolActionLines.COMMAND_LABEL_MAX);
+            assertCoreCommand("{\"command\":\"" + exact + "\"}", exact);
+        }
+
+        @Test
+        void given_running_result_replay_when_args_already_settled_then_label_keeps_command_raw() {
+            // 挂起重放（ToolResultEnd RUNNING）：参数已在落定点成形且保留至终态——
+            // 重算不闪回通用标签（#228 review：锚存退役、非终态恒重算取最新）
+            mapper.map(new ToolCallStartEvent("r", "tc-r1", "execute"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-r1", "execute",
+                    "{\"command\":\"npm test\"}"));
+            mapper.map(new ToolCallEndEvent("r", "tc-r1", "execute"));
+
+            List<AgentEvent> stillRunning = mapper.map(
+                    new ToolResultEndEvent("r", "tc-r1", "execute", ToolResultState.RUNNING));
+
+            assertThat(stillRunning.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "npm test");
+        }
+
+        @Test
+        void given_no_or_unparsable_command_args_when_settled_then_generic_label() {
+            // 无参数增量（调用落定但命令未到达）→ 通用标签
+            assertExecuteLabel(null, "运行命令");
+            // 参数流不完整（非 JSON）→ 通用标签
+            assertExecuteLabel("{\"comm", "运行命令");
+            // command 非字符串 / 空白 → 通用标签
+            assertExecuteLabel("{\"timeout\":60}", "运行命令");
+            assertExecuteLabel("{\"command\":\"   \"}", "运行命令");
+        }
+
+        private void assertCoreCommand(String args, String expected) {
+            assertExecuteLabel(args, expected);
+        }
+
+        /** 断言序列号（参数保留至终态的新语义下，多断言不可共用 toolCallId）。 */
+        private int seq;
+
+        private void assertExecuteLabel(String args, String expected) {
+            String id = "tc-lx" + seq++;
+            mapper.map(new ToolCallStartEvent("r", id, "execute"));
+            if (args != null) {
+                mapper.map(new ToolCallDeltaEvent("r", id, "execute", args));
+            }
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", id, "execute"));
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, expected);
+        }
+    }
+
     @Nested
     class StepsAndBoundaries {
 

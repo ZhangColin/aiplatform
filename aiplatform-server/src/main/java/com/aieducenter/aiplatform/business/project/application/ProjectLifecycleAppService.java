@@ -25,6 +25,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,7 @@ public class ProjectLifecycleAppService {
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
+    private final GenerationSegmentRepository generationSegments;
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -70,6 +72,7 @@ public class ProjectLifecycleAppService {
                                       ProjectKnowledgeAppService knowledgeAppService,
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
+                                      GenerationSegmentRepository generationSegments,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
@@ -80,6 +83,7 @@ public class ProjectLifecycleAppService {
         this.knowledgeAppService = knowledgeAppService;
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
+        this.generationSegments = generationSegments;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -178,6 +182,7 @@ public class ProjectLifecycleAppService {
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
         conversationHistory.purgeByProject(projectId);
+        generationSegments.deleteByProjectId(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));

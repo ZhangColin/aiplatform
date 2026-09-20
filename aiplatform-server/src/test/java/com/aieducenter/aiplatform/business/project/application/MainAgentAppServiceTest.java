@@ -906,22 +906,34 @@ class MainAgentAppServiceTest {
         // 灵魂用例（#101 生成无门自动发起）：主智能体产出 PRD 后意见轮收口，平台
         // 自动派首次生成 run（无需「开始做系统」按钮、无需模型调任何派发工具）——
         // 收口后第二条 converse 落在 coder 会话、携执行体配置与生成任务 prompt（#104
-        // 生成轨道首 run = 阶段 0 先起服）
+        // 生成轨道首 run = 阶段 0 先起服）。意见轮未产计划时先走补产轮（#220）：平台
+        // 重派主智能体按 PRD 补产 saveBuildPlan，补产收口再自动派生成
         Long projectId = persistedPrdProject("9727");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT.equals(command.prompt())) {
+                // 补产轮内主智能体调 saveBuildPlan（工具事实登记）
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+            }
+            return new AgentReply(command.runId(), "已产出 PRD 与切片计划");
+        });
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(command.capture(), any());
-        AgentCommand generation = command.getAllValues().get(1);
+        verify(agentClient, times(4)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .isEqualTo(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT);
+        AgentCommand generation = command.getAllValues().get(2); // 生成轨道首 run = 阶段 0
         assertThat(generation.sessionId()).isEqualTo(GenerationAppService.sliceSession(projectId, 0));
         assertThat(generation.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
         assertThat(generation.agentKey()).isEqualTo("executor");
-        assertThat(generation.prompt()).isEqualTo(
-                GenerationAppService.stage0Prompt(BuildPlan.minimalFallback()));
+        assertThat(generation.prompt()).isEqualTo(GenerationAppService.stage0Prompt(
+                new BuildPlan(List.of("用户能使用 PRD 描述的全部功能"))));
     }
 
     @Test
@@ -950,19 +962,27 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_main_no_build_plan_when_turn_closes_then_generation_falls_back_to_minimal_plan() {
-        // 无计划兜底（#103 守卫取舍）：主智能体产出 PRD 但未产出切片计划——退化为
-        // 最小两段（阶段 0 先起服由平台固定前置，计划含一段全量切片），不守卫不派
-        // （倒退 #101 生成无门）
+    void given_main_no_build_plan_when_turn_closes_then_plan_redispatched_not_faked() {
+        // 无计划兜底（#220 删 minimalFallback 后的新口径）：主智能体产出 PRD 但未产出
+        // 切片计划——不兜假计划，重派主智能体按 PRD 补产（补产轮收口再判）；补产轮
+        // 仍无计划即止（同 PRD 版本只补一次），生成无门不倒退为「守卫不派」也不冒进
         Long projectId = persistedPrdProject("9730");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-x", "已了解需求"));
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        assertThat(generationAppService.planOf(projectId))
-                .isEqualTo(BuildPlan.minimalFallback());
+        // 意见轮 + 补产轮恰两轮 main 会话（补产无果不递归），无任何编码 run
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .isEqualTo(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT);
+        assertThat(command.getAllValues())
+                .noneMatch(c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
+        assertThat(generationAppService.planOf(projectId)).isNull(); // 不出现假计划
     }
 
     @Test

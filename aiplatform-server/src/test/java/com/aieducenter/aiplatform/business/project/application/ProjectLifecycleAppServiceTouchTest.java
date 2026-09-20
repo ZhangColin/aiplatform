@@ -21,6 +21,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,6 +68,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private ConversationHistoryAppService conversationHistory;
+
+    @Mock
+    private GenerationSegmentRepository generationSegments;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -181,6 +185,6 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, transactionTemplate);
+                conversationHistory, generationSegments, transactionTemplate);
     }
 }

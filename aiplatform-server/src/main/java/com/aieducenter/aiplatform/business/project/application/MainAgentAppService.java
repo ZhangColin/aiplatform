@@ -286,6 +286,60 @@ public class MainAgentAppService {
     public record MainAgentRun(String runId) {
     }
 
+    /**
+     * 切片计划补产轮（#220 计划缺失兜底＝重派主智能体按 PRD 产计划，替位已删的
+     * minimalFallback）：平台发起的主智能体轮——按现行 PRD 补产切片计划并调用
+     * saveBuildPlan。不记用户发言（平台发起非用户话语——对话面只见主智能体的补产
+     * 回复，透明面可见）；轮收口走同一条 {@link #dispatchOnTurnClose}（saveBuildPlan
+     * 事实 → 自动派生成）。补产无果不递归再补——由 {@code GenerationAppService} 的
+     * 补产账止住（同一 PRD 版本只补产一次，用户重提意见即兜底）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
+     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     *                              （补产轮可追问——挂起即止，答复后续跑收口同链必达）
+     */
+    public MainAgentRun requestBuildPlan(Long projectId) {
+        Project project = requireUpdatableProject(projectId);
+        String sessionId = sessionIdOf(projectId);
+        requireNoPendingQuestion(project, sessionId);
+        String runId = EventsAppService.newRunId();
+        AgentCommand command = mainCommand(project, runId, BUILD_PLAN_REQUEST_PROMPT);
+        sessionExecutor.submit(sessionId, () -> {
+            // 同意见轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的计划事实
+            // 不冒充本轮补产产出）
+            String workspaceId = Long.toString(project.getWorkspaceId());
+            prdRevisions.clear(workspaceId);
+            buildPlanFacts.clear(workspaceId);
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 失败即清锚（同意见轮口径）：不派发，用户重提即兜底；error 事件已由
+                // converse 内发出（异常上抛由会话执行器吞）
+                opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
+                throw e;
+            }
+            dispatchOnTurnClose(projectId, sessionId, runId);
+        });
+        return new MainAgentRun(runId);
+    }
+
+    /**
+     * 补产轮 prompt（#220）：平台请求主智能体按现行 PRD 补产切片计划——只补产计划、
+     * 不动 PRD（PRD 修订走用户的意见链，不因补产顺手改需求）。
+     */
+    static final String BUILD_PLAN_REQUEST_PROMPT =
+            "平台请求：本项目还没有切片计划。请阅读工作区 docs/PRD.md（需求正本），"
+                    + "把系统拆成有序的纵向切片（每片一句用户语言「用户能 X」，从用户操作到"
+                    + "后端落库端到端走通，按实现的自然顺序排列，宁粗勿碎），并调用 "
+                    + "saveBuildPlan 工具保存切片计划。不要修改 PRD（本请求只补产计划）。"
+                    + "保存成功后，向用户简短说明已按 PRD 拟好实施计划、系统即将开始生成。";
+
     // ---------- 内部 ----------
 
     private MainAgentRun opinionTurn(Long projectId, String prompt,
@@ -404,8 +458,9 @@ public class MainAgentAppService {
             if (project.getGeneratedAt() == null) {
                 // 未生成：PRD 已产出即平台自动派首次生成（生成无门，#101）；未产出
                 // PRD 静默止于对话（访谈期常态：生成前意见链终点）。切片计划（saveBuildPlan
-                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话），无计划
-                // 时由 GenerationAppService 退化为最小两段
+                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话）；无计划
+                // 交接物时由 GenerationAppService 按轨道表解析现行计划，仍缺失则重派
+                // 本服务补产（#220，不兜假计划）
                 BuildPlan plan = buildPlanFacts.consume(workspaceId);
                 clearTurnAnchors(sessionId, workspaceId);
                 if (project.getPrdProducedAt() != null) {

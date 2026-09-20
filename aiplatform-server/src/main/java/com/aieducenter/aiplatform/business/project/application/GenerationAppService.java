@@ -2,12 +2,16 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 
@@ -20,9 +24,12 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.command.Workspa
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +52,14 @@ import lombok.extern.slf4j.Slf4j;
  * 由片内 self-test 兜）。失败语义：某片超限转终态即发 {@code run-failed} 收口、
  * 不自动跳下一片；{@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间
  * 片不落位）。</p>
+ *
+ * <p><b>生成轨道表（#220，ADR-0020）</b>：切片计划与每片收口/失败状态落平台库
+ * （{@code prj_generation_segments}，「run 无表、重启即清」口径的精确例外）
+ * ——进程重启后计划与片进度仍可查，断点 = 表中最深收口片（续跑事实源）。计划
+ * 生命周期跟 PRD 版本走：落库时记 {@code prd_produced_at} 版本锚，PRD 演进即
+ * 锚不一致、旧计划不沿用，重产 = 整组替换。计划缺失不兜假计划（minimalFallback
+ * 已删）——重派主智能体按 PRD 补产（{@link MainAgentAppService#requestBuildPlan}，
+ * 补产轮收口自动再派生成）。</p>
  *
  * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
  * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
@@ -228,21 +243,31 @@ public class GenerationAppService {
     private final AgentEventBridge eventBridge;
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
+    private final GenerationSegmentRepository generationSegments;
+    private final TransactionTemplate transactionTemplate;
+    private final MainAgentAppService mainAgentAppService;
 
     /**
-     * 生成交接物的切片计划（projectId → 构建计划）：收口派发时落定（显式计划优先，
-     * 无则退化为最小两段），生成轨道（#104 先起服 + 逐片多 run）据此顺序执行。进程
-     * 内事实（run 无表口径）：重启即清。不沿用旧计划——主智能体重提意见会修订 PRD，
-     * 旧切片计划相对已修订的 PRD 是过期结构（退化为最小两段，由 #104 决定是否及如何
-     * 跨重新发起保留计划）。
+     * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
+     * 同一 PRD 版本只补产一次——补产轮收口仍无计划即止（用户重提意见即兜底；PRD
+     * 演进换锚可再补产）。进程内账，重启即清（重启后至多多补一轮）；计划落库即清账
+     * （补产已兑现）。
      */
-    private final Map<Long, BuildPlan> generationPlans = new ConcurrentHashMap<>();
+    private final Map<Long, LocalDateTime> planProductionRequests = new ConcurrentHashMap<>();
 
+    /**
+     * @param mainAgentAppService 计划补产口（{@link MainAgentAppService#requestBuildPlan}）。
+     *        {@code @Lazy} 破主智能体编排与本服务的构造环：MainAgentAppService 收口派发
+     *        依赖本服务（既有方向），本服务计划缺失时重派主智能体补产（#220 新增方向）
+     *        ——环只此一处、以懒代理收口，行为仍是进程内直调。
+     */
     public GenerationAppService(ProjectRepository projectRepository,
             AgentSessionExecutor sessionExecutor,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
-            EventsAppService eventsAppService, CodingRunTrack codingRunTrack) {
+            EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
+            GenerationSegmentRepository generationSegments, TransactionTemplate transactionTemplate,
+            @Lazy MainAgentAppService mainAgentAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -250,6 +275,9 @@ public class GenerationAppService {
         this.eventBridge = eventBridge;
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
+        this.generationSegments = generationSegments;
+        this.transactionTemplate = transactionTemplate;
+        this.mainAgentAppService = mainAgentAppService;
     }
 
     /**
@@ -264,7 +292,13 @@ public class GenerationAppService {
      */
     public GenerationRun startGeneration(Long projectId) {
         Project project = requireGeneratableProject(projectId);
-        return dispatchGeneration(project, /* rejectInFlight= */ true, /* plan= */ null);
+        GenerationRun run = dispatchGeneration(project, /* rejectInFlight= */ true, /* plan= */ null);
+        if (run == null) {
+            // 计划缺失且该 PRD 版本已补产过（补产账拦截）：同步 409——重复触发口径
+            // 同在途拒绝（收口自动路径的 null 静默跳过不经过本入口）
+            throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+        }
+        return run;
     }
 
     /**
@@ -276,10 +310,10 @@ public class GenerationAppService {
      * 重复生成）；按钮路径在途拒绝 PRJ_017。run-failed 后项目仍「未生成」，用户
      * 重提一句即经本入口再触发，不自动重试（防空烧 token）。
      *
-     * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 主智能体未产出
-     *             切片计划，退化为最小两段——{@link BuildPlan#minimalFallback}）
-     * @return 派发的 run 标识；在途（生成进行中）静默跳过返回 null——调用方据此
-     *         区分「已派」与「跳过」，不误报派发事实
+     * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 本轮未产出——沿用
+     *             表内现行计划〔PRD 锚一致才有效〕，仍无则计划缺失走补产兜底）
+     * @return 派发的 run 标识；在途（生成进行中）或计划缺失不再派返回 null——调用方
+     *         据此区分「已派」与「未派」，不误报派发事实
      * @throws ApplicationException 守卫组同 {@link #startGeneration}（收口观测处
      *                              已判定过未归档 / 未生成 / PRD 已产出，此处守卫
      *                              兜其余竞态调用面）
@@ -290,10 +324,11 @@ public class GenerationAppService {
     }
 
     /**
-     * 首次生成派发（显式与收口自动两入口共用）：AGENTS.md 资产就位 → 异步提交
-     * 编码 run。在途口径按调用方分岔——按钮路径拒绝 PRJ_017、收口自动路径静默
-     * 跳过（返回 null 即「未派」，调用方不关心）。资产就位失败如实上抛并释放在途
-     * 标记（环境故障口径，生成不起跑）。
+     * 首次生成派发（显式与收口自动两入口共用）：切片计划解析（#220 计划跟 PRD 版本
+     * 走）→ AGENTS.md 资产就位 → 计划落轨道表 → 异步提交编码 run。在途口径按调用方
+     * 分岔——按钮路径拒绝 PRJ_017、收口自动路径静默跳过（返回 null 即「未派」，调用
+     * 方不关心）。资产就位/计划落库失败如实上抛并释放在途标记（环境故障口径，生成
+     * 不起跑）。计划缺失不派 run（不造假计划）——重派主智能体补产。
      */
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight, BuildPlan plan) {
         Long projectId = project.getId();
@@ -304,22 +339,31 @@ public class GenerationAppService {
             log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过", projectId);
             return null;
         }
+        // 切片计划解析（#220 计划跟 PRD 版本走）：显式交接物优先（即计划重产——PRD
+        // 演进随修订轮重交）；无交接物沿用表内现行计划（仅当 PRD 版本锚一致——PRD
+        // 未演进）。计划缺失：释放在途占位后走补产兜底（占位不跨补产轮——补产轮
+        // 收口再派时可重新占位，不自锁）
+        BuildPlan resolved = resolvePlan(project, plan);
+        if (resolved == null) {
+            codingRunTrack.end(projectId);
+            return dispatchPlanProduction(project);
+        }
         try {
             writeConventionsAsset(workspaceLifecycleAppService, project);
+            // 交接物在位 = 计划（重）产——整组替换落表；沿用表内计划的再派（REST 兜底、
+            // PRD 未演进）不重落——片状态是续跑事实，重落即清零
+            if (plan != null) {
+                recordPlan(project, resolved);
+            }
         } catch (RuntimeException e) {
             codingRunTrack.end(projectId);
             throw e;
         }
-        // 切片计划交接物（ADR 0009）：显式传入的计划优先（收口派发），无计划退化为
-        // 最小两段（阶段 0 先起服由平台固定前置，本计划含一段全量切片——守卫不派会
-        // 倒退 #101 生成无门）。交接物落定供生成轨道（#104）读取。
-        BuildPlan resolved = plan != null ? plan : BuildPlan.minimalFallback();
-        generationPlans.put(projectId, resolved);
 
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
             try {
-                runGenerationTrack(project, firstRunId);
+                runGenerationTrack(project, firstRunId, resolved);
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -328,9 +372,102 @@ public class GenerationAppService {
         return new GenerationRun(firstRunId);
     }
 
-    /** 生成交接物的切片计划探针（#104 生成轨道消费；测试断言交接物落定）。 */
+    /**
+     * 切片计划解析（#220 计划生命周期跟 PRD 版本走）：表内现行计划还原为
+     * {@link BuildPlan}——片行 prd 锚与项目 {@code prd_produced_at} 一致（PRD 未
+     * 演进）才有效；表空或锚不一致（PRD 已修订，旧计划是过期结构）返回 null
+     * （计划缺失/过期）。锚取自库读回值（与比对值同为库回读形，等值比较稳定）。
+     */
+    private BuildPlan resolvePlan(Project project, BuildPlan handed) {
+        if (handed != null) {
+            return handed;
+        }
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
+        if (segments.isEmpty()
+                || !segments.get(0).getPrdProducedAt().equals(project.getPrdProducedAt())) {
+            return null;
+        }
+        return new BuildPlan(segments.stream().skip(1)
+                .map(GenerationSegment::getDescription).toList());
+    }
+
+    /**
+     * 切片计划落轨道表（#220）：整组替换——清现行片集后按「阶段 0 + 切片计划」插入
+     * 待跑片行，PRD 版本锚取项目当下 {@code prd_produced_at}（此后 PRD 演进即锚
+     * 不一致、计划不沿用）。短事务原子替换（旧片不残留；删后先冲刷再插——JPA 同
+     * 事务冲刷序先插后删，不冲刷会撞 (project_id, ord) 唯一键）；失败如实上抛（无
+     * 轨道事实不空跑生成）。落库成功清补产账（补产已兑现）。
+     */
+    private void recordPlan(Project project, BuildPlan plan) {
+        Long projectId = project.getId();
+        LocalDateTime prdAnchor = project.getPrdProducedAt();
+        transactionTemplate.executeWithoutResult(status -> {
+            generationSegments.deleteByProjectId(projectId);
+            generationSegments.flush();
+            generationSegments.save(GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor));
+            for (int index = 0; index < plan.slices().size(); index++) {
+                generationSegments.save(GenerationSegment.pending(projectId, index + 1,
+                        plan.slices().get(index), prdAnchor));
+            }
+        });
+        planProductionRequests.remove(projectId);
+    }
+
+    /**
+     * 计划缺失兜底（#220，替位已删的 minimalFallback）：重派主智能体按 PRD 补产
+     * 切片计划——补产轮（main 会话、不记用户发言）收口即经既有链必达自动再派生成。
+     * 同一 PRD 版本只补产一次（{@link #planProductionRequests} 防烧护栏）：已补产过
+     * 即静默不派（返回 null），用户重提意见即兜底；PRD 演进换锚可再补产。
+     */
+    private GenerationRun dispatchPlanProduction(Project project) {
+        Long projectId = project.getId();
+        if (project.getPrdProducedAt().equals(planProductionRequests.get(projectId))) {
+            log.info("[generate] 项目 {} 计划缺失且该 PRD 版本已补产过，不再补产（用户重提意见即兜底）",
+                    projectId);
+            return null;
+        }
+        // 记账先于补产提交（补产轮收口的再派要靠它止住——同步执行器下后置记账会
+        // 递归失控）；补产轮起跑被守卫拒（挂起问答等）则清账——该版本仍可再补
+        planProductionRequests.put(projectId, project.getPrdProducedAt());
+        log.info("[generate] 项目 {} 计划缺失，重派主智能体按 PRD 补产切片计划", projectId);
+        try {
+            return new GenerationRun(mainAgentAppService.requestBuildPlan(projectId).runId());
+        }
+        catch (RuntimeException e) {
+            planProductionRequests.remove(projectId);
+            throw e;
+        }
+    }
+
+    /**
+     * 生成交接物的切片计划探针（#220 轨道表读回）：表内现行计划（PRD 锚一致才
+     * 有效；无/过期 = null）。测试断言交接物落定的读口，也是「重启后计划仍可查」
+     * 的事实面——计划唯一事实源是表，进程内无副本。
+     */
     BuildPlan planOf(Long projectId) {
-        return generationPlans.get(projectId);
+        return projectRepository.findById(projectId)
+                .map(project -> resolvePlan(project, null)).orElse(null);
+    }
+
+    /**
+     * 断点推导探针（#220 断点 = 表中最深收口片；「继续生成」续跑〔#221〕的消费面）：
+     * -1 = 无收口片。锚门自持——片行 PRD 锚与项目不一致（PRD 已修订、计划待重产）
+     * 时旧收口片不算断点（断点属现行计划，过期计划的进度不是新断点事实）。
+     */
+    int deepestClosedSegmentOf(Long projectId) {
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(projectId);
+        if (segments.isEmpty()) {
+            return -1;
+        }
+        return projectRepository.findById(projectId)
+                .filter(project -> segments.get(0).getPrdProducedAt().equals(project.getPrdProducedAt()))
+                .map(project -> segments.stream()
+                        .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                        .mapToInt(GenerationSegment::getOrd)
+                        .max().orElse(-1))
+                .orElse(-1);
     }
 
     /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */
@@ -347,10 +484,10 @@ public class GenerationAppService {
      * 核验）+ 成版 + run-finish（收口扩载，端到端可操作由片内 self-test 兜）；最后一片
      * 收口才落 {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed}
      * 收口（锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。
+     * 每片收口/失败状态随片落轨道表（#220）——段号口径与表 ord 一致（0 = 阶段 0）。
      */
-    private void runGenerationTrack(Project project, String firstRunId) {
+    private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan) {
         Long projectId = project.getId();
-        BuildPlan plan = planOf(projectId);
         List<String> slices = plan.slices();
         // 阶段 0（先起服）：最小可运行形态上 8081，收口即白底页，先于任何切片；会话
         // = slice-0（#114 每片新会话）。知识命中前置注入只在生成链首片（阶段 0）——
@@ -359,10 +496,11 @@ public class GenerationAppService {
                 sliceSession(projectId, 0),
                 new CoderRunAttempts.Prompts(stage0Prompt(plan),
                         generationRetryPrompt(plan, "先起服：应用以最小可运行形态跑上 8081", null)),
-                runId -> closeGenerationStage(project, false, "起服了系统骨架"),
+                attemptRunId -> closeGenerationStage(project, 0, false, firstRunId, "起服了系统骨架"),
                 CoderRunAttempts.GENERATE_LABEL, true,
                 RunHeading.titled(STAGE0_TITLE));
         if (!stage0.succeeded()) {
+            failSegment(projectId, 0, firstRunId);
             eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), firstRunId);
             return;
         }
@@ -376,21 +514,23 @@ public class GenerationAppService {
             String slice = slices.get(index);
             String runId = EventsAppService.newRunId();
             boolean last = index == slices.size() - 1;
+            int ord = index + 1; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
-                    sliceSession(projectId, index + 1),
+                    sliceSession(projectId, ord),
                     new CoderRunAttempts.Prompts(
                             slicePrompt(plan, index, previousHandoff),
                             generationRetryPrompt(plan, "实现切片「" + slice + "」", previousHandoff)),
-                    attemptRunId -> closeGenerationStage(project, last,
+                    attemptRunId -> closeGenerationStage(project, ord, last, runId,
                             "完成切片：" + slice),
                     CoderRunAttempts.GENERATE_LABEL, false,
                     RunHeading.slice(slice, index + 1, slices.size()));
             if (!result.succeeded()) {
+                failSegment(projectId, ord, runId);
                 eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
                 return;
             }
             previousHandoff = result.closingText();
-            placeSliceHandoff(project, index + 1, previousHandoff);
+            placeSliceHandoff(project, ord, previousHandoff);
         }
     }
 
@@ -423,19 +563,50 @@ public class GenerationAppService {
      * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达才收口——converse 无异常
      * 不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 self-test 兜
-     * （收口扩载 selfTest 统计），平台侧不新增探针。最后一片收口才落 {@code generated_at}
-     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）。
+     * （收口扩载 selfTest 统计），平台侧不新增探针。收口即片状态落表（#220，ord 段号
+     * 口径一致）；最后一片收口才落 {@code generated_at}（口径不变——阶段 0 / 中间片
+     * 不落位 = 拆片不漂移「确认下单」可见性）。
      */
-    private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project,
-            boolean markGenerated, String summary) {
+    private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
+            boolean markGenerated, String runId, String summary) {
         requireReachable(project);
         emitPreviewReady(project);
+        closeSegment(project.getId(), ord, runId);
         if (markGenerated) {
             markGenerated(project.getId());
         }
         // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
         return CoderRunAttempts.ClosingJudgment.generation(summary);
+    }
+
+    /** 片收口状态落表（#220）：真收口（8081 探活过）即置已收口 + 用户面 run 锚。 */
+    private void closeSegment(Long projectId, int ord, String runId) {
+        recordSegmentStatus(projectId, ord, segment -> segment.close(runId));
+    }
+
+    /** 片失败状态落表（#220）：尝试环超限终态即置失败（用户面 run 锚）。 */
+    private void failSegment(Long projectId, int ord, String runId) {
+        recordSegmentStatus(projectId, ord, segment -> segment.fail(runId));
+    }
+
+    /**
+     * 片状态落位（#220）：轨道表是断点推导与续跑的事实源，但落表失败不反噬 run——
+     * 只记日志（收口事实仍在收尾卡；缺行 = 续跑多跑一片，安全向，同
+     * {@link #markGenerated} 的尽力而为口径）。幂等覆写（重派后再收口/失败即刷新
+     * ——状态是「最近一次尝试的结局」）。
+     */
+    private void recordSegmentStatus(Long projectId, int ord, Consumer<GenerationSegment> transition) {
+        try {
+            generationSegments.findByProjectIdAndOrd(projectId, ord).ifPresent(segment -> {
+                transition.accept(segment);
+                generationSegments.save(segment);
+            });
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 状态落表失败（不反噬 run）：{}", projectId, ord,
+                    e.toString());
+        }
     }
 
     /** 8081 可达核验（#35 收口判据探针）：不可达即抛异常（驱动尝试环重试/终态）。 */

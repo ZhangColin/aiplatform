@@ -82,7 +82,7 @@ app:
     readiness-timeout: 10m
   # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
   # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
-  # 用户重新发起兜底（#22 重试次数/超时值实施期定）。
+  # 用户「继续生成」断点续跑兜底（#221；#22 重试次数/超时值实施期定）。
   generation:
     max-attempts: 3
     timeout: 30m

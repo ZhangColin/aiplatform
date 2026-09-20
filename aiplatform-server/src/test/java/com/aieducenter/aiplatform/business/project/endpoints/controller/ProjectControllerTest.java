@@ -43,6 +43,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
+import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
@@ -362,7 +363,9 @@ class ProjectControllerTest {
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null, null, null));
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
+                        GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
+                        null, null));
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -694,30 +697,52 @@ class ProjectControllerTest {
         // 成果区长出判据透出：闲聊期 null（指令区占满全宽），产出后有时点
         when(queryAppService.detail(100L)).thenReturn(
                 detailOf("100", ProjectStatus.IN_PROGRESS, false,
-                        LocalDateTime.of(2026, 8, 31, 9, 0)));
+                        LocalDateTime.of(2026, 8, 31, 9, 0), GenerationState.GENERATING));
 
         performAsUser(get("/api/projects/100"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.prdProducedAt").value("2026-08-31T09:00:00"));
 
         when(queryAppService.detail(101L)).thenReturn(
-                detailOf("101", ProjectStatus.IN_PROGRESS, false, null));
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.NEVER_GENERATED));
         performAsUser(get("/api/projects/101"))
                 .andExpect(jsonPath("$.data.prdProducedAt").value((Object) null));
     }
 
+    @Test
+    void given_generation_states_when_detail_then_projection_returned() throws Exception {
+        // 生成态四态投影透出（#222）：Integer code + *Name 随行——与 SSE 会话态无关，
+        // 前端档位与「继续生成」出口的推导输入
+        when(queryAppService.detail(100L)).thenReturn(
+                detailOf("100", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.INTERRUPTED));
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generationState").value(3))
+                .andExpect(jsonPath("$.data.generationStateName").value("生成中断"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.GENERATED));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(jsonPath("$.data.generationState").value(4))
+                .andExpect(jsonPath("$.data.generationStateName").value("已生成"));
+    }
+
     // ---------- 夹具 ----------
 
-    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出）。 */
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成）。 */
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
-        return detailOf(id, status, archived, null);
+        return detailOf(id, status, archived, null, GenerationState.NEVER_GENERATED);
     }
 
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
-            LocalDateTime prdProducedAt) {
+            LocalDateTime prdProducedAt, GenerationState generationState) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
                 "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null, null, null);
+                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null,
+                generationState, generationState.getName(), null, null);
     }
 
     /**

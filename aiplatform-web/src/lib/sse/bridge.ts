@@ -191,6 +191,9 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         if (payload.agent === "executor") {
           generation.noteCoderRun(payload.projectId, payload.runId);
           work.startWork(payload.projectId, payload.runId, payload.slice);
+          // 四态投影回「生成中」（#222）：起跑即失效项目域——补产轮收口再派的
+          // 轨道落库无对话面事件可搭，靠本失效收尾（点击路径的失效在 mutation）
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         } else if (payload.agent === "main") {
           chat.noteChatRun(payload.projectId, payload.runId);
           chat.ingestRunStart(payload.projectId, payload.runId, payload.prompt);
@@ -217,11 +220,14 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "run-failed": {
         // 编码 run 超限终态收口（#56）：轨道真终态（事件到 ⟺ 恢复出口可达）——
-        // 「重新发起/重新修改」只认本事件；无 executor 登记的 runId 忽略（事件序
+        // 「继续生成/重新修改」只认本事件；无 executor 登记的 runId 忽略（事件序
         // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
           generation.noteCoderFailed(payload.projectId);
+          // 四态投影回「生成中断」（#222）：终态落轨道表即失效项目域——「继续
+          // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 工作消息定格（run 失败是唯一失败终态——消息冻结，恢复出口在生成面）
         work.freezeWork(payload.projectId, payload.runId);

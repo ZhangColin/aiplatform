@@ -29,6 +29,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -36,12 +37,14 @@ import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
+import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +
  * 平台成本 + 分模型 + 分智能体）+ PRD 读（直读工作区文件事实源）。写侧（生命周期/
- * 归档/改名）归 {@link ProjectLifecycleAppService}，读拼装集中一处。
+ * 归档/改名）归 {@link ProjectLifecycleAppService}，读拼装集中一处。详情含生成态
+ * 四态投影（#222）——轨道表＋generated_at＋在途标记派生，与 SSE 会话态无关。
  */
 @Service
 public class ProjectQueryAppService {
@@ -64,15 +67,21 @@ public class ProjectQueryAppService {
     private final UsageQueryPort usageQueryPort;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
+    private final GenerationSegmentRepository generationSegments;
+    private final CodingRunTrack codingRunTrack;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   UsageQueryPort usageQueryPort,
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
-                                  OrderQueryAppService orderQueryAppService) {
+                                  OrderQueryAppService orderQueryAppService,
+                                  GenerationSegmentRepository generationSegments,
+                                  CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
+        this.generationSegments = generationSegments;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -273,16 +282,43 @@ public class ProjectQueryAppService {
     // ---------- 响应拼装 ----------
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
-     * + 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单摘要（归档终态
-     * 「完整记录」取单面，#30）。 */
+     * + 生成态四态投影（#222）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
+     * 摘要（归档终态「完整记录」取单面，#30）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
+        GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
-                project.getGeneratedAt(), base.activeOrder(),
+                project.getGeneratedAt(), generationState, generationState.getName(),
+                base.activeOrder(),
                 orderQueryAppService.latestOrderOf(project.getId()).orElse(null));
+    }
+
+    /**
+     * 生成态四态投影（#222，ADR-0020 裁决四——派生序即优先序）：
+     * <ol>
+     * <li>已生成：{@code generated_at} 落位恒赢——迭代/修正 run 在途不改变生成态
+     * （四态是生成面的呈现态，生成完成即定格）；</li>
+     * <li>生成中：编码 run 在途（{@link CodingRunTrack} 进程内标记，含已提交未起跑
+     * 的排队段）——重启丢标记即落到中断档，正是「中断不判死」的投影面；</li>
+     * <li>生成中断：轨道表有片行而未生成不在途——失败终态、进程重启、PRD 演进致
+     * 旧计划过期同档，「继续生成」出口挂本档；</li>
+     * <li>从未生成：无片行不在途（含存量中断项目——轨道表之前的在途项目，恢复走
+     * 计划重派，「继续生成」同一出口）。</li>
+     * </ol>
+     */
+    private GenerationState generationStateOf(Project project) {
+        if (project.getGeneratedAt() != null) {
+            return GenerationState.GENERATED;
+        }
+        if (codingRunTrack.isInFlight(project.getId())) {
+            return GenerationState.GENERATING;
+        }
+        return generationSegments.existsByProjectId(project.getId())
+                ? GenerationState.INTERRUPTED
+                : GenerationState.NEVER_GENERATED;
     }
 
     /** 列表项拼装：派生项目状态（归档 > 进行中）+ 未终结订单摘要。 */

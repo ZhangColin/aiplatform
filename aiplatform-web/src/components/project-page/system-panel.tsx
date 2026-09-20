@@ -22,6 +22,7 @@ import {
   resolvePreviewAddress,
   systemPanelPhase,
 } from "@/lib/preview/state";
+import type { GenerationState } from "@/lib/projects/detail";
 import { useAnnotationStore } from "@/lib/store/annotation";
 import { useProjectPreview } from "@/hooks/use-project-preview";
 
@@ -34,21 +35,22 @@ import {
 } from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
 import { RestartFixButton } from "./restart-fix";
-import { StartSystemButton } from "./start-generation";
+import { ResumeGenerationButton } from "./resume-generation";
 
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 修正
- * 超限终态恢复出口；#79 起为成果区「系统」tab，#80 浏览器条定稿）：恒为预览的
- * 容器。门禁解除——run 开始（含发起成功的乐观登记）即取预览地址并挂机制，
- * 不等 run-finish 纪元；后端探活通过才返回 URL，有 URL 即上真页面（空白页可
- * 接受）。空态两档（推导归 lib/preview/state 纯函数，本组件只呈现）：无应用 =
- * 占位随工作消息部件推进的步骤提示（解说自述优先、动作对象
- * 兜底，无信号「正在初始化」）；
- * 有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联，不再浮
- * 叠在预览上）；失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话
- * 与重试不闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为
- * key，手动刷新的本地节拍并入同 key）；超限终态给人工兜底入口——从未生成
- * 「重新发起」、修正轮「重新修改」，正常态全无。
+ * 超限终态恢复出口；#79 起为成果区「系统」tab，#80 浏览器条定稿；#222 档位改吃
+ * 四态投影）：恒为预览的容器。门禁——四态投影非「从未生成」（含中断——阶段 0
+ * 收口后应用可能已在跑）即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
+ * 即上真页面（空白页可接受）。档位推导归 lib/preview/state 纯函数（REST 投影为
+ * 主源——刷新/回访后档位仍正确；修正轨会话信号只喂更新中/修正失败两处，更新轨
+ * RestartFix 现状不动），本组件只呈现：无应用 = 占位随工作消息部件推进的步骤
+ * 提示；有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联）；
+ * 中断/失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话与重试不
+ * 闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为 key，手动
+ * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：生成中断与
+ * 从未生成（idle 档）给「继续生成」（断点续跑/计划重派），修正轮失败给「重新
+ * 修改」；无推倒重来按钮。正常态全无手动触发。
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
@@ -61,14 +63,14 @@ import { StartSystemButton } from "./start-generation";
  */
 export function SystemPanel({
   projectId,
-  generatedAt,
+  generationState,
   coderStatus,
   onGenerated,
 }: {
   projectId: string;
-  /** 首次生成时点（REST 事实；null = 未生成过）。 */
-  generatedAt?: string | null;
-  /** 本会话编码 run 状态（undefined = 未见）。 */
+  /** 生成态四态投影（REST 事实；缺省 = 后端未透出）。 */
+  generationState?: GenerationState;
+  /** 本会话编码 run 状态（修正轨信号——更新中/修正失败）。 */
   coderStatus?: CoderRunStatus;
   /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
   onGenerated: () => void;
@@ -78,8 +80,9 @@ export function SystemPanel({
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
   const [refreshTick, setRefreshTick] = useState(0);
-  // 门禁解除（#45）：run 开始或已有生成事实即取预览地址——不等收口纪元
-  const active = previewActive(coderStatus, generatedAt);
+  // 门禁（#45 解除；#222 投影口径）：非「从未生成」即取预览地址（中断档的应用
+  // 可能已在跑——阶段 0 收口即起服）
+  const active = previewActive(generationState, coderStatus);
   const preview = useProjectPreview(projectId, active);
   const url = preview.data?.url;
   // 地址栏 goto（#125）：navigatedUrl = 用户导航覆盖（解析后落在 origin 内），未导航
@@ -135,8 +138,8 @@ export function SystemPanel({
   }, [projectId, previewOrigin, addAnnotation]);
 
   const phase = systemPanelPhase({
+    generationState,
     coderStatus,
-    generatedAt,
     url,
     error: preview.error,
     parts,
@@ -147,15 +150,13 @@ export function SystemPanel({
   const notice = phase.kind === "page" ? phase.notice : undefined;
   const updatingNotice = notice && !notice.failed ? notice : undefined;
   const failedNotice = notice?.failed ? notice : undefined;
-  // 超限终态的人工兜底入口（页面失败细条与占位终态两处共用）：从未生成「重新发起」、
-  // 修正轮「重新修改」（#48，重派终态那场的交接物）
-  const restart = (
-    <StartSystemButton projectId={projectId} onGenerated={onGenerated} label="重新发起" />
-  );
+  // 恢复出口单出口（#222）：生成中断/从未生成 =「继续生成」（断点续跑或计划重派）、
+  // 修正轮失败 =「重新修改」（#48，重派终态那场的交接物——更新轨现状不动）
+  const resume = <ResumeGenerationButton projectId={projectId} onGenerated={onGenerated} />;
   const refix = <RestartFixButton projectId={projectId} />;
-  /** 失败态兜底入口选择（失败细条与占位终态两处共用，#48）：restart = 重新发起 / refix = 重新修改。 */
-  const recoveryAction = (recovery?: "restart" | "refix") =>
-    recovery === "restart" ? restart : recovery === "refix" ? refix : null;
+  /** 兜底入口选择（失败细条/占位终态/引导占位共用，#222）：resume = 继续生成 / refix = 重新修改。 */
+  const recoveryAction = (recovery?: "resume" | "refix") =>
+    recovery === "resume" ? resume : recovery === "refix" ? refix : null;
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));
@@ -300,6 +301,10 @@ export function SystemPanel({
               <PanelHint>
                 <Monitor className="size-5 text-muted-foreground" />
                 <p>系统生成后，这里会出现可以操作的你的系统</p>
+                {/* idle 档也挂「继续生成」（#222 单出口）：面板仅存在于 PRD 产出后
+                    ——本档 = 未起跑/存量无轨道（含旧机制卡死项目），重发 /generate
+                    即计划重派起跑；正常流片刻后自动转生成中档 */}
+                {resume}
               </PanelHint>
             )}
           </div>

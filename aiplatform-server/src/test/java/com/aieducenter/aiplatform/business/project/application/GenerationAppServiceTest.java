@@ -55,6 +55,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
@@ -87,6 +88,10 @@ class GenerationAppServiceTest {
 
     @Autowired
     private GenerationAppService appService;
+
+    /** 详情读口（#222 四态投影断言面——REST 行为，不触内部方法）。 */
+    @Autowired
+    private ProjectQueryAppService queryAppService;
 
     @Autowired
     private GenerationProperties properties;
@@ -741,6 +746,51 @@ class GenerationAppServiceTest {
                 // 交接降级：空交接不注「上一片交接摘要」块，计划轨迹自足
                 .doesNotContain("上一片交接摘要")
                 .contains("整体切片计划");
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    // ---------- 生成态四态投影（#222：REST 档位与「继续生成」出口的推导输入） ----------
+
+    @Test
+    void given_generation_lifecycle_when_detail_then_four_state_projection() {
+        // 灵魂用例（#222 AC①）：从未生成 →（派发起跑，含排队段）生成中 →（失败
+        // 终态）生成中断 →（「继续生成」续跑起跑）生成中 →（收口）已生成——投影由
+        // 轨道表＋generated_at＋在途标记派生，读口 = REST 详情（与 SSE 会话态无关）
+        Long projectId = persistedProject("9855");
+        givenAgentsMdWriteSucceeds();
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.NEVER_GENERATED);
+
+        // 派发即生成中（已提交未起跑的排队段也算在途——在途标记先于 run 执行）
+        List<Runnable> submitted = new ArrayList<>();
+        doAnswer(invocation -> {
+            submitted.add((Runnable) invocation.getArgument(1));
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.GENERATING);
+
+        // 起跑后重试耗尽转终态失败 → 生成中断（「继续生成」出口的档位；进程重启丢
+        // 在途标记同落此档——有轨道片行而未生成不在途）
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("阶段0起服失败"))
+                .thenThrow(new IllegalStateException("阶段0起服失败"))
+                .thenThrow(new IllegalStateException("阶段0起服失败"));
+        submitted.remove(0).run();
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.INTERRUPTED);
+
+        // 「继续生成」（REST 出口）→ 再次生成中；收口 → 已生成（generated_at 落位
+        // 恒赢——此后迭代/修正在途不再改变生成态）
+        doReturn(new AgentReply("r0", "阶段0完成"), new AgentReply("r1", "切片1完成"))
+                .when(agentClient).converse(any(), any());
+        appService.startGeneration(projectId);
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.GENERATING);
+        submitted.remove(0).run();
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.GENERATED);
         assertThat(generatedAt(projectId)).isNotNull();
     }
 

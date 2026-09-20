@@ -198,7 +198,12 @@ public class ProjectController {
 
     @GetMapping("/{id}")
     @Operation(summary = "项目详情",
-            description = "status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）")
+            description = "status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。"
+                    + "generationState = 生成态四态投影（#222，Integer code：1=从未生成 "
+                    + "2=生成中 3=生成中断 4=已生成）——轨道表＋generated_at＋在途标记派生、"
+                    + "与 SSE 会话态无关（刷新/回访后档位仍正确）；生成中断/从未生成即"
+                    + "「继续生成」出口的档位（POST /{id}/generate 断点续跑或计划重派），"
+                    + "已生成 =「确认下单」门槛口径不变")
     public ApiResponse<ProjectDetailResponse> get(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(parseId(id)));
     }

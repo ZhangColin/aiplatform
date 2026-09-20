@@ -10,13 +10,14 @@ import {
   useGenerationStore,
 } from "@/lib/store/generation";
 import { useWorkMessageStore, workPartsOf } from "@/lib/store/work-message";
+import type { GenerationState } from "@/lib/projects/detail";
 
 import { systemPanelPhase, UPDATING_NOTICE, type SystemPanelPhase } from "./state";
 
 /**
  * 预览渐进 b 档验收（#90 spec ⑤ → #104/#106 修订刷新单元口径：切片收口取代逐修改
- * 刷新）：脚本化生成/更新轨道——事件序列喂桥，每拍从 store 归约呈现档位
- * （systemPanelPhase），断言验收标准的端到端归约：
+ * 刷新；#222 档位输入改四态投影）：脚本化生成/更新轨道——事件序列喂桥，每拍从
+ * store 归约呈现档位（systemPanelPhase），断言验收标准的端到端归约：
  *
  * - AC1 生成轨道（多切片）：步骤占位（随解说推进）→ 阶段 0 收口上页面（探活取得
  *   URL）→ 切片逐段收口（run-finish 纪元重挂）——run 起跑后全程无空屏档；
@@ -26,18 +27,17 @@ import { systemPanelPhase, UPDATING_NOTICE, type SystemPanelPhase } from "./stat
  *   双重刷新；
  * - AC4 收口定格：run-finish → 纪元 +1 重挂定格最新态，进行中轻提示退场。
  *
- * URL 属 REST 查询面（状态以查询为准，探活通过才返回），本 seam 以查询事实注入；
- * URL 事件驱动推送（#105 preview-ready 写缓存）归 bridge.test.ts 覆盖。
+ * URL 与四态投影属 REST 查询面（状态以查询为准，探活通过才返回），本 seam 以查询
+ * 事实注入；URL 事件驱动推送（#105 preview-ready 写缓存）归 bridge.test.ts 覆盖。
  */
 
-const GENERATED_AT = "2026-09-01T00:00:00Z";
 const PREVIEW_URL = "http://localhost:30080";
 
-/** 项目 p1 的当前呈现档位（coderStatus/parts 取 store 实况，URL/生成事实作查询面注入）。 */
-function phaseNow(input: { url?: string; generatedAt?: string | null } = {}): SystemPanelPhase {
+/** 项目 p1 的当前呈现档位（coderStatus/parts 取 store 实况，URL/投影作查询面注入）。 */
+function phaseNow(input: { url?: string; generationState?: GenerationState } = {}): SystemPanelPhase {
   return systemPanelPhase({
+    generationState: input.generationState,
     coderStatus: coderStatusOf(useGenerationStore.getState(), "p1"),
-    generatedAt: input.generatedAt,
     url: input.url,
     parts: workPartsOf(useWorkMessageStore.getState(), "p1"),
   });
@@ -91,13 +91,14 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
 
     // 阶段 0 run 起跑：应用可访问前 = 进行中的步骤提示占位（无信号落「正在初始化」）
     dispatchAgentEvent(queryClient, agentEvent("run-start", { ...stage0, prompt: "做个花店官网", model: "m", agent: "executor" }));
-    expect(watch(phaseNow())).toEqual({ kind: "hint", text: "正在初始化" });
+    expect(watch(phaseNow({ generationState: "generating" }))).toEqual({ kind: "hint", text: "正在初始化" });
 
     // 步骤占位随工作消息部件推进：解说自述到场即换（「正在创建首页」）
     dispatchAgentEvent(queryClient, agentEvent("part-text", { ...stage0, text: "正在创建首页。" }));
-    expect(watch(phaseNow())).toEqual({ kind: "hint", text: "正在创建首页。" });
+    expect(watch(phaseNow({ generationState: "generating" }))).toEqual({ kind: "hint", text: "正在创建首页。" });
 
     // 阶段 0 收口：8081 起服探活通过——REST 探活取得 URL（查询事实）上真页面；
+    // 轨道仍在途（投影：生成中）——页面保留 +「更新中」轻提示（#222 投影如实呈现）；
     // run-finish 纪元 +1（刷新单元 = 切片收口，唯一刷新信号——无逐修改双重刷新）
     dispatchAgentEvent(queryClient, agentEvent("run-finish", {
       ...stage0,
@@ -105,19 +106,23 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
       closing: { summary: "系统骨架已起服", prdChanged: false, systemChanged: true, files: [], durationMs: 60_000 },
     }));
     expect(epochNow()).toBe(1);
-    expect(watch(phaseNow({ url: PREVIEW_URL }))).toEqual({ kind: "page" });
+    expect(watch(phaseNow({ url: PREVIEW_URL, generationState: "generating" }))).toEqual({
+      kind: "page",
+      notice: { failed: false, text: UPDATING_NOTICE },
+    });
 
     // 切片 1 run 起跑：页面位不动（有 URL 不退占位——保持可正常呈现），轻提示接棒
     dispatchAgentEvent(queryClient, agentEvent("run-start", { ...slice1, prompt: "完成首页与留言板", model: "m", agent: "executor" }));
     dispatchAgentEvent(queryClient, agentEvent("part-text", { ...slice1, text: "正在实现留言板。" }));
-    expect(watch(phaseNow({ url: PREVIEW_URL }))).toEqual({
+    expect(watch(phaseNow({ url: PREVIEW_URL, generationState: "generating" }))).toEqual({
       kind: "page",
       notice: { failed: false, text: UPDATING_NOTICE },
     });
     // run 中无重挂（刷新只由切片收口驱动）：纪元停在上一收口
     expect(epochNow()).toBe(1);
 
-    // 切片 1 收口：纪元 +1 重挂定格最新态，进行中轻提示退场；工作消息定格留驻（#117 不清空）
+    // 切片 1 收口（末片）：投影转「已生成」，纪元 +1 重挂定格最新态，进行中轻提示
+    // 退场；工作消息定格留驻（#117 不清空）
     dispatchAgentEvent(queryClient, agentEvent("run-finish", {
       ...slice1,
       finish: "end",
@@ -130,7 +135,7 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
       },
     }));
     expect(epochNow()).toBe(2);
-    expect(watch(phaseNow({ url: PREVIEW_URL, generatedAt: GENERATED_AT }))).toEqual({ kind: "page" });
+    expect(watch(phaseNow({ url: PREVIEW_URL, generationState: "generated" }))).toEqual({ kind: "page" });
     expect(workPartsOf(useWorkMessageStore.getState(), "p1")).toHaveLength(1); // 定格留驻（#117 不清空）
 
     // AC1 无空屏：起跑后每一拍都有内容档（hint 文案恒非空 / page 直挂）
@@ -138,8 +143,8 @@ describe("预览渐进 b 档（#90 → #104/#106 切片收口口径）· 脚本�
   });
 
   it("更新 run：预览保持可正常呈现（不退占位），刷新无档位倒退，收口定格（AC2）", () => {
-    // 查询事实：已有生成事实且预览可访问（更新 run 的起手式）
-    const facts = { url: PREVIEW_URL, generatedAt: GENERATED_AT };
+    // 查询事实：已生成（投影）且预览可访问（更新 run 的起手式）
+    const facts = { url: PREVIEW_URL, generationState: "generated" as const };
     const coder = { projectId: "p1", runId: "run2", sessionId: "coder-p1", engine: "agentscope" };
 
     // 更新 run 起跑：页面位不动（不退步骤占位——保持可正常呈现），轻提示接棒

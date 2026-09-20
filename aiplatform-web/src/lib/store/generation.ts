@@ -3,8 +3,8 @@ import { create } from "zustand";
 /**
  * 生成面 store（#22 片2-1，SSE 相关 store——ADR 0003 状态三分法）：按项目记编码
  * run 的判定锚与状态机 + 预览重挂纪元。写入方两路（同 chat store 先例）：
- * SSE 侧 = 桥（事件）；发送侧 = use-generate（发起成功的乐观登记，SSE 事件随后
- * 到达并幂等收敛）。
+ * SSE 侧 = 桥（事件）；发送侧 = use-resume-generation（「继续生成」发起成功的
+ * 乐观登记，SSE 事件随后到达并幂等收敛）。
  *
  * <p>本 store 是「生成事实」——编码 run 的 runId 登记（run-start agent=executor，
  * 后续 error/run-finish 事件不带角色，凭登记判定）与跨 run 的状态，对话轮不挤掉。

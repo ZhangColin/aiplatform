@@ -32,8 +32,8 @@ vi.mock("@/hooks/use-project-preview", () => ({
       : { data: undefined, error: undefined, isPending: false, isError: false, refetch: refetchMock },
 }));
 
-vi.mock("@/hooks/use-generate", () => ({
-  useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
+vi.mock("@/hooks/use-resume-generation", () => ({
+  useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 vi.mock("@/hooks/use-restart-fix", () => ({
@@ -46,7 +46,12 @@ function renderPanel() {
   });
   const utils = render(
     <QueryClientProvider client={new QueryClient()}>
-      <SystemPanel projectId="p1" coderStatus="running" onGenerated={() => {}} />
+      <SystemPanel
+        projectId="p1"
+        generationState="generating"
+        coderStatus="running"
+        onGenerated={() => {}}
+      />
     </QueryClientProvider>,
   );
   return { frame: () => utils.container.querySelector("iframe")!, ...utils };

@@ -17,6 +17,9 @@ public interface GenerationSegmentRepository extends BaseRepository<GenerationSe
     /** 项目当前轨道片集（ord 升序；空 = 无计划——表即「有无计划」的事实源）。 */
     List<GenerationSegment> findByProjectIdOrderByOrdAsc(Long projectId);
 
+    /** 有无片行（#222 四态投影的「生成中断」判据——有轨道事实而未生成不在途）。 */
+    boolean existsByProjectId(Long projectId);
+
     /** 单片寻址（状态落位的目标行）。 */
     Optional<GenerationSegment> findByProjectIdAndOrd(Long projectId, int ord);
 

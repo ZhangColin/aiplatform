@@ -755,6 +755,7 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
     // 未登记的 run（无 CODER run-start 前置）：不失效
     expect(projects.fetchCount()).toBe(1);
 
+    // 起跑即失效（#222 四态投影回「生成中」——补产轮再派无对话面事件可搭）
     dispatchAgentEvent(
       queryClient,
       {
@@ -766,6 +767,8 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
         }),
       },
     );
+    await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
+
     dispatchAgentEvent(
       queryClient,
       {
@@ -778,7 +781,44 @@ describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥�
       },
     );
 
+    await vi.waitFor(() => expect(projects.fetchCount()).toBe(3));
+    projects.unsubscribe();
+    queryClient.clear();
+  });
+
+  it("coder run-failed → projects 域 active query 重拉（#222 四态投影回「生成中断」——「继续生成」出口由投影派生）", async () => {
+    useGenerationStore.setState({ generations: {} });
+    const queryClient = new QueryClient();
+    queryClient.setDefaultOptions({ queries: { retry: false } });
+    const projects = observeActiveQuery(queryClient, queryKeys.projects.all);
+    await projects.waitForSettled();
+
+    dispatchAgentEvent(
+      queryClient,
+      {
+        id: "run2:0",
+        data: JSON.stringify({
+          type: "run-start",
+          payload: { projectId: "p1", runId: "run2", prompt: "做系统", agent: "executor" },
+          ts: "",
+        }),
+      },
+    );
     await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
+
+    dispatchAgentEvent(
+      queryClient,
+      {
+        id: "run2:9",
+        data: JSON.stringify({
+          type: "run-failed",
+          payload: { projectId: "p1", runId: "run2" },
+          ts: "",
+        }),
+      },
+    );
+
+    await vi.waitFor(() => expect(projects.fetchCount()).toBe(3));
     projects.unsubscribe();
     queryClient.clear();
   });

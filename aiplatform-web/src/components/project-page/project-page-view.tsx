@@ -32,7 +32,7 @@ import { lockRowOf } from "@/lib/orders/lock";
  * 订单自动挂「订单」不切换（#205 状态点点亮，主感知面在对话区报价卡）、
  * 「去看看」挂「文档」；用户手动收起/挂载/关闭优先至下一自动事件。生成无门自动发起
  * （#101）：主智能体产出 PRD 后平台自动派首次生成 run，无需「开始做系统」按钮
- * ——本层不再装配任何生成入口（失败态「重新发起」兜底归系统面板）。「确认下单」
+ * ——本层不再装配任何生成入口（「继续生成」恢复出口归系统面板）。「确认下单」
  * 可见性同在此单点判定（#26：首次生成完成即常驻、零迭代可点）。交易环（#28）：
  * 订单事实（detail.activeOrder）接出——确认下单 mutation 挂顶栏右上角按钮、锁定式
  * 矩阵行在此判定（lockRowOf 单点）注入对话区与订单范式。本组件是 agent 流通道
@@ -188,7 +188,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
             tabs={outputsTabs}
             ctx={{
               projectId,
-              generatedAt: detail?.generatedAt,
+              generationState: detail?.generationState,
               coderStatus,
               orderCardId,
               activeOrderStatus: detail?.activeOrder?.status,

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api/api-error";
+import type { GenerationState } from "@/lib/projects/detail";
 import type { WorkPart } from "@/lib/store/work-message";
 
 import {
   UPDATING_NOTICE,
+  INTERRUPTED_NOTICE,
   isPreviewNotServing,
   previewTrouble,
   workHintOf,
@@ -30,23 +32,22 @@ const seg = {
   }),
 };
 
-describe("previewActive · 门禁解除（#45）", () => {
-  it("run 开始（乐观登记 running）即启动——不等收口纪元", () => {
-    expect(previewActive("running", null)).toBe(true);
+describe("previewActive · 门禁解除（#45；#222 投影口径）", () => {
+  it("四态投影非「从未生成」即启动（生成中/中断/已生成）", () => {
+    expect(previewActive("generating", undefined)).toBe(true);
+    // 中断也启动：阶段 0 收口后应用可能已在跑——有成果就该探得到
+    expect(previewActive("interrupted", undefined)).toBe(true);
+    expect(previewActive("generated", undefined)).toBe(true);
   });
 
-  it("收口/终态同样在机制内（有 URL 即上页面）", () => {
-    expect(previewActive("finished", null)).toBe(true);
-    expect(previewActive("error", null)).toBe(true);
-  });
-
-  it("未见 run 且未生成过 = 不启动（idle 引导占位）", () => {
-    expect(previewActive(undefined, null)).toBe(false);
+  it("从未生成（无投影/明确 never）= 不启动（idle 引导占位）", () => {
     expect(previewActive(undefined, undefined)).toBe(false);
+    expect(previewActive("never", undefined)).toBe(false);
   });
 
-  it("跨会话：REST 事实 generatedAt 单独即可启动", () => {
-    expect(previewActive(undefined, "2026-09-01T08:00:00Z")).toBe(true);
+  it("修正轨会话信号在场即启动（更新轨现状不动）", () => {
+    expect(previewActive("generated", "running")).toBe(true);
+    expect(previewActive(undefined, "finished")).toBe(true);
   });
 });
 
@@ -81,107 +82,114 @@ describe("workHintOf · 占位步骤提示信号（解说自述优先、动作�
   });
 });
 
-describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
-  it("idle：未见 run 未生成 = 引导占位", () => {
-    expect(systemPanelPhase({ coderStatus: undefined, generatedAt: null, parts: [] })).toEqual({
-      kind: "idle",
+describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，与 SSE 会话态无关）", () => {
+  /** 断言生成面输入（projection + parts，无会话信号——刷新/回访后的纯投影面）。 */
+  function phaseOf(generationState: GenerationState | undefined, extra: {
+    url?: string;
+    error?: unknown;
+    parts?: WorkPart[];
+  } = {}) {
+    return systemPanelPhase({
+      generationState,
+      url: extra.url,
+      error: extra.error,
+      parts: extra.parts ?? [],
+    });
+  }
+
+  it("从未生成：引导占位（idle）", () => {
+    expect(phaseOf("never")).toEqual({ kind: "idle" });
+    expect(phaseOf(undefined)).toEqual({ kind: "idle" });
+  });
+
+  // ---------- 第一档：无应用，生成中占位随工作消息部件推进 ----------
+
+  it("生成中且无应用：无信号落「正在初始化」", () => {
+    expect(phaseOf("generating")).toEqual({ kind: "hint", text: "正在初始化" });
+  });
+
+  it("生成中且无应用：解说自述推进占位文案", () => {
+    expect(phaseOf("generating", { parts: [seg.text("t1", "正在创建首页")] })).toEqual({
+      kind: "hint",
+      text: "正在创建首页",
     });
   });
 
-  // ---------- 第一档：无应用，占位随工作消息部件推进 ----------
-
-  it("running 且无应用：无信号落「正在初始化」", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "running",
-      generatedAt: null,
-      parts: [],
-    });
-    expect(phase).toEqual({ kind: "hint", text: "正在初始化" });
-  });
-
-  it("running 且无应用：解说自述推进占位文案", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "running",
-      generatedAt: null,
-      parts: [seg.text("t1", "正在创建首页")],
-    });
-    expect(phase).toEqual({ kind: "hint", text: "正在创建首页" });
-  });
-
-  it("running 且无应用（修正轮，系统曾在）：无信号落「正在更新系统」", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "running",
-      generatedAt: "2026-09-01T08:00:00Z",
-      parts: [],
-    });
-    expect(phase).toEqual({ kind: "hint", text: "正在更新系统" });
-  });
-
-  it("超限终态且从未生成：问题提示 + 重新发起", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "error",
-      generatedAt: null,
-      parts: [],
-    });
-    expect(phase).toEqual({ kind: "failed", text: "生成遇到了问题", recovery: "restart" });
-  });
-
-  it("超限终态且已生成（修正失败、应用探不到）：修正口径 + 重新修改入口，无重新发起", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "error",
-      generatedAt: "2026-09-01T08:00:00Z",
-      parts: [],
-    });
-    expect(phase).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
-  });
-
-  it("正常态无任何手动触发：run 中/收口后均不带恢复入口", () => {
-    // 正常流程全自动——恢复入口只在超限终态出现（#48）
-    expect(systemPanelPhase({ coderStatus: "running", generatedAt: null, parts: [] }))
-      .toEqual({ kind: "hint", text: "正在初始化" });
+  it("修正在途（已生成 + 会话 running）且无应用：落「正在更新系统」（更新轨现状不动）", () => {
     expect(
-      systemPanelPhase({ coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] }),
+      systemPanelPhase({ generationState: "generated", coderStatus: "running", parts: [] }),
     ).toEqual({ kind: "hint", text: "正在更新系统" });
+  });
+
+  it("idle 档点「继续生成」的乐观登记窗口（投影未刷成生成中 + running）：落「正在初始化」不说「更新」", () => {
     expect(
-      systemPanelPhase({
-        coderStatus: "finished",
-        generatedAt: "2026-09-01T08:00:00Z",
-        url: "http://localhost:42659",
-        parts: [],
-      }),
-    ).toEqual({ kind: "page", notice: undefined });
+      systemPanelPhase({ generationState: "never", coderStatus: "running", parts: [] }),
+    ).toEqual({ kind: "hint", text: "正在初始化" });
+    expect(systemPanelPhase({ coderStatus: "running", parts: [] })).toEqual({
+      kind: "hint",
+      text: "正在初始化",
+    });
+  });
+
+  // ---------- 生成中断（#222 单出口「继续生成」） ----------
+
+  it("生成中断（投影）：中断提示 + 继续生成入口——刷新/回访后档位仍正确", () => {
+    expect(phaseOf("interrupted")).toEqual({
+      kind: "failed",
+      text: INTERRUPTED_NOTICE,
+      recovery: "resume",
+    });
+    expect(INTERRUPTED_NOTICE).toBe("生成中断了，已完成的进度都保留");
+  });
+
+  it("会话内 run 失败先行呈现（投影重拉收敛前）：未生成口径给继续生成、已生成给重新修改", () => {
+    expect(
+      systemPanelPhase({ generationState: "generating", coderStatus: "error", parts: [] }),
+    ).toEqual({ kind: "failed", text: INTERRUPTED_NOTICE, recovery: "resume" });
+    expect(
+      systemPanelPhase({ generationState: "generated", coderStatus: "error", parts: [] }),
+    ).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
+  });
+
+  it("正常态无任何手动触发：生成中/已生成均不带恢复入口", () => {
+    expect(phaseOf("generating")).toEqual({ kind: "hint", text: "正在初始化" });
+    expect(phaseOf("generated", { url: "http://localhost:42659" })).toEqual({
+      kind: "page",
+      notice: undefined,
+    });
   });
 
   // ---------- 第二档：应用可访问（有 URL 即探活通过），页面 + 一套轻提示 ----------
 
-  it("页面 + running：统一「更新中」轻提示（生成长出与修正同一套，不两套并存）", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "running",
-      generatedAt: null,
-      url: "http://localhost:42659",
-      parts: [],
+  it("页面 + 生成中（投影）：统一「更新中」轻提示——刷新后无会话信号也如实呈现", () => {
+    expect(phaseOf("generating", { url: "http://localhost:42659" })).toEqual({
+      kind: "page",
+      notice: { failed: false, text: UPDATING_NOTICE },
     });
-    expect(phase).toEqual({ kind: "page", notice: { failed: false, text: UPDATING_NOTICE } });
-    // 合并后的唯一话术（旧修正专用文案不再另立一套）
-    expect(UPDATING_NOTICE).toBe("正在更新系统，完成后自动刷新");
-  });
-
-  it("页面 + 超限终态：失败轻提示；从未生成带重新发起、修正轮带重新修改入口", () => {
+    // 会话信号同款（修正在途）
     expect(
       systemPanelPhase({
-        coderStatus: "error",
-        generatedAt: null,
+        generationState: "generated",
+        coderStatus: "running",
         url: "http://localhost:42659",
         parts: [],
       }),
-    ).toEqual({
+    ).toEqual({ kind: "page", notice: { failed: false, text: UPDATING_NOTICE } });
+    expect(UPDATING_NOTICE).toBe("正在更新系统，完成后自动刷新");
+  });
+
+  it("页面 + 生成中断：细条带「继续生成」入口（部分切片已收口、应用在跑——页面保留）", () => {
+    expect(phaseOf("interrupted", { url: "http://localhost:42659" })).toEqual({
       kind: "page",
-      notice: { failed: true, text: "生成遇到了问题", recovery: "restart" },
+      notice: { failed: true, text: INTERRUPTED_NOTICE, recovery: "resume" },
     });
+  });
+
+  it("页面 + 修正失败：修正口径 + 重新修改入口（更新轨现状不动）", () => {
     expect(
       systemPanelPhase({
+        generationState: "generated",
         coderStatus: "error",
-        generatedAt: "2026-09-01T08:00:00Z",
         url: "http://localhost:42659",
         parts: [],
       }),
@@ -191,54 +199,39 @@ describe("systemPanelPhase · 空态两档 + 页面档（#45）", () => {
     });
   });
 
-  it("页面 + 无进行中 run：无轻提示", () => {
-    const phase = systemPanelPhase({
-      coderStatus: "finished",
-      generatedAt: "2026-09-01T08:00:00Z",
-      url: "http://localhost:42659",
-      parts: [],
+  it("页面 + 无进行中信号：无轻提示", () => {
+    expect(phaseOf("generated", { url: "http://localhost:42659" })).toEqual({
+      kind: "page",
+      notice: undefined,
     });
-    expect(phase).toEqual({ kind: "page", notice: undefined });
   });
 
   // ---------- 跨会话与接通 ----------
 
-  it("跨会话就绪：generatedAt + URL 直接显示系统现状（无占位过渡）", () => {
-    const phase = systemPanelPhase({
-      coderStatus: undefined,
-      generatedAt: "2026-09-01T08:00:00Z",
-      url: "http://localhost:42659",
-      parts: [],
-    });
-    expect(phase.kind).toBe("page");
+  it("跨会话就绪：已生成 + URL 直接显示系统现状（无占位过渡）", () => {
+    expect(phaseOf("generated", { url: "http://localhost:42659" }).kind).toBe("page");
   });
 
   it("已生成但 URL 未到：接通中（WSP_012 未就绪同接通中，非故障）", () => {
-    expect(
-      systemPanelPhase({
-        coderStatus: undefined,
-        generatedAt: "2026-09-01T08:00:00Z",
-        error: notServingError(),
-        parts: [],
-      }),
-    ).toEqual({ kind: "connecting", trouble: false });
-    expect(
-      systemPanelPhase({
-        coderStatus: undefined,
-        generatedAt: "2026-09-01T08:00:00Z",
-        parts: [],
-      }),
-    ).toEqual({ kind: "connecting", trouble: false });
+    expect(phaseOf("generated", { error: notServingError() })).toEqual({
+      kind: "connecting",
+      trouble: false,
+    });
+    expect(phaseOf("generated")).toEqual({ kind: "connecting", trouble: false });
   });
 
   it("已生成但预览真故障（非 WSP_012）：trouble 口径", () => {
-    const phase = systemPanelPhase({
-      coderStatus: undefined,
-      generatedAt: "2026-09-01T08:00:00Z",
-      error: new ApiError({ status: 500, code: 1002, message: "环境后端操作失败" }),
-      parts: [],
-    });
-    expect(phase).toEqual({ kind: "connecting", trouble: true });
+    expect(
+      phaseOf("generated", {
+        error: new ApiError({ status: 500, code: 1002, message: "环境后端操作失败" }),
+      }),
+    ).toEqual({ kind: "connecting", trouble: true });
+  });
+
+  it("会话内已收口而投影未刷新：接通中平滑过渡，不闪回引导占位", () => {
+    expect(
+      systemPanelPhase({ generationState: "never", coderStatus: "finished", parts: [] }),
+    ).toEqual({ kind: "connecting", trouble: false });
   });
 });
 
@@ -256,8 +249,7 @@ describe("isPreviewNotServing · 探活未就绪判定", () => {
     // 启动中归 connecting（系统启动中），不进 trouble 打不开口径
     expect(
       systemPanelPhase({
-        coderStatus: undefined,
-        generatedAt: "2026-09-01T08:00:00Z",
+        generationState: "generated",
         error: new ApiError({ status: 503, code: 1013, message: "系统启动中" }),
         parts: [],
       }),
@@ -330,15 +322,16 @@ describe("resolvePreviewAddress · 地址栏 goto 解析（#125）", () => {
 describe("用户可见文案遵循「生成」词条 Avoid（不出现开发/构建）", () => {
   it("平台自有占位与提示话术全部合规", () => {
     const cases: Parameters<typeof systemPanelPhase>[0][] = [
-      { coderStatus: undefined, generatedAt: null, parts: [] },
-      { coderStatus: "running", generatedAt: null, parts: [] },
-      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
-      { coderStatus: "error", generatedAt: null, parts: [] },
-      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", parts: [] },
-      { coderStatus: "running", generatedAt: null, url: "http://localhost:42659", parts: [] },
-      { coderStatus: "running", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
-      { coderStatus: "error", generatedAt: null, url: "http://x", parts: [] },
-      { coderStatus: "error", generatedAt: "2026-09-01T08:00:00Z", url: "http://x", parts: [] },
+      { generationState: undefined, parts: [] },
+      { generationState: "never", parts: [] },
+      { generationState: "generating", parts: [] },
+      { generationState: "generated", coderStatus: "running", parts: [] },
+      { generationState: "generating", coderStatus: "error", parts: [] },
+      { generationState: "generated", coderStatus: "error", parts: [] },
+      { generationState: "generating", url: "http://localhost:42659", parts: [] },
+      { generationState: "interrupted", parts: [] },
+      { generationState: "interrupted", url: "http://x", parts: [] },
+      { generationState: "generated", coderStatus: "error", url: "http://x", parts: [] },
     ];
     for (const input of cases) {
       const phase = systemPanelPhase(input);

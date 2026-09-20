@@ -383,7 +383,7 @@ class BackofficeProjectSeamTest {
         when(projectQueryAppService.detail(projectId)).thenReturn(new ProjectDetailResponse(
                 Long.toString(projectId), "seam 测试项目", ProjectType.WEBSITE, "官网", "9200",
                 ProjectStatus.IN_PROGRESS, ProjectStatus.IN_PROGRESS.getName(), false,
-                LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null));
+                LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null, null, null));
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
                 Instant.parse("2026-09-13T01:00:00Z")));

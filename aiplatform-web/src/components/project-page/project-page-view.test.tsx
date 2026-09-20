@@ -43,8 +43,8 @@ vi.mock("@/hooks/use-project-files", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-generate", () => ({
-  useGenerate: () => ({ isPending: false, mutate: vi.fn() }),
+vi.mock("@/hooks/use-resume-generation", () => ({
+  useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 // 系统范式（默认激活）内「重新修改」按钮的 mutation 口 + 预览地址读口
@@ -106,16 +106,23 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(html).not.toContain('data-tree-file'); // 文件范式未挂载（按需）
   });
 
-  it("PRD 已产出且未生成（#101 生成无门）：不再渲染「开始做系统」卡片，系统范式空态留引导占位", () => {
-    seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z", generatedAt: null });
+  it("PRD 已产出且未生成（#101 生成无门）：不再渲染「开始做系统」卡片，系统范式空态留引导占位 +「继续生成」出口（#222 idle 档）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: null,
+      generationState: "never",
+    });
 
     const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
 
     // 生成无门自动发起：主智能体产出 PRD 后平台自动派生成，正常流不再出现任何
-    // 「开始做系统」按钮/卡片；系统范式空态只留一句引导占位（生成自动发起即被取代）
+    // 「开始做系统」按钮/卡片；系统范式空态留一句引导占位（生成自动发起即被取代）
     expect(html).not.toContain("差不多清楚了，剩下的交给我");
     expect(html).not.toContain("开始做系统");
     expect(html).toContain("系统生成后，这里会出现可以操作的你的系统");
+    // #222 单出口：idle 档也挂「继续生成」（未起跑/存量无轨道的恢复口），无推倒重来
+    expect(html).toContain("继续生成");
+    expect(html).not.toContain("重新发起");
   });
 
   it("闲聊期（PRD 未产出）：不出现「开始做系统」入口（无事可做）", () => {

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { cn } from "@/lib/utils";
+import type { GenerationState } from "@/lib/projects/detail";
 import type { CoderRunStatus } from "@/lib/store/generation";
 
 import { PrdDoc } from "./prd-doc";
@@ -26,9 +27,9 @@ import { SystemPanel } from "./system-panel";
 /** 范式渲染上下文（装配层注入的项目事实与回调）。 */
 export type ParadigmCtx = {
   projectId: string;
-  /** 首次生成时点（REST 事实；null = 未生成过）。 */
-  generatedAt?: string | null;
-  /** 本会话编码 run 状态（undefined = 未见）。 */
+  /** 生成态四态投影（REST 事实；#222——系统档位与「继续生成」出口的推导输入）。 */
+  generationState?: GenerationState;
+  /** 本会话编码 run 状态（修正轨信号——更新中/修正失败；undefined = 未见）。 */
   coderStatus?: CoderRunStatus;
   /** 订单卡挂的单（未终结单优先；归档终态挂最近单，null = 无单 → 占位）。 */
   orderCardId?: string | null;
@@ -63,7 +64,7 @@ export const PARADIGMS: Paradigm[] = [
     render: (ctx) => (
       <SystemPanel
         projectId={ctx.projectId}
-        generatedAt={ctx.generatedAt}
+        generationState={ctx.generationState}
         coderStatus={ctx.coderStatus}
         onGenerated={ctx.onGenerated}
       />

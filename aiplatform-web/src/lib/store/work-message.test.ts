@@ -7,9 +7,9 @@ import {
   type WorkPart,
 } from "@/lib/store/work-message";
 
-/** 事件引用速写（信封 ts → at）。 */
+/** 事件引用速写。 */
 function ref(overrides: Partial<PartEventRef> & Pick<PartEventRef, "eventId">): PartEventRef {
-  return { runId: "r1", sessionId: "coder-p1", at: 0, ...overrides };
+  return { runId: "r1", sessionId: "coder-p1", ...overrides };
 }
 
 function work(projectId = "p1") {
@@ -48,7 +48,7 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "正在编写订单管理页面。" });
-    notePart("p1", ref({ eventId: "r1:3", at: 1000 }), {
+    notePart("p1", ref({ eventId: "r1:3" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "write_file",
@@ -72,9 +72,9 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
       toolName: "write_file",
     } as const;
 
-    notePart("p1", ref({ eventId: "r1:3", at: 1_000 }), { ...action, state: "started", label: "编写【代码文件】" });
-    notePart("p1", ref({ eventId: "r1:4", at: 1_500 }), { ...action, state: "running", label: "编写【订单管理】" });
-    notePart("p1", ref({ eventId: "r1:6", at: 5_300 }), { ...action, state: "completed", label: "编写【订单管理】" });
+    notePart("p1", ref({ eventId: "r1:3" }), { ...action, state: "started", label: "编写【代码文件】" });
+    notePart("p1", ref({ eventId: "r1:4" }), { ...action, state: "running", label: "编写【订单管理】" });
+    notePart("p1", ref({ eventId: "r1:6" }), { ...action, state: "completed", label: "编写【订单管理】" });
 
     const parts = work()?.parts ?? [];
     expect(parts).toHaveLength(1); // 原位更新不另起行
@@ -87,17 +87,17 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
   it("failed 终态：state 落 failed（动作层状态，与 run 终态无关）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2", at: 2_000 }), {
+    notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "action",
       toolCallId: "tc-9",
-      toolName: "command",
+      toolName: "execute",
       state: "started",
       label: "执行【命令】",
     });
-    notePart("p1", ref({ eventId: "r1:3", at: 9_000 }), {
+    notePart("p1", ref({ eventId: "r1:3" }), {
       kind: "action",
       toolCallId: "tc-9",
-      toolName: "command",
+      toolName: "execute",
       state: "failed",
       label: "执行【命令】",
     });
@@ -109,21 +109,21 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
   it("多个动作并行（不同 toolCallId）各自成行、各自更新", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2", at: 100 }), {
+    notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "write_file",
       state: "started",
       label: "编写【A】",
     });
-    notePart("p1", ref({ eventId: "r1:3", at: 200 }), {
+    notePart("p1", ref({ eventId: "r1:3" }), {
       kind: "action",
       toolCallId: "tc-2",
-      toolName: "command",
+      toolName: "execute",
       state: "started",
       label: "执行【B】",
     });
-    notePart("p1", ref({ eventId: "r1:4", at: 300 }), {
+    notePart("p1", ref({ eventId: "r1:4" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "write_file",
@@ -141,7 +141,7 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
 
 describe("work-message store · 锚定守卫（部件全事件流恒挂，工作消息只锚编码 run）", () => {
   it("无锚 + coder- 会话的部件：补建锚（重放缓冲淘汰 run-start 的刷新回访恢复）", () => {
-    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:9", at: 5_000, runId: "r9" }), {
+    useWorkMessageStore.getState().notePart("p1", ref({ eventId: "r1:9", runId: "r9" }), {
       kind: "text",
       text: "正在收尾",
     });
@@ -176,7 +176,7 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
     notePart("p1", ref({ eventId: "r2:2", runId: "r2" }), { kind: "text", text: "当前尝试解说" });
 
     // 上一尝试 r1 的残段（同 coder 会话、异 runId）迟到：不清当前锚
-    notePart("p1", ref({ eventId: "r1:9", runId: "r1", at: 99_999 }), { kind: "text", text: "残段" });
+    notePart("p1", ref({ eventId: "r1:9", runId: "r1" }), { kind: "text", text: "残段" });
 
     expect(work()?.runId).toBe("r2");
     expect(work()?.parts).toHaveLength(1);
@@ -188,7 +188,7 @@ describe("work-message store · 锚定守卫（部件全事件流恒挂，工作
     notePart("p1", ref({ eventId: "r1:2" }), { kind: "text", text: "上一轮解说" });
     freezeWork("p1", "r1");
 
-    notePart("p1", ref({ eventId: "r2:5", runId: "r2", at: 50_000 }), { kind: "text", text: "新一轮解说" });
+    notePart("p1", ref({ eventId: "r2:5", runId: "r2" }), { kind: "text", text: "新一轮解说" });
 
     expect(work()?.runId).toBe("r2");
     expect(work()?.frozen).toBe(false);
@@ -211,7 +211,7 @@ describe("work-message store · 重放幂等与定格", () => {
   it("freezeWork（run-finish / run-failed）定格：部件不再进；重放再定格幂等", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2", at: 100 }), {
+    notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "write_file",
@@ -220,7 +220,7 @@ describe("work-message store · 重放幂等与定格", () => {
     });
 
     freezeWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:3", at: 9_000 }), { kind: "text", text: "迟到部件" });
+    notePart("p1", ref({ eventId: "r1:3" }), { kind: "text", text: "迟到部件" });
     freezeWork("p1", "r1");
 
     expect(work()?.frozen).toBe(true);
@@ -237,65 +237,6 @@ describe("work-message store · 重放幂等与定格", () => {
   });
 });
 
-describe("work-message store · 确认卡（#83 权限确认：长在工作消息流）", () => {
-  function permissionPart() {
-    return work()?.parts.find(
-      (part): part is Extract<WorkPart, { kind: "permission" }> => part.kind === "permission",
-    );
-  }
-
-  it("permission-required 部件入消息（pending 态、engineRef/summary 随卡）；重放按事件 id 去重", () => {
-    const { startWork, notePart } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    const input = { kind: "permission", engineRef: "reply-1", summary: "rm -rf /workspace/data" } as const;
-
-    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), input);
-    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), input);
-
-    const card = permissionPart();
-    expect(work()?.parts).toHaveLength(1);
-    expect(card).toMatchObject({
-      id: "r1:2",
-      engineRef: "reply-1",
-      summary: "rm -rf /workspace/data",
-      state: "pending",
-      at: 1_000,
-    });
-  });
-
-  it("resolvePermission 落定（permission-resolved 事件与作答乐观更新双写口）：同值幂等、异值以事件为准", () => {
-    const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "permission",
-      engineRef: "reply-1",
-      summary: "清理数据",
-    });
-
-    resolvePermission("p1", "reply-1", "denied"); // 乐观：拒绝
-    expect(permissionPart()?.state).toBe("denied");
-    resolvePermission("p1", "reply-1", "denied"); // 事件双达（同值）幂等
-    expect(permissionPart()?.state).toBe("denied");
-    resolvePermission("p1", "reply-1", "pending"); // 作答失败回滚重开
-    expect(permissionPart()?.state).toBe("pending");
-  });
-
-  it("resolvePermission 未知 engineRef（重放缺口/异项目）忽略；无锚项目忽略", () => {
-    const { startWork, notePart, resolvePermission } = useWorkMessageStore.getState();
-    startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2" }), {
-      kind: "permission",
-      engineRef: "reply-1",
-      summary: "清理数据",
-    });
-
-    resolvePermission("p1", "reply-x", "approved");
-    resolvePermission("p9", "reply-1", "approved");
-
-    expect(permissionPart()?.state).toBe("pending");
-  });
-});
-
 describe("work-message store · 自检播报（#85：一场 run 一个自检部件，原位换装）", () => {
   function checkPart() {
     return work()?.parts.find(
@@ -307,10 +248,10 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
 
-    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
     expect(checkPart()).toEqual({ kind: "check", id: "r1:8", state: "checking" });
 
-    notePart("p1", ref({ eventId: "r1:9", at: 9_500 }), { kind: "check", state: "passed" });
+    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "passed" });
     expect(work()?.parts).toHaveLength(1);
     expect(checkPart()).toEqual({
       kind: "check",
@@ -322,12 +263,12 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
   it("静默重试口径：重复 checking 幂等（不闪换、部件引用不变）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
     const partsBefore = work()?.parts;
 
     // 首试核验未过（不出 ❌）→ 重试核验再发 checking——用户面仍是同一次检查
     //（事件 id 簿记照收 = 重放去重口径；部件面零变更 = 不触发部件重渲染）
-    notePart("p1", ref({ eventId: "r1:12", at: 20_000 }), { kind: "check", state: "checking" });
+    notePart("p1", ref({ eventId: "r1:12" }), { kind: "check", state: "checking" });
 
     expect(work()?.parts).toBe(partsBefore); // 部件引用不变
   });
@@ -335,9 +276,9 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
   it("末次核验未过：checking → failed（与 run-failed 同窗口，❌ 定格留驻）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:8", at: 8_000 }), { kind: "check", state: "checking" });
+    notePart("p1", ref({ eventId: "r1:8" }), { kind: "check", state: "checking" });
 
-    notePart("p1", ref({ eventId: "r1:9", at: 9_000 }), { kind: "check", state: "failed" });
+    notePart("p1", ref({ eventId: "r1:9" }), { kind: "check", state: "failed" });
     freezeWork("p1", "r1");
 
     expect(checkPart()).toMatchObject({ state: "failed" });
@@ -366,7 +307,7 @@ describe("work-message store · 定格收口（#117：原地定格留驻，收�
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "正在更新" });
-    notePart("p1", ref({ eventId: "r1:2", at: 1_000 }), {
+    notePart("p1", ref({ eventId: "r1:2" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "write_file",
@@ -430,7 +371,7 @@ describe("work-message store · 定格收口（#117：原地定格留驻，收�
     notePart("p1", ref({ eventId: "r1:3", source: "self-test" }), {
       kind: "action",
       toolCallId: "tc-1",
-      toolName: "command",
+      toolName: "execute",
       state: "completed",
       label: "运行命令",
     });

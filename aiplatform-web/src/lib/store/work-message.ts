@@ -33,9 +33,6 @@ export type WorkActionState = "started" | "running" | "completed" | "failed";
 /** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
 export type WorkCheckState = "checking" | "passed" | "failed";
 
-/** 确认部件生命周期（#83：permission-required → pending，permission-resolved / 作答 → 终态；#112 超时 → timedout）。 */
-export type WorkPermissionState = "pending" | "approved" | "denied" | "timedout";
-
 /**
  * 工作消息头部切片进度（run-start 扩载 #118）：`title` 为用户语言标题（生成轨道
  * = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」）；`index`/`total`
@@ -47,21 +44,9 @@ export type WorkSlice = {
   total?: number;
 };
 
-/** 工作消息部件（part-* 事件 + 权限确认事件的投影）。 */
+/** 工作消息部件（part-* 事件的投影）。 */
 export type WorkPart =
   | { kind: "text"; id: string; source?: string; text: string }
-  | {
-      kind: "permission";
-      /** React key（确认卡首见事件 id）。 */
-      id: string;
-      /** 作答锚（挂起事件 engineRef——权限作答通道的 REST 寻址腿）。 */
-      engineRef: string;
-      /** 待确认操作摘要（首工具命令文本，服务端截断保短）。 */
-      summary: string;
-      state: WorkPermissionState;
-      /** 挂起时间戳（ms；事件信封 ts）。 */
-      at: number;
-    }
   | {
       kind: "action";
       /** React key（动作行首见事件 id——状态更新不改键，原位换装）。 */
@@ -88,15 +73,13 @@ export type WorkPart =
       state: WorkCheckState;
     };
 
-/** 部件事件的最小关联（信封公共字段 + 事件 id + 信封 ts）。 */
+/** 部件事件的最小关联（信封公共字段 + 事件 id）。 */
 export type PartEventRef = {
   runId: string;
   /** 会话标识（补建锚的 coder- 前缀判定；run-start 后的事件恒携带）。 */
   sessionId?: string;
   /** SSE 完整事件 id（重放去重锚 + 部件 React key）。 */
   eventId: string;
-  /** 信封 ts（ms）——确认卡挂起锚（过程耗时已下线，#115）。 */
-  at: number;
   /** 来源归属（#95 委派位：子智能体名；执行体缺省）。 */
   source?: string;
 };
@@ -104,7 +87,6 @@ export type PartEventRef = {
 /** 桥侧部件输入（store 负责落 id / 原位更新）。 */
 export type WorkPartInput =
   | { kind: "text"; text: string }
-  | { kind: "permission"; engineRef: string; summary: string }
   | { kind: "check"; state: WorkCheckState }
   | {
       kind: "action";
@@ -136,12 +118,6 @@ export type WorkMessageState = {
   startWork: (projectId: string, runId: string, slice?: WorkSlice) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
-  /**
-   * 确认卡状态落定（#83）：permission-resolved 事件与作答乐观更新双写口——同值
-   * 幂等（事件与乐观双到达不闪换；回滚传 "pending"）。无该 engineRef 的确认部件
-   * 时忽略（重放缺口 / 异项目）。
-   */
-  resolvePermission: (projectId: string, engineRef: string, state: WorkPermissionState) => void;
   /**
    * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。工作消息
    * 原地定格留驻（#117）：部件保留、只读、不再生长，成功收口（收尾卡归 chat
@@ -218,17 +194,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
     }
     return { ...work, parts: capParts(parts) };
   }
-  const part: WorkPart =
-    input.kind === "text"
-      ? { kind: "text", id: ref.eventId, source: ref.source, text: input.text }
-      : {
-          kind: "permission",
-          id: ref.eventId,
-          engineRef: input.engineRef,
-          summary: input.summary,
-          state: "pending",
-          at: ref.at,
-        };
+  const part: WorkPart = { kind: "text", id: ref.eventId, source: ref.source, text: input.text };
   return { ...work, parts: capParts([...work.parts, part]) };
 }
 
@@ -275,20 +241,6 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
       if (work.frozen) return work; // 定格不进部件（收口后无增量）
       if (work.seenEventIds.includes(ref.eventId)) return work; // 重放去重
       return applyPart({ ...work, seenEventIds: appendCapped(work.seenEventIds, ref.eventId) }, ref, input);
-    }),
-
-  resolvePermission: (projectId, engineRef, state) =>
-    updateWork(set, projectId, (work) => {
-      if (work === undefined) return work;
-      const target = work.parts.find(
-        (part): part is Extract<WorkPart, { kind: "permission" }> =>
-          part.kind === "permission" && part.engineRef === engineRef,
-      );
-      if (!target || target.state === state) return work;
-      const parts = work.parts.map((part) =>
-        part === target ? { ...target, state } : part,
-      );
-      return { ...work, parts };
     }),
 
   freezeWork: (projectId, runId) =>

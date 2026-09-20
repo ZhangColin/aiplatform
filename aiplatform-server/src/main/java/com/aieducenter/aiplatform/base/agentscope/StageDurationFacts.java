@@ -27,14 +27,11 @@ import io.agentscope.core.event.ToolResultEndEvent;
  * <p><b>口径</b>：① 只计配对闭合区间（模型调用按 replyId、工具执行按
  * toolCallId）——流中段崩断的未闭合区间丢弃（尝试失败账由 run 尝试环的尝试墙钟
  * 承载）；② 工具执行窗 = callEnd（参数落定）→ resultEnd（结果落定，含失败态——
- * 失败的执行照样耗时），参数在途的模型生成时间归 LLM 桶；③ command 工具不进
- * toolsMs 平铺——命令文本（参数增量累积解析）按命令归组进 commandMs；④ 带
- * source 的委派事件（子智能体转发进父流）不进执行体桶，只记委派窗（首末 source
- * 事件跨距——窗内细节即子智能体账，归属哪个桶的判定归收口装配侧）。</p>
- *
- * <p><b>已知洞</b>：权限挂起的工具调用跨流段（挂起段 callEnd、续跑段
- * resultEnd）若续跑不重放调用边界则配对不上——破坏性命令确认是例外路径，洞承认
- * （时间落「未归因差值」）。</p>
+ * 失败的执行照样耗时），参数在途的模型生成时间归 LLM 桶；③ 命令工具（内核
+ * shell）不进 toolsMs 平铺——命令文本（参数增量累积解析）按命令归组进
+ * commandMs；④ 带 source 的委派事件（子智能体转发进父流）不进执行体桶，只记
+ * 委派窗（首末 source 事件跨距——窗内细节即子智能体账，归属哪个桶的判定归收口
+ * 装配侧）。</p>
  */
 final class StageDurationFacts {
 
@@ -52,8 +49,8 @@ final class StageDurationFacts {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 命令工具名（与 {@link ToolActionLines} 播报表的命令面同值）。 */
-    private static final String COMMAND_TOOL = "command";
+    /** 命令工具名（与 {@link ToolActionLines} 播报表的命令面同值：内核 shell 注册名）。 */
+    private static final String COMMAND_TOOL = "execute";
 
     /**
      * 归组形态（宁粗勿细的首版——依赖安装 / dev server / 测试三族的常见形态命中，

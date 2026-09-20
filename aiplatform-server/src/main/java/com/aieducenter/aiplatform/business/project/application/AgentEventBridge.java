@@ -93,22 +93,6 @@ public class AgentEventBridge {
     }
 
     /**
-     * permission-resolved 发射（#83 权限确认落定）：作答被受理（批准或拒绝）即
-     * 发射——确认卡转已批/已拒终态的呈现源（事件族重放面：重连/刷新后确认卡
-     * 不回退成待答）。续跑结果另行经 run 过程事件到达（批准的动作卡完成 / 拒绝
-     * 的动作卡失败 + 后续模型行为）。
-     */
-    public void emitPermissionResolved(Long projectId, Long ownerAccountId, String runId,
-            String engineRef, boolean approved) {
-        eventsAppService.publishAgentEvent(AgentEventTypes.PERMISSION_RESOLVED, Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId),
-                EventsAppService.RUN_FIELD, runId,
-                AgentEventTypes.WAIT_ENGINE_REF_FIELD, engineRef,
-                AgentEventTypes.PERMISSION_APPROVED_FIELD, approved));
-    }
-
-    /**
      * acceptance-start 发射（#87 受理动作卡）：受理轮（迭代期意见轮）开场的受理
      * 事实——意见已接住、主智能体正在受理（追问或改 PRD 的过程呈现位，衔接收口
      * 自动派的更新 run 工作消息）。纯呈现事件：受理落定不出新事件（该轮

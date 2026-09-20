@@ -48,10 +48,9 @@ type QuestionProjection = {
 };
 
 /**
- * question-raised → 问答卡（#83 起纯 QUESTION——权限确认已拆 permission-required，
- * 不再按 kind 分岔）：data.questions[0] 可解析才成卡（形状残缺 → null，对话区
- * 不呈现交互卡）。选项取 label；无选项纯开放题照成卡（custom 恒 true，自由输入
- * 作答）。
+ * question-raised → 问答卡（ask_user 唯一挂起源）：data.questions[0] 可解析才成卡
+ * （形状残缺 → null，对话区不呈现交互卡）。选项取 label；无选项纯开放题照成卡
+ * （custom 恒 true，自由输入作答）。
  */
 export function parseQuestion(
   eventId: string,

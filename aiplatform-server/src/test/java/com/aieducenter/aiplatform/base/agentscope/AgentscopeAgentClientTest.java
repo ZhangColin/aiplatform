@@ -153,7 +153,7 @@ class AgentscopeAgentClientTest {
         givenStream(
                 new ModelCallStartEvent("r-1"),
                 new TextBlockDeltaEvent("r-1", "b-1", "访谈自述。"),
-                new ToolCallEndEvent("r-1", "tc-1", "command"));
+                new ToolCallEndEvent("r-1", "tc-1", "execute"));
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
@@ -358,9 +358,9 @@ class AgentscopeAgentClientTest {
     @Test
     void given_tool_error_result_when_converse_then_part_action_failed_state() {
         givenStream(
-                new ToolCallStartEvent("reply-1", "tc-1", "command"),
-                new ToolCallEndEvent("reply-1", "tc-1", "command"),
-                new ToolResultEndEvent("reply-1", "tc-1", "command", ToolResultState.ERROR));
+                new ToolCallStartEvent("reply-1", "tc-1", "execute"),
+                new ToolCallEndEvent("reply-1", "tc-1", "execute"),
+                new ToolResultEndEvent("reply-1", "tc-1", "execute", ToolResultState.ERROR));
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
@@ -413,7 +413,7 @@ class AgentscopeAgentClientTest {
                 new TextBlockDeltaEvent("reply-1", "b-1", "执行体自述。"),
                 new TextBlockDeltaEvent("reply-1", "b-2", "自测通过。")
                         .withSource("platform-agent/self-test"),
-                new ToolCallEndEvent("reply-1", "tc-1", "command")
+                new ToolCallEndEvent("reply-1", "tc-1", "execute")
                         .withSource("platform-agent/self-test"));
 
         List<AgentEvent> frames = new ArrayList<>();
@@ -447,10 +447,10 @@ class AgentscopeAgentClientTest {
         givenStream(
                 new ModelCallStartEvent("evt-1", ts(1_000), "reply-1"),
                 new ModelCallEndEvent("evt-2", ts(1_300), "reply-1", null),
-                new ToolCallDeltaEvent("evt-3", ts(1_300), "reply-1", "tc-1", "command",
+                new ToolCallDeltaEvent("evt-3", ts(1_300), "reply-1", "tc-1", "execute",
                         "{\"command\":\"npm install\"}"),
-                new ToolCallEndEvent("evt-4", ts(1_310), "reply-1", "tc-1", "command"),
-                new ToolResultEndEvent("evt-5", ts(2_000), "reply-1", "tc-1", "command",
+                new ToolCallEndEvent("evt-4", ts(1_310), "reply-1", "tc-1", "execute"),
+                new ToolResultEndEvent("evt-5", ts(2_000), "reply-1", "tc-1", "execute",
                         ToolResultState.SUCCESS),
                 new ToolCallEndEvent("evt-6", ts(2_000), "reply-1", "tc-2", "write_file"),
                 new ToolResultEndEvent("evt-7", ts(2_050), "reply-1", "tc-2", "write_file",
@@ -572,39 +572,6 @@ class AgentscopeAgentClientTest {
     // ---------- 挂起语义 / resume ----------
 
     @Test
-    void given_non_ask_user_confirm_event_when_converse_then_permission_required_and_no_run_finish() {
-        givenStream(
-                new TextBlockDeltaEvent("r-1", "b-1", "需要确认一个操作："),
-                new RequireUserConfirmEvent("reply-9", List.of(
-                        new ToolUseBlock("tc-1", "command",
-                                Map.of("command", "rm -rf /workspace/data")))));
-
-        List<AgentEvent> frames = new ArrayList<>();
-        var reply = client.converse(command(null, null), frames::add);
-
-        // #83 事件拆分：非提问挂起 = permission-required（确认卡呈现源）；挂起 = 软终点
-        // ——解说尾段部件先出（确认卡前不留解说尾巴），不发 run-finish，挂起面随返回值上浮
-        assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
-                AgentEventTypes.RUN_START,
-                "text", AgentEventTypes.PART_TEXT, AgentEventTypes.PERMISSION_REQUIRED);
-        AgentEvent permission = frames.get(3);
-        assertThat(permission.payload()).containsEntry(AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9");
-        assertThat(permission.payload()).containsEntry(
-                AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data");
-        // data = 待确认工具最小面（恢复入参由业务编排从项目侧事实重建，不随事件携带）
-        @SuppressWarnings("unchecked")
-        Map<String, Object> data = (Map<String, Object>) permission.payload()
-                .get(AgentEventTypes.WAIT_DATA_FIELD);
-        assertThat(data).containsOnlyKeys("toolCalls");
-        assertThat(reply.suspension()).isNotNull();
-        assertThat(reply.suspension().engineRef()).isEqualTo("reply-9");
-        assertThat(reply.suspension().question()).isFalse();
-        assertThat(reply.suspension().toolCalls()).isEqualTo(List.of(Map.of(
-                "id", "tc-1", "name", "command",
-                "input", Map.of("command", "rm -rf /workspace/data"))));
-    }
-
-    @Test
     void given_ask_user_confirm_event_when_converse_then_question_raised_with_question_suspension() {
         givenStream(
                 new RequireUserConfirmEvent("reply-8", List.of(
@@ -613,10 +580,9 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         var reply = client.converse(command(null, null), frames::add);
 
-        // 提问挂起 = question-raised（问答作答通道），挂起面 question=true
+        // 提问挂起（ask_user，唯一挂起源）= question-raised（问答作答通道）
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.QUESTION_RAISED);
-        assertThat(reply.suspension().question()).isTrue();
         assertThat(reply.suspension().engineRef()).isEqualTo("reply-8");
     }
 
@@ -691,30 +657,6 @@ class AgentscopeAgentClientTest {
         assertThat(result.getToolCall().getMetadata())
                 .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "甲号方案");
         assertThat(result.getToolCall().getState()).isEqualTo(io.agentscope.core.message.ToolCallState.ASKING);
-    }
-
-    @Test
-    void given_confirmed_tool_call_shape_when_rebuild_then_approved_flag_and_untouched_input() {
-        // 权限作答复跑批复重建（#83）：批准位进 ConfirmResult（拒绝 = false，引擎写
-        // DENIED 工具结果回模型）；input 原样、无答复 metadata（批准/拒绝无文本面）
-        ConfirmResult approved = AgentscopeAgentClient.confirmedToolCall(
-                Map.of("id", "tc-9", "name", "command",
-                        "input", Map.of("command", "rm -rf /workspace/data")),
-                true);
-        assertThat(approved.isConfirmed()).isTrue();
-        assertThat(approved.getToolCall().getName()).isEqualTo("command");
-        assertThat(approved.getToolCall().getInput())
-                .containsEntry("command", "rm -rf /workspace/data");
-        assertThat(approved.getToolCall().getMetadata()).isEmpty();
-        assertThat(approved.getToolCall().getContent()).contains("rm -rf");
-        assertThat(approved.getToolCall().getState())
-                .isEqualTo(io.agentscope.core.message.ToolCallState.ASKING);
-
-        ConfirmResult denied = AgentscopeAgentClient.confirmedToolCall(
-                Map.of("id", "tc-9", "name", "command",
-                        "input", Map.of("command", "rm -rf /workspace/data")),
-                false);
-        assertThat(denied.isConfirmed()).isFalse();
     }
 
     @Test

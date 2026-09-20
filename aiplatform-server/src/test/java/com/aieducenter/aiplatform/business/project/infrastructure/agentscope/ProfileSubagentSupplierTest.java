@@ -70,7 +70,7 @@ class ProfileSubagentSupplierTest {
 
         // 只读交付代码 + 跑测试命令 + 报告写隔离根；排除改交付代码与执行体收口工具
         assertThat(declaration.getTools())
-                .contains("read_file", "write_file", "command")
+                .contains("read_file", "write_file", "execute")
                 .doesNotContain("edit_file", "finish_edit");
     }
 

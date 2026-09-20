@@ -185,10 +185,9 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 智能体挂起提问（#83 起纯 QUESTION——权限确认已拆 permission-required）：答复
-       * 续跑归业务编排（问答作答通道，需求环）。`engineRef` = 引擎侧请求 id（续跑
-       * 批复的锚）；`data` = 引擎载荷原样（含前端问答卡投影 `data.questions`），
-       * 问答卡切片消费。
+       * 智能体挂起提问（ask_user，唯一挂起源）：答复续跑归业务编排（问答作答通道，
+       * 需求环）。`engineRef` = 引擎侧请求 id（续跑批复的锚）；`data` = 引擎载荷
+       * 原样（含前端问答卡投影 `data.questions`），问答卡切片消费。
        */
       type: "question-raised";
       payload: AgentPayload & {
@@ -199,46 +198,12 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 权限确认挂起（#83 事件拆分，词根 = 引擎权限确认原语的非提问面）：run 执行中
-       * 需用户批准的工具操作（如危险命令）→ 工作消息流内确认卡（批准/拒绝两个
-       * 动作）。作答走权限作答通道（与问答作答分家）。`summary` = 首工具命令文本
-       * （截断）；`data.toolCalls` = 待确认工具最小面（确认卡呈现待批准操作的依据）。
-       */
-      type: "permission-required";
-      payload: AgentPayload & {
-        summary: string;
-        engineRef?: string;
-        data?: unknown;
-      };
-    }
-  | {
-      /**
-       * 权限确认落定（#83）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒
-       * 终态（重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行经 run 过程
-       * 事件到达（批准的动作卡完成 / 拒绝的动作卡失败 + 后续模型行为）。
-       */
-      type: "permission-resolved";
-      payload: AgentPayload & { engineRef: string; approved: boolean };
-    }
-  | {
-      /**
-       * 权限确认超时落定（#112）：等作答越 10 分钟上限即发射——确认卡转「已超时」
-       * 终态（不可作答，按钮退场），随后轨道直接 run-failed 收口（不复用静默重试）。
-       * 与 permission-resolved 同族不同语义：本事件非作答（无批准位），超时即拒绝
-       * ——破坏性命令永不默认放行。
-       */
-      type: "permission-timed-out";
-      payload: AgentPayload & { engineRef: string };
-    }
-  | {
-      /**
        * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射（修正轨道与
        * 终态账同事实点——排队合并续派的中途超限不是终态，不发）；`runId` = 该场
        * run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚、不新发
        * run-start，中间尝试的内部 runId 不出用户面）。恢复出口（重新发起 /
        * 重新修改）只认本事件——run 失败为唯一失败终态，重试全程静默（中间错误
-       * 不出用户面）。权限确认超时（#112）同为失败终态——如实原因经
-       * `permission-timed-out`（确认卡「已超时」）表达。
+       * 不出用户面）。
        */
       type: "run-failed";
       payload: AgentPayload;
@@ -303,9 +268,6 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "error",
   "run-finish",
   "question-raised",
-  "permission-required",
-  "permission-resolved",
-  "permission-timed-out",
   "run-failed",
   "guide-reply",
   "acceptance-start",

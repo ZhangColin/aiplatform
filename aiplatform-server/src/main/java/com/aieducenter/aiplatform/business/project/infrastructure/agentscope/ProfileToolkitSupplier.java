@@ -25,9 +25,9 @@ import io.agentscope.core.tool.Toolkit;
  * web_search，答询查证与自主调研用），
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
  * PRD 写入走 savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
- * （更新收口结束工具——「要不要动系统」的判定面，其余编码工具由 harness 内核
- * 自带）+ command（#83 需确认的命令工具——替位内核 shell，破坏性命令挂起确认
- * 卡）；其余配置 / 本地兜底工作区 / 无配置语境 = 空集（模型不可见）。
+ * （更新收口结束工具——「要不要动系统」的判定面；其余编码工具——含内核 shell——
+ * 由 harness 内核自带，#219 透明面化后破坏性命令直通不确认）；其余配置 / 本地兜底
+ * 工作区 / 无配置语境 = 空集（模型不可见）。
  */
 @Component
 public class ProfileToolkitSupplier implements AgentToolkitSupplier {
@@ -76,9 +76,6 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
             toolkit.registerAgentTool(new FinishEditTool(dev.workspaceId(), finishFacts));
-            // #83 权限确认触发面：破坏性命令经平台侧 command 工具自检 ASK（内核 shell
-            // 已被工厂对本工作区关闭——非 ToolBase，引擎拦不住也进不了播报表）
-            toolkit.registerAgentTool(new ConfirmingShellTool(dev.containerName()));
         }
         return toolkit;
     }

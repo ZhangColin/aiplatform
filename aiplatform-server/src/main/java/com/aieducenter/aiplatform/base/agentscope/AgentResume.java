@@ -5,7 +5,7 @@ import java.util.List;
 import io.agentscope.core.event.ConfirmResult;
 
 /**
- * 挂起续跑请求（问答答复后的恢复）：以 ConfirmResult（用户答复/批准/拒绝）经同一
+ * 挂起续跑请求（问答答复后的恢复）：以 ConfirmResult（用户答复）经同一
  * (userId, sessionId) 从 AgentStateStore 恢复上下文续跑。恢复入参均可由业务编排从
  * 项目侧事实重建（配置/owner/工作区），待确认工具清单来自挂起事件载荷
  * （question-raised 的 data.toolCalls）。

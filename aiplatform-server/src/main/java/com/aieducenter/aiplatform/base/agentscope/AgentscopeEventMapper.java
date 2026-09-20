@@ -35,7 +35,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>ToolCallStart / ToolCallEnd</td><td>{@code tool}</td><td>toolCallId / toolName / phase</td></tr>
  *   <tr><td>ModelCallStart / ModelCallEnd</td><td>{@code step-start} / {@code step-finish}</td><td>replyId</td></tr>
  *   <tr><td>ExceedMaxIters</td><td>（结煞语）</td><td>{@link #finishToken}</td></tr>
- *   <tr><td>RequireUserConfirm</td><td>{@code question-raised} / {@code permission-required}</td><td>{@link #suspension}（挂起事件分诊，作答续跑归业务编排）</td></tr>
+ *   <tr><td>RequireUserConfirm</td><td>{@code question-raised}</td><td>{@link #suspension}（挂起事件，作答续跑归业务编排）</td></tr>
  * </table>
  *
  * <p>HITL 挂起（{@code RequireUserConfirmEvent}）不是过程事件也不是终态：
@@ -58,8 +58,8 @@ final class AgentscopeEventMapper {
 
     /**
      * 提问类工具名（业务侧 AskUserTool 的注册名，见
-     * {@code AgentscopeAgentClient.ASK_USER_TOOL_NAME}）：其确认挂起按 QUESTION
-     * 载荷形状呈现（向用户提问）。
+     * {@code AgentscopeAgentClient.ASK_USER_TOOL_NAME}）：ask_user 提问是唯一挂起
+     * 源——挂起事件的载荷投影按其入参形状呈现（向用户提问）。
      */
     private static final String ASK_USER_TOOL = AgentscopeAgentClient.ASK_USER_TOOL_NAME;
 
@@ -119,24 +119,10 @@ final class AgentscopeEventMapper {
     }
 
     /**
-     * 挂起事件分诊（#83 事件拆分）：待确认工具含提问类（ask_user，向用户提问）→
-     * {@code question-raised}（问答卡，问答作答通道）；其余（工具操作确认，如危险
-     * 命令）→ {@code permission-required}（确认卡，权限作答通道）——两族事件与
-     * 作答通道分家，互不串扰。
-     */
-    AgentEvent suspension(RequireUserConfirmEvent event) {
-        return hasQuestion(event) ? questionRaised(event) : permissionRequired(event);
-    }
-
-    private static boolean hasQuestion(RequireUserConfirmEvent event) {
-        return event.getToolCalls().stream()
-                .anyMatch(tc -> ASK_USER_TOOL.equals(tc.getName()));
-    }
-
-    /**
-     * 提问挂起事件（纯 QUESTION——权限面已拆 {@link #permissionRequired}）：
-     * payload 按 {@link AgentEventTypes} WAIT_* 契约。data = toolCalls 待确认清单
-     * （答复续跑重建 ConfirmResult 所需的最小面）+ questions 投影。
+     * 挂起事件（ask_user 提问，唯一挂起源）→ {@code question-raised}（问答卡，
+     * 问答作答通道）：payload 按 {@link AgentEventTypes} WAIT_* 契约。data =
+     * toolCalls 待确认清单（答复续跑重建 ConfirmResult 所需的最小面）+ questions
+     * 投影。
      *
      * <p>questions 投影（header/question/multiple/custom/options[{label}]，前端问答卡
      * 契约——multiple 恒 false / custom 恒 true：ask_user 一次一题开放可自由输入；
@@ -144,7 +130,7 @@ final class AgentscopeEventMapper {
      * （截断保短）。恢复入参（模型档位/会话寻址/计量）由业务编排从项目侧事实重建，
      * 不随事件携带。</p>
      */
-    private AgentEvent questionRaised(RequireUserConfirmEvent event) {
+    AgentEvent suspension(RequireUserConfirmEvent event) {
         List<ToolUseBlock> toolCalls = event.getToolCalls();
         List<ToolUseBlock> questions = toolCalls.stream()
                 .filter(tc -> ASK_USER_TOOL.equals(tc.getName())).toList();
@@ -156,26 +142,6 @@ final class AgentscopeEventMapper {
                 AgentEventTypes.SESSION_FIELD, sessionId,
                 AgentEventTypes.ENGINE_FIELD, engine,
                 AgentEventTypes.WAIT_SUMMARY_FIELD, summaryOfQuestion(questions.get(0)),
-                AgentEventTypes.WAIT_ENGINE_REF_FIELD, nvl(event.getReplyId()),
-                AgentEventTypes.WAIT_DATA_FIELD, data));
-    }
-
-    /**
-     * 权限确认挂起事件（#83 拆分独立事件，词根 = 引擎权限确认原语的待确认工具面）：
-     * run 执行中需用户批准的工具操作（如危险命令）→ 对话区确认卡（长在工作消息流）。
-     * data = toolCalls 待确认清单（批准/拒绝续跑重建 ConfirmResult 的最小面，输入
-     * 原样——确认卡呈现待批准操作的依据）。摘要口径 = 首工具的命令文本（截断保短，
-     * 非命令工具回落工具名）。恢复入参由业务编排从项目侧事实重建，不随事件携带。
-     */
-    private AgentEvent permissionRequired(RequireUserConfirmEvent event) {
-        List<ToolUseBlock> toolCalls = event.getToolCalls();
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("toolCalls", toolCallPayloads(toolCalls));
-        return new AgentEvent(AgentEventTypes.PERMISSION_REQUIRED, Map.of(
-                AgentEventTypes.RUN_FIELD, runId,
-                AgentEventTypes.SESSION_FIELD, sessionId,
-                AgentEventTypes.ENGINE_FIELD, engine,
-                AgentEventTypes.WAIT_SUMMARY_FIELD, summaryOfOperation(toolCalls),
                 AgentEventTypes.WAIT_ENGINE_REF_FIELD, nvl(event.getReplyId()),
                 AgentEventTypes.WAIT_DATA_FIELD, data));
     }
@@ -236,19 +202,6 @@ final class AgentscopeEventMapper {
                     return payload;
                 })
                 .toList();
-    }
-
-    /** 挂起中性短文本：首工具的命令文本（截断保短，确认卡摘要行）；非命令工具回落工具名。 */
-    private static String summaryOfOperation(List<ToolUseBlock> toolCalls) {
-        if (toolCalls.isEmpty()) {
-            return "";
-        }
-        ToolUseBlock first = toolCalls.get(0);
-        if (first.getInput() instanceof Map<?, ?> input
-                && input.get("command") instanceof String command && !command.isBlank()) {
-            return command.length() > 100 ? command.substring(0, 100) : command;
-        }
-        return nvl(first.getName());
     }
 
     // ---------- run 生命周期事件（平台封闭集合） ----------

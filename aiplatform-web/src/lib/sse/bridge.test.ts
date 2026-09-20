@@ -284,28 +284,12 @@ describe("bridge · 智能体事件 → chat store（对话面，#19）", () => 
     });
   });
 
-  it("PERMISSION 挂起不进对话（#83 起拆 permission-required 走工作消息确认卡）；非对话 run 的 text 不进对话", () => {
-    dispatchAgentEvent(agentQc,
-      agentEvent(
-        "permission-required",
-        { projectId: "p1", runId: "run1", sessionId: "coder-p1", summary: "rm -rf data", engineRef: "reply-1", data: { toolCalls: [{ id: "tc-1", name: "command", input: { command: "rm -rf data" } }] } },
-        "run1:3",
-      ),
-    );
+  it("非对话 run 的 text 不进对话（编码 run 解说归工作消息部件）", () => {
     dispatchAgentEvent(agentQc,
       agentEvent("text", { projectId: "p1", runId: "run1", sessionId: "coder-p1", data: { delta: "写代码" } }, "run1:4"),
     );
 
     expect(useChatStore.getState().chats["p1"]).toBeUndefined();
-    // 权限挂起落工作消息确认卡（待答，engineRef 随卡作答）
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.parts).toHaveLength(1);
-    expect(work?.parts[0]).toMatchObject({
-      kind: "permission",
-      engineRef: "reply-1",
-      summary: "rm -rf data",
-      state: "pending",
-    });
   });
 
   it("error / run-finish（对话 run）→ 收轮 + 中断提示", () => {
@@ -697,7 +681,7 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     ] as const) {
       dispatchAgentEvent(agentQc, agentEvent(
         "part-action",
-        { ...base, toolCallId: "tc-9", toolName: "command", state, label: "执行【安装依赖】" },
+        { ...base, toolCallId: "tc-9", toolName: "execute", state, label: "执行【安装依赖】" },
         id,
         at(sec),
       ));
@@ -711,95 +695,6 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       state: "failed",
       label: "执行【安装依赖】",
     });
-  });
-
-  it("permission-required → 确认卡部件（pending）→ permission-resolved 落定终态（镜面服务端 #83 拆分）", () => {
-    const t0 = "2026-09-05T06:00:00.000Z";
-    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
-    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
-
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...base, prompt: "做系统", model: "m", agent: "executor" },
-      "run1:1",
-      at(0),
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-required",
-      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
-        data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
-      "run1:5",
-      at(5),
-    ));
-
-    const work = useWorkMessageStore.getState().works["p1"];
-    expect(work?.parts).toEqual([
-      {
-        kind: "permission",
-        id: "run1:5",
-        engineRef: "reply-9",
-        summary: "rm -rf /workspace/data",
-        state: "pending",
-        at: Date.parse(at(5)),
-      },
-    ]);
-
-    // 作答落定（批准）：确认卡转已批终态 + run 回 running（续跑中；终态仍归 run-finish/failed）
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-resolved",
-      { projectId: "p1", runId: "run1", engineRef: "reply-9", approved: true },
-      "run1:9",
-      at(12),
-    ));
-    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
-      .toMatchObject({ kind: "permission", state: "approved" });
-
-    // 重放（断线重连先收缓冲）：required+resolved 双达确认卡不回退成待答（事件 id 去重 + 同值幂等）
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-required",
-      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
-        data: { toolCalls: [{ id: "tc-9", name: "command", input: {} }] } },
-      "run1:5",
-      at(5),
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-resolved",
-      { projectId: "p1", runId: "run1", engineRef: "reply-9", approved: true },
-      "run1:9",
-      at(12),
-    ));
-    expect(useWorkMessageStore.getState().works["p1"]?.parts).toHaveLength(1);
-    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
-      .toMatchObject({ kind: "permission", state: "approved" });
-  });
-
-  it("permission-timed-out → 确认卡转「已超时」定格（#112 超时默认拒绝，不可作答）", () => {
-    const t0 = "2026-09-05T06:00:00.000Z";
-    const at = (sec: number) => new Date(Date.parse(t0) + sec * 1000).toISOString();
-    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
-
-    dispatchAgentEvent(agentQc, agentEvent(
-      "run-start",
-      { ...base, prompt: "做系统", model: "m", agent: "executor" },
-      "run1:1",
-      at(0),
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-required",
-      { ...base, summary: "rm -rf /workspace/data", engineRef: "reply-9",
-        data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
-      "run1:5",
-      at(5),
-    ));
-    dispatchAgentEvent(agentQc, agentEvent(
-      "permission-timed-out",
-      { projectId: "p1", runId: "run1", engineRef: "reply-9" },
-      "run1:9",
-      at(12),
-    ));
-
-    expect(useWorkMessageStore.getState().works["p1"]?.parts[0])
-      .toMatchObject({ kind: "permission", state: "timedout" });
   });
 
   it("run-failed 也定格（run 失败是唯一失败终态，恢复出口在生成面）", () => {

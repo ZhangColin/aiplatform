@@ -174,7 +174,7 @@ export function CommandArea({
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} projectId={projectId} />
+              <WorkMessage work={work} />
             ) : null}
             <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
@@ -189,7 +189,7 @@ export function CommandArea({
             </MessageRow>
           </Fragment>
         ))}
-        {work && workAnchorIndex === -1 ? <WorkMessage work={work} projectId={projectId} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} /> : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

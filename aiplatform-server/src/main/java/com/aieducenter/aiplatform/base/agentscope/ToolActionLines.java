@@ -13,9 +13,9 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
  * 工具动作 → 人话行单点（部件 part-action 的生产内核）：工具名封闭表 + 参数增量
  * 累积 + 路径提取——平台不加翻译机器。write_file / edit_file 经参数增量
  * （ToolCallDelta）累积解析 path，取文件名去扩展名为标签 →「编写【标签】」；
- * command →「运行命令」；read_file / grep / glob / list 等读类不播（对客户是
- * 噪音）。行文为动作对象短语（无时态——「编写【订单管理】」，时态由动作部件的
- * state 表达）。
+ * execute（内核 shell，命令直通——#219 透明面化）→「运行命令」；read_file /
+ * grep / glob / list 等读类不播（对客户是噪音）。行文为动作对象短语（无时态——
+ * 「编写【订单管理】」，时态由动作部件的 state 表达）。
  */
 final class ToolActionLines {
 
@@ -24,7 +24,8 @@ final class ToolActionLines {
     /** 写文件类工具名（harness 内置编码工具，参数含 path）。 */
     private static final String WRITE_FILE_TOOL = "write_file";
     private static final String EDIT_FILE_TOOL = "edit_file";
-    private static final String COMMAND_TOOL = "command";
+    /** 命令工具名（harness 内核 shell 注册名）。 */
+    private static final String COMMAND_TOOL = "execute";
 
     /** 参数通用标签（解析不出 path / 参数未到达时的兜底）。 */
     private static final String GENERIC_FILE_LABEL = "代码文件";

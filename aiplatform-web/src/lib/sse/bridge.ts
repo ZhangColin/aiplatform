@@ -179,9 +179,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
   const chat = useChatStore.getState();
   const generation = useGenerationStore.getState();
   const work = useWorkMessageStore.getState();
-  // 信封 ts 保留（#115：过程耗时已下线不作展示——ts 仅供确认卡挂起锚与断线补发
-  // 排序；重放保留原值，客户端到达时序不可用）
-  const at = eventTime(envelope.ts);
 
   const platform = asPlatformAgentEvent(envelope);
   if (platform) {
@@ -204,36 +201,6 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         const question = parseQuestion(event.id, payload);
         if (question) chat.raiseQuestion(payload.projectId, payload.runId, question);
-        return;
-      }
-      // ---- 权限确认（#83 作答通道分家）：确认卡长在工作消息流，与问答卡分形态 ----
-      case "permission-required": {
-        const { payload } = platform;
-        work.notePart(
-          payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
-          {
-            kind: "permission",
-            engineRef: typeof payload.engineRef === "string" ? payload.engineRef : "",
-            summary: payload.summary,
-          },
-        );
-        return;
-      }
-      case "permission-resolved": {
-        const { payload } = platform;
-        work.resolvePermission(
-          payload.projectId,
-          payload.engineRef,
-          payload.approved ? "approved" : "denied",
-        );
-        return;
-      }
-      case "permission-timed-out": {
-        // 权限确认超时（#112）：确认卡转「已超时」定格（不可作答，按钮退场）——
-        // run-failed 随后到达定格整条工作消息
-        const { payload } = platform;
-        work.resolvePermission(payload.projectId, payload.engineRef, "timedout");
         return;
       }
       case "error": {
@@ -313,7 +280,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
             source: payload.source },
           { kind: "text", text: payload.text },
         );
@@ -323,7 +290,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
             source: payload.source },
           {
             kind: "action",
@@ -341,7 +308,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         const { payload } = platform;
         work.notePart(
           payload.projectId,
-          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id, at },
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
           { kind: "check", state: payload.state },
         );
         return;
@@ -359,10 +326,4 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
     const delta = asRecord(payload.data)?.delta;
     chat.appendAgentDelta(payload.projectId, payload.runId, delta, event.id);
   }
-}
-
-/** 信封 ts → ms（坏值回落客户端时钟：时长粗对齐总好过锚丢失）。 */
-function eventTime(ts: string): number {
-  const parsed = Date.parse(ts);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
 }

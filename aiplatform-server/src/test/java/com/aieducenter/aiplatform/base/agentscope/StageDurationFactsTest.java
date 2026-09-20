@@ -100,15 +100,15 @@ class StageDurationFactsTest {
     void given_command_tool_when_snapshot_then_grouped_by_command_text() {
         // command 桶按命令归组（不进 toolsMs 平铺）：命令文本从参数增量累积解析
         StageDurationFacts facts = new StageDurationFacts();
-        facts.onEvent(toolDelta("tc-1", "command", "{\"command\":\"npm ", 1_000));
-        facts.onEvent(toolDelta("tc-1", "command", "install\"}", 1_010));
-        facts.onEvent(toolCallEnd("tc-1", "command", 1_020));
-        facts.onEvent(toolResultEnd("tc-1", "command", ToolResultState.SUCCESS, 61_020));
-        facts.onEvent(toolDelta("tc-2", "command", "{\"command\":\"npm run dev\"}", 62_000));
-        facts.onEvent(toolCallEnd("tc-2", "command", 62_010));
-        facts.onEvent(toolResultEnd("tc-2", "command", ToolResultState.RUNNING, 62_800));
-        facts.onEvent(toolCallEnd("tc-3", "command", 63_000)); // 无参数增量（不可观测）→ 其他
-        facts.onEvent(toolResultEnd("tc-3", "command", ToolResultState.SUCCESS, 63_100));
+        facts.onEvent(toolDelta("tc-1", "execute", "{\"command\":\"npm ", 1_000));
+        facts.onEvent(toolDelta("tc-1", "execute", "install\"}", 1_010));
+        facts.onEvent(toolCallEnd("tc-1", "execute", 1_020));
+        facts.onEvent(toolResultEnd("tc-1", "execute", ToolResultState.SUCCESS, 61_020));
+        facts.onEvent(toolDelta("tc-2", "execute", "{\"command\":\"npm run dev\"}", 62_000));
+        facts.onEvent(toolCallEnd("tc-2", "execute", 62_010));
+        facts.onEvent(toolResultEnd("tc-2", "execute", ToolResultState.RUNNING, 62_800));
+        facts.onEvent(toolCallEnd("tc-3", "execute", 63_000)); // 无参数增量（不可观测）→ 其他
+        facts.onEvent(toolResultEnd("tc-3", "execute", ToolResultState.SUCCESS, 63_100));
 
         StageDurations durations = facts.snapshot();
         assertThat(durations.commandMs())
@@ -155,9 +155,9 @@ class StageDurationFactsTest {
                 .withSource("platform-agent/self-test"));
         facts.onEvent(modelStart("r-sub", 1_200).withSource("platform-agent/self-test"));
         facts.onEvent(modelEnd("r-sub", 1_500).withSource("platform-agent/self-test"));
-        facts.onEvent(toolCallEnd("tc-sub", "command", 1_600)
+        facts.onEvent(toolCallEnd("tc-sub", "execute", 1_600)
                 .withSource("platform-agent/self-test"));
-        facts.onEvent(toolResultEnd("tc-sub", "command", ToolResultState.SUCCESS, 1_900)
+        facts.onEvent(toolResultEnd("tc-sub", "execute", ToolResultState.SUCCESS, 1_900)
                 .withSource("platform-agent/self-test"));
         facts.onEvent(modelEnd("r-1", 2_000));
 

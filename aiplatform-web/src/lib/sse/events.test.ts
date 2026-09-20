@@ -114,48 +114,6 @@ describe("智能体事件族收窄", () => {
     expect(asPassthroughAgentEvent(env!)).toBeNull();
   });
 
-  it("permission-required / permission-resolved / permission-timed-out 按正本收窄（#83/#112）；平台 type 不落入透传口", () => {
-    // 期望值来自正本「智能体事件族」permission-required / permission-resolved / permission-timed-out 行
-    const required = parseSseEnvelope(
-      JSON.stringify({
-        type: "permission-required",
-        payload: { projectId: "a1b2c3d4", runId: "r1", sessionId: "s1", summary: "rm -rf /workspace/data", engineRef: "reply-9", data: { toolCalls: [{ id: "tc-9", name: "command", input: { command: "rm -rf /workspace/data" } }] } },
-        ts: "",
-      }),
-    );
-    expect(asPlatformAgentEvent(required!)).toMatchObject({
-      type: "permission-required",
-      payload: { projectId: "a1b2c3d4", runId: "r1", summary: "rm -rf /workspace/data", engineRef: "reply-9" },
-    });
-    expect(asPassthroughAgentEvent(required!)).toBeNull();
-
-    const resolved = parseSseEnvelope(
-      JSON.stringify({
-        type: "permission-resolved",
-        payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9", approved: false },
-        ts: "",
-      }),
-    );
-    expect(asPlatformAgentEvent(resolved!)).toMatchObject({
-      type: "permission-resolved",
-      payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9", approved: false },
-    });
-    expect(asPassthroughAgentEvent(resolved!)).toBeNull();
-
-    const timedOut = parseSseEnvelope(
-      JSON.stringify({
-        type: "permission-timed-out",
-        payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9" },
-        ts: "",
-      }),
-    );
-    expect(asPlatformAgentEvent(timedOut!)).toMatchObject({
-      type: "permission-timed-out",
-      payload: { projectId: "a1b2c3d4", runId: "r1", engineRef: "reply-9" },
-    });
-    expect(asPassthroughAgentEvent(timedOut!)).toBeNull();
-  });
-
   it("run-failed 按正本收窄（payload {projectId, runId}）；平台 type 不落入透传口", () => {
     // 期望值来自正本「智能体事件族」run-failed 行（#56：编码 run 重试超限终态收口事件）
     const env = parseSseEnvelope(

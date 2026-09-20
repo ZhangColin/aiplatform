@@ -24,7 +24,7 @@ function renderMessage(parts: WorkPart[]) {
   const client = new QueryClient({ defaultOptions: { mutations: { gcTime: 0 } } });
   return render(
     <QueryClientProvider client={client}>
-      <WorkMessage work={snapshot} projectId="p1" />
+      <WorkMessage work={snapshot} />
     </QueryClientProvider>,
   );
 }
@@ -35,7 +35,7 @@ describe("WorkMessage · 动作组折叠/展开交互（#116）", () => {
   it("默认折叠一行；点击展开见单条动作及状态；再点收起", () => {
     renderMessage([
       action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
-      action({ id: "a2", toolCallId: "t2", toolName: "command", label: "执行【B】", state: "failed" }),
+      action({ id: "a2", toolCallId: "t2", toolName: "execute", label: "执行【B】", state: "failed" }),
     ]);
 
     // 默认折叠：只有「N 个动作」一行，单条动作标签不播

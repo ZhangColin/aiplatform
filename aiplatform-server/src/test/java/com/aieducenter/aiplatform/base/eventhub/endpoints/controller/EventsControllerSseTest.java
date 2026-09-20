@@ -417,8 +417,7 @@ class EventsControllerSseTest {
         assertThat(apiDocs).contains("workspace-created"); // 通知族名册精简表
         assertThat(apiDocs).contains("run-start");   // 智能体事件族名册精简表
         assertThat(apiDocs).contains("projectId");
-        assertThat(apiDocs).contains("permission-required"); // #83 权限确认拆分补行（镜像对齐）
-        assertThat(apiDocs).contains("permission-resolved");
+        assertThat(apiDocs).contains("question-raised");    // 问答挂起（唯一挂起源）
         assertThat(apiDocs).contains("part-check");          // #85 自检播报补行（镜像对齐）
     }
 

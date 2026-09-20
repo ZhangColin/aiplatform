@@ -31,16 +31,17 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     /** 自测子智能体声明名（事件 source 归属值 + 引擎委派寻址键）。 */
     public static final String SELF_TEST_NAME = "self-test";
 
-    /** 自测子智能体工具白名单：只读交付代码 + 跑测试命令 + 报告写隔离根——排除
-     *  edit_file（不改交付代码）与 finish_edit（执行体收口工具）。 */
+    /** 自测子智能体工具白名单：只读交付代码 + 跑测试命令（内核 shell 注册名
+     *  execute）+ 报告写隔离根——排除 edit_file（不改交付代码）与 finish_edit
+     *  （执行体收口工具）。 */
     private static final List<String> SELF_TEST_TOOLS = List.of(
-            "read_file", "grep_files", "glob_files", "list_files", "write_file", "command");
+            "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute");
 
     /** 自测角色正文（任务自包含、结果回交执行体；读交付代码只读、报告写隔离根）。 */
     private static final String SELF_TEST_BODY = "你是 run 执行体委派的自测子智能体，专项负责运行自测。"
             + "工作协议：\n"
             + "1. 只读工作区内的系统代码（应用代码与 docs/），不修改任何交付文件。\n"
-            + "2. 用 command 工具逐项运行测试/探活命令，验证系统可用；每跑一项就播报一句"
+            + "2. 用 execute 命令工具逐项运行测试/探活命令，验证系统可用；每跑一项就播报一句"
             + "清单式结果（如「首页可访问 ✅」「留言板数据落库 ✅」「8081 服务常驻 ❌」）"
             + "——逐项 ✅/❌ 播报，失败项如实 ❌，不粉饰、不省略。\n"
             + "3. 把自测结果（逐项 ✅/❌）写成报告写入你的隔离工作区（write_file）。\n"

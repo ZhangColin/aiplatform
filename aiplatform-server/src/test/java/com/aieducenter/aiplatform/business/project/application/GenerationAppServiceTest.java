@@ -106,13 +106,6 @@ class GenerationAppServiceTest {
     @MockitoBean
     private KnowledgePort knowledgePort;
 
-    /**
-     * 权限作答通道（#83）：mock 时 rails 的 await 返 false——异常残留路径会变续跑
-     *（既有用例不触挂起，无影响；挂起/作答行为在 IterationAppServiceTest 镜面）。
-     */
-    @MockitoBean
-    private RunPermissionAppService runPermissionAppService;
-
     /** 两命中的检索桩（下发前置注入 happy path）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
@@ -645,25 +638,25 @@ class GenerationAppServiceTest {
             sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
                     AgentEventTypes.SOURCE_FIELD, "self-test",
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_STARTED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
             sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
                     AgentEventTypes.SOURCE_FIELD, "self-test",
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
             sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
                     AgentEventTypes.SOURCE_FIELD, "self-test",
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-2",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【留言落库】")));
             sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
                     AgentEventTypes.SOURCE_FIELD, "self-test",
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-3",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "command",
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【8081 常驻】")));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),

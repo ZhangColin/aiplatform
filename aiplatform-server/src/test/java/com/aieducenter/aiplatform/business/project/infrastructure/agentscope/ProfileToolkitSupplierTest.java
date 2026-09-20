@@ -25,8 +25,9 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
  * web_search}（答询查证 + 自主调研），
  * 仅随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关，写面结构性不存在——
  * PRD 写入走 savePrd 自带通道）；
- * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面）
- * + {command}（#83 需确认的命令工具）；无配置语境 / 本地兜底工作区 = 空集。
+ * run 执行体 = {finish_edit}（更新收口结束工具——「要不要动系统」的判定面；
+ * 其余编码工具——含内核 shell——由 harness 内核自带）；无配置语境 / 本地兜底
+ * 工作区 = 空集。
  */
 class ProfileToolkitSupplierTest {
 
@@ -79,15 +80,14 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_executor_on_project_dev_when_toolkit_then_finish_edit_and_command() {
-        // 执行体的业务工具面 = 结束工具（#46 修正收口判定）+ 需确认的命令工具
-        // （#83：command 替位内核 shell——破坏性命令挂确认卡）：主智能体资产不
-        // 泄漏（ask_user/savePrd/只读四件都不在执行体面），其余编码工具由 harness
-        // 内核自带
+    void given_executor_on_project_dev_when_toolkit_then_finish_edit_only() {
+        // 执行体的业务工具面 = 结束工具（#46 修正收口判定）：主智能体资产不泄漏
+        // （ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核 shell，
+        // #219 透明面化后破坏性命令直通）由 harness 内核自带
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .getToolNames())
-                .containsExactlyInAnyOrder(FinishEditTool.NAME, ConfirmingShellTool.NAME);
+                .containsExactly(FinishEditTool.NAME);
     }
 
     @Test

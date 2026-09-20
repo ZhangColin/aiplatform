@@ -30,10 +30,8 @@ import com.aieducenter.aiplatform.business.project.application.GenerationAppServ
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.RunPermissionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
-import com.aieducenter.aiplatform.business.project.application.dto.command.PermissionAnswerCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.RenameProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
@@ -54,14 +52,14 @@ import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
- * 派发）/ 问答卡作答 / 权限确认卡作答 / 重新发起生成（失败兜底）→ 重新修改（修正
+ * 派发）/ 问答卡作答 / 重新发起生成（失败兜底）→ 重新修改（修正
  * 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
  * 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 权限确认作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -70,7 +68,6 @@ public class ProjectController {
     private final MainAgentAppService mainAgentAppService;
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
-    private final RunPermissionAppService runPermissionAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
@@ -79,7 +76,6 @@ public class ProjectController {
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
-                             RunPermissionAppService runPermissionAppService,
                              ConversationHistoryAppService conversationHistoryAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
@@ -87,7 +83,6 @@ public class ProjectController {
         this.mainAgentAppService = mainAgentAppService;
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
-        this.runPermissionAppService = runPermissionAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
     }
 
@@ -150,20 +145,6 @@ public class ProjectController {
         mainAgentAppService.answerQuestion(parseId(id), command.runId(), qid,
                 command.toolCalls().stream().map(AnswerQuestionCommand.ToolCall::toMap).toList(),
                 command.answer());
-        return ApiResponse.ok();
-    }
-
-    @PostMapping("/{id}/permissions/{ref}/answer")
-    @Operation(summary = "权限确认卡作答（run 内需批准操作的批准/拒绝续跑，#83 与问答作答分家）",
-            description = "ref = 挂起事件 engineRef（续跑批复的锚），请求体只携带批准位 + 挂起轮 "
-                    + "runId（串卡校验）——恢复私货不回传（挂起事实在平台侧）。批准即放行执行；"
-                    + "拒绝即引擎写「用户已拒绝」工具结果回模型，run 据此改道或如实收口（可能仍收口成功）。"
-                    + "作答受理即发 permission-resolved 事件（确认卡转已批/已拒），续跑过程事件经 SSE。"
-                    + "runId 不符或确认已失效（运行已收口/平台重启丢账）409 PRJ_027（刷新查看最新状态）；"
-                    + "项目不存在 404 PRJ_001")
-    public ApiResponse<Void> answerPermission(@PathVariable String id, @PathVariable String ref,
-            @Valid @RequestBody PermissionAnswerCommand command) {
-        runPermissionAppService.answer(parseId(id), command.runId(), ref, command.approved());
         return ApiResponse.ok();
     }
 

@@ -154,7 +154,7 @@ class ConversationHistoryTest {
                                                 "header", "提问", "question", "目标用户是谁？",
                                                 "multiple", false, "custom", true, "options", List.of())))))));
                 return new AgentReply(command.runId(), "收到，先确认一个关键点",
-                        new AgentSuspension("reply-1", true, List.of(Map.of(
+                        new AgentSuspension("reply-1", List.of(Map.of(
                                 "id", "tc-1", "name", "ask_user"))));
             }
             // 收口自动派的修正 run：run-finish 事件 + finish_edit 事实 + 文件变更
@@ -276,7 +276,7 @@ class ConversationHistoryTest {
                                     "toolCalls", List.of(Map.of("id", "tc-9", "name", "ask_user")),
                                     "questions", List.of(Map.of("question", "要几分账？")))))));
             return new AgentReply(command.runId(), "先问一下",
-                    new AgentSuspension("reply-2", true, List.of(Map.of(
+                    new AgentSuspension("reply-2", List.of(Map.of(
                             "id", "tc-9", "name", "ask_user"))));
         });
 

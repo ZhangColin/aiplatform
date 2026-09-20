@@ -214,26 +214,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{id}/permissions/{ref}/answer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 权限确认卡作答（run 内需批准操作的批准/拒绝续跑，#83 与问答作答分家）
-         * @description ref = 挂起事件 engineRef（续跑批复的锚），请求体只携带批准位 + 挂起轮 runId（串卡校验）——恢复私货不回传（挂起事实在平台侧）。批准即放行执行；拒绝即引擎写「用户已拒绝」工具结果回模型，run 据此改道或如实收口（可能仍收口成功）。作答受理即发 permission-resolved 事件（确认卡转已批/已拒），续跑过程事件经 SSE。runId 不符或确认已失效（运行已收口/平台重启丢账）409 PRJ_027（刷新查看最新状态）；项目不存在 404 PRJ_001
-         */
-        post: operations["answerPermission"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{id}/messages": {
         parameters: {
             query?: never;
@@ -1012,24 +992,24 @@ export interface paths {
          *
          *     信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
          *     智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
-         *     对象、内禁 type 键名）。心跳：每 15s 发注释行 `:ping`。
+         *     对象、内禁 type 键名）。payload 另携 `ownerAccountId` 归属路由键（两族共
+         *     有；前端不消费——路由键非内容）。心跳：每 15s 发注释行 `:ping`。
          *
-         *     订阅：`?projectId=` / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；
-         *     缺省 = 只收平台通知族（智能体事件族只投递给带过滤的订阅——过程细节是项目
-         *     内事实）。智能体事件带 projectId（编排桥接注入）。
+         *     订阅：订阅握手绑定登录账号，投递按「事件归属 == 订阅者」隔离（未过滤订阅 =
+         *     我的全部通知；他人 projectId 过滤订阅 = 静默空流、连接不断）。`?projectId=`
+         *     / `?runId=` 过滤（与 payload 关联字段同名，可叠用 AND）；缺省 = 只收平台
+         *     通知族（智能体事件族只投递给带过滤的订阅——过程细节是项目内事实）。智能体
+         *     事件带 projectId（编排桥接注入）。
          *
          *     名册（type → 说明，payload 除关联字段外）：
          *
          *     | type | 族 | payload 字段 |
          *     |---|---|---|
-         *     | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed | 通知 | projectId（+ 各自载荷） |
+         *     | workspace-created / preview-ready / workspace-destroyed / document-updated / project-renamed / order-status-changed / order-repriced | 通知 | projectId（+ 各自载荷）+ ownerAccountId（路由键） |
          *     | run-start | 智能体·生命周期 | runId, prompt, model, engine, agent（可空——main/executor 配置键）, slice（可缺省——#118 工作消息头部标题：title + 生成轨道切片 index/total） |
          *     | error | 智能体·生命周期 | runId, message |
          *     | run-finish | 智能体·生命周期 | runId, sessionId, engine, finish, closing（可缺省——#88 收口扩载：编码 run 真收口携带收尾卡权威事实（summary/prdChanged/systemChanged/files/durationMs），主智能体对话轮不携带） |
          *     | question-raised | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（问答卡投影与待确认工具清单） |
-         *     | permission-required | 智能体·生命周期 | runId, sessionId, summary, engineRef, data（#83 权限确认挂起：确认卡——summary=命令文本、data.toolCalls=待确认工具最小面） |
-         *     | permission-resolved | 智能体·生命周期 | runId, engineRef, approved（#83 权限确认落定：确认卡转已批/已拒） |
-         *     | permission-timed-out | 智能体·生命周期 | runId, engineRef（#112 权限确认超时：确认卡转「已超时」——随后 run-failed 收口） |
          *     | run-failed / guide-reply | 智能体·生命周期 | runId（+ guide-reply 的 prompt/label/text） |
          *     | acceptance-start | 智能体·生命周期 | runId（#87 受理动作卡：受理轮开场受理事实；落定由该轮 run-finish / error 推导） |
          *     | part-text | 智能体·部件 | text（完整段非增量——消息部件契约） |
@@ -1800,10 +1780,6 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        PermissionAnswerCommand: {
-            runId: string;
-            approved: boolean;
-        };
         AnnotationAnchor: {
             selector?: string;
             text?: string;
@@ -2166,6 +2142,9 @@ export interface components {
             attachments?: {
                 [key: string]: Record<string, never>;
             }[];
+            quote?: {
+                [key: string]: Record<string, never>;
+            };
             answered?: boolean;
             /** Format: date-time */
             at?: string;
@@ -2821,33 +2800,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AnswerQuestionCommand"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
-    answerPermission: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                ref: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PermissionAnswerCommand"];
             };
         };
         responses: {

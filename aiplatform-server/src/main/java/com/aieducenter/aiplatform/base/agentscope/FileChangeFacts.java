@@ -12,7 +12,7 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
 
 /**
  * 工具写动作 → 文件变更事实（#88 收口扩载）：write_file / edit_file 的参数增量
- * 自行累积（command / 读类不含文件面不收），调用落定解析 path 与行数挂账，工具
+ * 自行累积（execute 命令 / 读类不含文件面不收），调用落定解析 path 与行数挂账，工具
  * <b>结果成功才提交</b>——失败/被拒的写不是变更。观察源 = 平台可观测的工具调用
  * 事实（判定与清单不由模型自报）；实例随流段生命周期（converse/resume 各一枚），
  * 收口侧经 {@link AgentReply#changes()} 携出。

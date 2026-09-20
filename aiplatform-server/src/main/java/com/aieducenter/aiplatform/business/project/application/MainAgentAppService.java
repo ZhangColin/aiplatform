@@ -340,11 +340,11 @@ public class MainAgentAppService {
     }
 
     /**
-     * 轮落定点的挂起问答会合锚维护：问答挂起（软终点）即落锚（渲染竞态窗口里
-     * 答询轮转作答复续跑的入参源）；权限类挂起/正常收口即清锚（无可答之问）。
+     * 轮落定点的挂起问答会合锚维护：问答挂起（软终点，ask_user 唯一挂起源）即落锚
+     * （渲染竞态窗口里答询轮转作答复续跑的入参源）；正常收口即清锚（无可答之问）。
      */
     private void settleSuspendedQuestion(String sessionId, String runId, AgentReply reply) {
-        if (reply.suspension() != null && !reply.suspension().permission()) {
+        if (reply.suspension() != null) {
             suspendedQuestions.put(sessionId, new SuspendedQuestion(runId, reply.suspension()));
         }
         else {

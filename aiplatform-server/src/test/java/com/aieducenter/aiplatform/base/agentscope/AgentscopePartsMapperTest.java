@@ -107,11 +107,11 @@ class AgentscopePartsMapperTest {
 
         @Test
         void given_error_result_when_lifecycle_completes_then_failed_state() {
-            mapper.map(new ToolCallStartEvent("r", "tc-2", "command"));
-            mapper.map(new ToolCallEndEvent("r", "tc-2", "command"));
+            mapper.map(new ToolCallStartEvent("r", "tc-2", "execute"));
+            mapper.map(new ToolCallEndEvent("r", "tc-2", "execute"));
 
             List<AgentEvent> failed = mapper.map(
-                    new ToolResultEndEvent("r", "tc-2", "command", ToolResultState.ERROR));
+                    new ToolResultEndEvent("r", "tc-2", "execute", ToolResultState.ERROR));
 
             assertThat(failed.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "tc-2",
@@ -123,8 +123,8 @@ class AgentscopePartsMapperTest {
         void given_denied_and_interrupted_results_when_lifecycle_completes_then_failed_state() {
             for (ToolResultState state : List.of(ToolResultState.DENIED, ToolResultState.INTERRUPTED)) {
                 AgentscopePartsMapper fresh = new AgentscopePartsMapper(RUN_ID, SESSION_ID, ENGINE);
-                fresh.map(new ToolCallStartEvent("r", "tc-9", "command"));
-                List<AgentEvent> parts = fresh.map(new ToolResultEndEvent("r", "tc-9", "command", state));
+                fresh.map(new ToolCallStartEvent("r", "tc-9", "execute"));
+                List<AgentEvent> parts = fresh.map(new ToolResultEndEvent("r", "tc-9", "execute", state));
                 assertThat(parts.get(0).payload()).containsEntry(
                         AgentEventTypes.PART_ACTION_STATE_FIELD,
                         AgentEventTypes.PART_ACTION_STATE_FAILED);
@@ -156,7 +156,7 @@ class AgentscopePartsMapperTest {
         void given_pending_narration_when_action_arrives_then_drained_before_action_part() {
             mapper.map(new TextBlockDeltaEvent("r", "b-1", "开始搭数据库"));
 
-            List<AgentEvent> atAction = mapper.map(new ToolCallStartEvent("r", "tc-5", "command"));
+            List<AgentEvent> atAction = mapper.map(new ToolCallStartEvent("r", "tc-5", "execute"));
             assertThat(types(atAction)).containsExactly(
                     AgentEventTypes.PART_TEXT, AgentEventTypes.PART_ACTION);
 
@@ -179,7 +179,7 @@ class AgentscopePartsMapperTest {
         void given_any_part_when_built_then_flat_keys_and_no_type_or_data_key() {
             // 信封契约：payload 顶层禁 type 键名；部件载荷扁平（无 data 键——前端
             // 透传收窄以 data 键为准，双发射期部件不被旧前端误收）
-            mapper.map(new ToolCallStartEvent("r", "tc-1", "command"));
+            mapper.map(new ToolCallStartEvent("r", "tc-1", "execute"));
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1", "一段。"));
 
             assertThat(parts).singleElement().satisfies(part ->
@@ -247,7 +247,7 @@ class AgentscopePartsMapperTest {
         @Test
         void given_subagent_action_when_mapped_then_part_action_carries_source() {
             List<AgentEvent> parts = mapper.map(
-                    new ToolCallStartEvent("r", "tc-1", "command").withSource("self-test"));
+                    new ToolCallStartEvent("r", "tc-1", "execute").withSource("self-test"));
 
             assertThat(parts).singleElement().satisfies(part -> {
                 assertThat(part.type()).isEqualTo(AgentEventTypes.PART_ACTION);

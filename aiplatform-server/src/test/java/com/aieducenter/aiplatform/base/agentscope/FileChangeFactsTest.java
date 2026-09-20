@@ -68,8 +68,8 @@ class FileChangeFactsTest {
     @Test
     void given_command_or_read_tools_when_streamed_then_not_collected() {
         FileChangeFacts facts = new FileChangeFacts();
-        facts.onDelta(delta("tc-4", "command", "{\"command\":\"npm install\"}"));
-        facts.onCallEnd("command", "tc-4");
+        facts.onDelta(delta("tc-4", "execute", "{\"command\":\"npm install\"}"));
+        facts.onCallEnd("execute", "tc-4");
         facts.onResultEnd("tc-4", true);
         facts.onDelta(delta("tc-5", "read_file", "{\"path\":\"/a.js\"}"));
         facts.onCallEnd("read_file", "tc-5");

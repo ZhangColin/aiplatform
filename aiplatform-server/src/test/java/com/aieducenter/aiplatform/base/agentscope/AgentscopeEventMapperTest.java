@@ -201,45 +201,6 @@ class AgentscopeEventMapperTest {
     class SuspensionFrames {
 
         @Test
-        void given_non_ask_user_confirm_when_suspension_then_permission_required_event() {
-            // #83 事件拆分：工具操作确认（非提问）→ 独立 permission-required（确认卡）
-            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-9", java.util.List.of(
-                    toolCall("tc-1", "command", Map.of("command", "rm -rf /workspace/data"))));
-
-            AgentEvent frame = mapper.suspension(event);
-
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.PERMISSION_REQUIRED);
-            assertThat(frame.payload()).containsAllEntriesOf(Map.of(
-                    AgentEventTypes.RUN_FIELD, RUN_ID,
-                    AgentEventTypes.SESSION_FIELD, SESSION_ID,
-                    AgentEventTypes.WAIT_SUMMARY_FIELD, "rm -rf /workspace/data",
-                    AgentEventTypes.WAIT_ENGINE_REF_FIELD, "reply-9",
-                    "engine", ENGINE));
-            @SuppressWarnings("unchecked")
-            Map<String, Object> data = (Map<String, Object>) frame.payload()
-                    .get(AgentEventTypes.WAIT_DATA_FIELD);
-            // 引擎载荷：待确认工具清单（作答复跑侧据此重建 ConfirmResult；恢复入参
-            // 由业务编排从项目侧事实重建，不随事件携带）——无 questions 投影
-            assertThat(data).containsOnlyKeys("toolCalls");
-            assertThat(data.get("toolCalls")).isEqualTo(java.util.List.of(
-                    Map.of("id", "tc-1", "name", "command",
-                            "input", Map.of("command", "rm -rf /workspace/data"))));
-        }
-
-        @Test
-        void given_non_command_tool_when_suspension_then_summary_falls_back_to_tool_name() {
-            // 非命令工具（无 command 入参）摘要回落工具名
-            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-13", java.util.List.of(
-                    toolCall("tc-1", "write_file", Map.of("path", "docs/PRD.md"))));
-
-            AgentEvent frame = mapper.suspension(event);
-
-            assertThat(frame.type()).isEqualTo(AgentEventTypes.PERMISSION_REQUIRED);
-            assertThat(frame.payload()).containsEntry(
-                    AgentEventTypes.WAIT_SUMMARY_FIELD, "write_file");
-        }
-
-        @Test
         void given_ask_user_tool_when_suspension_then_question_raised_event() {
             // 向用户提问（ask_user）= question-raised（问答卡，问答作答通道）
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-10", java.util.List.of(
@@ -375,7 +336,7 @@ class AgentscopeEventMapperTest {
         /** 工具事件同样带来源（动作卡分角色播的依据）。 */
         @Test
         void given_tool_event_with_source_when_map_then_source_on_tool_frame() {
-            AgentEvent frame = mapper.map(new ToolCallStartEvent("reply-1", "tc-1", "command")
+            AgentEvent frame = mapper.map(new ToolCallStartEvent("reply-1", "tc-1", "execute")
                     .withSource("platform-agent/self-test"));
 
             assertThat(frame.type()).isEqualTo("tool");

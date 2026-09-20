@@ -213,13 +213,9 @@ public class ConversationHistoryAppService {
 
         /**
          * 轮落定点落库：正常收口 / 问答挂起——挂起段文本先落、捕获的问答卡随后
-         * （live 呈现序：解说 → 问答卡）；权限类挂起不落（主智能体只读面无权限
-         * 工具，防御位）。失败 quietly（缺段不牵连已成轮）。
+         * （live 呈现序：解说 → 问答卡）。失败 quietly（缺段不牵连已成轮）。
          */
         public void settle(String runId, AgentReply reply) {
-            if (reply.suspension() != null && reply.suspension().permission()) {
-                return;
-            }
             if ((reply.text() == null || reply.text().isBlank()) && question == null) {
                 return;
             }

@@ -1,19 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronDown, Clock, FileCode2, Hammer, ShieldCheck, ShieldQuestion, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, FileCode2, Hammer, ShieldCheck, SquareTerminal, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { useAnswerPermission } from "@/hooks/use-answer-permission";
 import type { WorkPart, WorkSlice, WorkSnapshot } from "@/lib/store/work-message";
 
-/** 播报工具 → 图标（正本封闭表：write_file / edit_file / command；表外兜底锤子）。 */
+/** 播报工具 → 图标（正本封闭表：write_file / edit_file / execute；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   write_file: <FileCode2 className="size-3.5" />,
   edit_file: <FileCode2 className="size-3.5" />,
-  command: <SquareTerminal className="size-3.5" />,
+  execute: <SquareTerminal className="size-3.5" />,
 };
 const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
 
@@ -54,15 +52,15 @@ export function segmentWorkParts(parts: WorkPart[]): WorkSegment[] {
 /**
  * 生长中的工作消息（#81 事件模型迁移，形态同 #68 原型已验证形）：对话区内一条
  * 随部件逐段生长的消息——解说文本部件（智能体用户语言解说）+ 动作组折叠行（#116
- * 连续动作默认折叠成一行、展开见单条动作状态）+ 权限确认卡（#83：需批准的工具
- * 操作，批准/拒绝即续跑——与问答卡分形态）+ 自检播报行（#85：收口判据核验「正在
- * 检查系统 → ✅/❌」）。思考与代码不播、无进度条/百分比；run 开始即出现（空部件
+ * 连续动作默认折叠成一行、展开见单条动作状态；破坏性命令直通后命令动作照常播报
+ * ——#219 透明面化）+ 自检播报行（#85：收口判据核验「正在检查系统 → ✅/❌」）。
+ * 思考与代码不播、无进度条/百分比；run 开始即出现（空部件
  * 也出「正在做」头部），成功收口原地定格留驻（#117：部件保留、只读，收尾卡随后
  * 入流——「过程上文、结果下卡」），失败定格（run-failed）流水留驻。步骤分组与过程
  * 耗时已退役（#115：无「第 N 步」分组头、无动作耗时与头部总时长——部件按序竖排，
  * 「解说短段 ↔ 动作组」交替竖流）。
  */
-export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId: string }) {
+export function WorkMessage({ work }: { work: WorkSnapshot }) {
   const growing = !work.frozen;
 
   // 定格空壳不占位（run 零部件的退化态）：成功收口/run-failed 后部件均留驻
@@ -85,13 +83,7 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
       ) : null}
       {segmentWorkParts(work.parts).map((segment) =>
         segment.kind === "single" ? (
-          <WorkPartRow
-            key={segment.part.id}
-            part={segment.part}
-            frozen={work.frozen}
-            projectId={projectId}
-            runId={work.runId}
-          />
+          <WorkPartRow key={segment.part.id} part={segment.part} frozen={work.frozen} />
         ) : (
           <ActionGroup key={segment.actions[0].id} actions={segment.actions} frozen={work.frozen} />
         ),
@@ -105,23 +97,10 @@ export function WorkMessage({ work, projectId }: { work: WorkSnapshot; projectId
   );
 }
 
-/** 部件呈现：解说 = 正文段；权限确认 = 确认卡；自检 = 一句话播报行；动作 = 单行状态卡。 */
-function WorkPartRow({
-  part,
-  frozen,
-  projectId,
-  runId,
-}: {
-  part: WorkPart;
-  frozen: boolean;
-  projectId: string;
-  runId: string;
-}) {
+/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 单行状态卡。 */
+function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
   if (part.kind === "text") {
     return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
-  }
-  if (part.kind === "permission") {
-    return <PermissionRow part={part} frozen={frozen} projectId={projectId} runId={runId} />;
   }
   if (part.kind === "check") {
     return <CheckRow part={part} frozen={frozen} />;
@@ -165,87 +144,6 @@ function CheckRow({
           {!frozen ? <Spinner className="size-3 shrink-0 text-muted-foreground" /> : null}
         </>
       )}
-    </div>
-  );
-}
-
-/**
- * 权限确认卡（#83，长在工作消息流内——与对话区问答卡分形态）：待批准操作摘要
- * （命令文本，等宽）+ 拒绝/批准两个动作，作答即续跑（乐观转终态，permission-
- * resolved 事件幂等双达；失败回滚重开）。已批/已拒转徽标定格；run 收口截断的
- * 待答卡如实呈现「未作答」（按钮退场——过期卡作答会被服务端 409 指路刷新）；
- * 超时（#112）转「已超时」定格并播报「等待批准超时，本轮已停止」（不可作答，
- * 按钮退场）。
- */
-function PermissionRow({
-  part,
-  frozen,
-  projectId,
-  runId,
-}: {
-  part: Extract<WorkPart, { kind: "permission" }>;
-  frozen: boolean;
-  projectId: string;
-  runId: string;
-}) {
-  const answerPermission = useAnswerPermission(projectId);
-  const pending = part.state === "pending";
-  const interactive = pending && !frozen;
-  return (
-    <div
-      className={cn(
-        "my-1.5 rounded-lg border px-3 py-2.5",
-        interactive ? "border-amber-500/50 bg-amber-500/[0.06]" : "border-foreground/10",
-      )}
-    >
-      <div className="flex items-center gap-2 text-[13px] font-medium">
-        <ShieldQuestion className="size-4 shrink-0 text-amber-600" />
-        需要您的确认
-        {part.state === "approved" ? (
-          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-            <Check className="size-3.5 text-green-600" strokeWidth={3} /> 已批准
-          </span>
-        ) : part.state === "denied" ? (
-          <span className="ml-auto flex items-center gap-1 text-xs text-destructive">
-            <X className="size-3.5" strokeWidth={3} /> 已拒绝
-          </span>
-        ) : part.state === "timedout" ? (
-          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="size-3.5" /> 已超时
-          </span>
-        ) : frozen ? (
-          <span className="ml-auto text-xs text-muted-foreground">未作答</span>
-        ) : null}
-      </div>
-      <p className="mt-1.5 break-all rounded bg-muted px-2 py-1.5 font-mono text-xs leading-relaxed">
-        {part.summary}
-      </p>
-      {part.state === "timedout" ? (
-        <p className="mt-1.5 text-xs text-muted-foreground">等待批准超时，本轮已停止</p>
-      ) : null}
-      {interactive ? (
-        <div className="mt-2 flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={answerPermission.isPending}
-            onClick={() =>
-              answerPermission.mutate({ ref: part.engineRef, command: { runId, approved: false } })
-            }
-          >
-            拒绝
-          </Button>
-          <Button
-            size="sm"
-            disabled={answerPermission.isPending}
-            onClick={() =>
-              answerPermission.mutate({ ref: part.engineRef, command: { runId, approved: true } })
-            }
-          >
-            批准
-          </Button>
-        </div>
-      ) : null}
     </div>
   );
 }

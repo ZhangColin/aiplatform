@@ -573,7 +573,7 @@ class MainAgentAppServiceTest {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("main-")) { // 意见轮：以 ask_user 挂起
                 return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
-                        "reply-77", true, List.of(Map.of("id", "tc-9", "name", "ask_user"))));
+                        "reply-77", List.of(Map.of("id", "tc-9", "name", "ask_user"))));
             }
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             return new AgentReply(command.runId(), "修正完成");

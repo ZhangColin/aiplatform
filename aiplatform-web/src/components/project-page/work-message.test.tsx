@@ -1,4 +1,3 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -27,31 +26,9 @@ function action(overrides: Partial<Extract<WorkPart, { kind: "action" }>> = {}) 
   } satisfies Extract<WorkPart, { kind: "action" }>;
 }
 
-function permission(overrides: Partial<Extract<WorkPart, { kind: "permission" }>> = {}) {
-  return {
-    kind: "permission",
-    id: "run-1:5",
-    engineRef: "reply-9",
-    summary: "rm -rf /workspace/data",
-    state: "pending",
-    at: 2_000,
-    ...overrides,
-  } satisfies Extract<WorkPart, { kind: "permission" }>;
-}
-
-/** 确认卡走 useMutation（作答动作）——SSR 渲染包 QueryClientProvider。 */
-function renderWithClient(workSnapshot: WorkSnapshot) {
-  const client = new QueryClient({ defaultOptions: { mutations: { gcTime: 0 } } });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={client}>
-      <WorkMessage work={workSnapshot} projectId="p1" />
-    </QueryClientProvider>,
-  );
-}
-
 describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态呈现）", () => {
   it("run 开始即出现：空部件的生长中消息出「正在做」头部与打字点，无部件行", () => {
-    const html = renderToStaticMarkup(<WorkMessage work={work()} projectId="p1" />);
+    const html = renderToStaticMarkup(<WorkMessage work={work()} />);
 
     expect(html).toContain("正在做");
     expect(html).toContain("正在干活…");
@@ -66,7 +43,6 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
             action({ state: "running" }),
           ],
         })}
-        projectId="p1"
       />,
     );
 
@@ -78,19 +54,19 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
 
   it("动作卡三态：进行中转圈、完成打勾、失败「没做成」——均无时长数字（#115）", () => {
     const running = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "started" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "started" })] })} />,
     );
     expect(running).toContain("进行中");
     expect(running).not.toContain("秒");
 
     const done = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1" })] })} />,
     );
     expect(done).toContain("编写【订单管理】");
     expect(done).not.toContain("秒");
 
     const failed = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "failed" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "failed" })] })} />,
     );
     expect(failed).toContain("没做成");
     expect(failed).not.toContain("秒");
@@ -106,7 +82,6 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
             action({ id: "a1", toolCallId: "t1", state: "running" }),
           ],
         })}
-        projectId="p1"
       />,
     );
 
@@ -120,17 +95,14 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
   });
 
   it("定格且无部件（起跑即死）：不渲染空壳", () => {
-    expect(renderToStaticMarkup(<WorkMessage work={work({ frozen: true })} projectId="p1" />)).toBe("");
+    expect(renderToStaticMarkup(<WorkMessage work={work({ frozen: true })} />)).toBe("");
   });
 });
 
 describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
   it("生成轨道切片：头部「{切片标题}（{index}/{total}）」——取代「正在做」内部视角", () => {
     const html = renderToStaticMarkup(
-      <WorkMessage
-        work={work({ slice: { title: "商品浏览", index: 2, total: 5 } })}
-        projectId="p1"
-      />,
+      <WorkMessage work={work({ slice: { title: "商品浏览", index: 2, total: 5 } })} />,
     );
 
     expect(html).toContain("商品浏览（2/5）");
@@ -138,16 +110,14 @@ describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
   });
 
   it("阶段 0 / 更新 run：头部只出用户语言标题（无「（n/N）」进度）", () => {
-    const html = renderToStaticMarkup(
-      <WorkMessage work={work({ slice: { title: "系统更新" } })} projectId="p1" />,
-    );
+    const html = renderToStaticMarkup(<WorkMessage work={work({ slice: { title: "系统更新" } })} />);
 
     expect(html).toContain("系统更新");
     expect(html).not.toContain("（");
   });
 
   it("无 slice（run-start 被淘汰的补建路径 / 主智能体轮）：回落「正在做」", () => {
-    const html = renderToStaticMarkup(<WorkMessage work={work()} projectId="p1" />);
+    const html = renderToStaticMarkup(<WorkMessage work={work()} />);
 
     expect(html).toContain("正在做");
   });
@@ -156,52 +126,11 @@ describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
     const html = renderToStaticMarkup(
       <WorkMessage
         work={work({ frozen: true, slice: { title: "商品浏览", index: 2, total: 5 }, parts: [{ kind: "text", id: "1", text: "写好了。" }] })}
-        projectId="p1"
       />,
     );
 
     expect(html).not.toContain("商品浏览（2/5）");
     expect(html).toContain("写好了。");
-  });
-});
-
-describe("WorkMessage · 确认卡（#83 权限确认：长在工作消息流，与问答卡分形态）", () => {
-  it("待答：警示色调确认卡——命令摘要（等宽）+ 拒绝/批准两个动作", () => {
-    const html = renderWithClient(work({ parts: [permission()] }));
-
-    expect(html).toContain("需要您的确认");
-    expect(html).toContain("rm -rf /workspace/data");
-    expect(html).toContain("拒绝");
-    expect(html).toContain("批准");
-  });
-
-  it("已批准 / 已拒绝：转徽标定格（按钮退场——作答一次即续跑）", () => {
-    const approved = renderWithClient(work({ parts: [permission({ state: "approved" })] }));
-    expect(approved).toContain("已批准");
-    expect(approved).not.toContain(">批准</");
-
-    const denied = renderWithClient(work({ parts: [permission({ state: "denied" })] }));
-    expect(denied).toContain("已拒绝");
-    expect(denied).not.toContain(">批准</");
-  });
-
-  it("run 收口截断的待答卡：按钮退场、如实呈现「未作答」（过期卡作答被服务端 409 指路刷新）", () => {
-    const html = renderWithClient(
-      work({ frozen: true, parts: [permission()] }),
-    );
-
-    expect(html).toContain("未作答");
-    expect(html).not.toContain(">批准</");
-  });
-
-  it("超时：转「已超时」定格 + 播报「等待批准超时，本轮已停止」（按钮退场、不可作答）", () => {
-    const html = renderWithClient(
-      work({ frozen: true, parts: [permission({ state: "timedout" })] }),
-    );
-
-    expect(html).toContain("已超时");
-    expect(html).toContain("等待批准超时，本轮已停止");
-    expect(html).not.toContain(">批准</");
   });
 });
 
@@ -217,7 +146,7 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
 
   it("核验中：「正在检查系统」+ 进行中转圈", () => {
     const html = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [checkPart()] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [checkPart()] })} />,
     );
 
     expect(html).toContain("正在检查系统");
@@ -226,14 +155,14 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
 
   it("核验通过 / 未过：原位换 ✅「检查通过」/ ❌「检查未过」，转圈退场", () => {
     const passed = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [checkPart({ state: "passed" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [checkPart({ state: "passed" })] })} />,
     );
     expect(passed).toContain("检查通过");
     expect(passed).not.toContain("正在检查系统");
     expect(passed).not.toContain("animate-spin");
 
     const failed = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [checkPart({ state: "failed" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [checkPart({ state: "failed" })] })} />,
     );
     expect(failed).toContain("检查未过");
     expect(failed).not.toContain("animate-spin");
@@ -241,7 +170,7 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
 
   it("定格截断的「检查中」（run 未进核验即终态的防御面）：转圈退场、字样如实留驻", () => {
     const html = renderToStaticMarkup(
-      <WorkMessage work={work({ frozen: true, parts: [checkPart()] })} projectId="p1" />,
+      <WorkMessage work={work({ frozen: true, parts: [checkPart()] })} />,
     );
 
     expect(html).toContain("正在检查系统");
@@ -252,7 +181,7 @@ describe("WorkMessage · 自检播报行（#85：「正在检查系统 → ✅/�
 describe("WorkMessage · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
   it("定格空壳（run 零部件的退化态）：不渲染空壳（收尾卡长在对话流）", () => {
     const html = renderToStaticMarkup(
-      <WorkMessage work={work({ frozen: true, parts: [] })} projectId="p1" />,
+      <WorkMessage work={work({ frozen: true, parts: [] })} />,
     );
 
     expect(html).not.toContain("正在做");
@@ -261,7 +190,9 @@ describe("WorkMessage · 定格收口（#117：原地定格留驻，收尾卡归
   });
 
   it("失败定格（run-failed）：流水留驻、不出收尾卡", () => {
-    const html = renderWithClient(work({ frozen: true, parts: [action()] }));
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ frozen: true, parts: [action()] })} />,
+    );
 
     expect(html).not.toContain("本轮完成");
     expect(html).toContain("编写【订单管理】");
@@ -301,16 +232,14 @@ describe("segmentWorkParts · 动作组折叠投影（#116：纯呈现聚合，�
     expect(segments[0].kind).toBe("single");
   });
 
-  it("确认卡/自检同样切开动作组（非动作部件均独段，不参与聚合）", () => {
+  it("自检部件同样切开动作组（非动作部件均独段，不参与聚合）", () => {
     const segments = segmentWorkParts([
       action({ id: "1", toolCallId: "t1" }),
-      permission({ id: "2" }),
+      { kind: "check", id: "2", state: "checking" },
       action({ id: "3", toolCallId: "t2" }),
-      { kind: "check", id: "4", state: "checking" },
-      action({ id: "5", toolCallId: "t3" }),
     ]);
 
-    expect(segments.map((s) => s.kind)).toEqual(["single", "single", "single", "single", "single"]);
+    expect(segments.map((s) => s.kind)).toEqual(["single", "single", "single"]);
   });
 
   it("空部件序列 → 无段", () => {
@@ -325,10 +254,9 @@ describe("WorkMessage · 动作组折叠行（#116）", () => {
         work={work({
           parts: [
             action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
-            action({ id: "a2", toolCallId: "t2", toolName: "command", label: "执行【B】" }),
+            action({ id: "a2", toolCallId: "t2", toolName: "execute", label: "执行【B】" }),
           ],
         })}
-        projectId="p1"
       />,
     );
 
@@ -348,7 +276,6 @@ describe("WorkMessage · 动作组折叠行（#116）", () => {
             { kind: "text", id: "t2", text: "写好了。" },
           ],
         })}
-        projectId="p1"
       />,
     );
 
@@ -359,27 +286,10 @@ describe("WorkMessage · 动作组折叠行（#116）", () => {
 
   it("单动作不折叠：直接单行状态卡（无「个动作」）", () => {
     const html = renderToStaticMarkup(
-      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1" })] })} projectId="p1" />,
+      <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1" })] })} />,
     );
 
     expect(html).toContain("编写【订单管理】");
-    expect(html).not.toContain("个动作");
-  });
-
-  it("确认卡/自检等非动作部件形态不受聚合影响（切开动作组）", () => {
-    const html = renderWithClient(
-      work({
-        parts: [
-          action({ id: "a1", toolCallId: "t1", label: "编写【A】" }),
-          permission(),
-          action({ id: "a2", toolCallId: "t2", label: "执行【B】" }),
-        ],
-      }),
-    );
-
-    expect(html).toContain("需要您的确认");
-    expect(html).toContain("编写【A】"); // 确认卡两侧动作各为单动作、不聚合
-    expect(html).toContain("执行【B】");
     expect(html).not.toContain("个动作");
   });
 
@@ -393,7 +303,6 @@ describe("WorkMessage · 动作组折叠行（#116）", () => {
             { kind: "check", id: "c1", state: "checking" },
           ],
         })}
-        projectId="p1"
       />,
     );
 

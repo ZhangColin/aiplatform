@@ -61,40 +61,12 @@ public final class AgentEventTypes {
     public static final String SELF_TEST_TOTAL_FIELD = "total";
 
     /**
-     * 智能体挂起提问（ask_user 触发，#83 起纯 QUESTION——权限确认已拆独立事件
-     * {@link #PERMISSION_REQUIRED}）：payload 带 runId/sessionId/summary/engineRef/
-     * data（引擎载荷原样，含前端问答卡投影与续跑上下文）。答复续跑归业务编排
-     * （问答作答通道，需求环），eventhub 只承载事件。
+     * 智能体挂起提问（ask_user 触发，唯一挂起源）：payload 带
+     * runId/sessionId/summary/engineRef/data（引擎载荷原样，含前端问答卡投影与
+     * 续跑上下文）。答复续跑归业务编排（问答作答通道，需求环），eventhub 只承载
+     * 事件。
      */
     public static final String QUESTION_RAISED = "question-raised";
-
-    /**
-     * 权限确认挂起出现（#83 事件拆分：词根 = 引擎权限确认原语
-     * RequireUserConfirmEvent 的非提问面——危险命令等待用户批准）：payload 带
-     * runId/sessionId/summary/engineRef/data（data.toolCalls 为待确认工具最小面，
-     * 确认卡呈现源）。批准/拒绝续跑归业务编排（权限作答通道，与问答作答分家——
-     * 互不串扰），eventhub 只承载事件。
-     */
-    public static final String PERMISSION_REQUIRED = "permission-required";
-
-    /**
-     * 权限确认落定（#83）：作答被受理（批准或拒绝）即发射——确认卡转已批/已拒
-     * 终态的呈现源（事件族重放面：重连/刷新后确认卡不回退成待答）。续跑结果另行
-     * 经 run 过程事件到达。
-     */
-    public static final String PERMISSION_RESOLVED = "permission-resolved";
-
-    /** permission-resolved 的批准位键（true = 已批准 / false = 已拒绝）。 */
-    public static final String PERMISSION_APPROVED_FIELD = "approved";
-
-    /**
-     * 权限确认超时落定（#112 权限确认 10 分钟超时默认拒绝）：轨道驻留等作答超时即
-     * 发射——确认卡转「已超时」终态（不可作答，按钮退场），随后轨道直接
-     * {@link #RUN_FAILED} 收口（不复用静默重试）。payload 带 runId/engineRef；
-     * 与 {@link #PERMISSION_RESOLVED} 同族不同语义：本事件非作答（无批准位），
-     * 超时即拒绝——破坏性命令永不默认放行。
-     */
-    public static final String PERMISSION_TIMED_OUT = "permission-timed-out";
 
     /**
      * 编码 run 重试超限·终态收口（#56）：轨道层在真终态落定点发射——修正轨道与

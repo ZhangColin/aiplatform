@@ -17,8 +17,6 @@ import org.springframework.stereotype.Component;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
-import com.aieducenter.aiplatform.base.agentscope.AgentResume;
-import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
@@ -30,8 +28,9 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
-import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ConfirmingShellTool;
 import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
+
+import io.agentscope.harness.agent.tool.ShellExecuteTool;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -53,13 +52,9 @@ import lombok.extern.slf4j.Slf4j;
  * 项目工作区、流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试
  * 不重检索不重块）。</p>
  *
- * <p><b>权限确认挂起（#83）</b>：run 内需批准的工具操作（危险命令）以
- * {@code permission-required} 事件呈现确认卡后流软终点——本环在挂起点驻留
- * （{@link RunPermissionAppService#await}，持有会话执行器 stripe；作答由权限
- * 作答通道在请求线程直接唤醒，无自锁），批准/拒绝即以 ConfirmResult 续跑同
- * run（拒绝语义 = 引擎写 DENIED 工具结果回模型，改道或自行收口）。挂起期间
- * 轨道不收口、不重试（不是尝试失败）、不排空队列——run 仍在途，意见照常排队
- * 合并。挂起会合与作答校验的用户面锚 = 首试 runId（与投影后事件同锚）。</p>
+ * <p><b>破坏性命令直通（#219 透明面化）</b>：执行体命令走内核 shell 工具
+ * （无确认自检——沙箱可随时销毁重建，确认机制连代码带概念已删），过程照常经
+ * 动作部件播报（「运行命令」行）对用户透明可见。</p>
  */
 @Component
 @Slf4j
@@ -95,18 +90,9 @@ class CoderRunAttempts {
      * 持有的首试 runId，#84——重试不换新锚，本层不再回传末次尝试的内部标识）+ 收口
      * 时的执行体终文（{@code closingText}，成功收口才非 null——生成轨把它当交接
      * 摘要用，#114 片间交接：前片执行体自产的「做了什么/关键文件/下一片须知」即其
-     * 收口终文；修正轨不用）。权限确认超时（#112）同样以失败收场——直接 run-failed
-     * （不进静默重试），与重试超限同锚同事件；如实原因经「已超时」确认卡事件表达
-     * （见 settlePermissions）。
+     * 收口终文；修正轨不用）。
      */
     record RunResult(boolean succeeded, String closingText) {
-    }
-
-    /** 权限确认超时信号（#112）：中断尝试环、直接 run-failed 收口——不复用静默重试。 */
-    private static final class PermissionTimeoutException extends RuntimeException {
-        PermissionTimeoutException(String engineRef) {
-            super("权限确认超时（engineRef=" + engineRef + "）");
-        }
     }
 
     /**
@@ -123,20 +109,17 @@ class CoderRunAttempts {
     private final AgentEventBridge eventBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final GenerationProperties properties;
-    private final RunPermissionAppService permissions;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
-            GenerationProperties properties,
-            RunPermissionAppService permissions, ConversationHistoryAppService conversationHistory,
+            GenerationProperties properties, ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.properties = properties;
-        this.permissions = permissions;
         this.conversationHistory = conversationHistory;
         this.versions = versions;
     }
@@ -229,11 +212,16 @@ class CoderRunAttempts {
                 };
                 List<FileChange> attemptChanges = new ArrayList<>();
                 AgentReply reply = agentClient.converse(command, sink);
+                // 挂起在编码 run 不可达（执行体工具面无 ask_user、命令直通无确认
+                // 自检）——防御即失败：未来给执行体挂上提问工具时立即炸出，不静默
+                // 把挂起轮的部分文本当收口终文
+                if (reply.suspension() != null) {
+                    throw new IllegalStateException(
+                            "编码 run 出现提问挂起（执行体无 ask_user 工具，不可达）：engineRef="
+                                    + reply.suspension().engineRef());
+                }
                 durations.accumulateAndGet(reply.durations(), StageDurations::plus);
                 attemptChanges.addAll(reply.changes());
-                // 权限续跑段终文并入本场 reply（#114 交接摘要取收口终文——续跑后的最终
-                // 文本才是执行体留给下一片的交接，取 converse 原文本会漏续跑段）
-                reply = settlePermissions(command, reply, sink, firstRunId, attemptChanges, durations);
                 runChanges.addAll(attemptChanges);
                 // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
                 // 核验/收口段抛错不重记（attemptAccounted 守卫）
@@ -284,11 +272,6 @@ class CoderRunAttempts {
                     projection.accept(withClosing(pendingFinish.get(), closing));
                 }
                 return new RunResult(true, reply.text());
-            }
-            catch (PermissionTimeoutException e) {
-                // 权限确认超时（#112）：直接 run-failed 收口，不进静默重试（重试同上下文
-                // 同命令必然再挂）——如实原因经「已超时」确认卡事件表达
-                return new RunResult(false, null);
             }
             catch (RuntimeException e) {
                 if (!attemptAccounted) {
@@ -362,8 +345,8 @@ class CoderRunAttempts {
      * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
      * = 按工具名分桶·command 按命令归组嵌套 / 自测 = self-test 委派窗 / 收口尾序 =
      * 探活 + 成版）+ 逐尝试分布（静默重试代价可归因——每次尝试的墙钟与桶各自带）。
-     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、权限作答等待、判据
-     * 未过的核验等）= durationMs；closingMs 含成版而 durationMs 窗口不含（小正
+     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验等）
+     * = durationMs；closingMs 含成版而 durationMs 窗口不含（小正
      * 偏差）——量级不符即埋点有洞（缝测守卫）。
      */
     private static Map<String, Object> durationBreakdown(List<AttemptDuration> attempts,
@@ -433,7 +416,7 @@ class CoderRunAttempts {
                 .equals(event.payload().get(AgentEventTypes.SOURCE_FIELD))) {
             return;
         }
-        if (!ConfirmingShellTool.NAME
+        if (!ShellExecuteTool.NAME
                 .equals(event.payload().get(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD))) {
             return;
         }
@@ -494,76 +477,6 @@ class CoderRunAttempts {
                         "added", entry.getValue()[0],
                         "removed", entry.getValue()[1]))
                 .toList();
-    }
-
-    /**
-     * 权限确认驻留与续跑（#83）：挂起（软终点）即等作答——批准/拒绝以 ConfirmResult
-     * 续跑同 run（命令全要素同构，恢复私货从本环命令原样携带），续跑可再挂起
-     * （一 run 多确认点）。超时（#112）＝作答等待越 10 分钟上限——默认拒绝、发
-     * 「已超时」定格事件后上抛 {@link PermissionTimeoutException} 驱动 run 直接
-     * run-failed 收口（不复用静默重试）。问答挂起在编码 run 不可达（执行体无
-     * ask_user 工具），防御即失败（走尝试环重试，最终 run-failed——不静默错频道）。
-     *
-     * @param userRunId 用户面 run 身份（首试 runId，#84）——挂起会合与作答校验的
-     *                  锚，与投影后事件同锚（前端按所见 runId 作答）
-     * @param changes  本尝试的文件变更观察累积口（#88 收口扩载——续跑段的变更
-     *                 与首段同场，随 attempt 一并计入）
-     * @param durations 本尝试的阶段耗时观察累积口（#111——续跑段的事实与首段
-     *                  跨段合并）
-     */
-    private AgentReply settlePermissions(AgentCommand command, AgentReply reply,
-            Consumer<AgentEvent> sink, String userRunId, List<FileChange> changes,
-            AtomicReference<StageDurations> durations) {
-        while (reply.suspension() != null && reply.suspension().permission()) {
-            AgentSuspension suspension = reply.suspension();
-            RunPermissionAppService.Decision decision = permissions.await(suspension.engineRef(), userRunId);
-            if (decision == RunPermissionAppService.Decision.TIMED_OUT) {
-                // 超时（#112）：默认拒绝、不续跑。先发确认卡「已超时」定格事件
-                // （前端转已超时态、按钮退场——不可作答），再上抛超时信号驱动
-                // run 直接 run-failed 收口（不复用静默重试，重试同上下文必再挂）
-                sink.accept(new AgentEvent(AgentEventTypes.PERMISSION_TIMED_OUT, Map.of(
-                        AgentEventTypes.RUN_FIELD, userRunId,
-                        AgentEventTypes.WAIT_ENGINE_REF_FIELD, suspension.engineRef())));
-                throw new PermissionTimeoutException(suspension.engineRef());
-            }
-            reply = agentClient.resume(permissionResume(command, suspension,
-                    decision == RunPermissionAppService.Decision.APPROVED), sink);
-            changes.addAll(reply.changes());
-            durations.accumulateAndGet(reply.durations(), StageDurations::plus);
-        }
-        if (reply.suspension() != null) {
-            throw new IllegalStateException(
-                    "编码 run 出现提问挂起（执行体无 ask_user 工具，不可达）：engineRef="
-                            + reply.suspension().engineRef());
-        }
-        return reply;
-    }
-
-    /**
-     * 权限作答的续跑请求：命令全要素同构（会话/配置/计量/工作区原样——run 上下文
-     * 不因确认点漂移），ConfirmResult 按批准位重建（拒绝 = confirmed=false，引擎写
-     * DENIED 工具结果回模型）。续跑文本给模型明确的决策反馈与拒绝后的出路
-     * （改道或如实收口），不替模型做决定。
-     */
-    private static AgentResume permissionResume(AgentCommand command, AgentSuspension suspension,
-            boolean approved) {
-        return new AgentResume(
-                command.runId(),
-                command.sessionId(),
-                command.userId(),
-                command.workspaceId(),
-                command.modelString(),
-                command.systemPrompt(),
-                suspension.engineRef(),
-                suspension.toolCalls().stream()
-                        .map(toolCall -> AgentscopeAgentClient.confirmedToolCall(toolCall, approved))
-                        .toList(),
-                approved
-                        ? "用户已批准该操作，请继续执行并完成本轮任务。"
-                        : "用户已拒绝该操作。",
-                command.usageContext(),
-                command.agentKey(),
-                command.workspaceReadOnly());
     }
 
     /**

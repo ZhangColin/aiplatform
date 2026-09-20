@@ -112,6 +112,33 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
   });
 });
 
+describe("WorkMessage · 动作图标封闭表（#226：表键与服务端播报名册字面一致）", () => {
+  it("write_file / edit_file → 文件码图标；execute → 终端图标——命令动作不落兜底锤子", () => {
+    const write = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ toolName: "write_file" })] })} />,
+    );
+    expect(write).toContain("lucide-file-code-corner");
+
+    const edit = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ toolName: "edit_file" })] })} />,
+    );
+    expect(edit).toContain("lucide-file-code-corner");
+
+    const execute = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ toolName: "execute" })] })} />,
+    );
+    expect(execute).toContain("lucide-square-terminal");
+    expect(execute).not.toContain("lucide-hammer");
+  });
+
+  it("表外工具落兜底锤子（封闭表外唯一出口）", () => {
+    const unknown = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [action({ toolName: "read_file" })] })} />,
+    );
+    expect(unknown).toContain("lucide-hammer");
+  });
+});
+
 describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
   it("生成轨道切片：头部「{切片标题}（{index}/{total}）」——取代「正在做」内部视角", () => {
     const html = renderToStaticMarkup(

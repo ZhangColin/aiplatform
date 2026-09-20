@@ -239,7 +239,8 @@ export type PlatformAgentEvent =
        * 事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ started（参数在途，
        * label 通用对象）/ running（参数落定，label 具体对象）/ completed / failed
        * （动作层状态；run 层唯一失败终态仍是 run-failed）；`label` 无时态（时态由
-       * state 表达）。播报工具封闭表：write_file / edit_file / command。
+       * state 表达）。播报工具封闭表：write_file / edit_file / execute（内核 shell
+       * 注册名——非 durationBreakdown 的 command 归组键，两者字面勿混）。
        */
       type: "part-action";
       payload: AgentPayload & {

@@ -28,7 +28,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  * <table border="1">
  *   <caption>AgentScope 事件 → 消息部件事件</caption>
  *   <tr><th>AgentScope 事件</th><th>部件 type</th><th>部件字段</th></tr>
- *   <tr><td>TextBlockDelta（累积切段）</td><td>{@code part-text}</td><td>text（完整段）</td>
+ *   <tr><td>TextBlockDelta（累积切段，机器语法段守卫丢弃——#234）</td><td>{@code part-text}</td><td>text（完整段）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
  *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed（failed 携 error——错误/stderr 首行截断，#229）</td>

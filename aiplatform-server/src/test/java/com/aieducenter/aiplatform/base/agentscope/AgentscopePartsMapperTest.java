@@ -357,6 +357,131 @@ class AgentscopePartsMapperTest {
         }
     }
 
+    /**
+     * 机器语法守卫（#234 叙事段堵漏）：模型以原生工具参数语法（DSML 工具调用标记族）
+     * 直接发射、引擎未识别为工具调用的文本增量，经映射不产生携带该文本的解说部件——
+     * 识别即丢弃（不转译、不挪位到其他面）；正常人话解说不受守卫误伤。活体留痕形态
+     * （2026-09-21 后端 trace）：`<｜｜DSML｜｜tool_calls>…<｜｜DSML｜｜invoke
+     * name="execute">…<｜｜DSML｜｜parameter name="command">docker exec …` ——半角
+     * 角括号 + 全角竖线连打变体，与 canonical 形态同族，均吞。
+     */
+    @Nested
+    class MachineSyntaxGuard {
+
+        /** DSML 块单增量到达：人话前后段照常出段，标记体无任何部件携带（识别即丢弃）。 */
+        @Test
+        void given_dsml_block_between_narration_when_mapped_then_no_part_carries_syntax() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "先跑一遍自测。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
+                            + "<｜DSML｜parameter name=\"command\" string=\"true\">docker exec ws-1 pnpm test"
+                            + "</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>全部通过。"));
+
+            assertThat(texts(parts)).containsExactly("先跑一遍自测。", "全部通过。");
+        }
+
+        /** 标记头跨增量 split：残头从不入段（含 split 当拍的映射结果），拼全后整段吞。 */
+        @Test
+        void given_marker_split_across_deltas_when_mapped_then_head_never_leaks() {
+            List<AgentEvent> first = mapper.map(new TextBlockDeltaEvent("r", "b-1", "看日志确认。<｜DSM"));
+            List<AgentEvent> second = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "L｜tool_calls>\n<｜DSML｜invoke name=\"execute\"></｜DSML｜invoke>\n</｜DSML｜tool_calls>"));
+            List<AgentEvent> third = mapper.map(new TextBlockDeltaEvent("r", "b-1", "收口了。"));
+
+            assertThat(texts(first)).containsExactly("看日志确认。");
+            assertThat(second).isEmpty();
+            assertThat(texts(third)).containsExactly("收口了。");
+        }
+
+        /** 无闭合标记 = 模型脱轨：吞至 run 尾（堵漏优先），drain 不出携带尾段。 */
+        @Test
+        void given_unclosed_dsml_when_drained_then_swallowed_to_run_end() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "开始了。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">"));
+            List<AgentEvent> more = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜DSML｜parameter name=\"command\" string=\"true\">docker exec ws-1 ls"));
+
+            assertThat(texts(parts)).containsExactly("开始了。");
+            assertThat(more).isEmpty();
+            assertThat(mapper.drain()).isEmpty();
+        }
+
+        /** 全角竖线连打变体（活体留痕形态）：同族同吞，后续人话照常。 */
+        @Test
+        void given_doubled_bar_variant_when_mapped_then_swallowed() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"execute\">\n"
+                            + "<｜｜DSML｜｜parameter name=\"command\" string=\"true\">docker exec ws-1 ls"
+                            + "</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>好了。"));
+
+            assertThat(texts(parts)).containsExactly("好了。");
+        }
+
+        /** 人话含角括号与竖线（含全角）：非标记族，守卫不误伤，原样出段。 */
+        @Test
+        void given_plain_narration_with_angle_and_pipes_when_mapped_then_untouched() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "比较 a < b，再数 1｜2｜3 栏 | 末列 |。"));
+
+            assertThat(texts(parts)).containsExactly("比较 a < b，再数 1｜2｜3 栏 | 末列 |。");
+        }
+
+        /** 尾随角括号被活标记头按住：下一增量落定成死文本后整句原样出（不丢字）。 */
+        @Test
+        void given_trailing_angle_when_next_delta_resolves_then_text_intact() {
+            List<AgentEvent> first = mapper.map(new TextBlockDeltaEvent("r", "b-1", "箭头写作 <"));
+            List<AgentEvent> second = mapper.map(new TextBlockDeltaEvent("r", "b-1", "— 像这样。"));
+
+            assertThat(first).isEmpty();
+            assertThat(texts(second)).containsExactly("箭头写作 <— 像这样。");
+        }
+
+        /** 长句硬切挨着标记头：残头按住不随硬切漏出（切出段不含标记片段）。 */
+        @Test
+        void given_hard_cut_next_to_marker_head_when_mapped_then_head_held_back() {
+            String headless = "x".repeat(156);
+            List<AgentEvent> first = mapper.map(new TextBlockDeltaEvent("r", "b-1", headless + "<｜DS"));
+            List<AgentEvent> second = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "ML｜tool_calls></｜DSML｜tool_calls>"));
+
+            assertThat(texts(first)).containsExactly(headless);
+            assertThat(second).isEmpty();
+            assertThat(mapper.drain()).isEmpty();
+        }
+
+        /** 标记起点即段边界：人话余段先出再进动作部件，边界 drain 不带出标记体。 */
+        @Test
+        void given_dsml_then_action_boundary_when_mapped_then_narration_clean() {
+            mapper.map(new TextBlockDeltaEvent("r", "b-1", "正在改配色"));
+            List<AgentEvent> atSyntax = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>"));
+            List<AgentEvent> atAction = mapper.map(new ToolCallStartEvent("r", "tc-g1", "execute"));
+
+            assertThat(texts(atSyntax)).containsExactly("正在改配色");
+            assertThat(types(atAction)).containsExactly(AgentEventTypes.PART_ACTION);
+            assertThat(mapper.drain()).isEmpty();
+        }
+
+        /** 吞段中撞动作边界：drain 空（标记体已被吞），动作部件照常。 */
+        @Test
+        void given_action_boundary_mid_swallow_when_mapped_then_drain_empty() {
+            mapper.map(new TextBlockDeltaEvent("r", "b-1", "<｜DSML｜tool_calls>"));
+            List<AgentEvent> atAction = mapper.map(new ToolCallStartEvent("r", "tc-g2", "execute"));
+
+            assertThat(types(atAction)).containsExactly(AgentEventTypes.PART_ACTION);
+            assertThat(mapper.drain()).isEmpty();
+        }
+
+        private List<String> texts(List<AgentEvent> parts) {
+            // 断言面 = 全部部件的解说文本（无解说部件即空表——DSML 片段出现在任何
+            // 部件文本里都会直接挂掉 containsExactly 比对）
+            return parts.stream()
+                    .map(part -> String.valueOf(
+                            part.payload().getOrDefault(AgentEventTypes.PART_TEXT_FIELD, "")))
+                    .filter(text -> !text.isEmpty())
+                    .toList();
+        }
+    }
+
     @Nested
     class StepsAndBoundaries {
 

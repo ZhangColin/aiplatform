@@ -212,7 +212,7 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("进行中");
   });
 
-  it("编码 run 收口定格留驻（#117）：工作消息在收尾卡之前入流（过程上文、结果下卡）", () => {
+  it("编码 run 收口定格留驻（#117）：工作消息在收尾卡之前入流（过程上文、结果下卡）；活性行随定格沉没（#235）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "把主色调改成绿色" },
       {
@@ -232,7 +232,17 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
       p1: {
         runId: "run-1",
         frozen: true,
-        parts: [{ kind: "text", id: "run-1:3", text: "正在调整全站配色。" }],
+        parts: [
+          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
+          {
+            kind: "action",
+            id: "run-1:4",
+            toolCallId: "tc-1",
+            toolName: "edit_file",
+            state: "running",
+            label: "修改【全局样式】",
+          },
+        ],
       },
     };
 
@@ -242,6 +252,40 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("本轮完成");
     // 定格的工作消息上承意见、下启收尾卡——过程在上、结果卡在下
     expect(html.indexOf("正在调整全站配色。")).toBeLessThan(html.indexOf("本轮完成"));
+    // 收尾卡已入流：活性行随定格沉没——截断动作不留残骸（#235）
+    expect(html).not.toContain("修改【全局样式】");
+    expect(html).not.toContain("animate-pulse");
+  });
+
+  it("编码 run 定格但收尾卡未入流（run-failed 形态）：工作卡留对话流末尾，活性行保留末行（静态）不闪空（#235）", () => {
+    seedChat([
+      { kind: "user", id: "u1", text: "把主色调改成绿色" },
+      { kind: "agent", id: "b1", text: "已接住意见，开始处理。" },
+    ]);
+    seed.works = {
+      p1: {
+        runId: "run-1",
+        frozen: true,
+        parts: [
+          { kind: "text", id: "run-1:3", text: "正在调整全站配色。" },
+          {
+            kind: "action",
+            id: "run-1:4",
+            toolCallId: "tc-1",
+            toolName: "edit_file",
+            state: "running",
+            label: "修改【全局样式】",
+          },
+        ],
+      },
+    };
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    expect(html).toContain("正在调整全站配色。");
+    expect(html).toContain("修改【全局样式】"); // 保留末行
+    expect(html).not.toContain("进行中"); // 静态末行：定格卡不自称在跑
+    expect(html).not.toContain("animate-spin");
   });
 
   it("PRD 修订未认领：输入条上方出「PRD 有更新 · 去看看」胶囊；认领后不渲染", () => {

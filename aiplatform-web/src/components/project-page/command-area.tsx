@@ -83,7 +83,8 @@ export function CommandArea({
   const work = useWorkMessageStore((s) => s.works[projectId]);
   // 工作消息插入锚（#117「过程上文、结果下卡」）：定格留驻的工作消息插在本 run
   // 收尾卡之前——上承本轮意见、下启收尾卡；-1 = 无本 run 收尾卡（生长中 /
-  // run-failed），留对话流末尾。
+  // run-failed），留对话流末尾。锚位即活性行沉没信号（#235：收尾卡入流 → 末行
+  // 随定格沉没；未入流＝保留末行）
   const workAnchorIndex = work
     ? messages.findIndex(
         (message) => message.kind === "closing" && message.runId === work.runId,
@@ -178,7 +179,7 @@ export function CommandArea({
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} plan={plan} />
+              <WorkMessage work={work} plan={plan} closingArrived />
             ) : null}
             <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (

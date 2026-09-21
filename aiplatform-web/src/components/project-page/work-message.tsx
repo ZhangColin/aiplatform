@@ -18,25 +18,35 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
 
 /**
  * 成功无痕投影（#230）：completed 动作不产生静态条目——滤除只在呈现层（store 部件
- * 流水仍收全量，「store 不裁事件」口径不变）；failed 动作留红行；started/running
- * 动作只在当前动作行（最近发起的非终态动作锚定：直播行始终是「现在」——story15
- * 并发取最近发起的一条，被更新动作取代的未终态动作沉没）；定格后未终态动作随收口沉没——
- * run 已收口即无「进行中」，改了什么归收尾卡变更清单（排障抓手＝失败痕＋收尾卡）。
- * 读类工具不播报的封闭表口径在服务端/桥（part-action 事件已过滤只读工具），本投影不涉。
+ * 流水仍收全量，「store 不裁事件」口径不变）；failed 动作留红行。直播中的
+ * started/running 动作不进正文（#235 常驻活性行：直播行是唯一实时状态行，归卡片
+ * 底部活性行——动作起灭不推挤正文，稳定判据＝不闪不跳）。读类工具不播报的封闭表
+ * 口径在服务端/桥（part-action 事件已过滤只读工具），本投影不涉。
  */
-export function presentWorkParts(parts: WorkPart[], frozen: boolean): WorkPart[] {
-  // 当前动作行锚＝最近发起的 started/running 动作（story15 并发取最近发起的一条；
-  // 其后收尾的终态动作不夺走仍在跑的直播行）；定格后无「进行中」、未终态动作沉没。
-  const liveIndex = frozen
-    ? -1
-    : parts.findLastIndex(
-        (part) => part.kind === "action" && (part.state === "started" || part.state === "running"),
-      );
-  return parts.filter((part, index) => {
-    if (part.kind !== "action") return true;
-    if (part.state === "failed") return true; // 失败留痕（红行）
-    return index === liveIndex; // 当前动作行（最近发起的非终态动作）
-  });
+export function presentWorkParts(parts: WorkPart[]): WorkPart[] {
+  return parts.filter((part) => part.kind !== "action" || part.state === "failed");
+}
+
+/**
+ * 活性行三态（#235 唯一实时状态行；输入＝store 原始部件，非正文投影）：
+ * 末位动作失败＝红字变体（失败破例优先——停滚提示压过仍在跑的并发动作）；否则
+ * 最近发起的 started/running 动作＝命令原值 label 滚动（story15 并发取最近发起的
+ * 一条）；动作间隙（无在跑动作）＝无字打字点。
+ */
+export type WorkActivity =
+  | { kind: "failed" }
+  | { kind: "action"; part: Extract<WorkPart, { kind: "action" }> }
+  | { kind: "idle" };
+
+export function activityOf(parts: WorkPart[]): WorkActivity {
+  const actions = parts.filter(
+    (part): part is Extract<WorkPart, { kind: "action" }> => part.kind === "action",
+  );
+  if (actions.at(-1)?.state === "failed") return { kind: "failed" };
+  const live = actions.findLast(
+    (part) => part.state === "started" || part.state === "running",
+  );
+  return live ? { kind: "action", part: live } : { kind: "idle" };
 }
 
 /** 失败痕判定（#225 失败破例的部件级口径：failed 红行不埋进坍缩、常驻展开红显）。 */
@@ -50,7 +60,7 @@ export type WorkBody = {
   earlier: WorkPart[];
   /** 坍缩行计数（更早区解说/自检段数——失败红行不进坍缩行）。 */
   collapsedCount: number;
-  /** 尾部活动区：当前动作行（或最近失败红行）+ ≤2 句前展解说 + 其后自检恒留、解说 ≤2 句。 */
+  /** 尾部活动区：最近失败红行（锚）+ ≤2 句前展解说 + 其后自检恒留、解说 ≤2 句；直播动作不在此（归活性行）。 */
   tail: WorkPart[];
 };
 
@@ -58,12 +68,12 @@ export type WorkBody = {
 const TAIL_TEXT_QUOTA = 2;
 
 /**
- * 呈现部件 → 混合坍缩分区（#225 纯呈现聚合；#230 输入改为成功无痕投影后的部件）：
- * 尾部 = 最后一个动作部件（当前动作行／最近失败红行）+ 其后至多 2 句解说（自检行
- * 恒留）+ 其前 ≤2 个连续解说段（「当前动作行＋最近一两句解说」常驻可见、卡片高度
- * 有界——收口前的多句交接叙事折进更早区）；其余进更早区坍缩（完整回看时全量原序
- * 展开，事件不裁剪）。无动作部件（成功沉没后的纯解说常态）= 尾部取最后两段。更早
- * 区中的失败红行由渲染层提为破例面（常驻展开红显）。
+ * 呈现部件 → 混合坍缩分区（#225 纯呈现聚合；#230 输入改为成功无痕投影后的部件；
+ * #235 起直播动作不进正文——锚点即最近失败红行）：尾部 = 最后一个失败红行（无则
+ * 纯解说取末两段）+ 其后至多 2 句解说（自检行恒留）+ 其前 ≤2 个连续解说段（「最近
+ * 一两句解说」常驻可见、卡片高度有界——收口前的多句交接叙事折进更早区）；其余进
+ * 更早区坍缩（完整回看时全量原序展开，事件不裁剪）。更早区中的失败红行由渲染层
+ * 提为破例面（常驻展开红显）。
  */
 export function splitWorkBody(parts: WorkPart[]): WorkBody {
   if (parts.length === 0) {
@@ -119,27 +129,38 @@ export function planCurrentOrd(
 }
 
 /**
- * 生长中的工作消息——恒定高度直播进度卡（#225 呈现改版；形态同 #68 原型已验证
- * 形的演进）：自上而下三段——①计划区（生成轨道片清单常驻：✓ 已收口 / ● 当前〔
+ * 生长中的工作消息——直播进度卡（#225 呈现改版；形态同 #68 原型已验证
+ * 形的演进；稳定判据＝不闪、不跳、不无意义震荡、高度随内容长〔#235 D3，
+ * 「恒定高度」说法退役〕）：自上而下三段——①计划区（生成轨道片清单常驻：✓ 已收口 / ● 当前〔
  * run-start 切片序驱动〕/ ○ 待跑 / ✗ 失败，REST 只读透出）＋②头部活性（#118
  * 切片标题 + run 级「已运行 mm:ss」跳动时钟〔ADR-0010 窄修订：锚 run-start 信封
  * ts，收口定格〕）＋③正文混合坍缩（#230 成功无痕：动作组折叠退役、成功动作不产
- * 生静态条目——静态面＝解说段＋失败红行；尾部活动区常驻当前动作行＋最近一两句
- * 解说，更早内容坍缩为「⋯ 更早 N 项」点击回看——组成＝解说段＋失败痕；失败破
- * 例：失败红行不埋进坍缩、常驻展开红显）。零散维护需求（无切片上下文）不渲染
- * 计划区、不伪造计划；无切片标题回落「正在做」。思考与代码不播、无逐步耗时/
- * 百分比；run 开始即出现，成功收口原地定格留驻（#117：部件保留、只读，收尾卡随
- * 后入流——「过程上文、结果下卡」），失败定格（run-failed）流水留驻。定格时进行
- * 中动作随收口沉没、无成功残骸（story16「结束瞬间无界面跳变」承 #117 口径：卡片
- * 不清空不消失，叙事＋失败痕即终形）。
+ * 生静态条目——静态面＝解说段＋失败红行；尾部活动区常驻最近一两句解说，更早内
+ * 容坍缩为「⋯ 更早 N 项」点击回看；失败破例：失败红行不埋进坍缩、常驻展开红显）
+ * ＋④常驻活性行（#235：直播行＝唯一实时状态行，全程常驻不消失——动作在跑＝
+ * 命令原值 label 滚动、间隙＝无字打字点、失败＝红字变体；收口保留末行直到收尾卡
+ * 入流，随后随定格沉没。稳定判据＝不闪、不跳、不无意义震荡）。零散维护需求（无
+ * 切片上下文）不渲染计划区、不伪造计划；无切片标题回落「正在做」。思考与代码不
+ * 播、无逐步耗时/百分比；run 开始即出现，成功收口原地定格留驻（#117：部件保留、
+ * 只读，收尾卡随后入流——「过程上文、结果下卡」），失败定格（run-failed）流水
+ * 留驻。定格时进行中动作不立即沉没（#235 保留末行衔接），收尾卡入流后活性行退场——
+ * 终形无成功残骸（story16「结束瞬间无界面跳变」承 #117 口径：卡片不清空不消失，
+ * 叙事＋失败痕即终形）。
  */
 export function WorkMessage({
   work,
   plan,
+  closingArrived = false,
 }: {
   work: WorkSnapshot;
   /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
   plan?: GenerationSegmentFact[] | null;
+  /**
+   * 本 run 收尾卡已入流（#235 活性行沉没锚：同 runId closing 消息已在对话流——
+   * 「过程上文、结果下卡」接力完成，活性行随定格沉没；未入流 = 定格后保留末行，
+   * run-failed 无收尾卡即留驻终形）。缺省 false（装配层未供给时保守保留）。
+   */
+  closingArrived?: boolean;
 }) {
   const growing = !work.frozen;
 
@@ -149,8 +170,10 @@ export function WorkMessage({
 
   const currentOrd = planCurrentOrd(work.slice, plan);
   const showPlan = !!plan && plan.length > 0 && currentOrd != null;
-  const body = splitWorkBody(presentWorkParts(work.parts, work.frozen));
-  const failed = latestActionOf(work.parts)?.state === "failed";
+  const body = splitWorkBody(presentWorkParts(work.parts));
+  const activity = activityOf(work.parts);
+  // 活性行常驻（#235）：生长中恒在；定格后保留末行直到收尾卡入流（衔接窗无跳变）
+  const showActivity = growing || !closingArrived;
 
   return (
     // 无角色标签（界面只有一个「它」）；生长中带轻浮层感，定格回落为普通卡片
@@ -171,18 +194,52 @@ export function WorkMessage({
         <ElapsedClock startedAt={work.startedAt} endedAt={work.endedAt} active={growing} />
       </div>
       <WorkBodyRows body={body} frozen={work.frozen} />
-      {growing ? (
-        failed ? (
-          // 失败破例（#225 story10）：滚动行停滚并转红色——不再误以为正常推进
-          <div className="mt-2 flex items-center gap-2 text-[13px] text-destructive">
-            <X className="size-3.5 shrink-0" /> 刚才的动作没做成，正在处理
-          </div>
-        ) : (
-          <div className="mt-2 flex items-center gap-2 text-[13px] text-muted-foreground">
-            <TypingDots /> 正在干活…
-          </div>
-        )
-      ) : null}
+      {showActivity ? <ActivityLine activity={activity} live={growing} /> : null}
+    </div>
+  );
+}
+
+/**
+ * 常驻活性行（#235 唯一实时状态行）：三态同槽换装——动作在跑＝命令原值 label
+ * 滚动（#228 剥壳／定宽截断语义在服务端，本行逐字渲染＋单行 truncate 兜底）；
+ * 间隙＝无字打字点（「正在干活…」字样行已退役）；失败＝红字变体（#225 story10
+ * 「刚才的动作没做成，正在处理」语义沿用）。三态同高（py-1.5 + 20px 行高预算），
+ * 换装不跳行。定格保留末行时静态呈现（live=false：不转圈、不跳动——定格卡不
+ * 自称在跑）。
+ */
+function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolean }) {
+  if (activity.kind === "failed") {
+    // 失败破例（#225 story10）：滚动行停滚并转红色——不再误以为正常推进
+    return (
+      <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm text-destructive">
+        <X className="size-3.5 shrink-0" /> 刚才的动作没做成，正在处理
+      </div>
+    );
+  }
+  if (activity.kind === "action") {
+    const { part } = activity;
+    return (
+      <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm">
+        <span className="shrink-0 text-muted-foreground">
+          {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
+        </span>
+        <span className={cn("min-w-0 flex-1 truncate", !live && "text-muted-foreground")}>
+          {part.label}
+        </span>
+        {live ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <Spinner className="size-3" /> 进行中
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  // 间隙＝无字打字点（h-5 对齐三态行高，换装不跳）
+  return (
+    <div className="mt-1 flex items-center px-1 py-1.5">
+      <span className="flex h-5 items-center">
+        <TypingDots live={live} />
+      </span>
     </div>
   );
 }
@@ -218,7 +275,7 @@ function WorkBodyRows({ body, frozen }: { body: WorkBody; frozen: boolean }) {
   );
 }
 
-/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 当前动作行 / 失败红行（成功无痕，#230）。 */
+/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 失败红行（成功无痕 #230；进行中动作归活性行 #235，不进正文）。 */
 function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
   if (part.kind === "text") {
     return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
@@ -270,14 +327,12 @@ function CheckRow({
 }
 
 /**
- * 单行动作行（#230 成功无痕投影后仅两态可达——completed 已滤除、定格截断的未终态
- * 已沉没）：进行中 = 当前动作行（转圈直播 label，#228 命令原值）；失败 = 红行
- * （label＋「没做成」＋错误副行 #229 失败留痕——排障不进容器即可初判原因；恒定
- * 高度对失败破例让位〔#225 破例语义：事故不被埋掉〕）。逐步耗时已退役
- * （#115/ADR-0010：不显示动作时长）。
+ * 失败红行（正文静态面唯一的动作条目，#230 成功无痕 + #229 失败留痕）：label＋
+ * 「没做成」＋错误副行（排障不进容器即可初判原因；高度有界对失败破例让位〔#225
+ * 破例语义：事故不被埋掉〕）。进行中动作不进正文——直播归常驻活性行（#235）。
+ * 逐步耗时已退役（#115/ADR-0010：不显示动作时长）。
  */
 function ActionRow({ part }: { part: Extract<WorkPart, { kind: "action" }> }) {
-  const failed = part.state === "failed";
   return (
     <div>
       <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
@@ -285,20 +340,12 @@ function ActionRow({ part }: { part: Extract<WorkPart, { kind: "action" }> }) {
           {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
         </span>
         {/* 单行截断（#228）：长命令优雅截断不换行撑高——卡片宽度恒定（#225 story8）； */}
-        <span className={cn("min-w-0 flex-1 truncate", failed && "text-muted-foreground")}>
-          {part.label}
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{part.label}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
+          <X className="size-3.5" strokeWidth={3} /> 没做成
         </span>
-        {failed ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
-            <X className="size-3.5" strokeWidth={3} /> 没做成
-          </span>
-        ) : (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <Spinner className="size-3" /> 进行中
-          </span>
-        )}
       </div>
-      {failed && part.error ? (
+      {part.error ? (
         // 错误副行：与 label 同行宽截断（服务端已首行截断，此处行内样式兜底），
         // 左缩进与 label 起点对齐（px-1 + 图标 14px + gap-2）
         <div className="px-1 pb-1.5 pl-[22px] text-xs leading-relaxed text-destructive/90">
@@ -309,7 +356,7 @@ function ActionRow({ part }: { part: Extract<WorkPart, { kind: "action" }> }) {
   );
 }
 
-/** 计划区行高预算（恒定高度：清单超出行数内滚，当前片滚入视口）。 */
+/** 计划区行高预算（清单超出行数内滚，当前片滚入视口——计划区不撑高卡片）。 */
 const PLAN_MAX_ROWS = 3;
 /** 计划区单行像素高（行距 26px，+2 为容器边框）。 */
 const PLAN_ROW_PX = 26;
@@ -413,13 +460,6 @@ export function formatClock(ms: number): string {
   return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 }
 
-/** 最新动作部件（尾部活动/滚动行的判定输入；无动作 = undefined）。 */
-function latestActionOf(
-  parts: WorkPart[],
-): Extract<WorkPart, { kind: "action" }> | undefined {
-  return parts.findLast((part) => part.kind === "action");
-}
-
 /** 工作消息头部文案（#118）：切片标题 + 生成轨道进度；无切片信息回落「正在做」。 */
 function workHeading(slice?: WorkSlice): string {
   if (!slice?.title) return "正在做";
@@ -439,14 +479,15 @@ function WorkingDot() {
   );
 }
 
-function TypingDots() {
+/** 打字点活动指示（#235 无字间隙态；live=false＝定格保留末行的静态呈现——定格卡不跳动）。 */
+function TypingDots({ live }: { live: boolean }) {
   return (
     <span className="inline-flex gap-1">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60"
-          style={{ animationDelay: `${i * 0.2}s` }}
+          className={cn("size-1.5 rounded-full bg-muted-foreground/60", live && "animate-pulse")}
+          style={live ? { animationDelay: `${i * 0.2}s` } : undefined}
         />
       ))}
     </span>

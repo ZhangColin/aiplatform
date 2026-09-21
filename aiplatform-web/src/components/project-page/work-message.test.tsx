@@ -6,6 +6,7 @@ import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
 
 import {
   WorkMessage,
+  activityOf,
   formatClock,
   formatDuration,
   planCurrentOrd,
@@ -38,12 +39,102 @@ function segment(overrides: Partial<GenerationSegmentFact> = {}): GenerationSegm
   return { ord: 1, description: "用户能注册登录", status: "pending", ...overrides };
 }
 
+describe("WorkMessage · 常驻活性行（#235：直播行＝唯一实时状态行，全程常驻不消失）", () => {
+  it("动作在跑：活性行＝命令原值 label（单行截断）——恰好一条，无独立「正在干活」字样行", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            { kind: "text", id: "t0", text: "开始联调。" },
+            action({ id: "a1", toolCallId: "t1", toolName: "execute", state: "running", label: "npm run dev" }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("npm run dev");
+    expect(html.match(/npm run dev/g)).toHaveLength(1); // 唯一实时状态行——直播行不重复占位
+    expect(html).toContain("进行中");
+    expect(html.match(/进行中/g)).toHaveLength(1);
+    expect(html).not.toContain("正在干活"); // 独立字样行退役
+    expect(html).not.toContain("animate-pulse"); // 动作在跑不出打字点
+    expect(html).toContain("min-w-0 flex-1 truncate"); // 单行截断不回归（#228）
+  });
+
+  it("动作间隙（agent 思考中）：活性行＝无字打字点活动指示——行在、无字", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            { kind: "text", id: "t0", text: "开始联调。" },
+            action({ id: "a1", toolCallId: "t1", toolName: "execute", label: "npm run dev" }), // completed 成功无痕
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("animate-pulse"); // 打字点活动指示
+    expect(html).not.toContain("正在干活"); // 无字——字样退役
+    expect(html).not.toContain("进行中");
+    expect(html).not.toContain("npm run dev"); // 完成的动作沉没（成功无痕），不是「行消失」
+  });
+
+  it("动作起灭正文不动：同一动作 进行中→完成 两帧间，解说段与活性行位不增不减", () => {
+    const parts = (state: "running" | "completed"): WorkPart[] => [
+      { kind: "text", id: "t0", text: "先装依赖。" },
+      action({ id: "a1", toolCallId: "t1", toolName: "execute", state, label: "pnpm install" }),
+      { kind: "text", id: "t1", text: "依赖就绪。" },
+    ];
+
+    const running = renderToStaticMarkup(<WorkMessage work={work({ parts: parts("running") })} />);
+    const done = renderToStaticMarkup(<WorkMessage work={work({ parts: parts("completed") })} />);
+
+    for (const html of [running, done]) {
+      expect(html).toContain("先装依赖。");
+      expect(html).toContain("依赖就绪。"); // 正文两帧一致——直播行不进正文、起灭不推挤
+    }
+    // 活性行恒在：在跑帧＝label，完成帧＝打字点（间隙），全程恰好一条
+    expect(running).toContain("pnpm install");
+    expect(running).not.toContain("animate-pulse");
+    expect(done).not.toContain("pnpm install");
+    expect(done).toContain("animate-pulse");
+  });
+
+  it("动作失败：活性行＝红字变体「刚才的动作没做成，正在处理」（语义沿用）——打字点退场", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({
+              id: "a1",
+              toolCallId: "t1",
+              toolName: "execute",
+              state: "failed",
+              label: "npm install",
+              error: "npm err! 404",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html.match(/刚才的动作没做成，正在处理/g)).toHaveLength(1); // 红字变体唯一一条
+    expect(html).not.toContain("正在干活");
+    expect(html).not.toContain("animate-pulse");
+    // 失败红行（label＋error 留痕，#229）不回归
+    expect(html).toContain("npm install");
+    expect(html).toContain("npm err! 404");
+    expect(html).toContain("没做成");
+  });
+});
+
 describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态呈现）", () => {
-  it("run 开始即出现：空部件的生长中消息出「正在做」头部与打字点，无部件行", () => {
+  it("run 开始即出现：空部件的生长中消息出「正在做」头部与无字打字点（#235 间隙活性指示），无部件行", () => {
     const html = renderToStaticMarkup(<WorkMessage work={work()} />);
 
     expect(html).toContain("正在做");
-    expect(html).toContain("正在干活…");
+    expect(html).toContain("animate-pulse"); // 打字点（无字）
+    expect(html).not.toContain("正在干活"); // 独立字样行退役（#235）
   });
 
   it("部件序列呈现：解说段 + 动作卡对象短语（无步骤分组、无过程耗时）", () => {
@@ -93,7 +184,7 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
     expect(done).not.toContain("lucide-check");
   });
 
-  it("收口定格：打字点退场、叙事留驻；定格截断的未终态动作随收口沉没——无「进行中」残骸（#230）", () => {
+  it("收口保留末行（#235）：定格瞬间活性行不闪空——末行静态保留（不转圈、无「进行中」、打字点不跳），叙事留驻", () => {
     const html = renderToStaticMarkup(
       <WorkMessage
         work={work({
@@ -106,13 +197,34 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
       />,
     );
 
-    expect(html).not.toContain("正在做");
-    expect(html).not.toContain("正在干活…");
+    expect(html).not.toContain("正在做"); // 定格：头部脉冲与「正在做」回落退场
+    expect(html).toContain("订单管理完成"); // 叙事留驻
+    expect(html).toContain("编写【订单管理】"); // 活性行保留末行（run 收口 → 收尾卡入流的衔接窗）
+    expect(html).not.toContain("进行中"); // 静态末行：定格卡不自称在跑
+    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
+  });
+
+  it("收尾卡入流后活性行随定格沉没（#235）：截断的未终态动作无「进行中」残骸——终形＝叙事＋失败痕（#230 story16 沉没锚修订）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        closingArrived
+        work={work({
+          frozen: true,
+          parts: [
+            { kind: "text", id: "run-1:2", text: "订单管理完成" },
+            action({ id: "a1", toolCallId: "t1", state: "running" }),
+          ],
+        })}
+      />,
+    );
+
     expect(html).toContain("订单管理完成");
-    // run 已收口即无「进行中」：截断动作沉没（结果归收尾卡变更清单），不留转圈不带时长
+    // 收尾卡接力完成：截断动作沉没（结果归收尾卡变更清单），不留转圈不带时长
     expect(html).not.toContain("编写【订单管理】");
     expect(html).not.toContain("进行中");
     expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse"); // 打字点同步沉没
     expect(html).not.toContain("秒");
   });
 
@@ -295,7 +407,6 @@ describe("WorkMessage · 成功无痕（#230：动作组退役，静态面＝叙
         work={work({
           parts: [
             { kind: "text", id: "t0", text: "开始。" },
-            { kind: "text", id: "t1", text: "装依赖。" },
             action({
               id: "a1",
               toolCallId: "tc1",
@@ -304,30 +415,39 @@ describe("WorkMessage · 成功无痕（#230：动作组退役，静态面＝叙
               label: "npm install",
               error: "npm err! code ELIFECYCLE",
             }),
-            { kind: "text", id: "t2", text: "换个镜像源重装。" },
+            { kind: "text", id: "t1", text: "换个镜像源重装。" },
+            { kind: "text", id: "t2", text: "重装成功。" },
             action({
               id: "a2",
               toolCallId: "tc2",
               toolName: "execute",
-              state: "running",
-              label: "npm install --registry=https://registry.npmmirror.com",
+              state: "failed",
+              label: "npm test",
+              error: "1 test failed",
             }),
+            { kind: "text", id: "t3", text: "修脚本。" },
+            { kind: "text", id: "t4", text: "再跑一遍。" },
           ],
         })}
       />,
     );
 
-    // 失败红行常驻（label＋error，承接 #229 T2 形态），未展开也可见
+    // 更早区失败红行常驻（label＋error，承接 #229 T2 形态），未展开也可见
     expect(html).toContain("npm install");
     expect(html).toContain("npm err! code ELIFECYCLE");
-    expect(html).toContain("没做成");
-    // 坍缩行只数解说段（两句更早解说），失败痕不进计数
-    expect(html).toContain("更早 2 项");
+    // 坍缩行只数解说段（更早区＝1 句解说＋1 条失败痕，失败痕不进计数）
+    expect(html).toContain("更早 1 项");
+    // 最新失败红行在尾部锚定（label＋error），活性行转红字变体（唯一一条）
+    expect(html).toContain("npm test");
+    expect(html).toContain("1 test failed");
+    expect(html.match(/没做成/g)).toHaveLength(3); // 两条失败痕徽标各一＋活性行红字变体含其一
+    expect(html.match(/刚才的动作没做成，正在处理/g)).toHaveLength(1);
   });
 
-  it("定格形态（run-finish 后）无成功动作残骸（story16）：成功/截断动作沉没，失败红行与叙事留驻", () => {
+  it("定格形态（收尾卡入流后）无成功动作残骸（story16）：成功/截断动作沉没，失败红行与叙事留驻", () => {
     const html = renderToStaticMarkup(
       <WorkMessage
+        closingArrived
         work={work({
           frozen: true,
           parts: [
@@ -349,7 +469,7 @@ describe("WorkMessage · 成功无痕（#230：动作组退役，静态面＝叙
     );
 
     expect(html).not.toContain("编写【列表页】"); // 成功动作沉没
-    expect(html).not.toContain("编写【订单页】"); // 定格截断的未终态动作沉没
+    expect(html).not.toContain("编写【订单页】"); // 定格截断的未终态动作随活性行沉没（#235：沉没锚＝收尾卡入流）
     expect(html).not.toContain("进行中");
     expect(html).toContain("npm test"); // 失败红行留驻
     expect(html).toContain("1 test failed");
@@ -381,9 +501,10 @@ describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
     expect(html).toContain("正在做");
   });
 
-  it("定格留驻：标题与冻结时钟保形（story12 结束瞬间无跳变），脉冲点与打字点退场", () => {
+  it("定格留驻（收尾卡入流后终形）：标题与冻结时钟保形（story12 结束瞬间无跳变），脉冲点与活性行退场", () => {
     const html = renderToStaticMarkup(
       <WorkMessage
+        closingArrived
         work={work({
           frozen: true,
           startedAt: 1_758_000_000_000,
@@ -397,7 +518,7 @@ describe("WorkMessage · 头部标题（#118 切片标题与进度）", () => {
     expect(html).toContain("商品浏览（2/5）");
     expect(html).toContain("已运行 01:05"); // 时钟定格在收口信封 ts（#225）
     expect(html).not.toContain("animate-ping"); // 脉冲点退场
-    expect(html).not.toContain("正在干活…");
+    expect(html).not.toContain("animate-pulse"); // 活性行随定格沉没（#235）
     expect(html).toContain("写好了。");
   });
 });
@@ -548,7 +669,7 @@ describe("WorkMessage · 定格收口（#117：原地定格留驻，收尾卡归
     expect(html).not.toContain("本轮完成"); // 卡本体归 chat store（CommandArea 渲染）
   });
 
-  it("失败定格（run-failed）：失败红行留驻、不出收尾卡；成功动作无痕（#230）", () => {
+  it("失败定格（run-failed）：失败红行留驻、不出收尾卡；成功动作无痕（#230）；无收尾卡可接力——活性行末行红字留驻（#235）", () => {
     const html = renderToStaticMarkup(
       <WorkMessage
         work={work({
@@ -565,6 +686,10 @@ describe("WorkMessage · 定格收口（#117：原地定格留驻，收尾卡归
     expect(html).not.toContain("编写【订单管理】"); // 成功动作沉没
     expect(html).toContain("执行【起服务】"); // 失败红行留驻
     expect(html).toContain("没做成");
+    // run-failed 无收尾卡入流——活性行保留末行（红字变体静态留驻，恢复出口归生成面）
+    expect(html).toContain("刚才的动作没做成，正在处理");
+    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain("animate-pulse");
   });
 });
 
@@ -576,74 +701,82 @@ describe("收尾卡「用时」格式（用户语言，整秒）", () => {
   });
 });
 
-describe("presentWorkParts · 成功无痕投影（#230：滤除只在呈现层，store 部件流水不动）", () => {
-  it("completed 动作沉没；解说/自检全保留；failed 留红行", () => {
+describe("presentWorkParts · 成功无痕投影（#230 静态面＝叙事＋失败痕；#235 直播动作归活性行、不进正文）", () => {
+  it("completed 与进行中动作皆不进正文；解说/自检全保留；failed 留红行", () => {
     const parts: WorkPart[] = [
       { kind: "text", id: "1", text: "开始写。" },
-      action({ id: "2", toolCallId: "t1", label: "编写【A】" }),
+      action({ id: "2", toolCallId: "t1", label: "编写【A】" }), // completed 沉没
       action({ id: "3", toolCallId: "t2", toolName: "execute", state: "failed", label: "npm test" }),
-      { kind: "check", id: "4", state: "checking" },
+      action({ id: "4", toolCallId: "t3", state: "running", label: "编写【B】" }), // 直播归活性行
+      { kind: "check", id: "5", state: "checking" },
     ];
 
-    expect(presentWorkParts(parts, false).map((p) => p.id)).toEqual(["1", "3", "4"]);
+    expect(presentWorkParts(parts).map((p) => p.id)).toEqual(["1", "3", "5"]);
   });
 
-  it("末位动作锚定当前动作行：started/running 的末位动作保留（生长中）；被更新动作取代的进行中动作沉没", () => {
+  it("正文投影与定格无关：同一部件集生长/收口同面（定格形态差全归活性行沉没锚，#235）", () => {
     const parts: WorkPart[] = [
       action({ id: "1", toolCallId: "t1", state: "running", label: "编写【A】" }),
-      action({ id: "2", toolCallId: "t2", state: "running", label: "npm test" }),
+      action({ id: "2", toolCallId: "t2", state: "failed", label: "npm test" }),
     ];
 
-    expect(presentWorkParts(parts, false).map((p) => p.id)).toEqual(["2"]);
+    expect(presentWorkParts(parts).map((p) => p.id)).toEqual(["2"]);
   });
 
-  it("终态动作不夺走直播行：末位动作已收尾、更早动作仍在跑 → 当前动作行锚定仍在跑的动作（#227 决定 5）", () => {
+  it("空部件 → 空呈现", () => {
+    expect(presentWorkParts([])).toEqual([]);
+  });
+});
+
+describe("activityOf · 活性行三态推导（#235：唯一实时状态行）", () => {
+  it("末位动作失败 → 红字变体（失败破例：停滚提示压过仍在跑的并发动作）", () => {
+    const parts: WorkPart[] = [
+      action({ id: "1", toolCallId: "t1", state: "running", label: "编写【A】" }),
+      action({ id: "2", toolCallId: "t2", toolName: "execute", state: "failed", label: "npm test" }),
+    ];
+
+    expect(activityOf(parts)).toEqual({ kind: "failed" });
+  });
+
+  it("动作在跑 → label 态；并发取最近发起的一条（story15 直播行＝「现在」）", () => {
+    const parts: WorkPart[] = [
+      action({ id: "1", toolCallId: "t1", state: "running", label: "编写【A】" }),
+      action({ id: "2", toolCallId: "t2", toolName: "execute", state: "running", label: "npm test" }),
+    ];
+
+    expect(activityOf(parts)).toMatchObject({ kind: "action", part: { id: "2" } });
+  });
+
+  it("终态动作不夺走直播行：末位动作已收尾、更早动作仍在跑 → 锚定仍在跑的动作（#227 决定 5）", () => {
     const parts: WorkPart[] = [
       action({ id: "1", toolCallId: "t1", state: "running", label: "npm run dev" }),
       action({ id: "2", toolCallId: "t2", label: "npm test" }),
     ];
 
-    expect(presentWorkParts(parts, false).map((p) => p.id)).toEqual(["1"]);
+    expect(activityOf(parts)).toMatchObject({ kind: "action", part: { id: "1" } });
   });
 
-  it("定格（run-finish / run-failed 后）：未终态动作随收口沉没，失败红行留驻", () => {
-    const parts: WorkPart[] = [
-      action({ id: "1", toolCallId: "t1", label: "编写【A】" }),
-      action({ id: "2", toolCallId: "t2", state: "failed", label: "npm test" }),
-      action({ id: "3", toolCallId: "t3", state: "running", label: "编写【B】" }),
-    ];
-
-    expect(presentWorkParts(parts, true).map((p) => p.id)).toEqual(["2"]);
-  });
-
-  it("末位动作 completed：无当前动作行（纯叙事静态面）", () => {
-    const parts: WorkPart[] = [
-      { kind: "text", id: "1", text: "写好了。" },
-      action({ id: "2", toolCallId: "t1" }),
-    ];
-
-    expect(presentWorkParts(parts, false).map((p) => p.id)).toEqual(["1"]);
-  });
-
-  it("空部件 → 空呈现", () => {
-    expect(presentWorkParts([], false)).toEqual([]);
+  it("无在跑动作（纯解说／动作全收尾／空部件）→ 间隙打字点", () => {
+    expect(activityOf([{ kind: "text", id: "1", text: "写好了。" }]).kind).toBe("idle");
+    expect(activityOf([action({ id: "2", toolCallId: "t1" })]).kind).toBe("idle");
+    expect(activityOf([]).kind).toBe("idle");
   });
 });
 
-describe("splitWorkBody · 混合坍缩投影（#225 尾部活动区常驻；#230 组退役后以部件为段）", () => {
-  it("长解说流水：更早段坍缩（计数＝解说段数）、尾部 = 当前动作行 + ≤2 句前展解说；分区无损", () => {
+describe("splitWorkBody · 混合坍缩投影（#225 尾部活动区常驻；#230 组退役后以部件为段；#235 直播动作归活性行）", () => {
+  it("长解说流水：更早段坍缩（计数＝解说段数）、尾部＝最近两句解说——直播动作不进正文、起灭不推挤分区；分区无损", () => {
     const parts: WorkPart[] = [
       ...Array.from({ length: 6 }, (_, i) => ({ kind: "text", id: `t${i}`, text: `解说${i}。` } as WorkPart)),
       action({ id: "a1", toolCallId: "tc1", state: "running", label: "npm test" }),
     ];
-    const present = presentWorkParts(parts, false);
+    const present = presentWorkParts(parts);
     const body = splitWorkBody(present);
 
-    expect(body.collapsedCount).toBeGreaterThan(0);
-    // 坍缩区组成＝解说段（呈现序列无成功动作残骸）
+    expect(present).toHaveLength(6); // 直播动作不进正文（活性行承载）
+    expect(body.collapsedCount).toBe(4);
+    // 坍缩区组成＝解说段（呈现序列无成功/直播动作条目）
     expect(body.earlier.every((p) => p.kind === "text")).toBe(true);
-    expect(body.tail).toHaveLength(3); // ≤2 前展解说 + 当前动作行
-    expect(body.tail.at(-1)?.kind).toBe("action"); // 尾部含当前动作行
+    expect(body.tail.map((p) => p.id)).toEqual(["t4", "t5"]); // 尾部常驻最近两句解说
     // 分区无损：更早区 + 尾部 = 呈现序列（呈现层不再裁剪，仅坍缩控噪）
     expect(body.earlier.length + body.tail.length).toBe(present.length);
   });
@@ -653,18 +786,18 @@ describe("splitWorkBody · 混合坍缩投影（#225 尾部活动区常驻；#23
       ...Array.from({ length: 5 }, (_, i) => ({ kind: "text", id: `t${i}`, text: `解说${i}。` } as WorkPart)),
       action({ id: "a1", toolCallId: "tc1" }),
     ];
-    const body = splitWorkBody(presentWorkParts(parts, false));
+    const body = splitWorkBody(presentWorkParts(parts));
 
     expect(body.tail.map((p) => p.id)).toEqual(["t3", "t4"]);
     expect(body.earlier).toHaveLength(3);
   });
 
-  it("动作后长解说收尾（收口交接叙事）：尾部解说至多最近 2 句，更早句折进更早区（高度有界）", () => {
+  it("动作后长解说收尾（失败红行为锚）：尾部解说至多最近 2 句，更早句折进更早区（高度有界）", () => {
     const parts: WorkPart[] = [
-      action({ id: "a1", toolCallId: "tc1", state: "running", label: "npm test" }),
+      action({ id: "a1", toolCallId: "tc1", state: "failed", label: "npm test" }),
       ...Array.from({ length: 5 }, (_, i) => ({ kind: "text", id: `t${i}`, text: `交接${i}。` } as WorkPart)),
     ];
-    const body = splitWorkBody(presentWorkParts(parts, false));
+    const body = splitWorkBody(presentWorkParts(parts));
 
     expect(body.tail.map((p) => p.id)).toEqual(["a1", "t3", "t4"]);
     expect(body.earlier).toHaveLength(3); // 超配额的交接句折进更早（完整回看仍在）
@@ -673,18 +806,20 @@ describe("splitWorkBody · 混合坍缩投影（#225 尾部活动区常驻；#23
   it("失败破例：更早区失败红行不进坍缩行计数（渲染层提为破例面）", () => {
     const parts: WorkPart[] = [
       { kind: "text", id: "t0", text: "解说0。" },
+      action({ id: "a1", toolCallId: "tc1", state: "failed", label: "npm install" }),
       { kind: "text", id: "t1", text: "解说1。" },
-      action({ id: "a1", toolCallId: "tc1", state: "failed", label: "npm test" }),
       { kind: "text", id: "t2", text: "解说2。" },
-      action({ id: "a2", toolCallId: "tc2", state: "running", label: "npm install" }),
+      action({ id: "a2", toolCallId: "tc2", state: "failed", label: "npm test" }),
+      { kind: "text", id: "t3", text: "解说3。" },
+      { kind: "text", id: "t4", text: "解说4。" },
     ];
-    const body = splitWorkBody(presentWorkParts(parts, false));
+    const body = splitWorkBody(presentWorkParts(parts));
 
     const failures = body.earlier.filter(
       (p): p is Extract<WorkPart, { kind: "action" }> =>
         p.kind === "action" && p.state === "failed",
     );
-    expect(failures).toHaveLength(1); // 失败红行在更早区（其后有新动作）
+    expect(failures).toHaveLength(1); // 更早区失败红行（其后有新失败锚定尾部）
     expect(body.collapsedCount).toBe(body.earlier.length - failures.length);
   });
 
@@ -708,20 +843,21 @@ describe("WorkMessage · 混合坍缩呈现（#225 story3/4：恒定高度、更
     ];
   }
 
-  it("长流水生长中：出「更早 N 项」一行；当前动作行（末位动作）与最近解说常驻可见，成功动作无痕", () => {
+  it("长流水生长中：出「更早 N 项」一行；活性行＝最近发起的在跑动作（唯一一条），最近解说常驻可见，成功动作无痕", () => {
     const html = renderToStaticMarkup(<WorkMessage work={work({ parts: manyParts() })} />);
 
     expect(html).toContain("更早");
     expect(html).toContain("项");
-    // 尾部常驻：当前动作行（story7 常驻 spinner 与状态字）+ 最近解说
-    expect(html).toContain("执行【起服务】");
-    expect(html).toContain("订单页快好了。");
-    // 成功动作无痕（#230）；被更新动作取代的并发进行中动作沉没（story15）
+    // 活性行（#235 唯一实时状态行）：最近发起的在跑动作 label＋进行中（story7/15）
+    expect(html.match(/执行【起服务】/g)).toHaveLength(1);
+    expect(html).toContain("进行中");
+    expect(html).toContain("订单页快好了。"); // 尾部常驻最近解说
+    // 成功动作无痕（#230）；被更新动作取代的并发进行中动作不进任何面（story15）
     expect(html).not.toContain("动作0");
     expect(html).not.toContain("编写【订单页】");
   });
 
-  it("失败破例呈现（story9/10）：最新动作失败 → 滚动行停滚转红；失败组不折叠埋掉", () => {
+  it("失败破例呈现（story9/10）：最新动作失败 → 活性行停滚转红；失败红行不被折叠埋掉", () => {
     const parts: WorkPart[] = [
       action({ id: "a1", toolCallId: "tc1", label: "编写【A】" }),
       action({ id: "a2", toolCallId: "tc2", label: "执行【B】" }),
@@ -730,19 +866,29 @@ describe("WorkMessage · 混合坍缩呈现（#225 story3/4：恒定高度、更
     ];
     const html = renderToStaticMarkup(<WorkMessage work={work({ parts })} />);
 
-    expect(html).toContain("执行【安装依赖】"); // 失败动作行不被折叠埋掉（尾组展开）
+    expect(html).toContain("执行【安装依赖】"); // 失败动作行不被折叠埋掉（尾部展开）
     expect(html).toContain("没做成");
-    expect(html).toContain("刚才的动作没做成"); // 滚动行停滚转红（story10）
-    expect(html).not.toContain("正在干活…");
+    expect(html).toContain("刚才的动作没做成"); // 活性行停滚转红（story10）
+    expect(html).not.toContain("正在干活"); // 字样退役（#235）
+    expect(html).not.toContain("animate-pulse"); // 红字变体覆盖打字点
   });
 
-  it("定格：坍缩形态保持（story12——结束瞬间无界面跳变），尾部组回落折叠（正常收工维持折叠）", () => {
-    const html = renderToStaticMarkup(
+  it("定格：坍缩形态保持（story12——结束瞬间无界面跳变）；活性行保留末行（静态）直到收尾卡入流，入流后沉没（#235）", () => {
+    const retained = renderToStaticMarkup(
       <WorkMessage work={work({ frozen: true, parts: manyParts() })} />,
     );
 
-    expect(html).toContain("更早"); // 坍缩行保形
-    expect(html).not.toContain("编写【订单页】"); // 尾组回落折叠（完成态）
-    expect(html).not.toContain("正在干活…");
+    expect(retained).toContain("更早"); // 坍缩行保形
+    expect(retained).toContain("执行【起服务】"); // 保留末行——定格不闪空
+    expect(retained).not.toContain("进行中"); // 静态末行：不自称在跑
+    expect(retained).not.toContain("编写【订单页】"); // 并发被取代的进行中动作不留痕
+
+    const sunk = renderToStaticMarkup(
+      <WorkMessage closingArrived work={work({ frozen: true, parts: manyParts() })} />,
+    );
+
+    expect(sunk).toContain("更早"); // 坍缩行保形
+    expect(sunk).not.toContain("执行【起服务】"); // 活性行随定格沉没
+    expect(sunk).not.toContain("编写【订单页】");
   });
 });

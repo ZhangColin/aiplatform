@@ -612,6 +612,76 @@ describe("WorkMessage · 计划区（#225：轨道片清单常驻，run-start �
     expect(planCurrentOrd(undefined, plan)).toBeUndefined();
     expect(planCurrentOrd({ title: "系统初始化" }, [])).toBeUndefined();
   });
+
+  // ---------- #237 两级整合：生成轨切片级＋步骤级同卡共存 ----------
+
+  /** 计划区容器类（切片级与步骤级同款边框盒，计数即清单区个数；match 全局正则复用安全）。 */
+  const PLAN_BOX = /divide-y divide-border\/60 rounded-lg border border-border\/60/g;
+
+  const steps: WorkPlanStep[] = [
+    { id: "s1", title: "建订单数据表", state: "completed" },
+    { id: "s2", title: "写订单页面", state: "in_progress" },
+    { id: "s3", title: "下单接口联调", state: "pending" },
+  ];
+
+  it("生成轨 run 进行中：切片级＋步骤级两级清单同卡共存（#237）——切片级在上、步骤级在下，四态与两级高亮并存", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          slice: { title: "用户能下单支付", index: 2, total: 3 },
+          plan: steps,
+          parts: [{ kind: "text", id: "t0", text: "开始实现下单支付。" }],
+        })}
+        plan={plan}
+      />,
+    );
+
+    // 两级各自成表：切片级行（四态）与步骤级行（三态）同卡可见
+    for (const description of ["系统初始化", "用户能注册登录", "用户能下单支付", "用户能查看订单"]) {
+      expect(html).toContain(description); // 切片级：✓✓ + 当前 + ✗
+    }
+    for (const title of ["建订单数据表", "写订单页面", "下单接口联调"]) {
+      expect(html).toContain(title); // 步骤级：✓●○
+    }
+    expect(html.match(PLAN_BOX)).toHaveLength(2); // 恰两个清单区
+    expect(html.indexOf("系统初始化")).toBeLessThan(html.indexOf("建订单数据表")); // 上半切片级、下半步骤级
+    // 两级高亮并存：当前片 ● 与当前步 ● 各一、两级「进行中」徽标各一
+    expect(html.match(/●/g)).toHaveLength(2);
+    expect(html.match(/进行中/g)).toHaveLength(2);
+    expect(html.match(/text-green-600/g)).toHaveLength(3); // 2 ✓ 已收口切片 + 1 ✓ 完成步骤
+  });
+
+  it("定格：两级各自收口——切片级去高亮（状态归 REST）、步骤级快照留驻（状态标保形、徽标退场）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          frozen: true,
+          slice: { title: "用户能下单支付", index: 2, total: 3 },
+          plan: steps,
+          parts: [{ kind: "text", id: "t0", text: "写好了。" }],
+        })}
+        plan={plan}
+      />,
+    );
+
+    expect(html).toContain("用户能注册登录"); // 切片级行留驻
+    expect(html).toContain("写订单页面"); // 步骤级快照留驻
+    expect(html).not.toContain("bg-primary/10"); // 两级高亮皆退场（定格去高亮不回归）
+    expect(html).not.toContain("进行中"); // 两级徽标皆退场——静止的卡不自称在跑
+    expect(html.match(/●/g)).toHaveLength(1); // 只剩步骤级快照自报的 ●（忘推进如实滞留）
+  });
+
+  it("更新轨 run 卡只显步骤级（#237）：有切片计划事实也不渲染切片区——唯一清单区＝步骤级，无空切片区", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ slice: { title: "系统更新" }, plan: steps })} plan={plan} />,
+    );
+
+    expect(html).not.toContain("系统初始化"); // 切片级行不出场（连容器都不出——无空切片区）
+    expect(html).not.toContain("用户能注册登录");
+    expect(html).toContain("建订单数据表"); // 步骤级照常（更新轨主承载）
+    expect(html).toContain("系统更新"); // 头部照常
+    expect(html.match(PLAN_BOX)).toHaveLength(1);
+  });
 });
 
 describe("WorkMessage · 步骤清单（#236：run 级 part-plan 快照渲染，✓●○ 不设 ✗）", () => {

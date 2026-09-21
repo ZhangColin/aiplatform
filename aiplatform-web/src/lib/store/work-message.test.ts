@@ -126,6 +126,39 @@ describe("work-message store · 动作卡全生命周期（toolCallId 锚定原�
     expect(card.state).toBe("failed");
   });
 
+  it("失败留痕（#229）：failed 携 error 原位落卡；completed / 无 error 不落", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "action",
+      toolCallId: "tc-e1",
+      toolName: "execute",
+      state: "running",
+      label: "npm test",
+    });
+    notePart("p1", ref({ eventId: "r1:3" }), {
+      kind: "action",
+      toolCallId: "tc-e1",
+      toolName: "execute",
+      state: "failed",
+      label: "npm test",
+      error: "npm err! code ELIFECYCLE",
+    });
+    notePart("p1", ref({ eventId: "r1:4" }), {
+      kind: "action",
+      toolCallId: "tc-e2",
+      toolName: "execute",
+      state: "completed",
+      label: "pnpm build",
+    });
+
+    const parts = work()?.parts ?? [];
+    const failed = parts[0] as Extract<WorkPart, { kind: "action" }>;
+    expect(failed.error).toBe("npm err! code ELIFECYCLE"); // 失败红行双要素之一透传
+    const completed = parts[1] as Extract<WorkPart, { kind: "action" }>;
+    expect(completed.error).toBeUndefined();
+  });
+
   it("多个动作并行（不同 toolCallId）各自成行、各自更新", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");

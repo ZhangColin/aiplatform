@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.agentscope.core.event.ToolCallDeltaEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 
 /**
  * 工具动作 → 人话行单点（部件 part-action 的生产内核）：工具名封闭表 + 参数增量
@@ -18,7 +19,8 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
  * execute（内核 shell，命令直通——#219 透明面化）→ 命令原文首行（剥壳·截断，
  * #228：滚动行成为 claude code / replit 式 live tail）；read_file / grep / glob /
  * list 等读类不播（对客户是噪音）。行文为动作对象短语（无时态——「编写【订单
- * 管理】」，时态由动作部件的 state 表达）。
+ * 管理】」，时态由动作部件的 state 表达）；失败留痕原料（工具结果文本增量，
+ * #229）同表累积——终 failed 提取错误/stderr 首行截断进 error 字段。
  */
 final class ToolActionLines {
 
@@ -41,6 +43,13 @@ final class ToolActionLines {
      */
     static final int COMMAND_LABEL_MAX = 80;
 
+    /**
+     * 失败留痕定宽（#229 错误/stderr 首行截断，含省略号）：与 {@link #COMMAND_LABEL_MAX}
+     * 各管各的额度——错误摘要承载排障信息，略宽于命令原文；视觉截断由前端行内样式
+     * 兜底，走查票校准观感（#232）。
+     */
+    static final int ERROR_LINE_MAX = 120;
+
     /** 命令壳：`bash -c '…'` / `sh -c "…"`（引号内为壳载荷，引号后余参丢弃）。 */
     private static final Pattern SHELL_WRAP_QUOTED =
             Pattern.compile("^(?:bash|sh)\\s+-c\\s+(['\"])(.*?)\\1.*$");
@@ -51,10 +60,21 @@ final class ToolActionLines {
     private static final Pattern CD_PREFIX = Pattern.compile("cd\\s+.+?&&\\s*");
 
     private final Map<String, StringBuilder> toolArgs = new HashMap<>();
+    /** 工具结果文本增量（失败留痕的原料，#229）：生命周期同参数——终态取走。 */
+    private final Map<String, StringBuilder> toolResults = new HashMap<>();
 
     /** 工具参数增量只累积不出行（行在动作边界点取）。 */
     void onDelta(ToolCallDeltaEvent delta) {
         toolArgs.computeIfAbsent(nvl(delta.getToolCallId()), k -> new StringBuilder())
+                .append(nvl(delta.getDelta()));
+    }
+
+    /** 工具结果文本增量只累积不出行（失败留痕原料；封闭表外工具不积——读类结果是噪音）。 */
+    void onResultText(ToolResultTextDeltaEvent delta) {
+        if (!broadcastable(delta.getToolCallName())) {
+            return;
+        }
+        toolResults.computeIfAbsent(nvl(delta.getToolCallId()), k -> new StringBuilder())
                 .append(nvl(delta.getDelta()));
     }
 
@@ -89,6 +109,21 @@ final class ToolActionLines {
         return consume ? toolArgs.remove(nvl(toolCallId)) : toolArgs.get(nvl(toolCallId));
     }
 
+    /**
+     * 失败留痕（#229）：终 failed 取累积结果文本首行（strip·截断至
+     * {@link #ERROR_LINE_MAX}）——错误/stderr 的初判线索；终 completed 直接丢弃
+     * （结果文本生命周期同参数：终态即取走，非终态挂起重放保留）。无文本 / 首行
+     * 空白 → 空（error 字段可缺省）。
+     */
+    Optional<String> errorPhrase(String toolCallId, boolean failed, boolean consume) {
+        StringBuilder result = consume ? toolResults.remove(nvl(toolCallId)) : toolResults.get(nvl(toolCallId));
+        if (!failed || result == null || result.isEmpty()) {
+            return Optional.empty();
+        }
+        String line = result.toString().lines().findFirst().map(String::strip).orElse("");
+        return line.isBlank() ? Optional.empty() : Optional.of(truncate(line, ERROR_LINE_MAX));
+    }
+
     /** 累积参数 → 命令标签（原文首行·剥壳·定宽截断；解析不出/空白回落 null → 通用标签）。 */
     private static String commandLabel(StringBuilder args) {
         if (args == null || args.isEmpty()) {
@@ -99,7 +134,7 @@ final class ToolActionLines {
             if (!command.isTextual()) {
                 return null;
             }
-            String label = truncate(unwrap(command.asText()));
+            String label = truncate(unwrap(command.asText()), COMMAND_LABEL_MAX);
             return label.isBlank() ? null : label;
         }
         catch (Exception ignored) {
@@ -129,9 +164,9 @@ final class ToolActionLines {
         return line;
     }
 
-    /** 定宽截断（{@link #COMMAND_LABEL_MAX} 含省略号「…」）。 */
-    private static String truncate(String label) {
-        return label.length() <= COMMAND_LABEL_MAX ? label : label.substring(0, COMMAND_LABEL_MAX - 1) + "…";
+    /** 定宽截断（max 含省略号「…」——label / error 各管各的额度）。 */
+    private static String truncate(String text, int max) {
+        return text.length() <= max ? text : text.substring(0, max - 1) + "…";
     }
 
     /** 累积参数 → path 标签（文件名去扩展名；解析不出回落通用标签）。 */

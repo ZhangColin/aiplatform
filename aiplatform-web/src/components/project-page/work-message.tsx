@@ -330,6 +330,8 @@ function CheckRow({
 
 /**
  * 单行动作状态卡：图标 + 对象短语 + 状态（进行中转圈 / 完成打勾 / 失败「没做成」）。
+ * 失败携 error 时行下追加错误副行（#229 失败留痕：错误/stderr 首行红显——排障
+ * 不进容器即可初判原因；恒定高度对失败破例让位〔#225 破例语义：事故不被埋掉〕）。
  * 逐步耗时已退役（#115/ADR-0010：不显示动作时长）。定格后未终态的动作（run 收口
  * 截断的少数）不再转圈——如实留「进行中」字样不带终态标。
  */
@@ -342,29 +344,38 @@ function ActionRow({
 }) {
   const terminal = part.state === "completed" || part.state === "failed";
   return (
-    <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
-      <span className="shrink-0 text-muted-foreground">
-        {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
-      </span>
-      {/* 单行截断（#228）：长命令优雅截断不换行撑高——卡片宽度恒定（#225 story8）； */}
-      <span className={cn("min-w-0 flex-1 truncate", terminal && "text-muted-foreground")}>
-        {part.label}
-      </span>
-      {part.state === "completed" ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <Check className="size-3.5 text-green-600" strokeWidth={3} />
+    <div>
+      <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
+        <span className="shrink-0 text-muted-foreground">
+          {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
         </span>
-      ) : part.state === "failed" ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
-          <X className="size-3.5" strokeWidth={3} /> 没做成
+        {/* 单行截断（#228）：长命令优雅截断不换行撑高——卡片宽度恒定（#225 story8）； */}
+        <span className={cn("min-w-0 flex-1 truncate", terminal && "text-muted-foreground")}>
+          {part.label}
         </span>
-      ) : frozen ? (
-        <span className="shrink-0 text-xs text-muted-foreground">进行中</span>
-      ) : (
-        <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <Spinner className="size-3" /> 进行中
-        </span>
-      )}
+        {part.state === "completed" ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <Check className="size-3.5 text-green-600" strokeWidth={3} />
+          </span>
+        ) : part.state === "failed" ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
+            <X className="size-3.5" strokeWidth={3} /> 没做成
+          </span>
+        ) : frozen ? (
+          <span className="shrink-0 text-xs text-muted-foreground">进行中</span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <Spinner className="size-3" /> 进行中
+          </span>
+        )}
+      </div>
+      {part.state === "failed" && part.error ? (
+        // 错误副行：与 label 同行宽截断（服务端已首行截断，此处行内样式兜底），
+        // 左缩进与 label 起点对齐（px-1 + 图标 14px + gap-2）
+        <div className="px-1 pb-1.5 pl-[22px] text-xs leading-relaxed text-destructive/90">
+          <span className="block truncate">{part.error}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

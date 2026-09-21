@@ -11,6 +11,7 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.ToolResultState;
 
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -30,11 +31,12 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>TextBlockDelta（累积切段）</td><td>{@code part-text}</td><td>text（完整段）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
- *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed</td>
+ *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed（failed 携 error——错误/stderr 首行截断，#229）</td>
  * </table>
  *
  * <p>思考（reasoning）与读类工具不进部件（对客户是噪音）；读类动作的呈现位随
- * 需要扩表。动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
+ * 需要扩表。工具参数与结果文本增量只累积不出部件（label 在边界点取、error 在
+ * 终 failed 提取，#229）。动作边界先出解说余段（段与段有序不串），run 收尾/挂起由
  * 调用方 {@link #drain()} 出尾段（幂等）。步骤分组已退役（#115：步骤序号对
  * 用户零信息，部件按序竖排）。</p>
  */
@@ -65,6 +67,11 @@ final class AgentscopePartsMapper {
         if (event instanceof ToolCallDeltaEvent delta) {
             // 工具参数增量只累积不出部件（动作对象短语在边界点取）
             actions.onDelta(delta);
+            return List.of();
+        }
+        if (event instanceof ToolResultTextDeltaEvent delta) {
+            // 工具结果文本增量只累积不出部件（失败留痕的原料——终 failed 提取，#229）
+            actions.onResultText(delta);
             return List.of();
         }
         List<AgentEvent> parts = new ArrayList<>();
@@ -137,6 +144,11 @@ final class AgentscopePartsMapper {
         payload.put(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, nvl(toolName));
         payload.put(AgentEventTypes.PART_ACTION_STATE_FIELD, state);
         payload.put(AgentEventTypes.PART_ACTION_LABEL_FIELD, label);
+        // 失败留痕（#229）：仅 failed 携带 error——错误/stderr 首行截断（与 label
+        // 各管各的额度）；completed 终态取走丢弃（结果文本生命周期同参数）
+        actions.errorPhrase(nvl(toolCallId),
+                AgentEventTypes.PART_ACTION_STATE_FAILED.equals(state), consumeArgs)
+                .ifPresent(error -> payload.put(AgentEventTypes.PART_ACTION_ERROR_FIELD, error));
         parts.add(new AgentEvent(AgentEventTypes.PART_ACTION, payload));
     }
 

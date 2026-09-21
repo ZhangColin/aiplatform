@@ -252,6 +252,11 @@ export type PlatformAgentEvent =
         toolName: string;
         state: "started" | "running" | "completed" | "failed";
         label: string;
+        /**
+         * 失败留痕（#229）：仅 failed 携带——错误/stderr 首行截断（与 label 各管
+         * 各的截断额度）；失败红行渲染 label＋error，排障不进容器即可初判原因。
+         */
+        error?: string;
       };
     }
   | {

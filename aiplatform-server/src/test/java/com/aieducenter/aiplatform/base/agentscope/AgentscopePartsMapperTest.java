@@ -16,6 +16,7 @@ import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.event.ToolCallEndEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.ToolResultState;
 
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -256,6 +257,103 @@ class AgentscopePartsMapperTest {
             List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", id, "execute"));
             assertThat(running.get(0).payload()).containsEntry(
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, expected);
+        }
+    }
+
+    /**
+     * 失败留痕带原因（#229）：part-action 新增可选 error 字段——仅 failed 携带，
+     * 取工具结果文本（错误/stderr，经 ToolResultTextDelta 累积——同参数增量口径）
+     * 首行截断（与 label 各管各的额度）；completed / 无结果文本不携带。
+     */
+    @Nested
+    class FailureTraces {
+
+        @Test
+        void given_failed_result_with_text_when_terminal_then_error_first_line_alongside_label() {
+            mapper.map(new ToolCallStartEvent("r", "tc-e1", "execute"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-e1", "execute",
+                    "{\"command\":\"npm test\"}"));
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-e1", "execute", "Error: 容器不可达"));
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-e1", "execute", ToolResultState.ERROR));
+
+            // 失败红行双要素：label 复述命令原值 + error 首行（没做成＋为什么）
+            assertThat(failed.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "npm test",
+                    AgentEventTypes.PART_ACTION_ERROR_FIELD, "Error: 容器不可达"));
+        }
+
+        @Test
+        void given_chunked_multiline_failure_output_when_terminal_then_accumulated_first_line_only() {
+            mapper.map(new ToolCallStartEvent("r", "tc-e2", "execute"));
+            // 结果文本增量分片到达（流式），累积后取首行
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-e2", "execute", "npm err! code ELIFECYCLE\n"));
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-e2", "execute", "npm err! syscall spawn"));
+
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-e2", "execute", ToolResultState.ERROR));
+
+            assertThat(failed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_ERROR_FIELD, "npm err! code ELIFECYCLE");
+        }
+
+        @Test
+        void given_overlong_error_line_when_terminal_then_truncated_own_budget() {
+            // 各管各的额度：error 截断界独立于 label（COMMAND_LABEL_MAX）——超长首行截断
+            String over = "e".repeat(ToolActionLines.ERROR_LINE_MAX + 40);
+            assertFailedError(over, "e".repeat(ToolActionLines.ERROR_LINE_MAX - 1) + "…");
+            // 恰在宽度内：原样不截
+            String exact = "e".repeat(ToolActionLines.ERROR_LINE_MAX);
+            assertFailedError(exact, exact);
+        }
+
+        @Test
+        void given_completed_result_with_text_when_terminal_then_no_error_field() {
+            mapper.map(new ToolCallStartEvent("r", "tc-e3", "write_file"));
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-e3", "write_file", "文件已写入"));
+            List<AgentEvent> completed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-e3", "write_file", ToolResultState.SUCCESS));
+
+            assertThat(completed.get(0).payload())
+                    .containsEntry(AgentEventTypes.PART_ACTION_STATE_FIELD,
+                            AgentEventTypes.PART_ACTION_STATE_COMPLETED)
+                    .doesNotContainKey(AgentEventTypes.PART_ACTION_ERROR_FIELD);
+        }
+
+        @Test
+        void given_failed_without_result_text_when_terminal_then_no_error_field() {
+            mapper.map(new ToolCallStartEvent("r", "tc-e4", "execute"));
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-e4", "execute", ToolResultState.INTERRUPTED));
+
+            assertThat(failed.get(0).payload()).doesNotContainKey(AgentEventTypes.PART_ACTION_ERROR_FIELD);
+        }
+
+        @Test
+        void given_denied_result_with_text_when_terminal_then_error_carried() {
+            // 被拒也是失败族：拒绝文案即错误首行
+            mapper.map(new ToolCallStartEvent("r", "tc-e5", "execute"));
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-e5", "execute",
+                    "Permission denied by rules"));
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-e5", "execute", ToolResultState.DENIED));
+
+            assertThat(failed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_ERROR_FIELD, "Permission denied by rules");
+        }
+
+        private int seq;
+
+        /** 断言序列号（结果文本终态取走，多断言不可共用 toolCallId）。 */
+        private void assertFailedError(String resultText, String expected) {
+            String id = "tc-ex" + seq++;
+            mapper.map(new ToolCallStartEvent("r", id, "execute"));
+            mapper.map(new ToolResultTextDeltaEvent("r", id, "execute", resultText));
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", id, "execute", ToolResultState.ERROR));
+            assertThat(failed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_ERROR_FIELD, expected);
         }
     }
 

@@ -60,6 +60,12 @@ export type WorkPart =
       state: WorkActionState;
       /** 动作对象短语（人话行，无时态——时态由 state 表达；execute = 命令原文首行，#228 直播行 live tail）。 */
       label: string;
+      /**
+       * 失败留痕（#229）：仅 failed 携带——错误/stderr 首行截断（服务端已截，
+       * 与 label 各管各的额度）；失败红行渲染 label＋error，排障不进容器即可
+       * 初判原因。其余态缺省。
+       */
+      error?: string;
     }
   | {
       /**
@@ -95,6 +101,8 @@ export type WorkPartInput =
       toolName: string;
       state: WorkActionState;
       label: string;
+      /** 失败留痕（#229）：仅 failed 事件的 payload 携带（错误/stderr 首行截断）。 */
+      error?: string;
     };
 
 type ProjectWork = {
@@ -186,6 +194,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
         ...existing,
         state: input.state,
         label: input.label,
+        error: input.error,
       };
       parts = work.parts.map((part) => (part === existing ? updated : part));
     } else {
@@ -199,6 +208,7 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
           toolName: input.toolName,
           state: input.state,
           label: input.label,
+          error: input.error,
         },
       ];
     }

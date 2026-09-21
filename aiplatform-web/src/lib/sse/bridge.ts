@@ -315,6 +315,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
             toolName: payload.toolName,
             state: payload.state,
             label: payload.label,
+            error: payload.error, // 失败留痕（#229）：仅 failed 携带，其余态缺省
           },
         );
         return;

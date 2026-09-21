@@ -248,6 +248,31 @@ describe("智能体事件族收窄", () => {
     }
   });
 
+  it("part-action 失败留痕（#229）：failed 携 error（错误/stderr 首行截断）照收——与 label 各管各的额度", () => {
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "part-action",
+        payload: {
+          projectId: "p1",
+          runId: "r1",
+          sessionId: "coder-p1",
+          engine: "agentscope",
+          toolCallId: "tc-1",
+          toolName: "execute",
+          state: "failed",
+          label: "npm test",
+          error: "npm err! code ELIFECYCLE",
+        },
+        ts: "",
+      }),
+    );
+    const event = asPlatformAgentEvent(env!);
+    expect(event?.type).toBe("part-action");
+    if (event?.type === "part-action") {
+      expect(event.payload.error).toBe("npm err! code ELIFECYCLE");
+    }
+  });
+
   it("run-start 携角色键（#77 引擎信息归一：role=CODER 标编码 run）", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

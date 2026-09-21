@@ -188,6 +188,14 @@ public final class AgentEventTypes {
     public static final String PART_ACTION_LABEL_FIELD = "label";
 
     /**
+     * part-action 的失败留痕键（#229）：仅 state=failed 携带——错误/stderr 首行
+     * 截断（与 {@link #PART_ACTION_LABEL_FIELD} 各管各的截断额度）；结果文本为
+     * 空 / 首行空白不携带（可缺省）。失败红行＝label＋error，排障不进容器即可
+     * 初判原因。
+     */
+    public static final String PART_ACTION_ERROR_FIELD = "error";
+
+    /**
      * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
      * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成 = 8081
      * 探活、更新 = finish_edit 收口事实），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、

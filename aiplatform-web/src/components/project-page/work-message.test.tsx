@@ -112,6 +112,52 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
   });
 });
 
+describe("WorkMessage · 失败留痕（#229：失败红行＝命令原值＋错误/stderr 首行）", () => {
+  it("失败动作携 error：红行渲染 label 与 error（没做成＋为什么）——排障不进容器即可初判", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            action({
+              id: "a1",
+              toolCallId: "t1",
+              toolName: "execute",
+              state: "failed",
+              label: "npm test",
+              error: "npm err! code ELIFECYCLE",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("npm test"); // 命令原值（哪条命令失败）
+    expect(html).toContain("npm err! code ELIFECYCLE"); // 错误首行（为什么失败）
+    expect(html).toContain("没做成");
+  });
+
+  it("失败动作无 error（结果文本为空/首行空白）：不渲染错误副行——既有失败形态保持", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "failed" })] })}
+      />,
+    );
+
+    expect(html).toContain("没做成");
+    expect(html).not.toContain("text-destructive/90"); // 错误副行不出现（副行专属样式类）
+  });
+
+  it("成功/进行中动作不渲染错误副行（error 仅失败留痕）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "running" })] })}
+      />,
+    );
+
+    expect(html).not.toContain("text-destructive/90");
+  });
+});
+
 describe("WorkMessage · 动作图标封闭表（#226：表键与服务端播报名册字面一致）", () => {
   it("write_file / edit_file → 文件码图标；execute → 终端图标——命令动作不落兜底锤子", () => {
     const write = renderToStaticMarkup(

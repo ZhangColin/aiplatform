@@ -196,6 +196,38 @@ public final class AgentEventTypes {
     public static final String PART_ACTION_ERROR_FIELD = "error";
 
     /**
+     * 步骤清单部件（#236）：run 级步骤清单的<b>全量快照</b>——agent 调 update_plan
+     * 工具自产计划（步骤：稳定 id、标题、状态 ✓●○），由部件映射表从工具参数增量
+     * 解析产出（不走动作行、不留动作痕——计划变化不进部件流水）。快照式：执行中
+     * 再调即整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验）；断线
+     * 补发以最后快照为准；不落库（当次会话定格留驻，刷新不回显）；步骤不设 ✗ 态
+     * （失败留痕归动作部件与收尾卡）。契约与来源解耦——本部件不携带计划来源
+     * （v1 run 执行体提示词直产；skill 线接入时再议标注）。
+     */
+    public static final String PART_PLAN = "part-plan";
+
+    /** part-plan 的步骤清单键（值 = 全量快照数组，元素字段见 PART_PLAN_STEP_*）。 */
+    public static final String PART_PLAN_STEPS_FIELD = "steps";
+
+    /** part-plan 步骤的稳定 id 键（跨多次调用不变——就地整表更新的锚）。 */
+    public static final String PART_PLAN_STEP_ID_FIELD = "id";
+
+    /** part-plan 步骤的标题键（用户语言一句话）。 */
+    public static final String PART_PLAN_STEP_TITLE_FIELD = "title";
+
+    /** part-plan 步骤的状态键（值 = PART_PLAN_STATE_* 常量，✓●○ 三态）。 */
+    public static final String PART_PLAN_STEP_STATE_FIELD = "state";
+
+    /** 步骤待做（○）。 */
+    public static final String PART_PLAN_STATE_PENDING = "pending";
+
+    /** 步骤进行中（● 当前步）。 */
+    public static final String PART_PLAN_STATE_IN_PROGRESS = "in_progress";
+
+    /** 步骤已完成（✓——已收口不可变）。 */
+    public static final String PART_PLAN_STATE_COMPLETED = "completed";
+
+    /**
      * 自检播报部件（#85：「正在检查系统 → ✅/❌」）：run 收口判据核验（自检）的
      * 呈现——<b>平台侧产出</b>（不经引擎部件映射表，收口判据是平台事实：生成 = 8081
      * 探活、更新 = finish_edit 收口事实），核验开始发 {@link #PART_CHECK_STATE_CHECKING}、

@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore } from "@/lib/store/work-message";
+import { useWorkMessageStore, toWorkPlanSteps } from "@/lib/store/work-message";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
@@ -328,6 +328,18 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           payload.projectId,
           { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
           { kind: "check", state: payload.state },
+        );
+        return;
+      }
+      case "part-plan": {
+        // 步骤清单快照（#236）：整表替换落 `plan`（不进 parts 流水——不走动作行、
+        // 不留动作痕、不单独播报）；断线补发按事件序重放，最后快照即终态
+        const { payload } = platform;
+        work.notePlan(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
+            source: payload.source },
+          toWorkPlanSteps(payload.steps),
         );
         return;
       }

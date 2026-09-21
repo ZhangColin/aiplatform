@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
-import type { WorkPart, WorkSnapshot } from "@/lib/store/work-message";
+import type { WorkPart, WorkPlanStep, WorkSnapshot } from "@/lib/store/work-message";
 
 import {
   WorkMessage,
@@ -611,6 +611,90 @@ describe("WorkMessage · 计划区（#225：轨道片清单常驻，run-start �
     expect(planCurrentOrd({ title: "系统初始化" }, null)).toBeUndefined();
     expect(planCurrentOrd(undefined, plan)).toBeUndefined();
     expect(planCurrentOrd({ title: "系统初始化" }, [])).toBeUndefined();
+  });
+});
+
+describe("WorkMessage · 步骤清单（#236：run 级 part-plan 快照渲染，✓●○ 不设 ✗）", () => {
+  const steps: WorkPlanStep[] = [
+    { id: "s1", title: "读取现有配色", state: "completed" },
+    { id: "s2", title: "调整主题色变量", state: "in_progress" },
+    { id: "s3", title: "重启服务验证", state: "pending" },
+  ];
+
+  it("快照渲染：✓/●/○ 三态齐全、当前步高亮带「进行中」——更新轨 run 卡的主承载", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage work={work({ slice: { title: "系统更新" }, plan: steps })} />,
+    );
+
+    for (const title of ["读取现有配色", "调整主题色变量", "重启服务验证"]) {
+      expect(html).toContain(title);
+    }
+    expect(html).toContain("●"); // 当前步
+    expect(html).toContain("○"); // 待做步
+    expect(html.match(/text-green-600/g)).toHaveLength(1); // ✓ 完成步（green Check）
+    expect(html).toContain("系统更新"); // 头部照常（清单在计划区位、不取代标题）
+  });
+
+  it("快照就地整表更新：推进后新表替换旧表（单表不追加）", () => {
+    const before = renderToStaticMarkup(<WorkMessage work={work({ plan: steps })} />);
+    const after = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          plan: [
+            { id: "s1", title: "读取现有配色", state: "completed" },
+            { id: "s2", title: "调整主题色变量", state: "completed" },
+            { id: "s3", title: "重启服务验证", state: "in_progress" },
+          ],
+        })}
+      />,
+    );
+
+    expect(before.match(/调整主题色变量/g)).toHaveLength(1);
+    expect(after.match(/重启服务验证/g)).toHaveLength(1); // 全量替换：不追加第二条清单
+    expect(after.match(/text-green-600/g)).toHaveLength(2); // 两步已收口
+    expect(after).toContain("进行中");
+  });
+
+  it("agent 不产清单：无清单区域、无报错（解说兜底）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({ parts: [{ kind: "text", id: "t0", text: "开始改配色。" }] })}
+      />,
+    );
+
+    expect(html).toContain("开始改配色。");
+    expect(html).not.toContain("○"); // 无清单行（快照缺省 = 不显示）
+    expect(html).not.toContain("●");
+  });
+
+  it("定格留驻最后快照：「进行中」徽标退场、状态标保形（忘推进如实滞留）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          frozen: true,
+          plan: steps,
+          parts: [{ kind: "text", id: "1", text: "改完了。" }],
+        })}
+      />,
+    );
+
+    expect(html).toContain("读取现有配色"); // 清单留驻
+    expect(html).toContain("●"); // 状态标保形（快照自报事实，平台不推断补偿）
+    expect(html).not.toContain("进行中"); // 徽标退场——静止的卡不自称在跑
+  });
+
+  it("清单不进正文流水：计划变化不产生滚动播报/动作部件（步骤行与解说段分面）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          plan: steps,
+          parts: [{ kind: "text", id: "t0", text: "正在改配色。" }],
+        })}
+      />,
+    );
+
+    expect(html.match(/<p /g)?.length).toBe(1); // 正文只有解说段——步骤行是清单区行非段落（`<p ` 不误配图标 path）
+    expect(html).toContain("正在改配色。");
   });
 });
 

@@ -6,7 +6,7 @@ import { Check, ChevronDown, FileCode2, Hammer, ShieldCheck, SquareTerminal, X }
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
-import type { WorkPart, WorkSlice, WorkSnapshot } from "@/lib/store/work-message";
+import type { WorkPart, WorkPlanStep, WorkSlice, WorkSnapshot } from "@/lib/store/work-message";
 
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / execute；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -131,8 +131,10 @@ export function planCurrentOrd(
 /**
  * 生长中的工作消息——直播进度卡（#225 呈现改版；形态同 #68 原型已验证
  * 形的演进；稳定判据＝不闪、不跳、不无意义震荡、高度随内容长〔#235 D3，
- * 「恒定高度」说法退役〕）：自上而下三段——①计划区（生成轨道片清单常驻：✓ 已收口 / ● 当前〔
- * run-start 切片序驱动〕/ ○ 待跑 / ✗ 失败，REST 只读透出）＋②头部活性（#118
+ * 「恒定高度」说法退役〕）：自上而下——①计划区（生成轨道片清单常驻：✓ 已收口 / ● 当前〔
+ * run-start 切片序驱动〕/ ○ 待跑 / ✗ 失败，REST 只读透出；＋run 级步骤清单
+ * 〔#236 part-plan 快照：agent 自产计划，✓●○ 不设 ✗——更新轨 run 卡的主承载、
+ * 生成轨与切片级并存，两级整合随 #237〕）＋②头部活性（#118
  * 切片标题 + run 级「已运行 mm:ss」跳动时钟〔ADR-0010 窄修订：锚 run-start 信封
  * ts，收口定格〕）＋③正文混合坍缩（#230 成功无痕：动作组折叠退役、成功动作不产
  * 生静态条目——静态面＝解说段＋失败红行；尾部活动区常驻最近一两句解说，更早内
@@ -140,9 +142,11 @@ export function planCurrentOrd(
  * ＋④常驻活性行（#235：直播行＝唯一实时状态行，全程常驻不消失——动作在跑＝
  * 命令原值 label 滚动、间隙＝无字打字点、失败＝红字变体；收口保留末行直到收尾卡
  * 入流，随后随定格沉没。稳定判据＝不闪、不跳、不无意义震荡）。零散维护需求（无
- * 切片上下文）不渲染计划区、不伪造计划；无切片标题回落「正在做」。思考与代码不
+ * 切片上下文）不渲染计划区、不伪造计划；agent 不产步骤清单则无清单区域（解说
+ * 兜底，#236）；无切片标题回落「正在做」。思考与代码不
  * 播、无逐步耗时/百分比；run 开始即出现，成功收口原地定格留驻（#117：部件保留、
- * 只读，收尾卡随后入流——「过程上文、结果下卡」），失败定格（run-failed）流水
+ * 只读，收尾卡随后入流——「过程上文、结果下卡」；步骤清单随定格留驻最后快照，
+ * 刷新不回显——不落库口径），失败定格（run-failed）流水
  * 留驻。定格时进行中动作不立即沉没（#235 保留末行衔接），收尾卡入流后活性行退场——
  * 终形无成功残骸（story16「结束瞬间无界面跳变」承 #117 口径：卡片不清空不消失，
  * 叙事＋失败痕即终形）。
@@ -184,6 +188,9 @@ export function WorkMessage({
       )}
     >
       {showPlan ? <PlanArea plan={plan} currentOrd={growing ? currentOrd : undefined} /> : null}
+      {work.plan && work.plan.length > 0 ? (
+        <StepsArea steps={work.plan} growing={growing} />
+      ) : null}
       <div className="flex items-center gap-2 text-[13px] font-medium">
         {growing ? <WorkingDot /> : null}
         {/* 定格保标题与冻结时钟（story12 结束瞬间无跳变）；无切片上下文的定格
@@ -421,6 +428,58 @@ function SegmentMark({
   }
   if (status === "failed") {
     return <X className="size-3.5 shrink-0 text-destructive" strokeWidth={3} />;
+  }
+  return <span className="shrink-0 text-muted-foreground/60">○</span>;
+}
+
+/** 步骤清单行数预算（同计划区口径：清单超出内滚，当前步滚入视口——不撑高卡片）。 */
+const STEPS_MAX_ROWS = 3;
+
+/**
+ * 步骤清单区（#236 run 级步骤清单）：agent 自产计划的全量快照渲染——✓ 完成 /
+ * ● 当前 / ○ 待做（不设 ✗——失败留痕归动作部件与收尾卡）；快照式就地整表更新
+ * （React key = 稳定 id，未变行不重挂）。定格留驻最后快照，「进行中」徽标随定格
+ * 退场（静止的卡不自称在跑，同切片级定格去高亮口径）。
+ */
+function StepsArea({ steps, growing }: { steps: WorkPlanStep[]; growing: boolean }) {
+  const currentRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    // 当前步滚入视口（长清单内滚，当前步常在尾部不滚会藏）
+    currentRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [steps]);
+  return (
+    <div
+      className="mb-1.5 divide-y divide-border/60 rounded-lg border border-border/60 bg-muted/30"
+      style={{ maxHeight: `${STEPS_MAX_ROWS * PLAN_ROW_PX + 2}px`, overflowY: "auto" }}
+    >
+      {steps.map((step) => {
+        const current = growing && step.state === "in_progress";
+        return (
+          <div
+            key={step.id}
+            ref={current ? currentRef : undefined}
+            className={cn(
+              "flex items-center gap-2 px-2 py-1 text-[13px]",
+              current ? "bg-primary/10 font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            <StepMark state={step.state} />
+            <span className="min-w-0 flex-1 truncate">{step.title}</span>
+            {current ? <span className="shrink-0 text-[11px] text-primary">进行中</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 步骤状态标（✓●○ 三态）：状态来自快照自报（忘推进如实滞留，平台不推断补偿）。 */
+function StepMark({ state }: { state: WorkPlanStep["state"] }) {
+  if (state === "completed") {
+    return <Check className="size-3.5 shrink-0 text-green-600" strokeWidth={3} />;
+  }
+  if (state === "in_progress") {
+    return <span className="shrink-0 text-primary">●</span>;
   }
   return <span className="shrink-0 text-muted-foreground/60">○</span>;
 }

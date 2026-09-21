@@ -144,6 +144,17 @@ export type SseClosing = {
   version?: string;
 };
 
+/**
+ * 步骤清单条目（#236 正本 part-plan.steps 元素）：agent 自产计划的步骤——稳定 id
+ * （就地整表更新的锚）+ 用户语言标题 + 状态三值（✓●○，不设 ✗——失败留痕归
+ * part-action 与收尾卡）。
+ */
+export type SsePlanStep = {
+  id: string;
+  title: string;
+  state: "pending" | "in_progress" | "completed";
+};
+
 export type PlatformAgentEvent =
   | {
       /** 运行开始：一场 run 恰一次（#84 静默重试——编码 run 重试不新发，用户面
@@ -269,6 +280,18 @@ export type PlatformAgentEvent =
        */
       type: "part-check";
       payload: AgentPayload & { sessionId: string; state: "checking" | "passed" | "failed" };
+    }
+  | {
+      /**
+       * 步骤清单部件（#236）：run 级步骤清单的**全量快照**——agent 调 update_plan
+       * 工具自产计划（步骤：稳定 id、标题、状态），不走动作行、不留动作痕（计划
+       * 变化不进部件流水）。快照式：执行中再调即整表替换（已收口步骤不可变＝
+       * 提示词纪律，平台 v1 不强制校验）；断线补发以最后快照为准；不落库（当次
+       * 会话定格留驻，刷新不回显）；步骤不设 ✗ 态。契约与来源解耦——不携带计划
+       * 来源（v1 run 执行体提示词直产）。
+       */
+      type: "part-plan";
+      payload: AgentPayload & { engine: string; source?: string; steps: SsePlanStep[] };
     };
 
 const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
@@ -282,6 +305,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "part-text",
   "part-action",
   "part-check",
+  "part-plan",
 ] satisfies Array<PlatformAgentEvent["type"]>);
 
 const PASSTHROUGH_AGENT_TYPES: ReadonlySet<string> = new Set([

@@ -273,6 +273,37 @@ describe("智能体事件族收窄", () => {
     }
   });
 
+  it("part-plan 按正本收窄（#236 全量快照：steps 携稳定 id/title/state 三值域）；平台 type 不落入透传口", () => {
+    const env = parseSseEnvelope(
+      JSON.stringify({
+        type: "part-plan",
+        payload: {
+          projectId: "p1",
+          runId: "r1",
+          sessionId: "coder-p1",
+          engine: "agentscope",
+          steps: [
+            { id: "s1", title: "读取现有配色", state: "completed" },
+            { id: "s2", title: "调整主题色", state: "in_progress" },
+            { id: "s3", title: "重启服务验证", state: "pending" },
+          ],
+        },
+        ts: "",
+      }),
+    );
+    const event = asPlatformAgentEvent(env!);
+    expect(event?.type).toBe("part-plan");
+    if (event?.type === "part-plan") {
+      expect(event.payload.steps).toHaveLength(3);
+      expect(event.payload.steps[0]).toEqual({
+        id: "s1",
+        title: "读取现有配色",
+        state: "completed",
+      });
+    }
+    expect(asPassthroughAgentEvent(env!)).toBeNull();
+  });
+
   it("run-start 携角色键（#77 引擎信息归一：role=CODER 标编码 run）", () => {
     const env = parseSseEnvelope(
       JSON.stringify({

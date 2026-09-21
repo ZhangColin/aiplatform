@@ -756,6 +756,120 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     expect(work?.runId).toBe("run2");
     expect(work?.parts).toEqual([]);
   });
+
+  /**
+   * 步骤清单（#236 part-plan）：agent 调 update_plan 的全量快照——整表落 `plan`
+   * （不进 parts 流水：不走动作行、不留动作痕、不单独播报）；执行中再调即新快照
+   * 盖旧表（追加步骤 + 推进状态就地更新，平台不合并）。
+   */
+  it("part-plan：快照整表落 plan（parts 流水零增量），再调盖旧表", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "改配色", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "读取现有配色", state: "completed" },
+      { id: "s2", title: "调整主题色", state: "in_progress" },
+    ] }, "run1:2"));
+
+    const first = useWorkMessageStore.getState().works["p1"];
+    expect(first?.plan).toEqual([
+      { id: "s1", title: "读取现有配色", state: "completed" },
+      { id: "s2", title: "调整主题色", state: "in_progress" },
+    ]);
+    expect(first?.parts).toEqual([]); // 计划变化不产生播报部件/动作部件
+
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "读取现有配色", state: "completed" },
+      { id: "s2", title: "调整主题色", state: "completed" },
+      { id: "s3", title: "重启服务验证", state: "pending" },
+    ] }, "run1:3"));
+
+    const second = useWorkMessageStore.getState().works["p1"];
+    expect(second?.plan).toHaveLength(3); // 全量快照：终态 = 最后快照
+    expect(second?.plan?.[1]).toEqual({ id: "s2", title: "调整主题色", state: "completed" });
+    expect(second?.parts).toEqual([]);
+  });
+
+  /** 断线补发口径（#236）：重放按事件序、同一事件 id 去重——重放不回退，最后快照为准。 */
+  it("part-plan 重放：同 id 去重不回退；补发窗口内新事件照收（最后快照即终态）", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "改配色", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "调整主题色", state: "completed" },
+      { id: "s2", title: "验证效果", state: "in_progress" },
+    ] }, "run1:2"));
+    // 断线重连补发已见事件（同 id）：去重，旧快照不回退
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "调整主题色", state: "in_progress" },
+    ] }, "run1:2"));
+    expect(useWorkMessageStore.getState().works["p1"]?.plan).toHaveLength(2);
+
+    // 补发窗口内错过的更晚快照（新 id）：照收，终态 = 最后快照
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "调整主题色", state: "completed" },
+      { id: "s2", title: "验证效果", state: "completed" },
+    ] }, "run1:3"));
+    expect(useWorkMessageStore.getState().works["p1"]?.plan?.every(
+      (step) => step.state === "completed",
+    )).toBe(true);
+  });
+
+  /** 定格守卫：run-finish / run-failed 后快照不进（收口定格留驻最后快照，#117 口径同款）。 */
+  it("part-plan：定格后不进——收口即计划终形", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "改配色", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "调整主题色", state: "in_progress" },
+    ] }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-finish",
+      { ...base, finish: "end" },
+      "run1:3",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "调整主题色", state: "completed" },
+    ] }, "run1:4"));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.frozen).toBe(true);
+    expect(work?.plan).toEqual([{ id: "s1", title: "调整主题色", state: "in_progress" }]);
+  });
+
+  /** 载荷容错（toWorkPlanSteps 兜底）：缺 id/标题剔除、未知状态回落 pending、空表忽略不清好表。 */
+  it("part-plan 畸形载荷：防御归一落态（服务端内核已归一，此处兜底）", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "改配色", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: [
+      { id: "s1", title: "读文件" },            // 缺 state → pending
+      { id: "s2", title: "改色", state: "done" }, // 未知 state → pending
+      { id: "s3", state: "in_progress" },         // 缺 title → 剔除
+      "not an object",                            // 非对象 → 剔除
+    ] }, "run1:2"));
+
+    expect(useWorkMessageStore.getState().works["p1"]?.plan).toEqual([
+      { id: "s1", title: "读文件", state: "pending" },
+      { id: "s2", title: "改色", state: "pending" },
+    ]);
+
+    // 空表（全畸形归一后为空）忽略：不清已有好表
+    dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: "garbage" }, "run1:3"));
+    expect(useWorkMessageStore.getState().works["p1"]?.plan).toHaveLength(2);
+  });
 });
 
 describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥）", () => {

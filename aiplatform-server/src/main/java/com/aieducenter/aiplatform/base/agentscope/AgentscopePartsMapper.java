@@ -21,8 +21,9 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  * 部件映射表单点（parts 契约的生产方）：AgentScope 事件 → 平台消息部件事件
  * （词汇正本 = eventhub {@link AgentEventTypes} 部件组；词根取 agentscope 原生
  * part 族，薄翻译不套某家词表）。解说切段与动作行内核独立承载
- * （{@link NarrationSegments} / {@link ToolActionLines}）；工具动作<b>开始即出
- * 事件</b>（动作卡全生命周期），以 toolCallId 锚定跨状态（开始/进行中/完成/失败）。
+ * （{@link NarrationSegments} / {@link ToolActionLines}）；步骤清单快照内核
+ * {@link PlanSnapshots}（#236）。工具动作<b>开始即出事件</b>（动作卡全生命周期），
+ * 以 toolCallId 锚定跨状态（开始/进行中/完成/失败）。
  * 全事件流恒挂（不限编码 run）——消息 = 有序部件集合是全部智能体事件的呈现地基。
  *
  * <table border="1">
@@ -31,6 +32,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <tr><td>TextBlockDelta（累积切段，机器语法段守卫丢弃——#234）</td><td>{@code part-text}</td><td>text（完整段）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
+ *   <tr><td>ToolCallEnd（update_plan——#236）</td><td>{@code part-plan}</td><td>steps（全量快照，参数落定点出）</td>
  *   <tr><td>ToolResultEnd（同上）</td><td>{@code part-action}</td><td>state=completed / failed（failed 携 error——错误/stderr 首行截断，#229）</td>
  * </table>
  *
@@ -48,6 +50,7 @@ final class AgentscopePartsMapper {
 
     private final NarrationSegments narration = new NarrationSegments();
     private final ToolActionLines actions = new ToolActionLines();
+    private final PlanSnapshots plans = new PlanSnapshots();
 
     AgentscopePartsMapper(String runId, String sessionId, String engine) {
         this.runId = runId;
@@ -65,8 +68,14 @@ final class AgentscopePartsMapper {
             return textParts(narration.offer(delta, source));
         }
         if (event instanceof ToolCallDeltaEvent delta) {
-            // 工具参数增量只累积不出部件（动作对象短语在边界点取）
-            actions.onDelta(delta);
+            // 工具参数增量只累积不出部件（短语/快照在边界点取）：update_plan 归计划
+            // 内核（不出动作行），其余归动作行内核
+            if (PlanSnapshots.handles(delta.getToolCallName())) {
+                plans.onDelta(delta);
+            }
+            else {
+                actions.onDelta(delta);
+            }
             return List.of();
         }
         if (event instanceof ToolResultTextDeltaEvent delta) {
@@ -85,6 +94,10 @@ final class AgentscopePartsMapper {
             drainNarrationInto(parts);
             actionPart(parts, end.getToolCallName(), end.getToolCallId(),
                     AgentEventTypes.PART_ACTION_STATE_RUNNING, false, source);
+            // 步骤清单快照在参数落定点出（#236）：全量快照、不走动作行不留动作痕
+            if (PlanSnapshots.handles(end.getToolCallName())) {
+                planPart(parts, end.getToolCallId(), source);
+            }
             return parts;
         }
         if (event instanceof ToolResultEndEvent end) {
@@ -150,6 +163,20 @@ final class AgentscopePartsMapper {
                 AgentEventTypes.PART_ACTION_STATE_FAILED.equals(state), consumeArgs)
                 .ifPresent(error -> payload.put(AgentEventTypes.PART_ACTION_ERROR_FIELD, error));
         parts.add(new AgentEvent(AgentEventTypes.PART_ACTION, payload));
+    }
+
+    /**
+     * 步骤清单部件（#236）：update_plan 参数落定 → 全量快照（执行中再调即整表
+     * 替换——消费端不合并）；解析不出 / 空表不出部件（不产就不显示）。与来源
+     * 解耦：不携带计划来源（v1 run 执行体提示词直产）。
+     */
+    private void planPart(List<AgentEvent> parts, String toolCallId, String source) {
+        List<Map<String, Object>> steps = plans.takeSnapshot(toolCallId);
+        if (steps.isEmpty()) {
+            return;
+        }
+        parts.add(frame(AgentEventTypes.PART_PLAN, AgentEventTypes.PART_PLAN_STEPS_FIELD,
+                steps, source));
     }
 
     private List<AgentEvent> textParts(List<NarrationSegments.Segment> segments) {

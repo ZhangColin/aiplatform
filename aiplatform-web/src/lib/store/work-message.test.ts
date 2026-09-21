@@ -44,6 +44,33 @@ describe("work-message store · 生长与锚定（#81 parts 契约）", () => {
     expect(work()?.parts).toEqual([]);
   });
 
+  it("步骤清单快照（#236）：notePlan 整表落 plan 不进 parts；新 runId 重开不残留上一轮清单", () => {
+    const { startWork, notePlan } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePlan("p1", ref({ eventId: "r1:2" }), [
+      { id: "s1", title: "读取现有配色", state: "completed" },
+      { id: "s2", title: "调整主题色", state: "in_progress" },
+    ]);
+
+    expect(work()?.plan).toEqual([
+      { id: "s1", title: "读取现有配色", state: "completed" },
+      { id: "s2", title: "调整主题色", state: "in_progress" },
+    ]);
+    expect(work()?.parts).toEqual([]); // 快照不进部件流水
+
+    startWork("p1", "r2"); // 下一场 run：清单随消息重开清空
+    expect(work()?.plan).toBeUndefined();
+  });
+
+  it("无锚 + coder- 会话的步骤快照：补建锚（run-start 被缓冲淘汰的补建路径，与部件同款守卫）", () => {
+    useWorkMessageStore.getState().notePlan("p1", ref({ eventId: "r9:2", runId: "r9" }), [
+      { id: "s1", title: "改配色", state: "in_progress" },
+    ]);
+
+    expect(work()?.runId).toBe("r9");
+    expect(work()?.plan).toHaveLength(1);
+  });
+
   it("run 级时钟锚（#225）：startWork 落 startedAt（run-start 信封 ts）；freezeWork 落 endedAt（收口信封 ts）——定格后值不随重放漂移", () => {
     const { startWork, freezeWork } = useWorkMessageStore.getState();
     startWork("p1", "r1", undefined, 1_758_000_000_000);

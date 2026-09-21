@@ -3,7 +3,8 @@ import { create } from "zustand";
 /**
  * 工作消息 store（#81 事件模型迁移，SSE 相关 store——桥为唯一事件写入方，ADR 0003
  * 状态三分法）：按项目记当前编码 run 的**生长中的工作消息**（parts 契约的部件投影
- * ：解说文本部件 + 工具动作部件），run 收口定格。
+ * ：解说文本部件 + 工具动作部件 + 步骤清单快照〔#236 part-plan——整表落 `plan`，
+ * 不进 parts 流水〕），run 收口定格。
  *
  * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
  * run-failed 定格（不再生长）。成功收口（run-finish 携 closing，#88/#89
@@ -33,6 +34,17 @@ export type WorkActionState = "started" | "running" | "completed" | "failed";
 
 /** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
 export type WorkCheckState = "checking" | "passed" | "failed";
+
+/**
+ * 步骤清单条目（#236 part-plan 快照的投影）：agent 自产计划的步骤——稳定 id
+ * （跨快照不变）、用户语言标题、状态 ✓●○ 三态（不设 ✗——失败留痕归动作部件
+ * 与收尾卡）。快照整表替换（不进 parts 流水——计划变化不单独播报、不留动作痕）。
+ */
+export type WorkPlanStep = {
+  id: string;
+  title: string;
+  state: "pending" | "in_progress" | "completed";
+};
 
 /**
  * 工作消息头部切片进度（run-start 扩载 #118）：`title` 为用户语言标题（生成轨道
@@ -116,6 +128,13 @@ type ProjectWork = {
   /** 工作消息头部切片进度（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
   slice?: WorkSlice;
   /**
+   * run 级步骤清单（#236 part-plan 全量快照的落态）：整表替换（执行中 agent
+   * 再调 update_plan 即新快照盖旧表——已收口步骤不可变＝提示词纪律，平台不校验
+   * 不合并）；不进 parts 流水（不走动作行、不留动作痕、不单独播报）。不落库
+   * （当次会话定格留驻，刷新不回显）；无快照（agent 不调）= 缺省不显示。
+   */
+  plan?: WorkPlanStep[];
+  /**
    * run 级时钟起锚（#225，ADR-0010 窄修订）：run-start 事件信封 ts 的 epoch ms
    * ——前端「已运行 mm:ss」的唯一锚（活性锚定真实事件，缺锚不渲染时钟）。run-start
    * 被淘汰的补建路径缺省（不伪造起点）。
@@ -137,6 +156,12 @@ export type WorkMessageState = {
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
   /**
+   * 步骤清单快照入消息（#236 part-plan）：整表替换 `plan`（快照语义——不进
+   * parts 流水、不产生播报部件）；锚定/定格/重放去重守卫与 notePart 同款。
+   * 空表 = 无效载荷忽略（服务端不出空快照，畸形载荷不清好表）。
+   */
+  notePlan: (projectId: string, ref: PartEventRef, steps: WorkPlanStep[]) => void;
+  /**
    * run 收口定格（run-finish / run-failed）；非锚定 run / 已定格忽略。工作消息
    * 原地定格留驻（#117）：部件保留、只读、不再生长，成功收口（收尾卡归 chat
    * store 对话流、随后入流）不再清空——「过程上文、结果下卡」；run-failed 同样
@@ -157,6 +182,25 @@ const CODER_SESSION_PREFIX = "coder-";
 function appendCapped(list: string[], id: string): string[] {
   const next = [...list, id];
   return next.length > MAX_IDS ? next.slice(next.length - MAX_IDS) : next;
+}
+
+/**
+ * 锚定与定格守卫（部件/计划快照共用，notePart / notePlan 的同款前段）：
+ * 锚不在或异 runId 时仅编码会话补建/重锚（主智能体的部件不建工作消息——对话面走
+ * text 增量气泡，部件与其并行双发射；生长中的锚 + 异 runId = 事件序异常，静默重试
+ * 不换新锚〔#84〕，防御位忽略——清锚会闪空消息）；定格不进（收口后无增量）；
+ * 重放按 SSE 事件 id 去重。守卫未过 / 去重命中返回 undefined（无变更）。
+ */
+function openedWork(work: ProjectWork | undefined, ref: PartEventRef): ProjectWork | undefined {
+  let current = work;
+  if (current === undefined || current.runId !== ref.runId) {
+    if (current !== undefined && !current.frozen) return undefined;
+    if (!ref.sessionId?.startsWith(CODER_SESSION_PREFIX)) return undefined;
+    current = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [] };
+  }
+  if (current.frozen) return undefined; // 定格不进部件（收口后无增量）
+  if (current.seenEventIds.includes(ref.eventId)) return undefined; // 重放去重
+  return { ...current, seenEventIds: appendCapped(current.seenEventIds, ref.eventId) };
 }
 
 /** 部件应用（动作/自检原位更新；返回原数组引用即无变更）。 */
@@ -249,18 +293,15 @@ export const useWorkMessageStore = create<WorkMessageState>((set) => ({
 
   notePart: (projectId, ref, input) =>
     updateWork(set, projectId, (work) => {
-      // 锚不在或已定格（重放缺 run-start / 上一场定格后新 run 已开工）：仅编码
-      // 会话补建/重锚——主智能体的部件不建工作消息（对话面走 text 增量气泡，部件
-      // 与其并行双发射）。生长中的锚 + 异 runId = 事件序异常（静默重试不换新锚，
-      // #84——有序流不至，防御位忽略；清锚会闪空消息）
-      if (work === undefined || work.runId !== ref.runId) {
-        if (work !== undefined && !work.frozen) return work;
-        if (!ref.sessionId?.startsWith(CODER_SESSION_PREFIX)) return work;
-        work = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [] };
-      }
-      if (work.frozen) return work; // 定格不进部件（收口后无增量）
-      if (work.seenEventIds.includes(ref.eventId)) return work; // 重放去重
-      return applyPart({ ...work, seenEventIds: appendCapped(work.seenEventIds, ref.eventId) }, ref, input);
+      const opened = openedWork(work, ref);
+      return opened ? applyPart(opened, ref, input) : work;
+    }),
+
+  notePlan: (projectId, ref, steps) =>
+    updateWork(set, projectId, (work) => {
+      const opened = openedWork(work, ref);
+      // 空表 = 无效载荷忽略（服务端不出空快照）
+      return opened && steps.length > 0 ? { ...opened, plan: steps } : work;
     }),
 
   freezeWork: (projectId, runId, endedAt) =>
@@ -282,4 +323,29 @@ export function workPartsOf(
   projectId: string,
 ): WorkPart[] {
   return state.works[projectId]?.parts ?? NO_PARTS;
+}
+
+const PLAN_STEP_STATES: ReadonlySet<string> = new Set(["pending", "in_progress", "completed"]);
+
+/**
+ * part-plan 载荷 steps → 消费口径（#236，toWorkClosing 先例——线上数据容错归一）：
+ * 缺 id/标题的条目剔除、未知状态回落 pending（多跑向安全）；全空 = 空表（桥侧
+ * 忽略，不清好表）。服务端内核已归一，此处兜底不改语义。
+ */
+export function toWorkPlanSteps(raw: unknown): WorkPlanStep[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry): WorkPlanStep[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { id, title, state } = entry as Record<string, unknown>;
+    if (typeof id !== "string" || !id.trim() || typeof title !== "string" || !title.trim()) {
+      return [];
+    }
+    return [{
+      id,
+      title,
+      state: typeof state === "string" && PLAN_STEP_STATES.has(state)
+        ? (state as WorkPlanStep["state"])
+        : "pending",
+    }];
+  });
 }

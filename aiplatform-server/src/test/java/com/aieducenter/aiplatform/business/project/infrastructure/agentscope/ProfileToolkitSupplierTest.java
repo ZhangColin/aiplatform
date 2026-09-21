@@ -80,14 +80,15 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_executor_on_project_dev_when_toolkit_then_finish_edit_only() {
-        // 执行体的业务工具面 = 结束工具（#46 修正收口判定）：主智能体资产不泄漏
-        // （ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核 shell，
-        // #219 透明面化后破坏性命令直通）由 harness 内核自带
+    void given_executor_on_project_dev_when_toolkit_then_finish_edit_and_update_plan() {
+        // 执行体的业务工具面 = 结束工具（#46 修正收口判定）+ 步骤清单（#236 run 级
+        // 计划的全量快照观测面——呈现归部件映射表，本工具零副作用）：主智能体资产
+        // 不泄漏（ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核
+        // shell，#219 透明面化后破坏性命令直通）由 harness 内核自带
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .getToolNames())
-                .containsExactly(FinishEditTool.NAME);
+                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME);
     }
 
     @Test
@@ -125,6 +126,18 @@ class ProfileToolkitSupplierTest {
         String prompt = AgentProfile.MAIN.systemPrompt();
         for (String name : toolkit.getToolNames()) {
             assertThat(prompt).as("主智能体能力清单应点名工具：%s", name).contains(name);
+        }
+    }
+
+    @Test
+    void given_executor_capability_inventory_when_assembled_then_prompt_mentions_every_tool() {
+        // #216 单一事实的执行体镜像：装配的每件业务工具（finish_edit / update_plan）
+        // 都在执行协议里点名（update_plan 的调用纪律 = #236 提示词口径）
+        var toolkit = supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"));
+        String prompt = AgentProfile.EXECUTOR.systemPrompt();
+        for (String name : toolkit.getToolNames()) {
+            assertThat(prompt).as("执行体执行协议应点名工具：%s", name).contains(name);
         }
     }
 }

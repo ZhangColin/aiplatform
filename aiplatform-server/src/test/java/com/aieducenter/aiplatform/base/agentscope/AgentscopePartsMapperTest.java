@@ -2,7 +2,9 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -52,7 +54,7 @@ class AgentscopePartsMapperTest {
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1", "订单管理页面。"));
 
             assertThat(types(parts)).containsExactly(AgentEventTypes.PART_TEXT);
-            assertThat(parts.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(parts.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
                     AgentEventTypes.ENGINE_FIELD, ENGINE,
@@ -87,7 +89,7 @@ class AgentscopePartsMapperTest {
                     new ToolResultEndEvent("r", "tc-1", "write_file", ToolResultState.SUCCESS));
 
             assertThat(types(started)).containsExactly(AgentEventTypes.PART_ACTION);
-            assertThat(started.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(started.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.RUN_FIELD, RUN_ID,
                     AgentEventTypes.SESSION_FIELD, SESSION_ID,
                     AgentEventTypes.ENGINE_FIELD, ENGINE,
@@ -97,11 +99,11 @@ class AgentscopePartsMapperTest {
                     // 参数在途：动作对象为通用标签——动作卡出现即「进行中」（#77 补动作开始）
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【代码文件】"));
             // running：参数落定，动作对象具体化（无时态——时态由 state 表达）
-            assertThat(running.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(running.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_RUNNING,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】"));
             // completed：复述已锚定的具体对象，不闪回通用标签
-            assertThat(completed.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(completed.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "编写【订单管理】"));
         }
@@ -114,7 +116,7 @@ class AgentscopePartsMapperTest {
             List<AgentEvent> failed = mapper.map(
                     new ToolResultEndEvent("r", "tc-2", "execute", ToolResultState.ERROR));
 
-            assertThat(failed.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(failed.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "tc-2",
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行命令"));
@@ -278,7 +280,7 @@ class AgentscopePartsMapperTest {
                     new ToolResultEndEvent("r", "tc-e1", "execute", ToolResultState.ERROR));
 
             // 失败红行双要素：label 复述命令原值 + error 首行（没做成＋为什么）
-            assertThat(failed.get(0).payload()).containsAllEntriesOf(java.util.Map.of(
+            assertThat(failed.get(0).payload()).containsAllEntriesOf(Map.of(
                     AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
                     AgentEventTypes.PART_ACTION_LABEL_FIELD, "npm test",
                     AgentEventTypes.PART_ACTION_ERROR_FIELD, "Error: 容器不可达"));
@@ -479,6 +481,115 @@ class AgentscopePartsMapperTest {
                             part.payload().getOrDefault(AgentEventTypes.PART_TEXT_FIELD, "")))
                     .filter(text -> !text.isEmpty())
                     .toList();
+        }
+    }
+
+    @Nested
+    class PlanParts {
+
+        /** 一次 update_plan 全生命周期：参数落定出 part-plan 全量快照，全程无 part-action。 */
+        @Test
+        void given_update_plan_call_when_args_settle_then_part_plan_snapshot_and_no_action() {
+            assertThat(mapper.map(new ToolCallStartEvent("r", "tc-p1", "update_plan"))).isEmpty();
+            // 参数增量分块到达（JSON 裂两半）——快照在参数落定点才成型
+            assertThat(mapper.map(new ToolCallDeltaEvent("r", "tc-p1", "update_plan",
+                    "{\"steps\":[{\"id\":\"s1\",\"title\":\"读取现有配色\",\"state\":\"completed\"},")))
+                    .isEmpty();
+            assertThat(mapper.map(new ToolCallDeltaEvent("r", "tc-p1", "update_plan",
+                    "{\"id\":\"s2\",\"title\":\"调整主题色\",\"state\":\"in_progress\"},"
+                            + "{\"id\":\"s3\",\"title\":\"重启服务验证\",\"state\":\"pending\"}]}")))
+                    .isEmpty();
+
+            List<AgentEvent> atSettle = mapper.map(new ToolCallEndEvent("r", "tc-p1", "update_plan"));
+
+            assertThat(types(atSettle)).containsExactly(AgentEventTypes.PART_PLAN);
+            assertThat(atSettle.get(0).payload()).containsAllEntriesOf(Map.of(
+                    AgentEventTypes.RUN_FIELD, RUN_ID,
+                    AgentEventTypes.SESSION_FIELD, SESSION_ID,
+                    AgentEventTypes.ENGINE_FIELD, ENGINE));
+            assertThat(stepsOf(atSettle.get(0))).isEqualTo(List.of(
+                    Map.of("id", "s1", "title", "读取现有配色", "state", "completed"),
+                    Map.of("id", "s2", "title", "调整主题色", "state", "in_progress"),
+                    Map.of("id", "s3", "title", "重启服务验证", "state", "pending")));
+            // 不走动作行：工具结果（ack）不出部件——计划变化不留动作痕
+            assertThat(mapper.map(new ToolResultEndEvent("r", "tc-p1", "update_plan",
+                    ToolResultState.SUCCESS))).isEmpty();
+        }
+
+        /** 执行中再调：事件携带新全量快照（整表替换语义在消费端，平台不合并）。 */
+        @Test
+        void given_plan_called_again_when_settled_then_second_event_is_full_replacement() {
+            callUpdatePlan("tc-p1", "{\"steps\":[{\"id\":\"s1\",\"title\":\"定位文件\","
+                    + "\"state\":\"completed\"},{\"id\":\"s2\",\"title\":\"改配色\",\"state\":\"in_progress\"}]}");
+
+            List<AgentEvent> second = callUpdatePlan("tc-p2",
+                    "{\"steps\":[{\"id\":\"s1\",\"title\":\"定位文件\",\"state\":\"completed\"},"
+                            + "{\"id\":\"s2\",\"title\":\"改配色\",\"state\":\"completed\"},"
+                            + "{\"id\":\"s3\",\"title\":\"验证\",\"state\":\"in_progress\"}]}");
+
+            assertThat(types(second)).containsExactly(AgentEventTypes.PART_PLAN);
+            assertThat(stepsOf(second.get(0))).hasSize(3);
+            assertThat(stepsOf(second.get(0)).get(2))
+                    .containsEntry(AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
+                            AgentEventTypes.PART_PLAN_STATE_IN_PROGRESS);
+        }
+
+        /** 计划更新是工具边界：先出解说余段再出快照（段与段有序不串，同动作边界语义）。 */
+        @Test
+        void given_pending_narration_when_plan_settles_then_drained_before_plan() {
+            // 无句读结尾：余段挂在工具边界出（同动作边界先例——start 边界先 drain）
+            mapper.map(new TextBlockDeltaEvent("r", "b-1", "开始改配色"));
+
+            List<AgentEvent> atBoundary = new ArrayList<>(mapper.map(
+                    new ToolCallStartEvent("r", "tc-p1", "update_plan")));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-p1", "update_plan",
+                    "{\"steps\":[{\"id\":\"s1\",\"title\":\"改配色\",\"state\":\"in_progress\"}]}"));
+            atBoundary.addAll(mapper.map(new ToolCallEndEvent("r", "tc-p1", "update_plan")));
+
+            assertThat(types(atBoundary)).containsExactly(
+                    AgentEventTypes.PART_TEXT, AgentEventTypes.PART_PLAN);
+        }
+
+        /** 解析不出快照（非 JSON / steps 缺失或非数组 / 空表 / 参数未流出）→ 不发事件（不产就不显示）。 */
+        @Test
+        void given_missing_empty_or_unparsable_steps_when_settled_then_no_part_plan() {
+            assertThat(callUpdatePlan("tc-e1", "not json")).isEmpty();
+            assertThat(callUpdatePlan("tc-e2", "{\"steps\":\"nope\"}")).isEmpty();
+            assertThat(callUpdatePlan("tc-e3", "{\"steps\":[]}")).isEmpty();
+            assertThat(callUpdatePlan("tc-e4", "{\"other\":1}")).isEmpty();
+            // 无参数增量（参数未以增量流出）同样不出快照——快照只从参数增量成型
+            assertThat(mapper.map(new ToolCallEndEvent("r", "tc-e5", "update_plan"))).isEmpty();
+        }
+
+        /** 畸形条目防御归一：缺 id/标题或空白标题丢弃、未知状态回落 pending、重号首见胜出。 */
+        @Test
+        void given_malformed_step_entries_when_settled_then_normalized_snapshot() {
+            List<AgentEvent> parts = callUpdatePlan("tc-n1", "{\"steps\":["
+                    + "{\"id\":\"s1\",\"title\":\"读文件\"},"                       // 缺 state → pending
+                    + "{\"id\":\"s2\",\"title\":\"改色\",\"state\":\"done\"},"      // 未知 state → pending
+                    + "{\"id\":\"s3\",\"state\":\"in_progress\"},"                  // 缺 title → 丢弃
+                    + "{\"title\":\"无 id\",\"state\":\"pending\"},"                // 缺 id → 丢弃
+                    + "{\"id\":\"s1\",\"title\":\"重号\",\"state\":\"completed\"}," // 重号 → 首见胜出
+                    + "{\"id\":\"s4\",\"title\":\"   \"}]}");                        // 空白 title → 丢弃
+
+            assertThat(stepsOf(parts.get(0))).isEqualTo(List.of(
+                    Map.of("id", "s1", "title", "读文件",
+                            "state", AgentEventTypes.PART_PLAN_STATE_PENDING),
+                    Map.of("id", "s2", "title", "改色",
+                            "state", AgentEventTypes.PART_PLAN_STATE_PENDING)));
+        }
+
+        /** 完整调用剧本（start → delta → end → result）。 */
+        private List<AgentEvent> callUpdatePlan(String toolCallId, String args) {
+            mapper.map(new ToolCallStartEvent("r", toolCallId, "update_plan"));
+            mapper.map(new ToolCallDeltaEvent("r", toolCallId, "update_plan", args));
+            return mapper.map(new ToolCallEndEvent("r", toolCallId, "update_plan"));
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Map<String, Object>> stepsOf(AgentEvent part) {
+            return (List<Map<String, Object>>) part.payload()
+                    .get(AgentEventTypes.PART_PLAN_STEPS_FIELD);
         }
     }
 

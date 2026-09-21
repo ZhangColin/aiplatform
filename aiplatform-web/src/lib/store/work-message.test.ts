@@ -355,6 +355,32 @@ describe("work-message store · 自检播报（#85：一场 run 一个自检部�
   });
 });
 
+describe("work-message store · 成功无痕不回写事件面（#230：滤除只在呈现层）", () => {
+  it("completed 动作照收全量部件——store 不裁事件（静态面滤除是组件投影的事）", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "开始。" });
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "action",
+      toolCallId: "tc-1",
+      toolName: "execute",
+      state: "started",
+      label: "npm install",
+    });
+    notePart("p1", ref({ eventId: "r1:3" }), {
+      kind: "action",
+      toolCallId: "tc-1",
+      toolName: "execute",
+      state: "completed",
+      label: "npm install",
+    });
+
+    const parts = work()?.parts ?? [];
+    expect(parts).toHaveLength(2); // 文本 + completed 动作——全量收件
+    expect(parts[1]).toMatchObject({ state: "completed", label: "npm install" });
+  });
+});
+
 describe("work-message store · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
   it("freezeWork 定格留驻：部件保留、只读、不再生长（成功收口不再清空——「过程上文、结果下卡」）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();

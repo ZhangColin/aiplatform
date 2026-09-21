@@ -17,114 +17,89 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
 const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
 
 /**
- * 工作消息呈现段（#116 动作组折叠）：非动作部件（解说/确认/自检）独段；连续动作
- * 聚合为一段（≥2 才有折叠语义，单动作回落 single 段——不聚合）。
+ * 成功无痕投影（#230）：completed 动作不产生静态条目——滤除只在呈现层（store 部件
+ * 流水仍收全量，「store 不裁事件」口径不变）；failed 动作留红行；started/running
+ * 动作只在当前动作行（最近发起的非终态动作锚定：直播行始终是「现在」——story15
+ * 并发取最近发起的一条，被更新动作取代的未终态动作沉没）；定格后未终态动作随收口沉没——
+ * run 已收口即无「进行中」，改了什么归收尾卡变更清单（排障抓手＝失败痕＋收尾卡）。
+ * 读类工具不播报的封闭表口径在服务端/桥（part-action 事件已过滤只读工具），本投影不涉。
  */
-export type WorkSegment =
-  | { kind: "single"; part: WorkPart }
-  | { kind: "actions"; actions: Extract<WorkPart, { kind: "action" }>[] };
-
-/**
- * 部件序列 → 呈现段投影（#116）：连续动作部件聚合为「动作组」——纯呈现聚合，事件
- * 模型不动（store 部件流水不变）；非动作部件各自成段、把动作组切开（「解说短段 ↔
- * 动作组」交替竖流）。读类工具不播报的封闭表口径在服务端/桥（part-action 事件已
- * 过滤只读工具），本投影不涉。
- */
-export function segmentWorkParts(parts: WorkPart[]): WorkSegment[] {
-  const segments: WorkSegment[] = [];
-  let actions: Extract<WorkPart, { kind: "action" }>[] = [];
-  const flush = () => {
-    if (actions.length === 0) return;
-    segments.push(actions.length === 1 ? { kind: "single", part: actions[0] } : { kind: "actions", actions });
-    actions = [];
-  };
-  for (const part of parts) {
-    if (part.kind === "action") {
-      actions.push(part);
-    } else {
-      flush();
-      segments.push({ kind: "single", part });
-    }
-  }
-  flush();
-  return segments;
+export function presentWorkParts(parts: WorkPart[], frozen: boolean): WorkPart[] {
+  // 当前动作行锚＝最近发起的 started/running 动作（story15 并发取最近发起的一条；
+  // 其后收尾的终态动作不夺走仍在跑的直播行）；定格后无「进行中」、未终态动作沉没。
+  const liveIndex = frozen
+    ? -1
+    : parts.findLastIndex(
+        (part) => part.kind === "action" && (part.state === "started" || part.state === "running"),
+      );
+  return parts.filter((part, index) => {
+    if (part.kind !== "action") return true;
+    if (part.state === "failed") return true; // 失败留痕（红行）
+    return index === liveIndex; // 当前动作行（最近发起的非终态动作）
+  });
 }
 
-/** 段内是否含失败动作（#225 失败破例的判定：任一动作 failed 即破例）。 */
-export function segmentHasFailure(segment: WorkSegment): boolean {
-  if (segment.kind === "single") {
-    return segment.part.kind === "action" && segment.part.state === "failed";
-  }
-  return segment.actions.some((action) => action.state === "failed");
+/** 失败痕判定（#225 失败破例的部件级口径：failed 红行不埋进坍缩、常驻展开红显）。 */
+function isFailedPart(part: WorkPart): boolean {
+  return part.kind === "action" && part.state === "failed";
 }
 
-/** 混合坍缩投影（#225 正文三区）：更早区（坍缩）+ 失败破例面 + 尾部活动区。 */
+/** 混合坍缩投影（#225 正文三区；#230 动作组退役后以部件为段）：更早区（坍缩）+ 失败破例面 + 尾部活动区。 */
 export type WorkBody = {
-  /** 更早区全量（原序）：未展开时非失败段藏进「⋯ 更早 N 项」、失败段提为破例面；展开回看时全量竖流（事件不裁剪）。 */
-  earlier: WorkSegment[];
-  /** 坍缩行计数（更早区非失败段数——失败段不进坍缩行）。 */
+  /** 更早区全量（原序）：未展开时解说段藏进「⋯ 更早 N 项」、失败红行提为破例面；展开回看时全量竖流（事件不裁剪）。 */
+  earlier: WorkPart[];
+  /** 坍缩行计数（更早区解说/自检段数——失败红行不进坍缩行）。 */
   collapsedCount: number;
-  /** 尾部活动区：最近动作组（生长中展开，#225 story8）+ 最近一两句解说 + 收尾自检。 */
-  tail: WorkSegment[];
+  /** 尾部活动区：当前动作行（或最近失败红行）+ ≤2 句前展解说 + 其后自检恒留、解说 ≤2 句。 */
+  tail: WorkPart[];
 };
 
 /** 尾部解说配额（「最近一两句解说」两侧同限：动作前引入 ≤2 句、动作后收尾 ≤2 句）。 */
 const TAIL_TEXT_QUOTA = 2;
 
 /**
- * 呈现段 → 混合坍缩分区（#225 纯呈现聚合，store 部件流水不动）：
- * 尾部 = 最后一个动作承载段 + 其后至多 2 句解说（自检行恒留）+ 其前 ≤2 个连续
- * 解说段（「最近动作组＋当前动作行＋最近一两句解说」常驻可见、卡片高度有界——
- * 收口前的多句交接叙事折进更早区）；其余进更早区坍缩（含超配额的居中解说——
- * 完整回看时全量原序展开，事件不裁剪）。无动作承载段（纯解说）= 尾部取最后
- * 两段。更早区中含失败动作的段由渲染层提为破例面（常驻展开红显）。
+ * 呈现部件 → 混合坍缩分区（#225 纯呈现聚合；#230 输入改为成功无痕投影后的部件）：
+ * 尾部 = 最后一个动作部件（当前动作行／最近失败红行）+ 其后至多 2 句解说（自检行
+ * 恒留）+ 其前 ≤2 个连续解说段（「当前动作行＋最近一两句解说」常驻可见、卡片高度
+ * 有界——收口前的多句交接叙事折进更早区）；其余进更早区坍缩（完整回看时全量原序
+ * 展开，事件不裁剪）。无动作部件（成功沉没后的纯解说常态）= 尾部取最后两段。更早
+ * 区中的失败红行由渲染层提为破例面（常驻展开红显）。
  */
-export function splitWorkBody(segments: WorkSegment[]): WorkBody {
-  if (segments.length === 0) {
+export function splitWorkBody(parts: WorkPart[]): WorkBody {
+  if (parts.length === 0) {
     return { earlier: [], collapsedCount: 0, tail: [] };
   }
-  let anchor = -1;
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const segment = segments[i];
-    const bearsAction =
-      segment.kind === "actions" || (segment.kind === "single" && segment.part.kind === "action");
-    if (bearsAction) {
-      anchor = i;
-      break;
-    }
-  }
-  const tail: WorkSegment[] = [];
+  const anchor = parts.findLastIndex((part) => part.kind === "action");
+  const tail: WorkPart[] = [];
   if (anchor < 0) {
     // 纯解说：尾部取最后两段
-    tail.push(...segments.slice(Math.max(0, segments.length - TAIL_TEXT_QUOTA)));
+    tail.push(...parts.slice(Math.max(0, parts.length - TAIL_TEXT_QUOTA)));
   } else {
     // 前展 ≤2 个紧邻解说段（最近一两句解说随尾部常驻——解说引入当前动作的语境）
     for (let i = anchor - 1; tail.length < TAIL_TEXT_QUOTA && i >= 0; i--) {
-      const candidate = segments[i];
-      if (candidate.kind === "single" && candidate.part.kind === "text") {
-        tail.unshift(candidate);
+      if (parts[i].kind === "text") {
+        tail.unshift(parts[i]);
       } else {
         break;
       }
     }
-    tail.push(segments[anchor]);
+    tail.push(parts[anchor]);
     // 其后自检恒留、解说至多最近 2 句（超配额的居中句折进更早区）
     let textsKept = 0;
-    const trailing: WorkSegment[] = [];
-    for (let i = segments.length - 1; i > anchor; i--) {
-      const segment = segments[i];
-      const isText = segment.kind === "single" && segment.part.kind === "text";
-      if (isText && textsKept >= TAIL_TEXT_QUOTA) continue;
-      if (isText) textsKept++;
-      trailing.unshift(segment);
+    const trailing: WorkPart[] = [];
+    for (let i = parts.length - 1; i > anchor; i--) {
+      const part = parts[i];
+      if (part.kind === "text" && textsKept >= TAIL_TEXT_QUOTA) continue;
+      if (part.kind === "text") textsKept++;
+      trailing.unshift(part);
     }
     tail.push(...trailing);
   }
   const inTail = new Set(tail);
-  const earlier = segments.filter((segment) => !inTail.has(segment));
+  const earlier = parts.filter((part) => !inTail.has(part));
   return {
     earlier,
-    collapsedCount: earlier.filter((segment) => !segmentHasFailure(segment)).length,
+    collapsedCount: earlier.filter((part) => !isFailedPart(part)).length,
     tail,
   };
 }
@@ -148,14 +123,15 @@ export function planCurrentOrd(
  * 形的演进）：自上而下三段——①计划区（生成轨道片清单常驻：✓ 已收口 / ● 当前〔
  * run-start 切片序驱动〕/ ○ 待跑 / ✗ 失败，REST 只读透出）＋②头部活性（#118
  * 切片标题 + run 级「已运行 mm:ss」跳动时钟〔ADR-0010 窄修订：锚 run-start 信封
- * ts，收口定格〕）＋③正文混合坍缩（尾部活动区常驻、更早内容坍缩为「⋯ 更早 N 项」
- * 点击回看；失败破例：含失败动作的组不埋进坍缩、常驻展开红显）。零散维护需求
- * （无切片上下文）不渲染计划区、不伪造计划；无切片标题回落「正在做」。思考与
- * 代码不播、无逐步耗时/百分比；run 开始即出现，成功收口原地定格留驻（#117：
- * 部件保留、只读，收尾卡随后入流——「过程上文、结果下卡」），失败定格（run-failed）
- * 流水留驻。定格时生长中的尾部组回落折叠——决定五「正常收工维持折叠」优先
- * （story12 的「无界面跳变」承 #117 口径：卡片不清空不消失，坍缩即终形）。
- * 动作组折叠归 #116（≥2 连续动作折叠一行）。
+ * ts，收口定格〕）＋③正文混合坍缩（#230 成功无痕：动作组折叠退役、成功动作不产
+ * 生静态条目——静态面＝解说段＋失败红行；尾部活动区常驻当前动作行＋最近一两句
+ * 解说，更早内容坍缩为「⋯ 更早 N 项」点击回看——组成＝解说段＋失败痕；失败破
+ * 例：失败红行不埋进坍缩、常驻展开红显）。零散维护需求（无切片上下文）不渲染
+ * 计划区、不伪造计划；无切片标题回落「正在做」。思考与代码不播、无逐步耗时/
+ * 百分比；run 开始即出现，成功收口原地定格留驻（#117：部件保留、只读，收尾卡随
+ * 后入流——「过程上文、结果下卡」），失败定格（run-failed）流水留驻。定格时进行
+ * 中动作随收口沉没、无成功残骸（story16「结束瞬间无界面跳变」承 #117 口径：卡片
+ * 不清空不消失，叙事＋失败痕即终形）。
  */
 export function WorkMessage({
   work,
@@ -173,7 +149,7 @@ export function WorkMessage({
 
   const currentOrd = planCurrentOrd(work.slice, plan);
   const showPlan = !!plan && plan.length > 0 && currentOrd != null;
-  const body = splitWorkBody(segmentWorkParts(work.parts));
+  const body = splitWorkBody(presentWorkParts(work.parts, work.frozen));
   const failed = latestActionOf(work.parts)?.state === "failed";
 
   return (
@@ -211,22 +187,15 @@ export function WorkMessage({
   );
 }
 
-/** 正文三区渲染（#225 混合坍缩）：更早行（可展开）→ 失败破例面 → 尾部活动区。 */
+/** 正文三区渲染（#225 混合坍缩 + #230 成功无痕）：更早行（可展开）→ 失败破例面 → 尾部活动区。 */
 function WorkBodyRows({ body, frozen }: { body: WorkBody; frozen: boolean }) {
   const [earlierOpen, setEarlierOpen] = useState(false);
-  const surfaced = body.earlier.filter(segmentHasFailure);
+  const surfaced = body.earlier.filter(isFailedPart);
   return (
     <>
       {earlierOpen ? (
-        // 展开回看：更早区全量原序竖流（story5/17 完整过程——含失败段，事件不裁剪）
-        body.earlier.map((segment) => (
-          <WorkSegmentRow
-            key={segmentKey(segment)}
-            segment={segment}
-            frozen={frozen}
-            forceOpen={segmentHasFailure(segment)}
-          />
-        ))
+        // 展开回看：更早区全量原序竖流（story4/5/6——组成＝解说段＋失败痕，事件不裁剪）
+        body.earlier.map((part) => <WorkPartRow key={part.id} part={part} frozen={frozen} />)
       ) : body.collapsedCount > 0 ? (
         <button
           type="button"
@@ -240,44 +209,16 @@ function WorkBodyRows({ body, frozen }: { body: WorkBody; frozen: boolean }) {
       ) : null}
       {/* 失败破例面（#225 story9）：未展开时也不埋进坍缩行——常驻展开红显 */}
       {!earlierOpen
-        ? surfaced.map((segment) => (
-            <WorkSegmentRow key={segmentKey(segment)} segment={segment} frozen={frozen} forceOpen />
-          ))
+        ? surfaced.map((part) => <WorkPartRow key={part.id} part={part} frozen={frozen} />)
         : null}
-      {body.tail.map((segment) => (
-        <WorkSegmentRow
-          key={segmentKey(segment)}
-          segment={segment}
-          frozen={frozen}
-          forceOpen={!frozen}
-        />
+      {body.tail.map((part) => (
+        <WorkPartRow key={part.id} part={part} frozen={frozen} />
       ))}
     </>
   );
 }
 
-/** 呈现段 → 行（single 直行；动作组走折叠行，forceOpen = 生长中尾部/失败破例）。 */
-function WorkSegmentRow({
-  segment,
-  frozen,
-  forceOpen = false,
-}: {
-  segment: WorkSegment;
-  frozen: boolean;
-  forceOpen?: boolean;
-}) {
-  if (segment.kind === "single") {
-    return <WorkPartRow part={segment.part} frozen={frozen} />;
-  }
-  return <ActionGroup actions={segment.actions} frozen={frozen} forceOpen={forceOpen} />;
-}
-
-/** 段 React key（组取首动作 id——首见事件 id 稳定、状态更新不改键）。 */
-function segmentKey(segment: WorkSegment): string {
-  return segment.kind === "single" ? segment.part.id : segment.actions[0].id;
-}
-
-/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 单行状态卡。 */
+/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 当前动作行 / 失败红行（成功无痕，#230）。 */
 function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
   if (part.kind === "text") {
     return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
@@ -285,7 +226,7 @@ function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
   if (part.kind === "check") {
     return <CheckRow part={part} frozen={frozen} />;
   }
-  return <ActionRow part={part} frozen={frozen} />;
+  return <ActionRow part={part} />;
 }
 
 /**
@@ -329,20 +270,14 @@ function CheckRow({
 }
 
 /**
- * 单行动作状态卡：图标 + 对象短语 + 状态（进行中转圈 / 完成打勾 / 失败「没做成」）。
- * 失败携 error 时行下追加错误副行（#229 失败留痕：错误/stderr 首行红显——排障
- * 不进容器即可初判原因；恒定高度对失败破例让位〔#225 破例语义：事故不被埋掉〕）。
- * 逐步耗时已退役（#115/ADR-0010：不显示动作时长）。定格后未终态的动作（run 收口
- * 截断的少数）不再转圈——如实留「进行中」字样不带终态标。
+ * 单行动作行（#230 成功无痕投影后仅两态可达——completed 已滤除、定格截断的未终态
+ * 已沉没）：进行中 = 当前动作行（转圈直播 label，#228 命令原值）；失败 = 红行
+ * （label＋「没做成」＋错误副行 #229 失败留痕——排障不进容器即可初判原因；恒定
+ * 高度对失败破例让位〔#225 破例语义：事故不被埋掉〕）。逐步耗时已退役
+ * （#115/ADR-0010：不显示动作时长）。
  */
-function ActionRow({
-  part,
-  frozen,
-}: {
-  part: Extract<WorkPart, { kind: "action" }>;
-  frozen: boolean;
-}) {
-  const terminal = part.state === "completed" || part.state === "failed";
+function ActionRow({ part }: { part: Extract<WorkPart, { kind: "action" }> }) {
+  const failed = part.state === "failed";
   return (
     <div>
       <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
@@ -350,95 +285,24 @@ function ActionRow({
           {TOOL_ICONS[part.toolName] ?? FALLBACK_TOOL_ICON}
         </span>
         {/* 单行截断（#228）：长命令优雅截断不换行撑高——卡片宽度恒定（#225 story8）； */}
-        <span className={cn("min-w-0 flex-1 truncate", terminal && "text-muted-foreground")}>
+        <span className={cn("min-w-0 flex-1 truncate", failed && "text-muted-foreground")}>
           {part.label}
         </span>
-        {part.state === "completed" ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <Check className="size-3.5 text-green-600" strokeWidth={3} />
-          </span>
-        ) : part.state === "failed" ? (
+        {failed ? (
           <span className="flex shrink-0 items-center gap-1.5 text-xs text-destructive">
             <X className="size-3.5" strokeWidth={3} /> 没做成
           </span>
-        ) : frozen ? (
-          <span className="shrink-0 text-xs text-muted-foreground">进行中</span>
         ) : (
           <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             <Spinner className="size-3" /> 进行中
           </span>
         )}
       </div>
-      {part.state === "failed" && part.error ? (
+      {failed && part.error ? (
         // 错误副行：与 label 同行宽截断（服务端已首行截断，此处行内样式兜底），
         // 左缩进与 label 起点对齐（px-1 + 图标 14px + gap-2）
         <div className="px-1 pb-1.5 pl-[22px] text-xs leading-relaxed text-destructive/90">
           <span className="block truncate">{part.error}</span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** 折叠组头部堆叠图标至多露几个（余下靠「N 个动作」计数表达——防长组图标溢出）。 */
-const COLLAPSED_ICON_CAP = 3;
-
-/**
- * 动作组折叠行（#116；#225 增破例语义）：连续动作默认折叠为一行（堆叠图标 +
- * 「N 个动作」），点击展开见单条动作。forceOpen = 生长中的尾部组（story8「正在
- * 进行的动作组保持展开」）或失败破例组（story9「事故不被折叠埋掉」）——常驻展开，
- * 用户点击不收力；正常收工（frozen）回落折叠（「做完的」一眼可分）。组内含失败
- * 动作时折叠头带红色状态行计数。组键取首动作 id（首见事件 id 稳定、状态更新不改
- * 键），生长中同组追加动作时折叠态不丢。
- */
-function ActionGroup({
-  actions,
-  frozen,
-  forceOpen = false,
-}: {
-  actions: Extract<WorkPart, { kind: "action" }>[];
-  frozen: boolean;
-  forceOpen?: boolean;
-}) {
-  const [userOpen, setUserOpen] = useState(false);
-  const open = forceOpen || userOpen;
-  const failedCount = actions.filter((action) => action.state === "failed").length;
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setUserOpen((value) => !value)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-sm transition-colors hover:bg-muted/50"
-      >
-        <span className="flex shrink-0 -space-x-1.5">
-          {actions.slice(0, COLLAPSED_ICON_CAP).map((action) => (
-            <span
-              key={action.id}
-              className="flex size-5 shrink-0 items-center justify-center rounded-full border border-background bg-muted text-muted-foreground"
-            >
-              {TOOL_ICONS[action.toolName] ?? FALLBACK_TOOL_ICON}
-            </span>
-          ))}
-        </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 text-left text-muted-foreground",
-            failedCount > 0 && "text-destructive",
-          )}
-        >
-          {actions.length} 个动作
-          {failedCount > 0 ? `（${failedCount} 项没做成）` : ""}
-        </span>
-        <ChevronDown
-          className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
-        />
-      </button>
-      {open ? (
-        <div className="pl-1">
-          {actions.map((action) => (
-            <ActionRow key={action.id} part={action} frozen={frozen} />
-          ))}
         </div>
       ) : null}
     </div>
@@ -550,12 +414,10 @@ export function formatClock(ms: number): string {
 }
 
 /** 最新动作部件（尾部活动/滚动行的判定输入；无动作 = undefined）。 */
-function latestActionOf(parts: WorkPart[]): Extract<WorkPart, { kind: "action" }> | undefined {
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const part = parts[i];
-    if (part.kind === "action") return part;
-  }
-  return undefined;
+function latestActionOf(
+  parts: WorkPart[],
+): Extract<WorkPart, { kind: "action" }> | undefined {
+  return parts.findLast((part) => part.kind === "action");
 }
 
 /** 工作消息头部文案（#118）：切片标题 + 生成轨道进度；无切片信息回落「正在做」。 */

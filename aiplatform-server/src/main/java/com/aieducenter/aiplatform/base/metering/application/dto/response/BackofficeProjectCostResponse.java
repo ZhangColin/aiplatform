@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 
 /**
@@ -19,6 +21,9 @@ import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 public record BackofficeProjectCostResponse(
         String projectId,
         TokenUsage total,
+        @Schema(description = "平台成本（币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；"
+                + "全未配价时为空对象，成本标量缺失不伪装 0——allUnpriced 同行为 true）",
+                example = "{\"USD\": 12.34}")
         Map<String, BigDecimal> cost,
         boolean allUnpriced
 ) {

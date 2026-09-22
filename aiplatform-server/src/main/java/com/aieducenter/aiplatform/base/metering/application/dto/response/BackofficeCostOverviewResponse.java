@@ -7,6 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 
 /**
@@ -28,6 +30,9 @@ public record BackofficeCostOverviewResponse(
         Instant from,
         Instant to,
         TokenUsage total,
+        @Schema(description = "平台成本（币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；"
+                + "无生效单价的分量不进本桶，全未配价/无事件为空对象）",
+                example = "{\"USD\": 12.34}")
         Map<String, BigDecimal> cost,
         List<ModelUsage> byModel,
         List<AgentKindUsage> byAgentKind

@@ -3,6 +3,8 @@ package com.aieducenter.aiplatform.base.metering.application.dto.response;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
 
 /**
@@ -32,6 +34,10 @@ public record UnitPriceEntryResponse(
         String model,
         Integer tokenKind,
         String tokenKindName,
+        @Schema(description = "每 token 单价（响应侧为 string——精确十进制串交接，规避 "
+                + "BigDecimal 直出 JSON 落科学计数；开行/改价入参侧为 number，类型照实"
+                + "各自呈现、有意不做统一）",
+                example = "\"0.00000132\"")
         String unitPrice,
         String currency,
         Instant effectiveFrom,

@@ -3,6 +3,8 @@ package com.aieducenter.aiplatform.base.metering.application.dto.command;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
 
 /**
@@ -24,6 +26,9 @@ public record OpenPriceEntryCommand(
         String provider,
         String model,
         TokenKind tokenKind,
+        @Schema(description = "每 token 单价（入参侧为 number；非负，0＝免费档。"
+                + "响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）",
+                example = "0.00000132")
         BigDecimal unitPrice,
         String currency,
         Instant effectiveFrom

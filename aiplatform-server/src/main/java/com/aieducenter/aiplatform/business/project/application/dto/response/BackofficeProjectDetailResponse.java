@@ -6,6 +6,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -88,6 +90,9 @@ public record BackofficeProjectDetailResponse(
      * ＋false（明确空态）。
      */
     public record CostSummary(
+            @Schema(description = "总成本按币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；"
+                    + "无用量（或全未配价）为空对象",
+                    example = "{\"USD\": 12.34}")
             Map<String, BigDecimal> cost,
             boolean unpriced
     ) {

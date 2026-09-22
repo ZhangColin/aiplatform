@@ -100,6 +100,7 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.items.length()").value(1))
                 .andExpect(jsonPath("$.data.items[0].id").value("900"))
                 .andExpect(jsonPath("$.data.items[0].projectName").value("宠物店官网"))
+                .andExpect(jsonPath("$.data.items[0].ownerExternalId").value("sub-user-1"))
                 .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value("文野"))
                 .andExpect(jsonPath("$.data.items[0].status").value(1))
                 .andExpect(jsonPath("$.data.total").value("1")) // Long 全局序列化为字符串
@@ -147,6 +148,7 @@ class BackofficeOrderControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value("900"))
                 .andExpect(jsonPath("$.data.projectName").value("宠物店官网"))
+                .andExpect(jsonPath("$.data.ownerExternalId").value("sub-user-1"))
                 .andExpect(jsonPath("$.data.ownerDisplayName").value("文野"))
                 .andExpect(jsonPath("$.data.status").value(2))
                 .andExpect(jsonPath("$.data.amount").value("128000"))
@@ -319,13 +321,13 @@ class BackofficeOrderControllerTest {
     // ---------- 夹具 ----------
 
     private static BackofficeOrderSummaryResponse summary() {
-        return new BackofficeOrderSummaryResponse("900", "100", "宠物店官网", "文野",
+        return new BackofficeOrderSummaryResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.PENDING_QUOTE, "待报价", null, null,
                 LocalDateTime.of(2026, 9, 1, 9, 0), null);
     }
 
     private static BackofficeOrderDetailResponse backofficeDetail() {
-        return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "文野",
+        return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.QUOTED, "已报价", 128000L, "CNY", "首版报价",
                 List.of(
                         new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",

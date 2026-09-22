@@ -18,6 +18,7 @@ import com.cartisan.web.response.PageResponse;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageQueryPort;
 import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
+import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountBriefResponse;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.query.BackofficeProjectQuery;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeProjectDetailResponse;
@@ -98,11 +99,11 @@ public class BackofficeProjectAppService {
         Pageable pageable = pagination.toPageRequest()
                 .withSort(Sort.by(Sort.Direction.DESC, "id"));
         Page<Project> result = projectRepository.findAll(specification, pageable);
-        Map<Long, String> ownerNames = accountAppService.displayNamesOf(
+        Map<Long, AccountBriefResponse> owners = accountAppService.briefsOf(
                 result.getContent().stream().map(Project::getOwnerAccountId).toList());
         return PageResponse.of(result.map(project -> BackofficeProjectSummaryResponse.of(project,
                 project.getOwnerAccountId() == null ? null
-                        : ownerNames.get(project.getOwnerAccountId()))));
+                        : owners.get(project.getOwnerAccountId()))));
     }
 
     /**
@@ -122,11 +123,11 @@ public class BackofficeProjectAppService {
     }
 
     /**
-     * 后台项目详情：清单字段全量＋归属账号显示名＋订单引用（activeOrder＝未终结
-     * 订单摘要，有值即冻结迭代；latestOrder＝最近一张任意状态订单，支付归档后
-     * 承接「完整记录」取单面）＋成本汇总指针（项目全量口径，明细下钻走成本域
-     * 端点）。归属账号显示名软引用容缺（null 呈现）——项目是交付载体，不因
-     * 账号档缺失而 404（同清单口径）。
+     * 后台项目详情：清单字段全量＋归属账号摘要（externalId＋显示名）＋订单引用
+     * （activeOrder＝未终结订单摘要，有值即冻结迭代；latestOrder＝最近一张任意
+     * 状态订单，支付归档后承接「完整记录」取单面）＋成本汇总指针（项目全量
+     * 口径，明细下钻走成本域端点）。归属账号摘要软引用容缺（null 呈现）——
+     * 项目是交付载体，不因账号档缺失而 404（同清单口径）。
      *
      * @throws ApplicationException PRJ_001 项目不存在（含已删项目——真删无墓碑）
      */
@@ -136,7 +137,7 @@ public class BackofficeProjectAppService {
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
         UsageSummary usage = usageQueryPort.bySubject(Long.toString(projectId), null, null);
         return BackofficeProjectDetailResponse.of(project,
-                accountAppService.displayNameOf(project.getOwnerAccountId()),
+                accountAppService.briefOf(project.getOwnerAccountId()),
                 orderQueryAppService.activeOrderOf(projectId).orElse(null),
                 orderQueryAppService.latestOrderOf(projectId).orElse(null),
                 new BackofficeProjectDetailResponse.CostSummary(

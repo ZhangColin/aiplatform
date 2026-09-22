@@ -11,6 +11,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountBriefResponse;
 import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountResponse;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
@@ -46,24 +47,27 @@ public class AccountAppService {
     }
 
     /**
-     * 显示名（跨 BC 查名面：order 上下文后台订单视图嵌入用）。账号不存在或
-     * 标识为 null 时返 null——订单下单账号可空，缺档如实呈现，不放大成错误。
+     * 账号摘要（跨 BC 取档面：order/project 后台读面嵌入用）。externalId 与显示名
+     * 一批取齐（#243 起后台读面带 ownerExternalId——账号档案读口的寻址键）。
+     * 账号不存在或标识为 null 时返 null——下单/归属账号可空，缺档如实呈现，
+     * 不放大成错误。
      */
-    public String displayNameOf(Long accountId) {
+    public AccountBriefResponse briefOf(Long accountId) {
         if (accountId == null) {
             return null;
         }
         return accountRepository.findById(accountId)
-                .map(Account::getDisplayName)
+                .map(AccountBriefResponse::of)
                 .orElse(null);
     }
 
     /**
-     * 显示名批量（{@link #displayNameOf} 的清单面，#156 后台订单清单行嵌入用）：
-     * 缺档/可空账号不在返回 Map——调用面取不到即 null（容缺呈现，口径同单笔）。
+     * 账号摘要批量（{@link #briefOf} 的清单面，后台清单行嵌入用）：缺档/可空账号
+     * 不在返回 Map——调用面取不到即 null（容缺呈现，口径同单笔）。一批取齐
+     * externalId＋显示名，清单不放大查询次数。
      */
     @Transactional(readOnly = true)
-    public Map<Long, String> displayNamesOf(Collection<Long> accountIds) {
+    public Map<Long, AccountBriefResponse> briefsOf(Collection<Long> accountIds) {
         List<Long> ids = accountIds.stream()
                 .filter(Objects::nonNull)
                 .distinct()
@@ -72,8 +76,7 @@ public class AccountAppService {
             return Map.of();
         }
         return accountRepository.findAllById(ids).stream()
-                .filter(account -> account.getDisplayName() != null)
-                .collect(Collectors.toMap(Account::getId, Account::getDisplayName));
+                .collect(Collectors.toMap(Account::getId, AccountBriefResponse::of));
     }
 
     private static AccountResponse toResponse(Account account) {

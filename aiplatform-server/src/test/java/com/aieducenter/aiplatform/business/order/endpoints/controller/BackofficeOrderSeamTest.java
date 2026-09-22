@@ -65,6 +65,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 精确、行带 ownerDisplayName（账号缺档为 null）、分页上界截断与越界——过滤
  * 走数据库查询路径（真库 WHERE 生效即为证）。</p>
  *
+ * <p>#243 四读面补 ownerExternalId 在本类钉死：清单/详情行带下单账号对外正身
+ * （账号档案读口的寻址键），有主带值、无主/账号已删容缺 null——与
+ * ownerDisplayName 同源同批、同语义。</p>
+ *
  * <p>#157 运营取消写口在本类一链钉死：已报价单带原因＋操作者头签名取消 →
  * 订单落已取消＋库列留痕（JdbcTemplate）→ 后台详情呈现留痕 → 同项目再下单
  * 成功（解冻回迭代）；待报价无头取消留原因落空操作者；已支付/已归档/已取消
@@ -603,6 +607,66 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.items").isEmpty())
                 .andExpect(jsonPath("$.data.page").value(99))
                 .andExpect(jsonPath("$.data.total").value("101"));
+    }
+
+    // ---------- #243：四读面补 ownerExternalId（账号档案读口的键） ----------
+
+    @Test
+    void given_orders_with_and_without_registered_owner_when_read_surfaces_then_owner_external_id()
+            throws Exception {
+        // 真账号下单（ownerAccountId 落值）＋一笔无主单：清单/详情的 ownerExternalId
+        // 有主带值、无主 null；账号删除后悬空软引用容缺 null——与 ownerDisplayName
+        // 同语义（externalId 过滤面同 #156：换算不到＝空清单）
+        Account owner = accountRepository.save(Account.register("sub-243-a", "运营查档·钱七"));
+        OrderResponse owned = placeOrderAs(910801L, owner.getId());
+        OrderResponse anonymous = placeOrder(910802L);
+
+        // 清单（externalId 过滤命中行）：ownerExternalId＝对外正身原样
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("externalId", "sub-243-a"),
+                        "/api/backoffice/orders?externalId=sub-243-a", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[*].id", containsInAnyOrder(owned.id())))
+                .andExpect(jsonPath("$.data.items[0].ownerExternalId").value("sub-243-a"))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value("运营查档·钱七"));
+
+        // 详情（有主带值 / 无主 null）
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + owned.id()),
+                        "/api/backoffice/orders/" + owned.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ownerExternalId").value("sub-243-a"))
+                .andExpect(jsonPath("$.data.ownerDisplayName").value("运营查档·钱七"));
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + anonymous.id()),
+                        "/api/backoffice/orders/" + anonymous.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ownerExternalId").value(nullValue()))
+                .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
+
+        // 清单缺档面：无主单经订单号精确过滤单行呈现（不依赖 TSID 排序）——同 null 语义
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("orderId", anonymous.id()),
+                        "/api/backoffice/orders?orderId=" + anonymous.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].ownerExternalId").value(nullValue()))
+                .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value(nullValue()));
+
+        // 账号已删：悬空软引用容缺——ownerExternalId 与 displayName 同落 null；
+        // externalId 过滤面同「未建档」语义＝空清单（同 #156 口径）
+        accountRepository.deleteById(owner.getId());
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders").queryParam("externalId", "sub-243-a"),
+                        "/api/backoffice/orders?externalId=sub-243-a", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.total").value("0"));
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + owned.id()),
+                        "/api/backoffice/orders/" + owned.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ownerExternalId").value(nullValue()))
+                .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
     }
 
     // ---------- #158：重试归档写口（支付链造卡单 → 签名重试 → 全链一链断言） ----------

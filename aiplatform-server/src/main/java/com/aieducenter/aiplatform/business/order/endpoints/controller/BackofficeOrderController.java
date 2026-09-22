@@ -68,7 +68,8 @@ public class BackofficeOrderController {
                     + "② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，"
                     + "如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，"
                     + "换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，"
-                    + "查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。"
+                    + "查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName"
+                    + "（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）。"
                     + "page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。"
                     + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
                     + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
@@ -91,7 +92,8 @@ public class BackofficeOrderController {
     @Operation(summary = "订单详情（后台面）",
             description = "报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，"
                     + "每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、"
-                    + "下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001")
+                    + "下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。"
+                    + "需要机机签名；订单不存在 404 ORD_001")
     @ErrorCodes({"ORD_001"})
     public ApiResponse<BackofficeOrderDetailResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));

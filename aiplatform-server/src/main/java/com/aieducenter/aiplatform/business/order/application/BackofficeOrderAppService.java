@@ -17,6 +17,7 @@ import com.cartisan.web.request.Pagination;
 import com.cartisan.web.response.PageResponse;
 
 import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
+import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountBriefResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.query.BackofficeOrderQuery;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderDetailResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderSummaryResponse;
@@ -30,11 +31,11 @@ import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名四端点的三读端点）：
- * 四维检索分页拉单（运营工作清单，#156 扩）/ 详情（PRD 快照 + 项目名 + 用户
- * 昵称）/ 源码包（复用 project 上下文打包，排除 node_modules 等）。报价写动作
- * 归 {@link OrderAppService#submitQuote}。
+ * 四维检索分页拉单（运营工作清单，#156 扩）/ 详情（PRD 快照 + 项目名 + 下单
+ * 账号摘要）/ 源码包（复用 project 上下文打包，排除 node_modules 等）。报价写
+ * 动作归 {@link OrderAppService#submitQuote}。
  *
- * <p>跨 BC 事实（项目名/用户昵称/源码包/externalId 换算）经 project/identity
+ * <p>跨 BC 事实（项目名/账号摘要/源码包/externalId 换算）经 project/identity
  * 应用层软引用——与 {@link OrderAppService} 同方向（order → project/identity），
  * 不与 project → {@link OrderQueryAppService} 的读面反向成环。</p>
  */
@@ -95,18 +96,19 @@ public class BackofficeOrderAppService {
         Page<Order> result = orderRepository.findAll(specification, pageable);
         Map<Long, String> projectNames = projectQueryAppService.namesOf(
                 result.getContent().stream().map(Order::getProjectId).toList());
-        Map<Long, String> ownerNames = accountAppService.displayNamesOf(
+        Map<Long, AccountBriefResponse> owners = accountAppService.briefsOf(
                 result.getContent().stream().map(Order::getOwnerAccountId).toList());
         return PageResponse.of(result.map(order -> BackofficeOrderSummaryResponse.of(order,
                 projectNames.get(order.getProjectId()),
                 order.getOwnerAccountId() == null ? null
-                        : ownerNames.get(order.getOwnerAccountId()))));
+                        : owners.get(order.getOwnerAccountId()))));
     }
 
     /**
-     * 后台订单详情：报价依据全量——PRD 快照正文、项目名、下单用户昵称、金额
-     * 与最新备注、状态时点组。项目名/用户昵称软引用容缺（null 呈现）——订单
-     * 及其快照是交易记录，不因关联档缺失而 404（同清单口径）。
+     * 后台订单详情：报价依据全量——PRD 快照正文、项目名、下单账号摘要
+     * （externalId＋昵称）、金额与最新备注、状态时点组。项目名/账号摘要软引用
+     * 容缺（null 呈现）——订单及其快照是交易记录，不因关联档缺失而 404
+     * （同清单口径）。
      *
      * @throws ApplicationException ORD_001 订单不存在
      */
@@ -115,7 +117,7 @@ public class BackofficeOrderAppService {
         return BackofficeOrderDetailResponse.of(order,
                 projectQueryAppService.namesOf(List.of(order.getProjectId()))
                         .get(order.getProjectId()),
-                accountAppService.displayNameOf(order.getOwnerAccountId()));
+                accountAppService.briefOf(order.getOwnerAccountId()));
     }
 
     /**

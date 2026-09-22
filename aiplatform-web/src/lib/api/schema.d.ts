@@ -1083,7 +1083,7 @@ export interface paths {
         };
         /**
          * 项目清单（四维检索，分页）
-         * @description 监管工作清单：新项目在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态三档单选，Integer code（1=进行中 3=已归档；缺省＝全部，归档项目缺省含——照用户面状态过滤先例，与订单清单状态多选有意不同）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId 项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。已删项目不可见（真删无墓碑）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
+         * @description 监管工作清单：新项目在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态三档单选，Integer code（1=进行中 3=已归档；缺省＝全部，归档项目缺省含——照用户面状态过滤先例，与订单清单状态多选有意不同）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId 项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName（归属账号缺档/无主为 null；externalId＝账号档案读口的寻址键）。不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。已删项目不可见（真删无墓碑）。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
@@ -1107,7 +1107,7 @@ export interface paths {
         };
         /**
          * 项目详情（后台面，带订单引用＋成本指针）
-         * @description 清单字段全量＋归属账号显示名（缺档/无主为 null）＋订单引用（与订单域互链）：activeOrder＝未终结订单摘要（有值即冻结迭代，1=待报价 2=已报价），latestOrder＝最近一张任意状态订单（支付归档后 activeOrder 转空、本字段承接完整记录取单面；从未下单两者皆空）——照用户面先例。costSummary＝成本汇总指针（项目全量口径：总成本按币种分桶直读不折算＋unpriced 有无标记——true 时成本不完整；无用量＝空 cost＋false 明确空态；明细下钻走成本域端点 /api/backoffice/costs/projects/{id}，同数据源）。归档项目照读（工作区保留）；已删项目不可见（真删无墓碑）。需要机机签名；项目不存在 404 PRJ_001
+         * @description 清单字段全量＋归属账号 externalId＋显示名（缺档/无主为 null）＋订单引用（与订单域互链）：activeOrder＝未终结订单摘要（有值即冻结迭代，1=待报价 2=已报价），latestOrder＝最近一张任意状态订单（支付归档后 activeOrder 转空、本字段承接完整记录取单面；从未下单两者皆空）——照用户面先例。costSummary＝成本汇总指针（项目全量口径：总成本按币种分桶直读不折算＋unpriced 有无标记——true 时成本不完整；无用量＝空 cost＋false 明确空态；明细下钻走成本域端点 /api/backoffice/costs/projects/{id}，同数据源）。归档项目照读（工作区保留）；已删项目不可见（真删无墓碑）。需要机机签名；项目不存在 404 PRJ_001
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
@@ -1304,7 +1304,7 @@ export interface paths {
         };
         /**
          * 订单清单（四维检索，分页）
-         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerDisplayName（下单账号缺档为 null）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
+         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
@@ -1328,7 +1328,7 @@ export interface paths {
         };
         /**
          * 订单详情（后台面）
-         * @description 报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、下单用户昵称、状态时点组。需要机机签名；订单不存在 404 ORD_001
+         * @description 报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。需要机机签名；订单不存在 404 ORD_001
          *
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
@@ -1910,6 +1910,10 @@ export interface components {
             model?: string;
             /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理 */
             tokenKind?: number;
+            /**
+             * @description 每 token 单价（入参侧为 number；非负，0＝免费档。响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）
+             * @example 0.00000132
+             */
             unitPrice?: number;
             currency?: string;
             /** Format: date-time */
@@ -1930,6 +1934,10 @@ export interface components {
             /** Format: int32 */
             tokenKind?: number;
             tokenKindName?: string;
+            /**
+             * @description 每 token 单价（响应侧为 string——精确十进制串交接，规避 BigDecimal 直出 JSON 落科学计数；开行/改价入参侧为 number，类型照实各自呈现、有意不做统一）
+             * @example "0.00000132"
+             */
             unitPrice?: string;
             currency?: string;
             /** Format: date-time */
@@ -1940,6 +1948,10 @@ export interface components {
             operatorName?: string;
         };
         RepricePriceEntryCommand: {
+            /**
+             * @description 新每 token 单价（入参侧为 number；非负，0＝免费档。响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）
+             * @example 0.00000132
+             */
             unitPrice?: number;
             currency?: string;
             /** Format: date-time */
@@ -2145,15 +2157,93 @@ export interface components {
             kindName?: string;
             runId?: string;
             text?: string;
+            /**
+             * @description 问答卡载荷（kind=3 question 携带，其余 kind 为 null）：question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的待确认工具最小面）、data.questions=[{header,question,multiple,custom,options[{label}]}]（问答卡投影，custom 恒 true 可自由输入）。answered=false 即挂起待答，据此可重建可作答
+             * @example {
+             *       "runId": "r-01",
+             *       "sessionId": "s-01",
+             *       "engine": "agentscope",
+             *       "summary": "目标用户是谁？",
+             *       "engineRef": "req-77",
+             *       "data": {
+             *         "toolCalls": [
+             *           {
+             *             "id": "tc-1",
+             *             "name": "ask_user",
+             *             "input": {
+             *               "question": "目标用户是谁？",
+             *               "header": "目标用户"
+             *             }
+             *           }
+             *         ],
+             *         "questions": [
+             *           {
+             *             "header": "目标用户",
+             *             "question": "目标用户是谁？",
+             *             "multiple": false,
+             *             "custom": true,
+             *             "options": [
+             *               {
+             *                 "label": "个人开发者"
+             *               }
+             *             ]
+             *           }
+             *         ]
+             *       }
+             *     }
+             */
             question?: {
                 [key: string]: Record<string, never>;
             };
+            /**
+             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, selfTest?{total}, version?, durationBreakdown{llmMs,toolsMs,selfTestMs,closingMs,attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）
+             * @example {
+             *       "summary": "完成切片：用户能登录",
+             *       "prdChanged": false,
+             *       "systemChanged": true,
+             *       "systemNote": "起服了登录页",
+             *       "files": [
+             *         {
+             *           "path": "/src/App.jsx",
+             *           "added": 40,
+             *           "removed": 0
+             *         }
+             *       ],
+             *       "durationMs": 183420,
+             *       "selfTest": {
+             *         "total": 3
+             *       },
+             *       "version": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+             *     }
+             */
             closing?: {
                 [key: string]: Record<string, never>;
             };
+            /**
+             * @description 圈注附件数组（kind=1 user 可携带，其余 kind 为 null，#97）：元素＝{attachmentType:"annotation", annotation:{kind, anchor:{selector?,text?,region?{x,y,width,height}}, note?}}——结构化定位＋标注类型（kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容），据此重建圈注 chip（非截图）
+             * @example [
+             *       {
+             *         "attachmentType": "annotation",
+             *         "annotation": {
+             *           "kind": "select",
+             *           "anchor": {
+             *             "selector": "#login-btn",
+             *             "text": "登录"
+             *           }
+             *         }
+             *       }
+             *     ]
+             */
             attachments?: {
                 [key: string]: Record<string, never>;
             }[];
+            /**
+             * @description 报价卡载荷（kind=7 quote 携带，其余 kind 为 null，#203）：仅事件＋订单引用——{ orderId（字符串，防 JS 精度丢失）, event（quoted=报价已出 / repriced=报价已更新）}，不含金额（视镜非快照，ADR-0017——金额/备注/状态渲染时取订单当前态）
+             * @example {
+             *       "orderId": "3897654321098765432",
+             *       "event": "quoted"
+             *     }
+             */
             quote?: {
                 [key: string]: Record<string, never>;
             };
@@ -2239,6 +2329,7 @@ export interface components {
         BackofficeProjectSummaryResponse: {
             id?: string;
             name?: string;
+            ownerExternalId?: string;
             ownerDisplayName?: string;
             /** @description 1=官网, 2=电商 */
             type?: number;
@@ -2272,6 +2363,7 @@ export interface components {
         BackofficeProjectDetailResponse: {
             id?: string;
             name?: string;
+            ownerExternalId?: string;
             ownerDisplayName?: string;
             workspaceId?: string;
             /** @description 1=官网, 2=电商 */
@@ -2294,6 +2386,12 @@ export interface components {
             costSummary?: components["schemas"]["CostSummary"];
         };
         CostSummary: {
+            /**
+             * @description 总成本按币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；无用量（或全未配价）为空对象
+             * @example {
+             *       "USD": 12.34
+             *     }
+             */
             cost?: {
                 [key: string]: number;
             };
@@ -2328,6 +2426,7 @@ export interface components {
             id?: string;
             projectId?: string;
             projectName?: string;
+            ownerExternalId?: string;
             ownerDisplayName?: string;
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
@@ -2361,6 +2460,7 @@ export interface components {
             id?: string;
             projectId?: string;
             projectName?: string;
+            ownerExternalId?: string;
             ownerDisplayName?: string;
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
@@ -2473,6 +2573,12 @@ export interface components {
         BackofficeProjectCostResponse: {
             projectId?: string;
             total?: components["schemas"]["TokenUsage"];
+            /**
+             * @description 平台成本（币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；全未配价时为空对象，成本标量缺失不伪装 0——allUnpriced 同行为 true）
+             * @example {
+             *       "USD": 12.34
+             *     }
+             */
             cost?: {
                 [key: string]: number;
             };
@@ -2502,6 +2608,12 @@ export interface components {
             /** Format: date-time */
             to?: string;
             total?: components["schemas"]["TokenUsage"];
+            /**
+             * @description 平台成本（币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；无生效单价的分量不进本桶——其集合在 unpriced 呈现，互补不重叠）
+             * @example {
+             *       "USD": 12.34
+             *     }
+             */
             cost?: {
                 [key: string]: number;
             };
@@ -2523,6 +2635,12 @@ export interface components {
             /** Format: date-time */
             to?: string;
             total?: components["schemas"]["TokenUsage"];
+            /**
+             * @description 平台成本（币种分桶直读不折算：键 = ISO 4217 币种码、值 = 金额；无生效单价的分量不进本桶，全未配价/无事件为空对象）
+             * @example {
+             *       "USD": 12.34
+             *     }
+             */
             cost?: {
                 [key: string]: number;
             };

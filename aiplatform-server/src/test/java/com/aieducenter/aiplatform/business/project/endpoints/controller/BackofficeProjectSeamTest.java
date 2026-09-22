@@ -50,7 +50,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 无主容缺 null 不炸）、项目 id 精确（查无/非数值＝空清单 200）、详情订单引用三态
  * （有未终结单 / 只有历史单 / 无单，照用户面 activeOrder/latestOrder 先例）、已删
  * 项目不可见（真删无墓碑：清单不含＋详情 404）、分页上界截断与越界、签名负例与
- * 过滤参数绑定负例（框架信封）。</p>
+ * 过滤参数绑定负例（框架信封）。#243 起清单/详情行补 ownerExternalId（账号档案
+ * 读口的寻址键）——与 ownerDisplayName 同源同批、同容缺语义。</p>
  */
 @BackofficeSeamTest
 class BackofficeProjectSeamTest {
@@ -159,11 +160,13 @@ class BackofficeProjectSeamTest {
         Project owned = newProject("有主的项目", owner.getId());
         Project anonymous = newProject("无主的项目", null);
 
-        // externalId 命中：只有该账号的项目，行带显示名（运营不用二次查档）
+        // externalId 命中：只有该账号的项目，行带显示名（运营不用二次查档）；
+        // #243 ownerExternalId＝对外正身原样（账号档案读口的寻址键）
         signedGet("/api/backoffice/projects?externalId=sub-159-a")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[*].id",
                         containsInAnyOrder(owned.getId().toString())))
+                .andExpect(jsonPath("$.data.items[0].ownerExternalId").value("sub-159-a"))
                 .andExpect(jsonPath("$.data.items[0].ownerDisplayName")
                         .value("运营查档·王五"))
                 .andExpect(jsonPath("$.data.total").value("1"));
@@ -177,17 +180,23 @@ class BackofficeProjectSeamTest {
                 .andExpect(jsonPath("$.data.items", hasSize(2)))
                 .andExpect(jsonPath("$.data.items[" + ownedIndex + "].id")
                         .value(owned.getId().toString()))
+                .andExpect(jsonPath("$.data.items[" + ownedIndex + "].ownerExternalId")
+                        .value("sub-159-a"))
                 .andExpect(jsonPath("$.data.items[" + ownedIndex + "].ownerDisplayName")
                         .value("运营查档·王五"))
                 .andExpect(jsonPath("$.data.items[" + anonymousIndex + "].id")
                         .value(anonymous.getId().toString()))
+                .andExpect(jsonPath("$.data.items[" + anonymousIndex + "].ownerExternalId")
+                        .value(nullValue()))
                 .andExpect(jsonPath("$.data.items[" + anonymousIndex + "].ownerDisplayName")
                         .value(nullValue()));
 
-        // 详情同样带归属账号显示名（有主带名 / 无主 null）
+        // 详情同样带归属账号显示名＋externalId（有主带值 / 无主 null）
         signedGet("/api/backoffice/projects/" + owned.getId())
+                .andExpect(jsonPath("$.data.ownerExternalId").value("sub-159-a"))
                 .andExpect(jsonPath("$.data.ownerDisplayName").value("运营查档·王五"));
         signedGet("/api/backoffice/projects/" + anonymous.getId())
+                .andExpect(jsonPath("$.data.ownerExternalId").value(nullValue()))
                 .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
 
         // externalId 未命中（用户在我方无建档）＝无项目可检：如实空清单，非错误
@@ -197,16 +206,21 @@ class BackofficeProjectSeamTest {
                 .andExpect(jsonPath("$.data.total").value("0"));
 
         // 账号已删：externalId 换算必落空 → 过滤面同「未建档」语义＝空清单；
-        // 项目本身仍是交付记录（不带账号维度看），取名容缺 ownerDisplayName 落
-        // null 不炸（有主项目悬空引用＋无主项目，两行皆 null）
+        // 项目本身仍是交付记录（不带账号维度看），取档容缺 ownerExternalId/
+        // ownerDisplayName 落 null 不炸（有主项目悬空引用＋无主项目，两行皆 null）
         accountRepository.deleteById(owner.getId());
         signedGet("/api/backoffice/projects?externalId=sub-159-a")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items").isEmpty())
                 .andExpect(jsonPath("$.data.total").value("0"));
         signedGet("/api/backoffice/projects")
+                .andExpect(jsonPath("$.data.items[*].ownerExternalId",
+                        containsInAnyOrder(nullValue(), nullValue())))
                 .andExpect(jsonPath("$.data.items[*].ownerDisplayName",
                         containsInAnyOrder(nullValue(), nullValue())));
+        signedGet("/api/backoffice/projects/" + owned.getId())
+                .andExpect(jsonPath("$.data.ownerExternalId").value(nullValue()))
+                .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
     }
 
     @Test

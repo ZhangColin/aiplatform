@@ -85,7 +85,8 @@ public class BackofficeProjectController {
                     + "如 2026-09-01T00:00:00）；③ externalId 归属账号（对外正身，"
                     + "服务端换算，换算不到＝该用户无建档→空清单 200）；④ projectId "
                     + "项目 id 精确（TSID 十进制，用户报障贴链接场景；查无/非数值→"
-                    + "空清单 200）。行带 ownerDisplayName（归属账号缺档/无主为 null）。"
+                    + "空清单 200）。行带 ownerExternalId/ownerDisplayName（归属账号"
+                    + "缺档/无主为 null；externalId＝账号档案读口的寻址键）。"
                     + "不做项目名模糊。page 1 基（缺省 1）、size 缺省 20（上界 100），"
                     + "排序服务端定死不开放。已删项目不可见（真删无墓碑）。"
                     + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
@@ -107,7 +108,8 @@ public class BackofficeProjectController {
 
     @GetMapping("/{id}")
     @Operation(summary = "项目详情（后台面，带订单引用＋成本指针）",
-            description = "清单字段全量＋归属账号显示名（缺档/无主为 null）＋订单引用（与订单域"
+            description = "清单字段全量＋归属账号 externalId＋显示名（缺档/无主为 null）"
+                    + "＋订单引用（与订单域"
                     + "互链）：activeOrder＝未终结订单摘要（有值即冻结迭代，1=待报价 "
                     + "2=已报价），latestOrder＝最近一张任意状态订单（支付归档后 "
                     + "activeOrder 转空、本字段承接完整记录取单面；从未下单两者皆空）"

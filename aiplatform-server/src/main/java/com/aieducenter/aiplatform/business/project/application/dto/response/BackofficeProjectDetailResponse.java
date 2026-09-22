@@ -8,20 +8,23 @@ import java.util.Map;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import com.aieducenter.aiplatform.business.identity.application.dto.response.AccountBriefResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
 /**
- * 后台项目详情（#159 项目域，#164 补成本指针）：清单字段全量＋归属账号显示名＋
- * 订单引用——照用户面 activeOrder/latestOrder 先例，与订单域互链（activeOrder
- * 有值即冻结迭代；支付归档后转空、latestOrder 承接「完整记录」取单面）。
- * 归档项目全状态照读。
+ * 后台项目详情（#159 项目域，#164 补成本指针）：清单字段全量＋归属账号摘要
+ * （#243 起 externalId 与显示名同批）＋订单引用——照用户面 activeOrder/
+ * latestOrder 先例，与订单域互链（activeOrder 有值即冻结迭代；支付归档后
+ * 转空、latestOrder 承接「完整记录」取单面）。归档项目全状态照读。
  *
  * @param id               项目标识（TSID 十进制字符串）
  * @param name             项目名
- * @param ownerDisplayName 归属账号显示名（跨 BC 软引用取名；无主/缺档为 null）
+ * @param ownerExternalId  归属账号对外正身（OIDC sub——账号档案读口的寻址键；
+ *                         无主/跨 BC 软引用缺档为 null）
+ * @param ownerDisplayName 归属账号显示名（无主/缺档为 null）
  * @param workspaceId      dev 工作区标识（排障时工作区互查的锚点）
  * @param type             项目类型（code）
  * @param typeName         项目类型名
@@ -41,6 +44,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 public record BackofficeProjectDetailResponse(
         String id,
         String name,
+        String ownerExternalId,
         String ownerDisplayName,
         String workspaceId,
         ProjectType type,
@@ -57,8 +61,8 @@ public record BackofficeProjectDetailResponse(
         CostSummary costSummary
 ) {
 
-    /** 聚合 + 归属账号显示名 + 订单引用 + 成本汇总指针 → 详情。 */
-    public static BackofficeProjectDetailResponse of(Project project, String ownerDisplayName,
+    /** 聚合 + 归属账号摘要 + 订单引用 + 成本汇总指针 → 详情（缺档/无主整体 null 呈现）。 */
+    public static BackofficeProjectDetailResponse of(Project project, AccountBriefResponse owner,
                                                      OrderBriefResponse activeOrder,
                                                      OrderBriefResponse latestOrder,
                                                      CostSummary costSummary) {
@@ -67,7 +71,8 @@ public record BackofficeProjectDetailResponse(
         return new BackofficeProjectDetailResponse(
                 project.getId().toString(),
                 project.getName(),
-                ownerDisplayName,
+                owner == null ? null : owner.externalId(),
+                owner == null ? null : owner.displayName(),
                 project.getWorkspaceId().toString(),
                 project.getType(),
                 project.getType().getName(),

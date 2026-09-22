@@ -29,7 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>对话条目四载荷（question / closing / attachments / quote）：描述＋示例
  *       非空（quote 须注明不含金额——视镜语义，ADR-0017）；</li>
  *   <li>unitPrice 出入参：响应侧 string、开行/改价入参侧 number，类型照实各自
- *       显式呈现（不做类型统一）。</li>
+ *       显式呈现（不做类型统一）；</li>
+ *   <li>ownerExternalId（订单/项目四读面，#243）：账号档案读口的寻址键，
+ *       type=string 钉死。</li>
  * </ul>
  */
 @IntegrationTest
@@ -42,6 +44,13 @@ class SpringDocBackofficeContractTest {
             new String[]{"metering", "BackofficeProjectCostResponse"},
             new String[]{"metering", "BackofficeProjectCostDetailResponse"},
             new String[]{"project", "CostSummary"});
+
+    /** 四个 owner 读面（#243）：分组|schema 名——订单/项目各自的清单与详情。 */
+    private static final List<String[]> OWNER_SURFACES = List.of(
+            new String[]{"order", "BackofficeOrderSummaryResponse"},
+            new String[]{"order", "BackofficeOrderDetailResponse"},
+            new String[]{"project", "BackofficeProjectSummaryResponse"},
+            new String[]{"project", "BackofficeProjectDetailResponse"});
 
     @Autowired
     private MockMvc mockMvc;
@@ -115,6 +124,18 @@ class SpringDocBackofficeContractTest {
             assertThat(exampleText(unitPrice.getValue()))
                     .as("%s.unitPrice 应附示例", unitPrice.getKey())
                     .isNotBlank();
+        }
+    }
+
+    @Test
+    void given_owner_surfaces_when_read_schemas_then_owner_external_id_is_string() throws Exception {
+        // #243：ownerExternalId 是账号档案读口（按 externalId 寻址）的键——OIDC
+        // sub 为不透明串，四读面 type=string 钉死（防类型漂移炸消费方）
+        for (String[] surface : OWNER_SURFACES) {
+            JsonNode ownerExternalId = property(fetchGroup(surface[0]), surface[1], "ownerExternalId");
+            assertThat(ownerExternalId.path("type").asText(null))
+                    .as("%s.ownerExternalId 应渲染 type=string", surface[1])
+                    .isEqualTo("string");
         }
     }
 

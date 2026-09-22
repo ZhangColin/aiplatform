@@ -22,7 +22,8 @@ import io.agentscope.core.event.TextBlockDeltaEvent;
  *       转译、不挪位到其他面。标记起点即段边界（人话余段先出）；标记体吞至外包裹
  *       闭合，无闭合 = 模型脱轨、吞至 run 尾（堵漏优先）；跨增量 split 的标记头按住
  *       不入段（防句读缺位时的硬切 / 边界 drain 漏出残头），后续增量落定成真标记
- *       （进吞段）或死文本（照常出段，不丢字）；</li>
+ *       （进吞段）或死文本（照常出段，不丢字）；吞段开始同时产出脱轨信号（#240
+ *       人话留痕——只报发生事实不携带原文，形态归活性行变体，静态面无痕）；</li>
  *   <li>run 收尾 / 挂起 / 步骤与动作边界由调用方 {@link #drain()} 出尾段（幂等，
  *       空白不出段；吞段中无尾段）。</li>
  * </ul>
@@ -57,8 +58,20 @@ final class NarrationSegments {
     /** 活标记头扫描窗（字符）：canonical 标记头 7 字符、连打变体更宽，留足余量。 */
     private static final int MARKER_HEAD_WINDOW = 16;
 
-    /** 一段解说：文本 + 来源归属（source 可空 = 执行体自身）。 */
-    record Segment(String text, String source) {
+    /**
+     * 一次文本映射的产出（0..n，按发生序）：解说段（→ part-text）或脱轨信号
+     * （→ part-signal，#240 机器语法吞段的人话留痕——只报发生事实，不携带原文；
+     * 呈现形态归活性行变体，静态面无痕）。
+     */
+    sealed interface Outcome {
+
+        /** 解说段：完整段文本 + 来源归属（source 可空 = 执行体自身）。 */
+        record Narration(String text, String source) implements Outcome {
+        }
+
+        /** 脱轨信号：机器语法吞段开始（识别即丢弃的留痕，每次吞段一句）。 */
+        record Derailed(String source) implements Outcome {
+        }
     }
 
     private final StringBuilder text = new StringBuilder();
@@ -68,37 +81,37 @@ final class NarrationSegments {
     /** 机器语法吞段标志（#234）：true = 缓冲只装标记体，等外包裹闭合或 run 尾。 */
     private boolean machineSwallowing;
 
-    /** 文本增量 → 落定段（0..n：一次到达的长增量含多句时逐句出段）；source 为该增量来源。 */
-    List<Segment> offer(TextBlockDeltaEvent delta, String source) {
+    /** 文本增量 → 落定产出（0..n，段与信号按发生序混排：长增量含多句时逐句出段）；source 为该增量来源。 */
+    List<Outcome> offer(TextBlockDeltaEvent delta, String source) {
         String deltaBlock = nvl(delta.getBlockId());
-        List<Segment> segments = new ArrayList<>();
+        List<Outcome> outcomes = new ArrayList<>();
         if (!Objects.equals(source, this.source)) {
             // 来源切换即段边界（执行体 ↔ 子智能体）：先出上一来源余段
-            drainInto(segments);
+            drainInto(outcomes);
             this.source = source;
         }
         if (!deltaBlock.equals(blockId)) {
             // 块变即段边界：先出上一块余段
-            drainInto(segments);
+            drainInto(outcomes);
             blockId = deltaBlock;
         }
         text.append(nvl(delta.getDelta()));
         // 机器语法守卫先于句读切段：标记体不成段，人话余段按边界先行落定
-        exciseMachineSyntax(segments);
+        exciseMachineSyntax(outcomes);
         // 句读落定即逐句出段（含句读即出，不要求恰好收尾在句读上）
-        settleSentences(segments);
+        settleSentences(outcomes);
         if (text.length() >= MAX_SEGMENT_LENGTH) {
             // 超长无句读残留（长句）：硬切整段，时延有界
-            drainInto(segments);
+            drainInto(outcomes);
         }
-        return segments;
+        return outcomes;
     }
 
     /** 出余段（边界/收尾用，幂等；空白不出段；吞段中缓冲恒空、无尾段）。 */
-    List<Segment> drain() {
-        List<Segment> segments = new ArrayList<>();
-        drainInto(segments);
-        return segments;
+    List<Outcome> drain() {
+        List<Outcome> outcomes = new ArrayList<>();
+        drainInto(outcomes);
+        return outcomes;
     }
 
     // ---------- 内部 ----------
@@ -106,9 +119,10 @@ final class NarrationSegments {
     /**
      * 机器语法段切除（#234）：识别即丢弃，不转译、不挪位。起点即段边界（人话余段
      * 先出，段尾活标记头随标记一并切除——断头残片是机器族不是人话）；标记体吞至
-     * 外包裹闭合，闭合后余文继续扫（可能紧跟下一块或人话）。
+     * 外包裹闭合，闭合后余文继续扫（可能紧跟下一块或人话）。吞段开始产出脱轨信号
+     * （#240：每次吞段一句的人话留痕——发生在标记起点，吞段中的后续增量不刷）。
      */
-    private void exciseMachineSyntax(List<Segment> segments) {
+    private void exciseMachineSyntax(List<Outcome> outcomes) {
         while (true) {
             if (machineSwallowing) {
                 Matcher end = MACHINE_END.matcher(text);
@@ -124,7 +138,8 @@ final class NarrationSegments {
             if (!start.find()) {
                 return;
             }
-            drainInto(segments, start.start() - liveMarkerHeadLength(text, start.start()));
+            drainInto(outcomes, start.start() - liveMarkerHeadLength(text, start.start()));
+            outcomes.add(new Outcome.Derailed(source));
             text.delete(0, start.end());
             machineSwallowing = true;
         }
@@ -134,18 +149,18 @@ final class NarrationSegments {
      * 全量出段（句读硬切 / 边界 / 收尾 drain 用）：缓冲尾巴的活标记头按住不出——
      * 残头入段即机器语法漏出，按住等落定（真标记进吞段 / 死文本下拍随人话出）。
      */
-    private void drainInto(List<Segment> segments) {
-        drainInto(segments, text.length() - liveMarkerHeadLength(text, text.length()));
+    private void drainInto(List<Outcome> outcomes) {
+        drainInto(outcomes, text.length() - liveMarkerHeadLength(text, text.length()));
     }
 
     /** 限量出段：出 text[0, limit)（空白不出），余文留缓冲。 */
-    private void drainInto(List<Segment> segments, int limit) {
+    private void drainInto(List<Outcome> outcomes, int limit) {
         if (limit <= 0) {
             return;
         }
         String out = text.substring(0, limit);
         if (!out.isBlank()) {
-            segments.add(new Segment(out, source));
+            outcomes.add(new Outcome.Narration(out, source));
         }
         text.delete(0, limit);
     }
@@ -166,14 +181,14 @@ final class NarrationSegments {
      * 「句读落定即出段」对粗粒度增量同样成立）；无句读的尾部留在缓冲等下一边界
      * 或收尾 drain。
      */
-    private void settleSentences(List<Segment> segments) {
+    private void settleSentences(List<Outcome> outcomes) {
         int start = 0;
         int settled = 0;
         for (int i = 0; i < text.length(); i++) {
             if (SENTENCE_ENDERS.indexOf(text.charAt(i)) >= 0) {
                 String sentence = text.substring(start, i + 1);
                 if (!sentence.isBlank()) {
-                    segments.add(new Segment(sentence, source));
+                    outcomes.add(new Outcome.Narration(sentence, source));
                 }
                 start = i + 1;
                 settled = start;

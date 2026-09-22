@@ -158,6 +158,21 @@ public final class AgentEventTypes {
     public static final String PART_TEXT_FIELD = "text";
 
     /**
+     * 脱轨信号部件（#240 机器语法吞段的人话留痕）：叙事段守卫识别到机器语法段
+     * （模型以原生工具参数语法直接发射、引擎未识别为工具调用——什么都没跑）时
+     * 发射——只报发生事实，不携带原文（原文出口 = 后端 trace 日志，排障足够）。
+     * 呈现 = 活性行脱轨变体（#235 变体族），静态面无痕、不伪造动作；每次吞段
+     * （标记起点）一句，天然低频。
+     */
+    public static final String PART_SIGNAL = "part-signal";
+
+    /** part-signal 的信号值键（值 = PART_SIGNAL_* 常量，封闭词表）。 */
+    public static final String PART_SIGNAL_SIGNAL_FIELD = "signal";
+
+    /** 脱轨：模型直接发射机器语法（未被引擎识别为工具调用），吞段留痕。 */
+    public static final String PART_SIGNAL_DERAILED = "derailed";
+
+    /**
      * 工具动作部件（动作卡）：开始/进行中/完成/失败全生命周期——动作一开始即出
      * 事件，同一动作以 toolCallId 锚定跨状态更新。
      */

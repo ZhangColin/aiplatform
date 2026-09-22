@@ -128,6 +128,99 @@ describe("WorkMessage · 常驻活性行（#235：直播行＝唯一实时状态
   });
 });
 
+describe("WorkMessage · 脱轨留痕（#240：机器语法吞段的人话信号，活性行脱轨变体——静态面无痕）", () => {
+  const DERAILED_PHRASE = "刚才模型发射异常，正在调整";
+
+  function signal(overrides: Partial<Extract<WorkPart, { kind: "signal" }>> = {}) {
+    return {
+      kind: "signal",
+      id: "run-1:9",
+      signal: "derailed",
+      ...overrides,
+    } satisfies Extract<WorkPart, { kind: "signal" }>;
+  }
+
+  it("activityOf：末位信号（其后无动作接管）＝脱轨变体——纯解说轮 / 吞段在最后动作之后皆然", () => {
+    expect(activityOf([{ kind: "text", id: "t0", text: "开始。" }, signal()])).toEqual({
+      kind: "derailed",
+    });
+    // 动作已完成（成功无痕不占活性行）+ 其后脱轨：脱轨是动作世界的最新事实
+    expect(activityOf([action({ id: "a1" }), signal()])).toEqual({ kind: "derailed" });
+  });
+
+  it("activityOf：脱轨后被真实动作接管——在跑动作优先（run 恢复推进的直接证据）", () => {
+    expect(
+      activityOf([
+        signal(),
+        action({ id: "a2", toolCallId: "t2", state: "running", label: "pnpm test" }),
+      ]),
+    ).toEqual({ kind: "action", part: expect.objectContaining({ toolCallId: "t2" }) });
+    // 接管动作已完成：脱轨信号已被消化（不滞留旧事故），间隙回落打字点
+    expect(
+      activityOf([
+        signal(),
+        action({ id: "a2", toolCallId: "t2", state: "completed" }),
+      ]),
+    ).toEqual({ kind: "idle" });
+  });
+
+  it("activityOf：失败破例维持 #235 最高位——末位动作失败压过更早的脱轨信号", () => {
+    expect(
+      activityOf([
+        signal(),
+        action({ id: "a2", toolCallId: "t2", state: "failed" }),
+      ]),
+    ).toEqual({ kind: "failed" });
+  });
+
+  it("脱轨变体活性行：琥珀色一句定型文案，恰好一条——不出命令滚动行、不转圈、无「进行中」", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            { kind: "text", id: "t0", text: "先跑一遍自测。" },
+            signal({ id: "run-1:5" }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html.match(new RegExp(DERAILED_PHRASE, "g"))).toHaveLength(1); // 恰好一条
+    expect(html).toContain("text-amber-600"); // 脱轨变体琥珀色（与失败红字区分）
+    expect(html).not.toContain("进行中"); // 不伪造「在执行」
+    expect(html).not.toContain("animate-pulse"); // 打字点退场（脱轨 ≠ 间隙思考）
+    expect(html).not.toContain("DSML"); // 界面任何位置不见机器语法原文
+  });
+
+  it("静态面无痕：信号部件不进正文（不产生解说段/动作行/坍缩计数）——活性行是唯一呈现位", () => {
+    const parts: WorkPart[] = [
+      { kind: "text", id: "t0", text: "第一句。" },
+      signal({ id: "run-1:5" }),
+      { kind: "text", id: "t1", text: "第二句。" },
+    ];
+    expect(presentWorkParts(parts)).toEqual(parts.filter((part) => part.kind !== "signal"));
+
+    const html = renderToStaticMarkup(<WorkMessage work={work({ parts })} />);
+    expect(html).toContain("第一句。");
+    expect(html).toContain("第二句。");
+    expect(html).not.toContain("更早"); // 信号不占坍缩计数
+    expect(html).toContain(DERAILED_PHRASE); // 活性行照常呈现
+  });
+
+  it("定格保留末行（#235 口径同款）：脱轨行静态留驻至收尾卡入流，随后沉没", () => {
+    const frozen = work({
+      frozen: true,
+      parts: [{ kind: "text", id: "t0", text: "收口中。" }, signal({ id: "run-1:7" })],
+    });
+    // 收尾卡未入流：末行保留（衔接窗无跳变）
+    expect(renderToStaticMarkup(<WorkMessage work={frozen} />)).toContain(DERAILED_PHRASE);
+    // 收尾卡入流：活性行随定格沉没——终形无脱轨残骸（静态面本就无痕）
+    expect(
+      renderToStaticMarkup(<WorkMessage work={frozen} closingArrived />),
+    ).not.toContain(DERAILED_PHRASE);
+  });
+});
+
 describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态呈现）", () => {
   it("run 开始即出现：空部件的生长中消息出「正在做」头部与无字打字点（#235 间隙活性指示），无部件行", () => {
     const html = renderToStaticMarkup(<WorkMessage work={work()} />);

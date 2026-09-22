@@ -3,7 +3,8 @@ import { create } from "zustand";
 /**
  * 工作消息 store（#81 事件模型迁移，SSE 相关 store——桥为唯一事件写入方，ADR 0003
  * 状态三分法）：按项目记当前编码 run 的**生长中的工作消息**（parts 契约的部件投影
- * ：解说文本部件 + 工具动作部件 + 步骤清单快照〔#236 part-plan——整表落 `plan`，
+ * ：解说文本部件 + 工具动作部件 + 脱轨信号部件〔#240 part-signal——活性行脱轨变体
+ * 的推导源，静态面滤除在呈现层〕 + 步骤清单快照〔#236 part-plan——整表落 `plan`，
  * 不进 parts 流水〕），run 收口定格。
  *
  * <p>run 开始即出现（run-start 携 executor 配置键）、随部件事件逐段生长；run-finish /
@@ -34,6 +35,13 @@ export type WorkActionState = "started" | "running" | "completed" | "failed";
 
 /** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
 export type WorkCheckState = "checking" | "passed" | "failed";
+
+/**
+ * 脱轨信号值（正本 part-signal 词表，封闭集 v1 唯一值 #240）：derailed = 模型以
+ * 机器语法直接发射、引擎未识别为工具调用（什么都没跑）——吞段的人话留痕，呈现
+ * 归活性行脱轨变体（定型文案在组件），静态面无痕。
+ */
+export type WorkSignalKind = "derailed";
 
 /**
  * 步骤清单条目（#236 part-plan 快照的投影）：agent 自产计划的步骤——稳定 id
@@ -90,6 +98,20 @@ export type WorkPart =
       /** React key（首见 checking 事件 id——原位更新不改键）。 */
       id: string;
       state: WorkCheckState;
+    }
+  | {
+      /**
+       * 脱轨信号部件（#240 机器语法吞段的人话留痕）：每次吞段一件（不原位更新、
+       * 天然低频）——只报发生事实不携带原文；活性行脱轨变体的推导源（呈现归组件
+       * 投影：静态面无痕、不伪造动作）。
+       */
+      kind: "signal";
+      /** React key（首见事件 id）。 */
+      id: string;
+      /** 来源归属（#95 委派位：子智能体名；执行体缺省）。 */
+      source?: string;
+      /** 信号值（封闭词表，v1 唯一 derailed）。 */
+      signal: WorkSignalKind;
     };
 
 /** 部件事件的最小关联（信封公共字段 + 事件 id）。 */
@@ -106,6 +128,7 @@ export type PartEventRef = {
 /** 桥侧部件输入（store 负责落 id / 原位更新）。 */
 export type WorkPartInput =
   | { kind: "text"; text: string }
+  | { kind: "signal"; signal: WorkSignalKind }
   | { kind: "check"; state: WorkCheckState }
   | {
       kind: "action";
@@ -203,7 +226,7 @@ function openedWork(work: ProjectWork | undefined, ref: PartEventRef): ProjectWo
   return { ...current, seenEventIds: appendCapped(current.seenEventIds, ref.eventId) };
 }
 
-/** 部件应用（动作/自检原位更新；返回原数组引用即无变更）。 */
+/** 部件应用（动作/自检原位更新；解说/信号逐件追加；返回原数组引用即无变更）。 */
 function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): ProjectWork {
   if (input.kind === "check") {
     // 一场 run 至多一个自检部件：跨状态原位换装。静默重试的重复 checking 幂等
@@ -257,6 +280,16 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
       ];
     }
     return { ...work, parts: capParts(parts) };
+  }
+  if (input.kind === "signal") {
+    // 脱轨信号（#240）：每次吞段一件、不原位更新（天然低频——刷屏节流是触发器）
+    const part: WorkPart = {
+      kind: "signal",
+      id: ref.eventId,
+      source: ref.source,
+      signal: input.signal,
+    };
+    return { ...work, parts: capParts([...work.parts, part]) };
   }
   const part: WorkPart = { kind: "text", id: ref.eventId, source: ref.source, text: input.text };
   return { ...work, parts: capParts([...work.parts, part]) };

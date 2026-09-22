@@ -30,6 +30,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
  *   <caption>AgentScope 事件 → 消息部件事件</caption>
  *   <tr><th>AgentScope 事件</th><th>部件 type</th><th>部件字段</th></tr>
  *   <tr><td>TextBlockDelta（累积切段，机器语法段守卫丢弃——#234）</td><td>{@code part-text}</td><td>text（完整段）</td>
+ *   <tr><td>TextBlockDelta（机器语法吞段开始——#240）</td><td>{@code part-signal}</td><td>signal=derailed（人话留痕，不携带原文）</td>
  *   <tr><td>ToolCallStart（封闭表内工具）</td><td>{@code part-action}</td><td>state=started</td>
  *   <tr><td>ToolCallEnd（同上）</td><td>{@code part-action}</td><td>state=running（label 至此具体）</td>
  *   <tr><td>ToolCallEnd（update_plan——#236）</td><td>{@code part-plan}</td><td>steps（全量快照，参数落定点出）</td>
@@ -179,11 +180,19 @@ final class AgentscopePartsMapper {
                 steps, source));
     }
 
-    private List<AgentEvent> textParts(List<NarrationSegments.Segment> segments) {
+    private List<AgentEvent> textParts(List<NarrationSegments.Outcome> outcomes) {
         List<AgentEvent> parts = new ArrayList<>();
-        segments.forEach(segment -> parts.add(frame(
-                AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD,
-                segment.text(), segment.source())));
+        for (NarrationSegments.Outcome outcome : outcomes) {
+            // 穷尽 switch（sealed）：Outcome 加新变体时编译期强制扩展分派
+            switch (outcome) {
+                case NarrationSegments.Outcome.Narration narration -> parts.add(frame(
+                        AgentEventTypes.PART_TEXT, AgentEventTypes.PART_TEXT_FIELD,
+                        narration.text(), narration.source()));
+                case NarrationSegments.Outcome.Derailed derailed -> parts.add(frame(
+                        AgentEventTypes.PART_SIGNAL, AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD,
+                        AgentEventTypes.PART_SIGNAL_DERAILED, derailed.source()));
+            }
+        }
         return parts;
     }
 

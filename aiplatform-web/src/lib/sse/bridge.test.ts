@@ -870,6 +870,37 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
     dispatchAgentEvent(agentQc, agentEvent("part-plan", { ...base, steps: "garbage" }, "run1:3"));
     expect(useWorkMessageStore.getState().works["p1"]?.plan).toHaveLength(2);
   });
+
+  /**
+   * 脱轨信号（#240 part-signal）：守卫吞机器语法段的人话留痕——入 parts 流水
+   * （活性行脱轨变体的推导源，呈现归组件）；source 委派位照携；不产动作部件。
+   */
+  it("part-signal：signal 部件入流水（活性行推导源），重放同 id 去重", () => {
+    const base = { projectId: "p1", runId: "run1", sessionId: "coder-p1", engine: "agentscope" };
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...base, prompt: "改配色", model: "m", agent: "executor" },
+      "run1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "先跑一遍自测。" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-signal",
+      { ...base, source: "self-test", signal: "derailed" },
+      "run1:3",
+    ));
+    // 断线补发重放同 id：去重
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-signal",
+      { ...base, source: "self-test", signal: "derailed" },
+      "run1:3",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.parts).toEqual([
+      { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍自测。" },
+      { kind: "signal", id: "run1:3", source: "self-test", signal: "derailed" },
+    ]);
+  });
 });
 
 describe("bridge · 编码 run 收口 → 项目域失效（#22，失效归桥）", () => {

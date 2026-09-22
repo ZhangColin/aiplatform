@@ -408,6 +408,35 @@ describe("work-message store · 成功无痕不回写事件面（#230：滤除�
   });
 });
 
+describe("work-message store · 脱轨信号部件（#240：入 parts 流水供活性行推导，静态面滤除在呈现层）", () => {
+  it("signal 入流水（每次吞段一件、不原位更新）；重放同 id 去重", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), { kind: "signal", signal: "derailed" });
+    notePart("p1", ref({ eventId: "r1:3" }), { kind: "signal", signal: "derailed" });
+
+    const parts = work()?.parts ?? [];
+    expect(parts).toEqual([
+      { kind: "signal", id: "r1:2", source: undefined, signal: "derailed" },
+      { kind: "signal", id: "r1:3", source: undefined, signal: "derailed" },
+    ]); // 连续吞段各一件（天然低频，节流触发器未触发）
+
+    notePart("p1", ref({ eventId: "r1:2" }), { kind: "signal", signal: "derailed" });
+    expect(work()?.parts).toHaveLength(2); // 重放去重
+  });
+
+  it("signal 携来源归属（#95 委派位：子智能体脱轨分角色推导的依据）", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), {
+      kind: "signal",
+      signal: "derailed",
+    });
+
+    expect(work()?.parts[0]).toMatchObject({ kind: "signal", source: "self-test" });
+  });
+});
+
 describe("work-message store · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
   it("freezeWork 定格留驻：部件保留、只读、不再生长（成功收口不再清空——「过程上文、结果下卡」）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();

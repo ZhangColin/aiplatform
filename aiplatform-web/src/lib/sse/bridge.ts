@@ -303,6 +303,18 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
+      case "part-signal": {
+        // 脱轨信号（#240）：入 parts 流水（活性行脱轨变体的推导源）——呈现归组件
+        // 投影（静态面无痕），本路由不做转译（载荷只有发生事实，无原文）
+        const { payload } = platform;
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,
+            source: payload.source },
+          { kind: "signal", signal: payload.signal },
+        );
+        return;
+      }
       case "part-action": {
         const { payload } = platform;
         work.notePart(

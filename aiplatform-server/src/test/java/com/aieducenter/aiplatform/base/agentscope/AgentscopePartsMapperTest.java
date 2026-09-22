@@ -26,10 +26,11 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 
 /**
  * {@link AgentscopePartsMapper} 单点映射表（#77 parts 契约的唯一生产方）：AgentScope
- * 事件 → 消息部件事件（part-text / part-action）。口径：动作卡全生命
+ * 事件 → 消息部件事件（part-text / part-signal / part-action）。口径：动作卡全生命
  * 周期（开始即出事件——工具调用发起即 started，参数落定 running，结果返回
- * completed/failed，同一 toolCallId 锚定）；解说切段与直播同内核；思考与读类
- * 工具不进部件。步骤分组已退役（#115）：ModelCallStartEvent 不再产 part-step。
+ * completed/failed，同一 toolCallId 锚定）；解说切段与直播同内核；机器语法吞段
+ * 即时产脱轨信号（#240）；思考与读类工具不进部件。步骤分组已退役（#115）：
+ * ModelCallStartEvent 不再产 part-step。
  * 每事件 payload 盖 runId/sessionId/engine + 部件字段（扁平，无 data 键）。
  */
 class AgentscopePartsMapperTest {
@@ -390,7 +391,8 @@ class AgentscopePartsMapperTest {
             List<AgentEvent> third = mapper.map(new TextBlockDeltaEvent("r", "b-1", "收口了。"));
 
             assertThat(texts(first)).containsExactly("看日志确认。");
-            assertThat(second).isEmpty();
+            // 标记拼全即吞段开始：无解说部件携带（标记体仍不漏），只出脱轨信号（#240）
+            assertThat(types(second)).containsExactly(AgentEventTypes.PART_SIGNAL);
             assertThat(texts(third)).containsExactly("收口了。");
         }
 
@@ -446,7 +448,8 @@ class AgentscopePartsMapperTest {
                     "ML｜tool_calls></｜DSML｜tool_calls>"));
 
             assertThat(texts(first)).containsExactly(headless);
-            assertThat(second).isEmpty();
+            // 残头按住不随硬切漏出，拼全成真标记即吞段——只出脱轨信号（#240）
+            assertThat(types(second)).containsExactly(AgentEventTypes.PART_SIGNAL);
             assertThat(mapper.drain()).isEmpty();
         }
 
@@ -481,6 +484,107 @@ class AgentscopePartsMapperTest {
                             part.payload().getOrDefault(AgentEventTypes.PART_TEXT_FIELD, "")))
                     .filter(text -> !text.isEmpty())
                     .toList();
+        }
+    }
+
+    /**
+     * 脱轨留痕（#240 机器语法吞段的人话信号）：守卫识别到机器语法段（标记起点）
+     * 即产 part-signal（signal=derailed，封闭词表）——只报发生事实，不携带任何
+     * 原文（原文出口 = 后端 trace 日志）；不产生动作部件（脱轨 = 什么都没跑，
+     * 不伪造「在执行」）。呈现形态 = 活性行脱轨变体（#235 变体族，前端静态面
+     * 无痕）。频次 = 每次吞段一句（标记起点判定，吞段中的后续增量不再刷）。
+     */
+    @Nested
+    class DerailmentSignals {
+
+        /** 吞段即信号：人话余段先出、随后 part-signal；信号载荷不含任何机器语法原文。 */
+        @Test
+        void given_dsml_swallow_when_mapped_then_signal_after_human_text_without_syntax() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "先跑一遍自测。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
+                            + "<｜DSML｜parameter name=\"command\" string=\"true\">docker exec ws-1 pnpm test"
+                            + "</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"));
+
+            assertThat(types(parts)).containsExactly(
+                    AgentEventTypes.PART_TEXT, AgentEventTypes.PART_SIGNAL);
+            AgentEvent signal = parts.get(1);
+            assertThat(signal.payload()).containsAllEntriesOf(Map.of(
+                    AgentEventTypes.RUN_FIELD, RUN_ID,
+                    AgentEventTypes.SESSION_FIELD, SESSION_ID,
+                    AgentEventTypes.ENGINE_FIELD, ENGINE,
+                    AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD, AgentEventTypes.PART_SIGNAL_DERAILED));
+            // 信号不携带原文：无解说文本键，任何载荷值都不含机器语法片段
+            assertThat(signal.payload()).doesNotContainKey(AgentEventTypes.PART_TEXT_FIELD);
+            assertThat(signal.payload().values().toString())
+                    .doesNotContain("DSML").doesNotContain("docker exec");
+        }
+
+        /** 无闭合 = 脱轨吞至 run 尾：标记起点出一次信号，吞段中增量不刷、drain 无尾段。 */
+        @Test
+        void given_unclosed_derailment_when_swallowed_to_run_end_then_signal_once() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "开始了。<｜DSML｜tool_calls>\n<｜DSML｜parameter name=\"command\">docker exec"));
+            List<AgentEvent> more = mapper.map(new TextBlockDeltaEvent("r", "b-1", " exec ws-1 ls"));
+
+            assertThat(types(parts)).containsExactly(
+                    AgentEventTypes.PART_TEXT, AgentEventTypes.PART_SIGNAL);
+            assertThat(more).isEmpty();
+            assertThat(mapper.drain()).isEmpty();
+        }
+
+        /** 标记头跨增量 split：拼全成真标记才有信号（残头按住期不出；死文本照常出段、同样不出信号——#234 口径）。 */
+        @Test
+        void given_marker_split_across_deltas_when_completed_then_signal_fires_once() {
+            assertThat(mapper.map(new TextBlockDeltaEvent("r", "b-1", "看日志。<｜DSM")))
+                    .hasSize(1);
+
+            List<AgentEvent> completed = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "L｜tool_calls></｜DSML｜tool_calls>"));
+
+            assertThat(types(completed)).containsExactly(AgentEventTypes.PART_SIGNAL);
+        }
+
+        /** 每次吞段一句：同一增量内两段独立标记，各出一次信号，间夹人话照常出段。 */
+        @Test
+        void given_two_separate_swallows_when_mapped_then_signal_per_swallow() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>中间没脱轨。"
+                            + "<｜DSML｜tool_calls></｜DSML｜tool_calls>"));
+
+            assertThat(types(parts)).containsExactly(
+                    AgentEventTypes.PART_SIGNAL, AgentEventTypes.PART_TEXT, AgentEventTypes.PART_SIGNAL);
+        }
+
+        /** 正常人话（含角括号与全角竖线）与死文本残留：不出信号（守卫回归）。 */
+        @Test
+        void given_plain_narration_when_mapped_then_no_signal() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "比较 a < b，数 1｜2｜3。"));
+
+            assertThat(types(parts)).containsExactly(AgentEventTypes.PART_TEXT);
+        }
+
+        /** #95 委派位：子智能体脱轨信号带来源归属（过程呈现分角色的依据）。 */
+        @Test
+        void given_subagent_derailment_when_mapped_then_signal_carries_source() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>").withSource("platform-agent/self-test"));
+
+            assertThat(types(parts)).containsExactly(AgentEventTypes.PART_SIGNAL);
+            assertThat(parts.get(0).payload())
+                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        }
+
+        /** 信封契约：信号载荷扁平（无 data 键），只有关联字段 + 信号值。 */
+        @Test
+        void given_signal_part_when_built_then_flat_keys_only() {
+            List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
+                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>"));
+
+            assertThat(parts).singleElement().satisfies(part ->
+                    assertThat(part.payload()).containsOnlyKeys(
+                            AgentEventTypes.RUN_FIELD, AgentEventTypes.SESSION_FIELD,
+                            AgentEventTypes.ENGINE_FIELD, AgentEventTypes.PART_SIGNAL_SIGNAL_FIELD));
         }
     }
 

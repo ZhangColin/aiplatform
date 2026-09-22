@@ -246,6 +246,17 @@ export type PlatformAgentEvent =
     }
   | {
       /**
+       * 脱轨信号部件（#240 机器语法吞段的人话留痕）：叙事段守卫识别到机器语法段
+       * （模型以原生工具参数语法直接发射、引擎未识别为工具调用——什么都没跑）时
+       * 发射，每次吞段一句（天然低频）。载荷只有发生事实：不携带原文（原文出口 =
+       * 后端 trace 日志）。呈现 = 活性行脱轨变体（定型文案），静态面无痕、不伪造
+       * 动作；`signal` 为封闭词表，v1 唯一值 derailed。
+       */
+      type: "part-signal";
+      payload: AgentPayload & { engine: string; source?: string; signal: "derailed" };
+    }
+  | {
+      /**
        * 工具动作部件（动作卡）：开始/进行中/完成/失败全生命周期——动作一开始即出
        * 事件，同一动作以 `toolCallId` 锚定跨状态更新。`state` ∈ started（参数在途，
        * label 通用对象）/ running（参数落定，label 具体对象）/ completed / failed
@@ -303,6 +314,7 @@ const PLATFORM_AGENT_TYPES: ReadonlySet<string> = new Set([
   "guide-reply",
   "acceptance-start",
   "part-text",
+  "part-signal",
   "part-action",
   "part-check",
   "part-plan",

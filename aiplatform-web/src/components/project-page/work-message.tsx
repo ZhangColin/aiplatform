@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, FileCode2, Hammer, ShieldCheck, SquareTerminal, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileCode2,
+  Hammer,
+  ShieldCheck,
+  SquareTerminal,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -20,21 +29,26 @@ const FALLBACK_TOOL_ICON = <Hammer className="size-3.5" />;
  * 成功无痕投影（#230）：completed 动作不产生静态条目——滤除只在呈现层（store 部件
  * 流水仍收全量，「store 不裁事件」口径不变）；failed 动作留红行。直播中的
  * started/running 动作不进正文（#235 常驻活性行：直播行是唯一实时状态行，归卡片
- * 底部活性行——动作起灭不推挤正文，稳定判据＝不闪不跳）。读类工具不播报的封闭表
- * 口径在服务端/桥（part-action 事件已过滤只读工具），本投影不涉。
+ * 底部活性行——动作起灭不推挤正文，稳定判据＝不闪不跳）。脱轨信号部件不进正文
+ * （#240 静态面无痕——活性行是唯一呈现位）。读类工具不播报的封闭表口径在服务端/
+ * 桥（part-action 事件已过滤只读工具），本投影不涉。
  */
 export function presentWorkParts(parts: WorkPart[]): WorkPart[] {
-  return parts.filter((part) => part.kind !== "action" || part.state === "failed");
+  return parts.filter(
+    (part) => part.kind !== "signal" && (part.kind !== "action" || part.state === "failed"),
+  );
 }
 
 /**
- * 活性行三态（#235 唯一实时状态行；输入＝store 原始部件，非正文投影）：
+ * 活性行变体族（#235 唯一实时状态行；输入＝store 原始部件，非正文投影）：
  * 末位动作失败＝红字变体（失败破例优先——停滚提示压过仍在跑的并发动作）；否则
  * 最近发起的 started/running 动作＝命令原值 label 滚动（story15 并发取最近发起的
- * 一条）；动作间隙（无在跑动作）＝无字打字点。
+ * 一条）；末位脱轨信号（其后无动作接管）＝脱轨变体（#240 机器语法吞段的人话留痕
+ * ——吞段后恢复的真实动作优先，动作完成即信号消化）；动作间隙＝无字打字点。
  */
 export type WorkActivity =
   | { kind: "failed" }
+  | { kind: "derailed" }
   | { kind: "action"; part: Extract<WorkPart, { kind: "action" }> }
   | { kind: "idle" };
 
@@ -46,7 +60,11 @@ export function activityOf(parts: WorkPart[]): WorkActivity {
   const live = actions.findLast(
     (part) => part.state === "started" || part.state === "running",
   );
-  return live ? { kind: "action", part: live } : { kind: "idle" };
+  if (live) return { kind: "action", part: live };
+  // 末位信号晚于末位动作＝吞段后无动作接管（无动作时任何信号都算）：脱轨变体
+  const lastActionAt = parts.findLastIndex((part) => part.kind === "action");
+  const lastSignalAt = parts.findLastIndex((part) => part.kind === "signal");
+  return lastSignalAt > lastActionAt ? { kind: "derailed" } : { kind: "idle" };
 }
 
 /** 失败痕判定（#225 失败破例的部件级口径：failed 红行不埋进坍缩、常驻展开红显）。 */
@@ -141,7 +159,8 @@ export function planCurrentOrd(
  * 生静态条目——静态面＝解说段＋失败红行；尾部活动区常驻最近一两句解说，更早内
  * 容坍缩为「⋯ 更早 N 项」点击回看；失败破例：失败红行不埋进坍缩、常驻展开红显）
  * ＋④常驻活性行（#235：直播行＝唯一实时状态行，全程常驻不消失——动作在跑＝
- * 命令原值 label 滚动、间隙＝无字打字点、失败＝红字变体；收口保留末行直到收尾卡
+ * 命令原值 label 滚动、间隙＝无字打字点、失败＝红字变体、脱轨＝琥珀色变体〔#240
+ * 机器语法吞段的人话留痕，静态面无痕〕；收口保留末行直到收尾卡
  * 入流，随后随定格沉没。稳定判据＝不闪、不跳、不无意义震荡）。零散维护需求（无
  * 切片上下文）不渲染计划区、不伪造计划；agent 不产步骤清单则无清单区域（解说
  * 兜底，#236）；无切片标题回落「正在做」。思考与代码不
@@ -208,12 +227,13 @@ export function WorkMessage({
 }
 
 /**
- * 常驻活性行（#235 唯一实时状态行）：三态同槽换装——动作在跑＝命令原值 label
+ * 常驻活性行（#235 唯一实时状态行）：变体族同槽换装——动作在跑＝命令原值 label
  * 滚动（#228 剥壳／定宽截断语义在服务端，本行逐字渲染＋单行 truncate 兜底）；
  * 间隙＝无字打字点（「正在干活…」字样行已退役）；失败＝红字变体（#225 story10
- * 「刚才的动作没做成，正在处理」语义沿用）。三态同高（py-1.5 + 20px 行高预算），
- * 换装不跳行。定格保留末行时静态呈现（live=false：不转圈、不跳动——定格卡不
- * 自称在跑）。
+ * 「刚才的动作没做成，正在处理」语义沿用）；脱轨＝琥珀色变体（#240 机器语法吞段
+ * 的人话留痕——一句定型文案，不携带原文、不出命令滚动行、不转圈：脱轨＝什么都没
+ * 跑，不伪造「在执行」）。各变体同高（py-1.5 + 20px 行高预算），换装不跳行。定格
+ * 保留末行时静态呈现（live=false：不转圈、不跳动——定格卡不自称在跑）。
  */
 function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolean }) {
   if (activity.kind === "failed") {
@@ -221,6 +241,15 @@ function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolea
     return (
       <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm text-destructive">
         <X className="size-3.5 shrink-0" /> 刚才的动作没做成，正在处理
+      </div>
+    );
+  }
+  if (activity.kind === "derailed") {
+    // 脱轨变体（#240）：琥珀色与失败红字区分（抖了一下 ≠ 动作失败）——静态面
+    // 无痕，本行是唯一呈现位；定格保留末行时静态呈现（无动画，同失败变体口径）
+    return (
+      <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm text-amber-600">
+        <TriangleAlert className="size-3.5 shrink-0" /> 刚才模型发射异常，正在调整
       </div>
     );
   }
@@ -290,6 +319,10 @@ function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
   }
   if (part.kind === "check") {
     return <CheckRow part={part} frozen={frozen} />;
+  }
+  if (part.kind === "signal") {
+    // 防御位（#240 静态面无痕）：正文投影已滤除信号——漏进即不渲染，活性行是唯一呈现位
+    return null;
   }
   return <ActionRow part={part} />;
 }

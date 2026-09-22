@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 import com.aieducenter.aiplatform.base.skills.domain.model.BuiltinSkill;
 import com.aieducenter.aiplatform.base.skills.domain.port.BuiltinSkillCatalog;
 
+import com.cartisan.core.stereotype.Adapter;
+import com.cartisan.core.stereotype.PortType;
+
 import io.agentscope.core.skill.AgentSkill;
 import io.agentscope.core.skill.repository.ClasspathSkillRepository;
 
@@ -26,6 +29,7 @@ import io.agentscope.core.skill.repository.ClasspathSkillRepository;
  * 各持（T3 装配合成收口时统一装配缝，届时归一）。</p>
  */
 @Component
+@Adapter(PortType.CLIENT)
 public class ClasspathBuiltinSkillCatalog implements BuiltinSkillCatalog, DisposableBean {
 
     /** 内置技能目录（classpath 资源根，与装配侧同目录）。 */

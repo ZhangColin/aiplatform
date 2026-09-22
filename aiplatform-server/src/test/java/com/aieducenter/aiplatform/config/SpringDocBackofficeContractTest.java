@@ -32,6 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       显式呈现（不做类型统一）；</li>
  *   <li>ownerExternalId（订单/项目四读面，#243）：账号档案读口的寻址键，
  *       type=string 钉死。</li>
+ *   <li>技能域两 schema（#247）：技能柄 id 为 opaque 串两形制（builtin:&lt;技能名&gt;／
+ *       TSID 十进制串），type=string＋形制自描述；来源 code 带取值对照。</li>
  * </ul>
  */
 @IntegrationTest
@@ -137,6 +139,35 @@ class SpringDocBackofficeContractTest {
                     .as("%s.ownerExternalId 应渲染 type=string", surface[1])
                     .isEqualTo("string");
         }
+    }
+
+    @Test
+    void given_skill_schemas_when_read_group_then_id_is_opaque_string_and_source_coded() throws Exception {
+        // #247：技能柄是 opaque 串两形制（builtin:<技能名>／TSID 十进制串）——
+        // 消费方不得做数值假设，type=string 钉死＋柄形制自描述（#242 口径）
+        JsonNode skills = fetchGroup("skills");
+        for (String schema : List.of("BackofficeSkillSummaryResponse", "BackofficeSkillDetailResponse")) {
+            JsonNode id = property(skills, schema, "id");
+            assertThat(id.path("type").asText(null))
+                    .as("%s.id 应渲染 type=string（两形制 opaque 柄）", schema)
+                    .isEqualTo("string");
+            assertThat(id.path("description").asText(""))
+                    .as("%s.id 应自描述两形制（builtin: 前缀与 TSID 串）", schema)
+                    .contains("builtin:")
+                    .contains("TSID");
+            assertThat(exampleText(id))
+                    .as("%s.id 应附示例", schema)
+                    .isNotBlank();
+        }
+        // 来源 code 对照自描述（1=内置 2=安装）
+        JsonNode source = property(skills, "BackofficeSkillSummaryResponse", "source");
+        assertThat(source.path("type").asText(null))
+                .as("source 应渲染 type=integer（BaseEnum 房规）")
+                .isEqualTo("integer");
+        assertThat(source.path("description").asText(""))
+                .as("source 应带取值对照")
+                .contains("1=内置")
+                .contains("2=安装");
     }
 
     // ---------- 装载 ----------

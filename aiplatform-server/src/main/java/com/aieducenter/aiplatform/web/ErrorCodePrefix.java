@@ -31,7 +31,10 @@ public enum ErrorCodePrefix {
     ORD("ORD_", 5, "business.order"),
 
     /** business.identity：账号认证（idn_） */
-    IDN("IDN_", 6, "business.identity");
+    IDN("IDN_", 6, "business.identity"),
+
+    /** base.skills：技能库（skl_） */
+    SKL("SKL_", 7, "base.skills");
 
     private final String prefix;
     private final int domainCode;

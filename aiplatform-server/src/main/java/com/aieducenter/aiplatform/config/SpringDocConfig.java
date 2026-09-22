@@ -55,6 +55,11 @@ public class SpringDocConfig {
         return bcGroup("metering", "计量（base.metering）", "base.metering");
     }
 
+    @Bean
+    public GroupedOpenApi skillsGroup() {
+        return bcGroup("skills", "技能库（base.skills）", "base.skills");
+    }
+
     // -------- business 分区 --------
 
     @Bean

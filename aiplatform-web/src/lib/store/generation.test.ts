@@ -6,7 +6,7 @@ import { useGenerationStore } from "./generation";
  * 生成面 store「静默重试 vs 终态」判定（#56 → #82/#84 收紧）：终态只有一个写入口
  * noteCoderFailed（run-failed 轨道终态收口事件）——run 失败为唯一失败终态，重试
  * 全程静默（中间失败不出事件，store 无 error 中间态写入口——编译期即不可误判），
- * 重试间隔内「重新修改」出口零闪现。
+ * 重试间隔内「继续更新」出口零闪现。
  */
 
 /** 事件面走一遍的助手：run-start 登记即起跑（最小可判定前置）。 */

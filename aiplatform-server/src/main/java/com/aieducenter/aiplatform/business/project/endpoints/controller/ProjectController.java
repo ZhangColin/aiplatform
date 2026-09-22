@@ -52,14 +52,14 @@ import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
- * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 重新修改（修正
- * 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
+ * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 继续更新（更新
+ * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
  * 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 重新修改 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -113,8 +113,8 @@ public class ProjectController {
                     + "三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一"
                     + "主智能体单会话（main-{projectId}）连续："
                     + "意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台"
-                    + "自动派修正 run）；咨询 → 主智能体答询轮（只读工具集"
-                    + "查证后直接作答，零产物：PRD 与系统都不动、不起修正 run）；"
+                    + "自动派更新 run）；咨询 → 主智能体答询轮（只读工具集"
+                    + "查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；"
                     + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，"
                     + "下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。"
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / "
@@ -182,13 +182,13 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/fix-runs/restart")
-    @Operation(summary = "重新修改（修正 run 超限终态恢复出口）",
-            description = "修正 run 失败自动重试超限转终态后的人工兜底（与生成的「继续生成」"
-                    + "对齐）：重派终态那场的修正任务——交接物沿用（同任务清单）、续同 "
+    @Operation(summary = "继续更新（更新 run 超限终态恢复出口）",
+            description = "更新 run 失败自动重试超限转终态后的人工兜底（与生成的「继续生成」"
+                    + "对齐）：重派终态那场的更新任务——交接物沿用（同任务清单）、续同 "
                     + "coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识"
                     + "（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），"
                     + "重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发："
-                    + "修正在途（进行中/排队中）409 PRJ_025；无终态账（未派过修正/"
+                    + "更新在途（进行中/排队中）409 PRJ_025；无终态账（未派过更新/"
                     + "已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。"
                     + "已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001")
     public ApiResponse<FixRestartResponse> restartFix(@PathVariable String id) {
@@ -266,7 +266,7 @@ public class ProjectController {
             description = "交付文件视图 = 项目 dev 工作区剔除非交付物（data/、.platform/、"
                     + "node_modules/ 与 .env——与源码包同口径）后的文件清单：[{path, size}]，"
                     + "path 为工作区相对路径、按路径稳定排序，只列文件（目录由前端按路径段合成）。"
-                    + "直读工作区实时状态——生成/修正 run 完成后即反映最新文件长出。"
+                    + "直读工作区实时状态——生成/更新 run 完成后即反映最新文件长出。"
                     + "项目不存在 404 PRJ_001")
     public ApiResponse<ProjectFilesResponse> files(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.files(parseId(id)));

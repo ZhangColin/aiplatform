@@ -21,6 +21,7 @@ import {
   previewActive,
   resolvePreviewAddress,
   systemPanelPhase,
+  type RecoveryAction,
 } from "@/lib/preview/state";
 import type { GenerationState } from "@/lib/projects/detail";
 import { useAnnotationStore } from "@/lib/store/annotation";
@@ -34,23 +35,23 @@ import {
   type PreviewDevice,
 } from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
-import { RestartFixButton } from "./restart-fix";
+import { RestartUpdateButton } from "./restart-update";
 import { ResumeGenerationButton } from "./resume-generation";
 
 /**
- * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 修正
+ * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 更新
  * 超限终态恢复出口；#79 起为成果区「系统」tab，#80 浏览器条定稿；#222 档位改吃
  * 四态投影）：恒为预览的容器。门禁——四态投影非「从未生成」（含中断——阶段 0
  * 收口后应用可能已在跑）即取预览地址并挂机制；后端探活通过才返回 URL，有 URL
  * 即上真页面（空白页可接受）。档位推导归 lib/preview/state 纯函数（REST 投影为
- * 主源——刷新/回访后档位仍正确；修正轨会话信号只喂更新中/修正失败两处，更新轨
- * RestartFix 现状不动），本组件只呈现：无应用 = 占位随工作消息部件推进的步骤
+ * 主源——刷新/回访后档位仍正确；更新轨会话信号只喂更新中/更新失败两处），
+ * 本组件只呈现：无应用 = 占位随工作消息部件推进的步骤
  * 提示；有应用且 run 中 = 保留页面 +「更新中」轻状态（#124 收进浏览器条内联）；
  * 中断/失败态 = 非悬浮顶部占位细条（占自己高度、把预览下推）。跨会话与重试不
  * 闪断：有 URL 就不退占位；run 收口纪元驱动 iframe 重挂（url+epoch 为 key，手动
  * 刷新的本地节拍并入同 key）。恢复出口单出口（#222，ADR-0020）：生成中断与
- * 从未生成（idle 档）给「继续生成」（断点续跑/计划重派），修正轮失败给「重新
- * 修改」；无推倒重来按钮。正常态全无手动触发。
+ * 从未生成（idle 档）给「继续生成」（断点续跑/计划重派），更新轮失败给「继续
+ * 更新」；无推倒重来按钮。正常态全无手动触发。
  *
  * <p>浏览器条（#80）：地址框（真地址、可编辑 goto——#125 输入路径/同源 URL 导航，
  * 跨源拒绝，解析归 lib/preview/state 纯函数）+ 更新中轻状态内联（#124）+ 桌面/手机
@@ -70,7 +71,7 @@ export function SystemPanel({
   projectId: string;
   /** 生成态四态投影（REST 事实；缺省 = 后端未透出）。 */
   generationState?: GenerationState;
-  /** 本会话编码 run 状态（修正轨信号——更新中/修正失败）。 */
+  /** 本会话编码 run 状态（更新轨信号——更新中/更新失败）。 */
   coderStatus?: CoderRunStatus;
   /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
   onGenerated: () => void;
@@ -151,12 +152,12 @@ export function SystemPanel({
   const updatingNotice = notice && !notice.failed ? notice : undefined;
   const failedNotice = notice?.failed ? notice : undefined;
   // 恢复出口单出口（#222）：生成中断/从未生成 =「继续生成」（断点续跑或计划重派）、
-  // 修正轮失败 =「重新修改」（#48，重派终态那场的交接物——更新轨现状不动）
+  // 更新轮失败 =「继续更新」（#48，重派终态那场的交接物）
   const resume = <ResumeGenerationButton projectId={projectId} onGenerated={onGenerated} />;
-  const refix = <RestartFixButton projectId={projectId} />;
-  /** 兜底入口选择（失败细条/占位终态/引导占位共用，#222）：resume = 继续生成 / refix = 重新修改。 */
-  const recoveryAction = (recovery?: "resume" | "refix") =>
-    recovery === "resume" ? resume : recovery === "refix" ? refix : null;
+  const restartUpdate = <RestartUpdateButton projectId={projectId} />;
+  /** 兜底入口选择（失败细条/占位终态/引导占位共用，#222）：resume = 继续生成 / restart-update = 继续更新。 */
+  const recoveryAction = (recovery?: RecoveryAction) =>
+    recovery === "resume" ? resume : recovery === "restart-update" ? restartUpdate : null;
   /** 工具点选：同键再点即退出（非常驻），异键切换。 */
   const toggleTool = (tool: AnnotationKind) =>
     setActiveTool((cur) => (cur === tool ? null : tool));

@@ -9,13 +9,13 @@ import { useGenerationStore } from "@/lib/store/generation";
 type FixRestartResponse = components["schemas"]["FixRestartResponse"];
 
 /**
- * 重新修改（#48 修正 run 超限终态恢复出口）：POST
+ * 继续更新（#48 更新 run 超限终态恢复出口；端点实现词 fix-runs 沿用不改）：POST
  * /api/projects/{id}/fix-runs/restart——平台重派终态那场的交接物（同任务清单、
  * 续同 coder 会话）。成功即乐观登记编码 run 在途（SSE run-start 随后到，
- * 重放/回声幂等），面板随之离开终态档；无可恢复的修正（服务重启丢账等）
+ * 重放/回声幂等），面板随之离开终态档；无可恢复的更新（服务重启丢账等）
  * 由后端 409 语义指路重提意见。
  */
-export function useRestartFix(projectId: string) {
+export function useRestartUpdate(projectId: string) {
   return useMutation({
     mutationFn: () =>
       api.post<FixRestartResponse>(`/projects/${projectId}/fix-runs/restart`),
@@ -26,7 +26,7 @@ export function useRestartFix(projectId: string) {
       }
     },
     onError: (error) => {
-      toast.error(errorText(error, "重新修改发起失败，请稍后重试"));
+      toast.error(errorText(error, "继续更新发起失败，请稍后重试"));
     },
   });
 }

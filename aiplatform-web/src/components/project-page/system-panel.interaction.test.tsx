@@ -36,8 +36,8 @@ vi.mock("@/hooks/use-resume-generation", () => ({
   useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-restart-fix", () => ({
-  useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
+vi.mock("@/hooks/use-restart-update", () => ({
+  useRestartUpdate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 function renderPanel() {

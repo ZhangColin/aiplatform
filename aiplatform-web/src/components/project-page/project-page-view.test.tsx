@@ -47,10 +47,10 @@ vi.mock("@/hooks/use-resume-generation", () => ({
   useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-// 系统范式（默认激活）内「重新修改」按钮的 mutation 口 + 预览地址读口
+// 系统范式（默认激活）内「继续更新」按钮的 mutation 口 + 预览地址读口
 //（system-panel.test 同款；无 QueryClientProvider，query 口全 mock）
-vi.mock("@/hooks/use-restart-fix", () => ({
-  useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
+vi.mock("@/hooks/use-restart-update", () => ({
+  useRestartUpdate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 vi.mock("@/hooks/use-project-preview", () => ({

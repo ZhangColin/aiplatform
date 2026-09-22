@@ -45,7 +45,7 @@ describe("previewActive · 门禁解除（#45；#222 投影口径）", () => {
     expect(previewActive("never", undefined)).toBe(false);
   });
 
-  it("修正轨会话信号在场即启动（更新轨现状不动）", () => {
+  it("更新轨会话信号在场即启动", () => {
     expect(previewActive("generated", "running")).toBe(true);
     expect(previewActive(undefined, "finished")).toBe(true);
   });
@@ -115,7 +115,7 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
     });
   });
 
-  it("修正在途（已生成 + 会话 running）且无应用：落「正在更新系统」（更新轨现状不动）", () => {
+  it("更新在途（已生成 + 会话 running）且无应用：落「正在更新系统」", () => {
     expect(
       systemPanelPhase({ generationState: "generated", coderStatus: "running", parts: [] }),
     ).toEqual({ kind: "hint", text: "正在更新系统" });
@@ -142,13 +142,13 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
     expect(INTERRUPTED_NOTICE).toBe("生成中断了，已完成的进度都保留");
   });
 
-  it("会话内 run 失败先行呈现（投影重拉收敛前）：未生成口径给继续生成、已生成给重新修改", () => {
+  it("会话内 run 失败先行呈现（投影重拉收敛前）：未生成口径给继续生成、已生成给继续更新", () => {
     expect(
       systemPanelPhase({ generationState: "generating", coderStatus: "error", parts: [] }),
     ).toEqual({ kind: "failed", text: INTERRUPTED_NOTICE, recovery: "resume" });
     expect(
       systemPanelPhase({ generationState: "generated", coderStatus: "error", parts: [] }),
-    ).toEqual({ kind: "failed", text: "修正遇到了问题", recovery: "refix" });
+    ).toEqual({ kind: "failed", text: "更新遇到了问题", recovery: "restart-update" });
   });
 
   it("正常态无任何手动触发：生成中/已生成均不带恢复入口", () => {
@@ -166,7 +166,7 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
       kind: "page",
       notice: { failed: false, text: UPDATING_NOTICE },
     });
-    // 会话信号同款（修正在途）
+    // 会话信号同款（更新在途）
     expect(
       systemPanelPhase({
         generationState: "generated",
@@ -185,7 +185,7 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
     });
   });
 
-  it("页面 + 修正失败：修正口径 + 重新修改入口（更新轨现状不动）", () => {
+  it("页面 + 更新失败：更新失败口径 + 继续更新入口", () => {
     expect(
       systemPanelPhase({
         generationState: "generated",
@@ -195,7 +195,7 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
       }),
     ).toEqual({
       kind: "page",
-      notice: { failed: true, text: "修正遇到了问题", recovery: "refix" },
+      notice: { failed: true, text: "更新遇到了问题", recovery: "restart-update" },
     });
   });
 
@@ -319,7 +319,7 @@ describe("resolvePreviewAddress · 地址栏 goto 解析（#125）", () => {
   });
 });
 
-describe("用户可见文案遵循「生成」词条 Avoid（不出现开发/构建）", () => {
+describe("用户可见文案遵循词条 Avoid（「生成」不出现开发/构建；「迭代」不出现修正/重新修改）", () => {
   it("平台自有占位与提示话术全部合规", () => {
     const cases: Parameters<typeof systemPanelPhase>[0][] = [
       { generationState: undefined, parts: [] },
@@ -344,6 +344,8 @@ describe("用户可见文案遵循「生成」词条 Avoid（不出现开发/构
       for (const text of texts) {
         expect(text).not.toContain("开发");
         expect(text).not.toContain("构建");
+        expect(text).not.toContain("修正");
+        expect(text).not.toContain("重新修改");
       }
     }
   });

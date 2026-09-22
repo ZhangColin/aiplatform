@@ -229,7 +229,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "run-failed": {
         // 编码 run 超限终态收口（#56）：轨道真终态（事件到 ⟺ 恢复出口可达）——
-        // 「继续生成/重新修改」只认本事件；无 executor 登记的 runId 忽略（事件序
+        // 「继续生成/继续更新」只认本事件；无 executor 登记的 runId 忽略（事件序
         // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {

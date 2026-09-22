@@ -9,11 +9,11 @@ import type { WorkPart } from "@/lib/store/work-message";
 
 import { SystemPanel, previewFrameKey } from "./system-panel";
 
-// 系统模式主区域（#45 渐进预览第一片 + #48 修正超限终态恢复出口；#222 档位改吃
+// 系统模式主区域（#45 渐进预览第一片 + #48 更新超限终态恢复出口；#222 档位改吃
 // 四态投影）：非「从未生成」即取预览地址；空态两档——无应用随工作消息部件推进
 // 步骤提示（#81 自解说自述优先、动作兜底），有应用保留页面 + 「更新中」轻提示
 // 一套；跨会话/重试不闪断；恢复出口单出口——生成中断（含刷新后，投影派生）与
-// 从未生成（idle 档）给「继续生成」、修正轮失败给「重新修改」；无推倒重来按钮，
+// 从未生成（idle 档）给「继续生成」、更新轮失败给「继续更新」；无推倒重来按钮，
 // 正常态全无。预览地址读口 mock 掉（每用例摆 url 有无与 error）。
 let previewResult: {
   data?: { url: string };
@@ -33,8 +33,8 @@ vi.mock("@/hooks/use-resume-generation", () => ({
   useResumeGeneration: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-restart-fix", () => ({
-  useRestartFix: () => ({ isPending: false, mutate: vi.fn() }),
+vi.mock("@/hooks/use-restart-update", () => ({
+  useRestartUpdate: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 // 工作消息部件读口换直摆对象（zustand SSR 快照冻在建店时刻，setState 后渲染读
@@ -191,22 +191,22 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     expect(html).toContain("<iframe");
     expect(html).toContain("生成中断了");
     expect(html).toContain("继续生成");
-    expect(html).not.toContain("重新修改");
+    expect(html).not.toContain("继续更新");
   });
 
-  it("修正轮失败（已生成 + error）：修正口径 + 重新修改入口（更新轨现状不动），无继续生成", () => {
+  it("更新轮失败（已生成 + error）：更新失败口径 + 继续更新入口，无继续生成", () => {
     const html = renderPanel({
       generationState: "generated",
       coderStatus: "error",
     });
 
-    expect(html).toContain("修正遇到了问题");
-    expect(html).toContain("重新修改");
+    expect(html).toContain("更新遇到了问题");
+    expect(html).toContain("继续更新");
     expect(html).not.toContain("继续生成");
     expect(html).not.toContain("<iframe");
   });
 
-  it("应用可访问且修正失败：轻提示转失败 + 重新修改入口，页面仍可见", () => {
+  it("应用可访问且更新失败：轻提示转失败 + 继续更新入口，页面仍可见", () => {
     const html = renderPanel({
       generationState: "generated",
       coderStatus: "error",
@@ -214,8 +214,8 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     });
 
     expect(html).toContain("<iframe");
-    expect(html).toContain("修正遇到了问题");
-    expect(html).toContain("重新修改");
+    expect(html).toContain("更新遇到了问题");
+    expect(html).toContain("继续更新");
     expect(html).not.toContain("继续生成");
   });
 
@@ -228,14 +228,14 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
     });
     expect(updating).toContain("正在更新系统");
     expect(updating).not.toContain("继续生成");
-    expect(updating).not.toContain("重新修改");
+    expect(updating).not.toContain("继续更新");
 
     const finished = renderPanel({
       generationState: "generated",
       url: "http://localhost:42659",
     });
     expect(finished).not.toContain("继续生成");
-    expect(finished).not.toContain("重新修改");
+    expect(finished).not.toContain("继续更新");
   });
 
   it("run 收口后：轻提示消失，预览照常", () => {

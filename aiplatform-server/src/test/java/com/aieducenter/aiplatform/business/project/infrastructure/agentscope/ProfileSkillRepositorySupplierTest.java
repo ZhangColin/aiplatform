@@ -15,7 +15,9 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 import com.aieducenter.aiplatform.base.skills.domain.model.BuiltinSkill;
 import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
+import com.aieducenter.aiplatform.base.skills.domain.model.ParsedSkill;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillRecord;
+import com.aieducenter.aiplatform.base.skills.domain.model.SkillUpdateTrace;
 import com.aieducenter.aiplatform.base.skills.domain.port.BuiltinSkillCatalog;
 import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -150,7 +152,7 @@ class ProfileSkillRepositorySupplierTest {
     private static SkillRecord record(long id, String name, String sourcePackage) {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
                 SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
-                "正文", null, null);
+                "正文", null, null, null);
     }
 
     /**
@@ -171,7 +173,7 @@ class ProfileSkillRepositorySupplierTest {
             SkillRecord row = rows.get(id);
             rows.put(id, new SkillRecord(row.id(), row.name(), row.description(),
                     row.sourcePackage(), row.version(), status, row.frontmatter(),
-                    row.content(), row.operatorId(), row.operatorName()));
+                    row.content(), row.operatorId(), row.operatorName(), row.updateAvailable()));
         }
 
         void unassign(SkillSlot slot, long id) {
@@ -229,6 +231,51 @@ class ProfileSkillRepositorySupplierTest {
 
         @Override
         public boolean delete(long id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Map<String, String> findInstalledVersions() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<String> findExcludeDirs(String sourcePackage) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void installPackage(String sourcePackage, List<String> excludeDirs, String headVersion) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void recordCheckResult(String sourcePackage, String remoteHead, boolean updateAvailable) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void deletePackageIfNoSkills(String sourcePackage) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<SkillRecord> findBySourcePackage(String sourcePackage) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void refreshFromSnapshot(long id, ParsedSkill skill, String version, Operator operator) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void insertTrace(SkillUpdateTrace trace) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<SkillUpdateTrace> findTraces(String sourcePackage) {
             throw new UnsupportedOperationException();
         }
     }

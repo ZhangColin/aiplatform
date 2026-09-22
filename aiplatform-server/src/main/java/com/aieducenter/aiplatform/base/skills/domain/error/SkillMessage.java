@@ -31,7 +31,14 @@ public enum SkillMessage implements CodeMessage {
     // ========== 槽位指派（#249） ==========
     SKILL_SLOT_NOT_FOUND(404, "SKL_010", "职能槽位不存在"),
 
-    SKILL_BUILTIN_NOT_ASSIGNABLE(400, "SKL_011", "内置技能不可指派（内置随平台发版，装配合成按配置挂载，无需指派）");
+    SKILL_BUILTIN_NOT_ASSIGNABLE(400, "SKL_011", "内置技能不可指派（内置随平台发版，装配合成按配置挂载，无需指派）"),
+
+    // ========== 更新检查与显式更新（#250，ADR-0021 快照更新） ==========
+    SKILL_SOURCE_NOT_INSTALLED(404, "SKL_012", "来源包未安装（更新寻址已装来源包，未装先走安装）"),
+
+    SKILL_UPDATE_REMOVES_ASSIGNED(409, "SKL_013", "更新将移除有指派在身的技能，先解绑再更新"),
+
+    SKILL_SOURCE_PACKAGE_REQUIRED(400, "SKL_014", "来源包标识不能为空（取清单行 sourcePackage 值）");
 
     private final int httpStatus;
     private final String code;

@@ -39,6 +39,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       动作者、type=string）。</li>
  *   <li>技能域槽位指派面（#249）：SkillSlotAssignCommand.skillIds 整包替换语义
  *       （清单即终态）；BackofficeSlotAssignmentResponse.slot 三把槽位键自描述。</li>
+ *   <li>技能域更新面（#250）：清单行 updateAvailable 标记语义（有新版/未检查/
+ *       永不自动跟新）；SkillUpdateCommand.sourcePackage 取值口径（清单行原值）；
+ *       更新回执 from/to 版本与留痕读面自描述。</li>
  * </ul>
  */
 @IntegrationTest
@@ -228,6 +231,51 @@ class SpringDocBackofficeContractTest {
                 .contains("main")
                 .contains("executor")
                 .contains("subagent");
+    }
+
+    @Test
+    void given_update_schemas_when_read_group_then_update_semantics_self_described() throws Exception {
+        // #250：清单行 updateAvailable 标记三态语义（true 有新版/false 最新/null 未检查）
+        // ＋「永不自动跟新」的平台承诺写进自描述——消费方不得把标记当自动同步信号
+        JsonNode skills = fetchGroup("skills");
+        JsonNode mark = property(skills, "BackofficeSkillSummaryResponse", "updateAvailable");
+        assertThat(mark.path("type").asText(null))
+                .as("updateAvailable 应渲染 type=boolean")
+                .isEqualTo("boolean");
+        assertThat(mark.path("description").asText(""))
+                .as("updateAvailable 应自描述有新版语义")
+                .contains("有新版")
+                .contains("显式")
+                .contains("null＝未检查过");
+        // 命令口径：sourcePackage 是清单行原值回传（admin 不自拼原始 URL——同源身份单源）
+        JsonNode sourcePackage = property(skills, "SkillUpdateCommand", "sourcePackage");
+        assertThat(sourcePackage.path("type").asText(null))
+                .as("sourcePackage 应渲染 type=string")
+                .isEqualTo("string");
+        assertThat(sourcePackage.path("description").asText(""))
+                .as("sourcePackage 应自描述取值口径与显式语义")
+                .contains("sourcePackage 原值")
+                .contains("永不自动跟新");
+        // 更新回执：from/to 版本对（快照锚翻新确认面）＋移除确认名单位
+        for (String field : List.of("fromVersion", "toVersion")) {
+            JsonNode version = property(skills, "BackofficeSkillUpdateResponse", field);
+            assertThat(version.path("type").asText(null))
+                    .as("BackofficeSkillUpdateResponse.%s 应渲染 type=string", field)
+                    .isEqualTo("string");
+            assertThat(version.path("description").asText(""))
+                    .as("BackofficeSkillUpdateResponse.%s 应有版本语义说明", field)
+                    .isNotBlank();
+        }
+        assertThat(property(skills, "BackofficeSkillUpdateResponse", "removedSkillNames")
+                .path("type").asText(null))
+                .as("removedSkillNames 应渲染 type=array")
+                .isEqualTo("array");
+        // 留痕读面：操作者三件（id/名/时刻）＋版本对——历史版本可查的自描述面
+        for (String field : List.of("fromVersion", "toVersion", "operatorId", "operatedAt")) {
+            assertThat(property(skills, "BackofficeSkillUpdateTraceResponse", field).isMissingNode())
+                    .as("BackofficeSkillUpdateTraceResponse.%s 缺字段（契约漂移）", field)
+                    .isFalse();
+        }
     }
 
     // ---------- 装载 ----------

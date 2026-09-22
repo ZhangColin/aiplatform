@@ -28,6 +28,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
  *                      内置与未管理过为 null——#248 落痕）
  * @param operatorName  最近管理动作操作者名（直读展示；内置与未管理过为 null）
+ * @param updateAvailable 远端有新版标记（#250 来源包级，语义同清单行；内置恒
+ *                       null 不适用）
  */
 public record BackofficeSkillDetailResponse(
         @Schema(description = "技能柄（opaque 串两形制，同清单行 id：内置＝builtin:<技能名>、"
@@ -52,7 +54,10 @@ public record BackofficeSkillDetailResponse(
         String operatorId,
         @Schema(description = "最近管理动作操作者名（直读展示；内置为 null）",
                 example = "运营·技能管理员")
-        String operatorName) {
+        String operatorName,
+        @Schema(description = "远端有新版标记（来源包级，语义同清单行——true＝远端 HEAD ≠"
+                + "装时版本；null＝未检查过，内置技能恒 null 不适用）", example = "false")
+        Boolean updateAvailable) {
 
     /** 库条目 → 详情（来源＝安装）。 */
     public static BackofficeSkillDetailResponse of(SkillRecord record) {
@@ -69,7 +74,8 @@ public record BackofficeSkillDetailResponse(
                 record.frontmatter(),
                 record.content(),
                 record.operatorId(),
-                record.operatorName());
+                record.operatorName(),
+                record.updateAvailable());
     }
 
     /** 内置技能 → 详情（来源＝内置；来源包/版本标识无、状态恒启用）。 */
@@ -86,6 +92,7 @@ public record BackofficeSkillDetailResponse(
                 SkillStatus.ENABLED.getName(),
                 skill.frontmatter(),
                 skill.content(),
+                null,
                 null,
                 null);
     }

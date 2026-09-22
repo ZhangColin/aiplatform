@@ -32,12 +32,12 @@ import io.agentscope.core.skill.AgentSkill;
 import io.agentscope.core.skill.util.SkillUtil;
 
 /**
- * git CLI 子进程快照拉取（#248 快照安装）：{@code git clone} 到临时目录 →
- * {@code rev-parse HEAD} 取装时版本 → 扫描全部 SKILL.md 经 agentscope
+ * git CLI 子进程快照拉取（#248 快照安装＋#250 更新检查）：{@code git clone} 到
+ * 临时目录 → {@code rev-parse HEAD} 取装时版本 → 扫描全部 SKILL.md 经 agentscope
  * {@link SkillUtil} 解析（与内置目录同一管道——审核面所见即运行时注入面），
- * 拉完即删工作副本。照 {@code DockerEnvironmentBackend} 先例走 CLI 子进程
- * （弱化实现起步）；超时 destroyForcibly 强杀——网络挂起不拖死请求线程
- * （容器 clone 卡 TCP 的教训，#168）。
+ * 拉完即删工作副本；远端前进探查走 {@code ls-remote} 只读不落盘。照
+ * {@code DockerEnvironmentBackend} 先例走 CLI 子进程（弱化实现起步）；超时
+ * destroyForcibly 强杀——网络挂起不拖死请求线程（容器 clone 卡 TCP 的教训，#168）。
  *
  * <p>认证走宿主 git 全局配置（HTTPS credential helper／SSH agent）；
  * {@code GIT_TERMINAL_PROMPT=0} 禁交互提示——需凭据即速败，不挂等到超时。</p>
@@ -53,8 +53,11 @@ public class GitSkillPackageFetcher implements SkillPackageFetcher {
     /** 克隆超时：技能仓库量级小（42 技能的 matt 包在 MB 级），两分钟足够宽。 */
     private static final Duration CLONE_TIMEOUT = Duration.ofMinutes(2);
 
-    /** 本地 git 查询超时（rev-parse）：进程已起，秒级即异常。 */
+    /** 本地 git 查询超时（rev-parse）：进程已起、无网络往返，秒级即异常。 */
     private static final Duration GIT_QUERY_TIMEOUT = Duration.ofSeconds(15);
+
+    /** ls-remote 超时：走网络（远端可达性未知），30 秒兜死。 */
+    private static final Duration LS_REMOTE_TIMEOUT = Duration.ofSeconds(30);
 
     @Override
     public SkillPackageSnapshot fetch(String repoUrl, List<String> excludeDirs) {
@@ -75,6 +78,25 @@ public class GitSkillPackageFetcher implements SkillPackageFetcher {
         finally {
             deleteRecursively(workDir);
         }
+    }
+
+    /**
+     * 只读探查远端 HEAD（#250 更新检查）：{@code git ls-remote <url> HEAD}——
+     * 不 clone 不落盘，输出形如 {@code <sha>\tHEAD}；空输出（空仓等）与不可达
+     * 同语义 SKL_004（调用方自持静默降级）。失败语义与 {@link #fetch} 同码同因
+     * （仓库不可达），复用既有子进程机制（禁交互提示、超时强杀）。
+     */
+    @Override
+    public String remoteHead(String repoUrl) {
+        String output = runGit(LS_REMOTE_TIMEOUT, null, "ls-remote", repoUrl, "HEAD");
+        for (String line : output.split("\\R")) {
+            String head = line.trim().split("\\s+")[0];
+            if (!head.isEmpty()) {
+                return head;
+            }
+        }
+        logger.warn("ls-remote 无 HEAD 输出（空仓？）: {}", repoUrl);
+        throw new ApplicationException(SkillMessage.SKILL_REPOSITORY_CLONE_FAILED);
     }
 
     /**

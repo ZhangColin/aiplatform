@@ -20,6 +20,9 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
  * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
  *                      未管理过为 null——#248 落痕口径）
  * @param operatorName  最近管理动作操作者名（直读展示；未管理过为 null）
+ * @param updateAvailable 远端有新版标记（#250 来源包级事实经 join 呈现：远端
+ *                       HEAD ≠ 装时版本即 true；null＝未检查过——含 T4 前存量
+ *                       安装与装配视图外的直读）
  */
 public record SkillRecord(
         long id,
@@ -31,5 +34,6 @@ public record SkillRecord(
         Map<String, Object> frontmatter,
         String content,
         String operatorId,
-        String operatorName) {
+        String operatorName,
+        Boolean updateAvailable) {
 }

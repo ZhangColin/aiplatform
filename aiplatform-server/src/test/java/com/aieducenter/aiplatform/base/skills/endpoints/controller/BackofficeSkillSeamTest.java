@@ -23,10 +23,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 
+import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
+
 import com.jayway.jsonpath.JsonPath;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -90,11 +94,28 @@ import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.Pro
  * <li><b>卸载守卫接真</b>：有指派在身（任一槽位）卸载 409 SKL_008、解绑后可卸；</li>
  * <li><b>鉴权</b>：指派面非签名请求被拒（401）。</li>
  * </ul>
+ *
+ * <p>#250 更新检查与显式更新五面钉死（fixture 仓库追加 commit 模拟远端前进
+ * ——验收面）：</p>
+ * <ul>
+ * <li><b>检查轮</b>：装后即查（装＝事实检查，标记 false）→ 追加 commit →
+ * 扫描（直调应用服务）标记亮（清单 updateAvailable=true）→ 更新后复位 →
+ * 再扫描不亮（远端未前进不标）；</li>
+ * <li><b>显式更新</b>：重拉快照入库——同名行原地翻新（id/停用状态/指派跨更新
+ * 保留）＋新技能插入＋装时排除名单同口径（排除目录不随更新还魂）＋版本留痕
+ * 追加（from→to＋操作者，留痕读面可查）＋未前进幂等回执（不落痕）；</li>
+ * <li><b>移除守卫</b>：远端删除有指派在身的技能→整体 409 SKL_013，解绑后
+ * 更新成功（回执 removedSkillNames 确认移除了什么）；</li>
+ * <li><b>静默降级</b>：坏远端检查失败不炸轮、不写状态（标记留 null）、不拖垮
+ * 同轮他包；</li>
+ * <li><b>负例＋鉴权</b>：未装来源包 404 SKL_012＋空来源包 400 SKL_014＋缺
+ * 操作者 400 SKL_009＋非签名 401。</li>
+ * </ul>
  */
 @BackofficeSeamTest
 class BackofficeSkillSeamTest {
 
-    /** 信封数字业务码：SKL 域码 7 × 1000＋序号（SKL_001～SKL_011）。 */
+    /** 信封数字业务码：SKL 域码 7 × 1000＋序号（SKL_001～SKL_014）。 */
     private static final int SKILL_NOT_FOUND_CODE = 7001;
     private static final int SKILL_INSTALL_URL_REQUIRED_CODE = 7002;
     private static final int SKILL_SOURCE_ALREADY_INSTALLED_CODE = 7003;
@@ -105,6 +126,9 @@ class BackofficeSkillSeamTest {
     private static final int SKILL_OPERATOR_REQUIRED_CODE = 7009;
     private static final int SKILL_SLOT_NOT_FOUND_CODE = 7010;
     private static final int SKILL_BUILTIN_NOT_ASSIGNABLE_CODE = 7011;
+    private static final int SKILL_SOURCE_NOT_INSTALLED_CODE = 7012;
+    private static final int SKILL_UPDATE_REMOVES_ASSIGNED_CODE = 7013;
+    private static final int SKILL_SOURCE_PACKAGE_REQUIRED_CODE = 7014;
 
     /** 操作者透传头样例（admin 侧管理员，签名面明示信任）。 */
     private static final String OPERATOR_ID = "700200";
@@ -130,8 +154,15 @@ class BackofficeSkillSeamTest {
     @Autowired
     private ProfileSkillRepositorySupplier skillRepositorySupplier;
 
+    /** 更新检查扫描轮直调口（#250：定期轮测试可触发——验收面走应用服务）。 */
+    @Autowired
+    private BackofficeSkillAppService appService;
+
     /** 已种植库条目 id（teardown 精确清理 skl_skills）。 */
     private final List<Long> plantedSkillIds = new ArrayList<>();
+
+    /** 测试内现建的动态仓库（#250 更新线专用——每测试自持仓库互不串台；teardown 按来源包清）。 */
+    private final List<Path> dynamicRepos = new ArrayList<>();
 
     @BeforeAll
     static void createFixtureRepos() throws Exception {
@@ -165,10 +196,16 @@ class BackofficeSkillSeamTest {
             jdbcTemplate.update("DELETE FROM skl_skills WHERE id = ?", id);
         }
         plantedSkillIds.clear();
-        // 安装产物按来源包清理（本地 fixture 路径即规范化来源包身份）
-        for (Path repo : List.of(fixtureRepo, malformedRepo, emptyRepo)) {
+        // 安装产物按来源包清理（本地 fixture 路径即规范化来源包身份）＋动态仓库
+        List<Path> sources = new ArrayList<>(List.of(fixtureRepo, malformedRepo, emptyRepo));
+        sources.addAll(dynamicRepos);
+        for (Path repo : sources) {
             jdbcTemplate.update("DELETE FROM skl_skills WHERE source_package = ?", repo.toString());
         }
+        dynamicRepos.clear();
+        // #250 检查态与更新留痕（本测试类独写面——整面清即净）
+        jdbcTemplate.update("DELETE FROM skl_packages");
+        jdbcTemplate.update("DELETE FROM skl_update_traces");
     }
 
     // ---------- 清单：空库内置合成＋库行同权＋排序＋柄两形制 ----------
@@ -630,6 +667,205 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.name").value("tdd"));
     }
 
+    // ---------- #250 更新检查与显式更新：检查轮→标记→更新→留痕 ----------
+
+    @Test
+    void given_remote_advance_when_scan_then_marked_then_explicit_update_refreshes()
+            throws Exception {
+        Path repo = buildDynamicRepo("skill-update-flow", r -> {
+            writeSkill(r, "engineering/tdd", "tdd", "测试先行红绿重构。", "红绿重构循环。");
+            writeSkill(r, "engineering/code-review", "code-review", "双轴并行审查。", "先对规范、再对需求。");
+            writeSkill(r, "deprecated/legacy", "legacy", "装时排除面。", "应被排除段挡在库外。");
+        });
+        var ids = installAndReturnIds(repo, "deprecated");
+        String tddId = ids.get("tdd");
+        String reviewId = ids.get("code-review");
+        String oldSha = git(repo, "rev-parse", "HEAD").trim();
+
+        // 装后即查（安装＝事实上的检查，#250）：标记 false 非 null（包行已落）
+        assertThatUpdateAvailable(repo, false);
+
+        // 停用＋指派：平台侧状态与指派关系须跨更新保留（原地翻新不改 id/状态/指派）
+        signedPostNoBody("/api/backoffice/skills/" + tddId + "/disable", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, reviewId).andExpect(status().isOk());
+
+        // 远端前进：改 code-review 正文＋新增 debugging＋deprecated 类目再添新条目
+        appendCommit(repo, r -> {
+            writeSkill(r, "engineering/code-review", "code-review", "双轴并行审查。", "新版正文——两轴结论合并呈报。");
+            writeSkill(r, "engineering/debugging", "debugging", "系统化调试。", "先复现、再隔离、后修复。");
+            writeSkill(r, "deprecated/legacy-2", "legacy-2", "装后新增的排除面。", "更新不还魂装时排除目录。");
+        });
+        String newSha = git(repo, "rev-parse", "HEAD").trim();
+
+        // 检查轮（测试直调）：远端 HEAD ≠ 装时版本 → 标记亮（同包两行同亮——来源包级）
+        assertThat(appService.checkRemoteUpdates()).isEqualTo(1);
+        assertThatUpdateAvailable(repo, true);
+
+        // 显式更新（操作者二号）：翻新入库＋版本留痕＋标记复位
+        signedPostUpdate(repo.toString(), OPERATOR_ID_2, OPERATOR_NAME_2)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sourcePackage").value(repo.toString()))
+                .andExpect(jsonPath("$.data.fromVersion").value(oldSha))
+                .andExpect(jsonPath("$.data.toVersion").value(newSha))
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID_2))
+                .andExpect(jsonPath("$.data.operatorName").value(OPERATOR_NAME_2))
+                .andExpect(jsonPath("$.data.removedSkillNames").value(hasSize(0)))
+                // 终态行集：tdd＋code-review＋debugging（名称序），排除目录不还魂
+                .andExpect(jsonPath("$.data.skills", hasSize(3)))
+                .andExpect(jsonPath("$.data.skills[0].name").value("code-review"))
+                .andExpect(jsonPath("$.data.skills[0].id").value(reviewId))
+                .andExpect(jsonPath("$.data.skills[1].name").value("debugging"))
+                .andExpect(jsonPath("$.data.skills[2].name").value("tdd"))
+                .andExpect(jsonPath("$.data.skills[2].id").value(tddId))
+                // 原地翻新：id 不变＋停用状态跨更新保留＋版本统一翻新
+                .andExpect(jsonPath("$.data.skills[2].status").value(2))
+                .andExpect(jsonPath("$.data.skills[*].version", everyItem(equalTo(newSha))));
+        assertThatNoRows("legacy");
+        assertThatNoRows("legacy-2");
+
+        // 正文翻新可读（审核面所见即新快照）；指派跨更新保留（id 未变）
+        signedGet("/api/backoffice/skills/" + reviewId)
+                .andExpect(jsonPath("$.data.content").value(containsString("新版正文")))
+                .andExpect(jsonPath("$.data.version").value(newSha));
+        signedGet("/api/backoffice/skills/assignments/main")
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].id").value(reviewId));
+
+        // 版本留痕可查：from→to＋操作者二号（append-only 历史面）
+        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].sourcePackage").value(repo.toString()))
+                .andExpect(jsonPath("$.data[0].fromVersion").value(oldSha))
+                .andExpect(jsonPath("$.data[0].toVersion").value(newSha))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 标记复位（更新即一次事实检查）＋再扫描不亮（远端未前进不标）
+        assertThatUpdateAvailable(repo, false);
+        assertThat(appService.checkRemoteUpdates()).isZero();
+        assertThatUpdateAvailable(repo, false);
+
+        // 未前进再更新：幂等回执（from==to、不落痕不写行）
+        signedPostUpdate(repo.toString(), OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.fromVersion").value(newSha))
+                .andExpect(jsonPath("$.data.toVersion").value(newSha))
+                .andExpect(jsonPath("$.data.skills", hasSize(3)));
+        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+                .andExpect(jsonPath("$.data", hasSize(1)));
+    }
+
+    @Test
+    void given_update_removes_assigned_skill_when_signed_update_then_409_until_unbound()
+            throws Exception {
+        Path repo = buildDynamicRepo("skill-update-remove", r -> {
+            writeSkill(r, "engineering/tdd", "tdd", "测试先行红绿重构。", "红绿重构循环。");
+        });
+        String tddId = installAndReturnIds(repo).get("tdd");
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+
+        // 远端删 tdd 换 replacement：更新将移除有指派在身的 tdd → 整体 409 SKL_013
+        appendCommit(repo, r -> {
+            try {
+                Files.delete(r.resolve("engineering/tdd/SKILL.md"));
+            }
+            catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+            writeSkill(r, "engineering/replacement", "replacement", "顶替技能。", "新技能正文。");
+        });
+        signedPostUpdate(repo.toString(), OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(SKILL_UPDATE_REMOVES_ASSIGNED_CODE))
+                .andExpect(jsonPath("$.message").value("更新将移除有指派在身的技能，先解绑再更新"));
+
+        // 解绑后更新成功：移除确认面（removedSkillNames）＋终态行集只剩 replacement
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME).andExpect(status().isOk());
+        signedPostUpdate(repo.toString(), OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.removedSkillNames", hasSize(1)))
+                .andExpect(jsonPath("$.data.removedSkillNames[0]").value("tdd"))
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].name").value("replacement"));
+        assertThatNoRows("tdd");
+        // 留痕不因移除而缺（显式动作必留痕）
+        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+                .andExpect(jsonPath("$.data", hasSize(1)));
+    }
+
+    @Test
+    void given_unreachable_remote_when_scan_then_silent_degradation_not_throwing() throws Exception {
+        // 坏远端行（T4 前存量形制：无包行、无真实仓库）
+        plant(76_000_021L, "broken-skill", "/nonexistent/skill/repo-broken", "commit-broken", 1);
+        Path okRepo = buildDynamicRepo("skill-update-ok", r ->
+                writeSkill(r, "engineering/tdd", "tdd", "测试先行红绿重构。", "红绿重构循环。"));
+        installAndReturnIds(okRepo);
+        appendCommit(okRepo, r ->
+                writeSkill(r, "engineering/debugging", "debugging", "系统化调试。", "先复现、再隔离。"));
+
+        // 静默降级（#250 AC）：坏远端不炸轮、不写状态（标记留 null＝未检查过）、
+        // 不拖垮同轮他包（ok 包照常标记）
+        assertThat(appService.checkRemoteUpdates()).isEqualTo(1);
+        assertThatUpdateAvailable(okRepo, true);
+        Integer brokenRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM skl_packages WHERE source_package = ?",
+                Integer.class, "/nonexistent/skill/repo-broken");
+        assertThat(brokenRows).as("坏远端不落检查状态").isZero();
+        String listBody = signedGet("/api/backoffice/skills")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(JsonPath.<List<Object>>read(listBody,
+                "$.data[?(@.name == 'broken-skill')].updateAvailable"))
+                .as("坏远端清单行标记＝null（未检查过）")
+                .containsExactly((Object) null);
+    }
+
+    @Test
+    void given_blank_or_unknown_source_or_missing_operator_when_signed_update_then_error_family()
+            throws Exception {
+        Path repo = buildDynamicRepo("skill-update-negative", r ->
+                writeSkill(r, "engineering/tdd", "tdd", "测试先行红绿重构。", "红绿重构循环。"));
+        installAndReturnIds(repo);
+
+        // 空来源包：400 SKL_014（请求自身缺陷）
+        signedPostUpdate("", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(SKILL_SOURCE_PACKAGE_REQUIRED_CODE))
+                .andExpect(jsonPath("$.message").value("来源包标识不能为空（取清单行 sourcePackage 值）"));
+        // 未装来源包：404 SKL_012（尾斜杠变体同源——规范化身份）
+        signedPostUpdate("/nonexistent/skill/repo-xyz", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_SOURCE_NOT_INSTALLED_CODE))
+                .andExpect(jsonPath("$.message").value("来源包未安装（更新寻址已装来源包，未装先走安装）"));
+        signedPostUpdate("/nonexistent/skill/repo-xyz/", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_SOURCE_NOT_INSTALLED_CODE));
+        // 缺操作者透传头（已装来源包）：400 SKL_009（显式更新必留痕）
+        signedPostUpdate(repo.toString(), null, null)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(SKILL_OPERATOR_REQUIRED_CODE));
+        // 留痕读面空参：400 SKL_014 同语义
+        signedGet("/api/backoffice/skills/update-traces")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(SKILL_SOURCE_PACKAGE_REQUIRED_CODE));
+    }
+
+    @Test
+    void given_no_signature_headers_when_update_or_traces_then_401_signature_required()
+            throws Exception {
+        mockMvc.perform(post("/api/backoffice/skills/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sourcePackage\": \"whatever\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Signature required"));
+        mockMvc.perform(get("/api/backoffice/skills/update-traces?sourcePackage=whatever"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Signature required"));
+    }
+
     @Test
     void given_no_signature_headers_when_put_assignments_then_401_signature_required() throws Exception {
         mockMvc.perform(put("/api/backoffice/skills/assignments/main")
@@ -689,9 +925,27 @@ class BackofficeSkillSeamTest {
         git(repo, "-c", "init.defaultBranch=main", "init", "-q");
         populator.populate(repo);
         git(repo, "add", "-A");
-        git(repo, "-c", "user.name=Skill Fixture", "-c", "user.email=fixture@aiplatform.local",
-                "commit", "-q", "-m", "fixture");
+        commitAll(repo, "fixture");
         return repo;
+    }
+
+    /** 测试内现建动态仓库（#250 更新线专用）：登记 teardown 按来源包清理。 */
+    private Path buildDynamicRepo(String name, DirectoryPopulator populator) throws Exception {
+        Path repo = buildRepo(name, populator);
+        dynamicRepos.add(repo);
+        return repo;
+    }
+
+    /** fixture 仓库追加 commit（模拟远端前进——快照安装后远端 HEAD 前移的验收形制）。 */
+    private static void appendCommit(Path repo, DirectoryPopulator populator) throws Exception {
+        populator.populate(repo);
+        git(repo, "add", "-A");
+        commitAll(repo, "advance");
+    }
+
+    private static void commitAll(Path repo, String message) throws Exception {
+        git(repo, "-c", "user.name=Skill Fixture", "-c", "user.email=fixture@aiplatform.local",
+                "commit", "-q", "-m", message);
     }
 
     @FunctionalInterface
@@ -760,6 +1014,20 @@ class BackofficeSkillSeamTest {
         for (String skillName : skillNames) {
             ids.put(skillName, JsonPath.<List<String>>read(
                     response, "$.data[?(@.name == '" + skillName + "')].id").get(0));
+        }
+        return ids;
+    }
+
+    /** 走安装真链路装动态仓库（#250 通用形），回「技能名→TSID 柄」全量映射。 */
+    private Map<String, String> installAndReturnIds(Path repo, String... excludeDirs)
+            throws Exception {
+        String response = signedInstall(repo.toString(), OPERATOR_ID, OPERATOR_NAME, excludeDirs)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Map<String, String> ids = new LinkedHashMap<>();
+        for (String name : JsonPath.<List<String>>read(response, "$.data[*].name")) {
+            ids.put(name, JsonPath.<List<String>>read(
+                    response, "$.data[?(@.name == '" + name + "')].id").get(0));
         }
         return ids;
     }
@@ -841,6 +1109,35 @@ class BackofficeSkillSeamTest {
             request.header("X-User-Name", operatorName);
         }
         return mockMvc.perform(request);
+    }
+
+    /** 签名显式更新 POST（JSON 体＝sourcePackage＋操作者透传头；null 即缺头负例形制）。 */
+    private ResultActions signedPostUpdate(String sourcePackage, String operatorId,
+            String operatorName) throws Exception {
+        String path = "/api/backoffice/skills/update";
+        String body = "{\"sourcePackage\": \"%s\"}".formatted(sourcePackage);
+        MockHttpServletRequestBuilder request = BackofficeSignatures.signed(
+                post(path).contentType(MediaType.APPLICATION_JSON).content(body), path, body);
+        if (operatorId != null) {
+            request.header("X-User-Id", operatorId);
+        }
+        if (operatorName != null) {
+            request.header("X-User-Name", operatorName);
+        }
+        return mockMvc.perform(request);
+    }
+
+    /** 该来源包全部清单行的「有新版」标记同值断言（来源包级事实——行行同亮灭）。 */
+    private void assertThatUpdateAvailable(Path repo, boolean expected) throws Exception {
+        String response = signedGet("/api/backoffice/skills")
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        List<Boolean> marks = JsonPath.read(response,
+                "$.data[?(@.sourcePackage == '" + repo + "')].updateAvailable");
+        assertThat(marks)
+                .as("来源包 %s 的清单行有新版标记", repo)
+                .isNotEmpty()
+                .containsOnly(expected);
     }
 
     /**

@@ -42,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>技能域更新面（#250）：清单行 updateAvailable 标记语义（有新版/未检查/
  *       永不自动跟新）；SkillUpdateCommand.sourcePackage 取值口径（清单行原值）；
  *       更新回执 from/to 版本与留痕读面自描述。</li>
+ *   <li>智能体运营配置面（#251，project 分组）：覆盖态终态语义（null/缺省＝清空
+ *       回落枚举默认）、覆盖标记与默认预览、留痕 old/new 快照对自描述。</li>
  * </ul>
  */
 @IntegrationTest
@@ -276,6 +278,52 @@ class SpringDocBackofficeContractTest {
                     .as("BackofficeSkillUpdateTraceResponse.%s 缺字段（契约漂移）", field)
                     .isFalse();
         }
+    }
+
+    @Test
+    void given_agent_config_schemas_when_read_group_then_override_semantics_self_described() throws Exception {
+        // #251：智能体运营配置读写面——命令是覆盖态终态语义（null/缺省＝清空回落枚举
+        // 默认）、读面覆盖标记（运营要看到「现在跑的是覆盖还是默认」）与默认预览
+        //（清空回落即落此值）自描述；留痕读面 old/new 快照对齐全
+        JsonNode project = fetchGroup("project");
+        JsonNode systemPrompt = property(project, "AgentConfigUpdateCommand", "systemPrompt");
+        assertThat(systemPrompt.path("type").asText(null))
+                .as("AgentConfigUpdateCommand.systemPrompt 应渲染 type=string")
+                .isEqualTo("string");
+        assertThat(systemPrompt.path("description").asText(""))
+                .as("systemPrompt 应自描述清空回落语义")
+                .contains("清空覆盖")
+                .contains("枚举默认");
+        assertThat(property(project, "AgentConfigUpdateCommand", "modelId").path("description")
+                .asText(""))
+                .as("modelId 应自描述清空回落语义")
+                .contains("清空覆盖");
+        // 覆盖标记与默认预览：生效值来源可判（身份与配置分治——枚举仍是缺省正本）
+        for (String field : List.of("systemPromptOverridden", "modelIdOverridden")) {
+            JsonNode flag = property(project, "BackofficeAgentConfigResponse", field);
+            assertThat(flag.path("type").asText(null))
+                    .as("%s 应渲染 type=boolean", field)
+                    .isEqualTo("boolean");
+            assertThat(flag.path("description").asText(""))
+                    .as("%s 应自描述覆盖来源语义", field)
+                    .contains("枚举默认");
+        }
+        assertThat(property(project, "BackofficeAgentConfigResponse", "defaultSystemPrompt")
+                .path("description").asText(""))
+                .as("defaultSystemPrompt 应自描述回落落点语义")
+                .contains("清空覆盖");
+        // 留痕读面：old/new 快照对齐全（旧值快照＝回滚写回依据——回滚即新变更不留版本树）
+        for (String field : List.of("oldSystemPrompt", "oldModelId", "newSystemPrompt",
+                "newModelId", "oldWebSearchEnabled", "newWebSearchEnabled", "operatorId",
+                "operatedAt")) {
+            assertThat(property(project, "BackofficeAgentConfigTraceResponse", field).isMissingNode())
+                    .as("BackofficeAgentConfigTraceResponse.%s 缺字段（契约漂移）", field)
+                    .isFalse();
+        }
+        assertThat(property(project, "BackofficeAgentConfigTraceResponse", "oldSystemPrompt")
+                .path("description").asText(""))
+                .as("oldSystemPrompt 应自描述回滚依据语义")
+                .contains("回滚");
     }
 
     // ---------- 装载 ----------

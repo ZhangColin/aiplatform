@@ -71,7 +71,15 @@ public enum ProjectMessage implements CodeMessage {
     VERSION_ROLLBACK_RUN_IN_FLIGHT(409, "PRJ_031", "系统正在更新，请稍后再回滚"),
 
     /** 回滚脏树守卫（#100）：工作树有未提交 tracked 改动（如失败 run 残留）——restore 会静默丢弃。 */
-    VERSION_ROLLBACK_DIRTY_TREE(409, "PRJ_032", "系统有未完成的改动，请稍后再回滚");
+    VERSION_ROLLBACK_DIRTY_TREE(409, "PRJ_032", "系统有未完成的改动，请稍后再回滚"),
+
+    // ========== 智能体运营配置（#251，ADR-0021 修订 ADR-0006 边界——身份与配置分治） ==========
+
+    /** 配置面智能体寻址守卫：未知/空键 404——配置面只有 main/executor 两座（classify/naming 一次性判定不进配置面）。 */
+    AGENT_CONFIG_NOT_FOUND(404, "PRJ_033", "智能体不存在（运营配置面只有 main/executor 两座智能体）"),
+
+    /** 配置写操作者留痕守卫（缺 X-User-Id/X-User-Name 透传头即拦，知识治理/技能库同款无落空通道）。 */
+    AGENT_CONFIG_OPERATOR_REQUIRED(400, "PRJ_034", "操作者不能为空");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

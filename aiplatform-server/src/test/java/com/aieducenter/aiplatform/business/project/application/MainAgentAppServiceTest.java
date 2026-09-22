@@ -119,6 +119,7 @@ class MainAgentAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -231,6 +232,35 @@ class MainAgentAppServiceTest {
                 UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
         // 后续轮不重注知识：systemPrompt 即配置原文
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+    }
+
+    @Test
+    void given_main_config_override_when_opinion_turn_then_command_carries_library_values() {
+        // #251 装配断言（真命令构建缝，ADR-0021 库值优先缺省回落）：设运营配置库行后
+        // 对话命令实取库值（prompt 与模型档位两腿）；清空（行删即全回落）后下一轮
+        // 命令回枚举默认——解析单点 AgentConfigAppService 经 mainCommand 真链路钉死
+        Long projectId = persistedProject("9740");
+        givenSessionExecutorRunsInline();
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
+                VALUES ('main', ?, 'deepseek-v4-pro')
+                """, "主智能体覆盖协议：每轮先复述目标。");
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        ArgumentCaptor<AgentCommand> overridden = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(overridden.capture(), any());
+        assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。");
+        assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
+
+        jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
+        appService.runOpinionTurn(projectId, "再聊聊范围");
+        ArgumentCaptor<AgentCommand> fallback = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(fallback.capture(), any());
+        assertThat(fallback.getAllValues().get(1).systemPrompt())
+                .isEqualTo(AgentProfile.MAIN.systemPrompt());
+        assertThat(fallback.getAllValues().get(1).modelString())
+                .isEqualTo(AgentProfile.MAIN.chatModelString());
     }
 
     @Test

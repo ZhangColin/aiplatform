@@ -83,6 +83,7 @@ public class MainAgentAppService {
     private final AgentEventBridge eventBridge;
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
+    private final AgentConfigAppService agentConfigs;
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
@@ -115,14 +116,16 @@ public class MainAgentAppService {
     public MainAgentAppService(ProjectRepository projectRepository,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
-            OrderQueryAppService orderQueryAppService, IterationAppService iterationAppService,
-            GenerationAppService generationAppService, PrdRevisionFacts prdRevisions,
-            BuildPlanFacts buildPlanFacts, ConversationHistoryAppService conversationHistory) {
+            AgentConfigAppService agentConfigs, OrderQueryAppService orderQueryAppService,
+            IterationAppService iterationAppService, GenerationAppService generationAppService,
+            PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
+            ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
+        this.agentConfigs = agentConfigs;
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
@@ -246,14 +249,15 @@ public class MainAgentAppService {
         Project project = requireUpdatableProject(projectId);
         String sessionId = sessionIdOf(projectId);
         conversationHistory.recordAnswer(projectId, runId, answerText);
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
 
         AgentResume resume = new AgentResume(
                 runId,
                 sessionId,
                 project.ownerUserId(),
                 Long.toString(project.getWorkspaceId()),
-                AgentProfile.MAIN.chatModelString(),
-                AgentProfile.MAIN.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
+                main.chatModelString(),
+                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 replyId,
                 pendingToolCalls.stream()
                         .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
@@ -438,15 +442,18 @@ public class MainAgentAppService {
         }
     }
 
-    /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。 */
+    /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。systemPrompt/
+     * 模型档位经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认——每轮命令
+     * 构建时查，配置变更下一轮自然生效）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         return new AgentCommand(
                 runId,
                 prompt,
-                AgentProfile.MAIN.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
-                AgentProfile.MAIN.chatModelString(),
+                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
+                main.chatModelString(),
                 sessionId,
                 project.ownerUserId(),
                 usageContextOf(projectId, sessionId),

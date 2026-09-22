@@ -9,7 +9,9 @@
  *       答询 / 受理意见同会话、问答答复续跑；直调 base.agentscope 内核——编排缝
  *       极薄）与主智能体资产（ask_user / savePrd + 只读五件工具集 + PRD 落盘
  *       业务登记）</li>
- *   <li>智能体配置（AgentProfile：主智能体与 run 执行体两座，代码配置不落库）与
+ *   <li>智能体配置（AgentProfile：主智能体与 run 执行体两座的身份与缺省正本）＋
+ *       智能体运营配置（#251，ADR-0021 身份与配置分治：systemPrompt/模型档位
+ *       覆盖态落库后台可维护、变更留痕可回滚，装配库值优先缺省回落）与
  *       PRD 读侧</li>
  *   <li>SSE 编排层发射：平台通知（workspace-created / preview-ready /
  *       workspace-destroyed / document-updated / project-renamed）+ 智能体事件
@@ -22,10 +24,12 @@
  *
  * <h3>包结构</h3>
  * <ul>
- *   <li>domain - 领域层：聚合根（Project）、智能体配置（AgentProfile）与产物路径（model）、仓储接口、枚举、错误码</li>
- *   <li>application - 应用层：应用服务（Lifecycle / MainAgent / Dispatch / Query / Naming / Knowledge）、SSE 事件名册常量、DTO</li>
+ *   <li>domain - 领域层：聚合根（Project）、智能体配置（AgentProfile 身份与缺省 +
+ *       AgentOperationalConfig/AgentConfigTrace 运营配置覆盖态与留痕）与产物路径（model）、仓储接口、枚举、错误码</li>
+ *   <li>application - 应用层：应用服务（Lifecycle / MainAgent / Dispatch / Query / Naming / Knowledge /
+ *       AgentConfig 装配读面＋BackofficeAgentConfig 后台配置面）、SSE 事件名册常量、DTO</li>
  *   <li>infrastructure - 基础设施层：主智能体工具集装配（agentscope/，含 savePrd 的
- *       PRD 产物登记——置状态位 + document-updated）</li>
+ *       PRD 产物登记——置状态位 + document-updated）＋JdbcAgentConfigStore（运营配置两表）</li>
  *   <li>endpoints - 北向接口适配器层：REST API（ProjectController）</li>
  * </ul>
  *

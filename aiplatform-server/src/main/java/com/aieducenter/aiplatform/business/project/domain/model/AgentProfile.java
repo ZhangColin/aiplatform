@@ -9,14 +9,20 @@ import com.cartisan.core.domain.BaseEnum;
  * 智能体配置（职能是配置不是结构，ADR 0006「单一主智能体+委派式执行」）：平台
  * 两座智能体——{@link #MAIN 主智能体}（与用户对话的唯一职能体：追问、答询、受理
  * 意见、PRD 撰写修订、需求侧判定，永不读写沙箱代码）与 {@link #EXECUTOR run
- * 执行体}（生成/更新 run 的执行侧，按五段循环读写工作区）——的代码配置（不落库）。
+ * 执行体}（生成/更新 run 的执行侧，按五段循环读写工作区）——的身份与缺省配置。
  * 旧职能体角色卡（BA / 助理 / 编码智能体三座）已随 #86 并轨退役：差异只在
  * systemPrompt（工作协议）与模型档位，内核同一。
+ *
+ * <p><b>身份与配置分治（#251，ADR-0021 修订 ADR-0006「不落库」边界）</b>：本枚举
+ * 仍是智能体身份（有哪些智能体、职能、寻址键）与<b>缺省</b>正本；systemPrompt/
+ * 模型档位的运营覆盖态落库（{@code prj_agent_configs}）后台可维护——装配「库值
+ * 优先、缺省回落枚举默认」（解析单点 {@code AgentConfigAppService}），变更留痕
+ * 可回滚。classify/naming 等一次性判定提示词不属智能体身份面，不进配置面。</p>
  *
  * <p>{@link #key()} 是两处寻址腿的稳定键：工具集装配（ProfileToolkitSupplier 按
  * 配置发放）与 SSE run-start 载荷的 {@code agent} 字段（前端对话面/工作消息的
  * 登记锚）；计量 dims agentKind 同键（写侧 {@link UsageDims#kindOf}、读侧
- * {@link #byKey} 回解展示名）。</p>
+ * {@link #byKey} 回解展示名）；运营配置行 {@code agent_key} 同串寻址。</p>
  */
 public enum AgentProfile implements BaseEnum<AgentProfile> {
 
@@ -204,7 +210,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
         return name;
     }
 
-    /** 该配置的模型档位（对话内核模型条目名）。 */
+    /** 该配置的模型档位（对话内核模型条目名；运营覆盖时装配取库值，本值即回落缺省）。 */
     public String modelId() {
         return modelId;
     }
@@ -214,6 +220,15 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
      * {@code ModelRef} 白名单一致（当前仅 deepseek，加白时同步）。
      */
     public String chatModelString() {
+        return chatModelStringOf(modelId);
+    }
+
+    /**
+     * 模型档位 → 对话轨道模型串（#251 覆盖档位共用）：枚举默认与运营配置覆盖
+     * 档位同一 provider 前缀单源拼装（覆盖值是裸档位名，provider 不随配置漂移
+     * ——白名单口径同 {@link #chatModelString()}：当前仅 deepseek，加白时同步）。
+     */
+    public static String chatModelStringOf(String modelId) {
         return "deepseek:" + modelId;
     }
 

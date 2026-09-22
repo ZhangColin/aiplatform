@@ -47,7 +47,9 @@ import lombok.extern.slf4j.Slf4j;
  * 续派的中途超限不是终态，本层不判），用户侧兜底——生成「继续生成」断点续跑 /
  * 修正恢复出口重派或再提意见（#48/#221）。
  *
- * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}）、会话寻址由
+ * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}——systemPrompt/
+ * 模型档位经运营配置读面 {@link AgentConfigAppService} 取生效值，#251 库值优先、
+ * 缺省回落枚举默认）、会话寻址由
  * 轨道层拼装传入（#114 每片/每 run 换会话——重试续本会话，已落盘成果保留，同
  * 工作区不丢数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、
  * 项目工作区、流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试
@@ -128,17 +130,20 @@ class CoderRunAttempts {
     private final AgentscopeAgentClient agentClient;
     private final AgentEventBridge eventBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
+    private final AgentConfigAppService agentConfigs;
     private final GenerationProperties properties;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
-            GenerationProperties properties, ConversationHistoryAppService conversationHistory,
+            AgentConfigAppService agentConfigs, GenerationProperties properties,
+            ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
+        this.agentConfigs = agentConfigs;
         this.properties = properties;
         this.conversationHistory = conversationHistory;
         this.versions = versions;
@@ -195,12 +200,14 @@ class CoderRunAttempts {
                     new AtomicReference<>(StageDurations.zero());
             boolean attemptAccounted = false;
             String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
+            AgentConfigAppService.EffectiveConfig executor =
+                    agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
             AgentCommand command = new AgentCommand(
                     attemptRunId,
                     attempt == 1 ? knowledgePrefix + prompts.first()
                             : prompts.retry().apply(previousError),
-                    AgentProfile.EXECUTOR.systemPrompt(),
-                    AgentProfile.EXECUTOR.chatModelString(),
+                    executor.systemPrompt(),
+                    executor.chatModelString(),
                     sessionId,
                     project.ownerUserId(),
                     new UsageContext(Long.toString(projectId),

@@ -136,6 +136,7 @@ class GenerationAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -1005,6 +1006,28 @@ class GenerationAppServiceTest {
                 GenerationAppService.sliceSession(projectId, 0)));
         assertThat(value.streamCorrelation()).containsEntry("projectId", projectId.toString());
         assertThat(value.agentKey()).isEqualTo("executor"); // run-start 携配置键（工作消息锚）
+    }
+
+    @Test
+    void given_executor_config_override_when_generate_then_stage0_command_carries_library_values() {
+        // #251 装配断言（真命令构建缝，ADR-0021 库值优先）：设执行体运营配置库行后
+        // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死
+        Long projectId = persistedProject("9870");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
+                VALUES ('executor', ?, 'deepseek-v4-flash')
+                """, "执行体覆盖协议：开工先列步骤。");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        AgentCommand stage0 = command.getAllValues().get(0);
+        assertThat(stage0.systemPrompt()).isEqualTo("执行体覆盖协议：开工先列步骤。");
+        assertThat(stage0.modelString()).isEqualTo("deepseek:deepseek-v4-flash");
     }
 
     @Test

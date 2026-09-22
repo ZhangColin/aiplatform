@@ -59,6 +59,8 @@ class AgentscopeHarnessAgentFactoryTest {
         HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
                 new AgentWorkspace.Local(null), null);
 
+        // 同规格恰建一次（技能集不入键——供应商非工厂字段、obtain 无从取技能态；
+        // #249/ADR-0021 指派变更靠装配视图动态查库，不触发实例重建）
         assertThat(second).isSameAs(first);
         assertThat(created).hasSize(1);
     }

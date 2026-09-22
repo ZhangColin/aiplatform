@@ -75,6 +75,19 @@ class ProfileSubagentSupplierTest {
     }
 
     @Test
+    void given_self_test_skills_when_built_then_sentinel_allowlist_blocks_inheritance() {
+        // #249 子智能体槽「位就位」：框架 allowlist 非空才过滤、空即全量继承——
+        // 哨兵（永不匹配真实技能名的定名）把技能面结构性置空，执行体技能不漏入
+        // （ADR-0021 否决全量继承）。真独立动态接线备案（升级路径见生产类 javadoc）
+        SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
+
+        assertThat(declaration.getSkills())
+                .isNotEmpty()
+                .allSatisfy(name -> assertThat(name).startsWith("__"));
+    }
+
+    @Test
     void given_main_on_any_workspace_when_subagents_then_empty() {
         // 主智能体永不委派（对话姿态——委派是 run 内机制），任何工作区形态都拿不到声明
         assertThat(supplier.subagentsFor(AgentProfile.MAIN.key(),

@@ -22,11 +22,16 @@ public enum SkillMessage implements CodeMessage {
 
     SKILL_NAME_CONFLICT_IN_PACKAGE(400, "SKL_007", "同一仓库内存在重名技能"),
 
-    // ========== 卸载守卫（#248 定码；指派表 T3/#249 落地后接真检查） ==========
+    // ========== 卸载守卫（#248 定码；#249 指派表落地接真检查） ==========
     SKILL_ASSIGNED(409, "SKL_008", "技能有指派在身，先解绑再卸载"),
 
     // ========== 操作者（#248 全程留痕，知识治理同款无落空通道） ==========
-    SKILL_OPERATOR_REQUIRED(400, "SKL_009", "操作者不能为空");
+    SKILL_OPERATOR_REQUIRED(400, "SKL_009", "操作者不能为空"),
+
+    // ========== 槽位指派（#249） ==========
+    SKILL_SLOT_NOT_FOUND(404, "SKL_010", "职能槽位不存在"),
+
+    SKILL_BUILTIN_NOT_ASSIGNABLE(400, "SKL_011", "内置技能不可指派（内置随平台发版，装配合成按配置挂载，无需指派）");
 
     private final int httpStatus;
     private final String code;

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import com.cartisan.core.domain.BaseEnum;
 
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillRecord;
@@ -22,7 +23,8 @@ import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 /**
  * 技能库存取实现（JdbcTemplate 原生 SQL，照 {@code PgvectorKnowledgeStore}
  * 先例）：条目表 {@code skl_skills} 单表读写（读＝#247 清单/详情；写＝#248
- * 安装/启停/卸载）。frontmatter JSONB 经字面量序列化出入（Map ↔ JSON 文本），
+ * 安装/启停/卸载）＋指派表 {@code skl_slot_assignments}（#249 槽位读写，join
+ * 回条目列共形）。frontmatter JSONB 经字面量序列化出入（Map ↔ JSON 文本），
  * 不挂 JPA 映射面。
  */
 @Component
@@ -56,6 +58,37 @@ public class JdbcSkillStore implements SkillStore {
 
     private static final String DELETE_SQL =
             "DELETE FROM skl_skills WHERE id = ?";
+
+    /** 指派 join 回条目列（管理读面与装配视图共形；s 前缀＝条目表）。 */
+    private static final String FIND_ASSIGNED_SQL = """
+            SELECT s.id, s.name, s.description, s.source_package, s.version, s.status,
+                   s.frontmatter, s.content, s.operator_id, s.operator_name
+            FROM skl_slot_assignments a
+            JOIN skl_skills s ON s.id = a.skill_id
+            WHERE a.slot = ?
+            ORDER BY s.source_package, s.name
+            """;
+
+    /** 装配合成视图：指派行 join 启用条目（停用即退出候选——状态过滤在 SQL 单点）。 */
+    private static final String FIND_ENABLED_ASSIGNED_SQL = """
+            SELECT s.id, s.name, s.description, s.source_package, s.version, s.status,
+                   s.frontmatter, s.content, s.operator_id, s.operator_name
+            FROM skl_slot_assignments a
+            JOIN skl_skills s ON s.id = a.skill_id
+            WHERE a.slot = ? AND s.status = ?
+            ORDER BY s.source_package, s.name
+            """;
+
+    private static final String REPLACE_DELETE_SQL =
+            "DELETE FROM skl_slot_assignments WHERE slot = ?";
+
+    private static final String REPLACE_INSERT_SQL = """
+            INSERT INTO skl_slot_assignments (slot, skill_id, operator_id, operator_name)
+            VALUES (?, ?, ?, ?)
+            """;
+
+    private static final String EXISTS_ASSIGNMENT_SQL =
+            "SELECT EXISTS(SELECT 1 FROM skl_slot_assignments WHERE skill_id = ?)";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -100,6 +133,33 @@ public class JdbcSkillStore implements SkillStore {
     @Override
     public boolean delete(long id) {
         return jdbcTemplate.update(DELETE_SQL, id) > 0;
+    }
+
+    @Override
+    public List<SkillRecord> findAssigned(SkillSlot slot) {
+        return jdbcTemplate.query(FIND_ASSIGNED_SQL,
+                (rs, rowNum) -> recordOf(rs), slot.key());
+    }
+
+    @Override
+    public List<SkillRecord> findEnabledAssigned(SkillSlot slot) {
+        return jdbcTemplate.query(FIND_ENABLED_ASSIGNED_SQL,
+                (rs, rowNum) -> recordOf(rs), slot.key(), SkillStatus.ENABLED.getCode());
+    }
+
+    @Override
+    public void replaceAssignments(SkillSlot slot, List<Long> skillIds, Operator operator) {
+        // 整包替换（PUT 全量语义）：清行＋批插，事务由应用层 @Transactional 界定
+        jdbcTemplate.update(REPLACE_DELETE_SQL, slot.key());
+        jdbcTemplate.batchUpdate(REPLACE_INSERT_SQL, skillIds.stream().map(skillId -> new Object[] {
+                slot.key(), skillId, operator.id(), operator.name()
+        }).toList());
+    }
+
+    @Override
+    public boolean existsAssignmentForSkill(long skillId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(EXISTS_ASSIGNMENT_SQL,
+                Boolean.class, skillId));
     }
 
     private SkillRecord recordOf(ResultSet rs) throws SQLException {

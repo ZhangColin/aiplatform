@@ -37,6 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>技能域安装命令与留痕面（#248）：SkillInstallCommand.repoUrl 快照语义＋
  *       excludeDirs 路径段排除语义自描述；清单行 operatorId 留痕口径（装者/最近
  *       动作者、type=string）。</li>
+ *   <li>技能域槽位指派面（#249）：SkillSlotAssignCommand.skillIds 整包替换语义
+ *       （清单即终态）；BackofficeSlotAssignmentResponse.slot 三把槽位键自描述。</li>
  * </ul>
  */
 @IntegrationTest
@@ -202,6 +204,30 @@ class SpringDocBackofficeContractTest {
                 .as("operatorId 应自描述留痕口径")
                 .contains("装者")
                 .contains("最近动作者");
+    }
+
+    @Test
+    void given_slot_assignment_schemas_when_read_group_then_replacement_semantics_self_described() throws Exception {
+        // #249：槽位指派读写面——命令是整包替换语义（清单即终态）、柄是 TSID 串
+        //（type=string 防数值假设，与清单行 id 口径同源）、读面 slot 键自描述三槽
+        JsonNode skills = fetchGroup("skills");
+        JsonNode skillIds = property(skills, "SkillSlotAssignCommand", "skillIds");
+        assertThat(skillIds.path("type").asText(null))
+                .as("skillIds 应渲染 type=array")
+                .isEqualTo("array");
+        assertThat(skillIds.path("description").asText(""))
+                .as("skillIds 应自描述整包替换语义")
+                .contains("整包替换")
+                .contains("终态");
+        JsonNode slot = property(skills, "BackofficeSlotAssignmentResponse", "slot");
+        assertThat(slot.path("type").asText(null))
+                .as("slot 应渲染 type=string（槽位稳定键）")
+                .isEqualTo("string");
+        assertThat(slot.path("description").asText(""))
+                .as("slot 应自描述三把槽位键")
+                .contains("main")
+                .contains("executor")
+                .contains("subagent");
     }
 
     // ---------- 装载 ----------

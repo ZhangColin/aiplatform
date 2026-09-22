@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,26 +20,28 @@ import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillInstallCommand;
+import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillSlotAssignCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDetailResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillSummaryResponse;
+import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSlotAssignmentResponse;
 import com.aieducenter.aiplatform.base.skills.domain.error.SkillMessage;
 import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248，机机签名——五头 HMAC 强制闸，
- * 见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：清单 / 详情
- * （审核面）＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载。内置
- * （classpath 合成）与库中安装技能同权呈现；技能柄为 opaque 串两形制（内置
- * {@code builtin:<技能名>}／安装 TSID 十进制串）。错误码前缀 SKL_（SKL_001～
- * SKL_009）。操作者透传头 {@code X-User-Id}/{@code X-User-Name} 全程落痕
- * （安装/启停必留痕，缺头 SKL_009；卸载无行可留不留痕——admin 侧自有操作
- * 日志）。
+ * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249，机机签名——五头
+ * HMAC 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：
+ * 清单 / 详情（审核面）＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载
+ * / 槽位指派读写（三职能槽位整包替换）。内置（classpath 合成）与库中安装
+ * 技能同权呈现；技能柄为 opaque 串两形制（内置 {@code builtin:<技能名>}／安装
+ * TSID 十进制串）。错误码前缀 SKL_（SKL_001～SKL_011）。操作者透传头
+ * {@code X-User-Id}/{@code X-User-Name} 全程落痕（安装/启停/指派必留痕，
+ * 缺头 SKL_009；卸载无行可留不留痕——admin 侧自有操作日志）。
  */
 @RestController
 @RequestMapping("/api/backoffice/skills")
 @RequireSignature
-@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载（机机签名）")
+@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载 / 槽位指派读写（机机签名）")
 public class BackofficeSkillController {
 
     private final BackofficeSkillAppService appService;
@@ -126,16 +129,48 @@ public class BackofficeSkillController {
     @DeleteMapping("/{id}")
     @Operation(summary = "卸载技能（库行删除，不可逆）",
             description = "快照行删除即彻底出库（快照物无历史不漂移约束）；清单/"
-                    + "详情/装配均不可见。卸载守卫：有指派在身的技能拒绝卸载"
-                    + "（409 SKL_008，先解绑再卸）——指派面 #249 落地前结构上无"
-                    + "指派可查，该错误码已定契约暂不可达。无行可留不留痕（全局"
-                    + "审计流水不建——admin 侧自有操作日志，知识删除同款）。回执＝"
-                    + "删除前终态（确认移除了什么）。寻址 TSID 柄；内置技能不可卸"
-                    + "——builtin: 柄/畸形柄/未寻址 TSID 同语义 404 SKL_001、"
+                    + "详情/装配均不可见。卸载守卫：有指派在身（任一职能槽位）"
+                    + "的技能拒绝卸载（409 SKL_008，先解绑再卸）。无行可留不留痕"
+                    + "（全局审计流水不建——admin 侧自有操作日志，知识删除同款）。"
+                    + "回执＝删除前终态（确认移除了什么）。寻址 TSID 柄；内置技能"
+                    + "不可卸——builtin: 柄/畸形柄/未寻址 TSID 同语义 404 SKL_001、"
                     + "重复卸载 404。需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"SKL_001", "SKL_008"})
     public ApiResponse<BackofficeSkillSummaryResponse> uninstall(@PathVariable String id) {
         return ApiResponse.ok(appService.uninstall(Tsid.resolve(id, SkillMessage.SKILL_NOT_FOUND)));
+    }
+
+    @GetMapping("/assignments/{slot}")
+    @Operation(summary = "槽位指派读面（三职能槽位各自独立）",
+            description = "该职能槽位当前指派的技能清单（与技能清单行共形、含停用行"
+                    + "——启停是可逆开关指派关系随行保留，运营可见「指派了但已停用」"
+                    + "实态；停用行不参与装配合成）。槽位三把：main=主智能体 / "
+                    + "executor=run 执行体 / subagent=子智能体，未知槽位 404 SKL_010。"
+                    + "装配生效语义（ADR-0021）：装配合成＝内置∪该槽位已指派且启用，"
+                    + "动态查库——指派/启停变更后智能体下一轮自然生效、进行中 run "
+                    + "不定格不打断。回执与 PUT 同形。需要机机签名（五头 HMAC），"
+                    + "无签名 401")
+    @ErrorCodes({"SKL_010"})
+    public ApiResponse<BackofficeSlotAssignmentResponse> slotAssignments(@PathVariable String slot) {
+        return ApiResponse.ok(appService.slotAssignments(slot));
+    }
+
+    @PutMapping("/assignments/{slot}")
+    @Operation(summary = "槽位指派整包替换（清单即终态）",
+            description = "PUT 全量语义：skillIds 即该槽位终态（未列入即解绑、空清单"
+                    + "＝清空），支持整包批量勾选（admin 侧按来源包勾满后送全量）。"
+                    + "指派目标只收安装库行 TSID 柄：内置 builtin: 柄不可指派（400 "
+                    + "SKL_011——内置随平台发版，装配按配置挂载）；未寻址/畸形 TSID "
+                    + "404 SKL_001（先卸载后指派的不变窗口同语义）。X-User-Id/"
+                    + "X-User-Name 透传头落痕（整包替换留最近动作者，缺头 400 "
+                    + "SKL_009）。槽位寻址同 GET（未知 404 SKL_010）。生效语义＝"
+                    + "动态查库：变更后下一轮自然生效，不新增智能体实例（工厂缓存键"
+                    + "不含技能集）。回执＝替换后读面（与 GET 同形）。需要机机签名"
+                    + "（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_001", "SKL_009", "SKL_010", "SKL_011"})
+    public ApiResponse<BackofficeSlotAssignmentResponse> assignSlot(@PathVariable String slot,
+            @RequestBody SkillSlotAssignCommand command) {
+        return ApiResponse.ok(appService.assignSlot(slot, command, currentOperator()));
     }
 
     /**

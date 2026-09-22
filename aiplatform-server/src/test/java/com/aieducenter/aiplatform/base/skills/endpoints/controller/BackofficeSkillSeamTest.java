@@ -5,7 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
@@ -31,8 +33,14 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSkillRepositorySupplier;
+import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 
 /**
  * 技能库两端点（#247 读面＋#248 写口）在 {@code #152} seam 上全绿：真过滤链
@@ -65,22 +73,38 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>启停</b>：状态翻转且清单可见＋幂等（操作者留最近一次）＋操作者两列
  * 落痕＋缺操作者 400 SKL_009＋内置柄 404（内置非库行无状态迁移）；</li>
  * <li><b>卸载</b>：无指派成功（回执＝删除前终态、清单即不可见、重复卸载 404）
- * ＋内置柄 404——有指派拒绝 SKL_008 定码待 T3 指派表落地接真检查（结构上暂无
- * 指派可查，错误码契约先冻结）；</li>
+ * ＋内置柄 404——有指派拒绝 SKL_008（#249 指派表落地接真检查）；</li>
  * <li><b>鉴权</b>：写口非签名请求被拒（401）。</li>
+ * </ul>
+ *
+ * <p>#249 槽位指派与装配合成六面钉死：</p>
+ * <ul>
+ * <li><b>指派读写</b>：GET/PUT 三槽各自独立（整包替换——清单即终态，空清单＝
+ * 清空）＋回执与 GET 同形（含停用行实态）；</li>
+ * <li><b>负例族</b>：未知槽位 404 SKL_010＋内置柄不可指派 400 SKL_011＋未寻址
+ * TSID 404 SKL_001＋缺操作者 400 SKL_009；</li>
+ * <li><b>装配合成（技能装配缝真链路）</b>：某槽位装配面＝内置∪该槽位已指派且
+ * 启用的库技能（supplier 视图直断言）、他槽位技能不出现；</li>
+ * <li><b>动态性</b>：REST 指派/启停变更后同一 supplier 视图重读即反映最新
+ * （动态查库、非装配时固化）＋停用即时退出装配候选；</li>
+ * <li><b>卸载守卫接真</b>：有指派在身（任一槽位）卸载 409 SKL_008、解绑后可卸；</li>
+ * <li><b>鉴权</b>：指派面非签名请求被拒（401）。</li>
  * </ul>
  */
 @BackofficeSeamTest
 class BackofficeSkillSeamTest {
 
-    /** 信封数字业务码：SKL 域码 7 × 1000＋序号（SKL_001～SKL_009）。 */
+    /** 信封数字业务码：SKL 域码 7 × 1000＋序号（SKL_001～SKL_011）。 */
     private static final int SKILL_NOT_FOUND_CODE = 7001;
     private static final int SKILL_INSTALL_URL_REQUIRED_CODE = 7002;
     private static final int SKILL_SOURCE_ALREADY_INSTALLED_CODE = 7003;
     private static final int SKILL_REPOSITORY_CLONE_FAILED_CODE = 7004;
     private static final int SKILL_NO_SKILLS_PARSED_CODE = 7005;
     private static final int SKILL_MD_INVALID_CODE = 7006;
+    private static final int SKILL_ASSIGNED_CODE = 7008;
     private static final int SKILL_OPERATOR_REQUIRED_CODE = 7009;
+    private static final int SKILL_SLOT_NOT_FOUND_CODE = 7010;
+    private static final int SKILL_BUILTIN_NOT_ASSIGNABLE_CODE = 7011;
 
     /** 操作者透传头样例（admin 侧管理员，签名面明示信任）。 */
     private static final String OPERATOR_ID = "700200";
@@ -101,6 +125,10 @@ class BackofficeSkillSeamTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /** 技能装配缝（#249 缝 2 真链路断言：供应商视图即装配面）。 */
+    @Autowired
+    private ProfileSkillRepositorySupplier skillRepositorySupplier;
 
     /** 已种植库条目 id（teardown 精确清理 skl_skills）。 */
     private final List<Long> plantedSkillIds = new ArrayList<>();
@@ -131,6 +159,8 @@ class BackofficeSkillSeamTest {
 
     @AfterEach
     void tearDown() {
+        // 指派行先清（FK 挡在条目删除前——守卫的库级兜底同款次序）
+        jdbcTemplate.update("DELETE FROM skl_slot_assignments");
         for (Long id : plantedSkillIds) {
             jdbcTemplate.update("DELETE FROM skl_skills WHERE id = ?", id);
         }
@@ -410,7 +440,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
     }
 
-    // ---------- 卸载：无指派成功＋回执终态＋守卫错误码定契约待 T3 ----------
+    // ---------- 卸载：无指派成功＋回执终态（有指派拒绝见 #249 段） ----------
 
     @Test
     void given_unassigned_skill_when_signed_uninstall_then_deleted_with_receipt() throws Exception {
@@ -438,8 +468,176 @@ class BackofficeSkillSeamTest {
         signedDelete("/api/backoffice/skills/builtin:prd-writing")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
-        // 有指派在身拒绝卸载（SKL_008）：契约先冻结——指派表 T3/#249 落地后接真
-        // 检查，彼时补拒绝分支断言；当前结构上无指派，卸载恒过守卫位
+    }
+
+    // ---------- #249 槽位指派：读写＋负例族＋装配合成＋动态性＋卸载守卫 ----------
+
+    @Test
+    void given_installed_skills_when_signed_put_and_get_assignments_then_slots_independent()
+            throws Exception {
+        var fixtureIds = installFixtureAndReturnIds("tdd", "code-review");
+        String tddId = fixtureIds.get("tdd");
+        String reviewId = fixtureIds.get("code-review");
+
+        // PUT 整包替换：main=[tdd]，executor=[code-review, tdd]（整包批量勾选形制）
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, tddId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slot").value("main"))
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].id").value(tddId))
+                .andExpect(jsonPath("$.data.skills[0].name").value("tdd"))
+                .andExpect(jsonPath("$.data.skills[0].status").value(1));
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, reviewId, tddId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slot").value("executor"))
+                .andExpect(jsonPath("$.data.skills[0].name").value("code-review"))
+                .andExpect(jsonPath("$.data.skills[1].name").value("tdd"));
+
+        // GET 三槽各自独立（未动过的 subagent 槽为空）
+        signedGet("/api/backoffice/skills/assignments/main")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slot").value("main"))
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].id").value(tddId));
+        signedGet("/api/backoffice/skills/assignments/executor")
+                .andExpect(jsonPath("$.data.skills", hasSize(2)));
+        signedGet("/api/backoffice/skills/assignments/subagent")
+                .andExpect(jsonPath("$.data.slot").value("subagent"))
+                .andExpect(jsonPath("$.data.skills", hasSize(0)));
+
+        // 整包替换＝清单即终态：main 重指 [code-review]，tdd 即解绑；重复柄去重
+        signedPutAssignments("main", OPERATOR_ID_2, OPERATOR_NAME_2, reviewId, reviewId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].name").value("code-review"));
+        // 留痕＝最近动作者（整包替换行级）
+        var assignmentRow = jdbcTemplate.queryForMap(
+                "SELECT operator_id, operator_name FROM skl_slot_assignments WHERE slot = 'main'");
+        assertThat(assignmentRow)
+                .containsEntry("operator_id", OPERATOR_ID_2)
+                .containsEntry("operator_name", OPERATOR_NAME_2);
+        // executor 槽不受 main 重指影响（槽间独立）
+        signedGet("/api/backoffice/skills/assignments/executor")
+                .andExpect(jsonPath("$.data.skills", hasSize(2)));
+
+        // 空清单＝清空该槽位
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skills", hasSize(0)));
+    }
+
+    @Test
+    void given_bad_slot_or_builtin_or_unknown_id_when_signed_put_then_error_family() throws Exception {
+        String tddId = installFixtureAndReturnId("tdd");
+
+        // 未知槽位：404 SKL_010（GET 同语义）
+        signedPutAssignments("reviewer", OPERATOR_ID, OPERATOR_NAME, tddId)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_SLOT_NOT_FOUND_CODE))
+                .andExpect(jsonPath("$.message").value("职能槽位不存在"));
+        signedGet("/api/backoffice/skills/assignments/reviewer")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_SLOT_NOT_FOUND_CODE));
+
+        // 内置柄不可指派：400 SKL_011（内置随平台发版，装配按配置挂载）
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, "builtin:prd-writing")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(SKILL_BUILTIN_NOT_ASSIGNABLE_CODE));
+
+        // 未寻址/畸形 TSID：404 SKL_001 同语义（库行不在/先卸载后指派的不变窗口）
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, "999999999")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, "not-a-tsid")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
+        // 清单含 null 柄：同 404 语义（应用层先拦——Tsid 解析对 null 是 NPE 非 404）
+        String nullBody = "{\"skillIds\": [null]}";
+        mockMvc.perform(BackofficeSignatures.signed(
+                        put("/api/backoffice/skills/assignments/main")
+                                .contentType(MediaType.APPLICATION_JSON).content(nullBody),
+                        "/api/backoffice/skills/assignments/main", nullBody)
+                        .header("X-User-Id", OPERATOR_ID).header("X-User-Name", OPERATOR_NAME))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
+
+        // 缺操作者透传头：400 SKL_009（指派写操作必留痕）
+        signedPutAssignments("main", null, null, tddId)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(SKILL_OPERATOR_REQUIRED_CODE));
+        assertThatAssignmentRowCount(0);
+    }
+
+    @Test
+    void given_rest_assignment_and_status_changes_when_supplier_view_reread_then_dynamic()
+            throws Exception {
+        var fixtureIds = installFixtureAndReturnIds("tdd", "code-review");
+        String tddId = fixtureIds.get("tdd");
+        String reviewId = fixtureIds.get("code-review");
+        AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
+
+        // 初始装配面：main＝内置（prd-writing），executor/subagent＝空（无 <available_skills> 注入面）
+        assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
+                .containsExactly("prd-writing");
+        assertThat(assemblyFace(AgentProfile.EXECUTOR.key(), dev)).isEmpty();
+
+        // 指派 main=[tdd]、executor=[code-review]：同一 supplier 视图重读即反映
+        // ——装配合成＝内置∪该槽位已指派且启用、他槽位技能不出现（动态查库）
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, reviewId).andExpect(status().isOk());
+        assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
+                .containsExactlyInAnyOrder("prd-writing", "tdd");
+        assertThat(assemblyFace(AgentProfile.EXECUTOR.key(), dev))
+                .containsExactly("code-review");
+
+        // 停用即退出装配候选（同一视图重读——tdd 消失，内置不动）
+        signedPostNoBody("/api/backoffice/skills/" + tddId + "/disable", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
+                .containsExactly("prd-writing");
+
+        // 启用恢复参与合成；解绑（整包替换清空）下一读即退出
+        signedPostNoBody("/api/backoffice/skills/" + tddId + "/enable", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
+                .containsExactlyInAnyOrder("prd-writing", "tdd");
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME).andExpect(status().isOk());
+        assertThat(assemblyFace(AgentProfile.MAIN.key(), dev))
+                .containsExactly("prd-writing");
+
+        // subagent 槽视图（缝按三槽同权供读侧/未来一等化接线）：指派后即反映、
+        // 不继承执行体面
+        signedPutAssignments("subagent", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+        assertThat(assemblyFace(ProfileSubagentSupplier.SELF_TEST_NAME, dev))
+                .containsExactly("tdd");
+    }
+
+    @Test
+    void given_assigned_skill_when_signed_uninstall_then_409_until_unbound() throws Exception {
+        String tddId = installFixtureAndReturnId("tdd");
+
+        // 指派在身（main 槽）：卸载被拒 409 SKL_008——先解绑再卸
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+        signedDelete("/api/backoffice/skills/" + tddId)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(SKILL_ASSIGNED_CODE))
+                .andExpect(jsonPath("$.message").value("技能有指派在身，先解绑再卸载"));
+
+        // 解绑后可卸（守卫只看指派，不看槽位先后）
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME).andExpect(status().isOk());
+        signedDelete("/api/backoffice/skills/" + tddId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("tdd"));
+    }
+
+    @Test
+    void given_no_signature_headers_when_put_assignments_then_401_signature_required() throws Exception {
+        mockMvc.perform(put("/api/backoffice/skills/assignments/main")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillIds\": []}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Signature required"));
     }
 
     // ---------- 鉴权：写口非签名被拒 ----------
@@ -547,13 +745,23 @@ class BackofficeSkillSeamTest {
 
     /** 走安装真链路装主 fixture（排除 deprecated），回指定技能名的 TSID 柄。 */
     private String installFixtureAndReturnId(String skillName) throws Exception {
+        return installFixtureAndReturnIds(skillName).get(skillName);
+    }
+
+    /** 同上，一次装包回多名（同源仓库一测试只装一次——SKL_003 同源去重）。 */
+    private Map<String, String> installFixtureAndReturnIds(String... skillNames)
+            throws Exception {
         String body = """
                 {"repoUrl": "%s", "excludeDirs": ["deprecated"]}""".formatted(fixtureRepo);
         String response = mockMvc.perform(signedInstallBuilder(body, OPERATOR_ID, OPERATOR_NAME))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        return JsonPath.<List<String>>read(
-                response, "$.data[?(@.name == '" + skillName + "')].id").get(0);
+        Map<String, String> ids = new LinkedHashMap<>();
+        for (String skillName : skillNames) {
+            ids.put(skillName, JsonPath.<List<String>>read(
+                    response, "$.data[?(@.name == '" + skillName + "')].id").get(0));
+        }
+        return ids;
     }
 
     /** 签名安装 POST：JSON 体＋操作者透传头（null 即缺头负例形制）。 */
@@ -611,6 +819,42 @@ class BackofficeSkillSeamTest {
         return mockMvc.perform(request);
     }
 
+    /** 签名 PUT 指派（JSON 体＝skillIds 全量清单＋操作者透传头；null 即缺头负例形制）。 */
+    private ResultActions signedPutAssignments(String slot, String operatorId,
+            String operatorName, String... skillIds) throws Exception {
+        StringBuilder ids = new StringBuilder();
+        for (String id : skillIds) {
+            if (!ids.isEmpty()) {
+                ids.append(", ");
+            }
+            ids.append('"').append(id).append('"');
+        }
+        String body = "{\"skillIds\": [%s]}".formatted(ids);
+        MockHttpServletRequestBuilder request = BackofficeSignatures.signed(
+                put("/api/backoffice/skills/assignments/" + slot)
+                        .contentType(MediaType.APPLICATION_JSON).content(body),
+                "/api/backoffice/skills/assignments/" + slot, body);
+        if (operatorId != null) {
+            request.header("X-User-Id", operatorId);
+        }
+        if (operatorName != null) {
+            request.header("X-User-Name", operatorName);
+        }
+        return mockMvc.perform(request);
+    }
+
+    /**
+     * 装配缝视图（#249 缝 2 真链路）：该配置键全部仓库的技能名并集——即框架
+     * {@code <available_skills>} 注入面的来源（内置∪槽位库技能）。同一 supplier
+     * 实例重读（不重建供应商）＝动态查库断言形制。
+     */
+    private List<String> assemblyFace(String agentKey, AgentWorkspace workspace) {
+        return skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace).stream()
+                .flatMap(repo -> repo.getAllSkills().stream())
+                .map(skill -> skill.getName())
+                .toList();
+    }
+
     // ---------- 库列直查断言 ----------
 
     /** 按技能名直查无行（排除段未入库的夹具面断言）。 */
@@ -625,6 +869,13 @@ class BackofficeSkillSeamTest {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM skl_skills", Integer.class);
         assertThat(count).as("skl_skills 行数").isEqualTo(expected);
+    }
+
+    /** 指派表全行数（负例族 fail-fast 断言：整体不落指派）。 */
+    private void assertThatAssignmentRowCount(int expected) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM skl_slot_assignments", Integer.class);
+        assertThat(count).as("skl_slot_assignments 行数").isEqualTo(expected);
     }
 
     /** 行级断言：状态与操作者两列（启停留痕面）。 */

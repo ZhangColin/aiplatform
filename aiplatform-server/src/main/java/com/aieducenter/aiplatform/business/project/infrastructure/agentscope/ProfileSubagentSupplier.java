@@ -24,6 +24,15 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 智能体跑交付代码测试）：正文指令逐项 ✅/❌ 清单式播报（解说经 source=self-test
  * 归属进工作消息）+ 报告写隔离根 + 结果回交执行体。平台侧收尾统计（closing.selfTest）
  * 由 run 尝试环从自测 command 动作终态观测，不解析子智能体自由文本。</p>
+ *
+ * <p><b>技能面（#249 子智能体槽「位就位」）</b>：框架 declared 子智能体继承父级
+ * （执行体）技能仓库，allowlist 为空即不过滤＝全量继承——与 ADR-0021「子智能体
+ * 技能面独立收窄、否决全量继承」相抵。声明挂<b>哨兵 allowlist</b>（永不匹配的技能
+ * 名）把面结构性置空：执行体技能不漏入（superpowers SUBAGENT-STOP 实践同款收窄）。
+ * 独立动态接线（subagent 槽指派生效到运行时）v1 不做——框架无「子智能体自带仓库」
+ * 通路，自建子智能体构建路径属投机性复杂度（今日零真实子智能体技能负载）；升级
+ * 路径＝subagentFactory 自建或上游 {@code SubagentDeclaration.skillRepositories}，
+ * 触发器＝#245 瘦身落地/第一个真实要给子智能体指派的技能。</p>
  */
 @Component
 public class ProfileSubagentSupplier implements AgentSubagentSupplier {
@@ -36,6 +45,13 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
      *  （执行体收口工具）。 */
     private static final List<String> SELF_TEST_TOOLS = List.of(
             "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute");
+
+    /**
+     * 技能面哨兵 allowlist（#249）：永不匹配真实技能名的定名——框架「allowlist
+     * 非空才过滤、空即全继承」，挂哨兵＝子智能体技能面结构性空（执行体技能不
+     * 漏入）。subagent 槽真指派接线见类 javadoc（位就位备案）。
+     */
+    private static final List<String> NO_SKILLS_SENTINEL = List.of("__no_subagent_skills__");
 
     /** 自测角色正文（任务自包含、结果回交执行体；读交付代码只读、报告写隔离根）。 */
     private static final String SELF_TEST_BODY = "你是 run 执行体委派的自测子智能体，专项负责运行自测。"
@@ -57,6 +73,7 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
                 .workspaceMode(WorkspaceMode.ISOLATED)
                 .inlineAgentsBody(SELF_TEST_BODY)
                 .tools(SELF_TEST_TOOLS)
+                .skills(NO_SKILLS_SENTINEL)
                 .build();
     }
 

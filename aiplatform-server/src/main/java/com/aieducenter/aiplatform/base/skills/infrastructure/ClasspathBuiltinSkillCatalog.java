@@ -25,8 +25,8 @@ import io.agentscope.core.skill.repository.ClasspathSkillRepository;
  *
  * <p>{@link ClasspathSkillRepository} 长生命周期（fat-jar 下共享 JarFileSystem
  * 引用计数），持单例随容器关闭释放。装配侧（business
- * {@code ProfileSkillRepositorySupplier}）另持实例读同一目录——路径字面量两处
- * 各持（T3 装配合成收口时统一装配缝，届时归一）。</p>
+ * {@code ProfileSkillRepositorySupplier}）经 {@code BuiltinCatalogSkillRepository}
+ * 包本端口读同一目录——#249 装配合成收口后两侧同源单实例、路径字面量归一。</p>
  */
 @Component
 @Adapter(PortType.CLIENT)

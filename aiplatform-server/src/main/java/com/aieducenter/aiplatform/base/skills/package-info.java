@@ -7,8 +7,9 @@
  *       固化快照——来源包＋名称唯一、版本＝装时 commit）</li>
  *   <li>内置技能目录（classpath skills/ 合成，与库技能同权呈现；装配侧另读
  *       同一目录——T3 装配合成收口时归一）</li>
- *   <li>后台读面（#247：清单/详情——详情即安装审核承载面）；写口（安装/启停/
- *       卸载 #248、指派 #249）后续票落</li>
+ *   <li>后台读面（#247：清单/详情——详情即安装审核承载面）；写口（#248：安装
+ *       ＝git 仓库快照固化入库＋版本留痕、停用⇄启用、卸载＋守卫错误码定契约；
+ *       指派 #249 后续票落）</li>
  * </ul>
  *
  * <h3>限界上下文</h3>
@@ -20,15 +21,18 @@
  * <h3>包结构</h3>
  * <ul>
  *   <li>domain - 领域层：模型（SkillRecord 库条目读模型／BuiltinSkill 内置
- *       技能读模型）、枚举（SkillStatus 状态／SkillSource 来源）、端口
- *       （BuiltinSkillCatalog 内置目录）、SkillStore 存取接口、SKL_ 错误</li>
- *   <li>application - 应用层：BackofficeSkillAppService（#247 清单合成＋
- *       详情寻址分解——builtin: 前缀与 TSID 两形制）</li>
+ *       技能读模型／Operator 操作者／ParsedSkill＋SkillPackageSnapshot 装时
+ *       解析态）、枚举（SkillStatus 状态／SkillSource 来源）、端口
+ *       （BuiltinSkillCatalog 内置目录／SkillPackageFetcher 快照拉取）、
+ *       SkillStore 存取接口、SKL_ 错误</li>
+ *   <li>application - 应用层：BackofficeSkillAppService（#247 清单合成＋详情
+ *       寻址分解——builtin: 前缀与 TSID 两形制；#248 安装/启停/卸载写口）</li>
  *   <li>infrastructure - 基础设施层：ClasspathBuiltinSkillCatalog（agentscope
  *       ClasspathSkillRepository 包装）、persistence/JdbcSkillStore
- *       （JdbcTemplate 单表读）</li>
- *   <li>endpoints - 北向接口：controller/BackofficeSkillController（#247 后台
- *       技能库 REST 面，机机签名）</li>
+ *       （JdbcTemplate 单表读写）、git/GitSkillPackageFetcher（git CLI 子进程
+ *       快照拉取——clone/rev-parse/扫描解析，超时强杀）</li>
+ *   <li>endpoints - 北向接口：controller/BackofficeSkillController（#247＋#248
+ *       后台技能库 REST 面，机机签名）</li>
  * </ul>
  *
  * @since 0.1.0

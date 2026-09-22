@@ -25,6 +25,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param statusName    状态名（直读展示）
  * @param frontmatter   SKILL.md frontmatter 全量（解析态键值，含 name/description）
  * @param content       SKILL.md 正文（frontmatter 剥离后全文）
+ * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
+ *                      内置与未管理过为 null——#248 落痕）
+ * @param operatorName  最近管理动作操作者名（直读展示；内置与未管理过为 null）
  */
 public record BackofficeSkillDetailResponse(
         @Schema(description = "技能柄（opaque 串两形制，同清单行 id：内置＝builtin:<技能名>、"
@@ -43,7 +46,13 @@ public record BackofficeSkillDetailResponse(
                 example = "{\"name\": \"prd-writing\", \"description\": \"撰写或修订 PRD 时使用\"}")
         Map<String, Object> frontmatter,
         @Schema(description = "SKILL.md 正文（frontmatter 剥离后全文，审核承载面）")
-        String content) {
+        String content,
+        @Schema(description = "最近管理动作操作者 id（安装＝装者、启停＝最近动作者；"
+                + "内置为 null）", example = "700200")
+        String operatorId,
+        @Schema(description = "最近管理动作操作者名（直读展示；内置为 null）",
+                example = "运营·技能管理员")
+        String operatorName) {
 
     /** 库条目 → 详情（来源＝安装）。 */
     public static BackofficeSkillDetailResponse of(SkillRecord record) {
@@ -58,7 +67,9 @@ public record BackofficeSkillDetailResponse(
                 record.status().getCode(),
                 record.status().getName(),
                 record.frontmatter(),
-                record.content());
+                record.content(),
+                record.operatorId(),
+                record.operatorName());
     }
 
     /** 内置技能 → 详情（来源＝内置；来源包/版本标识无、状态恒启用）。 */
@@ -74,6 +85,8 @@ public record BackofficeSkillDetailResponse(
                 SkillStatus.ENABLED.getCode(),
                 SkillStatus.ENABLED.getName(),
                 skill.frontmatter(),
-                skill.content());
+                skill.content(),
+                null,
+                null);
     }
 }

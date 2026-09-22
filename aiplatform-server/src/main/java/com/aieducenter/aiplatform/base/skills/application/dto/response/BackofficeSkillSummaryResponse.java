@@ -22,6 +22,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param version       版本标识（装时 commit；内置为 null）
  * @param status        状态 code（1=启用 2=停用；内置恒 1）
  * @param statusName    状态名（直读展示）
+ * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
+ *                      内置与未管理过为 null——#248 落痕）
+ * @param operatorName  最近管理动作操作者名（直读展示；内置与未管理过为 null）
  */
 public record BackofficeSkillSummaryResponse(
         @Schema(description = "技能柄（详情寻址，opaque 串两形制，勿做数值假设）：内置技能＝"
@@ -39,7 +42,13 @@ public record BackofficeSkillSummaryResponse(
         String version,
         @Schema(description = "状态 code（1=启用 2=停用；内置恒 1）", example = "1")
         Integer status,
-        String statusName) {
+        String statusName,
+        @Schema(description = "最近管理动作操作者 id（安装＝装者、启停＝最近动作者；"
+                + "内置为 null）", example = "700200")
+        String operatorId,
+        @Schema(description = "最近管理动作操作者名（直读展示；内置为 null）",
+                example = "运营·技能管理员")
+        String operatorName) {
 
     /** 库条目 → 清单行（来源＝安装）。 */
     public static BackofficeSkillSummaryResponse of(SkillRecord record) {
@@ -52,7 +61,9 @@ public record BackofficeSkillSummaryResponse(
                 record.sourcePackage(),
                 record.version(),
                 record.status().getCode(),
-                record.status().getName());
+                record.status().getName(),
+                record.operatorId(),
+                record.operatorName());
     }
 
     /** 内置技能 → 清单行（来源＝内置；来源包/版本标识无、状态恒启用）。 */
@@ -66,7 +77,9 @@ public record BackofficeSkillSummaryResponse(
                 null,
                 null,
                 SkillStatus.ENABLED.getCode(),
-                SkillStatus.ENABLED.getName());
+                SkillStatus.ENABLED.getName(),
+                null,
+                null);
     }
 
     /** 内置技能合成柄：{@code builtin:<技能名>}。 */

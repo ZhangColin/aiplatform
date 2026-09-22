@@ -4,30 +4,41 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
+import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillInstallCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDetailResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillSummaryResponse;
+import com.aieducenter.aiplatform.base.skills.domain.error.SkillMessage;
+import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
+import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台技能库管理 REST 面（#246-T1/#247，机机签名——五头 HMAC 强制闸，见
- * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：技能管理域第一块——
- * 清单 / 详情（审核面）。内置（classpath 合成）与库中安装技能同权呈现；技能柄
- * 为 opaque 串两形制（内置 {@code builtin:<技能名>}／安装 TSID 十进制串）。错误码
- * 前缀 SKL_（技能不存在 SKL_001）。写口（安装/启停/卸载）属后续票。
+ * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248，机机签名——五头 HMAC 强制闸，
+ * 见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：清单 / 详情
+ * （审核面）＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载。内置
+ * （classpath 合成）与库中安装技能同权呈现；技能柄为 opaque 串两形制（内置
+ * {@code builtin:<技能名>}／安装 TSID 十进制串）。错误码前缀 SKL_（SKL_001～
+ * SKL_009）。操作者透传头 {@code X-User-Id}/{@code X-User-Name} 全程落痕
+ * （安装/启停必留痕，缺头 SKL_009；卸载无行可留不留痕——admin 侧自有操作
+ * 日志）。
  */
 @RestController
 @RequestMapping("/api/backoffice/skills")
 @RequireSignature
-@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情（机机签名）")
+@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载（机机签名）")
 public class BackofficeSkillController {
 
     private final BackofficeSkillAppService appService;
@@ -42,10 +53,11 @@ public class BackofficeSkillController {
                     + "（来源=2）同权呈现，空库时仍呈现内置技能。条目字段：名称、"
                     + "description、来源 code（1=内置 2=安装）与来源名、来源包"
                     + "（内置 null）、版本标识（装时 commit，内置 null）、状态"
-                    + "（1=启用 2=停用，内置恒 1）。排序服务端定死：内置在前"
+                    + "（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、"
+                    + "启停＝最近动作者，内置 null）。排序服务端定死：内置在前"
                     + "（名称序）、安装在后（来源包、名称序）。技能库是有界目录"
                     + "（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制"
-                    + "（builtin:<技能名>／TSID 十进制串），作详情寻址柄。"
+                    + "（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。"
                     + "需要机机签名（五头 HMAC），无签名 401")
     @ErrorCodes({"UNAUTHORIZED"})
     public ApiResponse<List<BackofficeSkillSummaryResponse>> skills() {
@@ -63,5 +75,78 @@ public class BackofficeSkillController {
     @ErrorCodes({"SKL_001"})
     public ApiResponse<BackofficeSkillDetailResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(id));
+    }
+
+    @PostMapping("/install")
+    @Operation(summary = "安装技能包（git 仓库快照固化）",
+            description = "装时 clone 解析全部 SKILL.md 固化入库（ADR-0021 快照安装，"
+                    + "不订阅远端）：来源包＝规范化仓库地址（trim、去尾斜杠与 .git——"
+                    + "同源去重键）、版本标识＝装时 HEAD commit（快照锚）、状态＝启用、"
+                    + "操作者＝装者（X-User-Id/X-User-Name 透传头，缺头 400 SKL_009）。"
+                    + "excludeDirs 可勾选排除目录段：技能的仓库相对路径任一段命中即"
+                    + "不入库（如 deprecated 类目整支排除；段名精确匹配）。解析管道"
+                    + "与内置同源（审核面所见即运行时注入面）。失败 fail-fast 整体"
+                    + "不入库：地址空 400 SKL_002、同源重复安装 409 SKL_003（更新"
+                    + "走显式更新动作）、克隆失败/超时 502 SKL_004、未解析到技能"
+                    + "400 SKL_005、SKILL.md 不合格 400 SKL_006、包内重名 400 "
+                    + "SKL_007。回执＝本次装入的条目清单（清单行同形）。"
+                    + "需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_002", "SKL_003", "SKL_004", "SKL_005", "SKL_006", "SKL_007", "SKL_009"})
+    public ApiResponse<List<BackofficeSkillSummaryResponse>> install(@RequestBody SkillInstallCommand command) {
+        return ApiResponse.ok(appService.install(command, currentOperator()));
+    }
+
+    @PostMapping("/{id}/disable")
+    @Operation(summary = "停用技能（可逆开关）",
+            description = "退出装配候选（装配合成只收启用行）、不丢库行；误伤可经"
+                    + " enable 恢复。X-User-Id/X-User-Name 透传头自动落痕（最近"
+                    + "管理动作操作者）——缺头 400 SKL_009（技能库写操作必留痕，"
+                    + "知识治理同款无落空通道）。重复停用幂等（操作者留最近一次）。"
+                    + "寻址 TSID 柄；内置技能非库行无状态迁移——builtin: 柄/畸形柄/"
+                    + "未寻址 TSID 同语义 404 SKL_001。回执＝翻转后清单行。"
+                    + "需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_001", "SKL_009"})
+    public ApiResponse<BackofficeSkillSummaryResponse> disable(@PathVariable String id) {
+        return ApiResponse.ok(appService.disable(
+                Tsid.resolve(id, SkillMessage.SKILL_NOT_FOUND), currentOperator()));
+    }
+
+    @PostMapping("/{id}/enable")
+    @Operation(summary = "启用技能（恢复装配候选）",
+            description = "停用的可逆侧：恢复参与装配合成。X-User-Id/X-User-Name"
+                    + " 透传头自动落痕（口径同 disable，缺头 400 SKL_009）。重复"
+                    + "启用幂等。寻址与 404 语义同 disable（TSID 柄；内置柄 404）。"
+                    + "回执＝翻转后清单行。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_001", "SKL_009"})
+    public ApiResponse<BackofficeSkillSummaryResponse> enable(@PathVariable String id) {
+        return ApiResponse.ok(appService.enable(
+                Tsid.resolve(id, SkillMessage.SKILL_NOT_FOUND), currentOperator()));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "卸载技能（库行删除，不可逆）",
+            description = "快照行删除即彻底出库（快照物无历史不漂移约束）；清单/"
+                    + "详情/装配均不可见。卸载守卫：有指派在身的技能拒绝卸载"
+                    + "（409 SKL_008，先解绑再卸）——指派面 #249 落地前结构上无"
+                    + "指派可查，该错误码已定契约暂不可达。无行可留不留痕（全局"
+                    + "审计流水不建——admin 侧自有操作日志，知识删除同款）。回执＝"
+                    + "删除前终态（确认移除了什么）。寻址 TSID 柄；内置技能不可卸"
+                    + "——builtin: 柄/畸形柄/未寻址 TSID 同语义 404 SKL_001、"
+                    + "重复卸载 404。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_001", "SKL_008"})
+    public ApiResponse<BackofficeSkillSummaryResponse> uninstall(@PathVariable String id) {
+        return ApiResponse.ok(appService.uninstall(Tsid.resolve(id, SkillMessage.SKILL_NOT_FOUND)));
+    }
+
+    /**
+     * 当前操作者（#248）：{@code X-User-Id}/{@code X-User-Name} 透传头经
+     * RequestContext 读出落痕（admin 侧管理员标识，签名面明示信任、不校验真实
+     * 性）。安装/启停必留痕——缺头不为落空，域面守卫 SKL_009 拦截（知识治理
+     * KNW_006 同款）。Id 两形转换在此一次完成（上下文 Long → 外域标识字符串）。
+     */
+    private static Operator currentOperator() {
+        Long userId = RequestContext.getUserId();
+        return new Operator(userId == null ? null : Long.toString(userId),
+                RequestContext.getUserName());
     }
 }

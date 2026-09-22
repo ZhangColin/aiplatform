@@ -34,6 +34,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       type=string 钉死。</li>
  *   <li>技能域两 schema（#247）：技能柄 id 为 opaque 串两形制（builtin:&lt;技能名&gt;／
  *       TSID 十进制串），type=string＋形制自描述；来源 code 带取值对照。</li>
+ *   <li>技能域安装命令与留痕面（#248）：SkillInstallCommand.repoUrl 快照语义＋
+ *       excludeDirs 路径段排除语义自描述；清单行 operatorId 留痕口径（装者/最近
+ *       动作者、type=string）。</li>
  * </ul>
  */
 @IntegrationTest
@@ -168,6 +171,37 @@ class SpringDocBackofficeContractTest {
                 .as("source 应带取值对照")
                 .contains("1=内置")
                 .contains("2=安装");
+    }
+
+    @Test
+    void given_install_command_schema_when_read_group_then_repo_url_and_excludes_are_self_described() throws Exception {
+        // #248：安装命令两字段自描述——repoUrl 是 clone 契约（快照语义、同源身份），
+        // excludeDirs 是排除语义（路径段命中即不入库）；消费方（admin）靠此拼装
+        JsonNode skills = fetchGroup("skills");
+        JsonNode repoUrl = property(skills, "SkillInstallCommand", "repoUrl");
+        assertThat(repoUrl.path("type").asText(null))
+                .as("repoUrl 应渲染 type=string")
+                .isEqualTo("string");
+        assertThat(repoUrl.path("description").asText(""))
+                .as("repoUrl 应自描述快照安装语义")
+                .contains("快照")
+                .contains("HEAD commit");
+        JsonNode excludeDirs = property(skills, "SkillInstallCommand", "excludeDirs");
+        assertThat(excludeDirs.path("type").asText(null))
+                .as("excludeDirs 应渲染 type=array")
+                .isEqualTo("array");
+        assertThat(excludeDirs.path("description").asText(""))
+                .as("excludeDirs 应自描述路径段排除语义")
+                .contains("命中即不入库");
+        // 操作者留痕面（#248）：清单行两列自描述（null 语义写明——内置与未管理过）
+        JsonNode operatorId = property(skills, "BackofficeSkillSummaryResponse", "operatorId");
+        assertThat(operatorId.path("type").asText(null))
+                .as("operatorId 应渲染 type=string（admin 侧 TSID，外域标识）")
+                .isEqualTo("string");
+        assertThat(operatorId.path("description").asText(""))
+                .as("operatorId 应自描述留痕口径")
+                .contains("装者")
+                .contains("最近动作者");
     }
 
     // ---------- 装载 ----------

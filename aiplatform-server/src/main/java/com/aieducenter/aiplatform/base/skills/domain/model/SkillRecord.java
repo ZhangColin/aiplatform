@@ -17,6 +17,9 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
  * @param status        技能状态（1=启用 2=停用）
  * @param frontmatter   SKILL.md frontmatter 全量（解析态，含 name/description）
  * @param content       SKILL.md 正文（frontmatter 剥离后全文）
+ * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
+ *                      未管理过为 null——#248 落痕口径）
+ * @param operatorName  最近管理动作操作者名（直读展示；未管理过为 null）
  */
 public record SkillRecord(
         long id,
@@ -26,5 +29,7 @@ public record SkillRecord(
         String version,
         SkillStatus status,
         Map<String, Object> frontmatter,
-        String content) {
+        String content,
+        String operatorId,
+        String operatorName) {
 }

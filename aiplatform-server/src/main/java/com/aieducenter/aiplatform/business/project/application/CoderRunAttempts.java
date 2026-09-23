@@ -218,7 +218,8 @@ class CoderRunAttempts {
                     properties.getTimeout(),
                     AgentProfile.EXECUTOR.key(),
                     /* workspaceReadOnly= */ false,
-                    heading);
+                    heading,
+                    executor.toolSpec());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(projectId, project.getOwnerAccountId()));

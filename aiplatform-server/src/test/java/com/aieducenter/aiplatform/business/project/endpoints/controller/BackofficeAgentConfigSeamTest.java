@@ -39,8 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>清空回落</b>：null/缺省/纯空白＝清空覆盖，GET 与装配读面回枚举默认；</li>
  * <li><b>留痕＋回滚</b>：每次实际变更一痕（前后全量值快照＋操作者＋倒序最近先）、
  * 同值幂等重写不落痕；回滚＝旧值写回（一次新变更、留新痕——不做版本树）；</li>
- * <li><b>工具开关存储面</b>：PUT 开关落库留痕、GET 可见（装配生效属 #252 另票）；
- * 开关缺省 true；</li>
+ * <li><b>工具开关写面</b>：PUT 开关落库留痕、GET 可见（装配生效与窄幅写口
+ * 属 #252 工具面两端点）；开关缺省 true；</li>
  * <li><b>负例＋鉴权</b>：未知键（classify/naming 一次性判定不进配置面）404
  * PRJ_033＋缺操作者 400 PRJ_034＋非签名 401。</li>
  * </ul>
@@ -241,12 +241,12 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data", hasSize(0)));
     }
 
-    // ---------- 工具开关存储面：落库留痕可见（生效属 #252） ----------
+    // ---------- 工具开关写面：落库留痕可见（装配生效属 #252 工具面） ----------
 
     @Test
     void given_tool_toggles_persisted_when_get_and_traces_then_storage_face_visible()
             throws Exception {
-        // 覆盖行落库时开关缺省 true；显式关两件＝存储面先行（装配生效属 #252）
+        // 覆盖行落库时开关缺省 true；显式关两件（#252 起生效装配——窄幅写口在工具面）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
                 "{\"webSearchEnabled\": false, \"fetchUrlEnabled\": false}")
                 .andExpect(status().isOk())

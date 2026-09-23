@@ -1011,7 +1011,9 @@ class GenerationAppServiceTest {
     @Test
     void given_executor_config_override_when_generate_then_stage0_command_carries_library_values() {
         // #251 装配断言（真命令构建缝，ADR-0021 库值优先）：设执行体运营配置库行后
-        // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死
+        // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死。
+        // #252 增强工具开关同批编入 toolSpec（执行体槽无增强件，规格恒缺省开——
+        // 进缓存键保持规格一致）
         Long projectId = persistedProject("9870");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -1028,6 +1030,7 @@ class GenerationAppServiceTest {
         AgentCommand stage0 = command.getAllValues().get(0);
         assertThat(stage0.systemPrompt()).isEqualTo("执行体覆盖协议：开工先列步骤。");
         assertThat(stage0.modelString()).isEqualTo("deepseek:deepseek-v4-flash");
+        assertThat(stage0.toolSpec()).isEqualTo("ws=true,fu=true");
     }
 
     @Test

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import com.aieducenter.aiplatform.base.agentscope.AgentToolkitSupplier;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
@@ -30,9 +31,19 @@ import io.agentscope.core.tool.Toolkit;
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。
+ *
+ * <p><b>增强工具开关（#252，ADR-0021 窄幅开关）</b>：fetch_url / web_search 两件
+ * 按 {@code toolSpec}（工具面规格串，{@code AgentConfigAppService} 编码——运营
+ * 配置开关列的生效态）装配——关＝不注册（该工具退出装配面），开＝注册（回归）；
+ * 骨架工具无开关概念恒注册。工具面正本（名字/类别/槽位）在 {@code AgentTool}
+ * 枚举，与本装配的同源性由装配面测试钉死。</p>
  */
 @Component
 public class ProfileToolkitSupplier implements AgentToolkitSupplier {
+
+    /** 工具面规格串的件键（与 {@code AgentConfigAppService#toolSpec} 编码对偶）。 */
+    private static final String WEB_SEARCH_KEY = "ws";
+    private static final String FETCH_URL_KEY = "fu";
 
     private final PrdArtifactAdapter prdArtifacts;
     private final FinishEditFacts finishFacts;
@@ -58,7 +69,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     }
 
     @Override
-    public Toolkit toolkitFor(String agentKey, AgentWorkspace workspace) {
+    public Toolkit toolkitFor(String agentKey, AgentWorkspace workspace, String toolSpec) {
         Toolkit toolkit = new Toolkit();
         if (AgentProfile.MAIN.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectReadOnly ro) {
@@ -71,9 +82,15 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new ProjectFactsTool(ro.workspaceId(),
                     projectRepository, workspaceLifecycleAppService));
             // #213 抓取闭环：贴 URL 读外部资料（只读 GET + 四条安全底线在取数口兑现）
-            toolkit.registerAgentTool(new FetchUrlTool(externalContentFetcher));
+            // ——增强工具，开关关即不注册（#252）
+            if (AgentConfigAppService.toolEnabled(toolSpec, FETCH_URL_KEY)) {
+                toolkit.registerAgentTool(new FetchUrlTool(externalContentFetcher));
+            }
             // #215 调研闭环：自主搜索补缺口（供数方接口 + 平台配置实例化）
-            toolkit.registerAgentTool(new WebSearchTool(webSearchProvider));
+            // ——增强工具，开关关即不注册（#252）
+            if (AgentConfigAppService.toolEnabled(toolSpec, WEB_SEARCH_KEY)) {
+                toolkit.registerAgentTool(new WebSearchTool(webSearchProvider));
+            }
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {

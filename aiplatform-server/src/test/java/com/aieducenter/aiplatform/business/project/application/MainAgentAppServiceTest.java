@@ -238,12 +238,14 @@ class MainAgentAppServiceTest {
     void given_main_config_override_when_opinion_turn_then_command_carries_library_values() {
         // #251 装配断言（真命令构建缝，ADR-0021 库值优先缺省回落）：设运营配置库行后
         // 对话命令实取库值（prompt 与模型档位两腿）；清空（行删即全回落）后下一轮
-        // 命令回枚举默认——解析单点 AgentConfigAppService 经 mainCommand 真链路钉死
+        // 命令回枚举默认——解析单点 AgentConfigAppService 经 mainCommand 真链路钉死。
+        // #252 增强工具开关同批：生效开关编入 toolSpec 随命令透传（进工厂缓存键＋
+        // 装配判据——开关变更下一轮命令构建即新装配）
         Long projectId = persistedProject("9740");
         givenSessionExecutorRunsInline();
         jdbcTemplate.update("""
-                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
-                VALUES ('main', ?, 'deepseek-v4-pro')
+                INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id, web_search_enabled)
+                VALUES ('main', ?, 'deepseek-v4-pro', false)
                 """, "主智能体覆盖协议：每轮先复述目标。");
 
         appService.runOpinionTurn(projectId, "做一个官网");
@@ -252,6 +254,8 @@ class MainAgentAppServiceTest {
         verify(agentClient).converse(overridden.capture(), any());
         assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。");
         assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        // 开关库值编入规格串（ws 关、fu 缺省开）
+        assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true");
 
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
         appService.runOpinionTurn(projectId, "再聊聊范围");
@@ -261,6 +265,7 @@ class MainAgentAppServiceTest {
                 .isEqualTo(AgentProfile.MAIN.systemPrompt());
         assertThat(fallback.getAllValues().get(1).modelString())
                 .isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(fallback.getAllValues().get(1).toolSpec()).isEqualTo("ws=true,fu=true");
     }
 
     @Test

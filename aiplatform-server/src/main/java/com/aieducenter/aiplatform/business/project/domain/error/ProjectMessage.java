@@ -79,7 +79,18 @@ public enum ProjectMessage implements CodeMessage {
     AGENT_CONFIG_NOT_FOUND(404, "PRJ_033", "智能体不存在（运营配置面只有 main/executor 两座智能体）"),
 
     /** 配置写操作者留痕守卫（缺 X-User-Id/X-User-Name 透传头即拦，知识治理/技能库同款无落空通道）。 */
-    AGENT_CONFIG_OPERATOR_REQUIRED(400, "PRJ_034", "操作者不能为空");
+    AGENT_CONFIG_OPERATOR_REQUIRED(400, "PRJ_034", "操作者不能为空"),
+
+    // ========== 工具面可观测与窄幅开关（#252，ADR-0021——编排权不下放配置） ==========
+
+    /** 工具面按名寻址守卫：平台工具与 harness 内建面之外的名字 404（清单读面即正名面）。 */
+    AGENT_TOOL_NOT_FOUND(404, "PRJ_035", "工具不存在（工具面按注册名寻址，清单读面即全集）"),
+
+    /** 骨架锁死守卫：编排链路工具与 harness 内建编码工具不开放开关（结构性锁死，语义明确的接口层拒绝）。 */
+    AGENT_TOOL_TOGGLE_FORBIDDEN(403, "PRJ_036", "该工具不开放开关（骨架/harness 内建结构性锁死——编排权不下放配置）"),
+
+    /** 开关命令守卫：PUT 开关必须显式带目标态（enabled 无缺省翻转语义，幂等写面）。 */
+    AGENT_TOOL_TOGGLE_TARGET_REQUIRED(400, "PRJ_037", "开关目标态必填（enabled=true/false）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

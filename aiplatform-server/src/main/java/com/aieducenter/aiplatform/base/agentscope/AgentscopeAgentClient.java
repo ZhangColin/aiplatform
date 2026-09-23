@@ -231,22 +231,23 @@ public class AgentscopeAgentClient {
     /**
      * 一轮准备的寻址要素束（converse 首轮与 resume 续跑的同源字段，按名访问消除
      * 同型位置参数的错位面；工作区形态随命令/续跑请求原样携带——主智能体的问答
-     * 挂起续跑同只读面，不漂移成读写面）。
+     * 挂起续跑同只读面，不漂移成读写面；toolSpec 工具面规格串同携——续跑与首轮
+     * 同规格，#252）。
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
             String systemPrompt, String workspaceId, String agentKey,
-            boolean workspaceReadOnly) {
+            boolean workspaceReadOnly, String toolSpec) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.systemPrompt(), command.workspaceId(),
-                    command.agentKey(), command.workspaceReadOnly());
+                    command.agentKey(), command.workspaceReadOnly(), command.toolSpec());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
                     resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
-                    resume.agentKey(), resume.workspaceReadOnly());
+                    resume.agentKey(), resume.workspaceReadOnly(), resume.toolSpec());
         }
     }
 
@@ -264,8 +265,9 @@ public class AgentscopeAgentClient {
 
     /**
      * 前段公共体（converse 首轮与 resume 续跑共用）：模型解析（配置兜底）→ 工作区
-     * 解析 → agent 工厂构建（配置键穿透工具装配——按配置发放工具集）→ 会话上下文
-     * 与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现地基）。
+     * 解析 → agent 工厂构建（配置键与工具面规格串穿透工具装配——按配置发放工具集）
+     * → 会话上下文与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现
+     * 地基）。
      */
     private PreparedTurn prepareFor(TurnSpec spec) {
         ModelRef modelRef = ModelRef.parse(spec.modelString() != null
@@ -274,7 +276,7 @@ public class AgentscopeAgentClient {
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
-                modelRef.toModelString(), workspace, spec.agentKey());
+                modelRef.toModelString(), workspace, spec.agentKey(), spec.toolSpec());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),

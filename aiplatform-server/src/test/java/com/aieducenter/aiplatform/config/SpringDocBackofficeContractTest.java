@@ -44,6 +44,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       更新回执 from/to 版本与留痕读面自描述。</li>
  *   <li>智能体运营配置面（#251，project 分组）：覆盖态终态语义（null/缺省＝清空
  *       回落枚举默认）、覆盖标记与默认预览、留痕 old/new 快照对自描述。</li>
+ *   <li>工具面清单与开关（#252，project 分组）：kind 三值对照（开关判定正本）、
+ *       enabled 挂载语义（false＝在册但退出装配面）、槽位三键、开关命令 enabled
+ *       必填语义自描述。</li>
  * </ul>
  */
 @IntegrationTest
@@ -326,8 +329,53 @@ class SpringDocBackofficeContractTest {
                 .contains("回滚");
     }
 
-    // ---------- 装载 ----------
+    @Test
+    void given_agent_tool_schemas_when_read_group_then_kind_slots_and_toggle_semantics_self_described()
+            throws Exception {
+        // #252：工具面清单与开关——kind 三值对照（开关判定正本：仅 ENHANCEMENT 可开关、
+        // SKELETON/HARNESS_BUILTIN 结构性锁死）、enabled 语义（false＝在册但退出装配面）、
+        // 槽位三键自描述、命令 enabled 必填（无缺省翻转语义）
+        JsonNode project = fetchGroup("project");
+        JsonNode kind = property(project, "BackofficeAgentToolResponse", "kind");
+        assertThat(kind.path("type").asText(null))
+                .as("kind 应渲染 type=string")
+                .isEqualTo("string");
+        assertThat(kind.path("description").asText(""))
+                .as("kind 应自描述三值对照（SKELETON/ENHANCEMENT/HARNESS_BUILTIN）")
+                .contains("SKELETON")
+                .contains("ENHANCEMENT")
+                .contains("HARNESS_BUILTIN")
+                .contains("锁死");
+        JsonNode enabled = property(project, "BackofficeAgentToolResponse", "enabled");
+        assertThat(enabled.path("type").asText(null))
+                .as("enabled 应渲染 type=boolean")
+                .isEqualTo("boolean");
+        assertThat(enabled.path("description").asText(""))
+                .as("enabled 应自描述挂载语义（false＝退出装配面）")
+                .contains("退出装配面");
+        assertThat(property(project, "BackofficeAgentToolResponse", "name")
+                .path("description").asText(""))
+                .as("name 应自描述按名寻址语义（清单读面即全集）")
+                .contains("寻址");
+        JsonNode slot = property(project, "BackofficeAgentToolSlotResponse", "slot");
+        assertThat(slot.path("type").asText(null))
+                .as("slot 应渲染 type=string")
+                .isEqualTo("string");
+        assertThat(slot.path("description").asText(""))
+                .as("slot 应自描述三槽位键（与技能槽位同键）")
+                .contains("main")
+                .contains("executor")
+                .contains("subagent");
+        JsonNode toggleEnabled = property(project, "AgentToolToggleCommand", "enabled");
+        assertThat(toggleEnabled.path("type").asText(null))
+                .as("开关命令 enabled 应渲染 type=boolean")
+                .isEqualTo("boolean");
+        assertThat(toggleEnabled.path("description").asText(""))
+                .as("开关命令 enabled 应自描述必填语义（无缺省翻转）")
+                .contains("必填");
+    }
 
+    // ---------- 装载 ----------
     private JsonNode fetchGroup(String group) throws Exception {
         MockHttpServletRequestBuilder request = get("/v3/api-docs/" + group);
         String body = mockMvc.perform(request)

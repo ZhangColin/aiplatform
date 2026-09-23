@@ -265,7 +265,8 @@ public class MainAgentAppService {
                 answerText,
                 usageContextOf(projectId, sessionId),
                 AgentProfile.MAIN.key(),
-                /* workspaceReadOnly= */ true);
+                /* workspaceReadOnly= */ true,
+                main.toolSpec());
         appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
                 conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
@@ -443,8 +444,9 @@ public class MainAgentAppService {
     }
 
     /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。systemPrompt/
-     * 模型档位经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认——每轮命令
-     * 构建时查，配置变更下一轮自然生效）。 */
+     * 模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认
+     * ——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入 toolSpec 随命令
+     * 透传装配）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
@@ -462,7 +464,8 @@ public class MainAgentAppService {
                 null,
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
-                /* heading= */ null);
+                /* heading= */ null,
+                main.toolSpec());
     }
 
     /** 会话标识派生（projectId → main-{projectId} 稳定绑定）。 */

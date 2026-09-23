@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
@@ -26,7 +27,8 @@ import org.junit.jupiter.api.Test;
 class AgentscopeHarnessAgentFactoryTest {
 
     /** 工具集空桩（工厂不解释工具内容——装配归 RoleToolkitSupplier 测试）。 */
-    private static final AgentToolkitSupplier TOOLKITS = (agentKey, workspace) -> new Toolkit();
+    private static final AgentToolkitSupplier TOOLKITS =
+            (agentKey, workspace, toolSpec) -> new Toolkit();
 
     /** 技能仓库空桩（#94 技能位——无技能挂载即框架不注入 <available_skills>）。 */
     private static final AgentSkillRepositorySupplier SKILL_REPOS =
@@ -42,7 +44,7 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, workspace, agentKey) -> {
+                (name, sysPrompt, modelString, workspace, agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -55,9 +57,9 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
 
         // 同规格恰建一次（技能集不入键——供应商非工厂字段、obtain 无从取技能态；
         // #249/ADR-0021 指派变更靠装配视图动态查库，不触发实例重建）
@@ -71,17 +73,17 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         factory.obtain("platform-agent", "另一个 sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-chat",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")), null);
+                new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")), null, null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("1", "ws-1-dev"), null);
+                new AgentWorkspace.ProjectDev("1", "ws-1-dev"), null, null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null);
+                new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null, null);
 
         assertThat(created).hasSize(6);
     }
@@ -92,10 +94,10 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
         // 同 workspaceId 同容器 = 同规格（复用）；同 id 不同容器名 = 不同规格
         HarnessAgent same = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
 
         assertThat(same).isSameAs(first);
         assertThat(created).hasSize(1);
@@ -107,9 +109,9 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
 
         assertThat(created).hasSize(2);
     }
@@ -122,11 +124,31 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "main");
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "main", null);
         HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER");
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER", null);
 
         assertThat(coder).isNotSameAs(ba);
+        assertThat(created).hasSize(2);
+    }
+
+    @Test
+    void given_same_spec_different_tool_spec_when_obtain_then_not_shared() {
+        // #252 工具面规格入缓存键：工具集构建时固化（Toolkit 静态注册、无技能线的
+        // 动态视图缝），规格变（开关变更）＝实例变——下一轮命令构建即新装配，进行中
+        // run 不定格；同规格（含同 toolSpec）自身复用
+        List<HarnessAgent> created = new ArrayList<>();
+        AgentscopeHarnessAgentFactory factory = factoryWith(created);
+
+        HarnessAgent open = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
+        HarnessAgent closed = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=false,fu=true");
+        HarnessAgent openAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
+
+        assertThat(closed).isNotSameAs(open);
+        assertThat(openAgain).isSameAs(open);
         assertThat(created).hasSize(2);
     }
 
@@ -138,11 +160,11 @@ class AgentscopeHarnessAgentFactoryTest {
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "X");
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "X", null);
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X");
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
         HarnessAgent readOnlyAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X");
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
 
         assertThat(readOnly).isNotSameAs(dev);
         assertThat(readOnlyAgain).isSameAs(readOnly); // 同规格只读面自身复用
@@ -154,9 +176,9 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         factory.obtain("platform-agent", "sys2", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
 
         factory.destroy();
 
@@ -164,7 +186,7 @@ class AgentscopeHarnessAgentFactoryTest {
             verify(agent, times(1)).close();
         }
         factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.Local(null), null);
+                new AgentWorkspace.Local(null), null, null);
         assertThat(created).hasSize(3);
     }
 
@@ -180,7 +202,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
-                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null);
+                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null, null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
         // 压缩接线守护（#108）：工厂显式配 compactionConfig → 压缩中间件非空（非 disableCompaction）
@@ -202,7 +224,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentscopeProperties());
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
 
         assertThat(dev.getSubagentAgentManager()).isNotNull();
     }
@@ -216,7 +238,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentscopeProperties());
 
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
-                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
 
         assertThat(readOnly.getSubagentAgentManager()).isNull();
     }
@@ -251,5 +273,127 @@ class AgentscopeHarnessAgentFactoryTest {
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
         assertThat(config.getModel()).isNull();
+    }
+
+    // ---------- #252 构建后工具面校正（框架 WebTools 恒注入 vs 平台供数方） ----------
+
+    /** 平台 web_search 替身（AgentTool 单件桩——getTool 按名可取，callAsync 不真被调）。 */
+    private static io.agentscope.core.tool.AgentTool platformWebSearchStub() {
+        return webSearchStub("平台供数方版（替身）");
+    }
+
+    /** 框架版同名替身（复刻上游恒注册件：Tavily env-key 直连版的占位形态）。 */
+    private static io.agentscope.core.tool.AgentTool frameworkWebSearchStub() {
+        return webSearchStub("框架直连版（替身）");
+    }
+
+    private static io.agentscope.core.tool.AgentTool webSearchStub(String description) {
+        return new io.agentscope.core.tool.AgentTool() {
+            @Override
+            public String getName() {
+                return "web_search";
+            }
+
+            @Override
+            public String getDescription() {
+                return description;
+            }
+
+            @Override
+            public java.util.Map<String, Object> getParameters() {
+                return java.util.Map.of();
+            }
+
+            @Override
+            public reactor.core.publisher.Mono<io.agentscope.core.message.ToolResultBlock> callAsync(
+                    io.agentscope.core.tool.ToolCallParam param) {
+                return reactor.core.publisher.Mono.empty();
+            }
+        };
+    }
+
+    /** 框架 web_fetch 替身（框架恒注册直抓件占位——与 web_search 不同名）。 */
+    private static io.agentscope.core.tool.AgentTool frameworkWebFetchStub() {
+        return new io.agentscope.core.tool.AgentTool() {
+            @Override
+            public String getName() {
+                return "web_fetch";
+            }
+
+            @Override
+            public String getDescription() {
+                return "框架直抓版（替身）";
+            }
+
+            @Override
+            public java.util.Map<String, Object> getParameters() {
+                return java.util.Map.of();
+            }
+
+            @Override
+            public reactor.core.publisher.Mono<io.agentscope.core.message.ToolResultBlock> callAsync(
+                    io.agentscope.core.tool.ToolCallParam param) {
+                return reactor.core.publisher.Mono.empty();
+            }
+        };
+    }
+
+    @Test
+    void given_framework_web_tools_overwrite_when_realign_then_platform_version_wins() {
+        // 复刻框架遮蔽现场（上游 main 已恒注册 WebTools、2.0.1 尚未带——替身占位）：
+        // 平台版先注册、框架版（同名 web_search）后注册即覆盖（ToolRegistry 后写胜）
+        // ——校正后平台版生效、框架版出局
+        Toolkit platform = new Toolkit();
+        platform.registerAgentTool(platformWebSearchStub());
+        Toolkit effective = new Toolkit();
+        effective.registerAgentTool(platformWebSearchStub());
+        effective.registerAgentTool(frameworkWebSearchStub());
+        effective.registerAgentTool(frameworkWebFetchStub());
+        assertThat(effective.getTool("web_search").getDescription())
+                .as("前置：框架同名后注册即覆盖平台版（遮蔽现场复刻）")
+                .doesNotContain("平台");
+
+        HarnessAgent agent = mock(HarnessAgent.class);
+        when(agent.getToolkit()).thenReturn(effective);
+        AgentscopeHarnessAgentFactory.realignBuiltinWebTools(platform, agent);
+
+        assertThat(effective.getToolNames()).doesNotContain("web_fetch"); // 框架直抓版结构性出局
+        assertThat(effective.getTool("web_search").getDescription())
+                .as("平台版注册回来（后写胜反转）")
+                .contains("平台");
+    }
+
+    @Test
+    void given_platform_toolkit_without_web_search_when_realign_then_both_absent() {
+        // 开关关（平台 toolkit 不含 web_search）：校正后 web_search/web_fetch 皆不在
+        // ——「关即退出装配面」对同名框架件也成立（不残留框架直连版）
+        Toolkit platform = new Toolkit(); // 空＝关态（增强件全不注册）
+        Toolkit effective = new Toolkit();
+        effective.registerAgentTool(frameworkWebSearchStub());
+        effective.registerAgentTool(frameworkWebFetchStub());
+
+        HarnessAgent agent = mock(HarnessAgent.class);
+        when(agent.getToolkit()).thenReturn(effective);
+        AgentscopeHarnessAgentFactory.realignBuiltinWebTools(platform, agent);
+
+        assertThat(effective.getToolNames())
+                .doesNotContain("web_search", "web_fetch");
+    }
+
+    @Test
+    void given_current_dependency_without_framework_web_tools_when_realign_then_noop() {
+        // 现行依赖（agentscope 2.0.1）无框架 WebTools：校正幂等无害——平台面原样保留、
+        // removeTool 对缺失名不炸（防御升级到恒注册版本时才吃上力）
+        Toolkit platform = new Toolkit();
+        platform.registerAgentTool(platformWebSearchStub());
+        Toolkit effective = new Toolkit();
+        effective.registerAgentTool(platformWebSearchStub());
+
+        HarnessAgent agent = mock(HarnessAgent.class);
+        when(agent.getToolkit()).thenReturn(effective);
+        AgentscopeHarnessAgentFactory.realignBuiltinWebTools(platform, agent);
+
+        assertThat(effective.getToolNames()).containsExactly("web_search");
+        assertThat(effective.getTool("web_search").getDescription()).contains("平台");
     }
 }

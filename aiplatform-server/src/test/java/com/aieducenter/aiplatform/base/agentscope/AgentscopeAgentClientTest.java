@@ -101,7 +101,7 @@ class AgentscopeAgentClientTest {
     }
 
     private void givenStream(io.agentscope.core.event.AgentEvent... events) {
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
                 .thenReturn(Flux.fromIterable(List.of(events)));
     }
@@ -201,7 +201,7 @@ class AgentscopeAgentClientTest {
                 });
 
         verify(factory).obtain(eq("platform-agent"), any(), eq("deepseek:deepseek-v4-flash"),
-                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), any());
+                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), any(), any());
     }
 
     @Test
@@ -213,11 +213,11 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "ASSISTANT", true, null), event -> {
+                null, "42", Map.of(), null, "ASSISTANT", true, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.ProjectReadOnly("42", "ws-42")), eq("ASSISTANT"));
+                eq(new AgentWorkspace.ProjectReadOnly("42", "ws-42")), eq("ASSISTANT"), any());
     }
 
     @Test
@@ -228,7 +228,7 @@ class AgentscopeAgentClientTest {
         });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.Local(properties.getWorkspace())), any());
+                eq(new AgentWorkspace.Local(properties.getWorkspace())), any(), any());
         verifyNoInteractions(workspaceLifecycleAppService);
     }
 
@@ -241,11 +241,11 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "main", false, null), event -> {
+                null, "42", Map.of(), null, "main", false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
-                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), eq("main"));
+                eq(new AgentWorkspace.ProjectDev("42", "ws-42")), eq("main"), any());
     }
 
     @Test
@@ -253,7 +253,7 @@ class AgentscopeAgentClientTest {
         // #109 模型边界计量：本轮计量上下文（ThreadLocal）在 streamEvents 期间挂起、
         // 收口摘除——主循环/压缩/记忆抽取共用同一模型实例据此归入本轮
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
             duringStream.set(MeteringScope.current());
             return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
@@ -272,7 +272,7 @@ class AgentscopeAgentClientTest {
     void given_no_usage_context_when_converse_then_no_metering_scope() {
         // 无 usageContext 不挂计量上下文（底座不发明归属——不报用量）
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
             duringStream.set(MeteringScope.current());
             return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
@@ -479,7 +479,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, null), frames::add);
+                null, null, Map.of(), null, "CODER", false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -499,7 +499,7 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
                 null, null, Map.of(), null, "CODER", false,
-                RunHeading.slice("商品浏览", 2, 5)), frames::add);
+                RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry(AgentEventTypes.SLICE_FIELD,
@@ -508,7 +508,7 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_stream_error_when_converse_then_error_frame_then_exception() {
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
                 .thenReturn(Flux.error(new RuntimeException("boom")));
 
@@ -527,7 +527,7 @@ class AgentscopeAgentClientTest {
         // 起跑失败（如缺 API key 致模型客户端构建抛 IllegalStateException）原是
         // runTurn 前的零事件区（异步轨道吞异常，用户只见死寂）——前段失败也经
         // sink 发 error 事件（runId 锚定 = command 的），异常照常上抛
-        when(factory.obtain(any(), any(), any(), any(), any()))
+        when(factory.obtain(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("DeepSeek API key 未配置"));
 
         List<AgentEvent> frames = new ArrayList<>();
@@ -546,7 +546,7 @@ class AgentscopeAgentClientTest {
     void given_stream_error_when_converse_then_metering_scope_cleared() {
         // 失败轮也摘计量上下文（finally）——不残留跨轮污染；失败轮已耗 token 由
         // MeteredModel 在 stream() 收口如实计量（见 MeteredModelTest）
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
                 .thenReturn(Flux.error(new RuntimeException("mid-stream boom")));
 
@@ -566,7 +566,7 @@ class AgentscopeAgentClientTest {
         });
 
         verify(factory).obtain(eq("platform-agent"), eq("你是平台智能体。"),
-                eq("deepseek:deepseek-v4-flash"), any(), any());
+                eq("deepseek:deepseek-v4-flash"), any(), any(), any());
     }
 
     // ---------- 挂起语义 / resume ----------
@@ -588,7 +588,7 @@ class AgentscopeAgentClientTest {
 
     @Test
     void given_resume_request_when_resume_then_confirm_results_in_metadata_and_finishes() {
-        when(factory.obtain(any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Msg>> messages = ArgumentCaptor.forClass(List.class);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
@@ -599,7 +599,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false), frames::add);
+                "approved", null, null, false, null), frames::add);
 
         // 恢复消息带 ConfirmResult metadata（AgentScope 挂起恢复口）；续跑流正常收口
         verify(agent).streamEvents(messages.capture(), any(RuntimeContext.class));
@@ -610,14 +610,14 @@ class AgentscopeAgentClientTest {
         // 续跑流部件恒挂：解说尾段部件在收口事件前
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 "text", AgentEventTypes.PART_TEXT, AgentEventTypes.RUN_FINISH);
-        verify(factory).obtain(any(), any(), eq("deepseek:deepseek-v4-flash"), any(), any());
+        verify(factory).obtain(any(), any(), eq("deepseek:deepseek-v4-flash"), any(), any(), any());
     }
 
     @Test
     void given_resume_prepare_fails_when_resume_then_error_frame_emitted_and_rethrown() {
         // resume 跑在异步轨道（异常被吞只记日志）：缺 API key 致模型创建失败等
         // 前段失败必须先发 error 事件（runId 锚定）再上抛——否则用户侧死寂
-        when(factory.obtain(any(), any(), any(), any(), any())).thenThrow(new IllegalArgumentException(
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenThrow(new IllegalArgumentException(
                 "Failed to create model for id: deepseek:deepseek-v4-flash: "
                         + "Environment variable DEEPSEEK_API_KEY is required to auto-create model"));
 
@@ -626,7 +626,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false), frames::add))
+                "approved", null, null, false, null), frames::add))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(frames.stream().map(AgentEvent::type))

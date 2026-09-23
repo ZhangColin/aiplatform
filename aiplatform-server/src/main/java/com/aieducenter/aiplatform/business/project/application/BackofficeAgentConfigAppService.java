@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
+import com.aieducenter.aiplatform.base.agentscope.HarnessBuiltinTools;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AgentConfigUpdateCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeAgentConfigResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeAgentConfigTraceResponse;
@@ -17,6 +18,8 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentConfigTrace;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentTool;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentToolKind;
 import com.aieducenter.aiplatform.business.project.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfigStore;
 
@@ -30,9 +33,10 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
  * 档位、两工具开关）同写；null/空白＝清空覆盖回落枚举默认。变更留痕
  * append-only（操作者＋变更前后全量值快照）：值面有动才落痕——幂等回执（同值
  * 重写）不落痕不写行（留痕链每痕都是真实变更，回滚才可逐痕回溯）；回滚＝把留痕
- * 旧值快照写回，即一次新变更、留新痕（不做版本树）。工具开关两件是存储面先行
- * （装配生效属 #252，与本配置共表共留痕机制）。事务：覆盖写入与留痕追加同事务
- * 原子（见 {@link AgentConfigStore}）。</p>
+ * 旧值快照写回，即一次新变更、留新痕（不做版本树）。工具开关已生效装配（#252
+ * {@link #toggleTool}：关即退出槽位装配面、开即回归——与本配置共表共留痕机制，
+ * 增强工具窄幅写口）。事务：覆盖写入与留痕追加同事务原子（见
+ * {@link AgentConfigStore}）。</p>
  */
 @Service
 public class BackofficeAgentConfigAppService {
@@ -80,16 +84,10 @@ public class BackofficeAgentConfigAppService {
                 safe.webSearchEnabled() == null || safe.webSearchEnabled(),
                 safe.fetchUrlEnabled() == null || safe.fetchUrlEnabled(),
                 operator.id(), operator.name(), null);
-        if (!valueFacetsChanged(current, next)) {
-            return BackofficeAgentConfigResponse.of(profile, current); // 幂等回执：值面无动零写入
-        }
-        configStore.save(next);
-        configStore.insertTrace(new AgentConfigTrace(TsidGenerator.newInstance().generate(),
-                profile.key(), current.systemPrompt(), current.modelId(),
-                current.webSearchEnabled(), current.fetchUrlEnabled(),
-                next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
-                next.fetchUrlEnabled(), operator.id(), operator.name(), LocalDateTime.now()));
-        return BackofficeAgentConfigResponse.of(profile, configStore.find(profile.key()));
+        AgentOperationalConfig persisted =
+                persistIfChanged(profile, current, next, operator);
+        return BackofficeAgentConfigResponse.of(profile,
+                persisted != null ? persisted : current); // 幂等回执：值面无动零写入
     }
 
     /**
@@ -102,6 +100,74 @@ public class BackofficeAgentConfigAppService {
         AgentProfile profile = requireProfile(agentKey);
         return configStore.findTraces(profile.key()).stream()
                 .map(BackofficeAgentConfigTraceResponse::of).toList();
+    }
+
+    /**
+     * 工具面开关写口（#252，PUT /agent-tools/{toolName}）：按工具注册名窄幅开关——
+     * 仅增强工具（web_search/fetch_url，挂 {@link AgentProfile#MAIN main} 行开关列，
+     * 与配置全量写共表共留痕机制）；骨架工具与 harness 内建编码工具结构性锁死
+     * （接口层拒绝）。写语义与全量写同构：只动目标开关列、其余值面原样携带，值面
+     * 有动才落痕（幂等回执零写入）。
+     *
+     * @throws ApplicationException PRJ_035 工具不存在（平台工具与 harness 内建面之外）；
+     *                              PRJ_036 骨架/harness 内建不开放开关；
+     *                              PRJ_037 目标态缺（enabled 无缺省语义）；
+     *                              PRJ_034 操作者缺
+     */
+    @Transactional
+    public ToolToggle toggleTool(String toolName, Boolean enabled, Operator operator) {
+        requireOperator(operator);
+        if (enabled == null) {
+            throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_TARGET_REQUIRED);
+        }
+        AgentTool tool = AgentTool.byName(toolName)
+                .orElseThrow(() -> harnessBuiltinOrNotFound(toolName));
+        if (tool.kind() != AgentToolKind.ENHANCEMENT) {
+            throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_FORBIDDEN);
+        }
+        AgentProfile profile = AgentProfile.byKey(tool.slot()).orElseThrow();
+        AgentOperationalConfig current = currentOf(profile);
+        AgentOperationalConfig next = new AgentOperationalConfig(profile.key(),
+                current.systemPrompt(), current.modelId(),
+                tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
+                tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
+                operator.id(), operator.name(), null);
+        persistIfChanged(profile, current, next, operator); // 幂等（开关已是目标态）零写入
+        return new ToolToggle(tool, enabled);
+    }
+
+    /** 开关回执（工具＋写定生效态——幂等重写时即现行态）。 */
+    public record ToolToggle(AgentTool tool, boolean enabled) {
+    }
+
+    /**
+     * harness 内建名判别腿（骨架锁死的前置）：平台枚举之外的注册名若属 harness
+     * 内建编码工具集 → PRJ_036 同锁死语义；两者皆非 → PRJ_035 不存在。
+     */
+    private static ApplicationException harnessBuiltinOrNotFound(String toolName) {
+        if (HarnessBuiltinTools.codingToolNames().contains(toolName)) {
+            return new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_FORBIDDEN);
+        }
+        return new ApplicationException(ProjectMessage.AGENT_TOOL_NOT_FOUND);
+    }
+
+    /**
+     * 值面变更落库＋留痕（全量写与工具开关写的共用写路径，同事务原子）：值面无动
+     * 返回 null（幂等回执零写入）；有动即整行 upsert＋留痕（变更前后全量值快照＋
+     * 操作者）并回读新现行。
+     */
+    private AgentOperationalConfig persistIfChanged(AgentProfile profile,
+            AgentOperationalConfig current, AgentOperationalConfig next, Operator operator) {
+        if (!valueFacetsChanged(current, next)) {
+            return null;
+        }
+        configStore.save(next);
+        configStore.insertTrace(new AgentConfigTrace(TsidGenerator.newInstance().generate(),
+                profile.key(), current.systemPrompt(), current.modelId(),
+                current.webSearchEnabled(), current.fetchUrlEnabled(),
+                next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
+                next.fetchUrlEnabled(), operator.id(), operator.name(), LocalDateTime.now()));
+        return configStore.find(profile.key());
     }
 
     /** 现行覆盖态（无行＝全回落缺省态：值面缺省、无写者——留痕前态与比对基准）。 */

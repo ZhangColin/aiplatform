@@ -10,7 +10,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 /**
  * 智能体配置读面（#251）：GET 与 PUT 回执同形。生效值（库值或枚举默认）＋
  * 覆盖标记（运营要看到「现在跑的是覆盖还是默认」）＋枚举默认预览（清空回落
- * 即落此值——回复默认前可先看落点）＋存储面工具开关（生效属 #252）＋最近
+ * 即落此值——回复默认前可先看落点）＋增强工具开关生效态（#252 起生效装配）＋最近
  * 写者。全库两座智能体（main/executor）各自寻址读写。
  *
  * @param agentKey                智能体稳定键（寻址腿）
@@ -21,7 +21,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
  * @param modelIdOverridden       true＝模型档位为库覆盖值（false＝枚举默认）
  * @param defaultSystemPrompt     枚举默认 systemPrompt（预览：清空覆盖即落此值）
  * @param defaultModelId          枚举默认模型档位（同上）
- * @param webSearchEnabled        联网搜索开关存储态（生效属 #252；无行语境＝true）
+ * @param webSearchEnabled        联网搜索开关生效态（无行语境＝true；#252 起生效装配）
  * @param fetchUrlEnabled         网页抓取开关存储态（同上）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
@@ -47,9 +47,9 @@ public record BackofficeAgentConfigResponse(
         String defaultSystemPrompt,
         @Schema(description = "枚举默认模型档位（清空覆盖即落此值）", example = "deepseek-v4-flash")
         String defaultModelId,
-        @Schema(description = "联网搜索开关存储态（生效属 #252；无覆盖行语境＝true 开）")
+        @Schema(description = "联网搜索开关生效态（#252 起生效装配：关即退出槽位装配面；无覆盖行语境＝true 开）")
         boolean webSearchEnabled,
-        @Schema(description = "网页抓取开关存储态（生效属 #252；无覆盖行语境＝true 开）")
+        @Schema(description = "网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开）")
         boolean fetchUrlEnabled,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,

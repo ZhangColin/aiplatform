@@ -16,7 +16,9 @@
  *       主循环 + 压缩摘要 + 记忆抽取全收口，取代只认 ModelCallEndEvent 的旧源）</li>
  *   <li>会话级任务执行器（同会话一次一轮串行、跨会话并行）</li>
  *   <li>工具集 SPI（AgentToolkitSupplier）：智能体资产（ask_user / savePrd 等业务
- *       工具）归业务侧注入，本包不供工具</li>
+ *       工具）归业务侧注入，本包不供工具；工具面规格串（#252 增强工具开关的装配腿）
+ *       随命令透传——底座不解释、进实例缓存键（harness 内建自省口
+ *       {@code HarnessBuiltinTools} 亦在本包）</li>
  * </ul>
  *
  * <h3>边界</h3>

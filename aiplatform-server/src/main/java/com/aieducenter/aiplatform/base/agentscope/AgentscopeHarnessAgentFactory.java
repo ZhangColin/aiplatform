@@ -2,6 +2,8 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import io.agentscope.core.model.ModelRegistry;
 import io.agentscope.core.state.AgentStateStore;
+import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,7 +33,9 @@ import org.springframework.stereotype.Component;
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
  * 替换框架缺省的本地 JSON 文件实现（单机 {@code ~/.agentscope/state/}，多副本/
  * 重启语义不成立）。工具集经 {@link AgentToolkitSupplier}、技能经
- * {@link AgentSkillRepositorySupplier}（业务侧资产，#94 技能位）注入。</p>
+ * {@link AgentSkillRepositorySupplier}（业务侧资产，#94 技能位）注入；工具面规格
+ * 串（#252 增强工具开关）入实例缓存键——规格变＝实例变，开关变更下一轮命令构建
+ * 即新装配。</p>
  */
 @Slf4j
 @Component
@@ -43,7 +47,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                AgentWorkspace workspace, String agentKey);
+                AgentWorkspace workspace, String agentKey, String toolSpec);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
@@ -55,9 +59,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey) ->
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
-                        name, sysPrompt, modelString, workspace, agentKey, properties));
+                        name, sysPrompt, modelString, workspace, agentKey, toolSpec, properties));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -68,13 +72,15 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
-            AgentWorkspace workspace, String agentKey) {
-        // sysPrompt/workspace/agentKey 明文入键（不用 hashCode：碰撞会把不同人格/
-        // 工作区/工具面的 agent 当同规格静默复用）
+            AgentWorkspace workspace, String agentKey, String toolSpec) {
+        // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
+        // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
+        // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
+        // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配
         String key = name + "|" + modelString + "|" + sysPrompt + "|" + workspace.identity()
-                + "|" + agentKey;
+                + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec);
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, workspace, agentKey));
+                k -> builder.build(name, sysPrompt, modelString, workspace, agentKey, toolSpec));
     }
 
     @Override
@@ -94,7 +100,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier,
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
-            String agentKey, AgentscopeProperties properties) {
+            String agentKey, String toolSpec, AgentscopeProperties properties) {
+        Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
@@ -102,7 +109,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // 迭代的 stream() 收口报用量（取代只认 ModelCallEndEvent 的旧源）
                 .model(MeteredModel.wrap(ModelRegistry.resolve(modelString), modelString))
                 .stateStore(stateStore)
-                .toolkit(toolkitSupplier.toolkitFor(agentKey, workspace))
+                .toolkit(toolkit)
                 // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
                 // 不注入 <available_skills>；本平台工作区技能用 .platform/skills/（非
                 // 框架 skills/），关闭框架工作区技能自动合成免无谓文件面往返
@@ -141,7 +148,29 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     .disableShellTool()
                     .disableSubagents();
         }
-        return builder.build();
+        HarnessAgent agent = builder.build();
+        realignBuiltinWebTools(toolkit, agent);
+        return agent;
+    }
+
+    /**
+     * 构建后工具面校正（#252）：上游 main 分支起框架 build() <b>无条件</b>注册自带
+     * WebTools 两件（{@code web_fetch} 直抓 / {@code web_search} Tavily env-key
+     * 直连；现行依赖 2.0.1 尚未带——本校正对缺失名幂等无害，是升级防御）——本平台
+     * 出口统一走业务侧供数方（WebSearchProvider／ExternalContentFetcher 取数口，
+     * 安全底线在取数口兑现），框架直连版结构性出局；且框架 {@code web_search} 与
+     * 平台版<b>同名后注册即覆盖</b>（ToolRegistry 后写胜）。故对全部构建形态：
+     * 先移除框架两件，平台版（toolkitFor 按开关装配、开才在）再注册回来——
+     * 开＝平台版生效、关＝两版皆不在（「关即退出装配面」对同名框架件也成立）。
+     */
+    static void realignBuiltinWebTools(Toolkit platformToolkit, HarnessAgent agent) {
+        Toolkit effective = agent.getToolkit();
+        effective.removeTool("web_fetch");
+        effective.removeTool("web_search");
+        AgentTool webSearch = platformToolkit.getTool("web_search");
+        if (webSearch != null) {
+            effective.registerAgentTool(webSearch);
+        }
     }
 
     /**

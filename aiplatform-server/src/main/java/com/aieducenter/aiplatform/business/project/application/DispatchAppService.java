@@ -196,7 +196,8 @@ public class DispatchAppService {
                 CLASSIFY_TIMEOUT,
                 null,
                 /* workspaceReadOnly= */ false,
-                /* heading= */ null);
+                /* heading= */ null,
+                /* toolSpec= */ null); // 一次性判定无配置语境：空工具面、无规格
         try {
             AgentReply reply = agentClient.converse(command, event -> {
             });

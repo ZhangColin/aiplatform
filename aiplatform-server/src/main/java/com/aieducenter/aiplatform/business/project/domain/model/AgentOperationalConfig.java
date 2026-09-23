@@ -7,8 +7,8 @@ import java.time.LocalDateTime;
  * {@code prj_agent_configs} 一行的读模型。智能体身份（有哪些智能体、职能、寻址
  * 键）仍以 {@link AgentProfile} 枚举为正本；本配置只是<b>覆盖态</b>——systemPrompt
  * /modelId 列 null＝无覆盖，装配回落枚举默认（「库值优先、缺省回落」的缺省腿）。
- * 增强工具开关两列是存储面先行（工具面生效属 #252）：默认 true＝开，与现行工具
- * 装配一致。
+ * 增强工具开关两列已生效装配（#252）：默认 true＝开；关＝该工具退出槽位装配面
+ * （生效值经 {@code AgentConfigAppService#effectiveOf} 编入工具面规格串随命令透传）。
  *
  * <p>行不存在与「行存在但两覆盖列全 null」语义等价（全回落）；行经 upsert 持续
  * 存在（清空覆盖不删行——操作者列留最近写者，运营可见「谁最后动过」）。</p>
@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
  * @param systemPrompt     运营覆盖 systemPrompt（null＝回落枚举默认）
  * @param modelId          运营覆盖模型档位（null＝回落枚举默认；裸档位名——provider
  *                         前缀由 {@link AgentProfile#chatModelStringOf} 统一拼）
- * @param webSearchEnabled 增强工具开关：联网搜索（存储面，生效属 #252）
+ * @param webSearchEnabled 增强工具开关：联网搜索（关即退出槽位装配面，#252）
  * @param fetchUrlEnabled  增强工具开关：网页抓取（同上）
  * @param operatorId       最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName     最近写者名（直读展示）

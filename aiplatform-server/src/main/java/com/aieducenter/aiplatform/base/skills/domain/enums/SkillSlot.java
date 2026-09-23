@@ -15,25 +15,34 @@ import com.cartisan.core.domain.BaseEnum;
  * （BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串键，code 不经任何面）。
  *
  * <p>新增职能槽位＝新增枚举值＋迁移扩键面（REST 槽位路径段即本键，未知键
- * 404 SKL_010）。</p>
+ * 404 SKL_010），并按该槽位运行时有无 shell 拍板 {@link #hasShell()} 位。</p>
+ *
+ * <p>scripts 资源开放面（#253，ADR-0021 内容面 c）：开放面＝<b>有 shell 的
+ * 槽位</b>——{@link #hasShell()} 为真的槽位装配面才附 scripts 资源（框架
+ * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell，
+ * 结构性 a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
+ * executor 容器内 shell、subagent（self-test）白名单含跑测试命令的 shell——
+ * 两槽开放。</p>
  */
 public enum SkillSlot implements BaseEnum<SkillSlot> {
 
-    /** 主智能体（需求侧：访谈梳理＋PRD 撰写——技能面挂内置 PRD 写作）。 */
-    MAIN(1, "main"),
+    /** 主智能体（需求侧：访谈梳理＋PRD 撰写——技能面挂内置 PRD 写作；禁 shell）。 */
+    MAIN(1, "main", false),
 
-    /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位）。 */
-    EXECUTOR(2, "executor"),
+    /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。 */
+    EXECUTOR(2, "executor", true),
 
-    /** 子智能体槽（当前唯一实例 self-test——技能面独立收窄配置，不继承执行体）。 */
-    SUBAGENT(3, "subagent");
+    /** 子智能体槽（当前唯一实例 self-test——白名单含跑测试命令的 shell，开放）。 */
+    SUBAGENT(3, "subagent", true);
 
     private final Integer code;
     private final String key;
+    private final boolean shell;
 
-    SkillSlot(Integer code, String key) {
+    SkillSlot(Integer code, String key, boolean shell) {
         this.code = code;
         this.key = key;
+        this.shell = shell;
     }
 
     /** 框架约定码（BaseEnum 自动转换面；不落库不经 REST——寻址用字符串键）。 */
@@ -51,6 +60,14 @@ public enum SkillSlot implements BaseEnum<SkillSlot> {
     /** 槽位稳定键（REST 路径段与装配缝寻址共用）。 */
     public String key() {
         return key;
+    }
+
+    /**
+     * 该槽位运行时有无 shell（#253 scripts 开放面判定正本）：真＝装配面附
+     * scripts 资源；假＝结构性 a-only（resources 恒空）。
+     */
+    public boolean hasShell() {
+        return shell;
     }
 
     /**

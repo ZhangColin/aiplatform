@@ -29,8 +29,8 @@ import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
  * 安装/启停/卸载）＋指派表 {@code skl_slot_assignments}（#249 槽位读写，join
  * 回条目列共形）＋包表 {@code skl_packages}／更新留痕表 {@code skl_update_
  * traces}（#250 检查态与版本留痕）。条目读一律 LEFT JOIN 包表带上「有新版」
- * 标记（null＝未检查过）；frontmatter/exclude_dirs JSONB 经字面量序列化出入
- * （Map/List ↔ JSON 文本），不挂 JPA 映射面。
+ * 标记（null＝未检查过）；frontmatter/resources/exclude_dirs JSONB 经字面量
+ * 序列化出入（Map/List ↔ JSON 文本），不挂 JPA 映射面。
  */
 @Component
 public class JdbcSkillStore implements SkillStore {
@@ -38,7 +38,7 @@ public class JdbcSkillStore implements SkillStore {
     /** 条目读列（#250 起四 SELECT 共形带包表标记列；顺序即 {@link #recordOf} 下标）。 */
     private static final String SKILL_SELECT_PREFIX = """
             SELECT s.id, s.name, s.description, s.source_package, s.version, s.status,
-                   s.frontmatter, s.content, s.operator_id, s.operator_name, p.update_available
+                   s.frontmatter, s.content, s.resources, s.operator_id, s.operator_name, p.update_available
             FROM skl_skills s
             LEFT JOIN skl_packages p ON p.source_package = s.source_package
             """;
@@ -54,8 +54,8 @@ public class JdbcSkillStore implements SkillStore {
     private static final String INSERT_SQL = """
             INSERT INTO skl_skills
                 (id, name, description, source_package, version, status, frontmatter, content,
-                 operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                 resources, operator_id, operator_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?)
             """;
 
     private static final String UPDATE_STATUS_SQL = """
@@ -138,8 +138,8 @@ public class JdbcSkillStore implements SkillStore {
 
     private static final String REFRESH_FROM_SNAPSHOT_SQL = """
             UPDATE skl_skills
-            SET description = ?, frontmatter = ?::jsonb, content = ?, version = ?,
-                operator_id = ?, operator_name = ?, updated_at = CURRENT_TIMESTAMP
+            SET description = ?, frontmatter = ?::jsonb, content = ?, resources = ?::jsonb,
+                version = ?, operator_id = ?, operator_name = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """;
 
@@ -186,7 +186,8 @@ public class JdbcSkillStore implements SkillStore {
         jdbcTemplate.batchUpdate(INSERT_SQL, records.stream().map(record -> new Object[] {
                 record.id(), record.name(), record.description(), record.sourcePackage(),
                 record.version(), record.status().getCode(), jsonOf(record.frontmatter()),
-                record.content(), record.operatorId(), record.operatorName()
+                record.content(), jsonOf(record.resources()),
+                record.operatorId(), record.operatorName()
         }).toList());
     }
 
@@ -278,8 +279,8 @@ public class JdbcSkillStore implements SkillStore {
     @Override
     public void refreshFromSnapshot(long id, ParsedSkill skill, String version, Operator operator) {
         jdbcTemplate.update(REFRESH_FROM_SNAPSHOT_SQL, skill.description(),
-                jsonOf(skill.frontmatter()), skill.content(), version,
-                operator.id(), operator.name(), id);
+                jsonOf(skill.frontmatter()), skill.content(), jsonOf(skill.resources()),
+                version, operator.id(), operator.name(), id);
     }
 
     @Override
@@ -306,10 +307,11 @@ public class JdbcSkillStore implements SkillStore {
                 BaseEnum.requireByCode(SkillStatus.class, rs.getInt(6)),
                 frontmatterOf(rs.getString(7)),
                 rs.getString(8),
-                rs.getString(9),
+                resourcesOf(rs.getString(9)),
                 rs.getString(10),
+                rs.getString(11),
                 // LEFT JOIN 包表：无包行即 null（未检查过），非 false
-                rs.getObject(11, Boolean.class));
+                rs.getObject(12, Boolean.class));
     }
 
     private Map<String, Object> frontmatterOf(String json) throws SQLException {
@@ -319,6 +321,16 @@ public class JdbcSkillStore implements SkillStore {
         catch (JsonProcessingException e) {
             // 库内 JSONB 即安装时写入的解析态，读不回是存储腐坏——如实炸出
             throw new SQLException("技能 frontmatter 解析失败", e);
+        }
+    }
+
+    /** scripts 资源面 JSONB → map（#253；读不回＝存储腐坏，与 frontmatter 同律炸出）。 */
+    private Map<String, String> resourcesOf(String json) throws SQLException {
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() { });
+        }
+        catch (JsonProcessingException e) {
+            throw new SQLException("技能 resources 解析失败", e);
         }
     }
 

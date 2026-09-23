@@ -25,6 +25,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param statusName    状态名（直读展示）
  * @param frontmatter   SKILL.md frontmatter 全量（解析态键值，含 name/description）
  * @param content       SKILL.md 正文（frontmatter 剥离后全文）
+ * @param resources     scripts/ 资源面（#253：技能目录相对路径 → 内容全文——
+ *                      脚本是注入面，审核须可读；无 scripts／内置技能恒空 map）
  * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
  *                      内置与未管理过为 null——#248 落痕）
  * @param operatorName  最近管理动作操作者名（直读展示；内置与未管理过为 null）
@@ -49,6 +51,10 @@ public record BackofficeSkillDetailResponse(
         Map<String, Object> frontmatter,
         @Schema(description = "SKILL.md 正文（frontmatter 剥离后全文，审核承载面）")
         String content,
+        @Schema(description = "scripts/ 资源面（#253：技能目录相对路径 → 文件内容全文，"
+                + "与运行时注入面同源；无 scripts／内置技能恒空对象）",
+                example = "{\"scripts/run-tests.sh\": \"#!/bin/bash\\nset -e\\n\"}")
+        Map<String, String> resources,
         @Schema(description = "最近管理动作操作者 id（安装＝装者、启停＝最近动作者；"
                 + "内置为 null）", example = "700200")
         String operatorId,
@@ -73,12 +79,13 @@ public record BackofficeSkillDetailResponse(
                 record.status().getName(),
                 record.frontmatter(),
                 record.content(),
+                record.resources(),
                 record.operatorId(),
                 record.operatorName(),
                 record.updateAvailable());
     }
 
-    /** 内置技能 → 详情（来源＝内置；来源包/版本标识无、状态恒启用）。 */
+    /** 内置技能 → 详情（来源＝内置；来源包/版本标识无、状态恒启用、resources 恒空）。 */
     public static BackofficeSkillDetailResponse builtin(BuiltinSkill skill) {
         return new BackofficeSkillDetailResponse(
                 BackofficeSkillSummaryResponse.builtinId(skill.name()),
@@ -92,6 +99,7 @@ public record BackofficeSkillDetailResponse(
                 SkillStatus.ENABLED.getName(),
                 skill.frontmatter(),
                 skill.content(),
+                Map.of(),
                 null,
                 null,
                 null);

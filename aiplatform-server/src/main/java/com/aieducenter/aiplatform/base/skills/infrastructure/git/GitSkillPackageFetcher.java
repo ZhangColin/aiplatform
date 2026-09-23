@@ -1,16 +1,24 @@
 package com.aieducenter.aiplatform.base.skills.infrastructure.git;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -32,12 +40,14 @@ import io.agentscope.core.skill.AgentSkill;
 import io.agentscope.core.skill.util.SkillUtil;
 
 /**
- * git CLI 子进程快照拉取（#248 快照安装＋#250 更新检查）：{@code git clone} 到
- * 临时目录 → {@code rev-parse HEAD} 取装时版本 → 扫描全部 SKILL.md 经 agentscope
- * {@link SkillUtil} 解析（与内置目录同一管道——审核面所见即运行时注入面），
- * 拉完即删工作副本；远端前进探查走 {@code ls-remote} 只读不落盘。照
- * {@code DockerEnvironmentBackend} 先例走 CLI 子进程（弱化实现起步）；超时
- * destroyForcibly 强杀——网络挂起不拖死请求线程（容器 clone 卡 TCP 的教训，#168）。
+ * git CLI 子进程快照拉取（#248 快照安装＋#250 更新检查＋#253 scripts 资源）：
+ * {@code git clone} 到临时目录 → {@code rev-parse HEAD} 取装时版本 → 扫描全部
+ * SKILL.md 经 agentscope {@link SkillUtil} 解析（与内置目录同一管道——审核面所见
+ * 即运行时注入面）＋逐技能采集 {@code scripts/} 子树进资源面（
+ * {@link ParsedSkill#resources()}，ADR-0021 内容面 c），拉完即删工作副本；远端
+ * 前进探查走 {@code ls-remote} 只读不落盘。照 {@code DockerEnvironmentBackend}
+ * 先例走 CLI 子进程（弱化实现起步）；超时 destroyForcibly 强杀——网络挂起不拖死
+ * 请求线程（容器 clone 卡 TCP 的教训，#168）。
  *
  * <p>认证走宿主 git 全局配置（HTTPS credential helper／SSH agent）；
  * {@code GIT_TERMINAL_PROMPT=0} 禁交互提示——需凭据即速败，不挂等到超时。</p>
@@ -49,6 +59,15 @@ public class GitSkillPackageFetcher implements SkillPackageFetcher {
     private static final Logger logger = LoggerFactory.getLogger(GitSkillPackageFetcher.class);
 
     private static final String SKILL_FILE_NAME = "SKILL.md";
+
+    /** scripts 资源目录名（agentskills 规范位——技能目录下 scripts/ 子树）。 */
+    private static final String SCRIPTS_DIR_NAME = "scripts";
+
+    /** 单资源上限：1MiB（框架 SkillManageTool 同款上限——超限跳过＋告警，不拦安装）。 */
+    private static final long MAX_RESOURCE_BYTES = 1024 * 1024;
+
+    /** 二进制资源存值前缀（框架物化面 SkillBox/MarketplaceStager 原生解码的约定）。 */
+    private static final String BASE64_PREFIX = "base64:";
 
     /** 克隆超时：技能仓库量级小（42 技能的 matt 包在 MB 级），两分钟足够宽。 */
     private static final Duration CLONE_TIMEOUT = Duration.ofMinutes(2);
@@ -146,7 +165,69 @@ public class GitSkillPackageFetcher implements SkillPackageFetcher {
             throw new ApplicationException(SkillMessage.SKILL_MD_INVALID);
         }
         return new ParsedSkill(skill.getName(), skill.getDescription(),
-                skill.getMetadata(), skill.getSkillContent());
+                skill.getMetadata(), skill.getSkillContent(), scanScripts(skillMd.getParent()));
+    }
+
+    /**
+     * scripts/ 资源采集（#253 安装内容面补课，ADR-0021 内容面 c）：技能目录
+     * {@code scripts/} 子树 → 框架 {@code AgentSkill.resources} 同形 map（键＝
+     * 技能目录相对路径、正斜杠；路径序稳定同 SKILL.md 扫描律）。无 scripts 目录
+     * 即空 map（纯 Markdown 技能不受影响）。三面纪律：隐藏段跳过（与仓库扫描
+     * 同律）；符号链接不跟（NOFOLLOW——防链接逃出克隆目录把宿主文件读进库）；
+     * 单文件超 {@link #MAX_RESOURCE_BYTES}（框架 SkillManageTool 同上限）跳过
+     * ＋告警（巨型文件几近误放的二进制资产，不拦安装——审核面可见实收集）。非
+     * UTF-8 按框架 {@code base64:} 前缀约定存（物化面原生解码）。技能目录被
+     * 排除即整支不入快照（排除语义与 SKILL.md 条目同轨，无需在此复读）。
+     */
+    private static Map<String, String> scanScripts(Path skillDir) {
+        Path scriptsDir = skillDir.resolve(SCRIPTS_DIR_NAME);
+        if (!Files.isDirectory(scriptsDir)) {
+            return Map.of();
+        }
+        Map<String, String> resources = new TreeMap<>();
+        try (Stream<Path> paths = Files.walk(scriptsDir)) {
+            for (Path path : paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> !hiddenSegment(scriptsDir, path))
+                    .sorted()
+                    .toList()) {
+                if (Files.size(path) > MAX_RESOURCE_BYTES) {
+                    logger.warn("scripts 资源超限跳过（>{} 字节）: {}", MAX_RESOURCE_BYTES, path);
+                    continue;
+                }
+                String key = SCRIPTS_DIR_NAME + "/"
+                        + scriptsDir.relativize(path).toString().replace(File.separatorChar, '/');
+                resources.put(key, encodeResource(Files.readAllBytes(path)));
+            }
+        }
+        catch (IOException e) {
+            logger.warn("scripts 资源扫描失败: {} ({})", scriptsDir, e.getMessage());
+            throw new ApplicationException(SkillMessage.SKILL_REPOSITORY_CLONE_FAILED);
+        }
+        return resources;
+    }
+
+    /** 隐藏段（.git、.hidden.sh 等）命中即不入快照——与仓库扫描同律。 */
+    private static boolean hiddenSegment(Path scriptsDir, Path path) {
+        for (Path segment : scriptsDir.relativize(path)) {
+            if (segment.toString().startsWith(".")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 资源内容编码：UTF-8 严格解码成功即文本直存；否则框架 base64: 前缀约定。 */
+    private static String encodeResource(byte[] bytes) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        }
+        catch (CharacterCodingException e) {
+            return BASE64_PREFIX + Base64.getEncoder().encodeToString(bytes);
+        }
     }
 
     /**

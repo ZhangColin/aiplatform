@@ -28,6 +28,8 @@ import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppServ
 import com.jayway.jsonpath.JsonPath;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
+import static org.hamcrest.Matchers.anEmptyMap;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.everyItem;
@@ -45,6 +47,8 @@ import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSkillRepositorySupplier;
 import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
+
+import io.agentscope.core.skill.AgentSkill;
 
 /**
  * 技能库两端点（#247 读面＋#248 写口）在 {@code #152} seam 上全绿：真过滤链
@@ -93,6 +97,17 @@ import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.Pro
  * （动态查库、非装配时固化）＋停用即时退出装配候选；</li>
  * <li><b>卸载守卫接真</b>：有指派在身（任一槽位）卸载 409 SKL_008、解绑后可卸；</li>
  * <li><b>鉴权</b>：指派面非签名请求被拒（401）。</li>
+ * </ul>
+ *
+ * <p>#253 scripts 资源面（安装内容面补课，ADR-0021 内容面 c）三面钉死：</p>
+ * <ul>
+ * <li><b>安装同轨</b>：fixture 仓库带 scripts（含嵌套子目录）——随快照入
+ * JSONB 列（库列直查）＋无 scripts 技能空 map 同轨＋详情审核面全文可读
+ * （内置恒空）；</li>
+ * <li><b>装配开放面</b>：同一技能 executor 槽（有 shell）装配带 resources、
+ * main 槽（禁 shell）结构性空（a-only）——缝 2 真链路断言；</li>
+ * <li><b>更新/卸载同轨</b>：远端 scripts 演进（改/增/删）显式更新后库列/
+ * 审核面/装配面三面同见新版（指派跨更新保留）；卸载行删即净、详情 404。</li>
  * </ul>
  *
  * <p>#250 更新检查与显式更新五面钉死（fixture 仓库追加 commit 模拟远端前进
@@ -171,6 +186,9 @@ class BackofficeSkillSeamTest {
                     "双轴并行审查——规范轴与需求轴互为对照。", "先对规范、再对需求，两轴结论合并呈报。");
             writeSkill(repo, "engineering/tdd", "tdd",
                     "测试先行红绿重构。", "红绿重构循环——先写失败测试，再最小实现，最后重构。");
+            // #253 scripts 资源面：tdd 带脚本（含嵌套子目录），code-review 不带——两形同钉
+            writeScript(repo, "engineering/tdd/scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
+            writeScript(repo, "engineering/tdd/scripts/lib/helper.py", "print('helper')\n");
             writeSkill(repo, "deprecated/legacy-flow", "legacy-flow",
                     "已废弃的旧流程技能。", "此技能应被安装排除段挡在库外。");
         });
@@ -667,7 +685,129 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.name").value("tdd"));
     }
 
+    // ---------- #253 scripts 资源：随快照入库＋审核面可见＋卸载同轨 ----------
+
+    @Test
+    void given_fixture_with_scripts_when_signed_install_then_resources_persisted_and_auditable()
+            throws Exception {
+        var ids = installFixtureAndReturnIds("tdd", "code-review");
+        String tddId = ids.get("tdd");
+        String reviewId = ids.get("code-review");
+
+        // 库列直查：scripts 随快照入 JSONB（键＝技能目录相对路径，值＝文件原文）；
+        // 无 scripts 的技能（code-review）空 map 同轨入库
+        assertThat(resourcesOf(tddId))
+                .containsOnly(
+                        entry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n"),
+                        entry("scripts/lib/helper.py", "print('helper')\n"));
+        assertThat(resourcesOf(reviewId)).isEmpty();
+
+        // 审核面（详情）：resources 全文可读——脚本是注入面，所见即注入面
+        signedGet("/api/backoffice/skills/" + tddId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resources['scripts/run-tests.sh']")
+                        .value("#!/bin/bash\nset -e\n"))
+                .andExpect(jsonPath("$.data.resources['scripts/lib/helper.py']")
+                        .value("print('helper')\n"));
+        signedGet("/api/backoffice/skills/" + reviewId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resources").value(anEmptyMap()));
+        // 内置技能详情：resources 恒空（classpath 无 scripts 面）
+        signedGet("/api/backoffice/skills/builtin:prd-writing")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resources").value(anEmptyMap()));
+
+        // 装配面开放（ADR-0021 内容面 c，缝 2 真链路）：executor 槽（有 shell）指派
+        // 后 resources 随装配可见；main 槽（禁 shell）同一技能 resources 结构性空
+        // ——主智能体拿不到（a-only）
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+        AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
+        assertThat(assemblyResources(AgentProfile.EXECUTOR.key(), dev, "tdd"))
+                .containsOnly(
+                        entry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n"),
+                        entry("scripts/lib/helper.py", "print('helper')\n"));
+        assertThat(assemblyResources(AgentProfile.MAIN.key(), dev, "tdd")).isEmpty();
+
+        // 解绑后卸载（有指派守卫同轨——先解绑再卸）：行删即净（资源是行内容面、
+        // 随快照物删除）——详情即 404
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME).andExpect(status().isOk());
+        signedPutAssignments("main", OPERATOR_ID, OPERATOR_NAME).andExpect(status().isOk());
+        signedDelete("/api/backoffice/skills/" + tddId).andExpect(status().isOk());
+        signedGet("/api/backoffice/skills/" + tddId)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(SKILL_NOT_FOUND_CODE));
+        Integer resourcesLeft = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM skl_skills WHERE name = 'tdd'"
+                        + " AND resources::text LIKE '%run-tests.sh%'", Integer.class);
+        assertThat(resourcesLeft).as("卸载后 scripts 资源随行净").isZero();
+    }
+
+    /** 库行 resources JSONB 直读（#253：安装落库事实面）。 */
+    private Map<String, String> resourcesOf(String id) {
+        String json = jdbcTemplate.queryForObject(
+                "SELECT resources::text FROM skl_skills WHERE id = ?",
+                String.class, Long.parseLong(id));
+        return JsonPath.read(json, "$");
+    }
+
+    /** 装配面资源视图（#253 缝 2）：该配置键并集面里指定技能的 resources。 */
+    private Map<String, String> assemblyResources(String agentKey, AgentWorkspace workspace,
+            String skillName) {
+        return skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace).stream()
+                .flatMap(repo -> repo.getAllSkills().stream())
+                .filter(skill -> skill.getName().equals(skillName))
+                .findFirst()
+                .map(AgentSkill::getResources)
+                .orElse(null);
+    }
+
     // ---------- #250 更新检查与显式更新：检查轮→标记→更新→留痕 ----------
+
+    @Test
+    void given_scripts_evolved_remote_when_signed_update_then_resources_refreshed_same_track()
+            throws Exception {
+        Path repo = buildDynamicRepo("skill-scripts-update", r -> {
+            writeSkill(r, "engineering/tdd", "tdd", "测试先行红绿重构。", "红绿重构循环。");
+            writeScript(r, "engineering/tdd/scripts/run-tests.sh", "#!/bin/bash\necho v1\n");
+            writeScript(r, "engineering/tdd/scripts/retire.sh", "#!/bin/bash\necho 即将退役\n");
+        });
+        String tddId = installAndReturnIds(repo).get("tdd");
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
+
+        // 远端前进：改脚本内容＋新增脚本＋删除退役脚本（scripts 三面演进）
+        appendCommit(repo, r -> {
+            writeScript(r, "engineering/tdd/scripts/run-tests.sh", "#!/bin/bash\necho v2\n");
+            writeScript(r, "engineering/tdd/scripts/new.sh", "#!/bin/bash\necho new\n");
+            Files.delete(r.resolve("engineering/tdd/scripts/retire.sh"));
+        });
+        String newSha = git(repo, "rev-parse", "HEAD").trim();
+
+        // 显式更新：scripts 与 SKILL.md 条目同轨翻新——同名行原地刷新（id/指派保留）、
+        // 消失脚本退场、新增脚本入场（内容面扩展：翻新与正文同一条 UPDATE）
+        signedPostUpdate(repo.toString(), OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.skills", hasSize(1)))
+                .andExpect(jsonPath("$.data.skills[0].id").value(tddId))
+                .andExpect(jsonPath("$.data.skills[0].version").value(newSha));
+        assertThat(resourcesOf(tddId))
+                .containsOnly(
+                        entry("scripts/run-tests.sh", "#!/bin/bash\necho v2\n"),
+                        entry("scripts/new.sh", "#!/bin/bash\necho new\n"));
+
+        // 审核面与装配面同见新版（指派跨更新保留——id 未变；动态查库视图即新值）
+        signedGet("/api/backoffice/skills/" + tddId)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.resources['scripts/run-tests.sh']")
+                        .value("#!/bin/bash\necho v2\n"))
+                .andExpect(jsonPath("$.data.resources['scripts/new.sh']")
+                        .value("#!/bin/bash\necho new\n"));
+        assertThat(assemblyResources(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "tdd"))
+                .containsOnly(
+                        entry("scripts/run-tests.sh", "#!/bin/bash\necho v2\n"),
+                        entry("scripts/new.sh", "#!/bin/bash\necho new\n"));
+    }
 
     @Test
     void given_remote_advance_when_scan_then_marked_then_explicit_update_refreshes()
@@ -970,6 +1110,18 @@ class BackofficeSkillSeamTest {
             Path skillDir = repo.resolve(dir);
             Files.createDirectories(skillDir);
             Files.writeString(skillDir.resolve("SKILL.md"), skillMd);
+        }
+        catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 技能脚本夹具（#253）：技能目录 scripts/ 子树落文件（含嵌套目录）。 */
+    private static void writeScript(Path repo, String relative, String content) {
+        try {
+            Path target = repo.resolve(relative);
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, content, StandardCharsets.UTF_8);
         }
         catch (IOException e) {
             throw new IllegalStateException(e);

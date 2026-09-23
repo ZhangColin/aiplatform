@@ -42,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>技能域更新面（#250）：清单行 updateAvailable 标记语义（有新版/未检查/
  *       永不自动跟新）；SkillUpdateCommand.sourcePackage 取值口径（清单行原值）；
  *       更新回执 from/to 版本与留痕读面自描述。</li>
+ *   <li>技能域 scripts 资源面（#253）：详情行 resources 自描述（技能目录相对
+ *       路径 → 内容全文，与运行时注入面同源；无 scripts／内置恒空对象）。</li>
  *   <li>智能体运营配置面（#251，project 分组）：覆盖态终态语义（null/缺省＝清空
  *       回落枚举默认）、覆盖标记与默认预览、留痕 old/new 快照对自描述。</li>
  *   <li>工具面清单与开关（#252，project 分组）：kind 三值对照（开关判定正本）、
@@ -181,6 +183,24 @@ class SpringDocBackofficeContractTest {
                 .as("source 应带取值对照")
                 .contains("1=内置")
                 .contains("2=安装");
+    }
+
+    @Test
+    void given_skill_detail_schema_when_read_group_then_resources_self_described() throws Exception {
+        // #253：scripts 资源面入详情 schema——键＝技能目录相对路径、值＝内容全文，
+        // 与运行时注入面同源（审核面所见即注入面）；无 scripts／内置恒空对象
+        JsonNode skills = fetchGroup("skills");
+        JsonNode resources = property(skills, "BackofficeSkillDetailResponse", "resources");
+        assertThat(resources.path("type").asText(null))
+                .as("resources 应渲染 type=object（路径→内容 map）")
+                .isEqualTo("object");
+        assertThat(resources.path("description").asText(""))
+                .as("resources 应自描述 scripts 资源面口径")
+                .contains("scripts/")
+                .contains("注入面");
+        assertThat(exampleText(resources))
+                .as("resources 应附示例")
+                .isNotBlank();
     }
 
     @Test

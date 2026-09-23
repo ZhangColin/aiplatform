@@ -127,6 +127,38 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(repos.get(1).getSkill("prd-writing").getSource()).isEqualTo("竞品对照包");
     }
 
+    // ---------- #253 scripts 开放面：有 shell 的槽位带资源，主智能体结构性 a-only ----------
+
+    @Test
+    void given_scripts_in_record_when_assembled_then_shell_slots_carry_resources_main_empty() {
+        // 同一技能三槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
+        skillStore.assign(SkillSlot.MAIN, recordWithScripts(101, "tdd", "matt 包"));
+        skillStore.assign(SkillSlot.EXECUTOR, recordWithScripts(102, "tdd", "matt 包"));
+        skillStore.assign(SkillSlot.SUBAGENT, recordWithScripts(103, "tdd", "matt 包"));
+
+        ProfileSkillRepositorySupplier supplier = supplier();
+        AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
+
+        // executor 槽（容器内 shell）：scripts 随装配面发放——load 工具可读、写盘可跑
+        AgentSkill executorSkill = supplier
+                .skillRepositoriesFor(AgentProfile.EXECUTOR.key(), dev).get(0).getSkill("tdd");
+        assertThat(executorSkill.getResources())
+                .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
+
+        // subagent 槽（self-test 白名单含跑测试命令的 shell）：同开
+        AgentSkill subagentSkill = supplier
+                .skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME, dev).get(0)
+                .getSkill("tdd");
+        assertThat(subagentSkill.getResources())
+                .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
+
+        // main 槽（ProjectReadOnly 禁 shell）：结构性 a-only——resources 恒空，
+        // load 工具枚举无 scripts 入口，拿不到
+        AgentSkill mainSkill = supplier
+                .skillRepositoriesFor(AgentProfile.MAIN.key(), dev).get(1).getSkill("tdd");
+        assertThat(mainSkill.getResources()).isEmpty();
+    }
+
     // ---------- 行为回归锚：内置七章节（#94 起保持） ----------
 
     @Test
@@ -152,7 +184,15 @@ class ProfileSkillRepositorySupplierTest {
     private static SkillRecord record(long id, String name, String sourcePackage) {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
                 SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
-                "正文", null, null, null);
+                "正文", Map.of(), null, null, null);
+    }
+
+    /** 带 scripts 资源面的条目（#253 开放面夹具）。 */
+    private static SkillRecord recordWithScripts(long id, String name, String sourcePackage) {
+        return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
+                SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
+                "正文", Map.of("scripts/run-tests.sh", "#!/bin/bash\nset -e\n"),
+                null, null, null);
     }
 
     /**
@@ -173,7 +213,8 @@ class ProfileSkillRepositorySupplierTest {
             SkillRecord row = rows.get(id);
             rows.put(id, new SkillRecord(row.id(), row.name(), row.description(),
                     row.sourcePackage(), row.version(), status, row.frontmatter(),
-                    row.content(), row.operatorId(), row.operatorName(), row.updateAvailable()));
+                    row.content(), row.resources(), row.operatorId(), row.operatorName(),
+                    row.updateAvailable()));
         }
 
         void unassign(SkillSlot slot, long id) {

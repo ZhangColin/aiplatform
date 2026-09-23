@@ -2917,6 +2917,15 @@ export interface components {
             /** @description SKILL.md 正文（frontmatter 剥离后全文，审核承载面） */
             content?: string;
             /**
+             * @description scripts/ 资源面（#253：技能目录相对路径 → 文件内容全文，与运行时注入面同源；无 scripts／内置技能恒空对象）
+             * @example {
+             *       "scripts/run-tests.sh": "#!/bin/bash\nset -e\n"
+             *     }
+             */
+            resources?: {
+                [key: string]: string;
+            };
+            /**
              * @description 最近管理动作操作者 id（安装＝装者、启停＝最近动作者；内置为 null）
              * @example 700200
              */

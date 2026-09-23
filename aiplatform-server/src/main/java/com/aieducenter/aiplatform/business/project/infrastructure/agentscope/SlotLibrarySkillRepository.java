@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.infrastructure.agentscope;
 
 import java.util.List;
+import java.util.Map;
 
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillRecord;
@@ -50,7 +51,7 @@ public class SlotLibrarySkillRepository implements AgentSkillRepository {
     @Override
     public List<AgentSkill> getAllSkills() {
         return skillStore.findEnabledAssigned(slot).stream()
-                .map(SlotLibrarySkillRepository::of)
+                .map(record -> of(record, slot.hasShell()))
                 .toList();
     }
 
@@ -90,14 +91,23 @@ public class SlotLibrarySkillRepository implements AgentSkillRepository {
         return false;
     }
 
-    /** 库条目 → 框架技能（解析态直映射——name/description 冗余列直读，来源＝来源包；
-     *  name/description 在 metadata 之后设置：builder 的 metadata() 整体替换 map）。 */
-    private static AgentSkill of(SkillRecord record) {
+    /**
+     * 库条目 → 框架技能（解析态直映射——name/description 冗余列直读，来源＝来源包；
+     * name/description 在 metadata 之后设置：builder 的 metadata() 整体替换 map）。
+     *
+     * <p>scripts 资源面（#253，ADR-0021 内容面 c）：仅 {@code shellOpen}（槽位
+     * {@link SkillSlot#hasShell()}）时随装配发放——框架 resources 通路（load 工具
+     * 可读、物化面可落盘）对有 shell 的槽位开放；无 shell 槽位（主智能体
+     * ProjectReadOnly）resources 恒空——load 工具枚举无 scripts 入口，结构性
+     * 拿不到（a-only）。</p>
+     */
+    private static AgentSkill of(SkillRecord record, boolean shellOpen) {
         return AgentSkill.builder()
                 .metadata(record.frontmatter())
                 .name(record.name())
                 .description(record.description())
                 .skillContent(record.content())
+                .resources(shellOpen ? record.resources() : Map.of())
                 .source(record.sourcePackage())
                 .build();
     }

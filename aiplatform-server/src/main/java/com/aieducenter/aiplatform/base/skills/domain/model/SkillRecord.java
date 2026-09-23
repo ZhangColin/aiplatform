@@ -7,7 +7,8 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 /**
  * 技能库条目读模型（#247 管理读面）：{@code skl_skills} 一行的呈现——安装时
  * 固化的快照（来源包＋版本标识＝装时 commit），内容面为解析态（frontmatter
- * 全量＋正文），审核面所见即运行时注入面。
+ * 全量＋正文）＋ scripts/ 资源面（#253，ADR-0021 内容面 c），审核面所见即
+ * 运行时注入面。
  *
  * @param id            条目标识（TSID，安装时生成；管理端点 URL 柄）
  * @param name          技能名（frontmatter name；与来源包合成唯一键）
@@ -17,6 +18,9 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
  * @param status        技能状态（1=启用 2=停用）
  * @param frontmatter   SKILL.md frontmatter 全量（解析态，含 name/description）
  * @param content       SKILL.md 正文（frontmatter 剥离后全文）
+ * @param resources     scripts/ 资源面（#253：技能目录相对路径 → 内容，与框架
+ *                      {@code AgentSkill.resources} 同形；无 scripts 即空 map——
+ *                      存量行 V20 回填空面）
  * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
  *                      未管理过为 null——#248 落痕口径）
  * @param operatorName  最近管理动作操作者名（直读展示；未管理过为 null）
@@ -33,6 +37,7 @@ public record SkillRecord(
         SkillStatus status,
         Map<String, Object> frontmatter,
         String content,
+        Map<String, String> resources,
         String operatorId,
         String operatorName,
         Boolean updateAvailable) {

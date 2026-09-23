@@ -4,6 +4,96 @@
  */
 
 export interface paths {
+    "/api/backoffice/skills/assignments/{slot}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 槽位指派读面（三职能槽位各自独立）
+         * @description 该职能槽位当前指派的技能清单（与技能清单行共形、含停用行——启停是可逆开关指派关系随行保留，运营可见「指派了但已停用」实态；停用行不参与装配合成）。槽位三把：main=主智能体 / executor=run 执行体 / subagent=子智能体，未知槽位 404 SKL_010。装配生效语义（ADR-0021）：装配合成＝内置∪该槽位已指派且启用，动态查库——指派/启停变更后智能体下一轮自然生效、进行中 run 不定格不打断。回执与 PUT 同形。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_010 — 职能槽位不存在
+         */
+        get: operations["slotAssignments"];
+        /**
+         * 槽位指派整包替换（清单即终态）
+         * @description PUT 全量语义：skillIds 即该槽位终态（未列入即解绑、空清单＝清空），支持整包批量勾选（admin 侧按来源包勾满后送全量）。指派目标只收安装库行 TSID 柄：内置 builtin: 柄不可指派（400 SKL_011——内置随平台发版，装配按配置挂载）；未寻址/畸形 TSID 404 SKL_001（先卸载后指派的不变窗口同语义）。X-User-Id/X-User-Name 透传头落痕（整包替换留最近动作者，缺头 400 SKL_009）。槽位寻址同 GET（未知 404 SKL_010）。生效语义＝动态查库：变更后下一轮自然生效，不新增智能体实例（工厂缓存键不含技能集）。回执＝替换后读面（与 GET 同形）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         *     - 400 SKL_009 — 操作者不能为空
+         *     - 404 SKL_010 — 职能槽位不存在
+         *     - 400 SKL_011 — 内置技能不可指派（内置随平台发版，装配合成按配置挂载，无需指派）
+         */
+        put: operations["assignSlot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/agent-tools/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 增强工具开关（窄幅：关即退出装配面、开即回归）
+         * @description 按工具注册名窄幅开关，仅增强工具（web_search=联网搜索 / fetch_url=网页抓取）接受：enabled=false 该工具退出对应槽位装配面（模型不可见），true 回归——动态生效：下一轮命令构建即新装配（工厂缓存键含工具面规格，进行中 run 不定格）。变更走配置留痕（与智能体配置同机制：值面有动才落痕、幂等回执零写入、回滚＝旧值写回）。骨架工具（问答/PRD 落库/计划/收口信号等编排链路件）与 harness 内建编码工具结构性锁死——接口层明确拒绝（403 PRJ_036，编排权不下放配置）；未知工具名 404 PRJ_035（清单读面即全集）。enabled 必填（无缺省翻转语义，缺即 400 PRJ_037）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_035 — 工具不存在（工具面按注册名寻址，清单读面即全集）
+         *     - 403 PRJ_036 — 该工具不开放开关（骨架/harness 内建结构性锁死——编排权不下放配置）
+         *     - 400 PRJ_037 — 开关目标态必填（enabled=true/false）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        put: operations["toggle"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/agent-configs/{agentKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 智能体配置读面（生效值＋覆盖标记＋默认预览）
+         * @description 该智能体生效配置：systemPrompt／模型档位生效值（库覆盖值或枚举默认——装配实取值）＋覆盖标记（systemPromptOverridden/modelIdOverridden，运营要看到「现在跑的是覆盖还是默认」）＋枚举默认预览（defaultSystemPrompt/defaultModelId——清空覆盖即落此值，恢复默认前可先看落点）＋增强工具开关存储态（webSearchEnabled/fetchUrlEnabled，#252 起生效装配——工具面清单与窄幅开关另见 /agent-tools 两端点）＋最近写者。无覆盖行＝全回落（覆盖标记 false、写者 null）。寻址稳定键两把：main=主智能体 / executor=run 执行体；classify/naming 等一次性判定不属配置面——未知键 404 PRJ_033。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor 两座智能体）
+         */
+        get: operations["config"];
+        /**
+         * 智能体配置全量写（覆盖态终态＋变更留痕）
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位名不做白名单校验（错值致新会话失败经留痕写回可回滚）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor 两座智能体）
+         *     - 400 PRJ_034 — 操作者不能为空
+         */
+        put: operations["update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -442,6 +532,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/skills/{id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 启用技能（恢复装配候选）
+         * @description 停用的可逆侧：恢复参与装配合成。X-User-Id/X-User-Name 透传头自动落痕（口径同 disable，缺头 400 SKL_009）。重复启用幂等。寻址与 404 语义同 disable（TSID 柄；内置柄 404）。回执＝翻转后清单行。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         *     - 400 SKL_009 — 操作者不能为空
+         */
+        post: operations["enable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 停用技能（可逆开关）
+         * @description 退出装配候选（装配合成只收启用行）、不丢库行；误伤可经 enable 恢复。X-User-Id/X-User-Name 透传头自动落痕（最近管理动作操作者）——缺头 400 SKL_009（技能库写操作必留痕，知识治理同款无落空通道）。重复停用幂等（操作者留最近一次）。寻址 TSID 柄；内置技能非库行无状态迁移——builtin: 柄/畸形柄/未寻址 TSID 同语义 404 SKL_001。回执＝翻转后清单行。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         *     - 400 SKL_009 — 操作者不能为空
+         */
+        post: operations["disable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 显式更新技能包（重拉快照＋版本留痕）
+         * @description 按来源包整体重拉快照入库（ADR-0021：更新永远显式点，平台永不自动跟新远端——清单「有新版」标记只提示、不动作）。sourcePackage 取清单行原值回传（服务端再规范化，同源身份单源）；排除名单＝装时持久化口径（更新不还魂装时排除的目录）。翻新语义：同名行原地翻新（id/状态/指派跨更新保留——TSID 柄稳定）、新技能插入（启用）、远端已删行移除——移除有指派在身的技能整体拒绝（409 SKL_013，先解绑再更新）。远端未前进＝幂等回执（from==to、不落痕不写行）。每次前进必留版本痕（from→to＋操作者，经 update-traces 可查）。X-User-Id/X-User-Name 透传头落痕（缺头 400 SKL_009）。失败族：来源包空 400 SKL_014、未安装 404 SKL_012、克隆失败/超时 502 SKL_004、远端未解析到技能 400 SKL_005、包内重名 400 SKL_007。回执＝from/to 版本＋被移除技能名＋更新后终态行集。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 502 SKL_004 — 技能仓库克隆失败
+         *     - 400 SKL_005 — 仓库未解析到任何技能（无 SKILL.md 或全部被排除）
+         *     - 400 SKL_007 — 同一仓库内存在重名技能
+         *     - 400 SKL_009 — 操作者不能为空
+         *     - 404 SKL_012 — 来源包未安装（更新寻址已装来源包，未装先走安装）
+         *     - 409 SKL_013 — 更新将移除有指派在身的技能，先解绑再更新
+         *     - 400 SKL_014 — 来源包标识不能为空（取清单行 sourcePackage 值）
+         */
+        post: operations["update_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 安装技能包（git 仓库快照固化）
+         * @description 装时 clone 解析全部 SKILL.md 固化入库（ADR-0021 快照安装，不订阅远端）：来源包＝规范化仓库地址（trim、去尾斜杠与 .git——同源去重键）、版本标识＝装时 HEAD commit（快照锚）、状态＝启用、操作者＝装者（X-User-Id/X-User-Name 透传头，缺头 400 SKL_009）。excludeDirs 可勾选排除目录段：技能的仓库相对路径任一段命中即不入库（如 deprecated 类目整支排除；段名精确匹配）。解析管道与内置同源（审核面所见即运行时注入面）。失败 fail-fast 整体不入库：地址空 400 SKL_002、同源重复安装 409 SKL_003（更新走显式更新动作）、克隆失败/超时 502 SKL_004、未解析到技能400 SKL_005、SKILL.md 不合格 400 SKL_006、包内重名 400 SKL_007。回执＝本次装入的条目清单（清单行同形）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 SKL_002 — 安装仓库地址不能为空
+         *     - 409 SKL_003 — 该技能仓库已安装过，不能重复安装（同源去重，更新走显式更新）
+         *     - 502 SKL_004 — 技能仓库克隆失败
+         *     - 400 SKL_005 — 仓库未解析到任何技能（无 SKILL.md 或全部被排除）
+         *     - 400 SKL_006 — 仓库内 SKILL.md 不合格（须含 name、description 与正文）
+         *     - 400 SKL_007 — 同一仓库内存在重名技能
+         *     - 400 SKL_009 — 操作者不能为空
+         */
+        post: operations["install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/price-entries": {
         parameters: {
             query?: never;
@@ -620,7 +816,7 @@ export interface paths {
          *     - 404 KNW_005 — 知识素材不存在
          *     - 400 KNW_006 — 操作者不能为空
          */
-        post: operations["enable"];
+        post: operations["enable_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -644,7 +840,7 @@ export interface paths {
          *     - 404 KNW_005 — 知识素材不存在
          *     - 400 KNW_006 — 操作者不能为空
          */
-        post: operations["disable"];
+        post: operations["disable_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1074,6 +1270,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 技能清单（内置＋安装同权，不分页）
+         * @description 平台全部技能：内置（classpath 合成，来源=1）与库中安装（来源=2）同权呈现，空库时仍呈现内置技能。条目字段：名称、description、来源 code（1=内置 2=安装）与来源名、来源包（内置 null）、版本标识（装时 commit，内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——更新走显式 POST /update，平台永不自动跟新；null＝未检查过，内置恒 null）。排序服务端定死：内置在前（名称序）、安装在后（来源包、名称序）。技能库是有界目录（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
+        get: operations["skills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 技能详情（元数据＋frontmatter＋正文，审核面）
+         * @description 读全文判安装审核（注入面＋方法论重叠把关）：元数据（与清单行同形）＋ frontmatter 全量（解析态键值，含 name/description）＋正文全文（frontmatter 剥离后的 SKILL.md body）——所见即运行时注入面。id 取清单行原值（opaque 串两形制）。技能不存在（含未寻址内置名/TSID、畸形柄）404 SKL_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         */
+        get: operations["detail_3"];
+        put?: never;
+        post?: never;
+        /**
+         * 卸载技能（库行删除，不可逆）
+         * @description 快照行删除即彻底出库（快照物无历史不漂移约束）；清单/详情/装配均不可见。卸载守卫：有指派在身（任一职能槽位）的技能拒绝卸载（409 SKL_008，先解绑再卸）。无行可留不留痕（全局审计流水不建——admin 侧自有操作日志，知识删除同款）。回执＝删除前终态（确认移除了什么）。寻址 TSID 柄；内置技能不可卸——builtin: 柄/畸形柄/未寻址 TSID 同语义 404 SKL_001、重复卸载 404。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         *     - 409 SKL_008 — 技能有指派在身，先解绑再卸载
+         */
+        delete: operations["uninstall"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/update-traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 更新留痕读面（历史版本可查）
+         * @description 该来源包全部显式更新留痕（from→to 版本＋操作者＋时刻），按时间倒序（最近先）。append-only：卸载不删留痕——历史事实不随库行消失，装时版本经链条首个 from 回溯。sourcePackage 取清单行原值（必填，空/缺 400 SKL_014）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 SKL_014 — 来源包标识不能为空（取清单行 sourcePackage 值）
+         */
+        get: operations["updateTraces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects": {
         parameters: {
             query?: never;
@@ -1112,7 +1385,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
          */
-        get: operations["detail_3"];
+        get: operations["detail_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1333,7 +1606,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_4"];
+        get: operations["detail_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1404,7 +1677,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        get: operations["detail_5"];
+        get: operations["detail_6"];
         put?: never;
         post?: never;
         /**
@@ -1513,6 +1786,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/agent-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 工具面清单（按职能槽位列当前挂载工具）
+         * @description 排障/审计面：按职能槽位（main=主智能体 / executor=run 执行体 / subagent=子智能体，与技能槽位同键）列当前挂载工具。三呈现源：平台资产（骨架=编排链路＋项目事实只读件；增强=联网搜索/网页抓取，enabled 按运营配置生效态——false＝在册但退出装配面）、harness 内建编码工具（executor 槽，框架注册自省的呈现口径，不可开关；main 只读面结构性无）、子智能体声明工具面（self-test 哨兵 allowlist）。骨架与harness 内建结构性锁死（ADR-0021 编排权不下放配置），开关面只收增强两件。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
+        get: operations["inventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/agent-configs/{agentKey}/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 配置变更留痕读面（历史可查，回滚依据）
+         * @description 该智能体全部配置变更留痕，按时间倒序（最近先）。每痕＝一次实际变更（同值幂等重写不落痕）：变更前后全量值快照（old*\/new* 四件对——旧值快照即回滚写回的依据）＋操作者＋时刻。append-only：留痕不随任何动作删除，历史事实不随配置行消失。回滚＝把某痕旧值快照 PUT 回写（即一次新变更、留新痕）。寻址同 GET（未知键 404 PRJ_033）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor 两座智能体）
+         */
+        get: operations["traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/accounts/{externalId}": {
         parameters: {
             query?: never;
@@ -1580,6 +1899,182 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        SkillSlotAssignCommand: {
+            /**
+             * @description 指派技能柄全量清单（安装行 TSID 十进制串，整包替换语义——清单即终态，未列入即解绑；空清单＝清空该槽位；内置 builtin: 柄不可指派 400 SKL_011）
+             * @example [
+             *       "7600000000001",
+             *       "7600000000003"
+             *     ]
+             */
+            skillIds?: string[];
+        };
+        ApiResponseBackofficeSlotAssignmentResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSlotAssignmentResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 已指派技能清单行（与技能清单行共形，含停用行——停用行不参与装配合成；跨包同名列靠来源包区分） */
+        BackofficeSkillSummaryResponse: {
+            /**
+             * @description 技能柄（详情寻址，opaque 串两形制，勿做数值假设）：内置技能＝builtin:<技能名>，安装技能＝TSID 十进制串
+             * @example builtin:prd-writing
+             */
+            id?: string;
+            name?: string;
+            description?: string;
+            /**
+             * Format: int32
+             * @description 来源 code（1=内置 2=安装）
+             * @example 1
+             */
+            source?: number;
+            sourceName?: string;
+            /** @description 来源包标识（安装仓库；内置为 null） */
+            sourcePackage?: string;
+            /** @description 版本标识（装时 commit；内置为 null） */
+            version?: string;
+            /**
+             * Format: int32
+             * @description 状态 code（1=启用 2=停用；内置恒 1）
+             * @example 1
+             */
+            status?: number;
+            statusName?: string;
+            /**
+             * @description 最近管理动作操作者 id（安装＝装者、启停＝最近动作者；内置为 null）
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 最近管理动作操作者名（直读展示；内置为 null）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /**
+             * @description 远端有新版标记（来源包级）：定期只读检查远端 HEAD 与装时版本不同即 true——更新永远显式点（POST /update），平台不自动跟新远端；null＝未检查过（内置技能恒 null 不适用）
+             * @example false
+             */
+            updateAvailable?: boolean;
+        };
+        BackofficeSlotAssignmentResponse: {
+            /**
+             * @description 职能槽位键（main=主智能体 / executor=run 执行体 / subagent=子智能体）
+             * @example executor
+             */
+            slot?: string;
+            /** @description 已指派技能清单行（与技能清单行共形，含停用行——停用行不参与装配合成；跨包同名列靠来源包区分） */
+            skills?: components["schemas"]["BackofficeSkillSummaryResponse"][];
+        };
+        FieldError: {
+            field?: string;
+            message?: string;
+            errorCode?: string;
+        };
+        AgentToolToggleCommand: {
+            /**
+             * @description 开关目标态（必填、无缺省：true=挂载回归装配面 / false=退出槽位装配面——变更走配置留痕，与智能体配置同机制）
+             * @example false
+             */
+            enabled?: boolean;
+        };
+        ApiResponseBackofficeAgentToolResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeAgentToolResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeAgentToolResponse: {
+            /**
+             * @description 工具注册名（模型可见名＝工具面按名寻址键；清单读面即全集——PUT 开关与骨架锁死判定都按本名）
+             * @example web_search
+             */
+            name?: string;
+            /**
+             * @description 工具面类别（开关判定正本）：SKELETON=骨架（编排链路＋项目事实只读件，结构性锁死不开放关停——ADR-0021 编排权不下放配置）；ENHANCEMENT=增强（联网搜索/网页抓取，窄幅可开关：关即退出槽位装配面、开即回归）；HARNESS_BUILTIN=harness 内建编码工具（框架自带，呈现口径，不可开关）
+             * @example ENHANCEMENT
+             */
+            kind?: string;
+            /** @description 挂载态：骨架/harness 内建恒 true；增强按运营配置生效态（false＝在册但退出装配面——模型不可见） */
+            enabled?: boolean;
+            /** @description 一句职能描述（清单即审核/排障面） */
+            description?: string;
+        };
+        AgentConfigUpdateCommand: {
+            /** @description 覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝清空覆盖，装配回落枚举默认——GET 回执的 defaultSystemPrompt 即回落落点） */
+            systemPrompt?: string;
+            /**
+             * @description 覆盖模型档位裸名（如 deepseek-v4-pro；null/缺省/纯空白＝清空覆盖回落枚举默认。不做白名单校验——错值致新会话失败经留痕写回可回滚）
+             * @example deepseek-v4-pro
+             */
+            modelId?: string;
+            /** @description 增强工具开关：联网搜索（缺省 true＝开；#252 起生效装配——关即退出槽位装配面、开即回归，窄幅写口 PUT /agent-tools/{toolName}） */
+            webSearchEnabled?: boolean;
+            /** @description 增强工具开关：网页抓取（缺省 true＝开；生效语义同 webSearchEnabled） */
+            fetchUrlEnabled?: boolean;
+        };
+        ApiResponseBackofficeAgentConfigResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeAgentConfigResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeAgentConfigResponse: {
+            /**
+             * @description 智能体稳定键（main=主智能体 / executor=run 执行体）
+             * @example main
+             */
+            agentKey?: string;
+            /**
+             * @description 展示名
+             * @example 主智能体
+             */
+            agentName?: string;
+            /** @description 生效 systemPrompt（库覆盖值或枚举默认——装配实取值，对照 systemPromptOverridden 知来源） */
+            systemPrompt?: string;
+            /**
+             * @description 生效模型档位裸名（如 deepseek-v4-flash）
+             * @example deepseek-v4-flash
+             */
+            modelId?: string;
+            /** @description systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认） */
+            systemPromptOverridden?: boolean;
+            /** @description 模型档位是否库覆盖值（true＝覆盖；false＝枚举默认） */
+            modelIdOverridden?: boolean;
+            /** @description 枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与配置分治的缺省正本） */
+            defaultSystemPrompt?: string;
+            /**
+             * @description 枚举默认模型档位（清空覆盖即落此值）
+             * @example deepseek-v4-flash
+             */
+            defaultModelId?: string;
+            /** @description 联网搜索开关生效态（#252 起生效装配：关即退出槽位装配面；无覆盖行语境＝true 开） */
+            webSearchEnabled?: boolean;
+            /** @description 网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开） */
+            fetchUrlEnabled?: boolean;
+            /**
+             * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 最近写者名（直读展示）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 最近写入时刻（null＝从未配置）
+             */
+            updatedAt?: string;
+        };
         CreateWorkspaceCommand: {
             /** @description 1=开发, 2=测试, 3=生产 */
             kind?: number;
@@ -1591,11 +2086,6 @@ export interface components {
             data?: components["schemas"]["WorkspaceResponse"];
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
-        };
-        FieldError: {
-            field?: string;
-            message?: string;
-            errorCode?: string;
         };
         MiddlewareResourceResponse: {
             /** @description 1=PostgreSQL, 2=Redis */
@@ -1904,6 +2394,74 @@ export interface components {
             projectId?: string;
             name?: string;
             archived?: boolean;
+        };
+        ApiResponseBackofficeSkillSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        SkillUpdateCommand: {
+            /**
+             * @description 来源包标识（取技能清单行 sourcePackage 原值回传；显式更新＝重拉快照入库＋版本留痕，永不自动跟新）
+             * @example https://github.com/mattpocock/skills
+             */
+            sourcePackage?: string;
+        };
+        ApiResponseBackofficeSkillUpdateResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillUpdateResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillUpdateResponse: {
+            /** @description 来源包标识（规范化仓库地址） */
+            sourcePackage?: string;
+            /** @description 更新前版本（装时/上次更新 commit；远端未前进时与 toVersion 相等） */
+            fromVersion?: string;
+            /** @description 更新后版本（更新时刻远端 HEAD commit——快照锚翻新） */
+            toVersion?: string;
+            /** @description 本次更新移除的技能名（远端已删且无指派在身的行；有指派在身的移除会被整体拒绝 SKL_013，不至此） */
+            removedSkillNames?: string[];
+            /**
+             * @description 更新操作者 id（显式动作必留痕）
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 更新操作者名（直读展示）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /** @description 更新后该来源包全部条目（清单行同形；同名行原地翻新保留 id/状态/指派，新增行插入、消失行移除） */
+            skills?: components["schemas"]["BackofficeSkillSummaryResponse"][];
+        };
+        SkillInstallCommand: {
+            /**
+             * @description 技能仓库 git 地址（https/ssh/本地路径；clone 走宿主 git 凭据，装时固化快照、版本＝装时 HEAD commit）
+             * @example https://github.com/mattpocock/skills.git
+             */
+            repoUrl?: string;
+            /**
+             * @description 排除目录段名单（可缺省）：技能的仓库相对路径任一段命中即不入库（如 deprecated 类目目录整支排除；段名精确匹配）
+             * @example [
+             *       "deprecated",
+             *       "in-progress"
+             *     ]
+             */
+            excludeDirs?: string[];
+        };
+        ApiResponseListBackofficeSkillSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillSummaryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
         };
         OpenPriceEntryCommand: {
             provider?: string;
@@ -2318,6 +2876,93 @@ export interface components {
             /** Format: int32 */
             size?: number;
         };
+        ApiResponseBackofficeSkillDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillDetailResponse: {
+            /**
+             * @description 技能柄（opaque 串两形制，同清单行 id：内置＝builtin:<技能名>、安装＝TSID 十进制串）
+             * @example builtin:prd-writing
+             */
+            id?: string;
+            name?: string;
+            description?: string;
+            /**
+             * Format: int32
+             * @description 来源 code（1=内置 2=安装）
+             * @example 1
+             */
+            source?: number;
+            sourceName?: string;
+            sourcePackage?: string;
+            version?: string;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /**
+             * @description SKILL.md frontmatter 全量（解析态键值——审核面所见即运行时注入面）
+             * @example {
+             *       "name": "prd-writing",
+             *       "description": "撰写或修订 PRD 时使用"
+             *     }
+             */
+            frontmatter?: {
+                [key: string]: Record<string, never>;
+            };
+            /** @description SKILL.md 正文（frontmatter 剥离后全文，审核承载面） */
+            content?: string;
+            /**
+             * @description 最近管理动作操作者 id（安装＝装者、启停＝最近动作者；内置为 null）
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 最近管理动作操作者名（直读展示；内置为 null）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /**
+             * @description 远端有新版标记（来源包级，语义同清单行——true＝远端 HEAD ≠装时版本；null＝未检查过，内置技能恒 null 不适用）
+             * @example false
+             */
+            updateAvailable?: boolean;
+        };
+        ApiResponseListBackofficeSkillUpdateTraceResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillUpdateTraceResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillUpdateTraceResponse: {
+            /** @description 来源包标识（规范化仓库地址） */
+            sourcePackage?: string;
+            /** @description 更新前版本（装时/上次更新 commit） */
+            fromVersion?: string;
+            /** @description 更新后版本（更新时刻远端 HEAD commit） */
+            toVersion?: string;
+            /**
+             * @description 更新操作者 id（显式动作必留痕）
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 更新操作者名（直读展示）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 更新动作时刻（留痕生成时刻）
+             */
+            operatedAt?: string;
+        };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
             code?: number;
@@ -2647,6 +3292,71 @@ export interface components {
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
         };
+        ApiResponseListBackofficeAgentToolSlotResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeAgentToolSlotResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeAgentToolSlotResponse: {
+            /**
+             * @description 职能槽位稳定键（与技能槽位同键）：main=主智能体 / executor=run 执行体 / subagent=子智能体
+             * @example main
+             */
+            slot?: string;
+            /**
+             * @description 槽位展示名
+             * @example 主智能体
+             */
+            slotName?: string;
+            /** @description 该槽位工具面（呈现序＝平台资产在前、harness 内建在后） */
+            tools?: components["schemas"]["BackofficeAgentToolResponse"][];
+        };
+        ApiResponseListBackofficeAgentConfigTraceResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeAgentConfigTraceResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeAgentConfigTraceResponse: {
+            /** @description 留痕标识（TSID 十进制串） */
+            id?: string;
+            /** @description 变更前 systemPrompt（null＝此前即缺省回落——回滚即把此值写回） */
+            oldSystemPrompt?: string;
+            /** @description 变更前模型档位（null＝此前即缺省回落） */
+            oldModelId?: string;
+            /** @description 变更前联网搜索开关 */
+            oldWebSearchEnabled?: boolean;
+            /** @description 变更前网页抓取开关 */
+            oldFetchUrlEnabled?: boolean;
+            /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
+            newSystemPrompt?: string;
+            /** @description 变更后模型档位（null＝本次清空回落） */
+            newModelId?: string;
+            /** @description 变更后联网搜索开关 */
+            newWebSearchEnabled?: boolean;
+            /** @description 变更后网页抓取开关 */
+            newFetchUrlEnabled?: boolean;
+            /**
+             * @description 变更操作者 id
+             * @example 700200
+             */
+            operatorId?: string;
+            /**
+             * @description 变更操作者名（直读展示）
+             * @example 运营·技能管理员
+             */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 变更动作时刻（留痕生成时刻）
+             */
+            operatedAt?: string;
+        };
         ApiResponseBackofficeAccountProfileResponse: {
             /** Format: int32 */
             code?: number;
@@ -2683,6 +3393,128 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    slotAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSlotAssignmentResponse"];
+                };
+            };
+        };
+    };
+    assignSlot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillSlotAssignCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSlotAssignmentResponse"];
+                };
+            };
+        };
+    };
+    toggle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AgentToolToggleCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeAgentToolResponse"];
+                };
+            };
+        };
+    };
+    config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeAgentConfigResponse"];
+                };
+            };
+        };
+    };
+    update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentConfigUpdateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeAgentConfigResponse"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -3168,6 +4000,98 @@ export interface operations {
             };
         };
     };
+    enable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    disable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    update_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillUpdateCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillUpdateResponse"];
+                };
+            };
+        };
+    };
+    install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillInstallCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
     entries: {
         parameters: {
             query?: {
@@ -3340,7 +4264,7 @@ export interface operations {
             };
         };
     };
-    enable: {
+    enable_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -3362,7 +4286,7 @@ export interface operations {
             };
         };
     };
-    disable: {
+    disable_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -3837,6 +4761,92 @@ export interface operations {
             };
         };
     };
+    skills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillDetailResponse"];
+                };
+            };
+        };
+    };
+    uninstall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    updateTraces: {
+        parameters: {
+            query?: {
+                sourcePackage?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeSkillUpdateTraceResponse"];
+                };
+            };
+        };
+    };
     projects: {
         parameters: {
             query?: {
@@ -3866,7 +4876,7 @@ export interface operations {
             };
         };
     };
-    detail_3: {
+    detail_4: {
         parameters: {
             query?: never;
             header?: never;
@@ -4074,7 +5084,7 @@ export interface operations {
             };
         };
     };
-    detail_4: {
+    detail_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -4146,7 +5156,7 @@ export interface operations {
             };
         };
     };
-    detail_5: {
+    detail_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -4283,6 +5293,48 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeCostOverviewResponse"];
+                };
+            };
+        };
+    };
+    inventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeAgentToolSlotResponse"];
+                };
+            };
+        };
+    };
+    traces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeAgentConfigTraceResponse"];
                 };
             };
         };

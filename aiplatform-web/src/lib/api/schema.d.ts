@@ -638,6 +638,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/skills/assignments/{slot}/precheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 指派双头预检（非阻断提示，只读）
+         * @description 指派确认前对候选集做方法论重叠判定（#255，ADR-0021 分层纪律的执行面）：对照双头——该槽位生效工作协议（智能体运营配置生效值：库值优先、缺省回落）＋该槽位已指派启用技能＋候选集内其他技能，由模型判定方法论重叠并返回<b>非阻断提示</b>（提示是输入不是门，判定权留管理员）。请求体与 PUT 指派同形（skillIds＝候选清单，寻址同源：内置柄 400 SKL_011、未寻址/畸形 TSID 404 SKL_001、未知槽位 404 SKL_010）。回执两件：executed（true＝判定已执行；false＝未执行——判定失败/超时/输出不可解析，如实标注不伪装成「确认无重叠」，预检组件故障不阻塞运营、指派照常可完成）＋ hints（重叠提示列表，每条：skills 涉及的候选技能、counterpart 对照侧〔「工作协议」或对侧技能名〕、overlap 重叠内容、resolution 消解方向；空列表＋executed=true＝确认无重叠）。subagent 槽无运营配置正本：对照＝已指派＋候选集（无协议面），机制同一不特判。判定引擎＝平台智能体内核一次性会话（flash 档专用配置键、专用计量标记skillcheck），全程只读——不落库、不留痕、不改指派、不拦后续指派调用。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_001 — 技能不存在
+         *     - 404 SKL_010 — 职能槽位不存在
+         *     - 400 SKL_011 — 内置技能不可指派（内置随平台发版，装配合成按配置挂载，无需指派）
+         */
+        post: operations["precheckSlot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/price-entries": {
         parameters: {
             query?: never;
@@ -2463,6 +2488,24 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        ApiResponseBackofficeSkillPrecheckResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillPrecheckResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillPrecheckResponse: {
+            executed?: boolean;
+            hints?: components["schemas"]["PrecheckHint"][];
+        };
+        PrecheckHint: {
+            skills?: string[];
+            counterpart?: string;
+            overlap?: string;
+            resolution?: string;
+        };
         OpenPriceEntryCommand: {
             provider?: string;
             model?: string;
@@ -4097,6 +4140,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    precheckSlot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillSlotAssignCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillPrecheckResponse"];
                 };
             };
         };

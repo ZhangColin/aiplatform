@@ -27,22 +27,24 @@ import com.cartisan.core.domain.BaseEnum;
 public enum SkillSlot implements BaseEnum<SkillSlot> {
 
     /** 主智能体（需求侧：访谈梳理＋PRD 撰写——技能面挂内置 PRD 写作；禁 shell）。 */
-    MAIN(1, "main", false),
+    MAIN(1, "main", false, "主智能体——需求侧：访谈梳理、PRD 撰写修订、答询，不读写沙箱代码"),
 
     /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。 */
-    EXECUTOR(2, "executor", true),
+    EXECUTOR(2, "executor", true, "run 执行体——实现侧：沙箱工作区内读写代码、运行命令"),
 
     /** 子智能体槽（当前唯一实例 self-test——白名单含跑测试命令的 shell，开放）。 */
-    SUBAGENT(3, "subagent", true);
+    SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：只读自测）");
 
     private final Integer code;
     private final String key;
     private final boolean shell;
+    private final String role;
 
-    SkillSlot(Integer code, String key, boolean shell) {
+    SkillSlot(Integer code, String key, boolean shell, String role) {
         this.code = code;
         this.key = key;
         this.shell = shell;
+        this.role = role;
     }
 
     /** 框架约定码（BaseEnum 自动转换面；不落库不经 REST——寻址用字符串键）。 */
@@ -68,6 +70,14 @@ public enum SkillSlot implements BaseEnum<SkillSlot> {
      */
     public boolean hasShell() {
         return shell;
+    }
+
+    /**
+     * 槽位职能一句话（#255 指派预检对照材料语境用）：判定模型对照工作协议与技能
+     * 重叠时需知道该槽位是干什么的——职能是槽位身份的一部分，正本随枚举。
+     */
+    public String role() {
+        return role;
     }
 
     /**

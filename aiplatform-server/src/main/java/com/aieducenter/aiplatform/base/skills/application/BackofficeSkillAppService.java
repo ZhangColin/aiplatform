@@ -352,18 +352,22 @@ public class BackofficeSkillAppService {
                 records.stream().map(BackofficeSkillSummaryResponse::of).toList());
     }
 
-    /** 槽位键解析：未知/空键 404 SKL_010（三把稳定键外的寻址一律不存在）。 */
-    private static SkillSlot requireSlot(String slotKey) {
+    /**
+     * 槽位键解析（指派写口与预检共用单点）：未知/空键 404 SKL_010（三把稳定键外
+     * 的寻址一律不存在）。
+     */
+    static SkillSlot requireSlot(String slotKey) {
         return SkillSlot.byKey(slotKey)
                 .orElseThrow(() -> new ApplicationException(SkillMessage.SKILL_SLOT_NOT_FOUND));
     }
 
     /**
-     * 指派目标解析（单点）：内置柄拒（SKL_011——内置随平台发版，装配按配置
-     * 挂载无需指派）、TSID 严格解析（畸形/非正数同 404 SKL_001）、库行存在性
-     * 校验（先卸载后指派的不变窗口防悬挂行）、保序去重。
+     * 指派目标解析（单点——PUT 指派与预检共用，口径同源不漂移）：内置柄拒
+     * （SKL_011——内置随平台发版，装配按配置挂载无需指派）、TSID 严格解析
+     * （畸形/非正数同 404 SKL_001）、库行存在性校验（先卸载后指派的不变窗口防
+     * 悬挂行）、保序去重。
      */
-    private List<Long> resolveAssignmentTargets(SkillSlotAssignCommand command) {
+    List<Long> resolveAssignmentTargets(SkillSlotAssignCommand command) {
         List<String> ids = command == null || command.skillIds() == null
                 ? List.of()
                 : command.skillIds();

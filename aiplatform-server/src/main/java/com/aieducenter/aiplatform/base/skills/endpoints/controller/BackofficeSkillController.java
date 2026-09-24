@@ -20,10 +20,12 @@ import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
+import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillPrecheckAppService;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillInstallCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillSlotAssignCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillUpdateCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDetailResponse;
+import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillPrecheckResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillSummaryResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillUpdateResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillUpdateTraceResponse;
@@ -33,27 +35,31 @@ import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250，机机签名
- * ——五头 HMAC 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：
+ * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250＋#255，机机
+ * 签名——五头 HMAC 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：
  * 清单 / 详情（审核面）＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载
- * / 槽位指派读写（三职能槽位整包替换）/ 显式更新＋版本留痕读面。内置
- * （classpath 合成）与库中安装技能同权呈现；技能柄为 opaque 串两形制（内置
- * {@code builtin:<技能名>}／安装 TSID 十进制串）。清单行带「有新版」标记
- * （定期只读检查远端 HEAD，更新永远显式点——永不自动跟新，ADR-0021）。错误码
- * 前缀 SKL_（SKL_001～SKL_014）。操作者透传头 {@code X-User-Id}/
- * {@code X-User-Name} 全程落痕（安装/启停/指派/更新必留痕，缺头 SKL_009；
- * 卸载无行可留不留痕——admin 侧自有操作日志）。
+ * / 槽位指派读写（三职能槽位整包替换）/ 指派双头预检（#255 非阻断提示，只读）
+ * / 显式更新＋版本留痕读面。内置（classpath 合成）与库中安装技能同权呈现；
+ * 技能柄为 opaque 串两形制（内置 {@code builtin:<技能名>}／安装 TSID 十进制串）。
+ * 清单行带「有新版」标记（定期只读检查远端 HEAD，更新永远显式点——永不自动
+ * 跟新，ADR-0021）。错误码前缀 SKL_（SKL_001～SKL_014）。操作者透传头
+ * {@code X-User-Id}/{@code X-User-Name} 全程落痕（安装/启停/指派/更新必留痕，
+ * 缺头 SKL_009；预检只读不留痕、卸载无行可留不留痕——admin 侧自有操作日志）。
  */
 @RestController
 @RequestMapping("/api/backoffice/skills")
 @RequireSignature
-@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载 / 槽位指派读写 / 显式更新＋版本留痕（机机签名）")
+@Tag(name = "Backoffice Skills", description = "后台技能库管理：清单 / 详情 / 安装 / 停用⇄启用 / 卸载 / 槽位指派读写 / 指派双头预检 / 显式更新＋版本留痕（机机签名）")
 public class BackofficeSkillController {
 
     private final BackofficeSkillAppService appService;
 
-    public BackofficeSkillController(BackofficeSkillAppService appService) {
+    private final BackofficeSkillPrecheckAppService precheckAppService;
+
+    public BackofficeSkillController(BackofficeSkillAppService appService,
+            BackofficeSkillPrecheckAppService precheckAppService) {
         this.appService = appService;
+        this.precheckAppService = precheckAppService;
     }
 
     @GetMapping
@@ -180,6 +186,31 @@ public class BackofficeSkillController {
     public ApiResponse<BackofficeSlotAssignmentResponse> assignSlot(@PathVariable String slot,
             @RequestBody SkillSlotAssignCommand command) {
         return ApiResponse.ok(appService.assignSlot(slot, command, currentOperator()));
+    }
+
+    @PostMapping("/assignments/{slot}/precheck")
+    @Operation(summary = "指派双头预检（非阻断提示，只读）",
+            description = "指派确认前对候选集做方法论重叠判定（#255，ADR-0021 分层"
+                    + "纪律的执行面）：对照双头——该槽位生效工作协议（智能体运营"
+                    + "配置生效值：库值优先、缺省回落）＋该槽位已指派启用技能＋候选"
+                    + "集内其他技能，由模型判定方法论重叠并返回<b>非阻断提示</b>"
+                    + "（提示是输入不是门，判定权留管理员）。请求体与 PUT 指派同形"
+                    + "（skillIds＝候选清单，寻址同源：内置柄 400 SKL_011、未寻址/"
+                    + "畸形 TSID 404 SKL_001、未知槽位 404 SKL_010）。回执两件："
+                    + "executed（true＝判定已执行；false＝未执行——判定失败/超时/"
+                    + "输出不可解析，如实标注不伪装成「确认无重叠」，预检组件故障"
+                    + "不阻塞运营、指派照常可完成）＋ hints（重叠提示列表，每条："
+                    + "skills 涉及的候选技能、counterpart 对照侧〔「工作协议」或"
+                    + "对侧技能名〕、overlap 重叠内容、resolution 消解方向；空列表"
+                    + "＋executed=true＝确认无重叠）。subagent 槽无运营配置正本："
+                    + "对照＝已指派＋候选集（无协议面），机制同一不特判。判定引擎＝"
+                    + "平台智能体内核一次性会话（flash 档专用配置键、专用计量标记"
+                    + "skillcheck），全程只读——不落库、不留痕、不改指派、不拦后续"
+                    + "指派调用。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"SKL_001", "SKL_010", "SKL_011"})
+    public ApiResponse<BackofficeSkillPrecheckResponse> precheckSlot(@PathVariable String slot,
+            @RequestBody SkillSlotAssignCommand command) {
+        return ApiResponse.ok(precheckAppService.precheck(slot, command));
     }
 
     @PostMapping("/update")

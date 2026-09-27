@@ -83,13 +83,15 @@ public class BackofficeSkillController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "技能详情（元数据＋frontmatter＋正文，审核面）",
-            description = "读全文判安装审核（注入面＋方法论重叠把关）：元数据（与"
-                    + "清单行同形）＋ frontmatter 全量（解析态键值，含 name/"
-                    + "description）＋正文全文（frontmatter 剥离后的 SKILL.md "
-                    + "body）——所见即运行时注入面。id 取清单行原值（opaque 串"
-                    + "两形制）。技能不存在（含未寻址内置名/TSID、畸形柄）"
-                    + "404 SKL_001。需要机机签名（五头 HMAC），无签名 401")
+    @Operation(summary = "技能详情（元数据＋frontmatter＋正文＋scripts，审核面）",
+            description = "读全文按技能审核指引判安装审核（docs/agents/"
+                    + "skill-audit-guide.md——注入面＋方法论重叠面＋description"
+                    + " 三要素）：元数据（与清单行同形）＋ frontmatter 全量"
+                    + "（解析态键值，含 name/description）＋正文全文（frontmatter"
+                    + " 剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时"
+                    + "注入面。id 取清单行原值（opaque 串两形制）。技能不存在"
+                    + "（含未寻址内置名/TSID、畸形柄）404 SKL_001。需要机机"
+                    + "签名（五头 HMAC），无签名 401")
     @ErrorCodes({"SKL_001"})
     public ApiResponse<BackofficeSkillDetailResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(id));

@@ -39,3 +39,7 @@ Issue 通过 GitHub Issues 管理（`gh` CLI）。见 `docs/agents/issue-tracker
 ### Domain docs
 
 Single-context 布局：仓库根目录 `CONTEXT.md` + `docs/adr/`（由 `/domain-modeling` 惰性创建）。见 `docs/agents/domain.md`。
+
+### Skill audit guide
+
+技能安装/更新/指派的审核正本（skills 域后台审核口径：双向边界判断＋安装清单＋重叠处置）。见根级 `docs/agents/skill-audit-guide.md`。

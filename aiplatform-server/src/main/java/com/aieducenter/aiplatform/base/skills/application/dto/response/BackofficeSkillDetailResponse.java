@@ -12,7 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * 后台技能详情（#247，审核面）：清单行同形元数据＋技能全文——frontmatter
  * （解析态全量）与正文（frontmatter 剥离后）分面可读，所见即运行时注入面；
- * 运营读全文判安装风险（注入面＋方法论重叠把关，#246 审核口径）。
+ * 运营读全文按技能审核指引判安装风险（docs/agents/skill-audit-guide.md
+ * ——注入面＋方法论重叠面＋description 三要素）。
  *
  * @param id            技能柄（两形制同清单行）
  * @param name          技能名

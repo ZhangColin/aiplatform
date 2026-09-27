@@ -32,8 +32,9 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * 接线 v1 收在「位就位」</b>：declared 子智能体经框架继承父级技能面（无自带
  * 仓库通路），声明挂哨兵 allowlist 断开继承（技能面结构性空，不继承执行体）；
  * 本键视图供读侧/缝测试与未来一等化接线（升级路径＝subagentFactory 自建或上游
- * {@code SubagentDeclaration.skillRepositories}，触发器＝#245 瘦身落地/第一个
- * 真实要给子智能体指派的技能）；</li>
+ * {@code SubagentDeclaration.skillRepositories}，触发器＝第一个真实要给子智能体
+ * 指派的技能——原并列触发器「#245 瘦身落地」已落地：核验证实 EXECUTOR 工作协议
+ * 分层合规、无物可迁，#245/#256）；</li>
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
  *

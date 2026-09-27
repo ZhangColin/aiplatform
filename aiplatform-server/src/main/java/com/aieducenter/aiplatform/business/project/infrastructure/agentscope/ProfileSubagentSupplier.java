@@ -32,7 +32,8 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 独立动态接线（subagent 槽指派生效到运行时）v1 不做——框架无「子智能体自带仓库」
  * 通路，自建子智能体构建路径属投机性复杂度（今日零真实子智能体技能负载）；升级
  * 路径＝subagentFactory 自建或上游 {@code SubagentDeclaration.skillRepositories}，
- * 触发器＝#245 瘦身落地/第一个真实要给子智能体指派的技能。</p>
+ * 触发器＝第一个真实要给子智能体指派的技能——原并列触发器「#245 瘦身落地」已
+ * 落地（核验证实 EXECUTOR 工作协议分层合规、无物可迁，#245/#256）。</p>
  */
 @Component
 public class ProfileSubagentSupplier implements AgentSubagentSupplier {

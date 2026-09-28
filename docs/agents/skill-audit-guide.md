@@ -1,6 +1,6 @@
 # 技能审核指引
 
-后台技能安装、更新与指派的审核正本（条目化）。分层纪律正本在 [ADR-0021](../adr/0021-agent-operational-config-persisted-skill-snapshot-install.md) 与根级 `CONTEXT.md` 技能词条——内建工作协议只载身份/编排/约束/技能指路，方法论一律住技能层；本指引是其在审核动作上的执行面（#245 核验后，ADR-0021 过渡期的「软性暂缓方法论包指派」口径解除，本指引即现行正常口径）。审核材料：技能详情端点（frontmatter／正文／scripts 全文可读，所见即运行时注入面）＋指派双头预检端点（#255，非阻断提示）。
+后台技能安装、更新、指派与自产晋升的审核正本（条目化）。分层纪律正本在 [ADR-0021](../adr/0021-agent-operational-config-persisted-skill-snapshot-install.md) 与根级 `CONTEXT.md` 技能词条——内建工作协议只载身份/编排/约束/技能指路，方法论一律住技能层；本指引是其在审核动作上的执行面（#245 核验后，ADR-0021 过渡期的「软性暂缓方法论包指派」口径解除，本指引即现行正常口径）。审核材料：技能详情端点（frontmatter／正文／scripts 全文可读，所见即运行时注入面）＋指派双头预检端点（#255，非阻断提示）＋草稿详情与晋升／拒绝端点（§五自产段，[ADR-0022](../adr/0022-self-produced-skill-draft-store-and-promotion.md)）。
 
 ## 一、双向边界判断
 
@@ -53,7 +53,24 @@ EXECUTOR 工作协议 10 条核验表（判据：机制挂点/换流派不变 �
 
 结论：10 条全留、迁出物≈零——EXECUTOR 工作协议现状即分层合规。MAIN 18 条同构审视：无方法论泄漏（访谈四方面＝PRD 固定章节镜像，问什么由域模板决定；第 12 条已是技能指路样板 load prd-writing），prompt 不动。
 
+## 五、自产草稿审核（ADR-0022）
+
+智能体自荐的技能草稿（三职能槽位皆可提）经后台人审：晋升或拒绝。审核材料＝草稿详情端点——正文全文＋扫描 findings＋血统三件（来源项目／来源 run／来源槽位）；自产 a-only 结构性无 scripts（自荐工具无此参数、晋升原样入库），审核面只有正文。四要素逐项过：
+
+1. **真伪**——是不是真模式：正文应是来源 run 里真实验证过的过程经验，不是通用最佳实践的拼凑或想象的规范。判法＝血统回溯：正文主张与来源 run 事实相称（声称「踩坑后验证」而来、来源 run 却一遍通过无此坑痕迹 → 存疑）。
+2. **重叠**——skillcheck 预检复用（与安装同一把尺、不另设门）：同名有两道结构性闸（自荐写入口查技能库＋在途草稿即拒；晋升事务撞名复查 409）——审核面无需人工比对同名，语义重叠才是审核对象（对照技能库既有技能与将指派槽位的生效工作协议，尺同安装审核第 2 条）；晋升不自动指派，指派确认前仍跑指派双头预检（#255）。
+3. **description 三要素**——同尺判、不同处置：trigger／scope／否定边界照安装审核第 3 条判；但草稿无人改稿（提出会话已结束、审核者代改是职责越界），不存在「要求补后重审」通道——要素缺陷一律拒绝终态（理由写明缺什么）；否定边界的软门槛在自产侧收窄为「明示豁免收下」或「拒绝」二选一。
+4. **血统可溯**——来源 run 的外部资料接触史必查（自产血统含抓取／调研面）：主智能体槽直连（web_search／fetch_url，ADR-0019）；执行体／子智能体槽经 PRD 间接受染（调研结论落 PRD、切片下发）。必查两问：正文与来源 run 的事实接触史是否相称（真伪侧）；正文是否混入外部内容的翻版（转载与注入风险——静态扫描只看模式串，看不见内容从哪来）。查法＝按血统三件回来源项目后台面回放：对话史（收尾卡锚定各 run 收口事实）＋PRD 直读。
+
+**扫描回执定位**：静态扫描是廉价哨兵非安全边界（ADR-0022）——DANGEROUS 已在写入口拒收不落库；SAFE／CAUTION 草稿的 findings 逐条过，SAFE 不豁免通读正文——人审是门。
+
+**处置口径**：晋升＝单级直达全局、内容原样（审核者不改稿）、操作者留痕——入池即与安装技能同权同套（启停／指派／预检／卸载／使用计数），但不自动生效（入池与生效分离）；拒绝＝终态留档、理由必填——重提只能靠未来会话产生新草稿。
+
+**技能 TDD（软方法论，非平台机制）**：RED＝无技能跑压力场景记基线（坑真实存在且会重复出现）→ GREEN＝写最小技能堵洞（内容对应真实差距、不多不少）。既是自荐者的写作参照，也是审核者判真伪的问法——真伪存疑时向来源 run 要 RED 基线（「这个模式真的踩到并验证过吗」）。不落地为平台机制：需要场景库＋带／不带技能 A/B 试跑的评测基建（ADR-0022 备案，触发器＝技能库规模大到人工审不动或需量化技能效价）。
+
 ## 关联
 
 - 技能详情（审核面）：`GET /api/backoffice/skills/{id}`；指派双头预检：`POST /api/backoffice/skills/assignments/{slot}/precheck`（#255）
-- [ADR-0021](../adr/0021-agent-operational-config-persisted-skill-snapshot-install.md)（快照安装＋分层纪律）、根级 `CONTEXT.md` 技能词条
+- 草稿清单／详情（审核面）：`GET /api/backoffice/skills/drafts`、`GET /api/backoffice/skills/drafts/{id}`；晋升／拒绝：`POST /api/backoffice/skills/drafts/{id}/promote`、`POST /api/backoffice/skills/drafts/{id}/reject`
+- 血统回溯（自产段）：`GET /api/backoffice/projects/{id}/conversation`（收尾卡锚定 run）、`GET /api/backoffice/projects/{id}/prd`
+- [ADR-0021](../adr/0021-agent-operational-config-persisted-skill-snapshot-install.md)（快照安装＋分层纪律）、[ADR-0022](../adr/0022-self-produced-skill-draft-store-and-promotion.md)（库制草稿＋单级晋升＋拒绝终态——自产段口径正本）、根级 `CONTEXT.md` 技能词条

@@ -14,4 +14,4 @@ Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威（子项目旧词�
 
 ### Skill audit guide
 
-技能安装/更新/指派的审核正本（后台运营口径：双向边界判断＋安装清单＋重叠处置）。见 `docs/agents/skill-audit-guide.md`。
+技能安装/更新/指派/自产晋升的审核正本（后台运营口径：双向边界判断＋安装清单＋重叠处置＋自产草稿审核四要素）。见 `docs/agents/skill-audit-guide.md`。

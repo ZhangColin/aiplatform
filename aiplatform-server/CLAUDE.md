@@ -42,4 +42,4 @@ Single-context 布局：仓库根目录 `CONTEXT.md` + `docs/adr/`（由 `/domai
 
 ### Skill audit guide
 
-技能安装/更新/指派的审核正本（skills 域后台审核口径：双向边界判断＋安装清单＋重叠处置）。见根级 `docs/agents/skill-audit-guide.md`。
+技能安装/更新/指派/自产晋升的审核正本（skills 域后台审核口径：双向边界判断＋安装清单＋重叠处置＋自产草稿审核四要素）。见根级 `docs/agents/skill-audit-guide.md`。

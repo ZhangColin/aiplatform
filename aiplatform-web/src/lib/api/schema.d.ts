@@ -1372,6 +1372,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/skills/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 技能草稿清单（活跃面＝在途，人审队列）
+         * @description 智能体自荐的技能草稿（#259 自产线，ADR-0022 库制草稿）：跨项目全部<b>在途</b>草稿按自荐时间倒序（最近先）——终态（已晋升/已拒绝）不列活跃面、详情仍可按 id 查。行字段：名称、简介、血统三件（来源项目 id／来源 run 标识／来源槽位键 main/executor/subagent）、写入前静态扫描判定（SAFE/CAUTION——DANGEROUS 已在写入口拒收不落库）、状态（恒 1=在途）与自荐时刻。草稿不参与任何装配（未审内容不影响任何 run）。不分页（人审是天然瓶颈，对齐技能清单有界目录先例）。id 为 TSID 十进制串。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 401 UNAUTHORIZED — Authentication required
+         */
+        get: operations["drafts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/drafts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 技能草稿详情（正文＋扫描回执＋血统，审核面）
+         * @description 草稿全文按自产审核口径判读（docs/agents/skill-audit-guide.md——真伪／重叠／description 三要素／血统可溯：来源 run 的外部资料接触史必查）：清单行同形字段＋正文全文（自荐只有正文——a-only 无 scripts）＋扫描 findings 逐条留档（patternId/severity/category/file/line/matchText/description，空列表＝无发现）＋终态留痕字段（审核操作者/时刻/拒绝理由——晋升/拒绝端点 T2 落地后回填，在途恒 null）。任意状态可查（终态留档）。id 取清单行原值（TSID 十进制串）；草稿不存在（含未寻址/畸形 TSID）404 SKL_015。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 SKL_015 — 技能草稿不存在
+         */
+        get: operations["draftDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects": {
         parameters: {
             query?: never;
@@ -3014,6 +3060,81 @@ export interface components {
              * @description 更新动作时刻（留痕生成时刻）
              */
             operatedAt?: string;
+        };
+        ApiResponseListBackofficeSkillDraftSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillDraftSummaryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillDraftSummaryResponse: {
+            /** @description 草稿柄（详情寻址，TSID 十进制串，勿做数值假设） */
+            id?: string;
+            name?: string;
+            description?: string;
+            /**
+             * @description 来源槽位稳定键（main=主智能体 executor=run 执行体 subagent=子智能体）
+             * @example executor
+             */
+            slot?: string;
+            /** @description 来源项目 id（血统——审核溯源与项目删除清理入口） */
+            projectId?: string;
+            /** @description 来源 run 标识（血统——外部资料接触史等 run 级溯源锚） */
+            runId?: string;
+            /**
+             * @description 写入前静态扫描判定（SAFE/CAUTION；DANGEROUS 已在写入口拒收不落库）
+             * @example SAFE
+             */
+            scanVerdict?: string;
+            /**
+             * Format: int32
+             * @description 状态 code（1=在途 2=已晋升 3=已拒绝；列表＝活跃面恒 1）
+             * @example 1
+             */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        ApiResponseBackofficeSkillDraftDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillDraftDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillDraftDetailResponse: {
+            id?: string;
+            name?: string;
+            description?: string;
+            slot?: string;
+            projectId?: string;
+            runId?: string;
+            scanVerdict?: string;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            content?: string;
+            /** @description 扫描 findings 留档：每条 patternId/severity/category/file/line/matchText/description（空列表＝无发现） */
+            scanFindings?: {
+                [key: string]: Record<string, never>;
+            }[];
+            /** @description 终态审核操作者 id（在途为 null） */
+            operatorId?: string;
+            /** @description 终态审核操作者名（在途为 null） */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 终态时刻（在途为 null）
+             */
+            reviewedAt?: string;
+            /** @description 拒绝理由（已拒绝态携带；其余 null） */
+            rejectReason?: string;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -4921,6 +5042,48 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListBackofficeSkillUpdateTraceResponse"];
+                };
+            };
+        };
+    };
+    drafts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListBackofficeSkillDraftSummaryResponse"];
+                };
+            };
+        };
+    };
+    draftDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillDraftDetailResponse"];
                 };
             };
         };

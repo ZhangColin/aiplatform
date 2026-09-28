@@ -179,7 +179,7 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_converse_when_call_agent_then_runtime_context_carries_session_and_user() {
+    void given_converse_when_call_agent_then_runtime_context_carries_session_user_and_run_id() {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "嗯"));
 
         client.converse(command(null, null), event -> {
@@ -188,6 +188,11 @@ class AgentscopeAgentClientTest {
         verify(agent).streamEvents(any(List.class), contextCaptor.capture());
         assertThat(contextCaptor.getValue().getSessionId()).isEqualTo("s-1");
         assertThat(contextCaptor.getValue().getUserId()).isEqualTo("alice");
+        // run 标识入上下文属性袋（#259 工具血统透传腿）：工具每调用提取，血统类
+        // 信息不固化在跨 run 复用的 agent/工具构造态
+        assertThat(contextCaptor.getValue()
+                .get(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY, String.class))
+                .isEqualTo("run-1");
     }
 
     @Test

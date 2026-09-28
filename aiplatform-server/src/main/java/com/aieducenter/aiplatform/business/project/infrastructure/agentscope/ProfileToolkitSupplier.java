@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentToolkitSupplier;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
@@ -14,6 +15,7 @@ import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFe
 import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
+import com.aieducenter.aiplatform.business.project.infrastructure.SkillProposalAdapter;
 
 import io.agentscope.core.tool.Toolkit;
 
@@ -27,7 +29,9 @@ import io.agentscope.core.tool.Toolkit;
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
  * PRD 写入走 savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
  * （更新收口结束工具——「要不要动系统」的判定面）+ update_plan（步骤清单——
- * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）；
+ * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）
+ * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
+ * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。
@@ -53,11 +57,13 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final ExternalContentFetcher externalContentFetcher;
     private final WebSearchProvider webSearchProvider;
+    private final SkillProposalAdapter skillProposals;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider) {
+            ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
+            SkillProposalAdapter skillProposals) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -66,6 +72,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.externalContentFetcher = externalContentFetcher;
         this.webSearchProvider = webSearchProvider;
+        this.skillProposals = skillProposals;
     }
 
     @Override
@@ -97,6 +104,10 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new FinishEditTool(dev.workspaceId(), finishFacts));
             // #236 步骤清单：run 级计划的全量快照（呈现面在部件映射表，本工具零副作用）
             toolkit.registerAgentTool(new UpdatePlanTool());
+            // #259 技能自荐：验证过的编码模式沉淀为草稿（骨架件无开关；软指引在
+            // 工作协议——无模式可沉淀的 run 不调用）
+            toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
+                    SkillSlot.EXECUTOR, skillProposals));
         }
         return toolkit;
     }

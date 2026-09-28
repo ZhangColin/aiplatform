@@ -42,6 +42,12 @@ public interface SkillStore {
     boolean existsBySourcePackage(String sourcePackage);
 
     /**
+     * 同名库行检查（#259 自荐撞名的技能库侧腿）：任一来源包下同名行即占名
+     * （含停用行——重名造成审核面混淆，保守拒）。
+     */
+    boolean existsByName(String name);
+
+    /**
      * 安装批量落库（#248 快照安装）：一次装时快照的全部技能条目同事务原子入
      * 库（失败整体回滚）；id/status/操作者由安装用例赋定。
      */

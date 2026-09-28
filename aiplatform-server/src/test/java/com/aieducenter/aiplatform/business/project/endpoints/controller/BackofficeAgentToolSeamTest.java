@@ -33,7 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>六面钉死（#252 验收面）：</p>
  * <ul>
  * <li><b>清单可观测</b>：三槽位分组（main/executor/subagent）——main 平台八件
- * （骨架六＋增强两）、executor 平台两件＋harness 内建编码工具（注册自省，含
+ * （骨架六＋增强两）、executor 平台三件（骨架，含 propose_skill 技能自荐 #259）
+ * ＋harness 内建编码工具（注册自省，含
  * read_file/execute）、subagent＝self-test 声明六件；增强 enabled 按生效开关、
  * 骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
@@ -105,16 +106,19 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].enabled").value(true))
-                // executor：平台两件（骨架）＋harness 内建编码工具（注册自省）
+                // executor：平台三件（骨架——含 propose_skill 技能自荐，#259）
+                // ＋harness 内建编码工具（注册自省）
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'finish_edit')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'propose_skill')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'read_file')].kind")
                         .value("HARNESS_BUILTIN"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'execute')].kind")
                         .value("HARNESS_BUILTIN"))
-                // harness 内建件数与自省一致（平台两件之外全是内建呈现）
+                // harness 内建件数与自省一致（平台三件之外全是内建呈现）
                 .andExpect(jsonPath("$.data[1].tools.length()").value(
-                        2 + harnessBuiltinCount()))
+                        3 + harnessBuiltinCount()))
                 // subagent：self-test 声明六件（同源引用声明常量）
                 .andExpect(jsonPath("$.data[2].tools", hasSize(
                         ProfileSubagentSupplier.SELF_TEST_TOOLS.size())));

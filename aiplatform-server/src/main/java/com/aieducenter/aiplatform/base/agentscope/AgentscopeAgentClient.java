@@ -69,6 +69,14 @@ public class AgentscopeAgentClient {
     public static final String ASK_USER_TOOL_NAME = "ask_user";
 
     /**
+     * RuntimeContext 属性键：本轮平台 run 标识（{@code AgentCommand.runId}——本轮
+     * 调用的平台标识，重试尝试为该次内部标识）。逐轮命令构建时写入上下文属性袋，
+     * 工具<b>每调用</b>提取（agent 实例按规格缓存跨 run 复用，血统类信息不能固化
+     * 在工具构造态）——首个消费面是技能草稿血统（#259 自荐工具的来源 run 腿）。
+     */
+    public static final String RUN_ID_CONTEXT_KEY = "platformRunId";
+
+    /**
      * 问答答复的注入通道：挂起批复重写 block 的 metadata 键（#34 口径——答复不进
      * 工具 input：input 持久化进会话、模型可见，会教模型「ask_user 可自带答案」
      * 自答后续提问；metadata 不序列化给模型，仅工具执行体经 ToolCallParam 读取）。
@@ -277,7 +285,8 @@ public class AgentscopeAgentClient {
         AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
                 modelRef.toModelString(), workspace, spec.agentKey(), spec.toolSpec());
-        return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId()),
+        return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId(),
+                spec.runId()),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new FileChangeFacts(), new StageDurationFacts());
@@ -348,10 +357,12 @@ public class AgentscopeAgentClient {
                 : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 
-    private RuntimeContext runtimeContext(String sessionId, String userId) {
+    private RuntimeContext runtimeContext(String sessionId, String userId, String runId) {
         return RuntimeContext.builder()
                 .sessionId(sessionId)
                 .userId(userId)
+                // run 标识入上下文属性袋（#259 工具血统透传腿，见 RUN_ID_CONTEXT_KEY）
+                .put(RUN_ID_CONTEXT_KEY, runId)
                 .build();
     }
 

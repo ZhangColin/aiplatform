@@ -19,6 +19,7 @@ import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFe
 import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
+import com.aieducenter.aiplatform.business.project.infrastructure.SkillProposalAdapter;
 
 /**
  * 按配置的工具集装配（#86 角色预设收敛为配置——职能是配置不是结构）：
@@ -48,12 +49,13 @@ class ProfileToolkitSupplierTest {
             mock(WorkspaceLifecycleAppService.class);
     private final ExternalContentFetcher externalContentFetcher = mock(ExternalContentFetcher.class);
     private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
+    private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider);
+                webSearchProvider, skillProposals);
     }
 
     @Test
@@ -88,15 +90,17 @@ class ProfileToolkitSupplierTest {
     }
 
     @Test
-    void given_executor_on_project_dev_when_toolkit_then_finish_edit_and_update_plan() {
+    void given_executor_on_project_dev_when_toolkit_then_finish_edit_update_plan_and_propose_skill() {
         // 执行体的业务工具面 = 结束工具（#46 修正收口判定）+ 步骤清单（#236 run 级
-        // 计划的全量快照观测面——呈现归部件映射表，本工具零副作用）：主智能体资产
+        // 计划的全量快照观测面——呈现归部件映射表，本工具零副作用）+ 技能自荐
+        // （#259 过程模式沉淀待审——骨架件无开关）：主智能体资产
         // 不泄漏（ask_user/savePrd/只读五件都不在执行体面），其余编码工具（含内核
         // shell，#219 透明面化后破坏性命令直通）由 harness 内核自带
         assertThat(supplier().toolkitFor(AgentProfile.EXECUTOR.key(),
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null)
                 .getToolNames())
-                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME);
+                .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
+                        ProposeSkillTool.NAME);
     }
 
     @Test

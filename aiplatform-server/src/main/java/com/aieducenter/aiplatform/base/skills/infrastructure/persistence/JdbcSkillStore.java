@@ -51,6 +51,9 @@ public class JdbcSkillStore implements SkillStore {
     private static final String EXISTS_BY_SOURCE_SQL =
             "SELECT EXISTS(SELECT 1 FROM skl_skills WHERE source_package = ?)";
 
+    private static final String EXISTS_BY_NAME_SQL =
+            "SELECT EXISTS(SELECT 1 FROM skl_skills WHERE name = ?)";
+
     private static final String INSERT_SQL = """
             INSERT INTO skl_skills
                 (id, name, description, source_package, version, status, frontmatter, content,
@@ -179,6 +182,12 @@ public class JdbcSkillStore implements SkillStore {
     public boolean existsBySourcePackage(String sourcePackage) {
         return Boolean.TRUE.equals(jdbcTemplate.queryForObject(EXISTS_BY_SOURCE_SQL,
                 Boolean.class, sourcePackage));
+    }
+
+    @Override
+    public boolean existsByName(String name) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(EXISTS_BY_NAME_SQL,
+                Boolean.class, name));
     }
 
     @Override

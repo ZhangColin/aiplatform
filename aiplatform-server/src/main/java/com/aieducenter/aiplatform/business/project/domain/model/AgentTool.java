@@ -45,7 +45,9 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     FINISH_EDIT(9, "finish_edit", "executor", AgentToolKind.SKELETON,
             "更新收口结束工具（「要不要动系统」的判定面——编排链路）"),
     UPDATE_PLAN(10, "update_plan", "executor", AgentToolKind.SKELETON,
-            "run 级步骤清单的全量快照（呈现面在部件映射表——编排链路）");
+            "run 级步骤清单的全量快照（呈现面在部件映射表——编排链路）"),
+    PROPOSE_SKILL(11, "propose_skill", "executor", AgentToolKind.SKELETON,
+            "技能草稿自荐（验证过的编码模式沉淀待审——过程知识沉淀链）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */

@@ -261,6 +261,11 @@ class ProfileSkillRepositorySupplierTest {
         }
 
         @Override
+        public boolean existsByName(String name) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void insertAll(List<SkillRecord> records) {
             throw new UnsupportedOperationException();
         }

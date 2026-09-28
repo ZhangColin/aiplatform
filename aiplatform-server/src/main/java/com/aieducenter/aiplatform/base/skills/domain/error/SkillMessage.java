@@ -38,7 +38,10 @@ public enum SkillMessage implements CodeMessage {
 
     SKILL_UPDATE_REMOVES_ASSIGNED(409, "SKL_013", "更新将移除有指派在身的技能，先解绑再更新"),
 
-    SKILL_SOURCE_PACKAGE_REQUIRED(400, "SKL_014", "来源包标识不能为空（取清单行 sourcePackage 值）");
+    SKILL_SOURCE_PACKAGE_REQUIRED(400, "SKL_014", "来源包标识不能为空（取清单行 sourcePackage 值）"),
+
+    // ========== 技能草稿（#259 自产线 T1，ADR-0022 库制草稿） ==========
+    SKILL_DRAFT_NOT_FOUND(404, "SKL_015", "技能草稿不存在");
 
     private final int httpStatus;
     private final String code;

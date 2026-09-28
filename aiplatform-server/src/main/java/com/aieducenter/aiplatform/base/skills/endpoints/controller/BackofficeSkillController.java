@@ -21,10 +21,13 @@ import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillPrecheckAppService;
+import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillInstallCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillSlotAssignCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.command.SkillUpdateCommand;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDetailResponse;
+import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDraftDetailResponse;
+import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillDraftSummaryResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillPrecheckResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillSummaryResponse;
 import com.aieducenter.aiplatform.base.skills.application.dto.response.BackofficeSkillUpdateResponse;
@@ -35,14 +38,16 @@ import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250＋#255，机机
+ * 后台技能库管理 REST 面（#246-T1/#247＋T2/#248＋T3/#249＋T4/#250＋#255＋#259
+ * 草稿只读面，机机
  * 签名——五头 HMAC 强制闸，见 {@link com.aieducenter.aiplatform.config.WebMvcConfig}）：
  * 清单 / 详情（审核面）＋写口——安装（git 仓库快照固化）/ 停用⇄启用 / 卸载
  * / 槽位指派读写（三职能槽位整包替换）/ 指派双头预检（#255 非阻断提示，只读）
- * / 显式更新＋版本留痕读面。内置（classpath 合成）与库中安装技能同权呈现；
+ * / 显式更新＋版本留痕读面＋技能草稿清单/详情（#259 自产线——自荐草稿的人审
+ * 分诊面，只读；晋升/拒绝写口 T2）。内置（classpath 合成）与库中安装技能同权呈现；
  * 技能柄为 opaque 串两形制（内置 {@code builtin:<技能名>}／安装 TSID 十进制串）。
  * 清单行带「有新版」标记（定期只读检查远端 HEAD，更新永远显式点——永不自动
- * 跟新，ADR-0021）。错误码前缀 SKL_（SKL_001～SKL_014）。操作者透传头
+ * 跟新，ADR-0021）。错误码前缀 SKL_（SKL_001～SKL_015）。操作者透传头
  * {@code X-User-Id}/{@code X-User-Name} 全程落痕（安装/启停/指派/更新必留痕，
  * 缺头 SKL_009；预检只读不留痕、卸载无行可留不留痕——admin 侧自有操作日志）。
  */
@@ -56,10 +61,14 @@ public class BackofficeSkillController {
 
     private final BackofficeSkillPrecheckAppService precheckAppService;
 
+    private final SkillDraftAppService draftAppService;
+
     public BackofficeSkillController(BackofficeSkillAppService appService,
-            BackofficeSkillPrecheckAppService precheckAppService) {
+            BackofficeSkillPrecheckAppService precheckAppService,
+            SkillDraftAppService draftAppService) {
         this.appService = appService;
         this.precheckAppService = precheckAppService;
+        this.draftAppService = draftAppService;
     }
 
     @GetMapping
@@ -234,6 +243,40 @@ public class BackofficeSkillController {
     @ErrorCodes({"SKL_004", "SKL_005", "SKL_007", "SKL_009", "SKL_012", "SKL_013", "SKL_014"})
     public ApiResponse<BackofficeSkillUpdateResponse> update(@RequestBody SkillUpdateCommand command) {
         return ApiResponse.ok(appService.update(command, currentOperator()));
+    }
+
+    @GetMapping("/drafts")
+    @Operation(summary = "技能草稿清单（活跃面＝在途，人审队列）",
+            description = "智能体自荐的技能草稿（#259 自产线，ADR-0022 库制草稿）："
+                    + "跨项目全部<b>在途</b>草稿按自荐时间倒序（最近先）——终态"
+                    + "（已晋升/已拒绝）不列活跃面、详情仍可按 id 查。行字段：名称、"
+                    + "简介、血统三件（来源项目 id／来源 run 标识／来源槽位键"
+                    + " main/executor/subagent）、写入前静态扫描判定（SAFE/CAUTION——"
+                    + "DANGEROUS 已在写入口拒收不落库）、状态（恒 1=在途）与自荐"
+                    + "时刻。草稿不参与任何装配（未审内容不影响任何 run）。不分页"
+                    + "（人审是天然瓶颈，对齐技能清单有界目录先例）。id 为 TSID "
+                    + "十进制串。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"UNAUTHORIZED"})
+    public ApiResponse<List<BackofficeSkillDraftSummaryResponse>> drafts() {
+        return ApiResponse.ok(draftAppService.drafts());
+    }
+
+    @GetMapping("/drafts/{id}")
+    @Operation(summary = "技能草稿详情（正文＋扫描回执＋血统，审核面）",
+            description = "草稿全文按自产审核口径判读（docs/agents/skill-audit-"
+                    + "guide.md——真伪／重叠／description 三要素／血统可溯：来源 run "
+                    + "的外部资料接触史必查）：清单行同形字段＋正文全文（自荐只有"
+                    + "正文——a-only 无 scripts）＋扫描 findings 逐条留档"
+                    + "（patternId/severity/category/file/line/matchText/description，"
+                    + "空列表＝无发现）＋终态留痕字段（审核操作者/时刻/拒绝理由——"
+                    + "晋升/拒绝端点 T2 落地后回填，在途恒 null）。任意状态可查"
+                    + "（终态留档）。id 取清单行原值（TSID 十进制串）；草稿不存在"
+                    + "（含未寻址/畸形 TSID）404 SKL_015。需要机机签名（五头 HMAC），"
+                    + "无签名 401")
+    @ErrorCodes({"SKL_015"})
+    public ApiResponse<BackofficeSkillDraftDetailResponse> draftDetail(@PathVariable String id) {
+        return ApiResponse.ok(draftAppService.draft(
+                Tsid.resolve(id, SkillMessage.SKILL_DRAFT_NOT_FOUND)));
     }
 
     @GetMapping("/update-traces")

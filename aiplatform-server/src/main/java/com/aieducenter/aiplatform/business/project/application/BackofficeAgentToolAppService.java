@@ -25,16 +25,17 @@ import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.Pro
  *       （名字跟框架版本走，不手工抄录）；main 槽只读面结构性无（#86 内核文件/shell
  *       已关，不呈现空组）；</li>
  *   <li>子智能体声明工具面（subagent 槽）：{@code ProfileSubagentSupplier#SELF_TEST_TOOLS}
- *       哨兵 allowlist 同源引用（#249 位就位——技能面结构性空，工具面按声明呈现）。</li>
+ *       同源引用（#260 装配一等化——工具面按声明 allowlist 呈现，技能面走 subagent
+ *       槽位装配视图）。</li>
  * </ul>
  * 开关写口在 {@link BackofficeAgentConfigAppService#toggleTool}（共表共留痕机制）。
  */
 @Service
 public class BackofficeAgentToolAppService {
 
-    /** subagent 槽呈现描述（self-test 声明面——技能面哨兵收窄的孪生呈现）。 */
+    /** subagent 槽呈现描述（self-test 声明面——工具面按声明 allowlist 呈现）。 */
     private static final String SUBAGENT_TOOL_DESCRIPTION =
-            "self-test 子智能体声明工具面（哨兵 allowlist 结构性收窄，只读交付代码＋跑测试＋报告写隔离根）";
+            "self-test 子智能体声明工具面（声明 allowlist 收窄，只读交付代码＋跑测试＋报告写隔离根）";
 
     private final AgentConfigAppService agentConfigs;
 

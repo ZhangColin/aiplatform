@@ -110,6 +110,26 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(names(executorView)).containsExactly("tdd");
     }
 
+    // ---------- #260 subagent 槽一等化：子智能体键视图随指派增减（动态查库同款语义） ----------
+
+    @Test
+    void given_subagent_slot_assignment_changes_when_reread_child_view_then_reflects_latest() {
+        // 子智能体技能面＝self-test 键视图（平台工厂按声明名取用）：指派即在面、
+        // 取消指派即退出——同一仓库实例重读（下一轮清单重建即生效，非固化快照）
+        skillStore.assign(SkillSlot.SUBAGENT, record(303, "review-pack", "superpowers 包"));
+
+        ProfileSkillRepositorySupplier supplier = supplier();
+        AgentSkillRepository childView = supplier
+                .skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
+                .get(0);
+
+        assertThat(names(childView)).containsExactly("review-pack");
+
+        skillStore.unassign(SkillSlot.SUBAGENT, 303);
+        assertThat(names(childView)).isEmpty();
+    }
+
     // ---------- 库技能同名覆盖内置（指派显式意图优先——顺序即框架覆盖语义） ----------
 
     @Test

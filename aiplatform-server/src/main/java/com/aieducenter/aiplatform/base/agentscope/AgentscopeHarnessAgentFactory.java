@@ -1,12 +1,18 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
+import io.agentscope.core.agent.Agent;
+import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ModelRegistry;
+import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
+import io.agentscope.harness.agent.subagent.SubagentDeclaration;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +29,10 @@ import org.springframework.stereotype.Component;
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
  * 是交付物，记忆文件不进包）——工作区上下文（AGENTS.md 等）与
  * workspace/tools.json 读取照常，经容器文件面即项目事实；subagents 委派位在此
- * 开启（#95：子智能体经 {@link AgentSubagentSupplier} 挂载，隔离根落位平台目录
- * 下进非交付目录集），只读面在分支处单独关闭；
+ * 开启（#95 挂载：声明经 {@link AgentSubagentSupplier} 取得；#260 装配一等化：
+ * 声明转平台子智能体工厂构建——技能面按子智能体键接 subagent 槽位装配视图、
+ * 容器文件面同父级，隔离根落位平台目录下进非交付目录集），只读面在分支处单独
+ * 关闭；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
  * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）。</p>
@@ -102,12 +110,20 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
             String agentKey, String toolSpec, AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
+        // 模型边界计量（#109）：主模型经 MeteredModel 包装——主循环每次迭代
+        // 的 stream() 收口报用量（取代只认 ModelCallEndEvent 的旧源）；子智能体
+        // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）
+        Model model = MeteredModel.wrap(ModelRegistry.resolve(modelString), modelString);
+        // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
+        DockerExecFilesystem containerFs = switch (workspace) {
+            case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
+            case AgentWorkspace.ProjectReadOnly ro -> new DockerExecFilesystem(ro.containerName());
+            case AgentWorkspace.Local ignored -> null;
+        };
         HarnessAgent.Builder builder = HarnessAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
-                // 模型边界计量（#109）：主模型经 MeteredModel 包装——主循环每次
-                // 迭代的 stream() 收口报用量（取代只认 ModelCallEndEvent 的旧源）
-                .model(MeteredModel.wrap(ModelRegistry.resolve(modelString), modelString))
+                .model(model)
                 .stateStore(stateStore)
                 .toolkit(toolkit)
                 // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
@@ -116,11 +132,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .disableDefaultWorkspaceSkills();
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);
-        // 委派位（#95）：按配置挂载子智能体声明——无声明挂载返回空集即框架不注入
-        // <available_subagents>（主智能体/无配置语境空集）；子智能体隔离根由声明
-        // 携带（框架 ISOLATED 工作区布局），工厂不另建机制
+        // 委派位（#95 挂载 / #260 装配一等化）：声明转平台子智能体工厂（框架 2.0.1
+        // declared 工厂只继承父级技能仓库，子智能体槽位视图接不进去——见工厂方法
+        // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>
         subagentSupplier.subagentsFor(agentKey, workspace)
-                .forEach(builder::subagent);
+                .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
+                        workspace, containerFs, model, toolkit, stateStore,
+                        skillRepositorySupplier)));
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
@@ -138,8 +156,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // 关此周期 flush 不丢抽取；亦与项目工作区同口径（记忆不进包）。
                 builder.disableMemoryHooks();
             }
-            case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, dev.containerName());
-            case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, ro.containerName())
+            case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, containerFs);
+            case AgentWorkspace.ProjectReadOnly ro -> projectSandbox(builder, containerFs)
                     // 只读面（#86 主智能体对话姿态）：另关内核文件与 shell 工具——
                     // 写面结构性不存在，项目事实的读取经业务侧只读工具集
                     // （ProfileToolkitSupplier）；委派是 run 内机制（#95 委派位只开在
@@ -178,15 +196,92 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 工作区根同形（路径规范化剥前缀后即工作区锚定形）、docker exec 文件面、
      * 关闭会写 harness 内脏进项目工作区的部件（memory：源码包是交付物，记忆文件
      * 不进包）。subagents 不在公共装配关——委派位（#95）只开在 ProjectDev，只读面
-     * 在分支处单独关闭。
+     * 在分支处单独关闭。文件面实例由调用方先建（子智能体工厂同面共享，#260）。
      */
     private static HarnessAgent.Builder projectSandbox(HarnessAgent.Builder builder,
-            String containerName) {
+            DockerExecFilesystem filesystem) {
         return builder
                 .workspace(java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT))
-                .abstractFilesystem(new DockerExecFilesystem(containerName))
+                .abstractFilesystem(filesystem)
                 .disableMemoryHooks()
                 .disableMemoryTools();
+    }
+
+    /**
+     * 子智能体构建工厂（#260 subagent 槽装配一等化——撤哨兵接真视图）：业务侧声明
+     * 携带 WHAT（名/描述/正文/工具 allowlist/步数），平台不变式在此兑现 HOW——计量
+     * 模型同实例、状态存储同库、记忆关闭（记忆不进包）、容器文件面同父级、无工作区
+     * 技能；<b>技能面＝按子智能体键取装配视图</b>（{@link
+     * AgentSkillRepositorySupplier#skillRepositoriesFor}——subagent 槽动态查库视图，
+     * 指派/启停变更子智能体下一轮清单重建即生效、进行中 run 不定格，ADR-0021 语义
+     * 与主装配同款）。
+     *
+     * <p>为何不走框架声明直配（{@code Builder.subagent(decl)}）：2.0.1 declared 工厂
+     * 把<b>父级</b>技能仓库实例原样继承给子智能体、声明 {@code skills} 只做静态名
+     * 过滤——无「子智能体自带仓库」通路，槽位视图接不进去（上游 {@code
+     * SubagentDeclaration.skillRepositories} 未发布）。自定义工厂路径的两处代价记录
+     * 在案：条目描述退化为名（2.0.1 {@code subagentFactory(name, factory)} 无描述参
+     * ——路由由执行体工作协议点名 agent_id 承担，框架带描述参版本发布后可回归）；
+     * 框架子智能体上下文段不随行（正文自含角色与回交纪律，通用英文段不复制以免
+     * 跟版漂移）。{@code asLeafSubagent()} 包私有不可及，公开等价面 {@code
+     * disableSubagents()} 封死子智能体再委派。</p>
+     *
+     * <p>容器文件面显式同父级：2.0.1 declared 工厂对 ISOLATED 子智能体不继承
+     * {@code abstractFilesystem}（子级回落宿主机本地缺省——读代码/报告落盘与
+     * {@code execute} 跑测试分裂在两个文件面）；本工厂给子智能体同一容器面，读/写/
+     * 命令一致落项目 dev 容器，技能脚本物化（hasShell 槽位）同面可跑。隔离根＝父级
+     * 工作区下 {@code agents/<name>/workspace/}（框架 ISOLATED 布局同款路径演算，
+     * 已进非交付目录集——报告写隔离根不脏交付面）。</p>
+     */
+    static Function<String, Agent> subagentFactory(
+            SubagentDeclaration declaration, AgentWorkspace workspace,
+            DockerExecFilesystem containerFs, Model parentModel, Toolkit parentToolkit,
+            AgentStateStore stateStore, AgentSkillRepositorySupplier skillRepositorySupplier) {
+        List<AgentSkillRepository> childSkills =
+                skillRepositorySupplier.skillRepositoriesFor(declaration.getName(), workspace);
+        Toolkit childToolkit = allowlistedToolkit(parentToolkit, declaration.getTools());
+        java.nio.file.Path isolatedRoot = containerFs != null
+                ? java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT)
+                        .resolve("agents").resolve(declaration.getName()).resolve("workspace")
+                : null;
+        // 注册键即声明名（Function 入参恒同名），构建只认声明——单声明单工厂
+        return name -> {
+            HarnessAgent.Builder sub = HarnessAgent.builder()
+                    .name(declaration.getName())
+                    .description(declaration.getDescription())
+                    .model(parentModel)
+                    .toolkit(childToolkit)
+                    .defaultSessionId(declaration.getName())
+                    .maxIters(declaration.getSteps())
+                    .sysPrompt(declaration.getInlineAgentsBody())
+                    // 子智能体不委派（框架 asLeafSubagent 包私有的公开等价面）
+                    .disableSubagents()
+                    .disableDefaultWorkspaceSkills()
+                    .stateStore(stateStore);
+            if (isolatedRoot != null) {
+                sub.workspace(isolatedRoot).abstractFilesystem(containerFs);
+            }
+            // 记忆同父级项目面口径关闭（记忆不进包；压缩链不走子智能体）
+            sub.disableMemoryHooks().disableMemoryTools();
+            childSkills.forEach(sub::skillRepository);
+            return sub.build();
+        };
+    }
+
+    /**
+     * 工具 allowlist 过滤（框架 declared 工厂同款语义）：非空 allowlist 只留列名件、
+     * 空即全保留；在副本上摘除（父级工具集不动）。
+     */
+    private static Toolkit allowlistedToolkit(Toolkit parentToolkit, List<String> allowlist) {
+        Toolkit toolkit = parentToolkit.copy();
+        if (allowlist == null || allowlist.isEmpty()) {
+            return toolkit;
+        }
+        toolkit.getToolNames().stream()
+                .filter(toolName -> !allowlist.contains(toolName))
+                .toList()
+                .forEach(toolkit::removeTool);
+        return toolkit;
     }
 
     /**

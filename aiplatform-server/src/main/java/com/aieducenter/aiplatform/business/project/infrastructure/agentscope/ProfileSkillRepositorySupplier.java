@@ -28,13 +28,10 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * <li>{@link AgentProfile#EXECUTOR run 执行体}＝executor 槽位库技能（安装技能的
  * 主消费槽位——编码方法论等）；</li>
  * <li>{@code self-test}（子智能体槽当前唯一实例，键见 {@link
- * ProfileSubagentSupplier#SELF_TEST_NAME}）＝subagent 槽位库技能——<b>运行时
- * 接线 v1 收在「位就位」</b>：declared 子智能体经框架继承父级技能面（无自带
- * 仓库通路），声明挂哨兵 allowlist 断开继承（技能面结构性空，不继承执行体）；
- * 本键视图供读侧/缝测试与未来一等化接线（升级路径＝subagentFactory 自建或上游
- * {@code SubagentDeclaration.skillRepositories}，触发器＝第一个真实要给子智能体
- * 指派的技能——原并列触发器「#245 瘦身落地」已落地：核验证实 EXECUTOR 工作协议
- * 分层合规、无物可迁，#245/#256）；</li>
+ * ProfileSubagentSupplier#SELF_TEST_NAME}）＝subagent 槽位库技能——<b>运行时已
+ * 接线</b>（#260 装配一等化：平台工厂构建子智能体时按本键取视图挂载，指派的
+ * 启用技能真实出现在自测子智能体技能清单；动态查库同款语义——指派/启停变更
+ * 下一轮清单重建即生效）；</li>
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
  *

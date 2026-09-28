@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.agentscope.core.model.Model;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
@@ -241,6 +242,184 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
 
         assertThat(readOnly.getSubagentAgentManager()).isNull();
+    }
+
+    // ---------- #260 subagent 槽装配一等化：声明转平台子智能体工厂（技能面按子键接视图） ----------
+
+    /** 可变技能名桩仓库（装配缝：仓库实例内容随指派变——identity 断言＋动态重读两用）。 */
+    private static final class StubSkillRepository
+            implements io.agentscope.core.skill.repository.AgentSkillRepository {
+
+        private final List<String> names;
+
+        StubSkillRepository(String... names) {
+            this.names = List.of(names);
+        }
+
+        @Override
+        public io.agentscope.core.skill.AgentSkill getSkill(String name) {
+            return null;
+        }
+
+        @Override
+        public List<String> getAllSkillNames() {
+            return names;
+        }
+
+        @Override
+        public List<io.agentscope.core.skill.AgentSkill> getAllSkills() {
+            return List.of();
+        }
+
+        @Override
+        public boolean save(List<io.agentscope.core.skill.AgentSkill> skills, boolean force) {
+            return false;
+        }
+
+        @Override
+        public boolean delete(String skillName) {
+            return false;
+        }
+
+        @Override
+        public boolean skillExists(String skillName) {
+            return names.contains(skillName);
+        }
+
+        @Override
+        public io.agentscope.core.skill.repository.AgentSkillRepositoryInfo getRepositoryInfo() {
+            return new io.agentscope.core.skill.repository.AgentSkillRepositoryInfo(
+                    "stub", "stub:" + names, false);
+        }
+
+        @Override
+        public String getSource() {
+            return "stub";
+        }
+
+        @Override
+        public void setWriteable(boolean writeable) {
+        }
+
+        @Override
+        public boolean isWriteable() {
+            return false;
+        }
+    }
+
+    /** 子智能体测试声明（名与业务 SELF_TEST 同形：inline 正文＋工具 allowlist）。 */
+    private static io.agentscope.harness.agent.subagent.SubagentDeclaration selfTestDeclaration() {
+        return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
+                .name("self-test")
+                .description("运行自测：读取系统代码（只读），运行测试验证系统可用，报告回交执行体。")
+                .inlineAgentsBody("你是自测子智能体，逐项 ✅/❌ 播报，结果回交执行体。")
+                .tools(List.of("read_file", "write_file", "execute"))
+                .build();
+    }
+
+    /** 槽位分视图桩供应商（self-test 键→子视图，其余→执行体视图——两测试共用）。 */
+    private static AgentSkillRepositorySupplier routedSkillRepos(
+            StubSkillRepository childView, StubSkillRepository executorView) {
+        return (agentKey, workspace) -> "self-test".equals(agentKey)
+                ? List.of(childView)
+                : List.of(executorView);
+    }
+
+    @Test
+    void given_declaration_when_child_built_then_skill_repos_are_child_key_view(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
+        // 一等化接线本体：子智能体技能仓库＝供应商按子智能体键发放的视图（identity
+        // 同实例——动态查库语义随视图自带），父级（executor）视图不漏入
+        StubSkillRepository childView = new StubSkillRepository("review-pack");
+        StubSkillRepository executorView = new StubSkillRepository("code-review");
+        Model parentModel = mock(Model.class);
+        Toolkit parentToolkit = new Toolkit();
+        parentToolkit.registerAgentTool(AgentToolStub.named("finish_edit"));
+        parentToolkit.registerAgentTool(AgentToolStub.named("update_plan"));
+
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
+                parentToolkit, new InMemoryAgentStateStore(),
+                routedSkillRepos(childView, executorView))
+                .apply("self-test");
+
+        try {
+            // 技能面＝子键视图（同一实例），executor 视图不在
+            assertThat(child.getSkillRepositories()).containsExactly(childView);
+            // 平台工具按声明 allowlist 排除（finish_edit/update_plan 不继承）
+            assertThat(child.getToolkit().getToolNames())
+                    .doesNotContain("finish_edit", "update_plan");
+            // 计量模型同实例（子智能体轮次归当轮用量）＋会话状态同库
+            assertThat(child.getModel()).isSameAs(parentModel);
+            assertThat(child.getName()).isEqualTo("self-test");
+        } finally {
+            child.close();
+        }
+    }
+
+    @Test
+    void given_child_and_parent_views_when_real_build_then_each_key_gets_own_view() {
+        // 全链缝（命令构建 → 工厂 → 子智能体创建）：执行体装配面只含 executor 视图，
+        // 经 subagent 管理器按声明名创建的子智能体只含 self-test 键视图（互不漏入）
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过真构建断言");
+        StubSkillRepository childView = new StubSkillRepository("review-pack");
+        StubSkillRepository executorView = new StubSkillRepository("code-review");
+        AgentSubagentSupplier subagents = (agentKey, workspace) -> "executor".equals(agentKey)
+                ? List.of(selfTestDeclaration())
+                : List.of();
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, routedSkillRepos(childView, executorView),
+                subagents,
+                new AgentscopeProperties());
+
+        HarnessAgent executor = factory.obtain("platform-agent", "sys",
+                "deepseek:deepseek-v4-flash", new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
+                "executor", null);
+        HarnessAgent child = (HarnessAgent) executor.getSubagentAgentManager()
+                .createAgent("self-test", io.agentscope.core.agent.RuntimeContext.empty());
+
+        try {
+            assertThat(executor.getSkillRepositories()).containsExactly(executorView);
+            assertThat(child.getSkillRepositories()).containsExactly(childView);
+        } finally {
+            child.close();
+        }
+    }
+
+    /** 命名 AgentTool 桩（allowlist 过滤断言用——callAsync 不真被调）。 */
+    private static final class AgentToolStub implements io.agentscope.core.tool.AgentTool {
+
+        private final String name;
+
+        private AgentToolStub(String name) {
+            this.name = name;
+        }
+
+        static AgentToolStub named(String name) {
+            return new AgentToolStub(name);
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public String getDescription() {
+            return "桩：" + name;
+        }
+
+        @Override
+        public java.util.Map<String, Object> getParameters() {
+            return java.util.Map.of();
+        }
+
+        @Override
+        public reactor.core.publisher.Mono<io.agentscope.core.message.ToolResultBlock> callAsync(
+                io.agentscope.core.tool.ToolCallParam param) {
+            return reactor.core.publisher.Mono.empty();
+        }
     }
 
     /**

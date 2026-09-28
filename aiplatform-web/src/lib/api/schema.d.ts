@@ -1866,7 +1866,7 @@ export interface paths {
         };
         /**
          * 工具面清单（按职能槽位列当前挂载工具）
-         * @description 排障/审计面：按职能槽位（main=主智能体 / executor=run 执行体 / subagent=子智能体，与技能槽位同键）列当前挂载工具。三呈现源：平台资产（骨架=编排链路＋项目事实只读件；增强=联网搜索/网页抓取，enabled 按运营配置生效态——false＝在册但退出装配面）、harness 内建编码工具（executor 槽，框架注册自省的呈现口径，不可开关；main 只读面结构性无）、子智能体声明工具面（self-test 哨兵 allowlist）。骨架与harness 内建结构性锁死（ADR-0021 编排权不下放配置），开关面只收增强两件。需要机机签名（五头 HMAC），无签名 401
+         * @description 排障/审计面：按职能槽位（main=主智能体 / executor=run 执行体 / subagent=子智能体，与技能槽位同键）列当前挂载工具。三呈现源：平台资产（骨架=编排链路＋项目事实只读件；增强=联网搜索/网页抓取，enabled 按运营配置生效态——false＝在册但退出装配面）、harness 内建编码工具（executor 槽，框架注册自省的呈现口径，不可开关；main 只读面结构性无）、子智能体声明工具面（self-test 声明 allowlist）。骨架与harness 内建结构性锁死（ADR-0021 编排权不下放配置），开关面只收增强两件。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 401 UNAUTHORIZED — Authentication required

@@ -6,7 +6,10 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
+import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
@@ -20,6 +23,12 @@ import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 import com.aieducenter.aiplatform.business.project.infrastructure.SkillProposalAdapter;
+
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.ToolResultState;
+import io.agentscope.core.message.ToolUseBlock;
+import io.agentscope.core.tool.ToolCallParam;
+import reactor.core.publisher.Mono;
 
 /**
  * 按配置的工具集装配（#86 角色预设收敛为配置——职能是配置不是结构）：
@@ -61,7 +70,8 @@ class ProfileToolkitSupplierTest {
     @Test
     void given_main_on_read_only_workspace_when_toolkit_then_dialog_prd_buildplan_and_read_trio() {
         // #86 并轨后的主智能体资产：访谈/判定工具 + 切片计划（saveBuildPlan）+
-        // 答询查证只读五件同面（单会话连续——追问、答询、受理意见不换工具面）；
+        // 答询查证只读五件同面（单会话连续——追问、答询、受理意见不换工具面）+
+        // 技能自荐（#263 三槽位齐开——需求侧经验不绑时刻，软指引在协议）；
         // savePrd 锚定项目（经 PrdArtifactAdapter 落盘登记）；无派发工具（链必达收口
         // 在平台代码）
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
@@ -69,11 +79,12 @@ class ProfileToolkitSupplierTest {
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
-                FetchUrlTool.NAME, WebSearchTool.NAME);
+                FetchUrlTool.NAME, WebSearchTool.NAME, ProposeSkillTool.NAME);
         for (String name : toolkit.getToolNames()) {
             // 只读五件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
-            // savePrd 是唯一写面（PRD 产出是访谈协议的预期终点）
-            if (!SavePrdTool.NAME.equals(name)) {
+            // 平台侧写面两件：savePrd（PRD 产出是访谈协议的预期终点）与
+            // propose_skill（草稿写库——不写工作区文件，#86 只读姿态不被破坏）
+            if (!SavePrdTool.NAME.equals(name) && !ProposeSkillTool.NAME.equals(name)) {
                 assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();
             }
         }
@@ -118,6 +129,89 @@ class ProfileToolkitSupplierTest {
                         null).getToolNames()).isEmpty();
         assertThat(supplier().toolkitFor("naming", new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
                         null).getToolNames()).isEmpty();
+    }
+
+    // ---------- #263 自荐三槽位齐开：self-test 子键视图（subagent 槽血统） ----------
+
+    @Test
+    void given_self_test_key_on_project_dev_when_toolkit_then_propose_skill_only() {
+        // 子智能体自有平台工具面＝技能自荐一件（#263 声明白名单接入的本体——
+        // 子键视图发 subagent 槽实例，执行体资产 finish_edit/update_plan 不泄漏）
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null).getToolNames())
+                .containsExactly(ProposeSkillTool.NAME);
+    }
+
+    @Test
+    void given_self_test_key_on_other_workspaces_when_toolkit_then_empty() {
+        // 子键视图只随项目 dev 面发放（self-test 委派位只在 ProjectDev——与声明面同锚）
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+                        new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null)
+                .getToolNames()).isEmpty();
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+                        new AgentWorkspace.Local(null), null).getToolNames()).isEmpty();
+    }
+
+    @Test
+    void given_three_slot_assemblies_when_propose_skill_called_then_lineage_slot_each() {
+        // #263 血统验收：三槽位装配出的 propose_skill 实例各带正确来源槽位——真缝
+        // 走通（装配 → 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
+        assertProposeLineage(AgentProfile.MAIN.key(),
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
+        assertProposeLineage(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
+        assertProposeLineage(ProfileSubagentSupplier.SELF_TEST_NAME,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
+    }
+
+    /** 适配器替身：记录血统调用形状（SkillProposalAdapter 为具体类，子类覆写）。 */
+    private static final class RecordingProposeAdapter extends SkillProposalAdapter {
+
+        final java.util.List<String> calls = new java.util.ArrayList<>();
+
+        RecordingProposeAdapter() {
+            super(null, null);
+        }
+
+        @Override
+        public SkillDraftReceipt propose(String workspaceId, String runId, SkillSlot slot,
+                String name, String description, String content) {
+            calls.add(workspaceId + "|" + runId + "|" + slot.key() + "|" + name);
+            return SkillDraftReceipt.accepted(1L, "技能草稿已留档待审。");
+        }
+    }
+
+    private void assertProposeLineage(String agentKey, AgentWorkspace workspace, String slotKey) {
+        RecordingProposeAdapter recorder = new RecordingProposeAdapter();
+        when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                externalContentFetcher, webSearchProvider, recorder);
+        var toolkit = supplier.toolkitFor(agentKey, workspace, null);
+        assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
+        String name = "seam-check-" + slotKey;
+        java.util.Map<String, Object> input = java.util.Map.of(
+                "name", name, "description", "缝测血统。", "body", "正文。");
+        var result = Mono.from(toolkit.getTool(ProposeSkillTool.NAME)
+                .callAsync(ToolCallParam.builder()
+                        .toolUseBlock(new ToolUseBlock("tc-1", ProposeSkillTool.NAME,
+                                input, null))
+                        .input(input)
+                        .runtimeContext(RuntimeContext.builder()
+                                .sessionId("s").userId("u")
+                                .put(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY, "run-seam")
+                                .build())
+                        .build()))
+                .block();
+        assertThat(result.getState()).as(agentKey).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(recorder.calls).containsExactly("42|run-seam|" + slotKey + "|" + name);
+    }
+
+    @Test
+    void given_main_protocol_when_built_then_soft_guidance_present() {
+        // #263 软指引落位钉死：主智能体协议含自荐指引句（不绑时刻——与 self-test
+        // 正文钉死测试对称；执行体对应句 #259 已落）
+        assertThat(AgentProfile.MAIN.systemPrompt()).contains("软指引非必做");
     }
 
     @Test
@@ -169,12 +263,14 @@ class ProfileToolkitSupplierTest {
 
     @Test
     void given_both_enhancements_disabled_when_toolkit_then_skeleton_only() {
-        // 两件全关＝只剩骨架六件（编排链路＋只读三件——结构性锁死件不受开关影响）
+        // 两件全关＝只剩骨架七件（编排链路＋只读三件＋自荐 #263——结构性锁死件
+        // 不受开关影响）
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "ws=false,fu=false");
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
-                ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME);
+                ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
+                ProposeSkillTool.NAME);
     }
 
     @Test

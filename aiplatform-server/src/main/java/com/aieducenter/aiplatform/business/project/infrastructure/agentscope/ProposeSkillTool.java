@@ -17,15 +17,19 @@ import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.aieducenter.aiplatform.business.project.infrastructure.SkillProposalAdapter;
 
 /**
- * 技能自荐工具（run 执行体平台资产，#259 自产线 T1）：把本轮验证过的可复用编码
- * 模式写成技能草稿——入参仅 name/description/body（<b>无 scripts 参数，自产
- * a-only 结构性锁死</b>，ADR-0022），落库经 {@link SkillProposalAdapter} 业务适配
- * （血统＝来源项目／run 标识／来源槽位）。校验正本共享
+ * 技能自荐工具（平台资产，#259 自产线 T1 → #263 三槽位齐开）：把本轮验证过的
+ * 可复用过程经验写成技能草稿——入参仅 name/description/body（<b>无 scripts 参数，
+ * 自产 a-only 结构性锁死</b>，ADR-0022），落库经 {@link SkillProposalAdapter} 业务
+ * 适配（血统＝来源项目／run 标识／来源槽位）。校验正本共享
  * {@link SkillDraftProposal#violation()} 在工具面先行（违例回执原因、不触落库）；
  * 撞名／DANGEROUS 的拒因由域用例回执透传（模型可读可修正重提）；run 失败不回滚
  * 已写入的自荐（工具执行即事实落库）。run 标识从 RuntimeContext <b>每调用</b>提取
  * ——agent 实例缓存跨 run 复用，血统不能固化在构造态
  * （{@link AgentscopeAgentClient#RUN_ID_CONTEXT_KEY} 透传腿）。
+ *
+ * <p><b>槽位血统随实例</b>（#263）：同一工具类按槽位各构实例（main／executor 装配
+ * 面直配、subagent 经子键视图挂子级面——同名后写胜出，见平台工厂），构造态
+ * {@code slot} 即草稿来源槽位，各槽经验类别见三处工作协议软指引。</p>
  *
  * <p>软指引非硬步骤（ADR-0022）：无模式可沉淀的 run 不调用——协议层一句指引，
  * 工具面不设门槛。无需确认（权限自检恒放行）：写入有静态扫描哨兵＋后台人审门，
@@ -45,12 +49,12 @@ public class ProposeSkillTool extends ToolBase {
     public ProposeSkillTool(String workspaceId, SkillSlot slot, SkillProposalAdapter adapter) {
         super(ToolBase.builder()
                 .name(NAME)
-                .description("把本轮验证过的可复用编码模式自荐为技能草稿（供后续项目"
+                .description("把本轮验证过的可复用过程经验自荐为技能草稿（供后续项目"
                         + "复用，后台人工审核后才生效）：name 传小写连字符技能名"
                         + "（如 react-form-pattern）；description 传一句话简介"
                         + "（何时用、解决什么）；body 传技能正文（markdown，写清"
-                        + "做法与步骤）。仅在本轮确实沉淀出可复用模式时调用——"
-                        + "软指引非必做，无模式不调用。")
+                        + "做法与步骤）。仅在本轮确实沉淀出可复用经验时调用——"
+                        + "软指引非必做，无经验不调用。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(

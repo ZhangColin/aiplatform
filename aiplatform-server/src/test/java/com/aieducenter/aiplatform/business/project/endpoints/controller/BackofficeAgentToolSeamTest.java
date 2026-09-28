@@ -32,10 +32,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>六面钉死（#252 验收面）：</p>
  * <ul>
- * <li><b>清单可观测</b>：三槽位分组（main/executor/subagent）——main 平台八件
- * （骨架六＋增强两）、executor 平台三件（骨架，含 propose_skill 技能自荐 #259）
+ * <li><b>清单可观测</b>：三槽位分组（main/executor/subagent）——main 平台九件
+ * （骨架七＋增强两，含 propose_skill 技能自荐 #263 三槽位齐开）、executor 平台
+ * 三件（骨架，含 propose_skill 技能自荐 #259）
  * ＋harness 内建编码工具（注册自省，含
- * read_file/execute）、subagent＝self-test 声明六件；增强 enabled 按生效开关、
+ * read_file/execute）、subagent＝self-test 声明七件（含 propose_skill——平台
+ * 资产件类别归正本 SKELETON）；增强 enabled 按生效开关、
  * 骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
  * （{@link AgentConfigAppService#effectiveOf} 取生效规格 →
@@ -95,8 +97,11 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].slot").value("main"))
                 .andExpect(jsonPath("$.data[1].slot").value("executor"))
                 .andExpect(jsonPath("$.data[2].slot").value("subagent"))
-                // main：平台八件（骨架六恒挂载＋增强两件按生效开关缺省开）
-                .andExpect(jsonPath("$.data[0].tools", hasSize(8)))
+                // main：平台九件（骨架七恒挂载——含 propose_skill #263 自荐三槽位齐开
+                // ＋增强两件按生效开关缺省开）
+                .andExpect(jsonPath("$.data[0].tools", hasSize(9)))
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')].kind")
+                        .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].kind")
                         .value("ENHANCEMENT"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].enabled")
@@ -119,9 +124,14 @@ class BackofficeAgentToolSeamTest {
                 // harness 内建件数与自省一致（平台三件之外全是内建呈现）
                 .andExpect(jsonPath("$.data[1].tools.length()").value(
                         3 + harnessBuiltinCount()))
-                // subagent：self-test 声明六件（同源引用声明常量）
+                // subagent：self-test 声明七件（同源引用声明常量——#263 自荐经声明
+                // 接入；平台资产件类别归正本 SKELETON，其余 harness 内建口径）
                 .andExpect(jsonPath("$.data[2].tools", hasSize(
-                        ProfileSubagentSupplier.SELF_TEST_TOOLS.size())));
+                        ProfileSubagentSupplier.SELF_TEST_TOOLS.size())))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'propose_skill')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'execute')].kind")
+                        .value("HARNESS_BUILTIN"));
     }
 
     // ---------- 开关生效：关→退出装配面、开→回归（装配断言） ----------

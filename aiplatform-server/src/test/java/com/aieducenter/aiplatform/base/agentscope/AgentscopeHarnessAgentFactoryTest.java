@@ -345,7 +345,7 @@ class AgentscopeHarnessAgentFactoryTest {
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
-                parentToolkit, new InMemoryAgentStateStore(),
+                parentToolkit, TOOLKITS, new InMemoryAgentStateStore(),
                 routedSkillRepos(childView, executorView), List.of())
                 .apply("self-test");
 
@@ -363,6 +363,76 @@ class AgentscopeHarnessAgentFactoryTest {
         }
     }
 
+    // ---------- #263 自荐三槽位齐开：子级工具面合并子键视图（血统槽位随视图） ----------
+
+    @Test
+    void given_child_key_tool_view_when_child_built_then_view_instance_wins_over_inherited(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
+        // 子级工具面＝声明白名单治理的（父级继承 ∪ 子键视图）：同名件子键视图后写
+        // 胜出——工具实例携带血统槽位（propose_skill 继承的是执行体槽实例，子键
+        // 视图覆写为 subagent 槽实例），identity 断言钉死不串槽
+        io.agentscope.core.tool.AgentTool parentPropose = AgentToolStub.named("propose_skill");
+        io.agentscope.core.tool.AgentTool childPropose = AgentToolStub.named("propose_skill");
+        Toolkit parentToolkit = new Toolkit();
+        parentToolkit.registerAgentTool(AgentToolStub.named("finish_edit"));
+        parentToolkit.registerAgentTool(parentPropose);
+        Toolkit childView = new Toolkit();
+        childView.registerAgentTool(childPropose);
+        AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
+                "self-test".equals(agentKey) ? childView : new Toolkit();
+
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                proposeEnabledDeclaration(), new AgentWorkspace.Local(tempDir), null,
+                mock(Model.class), parentToolkit, routedToolkits,
+                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
+                .apply("self-test");
+
+        try {
+            assertThat(child.getToolkit().getToolNames()).contains("propose_skill");
+            assertThat(child.getToolkit().getTool("propose_skill")).isSameAs(childPropose);
+            assertThat(child.getToolkit().getTool("propose_skill"))
+                    .isNotSameAs(parentPropose);
+            // 白名单外的父级件不继承（finish_edit 不在子级面）
+            assertThat(child.getToolkit().getToolNames()).doesNotContain("finish_edit");
+        } finally {
+            child.close();
+        }
+    }
+
+    @Test
+    void given_allowlist_without_propose_when_child_built_then_child_view_filtered_out(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
+        // 挂载治理归声明 allowlist：清单摘名即退出子级面（子键视图同受白名单约束，
+        // 不因视图自带而绕过声明）
+        Toolkit childView = new Toolkit();
+        childView.registerAgentTool(AgentToolStub.named("propose_skill"));
+        AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
+                "self-test".equals(agentKey) ? childView : new Toolkit();
+
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null,
+                mock(Model.class), new Toolkit(), routedToolkits,
+                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
+                .apply("self-test");
+
+        try {
+            assertThat(child.getToolkit().getToolNames()).doesNotContain("propose_skill");
+        } finally {
+            child.close();
+        }
+    }
+
+    /** 含 propose_skill 的声明（#263 生产面同形：自测六件＋自荐）。 */
+    private static io.agentscope.harness.agent.subagent.SubagentDeclaration
+            proposeEnabledDeclaration() {
+        return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
+                .name("self-test")
+                .description("probe")
+                .inlineAgentsBody("probe body")
+                .tools(List.of("read_file", "write_file", "execute", "propose_skill"))
+                .build();
+    }
+
     // ---------- #261 使用计数接线：平台中间件挂主构建与子智能体两处 ----------
 
     @Test
@@ -373,7 +443,7 @@ class AgentscopeHarnessAgentFactoryTest {
         MiddlewareBase counter = new MiddlewareBase() { };
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
-                new Toolkit(), new InMemoryAgentStateStore(),
+                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of(counter))
                 .apply("self-test");
 

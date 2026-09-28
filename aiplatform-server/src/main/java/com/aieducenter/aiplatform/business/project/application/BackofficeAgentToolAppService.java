@@ -26,7 +26,8 @@ import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.Pro
  *       已关，不呈现空组）；</li>
  *   <li>子智能体声明工具面（subagent 槽）：{@code ProfileSubagentSupplier#SELF_TEST_TOOLS}
  *       同源引用（#260 装配一等化——工具面按声明 allowlist 呈现，技能面走 subagent
- *       槽位装配视图）。</li>
+ *       槽位装配视图）；#263 propose_skill 平台资产件经声明接入，类别归 {@link
+ *       AgentTool} 正本（描述按子级职能语境）。</li>
  * </ul>
  * 开关写口在 {@link BackofficeAgentConfigAppService#toggleTool}（共表共留痕机制）。
  */
@@ -36,6 +37,10 @@ public class BackofficeAgentToolAppService {
     /** subagent 槽呈现描述（self-test 声明面——工具面按声明 allowlist 呈现）。 */
     private static final String SUBAGENT_TOOL_DESCRIPTION =
             "self-test 子智能体声明工具面（声明 allowlist 收窄，只读交付代码＋跑测试＋报告写隔离根）";
+
+    /** subagent 槽平台资产件呈现描述（#263 自荐经声明接入——按子级职能语境）。 */
+    private static final String SUBAGENT_PROPOSE_SKILL_DESCRIPTION =
+            "技能草稿自荐（自测清单经验沉淀待审——经声明 allowlist 挂子级面，#263 三槽位齐开）";
 
     private final AgentConfigAppService agentConfigs;
 
@@ -70,13 +75,28 @@ public class BackofficeAgentToolAppService {
         return new BackofficeAgentToolSlotResponse(slot, slotName, List.copyOf(tools));
     }
 
-    /** subagent 槽：self-test 声明工具面（内核工具子集，呈现即声明事实）。 */
+    /** subagent 槽：self-test 声明工具面（呈现即声明事实；平台资产件归自身类别正本）。 */
     private static BackofficeAgentToolSlotResponse subagentSlot() {
         List<BackofficeAgentToolResponse> tools = ProfileSubagentSupplier.SELF_TEST_TOOLS.stream()
-                .map(name -> BackofficeAgentToolResponse.of(name,
-                        AgentToolKind.HARNESS_BUILTIN, true, SUBAGENT_TOOL_DESCRIPTION))
+                .map(BackofficeAgentToolAppService::subagentToolOf)
                 .toList();
         return new BackofficeAgentToolSlotResponse("subagent", "子智能体", tools);
+    }
+
+    /**
+     * subagent 槽单件呈现：平台资产件（#263 自荐经声明 allowlist 接入）类别归
+     * {@link AgentTool} 正本（骨架锁死同口径——开关面同样不可及）、描述按子级职能
+     * 语境；其余按 harness 内建呈现口径。<b>单件假设钉死</b>：subagent 槽当前唯一
+     * 平台资产＝propose_skill——清单再进平台件时须按名分派描述，勿把专属文案
+     * 错挂。
+     */
+    private static BackofficeAgentToolResponse subagentToolOf(String name) {
+        if (AgentTool.PROPOSE_SKILL_MAIN.toolName().equals(name)) {
+            return BackofficeAgentToolResponse.of(name, AgentToolKind.SKELETON, true,
+                    SUBAGENT_PROPOSE_SKILL_DESCRIPTION);
+        }
+        return BackofficeAgentToolResponse.of(name, AgentToolKind.HARNESS_BUILTIN, true,
+                SUBAGENT_TOOL_DESCRIPTION);
     }
 
     /** 挂载态：骨架恒挂载；增强按生效开关（无开关语境的槽恒挂载——缺省开）。 */

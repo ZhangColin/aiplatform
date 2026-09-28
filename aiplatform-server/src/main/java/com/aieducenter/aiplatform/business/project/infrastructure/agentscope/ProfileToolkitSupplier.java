@@ -25,13 +25,18 @@ import io.agentscope.core.tool.Toolkit;
  * 的挂起源）+ savePrd（PRD 落盘 + 业务登记 + 修订事实登记，#52——需求侧判定的
  * 观测面）+ saveBuildPlan（切片计划事实登记，ADR 0009——生成编排的切片输入）+
  * 只读五件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url + 联网搜索
- * web_search，答询查证与自主调研用），
+ * web_search，答询查证与自主调研用）+ propose_skill（#263 自荐三槽位齐开——
+ * 需求侧梳理经验自荐，软指引不绑时刻），
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
- * PRD 写入走 savePrd 自带通道）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
+ * PRD 写入走 savePrd 自带通道，草稿写入走 propose_skill 平台侧通道——两写面
+ * 均不落工作区文件）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
  * （更新收口结束工具——「要不要动系统」的判定面）+ update_plan（步骤清单——
  * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）
  * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
  * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）；
+ * self-test 子键（#263，子智能体自有平台工具面——平台工厂构建子级时按此键取
+ * 视图合并，镜像技能仓库的子键路由先例）= propose_skill（subagent 槽血统实例，
+ * 测试清单经验自荐——绑任务回交前，挂载与否归声明 allowlist 治理）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。
@@ -98,6 +103,11 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             if (AgentConfigAppService.toolEnabled(toolSpec, WEB_SEARCH_KEY)) {
                 toolkit.registerAgentTool(new WebSearchTool(webSearchProvider));
             }
+            // #263 自荐三槽位齐开：需求侧梳理经验自荐（骨架件无开关；软指引在
+            // 工作协议——不绑时刻，无经验可沉淀的会话不调用）。写面是平台草稿库
+            // （经适配器），不写工作区文件——#86 只读姿态不被破坏
+            toolkit.registerAgentTool(new ProposeSkillTool(ro.workspaceId(),
+                    SkillSlot.MAIN, skillProposals));
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
@@ -108,6 +118,14 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // 工作协议——无模式可沉淀的 run 不调用）
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.EXECUTOR, skillProposals));
+        }
+        // #263 self-test 子键视图：子智能体自有平台工具面（技能自荐 subagent 槽
+        // 血统实例）——平台工厂构建子智能体时按本键取视图合并进子级工具面
+        // （镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否
+        if (ProfileSubagentSupplier.SELF_TEST_NAME.equals(agentKey)
+                && workspace instanceof AgentWorkspace.ProjectDev dev) {
+            toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
+                    SkillSlot.SUBAGENT, skillProposals));
         }
         return toolkit;
     }

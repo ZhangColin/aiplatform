@@ -33,6 +33,11 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 槽位视图接不进去，详见工厂方法 javadoc）；条目描述在 2.0.1 退化为名，路由由
  * 执行体工作协议点名 {@code agent_id=self-test} 承担。技能脚本资源按槽位
  * {@code hasShell} 口径发放（子智能体带 shell——同执行体开放面）。</p>
+ *
+ * <p><b>自荐工具（#263 三槽位齐开）</b>：propose_skill 经声明 allowlist 接入——
+ * 平台工厂按子智能体键取工具视图（{@code ProfileToolkitSupplier} 的 self-test 键
+ * ＝subagent 槽血统实例）合并进子级工具面，同名后写胜出覆盖父级继承的执行体槽
+ * 实例（血统不串槽）；软指引绑任务回交前（正文第 5 条），无经验不调用。</p>
  */
 @Component
 public class ProfileSubagentSupplier implements AgentSubagentSupplier {
@@ -41,11 +46,13 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     public static final String SELF_TEST_NAME = "self-test";
 
     /** 自测子智能体工具白名单：只读交付代码 + 跑测试命令（内核 shell 注册名
-     *  execute）+ 报告写隔离根——排除 edit_file（不改交付代码）与 finish_edit
-     *  （执行体收口工具）。 */
+     *  execute）+ 报告写隔离根 + 技能自荐（#263 声明白名单接入——平台工厂按
+     *  子键视图发 subagent 槽血统实例，挂载治理归本清单）——排除 edit_file
+     *  （不改交付代码）与 finish_edit（执行体收口工具）。 */
     /** public＝工具面清单读面（#252 subagent 槽位呈现口径）与本声明同源引用。 */
     public static final List<String> SELF_TEST_TOOLS = List.of(
-            "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute");
+            "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute",
+            "propose_skill");
 
     /** 自测角色正文（任务自包含、结果回交执行体；读交付代码只读、报告写隔离根）。 */
     private static final String SELF_TEST_BODY = "你是 run 执行体委派的自测子智能体，专项负责运行自测。"
@@ -56,6 +63,10 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
             + "——逐项 ✅/❌ 播报，失败项如实 ❌，不粉饰、不省略。\n"
             + "3. 把自测结果（逐项 ✅/❌）写成报告写入你的隔离工作区（write_file）。\n"
             + "4. 结果以简短文本回交 run 执行体，不直接面对用户。\n"
+            + "5. 经验沉淀（软指引非必做）：回交结果前，若本轮测试清单有可复用经验（某类"
+            + "系统值得逐项验证的要点、探活命令的稳妥写法等），用 propose_skill 工具把它"
+            + "写成技能草稿（name/description/body 三参数）供后续复用——后台审核采纳后"
+            + "才生效；没有可沉淀的就不调用，不为凑数硬写。\n"
             + "全程使用中文。";
 
     private final SubagentDeclaration selfTest;

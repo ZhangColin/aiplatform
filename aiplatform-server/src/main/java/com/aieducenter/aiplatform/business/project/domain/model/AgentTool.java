@@ -39,6 +39,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
             "读用户贴的 http/https 地址内容（外部资料，取数口安全底线兜底——增强可关）"),
     WEB_SEARCH(8, "web_search", "main", AgentToolKind.ENHANCEMENT,
             "自主搜索调研补缺口（增强可关——成本与滥用可控）"),
+    PROPOSE_SKILL_MAIN(12, "propose_skill", "main", AgentToolKind.SKELETON,
+            "技能草稿自荐（需求侧梳理经验沉淀待审——过程知识沉淀链，#263 三槽位齐开）"),
 
     // ---------- executor 槽位（run 执行体：生成/更新 run 的执行侧，读写面） ----------
 
@@ -52,7 +54,9 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */
     private final String name;
-    /** 所属职能槽位（AgentProfile 稳定键；subagent 槽位无平台工具资产——呈现走自省面）。 */
+    /** 所属职能槽位（AgentProfile 稳定键；subagent 槽平台件经声明面挂载、清单
+     * 呈现按名回解本枚举——#263 propose_skill 三槽位同名两词条：byName 首现件
+     * 仅作类别回解，两词条同为骨架、开关行为一致）。 */
     private final String slot;
     private final AgentToolKind kind;
     private final String description;
@@ -93,7 +97,11 @@ public enum AgentTool implements BaseEnum<AgentTool> {
         return description;
     }
 
-    /** 按注册名解析（REST 按名寻址腿；空/未知返回空）。 */
+    /**
+     * 按注册名解析（REST 按名寻址腿；空/未知返回空）。跨槽位同名件（#263 起
+     * propose_skill 两词条）解析到声明序首件——现消费面（开关拒绝、子级清单类别
+     * 回解）只读类别，同名件类别一致无歧义。
+     */
     public static Optional<AgentTool> byName(String toolName) {
         if (toolName == null || toolName.isBlank()) {
             return Optional.empty();

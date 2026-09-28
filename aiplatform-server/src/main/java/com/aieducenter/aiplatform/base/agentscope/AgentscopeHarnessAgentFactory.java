@@ -146,7 +146,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>
         subagentSupplier.subagentsFor(agentKey, workspace)
                 .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
-                        workspace, containerFs, model, toolkit, stateStore,
+                        workspace, containerFs, model, toolkit, toolkitSupplier, stateStore,
                         skillRepositorySupplier, platformMiddlewares)));
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
@@ -241,15 +241,23 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 命令一致落项目 dev 容器，技能脚本物化（hasShell 槽位）同面可跑。隔离根＝父级
      * 工作区下 {@code agents/<name>/workspace/}（框架 ISOLATED 布局同款路径演算，
      * 已进非交付目录集——报告写隔离根不脏交付面）。</p>
+     *
+     * <p><b>子级工具面（#263 自荐三槽位齐开）</b>：声明白名单治理的（父级继承 ∪
+     * 工具供应商按子智能体键发放的视图）——同件子键视图后写胜出（工具实例携带
+     * 血统槽位：继承的 propose_skill 是执行体槽实例，子键视图覆写为 subagent 槽
+     * 实例，草稿血统不串槽）。白名单摘名即退出子级面（视图自带也绕不过声明），
+     * 镜像技能仓库的子键路由先例。</p>
      */
     static Function<String, Agent> subagentFactory(
             SubagentDeclaration declaration, AgentWorkspace workspace,
             DockerExecFilesystem containerFs, Model parentModel, Toolkit parentToolkit,
-            AgentStateStore stateStore, AgentSkillRepositorySupplier skillRepositorySupplier,
+            AgentToolkitSupplier toolkitSupplier, AgentStateStore stateStore,
+            AgentSkillRepositorySupplier skillRepositorySupplier,
             List<MiddlewareBase> platformMiddlewares) {
         List<AgentSkillRepository> childSkills =
                 skillRepositorySupplier.skillRepositoriesFor(declaration.getName(), workspace);
-        Toolkit childToolkit = allowlistedToolkit(parentToolkit, declaration.getTools());
+        Toolkit childToolkit = childToolkit(parentToolkit, declaration, workspace,
+                toolkitSupplier);
         java.nio.file.Path isolatedRoot = containerFs != null
                 ? java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT)
                         .resolve("agents").resolve(declaration.getName()).resolve("workspace")
@@ -290,10 +298,35 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             return toolkit;
         }
         toolkit.getToolNames().stream()
-                .filter(toolName -> !allowlist.contains(toolName))
+                .filter(toolName -> !allows(allowlist, toolName))
                 .toList()
                 .forEach(toolkit::removeTool);
         return toolkit;
+    }
+
+    /**
+     * 子级工具面（#263 自荐三槽位齐开）：声明白名单治理的（父级继承 ∪ 工具供应商
+     * 按子智能体键发放的视图）。子键视图件经白名单放行后<b>后写胜出</b>注册——
+     * 工具实例携带血统槽位（继承的 propose_skill 是执行体槽实例，子键视图覆写为
+     * subagent 槽实例）；白名单摘名即退出子级面（视图自带也绕不过声明治理）。
+     * toolSpec 传 null：子智能体无运营配置行，且子键视图只发骨架件（无开关件）。
+     */
+    private static Toolkit childToolkit(Toolkit parentToolkit, SubagentDeclaration declaration,
+            AgentWorkspace workspace, AgentToolkitSupplier toolkitSupplier) {
+        List<String> allowlist = declaration.getTools();
+        Toolkit toolkit = allowlistedToolkit(parentToolkit, allowlist);
+        Toolkit ownView = toolkitSupplier.toolkitFor(declaration.getName(), workspace, null);
+        for (String name : ownView.getToolNames()) {
+            if (allows(allowlist, name)) {
+                toolkit.registerAgentTool(ownView.getTool(name));
+            }
+        }
+        return toolkit;
+    }
+
+    /** 声明白名单判定（同款语义单点）：缺省/空＝全放行，非空＝只放行列名件。 */
+    private static boolean allows(List<String> allowlist, String toolName) {
+        return allowlist == null || allowlist.isEmpty() || allowlist.contains(toolName);
     }
 
     /**

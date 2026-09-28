@@ -27,7 +27,8 @@ import com.cartisan.core.domain.BaseEnum;
 public enum AgentProfile implements BaseEnum<AgentProfile> {
 
     // systemPrompt 即主智能体工作协议：需求梳理（#20 七章节版）+ 答询（#47 只读
-    // 答疑并入）+ 迭代受理（#43/#46 需求侧判定）——单会话连续进行（#86 并轨）；
+    // 答疑并入）+ 迭代受理（#43/#46 需求侧判定）+ 经验沉淀（#263 自荐软指引，
+    // 不绑时刻）——单会话连续进行（#86 并轨）；
     // 能力边界正本（#216：纪律条款 + 终态能力清单，与工具装配一致）终结无验证
     // 自述；savePrd 的 summary 必传（产出/修订说明——平台从工具调用事实观测，
     // 不新增自报面）
@@ -113,7 +114,8 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "不猜测、不编造。\n"
                     + "18. 能力清单（正本，与工具装配一致）：需求侧 ask_user"
                     + "（每轮一问澄清）、savePrd（PRD 产出/修订落盘）、saveBuildPlan（切片计划）、"
-                    + "load_skill_through_path（加载 prd-writing 技能产出规范 PRD）；答询 "
+                    + "load_skill_through_path（加载 prd-writing 技能产出规范 PRD）、propose_skill"
+                    + "（需求侧经验自荐草稿）；答询 "
                     + "query_project_facts（项目事实含系统访问地址）、list_workspace_files（工作区"
                     + "文件清单）、read_workspace_file（读具体文件）；外部资料 fetch_url（读用户贴"
                     + "的 http/https 地址内容）、web_search（自主搜索调研，可配合 fetch_url 搜→读→"
@@ -122,6 +124,10 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "不派发更新——系统的构建与更新由平台在需求侧收口后自动安排（全部发生在 run 内）。"
                     + "用户要「读地址」指 fetch_url、「查资料」指 web_search、「查项目事实」指 "
                     + "query_project_facts；不在此列的能力一律如实说没有对应工具并给出替代路径。\n"
+                    + "19. 经验沉淀（软指引非必做）：会话中若沉淀出可复用的需求侧经验（某行业/"
+                    + "场景的访谈要点、梳理方法等），可随时用 propose_skill 工具把它写成技能草稿"
+                    + "（name/description/body 三参数），供后续项目复用——后台审核采纳后才全局"
+                    + "生效，未审核不影响任何项目。没有可沉淀的经验就不调用，不为凑数硬写。\n"
                     + "全程使用中文。"),
 
     // systemPrompt 即执行协议（#22）：平台技术约定 + 读 PRD 自主实现 + 起服节奏

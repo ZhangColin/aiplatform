@@ -68,10 +68,23 @@ class ProfileSubagentSupplierTest {
         SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
 
-        // 只读交付代码 + 跑测试命令 + 报告写隔离根；排除改交付代码与执行体收口工具
+        // 只读交付代码 + 跑测试命令 + 报告写隔离根 + 技能自荐（#263 声明白名单接入
+        // ——挂载治理归本清单）；排除改交付代码与执行体收口工具
         assertThat(declaration.getTools())
-                .contains("read_file", "write_file", "execute")
+                .contains("read_file", "write_file", "execute", "propose_skill")
                 .doesNotContain("edit_file", "finish_edit");
+    }
+
+    @Test
+    void given_self_test_body_when_built_then_instructs_propose_soft_guidance() {
+        // #263 软指引落位：测试清单经验自荐绑任务回交前——非必做，无经验不调用
+        SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
+
+        assertThat(declaration.getInlineAgentsBody())
+                .contains("propose_skill")
+                .contains("回交")
+                .contains("软指引");
     }
 
     @Test

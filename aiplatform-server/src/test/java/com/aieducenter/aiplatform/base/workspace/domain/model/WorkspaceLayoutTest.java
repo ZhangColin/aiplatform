@@ -20,7 +20,7 @@ class WorkspaceLayoutTest {
         assertThat(WorkspaceLayout.ROOT).isEqualTo("/workspace");
         List.of(WorkspaceLayout.AGENTS_MD, WorkspaceLayout.PRD, WorkspaceLayout.ENV_FILE,
                         WorkspaceLayout.DOCS_DIR, WorkspaceLayout.DATA_DIR, WorkspaceLayout.PG_DATA_DIR,
-                        WorkspaceLayout.PLATFORM_DIR, WorkspaceLayout.SKILLS_DIR,
+                        WorkspaceLayout.PLATFORM_DIR,
                         WorkspaceLayout.RULES_DIR,
                         WorkspaceLayout.LOGS_DIR, WorkspaceLayout.EXTERNAL_DIR)
                 .forEach(path -> {
@@ -32,11 +32,11 @@ class WorkspaceLayoutTest {
 
     @Test
     void given_layout_constants_when_inspect_then_directory_nesting_pinned() {
-        // 布局定盘：AGENTS.md 占根、PRD 在 docs、pg 数据在 data、平台产物三目录在 .platform
+        // 布局定盘：AGENTS.md 占根、PRD 在 docs、pg 数据在 data、平台产物目录在 .platform
+        //（skills 预留位已随草稿库制删除，ADR-0022；既有工作区残留目录无害不再创建）
         assertThat(WorkspaceLayout.PRD).startsWith(WorkspaceLayout.DOCS_DIR + "/");
         assertThat(WorkspaceLayout.PG_DATA_DIR).startsWith(WorkspaceLayout.DATA_DIR + "/");
-        List.of(WorkspaceLayout.SKILLS_DIR, WorkspaceLayout.RULES_DIR,
-                        WorkspaceLayout.LOGS_DIR)
+        List.of(WorkspaceLayout.RULES_DIR, WorkspaceLayout.LOGS_DIR)
                 .forEach(dir -> assertThat(dir).startsWith(WorkspaceLayout.PLATFORM_DIR + "/"));
         // AGENTS.md 与 .env 都是根级文件，不在任何目录约定之下
         assertThat(WorkspaceLayout.AGENTS_MD).doesNotContain("/");
@@ -48,8 +48,7 @@ class WorkspaceLayoutTest {
         // init 落位骨架 = 布局中的全部目录（应用代码占根无目录、AGENTS.md 内容归生成环）
         assertThat(WorkspaceLayout.SKELETON_DIRS).containsExactlyInAnyOrder(
                 WorkspaceLayout.DOCS_DIR, WorkspaceLayout.PG_DATA_DIR,
-                WorkspaceLayout.SKILLS_DIR, WorkspaceLayout.RULES_DIR,
-                WorkspaceLayout.LOGS_DIR);
+                WorkspaceLayout.RULES_DIR, WorkspaceLayout.LOGS_DIR);
     }
 
     @Test

@@ -11,7 +11,8 @@ import java.util.List;
  *       供给、run 执行体文件面、平台读侧同锚，不散落第二根</li>
  *   <li><b>布局</b>：根下五类落位——AGENTS.md（平台约定，内容归生成环资产）、
  *       {@code docs/}（PRD 等文档）、应用代码占根、{@code data/pg/}（pg 数据，
- *       PGDATA 进卷）、{@code .platform/{skills,rules,logs}}（平台产物）</li>
+ *       PGDATA 进卷）、{@code .platform/{rules,logs}}（平台产物——skills 预留位
+ *       已随技能草稿库制删除，ADR-0022；既有工作区残留目录无害不再创建）</li>
  *   <li><b>.env 唯一注入通道</b>：平台生成的连接串只经 {@link #ENV_FILE} 进工作区，
  *       run 执行体与应用从环境读，不经其他注入面</li>
  *   <li><b>可重建性断言</b>：全部持久物（代码、文档、数据、平台产物）都在卷内——
@@ -45,7 +46,7 @@ public final class WorkspaceLayout {
     /** pg 数据目录（PGDATA 归位修复：从独立卷改为工作区卷内，#3 决议）。 */
     public static final String PG_DATA_DIR = DATA_DIR + "/pg";
 
-    /** 平台产物目录（skills/rules/logs 的父目录）。 */
+    /** 平台产物目录（rules/logs 的父目录）。 */
     public static final String PLATFORM_DIR = ".platform";
 
     /**
@@ -62,9 +63,6 @@ public final class WorkspaceLayout {
      * 进可重建缓存集（封存默认保全——资料目录非缓存，与数据/平台产物同口径）。
      */
     public static final String EXTERNAL_DIR = "external";
-
-    /** 平台产物：技能资产。 */
-    public static final String SKILLS_DIR = PLATFORM_DIR + "/skills";
 
     /** 平台产物：规则资产。 */
     public static final String RULES_DIR = PLATFORM_DIR + "/rules";
@@ -84,7 +82,7 @@ public final class WorkspaceLayout {
      * 起手浅克隆创建）与 agents/（#95 框架委派位创建）是运行时按需创建，不进骨架。
      */
     public static final List<String> SKELETON_DIRS = List.of(
-            DOCS_DIR, PG_DATA_DIR, SKILLS_DIR, RULES_DIR, LOGS_DIR);
+            DOCS_DIR, PG_DATA_DIR, RULES_DIR, LOGS_DIR);
 
     /**
      * 非交付目录名单（任意深度）：数据（{@link #DATA_DIR}）、平台产物

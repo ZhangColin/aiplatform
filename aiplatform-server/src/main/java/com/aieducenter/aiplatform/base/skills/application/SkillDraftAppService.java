@@ -209,6 +209,16 @@ public class SkillDraftAppService {
         return BackofficeSkillDraftDetailResponse.of(draftStore.find(id));
     }
 
+    /**
+     * 项目删除清理入口（#264 T6，ADR-0022 生命周期）：清该项目全部<b>在途</b>草稿
+     * ——血统不留悬空（未审内容无可追责面），对齐知识素材清理先例（软引用显式清，
+     * 编排与失败语义归 {@code ProjectLifecycleAppService} 的删除流程）。终态草稿
+     * 留档不随删、已晋升库行是平台资产与来源项目脱钩（本用例不触技能库）。
+     */
+    public void purgeByProject(long projectId) {
+        draftStore.deletePendingByProject(projectId);
+    }
+
     /** 在途草稿守卫（晋升/拒绝共用前置）：查无 404、终态 409（重审拒绝）。 */
     private SkillDraftRecord requirePendingDraft(long id) {
         SkillDraftRecord record = draftStore.find(id);

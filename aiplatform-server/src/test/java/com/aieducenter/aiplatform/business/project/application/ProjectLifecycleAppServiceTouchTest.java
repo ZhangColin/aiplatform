@@ -13,6 +13,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.event.ApplicationEventPublisher;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
 import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -71,6 +72,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private GenerationSegmentRepository generationSegments;
+
+    @Mock
+    private SkillDraftAppService skillDrafts;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -185,6 +189,6 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, transactionTemplate);
+                conversationHistory, generationSegments, skillDrafts, transactionTemplate);
     }
 }

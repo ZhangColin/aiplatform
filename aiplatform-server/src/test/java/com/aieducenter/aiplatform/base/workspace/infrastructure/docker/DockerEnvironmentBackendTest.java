@@ -79,6 +79,10 @@ class DockerEnvironmentBackendTest {
         WorkspaceLayout.SKELETON_DIRS.forEach(dir ->
                 assertThat(execIn(handle, "test -d " + WorkspaceLayout.absolute(dir)).exitCode())
                         .as("布局目录 %s 应存在", dir).isZero());
+        // #264 T6：skills 预留位删除（ADR-0022 草稿库制）——新工作区不再创建
+        // .platform/skills/（既有卷残留目录无害，脚本无删除面）
+        assertThat(execIn(handle, "test -d /workspace/.platform/skills").exitCode())
+                .as("skills 预留位不应再创建").isNotZero();
         assertThat(execIn(handle, "test -f " + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR)
                 + "/PG_VERSION").exitCode()).as("PGDATA 应落卷内 data/pg").isZero();
 

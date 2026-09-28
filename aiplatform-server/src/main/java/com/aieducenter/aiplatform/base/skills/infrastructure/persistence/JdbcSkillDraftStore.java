@@ -70,6 +70,10 @@ public class JdbcSkillDraftStore implements SkillDraftStore {
             WHERE id = ? AND status = ?
             """;
 
+    /** 项目删除清理（#264 T6）：只在途行随项目清，终态留档。 */
+    private static final String DELETE_PENDING_BY_PROJECT_SQL =
+            "DELETE FROM skl_skill_drafts WHERE project_id = ? AND status = ?";
+
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -117,6 +121,12 @@ public class JdbcSkillDraftStore implements SkillDraftStore {
         return jdbcTemplate.update(MARK_REJECTED_SQL,
                 SkillDraftStatus.REJECTED.getCode(), reason, operator.id(), operator.name(),
                 id, SkillDraftStatus.PENDING.getCode()) > 0;
+    }
+
+    @Override
+    public void deletePendingByProject(long projectId) {
+        jdbcTemplate.update(DELETE_PENDING_BY_PROJECT_SQL,
+                projectId, SkillDraftStatus.PENDING.getCode());
     }
 
     private SkillDraftRecord recordOf(ResultSet rs) throws SQLException {

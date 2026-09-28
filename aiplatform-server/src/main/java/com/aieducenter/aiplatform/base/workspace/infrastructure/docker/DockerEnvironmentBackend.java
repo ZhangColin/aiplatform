@@ -60,7 +60,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    private static final String DEV_IMAGE = "aiplatform/dev:0.8";
+    /** 0.9（#264 T6）：init-workspace.sh 撤 skills 骨架位（ADR-0022）——升版强制重建镜像。 */
+    private static final String DEV_IMAGE = "aiplatform/dev:0.9";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

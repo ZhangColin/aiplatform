@@ -96,6 +96,12 @@ class SkillDraftAppServiceTest {
             return terminalize(id, SkillDraftStatus.REJECTED, operator, reason);
         }
 
+        @Override
+        public void deletePendingByProject(long projectId) {
+            inserted.removeIf(r -> r.projectId() == projectId
+                    && r.status() == SkillDraftStatus.PENDING);
+        }
+
         private boolean terminalize(long id, SkillDraftStatus status, Operator operator,
                 String reason) {
             SkillDraftRecord current = find(id);

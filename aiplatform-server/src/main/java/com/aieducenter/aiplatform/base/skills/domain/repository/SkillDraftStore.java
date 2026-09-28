@@ -52,4 +52,13 @@ public interface SkillDraftStore {
      * 无事务伴写，CAS 失败即整体无事发生。
      */
     boolean markRejected(long id, String reason, Operator operator);
+
+    /**
+     * 项目删除清理口（#264 T6，对齐知识素材清理先例——软引用显式清非库级
+     * 级联）：只清该项目的<b>在途</b>行（未审内容无可追责面，血统不留悬空）；
+     * 终态（已晋升/已拒绝）留档不随删——审结事实独立于项目存续，ADR-0022。
+     * 已晋升库行是平台资产，与来源项目脱钩（本口不触 {@code skl_skills}）。
+     * 单语句原子；失败如实上抛（store 存取口房规，调用方定编排降级与否）。
+     */
+    void deletePendingByProject(long projectId);
 }

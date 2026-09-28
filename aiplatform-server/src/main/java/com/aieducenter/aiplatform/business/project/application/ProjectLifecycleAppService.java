@@ -18,6 +18,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -43,8 +44,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>事务形态（照片1b workspace 的形态）：Docker 副作用在业务事务外先行，库记录
  * 收进短事务；落库失败回收已落定的工作区不留孤儿容器。删除真删级联（A3 §4）：
  * 工作区物理销毁（尽力而为，失败不阻断记录删除）→ prj_* 行级联（FK CASCADE）
- * → SSE workspace-destroyed（编排层发射制：副作用真实落定后，ADR-0001）。归档
- * 与源码包下载归本服务（动作与交付物）；读拼装（详情/列表/用量）归
+ * → 软引用表显式清（知识/对话史/生成段＋未终结技能草稿——#264 T6 终态与库行
+ * 不随删）→ SSE workspace-destroyed（编排层发射制：副作用真实落定后，ADR-0001）。
+ * 归档与源码包下载归本服务（动作与交付物）；读拼装（详情/列表/用量）归
  * {@link ProjectQueryAppService}。</p>
  */
 @Service
@@ -61,6 +63,7 @@ public class ProjectLifecycleAppService {
     private final ProjectNamingAppService namingService;
     private final ConversationHistoryAppService conversationHistory;
     private final GenerationSegmentRepository generationSegments;
+    private final SkillDraftAppService skillDrafts;
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -73,6 +76,7 @@ public class ProjectLifecycleAppService {
                                       ProjectNamingAppService namingService,
                                       ConversationHistoryAppService conversationHistory,
                                       GenerationSegmentRepository generationSegments,
+                                      SkillDraftAppService skillDrafts,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
@@ -84,6 +88,7 @@ public class ProjectLifecycleAppService {
         this.namingService = namingService;
         this.conversationHistory = conversationHistory;
         this.generationSegments = generationSegments;
+        this.skillDrafts = skillDrafts;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -174,7 +179,8 @@ public class ProjectLifecycleAppService {
     /**
      * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
      * 删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用显式清，
-     * 尽力而为）→ SSE workspace-destroyed。
+     * 尽力而为）→ 未终结技能草稿清理（#264 T6：只在途随删，终态留档、已晋升
+     * 库行是平台资产不动）→ SSE workspace-destroyed。
      */
     public void delete(Long projectId) {
         Project project = requireProject(projectId);
@@ -183,6 +189,7 @@ public class ProjectLifecycleAppService {
         knowledgeAppService.purgeByProject(projectId);
         conversationHistory.purgeByProject(projectId);
         generationSegments.deleteByProjectId(projectId);
+        skillDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));

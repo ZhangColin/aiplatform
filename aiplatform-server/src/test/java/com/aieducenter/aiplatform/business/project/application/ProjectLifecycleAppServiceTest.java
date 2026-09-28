@@ -19,6 +19,14 @@ import com.cartisan.core.exception.CartisanException;
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillDraftStatus;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
+import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
+import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftProposal;
+import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
+import com.aieducenter.aiplatform.base.skills.domain.repository.SkillDraftStore;
+import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
@@ -47,12 +55,15 @@ import static org.mockito.Mockito.when;
 
 /**
  * 项目生命周期用例：建项目 = 工作区副作用 → 一事务 Project（占位名）→ SSE
- * workspace-created → 自动开主智能体对话；删除真删级联 + workspace-destroyed；归档/改名的
- * 聚合不变量。Docker 链路在 WorkspaceLifecycleAppServiceTest（mock 工作区服务，
- * 聚焦编排）。
+ * workspace-created → 自动开主智能体对话；删除真删级联 + workspace-destroyed
+ * ＋未终结技能草稿清理（#264 T6，终态与库行不随删）；归档/改名的聚合不变量。
+ * Docker 链路在 WorkspaceLifecycleAppServiceTest（mock 工作区服务，聚焦编排）。
  */
 @IntegrationTest
 class ProjectLifecycleAppServiceTest {
+
+    /** 审结操作者（留痕口径同技能域单测先例）。 */
+    private static final Operator OPERATOR = new Operator("700264", "运营·技能管理员");
 
     @Autowired
     private ProjectLifecycleAppService appService;
@@ -62,6 +73,16 @@ class ProjectLifecycleAppServiceTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /** 草稿用例真面（#264 T6 删除清理）：真库 propose/promote/reject 走公共接口。 */
+    @Autowired
+    private SkillDraftAppService skillDrafts;
+
+    @Autowired
+    private SkillDraftStore draftStore;
+
+    @Autowired
+    private SkillStore skillStore;
 
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -84,6 +105,9 @@ class ProjectLifecycleAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
+        // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
+        jdbcTemplate.update("DELETE FROM skl_skill_drafts WHERE name LIKE 't6-purge-%'");
+        jdbcTemplate.update("DELETE FROM skl_skills WHERE name LIKE 't6-purge-%'");
     }
 
     @Test
@@ -287,6 +311,33 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
+    void given_pending_and_terminal_drafts_when_delete_then_pending_gone_terminal_and_library_intact() {
+        // #264 T6 草稿生命周期：删项目清在途草稿（血统不留悬空，对齐知识素材清理
+        // 先例）；终态草稿留档可查（审结事实独立于项目存续）；晋升库行是平台资产
+        // 与来源项目脱钩
+        Long projectId = persistedProject("9202");
+        Long otherProjectId = persistedProject("9203");
+        long pendingId = proposeDraft(projectId, "t6-purge-pending", SkillSlot.EXECUTOR);
+        long promotedId = proposeDraft(projectId, "t6-purge-promoted", SkillSlot.MAIN);
+        skillDrafts.promote(promotedId, OPERATOR);
+        long rejectedId = proposeDraft(projectId, "t6-purge-rejected", SkillSlot.SUBAGENT);
+        skillDrafts.reject(rejectedId, "与现有技能方法论重叠", OPERATOR);
+        long otherPendingId = proposeDraft(otherProjectId, "t6-purge-other", SkillSlot.EXECUTOR);
+
+        appService.delete(projectId);
+
+        // 在途随项目清；他项目在途不动（清理按 project_id 圈定）
+        assertThat(draftStore.find(pendingId)).isNull();
+        assertThat(draftStore.find(otherPendingId)).isNotNull();
+        assertThat(draftStore.find(otherPendingId).status()).isEqualTo(SkillDraftStatus.PENDING);
+        // 终态草稿留档（已晋升/已拒绝均不随删）
+        assertThat(draftStore.find(promotedId).status()).isEqualTo(SkillDraftStatus.PROMOTED);
+        assertThat(draftStore.find(rejectedId).status()).isEqualTo(SkillDraftStatus.REJECTED);
+        // 晋升库行不动（平台资产，删项目不触技能库）
+        assertThat(skillStore.existsByName("t6-purge-promoted")).isTrue();
+    }
+
+    @Test
     void given_workspace_destroy_failure_when_delete_then_rows_deleted_anyway() {
         Long projectId = persistedProject("9201");
         org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
@@ -344,6 +395,15 @@ class ProjectLifecycleAppServiceTest {
                         .create("删除对象", ProjectType.WEBSITE,
                                 Long.parseLong(workspaceId), null));
         return project.getId();
+    }
+
+    /** 真链自荐一发（收受即返回草稿 id；拒收带原因炸断言）。 */
+    private long proposeDraft(Long projectId, String name, SkillSlot slot) {
+        SkillDraftReceipt receipt = skillDrafts.propose(new SkillDraftProposal(
+                name, "T6 删除清理口径测试简介。", "T6 删除清理口径测试正文。", projectId,
+                "run-t6", slot));
+        assertThat(receipt.accepted()).as(receipt.message()).isTrue();
+        return receipt.draftId();
     }
 
     private void verifyNoRows() {

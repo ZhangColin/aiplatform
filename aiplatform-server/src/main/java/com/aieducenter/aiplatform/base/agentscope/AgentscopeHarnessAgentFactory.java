@@ -130,8 +130,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .stateStore(stateStore)
                 .toolkit(toolkit)
                 // 技能挂载位（#94）：按配置发放技能仓库——无技能挂载返回空集即框架
-                // 不注入 <available_skills>；本平台工作区技能用 .platform/skills/（非
-                // 框架 skills/），关闭框架工作区技能自动合成免无谓文件面往返
+                // 不注入 <available_skills>；平台技能来源三途（内置 classpath/安装库/
+                // 自产库）均非框架工作区目录 skills/（预留位已删，ADR-0022），关闭
+                // 框架工作区技能自动合成免无谓文件面往返
                 .disableDefaultWorkspaceSkills();
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);

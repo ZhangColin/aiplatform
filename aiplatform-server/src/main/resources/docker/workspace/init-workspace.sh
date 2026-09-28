@@ -14,9 +14,9 @@ PG_PORT=5432
 REDIS_PORT=6379
 
 # 1) 布局骨架（幂等）：WorkspaceLayout.SKELETON_DIRS 的物理落位
-#    （docs / data/pg / .platform/{skills,rules,logs}）
-mkdir -p "$WS_ROOT/docs" "$PG_DATA" "$WS_ROOT/.platform/skills" \
-  "$WS_ROOT/.platform/rules" "$WS_ROOT/.platform/logs"
+#    （docs / data/pg / .platform/{rules,logs}；skills 预留位已删——ADR-0022，
+#    既有卷残留的 .platform/skills/ 无害不清理、不再创建）
+mkdir -p "$WS_ROOT/docs" "$PG_DATA" "$WS_ROOT/.platform/rules" "$WS_ROOT/.platform/logs"
 
 # 1.5) 基座模板就位（幂等，#113 / ADR-0013）：镜像内置基座工程（依赖构建期已装进
 #    node_modules）首次复制到工作区根——判据 = 工作区尚无 package.json（新建卷首次）。

@@ -16,6 +16,7 @@ import com.cartisan.core.domain.BaseEnum;
 
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillDraftStatus;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
+import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftRecord;
 import com.aieducenter.aiplatform.base.skills.domain.repository.SkillDraftStore;
 
@@ -54,6 +55,21 @@ public class JdbcSkillDraftStore implements SkillDraftStore {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
             """;
 
+    /** 审结 CAS：只在途行可翻——并发审结零行命中，调用方定冲突语义。 */
+    private static final String MARK_PROMOTED_SQL = """
+            UPDATE skl_skill_drafts
+            SET status = ?, operator_id = ?, operator_name = ?,
+                reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = ?
+            """;
+
+    private static final String MARK_REJECTED_SQL = """
+            UPDATE skl_skill_drafts
+            SET status = ?, reject_reason = ?, operator_id = ?, operator_name = ?,
+                reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = ?
+            """;
+
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -87,6 +103,20 @@ public class JdbcSkillDraftStore implements SkillDraftStore {
         List<SkillDraftRecord> records = jdbcTemplate.query(FIND_SQL,
                 (rs, rowNum) -> recordOf(rs), id);
         return records.isEmpty() ? null : records.get(0);
+    }
+
+    @Override
+    public boolean markPromoted(long id, Operator operator) {
+        return jdbcTemplate.update(MARK_PROMOTED_SQL,
+                SkillDraftStatus.PROMOTED.getCode(), operator.id(), operator.name(),
+                id, SkillDraftStatus.PENDING.getCode()) > 0;
+    }
+
+    @Override
+    public boolean markRejected(long id, String reason, Operator operator) {
+        return jdbcTemplate.update(MARK_REJECTED_SQL,
+                SkillDraftStatus.REJECTED.getCode(), reason, operator.id(), operator.name(),
+                id, SkillDraftStatus.PENDING.getCode()) > 0;
     }
 
     private SkillDraftRecord recordOf(ResultSet rs) throws SQLException {

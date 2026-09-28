@@ -19,10 +19,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param id            技能柄（两形制同清单行）
  * @param name          技能名
  * @param description   简介
- * @param source        来源 code（1=内置 2=安装）
+ * @param source        来源 code（1=内置 2=安装 3=自产——#262 起库行两值、内置
+ *                      读模型合成）
  * @param sourceName    来源名（直读展示）
- * @param sourcePackage 来源包标识（内置为 null）
- * @param version       版本标识（装时 commit；内置为 null）
+ * @param sourcePackage 来源包标识（内置为 null、自产＝固定虚拟值 self）
+ * @param version       版本标识（装时 commit；自产＝self；内置为 null）
  * @param status        状态 code（1=启用 2=停用；内置恒 1）
  * @param statusName    状态名（直读展示）
  * @param frontmatter   SKILL.md frontmatter 全量（解析态键值，含 name/description）
@@ -44,7 +45,7 @@ public record BackofficeSkillDetailResponse(
         String id,
         String name,
         String description,
-        @Schema(description = "来源 code（1=内置 2=安装）", example = "1")
+        @Schema(description = "来源 code（1=内置 2=安装 3=自产）", example = "1")
         Integer source,
         String sourceName,
         String sourcePackage,
@@ -76,14 +77,14 @@ public record BackofficeSkillDetailResponse(
                 + "内置技能恒 null 不适用")
         LocalDateTime lastLoadedAt) {
 
-    /** 库条目 → 详情（来源＝安装）。 */
+    /** 库条目 → 详情（来源随行——#262 起安装/自产按 source 列分）。 */
     public static BackofficeSkillDetailResponse of(SkillRecord record) {
         return new BackofficeSkillDetailResponse(
                 Long.toString(record.id()),
                 record.name(),
                 record.description(),
-                SkillSource.INSTALLED.getCode(),
-                SkillSource.INSTALLED.getName(),
+                record.source().getCode(),
+                record.source().getName(),
                 record.sourcePackage(),
                 record.version(),
                 record.status().getCode(),

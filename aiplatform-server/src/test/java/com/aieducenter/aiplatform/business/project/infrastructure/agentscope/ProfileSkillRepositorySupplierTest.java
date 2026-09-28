@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSource;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 import com.aieducenter.aiplatform.base.skills.domain.model.BuiltinSkill;
 import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
@@ -203,14 +204,16 @@ class ProfileSkillRepositorySupplierTest {
 
     private static SkillRecord record(long id, String name, String sourcePackage) {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
-                SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
+                SkillSource.INSTALLED, SkillStatus.ENABLED,
+                Map.of("name", name, "description", "技能简介"),
                 "正文", Map.of(), null, null, null, 0, null);
     }
 
     /** 带 scripts 资源面的条目（#253 开放面夹具）。 */
     private static SkillRecord recordWithScripts(long id, String name, String sourcePackage) {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
-                SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
+                SkillSource.INSTALLED, SkillStatus.ENABLED,
+                Map.of("name", name, "description", "技能简介"),
                 "正文", Map.of("scripts/run-tests.sh", "#!/bin/bash\nset -e\n"),
                 null, null, null, 0, null);
     }
@@ -232,7 +235,7 @@ class ProfileSkillRepositorySupplierTest {
         void setStatus(long id, SkillStatus status) {
             SkillRecord row = rows.get(id);
             rows.put(id, new SkillRecord(row.id(), row.name(), row.description(),
-                    row.sourcePackage(), row.version(), status, row.frontmatter(),
+                    row.sourcePackage(), row.version(), row.source(), status, row.frontmatter(),
                     row.content(), row.resources(), row.operatorId(), row.operatorName(),
                     row.updateAvailable(), row.loadCount(), row.lastLoadedAt()));
         }

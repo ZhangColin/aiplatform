@@ -10,18 +10,20 @@ import com.aieducenter.aiplatform.base.skills.domain.model.SkillRecord;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * 后台技能清单行（#247）：内置与安装同权共形——来源分解出处（内置＝classpath
- * 合成、安装＝库行），来源包/版本标识/状态仅安装行有值（内置随平台发版：来源包
- * 与版本标识 null、状态恒启用）。
+ * 后台技能清单行（#247）：内置与安装/自产同权共形——来源分解出处（内置＝
+ * classpath 合成、安装/自产＝库行按 {@code source} 列分），来源包/版本标识/状态
+ * 仅库行有值（内置随平台发版：来源包与版本标识 null、状态恒启用；自产行包名/
+ * 版本＝固定虚拟值 {@code self}）。
  *
  * @param id            技能柄（详情寻址；两形制——内置 {@code builtin:<技能名>}／
- *                      安装 TSID 十进制串，消费方按 opaque 串回传）
- * @param name          技能名（frontmatter name；安装行与来源包合成唯一键）
+ *                      库行 TSID 十进制串，消费方按 opaque 串回传）
+ * @param name          技能名（frontmatter name；库行与来源包合成唯一键）
  * @param description   简介（frontmatter description）
- * @param source        来源 code（1=内置 2=安装）
+ * @param source        来源 code（1=内置 2=安装 3=自产——#262 起库行两值、
+ *                      内置读模型合成）
  * @param sourceName    来源名（直读展示）
- * @param sourcePackage 来源包标识（内置为 null）
- * @param version       版本标识（装时 commit；内置为 null）
+ * @param sourcePackage 来源包标识（安装仓库；内置为 null、自产＝固定虚拟值 self）
+ * @param version       版本标识（装时 commit；自产＝self；内置为 null）
  * @param status        状态 code（1=启用 2=停用；内置恒 1）
  * @param statusName    状态名（直读展示）
  * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
@@ -43,12 +45,12 @@ public record BackofficeSkillSummaryResponse(
         String id,
         String name,
         String description,
-        @Schema(description = "来源 code（1=内置 2=安装）", example = "1")
+        @Schema(description = "来源 code（1=内置 2=安装 3=自产）", example = "1")
         Integer source,
         String sourceName,
-        @Schema(description = "来源包标识（安装仓库；内置为 null）")
+        @Schema(description = "来源包标识（安装仓库；内置为 null、自产＝固定虚拟值 self）")
         String sourcePackage,
-        @Schema(description = "版本标识（装时 commit；内置为 null）")
+        @Schema(description = "版本标识（装时 commit；自产＝self；内置为 null）")
         String version,
         @Schema(description = "状态 code（1=启用 2=停用；内置恒 1）", example = "1")
         Integer status,
@@ -61,7 +63,7 @@ public record BackofficeSkillSummaryResponse(
         String operatorName,
         @Schema(description = "远端有新版标记（来源包级）：定期只读检查远端 HEAD 与装时版本"
                 + "不同即 true——更新永远显式点（POST /update），平台不自动跟新远端；"
-                + "null＝未检查过（内置技能恒 null 不适用）", example = "false")
+                + "null＝未检查过（内置/自产技能恒 null 不适用——无远端）", example = "false")
         Boolean updateAvailable,
         @Schema(description = "加载次数（使用计数观测面）：智能体 load 工具真实加载该技能"
                 + "一次即 +1（口径＝load 实际发生，指派/启停/清单重建不计数）；安装与自产"
@@ -71,14 +73,14 @@ public record BackofficeSkillSummaryResponse(
                 + "内置技能恒 null 不适用")
         LocalDateTime lastLoadedAt) {
 
-    /** 库条目 → 清单行（来源＝安装）。 */
+    /** 库条目 → 清单行（来源随行——#262 起安装/自产按 source 列分）。 */
     public static BackofficeSkillSummaryResponse of(SkillRecord record) {
         return new BackofficeSkillSummaryResponse(
                 Long.toString(record.id()),
                 record.name(),
                 record.description(),
-                SkillSource.INSTALLED.getCode(),
-                SkillSource.INSTALLED.getName(),
+                record.source().getCode(),
+                record.source().getName(),
                 record.sourcePackage(),
                 record.version(),
                 record.status().getCode(),

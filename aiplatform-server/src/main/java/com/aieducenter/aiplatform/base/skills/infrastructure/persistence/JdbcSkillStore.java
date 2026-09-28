@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import com.cartisan.core.domain.BaseEnum;
 
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
+import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSource;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.base.skills.domain.model.ParsedSkill;
@@ -35,9 +36,9 @@ import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 @Component
 public class JdbcSkillStore implements SkillStore {
 
-    /** 条目读列（#250 起四 SELECT 共形带包表标记列；#261 起带使用计数两列；顺序即 {@link #recordOf} 下标）。 */
+    /** 条目读列（#250 起四 SELECT 共形带包表标记列；#261 起带使用计数两列；#262 起带来源列；顺序即 {@link #recordOf} 下标）。 */
     private static final String SKILL_SELECT_PREFIX = """
-            SELECT s.id, s.name, s.description, s.source_package, s.version, s.status,
+            SELECT s.id, s.name, s.description, s.source_package, s.version, s.source, s.status,
                    s.frontmatter, s.content, s.resources, s.operator_id, s.operator_name, p.update_available,
                    s.load_count, s.last_loaded_at
             FROM skl_skills s
@@ -57,9 +58,9 @@ public class JdbcSkillStore implements SkillStore {
 
     private static final String INSERT_SQL = """
             INSERT INTO skl_skills
-                (id, name, description, source_package, version, status, frontmatter, content,
+                (id, name, description, source_package, version, source, status, frontmatter, content,
                  resources, operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?)
             """;
 
     private static final String UPDATE_STATUS_SQL = """
@@ -101,7 +102,9 @@ public class JdbcSkillStore implements SkillStore {
     // ========== #250：包表／更新留痕表 ==========
 
     private static final String FIND_INSTALLED_VERSIONS_SQL = """
-            SELECT source_package, MAX(version) FROM skl_skills GROUP BY source_package
+            SELECT source_package, MAX(version) FROM skl_skills
+            WHERE source = ?
+            GROUP BY source_package
             """;
 
     private static final String FIND_EXCLUDE_DIRS_SQL = """
@@ -202,7 +205,8 @@ public class JdbcSkillStore implements SkillStore {
     public void insertAll(List<SkillRecord> records) {
         jdbcTemplate.batchUpdate(INSERT_SQL, records.stream().map(record -> new Object[] {
                 record.id(), record.name(), record.description(), record.sourcePackage(),
-                record.version(), record.status().getCode(), jsonOf(record.frontmatter()),
+                record.version(), record.source().getCode(), record.status().getCode(),
+                jsonOf(record.frontmatter()),
                 record.content(), jsonOf(record.resources()),
                 record.operatorId(), record.operatorName()
         }).toList());
@@ -251,7 +255,7 @@ public class JdbcSkillStore implements SkillStore {
         Map<String, String> versions = new LinkedHashMap<>();
         jdbcTemplate.query(FIND_INSTALLED_VERSIONS_SQL, rs -> {
             versions.put(rs.getString(1), rs.getString(2));
-        });
+        }, SkillSource.INSTALLED.getCode());
         return versions;
     }
 
@@ -327,17 +331,18 @@ public class JdbcSkillStore implements SkillStore {
                 rs.getString(3),
                 rs.getString(4),
                 rs.getString(5),
-                BaseEnum.requireByCode(SkillStatus.class, rs.getInt(6)),
-                frontmatterOf(rs.getString(7)),
-                rs.getString(8),
-                resourcesOf(rs.getString(9)),
-                rs.getString(10),
+                BaseEnum.requireByCode(SkillSource.class, rs.getInt(6)),
+                BaseEnum.requireByCode(SkillStatus.class, rs.getInt(7)),
+                frontmatterOf(rs.getString(8)),
+                rs.getString(9),
+                resourcesOf(rs.getString(10)),
                 rs.getString(11),
-                // LEFT JOIN 包表：无包行即 null（未检查过），非 false
-                rs.getObject(12, Boolean.class),
+                rs.getString(12),
+                // LEFT JOIN 包表：无包行即 null（未检查过；自产行无包行——恒 null 不适用），非 false
+                rs.getObject(13, Boolean.class),
                 // 使用计数（#261）：last_loaded_at 可空＝从未加载过
-                rs.getLong(13),
-                rs.getTimestamp(14) == null ? null : rs.getTimestamp(14).toLocalDateTime());
+                rs.getLong(14),
+                rs.getTimestamp(15) == null ? null : rs.getTimestamp(15).toLocalDateTime());
     }
 
     private Map<String, Object> frontmatterOf(String json) throws SQLException {

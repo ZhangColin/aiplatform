@@ -41,7 +41,14 @@ public enum SkillMessage implements CodeMessage {
     SKILL_SOURCE_PACKAGE_REQUIRED(400, "SKL_014", "来源包标识不能为空（取清单行 sourcePackage 值）"),
 
     // ========== 技能草稿（#259 自产线 T1，ADR-0022 库制草稿） ==========
-    SKILL_DRAFT_NOT_FOUND(404, "SKL_015", "技能草稿不存在");
+    SKILL_DRAFT_NOT_FOUND(404, "SKL_015", "技能草稿不存在"),
+
+    // ========== 草稿人审（#262 自产线 T2，ADR-0022 晋升/拒绝） ==========
+    SKILL_DRAFT_PROMOTE_NAME_CONFLICT(409, "SKL_016", "技能库已有同名技能，晋升被拒（审核期间同名入库——先处置同名再晋升）"),
+
+    SKILL_DRAFT_ALREADY_REVIEWED(409, "SKL_017", "草稿已审结（已晋升/已拒绝），终态不可再审——重提为新草稿"),
+
+    SKILL_DRAFT_REJECT_REASON_REQUIRED(400, "SKL_018", "拒绝理由不能为空（终态留档，拒绝须有据）");
 
     private final int httpStatus;
     private final String code;

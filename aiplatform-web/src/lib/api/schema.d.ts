@@ -638,6 +638,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/skills/drafts/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拒绝草稿（终态留档，理由必填）
+         * @description 人审不采纳（#262 自产线 T2）：理由必填（空白 400 SKL_018——终态留档拒绝须有据）＋草稿标已拒绝＋操作者留痕（操作者/时刻/理由随行留档）。拒绝即终态：不再列活跃面（在途清单）、详情仍可查（留档）；不改稿不复活——重提只能靠未来会话产生新草稿（已拒绝不占名）。草稿须在途（已审结 409 SKL_017）；草稿不存在 404 SKL_015；缺操作者 400 SKL_009。回执＝终态草稿详情（留痕形状直读）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 SKL_009 — 操作者不能为空
+         *     - 404 SKL_015 — 技能草稿不存在
+         *     - 409 SKL_017 — 草稿已审结（已晋升/已拒绝），终态不可再审——重提为新草稿
+         *     - 400 SKL_018 — 拒绝理由不能为空（终态留档，拒绝须有据）
+         */
+        post: operations["rejectDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/skills/drafts/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 晋升草稿（一键入技能库，单级晋升）
+         * @description 人审采纳（#262 自产线 T2，ADR-0022 单级晋升）：事务＝撞名复查（审核期间技能库新增同名即拒——409 SKL_016）＋插入启用库行（来源＝3 自产、来源包/版本＝固定虚拟值 self、内容原样——审核者不改稿）＋草稿标已晋升＋操作者两处留痕（库行＝晋升者、草稿＝审结者），任一环失败整体回滚。晋升即入池同权：与安装技能同列同套（启停/指派/预检/卸载/使用计数），<b>不自动指派</b>——生效仍走人工指派＋skillcheck 预检（入池与生效分离）。自产技能结构性无 scripts（工具无此参数＋晋升原样）。草稿须在途（已审结 409 SKL_017——终态不可再审，重提为新草稿）；草稿不存在 404 SKL_015；缺操作者 400 SKL_009（X-User-Id/X-User-Name透传头）。回执＝新库行清单行（含技能 id——后续指派寻址柄）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 SKL_009 — 操作者不能为空
+         *     - 404 SKL_015 — 技能草稿不存在
+         *     - 409 SKL_016 — 技能库已有同名技能，晋升被拒（审核期间同名入库——先处置同名再晋升）
+         *     - 409 SKL_017 — 草稿已审结（已晋升/已拒绝），终态不可再审——重提为新草稿
+         */
+        post: operations["promoteDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/skills/assignments/{slot}/precheck": {
         parameters: {
             query?: never;
@@ -1303,8 +1355,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 技能清单（内置＋安装同权，不分页）
-         * @description 平台全部技能：内置（classpath 合成，来源=1）与库中安装（来源=2）同权呈现，空库时仍呈现内置技能。条目字段：名称、description、来源 code（1=内置 2=安装）与来源名、来源包（内置 null）、版本标识（装时 commit，内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——更新走显式 POST /update，平台永不自动跟新；null＝未检查过，内置恒 null）、使用计数两列 loadCount/lastLoadedAt（观测面：智能体 load 工具真实加载该技能一次即 +1——口径＝load 实际发生，指派/启停/清单重建不计数；安装与自产一并覆盖；0/null＝从未被加载过，内置恒 null 不适用）。排序服务端定死：内置在前（名称序）、安装在后（来源包、名称序）。技能库是有界目录（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。需要机机签名（五头 HMAC），无签名 401
+         * 技能清单（内置＋安装＋自产同权，不分页）
+         * @description 平台全部技能：内置（classpath 合成，来源=1）与库中安装（来源=2）/自产（来源=3——草稿晋升写入，来源包/版本＝固定虚拟值 self）同权呈现，空库时仍呈现内置技能。条目字段：名称、description、来源 code（1=内置 2=安装 3=自产）与来源名、来源包（内置 null、自产 self）、版本标识（装时 commit，自产 self、内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——更新走显式 POST /update，平台永不自动跟新；null＝未检查过，内置恒 null）、使用计数两列 loadCount/lastLoadedAt（观测面：智能体 load 工具真实加载该技能一次即 +1——口径＝load 实际发生，指派/启停/清单重建不计数；安装与自产一并覆盖；0/null＝从未被加载过，内置恒 null 不适用）。排序服务端定死：内置在前（名称序）、库行在后（来源包、名称序——安装与自产同列混排）。技能库是有界目录（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 401 UNAUTHORIZED — Authentication required
@@ -1404,7 +1456,7 @@ export interface paths {
         };
         /**
          * 技能草稿详情（正文＋扫描回执＋血统，审核面）
-         * @description 草稿全文按自产审核口径判读（docs/agents/skill-audit-guide.md——真伪／重叠／description 三要素／血统可溯：来源 run 的外部资料接触史必查）：清单行同形字段＋正文全文（自荐只有正文——a-only 无 scripts）＋扫描 findings 逐条留档（patternId/severity/category/file/line/matchText/description，空列表＝无发现）＋终态留痕字段（审核操作者/时刻/拒绝理由——晋升/拒绝端点 T2 落地后回填，在途恒 null）。任意状态可查（终态留档）。id 取清单行原值（TSID 十进制串）；草稿不存在（含未寻址/畸形 TSID）404 SKL_015。需要机机签名（五头 HMAC），无签名 401
+         * @description 草稿全文按自产审核口径判读（docs/agents/skill-audit-guide.md——真伪／重叠／description 三要素／血统可溯：来源 run 的外部资料接触史必查）：清单行同形字段＋正文全文（自荐只有正文——a-only 无 scripts）＋扫描 findings 逐条留档（patternId/severity/category/file/line/matchText/description，空列表＝无发现）＋终态留痕字段（审核操作者/时刻/拒绝理由——已晋升/已拒绝草稿回填，在途恒 null）。任意状态可查（终态留档）。id 取清单行原值（TSID 十进制串）；草稿不存在（含未寻址/畸形 TSID）404 SKL_015。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 SKL_015 — 技能草稿不存在
@@ -1999,14 +2051,14 @@ export interface components {
             description?: string;
             /**
              * Format: int32
-             * @description 来源 code（1=内置 2=安装）
+             * @description 来源 code（1=内置 2=安装 3=自产）
              * @example 1
              */
             source?: number;
             sourceName?: string;
-            /** @description 来源包标识（安装仓库；内置为 null） */
+            /** @description 来源包标识（安装仓库；内置为 null、自产＝固定虚拟值 self） */
             sourcePackage?: string;
-            /** @description 版本标识（装时 commit；内置为 null） */
+            /** @description 版本标识（装时 commit；自产＝self；内置为 null） */
             version?: string;
             /**
              * Format: int32
@@ -2026,7 +2078,7 @@ export interface components {
              */
             operatorName?: string;
             /**
-             * @description 远端有新版标记（来源包级）：定期只读检查远端 HEAD 与装时版本不同即 true——更新永远显式点（POST /update），平台不自动跟新远端；null＝未检查过（内置技能恒 null 不适用）
+             * @description 远端有新版标记（来源包级）：定期只读检查远端 HEAD 与装时版本不同即 true——更新永远显式点（POST /update），平台不自动跟新远端；null＝未检查过（内置/自产技能恒 null 不适用——无远端）
              * @example false
              */
             updateAvailable?: boolean;
@@ -2545,6 +2597,51 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        SkillDraftRejectCommand: {
+            /**
+             * @description 拒绝理由（终态留档可查——拒绝须有据；空白即 400 SKL_018）
+             * @example 正文与现有技能 prd-writing 方法论重叠，解消方向不明
+             */
+            reason?: string;
+        };
+        ApiResponseBackofficeSkillDraftDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSkillDraftDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSkillDraftDetailResponse: {
+            id?: string;
+            name?: string;
+            description?: string;
+            slot?: string;
+            projectId?: string;
+            runId?: string;
+            scanVerdict?: string;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            content?: string;
+            /** @description 扫描 findings 留档：每条 patternId/severity/category/file/line/matchText/description（空列表＝无发现） */
+            scanFindings?: {
+                [key: string]: Record<string, never>;
+            }[];
+            /** @description 终态审核操作者 id（在途为 null） */
+            operatorId?: string;
+            /** @description 终态审核操作者名（在途为 null） */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 终态时刻（在途为 null）
+             */
+            reviewedAt?: string;
+            /** @description 拒绝理由（已拒绝态携带；其余 null） */
+            rejectReason?: string;
+        };
         ApiResponseBackofficeSkillPrecheckResponse: {
             /** Format: int32 */
             code?: number;
@@ -2994,7 +3091,7 @@ export interface components {
             description?: string;
             /**
              * Format: int32
-             * @description 来源 code（1=内置 2=安装）
+             * @description 来源 code（1=内置 2=安装 3=自产）
              * @example 1
              */
             source?: number;
@@ -3119,44 +3216,6 @@ export interface components {
             statusName?: string;
             /** Format: date-time */
             createdAt?: string;
-        };
-        ApiResponseBackofficeSkillDraftDetailResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["BackofficeSkillDraftDetailResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        BackofficeSkillDraftDetailResponse: {
-            id?: string;
-            name?: string;
-            description?: string;
-            slot?: string;
-            projectId?: string;
-            runId?: string;
-            scanVerdict?: string;
-            /** Format: int32 */
-            status?: number;
-            statusName?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            content?: string;
-            /** @description 扫描 findings 留档：每条 patternId/severity/category/file/line/matchText/description（空列表＝无发现） */
-            scanFindings?: {
-                [key: string]: Record<string, never>;
-            }[];
-            /** @description 终态审核操作者 id（在途为 null） */
-            operatorId?: string;
-            /** @description 终态审核操作者名（在途为 null） */
-            operatorName?: string;
-            /**
-             * Format: date-time
-             * @description 终态时刻（在途为 null）
-             */
-            reviewedAt?: string;
-            /** @description 拒绝理由（已拒绝态携带；其余 null） */
-            rejectReason?: string;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -4283,6 +4342,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListBackofficeSkillSummaryResponse"];
+                };
+            };
+        };
+    };
+    rejectDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillDraftRejectCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    promoteDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSkillSummaryResponse"];
                 };
             };
         };

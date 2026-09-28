@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.skills.domain.repository;
 
 import java.util.List;
 
+import com.aieducenter.aiplatform.base.skills.domain.model.Operator;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftRecord;
 
 /**
@@ -36,4 +37,19 @@ public interface SkillDraftStore {
      * @return 查无返回 null，由调用方定 404 语义
      */
     SkillDraftRecord find(long id);
+
+    /**
+     * 草稿标已晋升（#262 T2 审结写口）：终态四件（状态/操作者两列/审结时刻）
+     * 同写；{@code WHERE status = 在途} 的条件更新即 CAS——并发审结（另一管理
+     * 员抢先晋升/拒绝）零行命中返 false，由调用方定冲突语义并回滚事务
+     * （晋升事务内的技能库插入随之撤销）。
+     */
+    boolean markPromoted(long id, Operator operator);
+
+    /**
+     * 草稿标已拒绝（#262 T2 审结写口）：终态五件（状态/操作者两列/审结时刻/
+     * 拒绝理由）同写；CAS 语义同 {@link #markPromoted}——拒绝是纯草稿侧写，
+     * 无事务伴写，CAS 失败即整体无事发生。
+     */
+    boolean markRejected(long id, String reason, Operator operator);
 }

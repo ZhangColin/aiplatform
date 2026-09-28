@@ -14,10 +14,13 @@ import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
+import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * {@link AgentscopeHarnessAgentFactory} 实例缓存与生命周期：HarnessAgent 无状态可
@@ -417,6 +420,56 @@ class AgentscopeHarnessAgentFactoryTest {
 
         try {
             assertThat(child.getToolkit().getToolNames()).doesNotContain("propose_skill");
+        } finally {
+            child.close();
+        }
+    }
+
+    // ---------- #266 内置件后置收口：子级构建收口后工具面 ⊆ 声明白名单 ----------
+
+    @Test
+    void given_harness_builtins_when_child_built_then_final_toolkit_within_declaration(
+            @TempDir Path tempDir) throws IOException {
+        // 框架 build() 在子级工具面合并之后无条件整体注册自带件（文件面含
+        // edit_file、wait_async_results）——内置件绕过声明 allowlist（#260 遗留）。
+        // 构建后对子级最终 toolkit 按声明再滤一道：构建收口后工具面 ⊆ 声明白名单
+        // （edit_file 结构性出局，「不改交付代码」不再只是协议级约束）；声明内的
+        // 件保留（read_file/write_file 不被误滤）
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
+                (agentKey, workspace) -> List.of(), List.of())
+                .apply("self-test");
+
+        try {
+            // Local 工作区真构建注册文件面六件＋execute＋wait_async_results；声明三件
+            // （read_file/write_file/execute）全在面、其余（edit_file/grep/glob/list/
+            // wait_async_results）结构性出局
+            assertThat(child.getToolkit().getToolNames())
+                    .containsExactlyInAnyOrder("read_file", "write_file", "execute");
+        } finally {
+            child.close();
+        }
+    }
+
+    @Test
+    void given_empty_allowlist_when_child_built_then_builtins_pass_through(
+            @TempDir Path tempDir) throws IOException {
+        // 缺省声明（空 allowlist）＝全放行（allowlistedToolkit 同语义单点）：后置
+        // 过滤不收窄未声明的子级——内置件照常在面
+        SubagentDeclaration noAllowlist = SubagentDeclaration.builder()
+                .name("self-test")
+                .description("probe")
+                .inlineAgentsBody("probe body")
+                .build();
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
+                (agentKey, workspace) -> List.of(), List.of())
+                .apply("self-test");
+
+        try {
+            assertThat(child.getToolkit().getToolNames()).contains("edit_file");
         } finally {
             child.close();
         }

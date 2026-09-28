@@ -244,10 +244,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 已进非交付目录集——报告写隔离根不脏交付面）。</p>
      *
      * <p><b>子级工具面（#263 自荐三槽位齐开）</b>：声明白名单治理的（父级继承 ∪
-     * 工具供应商按子智能体键发放的视图）——同件子键视图后写胜出（工具实例携带
-     * 血统槽位：继承的 propose_skill 是执行体槽实例，子键视图覆写为 subagent 槽
-     * 实例，草稿血统不串槽）。白名单摘名即退出子级面（视图自带也绕不过声明），
-     * 镜像技能仓库的子键路由先例。</p>
+     * 工具供应商按子智能体键发放的视图 ∪ 框架 build() 注册的内置件——后者在合并
+     * 之后整体注册，#266 起构建后按声明后置再滤一道，构建收口后子级工具面 ⊆ 声明
+     * ［运行时另挂的仅技能装载件 load_skill_through_path——中间件每轮重挂，归技能
+     * 面治理非工具面声明］）——同件子键视图后写胜出（工具实例携带血统槽位：继承的
+     * propose_skill 是执行体槽实例，子键视图覆写为 subagent 槽实例，草稿血统不串槽）。
+     * 白名单摘名即退出子级面（视图自带也绕不过声明），镜像技能仓库的子键路由先例。</p>
      */
     static Function<String, Agent> subagentFactory(
             SubagentDeclaration declaration, AgentWorkspace workspace,
@@ -285,7 +287,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             childSkills.forEach(sub::skillRepository);
             // 平台中间件显式同挂（框架对 HarnessRuntimeMiddleware 不随拷贝传播）
             platformMiddlewares.forEach(sub::middleware);
-            return sub.build();
+            HarnessAgent child = sub.build();
+            // #266 构建后置收口：框架 build() 在子级工具面合并之后整体注册自带件
+            // （内核文件面含 edit_file、wait_async_results、未来版 WebTools）——内置
+            // 件同受声明 allowlist 治理（镜像 realignBuiltinWebTools 后置校正先例，
+            // build() 之后才是完整事实面；技能装载件 load_skill_through_path 由中间
+            // 件每轮运行时挂载，不在此处、不受影响）
+            stripUndeclared(child.getToolkit(), declaration.getTools());
+            return child;
         };
     }
 
@@ -295,14 +304,19 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      */
     private static Toolkit allowlistedToolkit(Toolkit parentToolkit, List<String> allowlist) {
         Toolkit toolkit = parentToolkit.copy();
+        stripUndeclared(toolkit, allowlist);
+        return toolkit;
+    }
+
+    /** 就地摘除非列名件（声明白名单机械半边，两处消费：合并前副本＋#266 构建后收口）。 */
+    private static void stripUndeclared(Toolkit toolkit, List<String> allowlist) {
         if (allowlist == null || allowlist.isEmpty()) {
-            return toolkit;
+            return;
         }
         toolkit.getToolNames().stream()
                 .filter(toolName -> !allows(allowlist, toolName))
                 .toList()
                 .forEach(toolkit::removeTool);
-        return toolkit;
     }
 
     /**

@@ -48,7 +48,8 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     /** 自测子智能体工具白名单：只读交付代码 + 跑测试命令（内核 shell 注册名
      *  execute）+ 报告写隔离根 + 技能自荐（#263 声明白名单接入——平台工厂按
      *  子键视图发 subagent 槽血统实例，挂载治理归本清单）——排除 edit_file
-     *  （不改交付代码）与 finish_edit（执行体收口工具）。 */
+     *  （不改交付代码——#266 起平台工厂构建后置过滤兑现，构建收口后工具面 ⊆
+     *  本清单，排除是结构性的非协议级）与 finish_edit（执行体收口工具）。 */
     /** public＝工具面清单读面（#252 subagent 槽位呈现口径）与本声明同源引用。 */
     public static final List<String> SELF_TEST_TOOLS = List.of(
             "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute",

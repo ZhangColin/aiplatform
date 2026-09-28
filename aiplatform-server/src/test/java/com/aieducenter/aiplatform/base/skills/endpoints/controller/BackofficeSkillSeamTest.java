@@ -24,6 +24,7 @@ import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 
 import com.aieducenter.aiplatform.base.skills.application.BackofficeSkillAppService;
+import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 
 import com.jayway.jsonpath.JsonPath;
 
@@ -172,6 +173,10 @@ class BackofficeSkillSeamTest {
     /** 更新检查扫描轮直调口（#250：定期轮测试可触发——验收面走应用服务）。 */
     @Autowired
     private BackofficeSkillAppService appService;
+
+    /** 使用计数写口直调（#261：装配缝计数中间件的落库腿——REST 缝验观测呈现）。 */
+    @Autowired
+    private SkillStore skillStore;
 
     /** 已种植库条目 id（teardown 精确清理 skl_skills）。 */
     private final List<Long> plantedSkillIds = new ArrayList<>();
@@ -1035,6 +1040,72 @@ class BackofficeSkillSeamTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("Signature required"));
+    }
+
+    // ---------- #261 使用计数：recordLoad 落库 → 清单/详情观测呈现（安装技能一并覆盖） ----------
+
+    @Test
+    void given_loads_recorded_when_signed_list_and_detail_then_counts_visible_and_scoped()
+            throws Exception {
+        // 跨包同名两行：计数锚＝(name, source_package) 唯一键，分行互不误计
+        long mattTdd = plant(76_000_101L, "tdd", "matt 方法论包", "commit-a1", 1);
+        plant(76_000_102L, "tdd", "superpowers 包", "commit-b2", 1);
+
+        // 新装行零起步（V22 DEFAULT 0／last_loaded_at null）
+        signedGet("/api/backoffice/skills")
+                .andExpect(status().isOk())
+                // 内置行：无库行无计数（null 不适用，对齐 updateAvailable 口径）
+                .andExpect(jsonPath("$.data[0].id").value("builtin:prd-writing"))
+                .andExpect(jsonPath("$.data[0].loadCount").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].lastLoadedAt").value(nullValue()))
+                // 安装行：安装即覆盖（观测面对全库一致）
+                .andExpect(jsonPath("$.data[1].id").value(Long.toString(mattTdd)))
+                .andExpect(jsonPath("$.data[1].loadCount").value(0))
+                .andExpect(jsonPath("$.data[1].lastLoadedAt").value(nullValue()));
+
+        // 两次真实 load 落库（recordLoad＝装配缝计数中间件的写腿——安装技能同受益）
+        skillStore.recordLoad("tdd", "matt 方法论包");
+        skillStore.recordLoad("tdd", "matt 方法论包");
+        // 同名他包一次：唯一键锚分行
+        skillStore.recordLoad("tdd", "superpowers 包");
+
+        // 清单：matt 行 2、superpowers 行 1，最近加载非空
+        signedGet("/api/backoffice/skills")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[1].loadCount").value(2))
+                .andExpect(jsonPath("$.data[1].lastLoadedAt").isNotEmpty())
+                .andExpect(jsonPath("$.data[2].loadCount").value(1))
+                .andExpect(jsonPath("$.data[2].lastLoadedAt").isNotEmpty());
+
+        // 详情同形（治理决策的数据面）
+        signedGet("/api/backoffice/skills/" + mattTdd)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.loadCount").value(2))
+                .andExpect(jsonPath("$.data.lastLoadedAt").isNotEmpty());
+    }
+
+    @Test
+    void given_catalog_appearance_only_when_assembly_view_reread_then_counts_stay_zero()
+            throws Exception {
+        // 口径负钉：目录出现不计数——指派＋装配视图重读（每轮清单重建同款调用）
+        // 只触 findEnabledAssigned 读面，不产生 load 工具调用，计数恒零
+        long tdd = plant(76_000_111L, "tdd", "matt 方法论包", "commit-a1", 1);
+        signedPutAssignments("executor", OPERATOR_ID, OPERATOR_NAME, Long.toString(tdd));
+
+        for (int i = 0; i < 3; i++) {
+            // 装配视图重读（动态查库——清单重建即此调用的产物）
+            skillRepositorySupplier.skillRepositoriesFor("executor",
+                    new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
+                    .forEach(repo -> repo.getAllSkills());
+        }
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT load_count FROM skl_skills WHERE id = ?", Integer.class, tdd);
+        assertThat(count).as("目录出现（清单重建）不计数").isZero();
+        signedGet("/api/backoffice/skills/" + tdd)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.loadCount").value(0))
+                .andExpect(jsonPath("$.data.lastLoadedAt").value(nullValue()));
     }
 
     // ---------- 夹具 ----------

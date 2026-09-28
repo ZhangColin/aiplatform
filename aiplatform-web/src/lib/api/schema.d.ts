@@ -1304,7 +1304,7 @@ export interface paths {
         };
         /**
          * 技能清单（内置＋安装同权，不分页）
-         * @description 平台全部技能：内置（classpath 合成，来源=1）与库中安装（来源=2）同权呈现，空库时仍呈现内置技能。条目字段：名称、description、来源 code（1=内置 2=安装）与来源名、来源包（内置 null）、版本标识（装时 commit，内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——更新走显式 POST /update，平台永不自动跟新；null＝未检查过，内置恒 null）。排序服务端定死：内置在前（名称序）、安装在后（来源包、名称序）。技能库是有界目录（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。需要机机签名（五头 HMAC），无签名 401
+         * @description 平台全部技能：内置（classpath 合成，来源=1）与库中安装（来源=2）同权呈现，空库时仍呈现内置技能。条目字段：名称、description、来源 code（1=内置 2=安装）与来源名、来源包（内置 null）、版本标识（装时 commit，内置 null）、状态（1=启用 2=停用，内置恒 1）、最近管理动作操作者（安装＝装者、启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——更新走显式 POST /update，平台永不自动跟新；null＝未检查过，内置恒 null）、使用计数两列 loadCount/lastLoadedAt（观测面：智能体 load 工具真实加载该技能一次即 +1——口径＝load 实际发生，指派/启停/清单重建不计数；安装与自产一并覆盖；0/null＝从未被加载过，内置恒 null 不适用）。排序服务端定死：内置在前（名称序）、安装在后（来源包、名称序）。技能库是有界目录（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 401 UNAUTHORIZED — Authentication required
@@ -1327,7 +1327,7 @@ export interface paths {
         };
         /**
          * 技能详情（元数据＋frontmatter＋正文＋scripts，审核面）
-         * @description 读全文按技能审核指引判安装审核（docs/agents/skill-audit-guide.md——注入面＋方法论重叠面＋description 三要素）：元数据（与清单行同形）＋ frontmatter 全量（解析态键值，含 name/description）＋正文全文（frontmatter 剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时注入面。id 取清单行原值（opaque 串两形制）。技能不存在（含未寻址内置名/TSID、畸形柄）404 SKL_001。需要机机签名（五头 HMAC），无签名 401
+         * @description 读全文按技能审核指引判安装审核（docs/agents/skill-audit-guide.md——注入面＋方法论重叠面＋description 三要素）：元数据（与清单行同形）＋ frontmatter 全量（解析态键值，含 name/description）＋正文全文（frontmatter 剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时注入面，另带使用计数两列 loadCount/lastLoadedAt（语义同清单行——load 实际发生才计数，治理决策的数据面）。id 取清单行原值（opaque 串两形制）。技能不存在（含未寻址内置名/TSID、畸形柄）404 SKL_001。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 SKL_001 — 技能不存在
@@ -2030,6 +2030,17 @@ export interface components {
              * @example false
              */
             updateAvailable?: boolean;
+            /**
+             * Format: int64
+             * @description 加载次数（使用计数观测面）：智能体 load 工具真实加载该技能一次即 +1（口径＝load 实际发生，指派/启停/清单重建不计数）；安装与自产一并覆盖；0＝从未被加载过；内置技能恒 null 不适用
+             * @example 3
+             */
+            loadCount?: number;
+            /**
+             * Format: date-time
+             * @description 最近加载时刻（使用计数观测面）；null＝从未被加载过（含新装行）；内置技能恒 null 不适用
+             */
+            lastLoadedAt?: string;
         };
         BackofficeSlotAssignmentResponse: {
             /**
@@ -3029,6 +3040,17 @@ export interface components {
              * @example false
              */
             updateAvailable?: boolean;
+            /**
+             * Format: int64
+             * @description 加载次数（使用计数观测面，语义同清单行——智能体 load 工具真实加载该技能一次即 +1；0＝从未被加载过；内置技能恒 null 不适用）
+             * @example 3
+             */
+            loadCount?: number;
+            /**
+             * Format: date-time
+             * @description 最近加载时刻（使用计数观测面）；null＝从未被加载过；内置技能恒 null 不适用
+             */
+            lastLoadedAt?: string;
         };
         ApiResponseListBackofficeSkillUpdateTraceResponse: {
             /** Format: int32 */

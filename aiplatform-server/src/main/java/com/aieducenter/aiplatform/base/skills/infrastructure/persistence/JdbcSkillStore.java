@@ -35,10 +35,11 @@ import com.aieducenter.aiplatform.base.skills.domain.repository.SkillStore;
 @Component
 public class JdbcSkillStore implements SkillStore {
 
-    /** 条目读列（#250 起四 SELECT 共形带包表标记列；顺序即 {@link #recordOf} 下标）。 */
+    /** 条目读列（#250 起四 SELECT 共形带包表标记列；#261 起带使用计数两列；顺序即 {@link #recordOf} 下标）。 */
     private static final String SKILL_SELECT_PREFIX = """
             SELECT s.id, s.name, s.description, s.source_package, s.version, s.status,
-                   s.frontmatter, s.content, s.resources, s.operator_id, s.operator_name, p.update_available
+                   s.frontmatter, s.content, s.resources, s.operator_id, s.operator_name, p.update_available,
+                   s.load_count, s.last_loaded_at
             FROM skl_skills s
             LEFT JOIN skl_packages p ON p.source_package = s.source_package
             """;
@@ -157,6 +158,13 @@ public class JdbcSkillStore implements SkillStore {
             FROM skl_update_traces
             WHERE source_package = ?
             ORDER BY created_at DESC, id DESC
+            """;
+
+    /** 加载计数（#261 观测面）：唯一键锚单语句自增——零行命中（内置/已卸载）静默。 */
+    private static final String RECORD_LOAD_SQL = """
+            UPDATE skl_skills
+            SET load_count = load_count + 1, last_loaded_at = CURRENT_TIMESTAMP
+            WHERE name = ? AND source_package = ?
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -306,6 +314,12 @@ public class JdbcSkillStore implements SkillStore {
                 rs.getTimestamp(7).toLocalDateTime()), sourcePackage);
     }
 
+    @Override
+    public void recordLoad(String name, String sourcePackage) {
+        // 零行命中（内置/已卸载）即静默无操作——单语句原子，无需外层事务
+        jdbcTemplate.update(RECORD_LOAD_SQL, name, sourcePackage);
+    }
+
     private SkillRecord recordOf(ResultSet rs) throws SQLException {
         return new SkillRecord(
                 rs.getLong(1),
@@ -320,7 +334,10 @@ public class JdbcSkillStore implements SkillStore {
                 rs.getString(10),
                 rs.getString(11),
                 // LEFT JOIN 包表：无包行即 null（未检查过），非 false
-                rs.getObject(12, Boolean.class));
+                rs.getObject(12, Boolean.class),
+                // 使用计数（#261）：last_loaded_at 可空＝从未加载过
+                rs.getLong(13),
+                rs.getTimestamp(14) == null ? null : rs.getTimestamp(14).toLocalDateTime());
     }
 
     private Map<String, Object> frontmatterOf(String json) throws SQLException {

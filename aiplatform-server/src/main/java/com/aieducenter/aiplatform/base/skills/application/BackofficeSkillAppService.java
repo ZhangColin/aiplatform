@@ -419,14 +419,15 @@ public class BackofficeSkillAppService {
     /**
      * 快照条目 → 库行：TSID 现生成、状态＝启用、操作者＝装者/更新者；scripts
      * 资源面随快照同行入库（#253——内容面扩展，与框架 resources 同形）。新装行的
-     * 「有新版」标记恒 false——装/更新时刻版本即远端 HEAD（快照锚与检查同源）。
+     * 「有新版」标记恒 false——装/更新时刻版本即远端 HEAD（快照锚与检查同源）；
+     * 使用计数恒零起步（新行未被加载过，库列 DEFAULT 同口径）。
      */
     private static SkillRecord recordOf(ParsedSkill skill, String sourcePackage, String version,
             Operator operator) {
         return new SkillRecord(TsidGenerator.newInstance().generate(), skill.name(),
                 skill.description(), sourcePackage, version, SkillStatus.ENABLED,
                 skill.frontmatter(), skill.content(), skill.resources(),
-                operator.id(), operator.name(), false);
+                operator.id(), operator.name(), false, 0, null);
     }
 
     /**

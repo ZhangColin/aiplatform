@@ -204,7 +204,7 @@ class ProfileSkillRepositorySupplierTest {
     private static SkillRecord record(long id, String name, String sourcePackage) {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
                 SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
-                "正文", Map.of(), null, null, null);
+                "正文", Map.of(), null, null, null, 0, null);
     }
 
     /** 带 scripts 资源面的条目（#253 开放面夹具）。 */
@@ -212,7 +212,7 @@ class ProfileSkillRepositorySupplierTest {
         return new SkillRecord(id, name, "技能简介", sourcePackage, "commit-x",
                 SkillStatus.ENABLED, Map.of("name", name, "description", "技能简介"),
                 "正文", Map.of("scripts/run-tests.sh", "#!/bin/bash\nset -e\n"),
-                null, null, null);
+                null, null, null, 0, null);
     }
 
     /**
@@ -234,7 +234,7 @@ class ProfileSkillRepositorySupplierTest {
             rows.put(id, new SkillRecord(row.id(), row.name(), row.description(),
                     row.sourcePackage(), row.version(), status, row.frontmatter(),
                     row.content(), row.resources(), row.operatorId(), row.operatorName(),
-                    row.updateAvailable()));
+                    row.updateAvailable(), row.loadCount(), row.lastLoadedAt()));
         }
 
         void unassign(SkillSlot slot, long id) {
@@ -343,6 +343,11 @@ class ProfileSkillRepositorySupplierTest {
         @Override
         public List<SkillUpdateTrace> findTraces(String sourcePackage) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void recordLoad(String name, String sourcePackage) {
+            throw new UnsupportedOperationException("单测假库不覆盖计数口（中间件缝测覆盖）");
         }
     }
 

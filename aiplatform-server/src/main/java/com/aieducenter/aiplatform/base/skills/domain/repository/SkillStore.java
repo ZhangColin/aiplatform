@@ -155,4 +155,15 @@ public interface SkillStore {
      * 更新留痕读面（#250 历史版本可查）：该来源包全部留痕按时间倒序（最近先）。
      */
     List<SkillUpdateTrace> findTraces(String sourcePackage);
+
+    // ========== 使用计数（#261，观测面） ==========
+
+    /**
+     * 加载计数（#261 后台观测面，ADR-0022）：一次真实 load 落库——加载次数
+     * 自增＋最近加载刷当前时刻。锚＝(name, source_package) 唯一键（装配视图
+     * 发放的 AgentSkill 即此两元），跨槽位同指派计同一行。无行命中（内置/
+     * 已卸载）静默无操作——调用方为装配缝观测中间件，best-effort 语义（失败
+     * 降级不阻断加载）由调用侧 catch 承担，本口如实上抛（store 存取口房规）。
+     */
+    void recordLoad(String name, String sourcePackage);
 }

@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.base.agentscope;
 
 import io.agentscope.core.agent.Agent;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ModelRegistry;
 import io.agentscope.core.skill.repository.AgentSkillRepository;
@@ -66,9 +67,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
-            AgentSubagentSupplier subagentSupplier, AgentscopeProperties properties) {
+            AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
+            AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
+                        middlewareSupplier,
                         name, sysPrompt, modelString, workspace, agentKey, toolSpec, properties));
     }
 
@@ -106,7 +109,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
-            AgentSubagentSupplier subagentSupplier,
+            AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
             String agentKey, String toolSpec, AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
@@ -132,13 +135,19 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 .disableDefaultWorkspaceSkills();
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);
+        // 平台中间件挂载位（#261 首件＝技能加载计数）：全形态挂观测中间件；
+        // 委派声明的子智能体同挂（框架对 HarnessRuntimeMiddleware 不随实例拷贝
+        // 传播，子级须显式再挂——与技能视图同款两处接线）
+        List<MiddlewareBase> platformMiddlewares =
+                middlewareSupplier.middlewaresFor(agentKey, workspace);
+        platformMiddlewares.forEach(builder::middleware);
         // 委派位（#95 挂载 / #260 装配一等化）：声明转平台子智能体工厂（框架 2.0.1
         // declared 工厂只继承父级技能仓库，子智能体槽位视图接不进去——见工厂方法
         // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>
         subagentSupplier.subagentsFor(agentKey, workspace)
                 .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
                         workspace, containerFs, model, toolkit, stateStore,
-                        skillRepositorySupplier)));
+                        skillRepositorySupplier, platformMiddlewares)));
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
@@ -236,7 +245,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     static Function<String, Agent> subagentFactory(
             SubagentDeclaration declaration, AgentWorkspace workspace,
             DockerExecFilesystem containerFs, Model parentModel, Toolkit parentToolkit,
-            AgentStateStore stateStore, AgentSkillRepositorySupplier skillRepositorySupplier) {
+            AgentStateStore stateStore, AgentSkillRepositorySupplier skillRepositorySupplier,
+            List<MiddlewareBase> platformMiddlewares) {
         List<AgentSkillRepository> childSkills =
                 skillRepositorySupplier.skillRepositoriesFor(declaration.getName(), workspace);
         Toolkit childToolkit = allowlistedToolkit(parentToolkit, declaration.getTools());
@@ -264,6 +274,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             // 记忆同父级项目面口径关闭（记忆不进包；压缩链不走子智能体）
             sub.disableMemoryHooks().disableMemoryTools();
             childSkills.forEach(sub::skillRepository);
+            // 平台中间件显式同挂（框架对 HarnessRuntimeMiddleware 不随拷贝传播）
+            platformMiddlewares.forEach(sub::middleware);
             return sub.build();
         };
     }

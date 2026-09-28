@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.skills.domain.model;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
@@ -27,6 +28,12 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
  * @param updateAvailable 远端有新版标记（#250 来源包级事实经 join 呈现：远端
  *                       HEAD ≠ 装时版本即 true；null＝未检查过——含 T4 前存量
  *                       安装与装配视图外的直读）
+ * @param loadCount     加载次数（#261 使用计数观测面，V22 起随行带出：口径＝
+ *                      load 实际发生——装配缝中间件拦 load 工具调用且 catalog
+ *                      命中才计，目录重建不计；历史事实非状态，更新翻新不重置；
+ *                      新装行恒 0）
+ * @param lastLoadedAt  最近加载时刻（#261；null＝从未被加载过——含存量行 V22
+ *                      回填前与新装行）
  */
 public record SkillRecord(
         long id,
@@ -40,5 +47,7 @@ public record SkillRecord(
         Map<String, String> resources,
         String operatorId,
         String operatorName,
-        Boolean updateAvailable) {
+        Boolean updateAvailable,
+        long loadCount,
+        LocalDateTime lastLoadedAt) {
 }

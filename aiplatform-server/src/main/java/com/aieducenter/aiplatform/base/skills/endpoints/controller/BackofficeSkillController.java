@@ -81,7 +81,10 @@ public class BackofficeSkillController {
                     + "启停＝最近动作者，内置 null）、远端有新版标记 updateAvailable"
                     + "（来源包级：定期只读检查远端 HEAD 与装时版本不同即 true——"
                     + "更新走显式 POST /update，平台永不自动跟新；null＝未检查过，"
-                    + "内置恒 null）。排序服务端定死：内置在前"
+                    + "内置恒 null）、使用计数两列 loadCount/lastLoadedAt（观测面："
+                    + "智能体 load 工具真实加载该技能一次即 +1——口径＝load 实际"
+                    + "发生，指派/启停/清单重建不计数；安装与自产一并覆盖；0/null＝"
+                    + "从未被加载过，内置恒 null 不适用）。排序服务端定死：内置在前"
                     + "（名称序）、安装在后（来源包、名称序）。技能库是有界目录"
                     + "（装什么是运营决策），不分页不过滤。id 为 opaque 串两形制"
                     + "（builtin:<技能名>／TSID 十进制串），作详情/写口寻址柄。"
@@ -98,7 +101,9 @@ public class BackofficeSkillController {
                     + " 三要素）：元数据（与清单行同形）＋ frontmatter 全量"
                     + "（解析态键值，含 name/description）＋正文全文（frontmatter"
                     + " 剥离后的 SKILL.md body）＋ scripts/ 全文——所见即运行时"
-                    + "注入面。id 取清单行原值（opaque 串两形制）。技能不存在"
+                    + "注入面，另带使用计数两列 loadCount/lastLoadedAt（语义同"
+                    + "清单行——load 实际发生才计数，治理决策的数据面）。id 取清单行原值"
+                    + "（opaque 串两形制）。技能不存在"
                     + "（含未寻址内置名/TSID、畸形柄）404 SKL_001。需要机机"
                     + "签名（五头 HMAC），无签名 401")
     @ErrorCodes({"SKL_001"})

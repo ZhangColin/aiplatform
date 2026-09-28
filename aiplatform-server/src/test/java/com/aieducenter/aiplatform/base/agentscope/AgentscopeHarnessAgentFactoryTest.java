@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
@@ -37,6 +38,10 @@ class AgentscopeHarnessAgentFactoryTest {
 
     /** 子智能体空桩（#95 委派位——无声明挂载即框架不注入 <available_subagents>）。 */
     private static final AgentSubagentSupplier SUBAGENTS = (agentKey, workspace) -> List.of();
+
+    /** 恒空平台中间件（中间件装配另有缝测，工厂测试只验内核接线）。 */
+    private static final AgentMiddlewareSupplier NO_MIDDLEWARES =
+            (agentKey, workspace) -> List.of();
 
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
@@ -200,7 +205,8 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, new AgentscopeProperties());
+                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null, null);
@@ -221,7 +227,7 @@ class AgentscopeHarnessAgentFactoryTest {
         assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
@@ -235,7 +241,7 @@ class AgentscopeHarnessAgentFactoryTest {
         assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
@@ -340,7 +346,7 @@ class AgentscopeHarnessAgentFactoryTest {
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
                 parentToolkit, new InMemoryAgentStateStore(),
-                routedSkillRepos(childView, executorView))
+                routedSkillRepos(childView, executorView), List.of())
                 .apply("self-test");
 
         try {
@@ -357,6 +363,47 @@ class AgentscopeHarnessAgentFactoryTest {
         }
     }
 
+    // ---------- #261 使用计数接线：平台中间件挂主构建与子智能体两处 ----------
+
+    @Test
+    void given_platform_middlewares_when_child_built_then_mounted_on_child(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
+        // 子级显式再挂守护：框架对 HarnessRuntimeMiddleware 不随实例拷贝传播——
+        // subagentFactory 必须把平台中间件亲自挂上子级中间件链
+        MiddlewareBase counter = new MiddlewareBase() { };
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                new Toolkit(), new InMemoryAgentStateStore(),
+                (agentKey, workspace) -> List.of(), List.of(counter))
+                .apply("self-test");
+
+        try {
+            assertThat(child.getDelegate().getMiddlewares()).contains(counter);
+        } finally {
+            child.close();
+        }
+    }
+
+    @Test
+    void given_middleware_supplier_when_real_build_then_mounted_on_agent() {
+        // 主构建接线守护：supplier 发放件进 agent 中间件链（真构建路径，同
+        // given_state_store_when_built_then_wired_into_agent 的 API key 口径）
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过真构建断言");
+        MiddlewareBase counter = new MiddlewareBase() { };
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
+                (agentKey, workspace) -> List.of(counter), new AgentscopeProperties());
+
+        HarnessAgent agent = factory.obtain("platform-agent-mw", "sys",
+                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null, null);
+        try {
+            assertThat(agent.getDelegate().getMiddlewares()).contains(counter);
+        } finally {
+            agent.close();
+        }
+    }
+
     @Test
     void given_child_and_parent_views_when_real_build_then_each_key_gets_own_view() {
         // 全链缝（命令构建 → 工厂 → 子智能体创建）：执行体装配面只含 executor 视图，
@@ -370,7 +417,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 : List.of();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, routedSkillRepos(childView, executorView),
-                subagents,
+                subagents, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
         HarnessAgent executor = factory.obtain("platform-agent", "sys",

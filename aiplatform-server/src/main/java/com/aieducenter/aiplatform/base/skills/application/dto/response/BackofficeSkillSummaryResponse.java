@@ -1,5 +1,7 @@
 package com.aieducenter.aiplatform.base.skills.application.dto.response;
 
+import java.time.LocalDateTime;
+
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSource;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillStatus;
 import com.aieducenter.aiplatform.base.skills.domain.model.BuiltinSkill;
@@ -28,6 +30,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param updateAvailable 远端有新版标记（#250 来源包级）：定期只读检查远端 HEAD
  *                       与装时版本不同即 true——更新永远显式点（POST /update），
  *                       平台不自动跟新；null＝未检查过（内置技能恒 null 不适用）
+ * @param loadCount      加载次数（#261 使用计数观测面）：口径＝load 实际发生——
+ *                      智能体 load 工具真实加载该技能一次即 +1（指派/启停/清单
+ *                      重建不计数）；安装与自产一并覆盖；内置技能恒 null 不适用
+ * @param lastLoadedAt   最近加载时刻（#261；null＝从未被加载过——含新装行；
+ *                      内置技能恒 null 不适用）
  */
 public record BackofficeSkillSummaryResponse(
         @Schema(description = "技能柄（详情寻址，opaque 串两形制，勿做数值假设）：内置技能＝"
@@ -55,7 +62,14 @@ public record BackofficeSkillSummaryResponse(
         @Schema(description = "远端有新版标记（来源包级）：定期只读检查远端 HEAD 与装时版本"
                 + "不同即 true——更新永远显式点（POST /update），平台不自动跟新远端；"
                 + "null＝未检查过（内置技能恒 null 不适用）", example = "false")
-        Boolean updateAvailable) {
+        Boolean updateAvailable,
+        @Schema(description = "加载次数（使用计数观测面）：智能体 load 工具真实加载该技能"
+                + "一次即 +1（口径＝load 实际发生，指派/启停/清单重建不计数）；安装与自产"
+                + "一并覆盖；0＝从未被加载过；内置技能恒 null 不适用", example = "3")
+        Long loadCount,
+        @Schema(description = "最近加载时刻（使用计数观测面）；null＝从未被加载过（含新装行）；"
+                + "内置技能恒 null 不适用")
+        LocalDateTime lastLoadedAt) {
 
     /** 库条目 → 清单行（来源＝安装）。 */
     public static BackofficeSkillSummaryResponse of(SkillRecord record) {
@@ -71,7 +85,9 @@ public record BackofficeSkillSummaryResponse(
                 record.status().getName(),
                 record.operatorId(),
                 record.operatorName(),
-                record.updateAvailable());
+                record.updateAvailable(),
+                record.loadCount(),
+                record.lastLoadedAt());
     }
 
     /** 内置技能 → 清单行（来源＝内置；来源包/版本标识无、状态恒启用）。 */
@@ -86,6 +102,8 @@ public record BackofficeSkillSummaryResponse(
                 null,
                 SkillStatus.ENABLED.getCode(),
                 SkillStatus.ENABLED.getName(),
+                null,
+                null,
                 null,
                 null,
                 null);

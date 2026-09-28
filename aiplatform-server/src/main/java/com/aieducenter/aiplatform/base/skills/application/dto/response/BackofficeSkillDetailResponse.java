@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.base.skills.application.dto.response;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSource;
@@ -33,6 +34,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param operatorName  最近管理动作操作者名（直读展示；内置与未管理过为 null）
  * @param updateAvailable 远端有新版标记（#250 来源包级，语义同清单行；内置恒
  *                       null 不适用）
+ * @param loadCount      加载次数（#261 使用计数观测面，语义同清单行：口径＝load
+ *                      实际发生；0＝从未被加载过；内置恒 null 不适用）
+ * @param lastLoadedAt   最近加载时刻（#261；null＝从未被加载过；内置恒 null 不适用）
  */
 public record BackofficeSkillDetailResponse(
         @Schema(description = "技能柄（opaque 串两形制，同清单行 id：内置＝builtin:<技能名>、"
@@ -64,7 +68,13 @@ public record BackofficeSkillDetailResponse(
         String operatorName,
         @Schema(description = "远端有新版标记（来源包级，语义同清单行——true＝远端 HEAD ≠"
                 + "装时版本；null＝未检查过，内置技能恒 null 不适用）", example = "false")
-        Boolean updateAvailable) {
+        Boolean updateAvailable,
+        @Schema(description = "加载次数（使用计数观测面，语义同清单行——智能体 load 工具真实"
+                + "加载该技能一次即 +1；0＝从未被加载过；内置技能恒 null 不适用）", example = "3")
+        Long loadCount,
+        @Schema(description = "最近加载时刻（使用计数观测面）；null＝从未被加载过；"
+                + "内置技能恒 null 不适用")
+        LocalDateTime lastLoadedAt) {
 
     /** 库条目 → 详情（来源＝安装）。 */
     public static BackofficeSkillDetailResponse of(SkillRecord record) {
@@ -83,7 +93,9 @@ public record BackofficeSkillDetailResponse(
                 record.resources(),
                 record.operatorId(),
                 record.operatorName(),
-                record.updateAvailable());
+                record.updateAvailable(),
+                record.loadCount(),
+                record.lastLoadedAt());
     }
 
     /** 内置技能 → 详情（来源＝内置；来源包/版本标识无、状态恒启用、resources 恒空）。 */
@@ -101,6 +113,8 @@ public record BackofficeSkillDetailResponse(
                 skill.frontmatter(),
                 skill.content(),
                 Map.of(),
+                null,
+                null,
                 null,
                 null,
                 null);

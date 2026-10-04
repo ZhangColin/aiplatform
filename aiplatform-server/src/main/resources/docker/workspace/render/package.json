@@ -1,0 +1,11 @@
+{
+  "name": "aiplatform-render",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "位图出口渲染器（#284，ADR-0026/0027）：HTML→PNG（chromium 保真渲染）与 SVG→PNG（resvg 零浏览器旁路）。版本随 DEV_IMAGE 走；Playwright 与 chromium 二进制强绑定（1.63.0 ↔ builds/chromium/1243，浏览器 zip 由镜像构建期取同版解压 /opt/chrome、运行期经 RENDER_CHROMIUM 指路）——升版＝两处钉版同步改＋镜像重建。",
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "playwright": "1.63.0"
+  }
+}

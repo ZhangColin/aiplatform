@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <!-- SVG 旁路保真用例（#284 容器活体留存）：几何（矩形＋圆形）/ 配色（钉死 hex）/
+       文字（中文，resvg 走系统字体）。断言在 WorkspaceRendersLiveTest 逐像素核对
+       ——改动本文件须同步改动采样坐标。 -->
+  <rect x="0" y="0" width="400" height="300" fill="#ffffff"/>
+  <rect x="20" y="20" width="160" height="100" fill="#e60012"/>
+  <circle cx="300" cy="180" r="70" fill="#0055cc"/>
+  <text x="20" y="230" font-family="Noto Sans CJK SC, PingFang SC, Microsoft YaHei, sans-serif"
+        font-size="32" font-weight="700" fill="#1a1a1a">矢量旁路渲染保真</text>
+</svg>

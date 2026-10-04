@@ -62,10 +62,14 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
-     * 0.10（#283）：init-workspace.sh 增设计线三目录骨架（materials/design/exports，
-     * ADR-0027）——升版强制重建镜像。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。
+     * 0.11（#284）：镜像内置位图出口渲染器（/opt/render——chromium＋Playwright
+     * HTML→PNG 保真渲染、resvg SVG→PNG 零浏览器旁路，ADR-0026/0027；压缩体积
+     * +0.4–0.5GB、Playwright 版本强绑定）——升版强制重建镜像，存量项目经既有
+     * 幂等重建（唤醒/重建容器即用新镜像）自愈。0.10（#283）：init-workspace.sh
+     * 增设计线三目录骨架（materials/design/exports，ADR-0027）。0.9（#264 T6）：
+     * 撤 skills 骨架位（ADR-0022）。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.10";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.11";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
@@ -599,6 +603,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             copyResource("docker/workspace/init-workspace.sh", dir.resolve("init-workspace.sh"));
             copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
             copyResourceTree("docker/workspace/baseline", dir.resolve("baseline"));
+            copyResourceTree("docker/workspace/render", dir.resolve("render"));
             run("docker", "build", "-t", DEV_IMAGE, dir.toString());
         } catch (ApplicationException e) {
             throw e;

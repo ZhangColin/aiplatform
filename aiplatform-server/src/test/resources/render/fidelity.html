@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>位图出口保真用例</title>
+<style>
+  /* 渲染保真用例（#284 容器活体留存）：几何（矩形＋圆形）/ 配色（钉死 hex）/
+     文字（中文排版）。断言在 WorkspaceRendersLiveTest 逐像素核对——改动本文件
+     须同步改动采样坐标。字体栈照设计稿惯例（容器内解析到 Noto Sans CJK）。 */
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 800px; height: 600px; background: #ffffff;
+    font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC',
+                 'Microsoft YaHei', sans-serif;
+    position: relative;
+  }
+  .red-block {
+    position: absolute; left: 40px; top: 40px; width: 200px; height: 120px;
+    background: #e60012;
+  }
+  .blue-circle {
+    position: absolute; left: 480px; top: 80px; width: 220px; height: 220px;
+    border-radius: 50%; background: #0055cc;
+  }
+  .title {
+    position: absolute; left: 40px; top: 400px;
+    font-size: 48px; font-weight: 700; color: #1a1a1a; line-height: 1.2;
+    letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="red-block"></div>
+  <div class="blue-circle"></div>
+  <div class="title">设计稿位图出口保真</div>
+</body>
+</html>

@@ -93,8 +93,7 @@ public final class ProjectFiles {
         if (!isViewable(path)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
-        String quoted = "'" + WorkspaceLayout.absolute(path).replace("'", "'\\''") + "'";
-        return "p=" + quoted + "; if ! test -f \"$p\"; then exit 1; fi;"
+        return ContainerCommands.existenceGuard(path)
                 + " s=$(stat -c %s \"$p\");"
                 + " if [ \"$s\" -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
                 + " printf '%s\\n' \"$s\"; cat \"$p\"";
@@ -119,8 +118,7 @@ public final class ProjectFiles {
         if (!isViewable(path)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
-        String quoted = "'" + WorkspaceLayout.absolute(path).replace("'", "'\\''") + "'";
-        return "p=" + quoted + "; if ! test -f \"$p\"; then exit 1; fi;"
+        return ContainerCommands.existenceGuard(path)
                 + " s=$(stat -c %s \"$p\");"
                 + " if [ \"$s\" -gt " + MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
                 + " cat \"$p\"";

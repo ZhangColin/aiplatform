@@ -105,4 +105,62 @@ class ProjectFilesTest {
         assertThatThrownBy(() -> ProjectFiles.contentCommand("data/pg/base.sql"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    // ---------- 图片点看判定与 raw 直出命令（#283） ----------
+
+    @Test
+    void given_image_extensions_when_image_path_then_true() {
+        // 扩展名面（点看判定对图片放行）：五格式大小写不敏感；无扩展名/文本/二进制
+        // 非图片扩展名不在 raw 伺服面（文本走 content、真二进制非图片仍 PRJ_023）
+        assertThat(ProjectFiles.isImagePath("materials/ref.png")).isTrue();
+        assertThat(ProjectFiles.isImagePath("materials/ref.PNG")).isTrue();
+        assertThat(ProjectFiles.isImagePath("design/poster.Jpg")).isTrue();
+        assertThat(ProjectFiles.isImagePath("a/b/c.webp")).isTrue();
+        assertThat(ProjectFiles.isImagePath("logo.svg")).isTrue();
+        assertThat(ProjectFiles.isImagePath("anim.gif")).isTrue();
+    }
+
+    @Test
+    void given_non_image_paths_when_image_path_then_false() {
+        assertThat(ProjectFiles.isImagePath("docs/PRD.md")).isFalse();
+        assertThat(ProjectFiles.isImagePath("src/app/page.tsx")).isFalse();
+        assertThat(ProjectFiles.isImagePath("assets/logo.bin")).isFalse();
+        assertThat(ProjectFiles.isImagePath("no-extension")).isFalse();
+        assertThat(ProjectFiles.isImagePath("png")).isFalse(); // 文件名恰好叫 png，不是扩展名
+    }
+
+    @Test
+    void when_raw_image_command_then_size_guarded_before_cat_without_text_header() {
+        // 同 contentCommand 的三段守卫（1 = 不存在、2 = 超图片查看上限），但 stdout 是
+        // 文件原始字节（无「大小首行 + 正文」的文本形——二进制不经文本通道）
+        assertThat(ProjectFiles.rawImageCommand("materials/ref.png")).isEqualTo(
+                "p='/workspace/materials/ref.png'; if ! test -f \"$p\"; then exit 1; fi;"
+                        + " s=$(stat -c %s \"$p\");"
+                        + " if [ \"$s\" -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                        + " cat \"$p\"");
+    }
+
+    @Test
+    void given_quote_in_filename_when_raw_image_command_then_shell_escaped() {
+        assertThat(ProjectFiles.rawImageCommand("materials/it's.png"))
+                .contains("p='/workspace/materials/it'\\''s.png';");
+    }
+
+    @Test
+    void given_non_viewable_path_when_raw_image_command_then_rejected() {
+        assertThatThrownBy(() -> ProjectFiles.rawImageCommand(".env"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void when_content_type_then_mapped_by_extension() {
+        assertThat(ProjectFiles.contentTypeOf("materials/ref.png")).isEqualTo("image/png");
+        assertThat(ProjectFiles.contentTypeOf("materials/photo.jpg")).isEqualTo("image/jpeg");
+        assertThat(ProjectFiles.contentTypeOf("materials/photo.jpeg")).isEqualTo("image/jpeg");
+        assertThat(ProjectFiles.contentTypeOf("materials/shot.webp")).isEqualTo("image/webp");
+        assertThat(ProjectFiles.contentTypeOf("design/anim.gif")).isEqualTo("image/gif");
+        assertThat(ProjectFiles.contentTypeOf("design/logo.svg")).isEqualTo("image/svg+xml");
+        // 非图片扩展名兜底字节流（调用侧图片判定先行，此处不代偿）
+        assertThat(ProjectFiles.contentTypeOf("docs/PRD.md")).isEqualTo("application/octet-stream");
+    }
 }

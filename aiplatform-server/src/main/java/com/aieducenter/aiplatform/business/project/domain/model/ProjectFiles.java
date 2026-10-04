@@ -3,6 +3,8 @@ package com.aieducenter.aiplatform.business.project.domain.model;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
@@ -13,12 +15,33 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 口径）——嵌套同名目录（如应用自己的 {@code src/data/}）是交付物，不误伤。
  * 收拢四件事——可浏览路径判定（内容端点的用户可控入参防线）、树列表命令构造
  * （find 剪枝在源头排除，不进 node_modules 巨树）、内容读取命令构造（大小限读
- * 在容器侧先行，巨文件不进内存）、find 输出解析。纯函数无依赖。
+ * 在容器侧先行，巨文件不进内存）、find 输出解析。#283 起点看判定对图片放行
+ * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处。
+ * 纯函数无依赖。
  */
 public final class ProjectFiles {
 
     /** 在线查看的文件大小上限（1 MiB）：容器侧 cat 前拦截，超限不读取。 */
     public static final long MAX_CONTENT_BYTES = 1024 * 1024;
+
+    /**
+     * 图片点看（raw 直出）的大小上限（25 MiB，ADR-0027「≤25MB 量级」裁量）：
+     * 容器侧 cat 前拦截，超限不读取——与文本上限各自独立（图片以张计，量级放宽）。
+     */
+    public static final long MAX_RAW_IMAGE_BYTES = 25L * 1024 * 1024;
+
+    /**
+     * 图片点看的扩展名面（#283）：png/jpg/webp/gif/svg（与上传口径同集，ADR-0027）
+     * → 真实 content-type（raw 直出按扩展名映射，无内容嗅探面）。键即判定面、
+     * 值即响应头，一张表两用。
+     */
+    private static final Map<String, String> IMAGE_CONTENT_TYPES = Map.of(
+            "png", "image/png",
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "webp", "image/webp",
+            "gif", "image/gif",
+            "svg", "image/svg+xml");
 
     /** 文件树条目：工作区相对路径 + 字节大小（目录由前端按路径段合成，不出端点）。 */
     public record Entry(String path, long size) {
@@ -75,6 +98,49 @@ public final class ProjectFiles {
                 + " s=$(stat -c %s \"$p\");"
                 + " if [ \"$s\" -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
                 + " printf '%s\\n' \"$s\"; cat \"$p\"";
+    }
+
+    /**
+     * 图片点看判定（#283，ADR-0027 点看对图片放行）：按扩展名（大小写不敏感）。
+     * 放行即走 raw 直出 inline 大图；文本照旧走内容端点、含 NUL 的真二进制非图片
+     * 件仍由内容端点如实拒收（PRJ_023 语义保留）。
+     */
+    public static boolean isImagePath(String path) {
+        return IMAGE_CONTENT_TYPES.containsKey(extensionOf(path));
+    }
+
+    /**
+     * 图片 raw 直出命令（path 须先过 {@link #isViewable} 与 {@link #isImagePath}，
+     * 此处只代偿前者）：守卫结构同 {@link #contentCommand}（1 = 不存在、
+     * 2 = 超 {@link #MAX_RAW_IMAGE_BYTES}），但 stdout 是文件<strong>原始字节</strong>
+     * （无「大小首行 + 正文」文本形——二进制不经文本通道，走 exec 字节形）。
+     */
+    public static String rawImageCommand(String path) {
+        if (!isViewable(path)) {
+            throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
+        }
+        String quoted = "'" + WorkspaceLayout.absolute(path).replace("'", "'\\''") + "'";
+        return "p=" + quoted + "; if ! test -f \"$p\"; then exit 1; fi;"
+                + " s=$(stat -c %s \"$p\");"
+                + " if [ \"$s\" -gt " + MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                + " cat \"$p\"";
+    }
+
+    /**
+     * 扩展名 → content-type（raw 直出的响应头依据）：图片扩展名给真实 MIME，
+     * 其余兜底 {@code application/octet-stream}（调用侧图片判定先行，此处不代偿）。
+     */
+    public static String contentTypeOf(String path) {
+        return IMAGE_CONTENT_TYPES.getOrDefault(extensionOf(path), "application/octet-stream");
+    }
+
+    /** 小写扩展名（无扩展名即空串——点须在最后一段名内，整名恰为扩展词不算）。 */
+    private static String extensionOf(String path) {
+        int dot = path.lastIndexOf('.');
+        int slash = path.lastIndexOf('/');
+        return dot > slash
+                ? path.substring(dot + 1).toLowerCase(Locale.ROOT)
+                : "";
     }
 
     /**

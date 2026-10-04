@@ -2,6 +2,7 @@
  * 文件树浏览纯逻辑（#27 文件模式）：后端只列文件（目录是合成物），这里把
  * 平铺文件清单组成展示树 + 选中保持 + 祖先展开判定。排序用代码点序（与后端
  * 路径排序同构，跨环境确定性）；目录先于文件是文件浏览器的常规预期。
+ * #283 起收图片点看判定与 raw 直出 URL（ADR-0027：点看对图片放行）。
  */
 
 /** PRD 在工作区的路径（后端 WorkspaceLayout.PRD 的前端镜像，缺省选中的锚）。 */
@@ -83,6 +84,34 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${trimToOneDecimal(bytes / 1024)} KB`;
   return `${trimToOneDecimal(bytes / (1024 * 1024))} MB`;
+}
+
+/** 图片点看的扩展名面（后端 ProjectFiles 判定的前端镜像：png/jpg/webp/gif/svg）。 */
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg"]);
+
+/**
+ * 图片 inline 点看的大小上限（25 MiB，后端 PRJ_022 拒收口径的前端镜像）：
+ * 超限不发请求直接如实提示——省一次注定 400 的取件。
+ */
+export const RAW_IMAGE_SIZE_LIMIT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * 点看判定（#283，ADR-0027 点看对图片放行）：图片扩展名走 raw 直出 inline 大图，
+ * 其余照旧文本内容端点（含 NUL 的真二进制非图片件由后端 PRJ_023 如实拒收）。
+ */
+export function isImagePath(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  const slash = path.lastIndexOf("/");
+  if (dot <= slash) return false;
+  return IMAGE_EXTENSIONS.has(path.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * 图片点看的 raw 直出 URL：同源 `/api/*` 直链（会话 cookie 自动携带，对偶
+ * source-package 下载链接先例）——二进制不走 api client（其响应一律按 JSON 解包）。
+ */
+export function rawFileUrl(projectId: string, path: string): string {
+  return `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(path)}`;
 }
 
 // ---- 内部 ----

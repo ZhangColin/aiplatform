@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
@@ -79,7 +80,7 @@ class DockerEnvironmentBackendSealTest {
         assertThat(packed).isEqualTo("packed".getBytes());
         assertThat(backend.commands).contains("docker volume inspect vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.9"
+                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.10"
                         + " czf - --exclude=./node_modules --exclude=./.pnpm-store"
                         + " --exclude=./.next -C /workspace .");
         // 数据库随包：排除清单只有三大可重建缓存（无 --exclude data/.env 等）
@@ -126,6 +127,20 @@ class DockerEnvironmentBackendSealTest {
     }
 
     @Test
+    void given_command_when_exec_binary_then_same_exec_channel_with_byte_stdout() {
+        CapturingBackend backend = new CapturingBackend();
+
+        // #283 图片 raw 直出：exec 的字节形——同一 docker exec 通道（sh -c 直达、
+        // 无旁路容器），stdout 字节原样回传、退出码透传
+        BinaryExecResult result = backend.execBinary(HANDLE, "cat '/workspace/x/y.png'");
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).isEqualTo("packed".getBytes());
+        assertThat(backend.binaryCommands).containsExactly(
+                "docker exec ws-42 sh -c cat '/workspace/x/y.png'");
+    }
+
+    @Test
     void given_archive_when_restore_volume_then_volume_recreated_and_pid_cleared() {
         CapturingBackend backend = new CapturingBackend();
 
@@ -136,7 +151,7 @@ class DockerEnvironmentBackendSealTest {
                 "docker volume rm vol-ws-42",
                 "docker volume create vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.9"
+                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.10"
                         + " -c tar xzf - -C /workspace && rm -f /workspace/data/pg/postmaster.pid");
     }
 

@@ -146,7 +146,7 @@ class DockerEnvironmentBackendObservationTest {
         // 旁路形制：--entrypoint du、挂全卷、字节口径（-sb）
         assertThat(backend.runCommands).containsExactly(
                 "docker run --rm --entrypoint du -v vol-ws-42:/workspace "
-                        + "aiplatform/dev:0.9 -sb /workspace");
+                        + "aiplatform/dev:0.10 -sb /workspace");
     }
 
     @Test

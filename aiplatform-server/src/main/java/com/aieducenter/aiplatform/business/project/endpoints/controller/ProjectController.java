@@ -42,6 +42,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.PrdR
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
@@ -277,10 +278,36 @@ public class ProjectController {
             description = "path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小："
                     + "非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；"
                     + "文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）"
-                    + "400 PRJ_022；非文本（正文含 NUL）400 PRJ_023。项目不存在 404 PRJ_001")
+                    + "400 PRJ_022；非文本（正文含 NUL）400 PRJ_023——图片点看不走本端点"
+                    + "（raw 直出，#283）。项目不存在 404 PRJ_001")
     public ApiResponse<ProjectFileContentResponse> fileContent(@PathVariable String id,
             @RequestParam String path) {
         return ApiResponse.ok(queryAppService.fileContent(parseId(id), path));
+    }
+
+    @GetMapping("/{id}/files/raw")
+    @Operation(summary = "图片文件直出（点看图片 inline 大图，#283）",
+            description = "path = 工作区相对路径。只伺服图片（png/jpg/webp/gif/svg，扩展名"
+                    + "判定）：真实 content-type + 原始字节流 inline 直出（本端点不走"
+                    + " ApiResponse JSON 信封，先例＝源码包端点；img src 同源会话 cookie"
+                    + " 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、"
+                    + "含 NUL 的真二进制非图片件在那里如实拒收。点看免费（支付门只盖下载面，"
+                    + "#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区"
+                    + "不被触达）；非图片扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过"
+                    + "图片查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。"
+                    + "项目不存在 404 PRJ_001")
+    public ResponseEntity<ByteArrayResource> fileRaw(@PathVariable String id,
+            @RequestParam String path) {
+        ProjectFileRawResponse raw = queryAppService.fileRaw(parseId(id), path);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(raw.contentType()));
+        headers.setContentDisposition(ContentDisposition.inline()
+                .filename(fileNameOf(path)).build());
+        // SVG 同源直出的脚本面收口：<img> 内嵌本无脚本面，直开 URL 时 CSP 禁脚本
+        // （default-src 'none'）＋ nosniff 防 MIME 混淆——图片查看面无脚本诉求
+        headers.set("X-Content-Type-Options", "nosniff");
+        headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(raw.content()));
     }
 
     @GetMapping("/{id}/source-package")
@@ -323,5 +350,17 @@ public class ProjectController {
     /** 寻址解析收口（{@link Tsid}，畸形标识 → 404 PRJ_001）。 */
     private Long parseId(String id) {
         return Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND);
+    }
+
+    /**
+     * raw 直出的 inline 文件名（路径末段；ContentDisposition 对非 ASCII 自带
+     * RFC 5987 编码）。用户可控路径入响应头前的最小消毒：控制字符（含 CR/LF——
+     * 头注入面）与引号（quoted-string 语法字符）剔除；非 ASCII 文件名常规
+     * （中文等）原样保留。
+     */
+    private static String fileNameOf(String path) {
+        int slash = path.lastIndexOf('/');
+        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        return name.replaceAll("[\\p{Cntrl}\"]", "");
     }
 }

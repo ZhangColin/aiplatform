@@ -12,6 +12,7 @@ import com.cartisan.event.ApplicationEventPublisher;
 
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceContentPackage;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ProvisionFailedWorkspaceResponse;
@@ -25,6 +26,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -158,6 +160,17 @@ public class WorkspaceLifecycleAppService {
         Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
         ExecResult result = environmentBackend.exec(workspace.toHandle(), command.command());
         return new ExecResultResponse(result.stdout(), result.stderr(), result.exitCode());
+    }
+
+    /**
+     * 在工作区容器内执行命令取 stdout 原始字节（#283 图片 raw 直出）：exec 的
+     * 字节形——二进制（图片等）不经字符集解释原样取回；就绪语义与错误口径同
+     * {@link #exec}。字节止于调用方（REST 层直出，无 JSON 信封形）。
+     */
+    public BinaryExecResponse execBinary(String workspaceId, WorkspaceExecCommand command) {
+        Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
+        BinaryExecResult result = environmentBackend.execBinary(workspace.toHandle(), command.command());
+        return new BinaryExecResponse(result.stdout(), result.stderr(), result.exitCode());
     }
 
     /**

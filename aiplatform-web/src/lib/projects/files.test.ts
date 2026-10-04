@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   PRD_PATH,
+  RAW_IMAGE_SIZE_LIMIT_BYTES,
   buildFileTree,
   formatFileSize,
   isAncestorDir,
+  isImagePath,
+  rawFileUrl,
   selectableFile,
   type FileTreeDir,
   type FileTreeFile,
@@ -79,5 +82,40 @@ describe("formatFileSize · 大小人文可读", () => {
     expect(formatFileSize(1024)).toBe("1 KB");
     expect(formatFileSize(12 * 1024 + 512)).toBe("12.5 KB");
     expect(formatFileSize(2 * 1024 * 1024)).toBe("2 MB");
+  });
+});
+
+describe("isImagePath · 点看判定（#283 图片放行）", () => {
+  it("五格式大小写不敏感放行；文本/无扩展名/二进制非图片不在面内", () => {
+    expect(isImagePath("materials/ref.png")).toBe(true);
+    expect(isImagePath("materials/ref.PNG")).toBe(true);
+    expect(isImagePath("design/poster.Jpg")).toBe(true);
+    expect(isImagePath("a/b/c.webp")).toBe(true);
+    expect(isImagePath("logo.svg")).toBe(true);
+    expect(isImagePath("anim.gif")).toBe(true);
+
+    expect(isImagePath("docs/PRD.md")).toBe(false);
+    expect(isImagePath("src/app/page.tsx")).toBe(false);
+    expect(isImagePath("assets/logo.bin")).toBe(false);
+    expect(isImagePath("no-extension")).toBe(false);
+    expect(isImagePath("png")).toBe(false); // 文件名恰好叫 png，不是扩展名
+  });
+});
+
+describe("rawFileUrl · 图片直出 URL（#283）", () => {
+  it("同源 /api 直链，path 整体编码（不经 api client——二进制不走 JSON）", () => {
+    expect(rawFileUrl("p1", "materials/ref.png")).toBe(
+      "/api/projects/p1/files/raw?path=materials%2Fref.png",
+    );
+    // 特殊字符（空格/引号/中文）原样过 URL 编码，不破 query 结构
+    expect(rawFileUrl("p1", "materials/我的 图#1.png")).toBe(
+      `/api/projects/p1/files/raw?path=${encodeURIComponent("materials/我的 图#1.png")}`,
+    );
+  });
+});
+
+describe("RAW_IMAGE_SIZE_LIMIT_BYTES · 前端预检上界", () => {
+  it("与后端 PRJ_022 图片查看上限同值（25 MiB）", () => {
+    expect(RAW_IMAGE_SIZE_LIMIT_BYTES).toBe(25 * 1024 * 1024);
   });
 });

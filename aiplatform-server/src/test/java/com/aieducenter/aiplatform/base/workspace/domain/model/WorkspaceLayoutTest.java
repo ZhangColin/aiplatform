@@ -22,7 +22,9 @@ class WorkspaceLayoutTest {
                         WorkspaceLayout.DOCS_DIR, WorkspaceLayout.DATA_DIR, WorkspaceLayout.PG_DATA_DIR,
                         WorkspaceLayout.PLATFORM_DIR,
                         WorkspaceLayout.RULES_DIR,
-                        WorkspaceLayout.LOGS_DIR, WorkspaceLayout.EXTERNAL_DIR)
+                        WorkspaceLayout.LOGS_DIR, WorkspaceLayout.EXTERNAL_DIR,
+                        WorkspaceLayout.MATERIALS_DIR, WorkspaceLayout.DESIGN_DIR,
+                        WorkspaceLayout.EXPORTS_DIR)
                 .forEach(path -> {
                     assertThat(path).doesNotStartWith("/");
                     assertThat(path).doesNotContain("..");
@@ -45,10 +47,25 @@ class WorkspaceLayoutTest {
 
     @Test
     void given_skeleton_when_inspect_then_covers_pinned_directories_only() {
-        // init 落位骨架 = 布局中的全部目录（应用代码占根无目录、AGENTS.md 内容归生成环）
+        // init 落位骨架 = 布局中的全部目录（应用代码占根无目录、AGENTS.md 内容归生成环；
+        // #283 设计线三目录进骨架——物料/设计产物/导出物，ADR-0027 存储地基）
         assertThat(WorkspaceLayout.SKELETON_DIRS).containsExactlyInAnyOrder(
                 WorkspaceLayout.DOCS_DIR, WorkspaceLayout.PG_DATA_DIR,
-                WorkspaceLayout.RULES_DIR, WorkspaceLayout.LOGS_DIR);
+                WorkspaceLayout.RULES_DIR, WorkspaceLayout.LOGS_DIR,
+                WorkspaceLayout.MATERIALS_DIR, WorkspaceLayout.DESIGN_DIR, WorkspaceLayout.EXPORTS_DIR);
+    }
+
+    @Test
+    void given_design_line_dirs_when_inspect_then_deliverable_and_seal_preserved() {
+        // #283/ADR-0027：物料/设计产物/导出物三目录是文件区可见面（不进非交付名单
+        // ——文件树可见可点看），且都随封存保全（不进可重建缓存集——物料是输入、
+        // 设计产物含不可再生位图正身、导出件非缓存语义）
+        List.of(WorkspaceLayout.MATERIALS_DIR, WorkspaceLayout.DESIGN_DIR,
+                        WorkspaceLayout.EXPORTS_DIR)
+                .forEach(dir -> {
+                    assertThat(WorkspaceLayout.NON_DELIVERABLE_DIRS).doesNotContain(dir);
+                    assertThat(WorkspaceLayout.REBUILDABLE_CACHE_DIRS).doesNotContain(dir);
+                });
     }
 
     @Test

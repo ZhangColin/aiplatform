@@ -8,6 +8,7 @@ import com.cartisan.core.stereotype.PortType;
 
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.aieducenter.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
@@ -53,6 +54,14 @@ public interface EnvironmentBackend {
      * 在工作区内执行一条命令，取 stdout/stderr/exitCode。
      */
     ExecResult exec(WorkspaceHandle handle, String command);
+
+    /**
+     * 在工作区内执行一条命令，取 stdout 的<strong>原始字节</strong>/stderr/exitCode
+     * （#283 图片 raw 直出）：{@link #exec} 的字节形——stdout 不经字符集解释
+     * （String 形对二进制有损），读侧专用（无 stdin 面）。同一 docker exec 通道，
+     * 退出码语义与错误口径同 {@link #exec}。
+     */
+    BinaryExecResult execBinary(WorkspaceHandle handle, String command);
 
     /**
      * 暴露容器端口为可访问的预览 URL（本地 = Docker 端口映射；线上 = Ingress/负载均衡）。

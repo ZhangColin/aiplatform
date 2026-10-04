@@ -58,6 +58,7 @@ beforeEach(() => {
     data: [
       { path: "AGENTS.md", size: 7 },
       { path: "docs/PRD.md", size: 1234 },
+      { path: "materials/ref.png", size: 4096 },
       { path: "src/app/page.tsx", size: 340 },
     ],
     isPending: false,
@@ -105,6 +106,46 @@ describe("FilesPanel · 文件树浏览（#27）", () => {
     fireEvent.click(container.querySelector('button[data-tree-dir="src/app"]')!);
     fireEvent.click(container.querySelector('button[data-tree-file="src/app/page.tsx"]')!);
     expect(container.textContent).toContain("export default function Page() {}");
+  });
+
+  it("点图片（#283）→ inline 大图呈现（raw 直链），不走文本内容端点", () => {
+    const { container } = render(<FilesPanel projectId="p1" />);
+
+    // materials 目录随点开展开 → 点 ref.png：图片以 raw 直出 URL 呈现
+    fireEvent.click(container.querySelector('button[data-tree-dir="materials"]')!);
+    fireEvent.click(container.querySelector('button[data-tree-file="materials/ref.png"]')!);
+    const img = container.querySelector("img[data-file-image='materials/ref.png']");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(
+      "/api/projects/p1/files/raw?path=materials%2Fref.png",
+    );
+    // 图片路径不进文本内容 hook（点看判定对图片放行——不再撞 PRJ_023 拒收）
+    expect(seed.content.byPath["materials/ref.png"]).toBeUndefined();
+  });
+
+  it("图片超限（树条目大小预检 > 25 MiB）→ 如实提示、不发取件请求", () => {
+    seed.files = {
+      data: [{ path: "materials/huge.png", size: 26 * 1024 * 1024 }],
+      isPending: false,
+    };
+    const { container } = render(<FilesPanel projectId="p1" />);
+
+    fireEvent.click(container.querySelector('button[data-tree-file="materials/huge.png"]')!);
+    expect(container.textContent).toContain("文件太大，暂不支持在线查看");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("图片加载失败（raw 取件出错）→ 如实提示，不残留破图", () => {
+    seed.files = {
+      data: [{ path: "materials/gone.png", size: 100 }],
+      isPending: false,
+    };
+    const { container } = render(<FilesPanel projectId="p1" />);
+
+    fireEvent.click(container.querySelector('button[data-tree-file="materials/gone.png"]')!);
+    fireEvent.error(container.querySelector("img[data-file-image='materials/gone.png']")!);
+    expect(container.textContent).toContain("暂时读不到这张图片");
+    expect(container.querySelector("img")).toBeNull();
   });
 
   it("修正删掉选中文件后树刷新：选中回缺省 PRD（选中保持纯逻辑的面呈现）", () => {

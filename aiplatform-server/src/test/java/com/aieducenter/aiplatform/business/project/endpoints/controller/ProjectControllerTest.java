@@ -38,6 +38,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.PrdR
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
@@ -64,6 +65,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -557,6 +559,60 @@ class ProjectControllerTest {
         performAsUser(get("/api/projects/100/files/content").param("path", "logo.png"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("该文件不是文本文件，暂不支持在线查看"));
+    }
+
+    // ---------- 图片 raw 直出（#283 点看图片 inline 大图） ----------
+
+    @Test
+    void given_image_file_when_raw_then_real_content_type_and_inline_bytes_returned() throws Exception {
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01};
+        when(queryAppService.fileRaw(100L, "materials/ref.png"))
+                .thenReturn(new ProjectFileRawResponse(png, "image/png"));
+
+        byte[] body = performAsUser(get("/api/projects/100/files/raw")
+                        .param("path", "materials/ref.png"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                // inline 呈现语义（源码包是 attachment）＋ SVG 脚本面收口头
+                .andExpect(header().string("Content-Disposition", "inline; filename=\"ref.png\""))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(header().string("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(body).containsExactly(png); // 真实图片字节（不走 JSON 信封，含 NUL 原样）
+    }
+
+    @Test
+    void given_raw_guards_when_raw_then_prj_038_022_021_020_mapped() throws Exception {
+        // 非图片扩展名：raw 只伺服图片——400 PRJ_038（数字码 4038）
+        when(queryAppService.fileRaw(100L, "src/app.ts"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_IMAGE));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "src/app.ts"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4038))
+                .andExpect(jsonPath("$.message").value("该文件不是图片，暂不支持在线查看"));
+
+        // 超图片查看上限（25 MiB，容器侧拦截）：与文本上限同码族 PRJ_022
+        when(queryAppService.fileRaw(100L, "materials/huge.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_TOO_LARGE));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "materials/huge.png"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("文件太大，暂不支持在线查看"));
+
+        // 文件不存在：PRJ_021（与文本点看同口径）
+        when(queryAppService.fileRaw(100L, "materials/gone.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_FOUND));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "materials/gone.png"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("文件不存在"));
+
+        // 非交付物/机密/逃逸：判定层拒绝 PRJ_020（工作区不被触达）
+        when(queryAppService.fileRaw(100L, ".env"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_PATH_INVALID));
+        performAsUser(get("/api/projects/100/files/raw").param("path", ".env"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不在可浏览范围"));
     }
 
     // ---------- 指令区发言 / 问答卡作答（#19 需求环①） ----------

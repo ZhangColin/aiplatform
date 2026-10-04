@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.MiddlewareKind;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ExecResult;
 import com.aieducenter.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
@@ -60,8 +61,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
-    /** 0.9（#264 T6）：init-workspace.sh 撤 skills 骨架位（ADR-0022）——升版强制重建镜像。 */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.9";
+    /**
+     * 0.10（#283）：init-workspace.sh 增设计线三目录骨架（materials/design/exports，
+     * ADR-0027）——升版强制重建镜像。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。
+     */
+    private static final String DEV_IMAGE = "aiplatform/dev:0.10";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
@@ -164,6 +168,16 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     @Override
     public ExecResult exec(WorkspaceHandle handle, String command) {
         return runCapture("docker", "exec", handle.containerName(), "sh", "-c", command);
+    }
+
+    @Override
+    public BinaryExecResult execBinary(WorkspaceHandle handle, String command) {
+        // exec 的字节形（#283 图片 raw 直出）：同一 docker exec 通道，stdout 按原始
+        // 字节捕获（packSource/packVolume 已证的 runCaptureBinary 缝——二进制不经
+        // String 往返）
+        ByteExec executed = runCaptureBinary(null,
+                "docker", "exec", handle.containerName(), "sh", "-c", command);
+        return new BinaryExecResult(executed.stdout(), executed.stderr(), executed.exitCode());
     }
 
     @Override

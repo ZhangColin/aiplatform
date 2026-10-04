@@ -1164,6 +1164,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/files/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 图片文件直出（点看图片 inline 大图，#283）
+         * @description path = 工作区相对路径。只伺服图片（png/jpg/webp/gif/svg，扩展名判定）：真实 content-type + 原始字节流 inline 直出（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；img src 同源会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非图片扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过图片查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001
+         */
+        get: operations["fileRaw"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/files/content": {
         parameters: {
             query?: never;
@@ -1173,7 +1193,7 @@ export interface paths {
         };
         /**
          * 文本文件内容（文件模式点看）
-         * @description path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小：非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 NUL）400 PRJ_023。项目不存在 404 PRJ_001
+         * @description path = 工作区相对路径（文件树条目原样回传）。只收文本且限大小：非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021；超过在线查看上限（1 MiB，容器侧拦截不读取）400 PRJ_022；非文本（正文含 NUL）400 PRJ_023——图片点看不走本端点（raw 直出，#283）。项目不存在 404 PRJ_001
          */
         get: operations["fileContent"];
         put?: never;
@@ -4921,6 +4941,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectFilesResponse"];
+                };
+            };
+        };
+    };
+    fileRaw: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
         };

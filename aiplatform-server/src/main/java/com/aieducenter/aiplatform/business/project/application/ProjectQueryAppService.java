@@ -19,12 +19,14 @@ import com.aieducenter.aiplatform.business.order.application.OrderQueryAppServic
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
@@ -261,6 +263,42 @@ public class ProjectQueryAppService {
             throw new ApplicationException(ProjectMessage.FILE_NOT_TEXTUAL);
         }
         return new ProjectFileContentResponse(path, content);
+    }
+
+    /**
+     * 图片文件字节（#283 点看图片，ADR-0027 点看判定对图片放行）：{@code path} 为
+     * 工作区相对路径，先过可浏览判定（非交付物/逃逸一律 400、工作区不被触达）、
+     * 再过图片扩展名判定（raw 只伺服图片——文本照旧走 {@link #fileContent}，含 NUL
+     * 的真二进制非图片件在那里仍如实拒收 PRJ_023），再一次 execBinary 读取（25 MiB
+     * 上限在容器侧 cat 前拦截，退出码语义与文本读同构：1 = 不存在、2 = 超限）。
+     * 字节不经字符集解释，content-type 按扩展名。事务注解取舍同 {@link #prd}。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_020 路径不可浏览；
+     *                              PRJ_038 非图片扩展名；PRJ_021 文件不存在；
+     *                              PRJ_022 超图片查看上限；WSP_002 环境故障
+     */
+    public ProjectFileRawResponse fileRaw(Long projectId, String path) {
+        Project project = loadProject(projectId);
+        if (!ProjectFiles.isViewable(path)) {
+            throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
+        }
+        if (!ProjectFiles.isImagePath(path)) {
+            throw new ApplicationException(ProjectMessage.FILE_NOT_IMAGE);
+        }
+        BinaryExecResponse result = workspaceLifecycleAppService.execBinary(
+                Long.toString(project.getWorkspaceId()),
+                new WorkspaceExecCommand(ProjectFiles.rawImageCommand(path)));
+        if (result.exitCode() == 1) {
+            throw new ApplicationException(ProjectMessage.FILE_NOT_FOUND);
+        }
+        if (result.exitCode() == 2) {
+            throw new ApplicationException(ProjectMessage.FILE_TOO_LARGE);
+        }
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "图片读取失败: " + result.stderr());
+        }
+        return new ProjectFileRawResponse(result.stdout(), ProjectFiles.contentTypeOf(path));
     }
 
     // ---------- 装载与过滤 ----------

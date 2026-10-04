@@ -90,7 +90,10 @@ public enum ProjectMessage implements CodeMessage {
     AGENT_TOOL_TOGGLE_FORBIDDEN(403, "PRJ_036", "该工具不开放开关（骨架/harness 内建结构性锁死——编排权不下放配置）"),
 
     /** 开关命令守卫：PUT 开关必须显式带目标态（enabled 无缺省翻转语义，幂等写面）。 */
-    AGENT_TOOL_TOGGLE_TARGET_REQUIRED(400, "PRJ_037", "开关目标态必填（enabled=true/false）");
+    AGENT_TOOL_TOGGLE_TARGET_REQUIRED(400, "PRJ_037", "开关目标态必填（enabled=true/false）"),
+
+    /** 文件 raw 直出（#283 点看图片）：非图片扩展名——raw 路由只伺服图片 inline 点看（文本走 files/content，真二进制非图片仍 PRJ_023 如实拒收）。 */
+    FILE_NOT_IMAGE(400, "PRJ_038", "该文件不是图片，暂不支持在线查看");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

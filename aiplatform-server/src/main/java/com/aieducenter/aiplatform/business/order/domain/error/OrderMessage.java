@@ -33,7 +33,10 @@ public enum OrderMessage implements CodeMessage {
 
     ORDER_CANCEL_REASON_REQUIRED(400, "ORD_013", "取消原因必填（运营取消须填写原因）"),
 
-    ORDER_CANCEL_REASON_TOO_LONG(400, "ORD_014", "取消原因超长（至多 1000 字）");
+    ORDER_CANCEL_REASON_TOO_LONG(400, "ORD_014", "取消原因超长（至多 1000 字）"),
+
+    /** 下载支付门守卫（#287，ADR-0027「平台上随便体验、带走才付费」）：项目名下从未出现已支付/已归档订单——门只盖用户面下载（单文件＋源码包），点看/预览自由、后台运营面不受门。 */
+    ORDER_DOWNLOAD_NOT_PAID(402, "ORD_015", "还未支付，暂不能下载：平台上可随意浏览和预览，带走文件需先完成订单支付");
 
     private final int httpStatus;
     private final String code;

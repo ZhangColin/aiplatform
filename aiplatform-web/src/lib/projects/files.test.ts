@@ -7,6 +7,8 @@ import {
   formatFileSize,
   isAncestorDir,
   isImagePath,
+  downloadFileUrl,
+  downloadFileNameOf,
   rawFileUrl,
   selectableFile,
   type FileTreeDir,
@@ -117,5 +119,25 @@ describe("rawFileUrl · 图片直出 URL（#283）", () => {
 describe("RAW_IMAGE_SIZE_LIMIT_BYTES · 前端预检上界", () => {
   it("与后端 PRJ_022 图片查看上限同值（25 MiB）", () => {
     expect(RAW_IMAGE_SIZE_LIMIT_BYTES).toBe(25 * 1024 * 1024);
+  });
+});
+
+describe("downloadFileUrl · 单文件下载 URL（#287 支付门）", () => {
+  it("同源 /api 直链，path 整体编码（同 raw 直链形——门判定归后端，前端不预判）", () => {
+    expect(downloadFileUrl("p1", "exports/海报-终稿.png")).toBe(
+      `/api/projects/p1/files/download?path=${encodeURIComponent("exports/海报-终稿.png")}`,
+    );
+  });
+});
+
+describe("downloadFileNameOf · 落盘文件名消毒（与后端 fileNameOf 同口径）", () => {
+  it("路径末段直取；中文等非 ASCII 原样保留", () => {
+    expect(downloadFileNameOf("materials/ref.png")).toBe("ref.png");
+    expect(downloadFileNameOf("exports/海报 终稿.png")).toBe("海报 终稿.png");
+  });
+
+  it("控制字符与引号剔除（blob 锚点不走响应头，消毒镜像在后端同口径）", () => {
+    expect(downloadFileNameOf("materials/ba\"d.png")).toBe("bad.png");
+    expect(downloadFileNameOf("materials/line\nbreak.png")).toBe("linebreak.png");
   });
 });

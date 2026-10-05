@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.order.application;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -25,6 +26,10 @@ import com.aieducenter.aiplatform.business.order.domain.repository.OrderReposito
 @Service
 public class OrderQueryAppService {
 
+    /** 下载支付门放行态（#287）：已支付（归档前即可取）或已归档（终态）。 */
+    private static final List<OrderStatus> DOWNLOAD_UNLOCKED_STATUSES =
+            List.of(OrderStatus.PAID, OrderStatus.ARCHIVED);
+
     private final OrderRepository orderRepository;
 
     public OrderQueryAppService(OrderRepository orderRepository) {
@@ -47,6 +52,20 @@ public class OrderQueryAppService {
     public void requireNoActiveOrder(Long projectId) {
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
             throw new ApplicationException(OrderMessage.ORDER_FROZEN);
+        }
+    }
+
+    /**
+     * 下载支付门守卫（#287，ADR-0027「体验免费、带走才付费」的判定面）：项目
+     * 名下<strong>曾有</strong>已支付/已归档订单即放行——已支付是真实中间态
+     * （归档前即可取件），已归档是终态；「曾有」按事实查询不取最近一张（迭代
+     * 期间已购保持可取）。未支付（无单/待报价/已报价/已取消后未再购）抛
+     * ORD_015，门语义如实告知。门只盖用户面下载（单文件＋源码包）；点看/预览
+     * 自由，后台运营面不经本守卫。
+     */
+    public void requireDownloadable(Long projectId) {
+        if (!orderRepository.existsByProjectIdAndStatusIn(projectId, DOWNLOAD_UNLOCKED_STATUSES)) {
+            throw new ApplicationException(OrderMessage.ORDER_DOWNLOAD_NOT_PAID);
         }
     }
 

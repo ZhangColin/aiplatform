@@ -275,13 +275,14 @@ export interface paths {
         put?: never;
         /**
          * 上传图片物料（发送框回形针，#286）
-         * @description multipart 单文件（part 名 file）落工作区物料目录 materials/：只收 png/jpg/webp/gif/svg（按扩展名判定，格式不符 400 PRJ_044）、单文件 ≤10MB（超限 400 PRJ_043 如实报错不静默压缩——multipart 容器层超限同归此码）。落点命名 = TSID 前缀 + 净化后原始名（不撞名不覆盖），响应 path 即随话发送的附件载荷引用（attachmentType=image 的工作区路径引用、不带字节），name 为净化后原始名（chip 呈现用）。文件区即时可见（materials/ 在交付面），点看走 files/raw inline 大图（#283）。已归档 409 PRJ_013（归档是单向终点，不再收新物料）；项目不存在 404 PRJ_001
+         * @description multipart 单文件（part 名 file）落工作区物料目录 materials/：只收 png/jpg/webp/gif/svg（按扩展名判定，格式不符 400 PRJ_044）、单文件 ≤10MB（超限 400 PRJ_043 如实报错不静默压缩——multipart 容器层超限同归此码）。落点命名 = TSID 前缀 + 净化后原始名（不撞名不覆盖），响应 path 即随话发送的附件载荷引用（attachmentType=image 的工作区路径引用、不带字节），name 为净化后原始名（chip 呈现用）。文件区即时可见（materials/ 在交付面），点看走 files/raw inline 大图（#283）。已归档 409 PRJ_013（归档是单向终点，不再收新物料）；落盘失败/回执畸形 WSP_002；项目不存在 404 PRJ_001
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
          *     - 409 PRJ_013 — 项目已归档（归档是单向终点）
          *     - 400 PRJ_043 — 文件太大，单张图片不能超过 10MB
          *     - 400 PRJ_044 — 只支持 png、jpg、webp、gif、svg 格式的图片
+         *     - 500 WSP_002 — 环境后端操作失败
          */
         post: operations["upload"];
         delete?: never;
@@ -1132,8 +1133,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 源码包下载（常开）
-         * @description 交付物 = 源码包 + 仓内文档：打包项目 dev 工作区为 tar.gz（排除 .env 机密与 node_modules）。响应为二进制文件流（application/gzip，本端点不走 ApiResponse JSON 信封）
+         * 源码包下载（支付门，#287 补门）
+         * @description 交付物 = 源码包 + 仓内文档：打包项目 dev 工作区为 tar.gz（排除 .env 机密与 node_modules）。响应为二进制文件流（application/gzip，本端点不走 ApiResponse JSON 信封）。#287 起补支付门对齐单文件下载口径（此前无门，行为变更）：项目曾有已支付/已归档订单即开放，未付费 402 ORD_015 如实告知门语义（体验免费、带走才付费，ADR-0027）；后台镜像端点是运营侧、不受用户支付门约束。项目不存在 404 PRJ_001
          */
         get: operations["sourcePackage"];
         put?: never;
@@ -1222,6 +1223,26 @@ export interface paths {
          * @description path = 工作区相对路径。只伺服图片（png/jpg/webp/gif/svg，扩展名判定）：真实 content-type + 原始字节流 inline 直出（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；img src 同源会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非图片扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过图片查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001
          */
         get: operations["fileRaw"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单文件下载（通用，支付门，#287）
+         * @description path = 工作区相对路径（文件树条目原样回传）。文件区一切文件皆可下载——不挑类型（Content-Disposition attachment 带走语义；点看/预览照旧免费，ADR-0027 支付门只盖下载面：平台上随便体验、带走才付费）。支付门判定＝项目曾有已支付/已归档订单即开放（迭代期间已购保持可取）；未付费 402 ORD_015 如实告知门语义。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021。响应为二进制文件流（本端点不走 ApiResponse JSON 信封，先例＝源码包端点）。项目不存在 404 PRJ_001
+         */
+        get: operations["fileDownload"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5085,6 +5106,30 @@ export interface operations {
         };
     };
     fileRaw: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    fileDownload: {
         parameters: {
             query: {
                 path: string;

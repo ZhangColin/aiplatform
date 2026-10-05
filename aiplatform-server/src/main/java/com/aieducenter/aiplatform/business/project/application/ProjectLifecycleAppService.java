@@ -245,6 +245,24 @@ public class ProjectLifecycleAppService {
     }
 
     /**
+     * 用户面源码包下载（#287 支付门对齐——现状无门→有门，行为变更：ADR-0027
+     * 打磨期自用零存量影响、上线前复核）：门判定与文案归
+     * {@link OrderQueryAppService#requireDownloadable} 单点（曾支付/已归档即开放）。
+     * 后台镜像端点（运营侧取件）走 {@link #sourcePackage} 内核不受门——票面口径
+     * 「后台面不受用户支付门约束」。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；ORD_015 未支付（门语义）；
+     *                              工作区故障 WSP_（容器已亡等）
+     */
+    public byte[] downloadableSourcePackage(Long projectId) {
+        // 守卫序＝项目存在 → 门（与单文件下载面同序：寻址失败如实 404 PRJ_001，
+        // 不被门语义 402 吞掉）；sourcePackage 内核自带 requireProject 幂等无害
+        requireProject(projectId);
+        orderQueryAppService.requireDownloadable(projectId);
+        return sourcePackage(projectId);
+    }
+
+    /**
      * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
      * 删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用显式清，
      * 尽力而为）→ 未终结技能草稿清理（#264 T6：只在途随删，终态留档、已晋升

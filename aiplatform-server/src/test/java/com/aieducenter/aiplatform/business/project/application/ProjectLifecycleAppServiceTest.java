@@ -32,6 +32,9 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.command.CreateW
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -71,6 +74,10 @@ class ProjectLifecycleAppServiceTest {
     @Autowired
     private ProjectRepository projectRepository;
 
+    /** 支付门用例订单事实面（#287）：真库 place/quote/pay 走领域转移链。 */
+    @Autowired
+    private OrderRepository orderRepository;
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -103,6 +110,7 @@ class ProjectLifecycleAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
@@ -285,8 +293,46 @@ class ProjectLifecycleAppServiceTest {
 
         byte[] bytes = appService.sourcePackage(projectId);
 
-        // 交付物字节流来自项目 dev 工作区（文件名/HTTP 头归 REST 层）
+        // 交付物字节流来自项目 dev 工作区（文件名/HTTP 头归 REST 层）；本用例
+        // 无订单（门必闭）仍取到字节＝无门内核的钉子——后台镜像端点走本内核，
+        // 不受用户支付门约束（#287：门只盖用户面 downloadableSourcePackage）
         assertThat(bytes).containsExactly(tarball);
+    }
+
+    @Test
+    void given_paid_project_when_downloadable_source_package_then_bytes_returned() {
+        Long projectId = persistedProject("9501");
+        Order paid = Order.place(projectId, null, "# PRD");
+        paid.quote(10000L, null, null);
+        paid.pay("PAY-TEST-1");
+        orderRepository.save(paid);
+        byte[] tarball = {0x1f, (byte) 0x8b, 0x08};
+        when(workspaceLifecycleAppService.packSource("9501")).thenReturn(tarball);
+
+        // 用户面补门（#287）：曾支付（已支付＝归档前中间态）即放行
+        assertThat(appService.downloadableSourcePackage(projectId)).containsExactly(tarball);
+    }
+
+    @Test
+    void given_unpaid_project_when_downloadable_source_package_then_ord_015() {
+        Long projectId = persistedProject("9502");
+        orderRepository.save(Order.place(projectId, null, "# PRD")); // 待报价＝未支付
+
+        assertThatThrownBy(() -> appService.downloadableSourcePackage(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_DOWNLOAD_NOT_PAID.message());
+
+        // 判定层拒绝：打包内核零触达
+        verify(workspaceLifecycleAppService, never()).packSource(anyString());
+    }
+
+    @Test
+    void given_missing_project_when_downloadable_source_package_then_prj_001_not_gate() {
+        // 守卫序＝项目存在先于门（与单文件面同序）：寻址失败如实 404，不被门语义吞
+        assertThatThrownBy(() -> appService.downloadableSourcePackage(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+        verify(workspaceLifecycleAppService, never()).packSource(anyString());
     }
 
     @Test

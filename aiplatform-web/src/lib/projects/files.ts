@@ -114,6 +114,27 @@ export function rawFileUrl(projectId: string, path: string): string {
   return `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(path)}`;
 }
 
+/**
+ * 单文件下载 URL（#287 通用下载，ADR-0027 支付门）：文件区一切文件皆可带走，
+ * 门判定在后端（曾支付/已归档即开放）——前端不预判门态，被拦时按信封 message
+ * 如实告知（体验免费、带走才付费）。同样同源直链、不经 api client。
+ */
+export function downloadFileUrl(projectId: string, path: string): string {
+  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}`;
+}
+
+/**
+ * 下载落盘文件名（路径末段）：blob 锚点落盘不走响应头（Content-Disposition 的
+ * 后端消毒对它无效），消毒同后端 fileNameOf 口径——控制字符（含 CR/LF）与
+ * 引号剔除、非 ASCII（中文等）原样保留。
+ */
+export function downloadFileNameOf(path: string): string {
+  const name = path.split("/").pop() ?? path;
+  // 控制段显式区间（C0＋DEL＋C1＝后端 \\p{Cntrl} 同集；TS 不认 Cntrl 别名故不
+  // 用属性转义）
+  return name.replaceAll(/[\u0000-\u001f\u007f-\u009f"]/g, "");
+}
+
 // ---- 内部 ----
 
 /** 目录先于文件、同级按名代码点序（逐层就地重排）。 */

@@ -21,6 +21,7 @@ import {
 } from "@/lib/projects/files";
 import { cn } from "@/lib/utils";
 
+import { FileDownloadButton } from "./file-download";
 import { PrdDoc } from "./prd-doc";
 
 /**
@@ -185,7 +186,7 @@ function TreeRows({
   );
 }
 
-/** 其余文本文件篇：头部路径 + 大小，正文 pre 直出（等宽、横向滚动）。 */
+/** 其余文本文件篇：头部路径 + 大小 + 下载（#287），正文 pre 直出（等宽、横向滚动）。 */
 function FileView({
   projectId,
   path,
@@ -204,6 +205,7 @@ function FileView({
         {size !== undefined ? (
           <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(size)}</span>
         ) : null}
+        <FileDownloadButton projectId={projectId} path={path} />
       </header>
       <ScrollArea className="min-h-0 flex-1">
         {entry.isPending ? (
@@ -250,6 +252,7 @@ function ImageView({
         {size !== undefined ? (
           <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(size)}</span>
         ) : null}
+        <FileDownloadButton projectId={projectId} path={path} />
       </header>
       {oversized ? (
         <p className="p-4 text-xs text-muted-foreground">文件太大，暂不支持在线查看</p>

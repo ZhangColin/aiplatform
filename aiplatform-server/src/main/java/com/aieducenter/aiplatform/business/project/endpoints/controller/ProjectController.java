@@ -43,6 +43,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.PrdR
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
@@ -331,14 +332,39 @@ public class ProjectController {
         return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(raw.content()));
     }
 
+    @GetMapping("/{id}/files/download")
+    @Operation(summary = "单文件下载（通用，支付门，#287）",
+            description = "path = 工作区相对路径（文件树条目原样回传）。文件区一切文件皆可"
+                    + "下载——不挑类型（Content-Disposition attachment 带走语义；点看/预览照旧"
+                    + "免费，ADR-0027 支付门只盖下载面：平台上随便体验、带走才付费）。"
+                    + "支付门判定＝项目曾有已支付/已归档订单即开放（迭代期间已购保持可取）；"
+                    + "未付费 402 ORD_015 如实告知门语义。非交付物/机密/逃逸路径 400 PRJ_020"
+                    + "（判定层拒绝，工作区不被触达）；文件不存在 404 PRJ_021。"
+                    + "响应为二进制文件流（本端点不走 ApiResponse JSON 信封，先例＝源码包端点）。"
+                    + "项目不存在 404 PRJ_001")
+    public ResponseEntity<ByteArrayResource> fileDownload(@PathVariable String id,
+            @RequestParam String path) {
+        ProjectFileDownloadResponse file = queryAppService.fileDownload(parseId(id), path);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(file.contentType()));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(fileNameOf(path)).build());
+        headers.set("X-Content-Type-Options", "nosniff");
+        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(file.content()));
+    }
+
     @GetMapping("/{id}/source-package")
-    @Operation(summary = "源码包下载（常开）",
+    @Operation(summary = "源码包下载（支付门，#287 补门）",
             description = "交付物 = 源码包 + 仓内文档：打包项目 dev 工作区为 tar.gz"
                     + "（排除 .env 机密与 node_modules）。响应为二进制文件流"
-                    + "（application/gzip，本端点不走 ApiResponse JSON 信封）")
+                    + "（application/gzip，本端点不走 ApiResponse JSON 信封）。"
+                    + "#287 起补支付门对齐单文件下载口径（此前无门，行为变更）：项目曾有"
+                    + "已支付/已归档订单即开放，未付费 402 ORD_015 如实告知门语义"
+                    + "（体验免费、带走才付费，ADR-0027）；后台镜像端点是运营侧、不受用户"
+                    + "支付门约束。项目不存在 404 PRJ_001")
     public ResponseEntity<ByteArrayResource> sourcePackage(@PathVariable String id) {
         Long projectId = parseId(id);
-        byte[] bytes = appService.sourcePackage(projectId);
+        byte[] bytes = appService.downloadableSourcePackage(projectId);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/gzip"));
         headers.setContentDisposition(ContentDisposition.attachment()

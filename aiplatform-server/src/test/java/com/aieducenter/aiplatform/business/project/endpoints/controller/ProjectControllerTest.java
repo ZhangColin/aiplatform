@@ -40,6 +40,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.PrdR
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
@@ -506,7 +507,9 @@ class ProjectControllerTest {
     @Test
     void given_workspace_when_source_package_then_binary_file_returned() throws Exception {
         byte[] bytes = {0x1f, (byte) 0x8b, 0x08, 0x00, 0x74, 0x61, 0x72};
-        when(appService.sourcePackage(100L)).thenReturn(bytes);
+        // #287 用户面补门：控制器走 downloadableSourcePackage（门判定归应用层，
+        // 本缝只钉头与字节）
+        when(appService.downloadableSourcePackage(100L)).thenReturn(bytes);
 
         byte[] body = performAsUser(get("/api/projects/100/source-package"))
                 .andExpect(status().isOk())
@@ -514,6 +517,26 @@ class ProjectControllerTest {
                 .andReturn().getResponse().getContentAsByteArray();
 
         assertThat(body).containsExactly(bytes); // 真实文件字节（不走 JSON 信封）
+    }
+
+    @Test
+    void given_paid_project_when_file_download_then_binary_file_returned_with_attachment()
+            throws Exception {
+        byte[] bytes = {0x00, 0x01, (byte) 0x89, 'P'};
+        when(queryAppService.fileDownload(eq(100L), eq("exports/poster.png")))
+                .thenReturn(new ProjectFileDownloadResponse(bytes, "image/png"));
+
+        byte[] body = performAsUser(get("/api/projects/100/files/download")
+                        .param("path", "exports/poster.png"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                .andExpect(header().string("Content-Disposition",
+                        "attachment; filename=\"poster.png\""))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        // 带走语义（attachment）＋原始字节（不走 JSON 信封）；门判定归应用层本缝不代偿
+        assertThat(body).containsExactly(bytes);
     }
 
     @Test

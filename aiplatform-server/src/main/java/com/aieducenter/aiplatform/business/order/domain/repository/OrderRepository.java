@@ -30,6 +30,12 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
     /** 项目名下不在给定状态清单的订单。 */
     List<Order> findByProjectIdAndStatusNotIn(Long projectId, List<OrderStatus> statuses);
 
+    /**
+     * 项目名下是否曾出现给定状态的订单（#287 下载支付门判定：「曾有」的事实
+     * 查询，不依赖「最近一张」——判定语义直译，状态机演进不波及）。
+     */
+    boolean existsByProjectIdAndStatusIn(Long projectId, List<OrderStatus> statuses);
+
     /** 一批项目名下不在给定状态清单的订单（项目列表嵌入未终结订单事实的批量面）。 */
     List<Order> findByProjectIdInAndStatusNotIn(Collection<Long> projectIds, List<OrderStatus> statuses);
 

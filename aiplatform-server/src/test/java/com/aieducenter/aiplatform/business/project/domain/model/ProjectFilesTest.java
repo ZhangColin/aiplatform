@@ -152,6 +152,29 @@ class ProjectFilesTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    // ---------- 单文件下载命令（#287 通用下载＋支付门） ----------
+
+    @Test
+    void when_download_command_then_existence_guard_then_cat_without_size_cap() {
+        // 下载＝带走，无点看式大小上限（与源码包整卷 tar 同一 exec 通道同口径，
+        // 巨文件护面不在命令层）；唯一退出码语义：1 = 不存在（cat 前拦截）
+        assertThat(ProjectFiles.downloadCommand("materials/ref.png"))
+                .isEqualTo("p='/workspace/materials/ref.png'; if ! test -f \"$p\"; then exit 1; fi;"
+                        + " cat \"$p\"");
+    }
+
+    @Test
+    void given_quote_in_filename_when_download_command_then_shell_escaped() {
+        assertThat(ProjectFiles.downloadCommand("exports/it's.zip"))
+                .contains("p='/workspace/exports/it'\\''s.zip';");
+    }
+
+    @Test
+    void given_non_viewable_path_when_download_command_then_rejected() {
+        assertThatThrownBy(() -> ProjectFiles.downloadCommand(".env"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void when_content_type_then_mapped_by_extension() {
         assertThat(ProjectFiles.contentTypeOf("materials/ref.png")).isEqualTo("image/png");

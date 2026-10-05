@@ -123,6 +123,22 @@ describe("FilesPanel · 文件树浏览（#27）", () => {
     expect(seed.content.byPath["materials/ref.png"]).toBeUndefined();
   });
 
+  it("下载入口（#287 支付门）三视图齐备：PRD/文本/图片头部各带下载按钮", () => {
+    const { container } = render(<FilesPanel projectId="p1" />);
+
+    // PRD 视图（缺省选中）：PRD 也是文件区一文件，同口径可带走
+    expect(container.querySelector('button[data-file-download="docs/PRD.md"]')).not.toBeNull();
+
+    // 文本视图
+    fireEvent.click(container.querySelector('button[data-tree-file="AGENTS.md"]')!);
+    expect(container.querySelector('button[data-file-download="AGENTS.md"]')).not.toBeNull();
+
+    // 图片视图（点看照旧免费，下载带门——同一头部双通道）
+    fireEvent.click(container.querySelector('button[data-tree-dir="materials"]')!);
+    fireEvent.click(container.querySelector('button[data-tree-file="materials/ref.png"]')!);
+    expect(container.querySelector('button[data-file-download="materials/ref.png"]')).not.toBeNull();
+  });
+
   it("图片超限（树条目大小预检 > 25 MiB）→ 如实提示、不发取件请求", () => {
     seed.files = {
       data: [{ path: "materials/huge.png", size: 26 * 1024 * 1024 }],

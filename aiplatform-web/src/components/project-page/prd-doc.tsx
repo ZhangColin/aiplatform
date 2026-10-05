@@ -10,8 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePrd } from "@/hooks/use-prd";
+import { PRD_PATH } from "@/lib/projects/files";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { formatRelativeTime } from "@/lib/utils/time";
+
+import { FileDownloadButton } from "./file-download";
 
 /**
  * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文）：markdown 正文 +
@@ -48,6 +51,10 @@ export function PrdDoc({
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <h2 className="text-base font-semibold">需求文档</h2>
               {hasUpdate ? <Badge variant="secondary">已更新</Badge> : null}
+              {/* 下载（#287 支付门）：文件区一切文件可带走，PRD 同口径；门在后端 */}
+              {prd.data ? (
+                <FileDownloadButton projectId={projectId} path={PRD_PATH} />
+              ) : null}
             </div>
             <p className="text-xs text-muted-foreground">
               {prd.data

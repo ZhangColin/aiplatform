@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Gene
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
@@ -245,16 +246,7 @@ public class ProjectQueryAppService {
         }
         ExecResultResponse result = workspaceLifecycleAppService.exec(
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(ProjectFiles.contentCommand(path)));
-        if (result.exitCode() == 1) {
-            throw new ApplicationException(ProjectMessage.FILE_NOT_FOUND);
-        }
-        if (result.exitCode() == 2) {
-            throw new ApplicationException(ProjectMessage.FILE_TOO_LARGE);
-        }
-        if (result.exitCode() != 0) {
-            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "文件读取失败: " + result.stderr());
-        }
+        requireFileReadSuccess(result.exitCode(), result.stderr(), "文件读取");
         int newline = result.stdout().indexOf('\n');
         if (newline < 0) {
             // 大小首行缺失：printf 恒带换行，stat 成功时不可达，防御性如实暴露
@@ -291,17 +283,53 @@ public class ProjectQueryAppService {
         BinaryExecResponse result = workspaceLifecycleAppService.execBinary(
                 Long.toString(project.getWorkspaceId()),
                 new WorkspaceExecCommand(ProjectFiles.rawImageCommand(path)));
-        if (result.exitCode() == 1) {
+        requireFileReadSuccess(result.exitCode(), result.stderr(), "图片读取");
+        return new ProjectFileRawResponse(result.stdout(), ProjectFiles.contentTypeOf(path));
+    }
+
+    /**
+     * 单文件下载字节（#287 通用下载，ADR-0027 支付门——体验免费、带走才付费）：
+     * {@code path} 为工作区相对路径，守卫序＝项目 → 支付门（曾支付/已归档即放行，
+     * 未支付 ORD_015 如实告知门语义）→ 可浏览判定（非交付物/机密/逃逸一律 400，
+     * 工作区不被触达）→ execBinary 读取。<strong>不挑类型</strong>——文件区一切
+     * 可浏览文件皆可带走（点看/预览照旧免费，门只盖下载面）；无大小上限（下载＝
+     * 带走，与源码包整卷同通道同口径）。content-type 按扩展名（图片真实 MIME、
+     * 其余 octet-stream），attachment 头归 REST 层。事务注解取舍同 {@link #prd}。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；ORD_015 未支付（门语义）；
+     *                              PRJ_020 路径不可浏览；PRJ_021 文件不存在；
+     *                              WSP_002 环境故障
+     */
+    public ProjectFileDownloadResponse fileDownload(Long projectId, String path) {
+        Project project = loadProject(projectId);
+        orderQueryAppService.requireDownloadable(projectId);
+        if (!ProjectFiles.isViewable(path)) {
+            throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
+        }
+        BinaryExecResponse result = workspaceLifecycleAppService.execBinary(
+                Long.toString(project.getWorkspaceId()),
+                new WorkspaceExecCommand(ProjectFiles.downloadCommand(path)));
+        requireFileReadSuccess(result.exitCode(), result.stderr(), "文件读取");
+        return new ProjectFileDownloadResponse(result.stdout(), ProjectFiles.contentTypeOf(path));
+    }
+
+    /**
+     * 文件读命令的退出码阶梯（#287 收口——#284 备案触发器「第四处同形」已燃：
+     * content/raw/download 三面同码同形抽共享，渲染面 PRJ_039 语义不同不并）：
+     * 1 = 不存在（PRJ_021）、2 = 超限（PRJ_022——无上限面〔下载〕不产生此码，
+     * 阶梯保留以共形）、其余非 0 = 环境故障（WSP_002，动作语随调用面）。
+     */
+    private static void requireFileReadSuccess(int exitCode, String stderr, String action) {
+        if (exitCode == 1) {
             throw new ApplicationException(ProjectMessage.FILE_NOT_FOUND);
         }
-        if (result.exitCode() == 2) {
+        if (exitCode == 2) {
             throw new ApplicationException(ProjectMessage.FILE_TOO_LARGE);
         }
-        if (result.exitCode() != 0) {
+        if (exitCode != 0) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
-                    "图片读取失败: " + result.stderr());
+                    action + "失败: " + stderr);
         }
-        return new ProjectFileRawResponse(result.stdout(), ProjectFiles.contentTypeOf(path));
     }
 
     // ---------- 装载与过滤 ----------

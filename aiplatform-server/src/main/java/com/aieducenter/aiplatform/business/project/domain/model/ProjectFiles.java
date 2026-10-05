@@ -125,6 +125,20 @@ public final class ProjectFiles {
     }
 
     /**
+     * 单文件下载命令（#287 通用下载，ADR-0027 支付门；path 须先过
+     * {@link #isViewable}，此处不代偿）：存在守卫（1 = 不存在或不是文件）+
+     * {@code cat} 原始字节——<strong>无大小上限</strong>：下载＝带走，不是点看式
+     * 的限读面；同通道先例＝源码包整卷 tar（工作区全量打包亦无上限，巨文件护面
+     * 不在命令层）。路径经单引号包裹 + 转义，无注入面。
+     */
+    public static String downloadCommand(String path) {
+        if (!isViewable(path)) {
+            throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
+        }
+        return ContainerCommands.existenceGuard(path) + " cat \"$p\"";
+    }
+
+    /**
      * 扩展名 → content-type（raw 直出的响应头依据）：图片扩展名给真实 MIME，
      * 其余兜底 {@code application/octet-stream}（调用侧图片判定先行，此处不代偿）。
      */

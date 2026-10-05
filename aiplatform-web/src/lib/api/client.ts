@@ -83,10 +83,13 @@ async function request<T>(path: string, options: RequestOptions & { method: stri
 
 async function runRequest<T>(url: URL, options: RequestOptions & { method: string; body?: unknown }): Promise<T> {
   const { method, body, signal } = options;
+  // FormData（multipart 上传）原样直传——浏览器自带 boundary 的 Content-Type
+  // 不能手设；JSON body 照旧显式标 application/json
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: body === undefined ? undefined : isFormData ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : isFormData ? (body as FormData) : JSON.stringify(body),
     signal,
   });
 

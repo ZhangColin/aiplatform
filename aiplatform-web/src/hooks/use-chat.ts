@@ -5,6 +5,7 @@ import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
 import { errorText } from "@/lib/api/api-error";
 import { parseAnnotationAttachment } from "@/lib/preview/annotation";
+import { parseImageAttachment } from "@/lib/projects/materials";
 import { useChatStore } from "@/lib/store/chat";
 
 /**
@@ -24,14 +25,18 @@ export function usePostMessage(projectId: string) {
     mutationFn: (command: PostMessageCommand) =>
       api.post<InterviewTurnResponse>(`/projects/${projectId}/messages`, command),
     onMutate: ({ content, attachments }) => {
-      // 乐观落用户气泡（含圈注 chip）+ 起轮；runId 回来即入对话登记
+      // 乐观落用户气泡（含圈注/图片物料 chip）+ 起轮；runId 回来即入对话登记
       const chat = useChatStore.getState();
-      // schema 字段全可选：圈注容错收窄（同对话史水合口径，坏形状丢弃）
+      // schema 字段全可选：两形态容错收窄（同对话史水合口径，坏形状丢弃）
       const drafts = attachments?.flatMap((a) => {
         const draft = parseAnnotationAttachment(a);
         return draft ? [draft] : [];
       }) ?? [];
-      const messageId = chat.appendUserMessage(projectId, content, drafts);
+      const materials = attachments?.flatMap((a) => {
+        const material = parseImageAttachment(a);
+        return material ? [material] : [];
+      }) ?? [];
+      const messageId = chat.appendUserMessage(projectId, content, drafts, materials);
       chat.startTurn(projectId);
       return { messageId };
     },

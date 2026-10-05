@@ -174,6 +174,19 @@ public class WorkspaceLifecycleAppService {
     }
 
     /**
+     * 在工作区容器内执行命令并经 stdin 灌入字节（#286 物料上传）：exec 的写面
+     * ——{@code cat > 路径} 形落盘通道（上传字节不落平台文件系统）。就绪语义与
+     * 错误口径同 {@link #exec}；stdout 是文本回执（调用方与写入字节数核对）。
+     */
+    public ExecResultResponse execWithStdin(String workspaceId, WorkspaceExecCommand command,
+            byte[] stdin) {
+        Workspace workspace = readinessWaiter.awaitReady(requireWorkspace(workspaceId));
+        ExecResult result = environmentBackend.execWithStdin(
+                workspace.toHandle(), command.command(), stdin);
+        return new ExecResultResponse(result.stdout(), result.stderr(), result.exitCode());
+    }
+
+    /**
      * 暴露预览并发 PreviewReady（AFTER_COMMIT）。发布走短事务——订阅方的事务性
      * 监听依赖一个真实提交的事务，这里预览无落库、事务体只含发布。探活通过才返回
      * （#45：应用可访问的判据）；置备/唤醒进行中立即抛 WSP_013 待期（#170「系统

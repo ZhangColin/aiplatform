@@ -107,7 +107,15 @@ public enum ProjectMessage implements CodeMessage {
     DESIGN_SCOPE_PAGES_REQUIRED(400, "PRJ_041", "勾选的设计范围页面不能为空"),
 
     /** 生成轨道守卫（#285 设计类终点）：设计/系统＋设计项目不走系统生成——设计主线交付设计资产包、系统＋设计设计先行（构建从定稿设计稿长出，ADR-0025）。 */
-    GENERATION_DESIGN_ENDPOINT(409, "PRJ_042", "设计类终点项目不走系统生成");
+    GENERATION_DESIGN_ENDPOINT(409, "PRJ_042", "设计类终点项目不走系统生成"),
+
+    // ========== 上传物料（#286，ADR-0027 图片管道——multipart 端点落物料目录） ==========
+
+    /** 物料上传守卫：单文件超 10MB 上限（如实报错不静默压缩，容器层超限同归此码）。 */
+    MATERIAL_UPLOAD_TOO_LARGE(400, "PRJ_043", "文件太大，单张图片不能超过 10MB"),
+
+    /** 物料上传守卫：格式不符（只收 png/jpg/webp/gif/svg 五格式，按扩展名判定）。 */
+    MATERIAL_UPLOAD_FORMAT_INVALID(400, "PRJ_044", "只支持 png、jpg、webp、gif、svg 格式的图片");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

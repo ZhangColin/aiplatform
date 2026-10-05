@@ -9,13 +9,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.aieducenter.aiplatform.business.project.domain.enums.ConversationEntryKind;
@@ -44,8 +45,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConversationHistoryAppService {
 
-    /** 圈注附件 → JSONB 数组的序列化器（对话史落库用，静态无状态）。 */
-    private static final ObjectMapper JSON = new ObjectMapper();
+    /** 消息附件 → JSONB 数组的序列化器（对话史落库用，静态无状态；NON_NULL——
+     *  附件两形态各携带态字段，未携带的形态字段不入库不回访）。 */
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     /** 报价卡事件类型：首次报价（报价已出）/ 改价（报价已更新，#204 改价入流）。
      *  常量归写口持有——跨 BC 调用方（订单上下文）引用止于应用层，不下探聚合。 */
@@ -65,11 +68,12 @@ public class ConversationHistoryAppService {
 
     /**
      * 用户发言落库（意见 / 咨询 / 建项目开场需求——提交守卫全过后、异步轮提交前
-     * 同步写；失败上抛撤回 REST 面）。attachments = 随发言发送的圈注附件（可空/
-     * 空表——纯文字发言），落库为 JSONB 数组供刷新回显重建圈注 chip。
+     * 同步写；失败上抛撤回 REST 面）。attachments = 随发言发送的消息附件
+     * （圈注/图片物料两形态，可空/空表——纯文字发言），落库为 JSONB 数组供刷新
+     * 回显重建附件 chip。
      */
     public void recordUserUtterance(Long projectId, String runId, String text,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         entries.save(ConversationEntry.userUtterance(projectId, runId, text,
                 toJsonMaps(attachments)));
     }
@@ -79,18 +83,19 @@ public class ConversationHistoryAppService {
         recordUserUtterance(projectId, runId, text, null);
     }
 
-    /** 圈注附件 → 原始 JSON 数组（空/全非圈注返回 null——不入库空数组）。 */
-    private static List<Map<String, Object>> toJsonMaps(List<AnnotationAttachment> attachments) {
+    /** 消息附件 → 原始 JSON 数组（圈注与图片物料两形态；空/全无效形态返回 null
+     *  ——不入库空数组，回访 chip 重建以本数组为准）。 */
+    private static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
         if (attachments == null || attachments.isEmpty()) {
             return null;
         }
-        List<AnnotationAttachment> annotations = attachments.stream()
-                .filter(AnnotationAttachment::hasAnnotation)
+        List<MessageAttachment> kept = attachments.stream()
+                .filter(a -> a != null && (a.hasAnnotation() || a.hasImage()))
                 .toList();
-        if (annotations.isEmpty()) {
+        if (kept.isEmpty()) {
             return null;
         }
-        return JSON.convertValue(annotations, new TypeReference<>() {
+        return JSON.convertValue(kept, new TypeReference<>() {
         });
     }
 
@@ -140,10 +145,10 @@ public class ConversationHistoryAppService {
 
     /**
      * 平台轻引导落库（兜底分支零产物路径：用户发言 + 定型文案两行——对话完整）。
-     * 事件已发射后的补写：失败只记日志。attachments = 随发言发送的圈注附件（可空）。
+     * 事件已发射后的补写：失败只记日志。attachments = 随发言发送的消息附件（可空）。
      */
     public void recordGuide(Long projectId, String runId, String prompt, String text,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         quietly(() -> {
             entries.save(ConversationEntry.userUtterance(projectId, runId, prompt,
                     toJsonMaps(attachments)));

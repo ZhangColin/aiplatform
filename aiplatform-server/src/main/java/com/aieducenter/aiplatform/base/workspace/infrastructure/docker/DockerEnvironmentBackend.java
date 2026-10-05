@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.base.workspace.infrastructure.docker;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -182,6 +183,17 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         ByteExec executed = runCaptureBinary(null,
                 "docker", "exec", handle.containerName(), "sh", "-c", command);
         return new BinaryExecResult(executed.stdout(), executed.stderr(), executed.exitCode());
+    }
+
+    @Override
+    public ExecResult execWithStdin(WorkspaceHandle handle, String command, byte[] stdin) {
+        // exec 的写面（#286 物料上传）：-i 开 stdin 灌字节落盘（上传字节不经 shell
+        // 参数面、不落平台文件系统），stdout 按文本回执解释（stat 字节）——stdin
+        // 缝是 restoreVolume 已证的 runCaptureBinary
+        ByteExec executed = runCaptureBinary(stdin,
+                "docker", "exec", "-i", handle.containerName(), "sh", "-c", command);
+        return new ExecResult(new String(executed.stdout(), StandardCharsets.UTF_8),
+                executed.stderr(), executed.exitCode());
     }
 
     @Override

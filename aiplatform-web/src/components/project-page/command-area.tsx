@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
+import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
   annotationLabel,
@@ -17,6 +18,8 @@ import {
   renderAnnotationsText,
   toAttachmentCommand,
 } from "@/lib/preview/annotation";
+import { renderMaterialsText, toImageAttachmentCommand } from "@/lib/projects/materials";
+import { rawFileUrl } from "@/lib/projects/files";
 import type { LockRow } from "@/lib/orders/lock";
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
@@ -93,6 +96,9 @@ export function CommandArea({
 
   const postMessage = usePostMessage(projectId);
   const answerQuestion = useAnswerQuestion(projectId);
+  // 图片物料上传（#286 回形针真上传）：multipart 落工作区物料目录，chip 呈现
+  // 上传中/失败态、路径引用随下一句话发出
+  const uploadMaterial = useUploadMaterial(projectId);
   // 圈注条目（#97）：预览回传的标注，随发送框附件区呈现、发送前可删改，发送即清
   const annotations = useAnnotationStore((s) => s.annotations[projectId] ?? EMPTY_ANNOTATIONS);
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
@@ -147,23 +153,37 @@ export function CommandArea({
     setSelection([]);
   }
 
-  /** Composer 提交（Enter / 发送键同一入口）：圈注附件随发言同句发送（#97 增强）。 */
-  function submit(text: string, _attachments: ComposerAttachment[], annotations: AnnotationItem[]) {
+  /** Composer 提交（Enter / 发送键同一入口）：圈注与图片物料附件随发言同句发送
+   *  （#97 / #286 增强——图片载荷＝工作区路径引用、不带字节）。 */
+  function submit(
+    text: string,
+    attachments: ComposerAttachment[],
+    annotations: AnnotationItem[],
+  ) {
     if (!text.trim() || disabled || sending) return;
+    // 上传完成的物料才随话发出（上传中/失败态 Composer 已阻塞发送，防御再滤）
+    const materials = attachments.flatMap((a): { name: string; path: string }[] =>
+      a.state === "done" && a.path ? [{ name: a.name, path: a.path }] : [],
+    );
     if (pending) {
-      // 作答通道无附件位：圈注渲染进答复文本（主智能体可读），随答复同发即清
+      // 作答通道无附件位：圈注与物料渲染进答复文本（主智能体可读），随答复同发即清
       const annotationText = renderAnnotationsText(annotations);
-      const merged = composeAnswer(
-        selection,
-        text.trim() + (annotationText ? `\n【圈注】${annotationText}` : ""),
-      );
+      const materialText = renderMaterialsText(materials);
+      const extras = [
+        annotationText ? `【圈注】${annotationText}` : "",
+        materialText ? `【图片物料】${materialText}` : "",
+      ].filter(Boolean).join("\n");
+      const merged = composeAnswer(selection, extras ? `${text.trim()}\n${extras}` : text.trim());
       if (!merged) return;
       answer(merged);
       useAnnotationStore.getState().clear(projectId);
     } else {
       postMessage.mutate({
         content: text.trim(),
-        attachments: annotations.map(toAttachmentCommand),
+        attachments: [
+          ...materials.map(toImageAttachmentCommand),
+          ...annotations.map(toAttachmentCommand),
+        ],
       });
       // 发送即清（圈注随消息发出，不再滞留）
       useAnnotationStore.getState().clear(projectId);
@@ -236,7 +256,8 @@ export function CommandArea({
           onSubmit={submit}
           submitPending={sending}
           disabled={disabled}
-          attachmentsEnabled={false}
+          uploadFile={uploadMaterial}
+          materialUrl={(path) => rawFileUrl(projectId, path)}
           annotations={annotations}
           onAnnotationRemove={(id) => useAnnotationStore.getState().remove(projectId, id)}
           inputRef={inputRef}
@@ -310,6 +331,29 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
                 >
                   {i + 1}·{annotationLabel(a.kind)}·{annotationSummary(a)}
                 </span>
+              ))}
+            </div>
+          ) : null}
+          {message.materials && message.materials.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap justify-end gap-1">
+              {message.materials.map((m) => (
+                <a
+                  key={m.path}
+                  href={rawFileUrl(projectId, m.path)}
+                  target="_blank"
+                  rel="noopener"
+                  data-material-chip={m.path}
+                  className="flex items-center gap-1.5 rounded-md border bg-background/60 py-0.5 pl-0.5 pr-1.5 text-xs text-foreground/70 transition-colors hover:bg-muted"
+                  title={`${m.name}（点开看大图）`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- 平台文件服务直出的用户图片，非静态资源（Next Image 不适用） */}
+                  <img
+                    src={rawFileUrl(projectId, m.path)}
+                    alt={m.name}
+                    className="size-5 rounded-sm object-cover"
+                  />
+                  <span className="max-w-36 truncate">{m.name}</span>
+                </a>
               ))}
             </div>
           ) : null}

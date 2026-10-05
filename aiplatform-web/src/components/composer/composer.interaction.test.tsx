@@ -133,7 +133,116 @@ describe("Composer · 附件 chip 行与物料区", () => {
     fireEvent.change(screen.getByLabelText("上传参考物料"), {
       target: { files: [new File([new ArrayBuffer(380 * 1024)], "旧价目表.pdf")] },
     });
-    expect(screen.getByText("380 KB")).not.toBeNull();
+    // chip 行与打开的物料区各一份（大小标签两处命中，断言存在即可）
+    expect(screen.getAllByText("380 KB").length).toBeGreaterThan(0);
+  });
+});
+
+describe("Composer · 真上传（#286：uploadFile 管道）", () => {
+  /** 挂起态 Promise 的外部控制柄（uploading → done/error 的时序由测试驱动）。 */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function pngFile(name = "logo.png") {
+    return new File([new ArrayBuffer(2048)], name, { type: "image/png" });
+  }
+
+  function setupWithUpload(
+    uploadFile: (file: File) => Promise<{ path: string; name: string; size: number }>,
+    props: { value?: string } = {},
+  ) {
+    render(
+      <Composer
+        value={props.value ?? ""}
+        onValueChange={change}
+        onSubmit={submit}
+        uploadFile={uploadFile}
+        placeholder="一句话说说你想做什么"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /附件/ }));
+    return screen.getByLabelText("上传参考物料") as HTMLInputElement;
+  }
+
+  /** 发言输入框（Enter 提交锚——非 file input）。 */
+  function chatInput() {
+    return screen.getByPlaceholderText("一句话说说你想做什么") as HTMLTextAreaElement;
+  }
+
+  it("选文件即上传：chip 呈现上传中，完成转 done 携 path，随话发出", async () => {
+    const gate = deferred<{ path: string; name: string; size: number }>();
+    const uploadFile = vi.fn(() => gate.promise);
+    const input = setupWithUpload(uploadFile, { value: "照这张做 logo" });
+
+    fireEvent.change(input, { target: { files: [pngFile()] } });
+    expect(uploadFile).toHaveBeenCalledOnce();
+    // 上传中：chip 如实呈现、发送阻塞
+    expect(screen.getAllByText("上传中…").length).toBeGreaterThan(0);
+    expect(sendButton().disabled).toBe(true);
+
+    gate.resolve({ path: "materials/3897654321098765432-logo.png", name: "logo.png", size: 2048 });
+    await vi.waitFor(() =>
+      expect(screen.queryByText("上传中…")).toBeNull(),
+    );
+    expect(sendButton().disabled).toBe(false);
+
+    fireEvent.keyDown(chatInput(), { key: "Enter", shiftKey: false });
+    expect(submit).toHaveBeenCalledWith(
+      "照这张做 logo",
+      [
+        expect.objectContaining({
+          name: "logo.png",
+          state: "done",
+          path: "materials/3897654321098765432-logo.png",
+        }),
+      ],
+      [],
+    );
+  });
+
+  it("上传失败：chip 显失败原因、发送阻塞；移除后可发（不静默丢弃）", async () => {
+    const gate = deferred<{ path: string; name: string; size: number }>();
+    const input = setupWithUpload(vi.fn(() => gate.promise), { value: "照这张做" });
+
+    fireEvent.change(input, { target: { files: [pngFile()] } });
+    gate.reject(new Error("上传失败，请重试"));
+    await vi.waitFor(() =>
+      expect(screen.getAllByText("上传失败，请重试").length).toBeGreaterThan(0),
+    );
+    expect(sendButton().disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "移除logo.png" }));
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it("前端预检（五格式/10MB）：不符直接挂失败态，不发注定 400 的上传", () => {
+    const uploadFile = vi.fn();
+    const input = setupWithUpload(uploadFile, { value: "传资料" });
+
+    fireEvent.change(input, {
+      target: { files: [new File([new ArrayBuffer(8)], "价目表.pdf")] },
+    });
+    expect(screen.getAllByText(/只支持 png/).length).toBeGreaterThan(0);
+    expect(uploadFile).not.toHaveBeenCalled();
+
+    fireEvent.change(input, {
+      target: { files: [new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], "巨图.png")] },
+    });
+    expect(screen.getAllByText(/超过 10MB/).length).toBeGreaterThan(0);
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+
+  it("上传管道就位时：accept 收五格式、物料区文案如实（格式与上限）", () => {
+    const input = setupWithUpload(vi.fn(async () => ({ path: "materials/x.png", name: "x.png", size: 1 })));
+    expect(input.getAttribute("accept")).toBe(".png,.jpg,.jpeg,.webp,.gif,.svg");
+    expect(screen.getByText(/单张不超过 10MB/)).toBeTruthy();
   });
 });
 

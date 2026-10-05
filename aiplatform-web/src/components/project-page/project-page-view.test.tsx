@@ -24,6 +24,9 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
+vi.mock("@/hooks/use-upload-material", () => ({
+  useUploadMaterial: () => vi.fn(),
+}));
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),

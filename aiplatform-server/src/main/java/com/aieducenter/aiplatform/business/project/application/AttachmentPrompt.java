@@ -1,53 +1,93 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.util.ArrayList;
 import java.util.List;
 
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationAnchor;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationBody;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationAnchor;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationBody;
 
 /**
- * 圈注锚载荷 → 主智能体 prompt 的渲染（#97 圈注 B 档）：把用户在预览上指认的结构化
- * 锚（选择 / 圈选；评论仅历史兼容）渲染成主智能体可精确读取的自然语言段，逐条
- * 编号——用户 chip 与主输入框以「第 N 条」指代，与本渲染序号同构——随用户发言
- * 一并喂入（结构化定位而非猜图）。
+ * 消息附件 → 主智能体 prompt 的渲染（#97 圈注起立、#286 扩图片物料）：把附件
+ * 部件渲染成主智能体可精确读取的自然语言段——圈注（预览上指认的结构化锚）与
+ * 图片物料（用户上传的参考图、工作区路径引用）各成一段、各自编号（用户 chip
+ * 与主输入框以「第 N 条」指代，与本渲染序号同构），随用户发言一并喂入。
  *
  * <p>纯函数（无状态、无 IO），正本字段形状与 SSE 事件清单「消息附件部件锚载荷
  * schema」同源。渲染宽容：未知 kind / 空锚 / 缺字段都不抛——缺什么不渲染什么
  * （无评语的条目不出评语段——#135 起 UI 不再产生评语，历史带评语件照常回显），
- * 非圈注附件整体丢弃（防御性不误读）。</p>
+ * 非已知形态附件整体丢弃（防御性不误读）。</p>
  */
-public final class AnnotationPrompt {
+public final class AttachmentPrompt {
 
-    /** 渲染段标题（前缀，正本于本处）。 */
-    static final String HEADER = "【圈注（用户在预览上指认的位置）】";
+    /** 圈注渲染段标题（前缀，正本于本处）。 */
+    static final String ANNOTATION_HEADER = "【圈注（用户在预览上指认的位置）】";
 
-    private AnnotationPrompt() {
+    /** 图片物料渲染段标题（前缀，正本于本处——路径即工作区事实，智能体可读可嵌）。 */
+    static final String MATERIAL_HEADER = "【图片物料（用户随话上传的参考图，已落工作区）】";
+
+    private AttachmentPrompt() {
     }
 
     /**
-     * 圈注附件 → prompt 后缀：无有效圈注返回空串（调用方拼接后即原发言）。
+     * 消息附件 → prompt 后缀：圈注段在前（#97 既有序）、图片物料段随后，各段
+     * 独立编号；无有效附件返回空串（调用方拼接后即原发言）。
      */
-    public static String renderSuffix(List<AnnotationAttachment> attachments) {
+    public static String renderSuffix(List<MessageAttachment> attachments) {
         if (attachments == null || attachments.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        int index = 0;
-        for (AnnotationAttachment attachment : attachments) {
+        appendSection(sb, ANNOTATION_HEADER, annotationLinesOf(attachments));
+        appendSection(sb, MATERIAL_HEADER, materialLinesOf(attachments));
+        return sb.toString();
+    }
+
+    /** 编号段（两形态共用形）：标题 + 逐条编号行（序号与前端 chip 序号同构——
+     *  「第 N 条」指代对得上）；空行集不出段。 */
+    private static void appendSection(StringBuilder sb, String header, List<String> lines) {
+        if (lines.isEmpty()) {
+            return;
+        }
+        sb.append('\n').append('\n').append(header).append('\n');
+        for (int i = 0; i < lines.size(); i++) {
+            sb.append(i + 1).append(". ").append(lines.get(i)).append('\n');
+        }
+    }
+
+    /** 圈注附件 → 行集（空锚条目不出行——渲染宽容）。 */
+    private static List<String> annotationLinesOf(List<MessageAttachment> attachments) {
+        List<String> lines = new ArrayList<>();
+        for (MessageAttachment attachment : attachments) {
             if (attachment == null || !attachment.hasAnnotation()) {
                 continue;
             }
             String line = renderLine(attachment.annotation());
-            if (line == null) {
+            if (line != null) {
+                lines.add(line);
+            }
+        }
+        return lines;
+    }
+
+    /** 图片物料附件 → 行集（名称 + 工作区路径——路径即载荷本体；名称缺省回落路径末段）。 */
+    private static List<String> materialLinesOf(List<MessageAttachment> attachments) {
+        List<String> lines = new ArrayList<>();
+        for (MessageAttachment attachment : attachments) {
+            if (attachment == null || !attachment.hasImage()) {
                 continue;
             }
-            if (index == 0) {
-                sb.append('\n').append('\n').append(HEADER).append('\n');
-            }
-            sb.append(++index).append(". ").append(line).append('\n');
+            String name = attachment.name() == null || attachment.name().isBlank()
+                    ? basenameOf(attachment.path()) : attachment.name();
+            lines.add(name + "（工作区 " + attachment.path().trim() + "）");
         }
-        return index == 0 ? "" : sb.toString();
+        return lines;
+    }
+
+    /** 路径末段（name 缺省时的呈现回落）。 */
+    private static String basenameOf(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
     /** 单条圈注 → 一行（空锚返回 null——无内容不出行）。 */

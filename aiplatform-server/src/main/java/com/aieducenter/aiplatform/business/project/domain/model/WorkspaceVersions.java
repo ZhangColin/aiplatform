@@ -21,7 +21,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 的成版 commit：智能体 shell 面技术上可跑 git，野 commit 不进版本序列。git
  * 跟踪面 = 交付物全集——
  * .gitignore 由 {@link WorkspaceLayout#NON_DELIVERABLE_DIRS} + {@link WorkspaceLayout#ENV_FILE}
- * 单一事实派生（数据/平台产物/可重建依赖/机密不入版，与源码包、文件树同口径）；
+ * 单一事实派生（数据/平台产物/可重建依赖/机密不入版，与源码包、文件树同口径），
+ * 外加物料目录（输入面不入 git，ADR-0027——文件区/源码包仍含物料，仅版本流不跟）；
  * {@code .git} 本身由 git 天然排除。</p>
  *
  * <p>退出码约定（读命令三守卫）：0 = 正常；3 = 零版本 / 版本不存在（待期口径，
@@ -56,14 +57,17 @@ public final class WorkspaceVersions {
 
     /**
      * 幂等仓库初始化：无 .git 才 init（容器重建后卷内仓库原样续用，存量工作区懒
-     * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。非交付名单
+     * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。排除名单
      * 写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用脚手架自带
-     * 的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版生效）。
+     * 的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版生效）：
+     * 非交付名单＋机密之外，物料目录不入版本流（ADR-0027 版本化规则——刀＝可再生
+     * 性：上传物料是输入面，git 不跟踪；代价如实：「查看当时」对物料不快照、
+     * 回滚不触物料〔restore 只动 tracked 文件〕，物料以工作区卷为唯一正本随封存保全）。
      */
     public static String ensureRepoCommand() {
         String excludeEntries = Stream.concat(
                         WorkspaceLayout.NON_DELIVERABLE_DIRS.stream(),
-                        Stream.of(WorkspaceLayout.ENV_FILE))
+                        Stream.of(WorkspaceLayout.ENV_FILE, WorkspaceLayout.MATERIALS_DIR))
                 .map(name -> "'" + name + "'")
                 .collect(Collectors.joining(" "));
         return "cd " + WorkspaceLayout.ROOT

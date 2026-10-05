@@ -352,6 +352,30 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     });
   });
 
+  it("图片物料附件水合（#286）：image 形态条目收窄为物料 chip 条目、坏形状丢弃", () => {
+    useChatStore.getState().hydrate("p1", [
+      entry(1, "user", {
+        text: "照这张参考图做",
+        attachments: [
+          { attachmentType: "image", name: "logo.png", path: "materials/3897654321098765432-logo.png" },
+          { attachmentType: "image", path: "materials/123-海报.png" },
+          { attachmentType: "image", name: "无路径.png" },
+          { attachmentType: "annotation", annotation: { kind: "select", anchor: { selector: "button.a" } } },
+        ],
+      }),
+    ]);
+
+    const message = useChatStore.getState().chats["p1"]?.messages[0];
+    expect(message).toMatchObject({ kind: "user", text: "照这张参考图做" });
+    if (message?.kind !== "user") return;
+    // image 形态两件有效（name 缺省回落路径末段）、无路径件丢弃；圈注走 annotations
+    expect(message.materials).toEqual([
+      { name: "logo.png", path: "materials/3897654321098765432-logo.png" },
+      { name: "123-海报.png", path: "materials/123-海报.png" },
+    ]);
+    expect(message.annotations).toHaveLength(1);
+  });
+
   it("未答问答卡水合：待答可作答（挂起重放的刷新重建面）；已答卡不进待答", () => {
     useChatStore.getState().hydrate("p1", [
       entry(1, "user", { text: "需求" }),

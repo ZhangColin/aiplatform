@@ -64,6 +64,15 @@ public interface EnvironmentBackend {
     BinaryExecResult execBinary(WorkspaceHandle handle, String command);
 
     /**
+     * 在工作区内执行一条命令，经 stdin 灌入字节（#286 物料上传）：{@link #exec}
+     * 的写面——{@code cat > 路径} 形命令的落盘通道（上传字节不经 shell 参数面，
+     * 也不落平台文件系统）。stdout 是文本回执（如 stat 字节），读原始字节是
+     * {@link #execBinary} 的事。同一 docker exec 通道（{@code -i} 开 stdin），
+     * 退出码语义与错误口径同 {@link #exec}。
+     */
+    ExecResult execWithStdin(WorkspaceHandle handle, String command, byte[] stdin);
+
+    /**
      * 暴露容器端口为可访问的预览 URL（本地 = Docker 端口映射；线上 = Ingress/负载均衡）。
      * 渐进预览口径（#45）：映射置备时已落定、URL 确定，本调用只做探活——应用首起
      * 归 run 执行体（#44「一开工就跑起来」），死而复起归 {@link #startApp}（#170 平台

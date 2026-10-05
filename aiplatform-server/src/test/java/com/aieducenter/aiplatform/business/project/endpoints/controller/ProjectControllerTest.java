@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.project.endpoints.controller;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
 import com.aieducenter.aiplatform.business.project.application.DispatchAppService;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
@@ -694,6 +696,38 @@ class ProjectControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.runId").value("run-9"));
+    }
+
+    @Test
+    void given_message_with_two_form_attachments_when_post_then_both_bound_and_dispatched() throws Exception {
+        // #286 附件两形态（圈注 + 图片物料）在 REST 契约层绑定并透传派发——
+        // image 形态载荷＝工作区路径引用、不带字节
+        AtomicReference<List<MessageAttachment>> dispatched =
+                new AtomicReference<>();
+        when(dispatchAppService.dispatch(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    dispatched.set(invocation.getArgument(2));
+                    return new DispatchAppService.DispatchRun("run-10");
+                });
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"照这张参考图改",
+                                 "attachments":[
+                                   {"attachmentType":"image","name":"logo.png",
+                                    "path":"materials/3897654321098765432-logo.png"},
+                                   {"attachmentType":"annotation","annotation":{
+                                     "kind":"select","anchor":{"selector":"#hero"}}}]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-10"));
+
+        List<MessageAttachment> attachments = dispatched.get();
+        assertThat(attachments).hasSize(2);
+        assertThat(attachments.get(0).hasImage()).isTrue();
+        assertThat(attachments.get(0).path()).isEqualTo("materials/3897654321098765432-logo.png");
+        assertThat(attachments.get(1).hasAnnotation()).isTrue();
     }
 
     @Test

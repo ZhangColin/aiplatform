@@ -2,7 +2,11 @@ import { create } from "zustand";
 
 import { parseQuestion, type RaisedQuestion } from "@/lib/chat/qa";
 import { parseAnnotationAttachment, type AnnotationDraft } from "@/lib/preview/annotation";
+import { parseImageAttachment } from "@/lib/projects/materials";
 import { asRecord } from "@/lib/utils";
+
+/** 随话发出的图片物料条目（#286 回显 chip 用：名 + 工作区路径引用）。 */
+export type ChatMaterial = { name: string; path: string };
 
 /**
  * 对话面 store（issue #19 需求环①，SSE 相关 store——桥为唯一事件写入方，
@@ -71,12 +75,14 @@ export type HydratedEntry = {
 
 export type ChatMessage =
   | {
-      /** 用户发言；annotations = 随发言发送的圈注条目（#97 回显 chip）。 */
+      /** 用户发言；annotations = 随发言发送的圈注条目（#97 回显 chip）、materials =
+       * 图片物料条目（#286 回显 chip——路径引用，取件走 raw 直出）。 */
       kind: "user";
       id: string;
       text: string;
       runId?: string;
       annotations?: AnnotationDraft[];
+      materials?: ChatMaterial[];
     }
   | {
       /** 智能体话语与平台轻引导；runId 锚增量合并（同 run 才拼接）。label 仅
@@ -182,8 +188,14 @@ export type ChatState = {
   hydrate: (projectId: string, entries: HydratedEntry[]) => void;
   // ---- 发送侧（hooks） ----
   /** 乐观落用户气泡（返回消息 id；失败经 {@link removeMessage} 撤回）。annotations
-   *  = 随发言发送的圈注条目（#97 回显 chip）。 */
-  appendUserMessage: (projectId: string, text: string, annotations?: AnnotationDraft[]) => string;
+   *  = 随发言发送的圈注条目（#97 回显 chip）、materials = 图片物料条目（#286
+   *  回显 chip）。 */
+  appendUserMessage: (
+    projectId: string,
+    text: string,
+    annotations?: AnnotationDraft[],
+    materials?: ChatMaterial[],
+  ) => string;
   /** 作答落定：用户气泡 + 问题卡转已答 + 轮进行中。 */
   submitAnswer: (projectId: string, text: string, runId: string) => string;
   /** 发言起轮（智能体将回复；run-start 回声会被去重）。 */
@@ -280,6 +292,7 @@ function hydratedMessage(entry: HydratedEntry): ChatMessage | null {
         text: entry.text ?? "",
         runId,
         annotations: parseHydratedAnnotations(entry.attachments),
+        materials: parseHydratedMaterials(entry.attachments),
       };
     case "agent":
       return { kind: "agent", id: `h${entry.id}`, text: entry.text ?? "", runId };
@@ -319,6 +332,17 @@ function parseHydratedAnnotations(
   return attachments.flatMap((raw) => {
     const draft = parseAnnotationAttachment(raw);
     return draft ? [draft] : [];
+  });
+}
+
+/** 对话史附件数组 → 图片物料条目（#286 容错收窄：非 image 形态/缺路径丢弃）。 */
+function parseHydratedMaterials(
+  attachments: Record<string, unknown>[] | null | undefined,
+): ChatMaterial[] {
+  if (!attachments) return [];
+  return attachments.flatMap((raw) => {
+    const material = parseImageAttachment(raw);
+    return material ? [material] : [];
   });
 }
 
@@ -571,10 +595,10 @@ export const useChatStore = create<ChatState>((set) => ({
       return { ...chat, messages };
     }),
 
-  appendUserMessage: (projectId, text, annotations = []) => {
+  appendUserMessage: (projectId, text, annotations = [], materials = []) => {
     const id = localId();
     updateChat(set, projectId, (chat) =>
-      appendMessage(chat, { kind: "user", id, text, annotations }),
+      appendMessage(chat, { kind: "user", id, text, annotations, materials }),
     );
     return id;
   },

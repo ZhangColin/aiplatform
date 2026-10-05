@@ -67,7 +67,7 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     @Column(name = "closing", columnDefinition = "jsonb", updatable = false)
     private Map<String, Object> closing;
 
-    /** kind=user 的圈注附件（#97 随发言发送的消息附件部件，JSONB 数组——刷新/
+    /** kind=user 的消息附件（#97 圈注起立、#286 扩图片物料；随发言发送的附件部件，JSONB 数组——刷新/
      * 回访后消息回显可重建圈注 chip）；其余 kind 恒 NULL。 */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "attachments", columnDefinition = "jsonb", updatable = false)
@@ -100,7 +100,7 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
         this.answered = kind == ConversationEntryKind.QUESTION ? Boolean.FALSE : null;
     }
 
-    /** 用户发言条目（提交守卫全过后同步落；attachments = 圈注附件原始 JSON，可空）。 */
+    /** 用户发言条目（提交守卫全过后同步落；attachments = 消息附件原始 JSON，可空）。 */
     public static ConversationEntry userUtterance(Long projectId, String runId, String text,
             List<Map<String, Object>> attachments) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.USER, text, null, null,

@@ -46,6 +46,9 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
+vi.mock("@/hooks/use-upload-material", () => ({
+  useUploadMaterial: () => vi.fn(),
+}));
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: vi.fn() }),
   useAnswerQuestion: () => ({ isPending: false, mutate: vi.fn() }),
@@ -336,7 +339,7 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(html).toContain("rounded-2xl");
     expect(html).toContain('aria-label="发送"');
     expect(html).toContain('aria-label="做系统"');
-    // 对话流暂无附件管道：入口隐去（不邀请会被丢弃的操作）
-    expect(html).not.toContain('aria-label="附件"');
+    // 附件入口（#286 真上传）：回形针可见——选文件即上传、随话发出
+    expect(html).toContain('aria-label="附件"');
   });
 });

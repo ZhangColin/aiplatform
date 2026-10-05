@@ -19,6 +19,7 @@ const seed = vi.hoisted(() => ({ state: { chats: {} } as Pick<ChatState, "chats"
 const postMutate = vi.hoisted(() => vi.fn());
 const answerMutate = vi.hoisted(() => vi.fn());
 const seePrd = vi.hoisted(() => vi.fn());
+const uploadMaterial = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store/chat")>();
@@ -33,6 +34,9 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
+vi.mock("@/hooks/use-upload-material", () => ({
+  useUploadMaterial: () => uploadMaterial,
+}));
 vi.mock("@/hooks/use-chat", () => ({
   usePostMessage: () => ({ isPending: false, mutate: postMutate }),
   useAnswerQuestion: () => ({ isPending: false, mutate: answerMutate }),
@@ -83,6 +87,7 @@ function inputOf() {
 beforeEach(() => {
   postMutate.mockClear();
   answerMutate.mockClear();
+  uploadMaterial.mockReset();
 });
 
 // vitest 未开 globals：RTL 的自动 cleanup 不挂，手动清（否则 DOM 跨用例累积）
@@ -179,5 +184,80 @@ describe("CommandArea · 查看当时标题轮次语境（#142 整链：对话�
     fireEvent.click(screen.getByRole("button", { name: "查看当时" }));
 
     expect(screen.getByText("第 1 轮结束时的系统——主色调已改为绿色")).toBeTruthy();
+  });
+});
+
+describe("CommandArea · 图片物料真上传（#286 回形针接线）", () => {
+  it("选文件即上传：完成态随话发出（载荷＝路径引用），Enter 发言 attachments 携 image 形态", async () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+    uploadMaterial.mockResolvedValue({
+      path: "materials/3897654321098765432-logo.png",
+      name: "logo.png",
+      size: 2048,
+    });
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /附件/ }));
+    fireEvent.change(screen.getByLabelText("上传参考物料"), {
+      target: { files: [new File([new ArrayBuffer(2048)], "logo.png", { type: "image/png" })] },
+    });
+    expect(uploadMaterial).toHaveBeenCalledOnce();
+
+    await vi.waitFor(() => expect(screen.queryByText("上传中…")).toBeNull());
+    fireEvent.change(inputOf(), { target: { value: "照这张做 logo" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+
+    expect(postMutate).toHaveBeenCalledWith({
+      content: "照这张做 logo",
+      attachments: [
+        {
+          attachmentType: "image",
+          name: "logo.png",
+          path: "materials/3897654321098765432-logo.png",
+        },
+      ],
+    });
+  });
+
+  it("待答问题时物料随答复文本送达（作答通道无附件位，渲染进文本）", async () => {
+    seedChat([pendingQuestion()]);
+    uploadMaterial.mockResolvedValue({
+      path: "materials/123-参考.png",
+      name: "参考.png",
+      size: 8,
+    });
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /附件/ }));
+    fireEvent.change(screen.getByLabelText("上传参考物料"), {
+      target: { files: [new File([new ArrayBuffer(8)], "参考.png", { type: "image/png" })] },
+    });
+    await vi.waitFor(() => expect(screen.queryByText("上传中…")).toBeNull());
+    fireEvent.change(inputOf(), { target: { value: "按这张来" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+
+    expect(answerMutate.mock.calls[0][0].command.answer).toBe(
+      "按这张来\n【图片物料】1. 参考.png（materials/123-参考.png）",
+    );
+  });
+
+  it("对话史回访：物料 chip 随用户气泡呈现（缩略图走 raw 直出直链、点开看大图）", () => {
+    seedChat([
+      {
+        kind: "user",
+        id: "u1",
+        text: "照这张做",
+        materials: [{ name: "logo.png", path: "materials/3897654321098765432-logo.png" }],
+      },
+    ]);
+    const { container } = render(<CommandArea projectId="p1" />);
+
+    const chip = container.querySelector(
+      'a[data-material-chip="materials/3897654321098765432-logo.png"]',
+    );
+    expect(chip?.getAttribute("href")).toBe(
+      "/api/projects/p1/files/raw?path=materials%2F3897654321098765432-logo.png",
+    );
+    expect(chip?.textContent).toContain("logo.png");
   });
 });

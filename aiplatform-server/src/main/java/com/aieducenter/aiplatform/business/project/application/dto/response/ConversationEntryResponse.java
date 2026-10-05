@@ -13,7 +13,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Conversation
  * （#186 平台房规：枚举出口配 *Name，消费端零映射；§3.6.1 边界枚举统一 code
  * ——{@code ConversationEntryKind} 1=user 2=agent 3=question 4=answer 5=closing
  * 6=guide 7=quote），question / closing 为事件载荷 JSON 原样；attachments（#97
- * 圈注 B 档）= 用户发言随带的圈注附件 JSON 数组（消息回显重建圈注 chip 用）；
+ * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
  * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）。
  */
 public record ConversationEntryResponse(
@@ -49,13 +49,16 @@ public record ConversationEntryResponse(
                         + "\"durationMs\":183420,\"selfTest\":{\"total\":3},"
                         + "\"version\":\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2\"}")
         Map<String, Object> closing,
-        @Schema(description = "圈注附件数组（kind=1 user 可携带，其余 kind 为 null，#97）："
-                + "元素＝{attachmentType:\"annotation\", annotation:{kind, anchor:{selector?,"
-                + "text?,region?{x,y,width,height}}, note?}}——结构化定位＋标注类型"
-                + "（kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容），"
-                + "据此重建圈注 chip（非截图）",
+        @Schema(description = "消息附件数组（kind=1 user 可携带，其余 kind 为 null；#97 圈注起立、"
+                + "#286 扩图片物料）：两形态——{attachmentType:\"annotation\", annotation:{kind, "
+                + "anchor:{selector?,text?,region?{x,y,width,height}}, note?}}（结构化定位＋"
+                + "标注类型，kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容，"
+                + "据此重建圈注 chip，非截图）与 {attachmentType:\"image\", name, path}"
+                + "（图片物料——path 为工作区路径引用，据此重建物料 chip、取件走 files/raw）",
                 example = "[{\"attachmentType\":\"annotation\",\"annotation\":{\"kind\":\"select\","
-                        + "\"anchor\":{\"selector\":\"#login-btn\",\"text\":\"登录\"}}}]")
+                        + "\"anchor\":{\"selector\":\"#login-btn\",\"text\":\"登录\"}}},"
+                        + "{\"attachmentType\":\"image\",\"name\":\"logo.png\","
+                        + "\"path\":\"materials/3897654321098765432-logo.png\"}]")
         List<Map<String, Object>> attachments,
         @Schema(description = "报价卡载荷（kind=7 quote 携带，其余 kind 为 null，#203）："
                 + "仅事件＋订单引用——{ orderId（字符串，防 JS 精度丢失）, event（quoted=报价已出 / "

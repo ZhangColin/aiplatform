@@ -12,6 +12,7 @@ import {
   Paperclip,
   Sparkles,
   SquareDashed,
+  TriangleAlert,
   Upload,
   X,
 } from "lucide-react";
@@ -26,9 +27,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
 import { cn } from "@/lib/utils";
 import { isSubmitEnter } from "@/lib/chat/enter";
 import { formatFileSize } from "@/lib/projects/files";
+import {
+  MATERIAL_UPLOAD_LIMIT_BYTES,
+  isUploadableImageName,
+  type UploadedMaterial,
+} from "@/lib/projects/materials";
+import { errorText } from "@/lib/api/api-error";
 import { annotationLabel, annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
 import type { AnnotationItem } from "@/lib/store/annotation";
 import { PLATFORM_MODES } from "@/lib/modes";
@@ -38,21 +54,28 @@ import { PLATFORM_MODES } from "@/lib/modes";
  * （ring + 分层阴影）——输入区 → 附件 chip 行（可删可加）→ 工具行（回形针
  * 物料区 / 类型下拉 / 语音位 / 圆形发送键）。
  *
- * 输入受控（首页示例 chips 点选填入、项目页接对话流都由调用侧持态）；附件为
- * 组件内本地态——上传管道不在本票（#76「沿用既有上传能力」，现有服务端无
- * 上传端点），选择即挂 chip、可删可加，随 onSubmit 一并交出、发出即清；
- * 调用侧消费不了附件时传 attachmentsEnabled=false 隐去入口（不邀请会被
- * 丢弃的操作）。类型下拉 v1 仅「做系统」，做页面/写文档为「敬请期待」占位。
+ * 输入受控（首页示例 chips 点选填入、项目页接对话流都由调用侧持态）。附件两态
+ * （#286 真上传）：调用侧传 {@link uploadFile} 时选文件即真上传（multipart 落
+ * 工作区物料目录），chip 经附件组件族呈现上传中/失败/完成态、上传中或失败阻塞
+ * 发送（不静默丢弃）；无上传管道（首页——归 #280 入口票）维持本地挂载态：选即
+ * 挂 chip、可删可加，随 onSubmit 一并交出、发出即清。圈注附件归 store 持态、
+ * 同行呈现。类型下拉 v1 仅「做系统」，做页面/写文档为「敬请期待」占位。
  */
 
-/** 附件条目（物料区与 chip 行共用形状）。 */
+/** 附件条目（物料区与 chip 行共用形状）。state 缺省 = 本地挂载态（无上传管道）。 */
 export type ComposerAttachment = {
   id: string;
   name: string;
   sizeLabel: string;
+  /** 真上传态：uploading 上传中 / error 失败（error 随原因）/ done 完成（path 随行）。 */
+  state?: "uploading" | "error" | "done";
+  /** 工作区路径引用（state=done 携带——随话发送的载荷本体，不带字节）。 */
+  path?: string;
+  /** 失败原因（state=error 携带，chip 呈现）。 */
+  error?: string;
 };
 
-/** 图片物料判定（chip/列表图标分流：图用图片图标，其余按文档）。 */
+/** 图片物料判定（本地挂载态 chip 图标分流：图用图片图标，其余按文档）。 */
 function isImageMaterial(name: string, type?: string): boolean {
   if (type?.startsWith("image/")) return true;
   return /\.(png|jpe?g|gif|webp|svg|bmp|heic)$/i.test(name);
@@ -81,6 +104,8 @@ export function Composer({
   submitPending = false,
   disabled = false,
   attachmentsEnabled = true,
+  uploadFile,
+  materialUrl,
   annotations,
   onAnnotationRemove,
   inputRef,
@@ -98,6 +123,11 @@ export function Composer({
   disabled?: boolean;
   /** 附件入口（回形针 + chip 行）：调用侧无上传管道时置 false 隐去——不邀请会被丢弃的操作。 */
   attachmentsEnabled?: boolean;
+  /** 文件上传管道（#286）：选文件即真上传（multipart 落工作区物料目录）；缺省 =
+   *  本地挂载态（首页现状，上传管道归 #280 入口票）。 */
+  uploadFile?: (file: File) => Promise<UploadedMaterial>;
+  /** 已上传物料的取件 URL（完成态 chip 缩略图——raw 直出同源直链）。 */
+  materialUrl?: (path: string) => string;
   /** 圈注附件（#97 预览回传的标注条目，归 store 持态）：随附件 chip 行呈现（序号 +
    * 类型 + 摘要，多条指代靠序号——描述写主输入框）、发送前可删。 */
   annotations?: AnnotationItem[];
@@ -125,7 +155,9 @@ export function Composer({
     el.style.height = `${el.scrollHeight}px`;
   }, [value]);
 
-  const canSubmit = value.trim().length > 0 && !submitPending && !disabled;
+  // 上传中/失败的附件阻塞发送（如实呈现不静默丢弃——失败件须移除后才发）
+  const attachmentsBlocking = attachments.some((a) => a.state === "uploading" || a.state === "error");
+  const canSubmit = value.trim().length > 0 && !submitPending && !disabled && !attachmentsBlocking;
 
   function submit() {
     if (!canSubmit) return;
@@ -139,24 +171,77 @@ export function Composer({
     submit();
   }
 
+  /** 本地挂 chip（无管道态直挂；有管道态作为 uploading 占位）。 */
+  function appendAttachments(entries: ComposerAttachment[]) {
+    setAttachments((prev) => [...prev, ...entries]);
+  }
+
+  function patchAttachment(id: string, patch: Partial<ComposerAttachment>) {
+    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  }
+
   function onFilesSelected(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
-    if (files.length > 0) {
-      setAttachments((prev) => [
-        ...prev,
-        ...files.map((file, index) => ({
+    // 允许连续选同一文件再次挂载
+    event.target.value = "";
+    if (files.length === 0) return;
+    if (!uploadFile) {
+      // 本地挂载态（首页现状）：选择即挂 chip，发出即弃（#280 入口票备案）
+      appendAttachments(
+        files.map((file, index) => ({
           id: `${fileInputId}-${Date.now()}-${index}`,
           name: file.name,
           sizeLabel: formatFileSize(file.size),
         })),
-      ]);
+      );
+      return;
     }
-    // 允许连续选同一文件再次挂载
-    event.target.value = "";
+    // 真上传（#286）：前端预检（五格式/10MB，省注定 400 的上传）→ 逐文件独立上传，
+    // chip 呈现上传中/失败/完成态
+    files.forEach((file, index) => {
+      const id = `${fileInputId}-${Date.now()}-${index}`;
+      if (!isUploadableImageName(file.name)) {
+        appendAttachments([
+          { id, name: file.name, sizeLabel: formatFileSize(file.size), state: "error",
+            error: "只支持 png、jpg、webp、gif、svg 格式" },
+        ]);
+        return;
+      }
+      if (file.size > MATERIAL_UPLOAD_LIMIT_BYTES) {
+        appendAttachments([
+          { id, name: file.name, sizeLabel: formatFileSize(file.size), state: "error",
+            error: "超过 10MB 上限" },
+        ]);
+        return;
+      }
+      appendAttachments([
+        { id, name: file.name, sizeLabel: formatFileSize(file.size), state: "uploading" },
+      ]);
+      uploadFile(file).then(
+        (uploaded) =>
+          patchAttachment(id, {
+            state: "done",
+            path: uploaded.path,
+            name: uploaded.name,
+          }),
+        (failure) =>
+          patchAttachment(id, {
+            state: "error",
+            error: errorText(failure, "上传失败，请重试"),
+          }),
+      );
+    });
   }
 
   function removeAttachment(id: string) {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  /** chip 辅助描述：失败显原因、上传中显进度语、完成显大小。 */
+  function attachmentDescriptionOf(m: ComposerAttachment): string {
+    if (m.state === "error") return m.error ?? "上传失败";
+    if (m.state === "uploading") return "上传中…";
+    return m.sizeLabel;
   }
 
   return (
@@ -186,23 +271,39 @@ export function Composer({
       {attachmentsEnabled && attachments.length > 0 ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {attachments.map((m) => (
-            <span
+            <Attachment
               key={m.id}
-              className="flex items-center gap-1.5 rounded-lg border bg-muted/50 py-1 pl-2 pr-1 text-xs text-foreground/80"
+              size="xs"
+              state={m.state ?? "done"}
+              data-file-attachment={m.id}
             >
-              <span className="text-muted-foreground">
-                <AttachmentIcon name={m.name} />
-              </span>
-              {m.name}
-              <button
-                type="button"
-                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                onClick={() => removeAttachment(m.id)}
-                aria-label={`移除${m.name}`}
+              <AttachmentMedia
+                variant={m.state === "done" && materialUrl && m.path ? "image" : "icon"}
               >
-                <X className="size-3" />
-              </button>
-            </span>
+                {m.state === "uploading" ? (
+                  <Spinner className="size-3.5" />
+                ) : m.state === "error" ? (
+                  <TriangleAlert className="size-3.5" />
+                ) : materialUrl && m.path ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- 平台文件服务直出的用户图片，非静态资源（Next Image 不适用）
+                  <img src={materialUrl(m.path)} alt={m.name} />
+                ) : (
+                  <AttachmentIcon name={m.name} />
+                )}
+              </AttachmentMedia>
+              <AttachmentContent>
+                <AttachmentTitle>{m.name}</AttachmentTitle>
+                <AttachmentDescription>{attachmentDescriptionOf(m)}</AttachmentDescription>
+              </AttachmentContent>
+              <AttachmentActions>
+                <AttachmentAction
+                  aria-label={`移除${m.name}`}
+                  onClick={() => removeAttachment(m.id)}
+                >
+                  <X className="size-3" />
+                </AttachmentAction>
+              </AttachmentActions>
+            </Attachment>
           ))}
         </div>
       ) : null}
@@ -251,10 +352,21 @@ export function Composer({
               {attachments.map((m) => (
                 <div key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60">
                   <span className="text-muted-foreground">
-                    <AttachmentIcon name={m.name} />
+                    {m.state === "uploading" ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <AttachmentIcon name={m.name} />
+                    )}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                  <span className="text-xs text-muted-foreground">{m.sizeLabel}</span>
+                  <span
+                    className={cn(
+                      "text-xs text-muted-foreground",
+                      m.state === "error" && "text-destructive",
+                    )}
+                  >
+                    {attachmentDescriptionOf(m)}
+                  </span>
                 </div>
               ))}
               {attachments.length === 0 ? (
@@ -273,12 +385,15 @@ export function Composer({
                 id={fileInputId}
                 type="file"
                 multiple
+                accept={uploadFile ? ".png,.jpg,.jpeg,.webp,.gif,.svg" : undefined}
                 className="sr-only"
                 aria-label="上传参考物料"
                 onChange={onFilesSelected}
               />
               <p className="px-1 pt-2 text-xs leading-relaxed text-muted-foreground">
-                照片、价目表、旧系统截图都可以传，做系统时智能体会参考。
+                {uploadFile
+                  ? "png / jpg / webp / gif / svg，单张不超过 10MB，智能体会参考它做设计与系统。"
+                  : "照片、价目表、旧系统截图都可以传，做系统时智能体会参考。"}
               </p>
             </div>
           </PopoverContent>

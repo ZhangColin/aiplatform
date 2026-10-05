@@ -264,6 +264,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/materials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传图片物料（发送框回形针，#286）
+         * @description multipart 单文件（part 名 file）落工作区物料目录 materials/：只收 png/jpg/webp/gif/svg（按扩展名判定，格式不符 400 PRJ_044）、单文件 ≤10MB（超限 400 PRJ_043 如实报错不静默压缩——multipart 容器层超限同归此码）。落点命名 = TSID 前缀 + 净化后原始名（不撞名不覆盖），响应 path 即随话发送的附件载荷引用（attachmentType=image 的工作区路径引用、不带字节），name 为净化后原始名（chip 呈现用）。文件区即时可见（materials/ 在交付面），点看走 files/raw inline 大图（#283）。已归档 409 PRJ_013（归档是单向终点，不再收新物料）；项目不存在 404 PRJ_001
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 409 PRJ_013 — 项目已归档（归档是单向终点）
+         *     - 400 PRJ_043 — 文件太大，单张图片不能超过 10MB
+         *     - 400 PRJ_044 — 只支持 png、jpg、webp、gif、svg 格式的图片
+         */
+        post: operations["upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/rename": {
         parameters: {
             query?: never;
@@ -2434,6 +2460,20 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        ApiResponseMaterialUploadedResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["MaterialUploadedResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        MaterialUploadedResponse: {
+            path?: string;
+            name?: string;
+            /** Format: int64 */
+            size?: number;
+        };
         RenameProjectCommand: {
             /** @description 新项目名（空白拒绝 PRJ_005，长度上限 100 与建项目同口径） */
             name: string;
@@ -2471,10 +2511,6 @@ export interface components {
             text?: string;
             region?: components["schemas"]["AnnotationRegion"];
         };
-        AnnotationAttachment: {
-            attachmentType: string;
-            annotation?: components["schemas"]["AnnotationBody"];
-        };
         AnnotationBody: {
             kind: string;
             anchor?: components["schemas"]["AnnotationAnchor"];
@@ -2490,9 +2526,15 @@ export interface components {
             /** Format: double */
             height?: number;
         };
+        MessageAttachment: {
+            attachmentType: string;
+            annotation?: components["schemas"]["AnnotationBody"];
+            name?: string;
+            path?: string;
+        };
         PostMessageCommand: {
             content: string;
-            attachments?: components["schemas"]["AnnotationAttachment"][];
+            attachments?: components["schemas"]["MessageAttachment"][];
         };
         ApiResponseInterviewTurnResponse: {
             /** Format: int32 */
@@ -3032,7 +3074,7 @@ export interface components {
                 [key: string]: Record<string, never>;
             };
             /**
-             * @description 圈注附件数组（kind=1 user 可携带，其余 kind 为 null，#97）：元素＝{attachmentType:"annotation", annotation:{kind, anchor:{selector?,text?,region?{x,y,width,height}}, note?}}——结构化定位＋标注类型（kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容），据此重建圈注 chip（非截图）
+             * @description 消息附件数组（kind=1 user 可携带，其余 kind 为 null；#97 圈注起立、#286 扩图片物料）：两形态——{attachmentType:"annotation", annotation:{kind, anchor:{selector?,text?,region?{x,y,width,height}}, note?}}（结构化定位＋标注类型，kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容，据此重建圈注 chip，非截图）与 {attachmentType:"image", name, path}（图片物料——path 为工作区路径引用，据此重建物料 chip、取件走 files/raw）
              * @example [
              *       {
              *         "attachmentType": "annotation",
@@ -3043,6 +3085,11 @@ export interface components {
              *             "text": "登录"
              *           }
              *         }
+             *       },
+             *       {
+             *         "attachmentType": "image",
+             *         "name": "logo.png",
+             *         "path": "materials/3897654321098765432-logo.png"
              *       }
              *     ]
              */
@@ -4030,6 +4077,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMaterialUploadedResponse"];
                 };
             };
         };

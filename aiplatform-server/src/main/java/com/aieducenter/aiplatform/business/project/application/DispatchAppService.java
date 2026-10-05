@@ -12,7 +12,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
@@ -117,7 +117,7 @@ public class DispatchAppService {
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）
      */
-    public DispatchRun dispatch(Long projectId, String prompt, List<AnnotationAttachment> attachments) {
+    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {
@@ -129,9 +129,9 @@ public class DispatchAppService {
         };
     }
 
-    /** 无圈注附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
+    /** 无附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
     public DispatchRun dispatch(Long projectId, String prompt) {
-        return dispatch(projectId, prompt, AnnotationAttachment.NONE);
+        return dispatch(projectId, prompt, MessageAttachment.NONE);
     }
 
     /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
@@ -156,7 +156,7 @@ public class DispatchAppService {
      * run、不提交会话、不动任何产物。runId 为派发锚。
      */
     private DispatchRun guideReply(Project project, String prompt, boolean orderIntent,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         String runId = EventsAppService.newRunId();
         String text = orderIntent
                 ? (project.getGeneratedAt() != null
@@ -165,7 +165,7 @@ public class DispatchAppService {
         eventBridge.emitGuideReply(project.getId(), project.getOwnerAccountId(), runId, prompt,
                 GUIDE_LABEL, text);
         // 对话史落库（#89）：轻引导也是对话面——用户发言 + 定型文案两行（事件已发，
-        // 补写失败只记日志）；圈注附件随发言同落
+        // 补写失败只记日志）；消息附件随发言同落
         conversationHistory.recordGuide(project.getId(), runId, prompt, text, attachments);
         log.info("[dispatch] 项目 {} 兜底引导（{}）", project.getId(),
                 orderIntent ? "下单意图" : "泛引导");

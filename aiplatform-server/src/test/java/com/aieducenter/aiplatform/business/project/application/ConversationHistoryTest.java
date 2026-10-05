@@ -38,10 +38,10 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationAnchor;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationBody;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment.AnnotationRegion;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationAnchor;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationBody;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment.AnnotationRegion;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -222,13 +222,13 @@ class ConversationHistoryTest {
         // #97 圈注落库：用户发言随带的圈注附件落 JSONB、读口按附件数组回放——
         // 刷新/回访后消息回显可重建圈注 chip（结构化定位，非截图）
         Long projectId = persistedGeneratedProject("9802");
-        AnnotationAttachment select = new AnnotationAttachment("annotation",
+        MessageAttachment select = new MessageAttachment("annotation",
                 new AnnotationBody("select",
-                        new AnnotationAnchor("button.submit", "提交订单", null), ""));
-        AnnotationAttachment circle = new AnnotationAttachment("annotation",
+                        new AnnotationAnchor("button.submit", "提交订单", null), ""), null, null);
+        MessageAttachment circle = new MessageAttachment("annotation",
                 new AnnotationBody("circle",
                         new AnnotationAnchor(null, null, new AnnotationRegion(120, 340, 300, 80)),
-                        "改这里"));
+                        "改这里"), null, null);
 
         conversationHistory.recordUserUtterance(projectId, "run-anno", "把这里改成红色",
                 List.of(select, circle));
@@ -241,6 +241,29 @@ class ConversationHistoryTest {
                 .asInstanceOf(InstanceOfAssertFactories.MAP)
                 .containsEntry("kind", "circle")
                 .containsEntry("note", "改这里");
+        // 两形态各携带态字段：圈注件不出 path/name 键（NON_NULL 序列化）
+        assertThat(history.get(0).attachments().get(0)).doesNotContainKeys("path", "name");
+    }
+
+    @Test
+    void given_utterance_with_image_material_when_read_then_path_reference_round_trip() {
+        // #286 图片物料落库：载荷＝工作区路径引用（不带字节），回访 chip 重建以
+        // path/name 为据；无效形态（image 无 path）不入库
+        Long projectId = persistedGeneratedProject("9803");
+        MessageAttachment image = new MessageAttachment("image", null,
+                "logo.png", "materials/3897654321098765432-logo.png");
+        MessageAttachment broken = new MessageAttachment("image", null, "无路径.png", null);
+
+        conversationHistory.recordUserUtterance(projectId, "run-img", "照这张参考图做",
+                List.of(image, broken));
+
+        List<ConversationEntryResponse> history = conversationHistory.read(projectId);
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).attachments()).hasSize(1);
+        assertThat(history.get(0).attachments().get(0))
+                .containsEntry("attachmentType", "image")
+                .containsEntry("name", "logo.png")
+                .containsEntry("path", "materials/3897654321098765432-logo.png");
     }
 
     @Test

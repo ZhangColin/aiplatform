@@ -142,23 +142,27 @@ closing: {
 - **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 自测 / 收口尾序 + 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
-#### 消息附件部件锚载荷 schema（#97）
+#### 消息附件部件锚载荷 schema（#97；#286 扩 image 形态）
 
 圈注（#73 决议，#133/#135 口径收口）——工具条四键「选择 / 改字 / 圈选 / 评论」：选择与圈选启用（点选锚定 / 拖框圈区域），改字与评论置灰待启用；条目收进发送框附件区，chip 形态为**序号 + 类型 + 摘要**（撤评语输入框，多条指代靠序号——描述统一写主输入框），随下一句自然语言发送；载荷只定要点：**结构化定位 + 标注类型**（不走截图识图——模糊锚定指错位置反噬信任）。锚为注入脚本回传的结构化 DOM 锚（选择器/文本引用），字段 schema 随本票定形：
 
 ```
-attachmentType: "annotation"            # 附件种类（预留多类：圈注为首个；后续上传物料等另立）
-annotation:
+attachmentType: "annotation" | "image"  # 附件种类：圈注（#97 首个）| 图片物料（#286 扩值）
+annotation:                             # —— annotation 形态（结构化定位，非截图）
   kind: "select" | "circle" | "comment" # 标注类型：选择（点选锚定）/ 圈选（拖框圈区域）/ 评论（历史兼容，UI 不再产生）
   anchor:                               # 结构化定位（预览与前端跨源，postMessage 回传）
     selector: "CSS 选择器"               # 选择/评论：唯一指向目标元素
     text: "目标元素可见文本片段"          # 辅助定位与可读性（同文本多见时以选择器为准）
     region: { x, y, width, height }     # 圈选：页面级矩形区域（circle 专用，选择器可缺省）
   note: "可选评语"                       # 兼容历史只读回显（UI 不再产生评语）；多条圈注 = 多个附件部件可叠加
+name: "logo.png"                        # —— image 形态（#286，ADR-0027）：原始文件名（chip 呈现用）
+path: "materials/{tsid}-logo.png"       # 工作区路径引用（上传端点落物料目录后的 path 原样回传；载荷不带字节——
+                                        #   存储正本＝工作区容器卷，取件走 files/raw inline 直出）
 ```
 
 - 指认是对话输入的**增强不是替代**：附件部件与自然语言同句发送、被主智能体精确读取（结构化定位而非猜图）；
-- **落地口径（#97，#138 注入口径收口）**：附件部件随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发——渲染成主智能体 prompt 自然语言段精确读取（见 `AnnotationPrompt`），并随用户发言落对话史（`prj_conversation_entries.attachments` JSONB），刷新/回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip；注入脚本（`docker/workspace/annotation.js`）由预览网关 `sub_filter` 注入 HTML（ADR-0014 单源——serve.js 旧内联注入路径已删）、经 postMessage 回传结构化锚。
+- **落地口径（#97，#138 注入口径收口）**：附件部件随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发——渲染成主智能体 prompt 自然语言段精确读取（见 `AttachmentPrompt`），并随用户发言落对话史（`prj_conversation_entries.attachments` JSONB），刷新/回访经 `GET /api/projects/{id}/conversation` 水合回显附件 chip；注入脚本（`docker/workspace/annotation.js`）由预览网关 `sub_filter` 注入 HTML（ADR-0014 单源——serve.js 旧内联注入路径已删）、经 postMessage 回传结构化锚。
+- **图片物料（#286，ADR-0027）**：上传走 `POST /api/projects/{id}/materials`（multipart 单文件、五格式、≤10MB 如实报错）落工作区物料目录，path 即随话发送的载荷引用；两形态各携带态字段（NON_NULL——圈注件无 name/path、物料件无 annotation）；物料不入版本流 git（输入面，ADR-0027 版本化规则）。
 
 #### 引擎透传事件（开放集合）
 

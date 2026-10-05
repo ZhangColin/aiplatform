@@ -52,6 +52,15 @@ class WorkspaceVersionsTest {
     }
 
     @Test
+    void given_workspace_when_ensure_repo_command_then_materials_dir_excluded_from_version_flow() {
+        // ADR-0027 版本化规则：上传物料是输入面、不入版本流 git（文件区/源码包仍含
+        // 物料——仅版本跟踪面排除）；「查看当时」对物料如实不快照
+        String command = WorkspaceVersions.ensureRepoCommand();
+
+        assertThat(command).contains("'" + WorkspaceLayout.MATERIALS_DIR + "'");
+    }
+
+    @Test
     void given_closing_facts_when_commit_command_then_allow_empty_with_run_id_trailer() {
         String command = WorkspaceVersions.commitCommand("更新了系统", "1234567890");
 

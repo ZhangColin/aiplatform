@@ -19,7 +19,7 @@ import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.command.AnnotationAttachment;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -148,7 +148,7 @@ public class MainAgentAppService {
      */
     public MainAgentRun startConversation(Long projectId, String requirement) {
         knowledgeAppService.establishSessionInjection(projectId, requirement);
-        return opinionTurn(projectId, requirement, AnnotationAttachment.NONE);
+        return opinionTurn(projectId, requirement, MessageAttachment.NONE);
     }
 
     /**
@@ -179,13 +179,13 @@ public class MainAgentAppService {
      *                              PRJ_024 挂起问答待答（同步 409 指路作答，#40 / ADR-0005）
      */
     public MainAgentRun runOpinionTurn(Long projectId, String prompt,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         return opinionTurn(projectId, prompt, attachments);
     }
 
-    /** 无圈注附件的意见轮（纯文字发言——#97 之前与测试既有口径）。 */
+    /** 无附件的意见轮（纯文字发言——#97 之前与测试既有口径）。 */
     public MainAgentRun runOpinionTurn(Long projectId, String prompt) {
-        return runOpinionTurn(projectId, prompt, AnnotationAttachment.NONE);
+        return runOpinionTurn(projectId, prompt, MessageAttachment.NONE);
     }
 
     /**
@@ -201,11 +201,11 @@ public class MainAgentAppService {
      * 但 runId 已失）同步 409 PRJ_024 指路作答。</p>
      */
     public MainAgentRun answerInquiry(Project project, String question,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
         // 圈注随咨询同句发送：渲染进答复续跑/答询 prompt（结构化定位喂主智能体）
-        String annotated = question + AnnotationPrompt.renderSuffix(attachments);
+        String annotated = question + AttachmentPrompt.renderSuffix(attachments);
         SuspendedQuestion pending = suspendedQuestions.get(sessionId);
         if (pending != null) {
             MainAgentAppService.log.info("[main] 项目 {} 答询撞挂起问答（渲染竞态窗口），转作答复续跑（runId={}）",
@@ -232,9 +232,9 @@ public class MainAgentAppService {
         return new MainAgentRun(runId);
     }
 
-    /** 无圈注附件的答询轮（纯文字咨询——#97 之前与测试既有口径）。 */
+    /** 无附件的答询轮（纯文字咨询——#97 之前与测试既有口径）。 */
     public MainAgentRun answerInquiry(Project project, String question) {
-        return answerInquiry(project, question, AnnotationAttachment.NONE);
+        return answerInquiry(project, question, MessageAttachment.NONE);
     }
 
     /**
@@ -521,7 +521,7 @@ public class MainAgentAppService {
     // ---------- 内部 ----------
 
     private MainAgentRun opinionTurn(Long projectId, String prompt,
-            List<AnnotationAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         Project project = requireUpdatableProject(projectId);
         String sessionId = sessionIdOf(projectId);
         requireNoPendingQuestion(project, sessionId);
@@ -529,7 +529,7 @@ public class MainAgentAppService {
         String runId = EventsAppService.newRunId();
         // 圈注随意见同句发送：渲染进主智能体 prompt 与交接物（意见原文）——结构化
         // 定位随链下到更新 run，执行体知道改哪里
-        String annotated = prompt + AnnotationPrompt.renderSuffix(attachments);
+        String annotated = prompt + AttachmentPrompt.renderSuffix(attachments);
         // 对话史落库（#89）：提交守卫全过后同步落用户发言（失败上抛撤回 REST 面——
         // 「落库 ⟺ 说过」不漂移）；智能体回复段在轮落定点写（见 recordTurnReply）。
         // attachments 原始 JSON 落库供刷新回显重建圈注 chip

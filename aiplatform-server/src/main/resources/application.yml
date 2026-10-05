@@ -24,6 +24,14 @@ spring:
       pageable:
         one-indexed-parameters: true
         default-page-size: 20
+  # multipart 上传（#286 物料上传，v1 唯一上传面）：业务上限 10MB 在应用层判
+  # （PRJ_043 如实报错），容器层 12MB 是防大流量直灌的硬闸——越闸请求由
+  # MultipartLimitEnvelopeAdvice 归一回同一业务码信封（Spring 缺省 1MB 会把
+  # 合法上传拦在业务层之外，必须显式配）
+  servlet:
+    multipart:
+      max-file-size: 12MB
+      max-request-size: 12MB
 
 # 机机调用签名（cartisan-openapi；与用户会话无关，ADR-0001）；
 # 默认枚举 Controller 关闭（扫描包默认 com.cartisan/com.example，用不到，避免契约噪音）

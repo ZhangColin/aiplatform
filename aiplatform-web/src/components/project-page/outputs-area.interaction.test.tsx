@@ -71,7 +71,7 @@ describe("OutputsArea ·「+ 新标签页」按注册表挂载", () => {
     setup();
 
     fireEvent.click(screen.getByRole("button", { name: "新标签页" }));
-    for (const label of ["文件树", "业务数据", "下单与发布", "运行命令与日志", "项目名、通知"]) {
+    for (const label of ["文件树", "业务数据", "下单与发布", "运行命令与日志", "终点类型"]) {
       fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(label) }));
       fireEvent.click(screen.getByRole("button", { name: "新标签页" }));
     }

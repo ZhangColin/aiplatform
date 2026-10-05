@@ -28,6 +28,7 @@ import com.aieducenter.aiplatform.business.order.domain.repository.OrderReposito
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
@@ -479,7 +480,7 @@ class OrderAppServiceTest {
 
     private void stubProject(ProjectStatus status, String prd) {
         when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
-                Long.toString(PROJECT_ID), "订单缝测试", ProjectType.WEBSITE, "官网", "9100",
+                Long.toString(PROJECT_ID), "订单缝测试", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9100",
                 status, status.getName(), status == ProjectStatus.ARCHIVED,
                 LocalDateTime.of(2026, 8, 31, 10, 0), null, null, null, null, null, null, null, null));
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(

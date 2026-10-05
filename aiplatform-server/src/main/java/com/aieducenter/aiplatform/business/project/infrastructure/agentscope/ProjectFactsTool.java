@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import io.agentscope.core.message.ToolResultBlock;
@@ -36,7 +37,8 @@ public class ProjectFactsTool extends ToolBase {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("查询本项目的事实清单：系统访问地址（预览地址，端口映射已落定——"
-                        + "「我后台的地址」以此为准）、项目名、状态（进行中/已归档）、创建时间、"
+                        + "「我后台的地址」以此为准）、项目名、终点类型（设计/系统/系统＋设计，"
+                        + "含设计范围——产出 PRD 前查形态用）、状态（进行中/已归档）、创建时间、"
                         + "PRD 产出时间、系统首次生成时间。答项目现状类问题时调用；"
                         + "账号密码不在此（在工作区文件里，用文件工具查证）。")
                 .inputSchema(Map.of("type", "object", "properties", Map.of()))
@@ -68,6 +70,12 @@ public class ProjectFactsTool extends ToolBase {
     private String factsOf(Project project) {
         StringBuilder facts = new StringBuilder("项目事实：\n");
         facts.append("- 项目名：").append(project.getName()).append('\n');
+        facts.append("- 终点类型：").append(project.getEndpointType().getName());
+        DesignScope scope = project.designScope();
+        if (scope != null) {
+            facts.append("（设计范围：").append(scope.describe()).append("）");
+        }
+        facts.append('\n');
         facts.append("- 状态：").append(project.getArchivedAt() != null ? "已归档" : "进行中").append('\n');
         facts.append("- 创建时间：").append(project.getCreatedAt()).append('\n');
         facts.append("- PRD 产出时间：")

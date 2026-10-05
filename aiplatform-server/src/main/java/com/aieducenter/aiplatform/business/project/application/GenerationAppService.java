@@ -461,6 +461,17 @@ public class GenerationAppService {
      */
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight, BuildPlan plan) {
         Long projectId = project.getId();
+        // 设计类终点收口（#285，ADR-0025）：设计主线交付设计资产包、系统＋设计设计
+        // 先行（构建从定稿设计稿长出）——系统生成轨道对两者都不派。设计过程编排
+        // 归设计线后续票；在途口径按调用方分岔（按钮拒绝 PRJ_042、收口自动静默跳过）。
+        if (project.getEndpointType().designInvolved()) {
+            if (rejectInFlight) {
+                throw new ApplicationException(ProjectMessage.GENERATION_DESIGN_ENDPOINT);
+            }
+            log.info("[generate] 项目 {} 终点类型为 {}，系统生成不派（设计线编排）",
+                    projectId, project.getEndpointType().getName());
+            return null;
+        }
         if (!codingRunTrack.begin(projectId)) {
             if (rejectInFlight) {
                 throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);

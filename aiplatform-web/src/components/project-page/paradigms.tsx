@@ -5,13 +5,14 @@ import type { ReactNode } from "react";
 
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { cn } from "@/lib/utils";
-import type { GenerationState } from "@/lib/projects/detail";
+import type { GenerationState, ProjectDetail } from "@/lib/projects/detail";
 import type { CoderRunStatus } from "@/lib/store/generation";
 
 import { PrdDoc } from "./prd-doc";
 import { FilesPanel } from "./files-panel";
 import { OrderPanel } from "./order-panel";
 import { PanelPlaceholder } from "./panel-placeholder";
+import { SettingsPanel } from "./settings-panel";
 import { SystemPanel } from "./system-panel";
 
 /**
@@ -37,6 +38,13 @@ export type ParadigmCtx = {
   activeOrderStatus?: number;
   /** 项目归档终态。 */
   projectArchived?: boolean;
+  /** 终点类型面（#285 设置 tab 控件输入）：type/范围事实与冻结锁态、PRD 在否。 */
+  endpoint?: {
+    type?: number;
+    designScope?: ProjectDetail["designScope"];
+    locked: boolean;
+    hasPrd: boolean;
+  };
   /** 发起生成成功回调（切系统范式呈现等待态），归装配层。 */
   onGenerated: () => void;
 };
@@ -124,11 +132,15 @@ export const PARADIGMS: Paradigm[] = [
     label: "设置",
     icon: <Settings className="size-3.5" />,
     defaultOn: false,
-    blurb: "项目名、通知等设置项",
-    render: () => (
-      <PanelPlaceholder icon={<Settings />} title="项目设置">
-        设置项将在这里开放；眼下要改什么，直接在对话里说
-      </PanelPlaceholder>
+    blurb: "终点类型（做系统 / 做设计）",
+    render: (ctx) => (
+      <SettingsPanel
+        projectId={ctx.projectId}
+        endpointType={ctx.endpoint?.type}
+        designScope={ctx.endpoint?.designScope}
+        locked={ctx.endpoint?.locked ?? true}
+        hasPrd={ctx.endpoint?.hasPrd ?? false}
+      />
     ),
   },
 ];

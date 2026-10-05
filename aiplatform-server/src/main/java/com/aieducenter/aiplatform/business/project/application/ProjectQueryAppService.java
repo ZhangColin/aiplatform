@@ -30,13 +30,16 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesPackage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DesignScopeResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -329,12 +332,24 @@ public class ProjectQueryAppService {
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
         GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
+                project.getEndpointType(), project.getEndpointType().getName(),
+                designScopeOf(project),
                 base.workspaceId(), base.status(), base.statusName(),
                 base.archived(), base.createdAt(), base.updatedAt(), project.getPrdProducedAt(),
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
                 orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
                 segmentsOf(project));
+    }
+
+    /** 设计范围响应拼装（#285）：无页面锚定（null 聚合读面）即 null。 */
+    private DesignScopeResponse designScopeOf(Project project) {
+        DesignScope scope = project.designScope();
+        if (scope == null) {
+            return null;
+        }
+        return new DesignScopeResponse(scope.type(), scope.type().getName(),
+                scope.type() == DesignScopeType.SELECTED_PAGES ? scope.pages() : List.of());
     }
 
     /**

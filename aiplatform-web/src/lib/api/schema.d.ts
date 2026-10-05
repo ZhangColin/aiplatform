@@ -335,7 +335,7 @@ export interface paths {
         put?: never;
         /**
          * 继续生成（断点续跑；首次发起同入口）
-         * @description 生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成 run，本端点是「继续生成」出口的载体——run-failed 或生成中断后项目仍「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；项目不存在 404 PRJ_001
+         * @description 生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成 run，本端点是「继续生成」出口的载体——run-failed 或生成中断后项目仍「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、系统＋设计设计先行——构建从定稿设计稿长出）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -358,6 +358,26 @@ export interface paths {
          * @description 更新 run 失败自动重试超限转终态后的人工兜底（与生成的「继续生成」对齐）：重派终态那场的更新任务——交接物沿用（同任务清单）、续同 coder-{projectId} 会话（建系统上下文保留），新 runId = 重派首试标识（挂 /api/events?runId= 的锚，恢复动作与新 run 的链路关系），重派事实落服务端日志可追溯。仅终态可达——正常流程全自动无手动触发：更新在途（进行中/排队中）409 PRJ_025；无终态账（未派过更新/已成功收工/平台重启丢账）409 PRJ_026（指路对话区重提意见）。已归档 409 PRJ_013；系统从未生成 409 PRJ_019；项目不存在 404 PRJ_001
          */
         post: operations["restartFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/endpoint-type": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 切换终点类型（设置 tab 终点控件＝项目内唯一变更位，#285）
+         * @description 终点类型（Integer code：1=设计 2=系统 3=系统＋设计）下单前可变、下单即冻结（转轨是对话之外类型变更的一等入口，ADR-0024）。切换落库后平台派主智能体切换重产轮：PRD 已产出即重产清单章（形态随终点类型走——设计＝设计物清单、系统/系统＋设计＝功能清单〔后者设计硬约束入关键约束〕），访谈期即转向通告；过程经 SSE agent=main 可见。作用域：系统→设计类切换（PRD 已产出、功能清单在）必带 scopeType（1=全部页面 2=勾选页面，缺选 400 PRJ_040），勾选形 scopePages（功能清单条目标签）非空（空集 400 PRJ_041）；范围仅系统＋设计落库（设计主线由 PRD 设计物清单章承载）。同目标幂等无操作。已归档 409 PRJ_013；订单处理中 409 ORD_006（取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；项目不存在 404 PRJ_001
+         */
+        post: operations["switchEndpoint"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2293,6 +2313,12 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        DesignScopeResponse: {
+            /** @description 1=全部页面, 2=勾选页面 */
+            type?: number;
+            typeName?: string;
+            pages?: string[];
+        };
         GenerationSegmentResponse: {
             /** Format: int32 */
             ord?: number;
@@ -2317,6 +2343,10 @@ export interface components {
             /** @description 1=官网, 2=电商 */
             type?: number;
             typeName?: string;
+            /** @description 1=设计, 2=系统, 3=系统＋设计 */
+            endpointType?: number;
+            endpointTypeName?: string;
+            designScope?: components["schemas"]["DesignScopeResponse"];
             workspaceId?: string;
             /** @description 1=进行中, 3=已归档 */
             status?: number;
@@ -2496,6 +2526,13 @@ export interface components {
         };
         FixRestartResponse: {
             runId?: string;
+        };
+        SwitchEndpointTypeCommand: {
+            /** @description 1=设计, 2=系统, 3=系统＋设计 */
+            endpointType: number;
+            /** @description 1=全部页面, 2=勾选页面 */
+            scopeType?: number;
+            scopePages?: string[];
         };
         ApiResponseBackofficeWorkspaceDetailResponse: {
             /** Format: int32 */
@@ -4116,6 +4153,32 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseFixRestartResponse"];
+                };
+            };
+        };
+    };
+    switchEndpoint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchEndpointTypeCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseProjectDetailResponse"];
                 };
             };
         };

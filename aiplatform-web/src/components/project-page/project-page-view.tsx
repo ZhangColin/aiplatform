@@ -194,6 +194,13 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
               orderCardId,
               activeOrderStatus: detail?.activeOrder?.status,
               projectArchived: !!detail?.archived,
+              endpoint: {
+                type: detail?.endpointType,
+                designScope: detail?.designScope,
+                // 下单即冻结（#285）：未终结订单在或已归档，终点类型不可变更
+                locked: !!detail?.archived || !!detail?.activeOrder?.id,
+                hasPrd: !!detail?.prdProducedAt,
+              },
               onGenerated: () => openOutputsTo("system"),
             }}
             onClose={() => setOutputsOpen(false)}

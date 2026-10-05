@@ -45,8 +45,12 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DesignScopeResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
@@ -195,8 +199,68 @@ class ProjectControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value("100"))
                 .andExpect(jsonPath("$.data.name").value("官网 demo"))
+                .andExpect(jsonPath("$.data.endpointType").value(2))
+                .andExpect(jsonPath("$.data.endpointTypeName").value("系统"))
+                .andExpect(jsonPath("$.data.designScope").doesNotExist())
                 .andExpect(jsonPath("$.data.status").value(1))
                 .andExpect(jsonPath("$.data.archived").value(false));
+    }
+
+    @Test
+    void given_switch_command_when_endpoint_type_then_detail_returned_with_enum_binding() throws Exception {
+        // 终点控件动作端点（#285）：Integer code 双向（BaseEnum 契约），响应与详情同构
+        when(appService.switchEndpoint(eq(100L), argThat(command ->
+                command != null && command.endpointType() == ProjectEndpointType.SYSTEM_DESIGN
+                        && command.scopeType() == DesignScopeType.SELECTED_PAGES)))
+                .thenReturn(new ProjectDetailResponse("100", "官网 demo", ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计",
+                        new DesignScopeResponse(DesignScopeType.SELECTED_PAGES, "勾选页面",
+                                List.of("首页：展示产品与入口")),
+                        "900", ProjectStatus.IN_PROGRESS, "进行中", false,
+                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
+                        GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
+                        null, null, null));
+
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":3,\"scopeType\":2,"
+                                + "\"scopePages\":[\"首页：展示产品与入口\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.endpointType").value(3))
+                .andExpect(jsonPath("$.data.endpointTypeName").value("系统＋设计"))
+                .andExpect(jsonPath("$.data.designScope.type").value(2))
+                .andExpect(jsonPath("$.data.designScope.pages[0]").value("首页：展示产品与入口"));
+    }
+
+    @Test
+    void given_switch_without_endpoint_type_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+        verify(appService, never()).switchEndpoint(any(), any());
+    }
+
+    @Test
+    void given_switch_with_unknown_endpoint_code_then_rejected_with_legal_values() throws Exception {
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(appService, never()).switchEndpoint(any(), any());
+    }
+
+    @Test
+    void given_frozen_project_when_switch_then_ord_006_mapped_to_409() throws Exception {
+        when(appService.switchEndpoint(eq(100L), any()))
+                .thenThrow(new ApplicationException(OrderMessage.ORDER_FROZEN));
+
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":1,\"scopeType\":1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5006))
+                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FROZEN.message()));
     }
 
     @Test
@@ -366,6 +430,7 @@ class ProjectControllerTest {
         // 动作端点风格同 archive；响应与详情端点同构（前端 invalidate 后刷新列表/顶栏）
         when(appService.rename(100L, "品牌官网")).thenReturn(
                 new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM, "系统", null,
                         "900", ProjectStatus.IN_PROGRESS, "进行中", false,
                         LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
                         GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
@@ -829,6 +894,7 @@ class ProjectControllerTest {
             LocalDateTime prdProducedAt, GenerationState generationState,
             List<GenerationSegmentResponse> segments) {
         return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
+                ProjectEndpointType.SYSTEM, "系统", null,
                 "900", status, status.getName(), archived,
                 LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null,
                 generationState, generationState.getName(), null, null, segments);

@@ -1,11 +1,16 @@
 package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import com.cartisan.core.exception.DomainException;
 
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -161,5 +166,77 @@ class ProjectTest {
         assertThatThrownBy(project::archive)
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
+    }
+
+    @Test
+    void given_new_project_when_create_then_endpoint_defaults_system() {
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        // 入口面（门面票）落地前一律缺省系统；终点类型随建即有（NOT NULL 列语义）
+        assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM);
+        assertThat(project.designScope()).isNull(); // 系统终点无设计范围
+    }
+
+    @Test
+    void given_system_project_when_switch_to_system_design_then_scope_persisted() {
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN,
+                DesignScope.selected(List.of("首页：展示产品与入口", "订单管理：下单与查看订单")));
+
+        assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM_DESIGN);
+        assertThat(project.designScope().type()).isEqualTo(DesignScopeType.SELECTED_PAGES);
+        assertThat(project.designScope().pages()).containsExactly(
+                "首页：展示产品与入口", "订单管理：下单与查看订单");
+    }
+
+    @Test
+    void given_system_project_when_switch_to_design_then_scope_not_persisted() {
+        // 设计主线的计划对应物＝PRD 设计物清单章——范围不落库（防两处正本），
+        // 作用域只作为切换指令的输入由编排消费（编排对设计目标传 null 进聚合）
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        project.switchEndpoint(ProjectEndpointType.DESIGN, null);
+
+        assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN);
+        assertThat(project.designScope()).isNull();
+    }
+
+    @Test
+    void given_design_project_when_switch_to_system_design_without_scope_then_allowed() {
+        // 设计主线出身（转系统开发）：不由功能清单页面锚定，范围留空合法
+        Project project = Project.create("海报设计", null, 1L, null);
+        project.switchEndpoint(ProjectEndpointType.DESIGN, null);
+
+        project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
+
+        assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM_DESIGN);
+        assertThat(project.designScope()).isNull();
+    }
+
+    @Test
+    void given_scope_pages_when_selected_with_blanks_then_rejected() {
+        // 空白剔除后为空集即拒绝——不做设计不是部分设计（Arrays.asList 容 null 元素）
+        assertThatThrownBy(() -> DesignScope.selected(java.util.Arrays.asList(" ", null, "")))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(ProjectMessage.DESIGN_SCOPE_PAGES_REQUIRED.message());
+    }
+
+    @Test
+    void given_design_scope_when_describe_then_range_sentence() {
+        assertThat(DesignScope.allPages().describe()).isEqualTo("全部页面");
+        assertThat(DesignScope.selected(List.of("首页", "订单页")).describe())
+                .isEqualTo("勾选页面（功能清单）：首页、订单页");
+    }
+
+    @Test
+    void given_non_design_target_when_switch_with_scope_then_domain_error() {
+        // 范围只随系统＋设计落库——设计与系统目标携带范围即命令不完整
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        assertThatThrownBy(() -> project.switchEndpoint(ProjectEndpointType.SYSTEM,
+                DesignScope.allPages()))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_FIELDS_INCOMPLETE.message());
     }
 }

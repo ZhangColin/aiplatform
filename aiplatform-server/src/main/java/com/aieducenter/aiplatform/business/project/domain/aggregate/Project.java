@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,8 +16,11 @@ import com.cartisan.core.stereotype.Aggregate;
 import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 
 /**
  * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
@@ -53,6 +57,15 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "type", nullable = false, updatable = false)
     private ProjectType type;
 
+    /**
+     * 终点类型（#285，ADR-0024「项目不分型、终点是属性」）：下单前可变（切换
+     * 编排归 {@link #switchEndpoint}，项目内唯一变更位＝设置 tab 控件）、下单即
+     * 冻结（守卫归编排）。入口两档显式选择定初值（门面票落地前一律缺省系统）。
+     * PRD 清单章形态跟本属性走（技能 prd-writing 双形态选择键）。
+     */
+    @Column(name = "endpoint_type", nullable = false)
+    private ProjectEndpointType endpointType;
+
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
 
@@ -81,6 +94,21 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "generated_at")
     private LocalDateTime generatedAt;
 
+    /**
+     * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
+     * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
+     * 设计主线出身不由页面锚定时为 NULL。
+     */
+    @Column(name = "design_scope_type")
+    private DesignScopeType designScopeType;
+
+    /**
+     * 设计范围勾选页标签（#285）：功能清单条目原文 jsonb（建议性锚——PRD 是模型
+     * 独笔演进的正本，标签不构成稳定标识）；作用域为全部页面或无范围时 NULL。
+     */
+    @Column(name = "design_scope_pages", columnDefinition = "jsonb")
+    private List<String> designScopePages;
+
     protected Project() {
     }
 
@@ -93,16 +121,55 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         }
         this.name = name;
         this.type = ProjectType.orDefault(type);
+        this.endpointType = ProjectEndpointType.SYSTEM;
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
     }
 
     /**
-     * 建项目（编排在工作区副作用落定后调用，短事务落库）。
+     * 建项目（编排在工作区副作用落定后调用，短事务落库）。终点类型入口两档显式
+     * 选择定初值（门面票 #299 落地前的机制位）：建项目恒缺省系统，选「做设计」
+     * 进项目后经设置 tab 切换（#285 测试期口径）。
      */
     public static Project create(String name, ProjectType type,
                                  Long workspaceId, Long ownerAccountId) {
         return new Project(name, type, workspaceId, ownerAccountId);
+    }
+
+    /**
+     * 切换终点类型（#285，设置 tab 控件＝项目内唯一变更位）：纯属性落位——冻结
+     * （未终结订单）/关闭（归档）守卫与「同目标即无操作」判定归编排；设计范围
+     * 只随系统＋设计落库（其余目标清空——设计主线的范围由 PRD 设计物清单章承载，
+     * 不另存正本防两处漂移）。
+     */
+    public void switchEndpoint(ProjectEndpointType target, DesignScope scope) {
+        if (target == null || (scope != null && target != ProjectEndpointType.SYSTEM_DESIGN)) {
+            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
+        }
+        this.endpointType = target;
+        if (target == ProjectEndpointType.SYSTEM_DESIGN && scope != null) {
+            this.designScopeType = scope.type();
+            this.designScopePages = scope.type() == DesignScopeType.SELECTED_PAGES
+                    ? List.copyOf(scope.pages()) : null;
+        }
+        else {
+            this.designScopeType = null;
+            this.designScopePages = null;
+        }
+    }
+
+    /**
+     * 设计范围读面（{@link DesignScope} 组装）：无锚定（非系统＋设计或不由页面
+     * 锚定）返回 null。
+     */
+    public DesignScope designScope() {
+        if (designScopeType == null) {
+            return null;
+        }
+        if (designScopeType == DesignScopeType.ALL_PAGES) {
+            return DesignScope.allPages();
+        }
+        return DesignScope.selected(designScopePages == null ? List.of() : designScopePages);
     }
 
     /**

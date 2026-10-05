@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
@@ -15,6 +16,10 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param name                项目名
  * @param type                项目类型（code）
  * @param typeName            项目类型名
+ * @param endpointType        终点类型（code：1=设计 2=系统 3=系统＋设计，#285——
+ *                            下单前可变、下单即冻结；PRD 清单章形态的选择键）
+ * @param endpointTypeName    终点类型名
+ * @param designScope         设计范围（系统＋设计的页面锚定范围；null = 无页面锚定）
  * @param workspaceId         dev 工作区标识
  * @param status              派生项目状态（code）：IN_PROGRESS / ARCHIVED（归档优先）
  * @param statusName          派生状态名
@@ -45,6 +50,9 @@ public record ProjectDetailResponse(
         String name,
         ProjectType type,
         String typeName,
+        ProjectEndpointType endpointType,
+        String endpointTypeName,
+        DesignScopeResponse designScope,
         String workspaceId,
         ProjectStatus status,
         String statusName,

@@ -19,13 +19,18 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
+import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -64,6 +69,7 @@ public class ProjectLifecycleAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final GenerationSegmentRepository generationSegments;
     private final SkillDraftAppService skillDrafts;
+    private final OrderQueryAppService orderQueryAppService;
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -77,6 +83,7 @@ public class ProjectLifecycleAppService {
                                       ConversationHistoryAppService conversationHistory,
                                       GenerationSegmentRepository generationSegments,
                                       SkillDraftAppService skillDrafts,
+                                      OrderQueryAppService orderQueryAppService,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
@@ -89,6 +96,7 @@ public class ProjectLifecycleAppService {
         this.conversationHistory = conversationHistory;
         this.generationSegments = generationSegments;
         this.skillDrafts = skillDrafts;
+        this.orderQueryAppService = orderQueryAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -163,6 +171,66 @@ public class ProjectLifecycleAppService {
         project.rename(name); // 取名落位与用户改名共用同一行为
         projectRepository.save(project);
         return queryAppService.detail(projectId);
+    }
+
+    /**
+     * 切换终点类型（#285，设置 tab 终点控件＝项目内唯一变更位，ADR-0024/0025）：
+     * 下单前可变——归档关闭（PRJ_013）、未终结订单冻结（ORD_006，取消即解冻）；
+     * 同目标幂等无操作（不派重产轮）。切换落库后派主智能体切换重产轮
+     * （{@link MainAgentAppService#requestEndpointShift}——PRD 清单章随终点类型
+     * 走形重产，访谈期即转向通告）；挂起问答守卫先于落库同步判定（拒绝即零副作用）。
+     * 设计范围（系统→设计类切换受理时选）：仅系统＋设计落库（设计主线的范围由
+     * PRD 设计物清单章承载）；重产指令携范围（勾选标签＝功能清单条目原文）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档；ORD_006 订单
+     *                              处理中；PRJ_024 挂起问答待答；PRJ_040 设计范围
+     *                              缺选；PRJ_041 勾选页面空集
+     */
+    public ProjectDetailResponse switchEndpoint(Long projectId, SwitchEndpointTypeCommand command) {
+        Project project = requireProject(projectId);
+        ProjectEndpointType previous = project.getEndpointType();
+        ProjectEndpointType target = command.endpointType();
+        if (target == previous) {
+            return queryAppService.detail(projectId); // 同目标幂等：无操作不派轮（先于守卫——无变更即无冻结/挂起可言）
+        }
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        orderQueryAppService.requireNoActiveOrder(projectId);
+        mainAgentAppService.requireEndpointShiftable(projectId);
+
+        DesignScope inputScope = resolveScope(command,
+                /* required= */ previous == ProjectEndpointType.SYSTEM
+                        && target.designInvolved() && project.getPrdProducedAt() != null);
+        // 指令范围：输入优先；系统＋设计→设计（无输入）沿用已存范围锚定设计物
+        DesignScope directiveScope = inputScope != null ? inputScope
+                : (previous == ProjectEndpointType.SYSTEM_DESIGN ? project.designScope() : null);
+
+        project.switchEndpoint(target, target == ProjectEndpointType.SYSTEM_DESIGN ? inputScope : null);
+        projectRepository.save(project);
+
+        String prompt = MainAgentAppService.endpointShiftPrompt(previous, target, directiveScope,
+                project.getPrdProducedAt() != null);
+        mainAgentAppService.requestEndpointShift(projectId, prompt);
+        return queryAppService.detail(projectId);
+    }
+
+    /**
+     * 设计范围命令解析：作用域缺选按需判 PRJ_040（系统→设计类且功能清单在——
+     * 范围无从锚定才必填，访谈期切换无清单可勾不逼选）；勾选形空集 PRJ_041
+     * （聚合抛出）；全部页面形无标签集。
+     */
+    private DesignScope resolveScope(SwitchEndpointTypeCommand command, boolean required) {
+        if (command.scopeType() == null) {
+            if (required) {
+                throw new ApplicationException(ProjectMessage.ENDPOINT_SCOPE_REQUIRED);
+            }
+            return null;
+        }
+        if (command.scopeType() == DesignScopeType.SELECTED_PAGES) {
+            return DesignScope.selected(command.scopePages());
+        }
+        return DesignScope.allPages();
     }
 
     /**

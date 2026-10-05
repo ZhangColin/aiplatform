@@ -27,6 +27,7 @@ import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleA
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -96,7 +97,7 @@ class OrderPaymentArchiveTest {
     @BeforeEach
     void stubProject() {
         when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
-                Long.toString(PROJECT_ID), "宠物店官网", ProjectType.WEBSITE, "官网", "9200",
+                Long.toString(PROJECT_ID), "宠物店官网", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9200",
                 ProjectStatus.IN_PROGRESS, "进行中", false,
                 LocalDateTime.of(2026, 9, 1, 9, 0), null, null, null, null, null, null, null, null));
         when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))

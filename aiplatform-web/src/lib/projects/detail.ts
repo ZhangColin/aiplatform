@@ -64,6 +64,12 @@ export type ProjectDetail = {
   statusName?: string;
   archived?: boolean;
   createdAt?: string;
+  /** 终点类型（#285，Integer code：1=设计 2=系统 3=系统＋设计；缺省 = 旧后端，按系统兜底）。 */
+  endpointType?: number;
+  /** 终点类型名（后端 *Name 随行；缺省时消费端用 ENDPOINT_OPTIONS 文案兜底）。 */
+  endpointTypeName?: string;
+  /** 设计范围（系统＋设计的页面锚定；null = 无页面锚定）。 */
+  designScope?: { type: number; typeName?: string; pages?: string[] | null } | null;
   /** PRD 产出时点（成果区长出判据；缺省 = 闲聊期，对话区占满全宽）。 */
   prdProducedAt?: string | null;
   /** 首次生成时点（run 成功收口单向置位；缺省 = 未生成过——生成自动发起或失败重发）。 */
@@ -86,12 +92,27 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     statusName: raw.statusName,
     archived: raw.archived,
     createdAt: raw.createdAt,
+    endpointType: raw.endpointType,
+    endpointTypeName: raw.endpointTypeName,
+    designScope: normalizeDesignScope(raw.designScope),
     prdProducedAt: raw.prdProducedAt,
     generatedAt: raw.generatedAt,
     generationState: generationStateOf(raw.generationState),
     activeOrder: normalizeActiveOrder(raw.activeOrder),
     latestOrder: normalizeActiveOrder(raw.latestOrder),
     segments: normalizeSegments(raw.segments),
+  };
+}
+
+/** 设计范围（#285）→ 消费口径（无 type 视为无范围）。 */
+function normalizeDesignScope(
+  raw: ProjectDetailResponse["designScope"],
+): ProjectDetail["designScope"] {
+  if (!raw || raw.type == null) return null;
+  return {
+    type: raw.type,
+    typeName: raw.typeName ?? undefined,
+    pages: raw.pages ?? null,
   };
 }
 

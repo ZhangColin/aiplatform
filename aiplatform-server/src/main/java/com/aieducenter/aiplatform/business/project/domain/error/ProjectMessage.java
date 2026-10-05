@@ -115,7 +115,13 @@ public enum ProjectMessage implements CodeMessage {
     MATERIAL_UPLOAD_TOO_LARGE(400, "PRJ_043", "文件太大，单张图片不能超过 10MB"),
 
     /** 物料上传守卫：格式不符（只收 png/jpg/webp/gif/svg 五格式，按扩展名判定）。 */
-    MATERIAL_UPLOAD_FORMAT_INVALID(400, "PRJ_044", "只支持 png、jpg、webp、gif、svg 格式的图片");
+    MATERIAL_UPLOAD_FORMAT_INVALID(400, "PRJ_044", "只支持 png、jpg、webp、gif、svg 格式的图片"),
+
+    // ========== 出图工具件内核（#288，ADR-0026/27——四家供数方＋按张计量＋转存） ==========
+
+    /** 出图守卫：图片生成供应商未配置（无 active 适配器——运营侧配 app.image-generation.provider
+     *  与对应 key 环境变量后即恢复，平台照常起不静默降级）。 */
+    IMAGE_PROVIDER_UNCONFIGURED(503, "PRJ_045", "图片生成供应商未配置，暂时无法出图");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

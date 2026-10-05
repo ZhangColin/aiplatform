@@ -25,9 +25,11 @@ public enum MeteringMessage implements CodeMessage {
 
     // METER_009 曾是「无效的单价行过滤参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
 
-    PRICE_ENTRY_CURRENCY_UNKNOWN(400, "METER_010", "单价币种非 ISO 4217 代码");
+    PRICE_ENTRY_CURRENCY_UNKNOWN(400, "METER_010", "单价币种非 ISO 4217 代码"),
 
     // METER_011 曾是「无效的成本查询参数」，随过滤参数绑定失败骑框架（#199）注销，码位不复用
+
+    USAGE_IMAGES_NEGATIVE(400, "METER_012", "用量张数不能为负数");
 
     private final int httpStatus;
     private final String code;

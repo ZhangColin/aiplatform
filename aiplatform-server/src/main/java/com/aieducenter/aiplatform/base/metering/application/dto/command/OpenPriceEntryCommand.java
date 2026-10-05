@@ -15,9 +15,9 @@ import com.aieducenter.aiplatform.base.metering.domain.enums.TokenKind;
  *
  * @param provider      模型提供方
  * @param model         模型
- * @param tokenKind     token 档位（契约 Integer code：1=input 2=output 3=cache_read
- *                      4=cache_write 5=reasoning，TokenKind 房规）
- * @param unitPrice     每 token 单价（非负；0＝免费档）
+ * @param tokenKind     档位（契约 Integer code：1=input 2=output 3=cache_read
+ *                      4=cache_write 5=reasoning 6=image〔按张，#288〕，TokenKind 房规）
+ * @param unitPrice     档位单价（token 档每 token、按张档每张；非负；0＝免费档）
  * @param currency      币种（ISO 4217 代码，如 USD）
  * @param effectiveFrom 生效起点（可空＝缺省即时；可回溯——种子口径 2026-01-01
  *                      敞口覆盖存量事件；含未来时点＝预发布；同键重叠 METER_008）

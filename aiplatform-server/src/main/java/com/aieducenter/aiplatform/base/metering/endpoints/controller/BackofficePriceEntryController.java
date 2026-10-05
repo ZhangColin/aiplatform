@@ -71,7 +71,7 @@ public class BackofficePriceEntryController {
                     + "即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口"
                     + "覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补"
                     + "同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer"
-                    + " code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning）。"
+                    + " code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。"
                     + "X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本"
                     + "即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217"
                     + " 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。"

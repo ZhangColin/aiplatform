@@ -109,6 +109,30 @@ app:
   web-search:
     base-url: https://api.bocha.cn
     api-key: ${BOCHA_API_KEY:}
+  # #288 · business.project 出图工具件内核（ADR-0026/27）：图片生成供数方四家全接、
+  # 按供应商选适配器（provider 键＝zhipu/volcano/openai/dashscope，词表与计量
+  # UsageEvent.provider 同源）；空＝未配置（出图如实 PRJ_045，平台照常起）。key
+  # 只落环境变量（.env.local，gitignored）不进 git；model 各家可换（计量随改走
+  # 适配器自报）。技术失败有限自动重试（含首次，对偶 #63 置备重试上界）。
+  image-generation:
+    provider: ${IMAGE_GEN_PROVIDER:}
+    max-attempts: 3
+    zhipu:
+      base-url: https://open.bigmodel.cn
+      api-key: ${ZHIPU_API_KEY:}
+      model: glm-image
+    volcano:
+      base-url: https://ark.cn-beijing.volces.com
+      api-key: ${ARK_API_KEY:}
+      model: doubao-seedream-5-0-260128
+    openai:
+      base-url: https://api.openai.com
+      api-key: ${OPENAI_IMAGE_API_KEY:}
+      model: gpt-image-2.5-sunburst
+    dashscope:
+      base-url: https://dashscope.aliyuncs.com
+      api-key: ${DASHSCOPE_API_KEY:}
+      model: qwen-image-3.0
 
 # A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
 # 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本地开发启动.md。

@@ -19,7 +19,7 @@ import com.aieducenter.aiplatform.base.metering.domain.aggregate.PriceEntry;
  * @param id             单价行标识（TSID 十进制字符串）
  * @param provider       模型提供方
  * @param model          模型
- * @param tokenKind      token 档位 code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning）
+ * @param tokenKind      token 档位 code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））
  * @param tokenKindName  token 档位名（直读展示）
  * @param unitPrice      每 token 单价（精确十进制串）
  * @param currency       币种（ISO 4217）

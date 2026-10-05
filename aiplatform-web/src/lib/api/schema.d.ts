@@ -780,7 +780,7 @@ export interface paths {
         put?: never;
         /**
          * 开行（空键首行——种子脚本通道）
-         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning）。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
+         * @description 对指定匹配键（provider × model × tokenKind）新开一行敞口区间——写口唯一化到管理 API 后唯一的初始插入通道（#165：种子数据经幂等签名脚本走本端点种入，脚本侧幂等＝匹配键已有任意行即不再开行）。effectiveFrom 可回溯（种子口径 2026-01-01 敞口覆盖存量事件）、可指定未来时点（预发布），缺省即时。服务端补同键生效区间重叠校验（改价同款）。tokenKind 契约为 Integer code（1=input 2=output 3=cache_read 4=cache_write 5=reasoning 6=image（按张，#288））。X-User-Id/X-User-Name 透传头自动落痕新行（缺头落空——种子脚本即落空口径）。字段不完整/单价负数 400 METER_004；币种非 ISO 4217 400 METER_010；区间重叠（跨区间或同起点）409 METER_008。需要机机签名
          *
          *     错误码：
          *     - 400 METER_004 — 单价行字段不完整
@@ -2783,7 +2783,7 @@ export interface components {
         OpenPriceEntryCommand: {
             provider?: string;
             model?: string;
-            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理 */
+            /** @description 1=输入, 2=输出, 3=缓存读, 4=缓存写, 5=推理, 6=按张 */
             tokenKind?: number;
             /**
              * @description 每 token 单价（入参侧为 number；非负，0＝免费档。响应侧读回为十进制字符串——两侧类型有意不对称，照实各自呈现）

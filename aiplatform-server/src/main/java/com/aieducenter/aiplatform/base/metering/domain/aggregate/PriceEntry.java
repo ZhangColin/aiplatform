@@ -23,7 +23,8 @@ import com.aieducenter.aiplatform.base.metering.domain.model.Operator;
 
 /**
  * 单价行（{@code met_price_entries}，A6 §1）：provider × model × 档位 × 币种 ×
- * 生效区间的每 token 单价——平台成本换算的匹配数据，base.metering 私有表（不经
+ * 生效区间的档位单价（token 档位每 token、按张档每张——#288 档位维度扩「token
+ * 档位与按张」）——平台成本换算的匹配数据，base.metering 私有表（不经
  * 端口暴露，业务层零感知）。
  *
  * <p><b>改价 = 关旧行开新行</b>（append 式不 UPDATE 单价）：{@code unitPrice} 等

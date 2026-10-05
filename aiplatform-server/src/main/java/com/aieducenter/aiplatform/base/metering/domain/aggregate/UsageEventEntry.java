@@ -25,9 +25,11 @@ import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
  * 用量事件聚合根（{@code met_usage_events}）：append-only 事件日志行，无状态迁移。
  *
  * <p>{@code eventId} 是调用方生成的幂等键，直接作主键（重复上报 first-write-wins，
- * 主键即幂等约束）；五档 token 列互斥分解（见 {@link TokenUsage}）；dims 透传存储
- * （null/空归一为 NULL，分维度聚合自然跳过）。ID 由调用方显式赋值（先于落库存在），
- * 只插入不更新——全业务列 {@code updatable = false}。</p>
+ * 主键即幂等约束）；五档 token 列互斥分解（见 {@link TokenUsage}）；{@code images}
+ * 按张用量列（#288 图片生成计量事件——与 token 五档并列不混算，按张事件五档为零、
+ * token 事件张数为零）；dims 透传存储（null/空归一为 NULL，分维度聚合自然跳过）。
+ * ID 由调用方显式赋值（先于落库存在），只插入不更新——全业务列
+ * {@code updatable = false}。</p>
  */
 @Entity
 @Table(name = "met_usage_events")
@@ -76,6 +78,10 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
     @Column(name = "reasoning", nullable = false, updatable = false)
     private long reasoning;
 
+    /** 按张用量（#288 图片生成）：按张事件张数 > 0、五档 token 为零。 */
+    @Column(name = "images", nullable = false, updatable = false)
+    private long images;
+
     protected UsageEventEntry() {
     }
 
@@ -94,6 +100,7 @@ public class UsageEventEntry extends Auditable implements AggregateRoot<UsageEve
         this.cacheRead = tokens.cacheRead();
         this.cacheWrite = tokens.cacheWrite();
         this.reasoning = tokens.reasoning();
+        this.images = event.images();
     }
 
     /**

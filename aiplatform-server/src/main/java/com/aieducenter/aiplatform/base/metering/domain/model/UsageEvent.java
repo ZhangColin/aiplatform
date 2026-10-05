@@ -3,16 +3,22 @@ package com.aieducenter.aiplatform.base.metering.domain.model;
 import java.time.Instant;
 import java.util.Map;
 
+import com.cartisan.core.exception.DomainException;
+
+import com.aieducenter.aiplatform.base.metering.domain.error.MeteringMessage;
+
 /**
- * 用量事件协议（A1 §2.2，研究稿 F4.2 照收）：一次上报 = 一条 run 级 token 记录。
+ * 用量事件协议（A1 §2.2，研究稿 F4.2 照收）：一次上报 = 一条 run 级计量记录。
  *
  * <p>字段语义：{@code eventId} 调用方生成的幂等键（重复上报 first-write-wins）；
  * {@code subject} 不透明归属 id（业务层传 projectId，底座不解释）；{@code runId}/
  * {@code sessionId} 运行与会话寻址（可空——非 run 级来源可不带）；{@code provider}/
  * {@code model} 模型标识（单价表匹配键——无引擎维度，单栈后引擎不进协议）；
  * {@code dims} 业务维度透传（终态口径 projectId + agentKind(ba/coder) + sessionId，
- * 底座不解释，可空）；{@code tokens} 五档互斥分解（见 {@link TokenUsage}）。
- * run 级一条：step-finish 增量求和是 adapter 内部实现，不进协议。</p>
+ * 底座不解释，可空）；{@code tokens} 五档互斥分解（见 {@link TokenUsage}）；
+ * {@code images} 按张用量（#288 图片生成与模型调用并列的计量事件——按张事件
+ * token 五档为零、token 事件张数为零，两量并列不混算）。run 级一条：
+ * step-finish 增量求和是 adapter 内部实现，不进协议。</p>
  */
 public record UsageEvent(
         String eventId,
@@ -23,11 +29,25 @@ public record UsageEvent(
         String provider,
         String model,
         Map<String, String> dims,
-        TokenUsage tokens) {
+        TokenUsage tokens,
+        long images) {
 
     /**
      * 维度键：智能体种类（dims 协议词表之一——写侧终态口径成分，读侧分智能体
      * 分桶按此过滤；键名非用户输入，内联常量不占位）。
      */
     public static final String DIM_KEY_AGENT_KIND = "agentKind";
+
+    public UsageEvent {
+        if (images < 0) {
+            throw new DomainException(MeteringMessage.USAGE_IMAGES_NEGATIVE);
+        }
+    }
+
+    /** token 事件便捷构造（按张用量 = 0；既有模型调用计量口径不变）。 */
+    public UsageEvent(
+            String eventId, Instant ts, String subject, String runId, String sessionId,
+            String provider, String model, Map<String, String> dims, TokenUsage tokens) {
+        this(eventId, ts, subject, runId, sessionId, provider, model, dims, tokens, 0);
+    }
 }

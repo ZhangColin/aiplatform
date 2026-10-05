@@ -35,15 +35,17 @@ import com.aieducenter.aiplatform.base.metering.domain.repository.UsageEventAggr
  * 各组数字自洽（总量 = 各分模型之和 = 各分维度之和；cost = 窗口内已配价分量的
  * 币种分桶和）。
  *
- * <p>换算（A6 §2，查询侧现算不物化）：事件五档经 {@code CROSS JOIN LATERAL VALUES}
- * 展开后与单价表按 (provider, model, kind) + ts 落 {@code [effective_from,
- * effective_to)} 区间匹配，金额按币种分桶不折算；有 token 无生效单价行的
- * (provider, model, 档位) 进 unpriced（分量不进 cost，不伪装 0、不阻断查询）。</p>
+ * <p>换算（A6 §2，查询侧现算不物化）：事件档位（token 五档＋按张，#288）经
+ * {@code CROSS JOIN LATERAL VALUES} 展开后与单价表按 (provider, model, kind) + ts 落
+ * {@code [effective_from, effective_to)} 区间匹配，金额按币种分桶不折算；有用量
+ * 无生效单价行的 (provider, model, 档位) 进 unpriced（分量不进 cost，不伪装 0、
+ * 不阻断查询）。</p>
  */
 @Component
 public class UsageEventAggregationsImpl implements UsageEventAggregations {
 
-    /** 五档 SUM 清单（表别名恒为 e，分模型/分维度两查询共用）。 */
+    /** 五档 SUM 清单（表别名恒为 e，分模型/分维度两查询共用）。token 总量不含
+     *  按张列——张与 token 并列不混算（#288），张只进成本/未配价的档位展开。 */
     private static final String TOKEN_SUMS =
             "SUM(e.input), SUM(e.output), SUM(e.cache_read), SUM(e.cache_write), SUM(e.reasoning)";
 
@@ -53,17 +55,19 @@ public class UsageEventAggregationsImpl implements UsageEventAggregations {
                     + "COALESCE(SUM(e.cache_read), 0), COALESCE(SUM(e.cache_write), 0), "
                     + "COALESCE(SUM(e.reasoning), 0)";
 
-    /** 五档 ↔ token 列名（VALUES 展开素材，与 TokenUsage 五档同序）。 */
+    /** 档位 ↔ 用量列（VALUES 展开素材）：token 五档与 TokenUsage 五档同序，末位
+     *  按张档（#288）对应 images 列——成本换算与未配价对六档同一公式。 */
     private static final List<Map.Entry<TokenKind, String>> KIND_COLUMNS = List.of(
             Map.entry(TokenKind.INPUT, "input"),
             Map.entry(TokenKind.OUTPUT, "output"),
             Map.entry(TokenKind.CACHE_READ, "cache_read"),
             Map.entry(TokenKind.CACHE_WRITE, "cache_write"),
-            Map.entry(TokenKind.REASONING, "reasoning"));
+            Map.entry(TokenKind.REASONING, "reasoning"),
+            Map.entry(TokenKind.IMAGE, "images"));
 
     /**
-     * 五档展开 VALUES 子句（表别名恒为 e）：(token_kind code, 该档 token 列)——
-     * 成本换算与未配价标注共用的展开素材（kind 落库值单点取自 {@link TokenKind}）。
+     * 档位展开 VALUES 子句（表别名恒为 e）：(kind code, 该档用量列)——成本换算与
+     * 未配价标注共用的展开素材（kind 落库值单点取自 {@link TokenKind}）。
      */
     private static final String KIND_VALUES = KIND_COLUMNS.stream()
             .map(kindColumn -> "(" + kindColumn.getKey().getCode() + ", e." + kindColumn.getValue() + ")")

@@ -47,3 +47,40 @@ describe("normalizeProjectDetail · 生成轨道片清单（#225 计划区只读
     ]);
   });
 });
+
+describe("normalizeProjectDetail · 设计轨道件清单（#290 designer 直播卡计划区）", () => {
+  it("件行归一：ord/标题/状态 → 切片清单同构形状（title 落 description 位），保序", () => {
+    const detail = normalizeProjectDetail(
+      raw({
+        designItems: [
+          { ord: 1, title: "首页主视觉", status: 2, statusName: "已收口" },
+          { ord: 2, title: "logo 主标识", status: 1, statusName: "待跑" },
+          { ord: 3, title: "包装盒平面", status: 3, statusName: "失败" },
+        ],
+      }),
+    );
+
+    expect(detail.designItems).toEqual([
+      { ord: 1, description: "首页主视觉", status: "closed" },
+      { ord: 2, description: "logo 主标识", status: "pending" },
+      { ord: 3, description: "包装盒平面", status: "failed" },
+    ]);
+  });
+
+  it("无件行 / 空数组 = null（系统终点项目或清单未落库——不伪造计划）", () => {
+    expect(normalizeProjectDetail(raw()).designItems).toBeNull();
+    expect(normalizeProjectDetail(raw({ designItems: [] })).designItems).toBeNull();
+  });
+
+  it("防御归一：缺 ord 或缺标题的行剔除；未知状态 code 回落 pending", () => {
+    const detail = normalizeProjectDetail(
+      raw({
+        designItems: [{ ord: 1, title: "首页主视觉", status: 99 }, { title: "缺序号" }],
+      }),
+    );
+
+    expect(detail.designItems).toEqual([
+      { ord: 1, description: "首页主视觉", status: "pending" },
+    ]);
+  });
+});

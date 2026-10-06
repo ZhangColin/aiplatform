@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -82,6 +83,7 @@ class ProjectQueryAppServiceTest {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -231,6 +233,64 @@ class ProjectQueryAppServiceTest {
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 9_400_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
                 description, status, runId, Timestamp.valueOf(prdProducedAt));
+    }
+
+    // ---------- #290 设计轨道件清单读模型（计划区对偶透出） ----------
+
+    @Test
+    void given_design_item_rows_when_detail_then_item_list_returned_in_ord_order() {
+        // #290 计划区只读读模型：库中件行 → 设计物清单（序号/标题/状态 + *Name），
+        // ord 升序（1..N = 首产推进序）——「最近一次尝试的结局」原样透出（对偶片清单）
+        Project project = persistedProject(8401L, "设计项目");
+        project.markPrdProduced();
+        project = projectRepository.save(project);
+        Long projectId = project.getId();
+        insertDesignItem(projectId, 2, "logo 主标识", 1, null, project.getPrdProducedAt());
+        insertDesignItem(projectId, 1, "首页主视觉", 2, "run-d1", project.getPrdProducedAt());
+        insertDesignItem(projectId, 3, "包装盒平面", 3, "run-d3", project.getPrdProducedAt());
+
+        var items = appService.detail(projectId).designItems();
+
+        assertThat(items).extracting(item -> item.ord())
+                .containsExactly(1, 2, 3); // ord 升序（插入乱序不漂移）
+        assertThat(items).extracting(item -> item.title())
+                .containsExactly("首页主视觉", "logo 主标识", "包装盒平面");
+        assertThat(items).extracting(item -> item.status())
+                .containsExactly(DesignItemStatus.CLOSED, DesignItemStatus.PENDING,
+                        DesignItemStatus.FAILED);
+        assertThat(items).extracting(item -> item.statusName())
+                .containsExactly("已收口", "待跑", "失败");
+    }
+
+    @Test
+    void given_stale_design_checklist_anchor_when_detail_then_design_items_null() {
+        // PRD 已演进（锚不一致 = 旧清单过期）→ 不透出：不拿旧清单对进度（对偶 segments）
+        Project project = persistedProject(8402L, "锚漂设计项目");
+        project.markPrdProduced();
+        project = projectRepository.save(project);
+        insertDesignItem(project.getId(), 1, "首页主视觉", 2, "run-d1",
+                project.getPrdProducedAt().minusSeconds(5));
+
+        assertThat(appService.detail(project.getId()).designItems()).isNull();
+    }
+
+    @Test
+    void given_no_design_item_rows_when_detail_then_design_items_null() {
+        // 无件行（清单未落库/系统终点项目）= 无清单：null——前端不渲染计划区
+        Long projectId = persistedProject(8403L, "无设计轨项目").getId();
+
+        assertThat(appService.detail(projectId).designItems()).isNull();
+    }
+
+    /** 直插设计轨道件行（#289 表事实，绕开清单落库编排）。 */
+    private void insertDesignItem(Long projectId, int ord, String title, int status,
+            String runId, LocalDateTime prdProducedAt) {
+        jdbcTemplate.update(
+                "INSERT INTO prj_design_items (id, project_id, ord, title, status, "
+                        + "run_id, prd_produced_at, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9_500_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
+                title, status, runId, Timestamp.valueOf(prdProducedAt));
     }
 
     @Test

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   FileCode2,
   Hammer,
+  PenLine,
   ShieldCheck,
   SquareTerminal,
   TriangleAlert,
@@ -15,7 +16,13 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
-import type { WorkPart, WorkPlanStep, WorkSlice, WorkSnapshot } from "@/lib/store/work-message";
+import type {
+  WorkPart,
+  WorkPlanStep,
+  WorkSeat,
+  WorkSlice,
+  WorkSnapshot,
+} from "@/lib/store/work-message";
 
 /** 播报工具 → 图标（正本封闭表：write_file / edit_file / execute；表外兜底锤子）。 */
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -65,6 +72,28 @@ export function activityOf(parts: WorkPart[]): WorkActivity {
   const lastActionAt = parts.findLastIndex((part) => part.kind === "action");
   const lastSignalAt = parts.findLastIndex((part) => part.kind === "signal");
   return lastSignalAt > lastActionAt ? { kind: "derailed" } : { kind: "idle" };
+}
+
+/** 稿产出动作工具集（#290 出稿活性行的稿序口径）：写稿件（界面类 HTML）＋出图件
+ *（平面类位图）。generate_image 暂未进服务端播报封闭表（发放归 #292 真跑）——
+ * 口径先集齐，后端扩播后零改接入。 */
+const DRAFT_TOOLS: ReadonlySet<string> = new Set(["write_file", "generate_image"]);
+
+/**
+ * 活性行的稿序（#290 designer 变体）：当前在跑动作是稿产出动作时，按本场稿产出
+ * 动作的首次出现序数出 1-based 第 N 稿（一稿一文件——工作协议：稿独立落盘互不
+ * 覆盖，写动作数即稿数）；非稿产出动作（无稿序）返回 undefined——活性行回落
+ * executor 同款 label 滚动。
+ */
+export function draftNoOf(parts: WorkPart[], activity: WorkActivity): number | undefined {
+  if (activity.kind !== "action") return undefined;
+  let no = 0;
+  for (const part of parts) {
+    if (part.kind !== "action" || !DRAFT_TOOLS.has(part.toolName)) continue;
+    no += 1;
+    if (part === activity.part) return no;
+  }
+  return undefined;
 }
 
 /** 失败痕判定（#225 失败破例的部件级口径：failed 红行不埋进坍缩、常驻展开红显）。 */
@@ -177,7 +206,7 @@ export function WorkMessage({
   closingArrived = false,
 }: {
   work: WorkSnapshot;
-  /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
+  /** 计划区清单（#225 切片清单 / #290 设计物清单——装配层按座席选送，REST 详情透出；缺省 = 无现行计划）。 */
   plan?: GenerationSegmentFact[] | null;
   /**
    * 本 run 收尾卡已入流（#235 活性行沉没锚：同 runId closing 消息已在对话流——
@@ -187,6 +216,7 @@ export function WorkMessage({
   closingArrived?: boolean;
 }) {
   const growing = !work.frozen;
+  const seat: WorkSeat = work.seat ?? "executor";
 
   // 定格空壳不占位（run 零部件的退化态）：成功收口/run-failed 后部件均留驻
   // （#117），仅当本 run 从无部件时才整卡退场
@@ -220,8 +250,14 @@ export function WorkMessage({
         ) : null}
         <ElapsedClock startedAt={work.startedAt} endedAt={work.endedAt} active={growing} />
       </div>
-      <WorkBodyRows body={body} frozen={work.frozen} />
-      {showActivity ? <ActivityLine activity={activity} live={growing} /> : null}
+      <WorkBodyRows body={body} frozen={work.frozen} seat={seat} />
+      {showActivity ? (
+        <ActivityLine
+          activity={activity}
+          live={growing}
+          draftNo={seat === "designer" ? draftNoOf(work.parts, activity) : undefined}
+        />
+      ) : null}
     </div>
   );
 }
@@ -232,10 +268,22 @@ export function WorkMessage({
  * 间隙＝无字打字点（「正在干活…」字样行已退役）；失败＝红字变体（#225 story10
  * 「刚才的动作没做成，正在处理」语义沿用）；脱轨＝琥珀色变体（#240 机器语法吞段
  * 的人话留痕——一句定型文案，不携带原文、不出命令滚动行、不转圈：脱轨＝什么都没
- * 跑，不伪造「在执行」）。各变体同高（py-1.5 + 20px 行高预算），换装不跳行。定格
- * 保留末行时静态呈现（live=false：不转圈、不跳动——定格卡不自称在跑）。
+ * 跑，不伪造「在执行」）。designer 座席的出稿变体（#290）：稿产出动作在跑＝
+ * 「正在出第 N 稿」（稿序＝{@link draftNoOf}；无稿序动作回落 label 滚动）——设计
+ * 过程的用户语言，不出「编写文件」类工程行话。各变体同高（py-1.5 + 20px 行高
+ * 预算），换装不跳行。定格保留末行时静态呈现（live=false：不转圈、不跳动——
+ * 定格卡不自称在跑；出稿文案同失败/脱轨先例保留「正在」字样——定格快照语义）。
  */
-function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolean }) {
+function ActivityLine({
+  activity,
+  live,
+  draftNo,
+}: {
+  activity: WorkActivity;
+  live: boolean;
+  /** designer 座席的稿序（#290）；undefined＝非稿产出或非 designer——label 滚动。 */
+  draftNo?: number;
+}) {
   if (activity.kind === "failed") {
     // 失败破例（#225 story10）：滚动行停滚并转红色——不再误以为正常推进
     return (
@@ -255,6 +303,25 @@ function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolea
   }
   if (activity.kind === "action") {
     const { part } = activity;
+    // 出稿变体（#290 设计会话）：活性行＝「正在出第 N 稿」——稿序派生自本场稿
+    // 产出动作计数；同高同槽（py-1.5 + 20px），与 label 滚动换装不跳行
+    if (draftNo != null) {
+      return (
+        <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm">
+          <span className="shrink-0 text-muted-foreground">
+            <PenLine className="size-3.5" />
+          </span>
+          <span className={cn("min-w-0 flex-1", !live && "text-muted-foreground")}>
+            正在出第 {draftNo} 稿
+          </span>
+          {live ? (
+            <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner className="size-3" /> 进行中
+            </span>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="mt-1 flex items-center gap-2 px-1 py-1.5 text-sm">
         <span className="shrink-0 text-muted-foreground">
@@ -282,14 +349,16 @@ function ActivityLine({ activity, live }: { activity: WorkActivity; live: boolea
 }
 
 /** 正文三区渲染（#225 混合坍缩 + #230 成功无痕）：更早行（可展开）→ 失败破例面 → 尾部活动区。 */
-function WorkBodyRows({ body, frozen }: { body: WorkBody; frozen: boolean }) {
+function WorkBodyRows({ body, frozen, seat }: { body: WorkBody; frozen: boolean; seat: WorkSeat }) {
   const [earlierOpen, setEarlierOpen] = useState(false);
   const surfaced = body.earlier.filter(isFailedPart);
   return (
     <>
       {earlierOpen ? (
         // 展开回看：更早区全量原序竖流（story4/5/6——组成＝解说段＋失败痕，事件不裁剪）
-        body.earlier.map((part) => <WorkPartRow key={part.id} part={part} frozen={frozen} />)
+        body.earlier.map((part) => (
+          <WorkPartRow key={part.id} part={part} frozen={frozen} seat={seat} />
+        ))
       ) : body.collapsedCount > 0 ? (
         <button
           type="button"
@@ -303,22 +372,24 @@ function WorkBodyRows({ body, frozen }: { body: WorkBody; frozen: boolean }) {
       ) : null}
       {/* 失败破例面（#225 story9）：未展开时也不埋进坍缩行——常驻展开红显 */}
       {!earlierOpen
-        ? surfaced.map((part) => <WorkPartRow key={part.id} part={part} frozen={frozen} />)
+        ? surfaced.map((part) => (
+            <WorkPartRow key={part.id} part={part} frozen={frozen} seat={seat} />
+          ))
         : null}
       {body.tail.map((part) => (
-        <WorkPartRow key={part.id} part={part} frozen={frozen} />
+        <WorkPartRow key={part.id} part={part} frozen={frozen} seat={seat} />
       ))}
     </>
   );
 }
 
 /** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 失败红行（成功无痕 #230；进行中动作归活性行 #235，不进正文）。 */
-function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
+function WorkPartRow({ part, frozen, seat }: { part: WorkPart; frozen: boolean; seat: WorkSeat }) {
   if (part.kind === "text") {
     return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
   }
   if (part.kind === "check") {
-    return <CheckRow part={part} frozen={frozen} />;
+    return <CheckRow part={part} frozen={frozen} seat={seat} />;
   }
   if (part.kind === "signal") {
     // 防御位（#240 静态面无痕）：正文投影已滤除信号——漏进即不渲染，活性行是唯一呈现位
@@ -331,14 +402,17 @@ function WorkPartRow({ part, frozen }: { part: WorkPart; frozen: boolean }) {
  * 自检播报行（#85，spec「正在检查系统 → ✅/❌」）：收口判据核验的一句话呈现——
  * 核验中转圈，落定原位换 ✅（检查通过）/❌（检查未过）；终值即探活结果（收尾卡
  * 统计行随 #88 消费）。定格截断的「检查中」（run 未进核验即终态的防御面）不再
- * 转圈、如实留「检查中」字样。
+ * 转圈、如实留「检查中」字样。designer 座席核验中＝「正在检查产出」（#290：设计
+ * 判据＝本场有新稿——设计稿不是系统，文案随座席分岔）。
  */
 function CheckRow({
   part,
   frozen,
+  seat,
 }: {
   part: Extract<WorkPart, { kind: "check" }>;
   frozen: boolean;
+  seat: WorkSeat;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm">
@@ -358,7 +432,7 @@ function CheckRow({
       ) : (
         <>
           <span className={cn("min-w-0 flex-1", frozen && "text-muted-foreground")}>
-            正在检查系统
+            {seat === "designer" ? "正在检查产出" : "正在检查系统"}
           </span>
           {!frozen ? <Spinner className="size-3 shrink-0 text-muted-foreground" /> : null}
         </>

@@ -57,6 +57,24 @@ function normalizeSegments(
     }));
 }
 
+/**
+ * 设计轨道件清单 → 消费口径（#290 计划区对偶透出）：designer 直播卡的计划区与
+ * 切片清单同构——复用 {@link GenerationSegmentFact} 形状（title 即计划区行文本，
+ * 与 description 同位）；状态码表与片清单同集（待跑/已收口/失败）。
+ */
+function normalizeDesignItems(
+  raw: ProjectDetailResponse["designItems"],
+): GenerationSegmentFact[] | null {
+  if (!raw || raw.length === 0) return null;
+  return raw
+    .filter((item) => item.ord != null && !!item.title)
+    .map((item) => ({
+      ord: item.ord as number,
+      description: item.title as string,
+      status: SEGMENT_STATUSES[item.status ?? 1] ?? "pending",
+    }));
+}
+
 /** 消费口径的项目详情（缺省字段防御归一）：壳态只取骨架所需字段，随切片增补。 */
 export type ProjectDetail = {
   id: string;
@@ -82,6 +100,8 @@ export type ProjectDetail = {
   latestOrder?: ActiveOrderFact | null;
   /** 生成轨道片清单（#225 计划区；null = 无现行计划——锚过期/未落库，不伪造计划）。 */
   segments?: GenerationSegmentFact[] | null;
+  /** 设计轨道件清单（#290 designer 直播卡计划区；null = 无现行清单，不伪造计划）。 */
+  designItems?: GenerationSegmentFact[] | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */
@@ -101,6 +121,7 @@ export function normalizeProjectDetail(raw: ProjectDetailResponse): ProjectDetai
     activeOrder: normalizeActiveOrder(raw.activeOrder),
     latestOrder: normalizeActiveOrder(raw.latestOrder),
     segments: normalizeSegments(raw.segments),
+    designItems: normalizeDesignItems(raw.designItems),
   };
 }
 

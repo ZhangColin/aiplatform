@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import type { ChatState, ChatMessage } from "@/lib/store/chat";
 
 import { CommandArea } from "./command-area";
@@ -259,5 +260,85 @@ describe("CommandArea · 图片物料真上传（#286 回形针接线）", () =>
       "/api/projects/p1/files/raw?path=materials%2F3897654321098765432-logo.png",
     );
     expect(chip?.textContent).toContain("logo.png");
+  });
+});
+
+describe("CommandArea · designer 直播卡计划区选送（#290 装配 seam：座席分岔选清单）", () => {
+  beforeEach(() => {
+    seed.state = { chats: {} };
+    useWorkMessageStore.setState({ works: {} });
+  });
+
+  it("designer 座席在途：计划区出设计物清单（不出切片清单）——同构不混淆", () => {
+    useWorkMessageStore.setState({
+      works: {
+        p1: {
+          runId: "run-d1",
+          frozen: false,
+          seat: "designer",
+          slice: { title: "logo 主标识", index: 2, total: 3 },
+          parts: [
+            {
+              kind: "action",
+              id: "run-d1:2",
+              toolCallId: "tc-1",
+              toolName: "write_file",
+              state: "running",
+              label: "编写【logo-1】",
+            },
+          ],
+          seenEventIds: ["run-d1:2"],
+        },
+      },
+    });
+    render(
+      <CommandArea
+        projectId="p1"
+        plan={[{ ord: 1, description: "用户能注册登录", status: "pending" }]}
+        designPlan={[
+          { ord: 1, description: "首页主视觉", status: "closed" },
+          { ord: 2, description: "logo 主标识", status: "pending" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("logo 主标识（2/3）")).toBeTruthy(); // 头部＝设计物标题进度
+    expect(screen.getByText("正在出第 1 稿")).toBeTruthy(); // 活性行＝出稿动作
+    expect(screen.getByText("首页主视觉")).toBeTruthy(); // 计划区＝设计物清单
+    expect(screen.queryByText("用户能注册登录")).toBeNull(); // 切片清单不串台
+  });
+
+  it("executor 座席在途：计划区照旧切片清单（designPlan 不串台）", () => {
+    useWorkMessageStore.setState({
+      works: {
+        p1: {
+          runId: "run-c1",
+          frozen: false,
+          slice: { title: "用户能注册登录", index: 1, total: 1 },
+          parts: [
+            {
+              kind: "action",
+              id: "run-c1:2",
+              toolCallId: "tc-1",
+              toolName: "write_file",
+              state: "running",
+              label: "编写【订单管理】",
+            },
+          ],
+          seenEventIds: ["run-c1:2"],
+        },
+      },
+    });
+    render(
+      <CommandArea
+        projectId="p1"
+        plan={[{ ord: 1, description: "用户能注册登录", status: "pending" }]}
+        designPlan={[{ ord: 1, description: "首页主视觉", status: "pending" }]}
+      />,
+    );
+
+    expect(screen.getByText("用户能注册登录")).toBeTruthy();
+    expect(screen.queryByText("首页主视觉")).toBeNull();
+    expect(screen.getByText("编写【订单管理】")).toBeTruthy(); // label 滚动（executor 口径）
   });
 });

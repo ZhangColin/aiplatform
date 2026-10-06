@@ -93,3 +93,98 @@ describe("WorkMessage · 更早区展开回看交互（#225 混合坍缩 + #230 
     expect(screen.getByText("最新解说。")).toBeTruthy();
   });
 });
+
+describe("WorkMessage · designer 直播卡交互（#290：出稿活性行换装＋解说坍缩回看）", () => {
+  /** designer 快照（会话即设计物：slice＝标题＋1-based 序）。 */
+  function designWork(parts: WorkPart[], overrides: Partial<WorkSnapshot> = {}): WorkSnapshot {
+    return {
+      runId: "run-d1",
+      frozen: false,
+      seat: "designer",
+      slice: { title: "logo 主标识", index: 2, total: 3 },
+      parts,
+      ...overrides,
+    } satisfies WorkSnapshot;
+  }
+
+  function draft(
+    id: string,
+    toolCallId: string,
+    label: string,
+    state: Extract<WorkPart, { kind: "action" }>["state"] = "completed",
+  ) {
+    return action({ id, toolCallId, toolName: "write_file", state, label });
+  }
+
+  it("出稿活性行随直播事件换装：第 1 稿完成（打字点）→ 第 2 稿开跑（正在出第 2 稿）→ 定格保留末行（静态）", () => {
+    const { rerender } = render(<WorkMessage work={designWork([])} />);
+
+    // 第 1 稿在跑 → 出第 1 稿
+    rerender(<WorkMessage work={designWork([draft("a1", "tc1", "编写【logo-1】", "running")])} />);
+    expect(screen.getByText("正在出第 1 稿")).toBeTruthy();
+
+    // 第 1 稿完成（成功无痕）→ 间隙打字点
+    rerender(<WorkMessage work={designWork([draft("a1", "tc1", "编写【logo-1】")])} />);
+    expect(screen.queryByText(/正在出第/)).toBeNull();
+    expect(document.querySelector(".animate-pulse")).toBeTruthy();
+
+    // 第 2 稿开跑 → 出第 2 稿（换装不跳行：同槽文本替换）
+    rerender(
+      <WorkMessage
+        work={designWork([
+          draft("a1", "tc1", "编写【logo-1】"),
+          draft("a2", "tc2", "编写【logo-2】", "running"),
+        ])}
+      />,
+    );
+    expect(screen.getByText("正在出第 2 稿")).toBeTruthy();
+    expect(screen.queryByText("正在出第 1 稿")).toBeNull();
+
+    // 定格保留末行（静态——不自称在跑）；收尾卡入流即沉没
+    rerender(
+      <WorkMessage
+        work={designWork(
+          [
+            draft("a1", "tc1", "编写【logo-1】"),
+            draft("a2", "tc2", "编写【logo-2】", "running"),
+          ],
+          { frozen: true },
+        )}
+      />,
+    );
+    expect(screen.getByText("正在出第 2 稿")).toBeTruthy();
+    expect(screen.queryByText("进行中")).toBeNull();
+    rerender(
+      <WorkMessage
+        closingArrived
+        work={designWork(
+          [
+            draft("a1", "tc1", "编写【logo-1】"),
+            draft("a2", "tc2", "编写【logo-2】", "running"),
+          ],
+          { frozen: true },
+        )}
+      />,
+    );
+    expect(screen.queryByText(/正在出第/)).toBeNull();
+  });
+
+  it("解说坍缩回看同构：多段解说折进「更早 N 项」、点击展开（设计叙事不裁剪）", () => {
+    render(
+      <WorkMessage
+        work={designWork([
+          { kind: "text", id: "t0", text: "先读 PRD 清单章。" },
+          { kind: "text", id: "t1", text: "方向一走极简。" },
+          { kind: "text", id: "t2", text: "方向二用衬线字。" },
+          { kind: "text", id: "t3", text: "方向三上插画。" },
+        ])}
+      />,
+    );
+
+    expect(screen.getByText(/更早 2 项/)).toBeTruthy();
+    expect(screen.queryByText("方向一走极简。")).toBeNull(); // 坍缩控噪
+    fireEvent.click(screen.getByRole("button", { name: /更早/ }));
+    expect(screen.getByText("方向一走极简。")).toBeTruthy(); // 展开回看（事件不裁剪）
+    expect(screen.getByText("方向二用衬线字。")).toBeTruthy();
+  });
+});

@@ -7,6 +7,7 @@ import type { WorkPart, WorkPlanStep, WorkSnapshot } from "@/lib/store/work-mess
 import {
   WorkMessage,
   activityOf,
+  draftNoOf,
   formatClock,
   formatDuration,
   planCurrentOrd,
@@ -1137,5 +1138,144 @@ describe("WorkMessage · 混合坍缩呈现（#225 story3/4：恒定高度、更
     expect(sunk).toContain("更早"); // 坍缩行保形
     expect(sunk).not.toContain("执行【起服务】"); // 活性行随定格沉没
     expect(sunk).not.toContain("编写【订单页】");
+  });
+});
+
+describe("WorkMessage · designer 直播卡（#290：同构直播卡，agent 标识区分——座席分岔呈现）", () => {
+  /** 设计物清单（#290 计划区：REST designItems 透出，title 即行文本）。 */
+  function designPlan(): GenerationSegmentFact[] {
+    return [
+      { ord: 1, description: "首页主视觉", status: "closed" },
+      { ord: 2, description: "logo 主标识", status: "pending" },
+      { ord: 3, description: "包装盒平面", status: "pending" },
+    ];
+  }
+
+  /** designer 工作消息快照（run-start agent=designer：slice＝设计物标题＋1-based 序）。 */
+  function designWork(overrides: Partial<WorkSnapshot> = {}): WorkSnapshot {
+    return {
+      runId: "run-d1",
+      frozen: false,
+      parts: [],
+      seat: "designer",
+      slice: { title: "logo 主标识", index: 2, total: 3 },
+      ...overrides,
+    };
+  }
+
+  function draftAction(
+    overrides: Partial<Extract<WorkPart, { kind: "action" }>> = {},
+  ) {
+    return action({ toolName: "write_file", ...overrides });
+  }
+
+  it("计划区＝设计物清单（对偶切片清单、状态推进同构）：✓ 已收口在前、● 当前件高亮「进行中」", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={designWork({
+          parts: [
+            draftAction({ id: "a1", toolCallId: "tc1", state: "running", label: "编写【logo-1】" }),
+          ],
+        })}
+        plan={designPlan()}
+      />,
+    );
+
+    // 三件全出（清单常驻）；头部＝设计物标题＋进度（「logo 主标识（2/3）」）
+    expect(html).toContain("首页主视觉");
+    expect(html).toContain("logo 主标识（2/3）");
+    expect(html).toContain("包装盒平面");
+    // 状态推进同构：已收口件 ✓、当前件 ● 高亮＋「进行中」
+    expect(html).toContain("进行中");
+    expect((html.match(/进行中/g) ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("活性行＝出稿动作「正在出第 N 稿」：第 2 个写稿动作在跑＝正在出第 2 稿（不出工程行话）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={designWork({
+          parts: [
+            draftAction({ id: "a1", toolCallId: "tc1", label: "编写【logo-1】" }), // 第 1 稿已完成（成功无痕）
+            draftAction({ id: "a2", toolCallId: "tc2", state: "running", label: "编写【logo-2】" }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("正在出第 2 稿");
+    expect(html).not.toContain("编写【logo-2】"); // label 不出——出稿文案替位（用户语言）
+    expect(html).not.toContain("编写【logo-1】"); // 成功无痕照旧
+  });
+
+  it("draftNoOf 稿序口径：按稿产出动作首现序计数；间隙/失败/脱轨变体无稿序", () => {
+    const first = draftAction({ id: "a1", toolCallId: "tc1", state: "completed", label: "编写【logo-1】" });
+    const second = draftAction({ id: "a2", toolCallId: "tc2", state: "running", label: "编写【logo-2】" });
+    const parts: WorkPart[] = [
+      { kind: "text", id: "t0", text: "开始。" },
+      first,
+      second,
+    ];
+    expect(draftNoOf(parts, activityOf(parts))).toBe(2);
+    // 间隙（全部完成）：无稿序（活性行＝打字点）
+    const idle = [first, { ...second, state: "completed" as const }] as WorkPart[];
+    expect(draftNoOf(idle, activityOf(idle))).toBeUndefined();
+    // 失败变体：无稿序（红字文案，同 executor）
+    const failed = [first, { ...second, state: "failed" as const }] as WorkPart[];
+    expect(draftNoOf(failed, activityOf(failed))).toBeUndefined();
+    // 非稿产出动作在跑（无稿序）：undefined——活性行回落 label 滚动
+    const misc = [
+      first,
+      action({ id: "a3", toolCallId: "tc3", toolName: "edit_file", state: "running", label: "编辑【x】" }),
+    ] as WorkPart[];
+    expect(draftNoOf(misc, activityOf(misc))).toBeUndefined();
+  });
+
+  it("与构建 run 同构不混淆：executor 座席的写稿动作照旧 label 滚动（不出「正在出稿」文案）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [
+            draftAction({ id: "a1", toolCallId: "tc1", state: "running", label: "编写【订单管理】" }),
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("编写【订单管理】"); // label 滚动（executor 口径不变）
+    expect(html).not.toContain("正在出第"); // 座席分岔不串台
+  });
+
+  it("自检行文案随座席分岔：designer＝「正在检查产出」（设计判据＝本场有新稿，不自称检查系统）", () => {
+    const designing = renderToStaticMarkup(
+      <WorkMessage
+        work={designWork({ parts: [{ kind: "check", id: "c1", state: "checking" }] })}
+      />,
+    );
+    expect(designing).toContain("正在检查产出");
+    expect(designing).not.toContain("正在检查系统");
+
+    const coding = renderToStaticMarkup(
+      <WorkMessage work={work({ parts: [{ kind: "check", id: "c1", state: "checking" }] })} />,
+    );
+    expect(coding).toContain("正在检查系统");
+  });
+
+  it("定格终形（定格断言）：解说坍缩＋出稿活性行保留末行直到收尾卡入流（静态、不转圈）", () => {
+    const parts: WorkPart[] = [
+      { kind: "text", id: "t0", text: "先读 PRD 清单章。" },
+      { kind: "text", id: "t1", text: "三个方向分开了。" },
+      draftAction({ id: "a2", toolCallId: "tc2", state: "running", label: "编写【logo-2】" }),
+    ];
+    const retained = renderToStaticMarkup(
+      <WorkMessage work={designWork({ frozen: true, parts })} plan={designPlan()} />,
+    );
+    expect(retained).toContain("正在出第 1 稿"); // 保留末行（静态快照）
+    expect(retained).not.toContain("进行中"); // 不转圈、不自称在跑
+    expect(retained).not.toContain("●"); // 定格去高亮（状态归 REST）
+
+    const sunk = renderToStaticMarkup(
+      <WorkMessage closingArrived work={designWork({ frozen: true, parts })} plan={designPlan()} />,
+    );
+    expect(sunk).not.toContain("正在出第"); // 收尾卡入流即沉没（衔接完成）
   });
 });

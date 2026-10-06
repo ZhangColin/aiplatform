@@ -22,11 +22,9 @@ import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRep
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -395,10 +393,10 @@ class BackofficeProjectSeamTest {
 
     /** 经真应用服务下单（真库写入、快照冻结），返回带 TSID 的订单回执。 */
     private OrderResponse placeOrder(long projectId) {
-        when(projectQueryAppService.detail(projectId)).thenReturn(new ProjectDetailResponse(
-                Long.toString(projectId), "seam 测试项目", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9200",
-                ProjectStatus.IN_PROGRESS, ProjectStatus.IN_PROGRESS.getName(), false,
-                LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null, null, null, null));
+        when(projectQueryAppService.detail(projectId)).thenReturn(ProjectDetailResponseFixture
+                .detailOf(Long.toString(projectId), "seam 测试项目")
+                .workspaceId("9200")
+                .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
                 Instant.parse("2026-09-13T01:00:00Z")));

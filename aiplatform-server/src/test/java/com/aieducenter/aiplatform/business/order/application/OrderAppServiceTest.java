@@ -26,11 +26,9 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -479,10 +477,12 @@ class OrderAppServiceTest {
     }
 
     private void stubProject(ProjectStatus status, String prd) {
-        when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
-                Long.toString(PROJECT_ID), "订单缝测试", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9100",
-                status, status.getName(), status == ProjectStatus.ARCHIVED,
-                LocalDateTime.of(2026, 8, 31, 10, 0), null, null, null, null, null, null, null, null));
+        when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(ProjectDetailResponseFixture
+                .detailOf(Long.toString(PROJECT_ID), "订单缝测试")
+                .workspaceId("9100")
+                .status(status)
+                .archived(status == ProjectStatus.ARCHIVED)
+                .build());
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z")));
     }

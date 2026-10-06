@@ -1102,3 +1102,178 @@ describe("bridge · run-finish 收口扩载 → 工作消息定格收尾卡（#8
     expect(messages.some((message) => message.kind === "closing")).toBe(false);
   });
 });
+
+describe("bridge · designer 事件 → 直播卡生长＋收尾卡稿清单（#290 事件→状态 seam）", () => {
+  beforeEach(() => {
+    useChatStore.setState({ chats: {} });
+    useGenerationStore.setState({ generations: {} });
+    useWorkMessageStore.setState({ works: {} });
+  });
+
+  function agentEvent(
+    type: string,
+    payload: Record<string, unknown>,
+    id: string,
+    ts = "",
+  ): SseEvent {
+    return { id, data: JSON.stringify({ type, payload, ts }) };
+  }
+
+  /** designer 会话事件公共字段（每设计物一个设计会话：designer-{projectId}-item-{ord}）。 */
+  const designRun = {
+    projectId: "p1",
+    runId: "run-d1",
+    sessionId: "designer-p1-item-1",
+    engine: "agentscope",
+  };
+
+  it("run-start(agent=designer)：直播卡起锚（座席＋设计物标题进度＋时钟锚）、项目域失效（清单落表晚于 document-updated）", () => {
+    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
+    const teardown = projects.unsubscribe;
+    return projects
+      .waitForSettled()
+      .then(async () => {
+        dispatchAgentEvent(agentQc, agentEvent(
+          "run-start",
+          {
+            ...designRun,
+            prompt: "设计稿产出…",
+            model: "m",
+            agent: "designer",
+            slice: { title: "首页主视觉", index: 1, total: 3 },
+          },
+          "run-d1:1",
+          "2026-10-06T08:00:00Z",
+        ));
+
+        const work = useWorkMessageStore.getState().works["p1"];
+        expect(work).toMatchObject({
+          runId: "run-d1",
+          frozen: false,
+          seat: "designer",
+          slice: { title: "首页主视觉", index: 1, total: 3 },
+          startedAt: Date.parse("2026-10-06T08:00:00Z"),
+        });
+        // 生成面不涉（designer 非编码 run——四态投影不漂）
+        expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
+        await vi.waitFor(() => expect(projects.fetchCount()).toBe(2));
+      })
+      .finally(() => teardown());
+  });
+
+  it("部件事件 → 直播卡生长：解说/写稿动作/自检核验照常进卡（事件封闭集零新增——同 parts 契约）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
+      "run-d1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "先读 PRD 清单章" }, "run-d1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-action", {
+      ...designRun,
+      toolCallId: "tc-1",
+      toolName: "write_file",
+      state: "running",
+      label: "编写【home-1】",
+    }, "run-d1:3"));
+    dispatchAgentEvent(agentQc, agentEvent("part-check", { ...designRun, state: "checking" }, "run-d1:4"));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work?.parts.map((part) => part.kind)).toEqual(["text", "action", "check"]);
+    expect(useChatStore.getState().chats["p1"]).toBeUndefined(); // 解说不进对话面（长在直播卡）
+  });
+
+  it("run-finish 携 closing.drafts：收尾卡稿清单入对话流、直播卡定格留驻、项目域失效（件状态落表推进计划区）", async () => {
+    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
+    try {
+      await projects.waitForSettled();
+      const baseFetches = projects.fetchCount();
+      dispatchAgentEvent(agentQc, agentEvent(
+        "run-start",
+        { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
+        "run-d1:1",
+      ));
+      dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "本件产出三稿" }, "run-d1:2"));
+      dispatchAgentEvent(agentQc, agentEvent(
+        "run-finish",
+        {
+          ...designRun,
+          finish: "end",
+          closing: {
+            summary: "完成设计物：首页主视觉",
+            prdChanged: false,
+            systemChanged: false,
+            systemNote: "完成设计物：首页主视觉",
+            files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
+            durationMs: 95_000,
+            drafts: [
+              { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
+              { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
+            ],
+          },
+        },
+        "run-d1:3",
+      ));
+
+      const work = useWorkMessageStore.getState().works["p1"];
+      expect(work).toMatchObject({ frozen: true, seat: "designer" }); // 定格留驻（#117 同律）
+      const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
+      expect(card).toMatchObject({ runId: "run-d1" });
+      expect((card as { closing: { drafts?: unknown[] } }).closing.drafts).toHaveLength(2);
+      // 件收口落轨道表 → 失效项目域（计划区 ✓ 推进）
+      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches + 1));
+    } finally {
+      projects.unsubscribe();
+    }
+  });
+
+  it("error（设计会话在途）不进对话面（重试全程静默——run-failed 才是唯一失败终态）", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { ...designRun, prompt: "…", model: "m", agent: "designer" },
+      "run-d1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent("error", { ...designRun, message: "模型调用失败" }, "run-d1:2"));
+
+    expect(useChatStore.getState().chats["p1"]).toBeUndefined(); // 无失败气泡、无收轮副作用
+    expect(useWorkMessageStore.getState().works["p1"]?.frozen).toBe(false); // 卡不闪定格
+  });
+
+  it("run-failed（设计轨超限终态）：直播卡定格留驻、项目域失效（件 ✗ 落表）", async () => {
+    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
+    try {
+      await projects.waitForSettled();
+      const baseFetches = projects.fetchCount();
+      dispatchAgentEvent(agentQc, agentEvent(
+        "run-start",
+        { ...designRun, prompt: "…", model: "m", agent: "designer" },
+        "run-d1:1",
+      ));
+      dispatchAgentEvent(agentQc, agentEvent("part-text", { ...designRun, text: "尝试中" }, "run-d1:2"));
+      dispatchAgentEvent(agentQc, agentEvent("run-failed", { ...designRun }, "run-d1:3"));
+
+      expect(useWorkMessageStore.getState().works["p1"]).toMatchObject({ frozen: true, seat: "designer" });
+      // 生成面不写中断（设计轨无「继续生成」出口——重提意见走收口链）
+      expect(useGenerationStore.getState().generations["p1"]).toBeUndefined();
+      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches + 1));
+    } finally {
+      projects.unsubscribe();
+    }
+  });
+
+  it("与构建 run 同构不混淆（agent 标识区分）：executor 锚在途时 designer 会话部件不进卡、不重锚", () => {
+    dispatchAgentEvent(agentQc, agentEvent(
+      "run-start",
+      { projectId: "p1", runId: "run-c1", prompt: "做系统", model: "m", agent: "executor" },
+      "run-c1:1",
+    ));
+    dispatchAgentEvent(agentQc, agentEvent(
+      "part-text",
+      { projectId: "p1", runId: "run-d1", sessionId: "designer-p1-item-1", engine: "e", text: "迟到的设计部件" },
+      "run-d1:9",
+    ));
+
+    const work = useWorkMessageStore.getState().works["p1"];
+    expect(work).toMatchObject({ runId: "run-c1", seat: undefined }); // 编码锚不受扰（生长中不重锚）
+    expect(work?.parts).toHaveLength(0);
+  });
+});

@@ -33,6 +33,14 @@ import { create } from "zustand";
 /** 动作部件生命周期（正本 part-action 行：started / running / completed / failed）。 */
 export type WorkActionState = "started" | "running" | "completed" | "failed";
 
+/**
+ * 工作消息座席（#290，run-start 配置键的镜像）：executor＝编码 run（计划区＝
+ * 切片清单、活性行＝命令/编写 label 滚动）、designer＝设计会话（计划区＝设计物
+ * 清单、活性行＝「正在出第 N 稿」）——同骨架异语料的呈现分岔锚。缺省＝executor
+ * （旧调用面与 coder- 前缀补建路径的兼容口径）。
+ */
+export type WorkSeat = "executor" | "designer";
+
 /** 自检部件生命周期（正本 part-check 行：checking / passed / failed）。 */
 export type WorkCheckState = "checking" | "passed" | "failed";
 
@@ -151,6 +159,12 @@ type ProjectWork = {
   /** 工作消息头部切片进度（#118 run-start 扩载；run-start 被淘汰的补建路径缺省）。 */
   slice?: WorkSlice;
   /**
+   * 座席（#290）：呈现分岔锚（executor＝切片清单计划区＋label 滚动活性行、
+   * designer＝设计物清单计划区＋出稿活性行）；run-start 配置键写入、前缀补建
+   * 路径按会话前缀派生；缺省＝executor。
+   */
+  seat?: WorkSeat;
+  /**
    * run 级步骤清单（#236 part-plan 全量快照的落态）：整表替换（执行中 agent
    * 再调 update_plan 即新快照盖旧表——已收口步骤不可变＝提示词纪律，平台不校验
    * 不合并）；不进 parts 流水（不走动作行、不留动作痕、不单独播报）。不落库
@@ -172,10 +186,17 @@ export type WorkSnapshot = Omit<ProjectWork, "seenEventIds">;
 
 export type WorkMessageState = {
   works: Record<string, ProjectWork>;
-  /** 编码 run 起跑（run-start agent=executor）：新 runId 重开，同 runId 幂等；携
-   * 工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）与 run 级时钟起锚
-   * （#225 run-start 信封 ts 的 epoch ms，缺省 = 无锚不渲染时钟）。 */
-  startWork: (projectId: string, runId: string, slice?: WorkSlice, startedAt?: number) => void;
+  /** 编码/设计 run 起跑（run-start agent=executor|designer）：新 runId 重开，同
+   * runId 幂等；携工作消息头部切片进度（#118，缺省 = 无标题回落「正在做」）、
+   * run 级时钟起锚（#225 run-start 信封 ts 的 epoch ms，缺省 = 无锚不渲染时钟）
+   * 与座席（#290——呈现分岔锚，缺省 = executor）。 */
+  startWork: (
+    projectId: string,
+    runId: string,
+    slice?: WorkSlice,
+    startedAt?: number,
+    seat?: WorkSeat,
+  ) => void;
   /** 部件事件入消息（动作按 toolCallId 原位更新；锚定与定格守卫见实现）。 */
   notePart: (projectId: string, ref: PartEventRef, input: WorkPartInput) => void;
   /**
@@ -201,6 +222,8 @@ const MAX_IDS = 1000;
 
 /** 编码会话前缀（后端角色 × 项目命名约定：coder-{projectId}）。 */
 const CODER_SESSION_PREFIX = "coder-";
+/** 设计会话前缀（#289 命名约定：designer-{projectId}-item-{ord}）。 */
+const DESIGNER_SESSION_PREFIX = "designer-";
 
 function appendCapped(list: string[], id: string): string[] {
   const next = [...list, id];
@@ -209,17 +232,24 @@ function appendCapped(list: string[], id: string): string[] {
 
 /**
  * 锚定与定格守卫（部件/计划快照共用，notePart / notePlan 的同款前段）：
- * 锚不在或异 runId 时仅编码会话补建/重锚（主智能体的部件不建工作消息——对话面走
- * text 增量气泡，部件与其并行双发射；生长中的锚 + 异 runId = 事件序异常，静默重试
- * 不换新锚〔#84〕，防御位忽略——清锚会闪空消息）；定格不进（收口后无增量）；
- * 重放按 SSE 事件 id 去重。守卫未过 / 去重命中返回 undefined（无变更）。
+ * 锚不在或异 runId 时仅编码/设计会话补建/重锚（主智能体的部件不建工作消息——对话
+ * 面走 text 增量气泡，部件与其并行双发射；生长中的锚 + 异 runId = 事件序异常，静默
+ * 重试不换新锚〔#84〕，防御位忽略——清锚会闪空消息）；定格不进（收口后无增量）；
+ * 重放按 SSE 事件 id 去重。守卫未过 / 去重命中返回 undefined（无变更）。补建路径的
+ * 座席按会话前缀派生（coder-＝executor、designer-＝designer，#290）。
  */
 function openedWork(work: ProjectWork | undefined, ref: PartEventRef): ProjectWork | undefined {
   let current = work;
   if (current === undefined || current.runId !== ref.runId) {
     if (current !== undefined && !current.frozen) return undefined;
-    if (!ref.sessionId?.startsWith(CODER_SESSION_PREFIX)) return undefined;
-    current = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [] };
+    const sessionId = ref.sessionId ?? "";
+    const seat: WorkSeat = sessionId.startsWith(DESIGNER_SESSION_PREFIX)
+      ? "designer"
+      : "executor";
+    if (!sessionId.startsWith(CODER_SESSION_PREFIX) && !sessionId.startsWith(DESIGNER_SESSION_PREFIX)) {
+      return undefined;
+    }
+    current = { runId: ref.runId, frozen: false, parts: [], seenEventIds: [], seat };
   }
   if (current.frozen) return undefined; // 定格不进部件（收口后无增量）
   if (current.seenEventIds.includes(ref.eventId)) return undefined; // 重放去重
@@ -317,11 +347,11 @@ function updateWork(
 export const useWorkMessageStore = create<WorkMessageState>((set) => ({
   works: {},
 
-  startWork: (projectId, runId, slice, startedAt) =>
+  startWork: (projectId, runId, slice, startedAt, seat) =>
     updateWork(set, projectId, (work) => {
       // 同 runId 幂等（重放）：已长部件保留，不重开
       if (work?.runId === runId) return work;
-      return { runId, frozen: false, parts: [], seenEventIds: [], slice, startedAt };
+      return { runId, frozen: false, parts: [], seenEventIds: [], slice, seat, startedAt };
     }),
 
   notePart: (projectId, ref, input) =>

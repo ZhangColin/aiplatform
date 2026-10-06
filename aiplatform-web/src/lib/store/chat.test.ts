@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RaisedQuestion } from "@/lib/chat/qa";
 
-import { pendingQuestionOf, useChatStore, type ChatMessage } from "./chat";
+import { pendingQuestionOf, useChatStore, toWorkClosing, type ChatMessage, type WorkClosing } from "./chat";
 
 function question(id: string, overrides: Partial<RaisedQuestion> = {}): RaisedQuestion {
   return {
@@ -573,5 +573,68 @@ describe("chat store · 对话史水合（#89 落库④：闭史以 REST 为准�
     ]);
 
     expect(useChatStore.getState().chats["p1"]?.messages ?? []).toHaveLength(0);
+  });
+});
+
+describe("chat store · 收尾卡稿清单（#289 扩载、#290 呈现：live 与水合同形）", () => {
+  beforeEach(() => {
+    useChatStore.setState({ chats: {} });
+  });
+
+  const entry = (
+    id: number,
+    kind: "closing",
+    overrides: Record<string, unknown> = {},
+    runId: string | null = "run-1",
+  ) => ({ id: String(id), kind, runId, answered: false, ...overrides });
+
+  const designClosing = {
+    summary: "完成设计物：首页主视觉",
+    prdChanged: false,
+    systemChanged: false,
+    systemNote: "完成设计物：首页主视觉",
+    files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
+    durationMs: 95_000,
+    drafts: [
+      { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
+      { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
+    ],
+  };
+
+  it("live 到达（appendClosing）：稿清单随收尾卡入流原样保留", () => {
+    useChatStore.getState().appendClosing("p1", "run-1", toWorkClosing(designClosing)!, "run-1:9");
+
+    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
+    expect(card).toMatchObject({ runId: "run-1" });
+    expect((card as { closing: WorkClosing }).closing.drafts).toEqual([
+      { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
+      { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
+    ]);
+  });
+
+  it("刷新回访经对话史水合：稿清单完整（closed history 以 REST 为准，#89）", () => {
+    useChatStore.getState().hydrate("p1", [entry(1, "closing", { closing: designClosing })]);
+
+    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
+    expect((card as { closing: WorkClosing }).closing.drafts).toHaveLength(2);
+    expect((card as { closing: WorkClosing }).closing.drafts?.[1]).toMatchObject({
+      media: "image",
+      path: "/design/home-hero-2.png",
+    });
+  });
+
+  it("drafts 容错收窄：非数组回落缺省（编码 run 形态）；坏条目剔除不出坏行", () => {
+    expect(toWorkClosing({ ...designClosing, drafts: "nope" })?.drafts).toBeUndefined();
+    expect(
+      toWorkClosing({
+        ...designClosing,
+        drafts: [
+          { item: "ok", media: "html", path: "/design/a.html" },
+          { item: "无路径", media: "html" },
+          { item: "坏形态", media: "video", path: "/design/b.mp4" },
+          "not-an-object",
+        ],
+      })?.drafts,
+    ).toEqual([{ item: "ok", media: "html", path: "/design/a.html" }]);
   });
 });

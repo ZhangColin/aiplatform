@@ -1,7 +1,6 @@
 package com.aieducenter.aiplatform.business.order.application;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -25,11 +24,8 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -96,10 +92,10 @@ class OrderPaymentArchiveTest {
 
     @BeforeEach
     void stubProject() {
-        when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(new ProjectDetailResponse(
-                Long.toString(PROJECT_ID), "宠物店官网", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9200",
-                ProjectStatus.IN_PROGRESS, "进行中", false,
-                LocalDateTime.of(2026, 9, 1, 9, 0), null, null, null, null, null, null, null, null));
+        when(projectQueryAppService.detail(PROJECT_ID)).thenReturn(ProjectDetailResponseFixture
+                .detailOf(Long.toString(PROJECT_ID), "宠物店官网")
+                .workspaceId("9200")
+                .build());
         when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))
                 .thenReturn(Map.of(PROJECT_ID, "宠物店官网")); // 沉淀取名面（namesOf 单查询）
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(

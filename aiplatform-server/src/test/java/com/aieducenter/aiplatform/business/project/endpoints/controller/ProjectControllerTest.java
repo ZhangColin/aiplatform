@@ -35,10 +35,12 @@ import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleA
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
@@ -50,6 +52,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderB
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignScopeResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
@@ -210,19 +213,35 @@ class ProjectControllerTest {
     }
 
     @Test
+    void given_detail_with_design_items_when_get_then_item_list_returned() throws Exception {
+        // #290 设计轨道件清单读模型（对偶 segments 契约）：ord/标题/状态 code + *Name，
+        // null（无现行清单/锚漂）不序列化——前端不渲染计划区
+        when(queryAppService.detail(100L)).thenReturn(ProjectDetailResponseFixture
+                .detailOf("100", "官网 demo")
+                .designItems(List.of(new DesignItemResponse(1, "首页主视觉",
+                        DesignItemStatus.CLOSED, DesignItemStatus.CLOSED.getName())))
+                .build());
+
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.designItems[0].ord").value(1))
+                .andExpect(jsonPath("$.data.designItems[0].title").value("首页主视觉"))
+                .andExpect(jsonPath("$.data.designItems[0].status").value(2))
+                .andExpect(jsonPath("$.data.designItems[0].statusName").value("已收口"));
+    }
+
+    @Test
     void given_switch_command_when_endpoint_type_then_detail_returned_with_enum_binding() throws Exception {
         // 终点控件动作端点（#285）：Integer code 双向（BaseEnum 契约），响应与详情同构
         when(appService.switchEndpoint(eq(100L), argThat(command ->
                 command != null && command.endpointType() == ProjectEndpointType.SYSTEM_DESIGN
                         && command.scopeType() == DesignScopeType.SELECTED_PAGES)))
-                .thenReturn(new ProjectDetailResponse("100", "官网 demo", ProjectType.WEBSITE, "官网",
-                        ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计",
-                        new DesignScopeResponse(DesignScopeType.SELECTED_PAGES, "勾选页面",
-                                List.of("首页：展示产品与入口")),
-                        "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
-                        GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
-                        null, null, null));
+                .thenReturn(ProjectDetailResponseFixture.detailOf("100", "官网 demo")
+                        .workspaceId("900")
+                        .endpointType(ProjectEndpointType.SYSTEM_DESIGN)
+                        .designScope(new DesignScopeResponse(DesignScopeType.SELECTED_PAGES,
+                                "勾选页面", List.of("首页：展示产品与入口")))
+                        .build());
 
         performAsUser(post("/api/projects/100/endpoint-type")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -432,12 +451,9 @@ class ProjectControllerTest {
     void given_valid_name_when_rename_then_detail_returned() throws Exception {
         // 动作端点风格同 archive；响应与详情端点同构（前端 invalidate 后刷新列表/顶栏）
         when(appService.rename(100L, "品牌官网")).thenReturn(
-                new ProjectDetailResponse("100", "品牌官网", ProjectType.WEBSITE, "官网",
-                        ProjectEndpointType.SYSTEM, "系统", null,
-                        "900", ProjectStatus.IN_PROGRESS, "进行中", false,
-                        LocalDateTime.of(2026, 8, 22, 10, 0), null, null, null,
-                        GenerationState.NEVER_GENERATED, GenerationState.NEVER_GENERATED.getName(),
-                        null, null, null));
+                ProjectDetailResponseFixture.detailOf("100", "品牌官网")
+                        .workspaceId("900")
+                        .build());
 
         performAsUser(post("/api/projects/100/rename")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -950,11 +966,14 @@ class ProjectControllerTest {
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
             LocalDateTime prdProducedAt, GenerationState generationState,
             List<GenerationSegmentResponse> segments) {
-        return new ProjectDetailResponse(id, "官网 demo", ProjectType.WEBSITE, "官网",
-                ProjectEndpointType.SYSTEM, "系统", null,
-                "900", status, status.getName(), archived,
-                LocalDateTime.of(2026, 8, 22, 10, 0), null, prdProducedAt, null,
-                generationState, generationState.getName(), null, null, segments);
+        return ProjectDetailResponseFixture.detailOf(id, "官网 demo")
+                .workspaceId("900")
+                .status(status)
+                .archived(archived)
+                .prdProducedAt(prdProducedAt)
+                .generationState(generationState)
+                .segments(segments)
+                .build();
     }
 
     private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,

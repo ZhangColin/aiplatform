@@ -44,6 +44,10 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  *                            阶段 0 + 切片计划逐片；PRD 版本锚一致才有效，锚不一致
  *                            （PRD 已演进、旧计划过期）或无片行 = null——不拿旧计划
  *                            对进度）
+ * @param designItems         设计轨道件清单（#290 计划区只读透出，ord 升序——
+ *                            设计物清单逐件；PRD 版本锚一致才有效，锚不一致（PRD
+ *                            已演进、旧清单过期）或无件行 = null——不拿旧清单对进度，
+ *                            对偶 segments 口径）
  */
 public record ProjectDetailResponse(
         String id,
@@ -65,6 +69,7 @@ public record ProjectDetailResponse(
         String generationStateName,
         OrderBriefResponse activeOrder,
         OrderBriefResponse latestOrder,
-        List<GenerationSegmentResponse> segments
+        List<GenerationSegmentResponse> segments,
+        List<DesignItemResponse> designItems
 ) {
 }

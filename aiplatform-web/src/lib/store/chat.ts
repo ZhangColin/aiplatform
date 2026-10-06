@@ -37,6 +37,17 @@ export type ChatMaterial = { name: string; path: string };
 export const DEFAULT_GUIDE_LABEL = "平台";
 
 /**
+ * 收尾卡稿条目（#289 设计会话收尾卡扩载，#290 呈现）：item＝本场设计物、media＝
+ * 稿形态（html＝界面稿 / image＝图像稿）、path＝去向（工作区锚定形——文件区可见
+ * 可下载）。编码 run 不携带。
+ */
+export type ClosingDraft = {
+  item: string;
+  media: "html" | "image";
+  path: string;
+};
+
+/**
  * 收尾卡权威事实（#88 收口扩载的载荷形状，#89 起归对话流）：四要素 = 摘要
  * （summary）/判定行（prd 与 system 两组布尔+说明——服务端权威值）/变更清单
  * （files，文件级）/轮末统计（durationMs；文件数与变更行数由 files 派生）。
@@ -55,6 +66,9 @@ export type WorkClosing = {
   /** 自测统计（#96 自测子智能体清单式播报的收尾统计）：可缺省——自测子智能体未跑时不携带。
    *  只记「自测跑了几项」——逐项 ✅/❌ 明细在过程播报里，收尾卡不带通过/未过伪判。 */
   selfTest?: { total: number };
+  /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
+   *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
+  drafts?: ClosingDraft[];
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -711,7 +725,28 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
     selfTest: toSelfTest(record.selfTest),
+    drafts: toClosingDrafts(record.drafts),
   };
+}
+
+/**
+ * drafts 载荷容错收窄（#289/#290）：非数组回落 undefined（编码 run 不携带）；
+ * 条目缺 path / media 非二值剔除（不出坏行——稿条目的呈现依赖 path 与形态），
+ * item 缺失回落空串（行仍可按 path 呈现）。全空数组照收（收口判据过而清单
+ * 被裁的防御面，卡面零稿行）。
+ */
+function toClosingDrafts(raw: unknown): ClosingDraft[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.flatMap((draft): ClosingDraft[] => {
+    const entry = asRecord(draft);
+    if (!entry || typeof entry.path !== "string" || !entry.path) return [];
+    if (entry.media !== "html" && entry.media !== "image") return [];
+    return [{
+      item: typeof entry.item === "string" ? entry.item : "",
+      media: entry.media,
+      path: entry.path,
+    }];
+  });
 }
 
 /**

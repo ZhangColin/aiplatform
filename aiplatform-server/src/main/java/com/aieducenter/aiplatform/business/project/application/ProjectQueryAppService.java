@@ -22,6 +22,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -33,6 +34,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignScopeResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
@@ -45,6 +47,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
+import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -76,6 +79,7 @@ public class ProjectQueryAppService {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final OrderQueryAppService orderQueryAppService;
     private final GenerationSegmentRepository generationSegments;
+    private final DesignItemRepository designItems;
     private final CodingRunTrack codingRunTrack;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
@@ -83,12 +87,14 @@ public class ProjectQueryAppService {
                                   WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                   OrderQueryAppService orderQueryAppService,
                                   GenerationSegmentRepository generationSegments,
+                                  DesignItemRepository designItems,
                                   CodingRunTrack codingRunTrack) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.orderQueryAppService = orderQueryAppService;
         this.generationSegments = generationSegments;
+        this.designItems = designItems;
         this.codingRunTrack = codingRunTrack;
     }
 
@@ -354,7 +360,8 @@ public class ProjectQueryAppService {
 
     /** 详情拼装：列表字段全量 + PRD 产出时点（成果区长出判据）+ 首次生成时点
      * + 生成态四态投影（#222）+ 未终结订单摘要（锁定式矩阵推导输入）+ 最近订单
-     * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）。 */
+     * 摘要（归档终态「完整记录」取单面，#30）+ 生成轨道片清单（#225 计划区）
+     * + 设计轨道件清单（#290 计划区，对偶片清单）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
                 orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
@@ -367,7 +374,8 @@ public class ProjectQueryAppService {
                 project.getGeneratedAt(), generationState, generationState.getName(),
                 base.activeOrder(),
                 orderQueryAppService.latestOrderOf(project.getId()).orElse(null),
-                segmentsOf(project));
+                segmentsOf(project),
+                designItemsOf(project));
     }
 
     /** 设计范围响应拼装（#285）：无页面锚定（null 聚合读面）即 null。 */
@@ -395,6 +403,23 @@ public class ProjectQueryAppService {
         return segments.stream()
                 .map(segment -> new GenerationSegmentResponse(segment.getOrd(),
                         segment.getDescription(), segment.getStatus(), segment.getStatus().getName()))
+                .toList();
+    }
+
+    /**
+     * 设计轨道件清单读模型（#290 计划区只读透出，对偶 {@link #segmentsOf}）：轨道表
+     * 当前件集按 ord 升序映射——现行清单（PRD 版本锚门 {@link DesignItem#
+     * checklistMatchesPrd} 单点）才透出；锚不一致（PRD 已演进、旧清单是过期结构）
+     * 或无件行返回 null（过期清单的进度不是现行事实，不拿旧清单对进度）。
+     */
+    private List<DesignItemResponse> designItemsOf(Project project) {
+        List<DesignItem> items = designItems.findByProjectIdOrderByOrdAsc(project.getId());
+        if (!DesignItem.checklistMatchesPrd(items, project.getPrdProducedAt())) {
+            return null;
+        }
+        return items.stream()
+                .map(item -> new DesignItemResponse(item.getOrd(), item.getTitle(),
+                        item.getStatus(), item.getStatus().getName()))
                 .toList();
     }
 

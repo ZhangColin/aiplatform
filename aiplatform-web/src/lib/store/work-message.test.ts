@@ -437,6 +437,79 @@ describe("work-message store · 脱轨信号部件（#240：入 parts 流水供�
   });
 });
 
+describe("work-message store · 座席（#290 designer 设计会话：同骨架异语料的呈现分岔锚）", () => {
+  it("startWork 座席随 run-start 配置键落锚：designer 座＝设计会话（计划区/活性行分岔的依据）", () => {
+    useWorkMessageStore.getState().startWork("p1", "r1", undefined, undefined, "designer");
+
+    expect(work()).toMatchObject({ runId: "r1", seat: "designer" });
+  });
+
+  it("缺省座席＝executor（旧调用面兼容）：无 seat 即编码 run 呈现", () => {
+    useWorkMessageStore.getState().startWork("p1", "r1");
+
+    expect(work()?.seat).toBeUndefined();
+  });
+
+  it("无锚 + designer- 会话的部件：补建锚且座席派生 designer（run-start 被缓冲淘汰的补建路径）", () => {
+    useWorkMessageStore.getState().notePart(
+      "p1",
+      ref({ eventId: "r9:2", runId: "r9", sessionId: "designer-p1-item-1" }),
+      { kind: "text", text: "先读 PRD 清单章" },
+    );
+
+    expect(work()).toMatchObject({ runId: "r9", seat: "designer" });
+    expect(work()?.parts).toHaveLength(1);
+  });
+
+  it("无锚 + coder- 会话补建锚仍派生 executor；main- 会话照旧不建（对话面走气泡）", () => {
+    useWorkMessageStore.getState().notePart(
+      "p1",
+      ref({ eventId: "r8:2", runId: "r8", sessionId: "coder-p1" }),
+      { kind: "text", text: "编码解说" },
+    );
+
+    expect(work()).toMatchObject({ runId: "r8", seat: "executor" });
+
+    useWorkMessageStore.getState().notePart(
+      "p1",
+      ref({ eventId: "rb:2", runId: "rb", sessionId: "main-p1" }),
+      { kind: "text", text: "对话轮" },
+    );
+    expect(work()?.runId).toBe("r8"); // 主智能体部件不重锚
+  });
+
+  it("定格留驻保座席；下一场 run 重开随新 run-start 座席换装（设计物逐件推进＝逐件新卡）", () => {
+    const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();
+    startWork("p1", "r1", undefined, undefined, "designer");
+    notePart(
+      "p1",
+      ref({ eventId: "r1:2", sessionId: "designer-p1-item-1" }),
+      { kind: "text", text: "本件解说" },
+    );
+    freezeWork("p1", "r1");
+
+    expect(work()).toMatchObject({ frozen: true, seat: "designer" });
+
+    // 下一设计物（新 runId）重开：座席随新 run-start 再落（同轨恒 designer）
+    startWork("p1", "r2", undefined, undefined, "designer");
+    expect(work()).toMatchObject({ runId: "r2", frozen: false, seat: "designer", parts: [] });
+  });
+
+  it("同 runId 幂等（重放）：座席不覆写、部件保留", () => {
+    useWorkMessageStore.getState().startWork("p1", "r1", undefined, undefined, "designer");
+    useWorkMessageStore.getState().notePart(
+      "p1",
+      ref({ eventId: "r1:2", sessionId: "designer-p1-item-1" }),
+      { kind: "text", text: "解说" },
+    );
+
+    useWorkMessageStore.getState().startWork("p1", "r1");
+
+    expect(work()).toMatchObject({ seat: "designer" });
+    expect(work()?.parts).toHaveLength(1);
+  });
+});
+
 describe("work-message store · 定格收口（#117：原地定格留驻，收尾卡归 chat store 对话流）", () => {
   it("freezeWork 定格留驻：部件保留、只读、不再生长（成功收口不再清空——「过程上文、结果下卡」）", () => {
     const { startWork, notePart, freezeWork } = useWorkMessageStore.getState();

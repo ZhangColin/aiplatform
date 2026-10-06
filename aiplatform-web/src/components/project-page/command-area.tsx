@@ -62,6 +62,7 @@ export function CommandArea({
   lock,
   stage = "interview",
   plan,
+  designPlan,
   onSeePrd,
   onSeeOrder,
 }: {
@@ -72,6 +73,8 @@ export function CommandArea({
   stage?: keyof typeof STAGE_HINTS;
   /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
   plan?: GenerationSegmentFact[] | null;
+  /** 设计轨道件清单（#290 designer 直播卡计划区；工作消息座席＝designer 时选送）。 */
+  designPlan?: GenerationSegmentFact[] | null;
   /** 「去看看」跳转回调（跳成果区文档面等），认领（ack）在本组件内。 */
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
@@ -82,8 +85,12 @@ export function CommandArea({
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
-  // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）
+  // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）；designer 座席（#290
+  // 设计会话）同骨架异语料——计划区换设计物清单
   const work = useWorkMessageStore((s) => s.works[projectId]);
+  // 计划区选送（#290）：座席分岔——designer＝设计物清单、executor＝切片清单
+  //（两清单互斥出场：设计轨与生成轨不并行，同构不混淆）
+  const workPlan = work?.seat === "designer" ? designPlan : plan;
   // 工作消息插入锚（#117「过程上文、结果下卡」）：定格留驻的工作消息插在本 run
   // 收尾卡之前——上承本轮意见、下启收尾卡；-1 = 无本 run 收尾卡（生长中 /
   // run-failed），留对话流末尾。锚位即活性行沉没信号（#235：收尾卡入流 → 末行
@@ -199,7 +206,7 @@ export function CommandArea({
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (
-              <WorkMessage work={work} plan={plan} closingArrived />
+              <WorkMessage work={work} plan={workPlan} closingArrived />
             ) : null}
             <MessageRow message={message} projectId={projectId} round={closingRoundOf(messages, message)} onSeeOrder={onSeeOrder}>
               {message.kind === "question" ? (
@@ -214,7 +221,7 @@ export function CommandArea({
             </MessageRow>
           </Fragment>
         ))}
-        {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={plan} /> : null}
+        {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={workPlan} /> : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">

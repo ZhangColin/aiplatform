@@ -27,11 +27,8 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderR
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
-import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
-import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -827,10 +824,10 @@ class BackofficeOrderSeamTest {
 
     /** 项目读面桩（detail/prd 跨 BC 软引用收口——下单冻结快照所需）。 */
     private void stubProject(long projectId) {
-        when(projectQueryAppService.detail(projectId)).thenReturn(new ProjectDetailResponse(
-                Long.toString(projectId), "seam 测试项目", ProjectType.WEBSITE, "官网", ProjectEndpointType.SYSTEM, "系统", null, "9100",
-                ProjectStatus.IN_PROGRESS, ProjectStatus.IN_PROGRESS.getName(), false,
-                LocalDateTime.of(2026, 9, 13, 9, 0), null, null, null, null, null, null, null, null));
+        when(projectQueryAppService.detail(projectId)).thenReturn(ProjectDetailResponseFixture
+                .detailOf(Long.toString(projectId), "seam 测试项目")
+                .workspaceId("9100")
+                .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z")));
     }

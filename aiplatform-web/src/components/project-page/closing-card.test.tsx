@@ -153,3 +153,89 @@ describe("ClosingCard · 版本控件（#92/#93）", () => {
     expect(html).not.toContain("回滚到此");
   });
 });
+
+describe("ClosingCard · 稿清单与去向（#290 设计会话收尾卡扩载呈现）", () => {
+  /** 设计会话收尾载荷（#289 closing.drafts 扩载形）：判定行恒「未动」、文件清单与稿同集。 */
+  function designClosing(drafts: WorkClosing["drafts"]): WorkClosing {
+    return closing({
+      summary: "完成设计物：首页主视觉",
+      prdChanged: false,
+      prdNote: undefined,
+      systemChanged: false,
+      systemNote: "完成设计物：首页主视觉",
+      files: [{ path: "/design/home-1.html", added: 120, removed: 0 }],
+      durationMs: 95_000,
+      version: undefined,
+      drafts,
+    });
+  }
+
+  it("稿清单在场：每稿一行（文件名＋形态标签）、图像稿 raw 直看链接、稿数统计；判定行/文件清单/版本控件让位", () => {
+    const html = renderCard(
+      designClosing([
+        { item: "首页主视觉", media: "html", path: "/design/home-1.html" },
+        { item: "首页主视觉", media: "image", path: "/design/home-hero-2.png" },
+      ]),
+    );
+
+    expect(html).toContain("完成设计物：首页主视觉"); // 摘要（本场设计物叙事）
+    // 稿清单：文件名＋形态标签（用户语言——界面稿/图像稿，不出 html/png 工程词）
+    expect(html).toContain("home-1.html");
+    expect(html).toContain("界面稿");
+    expect(html).toContain("home-hero-2.png");
+    expect(html).toContain("图像稿");
+    // 去向＝平台文件服务 raw 直看（未付费照看：门只盖下载面，#287）——图像稿可点
+    expect(html).toContain('href="/api/projects/100/files/raw?path=%2Fdesign%2Fhome-hero-2.png"');
+    // 界面稿不出直链（raw 只伺服图片 PRJ_038——渲染式呈现归 #293 稿伺服通道）：
+    // 如实提示文件区可看，不伪造不可用入口
+    expect(html).not.toContain('href="/api/projects/100/files/raw?path=%2Fdesign%2Fhome-1.html"');
+    expect(html).toContain("文件区可看");
+    // 轮末统计：时长＋稿数（设计变体不出「检查通过」与文件行数）
+    expect(html).toContain("本轮");
+    expect(html).toContain("2");
+    expect(html).toContain("稿");
+    expect(html).toContain("1 分 35 秒");
+    // 让位面：判定行（PRD/系统恒未动的结构常量）与文件清单（与稿同集重复）不出
+    expect(html).not.toContain("需求文档：");
+    expect(html).not.toContain("系统：");
+    expect(html).not.toContain("+120");
+    expect(html).not.toContain("个文件");
+    expect(html).not.toContain("检查通过");
+    // 设计候选不自动成版（ADR-0025）：版本控件不出
+    expect(html).not.toContain("查看当时");
+    expect(html).not.toContain("回滚到此");
+  });
+
+  it("多稿长清单默认收五条，「查看全部 N 稿」收进折叠", () => {
+    const drafts = Array.from({ length: 7 }, (_, index) => ({
+      item: "首页主视觉",
+      media: "image" as const,
+      path: `/design/home-${index + 1}.png`,
+    }));
+    const html = renderCard(designClosing(drafts));
+
+    expect(html).toContain("home-5.png");
+    expect(html).not.toContain("home-6.png"); // 五条之外收进折叠（SSR 默认收起）
+    expect(html).toContain("查看全部 7 稿");
+  });
+
+  it("drafts 缺省（编码 run）：四要素照旧——判定行/文件清单在、无稿清单区", () => {
+    const html = renderCard(closing());
+
+    expect(html).toContain("需求文档：");
+    expect(html).toContain("/src/App.jsx");
+    expect(html).not.toContain("界面稿");
+    expect(html).not.toContain("图像稿");
+    expect(html).not.toContain("查看全部 7 稿");
+  });
+
+  it("drafts 空数组（畸形载荷防御面）：仍走设计形态如实「本轮 0 稿」——不闪编码 run 语料", () => {
+    const html = renderCard(designClosing([]));
+
+    expect(html).toContain("完成设计物：首页主视觉");
+    expect(html).toMatch(/本轮 <b[^>]*>0<\/b> 稿/);
+    expect(html).not.toContain("需求文档："); // 判定行不出（设计收口不是编码轮语料）
+    expect(html).not.toContain("检查通过");
+    expect(html).not.toContain("查看全部"); // 零稿行不出清单区
+  });
+});

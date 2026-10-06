@@ -461,9 +461,11 @@ public class GenerationAppService {
      */
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight, BuildPlan plan) {
         Long projectId = project.getId();
-        // 设计类终点收口（#285，ADR-0025）：设计主线交付设计资产包、系统＋设计设计
-        // 先行（构建从定稿设计稿长出）——系统生成轨道对两者都不派。设计过程编排
-        // 归设计线后续票；在途口径按调用方分岔（按钮拒绝 PRJ_042、收口自动静默跳过）。
+        // 设计类终点收口（#285 立门、#289 语义收敛）：设计主线交付设计资产包、
+        // 系统＋设计设计先行——构建只从定稿设计稿长出（定稿→起构建接线归设计线
+        // 后续票，#291），此前系统生成轨道对两者都不派（PRD 收口的路由已在上游
+        // 起设计过程，MainAgentAppService#dispatchOnTurnClose）。在途口径按调用方
+        // 分岔（按钮拒绝 PRJ_042、收口自动静默跳过——防御位，正常不可达）。
         if (project.getEndpointType().designInvolved()) {
             if (rejectInFlight) {
                 throw new ApplicationException(ProjectMessage.GENERATION_DESIGN_ENDPOINT);
@@ -745,9 +747,9 @@ public class GenerationAppService {
                     new CoderRunAttempts.Prompts(
                             prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
                             errorScene -> prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
-                    attemptRunId -> closeGenerationStage(project, ord, last, runId,
+                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last, runId,
                             stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice)),
-                    CoderRunAttempts.GENERATE_LABEL, stage0,
+                    CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()));
             if (!result.succeeded()) {

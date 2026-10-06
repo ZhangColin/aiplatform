@@ -32,7 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>六面钉死（#252 验收面）：</p>
  * <ul>
- * <li><b>清单可观测</b>：三槽位分组（main/executor/subagent）——main 平台九件
+ * <li><b>清单可观测</b>：四槽位分组（main/executor/designer/subagent，#289 designer
+ * 槽——平台件 generate_image＋harness 内建文件工具呈现、无 execute）——main 平台九件
  * （骨架七＋增强两，含 propose_skill 技能自荐 #263 三槽位齐开）、executor 平台
  * 三件（骨架，含 propose_skill 技能自荐 #259）
  * ＋harness 内建编码工具（注册自省，含
@@ -87,16 +88,17 @@ class BackofficeAgentToolSeamTest {
     // ---------- 清单可观测：三槽位分组、类别与挂载态 ----------
 
     @Test
-    void given_defaults_when_signed_get_inventory_then_three_slots_with_expected_tools()
+    void given_defaults_when_signed_get_inventory_then_four_slots_with_expected_tools()
             throws Exception {
         signedGet()
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data", hasSize(3)))
-                // 三槽位键序（与技能槽位同键）
+                .andExpect(jsonPath("$.data", hasSize(4)))
+                // 四槽位键序（与技能槽位同键；#289 designer 居 executor 后）
                 .andExpect(jsonPath("$.data[0].slot").value("main"))
                 .andExpect(jsonPath("$.data[1].slot").value("executor"))
-                .andExpect(jsonPath("$.data[2].slot").value("subagent"))
+                .andExpect(jsonPath("$.data[2].slot").value("designer"))
+                .andExpect(jsonPath("$.data[3].slot").value("subagent"))
                 // main：平台九件（骨架七恒挂载——含 propose_skill #263 自荐三槽位齐开
                 // ＋增强两件按生效开关缺省开）
                 .andExpect(jsonPath("$.data[0].tools", hasSize(9)))
@@ -124,13 +126,26 @@ class BackofficeAgentToolSeamTest {
                 // harness 内建件数与自省一致（平台三件之外全是内建呈现）
                 .andExpect(jsonPath("$.data[1].tools.length()").value(
                         3 + harnessBuiltinCount()))
+                // designer（#289）：平台件 generate_image（骨架，ADR-0026 档位表落
+                // 提示词层）＋harness 内建文件工具（写文件件——注册自省，含
+                // write_file）；无 shell——execute 不在设计面（结构性关闭的呈现同源）
+                .andExpect(jsonPath("$.data[2].slotName").value("设计执行体"))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'generate_image')].enabled")
+                        .value(true))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'write_file')].kind")
+                        .value("HARNESS_BUILTIN"))
+                .andExpect(jsonPath("$.data[2].tools.length()").value(
+                        1 + fileBuiltinCount()))
+                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'execute')]").doesNotExist())
                 // subagent：self-test 声明七件（同源引用声明常量——#263 自荐经声明
                 // 接入；平台资产件类别归正本 SKELETON，其余 harness 内建口径）
-                .andExpect(jsonPath("$.data[2].tools", hasSize(
+                .andExpect(jsonPath("$.data[3].tools", hasSize(
                         ProfileSubagentSupplier.SELF_TEST_TOOLS.size())))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'propose_skill')].kind")
+                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'propose_skill')].kind")
                         .value("SKELETON"))
-                .andExpect(jsonPath("$.data[2].tools[?(@.name == 'execute')].kind")
+                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'execute')].kind")
                         .value("HARNESS_BUILTIN"));
     }
 
@@ -281,6 +296,11 @@ class BackofficeAgentToolSeamTest {
     /** harness 内建编码工具件数（自省单源——清单断言不手工抄数）。 */
     private static int harnessBuiltinCount() {
         return HarnessBuiltinTools.codingToolNames().size();
+    }
+
+    /** harness 内建文件工具件数（#289 designer 槽呈现口径——不含 shell，自省单源）。 */
+    private static int fileBuiltinCount() {
+        return HarnessBuiltinTools.fileTools().size();
     }
 
     private ResultActions signedGet() throws Exception {

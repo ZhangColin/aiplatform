@@ -50,4 +50,20 @@ public final class HarnessBuiltinTools {
     public static List<String> codingToolNames() {
         return codingTools().stream().map(BuiltinTool::name).toList();
     }
+
+    /**
+     * harness 内建<b>文件</b>工具子集（#289 设计执行体槽的呈现口径，ADR-0025
+     * 无 shell）：{@link FilesystemTool} 六件（read_file / write_file / edit_file /
+     * grep_files / glob_files / list_files——以注册自省为准），不含
+     * {@link ShellExecuteTool}——设计面工厂结构性关 shell，呈现与装配同源。
+     */
+    public static List<BuiltinTool> fileTools() {
+        Toolkit probe = new Toolkit();
+        probe.registerTool(new FilesystemTool(new DockerExecFilesystem("builtin-probe")));
+        return probe.getToolSchemas().stream()
+                .map(schema -> new BuiltinTool(schema.getName(),
+                        schema.getDescription() == null ? "" : schema.getDescription()))
+                .sorted(Comparator.comparing(BuiltinTool::name))
+                .toList();
+    }
 }

@@ -6,12 +6,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 import org.springframework.stereotype.Component;
@@ -26,6 +27,7 @@ import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
@@ -81,6 +83,29 @@ class CoderRunAttempts {
     }
 
     /**
+     * 尝试环的执行体座席（#289 designer 座并入，两座共用同一环）：配置档位寻址
+     * （{@link AgentProfile#EXECUTOR} / {@link AgentProfile#DESIGNER}——systemPrompt
+     * 与模型档位经运营配置读面取生效值、计量 dims agentKind 同键）、工作区面
+     * （designer 无 shell——ProjectDesign 形态，写文件件在、命令执行结构性关闭）、
+     * 收口成版（执行体真收口自动成版；设计<b>候选</b>不成版——版本流只认定稿，
+     * ADR-0025 候选与版本两套语义不打通）、收尾卡稿清单锚（designer 会话扩载
+     * 「本轮稿清单与去向」；null = 非设计会话不扩载）。
+     */
+    record RunSeat(AgentProfile profile, boolean workspaceNoShell,
+            boolean commitVersionAtClosing, String draftsItem) {
+
+        /** run 执行体座（生成/更新轨道）。 */
+        static RunSeat executor() {
+            return new RunSeat(AgentProfile.EXECUTOR, false, true, null);
+        }
+
+        /** 设计执行体座（#289 设计过程轨道）：无 shell、候选不成版、收尾卡带稿清单。 */
+        static RunSeat designer(String draftsItem) {
+            return new RunSeat(AgentProfile.DESIGNER, true, false, draftsItem);
+        }
+    }
+
+    /**
      * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
      * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = finish_edit 工具
      * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本环
@@ -95,6 +120,15 @@ class CoderRunAttempts {
          */
         static ClosingJudgment generation(String note) {
             return new ClosingJudgment(false, null, true, note);
+        }
+
+        /**
+         * 设计轨道的分段判定（#289）：PRD 未动、系统未动（设计稿不是系统——两套
+         * 产出逻辑，ADR-0024）；note = 本场设计物叙事（完成设计物：X），进收尾卡
+         * summary（稿清单与去向在 closing.drafts 扩载）。
+         */
+        static ClosingJudgment design(String note) {
+            return new ClosingJudgment(false, null, false, note);
         }
     }
 
@@ -150,10 +184,12 @@ class CoderRunAttempts {
     }
 
     /**
-     * 跑一场编码 run（有限次尝试）：成功收口即 {@code onSuccess}（收口回调携该次
-     * 尝试的 runId，返回收口判定的权威事实——#88 判定行；回调抛异常即该次尝试
-     * 失败，走重试/终态——收口判据不满足的既有口径，如生成 8081 核验 / 修正
-     * finish_edit 事实）。项目事实（工作区 / owner）从聚合派生。
+     * 跑一场编码/设计 run（有限次尝试，座席 {@link RunSeat} 定配置与工具面）：
+     * 成功收口即 {@code onSuccess}（收口回调携该次尝试的 runId 与本场累计文件
+     * 变更事实——对偶 8081 探活看的是工作区累计状态，重试尝试不因「本次没新写」
+     * 误判；返回收口判定的权威事实——#88 判定行；回调抛异常即该次尝试失败，走
+     * 重试/终态——收口判据不满足的既有口径，如生成 8081 核验 / 修正 finish_edit
+     * 事实 / 设计会话 design/ 落稿核验）。项目事实（工作区 / owner）从聚合派生。
      *
      * <p><b>收口扩载（#88）</b>：真收口释放被押后的 run-finish 时拼装 {@code closing}
      * 载荷——摘要（判定事实的合并叙事）/ 判定行（onSuccess 返回的权威事实）/ 变更
@@ -180,8 +216,8 @@ class CoderRunAttempts {
      *                       / 修正恢复出口（#48/#56/#221）衔接
      */
     RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
-            Function<String, ClosingJudgment> onSuccess, String what, boolean injectKnowledge,
-            RunHeading heading) {
+            BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
+            boolean injectKnowledge, RunSeat seat, RunHeading heading) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
                 ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
@@ -200,26 +236,27 @@ class CoderRunAttempts {
                     new AtomicReference<>(StageDurations.zero());
             boolean attemptAccounted = false;
             String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
-            AgentConfigAppService.EffectiveConfig executor =
-                    agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+            AgentConfigAppService.EffectiveConfig agent =
+                    agentConfigs.effectiveOf(seat.profile());
             AgentCommand command = new AgentCommand(
                     attemptRunId,
                     attempt == 1 ? knowledgePrefix + prompts.first()
                             : prompts.retry().apply(previousError),
-                    executor.systemPrompt(),
-                    executor.chatModelString(),
+                    agent.systemPrompt(),
+                    agent.chatModelString(),
                     sessionId,
                     project.ownerUserId(),
                     new UsageContext(Long.toString(projectId),
-                            UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.EXECUTOR),
+                            UsageDims.of(projectId, UsageDims.kindOf(seat.profile()),
                                     sessionId)),
                     Long.toString(project.getWorkspaceId()),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                     properties.getTimeout(),
-                    AgentProfile.EXECUTOR.key(),
+                    seat.profile().key(),
                     /* workspaceReadOnly= */ false,
+                    seat.workspaceNoShell(),
                     heading,
-                    executor.toolSpec());
+                    agent.toolSpec());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(projectId, project.getOwnerAccountId()));
@@ -272,7 +309,7 @@ class CoderRunAttempts {
                 Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 成版）
                 ClosingJudgment judgment;
                 try {
-                    judgment = onSuccess.apply(attemptRunId);
+                    judgment = onSuccess.apply(attemptRunId, runChanges);
                 }
                 catch (RuntimeException e) {
                     if (attempt == maxAttempts) {
@@ -283,15 +320,18 @@ class CoderRunAttempts {
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
-                            runStartedAt, what, selfTestCommands);
+                            runStartedAt, what, selfTestCommands, seat.draftsItem());
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
-                    // （缺 version 键 = 本轮未成版，run 收口不受影响）
-                    String versionHash = versions.commitAtClosing(project, firstRunId,
-                            (String) closing.get(CLOSING_SUMMARY_FIELD));
-                    if (versionHash != null) {
-                        closing.put(CLOSING_VERSION_FIELD, versionHash);
+                    // （缺 version 键 = 本轮未成版，run 收口不受影响）。设计会话
+                    // 不成版（ADR-0025 候选与版本两套语义不打通——只有定稿成版）
+                    if (seat.commitVersionAtClosing()) {
+                        String versionHash = versions.commitAtClosing(project, firstRunId,
+                                (String) closing.get(CLOSING_SUMMARY_FIELD));
+                        if (versionHash != null) {
+                            closing.put(CLOSING_VERSION_FIELD, versionHash);
+                        }
                     }
                     // 阶段耗时分布（#111）：收口尾序止表于成版（落库自指不可测——载荷
                     // 先于落库定型，量级极小忽略）；四桶齐备 + 逐尝试分布
@@ -318,7 +358,7 @@ class CoderRunAttempts {
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
             }
         }
-        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成「继续生成」续跑/修正恢复出口）",
+        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
                 what, projectId, maxAttempts);
         return RunResult.failed(previousError);
     }
@@ -333,6 +373,9 @@ class CoderRunAttempts {
 
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
+
+    /** 设计轨日志标签（#289 设计过程轨道）：收口摘要口径分岔用。 */
+    static final String DESIGN_LABEL = "design";
 
     /** 收口扩载载荷的摘要键（成版提交主题 + 版本详情叙事同源）。 */
     static final String CLOSING_SUMMARY_FIELD = "summary";
@@ -358,11 +401,13 @@ class CoderRunAttempts {
      * schema 见 SSE事件清单·收口扩载（对话史落库 #89 与版本锚定 #91 复用同一载荷，
      * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径跨尝试
-     * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。
+     * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。设计会话
+     * （#289）另扩 {@code drafts} 稿清单——本轮落进 design/ 的稿（item＝设计物、
+     * media＝形态、path＝去向），候选稿的事实面，供收尾卡呈现与回访水合。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
-            Set<String> selfTestCommands) {
+            Set<String> selfTestCommands, String draftsItem) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -379,7 +424,63 @@ class CoderRunAttempts {
         if (selfTest != null) {
             closing.put(AgentEventTypes.SELF_TEST_FIELD, selfTest);
         }
+        if (draftsItem != null) {
+            closing.put(CLOSING_DRAFTS_FIELD, draftPayloads(changes, draftsItem));
+        }
         return closing;
+    }
+
+    /** 收口扩载的稿清单键（#289 设计会话扩载——本轮稿清单与去向）。 */
+    static final String CLOSING_DRAFTS_FIELD = "drafts";
+
+    /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
+     *  = 工作区布局常量表）。 */
+    private static final String DESIGN_DIR_PREFIX = "/" + WorkspaceLayout.DESIGN_DIR + "/";
+
+    /**
+     * design/ 锚定判定（#289 单点——稿清单派生与设计会话收口判据共用，两处口径
+     * 不许漂移）：path 为工作区锚定形（如 {@code /design/home-1.html}），大小写
+     * 不敏感（文件系统侧无大小写约定）。
+     */
+    static boolean designAnchored(String path) {
+        return path != null && path.toLowerCase(Locale.ROOT).startsWith(DESIGN_DIR_PREFIX);
+    }
+
+    /** 界面类稿扩展名（media 形态判据——平面类位图同目录落盘）。 */
+    private static final String HTML_MEDIA = "html";
+
+    /** 平面类稿扩展名集合（图片模型位图稿与 HTML 源同存口径随 #292）。 */
+    private static final Set<String> IMAGE_MEDIA_EXTENSIONS =
+            Set.of("png", "jpg", "jpeg", "webp", "gif", "svg");
+
+    /**
+     * 稿清单载荷（#289 设计会话收尾卡扩载）：本轮变更里锚定 design/ 的稿——
+     * item = 本场设计物（会话即设计物，条目原文）、media = 形态（界面类 html /
+     * 平面类 image，按扩展名派生）、path = 去向（工作区锚定形）。判定以平台可
+     * 观察的文件变更事实为准（同收口判据口径），不解析执行体自由文本。
+     */
+    private static List<Map<String, Object>> draftPayloads(List<FileChange> changes,
+            String draftsItem) {
+        return changes.stream()
+                .map(FileChange::path)
+                .filter(CoderRunAttempts::designAnchored)
+                .distinct()
+                .sorted()
+                .map(path -> Map.<String, Object>of(
+                        "item", draftsItem,
+                        "media", mediaOf(path),
+                        "path", path))
+                .toList();
+    }
+
+    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图）。 */
+    private static String mediaOf(String path) {
+        int dot = path.lastIndexOf('.');
+        String extension = dot >= 0 ? path.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
+        if (IMAGE_MEDIA_EXTENSIONS.contains(extension)) {
+            return "image";
+        }
+        return HTML_MEDIA;
     }
 
     /**
@@ -485,11 +586,13 @@ class CoderRunAttempts {
         return new AgentEvent(finish.type(), payload);
     }
 
-    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成轨道按段叙事。 */
+    /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成/
+     * 设计轨道按段叙事。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
-        if (GENERATE_LABEL.equals(what)) {
-            // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片，来自
-            // {@link ClosingJudgment#generation(String)} 的 note——恒非空）
+        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)) {
+            // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片）；
+            // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）——note
+            // 恒非空（轨道层 ClosingJudgment.generation 同形拼装）
             return judgment.systemNote();
         }
         if (judgment.prdChanged() && judgment.systemChanged()) {

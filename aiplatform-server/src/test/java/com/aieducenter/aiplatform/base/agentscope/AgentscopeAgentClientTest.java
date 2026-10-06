@@ -218,7 +218,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "ASSISTANT", true, null, null), event -> {
+                null, "42", Map.of(), null, "ASSISTANT", true, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -246,7 +246,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "main", false, null, null), event -> {
+                null, "42", Map.of(), null, "main", false, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -484,7 +484,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, null, null), frames::add);
+                null, null, Map.of(), null, "CODER", false, false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -503,7 +503,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false,
+                null, null, Map.of(), null, "CODER", false, false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -604,7 +604,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, null), frames::add);
+                "approved", null, null, false, false, null), frames::add);
 
         // 恢复消息带 ConfirmResult metadata（AgentScope 挂起恢复口）；续跑流正常收口
         verify(agent).streamEvents(messages.capture(), any(RuntimeContext.class));
@@ -631,7 +631,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, null), frames::add))
+                "approved", null, null, false, false, null), frames::add))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(frames.stream().map(AgentEvent::type))

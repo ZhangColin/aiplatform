@@ -10,6 +10,9 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import com.cartisan.core.domain.AggregateRoot;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.core.stereotype.Aggregate;
@@ -106,6 +109,7 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      * 设计范围勾选页标签（#285）：功能清单条目原文 jsonb（建议性锚——PRD 是模型
      * 独笔演进的正本，标签不构成稳定标识）；作用域为全部页面或无范围时 NULL。
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "design_scope_pages", columnDefinition = "jsonb")
     private List<String> designScopePages;
 

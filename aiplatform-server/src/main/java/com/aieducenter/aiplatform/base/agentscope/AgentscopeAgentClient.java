@@ -244,18 +244,20 @@ public class AgentscopeAgentClient {
      */
     private record TurnSpec(String runId, String sessionId, String userId, String modelString,
             String systemPrompt, String workspaceId, String agentKey,
-            boolean workspaceReadOnly, String toolSpec) {
+            boolean workspaceReadOnly, boolean workspaceNoShell, String toolSpec) {
 
         static TurnSpec of(AgentCommand command) {
             return new TurnSpec(command.runId(), command.sessionId(), command.userId(),
                     command.modelString(), command.systemPrompt(), command.workspaceId(),
-                    command.agentKey(), command.workspaceReadOnly(), command.toolSpec());
+                    command.agentKey(), command.workspaceReadOnly(), command.workspaceNoShell(),
+                    command.toolSpec());
         }
 
         static TurnSpec resumeOf(AgentResume resume) {
             return new TurnSpec(resume.runId(), resume.sessionId(), resume.userId(),
                     resume.modelString(), resume.systemPrompt(), resume.workspaceId(),
-                    resume.agentKey(), resume.workspaceReadOnly(), resume.toolSpec());
+                    resume.agentKey(), resume.workspaceReadOnly(), /* noShell= */ false,
+                    resume.toolSpec());
         }
     }
 
@@ -282,7 +284,8 @@ public class AgentscopeAgentClient {
                 ? spec.modelString() : properties.getDefaultModel());
         String sysPrompt = spec.systemPrompt() != null
                 ? spec.systemPrompt() : properties.getDefaultSystemPrompt();
-        AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly());
+        AgentWorkspace workspace = resolveWorkspace(spec.workspaceId(), spec.workspaceReadOnly(),
+                spec.workspaceNoShell());
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
                 modelRef.toModelString(), workspace, spec.agentKey(), spec.toolSpec());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId(),
@@ -345,15 +348,19 @@ public class AgentscopeAgentClient {
 
     /**
      * 工作区解析：带 workspaceId → 项目工作区（只读标记则解析为只读面——#86 起
-     * 主智能体的对话姿态：写面结构性关闭）；缺省 → 本地工作区。
+     * 主智能体的对话姿态：写面结构性关闭；noShell 标记则解析为设计面——#289 设计
+     * 执行体姿态：文件工具保留、shell/委派关闭，只读标记优先）；缺省 → 本地工作区。
      */
-    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly) {
+    private AgentWorkspace resolveWorkspace(String workspaceId, boolean readOnly, boolean noShell) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new AgentWorkspace.Local(properties.getWorkspace());
         }
         var handle = workspaceLifecycleAppService.handleOf(workspaceId);
-        return readOnly
-                ? new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName())
+        if (readOnly) {
+            return new AgentWorkspace.ProjectReadOnly(workspaceId, handle.containerName());
+        }
+        return noShell
+                ? new AgentWorkspace.ProjectDesign(workspaceId, handle.containerName())
                 : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 

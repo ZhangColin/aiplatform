@@ -251,8 +251,10 @@ public class IterationAppService {
                         fixSession(projectId, runId),
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
                                 IterationAppService::fixRetryPrompt),
-                        attemptRunId -> closeFixRun(project, attemptRunId, currentHandoff),
-                        "fix", true, RunHeading.titled(FIX_TITLE));
+                        (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
+                                currentHandoff),
+                        "fix", true, CoderRunAttempts.RunSeat.executor(),
+                        RunHeading.titled(FIX_TITLE));
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (codingRunTrack) {

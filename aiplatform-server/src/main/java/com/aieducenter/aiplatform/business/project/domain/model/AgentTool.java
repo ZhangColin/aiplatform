@@ -49,7 +49,13 @@ public enum AgentTool implements BaseEnum<AgentTool> {
     UPDATE_PLAN(10, "update_plan", "executor", AgentToolKind.SKELETON,
             "run 级步骤清单的全量快照（呈现面在部件映射表——编排链路）"),
     PROPOSE_SKILL(11, "propose_skill", "executor", AgentToolKind.SKELETON,
-            "技能草稿自荐（验证过的编码模式沉淀待审——过程知识沉淀链）");
+            "技能草稿自荐（验证过的编码模式沉淀待审——过程知识沉淀链）"),
+
+    // ---------- designer 槽位（设计执行体：设计过程的执行侧，写文件无 shell——#289） ----------
+
+    GENERATE_IMAGE(13, "generate_image", "designer", AgentToolKind.SKELETON,
+            "图片生成模型出位图设计稿（写实光影/插画氛围向；档位表落提示词层——文字排版"
+                    + "海报写 HTML，ADR-0026 不做代码级硬路由）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */

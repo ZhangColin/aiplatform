@@ -140,8 +140,20 @@ export type SseClosing = {
   systemNote?: string;
   files: SseClosingFile[];
   durationMs: number;
-  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。 */
+  /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。
+   * 设计会话（#289）恒不携带——设计候选不自动成版（ADR-0025，只有定稿成版）。 */
   version?: string;
+  /** 稿清单（#289 设计会话收尾卡扩载，closing 复用先例对偶 version）：本轮落进
+   * design/ 的稿——item＝设计物、media＝形态（html 界面类 / image 平面类）、
+   * path＝去向（工作区锚定形）。编码 run 不携带。 */
+  drafts?: SseClosingDraft[];
+};
+
+/** 收尾卡稿条目（#289 设计会话）：item＝本场设计物、media＝稿形态、path＝去向。 */
+export type SseClosingDraft = {
+  item: string;
+  media: "html" | "image";
+  path: string;
 };
 
 /**
@@ -166,17 +178,19 @@ export type PlatformAgentEvent =
         engine?: string;
         /**
          * 智能体配置键（引擎信息归一：业务侧 AgentProfile 稳定键——main 主智能体
-         * 对话轮 / executor 编码 run；无配置语境的一次性调用不携带）——呈现形态
-         * 的登记锚：executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有
-         * 主智能体一座）。字面量联合即后端正本键值的镜像（AgentProfile.key()）。
+         * 对话轮 / executor 编码 run / designer 设计会话（#289——事件封闭集零新增、
+         * agent 扩值即达）；无配置语境的一次性调用不携带）——呈现形态的登记锚：
+         * executor 起工作消息、main 进对话面（#86 单会话收敛后对话只有主智能体
+         * 一座）、designer 同构直播卡（agent 标识区分，呈现归 #290）。字面量联合
+         * 即后端正本键值的镜像（AgentProfile.key()）。
          */
-        agent?: "main" | "executor";
+        agent?: "main" | "executor" | "designer";
         /**
          * 工作消息头部标题扩载（#118）：`title` 为用户语言标题（生成轨道 = 切片
-         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」），`index`/`total`
-         * 仅生成轨道切片携带（1-based——头部「{title}（{index}/{total}）」）；阶段 0
-         * 与更新 run 只携 title（无进度）；主智能体对话轮 / 一次性调用不携带
-         * （前端回落「正在做」）。
+         * 标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、设计轨道 = 设计物
+         * 标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based——头部
+         * 「{title}（{index}/{total}）」）；阶段 0 与更新 run 只携 title（无进度）；
+         * 主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。
          */
         slice?: {
           title: string;

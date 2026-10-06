@@ -9,6 +9,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
+import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFetcher;
@@ -34,6 +35,10 @@ import io.agentscope.core.tool.Toolkit;
  * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）
  * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
  * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）；
+ * {@link AgentProfile#DESIGNER 设计执行体} = generate_image（出图工具件，#288
+ * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由），随设计面
+ * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
+ * 委派在工厂结构性关闭）；
  * self-test 子键（#263，子智能体自有平台工具面——平台工厂构建子级时按此键取
  * 视图合并，镜像技能仓库的子键路由先例）= propose_skill（subagent 槽血统实例，
  * 测试清单经验自荐——绑任务回交前，挂载与否归声明 allowlist 治理）；
@@ -63,12 +68,13 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final ExternalContentFetcher externalContentFetcher;
     private final WebSearchProvider webSearchProvider;
     private final SkillProposalAdapter skillProposals;
+    private final ImageGenerationAppService imageGeneration;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
-            SkillProposalAdapter skillProposals) {
+            SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -78,6 +84,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.externalContentFetcher = externalContentFetcher;
         this.webSearchProvider = webSearchProvider;
         this.skillProposals = skillProposals;
+        this.imageGeneration = imageGeneration;
     }
 
     @Override
@@ -118,6 +125,13 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // 工作协议——无模式可沉淀的 run 不调用）
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.EXECUTOR, skillProposals));
+        }
+        // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
+        // 档位表落提示词层，执行体按设计物语义自选）；写文件件是 harness 内建、
+        // 经 ProjectDesign 形态自带（shell/委派在工厂结构性关闭——本面零注册即无）
+        if (AgentProfile.DESIGNER.key().equals(agentKey)
+                && workspace instanceof AgentWorkspace.ProjectDesign design) {
+            toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration));
         }
         // #263 self-test 子键视图：子智能体自有平台工具面（技能自荐 subagent 槽
         // 血统实例）——平台工厂构建子智能体时按本键取视图合并进子级工具面

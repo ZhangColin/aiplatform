@@ -63,7 +63,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 
 | type | payload 字段 | 说明 |
 |---|---|---|
-| `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title, index?, total? }`——`title` 为用户语言标题（生成轨道 = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」），`index`/`total` 仅生成轨道切片携带（1-based 序号与总数，头部呈现「{title}（{index}/{total}）」如「商品浏览（2/5）」）；阶段 0 与更新 run 只携 `title`（无进度）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
+| `run-start` | `projectId` `runId` `prompt` `model` `engine` `agent`（可空） `slice`（可缺省） | 运行开始（runId 随 run 响应同值返回）。**引擎信息归一**：engine/model 之外携带智能体配置键 `agent`（业务侧 AgentProfile 的稳定键：`main` 主智能体对话轮 / `executor` 编码 run / `designer` 设计会话（[#289](https://github.com/ZhangColin/aiplatform/issues/289) 设计执行体——事件封闭集零新增、agent 扩值即达，ADR-0025）；无配置语境的一次性调用不携带）——前端呈现形态的登记锚：executor 起工作消息、main 进对话面（[#86](https://github.com/ZhangColin/aiplatform/issues/86) 单会话收敛后对话只有主智能体一座，无角色分支）、designer 同构直播卡（计划区＝设计物清单、agent 标识区分，呈现归 #290）。**工作消息头部标题扩载（[#118](https://github.com/ZhangColin/aiplatform/issues/118)）**：`slice` = `{ title, index?, total? }`——`title` 为用户语言标题（生成轨道 = 切片标题、阶段 0 = 「系统初始化」、更新 run = 「系统更新」、设计轨道 = 设计物标题），`index`/`total` 仅生成轨道切片与设计轨道携带（1-based 序号与总数，头部呈现「{title}（{index}/{total}）」如「商品浏览（2/5)」）；阶段 0 与更新 run 只携 `title`（无进度）；主智能体对话轮 / 一次性调用不携带（前端回落「正在做」）。**一场 run 恰一次**（[#84](https://github.com/ZhangColin/aiplatform/issues/84) 静默重试：编码 run 重试不新发——用户面 run 身份 = 首试 runId 全程不变，重试尝试的内部 runId 不出用户面） |
 | `error` | `projectId` `runId` `message` | 失败表达（非重试族：对话轮失败、挂起续跑失败、run 起跑前段失败、意见链收口后派发修正 run 失败——锚定收口对话轮，如实呈现重提即兜底）。编码 run 尝试环内中间失败**不出事件**（静默重试）——run 级唯一失败终态见 run-failed |
 | `run-finish` | `projectId` `runId` `sessionId` `engine` `finish` `closing`（可缺省） | 运行结束（finish = 引擎结煞语 end / exceed_max_iters 等）；挂起轮不发（软终点，等答复续跑后收口）。编码 run 在收口判据落定后才发（[#84](https://github.com/ZhangColin/aiplatform/issues/84)：判据不过 = 该次尝试失败静默重试，中场无假收口——run-finish 一场 run 至多一次、到达即真收口）。**收口扩载**（[#88](https://github.com/ZhangColin/aiplatform/issues/88)）：编码 run 的真收口携带 `closing` 对象（收尾卡的服务端权威事实，schema 见[下节](#收口扩载closing-schema88)）——工作消息定格为收尾卡（四要素：摘要/判定行/变更清单/轮末统计）；**主智能体对话轮（咨询/纯追问）不携带**——无收尾卡 |
 | `question-raised` | `projectId` `runId` `sessionId` `summary` `engineRef` `data` | 智能体挂起提问（ask_user，唯一挂起源——权限确认机制已随透明面化删除，[#219](https://github.com/ZhangColin/aiplatform/issues/219)；破坏性命令直通、过程经 `part-action` 动作卡透明可见）；`data.questions` 为前端问答卡投影，`data.toolCalls`（待确认工具最小面）为答复通道回传面 |
@@ -114,7 +114,19 @@ closing: {
                                    # completed），平台不据此伪报通过/未过（不粉饰、不瞎判）
   version:     "a1b2c3d4e5f6..."   # 可缺省——版本锚定（#91）：收口自动成版的 commit hash
                                    # （容器内 git，主题 = 摘要、Run-Id trailer 锚定收尾卡）；
-                                   # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响
+                                   # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响；
+                                   # 设计会话（#289）恒不携带——设计候选不自动成版（ADR-0025
+                                   # 候选与版本两套语义不打通，只有定稿成版、定稿机制归 #291）
+  drafts:      [                   # 可缺省——稿清单（#289 设计会话收尾卡扩载，closing 复用先例
+                                   # 对偶 version/selfTest）：设计会话真收口携带本轮稿清单与
+                                   # 去向（判定以平台可观察的文件变更事实为准——本场落进
+                                   # design/ 的稿）：
+    { item: "首页主视觉",          #   item = 本场设计物（清单章条目原文——会话即设计物）
+      media: "html",               #   media = 稿形态（html＝界面类可交互轻量实现 / image＝
+      path: "/design/home-1.html" }#          平面类位图，按扩展名派生）；path = 去向（工作区
+                                   #   锚定形，文件区可见可下载）；版本/规范去向与后续触发
+                                   #   随定稿机制（#291/#295）扩载。编码 run 不携带本键
+  ]
   durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
                                    # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
     llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）

@@ -253,6 +253,30 @@ class AgentscopeHarnessAgentFactoryTest {
         assertThat(readOnly.getSubagentAgentManager()).isNull();
     }
 
+    /**
+     * 设计面结构守护（#289，ADR-0025 无 shell）：ProjectDesign（设计执行体姿态）
+     * ——内核文件工具（写文件件）保留、shell 工具与委派结构性关闭。真构建路径
+     * （需 API key 建模型，无 key 跳过——同上口径）。
+     */
+    @Test
+    void given_project_design_when_built_then_file_tools_kept_shell_and_subagents_disabled() {
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过真构建断言");
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                new AgentscopeProperties());
+
+        HarnessAgent designer = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+                new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), "designer", null);
+
+        // 写文件件在（界面稿 HTML 落工作区的执行面）；shell（execute）结构性不在
+        assertThat(designer.getToolkit().getToolNames())
+                .contains("write_file")
+                .doesNotContain("execute");
+        // 委派关闭（设计会话不委派——同只读面口径）
+        assertThat(designer.getSubagentAgentManager()).isNull();
+    }
+
     // ---------- #260 subagent 槽装配一等化：声明转平台子智能体工厂（技能面按子键接视图） ----------
 
     /** 可变技能名桩仓库（装配缝：仓库实例内容随指派变——identity 断言＋动态重读两用）。 */

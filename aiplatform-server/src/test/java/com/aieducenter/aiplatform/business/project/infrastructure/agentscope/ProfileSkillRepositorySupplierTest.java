@@ -50,9 +50,11 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_assignments_when_skill_repositories_then_union_and_slot_scoped() {
-        // main 槽指派 tdd；executor 槽指派 code-review；subagent 槽指派 review-pack
+        // main 槽指派 tdd；executor 槽指派 code-review；designer 槽指派 visual-qa；
+        // subagent 槽指派 review-pack
         skillStore.assign(SkillSlot.MAIN, record(101, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.EXECUTOR, record(202, "code-review", "matt 包"));
+        skillStore.assign(SkillSlot.DESIGNER, record(404, "visual-qa", "设计包"));
         skillStore.assign(SkillSlot.SUBAGENT, record(303, "review-pack", "superpowers 包"));
 
         ProfileSkillRepositorySupplier supplier = supplier();
@@ -71,6 +73,12 @@ class ProfileSkillRepositorySupplierTest {
                 .hasSize(1);
         assertThat(names(supplier.skillRepositoriesFor(AgentProfile.EXECUTOR.key(), dev).get(0)))
                 .containsExactly("code-review");
+
+        // 设计执行体＝designer 槽库技能（#289 技能指派进槽位）；main/executor 槽
+        // 技能不出现
+        assertThat(supplier.skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev)).hasSize(1);
+        assertThat(names(supplier.skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev).get(0)))
+                .containsExactly("visual-qa");
 
         // 子智能体槽视图（self-test 键）＝subagent 槽库技能；不继承执行体面
         assertThat(names(supplier.skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME, dev)
@@ -152,10 +160,11 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_scripts_in_record_when_assembled_then_shell_slots_carry_resources_main_empty() {
-        // 同一技能三槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
+        // 同一技能四槽同指（ADR-0021 内容面 c 开放面＝有 shell 的槽位）
         skillStore.assign(SkillSlot.MAIN, recordWithScripts(101, "tdd", "matt 包"));
         skillStore.assign(SkillSlot.EXECUTOR, recordWithScripts(102, "tdd", "matt 包"));
-        skillStore.assign(SkillSlot.SUBAGENT, recordWithScripts(103, "tdd", "matt 包"));
+        skillStore.assign(SkillSlot.DESIGNER, recordWithScripts(104, "tdd", "设计包"));
+        skillStore.assign(SkillSlot.SUBAGENT, recordWithScripts(103, "tdd", "superpowers 包"));
 
         ProfileSkillRepositorySupplier supplier = supplier();
         AgentWorkspace dev = new AgentWorkspace.ProjectDev("42", "ws-42-dev");
@@ -173,11 +182,15 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(subagentSkill.getResources())
                 .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
 
-        // main 槽（ProjectReadOnly 禁 shell）：结构性 a-only——resources 恒空，
-        // load 工具枚举无 scripts 入口，拿不到
+        // main 槽（ProjectReadOnly 禁 shell）与 designer 槽（#289 ProjectDesign 禁
+        // shell）：结构性 a-only——resources 恒空，load 工具枚举无 scripts 入口，
+        // 拿不到
         AgentSkill mainSkill = supplier
                 .skillRepositoriesFor(AgentProfile.MAIN.key(), dev).get(1).getSkill("tdd");
         assertThat(mainSkill.getResources()).isEmpty();
+        AgentSkill designerSkill = supplier
+                .skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev).get(0).getSkill("tdd");
+        assertThat(designerSkill.getResources()).isEmpty();
     }
 
     // ---------- 行为回归锚：内置七章节（#94 起保持） ----------

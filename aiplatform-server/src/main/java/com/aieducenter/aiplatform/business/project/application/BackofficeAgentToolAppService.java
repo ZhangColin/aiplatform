@@ -48,13 +48,14 @@ public class BackofficeAgentToolAppService {
         this.agentConfigs = agentConfigs;
     }
 
-    /** 三槽位工具面清单（main/executor/subagent，平台资产在前、内建呈现口径在后）。 */
+    /** 四槽位工具面清单（main/executor/designer/subagent，平台资产在前、内建呈现口径在后）。 */
     @Transactional(readOnly = true)
     public List<BackofficeAgentToolSlotResponse> inventory() {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         return List.of(
                 slotOf("main", AgentProfile.MAIN.getName(), main),
                 slotOf("executor", AgentProfile.EXECUTOR.getName(), null),
+                designerSlot(),
                 subagentSlot());
     }
 
@@ -73,6 +74,25 @@ public class BackofficeAgentToolAppService {
             }
         }
         return new BackofficeAgentToolSlotResponse(slot, slotName, List.copyOf(tools));
+    }
+
+    /**
+     * designer 槽（#289 设计执行体，ADR-0025 无 shell）：平台资产（generate_image）
+     * ＋ harness 内建<b>文件</b>工具（写文件件——设计稿落工作区；shell 结构性关闭，
+     * 呈现面与装配面同源不含 execute）。
+     */
+    private static BackofficeAgentToolSlotResponse designerSlot() {
+        List<BackofficeAgentToolResponse> tools = new ArrayList<>();
+        for (AgentTool tool : AgentTool.ofSlot("designer")) {
+            tools.add(BackofficeAgentToolResponse.of(tool.toolName(), tool.kind(),
+                    true, tool.description()));
+        }
+        for (HarnessBuiltinTools.BuiltinTool builtin : HarnessBuiltinTools.fileTools()) {
+            tools.add(BackofficeAgentToolResponse.of(builtin.name(),
+                    AgentToolKind.HARNESS_BUILTIN, true, builtin.description()));
+        }
+        return new BackofficeAgentToolSlotResponse("designer", AgentProfile.DESIGNER.getName(),
+                List.copyOf(tools));
     }
 
     /** subagent 槽：self-test 声明工具面（呈现即声明事实；平台资产件归自身类别正本）。 */

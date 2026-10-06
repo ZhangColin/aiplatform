@@ -12,6 +12,7 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
+import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
@@ -59,12 +60,13 @@ class ProfileToolkitSupplierTest {
     private final ExternalContentFetcher externalContentFetcher = mock(ExternalContentFetcher.class);
     private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
     private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
+    private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider, skillProposals);
+                webSearchProvider, skillProposals, imageGeneration);
     }
 
     @Test
@@ -131,6 +133,31 @@ class ProfileToolkitSupplierTest {
                         null).getToolNames()).isEmpty();
     }
 
+    // ---------- #289 设计执行体（设计面工作区：写文件件＋出图件，无 shell） ----------
+
+    @Test
+    void given_designer_on_design_workspace_when_toolkit_then_generate_image_only() {
+        // #289 设计执行体平台工具面＝出图工具件（#288 立内核、#289 发放——档位表
+        // 落提示词层）；写文件件是 harness 内建、经 ProjectDesign 形态自带（shell/
+        // 委派在工厂结构性关闭），不在此注册——主智能体与执行体资产不泄漏
+        assertThat(supplier().toolkitFor(AgentProfile.DESIGNER.key(),
+                        new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), null)
+                .getToolNames())
+                .containsExactly(GenerateImageTool.NAME);
+    }
+
+    @Test
+    void given_designer_on_other_workspaces_when_toolkit_then_empty() {
+        // 设计资产只随设计面发放（配置 × 工作区形态双锚防误配——#289 无 shell 的
+        // 结构性第一道：错配到 ProjectDev 即零平台件，工具面仍经工厂关 shell）
+        assertThat(supplier().toolkitFor(AgentProfile.DESIGNER.key(),
+                        new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null)
+                .getToolNames()).isEmpty();
+        assertThat(supplier().toolkitFor(AgentProfile.DESIGNER.key(),
+                        new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null)
+                .getToolNames()).isEmpty();
+    }
+
     // ---------- #263 自荐三槽位齐开：self-test 子键视图（subagent 槽血统） ----------
 
     @Test
@@ -186,7 +213,7 @@ class ProfileToolkitSupplierTest {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
-                externalContentFetcher, webSearchProvider, recorder);
+                externalContentFetcher, webSearchProvider, recorder, imageGeneration);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;
@@ -325,6 +352,11 @@ class ProfileToolkitSupplierTest {
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         assertThat(executorToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
                 AgentTool.ofSlot("executor").stream().map(AgentTool::toolName).toList());
+        // #289 designer 槽同源：装配注册集 ≡ 枚举 designer 槽位集合（generate_image）
+        var designerToolkit = supplier().toolkitFor(AgentProfile.DESIGNER.key(),
+                new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), null);
+        assertThat(designerToolkit.getToolNames()).containsExactlyInAnyOrderElementsOf(
+                AgentTool.ofSlot("designer").stream().map(AgentTool::toolName).toList());
         assertThat(AgentTool.ofSlot("main").stream().filter(
                         tool -> tool.kind() == AgentToolKind.ENHANCEMENT).map(AgentTool::toolName))
                 .containsExactlyInAnyOrder(WebSearchTool.NAME, FetchUrlTool.NAME);

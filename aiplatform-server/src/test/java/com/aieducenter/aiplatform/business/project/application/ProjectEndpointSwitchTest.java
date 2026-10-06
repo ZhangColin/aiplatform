@@ -151,6 +151,26 @@ class ProjectEndpointSwitchTest {
     }
 
     @Test
+    void given_system_project_when_switch_to_system_design_selected_pages_then_scope_persisted() {
+        // #289 修回归（#285 遗留缺陷）：系统＋设计·勾选页面的范围标签 jsonb 落库——
+        // 原映射缺 @JdbcTypeCode(JSON)，勾选形切换落库即炸（既有测试只覆盖全部页面
+        // 与设计主线的空范围，未触达此路径）
+        Long projectId = persistedProject(true, false);
+        givenSessionExecutorRunsInline();
+
+        ProjectDetailResponse detail = appService.switchEndpoint(projectId, new SwitchEndpointTypeCommand(
+                ProjectEndpointType.SYSTEM_DESIGN, DesignScopeType.SELECTED_PAGES,
+                List.of("首页：展示产品与入口", "订单管理：下单与查看订单")));
+
+        assertThat(detail.designScope().type()).isEqualTo(DesignScopeType.SELECTED_PAGES);
+        assertThat(detail.designScope().pages()).containsExactly(
+                "首页：展示产品与入口", "订单管理：下单与查看订单");
+        // 回读库事实（jsonb 落库真通）
+        assertThat(projectOf(projectId).designScope().pages()).containsExactly(
+                "首页：展示产品与入口", "订单管理：下单与查看订单");
+    }
+
+    @Test
     void given_interview_project_when_switch_to_design_then_steer_notice_without_scope() {
         Long projectId = persistedProject(false, false); // 访谈期：无 PRD 无功能清单可勾
         givenSessionExecutorRunsInline();

@@ -154,6 +154,7 @@ public class BackofficeSkillPrecheckAppService {
                 PRECHECK_TIMEOUT,
                 null, // 一次性判定无配置语境：空工具面、无规格
                 /* workspaceReadOnly= */ false,
+                /* workspaceNoShell= */ false,
                 /* heading= */ null,
                 /* toolSpec= */ null);
         try {

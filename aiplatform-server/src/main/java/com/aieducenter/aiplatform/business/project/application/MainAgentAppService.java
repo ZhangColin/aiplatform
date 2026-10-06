@@ -89,6 +89,7 @@ public class MainAgentAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
+    private final DesignProcessAppService designProcessAppService;
     private final PrdRevisionFacts prdRevisions;
     private final BuildPlanFacts buildPlanFacts;
     private final ConversationHistoryAppService conversationHistory;
@@ -120,6 +121,7 @@ public class MainAgentAppService {
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, OrderQueryAppService orderQueryAppService,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
+            DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
@@ -131,6 +133,7 @@ public class MainAgentAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
+        this.designProcessAppService = designProcessAppService;
         this.prdRevisions = prdRevisions;
         this.buildPlanFacts = buildPlanFacts;
         this.conversationHistory = conversationHistory;
@@ -268,6 +271,7 @@ public class MainAgentAppService {
                 usageContextOf(projectId, sessionId),
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
+                /* workspaceNoShell= */ false,
                 main.toolSpec());
         appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
@@ -605,6 +609,7 @@ public class MainAgentAppService {
                 null,
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
+                /* workspaceNoShell= */ false,
                 /* heading= */ null,
                 main.toolSpec());
     }
@@ -639,14 +644,28 @@ public class MainAgentAppService {
                 return;
             }
             if (project.getGeneratedAt() == null) {
-                // 未生成：PRD 已产出即平台自动派首次生成（生成无门，#101）；未产出
+                // 未生成：PRD 已产出即平台自动派首次产出轨（轨内无门——终点类型定轨：
+                // 系统终点派生成 #101、设计类终点起设计过程 #289 同律）；未产出
                 // PRD 静默止于对话（访谈期常态：生成前意见链终点）。切片计划（saveBuildPlan
-                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话）；无计划
-                // 交接物时由 GenerationAppService 按轨道表解析现行计划，仍缺失则重派
+                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话；设计轨
+                // 清单源＝PRD 清单章直读，无交接物）；无计划交接物时由
+                // GenerationAppService 按轨道表解析现行计划，仍缺失则重派
                 // 本服务补产（#220，不兜假计划）
                 BuildPlan plan = buildPlanFacts.consume(workspaceId);
                 clearTurnAnchors(sessionId, workspaceId);
                 if (project.getPrdProducedAt() != null) {
+                    if (project.getEndpointType().designInvolved()) {
+                        // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
+                        // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
+                        // ADR-0025）；构建从定稿设计稿长出（定稿接线归后续票）
+                        DesignProcessAppService.DesignRun run =
+                                designProcessAppService.dispatchDesignOnTurnClose(projectId);
+                        if (run != null) {
+                            log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
+                                    projectId, run.runId());
+                        }
+                        return;
+                    }
                     GenerationAppService.GenerationRun run =
                             generationAppService.dispatchGenerationOnTurnClose(projectId, plan);
                     if (run != null) {

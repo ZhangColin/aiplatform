@@ -6,12 +6,12 @@ import java.util.Optional;
 import com.cartisan.core.domain.BaseEnum;
 
 /**
- * 职能槽位（#249 指派模型，ADR-0021）：技能指派的全局配置单元——平台智能体
- * 的职能面（主智能体 / run 执行体 / 子智能体），各自独立多选、不分项目。槽位
+ * 职能槽位（#249 指派模型，ADR-0021；#289 起四槽）：技能指派的全局配置单元——平台智能体
+ * 的职能面（主智能体 / run 执行体 / 设计执行体 / 子智能体），各自独立多选、不分项目。槽位
  * 是<b>键不是身份</b>：智能体身份仍以 business 侧 {@code AgentProfile} 枚举为
- * 正本（ADR-0006 身份与配置分治），本枚举只固化指派面的三把稳定键——business
- * 装配缝按配置键对齐到此（main/executor 与 AgentProfile 键同串、subagent 是
- * 子智能体槽的键，self-test 是其当前唯一职能实例）。code 是框架约定码
+ * 正本（ADR-0006 身份与配置分治），本枚举只固化指派面的稳定键——business
+ * 装配缝按配置键对齐到此（main/executor/designer 与 AgentProfile 键同串、
+ * subagent 是子智能体槽的键，self-test 是其当前唯一职能实例）。code 是框架约定码
  * （BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串键，code 不经任何面）。
  *
  * <p>新增职能槽位＝新增枚举值＋迁移扩键面（REST 槽位路径段即本键，未知键
@@ -19,8 +19,9 @@ import com.cartisan.core.domain.BaseEnum;
  *
  * <p>scripts 资源开放面（#253，ADR-0021 内容面 c）：开放面＝<b>有 shell 的
  * 槽位</b>——{@link #hasShell()} 为真的槽位装配面才附 scripts 资源（框架
- * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell，
- * 结构性 a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
+ * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell、
+ * 设计执行体（#289，ProjectDesign 工作区面）同样禁 shell——两槽结构性
+ * a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
  * executor 容器内 shell、subagent（self-test）白名单含跑测试命令的 shell——
  * 两槽开放。</p>
  */
@@ -31,6 +32,9 @@ public enum SkillSlot implements BaseEnum<SkillSlot> {
 
     /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。 */
     EXECUTOR(2, "executor", true, "run 执行体——实现侧：沙箱工作区内读写代码、运行命令"),
+
+    /** 设计执行体（#289，ADR-0025：设计过程执行侧——写界面稿与出图；禁 shell，a-only）。 */
+    DESIGNER(4, "designer", false, "设计执行体——设计过程执行侧：按设计物产出多稿候选（界面稿＋出图），不动系统代码"),
 
     /** 子智能体槽（当前唯一实例 self-test——白名单含跑测试命令的 shell，开放）。 */
     SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：只读自测）");

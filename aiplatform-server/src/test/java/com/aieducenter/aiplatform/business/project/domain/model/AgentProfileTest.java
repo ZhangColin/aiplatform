@@ -5,7 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 /**
- * 智能体配置（#86 角色预设收敛为配置）：两座（主智能体 / run 执行体）的稳定键
+ * 智能体配置（#86 角色预设收敛为配置；#289 起三座——主智能体 / run 执行体 / 设计
+ * 执行体）的稳定键
  * 是工具集装配、run-start 载荷与计量 dims 的共用寻址腿；byKey 是计量读侧的
  * 回解口（未知/空键返回空——辅助调用 classify/naming 无展示名）。
  */
@@ -22,6 +23,7 @@ class AgentProfileTest {
         assertThat(AgentProfile.byKey("main")).contains(AgentProfile.MAIN);
         assertThat(AgentProfile.byKey("EXECUTOR")).contains(AgentProfile.EXECUTOR);
         assertThat(AgentProfile.byKey("  Main ")).contains(AgentProfile.MAIN);
+        assertThat(AgentProfile.byKey("designer")).contains(AgentProfile.DESIGNER); // #289 designer 座
     }
 
     @Test

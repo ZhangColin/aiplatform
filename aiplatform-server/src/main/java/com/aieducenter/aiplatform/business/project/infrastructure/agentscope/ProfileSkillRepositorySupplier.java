@@ -27,6 +27,8 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * <li>{@link AgentProfile#MAIN 主智能体}＝内置（PRD 写作）∪ main 槽位库技能；</li>
  * <li>{@link AgentProfile#EXECUTOR run 执行体}＝executor 槽位库技能（安装技能的
  * 主消费槽位——编码方法论等）；</li>
+ * <li>{@link AgentProfile#DESIGNER 设计执行体}＝designer 槽位库技能（#289 技能
+ * 指派进槽位；hasShell=false——scripts 结构性不发放，a-only 同主智能体）；</li>
  * <li>{@code self-test}（子智能体槽当前唯一实例，键见 {@link
  * ProfileSubagentSupplier#SELF_TEST_NAME}）＝subagent 槽位库技能——<b>运行时已
  * 接线</b>（#260 装配一等化：平台工厂构建子智能体时按本键取视图挂载，指派的
@@ -35,7 +37,7 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
  *
- * <p>三个槽位视图实例长生命周期（无状态查库），随容器同生灭。</p>
+ * <p>四个槽位视图实例长生命周期（无状态查库），随容器同生灭。</p>
  */
 @Component
 public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySupplier {
@@ -43,6 +45,7 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
     private final AgentSkillRepository builtinSkills;
     private final AgentSkillRepository mainLibrary;
     private final AgentSkillRepository executorLibrary;
+    private final AgentSkillRepository designerLibrary;
     private final AgentSkillRepository subagentLibrary;
 
     public ProfileSkillRepositorySupplier(BuiltinSkillCatalog builtinSkillCatalog,
@@ -50,6 +53,7 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
         this.builtinSkills = new BuiltinCatalogSkillRepository(builtinSkillCatalog);
         this.mainLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.MAIN);
         this.executorLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.EXECUTOR);
+        this.designerLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.DESIGNER);
         this.subagentLibrary = new SlotLibrarySkillRepository(skillStore, SkillSlot.SUBAGENT);
     }
 
@@ -62,6 +66,9 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)) {
             return List.of(executorLibrary);
+        }
+        if (AgentProfile.DESIGNER.key().equals(agentKey)) {
+            return List.of(designerLibrary);
         }
         if (ProfileSubagentSupplier.SELF_TEST_NAME.equals(agentKey)) {
             return List.of(subagentLibrary);

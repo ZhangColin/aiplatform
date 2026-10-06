@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * （name + sysPrompt + model + workspace）构建一次、进程内复用；容器关闭时统一释放
  * （HarnessAgent 是 AutoCloseable）。
  *
- * <p>工作区三形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
+ * <p>工作区四形态（{@link AgentWorkspace}）：{@link AgentWorkspace.Local Local}
  * 本地目录直用；{@link AgentWorkspace.ProjectDev ProjectDev} 项目 dev 工作区——经
  * {@code abstractFilesystem} 逃生舱换 {@link DockerExecFilesystem}（docker exec
  * 落既有 dev 容器），并关闭会写 harness 内脏进项目工作区的部件（memory：源码包
@@ -36,7 +36,10 @@ import org.springframework.stereotype.Component;
  * 关闭；
  * {@link AgentWorkspace.ProjectReadOnly ProjectReadOnly} 项目工作区只读面（#86
  * 主智能体对话姿态）——容器与内脏关闭同 ProjectDev，另关内核文件/shell 工具
- * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）。</p>
+ * （写面结构性关闭，主智能体永不读写沙箱代码——PRD 写入走业务侧 savePrd）；
+ * {@link AgentWorkspace.ProjectDesign ProjectDesign} 项目工作区设计面（#289
+ * 设计执行体姿态，ADR-0025 无 shell）——文件工具保留、另关内核 shell 与委派
+ * （写文件件在、命令执行结构性不存在）。</p>
  *
  * <p>会话状态：全形态统一接 {@link PostgresAgentStateStore}（cat_agent_state，
  * (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑，会话上下文不丢；
@@ -121,6 +124,7 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
             case AgentWorkspace.ProjectReadOnly ro -> new DockerExecFilesystem(ro.containerName());
+            case AgentWorkspace.ProjectDesign design -> new DockerExecFilesystem(design.containerName());
             case AgentWorkspace.Local ignored -> null;
         };
         HarnessAgent.Builder builder = HarnessAgent.builder()
@@ -173,6 +177,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // （ProfileToolkitSupplier）；委派是 run 内机制（#95 委派位只开在
                     // ProjectDev），主智能体永不委派——子智能体一并关闭
                     .disableFilesystemTools()
+                    .disableShellTool()
+                    .disableSubagents();
+            case AgentWorkspace.ProjectDesign design -> projectSandbox(builder, containerFs)
+                    // 设计面（#289 设计执行体姿态，ADR-0025 无 shell）：内核文件
+                    // 工具（写文件件）保留——设计稿落工作区；shell 与委派结构性
+                    // 关闭——写稿无需命令、设计会话不委派（信任面收窄同主智能体）
                     .disableShellTool()
                     .disableSubagents();
         }

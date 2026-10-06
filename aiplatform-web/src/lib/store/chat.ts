@@ -45,6 +45,8 @@ export type ClosingDraft = {
   item: string;
   media: "html" | "image";
   path: string;
+  /** 定稿后续触发事实（#291 定稿收尾卡；候选产出轮缺省）——呈现「已触发」行。 */
+  triggers?: string[];
 };
 
 /**
@@ -745,6 +747,9 @@ function toClosingDrafts(raw: unknown): ClosingDraft[] | undefined {
       item: typeof entry.item === "string" ? entry.item : "",
       media: entry.media,
       path: entry.path,
+      triggers: Array.isArray(entry.triggers)
+        ? entry.triggers.filter((trigger): trigger is string => typeof trigger === "string")
+        : undefined,
     }];
   });
 }

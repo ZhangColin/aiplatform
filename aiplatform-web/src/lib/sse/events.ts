@@ -141,7 +141,9 @@ export type SseClosing = {
   files: SseClosingFile[];
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——版本控件的寻址锚。
-   * 设计会话（#289）恒不携带——设计候选不自动成版（ADR-0025，只有定稿成版）。 */
+   * 设计会话（#289）的候选产出轮（首产/改稿，#291）不携带——设计候选不自动成版
+   * （ADR-0025，只有定稿成版）；定稿收尾卡（#291）例外：显式动作收口即成版，
+   * 携带本键（「查看当时」即见定稿稿）。 */
   version?: string;
   /** 稿清单（#289 设计会话收尾卡扩载，closing 复用先例对偶 version）：本轮落进
    * design/ 的稿——item＝设计物、media＝形态（html 界面类 / image 平面类）、
@@ -149,11 +151,14 @@ export type SseClosing = {
   drafts?: SseClosingDraft[];
 };
 
-/** 收尾卡稿条目（#289 设计会话）：item＝本场设计物、media＝稿形态、path＝去向。 */
+/** 收尾卡稿条目（#289 设计会话；#291 定稿收尾卡扩 triggers）：item＝本场设计物、
+ * media＝稿形态、path＝去向；triggers＝定稿后续触发事实（仅定稿收尾卡携带——
+ * 已按稿对齐/已开始生成/下单开放，用户语言；候选产出轮缺省）。 */
 export type SseClosingDraft = {
   item: string;
   media: "html" | "image";
   path: string;
+  triggers?: string[];
 };
 
 /**

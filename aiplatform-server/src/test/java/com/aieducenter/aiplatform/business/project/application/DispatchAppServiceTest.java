@@ -15,6 +15,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.List;
+import java.time.LocalDateTime;
 
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.AfterEach;
@@ -33,9 +36,12 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
@@ -65,6 +71,9 @@ class DispatchAppServiceTest {
     private DispatchProperties dispatchProperties;
 
     @Autowired
+    private CodingRunTrack codingRunTrack;
+
+    @Autowired
     private ProjectRepository projectRepository;
 
     @Autowired
@@ -81,6 +90,7 @@ class DispatchAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -378,6 +388,107 @@ class DispatchAppServiceTest {
 
         // 意见链：意见轮 converse 到达（分类 converse 在其前静默完成——总量 2）
         verify(agentClient, times(2)).converse(any(), any());
+    }
+
+    // ---------- #291 设计物作用域：直达改稿（跨件回溯的会话路由） ----------
+
+    @Test
+    void given_design_item_scope_when_dispatched_then_direct_revision_without_classification() {
+        // 灵魂用例（#291）：designItem 在场即跳过三分类与主智能体轮——发言直达目标件
+        // 设计会话改稿（designer 座、同会话继续、prompt 携意见与新代纪律）；发言照
+        // 落对话史（回访可见）；零分类调用（无 classify- 会话）
+        Long projectId = persistedDesignScopeProject("9760", 1, 2);
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(1)).run();
+            return null;
+        }).when(sessionExecutor).submit(any(), any());
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null;
+            }
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "已出新代", null, List.of());
+        });
+
+        DispatchAppService.DispatchRun run = appService.dispatch(projectId,
+                "刚才那稿的颜色再亮一点", MessageAttachment.NONE, 1);
+
+        assertThat(run).isNotNull();
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(commands.capture(), any()); // 零分类、零主智能体轮
+        AgentCommand revision = commands.getValue();
+        assertThat(revision.sessionId())
+                .isEqualTo(DesignProcessAppService.itemSession(projectId, 1));
+        assertThat(revision.agentKey()).isEqualTo(AgentProfile.DESIGNER.key());
+        assertThat(revision.prompt())
+                .contains("刚才那稿的颜色再亮一点")
+                .contains("新一代候选");
+        // 发言落对话史（用户面照见——回访水合）
+        assertThat(conversationHistory.read(projectId))
+                .anySatisfy(entry -> assertThat(entry.text())
+                        .contains("刚才那稿的颜色再亮一点"));
+    }
+
+    @Test
+    void given_design_item_scope_when_track_in_flight_then_queued() {
+        // 作用域改稿在途排队（#291 在途插话）：设计轨在途——发言落库＋意见排队
+        //（返回发言锚），当前稿代收口后受理（受理面归 DesignProcessAppServiceTest）
+        Long projectId = persistedDesignScopeProject("9761", 2, 2);
+        // 手工占位轨道（在途形态）
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
+        try {
+            DispatchAppService.DispatchRun run = appService.dispatch(projectId,
+                    "海报文字加大", MessageAttachment.NONE, 2);
+
+            assertThat(run).isNotNull();
+            verify(agentClient, never()).converse(any(), any()); // 未起 run（排队中）
+            assertThat(conversationHistory.read(projectId))
+                    .anySatisfy(entry -> assertThat(entry.text()).contains("海报文字加大"));
+        }
+        finally {
+            codingRunTrack.end(projectId);
+        }
+    }
+
+    @Test
+    void given_missing_design_item_scope_when_dispatched_then_rejected() {
+        // 作用域守卫：件不存在 404 PRJ_047；件未产出稿（待跑）409 PRJ_048
+        Long projectId = persistedDesignScopeProject("9762", 1, 1);
+
+        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 9))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.DESIGN_ITEM_NOT_FOUND.message());
+
+        jdbcTemplate.update("UPDATE prj_design_items SET status = 1 WHERE project_id = ?",
+                projectId); // 退回待跑（未产出稿）
+        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 1))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.DESIGN_ITEM_NOT_READY.message());
+    }
+
+    /** 设计主线项目＋现行清单件行（closedOrd 件已收口、其余待跑；PRD 锚对齐）。 */
+    private Long persistedDesignScopeProject(String workspaceId, int closedOrd, int total) {
+        Project project = Project.create("设计作用域项目", null, Long.parseLong(workspaceId),
+                OWNER);
+        project.switchEndpoint(ProjectEndpointType.DESIGN, null);
+        project.markPrdProduced();
+        Long projectId = projectRepository.save(project).getId();
+        LocalDateTime anchor = projectRepository.findById(projectId).orElseThrow()
+                .getPrdProducedAt();
+        for (int ord = 1; ord <= total; ord++) {
+            jdbcTemplate.update("""
+                    INSERT INTO prj_design_items (id, project_id, ord, title, status,
+                        prd_produced_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, System.nanoTime(), projectId, ord, "设计物" + ord,
+                    ord <= closedOrd ? 2 : 1, anchor);
+        }
+        return projectId;
     }
 
     // ---------- 分类输出解析（容错口径） ----------

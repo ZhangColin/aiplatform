@@ -93,15 +93,18 @@ public class DispatchAppService {
     private final AgentscopeAgentClient agentClient;
     private final DispatchProperties properties;
     private final ConversationHistoryAppService conversationHistory;
+    private final DesignProcessAppService designProcessAppService;
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
             AgentscopeAgentClient agentClient, DispatchProperties properties,
-            ConversationHistoryAppService conversationHistory) {
+            ConversationHistoryAppService conversationHistory,
+            DesignProcessAppService designProcessAppService) {
         this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
         this.properties = properties;
         this.conversationHistory = conversationHistory;
+        this.designProcessAppService = designProcessAppService;
     }
 
     /**
@@ -112,13 +115,24 @@ public class DispatchAppService {
      * 调用，秒级轻调用，接受）。响应携带所派 run 的标识（意见 = 意见轮 / 咨询 =
      * 答询轮 / 兜底 = 引导事件锚）。
      *
+     * <p><b>设计物作用域（#291 跨件回溯的会话路由）</b>：{@code designItem} 在场
+     * 即跳过分类与主智能体轮——发言直达该件设计会话改稿（同会话继续；设计轨在途
+     * 即排队、当前稿代收口后受理）。守卫同意见链（归档/订单冻结——设计改稿是
+     * 迭代动作）；挂起问答不拦（主智能体会话的问答与设计会话互不相干）。发言照
+     * 常落对话史（回访可见），排队时响应锚＝发言锚（改稿 run 起跑另带自身锚）。</p>
+     *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区
      *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
-     *                              分类后拦）
+     *                              分类后拦）；PRJ_047 设计物不存在 / PRJ_048 件
+     *                              未产出稿（仅作用域形态）
      */
-    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments) {
+    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments,
+            Integer designItem) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
+        if (designItem != null) {
+            return dispatchDesignRevision(project, prompt, attachments, designItem);
+        }
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {
             case OPINION -> new DispatchRun(
@@ -129,9 +143,25 @@ public class DispatchAppService {
         };
     }
 
+    /**
+     * 作用域改稿派发（#291）：发言落对话史（用户面照见）＋直达目标件设计会话。
+     * 排队时锚＝发言锚（runId 只作响应与事件挂载的链路锚，改稿 run 各带自身锚
+     * ——项目过滤订阅照常看见直播卡生长）。
+     */
+    private DispatchRun dispatchDesignRevision(Project project, String prompt,
+            List<MessageAttachment> attachments, int designItem) {
+        // 守卫先于落库（对齐意见轮口径）：拒绝即零副作用——不落幽灵发言
+        designProcessAppService.requireRevisionableItem(project.getId(), designItem);
+        String runId = EventsAppService.newRunId();
+        conversationHistory.recordUserUtterance(project.getId(), runId, prompt, attachments);
+        DesignProcessAppService.DesignRun run = designProcessAppService.reviseDesignItem(
+                project.getId(), designItem, prompt);
+        return new DispatchRun(run != null ? run.runId() : runId);
+    }
+
     /** 无附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
     public DispatchRun dispatch(Long projectId, String prompt) {
-        return dispatch(projectId, prompt, MessageAttachment.NONE);
+        return dispatch(projectId, prompt, MessageAttachment.NONE, null);
     }
 
     /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */

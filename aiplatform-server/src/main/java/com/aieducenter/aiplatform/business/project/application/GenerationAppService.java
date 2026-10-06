@@ -26,11 +26,14 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.command.Workspa
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -203,6 +206,26 @@ public class GenerationAppService {
     }
 
     /**
+     * 定稿设计稿引用块（#291 稿入起跑上下文——ADR-0024「定稿稿以规范源身份经
+     * 起跑上下文喂系统轨」）：设计类终点全部定稿后的构建，每段 prompt 前置定稿
+     * 稿清单——执行体先读稿再动手，系统的配色、字体、圆角与整体视觉语感与定稿
+     * 稿保持一致（规范级提炼与校验归一致性桥 #295/#296）。空清单＝纯系统项目或
+     * 无定稿件，零注入。
+     */
+    static String finalizedDesignsContext(List<DesignItem> finalized) {
+        if (finalized.isEmpty()) {
+            return "";
+        }
+        StringBuilder block = new StringBuilder("本项目有已定稿的设计稿（设计先行——先读稿再动手：")
+                .append("系统的配色、字体、圆角与整体视觉语感与定稿稿保持一致）：\n");
+        for (DesignItem item : finalized) {
+            block.append("- 设计物「").append(item.getTitle()).append("」定稿稿：")
+                    .append(item.getFinalizedPath()).append('\n');
+        }
+        return block.append('\n').toString();
+    }
+
+    /**
      * 片级上下文（#114 每片新会话）：首试与重试共用——重试可能落在空会话（首试
      * converse 在引擎建会话前就失败，#84 静默重试恰覆盖此路径），故重试不能依赖
      * 「会话历史自持前片摘要」，须自足携带同一份上下文。拼装 = PRD 引用 + 切片
@@ -361,6 +384,7 @@ public class GenerationAppService {
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
     private final GenerationSegmentRepository generationSegments;
+    private final DesignItemRepository designItems;
     private final TransactionTemplate transactionTemplate;
     private final MainAgentAppService mainAgentAppService;
     private final ConversationHistoryAppService conversationHistory;
@@ -392,7 +416,8 @@ public class GenerationAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
-            GenerationSegmentRepository generationSegments, TransactionTemplate transactionTemplate,
+            GenerationSegmentRepository generationSegments, DesignItemRepository designItems,
+            TransactionTemplate transactionTemplate,
             @Lazy MainAgentAppService mainAgentAppService,
             ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
@@ -403,6 +428,7 @@ public class GenerationAppService {
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
         this.generationSegments = generationSegments;
+        this.designItems = designItems;
         this.transactionTemplate = transactionTemplate;
         this.mainAgentAppService = mainAgentAppService;
         this.conversationHistory = conversationHistory;
@@ -461,16 +487,20 @@ public class GenerationAppService {
      */
     private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight, BuildPlan plan) {
         Long projectId = project.getId();
-        // 设计类终点收口（#285 立门、#289 语义收敛）：设计主线交付设计资产包、
-        // 系统＋设计设计先行——构建只从定稿设计稿长出（定稿→起构建接线归设计线
-        // 后续票，#291），此前系统生成轨道对两者都不派（PRD 收口的路由已在上游
-        // 起设计过程，MainAgentAppService#dispatchOnTurnClose）。在途口径按调用方
-        // 分岔（按钮拒绝 PRJ_042、收口自动静默跳过——防御位，正常不可达）。
-        if (project.getEndpointType().designInvolved()) {
+        // 设计类终点收口（#285 立门、#289 立语义、#291 定稿放行）：设计主线交付
+        // 设计资产包、系统＋设计设计先行——构建只从定稿设计稿长出（ADR-0024）：
+        // 清单全部定稿即门开（定稿触发与计划补产链双路可达，起跑上下文携定稿稿
+        // 引用块）；未定稿完不派（PRD 收口的路由已在上游起设计过程，
+        // MainAgentAppService#dispatchOnTurnClose）。在途口径按调用方分岔（按钮
+        // 拒绝 PRJ_042、收口自动静默跳过——防御位，正常不可达）。
+        if (project.getEndpointType().designInvolved()
+                && !DesignItem.checklistFinalized(
+                        designItems.findByProjectIdOrderByOrdAsc(projectId),
+                        project.getPrdProducedAt())) {
             if (rejectInFlight) {
                 throw new ApplicationException(ProjectMessage.GENERATION_DESIGN_ENDPOINT);
             }
-            log.info("[generate] 项目 {} 终点类型为 {}，系统生成不派（设计线编排）",
+            log.info("[generate] 项目 {} 终点类型为 {} 且设计未全部定稿，系统生成不派（设计线编排）",
                     projectId, project.getEndpointType().getName());
             return null;
         }
@@ -727,6 +757,12 @@ public class GenerationAppService {
         // 首 run 身份），此后逐片新 runId；某片失败不自动跳下一片（完整性优先）。
         // 末段 = 最深待跑段（其后段已收口——存量对照的分布边角，全收口即落位）
         int lastOrd = openOrds.get(openOrds.size() - 1);
+        // 定稿设计稿引用块（#291 稿入起跑上下文）：设计类终点门开后的构建，每段
+        // prompt（首试与重试）前置定稿稿清单；纯系统项目零注入
+        String designContext = finalizedDesignsContext(
+                designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
+                        .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
+                        .toList());
         for (int index = startOrd; index <= slices.size(); index++) {
             int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
             if (closedOrds.contains(ord)) {
@@ -745,8 +781,8 @@ public class GenerationAppService {
                             ? resumeSession(projectId, ord, runId)
                             : sliceSession(projectId, ord),
                     new CoderRunAttempts.Prompts(
-                            prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
-                            errorScene -> prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                            designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
+                            errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                     (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last, runId,
                             stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice)),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),

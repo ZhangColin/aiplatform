@@ -100,6 +100,19 @@ public final class ProjectFiles {
     }
 
     /**
+     * 存在性检查命令（#291 定稿守卫；path 须先过 {@link #isViewable}，此处不
+     * 代偿）：退出码 0 = 文件在、1 = 不存在——定稿选定的稿以容器事实为准（候选
+     * 稿可被悬卡删除，删除即不可定稿）。守卫结构同 {@link #contentCommand}，
+     * 命令体只有成功（无读取）。
+     */
+    public static String existenceCommand(String path) {
+        if (!isViewable(path)) {
+            throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
+        }
+        return ContainerCommands.existenceGuard(path) + " true";
+    }
+
+    /**
      * 图片点看判定（#283，ADR-0027 点看对图片放行）：按扩展名（大小写不敏感）。
      * 放行即走 raw 直出 inline 大图；文本照旧走内容端点、含 NUL 的真二进制非图片
      * 件仍由内容端点如实拒收（PRJ_023 语义保留）。

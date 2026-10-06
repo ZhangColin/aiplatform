@@ -154,6 +154,50 @@ describe("ClosingCard · 版本控件（#92/#93）", () => {
   });
 });
 
+describe("ClosingCard · 定稿收尾卡（#291 显式动作收口：成版锚＋后续触发行）", () => {
+  /** 定稿收尾载荷（#291 平台侧发射形）：closing 携 version（成版锚）与 drafts 单条（triggers）。 */
+  function finalizeClosing(triggers?: string[]): WorkClosing {
+    return closing({
+      summary: "定稿设计物：首页主视觉",
+      prdChanged: false,
+      prdNote: undefined,
+      systemChanged: false,
+      systemNote: undefined,
+      files: [],
+      durationMs: 320,
+      version: "abc123def456",
+      drafts: [
+        { item: "首页主视觉", media: "html", path: "/design/home-2.html", triggers },
+      ],
+    });
+  }
+
+  it("定稿稿行＋「已触发」行＋版本控件（成版锚在场——「查看当时」即见定稿稿）", () => {
+    const html = renderCard(finalizeClosing(["设计已全部定稿，可以确认下单了"]));
+
+    expect(html).toContain("定稿设计物：首页主视觉"); // 定稿叙事
+    expect(html).toContain("home-2.html"); // 定稿稿单条
+    expect(html).toContain("已触发：设计已全部定稿，可以确认下单了"); // 后续触发事实
+    // 版本控件：定稿例外携带 version——候选轮不出、定稿轮出（ADR-0025 只有定稿成版）
+    expect(html).toContain("查看当时");
+    expect(html).toContain("回滚到此");
+  });
+
+  it("triggers 空（未触发分岔——如非全部定稿的中间定稿）：不出「已触发」行", () => {
+    const html = renderCard(finalizeClosing(undefined));
+
+    expect(html).toContain("定稿设计物：首页主视觉");
+    expect(html).not.toContain("已触发：");
+    expect(html).toContain("查看当时"); // 成版锚仍在（定稿即成版，与触发无关）
+  });
+
+  it("多触发并置以「；」连缀（全部定稿起构建后仍可按稿对齐的复合场景面）", () => {
+    const html = renderCard(finalizeClosing(["系统已开始按定稿设计对齐", "系统更新已排入下一轮"]));
+
+    expect(html).toContain("已触发：系统已开始按定稿设计对齐；系统更新已排入下一轮");
+  });
+});
+
 describe("ClosingCard · 稿清单与去向（#290 设计会话收尾卡扩载呈现）", () => {
   /** 设计会话收尾载荷（#289 closing.drafts 扩载形）：判定行恒「未动」、文件清单与稿同集。 */
   function designClosing(drafts: WorkClosing["drafts"]): WorkClosing {

@@ -107,7 +107,7 @@ public enum ProjectMessage implements CodeMessage {
     DESIGN_SCOPE_PAGES_REQUIRED(400, "PRJ_041", "勾选的设计范围页面不能为空"),
 
     /** 生成轨道守卫（#285 设计类终点）：设计/系统＋设计项目不走系统生成——设计主线交付设计资产包、系统＋设计设计先行（构建从定稿设计稿长出，ADR-0025）。 */
-    GENERATION_DESIGN_ENDPOINT(409, "PRJ_042", "设计类终点项目不走系统生成"),
+    GENERATION_DESIGN_ENDPOINT(409, "PRJ_042", "设计尚未定稿，系统从定稿设计稿长出"),
 
     // ========== 上传物料（#286，ADR-0027 图片管道——multipart 端点落物料目录） ==========
 
@@ -121,7 +121,21 @@ public enum ProjectMessage implements CodeMessage {
 
     /** 出图守卫：图片生成供应商未配置（无 active 适配器——运营侧配 app.image-generation.provider
      *  与对应 key 环境变量后即恢复，平台照常起不静默降级）。 */
-    IMAGE_PROVIDER_UNCONFIGURED(503, "PRJ_045", "图片生成供应商未配置，暂时无法出图");
+    IMAGE_PROVIDER_UNCONFIGURED(503, "PRJ_045", "图片生成供应商未配置，暂时无法出图"),
+
+    /** 定稿守卫（#291 定稿机制）：设计/更新轨在途——工作区正被执行体读写，定稿
+     * 成版（全量提交）会卷入在途未完成改动，收口后再定稿。 */
+    DESIGN_FINALIZE_IN_FLIGHT(409, "PRJ_046", "设计或系统产出进行中，请稍后再定稿"),
+
+    /** 定稿守卫（#291）：设计物不存在（清单章无此序号——或清单已随 PRD 演进重产）。 */
+    DESIGN_ITEM_NOT_FOUND(404, "PRJ_047", "设计物不存在"),
+
+    /** 定稿/改稿守卫（#291）：件状态不可定稿——尚未产出设计稿（待跑/失败）无稿可选。 */
+    DESIGN_ITEM_NOT_READY(409, "PRJ_048", "该设计物还没有产出设计稿，无法定稿"),
+
+    /** 定稿守卫（#291）：选定的稿在工作区不存在（候选可被悬卡删除——定稿对象以
+     * 容器事实为准）。 */
+    DESIGN_DRAFT_NOT_FOUND(404, "PRJ_049", "选定的设计稿不存在，请在现有稿中定稿");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

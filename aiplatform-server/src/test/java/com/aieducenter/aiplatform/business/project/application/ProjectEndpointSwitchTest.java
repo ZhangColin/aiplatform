@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import cn.hutool.core.collection.CollUtil;
@@ -32,6 +33,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -39,6 +41,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
@@ -68,6 +71,9 @@ class ProjectEndpointSwitchTest {
 
     @Autowired
     private GenerationAppService generationAppService;
+
+    @Autowired
+    private BuildPlanFacts buildPlanFacts;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -301,6 +307,51 @@ class ProjectEndpointSwitchTest {
         assertThatThrownBy(() -> generationAppService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.GENERATION_DESIGN_ENDPOINT.message());
+    }
+
+    @Test
+    void given_finalized_design_project_when_switch_to_system_then_build_auto_starts_with_drafts() {
+        // #291 转系统开发（验收⑤）：设计主线定稿后转系统开发＝终点切换链——PRD 重写
+        // 系统形（切换重产轮）后同序自动起构建（shift 轮产计划 → 收口派生成），
+        // 起跑上下文携定稿稿引用块（稿以规范源身份进系统轨）
+        Long projectId = persistedProject(/* prdProduced= */ true, /* generated= */ false);
+        Project design = projectOf(projectId);
+        design.switchEndpoint(ProjectEndpointType.DESIGN, null);
+        projectRepository.save(design);
+        LocalDateTime prdAnchor = projectOf(projectId).getPrdProducedAt();
+        jdbcTemplate.update("""
+                INSERT INTO prj_design_items (id, project_id, ord, title, status, run_id,
+                    prd_produced_at, finalized_path, created_at, updated_at)
+                VALUES (?, ?, 1, '品牌主 logo——方形构图', 4, 'run-x', ?, '/design/logo-2.html',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, prdAnchor);
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // 切换重产轮脚本：主智能体重写 PRD＋产计划（saveBuildPlan 事实登记）
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command != null) {
+                converseCommands.add(command);
+                if (command.prompt().contains("修订为系统形态")) {
+                    buildPlanFacts.record(command.workspaceId(),
+                            new BuildPlan(List.of("用户能使用全部功能")));
+                }
+            }
+            return command != null ? new AgentReply(command.runId(), "已转系统开发") : null;
+        });
+
+        appService.switchEndpoint(projectId, new SwitchEndpointTypeCommand(
+                ProjectEndpointType.SYSTEM, null, null));
+
+        AgentCommand stage0 = converseCommands.stream()
+                .filter(command -> GenerationAppService.sliceSession(projectId, 0)
+                        .equals(command.sessionId()))
+                .findFirst().orElseThrow();
+        assertThat(stage0.agentKey()).isEqualTo(AgentProfile.EXECUTOR.key());
+        assertThat(stage0.prompt())
+                .contains("已定稿的设计稿")
+                .contains("/design/logo-2.html");
     }
 
     // ---------- 内部 ----------

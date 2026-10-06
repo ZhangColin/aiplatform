@@ -53,9 +53,11 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
@@ -135,6 +137,7 @@ class GenerationAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
@@ -1508,6 +1511,86 @@ class GenerationAppServiceTest {
         Project project = Project.create("归档生成项目", null, Long.parseLong(workspaceId), OWNER);
         project.archive();
         return projectRepository.save(project).getId();
+    }
+
+    // ---------- #291 构建门定稿放行：稿入起跑上下文 ----------
+
+    @Test
+    void given_finalized_items_when_prompt_assembled_then_draft_context_listed() {
+        // 定稿稿引用块（#291）：已定稿件逐条列出（设计物标题＋定稿稿路径），空清单
+        // 零注入（纯系统项目不携带）
+        assertThat(GenerationAppService.finalizedDesignsContext(List.of())).isEmpty();
+        DesignItem item = DesignItem.pending(1L, 1, "品牌主 logo——方形构图",
+                LocalDateTime.now());
+        item.finalize("run-x", "/design/logo-2.html");
+        assertThat(GenerationAppService.finalizedDesignsContext(List.of(item)))
+                .contains("已定稿的设计稿")
+                .contains("品牌主 logo——方形构图")
+                .contains("/design/logo-2.html");
+    }
+
+    @Test
+    void given_system_design_all_finalized_when_generation_dispatched_then_gate_opens() {
+        // #291 验收④第二岔的生成面：设计类终点清单全部定稿——生成门放行（PRJ_042
+        // 只拦未定稿完），起跑上下文携定稿稿引用块（阶段 0 与切片同携——规范源
+        // 全程在场）
+        Long projectId = persistedSystemDesignProject("9871");
+        seedFinalizedItem(projectId, projectOf(projectId).getPrdProducedAt());
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return command != null ? new AgentReply(command.runId(), "已构建", null, List.of())
+                    : null;
+        });
+
+        GenerationAppService.GenerationRun run =
+                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        assertThat(run).isNotNull();
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::prompt)
+                .allSatisfy(prompt -> assertThat(prompt)
+                        .contains("已定稿的设计稿")
+                        .contains("/design/home-1.html"));
+    }
+
+    @Test
+    void given_system_design_partially_finalized_when_start_generation_then_still_gated() {
+        // 门语义（#291 修订）：PRJ_042 拦「未全部定稿」——已收口未定稿（设计进行中）
+        // 仍不放行；文案如实告知构建从定稿设计稿长出
+        Long projectId = persistedSystemDesignProject("9872");
+        seedFinalizedItem(projectId, projectOf(projectId).getPrdProducedAt());
+        jdbcTemplate.update("UPDATE prj_design_items SET status = 2 WHERE project_id = ?",
+                projectId); // 一件退回已收口（未定稿）
+
+        assertThatThrownBy(() -> appService.startGeneration(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.GENERATION_DESIGN_ENDPOINT.message());
+    }
+
+    /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */
+    private Long persistedSystemDesignProject(String workspaceId) {
+        Project project = Project.create("设计先行项目", null, Long.parseLong(workspaceId), OWNER);
+        project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
+        project.markPrdProduced();
+        return projectRepository.save(project).getId();
+    }
+
+    private Project projectOf(Long projectId) {
+        return projectRepository.findById(projectId).orElseThrow();
+    }
+
+    /** 全部定稿的清单行（单件——门与起跑上下文的断言面）。 */
+    private void seedFinalizedItem(Long projectId, LocalDateTime prdAnchor) {
+        jdbcTemplate.update("""
+                INSERT INTO prj_design_items (id, project_id, ord, title, status, run_id,
+                    prd_produced_at, finalized_path, created_at, updated_at)
+                VALUES (?, ?, 1, '首页视觉', 4, 'run-x', ?, '/design/home-1.html',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, prdAnchor);
     }
 
     private Long persistedGeneratedProject(String workspaceId) {

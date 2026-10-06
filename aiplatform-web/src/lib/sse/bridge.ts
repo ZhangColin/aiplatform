@@ -283,9 +283,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
           // 编码 run 收口：generated_at 落库 → 失效项目域（详情重拉出事实，
           // 预览地址域随之刷新；预览重挂由 generation store 纪元驱动）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-        } else if (isDesignerWork(payload.projectId, payload.runId)) {
+        } else if (isDesignerWork(payload.projectId, payload.runId) || closing?.drafts) {
           // 设计会话收口（#290）：件状态落轨道表 → 失效项目域（计划区 ✓ 推进
-          //——逐件收口即逐件亮灯，对偶编码 run 收口失效）
+          //——逐件收口即逐件亮灯，对偶编码 run 收口失效）；closing.drafts 在场
+          //（#291 定稿收尾卡——平台侧发射、无锚定直播卡）同判：件状态转已定稿
+          //（finalized_path 透出）也经项目域重拉进计划区
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
         }
         // 轮收口即对话史有新条目（发言+回复 / 收尾卡落库）——失效对话域，水合增量

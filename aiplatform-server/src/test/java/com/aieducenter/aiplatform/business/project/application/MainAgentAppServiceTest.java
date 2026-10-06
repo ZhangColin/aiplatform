@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -16,6 +17,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +39,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.AgentResume;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentSuspension;
@@ -47,9 +50,11 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
@@ -1246,6 +1251,105 @@ class MainAgentAppServiceTest {
                 projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
                         && "意见派发失败，请重新发送".equals(
                                 payload.get(AgentEventTypes.ERROR_MESSAGE_FIELD))));
+    }
+
+    // ---------- #291 中途切换路由：已生成＋设计类终点的意见车道 ----------
+
+    @Test
+    void given_generated_system_design_without_items_when_opinion_closes_then_design_lane() {
+        // #291 系统中途切换：已生成＋设计类终点＋设计未定稿完——意见收口进设计轨
+        //（designer 会话起设计，清单＝功能清单），系统迭代让位（不派修正 run）
+        Long projectId = persistedGeneratedDesignProject("9736", ProjectEndpointType.SYSTEM_DESIGN);
+        givenSessionExecutorRunsInline();
+        givenPrdContent("""
+                # 门店系统 PRD
+
+                ## 功能清单
+
+                1. 用户能注册登录
+                2. 用户能浏览商品下单
+
+                ## 待定项
+                暂无
+                """);
+        givenDesignerDraftsSession("/design/home-1.html");
+
+        appService.runOpinionTurn(projectId, "先做设计");
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().stream()
+                .filter(command -> !command.sessionId().startsWith("main-"))
+                .map(AgentCommand::sessionId))
+                .allSatisfy(sessionId -> assertThat(sessionId).startsWith("designer-"));
+        assertThat(commands.getAllValues().stream()
+                .filter(command -> !command.sessionId().startsWith("main-"))
+                .map(AgentCommand::agentKey))
+                .containsOnly(AgentProfile.DESIGNER.key());
+    }
+
+    @Test
+    void given_generated_system_design_all_finalized_when_opinion_closes_then_fix_lane() {
+        // #291 路由收口：设计全部定稿后回到更新 lane——意见收口派修正 run（coder
+        // 会话），设计轨不重派（定稿后按稿对齐走定稿触发，不夹在设计意见里）
+        Long projectId = persistedGeneratedDesignProject("9737", ProjectEndpointType.SYSTEM_DESIGN);
+        LocalDateTime prdAnchor = projectOf(projectId).getPrdProducedAt();
+        jdbcTemplate.update("""
+                INSERT INTO prj_design_items (id, project_id, ord, title, status, run_id,
+                    prd_produced_at, finalized_path, created_at, updated_at)
+                VALUES (?, ?, 1, '用户能注册登录', 4, 'run-x', ?, '/design/home-1.html',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, prdAnchor);
+        givenSessionExecutorRunsInline();
+        givenConverseMainRepliesAndExecutorFinishes("好的，会处理的");
+
+        appService.runOpinionTurn(projectId, "系统首页加个按钮");
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).sessionId()).startsWith("coder-")
+                .doesNotStartWith("designer-");
+        assertThat(commands.getAllValues().get(1).prompt()).contains("系统首页加个按钮");
+    }
+
+    private Project projectOf(Long projectId) {
+        return projectRepository.findById(projectId).orElseThrow();
+    }
+
+    /** 已生成＋设计类终点的项目（中途切换形态——设计先行承接的路由前提）。 */
+    private Long persistedGeneratedDesignProject(String workspaceId, ProjectEndpointType endpoint) {
+        Project project = projectRepository.save(Project.create("中途切换项目", null,
+                Long.parseLong(workspaceId), OWNER));
+        project.switchEndpoint(endpoint, null);
+        project.markPrdProduced();
+        project.markGenerated();
+        return projectRepository.save(project).getId();
+    }
+
+    /** PRD 读取桩（设计轨清单源）。 */
+    private void givenPrdContent(String prdMarkdown) {
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse(prdMarkdown, "", 0));
+    }
+
+    /** 脚本化设计会话（designer 座落稿收口）。 */
+    private void givenDesignerDraftsSession(String draftPath) {
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null;
+            }
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            if (!command.sessionId().startsWith("designer-")) {
+                return new AgentReply(command.runId(), "好的", null, List.of());
+            }
+            sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(AgentEventScripts.scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "已出稿", null,
+                    List.of(new FileChange(draftPath, 60, 0)));
+        });
     }
 
     // ---------- 测试数据 ----------

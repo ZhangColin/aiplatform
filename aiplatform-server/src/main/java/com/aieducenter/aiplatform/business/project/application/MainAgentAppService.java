@@ -652,26 +652,49 @@ public class MainAgentAppService {
                 // GenerationAppService 按轨道表解析现行计划，仍缺失则重派
                 // 本服务补产（#220，不兜假计划）
                 BuildPlan plan = buildPlanFacts.consume(workspaceId);
-                clearTurnAnchors(sessionId, workspaceId);
+                // 意见锚取出（#291）：设计类终点的设计派发消费意见原文（在途排队/
+                // 改稿受理）；生成路径不需要（生成读工作区 PRD 正本）——其余锚照
+                // 「收口即消费」清掉
+                String opinion = opinionExchanges.remove(sessionId);
+                prdRevisions.clear(workspaceId);
                 if (project.getPrdProducedAt() != null) {
-                    if (project.getEndpointType().designInvolved()) {
+                    if (project.getEndpointType().designInvolved()
+                            && !designProcessAppService.designFinalized(project)) {
                         // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
                         // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
-                        // ADR-0025）；构建从定稿设计稿长出（定稿接线归后续票）
+                        // ADR-0025）；意见原文随派发（#291：在途即排队、清单全收口
+                        // 即改稿——改稿同会话继续）
                         DesignProcessAppService.DesignRun run =
-                                designProcessAppService.dispatchDesignOnTurnClose(projectId);
+                                designProcessAppService.dispatchDesignOnTurnClose(projectId,
+                                        opinion);
                         if (run != null) {
                             log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
                                     projectId, run.runId());
                         }
                         return;
                     }
+                    // 系统终点、或设计类终点全部定稿（#291 定稿→构建经计划补产链
+                    // 自然恢复——构建从定稿设计稿长出）——首次生成同律
                     GenerationAppService.GenerationRun run =
                             generationAppService.dispatchGenerationOnTurnClose(projectId, plan);
                     if (run != null) {
                         log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
                                 projectId, run.runId());
                     }
+                }
+                return;
+            }
+            if (project.getEndpointType().designInvolved()
+                    && !designProcessAppService.designFinalized(project)) {
+                // 已生成＋设计类终点＋设计未定稿完（#291 系统中途切换的设计轨承接）：
+                // 意见进设计轨（在途排队/改稿/续跑）——系统迭代让位（设计先行；
+                // 全部定稿后回更新 lane，按稿对齐经定稿触发）
+                String designOpinion = opinionExchanges.remove(sessionId);
+                DesignProcessAppService.DesignRun run =
+                        designProcessAppService.dispatchDesignOnTurnClose(projectId, designOpinion);
+                if (run != null) {
+                    log.info("[main-close] 项目 {} 意见轮收口，平台起设计过程（{}，系统中途切换承接）",
+                            projectId, run.runId());
                 }
                 return;
             }

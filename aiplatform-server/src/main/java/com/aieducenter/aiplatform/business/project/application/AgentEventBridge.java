@@ -107,6 +107,26 @@ public class AgentEventBridge {
     }
 
     /**
+     * 定稿收尾卡发射（#291 定稿机制——平台侧显式动作的收口呈现）：定稿不是智能体
+     * run（无 run-start、无过程事件），收尾卡经 {@code run-finish} 载 closing 直达
+     * 对话流——事件封闭集零新增（收口即 run-finish 的既有语义，#88 收尾卡复用）。
+     * runId ＝ 定稿锚（成版 commit 的 Run-Id trailer 对偶锚定本卡——版本详情联接
+     * 对话史 closing 条目同锚）；sessionId 携该设计物的设计会话标识（归属可读，
+     * 非续跑锚）。发射走 {@link #publishQuietly}——呈现面失败不牵连定稿事实
+     * （件状态与成版已落定，回访经对话史水合）。
+     */
+    public void emitClosingCard(Long projectId, Long ownerAccountId, String runId,
+            String sessionId, Map<String, Object> closing) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(EventsAppService.PROJECT_FIELD, projectId.toString());
+        payload.put(EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId));
+        payload.put(EventsAppService.RUN_FIELD, runId);
+        payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
+        payload.put(AgentEventTypes.CLOSING_FIELD, closing);
+        publishQuietly(AgentEventTypes.RUN_FINISH, payload);
+    }
+
+    /**
      * 纯呈现事件的静默发射（#87）：失败只记日志不上抛——呈现面失败不牵连受理/
      * 对话本身（SSE 是「让 UI 活」的面，不承担正确性；sink 护栏同款，收拢单点）。
      */

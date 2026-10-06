@@ -103,7 +103,26 @@ function DraftsArea({ projectId, drafts }: { projectId: string; drafts: ClosingD
           {open ? "收起" : `查看全部 ${drafts.length} 稿`}
         </button>
       ) : null}
+      <FinalizeTriggers drafts={drafts} />
     </div>
+  );
+}
+
+/**
+ * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
+ * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
+ * 候选产出轮（首产/改稿）不携带、零呈现。定稿稿行在卡内即「锁定那张」的叙事
+ * （摘要＋版本控件），不另加标记。
+ */
+function FinalizeTriggers({ drafts }: { drafts: ClosingDraft[] }) {
+  const triggers = drafts.flatMap((draft) => draft.triggers ?? []).filter(Boolean);
+  if (triggers.length === 0) {
+    return null;
+  }
+  return (
+    <p className="mt-1.5 text-xs text-muted-foreground">
+      已触发：{triggers.join("；")}
+    </p>
   );
 }
 
@@ -117,10 +136,12 @@ function DraftsArea({ projectId, drafts }: { projectId: string; drafts: ClosingD
  * 版本控件（#92/#93）随 closing.version 成版锚点呈现（成版失败缺 version 键则不
  * 出，版本动作无锚不可用）。
  *
- * <p><b>设计会话变体</b>（#289 扩载、#290 呈现）：closing.drafts 在场即设计收口
- * ——稿清单＋去向是本卡主承载（{@link DraftsArea}），判定行/文件清单让位（设计稿
- * 不是系统：PRD 恒未动、系统恒未动，文件清单与稿清单同集重复）；轮末统计＝时长
- * ＋稿数。设计候选不自动成版（ADR-0025），版本控件不出。</p>
+ * <p><b>设计会话变体</b>（#289 扩载、#290 呈现；#291 定稿收尾卡）：closing.drafts
+ * 在场即设计收口——稿清单＋去向是本卡主承载（{@link DraftsArea}），判定行/文件
+ * 清单让位（设计稿不是系统：PRD 恒未动、系统恒未动，文件清单与稿清单同集重复）
+ * ；轮末统计＝时长＋稿数。候选产出轮（首产/改稿）不自动成版（ADR-0025），版本
+ * 控件不出；定稿收尾卡（平台侧发射、无直播卡）例外——closing 携 version（成版
+ * 锚）与 drafts 单条（triggers 后续触发事实，{@link FinalizeTriggers}）。</p>
  */
 export function ClosingCard({
   closing,
@@ -302,7 +323,9 @@ export function ClosingCard({
 
       {/* 版本控件（#92/#93）：成版锚点在场才可用——查看当时（起快照只逛不换）/回滚到此
           （追加版本、只回代码不回数据）。成版失败（缺 version）轮不出控件；设计
-          会话恒无 version（候选不自动成版，ADR-0025）亦不出。 */}
+          会话的候选产出轮（首产/改稿）不携带 version（候选不自动成版，ADR-0025）
+          亦不出；定稿收尾卡（#291）例外——显式动作收口即成版，「查看当时」即见
+          定稿稿。 */}
       {version ? (
         <>
           <div className="mt-2.5 flex items-center gap-2">

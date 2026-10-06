@@ -61,6 +61,11 @@ public class DesignItem extends Auditable implements AggregateRoot<DesignItem, L
     @Column(name = "run_id", length = 100)
     private String runId;
 
+    /** 定稿选定的稿（#291：工作区锚定形路径——候选中锁定的一张；再定稿即覆写，
+     * 交付物包与一致性桥的取件锚）。 */
+    @Column(name = "finalized_path", length = 500)
+    private String finalizedPath;
+
     /** 清单落库时的 PRD 版本锚（与项目 prd_produced_at 比对——锚不一致 = 清单过期）。 */
     @Column(name = "prd_produced_at", nullable = false, updatable = false)
     private LocalDateTime prdProducedAt;
@@ -90,6 +95,16 @@ public class DesignItem extends Auditable implements AggregateRoot<DesignItem, L
         return !items.isEmpty() && items.get(0).getPrdProducedAt().equals(prdProducedAt);
     }
 
+    /**
+     * 清单定稿完毕判定（#291 定稿后续分岔的守卫单点）：现行清单（锚一致）且全部
+     * 已定稿——构建从定稿设计稿长出（PRJ_042 门放行）、系统在途起按稿对齐的
+     * 判据。空件集或锚漂（清单过期/未落）= false（未定稿完）。
+     */
+    public static boolean checklistFinalized(List<DesignItem> items, LocalDateTime prdProducedAt) {
+        return checklistMatchesPrd(items, prdProducedAt)
+                && items.stream().allMatch(item -> item.status == DesignItemStatus.FINALIZED);
+    }
+
     /** 收口落位（幂等覆写——重派后再收口即刷新；runId = 该件的用户面 run 锚）。 */
     public void close(String runId) {
         this.status = DesignItemStatus.CLOSED;
@@ -100,6 +115,17 @@ public class DesignItem extends Auditable implements AggregateRoot<DesignItem, L
     public void fail(String runId) {
         this.status = DesignItemStatus.FAILED;
         this.runId = runId;
+    }
+
+    /**
+     * 定稿落位（#291，显式动作收口）：候选中锁定一稿——状态转已定稿、runId 锚
+     * 定稿收尾卡（版本 Run-Id trailer 对偶锚定）、finalizedPath 记选定稿。幂等
+     * 覆写（再定稿即刷新——改稿产新代后重新锁定）。
+     */
+    public void finalize(String runId, String finalizedPath) {
+        this.status = DesignItemStatus.FINALIZED;
+        this.runId = runId;
+        this.finalizedPath = finalizedPath;
     }
 
     @PrePersist

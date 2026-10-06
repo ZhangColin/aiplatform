@@ -419,7 +419,7 @@ public class ProjectQueryAppService {
         }
         return items.stream()
                 .map(item -> new DesignItemResponse(item.getOrd(), item.getTitle(),
-                        item.getStatus(), item.getStatus().getName()))
+                        item.getStatus(), item.getStatus().getName(), item.getFinalizedPath()))
                 .toList();
     }
 

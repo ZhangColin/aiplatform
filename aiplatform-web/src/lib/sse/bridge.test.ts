@@ -1226,6 +1226,53 @@ describe("bridge · designer 事件 → 直播卡生长＋收尾卡稿清单（#
     }
   });
 
+  it("定稿收尾卡（#291，平台侧发射、无锚定直播卡）：closing.drafts 在场即入流＋失效项目域（件状态转已定稿进计划区）", async () => {
+    const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
+    const baseFetches = projects.fetchCount();
+    try {
+      await projects.waitForSettled();
+      // 平台侧定稿发射：无 run-start、无过程事件——run-finish 直达（version 锚＋
+      // drafts 单条携 triggers）
+      dispatchAgentEvent(agentQc, agentEvent(
+        "run-finish",
+        {
+          ...designRun,
+          finish: "end",
+          closing: {
+            summary: "定稿设计物：首页主视觉",
+            prdChanged: false,
+            systemChanged: false,
+            files: [],
+            durationMs: 300,
+            version: "abc123def456",
+            drafts: [
+              {
+                item: "首页主视觉",
+                media: "html",
+                path: "/design/home-2.html",
+                triggers: ["设计已全部定稿，可以确认下单了"],
+              },
+            ],
+          },
+        },
+        "run-f2:1",
+      ));
+
+      // 无锚定 run：工作消息不建不定格（定稿不是 run）
+      expect(useWorkMessageStore.getState().works["p1"]).toBeUndefined();
+      // 收尾卡直达对话流：version 锚与 triggers 完整
+      const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
+      expect(card).toMatchObject({ runId: "run-d1" });
+      const closing = (card as { closing: { version?: string; drafts?: Array<{ triggers?: string[] }> } }).closing;
+      expect(closing.version).toBe("abc123def456");
+      expect(closing.drafts?.[0].triggers).toEqual(["设计已全部定稿，可以确认下单了"]);
+      // 件状态落轨道表 → 失效项目域（finalized_path 透出）
+      await vi.waitFor(() => expect(projects.fetchCount()).toBeGreaterThan(baseFetches));
+    } finally {
+      projects.unsubscribe();
+    }
+  });
+
   it("error（设计会话在途）不进对话面（重试全程静默——run-failed 才是唯一失败终态）", () => {
     dispatchAgentEvent(agentQc, agentEvent(
       "run-start",

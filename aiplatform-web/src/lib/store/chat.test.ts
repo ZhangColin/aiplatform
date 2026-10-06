@@ -623,6 +623,50 @@ describe("chat store · 收尾卡稿清单（#289 扩载、#290 呈现：live �
     });
   });
 
+  it("定稿收尾卡（#291）：version 锚与 drafts 单条 triggers 透传（live 与水合同形）", () => {
+    const finalizeClosing = {
+      ...designClosing,
+      summary: "定稿设计物：首页主视觉",
+      version: "abc123def456",
+      drafts: [
+        {
+          item: "首页主视觉",
+          media: "html",
+          path: "/design/home-2.html",
+          triggers: ["设计已全部定稿，可以确认下单了"],
+        },
+      ],
+    };
+
+    const live = toWorkClosing(finalizeClosing)!;
+    expect(live.version).toBe("abc123def456");
+    expect(live.drafts?.[0]).toEqual({
+      item: "首页主视觉",
+      media: "html",
+      path: "/design/home-2.html",
+      triggers: ["设计已全部定稿，可以确认下单了"],
+    });
+
+    useChatStore.getState().hydrate("p1", [entry(1, "closing", { closing: finalizeClosing })]);
+    const card = useChatStore.getState().chats["p1"]?.messages.find((m) => m.kind === "closing");
+    expect((card as { closing: WorkClosing }).closing.version).toBe("abc123def456");
+    expect((card as { closing: WorkClosing }).closing.drafts?.[0].triggers)
+        .toEqual(["设计已全部定稿，可以确认下单了"]);
+  });
+
+  it("triggers 容错收窄（#291）：非数组回落缺省、非字符串条目剔除", () => {
+    const narrowed = toWorkClosing({
+      ...designClosing,
+      drafts: [{ item: "首页主视觉", media: "html", path: "/design/a.html",
+        triggers: ["已开始构建", 42, null] }],
+    })?.drafts;
+    expect(narrowed?.[0].triggers).toEqual(["已开始构建"]);
+    expect(toWorkClosing({
+      ...designClosing,
+      drafts: [{ item: "首页主视觉", media: "html", path: "/design/a.html", triggers: "nope" }],
+    })?.drafts?.[0].triggers).toBeUndefined();
+  });
+
   it("drafts 容错收窄：非数组回落缺省（编码 run 形态）；坏条目剔除不出坏行", () => {
     expect(toWorkClosing({ ...designClosing, drafts: "nope" })?.drafts).toBeUndefined();
     expect(

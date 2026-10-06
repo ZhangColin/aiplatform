@@ -41,6 +41,9 @@ const SEGMENT_STATUSES: Record<number, GenerationSegmentFact["status"]> = {
   1: "pending",
   2: "closed",
   3: "failed",
+  // 设计物件状态扩值（#291 定稿）：已定稿在计划区同「已收口」位（推进完成——
+  // 定稿标记的呈现归设计稿范式，读模型 finalizedPath 另行透出）
+  4: "closed",
 };
 
 /** 片清单 → 消费口径（缺行/缺 ord 防御剔除；空 = 无计划）。 */
@@ -62,6 +65,9 @@ function normalizeSegments(
  * 切片清单同构——复用 {@link GenerationSegmentFact} 形状（title 即计划区行文本，
  * 与 description 同位）；状态码表与片清单同集（待跑/已收口/失败）。
  */
+/** 设计物件 → 计划区消费口径（#290；#291 已定稿位＝closed）。定稿稿路径
+ * （finalizedPath）不进本形状——定稿标记的呈现归设计稿范式（#293/#294），详情
+ * 域经 REST 原样可取。 */
 function normalizeDesignItems(
   raw: ProjectDetailResponse["designItems"],
 ): GenerationSegmentFact[] | null {

@@ -123,6 +123,10 @@ public class ProjectController {
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / "
                     + "咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
                     + "回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。"
+                    + "designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——"
+                    + "画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达"
+                    + "该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代"
+                    + "收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。"
                     + "空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；"
                     + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；"
                     + "挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑"
@@ -131,7 +135,8 @@ public class ProjectController {
     public ApiResponse<InterviewTurnResponse> postMessage(@PathVariable String id,
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
-                dispatchAppService.dispatch(parseId(id), command.content(), command.attachments())
+                dispatchAppService.dispatch(parseId(id), command.content(), command.attachments(),
+                        command.designItem())
                         .runId()));
     }
 

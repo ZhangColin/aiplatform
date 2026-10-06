@@ -473,8 +473,9 @@ class CoderRunAttempts {
                 .toList();
     }
 
-    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图）。 */
-    private static String mediaOf(String path) {
+    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图）——
+     * 首产收尾卡与定稿收尾卡（#291）同源派生。 */
+    static String mediaOf(String path) {
         int dot = path.lastIndexOf('.');
         String extension = dot >= 0 ? path.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
         if (IMAGE_MEDIA_EXTENSIONS.contains(extension)) {

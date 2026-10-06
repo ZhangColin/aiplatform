@@ -19,6 +19,8 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.FileChange;
+import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 
@@ -53,7 +55,8 @@ class GenerateImageToolTest {
     }
 
     private final RecordingService service = new RecordingService();
-    private final GenerateImageTool tool = new GenerateImageTool("77", service);
+    private final LandedFileFacts landedFiles = new LandedFileFacts();
+    private final GenerateImageTool tool = new GenerateImageTool("77", service, landedFiles);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
@@ -113,6 +116,35 @@ class GenerateImageToolTest {
     }
 
     @Test
+    void given_generated_when_called_then_landed_files_reported_anchored() {
+        // #292 落盘事实进变更事实流：转存不经引擎写文件工具，流内观察看不见——
+        // 工具携 runId 报锚定形路径（收口判据与收尾卡清单由此看见图片模型路的稿）
+        service.next = new ImageGenerationOutcome.Generated("zhipu", "glm-image",
+                List.of(
+                        new ImageGenerationOutcome.LandedImage("design/123-a.png", 2048),
+                        new ImageGenerationOutcome.LandedImage("design/123-b.png", 4096)),
+                List.of());
+
+        tool.callAsync(call(Map.of("prompt", "p"), "run-7", "designer-1")).block();
+
+        assertThat(landedFiles.drain("run-7")).containsExactly(
+                new FileChange("/design/123-a.png", 1, 0),
+                new FileChange("/design/123-b.png", 1, 0));
+        // 取走即清：二次取空（无跨 run 残留）
+        assertThat(landedFiles.drain("run-7")).isEmpty();
+    }
+
+    @Test
+    void given_no_run_context_or_failed_when_called_then_nothing_reported() {
+        // 非 run 上下文（血统腿缺 runId）与全部失败（无落盘）都不报——事实面如实
+        tool.callAsync(call(Map.of("prompt", "p"), null, null)).block();
+        service.next = new ImageGenerationOutcome.Failed("全失败");
+        tool.callAsync(call(Map.of("prompt", "p"), "run-8", "designer-1")).block();
+
+        assertThat(landedFiles.drain("run-8")).isEmpty();
+    }
+
+    @Test
     void given_partial_failures_when_called_then_receipt_lists_failures_honestly() {
         service.next = new ImageGenerationOutcome.Generated("zhipu", "glm-image",
                 List.of(new ImageGenerationOutcome.LandedImage("design/1-a.png", 10)),
@@ -145,7 +177,7 @@ class GenerateImageToolTest {
                 throw new IllegalStateException("图片生成供应商未配置，暂时无法出图");
             }
         };
-        GenerateImageTool tool = new GenerateImageTool("77", throwing);
+        GenerateImageTool tool = new GenerateImageTool("77", throwing, new LandedFileFacts());
 
         ToolResultBlock result = tool.callAsync(call(Map.of("prompt", "p"), null, null)).block();
 

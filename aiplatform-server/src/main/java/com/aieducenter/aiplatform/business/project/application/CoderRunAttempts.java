@@ -88,8 +88,9 @@ class CoderRunAttempts {
      * 与模型档位经运营配置读面取生效值、计量 dims agentKind 同键）、工作区面
      * （designer 无 shell——ProjectDesign 形态，写文件件在、命令执行结构性关闭）、
      * 收口成版（执行体真收口自动成版；设计<b>候选</b>不成版——版本流只认定稿，
-     * ADR-0025 候选与版本两套语义不打通）、收尾卡稿清单锚（designer 会话扩载
-     * 「本轮稿清单与去向」；null = 非设计会话不扩载）。
+     * ADR-0025 候选与版本两套语义不打通）、收尾卡稿清单开关（designer 会话扩载
+     * 「本轮稿清单与去向」——条目随判定事实由轨道层拼装，#292；null = 非设计
+     * 会话不扩载）。
      */
     record RunSeat(AgentProfile profile, boolean workspaceNoShell,
             boolean commitVersionAtClosing, String draftsItem) {
@@ -109,26 +110,38 @@ class CoderRunAttempts {
      * 收口判定的权威事实（#88 判定行）：PRD 改没改（生成轮恒未动；更新轮 = 交接物
      * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = finish_edit 工具
      * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本环
-     * 只拼装不判定。
+     * 只拼装不判定。设计轨道另携 {@code drafts} 稿清单（#292：轨道层在收口点拼装
+     * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
-            String systemNote) {
+            String systemNote, List<Map<String, Object>> drafts) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note);
+            return new ClosingJudgment(false, null, true, note, null);
         }
 
         /**
          * 设计轨道的分段判定（#289）：PRD 未动、系统未动（设计稿不是系统——两套
          * 产出逻辑，ADR-0024）；note = 本场设计物叙事（完成设计物：X），进收尾卡
-         * summary（稿清单与去向在 closing.drafts 扩载）。
+         * summary；drafts = 本轮稿清单与去向（#292 轨道层拼装——渲成的平面稿以
+         * PNG 为正身；relaxed 改稿收口 0 稿即空清单，如实）。
          */
-        static ClosingJudgment design(String note) {
-            return new ClosingJudgment(false, null, false, note);
+        static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
+            return new ClosingJudgment(false, null, false, note,
+                    drafts == null ? List.of() : drafts);
+        }
+
+        /**
+         * 修正轨道的分段判定（#26）：判定事实随交接物与 finish_edit 事实直拼
+         * （稿清单恒无——设计会话才有）。
+         */
+        static ClosingJudgment update(boolean prdChanged, String prdNote,
+                boolean systemChanged, String systemNote) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null);
         }
     }
 
@@ -402,8 +415,8 @@ class CoderRunAttempts {
      * 拼装单点：SSE 扩载与对话史落库取同一 map）。
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径跨尝试
      * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。设计会话
-     * （#289）另扩 {@code drafts} 稿清单——本轮落进 design/ 的稿（item＝设计物、
-     * media＝形态、path＝去向），候选稿的事实面，供收尾卡呈现与回访水合。
+     * （#289）另扩 {@code drafts} 稿清单（#292 起随判定事实由轨道层拼装——平面稿
+     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
@@ -425,7 +438,7 @@ class CoderRunAttempts {
             closing.put(AgentEventTypes.SELF_TEST_FIELD, selfTest);
         }
         if (draftsItem != null) {
-            closing.put(CLOSING_DRAFTS_FIELD, draftPayloads(changes, draftsItem));
+            closing.put(CLOSING_DRAFTS_FIELD, judgment.drafts());
         }
         return closing;
     }
@@ -449,32 +462,13 @@ class CoderRunAttempts {
     /** 界面类稿扩展名（media 形态判据——平面类位图同目录落盘）。 */
     private static final String HTML_MEDIA = "html";
 
-    /** 平面类稿扩展名集合（图片模型位图稿与 HTML 源同存口径随 #292）。 */
+    /** 平面类稿扩展名集合（#292 双路位图：图片模型直出与代码出图渲成的 PNG 同集）。 */
     private static final Set<String> IMAGE_MEDIA_EXTENSIONS =
             Set.of("png", "jpg", "jpeg", "webp", "gif", "svg");
 
-    /**
-     * 稿清单载荷（#289 设计会话收尾卡扩载）：本轮变更里锚定 design/ 的稿——
-     * item = 本场设计物（会话即设计物，条目原文）、media = 形态（界面类 html /
-     * 平面类 image，按扩展名派生）、path = 去向（工作区锚定形）。判定以平台可
-     * 观察的文件变更事实为准（同收口判据口径），不解析执行体自由文本。
-     */
-    private static List<Map<String, Object>> draftPayloads(List<FileChange> changes,
-            String draftsItem) {
-        return changes.stream()
-                .map(FileChange::path)
-                .filter(CoderRunAttempts::designAnchored)
-                .distinct()
-                .sorted()
-                .map(path -> Map.<String, Object>of(
-                        "item", draftsItem,
-                        "media", mediaOf(path),
-                        "path", path))
-                .toList();
-    }
-
-    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图）——
-     * 首产收尾卡与定稿收尾卡（#291）同源派生。 */
+    /** 稿形态（按扩展名派生：html＝界面类可交互轻量实现；图片＝平面类位图——
+     * 代码出图路渲成的 PNG 同此派生）——首产/改稿收尾卡与定稿收尾卡（#291）
+     * 同源派生。 */
     static String mediaOf(String path) {
         int dot = path.lastIndexOf('.');
         String extension = dot >= 0 ? path.substring(dot + 1).toLowerCase(Locale.ROOT) : "";

@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +94,7 @@ public class AgentscopeAgentClient {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final AgentStateStore stateStore;
     private final UsageEventSink usageEventSink;
+    private final LandedFileFacts landedFiles;
     private final Clock clock;
 
     @Autowired
@@ -100,21 +102,22 @@ public class AgentscopeAgentClient {
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink) {
+            UsageEventSink usageEventSink, LandedFileFacts landedFiles) {
         this(factory, properties, workspaceLifecycleAppService, stateStore, usageEventSink,
-                Clock.systemUTC());
+                landedFiles, Clock.systemUTC());
     }
 
     AgentscopeAgentClient(AgentscopeHarnessAgentFactory factory,
             AgentscopeProperties properties,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             AgentStateStore stateStore,
-            UsageEventSink usageEventSink, Clock clock) {
+            UsageEventSink usageEventSink, LandedFileFacts landedFiles, Clock clock) {
         this.factory = factory;
         this.properties = properties;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.stateStore = stateStore;
         this.usageEventSink = usageEventSink;
+        this.landedFiles = landedFiles;
         this.clock = clock;
     }
 
@@ -134,13 +137,17 @@ public class AgentscopeAgentClient {
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
                 command.timeout(), sink);
+        // 平台工具落盘事实（#292）取走并进变更事实流——错误分支弃取（失败尝试的
+        // 变更不进收口清单，#84 口径）
+        List<FileChange> changes = new ArrayList<>(result.changes());
+        changes.addAll(landedFiles.drain(command.runId()));
         if (result.error() != null) {
             throw new IllegalStateException("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
                     + result.error().getMessage(), result.error());
         }
         return new AgentReply(command.runId(), result.text(), result.suspension(),
-                result.changes(), result.durations());
+                changes, result.durations());
     }
 
     /**
@@ -174,13 +181,16 @@ public class AgentscopeAgentClient {
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), null, sink);
+        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流
+        List<FileChange> changes = new ArrayList<>(result.changes());
+        changes.addAll(landedFiles.drain(resume.runId()));
         if (result.error() != null) {
             throw new IllegalStateException("智能体续跑失败（runId=" + resume.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
                     + result.error().getMessage(), result.error());
         }
         return new AgentReply(resume.runId(), result.text(), result.suspension(),
-                result.changes(), result.durations());
+                changes, result.durations());
     }
 
     /**

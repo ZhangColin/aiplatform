@@ -12,6 +12,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import reactor.core.publisher.Mono;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 
@@ -43,13 +44,16 @@ public class GenerateImageTool extends ToolBase {
 
     private final String workspaceId;
     private final ImageGenerationAppService generation;
+    private final LandedFileFacts landedFiles;
 
-    public GenerateImageTool(String workspaceId, ImageGenerationAppService generation) {
+    public GenerateImageTool(String workspaceId, ImageGenerationAppService generation,
+            LandedFileFacts landedFiles) {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("图片生成模型出位图设计稿，落盘到工作区 design/ 目录并返回文件路径。"
                         + "适用档位（重要）：写实照片质感、复杂光影、插画氛围向的画面用本工具；"
-                        + "以文字排版为主的海报/卡片/横幅不要用本工具——写 HTML/CSS 再由平台渲 PNG"
+                        + "以文字排版为主的海报/卡片/横幅不要用本工具——写 HTML/CSS（首行 "
+                        + "<!-- print: 宽x高 --> 画幅声明）由平台渲 PNG"
                         + "（文字像素级可控，图片模型画长文案易错字漏字）。prompt 传完整的画面正向"
                         + "描述（主体、风格、配色、氛围；画面内文字尽量短）；size 可选（画幅，"
                         + "如 1024x1024）；count 出几张（1~5，探索多稿时用）；name 可选（文件名"
@@ -77,6 +81,7 @@ public class GenerateImageTool extends ToolBase {
                 .concurrencySafe(false));
         this.workspaceId = workspaceId;
         this.generation = generation;
+        this.landedFiles = landedFiles;
     }
 
     @Override
@@ -105,6 +110,13 @@ public class GenerateImageTool extends ToolBase {
                     workspaceId, runId, sessionId,
                     String.valueOf(prompt).strip(), count,
                     textOf(input, SIZE_KEY), textOf(input, NAME_KEY));
+            // 落盘事实进变更事实流（#292）：转存不经引擎写文件工具，流内观察看不见
+            // ——报进 LandedFileFacts，客户端 reply 装配点取走（设计轨收口判据与
+            // 收尾卡清单由此看见图片模型路的稿）。转存路径是相对形，报锚定形
+            if (runId != null
+                    && outcome instanceof ImageGenerationOutcome.Generated generated) {
+                generated.files().forEach(file -> landedFiles.land(runId, "/" + file.path()));
+            }
             return Mono.just(switch (outcome) {
                 case ImageGenerationOutcome.Generated generated -> ToolResultBlock.text(
                         format(generated));

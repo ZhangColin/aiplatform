@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentToolkitSupplier;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
@@ -69,12 +70,14 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final WebSearchProvider webSearchProvider;
     private final SkillProposalAdapter skillProposals;
     private final ImageGenerationAppService imageGeneration;
+    private final LandedFileFacts landedFiles;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
-            SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration) {
+            SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration,
+            LandedFileFacts landedFiles) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -85,6 +88,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.webSearchProvider = webSearchProvider;
         this.skillProposals = skillProposals;
         this.imageGeneration = imageGeneration;
+        this.landedFiles = landedFiles;
     }
 
     @Override
@@ -127,11 +131,13 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                     SkillSlot.EXECUTOR, skillProposals));
         }
         // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
-        // 档位表落提示词层，执行体按设计物语义自选）；写文件件是 harness 内建、
+        // 档位表落提示词层，执行体按设计物语义自选；#292 落盘事实报进变更事实流，
+        // 收口判据与稿清单看得见图片模型路的稿）；写文件件是 harness 内建、
         // 经 ProjectDesign 形态自带（shell/委派在工厂结构性关闭——本面零注册即无）
         if (AgentProfile.DESIGNER.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDesign design) {
-            toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration));
+            toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration,
+                    landedFiles));
         }
         // #263 self-test 子键视图：子智能体自有平台工具面（技能自荐 subagent 槽
         // 血统实例）——平台工厂构建子智能体时按本键取视图合并进子级工具面

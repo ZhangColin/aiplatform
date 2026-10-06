@@ -1228,6 +1228,12 @@ describe("WorkMessage · designer 直播卡（#290：同构直播卡，agent 标
       action({ id: "a3", toolCallId: "tc3", toolName: "edit_file", state: "running", label: "编辑【x】" }),
     ] as WorkPart[];
     expect(draftNoOf(misc, activityOf(misc))).toBeUndefined();
+    // 出图件同计稿序（#292 已进服务端播报封闭表——图片模型路的稿与写稿件同口径）
+    const imageRun = [
+      first,
+      action({ id: "a4", toolCallId: "tc4", toolName: "generate_image", state: "running", label: "出图【logo-2】" }),
+    ] as WorkPart[];
+    expect(draftNoOf(imageRun, activityOf(imageRun))).toBe(2);
   });
 
   it("与构建 run 同构不混淆：executor 座席的写稿动作照旧 label 滚动（不出「正在出稿」文案）", () => {

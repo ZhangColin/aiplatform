@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.AgentWorkspace;
+import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
 import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -61,12 +62,13 @@ class ProfileToolkitSupplierTest {
     private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
     private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
     private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
+    private final LandedFileFacts landedFiles = new LandedFileFacts();
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider, skillProposals, imageGeneration);
+                webSearchProvider, skillProposals, imageGeneration, landedFiles);
     }
 
     @Test
@@ -213,7 +215,8 @@ class ProfileToolkitSupplierTest {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
-                externalContentFetcher, webSearchProvider, recorder, imageGeneration);
+                externalContentFetcher, webSearchProvider, recorder, imageGeneration,
+                landedFiles);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;

@@ -28,6 +28,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignPrints;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
@@ -73,12 +74,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>执行体座席</b>：设计执行体（{@link com.aieducenter.aiplatform.business.project.domain.model.AgentProfile#DESIGNER}）
  * 无 shell（ProjectDesign 工作区面：写文件件在、命令执行结构性关闭——界面类稿
- * 写可交互 HTML 落 design/，平面类出图经 generate_image 归 #292 真跑）；模型档位
- * 与 systemPrompt 经智能体运营配置覆盖（三座齐，ADR-0021）。首产收口判据＝本场
+ * 写可交互 HTML 落 design/，平面类出图走双路——图片模型路经 generate_image 位图
+ * 直达、代码出图路写 HTML 收口即渲 PNG，#292）；模型档位与 systemPrompt 经智能体
+ * 运营配置覆盖（三座齐，ADR-0021）。首产收口判据＝本场
  * design/ 有新稿（平台可观察的文件变更事实，对偶生成轨 8081 探活——converse
  * 无异常不构成成功）；设计候选不自动成版（ADR-0025 候选与版本两套语义不打通，
- * 只有定稿成版）。收尾卡走收口扩载（closing.drafts 带本轮稿清单与去向），
- * 对话史落库同载荷（写口唯一口径不破）。</p>
+ * 只有定稿成版）。收尾卡走收口扩载（closing.drafts 带本轮稿清单与去向——平面
+ * 稿渲成后以 PNG 为正身），对话史落库同载荷（写口唯一口径不破）。</p>
  *
  * <p><b>失败与续跑</b>：某件超限转终态即发 {@code run-failed}、不自动跳下一件
  * （完整性优先，同生成轨道）；用户重提意见即经收口链再触发本编排——轨道表件行
@@ -226,6 +228,7 @@ public class DesignProcessAppService {
     private final GenerationAppService generationAppService;
     private final OrderQueryAppService orderQueryAppService;
     private final ConversationHistoryAppService conversationHistory;
+    private final ProjectRenderAppService renders;
 
     /**
      * 设计轨在途的排队意见（#291 在途插话，projectId → FIFO）：当前稿代收口后
@@ -250,7 +253,8 @@ public class DesignProcessAppService {
             TransactionTemplate transactionTemplate, ProjectVersionAppService versions,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             OrderQueryAppService orderQueryAppService,
-            ConversationHistoryAppService conversationHistory) {
+            ConversationHistoryAppService conversationHistory,
+            ProjectRenderAppService renders) {
         this.projectRepository = projectRepository;
         this.designItems = designItems;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -264,6 +268,7 @@ public class DesignProcessAppService {
         this.generationAppService = generationAppService;
         this.orderQueryAppService = orderQueryAppService;
         this.conversationHistory = conversationHistory;
+        this.renders = renders;
     }
 
     /** 一场设计轨道的运行标识（首件 run 的用户面身份）。 */
@@ -555,7 +560,7 @@ public class DesignProcessAppService {
                 new CoderRunAttempts.Prompts(
                         revisionPrompt(item.getTitle(), feedback),
                         errorScene -> revisionRetryPrompt(item.getTitle(), errorScene)),
-                (attemptRunId, attemptChanges) -> closeRevision(item, attemptRunId),
+                (attemptRunId, attemptChanges) -> closeRevision(item, attemptRunId, attemptChanges),
                 CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,
                 CoderRunAttempts.RunSeat.designer(item.getTitle()),
                 RunHeading.slice(item.getTitle(), item.getOrd(),
@@ -572,23 +577,30 @@ public class DesignProcessAppService {
     /**
      * 改稿收口（#291 relaxed 判据）：对话收口即收口——不校验本场落稿（0 稿如实，
      * 判定行仍 PRD 未动/系统未动）；非定稿件的 run 锚随改稿刷新（最近设计会话
-     * 事实），已定稿件的定稿锚不覆写（定稿选择保持到再定稿）。
+     * 事实），已定稿件的定稿锚不覆写（定稿选择保持到再定稿）。新代平面稿同律
+     * 出稿即渲（#292——渲败/未渲条目保持 HTML 形态如实）。
      */
-    private CoderRunAttempts.ClosingJudgment closeRevision(DesignItem item, String attemptRunId) {
+    private CoderRunAttempts.ClosingJudgment closeRevision(DesignItem item, String attemptRunId,
+            List<FileChange> sessionChanges) {
+        Map<String, String> printed = renders.renderPrintDrafts(
+                item.getProjectId(), htmlDraftPaths(sessionChanges));
         if (item.getStatus() != DesignItemStatus.FINALIZED) {
             recordItemStatus(item.getProjectId(), item.getOrd(),
                     row -> row.close(attemptRunId));
         }
-        return CoderRunAttempts.ClosingJudgment.design(revisionClosingSummary(item.getTitle()));
+        return CoderRunAttempts.ClosingJudgment.design(revisionClosingSummary(item.getTitle()),
+                designDrafts(item.getTitle(), sessionChanges, printed));
     }
 
     /**
-     * 单件收口判据与落位（#289）：本场 design/ 有新稿才收口——converse 无异常不
-     * 构成成功（执行体可能道歉式放弃，对偶生成轨 8081 探门口径；判据看本场累计
-     * 变更——重试尝试不因「本次没新写」误判）；核验不过抛异常，被尝试环当作该次
-     * 尝试失败（走重试/终态）。收口即件状态落表（对偶片状态落表）；判定行＝PRD
-     * 未动、系统未动（设计稿不是系统），summary＝本场设计物叙事，稿清单在
-     * closing.drafts 扩载（拼装归尝试环）。
+     * 单件收口判据与落位（#289；#292 出稿即渲接线）：本场 design/ 有新稿才收口
+     * ——converse 无异常不构成成功（执行体可能道歉式放弃，对偶生成轨 8081 探门
+     * 口径；判据看本场累计变更——重试尝试不因「本次没新写」误判）；核验不过抛
+     * 异常，被尝试环当作该次尝试失败（走重试/终态）。收口即渲平面稿（判据通过
+     * 后、件状态落表前——PNG 落盘先于收尾卡与对话史，回访即见；渲败不反噬收口）
+     * ＋件状态落表（对偶片状态落表）；判定行＝PRD 未动、系统未动（设计稿不是
+     * 系统），summary＝本场设计物叙事，稿清单随判定事实拼装（渲成平面稿以 PNG
+     * 为正身——closing.drafts 扩载）。
      */
     private CoderRunAttempts.ClosingJudgment closeDesignItem(Project project, DesignItem item,
             String attemptRunId, List<FileChange> sessionChanges) {
@@ -599,9 +611,56 @@ public class DesignProcessAppService {
             throw new IllegalStateException(
                     "设计会话未产出设计稿（design/ 目录无新稿）——收口判据未过");
         }
+        Map<String, String> printed = renders.renderPrintDrafts(
+                project.getId(), htmlDraftPaths(sessionChanges));
         recordItemStatus(project.getId(), item.getOrd(), row -> row.close(attemptRunId));
         lastActiveOrd.put(project.getId(), item.getOrd());
-        return CoderRunAttempts.ClosingJudgment.design(itemClosingSummary(item.getTitle()));
+        return CoderRunAttempts.ClosingJudgment.design(itemClosingSummary(item.getTitle()),
+                designDrafts(item.getTitle(), sessionChanges, printed));
+    }
+
+    /**
+     * 本场新落的设计稿路径（锚定 design/、去重稳定序——渲前集合与稿清单的公共
+     * 底座）。判定以平台可观察的文件变更事实为准（同收口判据口径），不解析执行体
+     * 自由文本。
+     */
+    private static List<String> designAnchoredPaths(List<FileChange> changes) {
+        return changes.stream()
+                .map(FileChange::path)
+                .filter(CoderRunAttempts::designAnchored)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * 本场新落的设计 HTML 稿（渲前集合，平面/界面未分）：判平面归首行画幅声明
+     * （{@link DesignPrints}——语义自选住提示词层，平台确定性直提），渲入口在
+     * {@link ProjectRenderAppService#renderPrintDrafts}。
+     */
+    private static List<String> htmlDraftPaths(List<FileChange> changes) {
+        return designAnchoredPaths(changes).stream()
+                .filter(DesignPrints::htmlDraft)
+                .toList();
+    }
+
+    /**
+     * 稿清单条目（#289 事实面；#292 平面稿渲成后以 PNG 为正身）：渲成的平面 HTML
+     * 稿换位同名 PNG（media=image——收尾卡 inline 直看、画布大图，stitch 双形态
+     * 同构）；未渲（界面稿）与渲败回落（#292 quietly）按扩展名派生如实。判定以
+     * 平台可观察事实为准（变更清单＋渲成映射），不解析执行体自由文本。
+     */
+    private static List<Map<String, Object>> designDrafts(String item, List<FileChange> changes,
+            Map<String, String> printed) {
+        return designAnchoredPaths(changes).stream()
+                .map(path -> {
+                    String draftPath = printed.getOrDefault(path, path);
+                    return Map.<String, Object>of(
+                            "item", item,
+                            "media", CoderRunAttempts.mediaOf(draftPath),
+                            "path", draftPath);
+                })
+                .toList();
     }
 
     /** 件失败状态落表（尝试环超限终态）。 */

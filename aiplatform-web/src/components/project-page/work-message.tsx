@@ -75,8 +75,7 @@ export function activityOf(parts: WorkPart[]): WorkActivity {
 }
 
 /** 稿产出动作工具集（#290 出稿活性行的稿序口径）：写稿件（界面类 HTML）＋出图件
- *（平面类位图）。generate_image 暂未进服务端播报封闭表（发放归 #292 真跑）——
- * 口径先集齐，后端扩播后零改接入。 */
+ *（平面类位图——#292 已进服务端播报封闭表，两路稿同计稿序）。 */
 const DRAFT_TOOLS: ReadonlySet<string> = new Set(["write_file", "generate_image"]);
 
 /**

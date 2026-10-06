@@ -143,6 +143,56 @@ class AgentscopePartsMapperTest {
                     ToolResultState.SUCCESS))).isEmpty();
             assertThat(mapper.map(new ToolCallEndEvent("r", "tc-4", "grep_files"))).isEmpty();
         }
+
+        @Test
+        void given_generate_image_when_full_lifecycle_then_started_generic_running_named() {
+            // #292 出图件进播报封闭表：稿产出动作（前端「正在出第 N 稿」的稿序口径）
+            List<AgentEvent> started = mapper.map(new ToolCallStartEvent("r", "tc-i1", "generate_image"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-i1", "generate_image",
+                    "{\"prompt\":\"米色背景的极简海报\",\"name\":\"品牌海报-方案A\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-i1", "generate_image"));
+            List<AgentEvent> completed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-i1", "generate_image", ToolResultState.SUCCESS));
+
+            // started：参数在途 → 通用对象（同写文件类通用形态）
+            assertThat(started.get(0).payload()).containsAllEntriesOf(Map.of(
+                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "generate_image",
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_STARTED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "出图【设计稿】"));
+            // running：参数落定 → name 词干即稿名
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "出图【品牌海报-方案A】");
+            // completed：复述已锚定对象，不闪换文案
+            assertThat(completed.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "出图【品牌海报-方案A】");
+        }
+
+        @Test
+        void given_generate_image_without_name_when_settled_then_label_falls_back_to_prompt() {
+            mapper.map(new ToolCallStartEvent("r", "tc-i2", "generate_image"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-i2", "generate_image",
+                    "{\"prompt\":\"一张写实风格的绿色山林插画，晨雾光线，层次丰富\"}"));
+            List<AgentEvent> running = mapper.map(new ToolCallEndEvent("r", "tc-i2", "generate_image"));
+
+            // name 缺省 → 画面描述首行截断（描述即对象）
+            assertThat(running.get(0).payload()).containsEntry(
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "出图【一张写实风格的绿色山林插画，晨雾光线，层次丰富】");
+        }
+
+        @Test
+        void given_generate_image_failure_when_terminal_then_error_first_line_carried() {
+            mapper.map(new ToolCallStartEvent("r", "tc-i3", "generate_image"));
+            mapper.map(new ToolCallDeltaEvent("r", "tc-i3", "generate_image", "{\"name\":\"logo\"}"));
+            mapper.map(new ToolResultTextDeltaEvent("r", "tc-i3", "generate_image",
+                    "出图失败: 供应商返回 1301 内容拦截\nsecond line"));
+            List<AgentEvent> failed = mapper.map(
+                    new ToolResultEndEvent("r", "tc-i3", "generate_image", ToolResultState.ERROR));
+
+            assertThat(failed.get(0).payload()).containsAllEntriesOf(Map.of(
+                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
+                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "出图【logo】",
+                    AgentEventTypes.PART_ACTION_ERROR_FIELD, "出图失败: 供应商返回 1301 内容拦截"));
+        }
     }
 
     /**

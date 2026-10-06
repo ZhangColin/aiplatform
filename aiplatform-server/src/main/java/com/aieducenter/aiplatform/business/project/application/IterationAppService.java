@@ -328,7 +328,7 @@ public class IterationAppService {
                 .map(FixHandoff.Round::prdRevisionSummary)
                 .filter(summary -> summary != null && !summary.isBlank())
                 .toList();
-        return new CoderRunAttempts.ClosingJudgment(
+        return CoderRunAttempts.ClosingJudgment.update(
                 !prdNotes.isEmpty(),
                 prdNotes.isEmpty() ? null : String.join("；", prdNotes),
                 fact.changed(),

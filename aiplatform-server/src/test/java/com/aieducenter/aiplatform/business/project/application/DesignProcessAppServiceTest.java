@@ -337,6 +337,146 @@ class DesignProcessAppServiceTest {
                 });
     }
 
+    /** 单设计物 PRD（#292 出稿即渲用例——平面海报一件，渲命令数即稿数好数）。 */
+    private static final String POSTER_PRD = """
+            # 海报设计需求
+
+            ## 设计物清单
+
+            1. 促销海报——竖版
+
+            ## 待定项
+            暂无
+            """;
+
+    /**
+     * 按命令分岔的工作区桩（#292 出稿即渲用例形态）：PRD 读取回 markdown；首行
+     * 读取按稿分岔（poster-1＝平面稿首行可注入、其余＝界面稿 DOCTYPE）；渲 PNG
+     * 按注入退出码回字节回执或失败；其余命令成功零输出。
+     */
+    private void givenPrintRenderCommands(String prdMarkdown, String posterHead, int renderExit) {
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenAnswer(invocation -> {
+                    String command = invocation.<WorkspaceExecCommand>getArgument(1).command();
+                    if (command.startsWith("cat ")) {
+                        return new ExecResultResponse(prdMarkdown, "", 0);
+                    }
+                    if (command.contains("head -n 1")) {
+                        return command.contains("poster-")
+                                ? new ExecResultResponse(posterHead + "\n", "", 0)
+                                : new ExecResultResponse("<!DOCTYPE html>\n", "", 0);
+                    }
+                    if (command.contains("render-html.mjs")) {
+                        return renderExit == 0
+                                ? new ExecResultResponse("54321\n", "", 0)
+                                : new ExecResultResponse("", "渲染失败", renderExit);
+                    }
+                    return new ExecResultResponse("", "", 0);
+                });
+    }
+
+    @Test
+    void given_print_html_draft_when_close_then_rendered_to_png_and_entry_swapped() {
+        // #292 代码出图路（灵魂用例）：平面 HTML 稿（首行画幅声明）收口即渲 PNG——
+        // 按声明画幅渲成同名 PNG（HTML 源与 PNG 双形态落盘）、稿清单以 PNG 为正身
+        // （media=image）；界面稿（无声明）零渲染、条目保持 html 形态
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrintRenderCommands(POSTER_PRD, "<!-- print: 800x1200 -->", 0);
+        givenScriptedDesignSession(
+                new FileChange("/design/poster-1.html", 120, 0),
+                new FileChange("/design/poster-2.html", 118, 0),
+                new FileChange("/design/home-1.html", 90, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeastOnce()).exec(any(), execs.capture());
+        List<String> renderCommands = execs.getAllValues().stream()
+                .map(WorkspaceExecCommand::command)
+                .filter(command -> command.contains("render-html.mjs"))
+                .toList();
+        // 多稿逐张渲（两平面稿各一条渲命令——按声明画幅 800x1200、渲成同名 PNG）；
+        // 界面稿零渲染
+        assertThat(renderCommands).hasSize(2);
+        renderCommands.forEach(command -> {
+            assertThat(command).contains(" 800 1200");
+            assertThat(command).contains(".png");
+        });
+        assertThat(renderCommands).anySatisfy(c -> {
+            assertThat(c).contains("design/poster-1.html");
+            assertThat(c).contains("design/poster-1.png");
+        });
+        assertThat(renderCommands).anySatisfy(c -> {
+            assertThat(c).contains("design/poster-2.html");
+            assertThat(c).contains("design/poster-2.png");
+        });
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> drafts =
+                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+        assertThat(drafts).containsExactly(
+                Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/home-1.html"),
+                Map.of("item", "促销海报——竖版", "media", "image", "path", "/design/poster-1.png"),
+                Map.of("item", "促销海报——竖版", "media", "image", "path", "/design/poster-2.png"));
+    }
+
+    @Test
+    void given_render_failure_when_close_then_entry_falls_back_to_html_and_run_closes() {
+        // #292 渲败不反噬收口（PNG 是可再生衍生）：该稿条目回落 HTML 形态如实、
+        // 件状态照常收口、收尾卡照常入流——对偶收口成版失败 quietly 先例
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrintRenderCommands(POSTER_PRD, "<!-- print: 800x1200 -->", 2);
+        givenScriptedDesignSession(
+                new FileChange("/design/poster-1.html", 120, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> drafts =
+                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+        assertThat(drafts).containsExactly(
+                Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/poster-1.html"));
+    }
+
+    @Test
+    void given_malformed_declaration_when_close_then_no_render_and_html_entry() {
+        // 协议偏离（画幅声明在而宽高解析不出）＝零渲——不猜画幅（猜错画幅比不渲
+        // 更糟），稿保持 HTML 形态如实；渲命令零发出
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrintRenderCommands(POSTER_PRD, "<!-- print: 800xabc -->", 0);
+        givenScriptedDesignSession(
+                new FileChange("/design/poster-1.html", 120, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        verify(workspaceLifecycleAppService, never()).exec(anyString(),
+                argThat(command -> command.command().contains("render-html.mjs")));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<?, ?> closing = (Map<?, ?>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> drafts =
+                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+        assertThat(drafts).containsExactly(
+                Map.of("item", "促销海报——竖版", "media", "html", "path", "/design/poster-1.html"));
+    }
+
     @Test
     void given_no_drafts_when_session_closes_then_retries_then_run_failed_no_next_item() {
         // 收口判据（converse 无异常不构成成功——本场 design/ 无新稿即判据未过）：

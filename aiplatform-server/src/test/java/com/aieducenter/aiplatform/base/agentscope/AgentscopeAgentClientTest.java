@@ -92,7 +92,7 @@ class AgentscopeAgentClientTest {
         properties.setDefaultSystemPrompt("你是平台智能体。");
         properties.setTimeout(Duration.ofSeconds(30));
         client = new AgentscopeAgentClient(factory, properties, workspaceLifecycleAppService,
-                stateStore, usageEventSink, CLOCK);
+                stateStore, usageEventSink, new LandedFileFacts(), CLOCK);
     }
 
     private AgentCommand command(String modelString, UsageContext usage) {

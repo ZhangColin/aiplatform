@@ -12,18 +12,16 @@ import { create } from "zustand";
  * 点选他件即换目标、X 即退出作用域回常规三分类。回访/刷新不保留（会话内态）。</p>
  */
 
-/** 发散度三档（后端 DesignDivergence 的前端镜像；api 值＝枚举名）。 */
-export type DesignDivergence = "refine" | "explore" | "reimagine";
+/** 发散度三档（后端 DesignDivergence 的前端镜像——BaseEnum 契约线上 Integer
+ * code，endpointType 同款先例；缺省档＝探索）。 */
+export type DesignDivergence = 1 | 2 | 3;
+export const DIVERGENCE_EXPLORE: DesignDivergence = 2;
 
-/** 档位呈现正本（label/说明与后端枚举 label 同源语义）。 */
-export const DIVERGENCE_LEVELS: {
-  value: DesignDivergence;
-  api: string;
-  label: string;
-}[] = [
-  { value: "refine", api: "REFINE", label: "微调" },
-  { value: "explore", api: "EXPLORE", label: "探索" },
-  { value: "reimagine", api: "REIMAGINE", label: "大胆" },
+/** 档位呈现正本（code 即 REST 值；label 与后端枚举 label 同源语义）。 */
+export const DIVERGENCE_LEVELS: { value: DesignDivergence; label: string }[] = [
+  { value: 1, label: "微调" },
+  { value: 2, label: "探索" },
+  { value: 3, label: "大胆" },
 ];
 
 /** 作用域事实：目标设计物（ord＝REST 路由键；itemTitle＝chip 呈现）。 */

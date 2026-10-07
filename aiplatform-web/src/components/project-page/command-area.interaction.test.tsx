@@ -369,7 +369,7 @@ describe("CommandArea · 设计改稿作用域＋发散度 chip（#294 点哪改
       content: "颜色再亮一点",
       attachments: [],
       designItem: 2,
-      divergence: "EXPLORE",
+      divergence: 2,
     });
   });
 
@@ -388,7 +388,7 @@ describe("CommandArea · 设计改稿作用域＋发散度 chip（#294 点哪改
       content: "索性换个方向",
       attachments: [],
       designItem: 1,
-      divergence: "REIMAGINE",
+      divergence: 3,
     });
     // 发送后作用域仍在（stitch 挑选语义——下一句继续改同一件零重复点选）
     expect(useDesignScopeStore.getState().scopes.p1).toEqual({ ord: 1, itemTitle: "首页主视觉" });

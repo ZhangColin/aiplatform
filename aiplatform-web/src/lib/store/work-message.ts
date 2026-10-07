@@ -122,6 +122,18 @@ export type WorkPart =
       signal: WorkSignalKind;
     };
 
+/**
+ * 稿落盘动作工具集（#294 渐进长出的文件变更口径）：写/改文件＋出图——completed
+ * 即 design/ 有新内容（桥的文件树失效与画布在途稿 rev 戳共用；{@link WorkPart}
+ * 的工具名面）。与 work-message 组件 DRAFT_TOOLS 的分野：彼计「出第几稿」
+ * （edit 改旧稿不涨稿序）、此计「文件面变了没有」（edit 改旧稿也要刷新帧）。
+ */
+export const DRAFT_WRITING_TOOLS: ReadonlySet<string> = new Set([
+  "write_file",
+  "edit_file",
+  "generate_image",
+]);
+
 /** 部件事件的最小关联（信封公共字段 + 事件 id）。 */
 export type PartEventRef = {
   runId: string;

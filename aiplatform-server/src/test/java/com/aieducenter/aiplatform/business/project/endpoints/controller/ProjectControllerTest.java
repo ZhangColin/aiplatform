@@ -52,6 +52,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderB
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignScopeResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
@@ -738,6 +739,23 @@ class ProjectControllerTest {
     }
 
     @Test
+    void given_scoped_message_with_divergence_when_post_then_enum_code_bound() throws Exception {
+        // #294 作用域发言携发散度：BaseEnum Integer code 双向（endpointType 先例）——
+        // 3=REIMAGINE 绑定到枚举后透传派发
+        when(dispatchAppService.dispatch(eq(100L), eq("换个方向"), any(), eq(1),
+                eq(DesignDivergence.REIMAGINE)))
+                .thenReturn(new DispatchAppService.DispatchRun("run-11"));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"换个方向\",\"designItem\":1,\"divergence\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-11"));
+        verify(dispatchAppService).dispatch(eq(100L), eq("换个方向"), any(), eq(1),
+                eq(DesignDivergence.REIMAGINE));
+    }
+
+    @Test
     void given_message_with_two_form_attachments_when_post_then_both_bound_and_dispatched() throws Exception {
         // #286 附件两形态（圈注 + 图片物料）在 REST 契约层绑定并透传派发——
         // image 形态载荷＝工作区路径引用、不带字节
@@ -775,6 +793,12 @@ class ProjectControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\" \"}"))
                 .andExpect(status().isBadRequest());
+        // #294 发散度非法档位码：BaseEnum Integer code 绑定面 400（零派发调用）
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"改稿\",\"designItem\":1,\"divergence\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
         performAsUser(post("/api/projects/100/messages")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))

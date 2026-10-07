@@ -127,14 +127,13 @@ public class DispatchAppService {
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）；PRJ_047 设计物不存在 / PRJ_048 件
      *                              未产出稿（仅作用域形态）；divergence 非法值
-     *                              400（bean validation 面）
+     *                              400（Jackson 枚举绑定面）
      */
     public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments,
-            Integer designItem, String divergence) {
+            Integer designItem, DesignDivergence divergence) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
         if (designItem != null) {
-            return dispatchDesignRevision(project, prompt, attachments, designItem,
-                    DesignDivergence.of(divergence));
+            return dispatchDesignRevision(project, prompt, attachments, designItem, divergence);
         }
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {

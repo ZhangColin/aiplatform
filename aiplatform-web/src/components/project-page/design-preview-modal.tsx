@@ -2,13 +2,12 @@
 
 import { Download, X } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ApiEnvelopeMeta } from "@/lib/api/api-error";
+import { downloadWorkspaceFile } from "@/lib/projects/download";
 import { downloadFileNameOf, downloadFileUrl, rawFileUrl, relativeFormOf } from "@/lib/projects/files";
-import type { CanvasDraft } from "@/lib/projects/design-canvas";
+import { FRAME_H, FRAME_W, type CanvasDraft } from "@/lib/projects/design-canvas";
 
 /**
  * 稿卡点开预览（#294，ADR-0025「点开预览：界面类可交互、平面类大图」）：界面类
@@ -25,12 +24,13 @@ function draftPngUrl(projectId: string, path: string): string {
   return `/api/projects/${projectId}/design-drafts/png?path=${encodeURIComponent(relativeFormOf(path))}`;
 }
 
-/** 位图化下载的落盘名（词干＋画幅——所见即所下的事实进文件名）。 */
+/** 位图化下载的落盘名（词干＋画幅——所见即所下的事实进文件名；与后端控制器
+ * fileNameOf 同契约互指）。 */
 function draftPngNameOf(path: string): string {
   const name = downloadFileNameOf(path);
   const dot = name.lastIndexOf(".");
   const stem = dot > 0 ? name.slice(0, dot) : name;
-  return `${stem}-1280x800.png`;
+  return `${stem}-${FRAME_W}x${FRAME_H}.png`;
 }
 
 export function DesignPreviewModal({
@@ -49,30 +49,13 @@ export function DesignPreviewModal({
   const live = draft.media === "html";
 
   const onDownload = async (kind: "png" | "html") => {
-    const url =
-      kind === "png" && live
-        ? draftPngUrl(projectId, draft.path)
-        : downloadFileUrl(projectId, draft.path);
-    const fallbackName =
-      kind === "png" && live ? draftPngNameOf(draft.path) : downloadFileNameOf(draft.path);
+    const bitmap = kind === "png" && live;
     setPending(kind);
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        // 错误面与 api client 同形（信封 message 直出——支付门语义如实告知）
-        const payload: ApiEnvelopeMeta | null = await res.json().catch(() => null);
-        toast.error(payload?.message ?? `下载失败（HTTP ${res.status}）`);
-        return;
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = fallbackName || "download";
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      toast.error("下载失败，请稍后重试");
+      await downloadWorkspaceFile(
+        bitmap ? draftPngUrl(projectId, draft.path) : downloadFileUrl(projectId, draft.path),
+        bitmap ? draftPngNameOf(draft.path) : downloadFileNameOf(draft.path),
+      );
     } finally {
       setPending(null);
     }
@@ -100,7 +83,7 @@ export function DesignPreviewModal({
         </div>
         <div className="min-h-0 flex-1 bg-muted/30 p-4">
           {live ? (
-            <div className="relative mx-auto h-full w-full max-w-[1280px] overflow-hidden rounded-lg border bg-white shadow-lg">
+            <div className="relative mx-auto h-full w-full max-w-[1400px] overflow-hidden rounded-lg border bg-white shadow-lg">
               <FitFrame projectId={projectId} path={draft.path} title={name} />
             </div>
           ) : (
@@ -157,7 +140,7 @@ function FitFrame({ projectId, path, title }: { projectId: string; path: string;
         const observer = new ResizeObserver((entries) => {
           const rect = entries[0]?.contentRect;
           if (rect && rect.height) {
-            setScale(Math.min(rect.width / 1280, rect.height / 800));
+            setScale(Math.min(rect.width / FRAME_W, rect.height / FRAME_H));
           }
         });
         observer.observe(el);
@@ -170,8 +153,8 @@ function FitFrame({ projectId, path, title }: { projectId: string; path: string;
         data-preview-frame={path}
         className="absolute left-1/2 top-1/2 origin-center border-0 bg-white"
         style={{
-          width: 1280,
-          height: 800,
+          width: FRAME_W,
+          height: FRAME_H,
           transform: `translate(-50%, -50%) scale(${scale})`,
         }}
         sandbox=""

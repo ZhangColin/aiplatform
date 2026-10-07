@@ -53,6 +53,17 @@ public final class ProjectFiles {
     }
 
     /**
+     * 工作区锚定形（前导 /）→ 相对形；相对形/null 原样（null 透传——调用侧守卫
+     * 在后）。两形并存的事实面：文件树/raw 路由收相对形、收尾卡稿清单与定稿锚
+     * 携锚定形——比较与取件先过本归一（前端镜像＝files.ts relativeFormOf，
+     * 互指为约）。
+     */
+    public static String relativeFormOf(String path) {
+        return path != null && path.startsWith("/")
+                ? path.substring(1) : path;
+    }
+
+    /**
      * 路径是否可浏览：工作区锚定形（相对根、无 {@code ..} 逃逸、非空白）且首段
      * 不是根级非交付目录、路径不是根级 {@code .env} 机密。
      */

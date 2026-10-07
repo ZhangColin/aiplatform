@@ -373,7 +373,7 @@ export interface paths {
         put?: never;
         /**
          * 对话区发言（入口三分类派发：意见/咨询/兜底）
-         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。divergence（可选，#294 发散度 chip）：REFINE/EXPLORE/REIMAGINE（微调/探索/大胆）——只随作用域发言生效，改稿 prompt 携档位引导；非法值 400。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
+         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。divergence（可选，#294 发散度 chip，Integer code）：1=REFINE（微调）/2=EXPLORE（探索）/3=REIMAGINE（大胆）——只随作用域发言生效，改稿 prompt 携档位引导；非法值 400。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -2670,7 +2670,8 @@ export interface components {
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Format: int32 */
             designItem?: number;
-            divergence?: string;
+            /** @description 1=微调, 2=探索, 3=大胆 */
+            divergence?: number;
         };
         ApiResponseInterviewTurnResponse: {
             /** Format: int32 */

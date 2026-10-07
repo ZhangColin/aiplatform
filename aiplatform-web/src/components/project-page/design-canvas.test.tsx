@@ -71,10 +71,14 @@ vi.mock("@/lib/store/chat", () => ({
   useChatStore: <T,>(selector: (state: { chats: Record<string, { messages: unknown[] }> }) => T): T =>
     selector({ chats: { p1: { messages: seed.messages } } }),
 }));
-vi.mock("@/lib/store/work-message", () => ({
-  useWorkMessageStore: <T,>(selector: (state: { works: Record<string, unknown> }) => T): T =>
-    selector({ works: { p1: seed.work } }),
-}));
+vi.mock("@/lib/store/work-message", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store/work-message")>();
+  return {
+    ...actual, // DRAFT_WRITING_TOOLS 等常量保真（rev 戳口径与真身同源）
+    useWorkMessageStore: <T,>(selector: (state: { works: Record<string, unknown> }) => T): T =>
+      selector({ works: { p1: seed.work } }),
+  };
+});
 vi.mock("@/lib/store/design-scope", () => ({
   useDesignScopeStore: <T,>(selector: (state: { scopes: Record<string, unknown> }) => T): T =>
     selector({ scopes: { p1: seed.scope } }),

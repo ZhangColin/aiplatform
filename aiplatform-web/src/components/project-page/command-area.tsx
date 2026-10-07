@@ -25,6 +25,7 @@ import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
 import {
+  DIVERGENCE_EXPLORE,
   DIVERGENCE_LEVELS,
   useDesignScopeStore,
 } from "@/lib/store/design-scope";
@@ -115,7 +116,7 @@ export function CommandArea({
   // 设计改稿作用域（#294 点哪改哪）：画布点选写入，chip 呈现于发送框上方；随话
   // 直达该件设计会话（designItem）＋发散度档位（divergence）同句发出
   const scope = useDesignScopeStore((s) => s.scopes[projectId]);
-  const divergence = useDesignScopeStore((s) => s.divergences[projectId] ?? "explore");
+  const divergence = useDesignScopeStore((s) => s.divergences[projectId] ?? DIVERGENCE_EXPLORE);
   const clearScope = useDesignScopeStore((s) => s.clear);
   const setDivergence = useDesignScopeStore((s) => s.setDivergence);
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
@@ -203,14 +204,7 @@ export function CommandArea({
         ],
         // 作用域在场＝改稿直达（#294 点哪改哪）：designItem 路由＋发散度同句；
         // 作用域不清（stitch 挑选语义——连续改稿零重复点选，X 才退出）
-        ...(scope
-          ? {
-              designItem: scope.ord,
-              divergence:
-                DIVERGENCE_LEVELS.find((level) => level.value === divergence)?.api
-                ?? "EXPLORE",
-            }
-          : {}),
+        ...(scope ? { designItem: scope.ord, divergence } : {}),
       });
       // 发送即清（圈注随消息发出，不再滞留）
       useAnnotationStore.getState().clear(projectId);

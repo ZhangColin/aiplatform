@@ -41,6 +41,7 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -416,7 +417,7 @@ class DispatchAppServiceTest {
         });
 
         DispatchAppService.DispatchRun run = appService.dispatch(projectId,
-                "刚才那稿的颜色再亮一点", MessageAttachment.NONE, 1, "REIMAGINE");
+                "刚才那稿的颜色再亮一点", MessageAttachment.NONE, 1, DesignDivergence.REIMAGINE);
 
         assertThat(run).isNotNull();
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);

@@ -20,6 +20,11 @@ import type { ClosingDraft } from "@/lib/store/chat";
  * 下载位图化产物）不冒充代际事实。
  */
 
+/** 界面类稿的固定画幅（stitch screen 同构，#278）：1280×800 桌面帧——画布卡、
+ * 点开预览、位图化下载三面同帧（后端镜像＝ProjectRenderAppService.DRAFT_PNG_*）。 */
+export const FRAME_W = 1280;
+export const FRAME_H = 800;
+
 /** 画布稿卡事实：path 工作区锚定形（取件走 raw 路由）。 */
 export type CanvasDraft = {
   path: string;

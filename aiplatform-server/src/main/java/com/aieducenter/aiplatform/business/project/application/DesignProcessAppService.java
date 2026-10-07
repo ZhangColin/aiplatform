@@ -795,8 +795,7 @@ public class DesignProcessAppService {
         DesignItem item = designItems.findByProjectIdAndOrd(projectId, ord)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.DESIGN_ITEM_NOT_FOUND));
         requireRevisionable(item);
-        String relative = draftPath != null && draftPath.startsWith("/")
-                ? draftPath.substring(1) : draftPath;
+        String relative = ProjectFiles.relativeFormOf(draftPath);
         if (!CoderRunAttempts.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }
@@ -849,8 +848,7 @@ public class DesignProcessAppService {
             throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
         }
         orderQueryAppService.requireNoActiveOrder(projectId);
-        String relative = draftPath != null && draftPath.startsWith("/")
-                ? draftPath.substring(1) : draftPath;
+        String relative = ProjectFiles.relativeFormOf(draftPath);
         if (!CoderRunAttempts.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }

@@ -142,8 +142,7 @@ public class ProjectRenderAppService {
     public ProjectFileDownloadResponse downloadableDraftPng(Long projectId, String draftPath) {
         Project project = loadProject(projectId);
         orderQueryAppService.requireDownloadable(projectId);
-        String relative = draftPath != null && draftPath.startsWith("/")
-                ? draftPath.substring(1) : draftPath;
+        String relative = ProjectFiles.relativeFormOf(draftPath);
         if (!ProjectFiles.isDraftHtml(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }

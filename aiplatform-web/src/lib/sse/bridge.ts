@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/api/keys";
 import { toWorkClosing, useChatStore } from "@/lib/store/chat";
 import { isCoderRun, useGenerationStore } from "@/lib/store/generation";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
-import { useWorkMessageStore, toWorkPlanSteps } from "@/lib/store/work-message";
+import { useWorkMessageStore, toWorkPlanSteps, DRAFT_WRITING_TOOLS } from "@/lib/store/work-message";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import { orderStatusToastText, REPRICED_TOAST_TEXT } from "@/lib/orders/status";
 
@@ -177,14 +177,6 @@ function isDesignerWork(projectId: string, runId: string): boolean {
   const work = useWorkMessageStore.getState().works[projectId];
   return work?.seat === "designer" && work.runId === runId;
 }
-
-/** 设计轨的稿落盘动作工具面（#294 渐进长出的文件树失效口径）：写/改文件＋出图
- * ——completed 即 design/ 有新事实（一张张到达不等齐的驱动源）。 */
-const DRAFT_WRITING_TOOLS: ReadonlySet<string> = new Set([
-  "write_file",
-  "edit_file",
-  "generate_image",
-]);
 
 /** 该部件事件是否设计轨的稿落盘完成（#294）：designer 锚定＋写动作族＋completed
  * ——文件树失效的窄条件（编码轨照旧 run-finish 才失效、读类与失败动作不触发）。 */

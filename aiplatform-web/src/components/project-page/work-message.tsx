@@ -78,6 +78,7 @@ export function activityOf(parts: WorkPart[]): WorkActivity {
  *（平面类位图——#292 已进服务端播报封闭表，两路稿同计稿序）。 */
 const DRAFT_TOOLS: ReadonlySet<string> = new Set(["write_file", "generate_image"]);
 
+
 /**
  * 活性行的稿序（#290 designer 变体）：当前在跑动作是稿产出动作时，按本场稿产出
  * 动作的首次出现序数出 1-based 第 N 稿（一稿一文件——工作协议：稿独立落盘互不

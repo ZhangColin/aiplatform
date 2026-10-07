@@ -14,13 +14,15 @@ import { errorText } from "@/lib/api/api-error";
 import {
   buildDesignCanvas,
   draftDisplayName,
+  FRAME_H,
+  FRAME_W,
   type CanvasDraft,
   type CanvasItem,
 } from "@/lib/projects/design-canvas";
 import { rawFileUrl } from "@/lib/projects/files";
 import { useChatStore } from "@/lib/store/chat";
 import { useDesignScopeStore } from "@/lib/store/design-scope";
-import { useWorkMessageStore, type WorkPart } from "@/lib/store/work-message";
+import { useWorkMessageStore, DRAFT_WRITING_TOOLS, type WorkPart } from "@/lib/store/work-message";
 import { cn } from "@/lib/utils";
 
 import { DesignPreviewModal } from "./design-preview-modal";
@@ -55,18 +57,11 @@ const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 1.6;
 const ZOOM_DEFAULT = 0.55;
 
-/** 界面类稿的固定画幅（stitch screen 同构）：1280×800 桌面帧，缩放进容器。 */
-const FRAME_W = 1280;
-const FRAME_H = 800;
-
-/** 在途稿帧刷新的写动作面（rev 戳口径）：写/改文件＋出图——落盘即进度事实。 */
-const WRITING_TOOLS: ReadonlySet<string> = new Set(["write_file", "edit_file", "generate_image"]);
-
 /** 在途稿帧刷新戳：本场写动作完成数（每完成一次＝一次可取的新内容）。 */
 function writingRevOf(parts: WorkPart[]): number {
   return parts.filter(
     (part) =>
-      part.kind === "action" && WRITING_TOOLS.has(part.toolName) && part.state === "completed",
+      part.kind === "action" && DRAFT_WRITING_TOOLS.has(part.toolName) && part.state === "completed",
   ).length;
 }
 

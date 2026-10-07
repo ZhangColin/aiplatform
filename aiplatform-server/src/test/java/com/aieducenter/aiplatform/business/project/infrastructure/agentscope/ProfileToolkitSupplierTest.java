@@ -13,6 +13,7 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
+import com.aieducenter.aiplatform.business.project.application.DesignSpecAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
@@ -63,12 +64,13 @@ class ProfileToolkitSupplierTest {
     private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
     private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
     private final LandedFileFacts landedFiles = new LandedFileFacts();
+    private final DesignSpecAppService designSpecs = mock(DesignSpecAppService.class);
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider, skillProposals, imageGeneration, landedFiles);
+                webSearchProvider, skillProposals, imageGeneration, landedFiles, designSpecs);
     }
 
     @Test
@@ -216,7 +218,7 @@ class ProfileToolkitSupplierTest {
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, imageGeneration,
-                landedFiles);
+                landedFiles, designSpecs);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;

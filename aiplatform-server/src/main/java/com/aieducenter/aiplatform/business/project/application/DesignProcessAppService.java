@@ -235,6 +235,7 @@ public class DesignProcessAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectRenderAppService renders;
+    private final DesignSpecAppService designSpecs;
 
     /**
      * 设计轨在途的排队意见（#291 在途插话，projectId → FIFO）：当前稿代收口后
@@ -260,7 +261,8 @@ public class DesignProcessAppService {
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             OrderQueryAppService orderQueryAppService,
             ConversationHistoryAppService conversationHistory,
-            ProjectRenderAppService renders) {
+            ProjectRenderAppService renders,
+            DesignSpecAppService designSpecs) {
         this.projectRepository = projectRepository;
         this.designItems = designItems;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -275,6 +277,7 @@ public class DesignProcessAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.conversationHistory = conversationHistory;
         this.renders = renders;
+        this.designSpecs = designSpecs;
     }
 
     /** 一场设计轨道的运行标识（首件 run 的用户面身份）。 */
@@ -763,9 +766,11 @@ public class DesignProcessAppService {
      * 守卫序＝存在 → 未归档 → 未冻结（订单）→ 轨道空闲（在途 run 读写工作区，
      * 成版全量提交会卷入在途改动——收口后再定稿）→ 件在 → 件已产出稿 → 稿在
      * 工作区（容器事实——候选可被悬卡删除）。落定序＝件状态成版落表 → git commit
-     * 成版（Run-Id 对偶锚定定稿收尾卡，「查看当时」即见定稿稿）→ 后续分岔派发 →
-     * 定稿收尾卡入对话流（对话史落库＋run-finish 载 closing 直达——SSE 事件封闭
-     * 零新增）。成版/落卡失败不反噬定稿（件状态是事实、回访经轨道表——quietly
+     * 成版（Run-Id 对偶锚定定稿收尾卡，「查看当时」即见定稿稿）→ 刷新项目设计
+     * 规范（#295 提炼线：界面类 :root 确定性直提／平面类出图参数转正——新定稿
+     * 覆盖项目正本、提炼无所得不刷新）→ 后续分岔派发 → 定稿收尾卡入对话流
+     * （对话史落库＋run-finish 载 closing 直达——SSE 事件封闭零新增）。
+     * 成版/落卡/提炼失败不反噬定稿（件状态是事实、回访经轨道表——quietly
      * 留日志，同收口成版先例）。
      *
      * <p><b>后续分岔</b>（ADR-0024 触发律：定稿自动转后续、紧跟的门是冗余门）：
@@ -813,6 +818,10 @@ public class DesignProcessAppService {
         lastActiveOrd.put(projectId, ord);
         String versionHash = versions.commitAtClosing(project, runId,
                 finalizeClosingSummary(item.getTitle()));
+        // 随定稿刷新项目设计规范（#295 提炼线——CONTEXT「定稿」：稿随即进版本流、
+        // 刷新项目设计规范并触发后续）：先于后续分岔，按稿对齐的 run 以刷新后的
+        // 正本为准；提炼无所得/失败 quietly 不反噬定稿（规范是伴随事实）
+        designSpecs.refreshAtFinalize(project, draftPath, runId);
         List<String> triggers = dispatchFinalizeTriggers(project, item, draftPath);
         emitFinalizeClosingCard(project, item, draftPath, runId, versionHash, triggers,
                 startedAt);

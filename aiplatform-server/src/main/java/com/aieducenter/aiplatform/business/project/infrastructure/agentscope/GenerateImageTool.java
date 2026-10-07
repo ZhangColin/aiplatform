@@ -1,5 +1,6 @@
 package com.aieducenter.aiplatform.business.project.infrastructure.agentscope;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +14,7 @@ import reactor.core.publisher.Mono;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
+import com.aieducenter.aiplatform.business.project.application.DesignSpecAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 
@@ -26,9 +28,13 @@ import com.aieducenter.aiplatform.business.project.application.ImageGenerationAp
  *
  * <p>参数：{@code prompt}（画面正向描述，必传）；{@code count} 1~5 缺省 1（多稿
  * 候选数量归执行体协议约定）；{@code size} 可选（画幅，供应商词表原样透传）；
- * {@code name} 可选（落盘词干提示，平台消毒＋TSID 前缀防撞）。计量（按张事件）
- * 与转存归 {@link ImageGenerationAppService} 内核；run/会话标识经
- * {@link AgentscopeAgentClient#RUN_ID_CONTEXT_KEY} 上下文腿透传（#259 先例）。</p>
+ * {@code name} 可选（落盘词干提示，平台消毒＋TSID 前缀防撞）；{@code palette}＋
+ * {@code style} 可选（设计参数——色板 hex 数组＋风格短语，#295 随稿物化为设计
+ * 规范草稿 {@code design/{词干}.spec.json}，该稿定稿时转正进项目规范：参数即
+ * 设计意图正身，ADR-0028）。计量（按张事件）与转存归
+ * {@link ImageGenerationAppService} 内核；物化归 {@link DesignSpecAppService}；
+ * run/会话标识经 {@link AgentscopeAgentClient#RUN_ID_CONTEXT_KEY} 上下文腿透传
+ * （#259 先例）。</p>
  */
 public class GenerateImageTool extends ToolBase {
 
@@ -39,15 +45,18 @@ public class GenerateImageTool extends ToolBase {
     private static final String COUNT_KEY = "count";
     private static final String SIZE_KEY = "size";
     private static final String NAME_KEY = "name";
+    private static final String PALETTE_KEY = "palette";
+    private static final String STYLE_KEY = "style";
 
     private static final int DEFAULT_COUNT = 1;
 
     private final String workspaceId;
     private final ImageGenerationAppService generation;
     private final LandedFileFacts landedFiles;
+    private final DesignSpecAppService designSpecs;
 
     public GenerateImageTool(String workspaceId, ImageGenerationAppService generation,
-            LandedFileFacts landedFiles) {
+            LandedFileFacts landedFiles, DesignSpecAppService designSpecs) {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("图片生成模型出位图设计稿，落盘到工作区 design/ 目录并返回文件路径。"
@@ -57,7 +66,11 @@ public class GenerateImageTool extends ToolBase {
                         + "（文字像素级可控，图片模型画长文案易错字漏字）。prompt 传完整的画面正向"
                         + "描述（主体、风格、配色、氛围；画面内文字尽量短）；size 可选（画幅，"
                         + "如 1024x1024）；count 出几张（1~5，探索多稿时用）；name 可选（文件名"
-                        + "提示，如 logo-方案A）。失败会自动重试，仍失败会如实返回原因。")
+                        + "提示，如 logo-方案A）；palette 可选（本场色板的 hex 色值数组，"
+                        + "品牌主色在内，如 [\"#166534\",\"#faf9f6\"]）＋style 可选（一句"
+                        + "风格短语）——两者是设计意图正身，随稿物化为设计规范草稿，"
+                        + "定稿时转正进项目规范（品牌色由此进系统主题），出图时尽量"
+                        + "传。失败会自动重试，仍失败会如实返回原因。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(
@@ -75,13 +88,25 @@ public class GenerateImageTool extends ToolBase {
                                 NAME_KEY, Map.of(
                                         "type", "string",
                                         "description", "文件名词干提示（可选，如 logo-方案A；"
-                                                + "平台自动加唯一前缀）")),
+                                                + "平台自动加唯一前缀）"),
+                                PALETTE_KEY, Map.of(
+                                        "type", "array",
+                                        "items", Map.of("type", "string"),
+                                        "description", "本场色板（可选，hex 色值数组、品牌"
+                                                + "主色在内，如 [\"#166534\",\"#faf9f6\"]）"
+                                                + "——随稿物化为设计规范草稿，定稿转正"),
+                                STYLE_KEY, Map.of(
+                                        "type", "string",
+                                        "description", "风格短语（可选，如「扁平暖调、"
+                                                + "圆润」）——随稿物化为设计规范草稿，"
+                                                + "定稿转正")),
                         "required", List.of(PROMPT_KEY)))
                 .readOnly(false)
                 .concurrencySafe(false));
         this.workspaceId = workspaceId;
         this.generation = generation;
         this.landedFiles = landedFiles;
+        this.designSpecs = designSpecs;
     }
 
     @Override
@@ -116,6 +141,18 @@ public class GenerateImageTool extends ToolBase {
             if (runId != null
                     && outcome instanceof ImageGenerationOutcome.Generated generated) {
                 generated.files().forEach(file -> landedFiles.land(runId, "/" + file.path()));
+            }
+            // 设计参数随稿物化（#295 平面类规范草稿）：参数在场才物化（缺席＝无
+            // 设计意图，不写空壳）；失败 quietly 不反噬出图（伴随产出）
+            if (outcome instanceof ImageGenerationOutcome.Generated generated) {
+                List<String> palette = paletteOf(input);
+                String style = textOf(input, STYLE_KEY);
+                if (!palette.isEmpty() || style != null) {
+                    designSpecs.materializePrintParams(workspaceId,
+                            generated.files().stream()
+                                    .map(ImageGenerationOutcome.LandedImage::path).toList(),
+                            palette, style);
+                }
             }
             return Mono.just(switch (outcome) {
                 case ImageGenerationOutcome.Generated generated -> ToolResultBlock.text(
@@ -155,6 +192,29 @@ public class GenerateImageTool extends ToolBase {
         catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /** 色板参数宽容收口（对偶 countOf 的字形变体容忍）：数组逐项收字符串、
+     *  单串按中英文逗号/顿号切分；空白项剔除（载荷层再截 8——品牌附加色量级）。 */
+    private static List<String> paletteOf(Map<String, Object> input) {
+        if (input == null) {
+            return List.of();
+        }
+        Object raw = input.get(PALETTE_KEY);
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::strip)
+                    .filter(color -> !color.isEmpty())
+                    .toList();
+        }
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(String.valueOf(raw).split("[,，、]"))
+                .map(String::strip)
+                .filter(color -> !color.isEmpty())
+                .toList();
     }
 
     private static String textOf(Map<String, Object> input, String key) {

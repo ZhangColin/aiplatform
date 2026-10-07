@@ -32,6 +32,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -70,6 +71,7 @@ public class ProjectLifecycleAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final GenerationSegmentRepository generationSegments;
     private final DesignItemRepository designItems;
+    private final DesignSpecRepository designSpecs;
     private final SkillDraftAppService skillDrafts;
     private final OrderQueryAppService orderQueryAppService;
     private final TransactionTemplate transactionTemplate;
@@ -85,6 +87,7 @@ public class ProjectLifecycleAppService {
                                       ConversationHistoryAppService conversationHistory,
                                       GenerationSegmentRepository generationSegments,
                                       DesignItemRepository designItems,
+                                      DesignSpecRepository designSpecs,
                                       SkillDraftAppService skillDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       TransactionTemplate transactionTemplate) {
@@ -99,6 +102,7 @@ public class ProjectLifecycleAppService {
         this.conversationHistory = conversationHistory;
         this.generationSegments = generationSegments;
         this.designItems = designItems;
+        this.designSpecs = designSpecs;
         this.skillDrafts = skillDrafts;
         this.orderQueryAppService = orderQueryAppService;
         this.transactionTemplate = transactionTemplate;
@@ -280,6 +284,7 @@ public class ProjectLifecycleAppService {
         conversationHistory.purgeByProject(projectId);
         generationSegments.deleteByProjectId(projectId);
         designItems.deleteByProjectId(projectId);
+        designSpecs.deleteByProjectId(projectId);
         skillDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),

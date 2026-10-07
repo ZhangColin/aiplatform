@@ -9,6 +9,7 @@ import com.aieducenter.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
+import com.aieducenter.aiplatform.business.project.application.DesignSpecAppService;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
@@ -71,13 +72,14 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final SkillProposalAdapter skillProposals;
     private final ImageGenerationAppService imageGeneration;
     private final LandedFileFacts landedFiles;
+    private final DesignSpecAppService designSpecs;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration,
-            LandedFileFacts landedFiles) {
+            LandedFileFacts landedFiles, DesignSpecAppService designSpecs) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -89,6 +91,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.skillProposals = skillProposals;
         this.imageGeneration = imageGeneration;
         this.landedFiles = landedFiles;
+        this.designSpecs = designSpecs;
     }
 
     @Override
@@ -137,7 +140,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         if (AgentProfile.DESIGNER.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDesign design) {
             toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration,
-                    landedFiles));
+                    landedFiles, designSpecs));
         }
         // #263 self-test 子键视图：子智能体自有平台工具面（技能自荐 subagent 槽
         // 血统实例）——平台工厂构建子智能体时按本键取视图合并进子级工具面

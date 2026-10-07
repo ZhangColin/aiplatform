@@ -21,6 +21,7 @@ import reactor.core.publisher.Mono;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.LandedFileFacts;
+import com.aieducenter.aiplatform.business.project.application.DesignSpecAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
 
@@ -30,7 +31,8 @@ import com.aieducenter.aiplatform.business.project.application.ImageGenerationAp
  * 必传、count 1~5 缺省 1、size/name 可选透传）；run/会话标识从 RuntimeContext
  * 每调用提取（实例缓存跨 run 复用，血统不固化在构造态）；成功回执只含落盘路径
  * 与字节（<b>供应商 URL 永不透出</b>）、部分失败如实附注；失败与平台异常如实回
- * 给模型不炸会话。
+ * 给模型不炸会话。#295：设计参数（palette/style）在场随稿物化（规范草稿归
+ * {@code DesignSpecAppService}）、缺席不物化空壳。
  */
 class GenerateImageToolTest {
 
@@ -54,9 +56,26 @@ class GenerateImageToolTest {
         }
     }
 
+    /** 设计规范服务替身（#295 物化面记录器，同 RecordingService 形制）。 */
+    private static class RecordingSpecService extends DesignSpecAppService {
+        final List<String> materializations = new ArrayList<>();
+
+        RecordingSpecService() {
+            super(null, null);
+        }
+
+        @Override
+        public void materializePrintParams(String workspaceId, List<String> landedPaths,
+                List<String> palette, String style) {
+            materializations.add(workspaceId + "|" + landedPaths + "|" + palette + "|" + style);
+        }
+    }
+
     private final RecordingService service = new RecordingService();
+    private final RecordingSpecService specService = new RecordingSpecService();
     private final LandedFileFacts landedFiles = new LandedFileFacts();
-    private final GenerateImageTool tool = new GenerateImageTool("77", service, landedFiles);
+    private final GenerateImageTool tool = new GenerateImageTool("77", service, landedFiles,
+            specService);
 
     @Test
     void given_registration_shape_when_inspected_then_contract_keys_present() {
@@ -177,12 +196,49 @@ class GenerateImageToolTest {
                 throw new IllegalStateException("图片生成供应商未配置，暂时无法出图");
             }
         };
-        GenerateImageTool tool = new GenerateImageTool("77", throwing, new LandedFileFacts());
+        GenerateImageTool tool = new GenerateImageTool("77", throwing, new LandedFileFacts(),
+                new RecordingSpecService());
 
         ToolResultBlock result = tool.callAsync(call(Map.of("prompt", "p"), null, null)).block();
 
         assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
         assertThat(textOf(result)).contains("供应商未配置");
+    }
+
+    @Test
+    void given_params_when_generated_then_materialized_with_landed_paths() {
+        // #295 灵魂用例（平面类前半）：设计参数在场 → 出图成功即随每张落盘稿物化
+        //（工作区＋落盘路径清单＋色板＋风格全要素）；字符串色板按分隔符宽容收口
+        service.next = new ImageGenerationOutcome.Generated("zhipu", "glm-image",
+                List.of(new ImageGenerationOutcome.LandedImage("design/123-a.png", 2048)),
+                List.of());
+
+        tool.callAsync(call(mapOf("prompt", "p", "palette", List.of("#166534", " #faf9f6 "),
+                "style", "扁平暖调"), "run-9", "designer-1")).block();
+
+        assertThat(specService.materializations).containsExactly(
+                "77|[design/123-a.png]|[#166534, #faf9f6]|扁平暖调");
+
+        specService.materializations.clear();
+        service.next = new ImageGenerationOutcome.Generated("zhipu", "glm-image",
+                List.of(new ImageGenerationOutcome.LandedImage("design/123-hero.png", 2048)),
+                List.of());
+        tool.callAsync(call(mapOf("prompt", "p", "palette", "#166534，#faf9f6"), null, null))
+                .block();
+        assertThat(specService.materializations).containsExactly(
+                "77|[design/123-hero.png]|[#166534, #faf9f6]|null");
+    }
+
+    @Test
+    void given_no_params_or_failed_when_called_then_no_materialization() {
+        // 参数缺席＝无设计意图不物化空壳；出图失败无落盘、无物化
+        tool.callAsync(call(Map.of("prompt", "p"), "run-10", "designer-1")).block();
+        assertThat(specService.materializations).isEmpty();
+
+        service.next = new ImageGenerationOutcome.Failed("全失败");
+        tool.callAsync(call(mapOf("prompt", "p", "style", "极简"), "run-10", "designer-1"))
+                .block();
+        assertThat(specService.materializations).isEmpty();
     }
 
     // ---------- 替身与参数构造 ----------

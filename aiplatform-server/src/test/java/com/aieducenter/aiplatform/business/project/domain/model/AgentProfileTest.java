@@ -48,6 +48,15 @@ class AgentProfileTest {
                 .contains("self-test") // #96 自检段委派自测子智能体
                 .contains("agent_spawn")
                 .contains("关键节点才解说"); // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
+        // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
+        // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
+        // 运营配置面可覆盖（ADR-0021）
+        assertThat(AgentProfile.DESIGNER.systemPrompt())
+                .contains(":root")
+                .contains("--primary")
+                .contains("--brand-1")
+                .contains("palette")
+                .contains("定稿时转正");
     }
 
     @Test

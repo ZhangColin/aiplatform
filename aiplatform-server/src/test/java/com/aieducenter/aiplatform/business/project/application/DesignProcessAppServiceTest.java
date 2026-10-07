@@ -16,6 +16,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -134,6 +135,7 @@ class DesignProcessAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_design_items");
+        jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM ord_orders");
@@ -1016,6 +1018,46 @@ class DesignProcessAppServiceTest {
                     assertThat(entry.closing()).containsEntry(
                             CoderRunAttempts.CLOSING_VERSION_FIELD, "abc123def456");
                 });
+    }
+
+    @Test
+    void given_interface_draft_with_root_when_finalized_then_project_spec_refreshed() {
+        // #295 验收②接线（定稿落定序＝成版之后、分岔之前随定稿刷新项目设计规范）：
+        // 界面类定稿 → 稿内 :root 确定性直提（零模型调用）→ 项目正本行（token 面、
+        // 源锚＝定稿稿＋定稿锚——多设计物共用的单一正本）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceCommands(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null);
+        // 定稿稿内容读桩（提炼取件通道＝contentCommand）：命中稿路径回「大小行＋正文」
+        String draft = "<style>:root { --primary: #166534; --radius: 0.75rem; }</style>";
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenAnswer(invocation -> {
+                    String command = invocation.<WorkspaceExecCommand>getArgument(1).command();
+                    if (command.contains("git commit")) {
+                        return new ExecResultResponse("abc123def456\n", "", 0);
+                    }
+                    if (command.contains("design/logo-1.html") && command.contains("cat \"$p\"")) {
+                        return new ExecResultResponse(
+                                draft.getBytes(StandardCharsets.UTF_8).length
+                                        + "\n" + draft, "", 0);
+                    }
+                    return new ExecResultResponse("", "", 0);
+                });
+
+        DesignProcessAppService.DesignFinalization finalization =
+                appService.finalizeDesignItem(projectId, 1, "/design/logo-1.html");
+
+        List<Map<String, Object>> specs = jdbcTemplate.queryForList(
+                "SELECT source_draft_path, source_run_id, tokens FROM prj_design_specs"
+                        + " WHERE project_id = ?", projectId);
+        assertThat(specs).singleElement().satisfies(row -> {
+            assertThat(row.get("source_draft_path")).isEqualTo("/design/logo-1.html");
+            assertThat(row.get("source_run_id")).isEqualTo(finalization.runId());
+            assertThat(String.valueOf(row.get("tokens")))
+                    .contains("--primary").contains("#166534").contains("--radius");
+        });
     }
 
     @Test

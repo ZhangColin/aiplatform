@@ -24,6 +24,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -77,6 +78,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private DesignItemRepository designItems;
+
+    @Mock
+    private DesignSpecRepository designSpecs;
 
     @Mock
     private SkillDraftAppService skillDrafts;
@@ -197,7 +201,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, designItems, skillDrafts,
+                conversationHistory, generationSegments, designItems, designSpecs, skillDrafts,
                 orderQueryAppService, transactionTemplate);
     }
 }

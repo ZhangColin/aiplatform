@@ -48,6 +48,13 @@ describe("四态（#21 骨架 + #28 订单态接线：全量拉取 + 本地分�
       updatedAt: "2026-08-28T00:00:00Z",
     });
   });
+
+  it("normalize：终点类型透传（#299 弱标识取数面：code＋名随行、缺省 undefined）", () => {
+    expect(
+      normalizeProjectSummary({ id: "p3", endpointType: 1, endpointTypeName: "设计" }),
+    ).toMatchObject({ endpointType: 1, endpointTypeName: "设计" });
+    expect(normalizeProjectSummary({ id: "p4" }).endpointType).toBeUndefined();
+  });
 });
 
 describe("列表分区（主网格 = 选中态；历史归档默认折叠分组）", () => {

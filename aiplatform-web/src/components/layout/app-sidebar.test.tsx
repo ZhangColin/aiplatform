@@ -44,12 +44,22 @@ describe("AppSidebar（#76 侧栏定稿形态）", () => {
     expect(html).toContain("新建项目");
     expect(html).toContain('href="/"');
     expect(html).toContain("能做这些");
+    // #299 两档 live（ADR-0029）：占位档（做页面/写文档）已删——不承诺还没有的东西
     expect(html).toContain("做系统");
-    expect(html).toContain("做页面");
+    expect(html).toContain("做设计");
+    expect(html).not.toContain("做页面");
+    expect(html).not.toContain("写文档");
+    expect(html).not.toContain("敬请期待");
     expect(html).toContain("历史项目");
     expect(html).toContain("巷口花店小程序");
     expect(html).toContain('href="/projects/p1"');
     expect(html).toContain('href="/projects"'); // 全部项目
+  });
+
+  it("「能做这些」两档 = 去首页链接（点「做设计」＝去首页并预设设计态的导航面）", () => {
+    const html = renderSidebar(true);
+    expect(html).toContain('aria-label="做设计"');
+    expect((html.match(/href="\/"/g) ?? []).length).toBeGreaterThanOrEqual(3); // 新建项目 + 首页 + 两档
   });
 
   it("footer 不出现 button 嵌套（hydration 回归：AccountMenu 为触发按钮）", () => {

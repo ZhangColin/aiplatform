@@ -51,7 +51,7 @@ class ProjectLifecycleCreateRollbackTest {
                 .thenThrow(new IllegalStateException("db down"));
 
         assertThatThrownBy(() -> appService.create(
-                new CreateProjectCommand("做一个官网")))
+                new CreateProjectCommand("做一个官网", null)))
                 .isInstanceOf(IllegalStateException.class);
 
         // 落库失败 → 回收已落定的工作区；不发射任何 SSE、不开主智能体对话、不取名

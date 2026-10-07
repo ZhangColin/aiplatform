@@ -59,3 +59,27 @@ describe("ProjectCard · 阶段徽标（#205 纯文本升级）", () => {
     expect(html).toContain("创建于");
   });
 });
+
+describe("ProjectCard · 终点弱标识（#299，ADR-0029）", () => {
+  it("设计项目显「设计」文字级小标签（与首页最近项目卡同口径）", () => {
+    const html = renderCard({ endpointType: 1, endpointTypeName: "设计" });
+    expect(html).toContain("设计");
+    expect(html).toContain('data-endpoint-type="1"');
+  });
+
+  it("弱标识不加颜色强调（不抢四态徽标焦点——纯 muted 文字）", () => {
+    const html = renderCard({ endpointType: 1, endpointTypeName: "设计" });
+    expect(html).toContain("text-muted-foreground/80");
+    expect(html).not.toContain("bg-primary");
+  });
+
+  it("终点缺省（旧后端）：弱标识不出", () => {
+    const html = renderCard();
+    expect(html).not.toContain("data-endpoint-type");
+  });
+
+  it("未知终点码（名缺席）：不猜归属——弱标识不出", () => {
+    const html = renderCard({ endpointType: 9 });
+    expect(html).not.toContain("data-endpoint-type");
+  });
+});

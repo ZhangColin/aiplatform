@@ -29,8 +29,11 @@ describe("SiteShell（#76 侧栏定稿形态装配 / #79 项目页 icon rail）"
   it("导航锚 = 新建项目 / 首页 / 历史项目直列 / 全部项目", () => {
     const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
     const anchors = navAnchors(html);
-    // href 序（新建项目按钮与首页项同指 /；历史项目首字色块会并入文本，取 href 序断言）
+    // href 序（新建项目按钮、首页项与「能做这些」两档同指 /；历史项目首字色块会
+    // 并入文本，取 href 序断言）
     expect(anchors.map((a) => a.href)).toEqual([
+      "/",
+      "/",
       "/",
       "/",
       "/projects/p1",
@@ -38,8 +41,10 @@ describe("SiteShell（#76 侧栏定稿形态装配 / #79 项目页 icon rail）"
     ]);
     expect(anchors[0].text).toBe("新建项目");
     expect(anchors[1].text).toBe("首页");
-    expect(anchors[2].text).toContain("巷口花店小程序");
-    expect(anchors[3].text).toBe("全部项目");
+    expect(anchors[2].text).toBe("做系统");
+    expect(anchors[3].text).toBe("做设计");
+    expect(anchors[4].text).toContain("巷口花店小程序");
+    expect(anchors[5].text).toBe("全部项目");
   });
 });
 

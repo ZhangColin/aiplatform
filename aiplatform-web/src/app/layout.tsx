@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     default: "AI 开发平台",
     template: "%s · AI 开发平台",
   },
-  description: "从一句话需求到可操作系统的定制交易平台",
+  description: "从一句话需求到系统与设计的定制交易平台",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

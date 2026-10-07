@@ -29,12 +29,13 @@ import { projectStage, type ProjectSummary } from "@/lib/projects/list";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/time";
 
+import { EndpointMark } from "./endpoint-mark";
 import { StageBadge } from "./stage-badge";
 
 /**
  * 项目列表卡（issue #21）：项目名 + 四态徽标（#205 纯文本升级，待支付最强档、
- * 不带金额）+ 创建/更新时间（无动态摘要行），归档走下拉菜单 + 二次确认。
- * 已归档卡灰态、无菜单。
+ * 不带金额）+ 终点弱标识（#299 文字级小标签）+ 创建/更新时间（无动态摘要行），
+ * 归档走下拉菜单 + 二次确认。已归档卡灰态、无菜单。
  */
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   const router = useRouter();
@@ -87,7 +88,14 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <StageBadge stage={projectStage(project)} />
+        <div className="flex items-center gap-1.5">
+          <StageBadge stage={projectStage(project)} />
+          {/* 终点弱标识（#299）：文字级小标签，不抢四态徽标焦点、不加过滤维度 */}
+          <EndpointMark
+            endpointType={project.endpointType}
+            endpointTypeName={project.endpointTypeName}
+          />
+        </div>
         <p className="text-xs text-muted-foreground/70">{timeLine(project)}</p>
       </CardContent>
 

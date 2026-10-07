@@ -40,11 +40,25 @@ import { WorkMessage } from "./work-message";
 const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_ANNOTATIONS: AnnotationItem[] = [];
 
-/** 常驻文案（#79 初版）：随访谈/迭代阶段化，告诉用户「现在在哪、下一步能做什么」。 */
+/** 常驻文案（#79 初版；#299 设计主线变体）：随访谈/迭代阶段化 × 终点轨道变体——
+ * 设计主线（做设计出身）梳的是设计物清单、迭代即改稿；系统/系统＋设计访谈用
+ * 系统形（系统＋设计的 PRD 是功能清单形，#285 口径）。 */
 const STAGE_HINTS = {
-  interview: "访谈中：说说你的想法，平台会提问、把要点整理成需求文档，聊清楚后动手做系统",
-  iterate: "迭代中：想改什么、想问什么直接说，每轮修改都会更新文档、留下记录",
+  system: {
+    interview: "访谈中：说说你的想法，平台会提问、把要点整理成需求文档，聊清楚后动手做系统",
+    iterate: "迭代中：想改什么、想问什么直接说，每轮修改都会更新文档、留下记录",
+  },
+  design: {
+    interview: "访谈中：说说你想要的设计，平台会提问、把要点整理成设计物清单，聊清楚后开始出稿",
+    iterate: "迭代中：想改哪件、想问什么直接说，改稿与定稿都在这里聊、留下记录",
+  },
 } as const;
+
+/** 轨道两态（缺省系统——终点缺省/未知按系统形，与弱标识缺省不出同口径方向）。 */
+type ChatTrack = keyof typeof STAGE_HINTS;
+
+/** 阶段两态（两轨道同键集）。 */
+type StageKey = keyof typeof STAGE_HINTS["system"];
 
 /**
  * 对话区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
@@ -66,6 +80,7 @@ export function CommandArea({
   projectId,
   lock,
   stage = "interview",
+  track = "system",
   plan,
   designPlan,
   onSeePrd,
@@ -75,7 +90,9 @@ export function CommandArea({
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
   lock?: LockRow;
   /** 阶段（常驻文案两态）：缺省访谈期，PRD 产出后装配层切迭代期。 */
-  stage?: keyof typeof STAGE_HINTS;
+  stage?: StageKey;
+  /** 终点轨道（#299 常驻文案变体）：设计主线＝设计形文案；缺省系统。 */
+  track?: ChatTrack;
   /** 生成轨道片清单（#225 计划区，REST 详情透出；缺省 = 无现行计划）。 */
   plan?: GenerationSegmentFact[] | null;
   /** 设计轨道件清单（#290 designer 直播卡计划区；工作消息座席＝designer 时选送）。 */
@@ -216,7 +233,7 @@ export function CommandArea({
     // 居中当主角（#79）：对话列限宽居中，宽屏不散读
     <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col">
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[stage]}</p>
+        <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[track][stage]}</p>
         {messages.map((message, index) => (
           <Fragment key={message.id}>
             {work && index === workAnchorIndex ? (

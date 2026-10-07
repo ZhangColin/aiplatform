@@ -22,6 +22,7 @@ import { ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
 import { planAreaOfDesignItems } from "@/lib/projects/detail";
+import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
 
 /**
  * 项目页装配（issue #17 单站壳 + #19/#20 需求环 + #22 生成环① + #79 对话
@@ -205,6 +206,9 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           projectId={projectId}
           lock={lock}
           stage={chatOnly ? "interview" : "iterate"}
+          // 常驻文案轨道（#299）：设计主线（做设计出身）＝设计形；系统/系统＋设计
+          // ＝系统形（系统＋设计 PRD 是功能清单形，#285 口径）
+          track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
           plan={detail?.segments}
           designPlan={planAreaOfDesignItems(detail?.designItems)}
           onSeePrd={() => openOutputsTo("docs")}

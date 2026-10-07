@@ -35,6 +35,34 @@ describe("RecentProjectCard（首页最近项目卡：四态 · 更新时间）"
     expect(html).toContain("未命名项目");
   });
 
+  // ---------- 终点弱标识（#299，ADR-0029：文字级小标签、不加颜色强调） ----------
+
+  it("设计项目显「设计」弱标识；系统＋设计显全名（文字级、非徽标形）", () => {
+    const design = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, endpointType: 1, endpointTypeName: "设计" }} />,
+    );
+    expect(design).toContain("设计");
+    expect(design).toContain('data-endpoint-type="1"');
+
+    const both = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, endpointType: 3, endpointTypeName: "系统＋设计" }} />,
+    );
+    expect(both).toContain("系统＋设计");
+  });
+
+  it("弱标识不带颜色强调（不抢四态徽标焦点——纯 muted 文字，非实底徽标）", () => {
+    const html = renderToStaticMarkup(
+      <RecentProjectCard project={{ ...project, endpointType: 1, endpointTypeName: "设计" }} />,
+    );
+    expect(html).toContain("text-muted-foreground/80");
+    expect(html).not.toContain("bg-primary");
+  });
+
+  it("终点缺省（旧后端）：弱标识不出（不假装归属）", () => {
+    const html = renderToStaticMarkup(<RecentProjectCard project={project} />);
+    expect(html).not.toContain("data-endpoint-type");
+  });
+
   // ---------- 四态徽标分量（#205 三面渗透：待支付最强档、不带金额） ----------
 
   it("待支付态徽标提至最强视觉档（primary 实底）、不带金额", () => {

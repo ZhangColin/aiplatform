@@ -7,9 +7,9 @@ import type { AnnotationItem } from "@/lib/store/annotation";
 
 /**
  * 共享发送框（#76 首页/项目页同一组件）的交互契约：受控输入 + Enter 提交
- * （Shift+Enter 换行、输入法组词不触发）+ 附件 chip 增删 + 类型下拉（v1 仅
- * 「做系统」可选）+ 圆形发送键启停 + 圈注 chip 形态（#135 序号 + 类型 + 摘要、
- * 撤评语输入框）。沿 command-area.interaction 先例（happy-dom 逐文件例外）；
+ * （Shift+Enter 换行、输入法组词不触发）+ 附件 chip 增删 + 类型下拉（#299 两档
+ * live 受控、项目页不呈现）+ 圆形发送键启停 + 圈注 chip 形态（#135 序号 + 类型 +
+ * 摘要、撤评语输入框）。沿 command-area.interaction 先例（happy-dom 逐文件例外）；
  * 断言用原生属性（本仓无 jest-dom）。
  */
 
@@ -246,16 +246,30 @@ describe("Composer · 真上传（#286：uploadFile 管道）", () => {
   });
 });
 
-describe("Composer · 类型下拉", () => {
-  it("默认「做系统」；做页面/写文档为占位（disabled 敬请期待）", () => {
+describe("Composer · 类型下拉（#299 两档 live，ADR-0029）", () => {
+  it("受控两档（传 onModeChange 才呈现）：选「做设计」回调换档；两档全可选无占位", () => {
+    const onModeChange = vi.fn();
+    render(
+      <Composer
+        value=""
+        onValueChange={change}
+        onSubmit={submit}
+        mode="做系统"
+        onModeChange={onModeChange}
+        placeholder="一句话说说你想做什么"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "做系统" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "做设计" }));
+
+    expect(onModeChange).toHaveBeenCalledWith("做设计");
+    expect(screen.queryByText("敬请期待")).toBeNull();
+  });
+
+  it("项目页口径（不传 onModeChange）：类型下拉不呈现——模式位是一次性分流语义，项目内终点变更唯一位＝设置 tab", () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: /做系统/ }));
-    expect(screen.getByRole("menuitem", { name: /做页面/ }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("menuitem", { name: /写文档/ }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
+    expect(screen.queryByRole("button", { name: /做系统/ })).toBeNull();
   });
 });
 

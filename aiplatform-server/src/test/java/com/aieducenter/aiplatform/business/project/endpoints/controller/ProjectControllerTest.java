@@ -153,12 +153,39 @@ class ProjectControllerTest {
     }
 
     @Test
+    void given_design_endpoint_when_create_then_initial_type_bound() throws Exception {
+        when(appService.create(any())).thenReturn(
+                new ProjectCreatedResponse(detailOf("300", ProjectStatus.IN_PROGRESS, false),
+                        "run-9"));
+
+        // #299 mode 进载荷（ADR-0029）：入口选「做设计」携终点初值 Integer code
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"给我的咖啡店设计一个 logo\",\"endpointType\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-9"));
+
+        verify(appService).create(argThat(cmd -> cmd.endpointType() == ProjectEndpointType.DESIGN));
+    }
+
+    @Test
+    void given_unknown_endpoint_code_when_create_then_rejected_as_400() throws Exception {
+        // Integer code 表外值：框架统一信封 400（与 status 过滤参数同口径）
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\",\"endpointType\":99}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void given_projects_when_list_then_wrapped_array() throws Exception {
         when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
-                ProjectType.WEBSITE, "官网", "900",
-                ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null),
+                        ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM, "系统", "900",
+                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null),
                 new ProjectResponse("101", "已下单官网",
-                        ProjectType.WEBSITE, "官网", "901",
+                        ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计", "901",
                         ProjectStatus.IN_PROGRESS, "进行中", false, null, null,
                         new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"))));
 
@@ -167,6 +194,9 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[0].id").value("100"))
                 .andExpect(jsonPath("$.data[0].status").value(1)) // IN_PROGRESS → code
                 .andExpect(jsonPath("$.data[0].statusName").value("进行中"))
+                .andExpect(jsonPath("$.data[0].endpointType").value(2)) // 终点类型弱标识取数面
+                .andExpect(jsonPath("$.data[0].endpointTypeName").value("系统"))
+                .andExpect(jsonPath("$.data[1].endpointTypeName").value("系统＋设计"))
                 .andExpect(jsonPath("$.data[0].activeOrder").isEmpty()) // 无订单 → null
                 // #28：未终结订单嵌入（四态列表「待报价」的推导输入）
                 .andExpect(jsonPath("$.data[1].activeOrder.id").value("900"))

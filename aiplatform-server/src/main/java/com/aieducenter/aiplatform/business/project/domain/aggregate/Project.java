@@ -63,8 +63,8 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     /**
      * 终点类型（#285，ADR-0024「项目不分型、终点是属性」）：下单前可变（切换
      * 编排归 {@link #switchEndpoint}，项目内唯一变更位＝设置 tab 控件）、下单即
-     * 冻结（守卫归编排）。入口两档显式选择定初值（门面票落地前一律缺省系统）。
-     * PRD 清单章形态跟本属性走（技能 prd-writing 双形态选择键）。
+     * 冻结（守卫归编排）。入口两档显式选择定初值（#299：做设计＝DESIGN，缺省
+     * 系统）。PRD 清单章形态跟本属性走（技能 prd-writing 双形态选择键）。
      */
     @Column(name = "endpoint_type", nullable = false)
     private ProjectEndpointType endpointType;
@@ -116,7 +116,8 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     protected Project() {
     }
 
-    private Project(String name, ProjectType type, Long workspaceId, Long ownerAccountId) {
+    private Project(String name, ProjectType type, ProjectEndpointType endpointType,
+                    Long workspaceId, Long ownerAccountId) {
         if (name == null || name.isBlank()) {
             throw new DomainException(ProjectMessage.PROJECT_NAME_BLANK);
         }
@@ -125,19 +126,30 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         }
         this.name = name;
         this.type = ProjectType.orDefault(type);
-        this.endpointType = ProjectEndpointType.SYSTEM;
+        this.endpointType = ProjectEndpointType.orDefault(endpointType);
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
     }
 
     /**
-     * 建项目（编排在工作区副作用落定后调用，短事务落库）。终点类型入口两档显式
-     * 选择定初值（门面票 #299 落地前的机制位）：建项目恒缺省系统，选「做设计」
-     * 进项目后经设置 tab 切换（#285 测试期口径）。
+     * 建项目（主链路缺省系统形，编排在工作区副作用落定后调用，短事务落库）：
+     * 入口不携终点初值——「生成无门」主链路建项目恒系统（终显形见
+     * {@link #create(String, ProjectType, ProjectEndpointType, Long, Long)}）。
      */
     public static Project create(String name, ProjectType type,
                                  Long workspaceId, Long ownerAccountId) {
-        return new Project(name, type, workspaceId, ownerAccountId);
+        return create(name, type, null, workspaceId, ownerAccountId);
+    }
+
+    /**
+     * 建项目（终点初值形，#299 入口两档显式选择定初值，ADR-0029 mode 进载荷）：
+     * 入口选「做设计」携 {@link ProjectEndpointType#DESIGN}、做系统/不选传 null
+     * 走缺省（主链路零变化）；此后项目内变更归 {@link #switchEndpoint}
+     * （设置 tab 唯一位）。
+     */
+    public static Project create(String name, ProjectType type, ProjectEndpointType endpointType,
+                                 Long workspaceId, Long ownerAccountId) {
+        return new Project(name, type, endpointType, workspaceId, ownerAccountId);
     }
 
     /**

@@ -26,9 +26,20 @@ class ProjectTest {
 
         assertThat(project.getName()).isEqualTo("官网 demo");
         assertThat(project.getType()).isEqualTo(ProjectType.WEBSITE); // 类型缺省官网
+        assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM); // 终点缺省系统（主链路）
         assertThat(project.getWorkspaceId()).isEqualTo(100L);
         assertThat(project.getOwnerAccountId()).isEqualTo(200L);
         assertThat(project.getArchivedAt()).isNull(); // 未归档
+    }
+
+    @Test
+    void given_design_endpoint_when_create_then_initial_type_kept() {
+        // #299 入口两档定初值：终显形携终点、null 走缺省（orDefault）
+        Project design = Project.create("咖啡店视觉", null, ProjectEndpointType.DESIGN, 1L, null);
+        assertThat(design.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN);
+
+        Project mainline = Project.create("官网", null, null, 1L, null);
+        assertThat(mainline.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM);
     }
 
     @Test

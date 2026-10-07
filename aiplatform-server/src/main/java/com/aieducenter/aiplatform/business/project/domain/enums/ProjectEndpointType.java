@@ -47,6 +47,14 @@ public enum ProjectEndpointType implements BaseEnum<ProjectEndpointType> {
     }
 
     /**
+     * 缺省终点（创建不携终点初值时）：系统——主链路「生成无门」口径，入口不选
+     * 即走系统主线（ProjectType.orDefault 同款缺省兜底）。
+     */
+    public static ProjectEndpointType orDefault(ProjectEndpointType type) {
+        return type == null ? SYSTEM : type;
+    }
+
+    /**
      * JPA Converter - 必须声明为 public static class。
      */
     @Converter(autoApply = true)

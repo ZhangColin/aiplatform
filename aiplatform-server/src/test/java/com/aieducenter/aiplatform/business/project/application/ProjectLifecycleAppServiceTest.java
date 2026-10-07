@@ -41,6 +41,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -128,7 +129,7 @@ class ProjectLifecycleAppServiceTest {
         ProjectCreatedResponse response = RequestContext.runFor(
                 new RequestContext(null, null, null, null, 3897654321098765432L,
                         "归属测试", null, null),
-                () -> appService.create(new CreateProjectCommand("做一个官网")));
+                () -> appService.create(new CreateProjectCommand("做一个官网", null)));
 
         assertThat(projectRepository.findById(Long.parseLong(response.project().id())))
                 .hasValueSatisfying(project -> assertThat(project.getOwnerAccountId())
@@ -141,7 +142,7 @@ class ProjectLifecycleAppServiceTest {
         stubInterviewAccepted("run-1");
 
         ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand("做一个官网"));
+                new CreateProjectCommand("做一个官网", null));
 
         // 工作区副作用先行：dev 工作区
         verify(workspaceLifecycleAppService).create(new CreateWorkspaceCommand(EnvKind.DEV));
@@ -153,6 +154,7 @@ class ProjectLifecycleAppServiceTest {
         assertThat(projectRepository.findById(projectId)).hasValueSatisfying(
                 project -> assertThat(project.getName()).isEqualTo(Project.PLACEHOLDER_NAME));
         assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 单模板服务端缺省
+        assertThat(response.project().endpointType()).isEqualTo(ProjectEndpointType.SYSTEM); // 不携终点＝缺省系统（主链路零变化）
         assertThat(response.project().workspaceId()).isEqualTo("9100");
         assertThat(response.project().status()).isEqualTo(ProjectStatus.IN_PROGRESS);
         assertThat(response.runId()).isEqualTo("run-1"); // 自动开场运行标识随响应返回
@@ -176,12 +178,29 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
+    void given_design_endpoint_when_create_then_initial_type_persisted() {
+        stubWorkspace("9103", "aiplatform-dev-103");
+        stubInterviewAccepted("run-3");
+
+        // #299 入口两档 mode 进载荷：选「做设计」→ 终点初值随建项目落库（缺省主链路
+        // 仍系统——上一用例隐含），访谈/PRD 清单形跟终点类型走（#285 已接线）
+        ProjectCreatedResponse response = appService.create(
+                new CreateProjectCommand("给我的咖啡店设计一个 logo", ProjectEndpointType.DESIGN));
+
+        Long projectId = Long.parseLong(response.project().id());
+        assertThat(projectRepository.findById(projectId)).hasValueSatisfying(
+                project -> assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN));
+        assertThat(response.project().endpointType()).isEqualTo(ProjectEndpointType.DESIGN);
+        assertThat(response.project().endpointTypeName()).isEqualTo("设计");
+    }
+
+    @Test
     void given_blank_requirement_when_create_then_default_kickoff_prompt_and_no_naming() {
         stubWorkspace("9101", "aiplatform-dev-101");
         stubInterviewAccepted("run-2");
 
         ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand(" "));
+                new CreateProjectCommand(" ", null));
 
         assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
         // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
@@ -197,7 +216,7 @@ class ProjectLifecycleAppServiceTest {
                 .thenThrow(new RuntimeException("对话智能体不可用"));
 
         ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand(null));
+                new CreateProjectCommand(null, null));
 
         // 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
         assertThat(response.runId()).isNull();

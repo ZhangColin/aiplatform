@@ -109,10 +109,12 @@ public class ProjectLifecycleAppService {
     }
 
     /**
-     * 建项目（只传 requirement）：dev 工作区落定 → 一事务 Project（占位名 + 类型
-     * 服务端缺省）→ SSE workspace-created → 异步 LLM 取名（不等结果，失败保占位）
+     * 建项目（requirement + 终点初值可空）：dev 工作区落定 → 一事务 Project
+     * （占位名 + 类型服务端缺省 + 终点初值入口两档定、缺省系统——#299 mode 进
+     * 载荷）→ SSE workspace-created → 异步 LLM 取名（不等结果，失败保占位）
      * → 自动开始主智能体对话（经 {@link MainAgentAppService}，欢迎语 + 首个澄清
-     * 问题）。起跑失败不回滚建项目（项目已成立，失败原因经 error 事件/日志表达）。
+     * 问题；设计主线访谈/PRD 清单形跟终点类型走，#285 已接线）。起跑失败不回滚
+     * 建项目（项目已成立，失败原因经 error 事件/日志表达）。
      */
     public ProjectCreatedResponse create(CreateProjectCommand command) {
         WorkspaceResponse workspace = workspaceLifecycleAppService
@@ -120,7 +122,7 @@ public class ProjectLifecycleAppService {
         Project project;
         try {
             project = transactionTemplate.execute(status -> projectRepository.save(Project.create(
-                    Project.PLACEHOLDER_NAME, null,
+                    Project.PLACEHOLDER_NAME, null, command.endpointType(),
                     Long.parseLong(workspace.workspaceId()), RequestContext.getUserId())));
         } catch (RuntimeException e) {
             // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）

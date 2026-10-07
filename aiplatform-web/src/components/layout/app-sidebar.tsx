@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useRecentProjects } from "@/hooks/use-projects";
 import { PLATFORM_MODES } from "@/lib/modes";
+import { useEntryModeStore } from "@/lib/store/entry-mode";
 import { cn } from "@/lib/utils";
 
 /**
@@ -39,6 +40,9 @@ const SIDEBAR_PROJECT_LIMIT = 8;
 export function AppSidebar() {
   const pathname = usePathname();
   const projects = useRecentProjects().slice(0, SIDEBAR_PROJECT_LIMIT);
+  // 入口两档分流态（#299）：与首页 hero/发送框下拉同源——侧栏是第三处呈现面
+  const entryMode = useEntryModeStore((s) => s.mode);
+  const setEntryMode = useEntryModeStore((s) => s.setMode);
   // 收起态判定补 !isMobile：mobile 走 Sheet 始终按展开态渲染。
   const { state, isMobile, setOpen, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
@@ -130,9 +134,13 @@ export function AppSidebar() {
                 <SidebarMenuItem key={m.label}>
                   <SidebarMenuButton
                     tooltip={m.label}
-                    isActive={m.live}
+                    // 与首页 hero 切换件/发送框类型下拉状态同源（#299 两档 live，
+                    // ADR-0029）：在首页且当前档命中才亮；点选＝去首页并预设该档
+                    isActive={pathname === "/" && entryMode === m.label}
                     disabled={!m.live}
-                    aria-label={m.live ? m.label : `${m.label}（敬请期待）`}
+                    aria-label={m.label}
+                    render={m.live ? <Link href="/" /> : undefined}
+                    onClick={() => m.live && setEntryMode(m.label)}
                   >
                     <Sparkles />
                     <span>{m.label}</span>

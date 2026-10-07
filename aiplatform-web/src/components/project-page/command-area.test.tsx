@@ -331,14 +331,29 @@ describe("CommandArea · 常驻文案与共享发送框（#79）", () => {
     expect(iterated).not.toContain("访谈中");
   });
 
+  it("轨道变体（#299 设计主线）：track=design 梳设计物清单、迭代即改稿；缺省系统形", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+
+    const system = renderToStaticMarkup(<CommandArea projectId="p1" />);
+    expect(system).toContain("把要点整理成需求文档");
+
+    const design = renderToStaticMarkup(<CommandArea projectId="p1" track="design" />);
+    expect(design).toContain("把要点整理成设计物清单");
+    const designIterated = renderToStaticMarkup(
+      <CommandArea projectId="p1" track="design" stage="iterate" />,
+    );
+    expect(designIterated).toContain("改稿与定稿都在这里聊");
+  });
+
   it("发送框 = 共享 Composer（立体卡片）——首页/项目页同一组件", () => {
     seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
 
     const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
-    // Composer 卡片形态（ring 圆角卡片 + 圆形发送键 + 类型下拉）
+    // Composer 卡片形态（ring 圆角卡片 + 圆形发送键）
     expect(html).toContain("rounded-2xl");
     expect(html).toContain('aria-label="发送"');
-    expect(html).toContain('aria-label="做系统"');
+    // 类型下拉不呈现（#299 项目页不带模式切换：一次性分流语义，终点变更唯一位＝设置 tab）
+    expect(html).not.toContain('aria-label="做系统"');
     // 附件入口（#286 真上传）：回形针可见——选文件即上传、随话发出
     expect(html).toContain('aria-label="附件"');
   });

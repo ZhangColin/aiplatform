@@ -20,6 +20,11 @@ export type ProjectSummary = {
   updatedAt?: string;
   /** 未终结订单状态（#28：缺省 = 无订单；待报价/待支付态的推导输入）。 */
   activeOrderStatus?: number;
+  /** 终点类型 code（#299 项目卡弱标识取数面：1=设计 2=系统 3=系统＋设计；缺省 =
+   * 旧后端，弱标识不出）。 */
+  endpointType?: number;
+  /** 终点类型名（后端 *Name 随行——弱标识文字直取）。 */
+  endpointTypeName?: string;
 };
 
 export function normalizeProjectSummary(raw: ProjectResponse): ProjectSummary {
@@ -30,6 +35,8 @@ export function normalizeProjectSummary(raw: ProjectResponse): ProjectSummary {
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     activeOrderStatus: raw.activeOrder?.status ?? undefined,
+    endpointType: raw.endpointType,
+    endpointTypeName: raw.endpointTypeName,
   };
 }
 

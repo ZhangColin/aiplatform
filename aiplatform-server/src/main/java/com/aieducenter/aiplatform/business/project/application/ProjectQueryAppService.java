@@ -451,7 +451,7 @@ public class ProjectQueryAppService {
                 : GenerationState.NEVER_GENERATED;
     }
 
-    /** 列表项拼装：派生项目状态（归档 > 进行中）+ 未终结订单摘要。 */
+    /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要。 */
     private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder) {
         boolean archived = project.getArchivedAt() != null;
         ProjectStatus status = archived ? ProjectStatus.ARCHIVED : ProjectStatus.IN_PROGRESS;
@@ -460,6 +460,8 @@ public class ProjectQueryAppService {
                 project.getName(),
                 project.getType(),
                 project.getType().getName(),
+                project.getEndpointType(),
+                project.getEndpointType().getName(),
                 project.getWorkspaceId().toString(),
                 status,
                 status.getName(),

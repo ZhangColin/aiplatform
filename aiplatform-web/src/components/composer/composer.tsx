@@ -47,7 +47,7 @@ import {
 import { errorText } from "@/lib/api/api-error";
 import { annotationLabel, annotationSummary, type AnnotationKind } from "@/lib/preview/annotation";
 import type { AnnotationItem } from "@/lib/store/annotation";
-import { PLATFORM_MODES } from "@/lib/modes";
+import { PLATFORM_MODES, type EntryMode } from "@/lib/modes";
 
 /**
  * 共享发送框（#72 定稿 / #76 落地）：首页 hero 与项目页同一组件的立体卡片
@@ -59,7 +59,9 @@ import { PLATFORM_MODES } from "@/lib/modes";
  * 工作区物料目录），chip 经附件组件族呈现上传中/失败/完成态、上传中或失败阻塞
  * 发送（不静默丢弃）；无上传管道（首页——归 #280 入口票）维持本地挂载态：选即
  * 挂 chip、可删可加，随 onSubmit 一并交出、发出即清。圈注附件归 store 持态、
- * 同行呈现。类型下拉 v1 仅「做系统」，做页面/写文档为「敬请期待」占位。
+ * 同行呈现。类型下拉＝入口两档（做系统/做设计，#299 收编两档 live——ADR-0029）：
+ * 受控件（传 {@link onModeChange} 才呈现——首页 hero 与切换件状态同源；项目页
+ * 不传＝不呈现，模式位是一次性分流语义、项目内终点变更唯一位＝设置 tab）。
  */
 
 /** 附件条目（物料区与 chip 行共用形状）。state 缺省 = 本地挂载态（无上传管道）。 */
@@ -109,6 +111,8 @@ export function Composer({
   annotations,
   onAnnotationRemove,
   inputRef,
+  mode,
+  onModeChange,
   placeholder = "说说你想做什么…",
 }: {
   /** hero = 首页居中大框（加大一号）；项目页常规尺寸。 */
@@ -135,12 +139,17 @@ export function Composer({
   onAnnotationRemove?: (id: string) => void;
   /** 输入框外接 ref（项目页：问题到达自动聚焦）。 */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** 当前入口档（类型下拉受控显示；仅 onModeChange 在场才有意义）。 */
+  mode?: EntryMode;
+  /** 类型下拉切换（传＝呈现下拉——首页 hero 分流位；不传＝不呈现，项目页口径）。 */
+  onModeChange?: (mode: EntryMode) => void;
   placeholder?: string;
 }) {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
-  const [mode, setMode] = useState<string>(PLATFORM_MODES[0].label);
   const fileInputId = useId();
+  // 下拉触发面显示档（受控缺省＝首档做系统）
+  const activeMode = mode ?? PLATFORM_MODES[0].label;
 
   // 自动增高：随输入长高、上限后内部滚动（create-project-form 既有口径迁入）。
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -399,20 +408,21 @@ export function Composer({
           </PopoverContent>
         </Popover>
         ) : null}
+        {onModeChange ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label={mode}
+            aria-label={activeMode}
             disabled={disabled}
           >
-            <Sparkles className="size-3.5" /> {mode} <ChevronDown className="size-3" />
+            <Sparkles className="size-3.5" /> {activeMode} <ChevronDown className="size-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {PLATFORM_MODES.map((m) => (
               <DropdownMenuItem
                 key={m.label}
                 disabled={!m.live}
-                onClick={() => m.live && setMode(m.label)}
+                onClick={() => m.live && onModeChange(m.label)}
               >
                 <span className="flex-1">{m.label}</span>
                 {m.label === mode ? <Check className="size-3.5" /> : null}
@@ -421,6 +431,7 @@ export function Composer({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        ) : null}
 
         <span className="ml-auto" />
         <Button

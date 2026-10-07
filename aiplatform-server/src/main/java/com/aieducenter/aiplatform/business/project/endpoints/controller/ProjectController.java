@@ -95,7 +95,9 @@ public class ProjectController {
     @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
-                    + "失败保占位经改名端点可改）；类型单模板服务端缺省。"
+                    + "失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，"
+                    + "#299 入口两档 mode 进载荷）：入口选「做设计」携 1、缺省/做系统＝2 系统（主链路零变化）；"
+                    + "不合法 code 400（框架统一信封）。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
                     + "SSE：workspace-created → 智能体事件")

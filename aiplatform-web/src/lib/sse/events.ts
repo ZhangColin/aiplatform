@@ -149,6 +149,28 @@ export type SseClosing = {
    * design/ 的稿——item＝设计物、media＝形态（html 界面类 / image 平面类）、
    * path＝去向（工作区锚定形）。编码 run 不携带。 */
   drafts?: SseClosingDraft[];
+  /** 设计规范扫描（#296 遵守三件套③）：带规范项目编码 run 的「按稿对齐」叙事与
+   *  lint 结果——status＝passed（样式合规）/ violations（违规清单随附，曾自动修
+   *  一轮则 retried）/ unavailable（扫描未执行，如实呈现）。无规范项目与设计
+   *  会话不携带。 */
+  designLint?: SseDesignLint;
+};
+
+/** 收尾卡设计规范扫描载荷（#296）：违规条目＝文件+行号+规则+诊断原文。 */
+export type SseDesignLint = {
+  status: "passed" | "violations" | "unavailable";
+  /** 曾发现违规并自动修一轮（修净后仍携 passed+retried——纠偏过程如实）。 */
+  retried?: boolean;
+  /** 违规总数（violations 时在场；清单截 20、total 如实）。 */
+  total?: number;
+  violations?: SseDesignLintViolation[];
+};
+
+export type SseDesignLintViolation = {
+  file: string;
+  line: number;
+  rule: string;
+  message: string;
 };
 
 /** 收尾卡稿条目（#289 设计会话；#291 定稿收尾卡扩 triggers）：item＝本场设计物、

@@ -63,14 +63,17 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
-     * 0.11（#284）：镜像内置位图出口渲染器（/opt/render——chromium＋Playwright
-     * HTML→PNG 保真渲染、resvg SVG→PNG 零浏览器旁路，ADR-0026/0027；压缩体积
-     * +0.4–0.5GB、Playwright 版本强绑定）——升版强制重建镜像，存量项目经既有
-     * 幂等重建（唤醒/重建容器即用新镜像）自愈。0.10（#283）：init-workspace.sh
-     * 增设计线三目录骨架（materials/design/exports，ADR-0027）。0.9（#264 T6）：
-     * 撤 skills 骨架位（ADR-0022）。
+     * 0.12（#296）：基座 devDependencies 增 @shadcn/lint＋oxlint（遵守三件套③——
+     * 带规范项目收口 token 合规扫描的容器内执行件）＋基座骨架页改语义 token（调色板
+     * 收窄兼容）＋渲染层前移（基座依赖演进不触发 chromium 重下载）。0.11（#284）：
+     * 镜像内置位图出口渲染器（/opt/render——chromium＋Playwright HTML→PNG 保真
+     * 渲染、resvg SVG→PNG 零浏览器旁路，ADR-0026/0027；压缩体积 +0.4–0.5GB、
+     * Playwright 版本强绑定）。0.10（#283）：init-workspace.sh 增设计线三目录骨架
+     * （materials/design/exports，ADR-0027）。0.9（#264 T6）：撤 skills 骨架位
+     * （ADR-0022）。升版强制重建镜像，存量项目经既有幂等重建（唤醒/重建容器即用
+     * 新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.11";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.12";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

@@ -47,7 +47,13 @@ class AgentProfileTest {
                 .contains("finish_edit")
                 .contains("self-test") // #96 自检段委派自测子智能体
                 .contains("agent_spawn")
-                .contains("关键节点才解说"); // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
+                .contains("关键节点才解说") // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
+                // #296 遵守三件套②（验收③）：设计规范短条目（短条目优于长段——
+                // 条件式「若有 DESIGN.md」兼容无规范项目；缺省正本在此、运营
+                // 配置面可覆盖＝调整不发版）
+                .contains("DESIGN.md")
+                .contains("token 优先")
+                .contains("禁裸色");
         // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
         // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
         // 运营配置面可覆盖（ADR-0021）

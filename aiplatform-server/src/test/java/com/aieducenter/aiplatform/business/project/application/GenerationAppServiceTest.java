@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -137,6 +138,7 @@ class GenerationAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
@@ -1403,6 +1405,219 @@ class GenerationAppServiceTest {
         assertThat(breakdown).containsEntry("llmMs", 7L);
         assertThat((Map<String, Object>) breakdown.get("toolsMs"))
                 .containsExactly(Map.entry("command", Map.of("test", 4L)));
+    }
+
+    // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
+
+    /** oxlint 违规诊断输出（真实 --format json 形状）。 */
+    private static final String OXLINT_VIOLATIONS_JSON = """
+            { "diagnostics": [{"message": "\\"bg-red-500\\" uses the raw Tailwind palette. Use a theme token.",
+            "code": "shadcn(no-raw-colors)","severity": "error","filename": "src/app/page.tsx",
+            "labels": [{"span": {"line": 3}}]}]}
+            """;
+
+    /** 收尾卡里的设计规范扫描载荷（payload → closing → designLint 两层取值）。 */
+    private static Map<String, Object> lintOf(ArgumentCaptor<Map<String, Object>> payloads,
+            int index) {
+        Map<String, Object> closing = (Map<String, Object>) payloads.getAllValues().get(index)
+                .get(AgentEventTypes.CLOSING_FIELD);
+        return (Map<String, Object>) closing.get("designLint");
+    }
+
+    /** 带规范正本的项目（遵守链的分岔依据——直插正本行，免提炼链路）。 */
+    private void givenSpecRow(Long projectId) {
+        jdbcTemplate.update(
+                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
+                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
+                4821000000000000001L, projectId, "/design/home-1.html", "run-final-1",
+                "{\"--primary\": \"#166534\"}");
+    }
+
+    /** 平台落盘写桩（物化路径的 execWithStdin——缺省成功）。 */
+    private void givenPlatformWriteSucceeds() {
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+    }
+
+    /** oxlint 扫描违规桩（后注册优先——命令含 oxlint 的 exec 分岔到本桩）。 */
+    private void givenOxlintViolations() {
+        when(workspaceLifecycleAppService.exec(anyString(),
+                argThat(command -> command != null && command.command().contains("oxlint"))))
+                .thenReturn(new ExecResultResponse(OXLINT_VIOLATIONS_JSON, "", 1));
+    }
+
+    @Test
+    void given_no_spec_when_dispatch_then_agents_md_plain_and_zero_materialization() {
+        // 一等断言（#296 验收⑤）：无规范项目派发——AGENTS.md 不带设计规范节、
+        // 物化零写入（DESIGN.md／lint 配置皆不落，基座行为零改变）
+        Long projectId = persistedProject("9820");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("已生成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9820"), execs.capture());
+        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .anySatisfy(command -> assertThat(command).contains("AGENTS.md"))
+                .noneSatisfy(command -> assertThat(command).contains("## 设计规范"))
+                .noneSatisfy(command -> assertThat(command).contains("DESIGN.md"));
+        verify(workspaceLifecycleAppService, never()).execWithStdin(any(), any(), any());
+    }
+
+    @Test
+    void given_spec_when_dispatch_then_materialized_and_agents_md_carries_design_section() {
+        // 灵魂用例（#296 验收①）：带规范项目首个构建起跑——物化落位（规则文件＋
+        // lint 配置）＋AGENTS.md 拼入设计规范节（提示词注入的工作区腿）
+        Long projectId = persistedProject("9821");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        givenConverseSucceeds("已生成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9821"), execs.capture());
+        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .anySatisfy(command -> assertThat(command)
+                        .contains("AGENTS.md").contains("## 设计规范"));
+        ArgumentCaptor<WorkspaceExecCommand> writes =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(2)).execWithStdin(eq("9821"),
+                writes.capture(), any());
+        assertThat(writes.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .anySatisfy(command -> assertThat(command).contains("DESIGN.md"))
+                .anySatisfy(command -> assertThat(command).contains(".oxlintrc.json"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_lint_violations_when_close_then_fix_round_then_listed_with_retried() {
+        // 灵魂用例（#296 验收④）：违规 → 自动重试一轮（违规清单经错误现场喂回
+        // 执行体原地修）→ 仍违规 → 收口不被炸（软约束不当硬门）、收尾卡如实列
+        // 违规项＋retried
+        Long projectId = persistedProject("9822");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        givenOxlintViolations();
+        List<String> prompts = new ArrayList<>();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            prompts.add(command.prompt());
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 与切片各一次违规修轮（首试＋修轮）＝4 次 converse；修轮 prompt
+        // 携带违规现场（文件/规则/诊断原文）
+        verify(agentClient, times(4)).converse(any(), any());
+        assertThat(prompts.get(1))
+                .contains("样式合规扫描未过")
+                .contains("src/app/page.tsx:3 no-raw-colors")
+                .contains("bg-red-500");
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing0 = (Map<String, Object>) payloads.getAllValues().get(0)
+                .get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> lint = (Map<String, Object>) closing0.get("designLint");
+        assertThat(lint)
+                .containsEntry("status", "violations")
+                .containsEntry("total", 1)
+                .containsEntry("retried", true);
+        List<Map<String, Object>> listedViolations = (List<Map<String, Object>>) lint.get("violations");
+        assertThat(listedViolations).hasSize(1);
+        assertThat(listedViolations.get(0))
+                .containsEntry("file", "src/app/page.tsx")
+                .containsEntry("rule", "no-raw-colors");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_lint_violations_fixed_when_retry_then_closing_reports_passed_with_retried() {
+        // 修一轮后清零：收尾卡如实叙事「曾发现违规、修一轮后通过」（passed＋
+        // retried）；后继段干净收口＝passed 无 retried（修轮一场 run 至多一轮）
+        Long projectId = persistedProject("9823");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        AtomicInteger scans = new AtomicInteger();
+        when(workspaceLifecycleAppService.exec(anyString(),
+                argThat(command -> command != null && command.command().contains("oxlint"))))
+                .thenAnswer(invocation -> scans.incrementAndGet() == 1
+                        ? new ExecResultResponse(OXLINT_VIOLATIONS_JSON, "", 1)
+                        : new ExecResultResponse("{}", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0：首试违规→修轮清零（2 次 converse）；切片：首试即净（1 次）
+        verify(agentClient, times(3)).converse(any(), any());
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> stage0Lint = lintOf(payloads, 0);
+        assertThat(stage0Lint).containsEntry("status", "passed").containsEntry("retried", true);
+        Map<String, Object> sliceLint = lintOf(payloads, 1);
+        assertThat(sliceLint).containsEntry("status", "passed").doesNotContainKey("retried");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_violations_on_last_attempt_when_no_budget_then_accepted_not_failed() {
+        // 软约束灵魂用例（ADR-0028 Considered「违规即 run 失败——拒绝」）：修轮
+        // 无预算位（末次尝试才见违规）＝如实收口列违规、不 run 失败——重试耗尽
+        // 的硬判据口径不因 lint 改变
+        Long projectId = persistedProject("9824");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        givenOxlintViolations();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("首次中断"))
+                .thenThrow(new IllegalStateException("再次中断"))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "系统已生成");
+                });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 三试（两硬败＋末次收口见违规无预算）→ 如实收口；切片照常起跑
+        // 收口——run 整体成功（generated_at 落位），违规随收尾卡不随 run-failed
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing0 = (Map<String, Object>) payloads.getAllValues().get(0)
+                .get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> lint = (Map<String, Object>) closing0.get("designLint");
+        assertThat(lint)
+                .containsEntry("status", "violations")
+                .doesNotContainKey("retried");
     }
 
     // ---------- 守卫 ----------

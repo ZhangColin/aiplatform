@@ -71,6 +71,17 @@ export type WorkClosing = {
   /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
    *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
   drafts?: ClosingDraft[];
+  /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
+   *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
+  designLint?: DesignLintClosing;
+};
+
+/** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
+export type DesignLintClosing = {
+  status: "passed" | "violations" | "unavailable";
+  retried?: boolean;
+  total?: number;
+  violations?: { file: string; line: number; rule: string; message: string }[];
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -728,6 +739,39 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     version: typeof record.version === "string" ? record.version : undefined,
     selfTest: toSelfTest(record.selfTest),
     drafts: toClosingDrafts(record.drafts),
+    designLint: toDesignLint(record.designLint),
+  };
+}
+
+/**
+ * designLint 载荷容错收窄（#296）：非对象或缺有效 status 回落 undefined（不出
+ * 坏行——收尾卡「按稿对齐」行随在场呈现）；违规清单条目缺 file 剔除（行呈现
+ * 依赖文件定位），status＝violations 而清单空照收（total 仍在——如实）。
+ */
+function toDesignLint(raw: unknown): DesignLintClosing | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  if (record.status !== "passed" && record.status !== "violations"
+      && record.status !== "unavailable") {
+    return undefined;
+  }
+  return {
+    status: record.status,
+    retried: record.retried === true,
+    total: typeof record.total === "number" ? record.total : undefined,
+    violations: Array.isArray(record.violations)
+      ? record.violations.flatMap((violation) => {
+          const entry = asRecord(violation);
+          return entry && typeof entry.file === "string"
+            ? [{
+                file: entry.file,
+                line: typeof entry.line === "number" ? entry.line : 0,
+                rule: typeof entry.rule === "string" ? entry.rule : "",
+                message: typeof entry.message === "string" ? entry.message : "",
+              }]
+            : [];
+        })
+      : undefined,
   };
 }
 

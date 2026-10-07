@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   Monitor,
+  Palette,
   PenLine,
   RotateCcw,
   ShieldCheck,
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useRollbackVersion, useStartVersionView, useStopVersionView } from "@/hooks/use-version";
-import type { ClosingDraft, WorkClosing } from "@/lib/store/chat";
+import type { ClosingDraft, DesignLintClosing, WorkClosing } from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
 import { cn } from "@/lib/utils";
 
@@ -108,6 +109,81 @@ function DraftsArea({ projectId, drafts }: { projectId: string; drafts: ClosingD
   );
 }
 
+/** 违规清单默认可见条数（其余收进「查看全部」——同文件/稿清单收口）。 */
+const VISIBLE_LINT = 5;
+
+/** lint 规则中文名（用户面不露工程码；诊断原文经行 hover 可见）。 */
+const LINT_RULE_LABELS: Record<string, string> = {
+  "no-raw-colors": "裸色",
+  "no-arbitrary-values": "任意值",
+  "no-inline-styles": "内联样式",
+};
+
+/**
+ * 按稿对齐区（#296 遵守三件套③感知面）：带规范项目编码 run 的设计规范扫描
+ * 事实——样式合规（曾自动修一轮则注明，纠偏过程如实）/违规清单（文件:行 +
+ * 规则中文名，hover 带诊断原文）/扫描未执行（如实，不假装达标）。圈注提意见
+ * 走系统预览面既有通道（「像不像」归用户人眼，ADR-0028）。
+ */
+function DesignLintArea({ lint }: { lint: DesignLintClosing }) {
+  const [open, setOpen] = useState(false);
+  const violations = lint.violations ?? [];
+  const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
+  const violating = lint.status === "violations";
+  return (
+    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
+      <div className="flex items-center gap-2 text-[13px]">
+        <Palette className={cn("size-3.5 shrink-0", violating ? "text-amber-600" : "text-muted-foreground")} />
+        <span>
+          按稿对齐：
+          {lint.status === "passed" ? (
+            lint.retried ? "样式合规（曾自动修正一轮）" : "样式合规"
+          ) : lint.status === "unavailable" ? (
+            "样式合规扫描未执行"
+          ) : (
+            <>
+              <span className="font-medium text-amber-600">
+                {lint.total ?? violations.length} 处样式违规
+              </span>
+              {lint.retried ? "（已自动修正一轮，仍余）" : null}
+            </>
+          )}
+        </span>
+      </div>
+      {violating && violations.length > 0 ? (
+        <>
+          <div className="mt-1 font-mono text-xs">
+            {shown.map((violation) => (
+              <div
+                key={`${violation.file}:${violation.line}:${violation.rule}`}
+                className="flex items-center justify-between gap-2 py-0.5"
+                title={violation.message}
+              >
+                <span className="min-w-0 truncate text-foreground/80">
+                  {violation.file}:{violation.line || ""}
+                </span>
+                <span className="shrink-0 text-muted-foreground">
+                  {LINT_RULE_LABELS[violation.rule] ?? violation.rule}
+                </span>
+              </div>
+            ))}
+          </div>
+          {violations.length > VISIBLE_LINT ? (
+            <button
+              type="button"
+              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setOpen(!open)}
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+              {open ? "收起" : `查看全部 ${violations.length} 处`}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
  * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
@@ -160,6 +236,8 @@ export function ClosingCard({
   const removed = files.reduce((total, file) => total + file.removed, 0);
   // 自测统计（#96）：可缺省——自测子智能体未跑时不携带；只记「自测几项」，逐项 ✅/❌ 明细在过程播报
   const selfTest = closing.selfTest;
+  // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
+  const designLint = closing.designLint;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
   // 版本控件让位）——空数组（畸形载荷，后端收口判据＝有新稿、正常路径非空）也走
   // 设计形态如实出「本轮 0 稿」，不闪编码 run 语料
@@ -284,6 +362,10 @@ export function ClosingCard({
               ) : null}
             </div>
           ) : null}
+
+          {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
+              叙事行＋违规清单；设计会话不携带不出 */}
+          {designLint ? <DesignLintArea lint={designLint} /> : null}
         </>
       )}
 

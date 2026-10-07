@@ -93,6 +93,7 @@ public class IterationAppService {
     private final AgentEventBridge eventBridge;
     private final CodingRunTrack codingRunTrack;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final DesignSpecAppService designSpecs;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -107,7 +108,8 @@ public class IterationAppService {
             AgentSessionExecutor sessionExecutor, CoderRunAttempts coderRunAttempts,
             FinishEditFacts finishFacts, AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
-            WorkspaceLifecycleAppService workspaceLifecycleAppService) {
+            WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            DesignSpecAppService designSpecs) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -115,6 +117,7 @@ public class IterationAppService {
         this.eventBridge = eventBridge;
         this.codingRunTrack = codingRunTrack;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.designSpecs = designSpecs;
     }
 
     /**
@@ -332,7 +335,10 @@ public class IterationAppService {
                 !prdNotes.isEmpty(),
                 prdNotes.isEmpty() ? null : String.join("；", prdNotes),
                 fact.changed(),
-                fact.text());
+                fact.text())
+                // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
+                // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
+                .withDesignLint(designSpecs.lintClosingPayload(project));
     }
 
     /**
@@ -364,15 +370,17 @@ public class IterationAppService {
     }
 
     /**
-     * 修正轨道起手（AGENTS.md 资产就位 + 异步提交，{@link #dispatch} 与
-     * {@link #restartFixRun} 共用）：与生成轨同口径——AGENTS.md 平台约定幂等覆写
-     * （#214 既有工作区自动刷新新物理规则，无需重建工作区），失败即环境故障口径
-     * 如实上抛并释放在途标记（run 不起跑）。
+     * 修正轨道起手（设计规范物化＋AGENTS.md 资产就位 + 异步提交，{@link #dispatch}
+     * 与 {@link #restartFixRun} 共用）：与生成轨同口径——设计规范派发物化（#296：
+     * 定稿触发的更新 run 按稿对齐——:root 刷值＝换肤先行、裸色残留交执行体修）＋
+     * AGENTS.md 平台约定幂等覆写（#214 既有工作区自动刷新新物理规则，无需重建
+     * 工作区），失败即环境故障口径如实上抛并释放在途标记（run 不起跑）。
      */
     private void beginFixTrack(Project project, String firstRunId, FixHandoff handoff) {
         Long projectId = project.getId();
         try {
-            GenerationAppService.writeConventionsAsset(workspaceLifecycleAppService, project);
+            GenerationAppService.writeConventionAssets(workspaceLifecycleAppService,
+                    designSpecs, project);
         } catch (RuntimeException e) {
             synchronized (codingRunTrack) {
                 codingRunTrack.end(projectId);

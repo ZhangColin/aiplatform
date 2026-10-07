@@ -33,4 +33,15 @@ final class ContainerCommands {
     static String existenceGuard(String relativePath) {
         return "p=" + quoted(relativePath) + "; if ! test -f \"$p\"; then exit 1; fi;";
     }
+
+    /**
+     * stdin 灌入写文件（#296 收单点，承 #295 备案触发器「第三处出现」）：父目录
+     * 幂等落位、{@code cat >} 接 stdin、stdout = stat 字节回执——平台落盘件共用形
+     * （{@link ProjectMaterials} 物料上传 / {@link DesignSpecs} 规范侧车 / 遵守面
+     * 规则文件与 lint 配置）。路径经单引号包裹＋转义，无注入面。
+     */
+    static String stdinWriteCommand(String relativePath) {
+        return "p=" + quoted(relativePath)
+                + "; d=${p%/*}; mkdir -p \"$d\" && cat > \"$p\" && stat -c %s \"$p\"";
+    }
 }

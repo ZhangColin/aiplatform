@@ -36,6 +36,8 @@ function closing(overrides: Partial<WorkClosing> = {}): WorkClosing {
   };
 }
 
+const VISIBLE_LINT_COUNT = 5;
+
 function renderCard(card: WorkClosing) {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
@@ -281,5 +283,66 @@ describe("ClosingCard · 稿清单与去向（#290 设计会话收尾卡扩载�
     expect(html).not.toContain("需求文档："); // 判定行不出（设计收口不是编码轮语料）
     expect(html).not.toContain("检查通过");
     expect(html).not.toContain("查看全部"); // 零稿行不出清单区
+  });
+});
+
+describe("ClosingCard · 按稿对齐（#296 设计规范扫描）", () => {
+  it("通过：样式合规一行；曾自动修一轮则注明（纠偏过程如实）", () => {
+    const html = renderCard(closing({
+      designLint: { status: "passed" },
+    }));
+    expect(html).toContain("按稿对齐：");
+    expect(html).toContain("样式合规");
+    expect(html).not.toContain("曾自动修正一轮");
+
+    const retried = renderCard(closing({
+      designLint: { status: "passed", retried: true },
+    }));
+    expect(retried).toContain("样式合规（曾自动修正一轮）");
+  });
+
+  it("违规：总数行（曾修一轮注明仍余）＋清单（文件:行＋规则中文名，hover 带诊断原文）", () => {
+    const html = renderCard(closing({
+      designLint: {
+        status: "violations",
+        total: 3,
+        retried: true,
+        violations: [
+          { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
+          { file: "src/app/page.tsx", line: 4, rule: "no-arbitrary-values", message: "p-[13px]" },
+        ],
+      },
+    }));
+    expect(html).toContain("3 处样式违规");
+    expect(html).toContain("（已自动修正一轮，仍余）");
+    expect(html).toContain("src/app/page.tsx:3");
+    expect(html).toContain("裸色"); // 规则中文名（不露工程码）
+    expect(html).toContain("任意值");
+    expect(html).toContain('title="raw palette"'); // 诊断原文经 hover 可见
+  });
+
+  it("违规超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      file: `src/app/p${i}.tsx`, line: i + 1, rule: "no-raw-colors", message: "raw",
+    }));
+    const html = renderCard(closing({
+      designLint: { status: "violations", total: 7, violations: many },
+    }));
+    expect(html).toContain("7 处样式违规");
+    expect(html).toContain("查看全部 7 处");
+    expect(html).not.toContain(`src/app/p${VISIBLE_LINT_COUNT}.tsx`); // 超限条目收起
+  });
+
+  it("扫描未执行：如实呈现，不假装达标", () => {
+    const html = renderCard(closing({
+      designLint: { status: "unavailable" },
+    }));
+    expect(html).toContain("样式合规扫描未执行");
+    expect(html).not.toContain("样式合规（"); // 不与通过叙事混淆
+  });
+
+  it("无规范项目：不携带不出按稿对齐行（基座行为零改变的呈现面）", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("按稿对齐");
   });
 });

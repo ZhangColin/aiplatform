@@ -23,8 +23,8 @@ import com.aieducenter.aiplatform.base.workspace.infrastructure.docker.DockerEnv
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 位图出口内核容器活体（#284，B0 §5 副作用以真实状态为准）：真 dev 容器（0.11
- * 镜像，chromium＋resvg 已内置）里跑 {@link WorkspaceRenders} 命令——HTML→PNG
+ * 位图出口内核容器活体（#284，B0 §5 副作用以真实状态为准）：真 dev 容器（0.12 镜像，
+ * chromium＋resvg 已内置）里跑 {@link WorkspaceRenders} 命令——HTML→PNG
  * 保真（几何/配色/文字逐像素核对，fixture 留存 test/resources/render）、SVG→PNG
  * 旁路（同款保真核对＋零浏览器证明：chromium 二进制挪走仍渲染成）、源不在退出码
  * 1。daemon 不在则跳过（CI 无 docker 时不红）；「与浏览器呈现保真」的人眼活体

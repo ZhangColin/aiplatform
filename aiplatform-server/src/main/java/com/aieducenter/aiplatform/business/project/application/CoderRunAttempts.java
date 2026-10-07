@@ -111,17 +111,21 @@ class CoderRunAttempts {
      * 的修订说明）+ 系统改没改（生成轮 = 探活收口产出；更新轮 = finish_edit 工具
      * 事实）+ 各自说明。事实源在收口判据回调（onSuccess）——判定跟职责走，本环
      * 只拼装不判定。设计轨道另携 {@code drafts} 稿清单（#292：轨道层在收口点拼装
-     * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）。
+     * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
+     * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
+     * <b>自测事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
+     * 项目的编码 run 在场，非规范项目/设计会话恒 null）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
-            String systemNote, List<Map<String, Object>> drafts) {
+            String systemNote, List<Map<String, Object>> drafts,
+            Map<String, Object> designLint) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null);
+            return new ClosingJudgment(false, null, true, note, null, null);
         }
 
         /**
@@ -132,7 +136,7 @@ class CoderRunAttempts {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts);
+                    drafts == null ? List.of() : drafts, null);
         }
 
         /**
@@ -141,7 +145,12 @@ class CoderRunAttempts {
          */
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null, null);
+        }
+
+        /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
+        ClosingJudgment withDesignLint(Map<String, Object> lint) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts, lint);
         }
     }
 
@@ -243,6 +252,9 @@ class CoderRunAttempts {
         // 阶段耗时分布（#111）：每次尝试各起一账——尝试墙钟 + 跨流段合并的阶段耗时
         // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）
         List<AttemptDuration> attemptDurations = new ArrayList<>();
+        // lint 违规修轮已用标记（#296 有限自动重试一轮）：一场 run 至多一轮——首轮
+        // 收口扫描违规即喂回执行体原地修，之后（修净或仍违规）如实收口
+        boolean lintFixRoundUsed = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             Instant attemptStartedAt = Instant.now();
             AtomicReference<StageDurations> durations =
@@ -319,7 +331,7 @@ class CoderRunAttempts {
                 //（超限转终态）时出，与轨道层 run-failed 同窗口。状态终值 = 探活结果，
                 // 随智能体事件族进重放缓冲，可被收尾统计消费（#88 轮末统计行）
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
-                Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 成版）
+                Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 样式扫描 → 成版）
                 ClosingJudgment judgment;
                 try {
                     judgment = onSuccess.apply(attemptRunId, runChanges);
@@ -330,8 +342,30 @@ class CoderRunAttempts {
                     }
                     throw e;
                 }
+                // lint 违规有限自动重试一轮（#296 遵守三件套③，软约束不当硬门）：
+                // 判据已过（8081/finish_edit）、样式扫描有违规且修轮未用、尝试还有
+                // 余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试——
+                // 静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）；
+                // 一轮用尽仍违规＝如实随收尾卡列违规项收口（不静默不假装达标，
+                // 也不 run 失败）
+                Map<String, Object> lint = judgment.designLint();
+                if (lint != null && !lintViolations(lint).isEmpty()
+                        && !lintFixRoundUsed && attempt < maxAttempts) {
+                    lintFixRoundUsed = true;
+                    previousError = lintRetryScene(lint);
+                    log.info("[{}] 项目 {} 样式合规扫描未过，自动修一轮（attemptRunId={}，违规 {} 处）",
+                            what, projectId, attemptRunId, lint.get("total"));
+                    continue;
+                }
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
+                    // lint 修轮事实（#296）：曾自动修一轮即标记 retried——收尾卡如实
+                    // 叙事「曾发现违规、修一轮后通过/仍余 N 处」，不抹掉纠偏过程
+                    if (judgment.designLint() != null && lintFixRoundUsed) {
+                        Map<String, Object> retried = new LinkedHashMap<>(judgment.designLint());
+                        retried.put(CLOSING_LINT_RETRIED_FIELD, true);
+                        judgment = judgment.withDesignLint(retried);
+                    }
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what, selfTestCommands, seat.draftsItem());
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
@@ -440,11 +474,61 @@ class CoderRunAttempts {
         if (draftsItem != null) {
             closing.put(CLOSING_DRAFTS_FIELD, judgment.drafts());
         }
+        if (judgment.designLint() != null) {
+            closing.put(CLOSING_LINT_FIELD, judgment.designLint());
+        }
         return closing;
     }
 
     /** 收口扩载的稿清单键（#289 设计会话扩载——本轮稿清单与去向）。 */
     static final String CLOSING_DRAFTS_FIELD = "drafts";
+
+    /**
+     * 收口扩载的设计规范扫描键（#296：{@code { status, retried?, total?, violations? }}
+     * ——带规范项目编码 run 的「按稿对齐」叙事与 lint 结果；无规范项目不携带）。
+     */
+    static final String CLOSING_LINT_FIELD = "designLint";
+
+    /** 扫描载荷的「曾自动修一轮」键（修轮用尽即标——纠偏过程如实）。 */
+    static final String CLOSING_LINT_RETRIED_FIELD = "retried";
+
+    /**
+     * 扫描事实里的违规清单（形状由 {@code DesignSpecAppService#lintClosingPayload}
+     * 平台拼装——此处只读不计；passed/unavailable 无清单＝空）。
+     */
+    private static List<Map<String, Object>> lintViolations(Map<String, Object> lint) {
+        Object violations = lint.get("violations");
+        if (violations instanceof List<?> list) {
+            return list.stream()
+                    .filter(item -> item instanceof Map)
+                    .map(item -> {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> violation = (Map<String, Object>) item;
+                        return violation;
+                    })
+                    .toList();
+        }
+        return List.of();
+    }
+
+    /**
+     * lint 违规重试现场（#296 喂回执行体的错误现场——对偶 #221 原地修携带物）：
+     * 违规清单逐条原样（file:line 规则：message——执行体据此定位修），不加工
+     * 不截短（清单在扫描载荷处已截 {@code MAX_LINT_LISTED}）。
+     */
+    private static String lintRetryScene(Map<String, Object> lint) {
+        StringBuilder scene = new StringBuilder(
+                "设计规范样式合规扫描未过（样式一律引用语义 token 或品牌色 token，细则见工作区"
+                        + " DESIGN.md）——修掉以下违规再收口：");
+        List<Map<String, Object>> violations = lintViolations(lint);
+        for (int i = 0; i < violations.size(); i++) {
+            Map<String, Object> violation = violations.get(i);
+            scene.append('\n').append(i + 1).append(". ").append(violation.get("file"))
+                    .append(':').append(violation.get("line")).append(' ')
+                    .append(violation.get("rule")).append("：").append(violation.get("message"));
+        }
+        return scene.toString();
+    }
 
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
      *  = 工作区布局常量表）。 */
@@ -483,7 +567,8 @@ class CoderRunAttempts {
     /**
      * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
      * = 按工具名分桶·command 按命令归组嵌套 / 自测 = self-test 委派窗 / 收口尾序 =
-     * 探活 + 成版）+ 逐尝试分布（静默重试代价可归因——每次尝试的墙钟与桶各自带）。
+     * 探活 + 样式合规扫描（#296）+ 成版）+ 逐尝试分布（静默重试代价可归因——每次
+     * 尝试的墙钟与桶各自带）。
      * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验等）
      * = durationMs；closingMs 含成版而 durationMs 窗口不含（小正
      * 偏差）——量级不符即埋点有洞（缝测守卫）。

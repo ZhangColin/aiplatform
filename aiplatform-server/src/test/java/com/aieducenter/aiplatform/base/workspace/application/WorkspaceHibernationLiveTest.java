@@ -162,7 +162,7 @@ class WorkspaceHibernationLiveTest {
         try {
             Process p = new ProcessBuilder("docker", "run", "--rm", "--entrypoint", "cat",
                     "-v", "vol-" + containerName + ":/workspace",
-                    "aiplatform/dev:0.11", "/workspace/.hibernate-probe")
+                    "aiplatform/dev:0.12", "/workspace/.hibernate-probe")
                     .redirectErrorStream(false).start();
             String out = new String(p.getInputStream().readAllBytes());
             p.waitFor();

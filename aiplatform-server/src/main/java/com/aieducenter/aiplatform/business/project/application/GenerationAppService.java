@@ -368,6 +368,18 @@ public class GenerationAppService {
             """;
 
     /**
+     * AGENTS.md 设计规范节（#296 遵守三件套②提示词注入的工作区腿——短条目优于
+     * 长段，Lovable 官方指引；带规范项目才拼入，无规范项目零改变）：DESIGN.md
+     * 指路每轮读＋token 纪律。事实面（token 清单/色板/风格）在 DESIGN.md，本节
+     * 只立规矩——两级各安其位。
+     */
+    static final String AGENTS_MD_DESIGN_SPEC_SECTION = """
+
+            ## 设计规范
+
+            本项目带设计规范正本：工作区根的 DESIGN.md（随设计定稿刷新、平台维护）——每轮开工先读，系统界面的颜色、字体、圆角与组件风格照它对齐（视觉正源＝定稿设计稿）。src/app/globals.css 的 :root 是 token 生效位，其中平台维护的「平台设计规范」@theme 块已收窄默认调色板（bg-red-500 等裸色工具类不可用）：样式一律引用语义 token 或品牌色 token（bg-brand-1 等），禁裸色、禁任意值（p-[13px]）、禁 inline style；需要新颜色时在 :root 定义 token 并在 @theme 暴露，不写死色值。token 清单与细则见 DESIGN.md。""";
+
+    /**
      * 收口判据核验探针（#35）：converse 无异常不构成成功——run 执行体可能道歉式
      * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 EXECUTOR systemPrompt
      * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
@@ -388,6 +400,7 @@ public class GenerationAppService {
     private final TransactionTemplate transactionTemplate;
     private final MainAgentAppService mainAgentAppService;
     private final ConversationHistoryAppService conversationHistory;
+    private final DesignSpecAppService designSpecs;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -419,7 +432,8 @@ public class GenerationAppService {
             GenerationSegmentRepository generationSegments, DesignItemRepository designItems,
             TransactionTemplate transactionTemplate,
             @Lazy MainAgentAppService mainAgentAppService,
-            ConversationHistoryAppService conversationHistory) {
+            ConversationHistoryAppService conversationHistory,
+            DesignSpecAppService designSpecs) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -432,6 +446,7 @@ public class GenerationAppService {
         this.transactionTemplate = transactionTemplate;
         this.mainAgentAppService = mainAgentAppService;
         this.conversationHistory = conversationHistory;
+        this.designSpecs = designSpecs;
     }
 
     /**
@@ -521,7 +536,9 @@ public class GenerationAppService {
             return dispatchPlanProduction(project);
         }
         try {
-            writeConventionsAsset(workspaceLifecycleAppService, project);
+            // 起手资产就位（#296）：设计规范物化＋AGENTS.md 平台约定（物化先于
+            // AGENTS.md——设计规范节内容随物化结果）
+            writeConventionAssets(workspaceLifecycleAppService, designSpecs, project);
             // 交接物在位 = 计划（重）产——整组替换落表；沿用表内计划的再派（REST 兜底、
             // PRD 未演进）不重落——片状态是续跑事实，重落即清零
             if (plan != null) {
@@ -833,9 +850,10 @@ public class GenerationAppService {
      * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达才收口——converse 无异常
      * 不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 self-test 兜
-     * （收口扩载 selfTest 统计），平台侧不新增探针。收口即片状态落表（#220，ord 段号
-     * 口径一致）；最后一片收口才落 {@code generated_at}（口径不变——阶段 0 / 中间片
-     * 不落位 = 拆片不漂移「确认下单」可见性）。
+     * （收口扩载 selfTest 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
+     * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
+     * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
+     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）。
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
             boolean markGenerated, String runId, String summary) {
@@ -847,7 +865,8 @@ public class GenerationAppService {
         }
         // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
-        return CoderRunAttempts.ClosingJudgment.generation(summary);
+        return CoderRunAttempts.ClosingJudgment.generation(summary)
+                .withDesignLint(designSpecs.lintClosingPayload(project));
     }
 
     /** 片收口状态落表（#220）：真收口（8081 探活过）即置已收口 + 用户面 run 锚。 */
@@ -927,21 +946,30 @@ public class GenerationAppService {
 
     /**
      * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
-     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无单引号）。
+     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无单引号）。带规范项目
+     * 追加设计规范节（#296）。
      */
-    static String agentsMdWriteCommand() {
+    static String agentsMdWriteCommand(boolean withDesignSpec) {
         return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
-                + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT + "\nPLATFORM_EOF";
+                + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT
+                + (withDesignSpec ? AGENTS_MD_DESIGN_SPEC_SECTION : "")
+                + "\nPLATFORM_EOF";
     }
 
     /**
-     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区）：
-     * AGENTS.md 平台约定写入。退出码非 0 即写入失败（环境故障口径如实上抛，run
-     * 不起跑）。
+     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区；
+     * #296 起手序单点——<b>物化先于 AGENTS.md</b>，节内容随物化结果）：设计规范
+     * 派发物化（带规范项目四件落位〔:root 刷值／收窄块／DESIGN.md／lint 配置〕、
+     * 无规范项目零动作零写入）→ AGENTS.md 平台约定写入（带规范项目拼设计规范
+     * 节）。退出码非 0 即写入失败（环境故障口径如实上抛，run 不起跑——遵守链
+     * 不静默缺席）。
      */
-    static void writeConventionsAsset(WorkspaceLifecycleAppService workspace, Project project) {
+    static void writeConventionAssets(WorkspaceLifecycleAppService workspace,
+            DesignSpecAppService designSpecs, Project project) {
+        boolean withDesignSpec = designSpecs.materializeAtDispatch(project);
         ExecResultResponse result = workspace.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(agentsMdWriteCommand()));
+                Long.toString(project.getWorkspaceId()),
+                new WorkspaceExecCommand(agentsMdWriteCommand(withDesignSpec)));
         if (result.exitCode() != 0) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "AGENTS.md 平台约定写入失败: " + result.stderr());

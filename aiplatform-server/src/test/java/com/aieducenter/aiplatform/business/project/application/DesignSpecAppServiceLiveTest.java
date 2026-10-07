@@ -31,11 +31,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 规范提炼容器活体（#295 验收⑤；docker daemon 不在整类跳过，对偶出图冒烟口径）：
- * 真 dev 容器里走全链——界面类稿 :root 直提落正本（提取的 token 与稿内 :root
- * 一致——cat 回读独立见证）、平面类参数物化侧车＋定稿转正（平面参数与物化草稿
- * 一致）。提炼是确定性平台动作（零供应商依赖），无需出图 key；「执行体真按协议
- * 写 :root」的活体走查归用户（绿测≠能跑）。
+ * 规范正本容器活体（#295 验收⑤＋#296 验收⑦；docker daemon 不在整类跳过，对偶出图
+ * 冒烟口径）：真 dev 容器里走全链——界面类稿 :root 直提落正本（提取的 token 与稿内
+ * :root 一致——cat 回读独立见证）、平面类参数物化侧车＋定稿转正（平面参数与物化
+ * 草稿一致）、遵守面派发物化（:root 刷值落位/再物化＝换肤幂等、DESIGN.md／lint
+ * 配置落位）与收口扫描（oxlint＋@shadcn/lint 真跑：违规回执带定位与规则、修净即
+ * passed、基座骨架页合规）。提炼与物化是确定性平台动作（零供应商依赖），无需出图
+ * key；「执行体真按协议写 :root／修违规」的活体走查归用户（绿测≠能跑）。
  */
 @IntegrationTest
 class DesignSpecAppServiceLiveTest {
@@ -145,6 +147,107 @@ class DesignSpecAppServiceLiveTest {
         assertThat(paletteFace(row)).as("平面参数（色板）与物化草稿一致").isEqualTo(PALETTE);
         assertThat(row.get("style")).as("平面参数（风格）与物化草稿一致").isEqualTo(STYLE);
         assertThat(row.get("tokens")).isNull();
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_spec_in_container_when_dispatch_materialize_then_root_written_then_refreshed() {
+        // 灵魂用例（#296 验收①②⑦）：派发物化容器事实——:root 刷值落位（cat 回读
+        // 独立见证：定稿 token 值进基座）＋平台收窄块＋DESIGN.md／lint 配置；再定稿
+        // 再物化＝刷值（换肤）且标记块唯一（幂等不叠加）
+        givenProjectWithWorkspace();
+        writeFile("design/home-1.html", INTERFACE_DRAFT);
+        appService.refreshAtFinalize(project(), "/design/home-1.html", "live-run-3");
+
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        String css = readFile(DesignSpecs.BASELINE_GLOBALS_CSS);
+        assertThat(css).as("定稿 token 值刷进基座 :root").contains("--primary: #166534;");
+        assertThat(css).as("基座缺省值已被换肤").doesNotContain("--primary: oklch(0.205 0 0)");
+        assertThat(css).as("调色板收窄块在位（先于 @theme inline）")
+                .contains("--color-*: initial;")
+                .contains(DesignSpecs.SPEC_THEME_BEGIN);
+        assertThat(css.indexOf(DesignSpecs.SPEC_THEME_END))
+                .isLessThan(css.indexOf("@theme inline"));
+        assertThat(readFile("DESIGN.md")).as("规则文件落位").contains("# 设计规范").contains("/design/home-1.html");
+        assertThat(readFile(".oxlintrc.json")).as("lint 配置落位").contains("shadcn/no-raw-colors");
+
+        // 中途更新＝先确定性刷值：新定稿换主色 → 再物化 → :root 值换掉、收窄块唯一
+        writeFile("design/home-2.html", """
+                <!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>
+                :root { --primary: #b91c1c; --radius: 0.75rem; }
+                body { background: var(--primary); }
+                </style></head><body></body></html>
+                """);
+        appService.refreshAtFinalize(project(), "/design/home-2.html", "live-run-4");
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        String refreshed = readFile(DesignSpecs.BASELINE_GLOBALS_CSS);
+        assertThat(refreshed).as("新定稿刷值＝全局换肤").contains("--primary: #b91c1c;");
+        assertThat(refreshed).doesNotContain("--primary: #166534;");
+        assertThat(countOccurrences(refreshed, DesignSpecs.SPEC_THEME_BEGIN))
+                .as("标记块幂等唯一").isEqualTo(1);
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_violating_page_in_container_when_closing_scan_then_receipt_roundtrip() {
+        // 灵魂用例（#296 验收④⑦）：lint 回执容器事实——基座装好的 oxlint＋@shadcn/lint
+        // 真跑：违规页 → violations 带文件/行号/规则；修掉 → passed。基座骨架页本身
+        // 合规（token 化）＝首个构建不被空违规炸修轮的活证
+        givenProjectWithWorkspace();
+        writeFile("design/home-1.html", INTERFACE_DRAFT);
+        appService.refreshAtFinalize(project(), "/design/home-1.html", "live-run-5");
+        assertThat(appService.materializeAtDispatch(project())).isTrue();
+
+        // 基座骨架页（物化后的收窄环境）应干净
+        Map<String, Object> baselineScan = appService.lintClosingPayload(project());
+        assertThat(baselineScan).as("基座骨架页合规（不空耗修轮）").containsEntry("status", "passed");
+
+        // 执行体写了裸色 → 扫描回执带定位与规则
+        writeFile("src/app/violating-page.tsx", """
+                export default function Page() {
+                  return (
+                    <div className="bg-red-500 p-[13px]" style={{ margin: 4 }}>
+                      <span className="text-muted-foreground">违规样例</span>
+                    </div>
+                  );
+                }
+                """);
+        Map<String, Object> payload = appService.lintClosingPayload(project());
+        assertThat(payload.get("status")).isEqualTo("violations");
+        assertThat((Integer) payload.get("total")).isGreaterThanOrEqualTo(2);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> violations = (List<Map<String, Object>>) payload.get("violations");
+        assertThat(violations).extracting(violation -> violation.get("rule"))
+                .contains("no-raw-colors", "no-arbitrary-values", "no-inline-styles");
+        assertThat(violations).allSatisfy(violation -> {
+            assertThat((String) violation.get("file")).isEqualTo("src/app/violating-page.tsx");
+            assertThat((Integer) violation.get("line")).isPositive();
+        });
+
+        // 修掉（token 化）→ passed
+        writeFile("src/app/violating-page.tsx", """
+                export default function Page() {
+                  return (
+                    <div className="bg-primary p-3">
+                      <span className="text-muted-foreground">合规样例</span>
+                    </div>
+                  );
+                }
+                """);
+        assertThat(appService.lintClosingPayload(project())).containsEntry("status", "passed");
+    }
+
+    /** 子串计数（幂等唯一性断言）。 */
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 
     // ---------- 工具 ----------

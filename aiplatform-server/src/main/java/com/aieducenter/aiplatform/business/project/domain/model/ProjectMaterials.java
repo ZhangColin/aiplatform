@@ -87,8 +87,7 @@ public final class ProjectMaterials {
         if (!ProjectFiles.isViewable(relativePath)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + relativePath);
         }
-        return "p=" + ContainerCommands.quoted(relativePath)
-                + "; d=${p%/*}; mkdir -p \"$d\" && cat > \"$p\" && stat -c %s \"$p\"";
+        return ContainerCommands.stdinWriteCommand(relativePath);
     }
 
     /** 词干按 UTF-8 字节截断（不切半个字符；上限内原样）。 */

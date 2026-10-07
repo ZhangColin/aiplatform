@@ -37,6 +37,13 @@ public final class WorkspaceLayout {
     /** 约定二：平台约定文件（生成环注入内容，v1 由 system prompt 承载、文件面随资产就位）。 */
     public static final String AGENTS_MD = "AGENTS.md";
 
+    /**
+     * 设计规范规则文件（#296/ADR-0028 双件之规则面）：带规范项目由平台随定稿刷新
+     * 确定性写入（人读正本——token 表/品牌色板/风格/遵守条目），AGENTS.md 指路
+     * 每轮读；无规范项目不落位。
+     */
+    public static final String DESIGN_MD = "DESIGN.md";
+
     /** 文档目录（PRD 等面向用户与智能体的文档产物）。 */
     public static final String DOCS_DIR = "docs";
 

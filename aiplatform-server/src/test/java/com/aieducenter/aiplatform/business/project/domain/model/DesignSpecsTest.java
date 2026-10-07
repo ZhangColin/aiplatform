@@ -178,4 +178,144 @@ class DesignSpecsTest {
                 .contains("cat > \"$p\"")
                 .contains("stat -c %s \"$p\"");
     }
+
+    // ---------- 遵守面（#296 消费侧：:root 刷值 / 收窄块 / 品牌色 / 规则文件） ----------
+
+    /** 真实形态基座 globals.css（#293 起基座即此形——物化的改写对象）。 */
+    private static final String BASELINE_CSS = """
+            @import "tailwindcss";
+            @import "shadcn/tailwind.css";
+
+            @custom-variant dark (&:is(.dark *));
+
+            @theme inline {
+              --color-primary: var(--primary);
+              --color-muted-foreground: var(--muted-foreground);
+            }
+
+            :root {
+              --primary: oklch(0.205 0 0);
+              --muted-foreground: oklch(0.556 0 0);
+              --radius: 0.625rem;
+            }
+            """;
+
+    @Test
+    void given_spec_tokens_when_refresh_root_then_values_swapped_and_rest_kept() {
+        // 灵魂用例（#296 验收②：中途更新先刷值——语义引用不变时刷值即全局换肤）：
+        // 已声明 token 原位换值、未声明的（--brand-1）追加进块尾、执行体自加
+        // token（--chart-1）与注释原样保留；@theme inline 引用不动
+        String refreshed = DesignSpecs.refreshRootValues(BASELINE_CSS, Map.of(
+                "--primary", "oklch(0.55 0.2 260)",
+                "--muted-foreground", "oklch(0.4 0 0)",
+                "--brand-1", "#7c3aed"));
+        assertThat(refreshed)
+                .contains("--primary: oklch(0.55 0.2 260);")
+                .contains("--muted-foreground: oklch(0.4 0 0);")
+                .contains("--brand-1: #7c3aed;")
+                .contains("--radius: 0.625rem;")
+                .contains("--color-primary: var(--primary);")
+                .doesNotContain("--primary: oklch(0.205 0 0)");
+        // 幂等：同输入重复刷值稳定（重复派发＝重复刷值不叠加）
+        assertThat(DesignSpecs.refreshRootValues(refreshed, Map.of(
+                "--primary", "oklch(0.55 0.2 260)",
+                "--muted-foreground", "oklch(0.4 0 0)",
+                "--brand-1", "#7c3aed"))).isEqualTo(refreshed);
+    }
+
+    @Test
+    void given_no_root_block_when_refresh_then_block_appended() {
+        // 执行体重构了样式文件（:root 不在）＝整块追加在文件尾——生效位由平台落定
+        String css = "@import \"tailwindcss\";\n\nbody { margin: 0; }\n";
+        String refreshed = DesignSpecs.refreshRootValues(css, Map.of("--primary", "#123456"));
+        assertThat(refreshed)
+                .startsWith("@import \"tailwindcss\";")
+                .endsWith(":root {\n  --primary: #123456;\n}\n")
+                .contains("body { margin: 0; }");
+    }
+
+    @Test
+    void given_blank_or_empty_when_refresh_then_unchanged() {
+        assertThat(DesignSpecs.refreshRootValues(BASELINE_CSS, Map.of())).isEqualTo(BASELINE_CSS);
+        assertThat(DesignSpecs.refreshRootValues(null, Map.of("--primary", "#fff"))).isNull();
+    }
+
+    @Test
+    void given_no_spec_theme_when_upsert_then_inserted_after_imports_before_theme_inline() {
+        // 首次物化：收窄块插在最后一条 @import 之后——必须先于 @theme inline
+        // （实测序即语义：重置块在后会连语义映射一并清掉）
+        String block = DesignSpecs.specThemeBlockOf(Map.of("--brand-1", "#7c3aed"));
+        String css = DesignSpecs.upsertSpecTheme(BASELINE_CSS, block);
+        assertThat(css.indexOf("@import \"shadcn/tailwind.css\";")).isLessThan(css.indexOf(DesignSpecs.SPEC_THEME_BEGIN));
+        assertThat(css.indexOf(DesignSpecs.SPEC_THEME_END)).isLessThan(css.indexOf("@theme inline"));
+        assertThat(css).contains("--color-*: initial;").contains("--color-brand-1: var(--brand-1);");
+    }
+
+    @Test
+    void given_existing_spec_theme_when_upsert_then_replaced_wholesale() {
+        // 再派发（新定稿刷新）：标记块整块替换——色板演进不残留旧映射
+        String first = DesignSpecs.upsertSpecTheme(BASELINE_CSS,
+                DesignSpecs.specThemeBlockOf(Map.of("--brand-1", "#111111", "--brand-2", "#222222")));
+        String second = DesignSpecs.upsertSpecTheme(first,
+                DesignSpecs.specThemeBlockOf(Map.of("--brand-9", "#999999")));
+        assertThat(second).contains("--color-brand-9: var(--brand-9);");
+        assertThat(second).doesNotContain("--brand-1").doesNotContain("--brand-2");
+        // 标记块外的原内容不动（@import 与 @theme inline 保持唯一）
+        assertThat(second.indexOf("@theme inline")).isGreaterThan(second.indexOf(DesignSpecs.SPEC_THEME_END));
+        int imports = second.split("@import", -1).length - 1;
+        assertThat(imports).isEqualTo(2);
+    }
+
+    @Test
+    void given_tokens_when_spec_theme_block_then_only_brand_exposed() {
+        // 品牌色暴露只认 --brand-* 命名约定（语义 token 已在 @theme inline——重复
+        // 暴露无收益）；无品牌色＝仅收窄行
+        String noBrand = DesignSpecs.specThemeBlockOf(Map.of("--primary", "#123", "--radius", "1rem"));
+        assertThat(noBrand).contains("--color-*: initial;").doesNotContain("--color-primary");
+    }
+
+    @Test
+    void given_palette_when_brand_tokens_then_order_deterministic() {
+        // 参数面确定性映射：--brand-N 名序即色板序（不猜语义角色）；空白剔除、
+        // 截 8 防御（正本列已截）
+        assertThat(DesignSpecs.brandTokensOf(List.of("#7c3aed", " #0ea5e9 ", "")))
+                .containsExactly(Map.entry("--brand-1", "#7c3aed"), Map.entry("--brand-2", "#0ea5e9"));
+        assertThat(DesignSpecs.brandTokensOf(null)).isEmpty();
+        List<String> ten = List.of("#1", "#2", "#3", "#4", "#5", "#6", "#7", "#8", "#9", "#10");
+        assertThat(DesignSpecs.brandTokensOf(ten)).hasSize(8);
+    }
+
+    @Test
+    void given_token_face_when_design_rules_then_table_and_terms_present() {
+        // 规则文件（双件之规则面）：token 表直陈＋遵守条目常量＋视觉正源指路＋
+        // 机器正本指路——平台确定性拼装、非模型动作
+        String md = DesignSpecs.designRulesMarkdown("/design/home-1.html",
+                Map.of("--primary", "#166534", "--brand-1", "#7c3aed"), null, null);
+        assertThat(md)
+                .contains("# 设计规范")
+                .contains("/design/home-1.html")
+                .contains("src/app/globals.css")
+                .contains("| `--primary` | `#166534` |")
+                .contains("token 优先")
+                .contains("禁止裸色")
+                .contains("--color-*: initial")
+                .contains("@shadcn/lint")
+                .doesNotContain("## 品牌色板");
+    }
+
+    @Test
+    void given_params_face_when_design_rules_then_palette_and_style_sections() {
+        // 参数面：品牌色板（含工具类指引）＋风格短语各按在场呈现
+        String md = DesignSpecs.designRulesMarkdown("/design/logo-1.png", null,
+                List.of("#7c3aed", "#0ea5e9"), "几何极简");
+        assertThat(md)
+                .contains("## 品牌色板")
+                .contains("`--brand-1`：#7c3aed（工具类 bg-brand-1 等）")
+                .contains("## 风格")
+                .contains("几何极简")
+                .doesNotContain("## 设计 token");
+        // 仅风格正本（无色板）也成文——两面各按在场
+        String styleOnly = DesignSpecs.designRulesMarkdown("/design/logo-2.png", null, null, "手写体温度");
+        assertThat(styleOnly).contains("## 风格").doesNotContain("## 品牌色板");
+    }
 }

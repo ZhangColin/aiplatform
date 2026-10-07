@@ -170,6 +170,16 @@ public final class ProjectFiles {
     }
 
     /**
+     * stdin 灌入写文件命令（#296 公开腿——平台落盘件共用形：父目录幂等落位＋
+     * {@code cat} 接 stdin＋stat 字节回执；命令体单点在
+     * {@link ContainerCommands#stdinWriteCommand}）。路径经单引号包裹＋转义，
+     * 无注入面。
+     */
+    public static String stdinWriteCommand(String path) {
+        return ContainerCommands.stdinWriteCommand(path);
+    }
+
+    /**
      * 设计稿删除命令（#293 悬卡删除；path 须先过 {@link #isViewable}，design
      * 锚定判定归调用侧）：{@code rm -f} 幂等——稿已不在也 0 退出（删除的终态
      * 就是不在，重复删除不报错）。路径经单引号包裹 + 转义，无注入面。

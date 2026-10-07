@@ -135,10 +135,21 @@ closing: {
                                    #   收尾卡携带）＝后续触发事实（用户语言：「系统已开始
                                    #   按定稿设计对齐」/「系统更新已排入下一轮」/「设计已
                                    #   全部定稿，系统开始构建」/「设计已全部定稿，可以确认
-                                   #   下单了」——开放下单是可见性事实非派发）；规范去向随
-                                   #   一致性桥（#295）扩载。候选产出轮（首产/改稿）不携带
-                                   #   triggers；编码 run 不携带本键
-  ]
+                                   #   下单了」——开放下单是可见性事实非派发）；候选产出轮
+                                   #   （首产/改稿）不携带 triggers；编码 run 不携带本键
+  ],
+  designLint:  {                    # 可缺省——设计规范扫描（#296 遵守三件套③）：带规范
+    status: "violations",           # 项目编码 run（生成段/更新轮）携带（收尾卡「按稿对齐」
+    retried:   true,                # 行）；status ∈ passed（样式合规）/ violations（违规清
+    total:     3,                   # 单随附）/ unavailable（扫描未执行——如实不假装达标）；
+    violations: [                   # retried＝曾发现违规并自动修一轮（修净仍携 passed＋
+      { file: "src/app/page.tsx",   # retried，纠偏过程如实）；total＝违规总数（清单截 20）；
+        line: 3,                    # violations 条目＝file（工作区相对形）/ line / rule
+        rule: "no-raw-colors",      # （no-raw-colors 裸色 / no-arbitrary-values 任意值 /
+        message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
+    ]                               # message（诊断原文）。无规范项目与设计会话不携带——
+  }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
+
   durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
                                    # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
     llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）

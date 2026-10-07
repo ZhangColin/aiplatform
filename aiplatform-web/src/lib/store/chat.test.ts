@@ -681,4 +681,35 @@ describe("chat store · 收尾卡稿清单（#289 扩载、#290 呈现：live �
       })?.drafts,
     ).toEqual([{ item: "ok", media: "html", path: "/design/a.html" }]);
   });
+
+  it("designLint 容错收窄（#296）：三态照收、坏条目剔除、非对象/坏状态回落缺省", () => {
+    const passed = toWorkClosing({
+      ...designClosing,
+      drafts: undefined,
+      designLint: { status: "passed", retried: true },
+    })?.designLint;
+    expect(passed).toEqual({ status: "passed", retried: true, total: undefined, violations: undefined });
+
+    const violating = toWorkClosing({
+      ...designClosing,
+      drafts: undefined,
+      designLint: {
+        status: "violations",
+        total: 2,
+        violations: [
+          { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
+          { file: "no-line.tsx", rule: "no-inline-styles", message: "inline" },
+        ],
+      },
+    })?.designLint;
+    expect(violating?.total).toBe(2);
+    expect(violating?.violations).toEqual([
+      { file: "src/app/page.tsx", line: 3, rule: "no-raw-colors", message: "raw palette" },
+      { file: "no-line.tsx", line: 0, rule: "no-inline-styles", message: "inline" },
+    ]);
+
+    expect(toWorkClosing({ ...designClosing, designLint: { status: "weird" } })?.designLint)
+        .toBeUndefined();
+    expect(toWorkClosing({ ...designClosing, designLint: "nope" })?.designLint).toBeUndefined();
+  });
 });

@@ -42,7 +42,7 @@ class WorkspaceRendersTest {
 
     @Test
     void given_quote_in_paths_when_commands_then_shell_escaped() {
-        // 单引号串内 ' 转义为 '\''，与 contentCommand/rawImageCommand 同款（isViewable
+        // 单引号串内 ' 转义为 '\''，与 contentCommand/rawInlineCommand 同款（isViewable
         // 已拒畸形，此处兜底）
         assertThat(WorkspaceRenders.htmlToPngCommand(
                 "design/it's.html", "design/it's.png", 100, 100))

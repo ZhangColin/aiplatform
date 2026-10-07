@@ -58,7 +58,7 @@ describe("ClosingCard · 稿清单交互（#290 设计会话收尾卡：去向�
     );
 
     const link = screen.getByRole("link", { name: /home-hero-2\.png/ });
-    expect(link.getAttribute("href")).toBe("/api/projects/100/files/raw?path=%2Fdesign%2Fhome-hero-2.png");
+    expect(link.getAttribute("href")).toBe("/api/projects/100/files/raw?path=design%2Fhome-hero-2.png");
     expect(link.getAttribute("target")).toBe("_blank");
     // 界面稿不出直链（渲染式呈现归 #293 设计稿范式）——无可用链接即不出 role=link
     expect(screen.queryByRole("link", { name: /home-1\.html/ })).toBeNull();

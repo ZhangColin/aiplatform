@@ -114,6 +114,14 @@ describe("rawFileUrl · 图片直出 URL（#283）", () => {
       `/api/projects/p1/files/raw?path=${encodeURIComponent("materials/我的 图#1.png")}`,
     );
   });
+
+  it("工作区锚定形（前导 /）归一为相对形——收尾卡稿清单/画布稿卡携锚定形直取", () => {
+    // #293 画布取件暴露的 #290 遗留缝：drafts.path 是锚定形「/design/x.png」，
+    // 后端 isViewable 拒绝对路径——单点归一（两形同收，消费面不再各自转换）
+    expect(rawFileUrl("p1", "/design/home-1.html")).toBe(
+      "/api/projects/p1/files/raw?path=design%2Fhome-1.html",
+    );
+  });
 });
 
 describe("RAW_IMAGE_SIZE_LIMIT_BYTES · 前端预检上界", () => {
@@ -126,6 +134,10 @@ describe("downloadFileUrl · 单文件下载 URL（#287 支付门）", () => {
   it("同源 /api 直链，path 整体编码（同 raw 直链形——门判定归后端，前端不预判）", () => {
     expect(downloadFileUrl("p1", "exports/海报-终稿.png")).toBe(
       `/api/projects/p1/files/download?path=${encodeURIComponent("exports/海报-终稿.png")}`,
+    );
+    // 锚定形归一同 rawFileUrl
+    expect(downloadFileUrl("p1", "/design/home-1.html")).toBe(
+      "/api/projects/p1/files/download?path=design%2Fhome-1.html",
     );
   });
 });

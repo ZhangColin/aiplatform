@@ -41,9 +41,6 @@ const SEGMENT_STATUSES: Record<number, GenerationSegmentFact["status"]> = {
   1: "pending",
   2: "closed",
   3: "failed",
-  // 设计物件状态扩值（#291 定稿）：已定稿在计划区同「已收口」位（推进完成——
-  // 定稿标记的呈现归设计稿范式，读模型 finalizedPath 另行透出）
-  4: "closed",
 };
 
 /** 片清单 → 消费口径（缺行/缺 ord 防御剔除；空 = 无计划）。 */
@@ -61,24 +58,56 @@ function normalizeSegments(
 }
 
 /**
- * 设计轨道件清单 → 消费口径（#290 计划区对偶透出）：designer 直播卡的计划区与
- * 切片清单同构——复用 {@link GenerationSegmentFact} 形状（title 即计划区行文本，
- * 与 description 同位）；状态码表与片清单同集（待跑/已收口/失败）。
+ * 设计物件 → 消费口径（#290 计划区；#293 画布随读）：状态四值（待跑/已收口/
+ * 失败/已定稿——计划区呈现经 {@link planAreaOfDesignItems} 投影：已定稿在同
+ * 「已收口」位；定稿标记与 finalizedPath 的消费面是设计稿画布：定稿徽记＋
+ * 悬卡删除的不可删判据）。
  */
-/** 设计物件 → 计划区消费口径（#290；#291 已定稿位＝closed）。定稿稿路径
- * （finalizedPath）不进本形状——定稿标记的呈现归设计稿范式（#293/#294），详情
- * 域经 REST 原样可取。 */
+export type DesignItemFact = {
+  ord: number;
+  title: string;
+  status: "pending" | "closed" | "failed" | "finalized";
+  /** 定稿稿路径（工作区锚定形，仅已定稿件携带）。 */
+  finalizedPath?: string;
+};
+
+const DESIGN_ITEM_STATUSES: Record<number, DesignItemFact["status"]> = {
+  1: "pending",
+  2: "closed",
+  3: "failed",
+  4: "finalized",
+};
+
+/** 件清单 → 消费口径（缺行/缺 ord 防御剔除；空 = 无现行清单，不伪造计划）。 */
 function normalizeDesignItems(
   raw: ProjectDetailResponse["designItems"],
-): GenerationSegmentFact[] | null {
+): DesignItemFact[] | null {
   if (!raw || raw.length === 0) return null;
-  return raw
-    .filter((item) => item.ord != null && !!item.title)
-    .map((item) => ({
-      ord: item.ord as number,
-      description: item.title as string,
-      status: SEGMENT_STATUSES[item.status ?? 1] ?? "pending",
-    }));
+  return raw.flatMap((item) =>
+    item.ord != null && !!item.title
+      ? [{
+          ord: item.ord as number,
+          title: item.title as string,
+          status: DESIGN_ITEM_STATUSES[item.status ?? 1] ?? "pending",
+          finalizedPath: item.finalizedPath || undefined,
+        }]
+      : [],
+  );
+}
+
+/**
+ * 计划区投影（#290/#291）：件清单 → 计划区行形状（GenerationSegmentFact 同构
+ * ——title 即行文本；已定稿投影为「已收口」位：推进完成，定稿呈现归画布）。
+ */
+export function planAreaOfDesignItems(
+  items: DesignItemFact[] | null | undefined,
+): GenerationSegmentFact[] | null {
+  if (!items || items.length === 0) return null;
+  return items.map((item) => ({
+    ord: item.ord,
+    description: item.title,
+    status: item.status === "finalized" ? "closed" : item.status,
+  }));
 }
 
 /** 消费口径的项目详情（缺省字段防御归一）：壳态只取骨架所需字段，随切片增补。 */
@@ -106,8 +135,9 @@ export type ProjectDetail = {
   latestOrder?: ActiveOrderFact | null;
   /** 生成轨道片清单（#225 计划区；null = 无现行计划——锚过期/未落库，不伪造计划）。 */
   segments?: GenerationSegmentFact[] | null;
-  /** 设计轨道件清单（#290 designer 直播卡计划区；null = 无现行清单，不伪造计划）。 */
-  designItems?: GenerationSegmentFact[] | null;
+  /** 设计轨道件清单（#290 计划区；null = 无现行清单，不伪造计划）。计划区消费经
+   * planAreaOfDesignItems 投影；#293 画布直取富形状（finalized/finalizedPath）。 */
+  designItems?: DesignItemFact[] | null;
 };
 
 /** 信封解包后的详情 → 消费口径（缺省字段防御归一）。 */

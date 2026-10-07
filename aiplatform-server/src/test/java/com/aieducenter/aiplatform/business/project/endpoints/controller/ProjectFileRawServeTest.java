@@ -34,6 +34,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,14 +45,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 图片 raw 直出端到端（#283 点看图片，@IntegrationTest 隔离库＋EnvironmentBackend
- * 假面）：真过滤链（BFF 会话绑定 → ApiAuth 闸）→ 真应用/查询服务 → aiplatform_test
- * 真库。契约面：真实 content-type ＋ 原始字节 inline 直出（非 ApiResponse 信封，
- * 先例＝源码包端点）、容器命令带三段守卫与 25 MiB 上限字面量；守卫面：非图片
- * 4038 / 超限 4022 / 不存在 4021 / 非可浏览 4020（判定层拒绝、docker 零触达）；
- * 越权面＝既有会话闸（无会话 401，单账号 v1 口径）。点看放行与拒收分界（ADR-0027）：
- * 同一图片路径 raw 放行（字节原样、含 NUL 无碍）、files/content 照旧 NUL 拒收
- * （PRJ_023 语义保留给真二进制非图片件）。
+ * 图片 raw 直出端到端（#283 点看图片；#293 起扩设计稿 HTML 伺服——稿伺服通道，
+ * @IntegrationTest 隔离库＋EnvironmentBackend 假面）：真过滤链（BFF 会话绑定 →
+ * ApiAuth 闸）→ 真应用/查询服务 → aiplatform_test 真库。契约面：真实 content-type
+ * ＋ 原始字节 inline 直出（非 ApiResponse 信封，先例＝源码包端点）、容器命令带
+ * 三段守卫与 25 MiB 上限字面量、稿 HTML 的帧 CSP（禁脚本、放行样式与内嵌图）；
+ * 守卫面：非伺服面扩展名 4038（含非 design 锚定 HTML——伺服面只认图片与设计稿
+ * HTML）/ 超限 4022 / 不存在 4021 / 非可浏览 4020（判定层拒绝、docker 零触达）；
+ * 越权面＝既有会话闸（无会话 401，单账号 v1 口径）。点看放行与拒收分界
+ * （ADR-0027）：同一图片路径 raw 放行（字节原样、含 NUL 无碍）、files/content
+ * 照旧 NUL 拒收（PRJ_023 语义保留给真二进制非图片件）。
  */
 @IntegrationTest
 @AutoConfigureMockMvc
@@ -130,11 +133,11 @@ class ProjectFileRawServeTest {
 
         // 原始字节原样（含 NUL——非文本通道、非 JSON 信封）
         assertThat(body).containsExactly(PNG_BYTES);
-        // 容器命令＝ProjectFiles.rawImageCommand 正本：三段守卫 + 25 MiB 上限字面量
+        // 容器命令＝ProjectFiles.rawInlineCommand 正本：三段守卫 + 25 MiB 上限字面量
         ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
         verify(environmentBackend).execBinary(any(WorkspaceHandle.class), command.capture());
         assertThat(command.getValue())
-                .isEqualTo(ProjectFiles.rawImageCommand("materials/ref.png"))
+                .isEqualTo(ProjectFiles.rawInlineCommand("materials/ref.png"))
                 .contains(String.valueOf(ProjectFiles.MAX_RAW_IMAGE_BYTES));
     }
 
@@ -151,6 +154,40 @@ class ProjectFileRawServeTest {
                 .andExpect(header().string("Content-Security-Policy",
                         "default-src 'none'; style-src 'unsafe-inline'"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+    }
+
+    @Test
+    void given_design_draft_html_when_raw_then_html_content_type_frame_csp() throws Exception {
+        // 稿伺服通道（#293 设计稿画布固定画幅帧取件）：design/ 锚定 HTML 直出
+        // text/html（带 charset——中文稿直开不乱码）；CSP 禁脚本（default-src
+        // 'none'——设计稿是帧不是网站）但放行内嵌样式与内嵌图（呈现面可达）
+        byte[] html = "<!DOCTYPE html><html><body><h1>首页稿</h1></body></html>".getBytes();
+        when(environmentBackend.execBinary(any(WorkspaceHandle.class), anyString()))
+                .thenReturn(new BinaryExecResult(html, "", 0));
+
+        byte[] body = performAsUser(get(rawUrl("design/home-1.html")))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/html;charset=utf-8"))
+                .andExpect(header().string("Content-Disposition",
+                        "inline; filename=\"home-1.html\""))
+                .andExpect(header().string("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsByteArray();
+        assertThat(body).containsExactly(html);
+        // 与图片同命令正本（命令体与内容无关，判定归查询服务）
+        verify(environmentBackend).execBinary(any(WorkspaceHandle.class),
+                contains("design/home-1.html"));
+    }
+
+    @Test
+    void given_non_design_html_when_raw_then_prj_038_without_workspace_touch() throws Exception {
+        // 伺服面只认 design/ 锚定：应用源码 HTML 不经 raw 面（文本走 content 端点）
+        performAsUser(get(rawUrl("src/index.html")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4038))
+                .andExpect(jsonPath("$.message").value("该文件暂不支持在线查看"));
+        verify(environmentBackend, never()).execBinary(any(WorkspaceHandle.class), anyString());
     }
 
     // ---------- 守卫：上界 / 不存在 / 非图片 / 非可浏览 ----------
@@ -184,7 +221,7 @@ class ProjectFileRawServeTest {
         performAsUser(get(rawUrl("src/app.ts")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4038))
-                .andExpect(jsonPath("$.message").value("该文件不是图片，暂不支持在线查看"));
+                .andExpect(jsonPath("$.message").value("该文件暂不支持在线查看"));
 
         // 判定层拒绝：docker 边界零触达
         verify(environmentBackend, never()).execBinary(any(WorkspaceHandle.class), anyString());

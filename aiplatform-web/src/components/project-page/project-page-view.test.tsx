@@ -255,4 +255,31 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect((outputsTabStrip(html).match(/role="tab"/g) ?? []).length).toBe(2);
     expect(html).not.toContain('data-slot="order-status-dot"');
   });
+
+  it("回访有设计物清单（#293）：设计稿 tab 自动挂载（簇上三枚），激活面仍是「系统」", () => {
+    // 对偶订单先例：设计过程启动→挂载点亮；回访只挂载不抢激活（live 起跑切面
+    // 归 interaction 测试）
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      designItems: [{ ord: 1, title: "首页主视觉", status: "closed" }],
+    });
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    const strip = outputsTabStrip(html);
+    expect((strip.match(/role="tab"/g) ?? []).length).toBe(3);
+    expect(strip).toContain("设计稿");
+    // 不自动切换：唯一激活面仍是「系统」
+    const selectedAt = strip.indexOf('role="tab" aria-selected="true"');
+    expect(strip.slice(selectedAt, selectedAt + 800)).toContain("系统");
+  });
+
+  it("无设计物清单：设计稿 tab 不自动挂载（「+ 新标签页」里可加挂——注册表项）", () => {
+    seed.detail = detail({ prdProducedAt: "2026-08-31T08:00:00Z" });
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    expect((outputsTabStrip(html).match(/role="tab"/g) ?? []).length).toBe(2);
+    expect(outputsTabStrip(html)).not.toContain("设计稿");
+  });
 });

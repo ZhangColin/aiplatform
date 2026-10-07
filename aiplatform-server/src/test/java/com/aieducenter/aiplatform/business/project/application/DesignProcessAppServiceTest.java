@@ -50,6 +50,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointT
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -134,6 +135,7 @@ class DesignProcessAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
+        jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -1131,6 +1133,93 @@ class DesignProcessAppServiceTest {
         assertThatThrownBy(() -> appService.finalizeDesignItem(projectId, 1, "/design/logo-1.html"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.DESIGN_ITEM_NOT_READY.message());
+    }
+
+    // ---------- #293 悬卡删除：画布整理（候选可删、定稿不可删） ----------
+
+    @Test
+    void given_candidate_draft_when_delete_then_rm_forced_idempotent() {
+        // 灵魂用例（#293 验收④）：候选稿悬卡删除＝真删工作区文件（命令正本＝
+        // ProjectFiles.deleteCommand，rm -f 幂等——删除的终态就是不在）；对话史
+        // 稿清单是历史事实不回写（回访画布以文件树存在性过滤，删稿即消卡）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceCommands(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        appService.deleteDesignDraft(projectId, "/design/logo-1.html");
+
+        ArgumentCaptor<WorkspaceExecCommand> execCommands =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeastOnce()).exec(any(), execCommands.capture());
+        assertThat(execCommands.getAllValues().stream().map(WorkspaceExecCommand::command))
+                .contains(ProjectFiles.deleteCommand("design/logo-1.html"));
+    }
+
+    @Test
+    void given_finalized_draft_when_delete_then_rejected_prj_050() {
+        // 定稿不可删（#293 验收④）：定稿稿是成版锚与交付物包成员——PRJ_050 且
+        // 容器零触达；同批候选（未定稿）照常可删（整理不动定稿事实）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceCommands(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0),
+                new FileChange("/design/logo-2.html", 82, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null);
+        appService.finalizeDesignItem(projectId, 1, "/design/logo-1.html");
+
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "/design/logo-1.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.DESIGN_DRAFT_FINALIZED.message());
+        verify(workspaceLifecycleAppService, never()).exec(any(),
+                argThat(command -> command != null && command.command().startsWith("rm -f ")));
+
+        appService.deleteDesignDraft(projectId, "/design/logo-2.html"); // 候选可删
+    }
+
+    @Test
+    void given_guards_when_delete_then_rejected() {
+        // 守卫矩阵：项目不存在 PRJ_001 / 非 design 锚定或不可浏览 PRJ_020 /
+        // 冻结 ORD_006 / 归档 PRJ_013；删除是整理动作非轨道动作——设计轨在途
+        // 不拦（无成版全量提交卷入问题，PRJ_046 不适用）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceCommands(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        assertThatThrownBy(() -> appService.deleteDesignDraft(9876543210123L, "/design/x.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "/docs/PRD.md"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FILE_PATH_INVALID.message());
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "/design/../.env"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.FILE_PATH_INVALID.message());
+
+        // 订单冻结（同律冻结——设计工作面整体停摆）
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9951L, projectId);
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "/design/logo-1.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("订单处理中");
+        jdbcTemplate.update("DELETE FROM ord_orders WHERE project_id = ?", projectId);
+
+        // 在途不拦：轨道占位中删除照常受理（删旧候选无竞态面）
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
+        appService.deleteDesignDraft(projectId, "/design/logo-1.html");
+        codingRunTrack.end(projectId);
+
+        // 归档：终态工作区只读
+        jdbcTemplate.update(
+                "UPDATE prj_projects SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", projectId);
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "/design/logo-1.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_ALREADY_ARCHIVED.message());
     }
 
     // ---------- designer 座运营配置（三座齐） ----------

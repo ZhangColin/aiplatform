@@ -106,7 +106,7 @@ class ProjectFilesTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    // ---------- 图片点看判定与 raw 直出命令（#283） ----------
+    // ---------- 图片点看判定与 raw 直出命令（#283；#293 起图片与稿 HTML 共用） ----------
 
     @Test
     void given_image_extensions_when_image_path_then_true() {
@@ -130,25 +130,76 @@ class ProjectFilesTest {
     }
 
     @Test
-    void when_raw_image_command_then_size_guarded_before_cat_without_text_header() {
-        // 同 contentCommand 的三段守卫（1 = 不存在、2 = 超图片查看上限），但 stdout 是
-        // 文件原始字节（无「大小首行 + 正文」的文本形——二进制不经文本通道）
-        assertThat(ProjectFiles.rawImageCommand("materials/ref.png")).isEqualTo(
+    void when_raw_inline_command_then_size_guarded_before_cat_without_text_header() {
+        // 同 contentCommand 的三段守卫（1 = 不存在、2 = 超直出查看上限），但 stdout 是
+        // 文件原始字节（无「大小首行 + 正文」的文本形——二进制不经文本通道）。
+        // #293 起图片点看与设计稿 HTML 伺服共用（命令体与内容无关，判定归调用侧）
+        assertThat(ProjectFiles.rawInlineCommand("materials/ref.png")).isEqualTo(
                 "p='/workspace/materials/ref.png'; if ! test -f \"$p\"; then exit 1; fi;"
+                        + " s=$(stat -c %s \"$p\");"
+                        + " if [ \"$s\" -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                        + " cat \"$p\"");
+        assertThat(ProjectFiles.rawInlineCommand("design/home-1.html")).isEqualTo(
+                "p='/workspace/design/home-1.html'; if ! test -f \"$p\"; then exit 1; fi;"
                         + " s=$(stat -c %s \"$p\");"
                         + " if [ \"$s\" -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
                         + " cat \"$p\"");
     }
 
     @Test
-    void given_quote_in_filename_when_raw_image_command_then_shell_escaped() {
-        assertThat(ProjectFiles.rawImageCommand("materials/it's.png"))
+    void given_quote_in_filename_when_raw_inline_command_then_shell_escaped() {
+        assertThat(ProjectFiles.rawInlineCommand("materials/it's.png"))
                 .contains("p='/workspace/materials/it'\\''s.png';");
     }
 
     @Test
-    void given_non_viewable_path_when_raw_image_command_then_rejected() {
-        assertThatThrownBy(() -> ProjectFiles.rawImageCommand(".env"))
+    void given_non_viewable_path_when_raw_inline_command_then_rejected() {
+        assertThatThrownBy(() -> ProjectFiles.rawInlineCommand(".env"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // ---------- 设计稿 HTML 伺服判定（#293 稿伺服通道） ----------
+
+    @Test
+    void given_design_anchored_html_when_draft_html_then_true() {
+        // 稿伺服面＝设计稿范式画布的固定画幅帧取件：design/ 锚定 + html 扩展名，
+        // 两者大小写不敏感（与 designAnchored 同律——文件系统侧无大小写约定）
+        assertThat(ProjectFiles.isDraftHtml("design/home-1.html")).isTrue();
+        assertThat(ProjectFiles.isDraftHtml("design/poster.HTML")).isTrue();
+        assertThat(ProjectFiles.isDraftHtml("DESIGN/home.html")).isTrue();
+        assertThat(ProjectFiles.isDraftHtml("design/a/b/cover.html")).isTrue();
+    }
+
+    @Test
+    void given_other_paths_when_draft_html_then_false() {
+        // 界面外 HTML 不开伺服面（应用源码不经 raw 面）；设计稿图片走既有图片判定
+        assertThat(ProjectFiles.isDraftHtml("src/index.html")).isFalse();
+        assertThat(ProjectFiles.isDraftHtml("docs/spec.html")).isFalse();
+        assertThat(ProjectFiles.isDraftHtml("design/logo.png")).isFalse();
+        assertThat(ProjectFiles.isDraftHtml("design/no-extension")).isFalse();
+        assertThat(ProjectFiles.isDraftHtml("html")).isFalse(); // 文件名恰好叫 html
+        assertThat(ProjectFiles.isDraftHtml(null)).isFalse();
+    }
+
+    // ---------- 设计稿删除命令（#293 悬卡删除） ----------
+
+    @Test
+    void when_delete_command_then_rm_forced_quoted() {
+        // rm -f 幂等（稿已不在也 0 退出——删除的终态就是不在，重复删除不报错）；
+        // 路径经单引号包裹 + 转义，无注入面；design 锚定判定归调用侧
+        assertThat(ProjectFiles.deleteCommand("design/home-1.html"))
+                .isEqualTo("rm -f '/workspace/design/home-1.html'");
+    }
+
+    @Test
+    void given_quote_in_filename_when_delete_command_then_shell_escaped() {
+        assertThat(ProjectFiles.deleteCommand("design/it's.html"))
+                .isEqualTo("rm -f '/workspace/design/it'\\''s.html'");
+    }
+
+    @Test
+    void given_non_viewable_path_when_delete_command_then_rejected() {
+        assertThatThrownBy(() -> ProjectFiles.deleteCommand(".env"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -183,7 +234,12 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.contentTypeOf("materials/shot.webp")).isEqualTo("image/webp");
         assertThat(ProjectFiles.contentTypeOf("design/anim.gif")).isEqualTo("image/gif");
         assertThat(ProjectFiles.contentTypeOf("design/logo.svg")).isEqualTo("image/svg+xml");
-        // 非图片扩展名兜底字节流（调用侧图片判定先行，此处不代偿）
+        // 设计稿 HTML 伺服（#293）：真实 text/html 带 charset（中文稿直开不乱码）
+        assertThat(ProjectFiles.contentTypeOf("design/home-1.html"))
+                .isEqualTo("text/html; charset=utf-8");
+        assertThat(ProjectFiles.contentTypeOf("design/poster.HTML"))
+                .isEqualTo("text/html; charset=utf-8");
+        // 其余非图片扩展名兜底字节流（调用侧判定先行，此处不代偿）
         assertThat(ProjectFiles.contentTypeOf("docs/PRD.md")).isEqualTo("application/octet-stream");
     }
 }

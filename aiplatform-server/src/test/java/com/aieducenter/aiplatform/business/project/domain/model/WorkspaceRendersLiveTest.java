@@ -157,7 +157,7 @@ class WorkspaceRendersLiveTest {
     /** 取回渲成的 PNG 字节（复用点看 raw 命令——同一条容器读通道，顺带核通路）。 */
     private byte[] readRenderedPngBytes(String path) {
         BinaryExecResult read = backend.execBinary(provision.handle(),
-                ProjectFiles.rawImageCommand(path));
+                ProjectFiles.rawInlineCommand(path));
         assertThat(read.exitCode()).as("渲成的 PNG 应可经 raw 通道取回：%s", read.stderr()).isZero();
         return read.stdout();
     }

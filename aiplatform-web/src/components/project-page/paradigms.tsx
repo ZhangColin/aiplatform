@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, FileText, Folder, Monitor, ReceiptText, Settings, SquareTerminal } from "lucide-react";
+import { Database, FileText, Folder, Layers, Monitor, ReceiptText, Settings, SquareTerminal } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ORDER_STATUS } from "@/lib/orders/lock";
@@ -9,6 +9,7 @@ import type { GenerationState, ProjectDetail } from "@/lib/projects/detail";
 import type { CoderRunStatus } from "@/lib/store/generation";
 
 import { PrdDoc } from "./prd-doc";
+import { DesignCanvas } from "./design-canvas";
 import { FilesPanel } from "./files-panel";
 import { OrderPanel } from "./order-panel";
 import { PanelPlaceholder } from "./panel-placeholder";
@@ -16,10 +17,11 @@ import { SettingsPanel } from "./settings-panel";
 import { SystemPanel } from "./system-panel";
 
 /**
- * 成果区范式注册表（#72 决议 / #79 落地）：每种面（系统/文档/文件/数据/订单/
- * 设置/终端）是一个自包含范式，注册进 PARADIGMS 即可被成果区 tab 簇挂载——
+ * 成果区范式注册表（#72 决议 / #79 落地）：每种面（系统/文档/设计稿/文件/数据/
+ * 订单/设置/终端）是一个自包含范式，注册进 PARADIGMS 即可被成果区 tab 簇挂载——
  * 「+ 新标签页」按需加挂，「系统」居首默认主舞台、「文档」默认挂载，其余按需。
- * 新面 = 注册表加一项，平台后续能不断填入。
+ * 新面 = 注册表加一项，平台后续能不断填入。设计稿（#293，ADR-0025）＝全系统
+ * 画布：设计过程启动自动挂载点亮（对偶订单范式先例——回访只挂载不抢激活）。
  *
  * 文件的 M/U 角标与改动徽章：文件清单与改动状态由收口扩载服务端权威化
  * （#77/#88），供数前不演假状态。
@@ -85,6 +87,14 @@ export const PARADIGMS: Paradigm[] = [
     defaultOn: true,
     blurb: "需求文档，随每轮修改更新",
     render: (ctx) => <PrdDoc projectId={ctx.projectId} />,
+  },
+  {
+    id: "design",
+    label: "设计稿",
+    icon: <Layers className="size-3.5" />,
+    defaultOn: false,
+    blurb: "全系统画布——各设计物的稿多代并置，看着一张张长出来",
+    render: (ctx) => <DesignCanvas projectId={ctx.projectId} />,
   },
   {
     id: "files",

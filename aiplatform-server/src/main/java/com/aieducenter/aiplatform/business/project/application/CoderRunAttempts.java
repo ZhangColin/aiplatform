@@ -453,7 +453,9 @@ class CoderRunAttempts {
     /**
      * design/ 锚定判定（#289 单点——稿清单派生与设计会话收口判据共用，两处口径
      * 不许漂移）：path 为工作区锚定形（如 {@code /design/home-1.html}），大小写
-     * 不敏感（文件系统侧无大小写约定）。
+     * 不敏感（文件系统侧无大小写约定）。相对形同律判定在
+     * {@code ProjectFiles.isDraftHtml}（#293 稿伺服面——domain 层不可上引本包，
+     * 同律两形互指为约）。
      */
     static boolean designAnchored(String path) {
         return path != null && path.toLowerCase(Locale.ROOT).startsWith(DESIGN_DIR_PREFIX);

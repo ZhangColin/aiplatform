@@ -109,18 +109,30 @@ export function isImagePath(path: string): boolean {
 /**
  * 图片点看的 raw 直出 URL：同源 `/api/*` 直链（会话 cookie 自动携带，对偶
  * source-package 下载链接先例）——二进制不走 api client（其响应一律按 JSON 解包）。
+ * 路径形归一：前导斜杠剥掉（收尾卡稿清单等携工作区锚定形「/design/x.png」，
+ * 后端只收相对形——两形同收，消费面不再各自转换）。
  */
 export function rawFileUrl(projectId: string, path: string): string {
-  return `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(path)}`;
+  return `/api/projects/${projectId}/files/raw?path=${encodeURIComponent(relativeFormOf(path))}`;
 }
 
 /**
  * 单文件下载 URL（#287 通用下载，ADR-0027 支付门）：文件区一切文件皆可带走，
  * 门判定在后端（曾支付/已归档即开放）——前端不预判门态，被拦时按信封 message
- * 如实告知（体验免费、带走才付费）。同样同源直链、不经 api client。
+ * 如实告知（体验免费、带走才付费）。同样同源直链、不经 api client；路径形
+ * 归一同 {@link rawFileUrl}。
  */
 export function downloadFileUrl(projectId: string, path: string): string {
-  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(path)}`;
+  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(relativeFormOf(path))}`;
+}
+
+/**
+ * 工作区锚定形（前导 /）→ 相对形；相对形原样。两形并存的事实面：文件树 API
+ * 逐路径相对形（find %P），收尾卡稿清单/定稿锚携锚定形——比较与取件先过本
+ * 归一（raw 直链与画布存在性滤卡共用）。
+ */
+export function relativeFormOf(path: string): string {
+  return path.startsWith("/") ? path.slice(1) : path;
 }
 
 /**

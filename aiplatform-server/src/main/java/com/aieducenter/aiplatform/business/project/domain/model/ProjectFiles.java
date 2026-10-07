@@ -16,8 +16,9 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 收拢四件事——可浏览路径判定（内容端点的用户可控入参防线）、树列表命令构造
  * （find 剪枝在源头排除，不进 node_modules 巨树）、内容读取命令构造（大小限读
  * 在容器侧先行，巨文件不进内存）、find 输出解析。#283 起点看判定对图片放行
- * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处。
- * 纯函数无依赖。
+ * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处；
+ * #293 起 raw 直出面扩设计稿 HTML（稿伺服通道——设计稿画布固定画幅帧取件，
+ * design/ 锚定单开判定）＋设计稿删除命令（悬卡删除）。纯函数无依赖。
  */
 public final class ProjectFiles {
 
@@ -27,6 +28,7 @@ public final class ProjectFiles {
     /**
      * 图片点看（raw 直出）的大小上限（25 MiB，ADR-0027「≤25MB 量级」裁量）：
      * 容器侧 cat 前拦截，超限不读取——与文本上限各自独立（图片以张计，量级放宽）。
+     * #293 起稿 HTML 伺服共用本上限（单文件 HTML 稿同「一张」量级）。
      */
     public static final long MAX_RAW_IMAGE_BYTES = 25L * 1024 * 1024;
 
@@ -122,12 +124,31 @@ public final class ProjectFiles {
     }
 
     /**
-     * 图片 raw 直出命令（path 须先过 {@link #isViewable} 与 {@link #isImagePath}，
-     * 此处只代偿前者）：守卫结构同 {@link #contentCommand}（1 = 不存在、
-     * 2 = 超 {@link #MAX_RAW_IMAGE_BYTES}），但 stdout 是文件<strong>原始字节</strong>
-     * （无「大小首行 + 正文」文本形——二进制不经文本通道，走 exec 字节形）。
+     * 设计稿 HTML 伺服判定（#293 稿伺服通道）：design/ 锚定（大小写不敏感）＋
+     * html 扩展名（大小写不敏感）。设计稿画布的界面类稿＝固定画幅帧，取件走
+     * raw 路由 iframe 直渲；其余 HTML（应用源码等）不开伺服面（raw 只认图片与
+     * 本判定）。
+     *
+     * <p>design/ 锚定与轨道层 {@code CoderRunAttempts.designAnchored} 同律两形
+     * （彼收锚定形前导 {@code /}、本收相对形——本类在 domain 层不可上引
+     * application 包，无法共享单点；两处口径同改，互指为约）。</p>
      */
-    public static String rawImageCommand(String path) {
+    public static boolean isDraftHtml(String path) {
+        if (path == null || !path.toLowerCase(Locale.ROOT)
+                .startsWith(WorkspaceLayout.DESIGN_DIR + "/")) {
+            return false;
+        }
+        return "html".equals(extensionOf(path));
+    }
+
+    /**
+     * raw 直出命令（#283 图片点看；#293 起稿 HTML 伺服共用——命令体与内容无关，
+     * 判定归调用侧；path 须先过 {@link #isViewable}，此处代偿）：守卫结构同
+     * {@link #contentCommand}（1 = 不存在、2 = 超 {@link #MAX_RAW_IMAGE_BYTES}），
+     * 但 stdout 是文件<strong>原始字节</strong>（无「大小首行 + 正文」文本形——
+     * 二进制不经文本通道，走 exec 字节形）。
+     */
+    public static String rawInlineCommand(String path) {
         if (!isViewable(path)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
@@ -135,6 +156,18 @@ public final class ProjectFiles {
                 + " s=$(stat -c %s \"$p\");"
                 + " if [ \"$s\" -gt " + MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
                 + " cat \"$p\"";
+    }
+
+    /**
+     * 设计稿删除命令（#293 悬卡删除；path 须先过 {@link #isViewable}，design
+     * 锚定判定归调用侧）：{@code rm -f} 幂等——稿已不在也 0 退出（删除的终态
+     * 就是不在，重复删除不报错）。路径经单引号包裹 + 转义，无注入面。
+     */
+    public static String deleteCommand(String path) {
+        if (!isViewable(path)) {
+            throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
+        }
+        return "rm -f " + ContainerCommands.quoted(path);
     }
 
     /**
@@ -152,10 +185,15 @@ public final class ProjectFiles {
     }
 
     /**
-     * 扩展名 → content-type（raw 直出的响应头依据）：图片扩展名给真实 MIME，
-     * 其余兜底 {@code application/octet-stream}（调用侧图片判定先行，此处不代偿）。
+     * 扩展名 → content-type（raw 直出与下载的响应头依据）：图片扩展名给真实
+     * MIME、设计稿 HTML 给带 charset 的 text/html（#293 伺服——中文稿直开不
+     * 乱码），其余兜底 {@code application/octet-stream}（调用侧判定先行，
+     * 此处不代偿）。
      */
     public static String contentTypeOf(String path) {
+        if ("html".equals(extensionOf(path))) {
+            return "text/html; charset=utf-8";
+        }
         return IMAGE_CONTENT_TYPES.getOrDefault(extensionOf(path), "application/octet-stream");
     }
 

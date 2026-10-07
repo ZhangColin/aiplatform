@@ -697,7 +697,7 @@ class ProjectControllerTest {
         performAsUser(get("/api/projects/100/files/raw").param("path", "src/app.ts"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(4038))
-                .andExpect(jsonPath("$.message").value("该文件不是图片，暂不支持在线查看"));
+                .andExpect(jsonPath("$.message").value("该文件暂不支持在线查看"));
 
         // 超图片查看上限（25 MiB，容器侧拦截）：与文本上限同码族 PRJ_022
         when(queryAppService.fileRaw(100L, "materials/huge.png"))

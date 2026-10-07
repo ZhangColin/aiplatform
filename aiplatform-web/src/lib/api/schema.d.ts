@@ -1250,8 +1250,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 图片文件直出（点看图片 inline 大图，#283）
-         * @description path = 工作区相对路径。只伺服图片（png/jpg/webp/gif/svg，扩展名判定）：真实 content-type + 原始字节流 inline 直出（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；img src 同源会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非图片扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过图片查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001
+         * 文件直出（点看图片 inline 大图 #283；设计稿 HTML 伺服 #293）
+         * @description path = 工作区相对路径。伺服面＝图片（png/jpg/webp/gif/svg，扩展名判定）＋设计稿 HTML（design/ 锚定——设计稿画布固定画幅帧取件，iframe 直渲）：真实 content-type + 原始字节流 inline 直出（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；src 同源会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。稿 HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——设计稿是帧不是网站，呈现面（样式/内嵌图）可达、行为面结构性关闭。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非伺服面扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过直出查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001
          */
         get: operations["fileRaw"];
         put?: never;
@@ -2131,6 +2131,34 @@ export interface paths {
          * @description 销毁 viewId 对应的快照容器（副本随容器可写层消失，工作区零变化）。ref 仅为 URL 对称占位（寻址锚是 viewId）；会话不存在 404 PRJ_030
          */
         delete: operations["stopView"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/design-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除设计稿（#293 悬卡删除）
+         * @description path＝稿的工作区锚定形路径（收尾卡 drafts/画布稿卡同形）。把不要的候选稿从画布清掉＝真删工作区文件（删除即不可定稿——定稿对象以容器事实为准）；已定稿与版本不受影响（定稿稿不可删）。幂等：稿已不在也成功（删除的终态就是不在）。守卫序：项目存在 → 未归档 → 未冻结（ORD_006）→ design 锚定且可浏览（400 PRJ_020）→ 非定稿稿（409 PRJ_050）。项目不存在 404 PRJ_001；删除失败 WSP_002
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 409 PRJ_013 — 项目已归档（归档是单向终点）
+         *     - 400 PRJ_020 — 该文件不在可浏览范围
+         *     - 409 PRJ_050 — 已定稿的设计稿不能删除
+         *     - 409 ORD_006 — 订单处理中——如需继续修改，请取消订单
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        delete: operations["delete_2"];
         options?: never;
         head?: never;
         patch?: never;
@@ -6072,6 +6100,30 @@ export interface operations {
                 projectId: string;
                 ref: string;
                 viewId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    delete_2: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                projectId: string;
             };
             cookie?: never;
         };

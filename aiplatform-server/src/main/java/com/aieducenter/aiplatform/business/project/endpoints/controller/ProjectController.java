@@ -46,6 +46,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
@@ -313,16 +314,19 @@ public class ProjectController {
     }
 
     @GetMapping("/{id}/files/raw")
-    @Operation(summary = "图片文件直出（点看图片 inline 大图，#283）",
-            description = "path = 工作区相对路径。只伺服图片（png/jpg/webp/gif/svg，扩展名"
-                    + "判定）：真实 content-type + 原始字节流 inline 直出（本端点不走"
-                    + " ApiResponse JSON 信封，先例＝源码包端点；img src 同源会话 cookie"
-                    + " 自动携带）。点看判定对图片放行（ADR-0027）——文本照旧 files/content、"
-                    + "含 NUL 的真二进制非图片件在那里如实拒收。点看免费（支付门只盖下载面，"
-                    + "#287 对齐）。非交付物/机密/逃逸路径 400 PRJ_020（判定层拒绝，工作区"
-                    + "不被触达）；非图片扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过"
-                    + "图片查看上限（25 MiB，容器侧拦截不读取）400 PRJ_022。"
-                    + "项目不存在 404 PRJ_001")
+    @Operation(summary = "文件直出（点看图片 inline 大图 #283；设计稿 HTML 伺服 #293）",
+            description = "path = 工作区相对路径。伺服面＝图片（png/jpg/webp/gif/svg，"
+                    + "扩展名判定）＋设计稿 HTML（design/ 锚定——设计稿画布固定画幅帧"
+                    + "取件，iframe 直渲）：真实 content-type + 原始字节流 inline 直出"
+                    + "（本端点不走 ApiResponse JSON 信封，先例＝源码包端点；src 同源"
+                    + "会话 cookie 自动携带）。点看判定对图片放行（ADR-0027）——文本"
+                    + "照旧 files/content、含 NUL 的真二进制非图片件在那里如实拒收。"
+                    + "稿 HTML 伺服的脚本面收口：CSP 禁脚本（default-src 'none'）——"
+                    + "设计稿是帧不是网站，呈现面（样式/内嵌图）可达、行为面结构性"
+                    + "关闭。点看免费（支付门只盖下载面，#287 对齐）。非交付物/机密/"
+                    + "逃逸路径 400 PRJ_020（判定层拒绝，工作区不被触达）；非伺服面"
+                    + "扩展名 400 PRJ_038；文件不存在 404 PRJ_021；超过直出查看上限"
+                    + "（25 MiB，容器侧拦截不读取）400 PRJ_022。项目不存在 404 PRJ_001")
     public ResponseEntity<ByteArrayResource> fileRaw(@PathVariable String id,
             @RequestParam String path) {
         ProjectFileRawResponse raw = queryAppService.fileRaw(parseId(id), path);
@@ -330,10 +334,15 @@ public class ProjectController {
         headers.setContentType(MediaType.parseMediaType(raw.contentType()));
         headers.setContentDisposition(ContentDisposition.inline()
                 .filename(fileNameOf(path)).build());
-        // SVG 同源直出的脚本面收口：<img> 内嵌本无脚本面，直开 URL 时 CSP 禁脚本
-        // （default-src 'none'）＋ nosniff 防 MIME 混淆——图片查看面无脚本诉求
+        // 同源直出的脚本面收口：<img>/iframe 内嵌本无脚本面，直开 URL 时 CSP 禁
+        // 脚本（default-src 'none'，稿 HTML 放行内嵌样式与内嵌图——呈现面可达）
+        // ＋ nosniff 防 MIME 混淆——查看面无脚本诉求。HTML 分岔判定归
+        // ProjectFiles.isDraftHtml 单点（与查询层伺服判定同源，不按 content-type
+        // 反推）
         headers.set("X-Content-Type-Options", "nosniff");
-        headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+        headers.set("Content-Security-Policy", ProjectFiles.isDraftHtml(path)
+                ? "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:"
+                : "default-src 'none'; style-src 'unsafe-inline'");
         return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(raw.content()));
     }
 

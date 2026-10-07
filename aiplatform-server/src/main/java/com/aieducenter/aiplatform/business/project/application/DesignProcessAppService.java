@@ -807,6 +807,51 @@ public class DesignProcessAppService {
     }
 
     /**
+     * 悬卡删除（#293 画布整理——把不要的候选稿从画布清掉）：真删工作区文件
+     * （删除即定稿守卫的容器事实变化——候选删了就不可定稿，PRJ_049 语义闭环）。
+     * 守卫序＝存在 → 未归档 → 未冻结（订单——同律冻结，设计工作面整体停摆）
+     * → design 锚定且可浏览（PRJ_020，稿面才可删）→ 非任何件的定稿稿
+     * （PRJ_050——定稿稿是成版锚与交付物包成员，整理不动定稿事实）。
+     * {@code rm -f} 幂等：稿已不在也成功（删除的终态就是不在）。删除是整理
+     * 动作非轨道动作——设计轨在途不加 PRJ_046 门（run 读写的是新稿，删旧候选
+     * 无竞态面；无成版全量提交卷入问题）。对话史的稿清单是历史事实不回写
+     * （回访画布以文件树存在性过滤，删稿即消卡）。定稿比较与锚定判定同宽
+     * （大小写不敏感——designAnchored 先放宽了 {@code /DESIGN/} 变体，守卫
+     * 不留窄缝）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档；ORD_006
+     *                              订单处理中；PRJ_020 路径不可浏览或非 design
+     *                              锚定；PRJ_050 已定稿的稿；WSP_002 删除失败
+     *                              （环境故障）
+     */
+    public void deleteDesignDraft(Long projectId, String draftPath) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        orderQueryAppService.requireNoActiveOrder(projectId);
+        String relative = draftPath != null && draftPath.startsWith("/")
+                ? draftPath.substring(1) : draftPath;
+        if (!CoderRunAttempts.designAnchored(draftPath) || !ProjectFiles.isViewable(relative)) {
+            throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
+        }
+        boolean finalizedDraft = designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .anyMatch(item -> item.getFinalizedPath() != null
+                        && item.getFinalizedPath().equalsIgnoreCase(draftPath));
+        if (finalizedDraft) {
+            throw new ApplicationException(ProjectMessage.DESIGN_DRAFT_FINALIZED);
+        }
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()),
+                new WorkspaceExecCommand(ProjectFiles.deleteCommand(relative)));
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "设计稿删除失败: " + result.stderr());
+        }
+    }
+
+    /**
      * 定稿后续分岔（#291 三分岔——派发即事实，跟职责走：更新 run 归迭代编排、
      * 首个构建归生成编排、开放下单是可见性事实非派发）。失败不反噬定稿（分岔
      * 派发自身有兜底：更新撞在途排队、构建经补产链——异常如实上抛前定稿已落定，

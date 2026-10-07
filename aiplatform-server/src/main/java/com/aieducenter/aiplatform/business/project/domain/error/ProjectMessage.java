@@ -92,8 +92,10 @@ public enum ProjectMessage implements CodeMessage {
     /** 开关命令守卫：PUT 开关必须显式带目标态（enabled 无缺省翻转语义，幂等写面）。 */
     AGENT_TOOL_TOGGLE_TARGET_REQUIRED(400, "PRJ_037", "开关目标态必填（enabled=true/false）"),
 
-    /** 文件 raw 直出（#283 点看图片）：非图片扩展名——raw 路由只伺服图片 inline 点看（文本走 files/content，真二进制非图片仍 PRJ_023 如实拒收）。 */
-    FILE_NOT_IMAGE(400, "PRJ_038", "该文件不是图片，暂不支持在线查看"),
+    /** 文件 raw 直出（#283 点看图片；#293 扩设计稿 HTML 伺服）：非伺服面扩展名
+     * ——raw 路由只伺服图片与 design/ 锚定设计稿 HTML inline 点看（文本走
+     * files/content，真二进制非图片仍 PRJ_023 如实拒收）。 */
+    FILE_NOT_IMAGE(400, "PRJ_038", "该文件暂不支持在线查看"),
 
     /** 位图出口（#284 渲染内核）：渲染失败——chromium 渲染或 SVG 旁路转 PNG 未成（技术失败，非源文件缺失的 PRJ_021）。 */
     RENDER_FAILED(500, "PRJ_039", "位图渲染失败"),
@@ -135,7 +137,11 @@ public enum ProjectMessage implements CodeMessage {
 
     /** 定稿守卫（#291）：选定的稿在工作区不存在（候选可被悬卡删除——定稿对象以
      * 容器事实为准）。 */
-    DESIGN_DRAFT_NOT_FOUND(404, "PRJ_049", "选定的设计稿不存在，请在现有稿中定稿");
+    DESIGN_DRAFT_NOT_FOUND(404, "PRJ_049", "选定的设计稿不存在，请在现有稿中定稿"),
+
+    /** 悬卡删除守卫（#293 画布整理）：已定稿的稿是成版锚与交付物包成员，不可删除
+     * ——候选稿（未定稿）可删，画布整理不动定稿事实。 */
+    DESIGN_DRAFT_FINALIZED(409, "PRJ_050", "已定稿的设计稿不能删除");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

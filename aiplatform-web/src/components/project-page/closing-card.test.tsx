@@ -229,10 +229,10 @@ describe("ClosingCard · 稿清单与去向（#290 设计会话收尾卡扩载�
     expect(html).toContain("home-hero-2.png");
     expect(html).toContain("图像稿");
     // 去向＝平台文件服务 raw 直看（未付费照看：门只盖下载面，#287）——图像稿可点
-    expect(html).toContain('href="/api/projects/100/files/raw?path=%2Fdesign%2Fhome-hero-2.png"');
+    expect(html).toContain('href="/api/projects/100/files/raw?path=design%2Fhome-hero-2.png"');
     // 界面稿不出直链（raw 只伺服图片 PRJ_038——渲染式呈现归 #293 稿伺服通道）：
     // 如实提示文件区可看，不伪造不可用入口
-    expect(html).not.toContain('href="/api/projects/100/files/raw?path=%2Fdesign%2Fhome-1.html"');
+    expect(html).not.toContain('href="/api/projects/100/files/raw?path=design%2Fhome-1.html"');
     expect(html).toContain("文件区可看");
     // 轮末统计：时长＋稿数（设计变体不出「检查通过」与文件行数）
     expect(html).toContain("本轮");

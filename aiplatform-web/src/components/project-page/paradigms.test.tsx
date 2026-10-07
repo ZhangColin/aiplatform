@@ -6,8 +6,9 @@ import { PARADIGMS, paradigmOf } from "./paradigms";
 /**
  * 范式注册表契约（#79 验收锚）：注册即挂载——id 唯一、每面有 label/blurb/icon
  * （「+ 新标签页」可挂载浏览的最低门槛）、「系统」居首默认主舞台、「文档」
- * 默认挂载、文件/数据/订单/设置/终端按需（defaultOn=false）。各面内容呈现归
- * 各面板测试（system-panel / files-panel / order-panel）。
+ * 默认挂载、设计稿/文件/数据/订单/设置/终端按需（defaultOn=false——设计稿
+ * #293 由设计过程启动自动挂载点亮，对偶订单先例）。各面内容呈现归各面板测试
+ * （system-panel / files-panel / order-panel / design-canvas）。
  */
 describe("PARADIGMS · 范式注册表", () => {
   it("id 唯一（挂载/关闭按 id 键控，重号会串台）", () => {
@@ -15,16 +16,21 @@ describe("PARADIGMS · 范式注册表", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("「系统」居首（默认主舞台）、「文档」默认挂载；其余按需", () => {
+  it("「系统」居首（默认主舞台）、「文档」默认挂载；其余按需（设计稿随启动挂载）", () => {
     expect(PARADIGMS[0]).toMatchObject({ id: "system", label: "系统" });
     expect(PARADIGMS.filter((p) => p.defaultOn).map((p) => p.id)).toEqual(["system", "docs"]);
     expect(PARADIGMS.filter((p) => !p.defaultOn).map((p) => p.id)).toEqual([
+      "design",
       "files",
       "data",
       "order",
       "terminal",
       "settings",
     ]);
+  });
+
+  it("设计稿范式注册（#293）：「+ 新标签页」可加挂——label/渲染面就位", () => {
+    expect(paradigmOf("design")).toMatchObject({ id: "design", label: "设计稿" });
   });
 
   it("每面可挂载浏览的最低门槛：label / blurb / icon / render 就位", () => {

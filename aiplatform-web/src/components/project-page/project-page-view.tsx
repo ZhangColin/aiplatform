@@ -12,6 +12,7 @@ import { errorText } from "@/lib/api/api-error";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 import { coderStatusOf, useGenerationStore } from "@/lib/store/generation";
+import { useWorkMessageStore } from "@/lib/store/work-message";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 
 import { CommandArea } from "./command-area";
@@ -20,6 +21,7 @@ import { OutputsArea, useOutputsTabs } from "./outputs-area";
 import { ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
 import { lockRowOf } from "@/lib/orders/lock";
+import { planAreaOfDesignItems } from "@/lib/projects/detail";
 
 /**
  * 项目页装配（issue #17 单站壳 + #19/#20 需求环 + #22 生成环① + #79 对话
@@ -80,6 +82,31 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   if (hasActiveOrder && !seenActiveOrder) {
     setSeenActiveOrder(true);
     outputsTabs.attach("order");
+  }
+
+  // 设计过程启动→设计稿 tab 自动挂载（#293，对偶订单先例）：现行设计物清单在
+  // 即挂载——回访只挂载不抢激活（对话区直播卡是过程主感知面）；锁存同订单口径
+  //（此后 detail 重拉不再补挂，用户手动关闭优先）。设计轨起跑的 live 切面见
+  // 下方 designerWork（#278 原型定稿的主感知面＝画布）
+  const hasDesignItems = !!detail?.designItems?.length;
+  const [seenDesignItems, setSeenDesignItems] = useState(false);
+  if (hasDesignItems && !seenDesignItems) {
+    setSeenDesignItems(true);
+    outputsTabs.attach("design");
+  }
+
+  // 设计轨起跑（live）自动开成果区并切「设计稿」——稿在画布上一张张长出来
+  // （#293 主感知面；对偶编码 run 起跑切「系统」先例）。渲染期派生态同
+  // generating（锁存初始＝挂载时状态——挂载即在途〔断线补发重建〕不抢当前
+  // 查看面，同生成轨口径）；件间换 run（frozen 翻转）再度切面＝新一批稿到达
+  const designerWork = useWorkMessageStore(
+    (state) => state.works[projectId],
+  );
+  const designing = designerWork?.seat === "designer" && !designerWork.frozen;
+  const [seenDesigning, setSeenDesigning] = useState(designing);
+  if (designing !== seenDesigning) {
+    setSeenDesigning(designing);
+    if (designing) openOutputsTo("design");
   }
 
   /** 开成果区并挂某范式（mobile 跳成果区页）——自动切换三入口共用的动作。 */
@@ -179,7 +206,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           lock={lock}
           stage={chatOnly ? "interview" : "iterate"}
           plan={detail?.segments}
-          designPlan={detail?.designItems}
+          designPlan={planAreaOfDesignItems(detail?.designItems)}
           onSeePrd={() => openOutputsTo("docs")}
           onSeeOrder={() => openOutputsTo("order")}
         />

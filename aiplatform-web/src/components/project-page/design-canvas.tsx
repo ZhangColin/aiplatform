@@ -1,0 +1,517 @@
+"use client";
+
+import * as React from "react";
+import { BadgeCheck, Layers, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useDeleteDesignDraft } from "@/hooks/use-delete-design-draft";
+import { useProject } from "@/hooks/use-project";
+import { useProjectFiles } from "@/hooks/use-project-files";
+import { errorText } from "@/lib/api/api-error";
+import {
+  buildDesignCanvas,
+  draftDisplayName,
+  type CanvasDraft,
+  type CanvasItem,
+} from "@/lib/projects/design-canvas";
+import { rawFileUrl } from "@/lib/projects/files";
+import { useChatStore } from "@/lib/store/chat";
+import { cn } from "@/lib/utils";
+
+/**
+ * 全系统画布（#293 设计稿范式，原型正选蓝本＝proto/design-process 变体 C）：
+ * 一次设计的各设计物稿卡多屏共置、代际并置（轮收口＝代、左→右）——界面类稿＝
+ * 固定画幅帧 1280×800（稿是帧不是网站，iframe live 直渲正身、取件走 raw 稿
+ * 伺服通道），平面类＝大图（raw 直出）。拖动排列、滚轮缩放（0.3–1.6 指向
+ * 光标）、空白平移、悬卡删除（定稿不可删——真删工作区文件，候选整理）。
+ *
+ * <p>数据三源（事件→状态 seam＝既有事件零扩展）：收尾卡稿清单（chat store
+ * closing.drafts——live run-finish 入流、回访水合同载荷）× 文件树（存在性正本
+ * ——悬卡删除即消卡）× 轨道件清单（分组锚与定稿事实）。稿到达＝run-finish
+ * 失效重拉后画布增量呈现（多稿逐张不等齐归 #294 渐进长出）。</p>
+ */
+
+const CARD_W = 300;
+/** 卡全高＝帧区 16:10（188）＋名条（36）。 */
+const CARD_H = Math.round(CARD_W * 0.625) + 36;
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 1.6;
+const ZOOM_DEFAULT = 0.55;
+
+/** 界面类稿的固定画幅（stitch screen 同构）：1280×800 桌面帧，缩放进容器。 */
+const FRAME_W = 1280;
+const FRAME_H = 800;
+
+export function DesignCanvas({ projectId }: { projectId: string }) {
+  const { data: detail } = useProject(projectId);
+  const files = useProjectFiles(projectId);
+  const messages = useChatStore((state) => state.chats[projectId]?.messages);
+  const deleteDraft = useDeleteDesignDraft(projectId);
+
+  // 稿事实轮（对话序的收尾卡稿清单——live 入流与回访水合同一源）
+  const rounds = React.useMemo(
+    () =>
+      (messages ?? []).flatMap((message) =>
+        message.kind === "closing" && message.closing.drafts
+          ? [message.closing.drafts]
+          : [],
+      ),
+    [messages],
+  );
+  const canvas = React.useMemo(
+    () => buildDesignCanvas(rounds, files.data, detail?.designItems),
+    [rounds, files.data, detail?.designItems],
+  );
+  // 板上只呈现有稿的件（排队件在计划区——画布是产物面不是计划面）
+  const items = React.useMemo(() => canvas.filter((item) => item.gens.length > 0), [canvas]);
+  const finalizedCount = canvas.filter((item) => item.status === "finalized").length;
+
+  // ---------- 板坐标系：缩放（滚轮指向光标）＋平移（空白拖）＋拖排 ----------
+
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = React.useState(ZOOM_DEFAULT);
+  const zoomRef = React.useRef(ZOOM_DEFAULT);
+  const pan = React.useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
+  /** 拖排的卡位覆盖（板坐标；会话内态不落库——重排是画布整理不是设计事实）。 */
+  const [dragged, setDragged] = React.useState<Record<string, { x: number; y: number }>>({});
+  const cardDrag = React.useRef<{
+    path: string;
+    sx: number;
+    sy: number;
+    ox: number;
+    oy: number;
+    moved: boolean;
+  } | null>(null);
+
+  /** 缩放后待补偿的滚动位（指向光标锚定——内容尺寸随 zoom 重渲染后再应用，
+   * 同步写会被旧尺寸的最大滚动钳制，滚到边缘时锚点漂移）。 */
+  const pendingScroll = React.useRef<{ left: number; top: number } | null>(null);
+
+  /** 缩放：指向光标——板坐标系不动、层 transform 缩放，滚动量按比例补偿。 */
+  const zoomAt = (next: number, cx: number, cy: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(next * 100) / 100));
+    const old = zoomRef.current;
+    if (z === old) return;
+    const bx = (el.scrollLeft + cx) / old;
+    const by = (el.scrollTop + cy) / old;
+    zoomRef.current = z;
+    setZoom(z);
+    pendingScroll.current = { left: bx * z - cx, top: by * z - cy };
+  };
+  // 布局提交后应用滚动补偿（zoom 变化 → 内容宽高重渲染完成，钳制上限已就位）
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const pending = pendingScroll.current;
+    if (!el || !pending) return;
+    pendingScroll.current = null;
+    el.scrollLeft = pending.left;
+    el.scrollTop = pending.top;
+  });
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomAt(
+        zoomRef.current * (event.deltaY < 0 ? 1.12 : 1 / 1.12),
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  /** 自动布局：每设计物一条横带（件标签），带内代左→右（代标签），卡横排。 */
+  const layout = React.useMemo(() => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    const labels: { x: number; y: number; node: React.ReactNode; key: string }[] = [];
+    let y = 20;
+    let maxX = 0;
+    for (const item of items) {
+      labels.push({ x: 20, y, node: <ItemLabel item={item} />, key: `item-${item.item}` });
+      let x = 20;
+      for (const gen of item.gens) {
+        labels.push({
+          x,
+          y: y + 30,
+          node: <GenLabel gen={gen.gen} />,
+          key: `gen-${item.item}-${gen.gen}`,
+        });
+        gen.drafts.forEach((draft, index) => {
+          positions[draft.path] = { x: x + index * (CARD_W + 14), y: y + 54 };
+        });
+        x += gen.drafts.length * (CARD_W + 14) + 56;
+      }
+      maxX = Math.max(maxX, x);
+      y += 54 + CARD_H + 64;
+    }
+    return { positions, labels, w: maxX + CARD_W + 40, h: items.length > 0 ? y : 0 };
+  }, [items]);
+  const positions = { ...layout.positions, ...dragged };
+
+  // 新稿落板 → 滚到最右（最新代在右）
+  const seenCount = React.useRef(0);
+  React.useEffect(() => {
+    const count = items.reduce((sum, item) => sum + item.gens.length, 0);
+    if (count !== seenCount.current && scrollRef.current) {
+      seenCount.current = count;
+      scrollRef.current.scrollTo({ left: scrollRef.current.scrollWidth, behavior: "smooth" });
+    }
+  }, [items]);
+
+  const onPanDown = (event: React.PointerEvent) => {
+    if ((event.target as HTMLElement).closest("[data-card]")) return;
+    pan.current = {
+      x: event.clientX,
+      y: event.clientY,
+      sl: scrollRef.current?.scrollLeft ?? 0,
+      st: scrollRef.current?.scrollTop ?? 0,
+    };
+  };
+  const onPanMove = (event: React.PointerEvent) => {
+    if (!pan.current || !scrollRef.current) return;
+    scrollRef.current.scrollLeft = pan.current.sl - (event.clientX - pan.current.x);
+    scrollRef.current.scrollTop = pan.current.st - (event.clientY - pan.current.y);
+  };
+
+  /* 卡拖排（#278 拖拽标准法）：按下即接管指针——快甩也不丢事件；按钮区
+   * data-no-drag 不接管、原生点击照常（#294 点选作用域在抬起处接线）。 */
+  const startCardDrag = (event: React.PointerEvent, draft: CanvasDraft) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-no-drag]")) return;
+    const position = positions[draft.path];
+    if (!position) return;
+    cardDrag.current = {
+      path: draft.path,
+      sx: event.clientX,
+      sy: event.clientY,
+      ox: position.x,
+      oy: position.y,
+      moved: false,
+    };
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  };
+  const moveCardDrag = (event: React.PointerEvent, draft: CanvasDraft) => {
+    const drag = cardDrag.current;
+    if (!drag || drag.path !== draft.path) return;
+    const dx = (event.clientX - drag.sx) / zoomRef.current;
+    const dy = (event.clientY - drag.sy) / zoomRef.current;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    setDragged((map) => ({
+      ...map,
+      [draft.path]: { x: Math.max(0, drag.ox + dx), y: Math.max(0, drag.oy + dy) },
+    }));
+  };
+  const endCardDrag = () => {
+    cardDrag.current = null;
+  };
+
+  const onDelete = (draft: CanvasDraft) => {
+    deleteDraft.mutate(draft.path, {
+      onError: (error) => toast.error(errorText(error, "暂时删不掉这张稿，请稍后再试")),
+    });
+  };
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2 text-[11px] text-muted-foreground">
+        <span className="rounded-full border bg-background px-1.5 py-0.5 shadow-sm">
+          一次设计的各页面都长在这块板上
+        </span>
+        <span>滚轮缩放 · 拖卡排列 · 拖空白平移 · 悬卡可删</span>
+        {canvas.length > 0 ? (
+          <span className="ml-auto">
+            {finalizedCount}/{canvas.length} 件已定稿
+          </span>
+        ) : null}
+      </div>
+      <div
+        ref={scrollRef}
+        data-design-board
+        className={cn(
+          "min-h-0 flex-1 cursor-grab overflow-auto active:cursor-grabbing",
+          "bg-[radial-gradient(circle_at_1px_1px,var(--color-border)_1px,transparent_0)] [background-size:24px_24px]",
+        )}
+        onPointerDown={onPanDown}
+        onPointerMove={onPanMove}
+        onPointerUp={() => (pan.current = null)}
+        onPointerLeave={() => (pan.current = null)}
+      >
+        {items.length === 0 ? (
+          <EmptyDesignBoard />
+        ) : (
+          <div style={{ width: layout.w * zoom, height: layout.h * zoom }}>
+            <div
+              className="relative"
+              style={{ width: layout.w, height: layout.h, transform: `scale(${zoom})`, transformOrigin: "0 0" }}
+            >
+              {layout.labels.map((label) => (
+                <span
+                  key={label.key}
+                  className="absolute select-none"
+                  style={{ left: label.x, top: label.y }}
+                >
+                  {label.node}
+                </span>
+              ))}
+              {items.flatMap((item) =>
+                item.gens.flatMap((gen) =>
+                  gen.drafts.map((draft) => {
+                    const position = positions[draft.path] ?? { x: 20, y: 20 };
+                    return (
+                      <div
+                        key={draft.path}
+                        data-card={draft.path}
+                        className="absolute cursor-grab touch-none select-none active:cursor-grabbing"
+                        style={{ left: position.x, top: position.y, width: CARD_W }}
+                        onPointerDown={(event) => startCardDrag(event, draft)}
+                        onPointerMove={(event) => moveCardDrag(event, draft)}
+                        onPointerUp={endCardDrag}
+                        onPointerCancel={endCardDrag}
+                      >
+                        <DraftCard
+                          projectId={projectId}
+                          draft={draft}
+                          finalized={item.finalizedPath === draft.path}
+                          deleting={deleteDraft.isPending}
+                          onDelete={() => onDelete(draft)}
+                        />
+                      </div>
+                    );
+                  }),
+                ),
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+      {/* 缩放控件＋回到最新 */}
+      {items.length > 0 ? (
+        <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-full border bg-background/95 px-1.5 py-1 shadow-lg backdrop-blur">
+          <button
+            type="button"
+            className="pointer-events-auto rounded-full px-2 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
+            onClick={() => {
+              const el = scrollRef.current;
+              if (el) zoomAt(zoomRef.current - 0.15, el.clientWidth / 2, el.clientHeight / 2);
+            }}
+            aria-label="缩小"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto w-11 text-center text-[11px] tabular-nums text-muted-foreground hover:bg-muted"
+            onClick={() =>
+              zoomAt(
+                ZOOM_DEFAULT,
+                (scrollRef.current?.clientWidth ?? 0) / 2,
+                (scrollRef.current?.clientHeight ?? 0) / 2,
+              )
+            }
+            title={`回到 ${Math.round(ZOOM_DEFAULT * 100)}%`}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto rounded-full px-2 py-0.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
+            onClick={() => {
+              const el = scrollRef.current;
+              if (el) zoomAt(zoomRef.current + 0.15, el.clientWidth / 2, el.clientHeight / 2);
+            }}
+            aria-label="放大"
+          >
+            ＋
+          </button>
+          <span className="mx-0.5 h-4 w-px bg-border" />
+          <button
+            type="button"
+            className="pointer-events-auto rounded-full px-2.5 py-1 text-[11px] text-primary transition-colors hover:bg-muted"
+            onClick={() =>
+              scrollRef.current?.scrollTo({ left: scrollRef.current.scrollWidth, behavior: "smooth" })
+            }
+          >
+            回到最新
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ---------- 件与代标签 ---------- */
+
+function ItemLabel({ item }: { item: CanvasItem }) {
+  return (
+    <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground/80">
+      {item.item}
+      {item.status === "finalized" ? (
+        <span className="flex items-center gap-0.5 text-[11px] font-medium text-green-700 dark:text-green-400">
+          <BadgeCheck className="size-3.5" /> 已定稿
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function GenLabel({ gen }: { gen: number }) {
+  return (
+    <span className="rounded-full border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      第 {gen} 代{gen > 1 ? "（改稿）" : ""}
+    </span>
+  );
+}
+
+/* ---------- 稿卡 ---------- */
+
+function DraftCard({
+  projectId,
+  draft,
+  finalized,
+  deleting,
+  onDelete,
+}: {
+  projectId: string;
+  draft: CanvasDraft;
+  /** 本卡是否该件的定稿稿（finalizedPath 精确匹配——定稿徽记＋不可删）。 */
+  finalized: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
+  const name = draftDisplayName(draft.path);
+  return (
+    <div
+      data-draft-card={draft.path}
+      className={cn(
+        "group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-colors",
+        finalized ? "border-green-600/50" : "hover:border-foreground/25",
+      )}
+    >
+      <div className="relative block w-full overflow-hidden bg-muted/20" style={{ aspectRatio: "8 / 5" }}>
+        {draft.media === "image" ? (
+          // eslint-disable-next-line @next/next/no-img-element -- 平台文件服务直出的设计稿，非静态资源（Next Image 不适用）
+          <img
+            src={rawFileUrl(projectId, draft.path)}
+            alt={name}
+            className="h-full w-full object-cover"
+            data-draft-media={draft.path}
+          />
+        ) : (
+          <DraftFrame projectId={projectId} path={draft.path} title={name} />
+        )}
+        {finalized ? (
+          <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+            <BadgeCheck className="size-3" /> 定稿
+          </span>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <span className="min-w-0 flex-1 truncate text-xs text-foreground/80">{name}</span>
+        {draft.media === "html" ? (
+          <span className="shrink-0 font-mono text-[9px] text-muted-foreground/50">1280×800</span>
+        ) : null}
+        {finalized ? null : (
+          <span data-no-drag className="shrink-0">
+            <Popover>
+              <PopoverTrigger
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                className="rounded p-1 text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-destructive"
+                aria-label={`删除${name}`}
+              >
+                <Trash2 className="size-3.5" />
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-3" onClick={(event) => event.stopPropagation()}>
+                <div className="text-sm font-medium">删除「{name}」？</div>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  把不要的稿从画布清掉；已定稿与版本不受影响。
+                </p>
+                <div className="mt-2 flex justify-end gap-2">
+                  <PopoverTrigger className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted">
+                    取消
+                  </PopoverTrigger>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={deleting}
+                    onClick={onDelete}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- 界面类稿：固定画幅帧（iframe live 直渲） ---------- */
+
+/** 容器实宽 → 等比缩放系数（帧内 1280×800 恒定，缩放进容器）。 */
+function useFitScale(baseW: number) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [scale, setScale] = React.useState(0.25);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setScale(width / baseW);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [baseW]);
+  return { ref, scale };
+}
+
+/**
+ * 界面类稿正身（ADR-0025 渐进呈现、ADR-0027 界面类 v1 零截图）：设计稿是
+ * 「帧」不是网站——iframe 按 raw 稿伺服通道取件（同源直链，服务端 CSP 禁脚本
+ * ——帧无行为面），内页恒 1280×800 桌面布局、缩放进卡（不随容器响应）。
+ * 帧区 pointerEvents 关闭：卡上按压要落进卡层接管拖排（iframe 文档会吞指针，
+ * 事件不冒泡回父层）——画布卡是呈现面，可交互预览归点开（#294）。
+ */
+function DraftFrame({ projectId, path, title }: { projectId: string; path: string; title: string }) {
+  const { ref, scale } = useFitScale(FRAME_W);
+  return (
+    <div ref={ref} className="relative h-full w-full overflow-hidden bg-white">
+      <iframe
+        title={title}
+        src={rawFileUrl(projectId, path)}
+        data-draft-frame={path}
+        className="absolute left-0 top-0 origin-top-left border-0 bg-white"
+        style={{ width: FRAME_W, height: FRAME_H, transform: `scale(${scale})`, pointerEvents: "none" }}
+        sandbox=""
+        tabIndex={-1}
+      />
+    </div>
+  );
+}
+
+/* ---------- 空态 ---------- */
+
+function EmptyDesignBoard() {
+  return (
+    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 p-6 text-center">
+      <span className="flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+        <Layers className="size-5" />
+      </span>
+      <div className="text-sm font-medium">设计稿会在这里长出来</div>
+      <div className="text-xs text-muted-foreground">
+        出稿开始后一张张到——平面类整图到达，界面类看着它一点点写出来
+      </div>
+    </div>
+  );
+}

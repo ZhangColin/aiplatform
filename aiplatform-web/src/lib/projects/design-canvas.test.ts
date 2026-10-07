@@ -45,6 +45,7 @@ describe("buildDesignCanvas · 件×代×稿派生（#293 全系统画布）", (
         ord: 1,
         status: "closed",
         finalizedPath: undefined,
+        live: false,
         gens: [
           {
             gen: 1,
@@ -66,6 +67,7 @@ describe("buildDesignCanvas · 件×代×稿派生（#293 全系统画布）", (
         ord: 2,
         status: "closed",
         finalizedPath: undefined,
+        live: false,
         gens: [
           { gen: 1, drafts: [{ path: "/design/123-poster.png", media: "image", item: "海报", gen: 1 }] },
         ],
@@ -85,7 +87,7 @@ describe("buildDesignCanvas · 件×代×稿派生（#293 全系统画布）", (
     );
 
     expect(canvas).toEqual([
-      { item: "首页", ord: 1, status: "closed", finalizedPath: undefined, gens: [] },
+      { item: "首页", ord: 1, status: "closed", finalizedPath: undefined, live: false, gens: [] },
     ]);
   });
 
@@ -145,7 +147,125 @@ describe("buildDesignCanvas · 件×代×稿派生（#293 全系统画布）", (
     );
     // 件行在（清单事实、画布件带标注）、零代零稿
     expect(canvas).toEqual([
-      { item: "首页", ord: 1, status: "pending", finalizedPath: undefined, gens: [] },
+      { item: "首页", ord: 1, status: "pending", finalizedPath: undefined, live: false, gens: [] },
+    ]);
+  });
+});
+
+describe("buildDesignCanvas · 在途稿提升（#294 渐进长出）", () => {
+  it("灵魂用例：live 会话的树上未见稿提升为目标件下一代替补（incoming）；多稿逐张到达不等齐", () => {
+    // live 首产：首页已收口两代，海报正在出——树上 design/ 新落两张（一张到达、
+    // 一张在写）即提升为海报的第 1 代 incoming；收口轮的稿（首页）不重复提升
+    const canvas = buildDesignCanvas(
+      [[draft("首页", "/design/home-1.html")]],
+      [
+        file("design/home-1.html"),
+        file("design/poster-1.html"),
+        file("design/123-poster-2.png"),
+      ],
+      [item({ title: "首页", ord: 1 }), item({ title: "海报", ord: 2, status: "pending" })],
+      { itemTitle: "海报" },
+    );
+
+    expect(canvas).toEqual([
+      {
+        item: "首页",
+        ord: 1,
+        status: "closed",
+        finalizedPath: undefined,
+        live: false,
+        gens: [
+          { gen: 1, drafts: [{ path: "/design/home-1.html", media: "html", item: "首页", gen: 1 }] },
+        ],
+      },
+      {
+        item: "海报",
+        ord: 2,
+        status: "pending",
+        finalizedPath: undefined,
+        live: true, // live 目标件——占位卡的呈现判据
+        gens: [
+          {
+            gen: 1,
+            drafts: [
+              { path: "/design/123-poster-2.png", media: "image", item: "海报", gen: 1, incoming: true },
+              { path: "/design/poster-1.html", media: "html", item: "海报", gen: 1, incoming: true },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("live 改稿：新代挂既有代之后（gen＝代数＋1），旧代不动", () => {
+    const canvas = buildDesignCanvas(
+      [[draft("首页", "/design/home-1.html")]],
+      [file("design/home-1.html"), file("design/home-v2-1.html")],
+      [item({ title: "首页" })],
+      { itemTitle: "首页" },
+    );
+
+    expect(canvas[0]?.gens).toEqual([
+      { gen: 1, drafts: [{ path: "/design/home-1.html", media: "html", item: "首页", gen: 1 }] },
+      {
+        gen: 2,
+        drafts: [
+          { path: "/design/home-v2-1.html", media: "html", item: "首页", gen: 2, incoming: true },
+        ],
+      },
+    ]);
+  });
+
+  it("非 live 零提升：树上游离稿（渲失败的 HTML 源等）不冒充代际事实", () => {
+    const canvas = buildDesignCanvas(
+      [[draft("首页", "/design/home-1.html")]],
+      [file("design/home-1.html"), file("design/orphan.html")],
+      [item({ title: "首页" })],
+      // null＝无 live 会话（收口后/回访）
+      null,
+    );
+
+    expect(canvas[0]?.gens).toHaveLength(1);
+    expect(canvas[0]?.gens[0]?.drafts.map((d) => d.path)).toEqual(["/design/home-1.html"]);
+  });
+
+  it("live 但树上无新稿：目标件只标记 live（占位呈现），不开空代", () => {
+    const canvas = buildDesignCanvas(
+      [[draft("首页", "/design/home-1.html")]],
+      [file("design/home-1.html")],
+      [item({ title: "首页" }), item({ title: "海报", ord: 2, status: "pending" })],
+      { itemTitle: "海报" },
+    );
+
+    const poster = canvas.find((entry) => entry.item === "海报");
+    expect(poster).toMatchObject({ live: true, gens: [] });
+  });
+
+  it("live 标题清单对照不上（措辞漂移）：按标题自组件（ord null），提升照常", () => {
+    const canvas = buildDesignCanvas(
+      [],
+      [file("design/logo-1.html")],
+      [item({ title: "品牌 logo", ord: 1 })],
+      { itemTitle: "旧标题 logo" },
+    );
+
+    expect(canvas).toEqual([
+      { item: "品牌 logo", ord: 1, status: "closed", finalizedPath: undefined, live: false, gens: [] },
+      {
+        item: "旧标题 logo",
+        ord: null,
+        status: null,
+        finalizedPath: undefined,
+        live: true,
+        gens: [
+          {
+            gen: 1,
+            drafts: [
+              { path: "/design/logo-1.html", media: "html", item: "旧标题 logo", gen: 1, incoming: true },
+            ],
+          },
+        ],
+      },
     ]);
   });
 });

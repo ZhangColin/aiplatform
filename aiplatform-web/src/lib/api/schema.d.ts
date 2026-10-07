@@ -373,7 +373,7 @@ export interface paths {
         put?: never;
         /**
          * 对话区发言（入口三分类派发：意见/咨询/兜底）
-         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
+         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。divergence（可选，#294 发散度 chip）：REFINE/EXPLORE/REIMAGINE（微调/探索/大胆）——只随作用域发言生效，改稿 prompt 携档位引导；非法值 400。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
         delete?: never;
@@ -1104,6 +1104,34 @@ export interface paths {
          * @description 版本元数据（hash / 摘要 / 锚定 run / 成版时刻）+ 收尾卡载荷（Run-Id 联接对话史 closing 条目；收尾卡缺位时 closing 为 null）。ref = commit hash（hex）——非 hash 形态 404 PRJ_028 且不触工作区（shell 注入防线）。项目不存在 404 PRJ_001
          */
         get: operations["detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/design-drafts/png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 下载设计稿图（#294 界面类 PNG 位图化，支付门）
+         * @description path＝稿的工作区锚定形路径（收尾卡 drafts/画布稿卡同形）。界面类 HTML 稿按画布帧同一画幅（1280×800）chromium 渲成 PNG——所见即所下（下载的图就是画布上看到的那帧）；产物落 exports/ （可再生衍生），重复下载幂等覆写。支付门只盖下载面（ADR-0027：平台随便看、带走才付费）：项目曾有已支付/已归档订单即开放，未付费 402 ORD_015 如实告知门语义。非 design 锚定 HTML 400 PRJ_020（平面类图片稿直接走通用单文件下载）；源稿不存在 404 PRJ_021；渲染失败 500 PRJ_039。响应为二进制流（image/png，本端点不走 ApiResponse JSON 信封，先例＝单文件下载）。项目不存在 404 PRJ_001
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 400 PRJ_020 — 该文件不在可浏览范围
+         *     - 404 PRJ_021 — 文件不存在
+         *     - 500 PRJ_039 — 位图渲染失败
+         *     - 402 ORD_015 — 还未支付，暂不能下载：平台上可随意浏览和预览，带走文件需先完成订单支付
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["downloadPng"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2642,6 +2670,7 @@ export interface components {
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Format: int32 */
             designItem?: number;
+            divergence?: string;
         };
         ApiResponseInterviewTurnResponse: {
             /** Format: int32 */
@@ -5060,6 +5089,30 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseVersionDetailResponse"];
+                };
+            };
+        };
+    };
+    downloadPng: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
         };

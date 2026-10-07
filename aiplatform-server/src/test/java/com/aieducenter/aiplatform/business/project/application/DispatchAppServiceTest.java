@@ -416,7 +416,7 @@ class DispatchAppServiceTest {
         });
 
         DispatchAppService.DispatchRun run = appService.dispatch(projectId,
-                "刚才那稿的颜色再亮一点", MessageAttachment.NONE, 1);
+                "刚才那稿的颜色再亮一点", MessageAttachment.NONE, 1, "REIMAGINE");
 
         assertThat(run).isNotNull();
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
@@ -427,7 +427,8 @@ class DispatchAppServiceTest {
         assertThat(revision.agentKey()).isEqualTo(AgentProfile.DESIGNER.key());
         assertThat(revision.prompt())
                 .contains("刚才那稿的颜色再亮一点")
-                .contains("新一代候选");
+                .contains("新一代候选")
+                .contains("大胆"); // #294 发散度档位进改稿 prompt（chip 同语义通道）
         // 发言落对话史（用户面照见——回访水合）
         assertThat(conversationHistory.read(projectId))
                 .anySatisfy(entry -> assertThat(entry.text())
@@ -443,7 +444,7 @@ class DispatchAppServiceTest {
         assertThat(codingRunTrack.begin(projectId)).isTrue();
         try {
             DispatchAppService.DispatchRun run = appService.dispatch(projectId,
-                    "海报文字加大", MessageAttachment.NONE, 2);
+                    "海报文字加大", MessageAttachment.NONE, 2, null);
 
             assertThat(run).isNotNull();
             verify(agentClient, never()).converse(any(), any()); // 未起 run（排队中）
@@ -460,13 +461,13 @@ class DispatchAppServiceTest {
         // 作用域守卫：件不存在 404 PRJ_047；件未产出稿（待跑）409 PRJ_048
         Long projectId = persistedDesignScopeProject("9762", 1, 1);
 
-        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 9))
+        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 9, null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.DESIGN_ITEM_NOT_FOUND.message());
 
         jdbcTemplate.update("UPDATE prj_design_items SET status = 1 WHERE project_id = ?",
                 projectId); // 退回待跑（未产出稿）
-        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 1))
+        assertThatThrownBy(() -> appService.dispatch(projectId, "改稿", MessageAttachment.NONE, 1, null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.DESIGN_ITEM_NOT_READY.message());
     }

@@ -1182,6 +1182,47 @@ describe("bridge · designer 事件 → 直播卡生长＋收尾卡稿清单（#
     expect(useChatStore.getState().chats["p1"]).toBeUndefined(); // 解说不进对话面（长在直播卡）
   });
 
+  it("part-action（designer 写动作 completed）→ 文件树失效（#294 渐进长出——稿落盘即重拉树）；running/读类/他 run 不触发", async () => {
+    const files = observeActiveQuery(agentQc, queryKeys.projects.files("p1"));
+    try {
+      await files.waitForSettled();
+      dispatchAgentEvent(agentQc, agentEvent(
+        "run-start",
+        { ...designRun, prompt: "…", model: "m", agent: "designer", slice: { title: "首页主视觉", index: 1, total: 3 } },
+        "run-d1:1",
+      ));
+      // run-start 失效的是 projects 域（前缀命中 files）——先等这次重拉落定再区分后续
+      await vi.waitFor(() => expect(files.fetchCount()).toBe(2));
+      const base = files.fetchCount();
+
+      // running 不触发（稿未落盘——文件树无新事实）
+      dispatchAgentEvent(agentQc, agentEvent("part-action", {
+        ...designRun, toolCallId: "tc-1", toolName: "write_file", state: "running", label: "编写【home-1】",
+      }, "run-d1:2"));
+      // 读类完成不触发（读不落盘）
+      dispatchAgentEvent(agentQc, agentEvent("part-action", {
+        ...designRun, toolCallId: "tc-2", toolName: "read_file", state: "completed", label: "读取【PRD】",
+      }, "run-d1:3"));
+      // 他 run 的写完成不触发（锚定判定——designer 座席＋runId 双锚）
+      dispatchAgentEvent(agentQc, agentEvent("part-action", {
+        ...designRun, runId: "run-x", toolCallId: "tc-3", toolName: "write_file", state: "completed", label: "编写【他件】",
+      }, "run-x:1"));
+      expect(files.fetchCount()).toBe(base);
+
+      // 写动作完成（write_file/edit_file/generate_image）——稿落盘即失效（逐张不等齐）
+      dispatchAgentEvent(agentQc, agentEvent("part-action", {
+        ...designRun, toolCallId: "tc-4", toolName: "write_file", state: "completed", label: "编写【home-1】",
+      }, "run-d1:4"));
+      await vi.waitFor(() => expect(files.fetchCount()).toBe(base + 1));
+      dispatchAgentEvent(agentQc, agentEvent("part-action", {
+        ...designRun, toolCallId: "tc-5", toolName: "generate_image", state: "completed", label: "出图【海报】",
+      }, "run-d1:5"));
+      await vi.waitFor(() => expect(files.fetchCount()).toBe(base + 2));
+    } finally {
+      files.unsubscribe();
+    }
+  });
+
   it("run-finish 携 closing.drafts：收尾卡稿清单入对话流、直播卡定格留驻、项目域失效（件状态落表推进计划区）", async () => {
     const projects = observeActiveQuery(agentQc, queryKeys.projects.all);
     try {

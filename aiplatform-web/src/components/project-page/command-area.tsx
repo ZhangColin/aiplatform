@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileText, Inbox, Lock, TriangleAlert } from "lucide-react";
+import { Check, FileText, Inbox, Lock, TriangleAlert, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Composer, type ComposerAttachment } from "@/components/composer/composer";
@@ -24,6 +24,10 @@ import type { LockRow } from "@/lib/orders/lock";
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import { useAnnotationStore, type AnnotationItem } from "@/lib/store/annotation";
 import { pendingQuestionOf, useChatStore, type ChatMessage } from "@/lib/store/chat";
+import {
+  DIVERGENCE_LEVELS,
+  useDesignScopeStore,
+} from "@/lib/store/design-scope";
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
@@ -108,6 +112,12 @@ export function CommandArea({
   const uploadMaterial = useUploadMaterial(projectId);
   // 圈注条目（#97）：预览回传的标注，随发送框附件区呈现、发送前可删改，发送即清
   const annotations = useAnnotationStore((s) => s.annotations[projectId] ?? EMPTY_ANNOTATIONS);
+  // 设计改稿作用域（#294 点哪改哪）：画布点选写入，chip 呈现于发送框上方；随话
+  // 直达该件设计会话（designItem）＋发散度档位（divergence）同句发出
+  const scope = useDesignScopeStore((s) => s.scopes[projectId]);
+  const divergence = useDesignScopeStore((s) => s.divergences[projectId] ?? "explore");
+  const clearScope = useDesignScopeStore((s) => s.clear);
+  const setDivergence = useDesignScopeStore((s) => s.setDivergence);
   // 对话史水合（#89）：刷新 / 回访对话完整（含问答作答与收尾卡）；轮收口事件与
   // 重连失效驱动增量水合，live 事件只承载在途增量
   useConversation(projectId);
@@ -191,6 +201,16 @@ export function CommandArea({
           ...materials.map(toImageAttachmentCommand),
           ...annotations.map(toAttachmentCommand),
         ],
+        // 作用域在场＝改稿直达（#294 点哪改哪）：designItem 路由＋发散度同句；
+        // 作用域不清（stitch 挑选语义——连续改稿零重复点选，X 才退出）
+        ...(scope
+          ? {
+              designItem: scope.ord,
+              divergence:
+                DIVERGENCE_LEVELS.find((level) => level.value === divergence)?.api
+                ?? "EXPLORE",
+            }
+          : {}),
       });
       // 发送即清（圈注随消息发出，不再滞留）
       useAnnotationStore.getState().clear(projectId);
@@ -255,6 +275,40 @@ export function CommandArea({
           <div className="mb-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             <Lock className="size-3.5 shrink-0" />
             {lock.chatHint}
+          </div>
+        ) : null}
+        {/* 编辑作用域＋发散档（#294 点哪改哪——stitch：选中＝编辑作用域、chip 调幅） */}
+        {scope && !disabled ? (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs" data-design-scope>
+            <span className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-primary">
+              就「{scope.itemTitle}」改
+              <button
+                type="button"
+                className="rounded-full p-0.5 transition-colors hover:bg-primary/10"
+                aria-label="取消作用域"
+                data-scope-clear
+                onClick={() => clearScope(projectId)}
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+            <span className="text-muted-foreground">发散幅度</span>
+            {DIVERGENCE_LEVELS.map((level) => (
+              <button
+                key={level.value}
+                type="button"
+                onClick={() => setDivergence(projectId, level.value)}
+                data-divergence={level.value}
+                className={cn(
+                  "rounded-full border px-2 py-0.5 transition-colors",
+                  divergence === level.value
+                    ? "border-foreground/40 bg-muted font-medium"
+                    : "text-muted-foreground hover:bg-muted/50",
+                )}
+              >
+                {level.label}
+              </button>
+            ))}
           </div>
         ) : null}
         <Composer

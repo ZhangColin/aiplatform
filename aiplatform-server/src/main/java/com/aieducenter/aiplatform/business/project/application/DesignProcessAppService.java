@@ -31,6 +31,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignPrints;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -168,16 +169,21 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 改稿 prompt（#291 改稿同会话继续——审美上下文靠会话连续性）：携用户意见
-     * 原文，产<b>新代候选</b>——新稿文件名与既有各代不重（旧代全部保留、横向
-     * 可对照，ADR-0025 候选集语义）；意见不涉改稿时文字回应即合法收口（0 稿如实
-     * ——改稿收口判据是 relaxed，对偶修正「判定无需改动也合法收口」）。
+     * 改稿 prompt（#291 改稿同会话继续——审美上下文靠会话连续性；#294 携发散度
+     * 档位引导）：携用户意见原文，产<b>新代候选</b>——新稿文件名与既有各代不重
+     * （旧代全部保留、横向可对照，ADR-0025 候选集语义）；意见不涉改稿时文字回应
+     * 即合法收口（0 稿如实——改稿收口判据是 relaxed，对偶修正「判定无需改动也
+     * 合法收口」）。发散度档位（chip 或自然语言同一语义通道——用户话里表达了
+     * 幅度就以话为准，档位是缺省引导）替换「实质推进」的幅度约定。
      */
-    static String revisionPrompt(String item, String feedback) {
+    static String revisionPrompt(String item, String feedback, DesignDivergence divergence) {
+        String range = divergence != null
+                ? "新代与上一代的距离按「" + divergence.label() + "」档把握：" + divergence.guidance()
+                : "与既有各代方向有实质推进（不是重复旧稿）";
         return "设计稿改稿（设计物「" + item + "」）：请按用户意见继续推进设计稿。"
                 + "\n用户意见：" + feedback
                 + "\n产出要求："
-                + "\n- 产出新一代候选稿：与既有各代方向有实质推进（不是重复旧稿），"
+                + "\n- 产出新一代候选稿：" + range + "，"
                 + "默认 3 稿、各稿方向有实质差异；"
                 + "\n- 新稿独立落盘、文件名与既有各代不重——旧稿不改写不覆盖"
                 + "（旧代全部保留、横向可对照）；设计稿只落 design/ 目录；"
@@ -241,8 +247,8 @@ public class DesignProcessAppService {
      * 会话的件；重启丢失后回落清单最高已收口/定稿件）。 */
     private final Map<Long, Integer> lastActiveOrd = new ConcurrentHashMap<>();
 
-    /** 排队意见（#291）：目标件序（null = 受理时派目标）＋意见原文。 */
-    record QueuedRevision(Integer ord, String feedback) {
+    /** 排队意见（#291；#294 携发散度）：目标件序（null = 受理时派目标）＋意见原文＋档位。 */
+    record QueuedRevision(Integer ord, String feedback, DesignDivergence divergence) {
     }
 
     public DesignProcessAppService(ProjectRepository projectRepository,
@@ -301,7 +307,7 @@ public class DesignProcessAppService {
         Project project = requireDesignableProject(projectId);
         if (!codingRunTrack.begin(projectId)) {
             // 在途插话排队（#291）：不丢失、不打断——当前稿代收口后排空受理
-            enqueueRevision(projectId, null, opinion);
+            enqueueRevision(projectId, null, opinion, null);
             log.info("[design] 项目 {} 设计轨道在途，意见已排队受理", projectId);
             return null;
         }
@@ -343,7 +349,7 @@ public class DesignProcessAppService {
             codingRunTrack.end(projectId);
             return null;
         }
-        enqueueRevision(projectId, target, opinion);
+        enqueueRevision(projectId, target, opinion, null);
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
@@ -358,9 +364,10 @@ public class DesignProcessAppService {
 
     /**
      * 作用域改稿派发（#291 跨件回溯的会话路由能力——画布点选随到，画布侧接线归
-     * #294）：意见携目标件序直达该件设计会话（同会话继续），不经主智能体轮——
-     * 作用域即「这是设计意见」的显式声明（对用户隐式：画布点选后随话发送）。设计
-     * 轨在途即排队（目标件锚定，当前稿代收口后受理）；空闲即起改稿（顺带排空残队）。
+     * #294；#294 起携发散度档位）：意见携目标件序直达该件设计会话（同会话继续），
+     * 不经主智能体轮——作用域即「这是设计意见」的显式声明（对用户隐式：画布点选
+     * 后随话发送）。设计轨在途即排队（目标件锚定＋发散度随行，当前稿代收口后
+     * 受理）；空闲即起改稿（顺带排空残队）。
      *
      * @return 派发的 run 标识；在途排队返回 null（不误报派发事实）
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档；PRJ_017
@@ -368,20 +375,21 @@ public class DesignProcessAppService {
      *                              从未产出；PRJ_047 设计物不存在；PRJ_048 件
      *                              状态不可改稿（未产出设计稿）
      */
-    public DesignRun reviseDesignItem(Long projectId, int ord, String feedback) {
+    public DesignRun reviseDesignItem(Long projectId, int ord, String feedback,
+            DesignDivergence divergence) {
         Project project = requireRevisionableProject(projectId, ord);
         // 守卫后重载（竞态窗口失位如实 404，不裸 orElseThrow 500）
         DesignItem item = designItems.findByProjectIdAndOrd(projectId, ord)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.DESIGN_ITEM_NOT_FOUND));
         if (!codingRunTrack.begin(projectId)) {
-            enqueueRevision(projectId, ord, feedback);
+            enqueueRevision(projectId, ord, feedback, divergence);
             log.info("[design] 项目 {} 设计轨道在途，件 {} 改稿意见已排队受理", projectId, ord);
             return null;
         }
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
-                runRevision(project, item, feedback, firstRunId);
+                runRevision(project, item, feedback, divergence, firstRunId);
                 sweepQueuedRevisions(project, null, null);
             }
             finally {
@@ -451,16 +459,17 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 排队意见入队（#291 在途插话/作用域改稿共口）：空白意见不入队（重提续跑类
-     * 触发不产改稿噪音）；ord null＝受理时派目标（轨道内＝刚收口件，独立改稿轨
-     * ＝最近活跃件）。
+     * 排队意见入队（#291 在途插话/作用域改稿共口；#294 携发散度）：空白意见不入队
+     * （重提续跑类触发不产改稿噪音）；ord null＝受理时派目标（轨道内＝刚收口件，
+     * 独立改稿轨＝最近活跃件）。
      */
-    private void enqueueRevision(Long projectId, Integer ord, String feedback) {
+    private void enqueueRevision(Long projectId, Integer ord, String feedback,
+            DesignDivergence divergence) {
         if (isBlank(feedback)) {
             return;
         }
         queuedRevisions.computeIfAbsent(projectId, key -> new ConcurrentLinkedDeque<>())
-                .add(new QueuedRevision(ord, feedback.strip()));
+                .add(new QueuedRevision(ord, feedback.strip(), divergence));
     }
 
     private boolean hasQueuedRevisions(Long projectId) {
@@ -469,9 +478,10 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 排空排队意见（#291 当前稿代收口后受理）：按目标件分组、每组合并成一场改稿
-     * run（多条意见以「；」连缀——对偶修正轨排队合并）；无目标意见派向
-     * {@code justClosedOrd}（轨道内刚收口件；独立改稿轨传 null 派最近活跃件）。
+     * 排空排队意见（#291 当前稿代收口后受理；#294 档位随行）：按目标件分组、每组
+     * 合并成一场改稿 run（多条意见以「；」连缀——对偶修正轨排队合并；发散度取组内
+     * 最后一条非空——最近表达覆盖早先，合并受理只一场 run 档位唯一）；无目标意见
+     * 派向 {@code justClosedOrd}（轨道内刚收口件；独立改稿轨传 null 派最近活跃件）。
      * 目标件竞态失位（清单重产换序/状态翻失败）如实跳过留日志——意见已从队列
      * 取出，用户重提即兜底（不静默重投，防改稿轰炸）。firstRunId 非空时锚定首场
      * 改稿（派发响应的用户面身份）。
@@ -482,16 +492,16 @@ public class DesignProcessAppService {
         if (queue == null || queue.isEmpty()) {
             return;
         }
-        Map<Integer, List<String>> grouped = new LinkedHashMap<>();
+        Map<Integer, List<QueuedRevision>> grouped = new LinkedHashMap<>();
         for (QueuedRevision entry : queue) {
             Integer ord = entry.ord() != null ? entry.ord()
                     : justClosedOrd != null ? justClosedOrd : resolveRevisionTarget(projectId);
             if (ord != null) {
-                grouped.computeIfAbsent(ord, key -> new ArrayList<>()).add(entry.feedback());
+                grouped.computeIfAbsent(ord, key -> new ArrayList<>()).add(entry);
             }
         }
         boolean first = true;
-        for (Map.Entry<Integer, List<String>> target : grouped.entrySet()) {
+        for (Map.Entry<Integer, List<QueuedRevision>> target : grouped.entrySet()) {
             DesignItem item = designItems.findByProjectIdAndOrd(projectId, target.getKey())
                     .orElse(null);
             if (item == null || !isRevisionable(item)) {
@@ -499,11 +509,19 @@ public class DesignProcessAppService {
                         projectId, target.getKey());
                 continue;
             }
+            List<QueuedRevision> entries = target.getValue();
+            DesignDivergence divergence = entries.stream()
+                    .map(QueuedRevision::divergence)
+                    .filter(d -> d != null)
+                    .reduce((earlier, later) -> later) // 最后表达覆盖早先（合并受理档位唯一）
+                    .orElse(null);
             String runId = first && firstRunId != null ? firstRunId : EventsAppService.newRunId();
             first = false;
             log.info("[design] 项目 {} 受理排队改稿（件 {}，合并 {} 条意见）",
-                    projectId, target.getKey(), target.getValue().size());
-            runRevision(project, item, String.join("；", target.getValue()), runId);
+                    projectId, target.getKey(), entries.size());
+            runRevision(project, item,
+                    String.join("；", entries.stream().map(QueuedRevision::feedback).toList()),
+                    divergence, runId);
         }
     }
 
@@ -544,21 +562,21 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 一场改稿 run（#291 改稿同会话继续）：同件设计会话（审美上下文连续）、携
-     * 意见原文产新代候选；收口判据＝对话收口（relaxed——意见不涉改稿的回应也是
-     * 合法收口，drafts 如实可能 0 稿；对偶修正 finish_edit(changed=false)）。改稿
-     * 失败发 {@code run-failed}（唯一失败终态）——件状态不翻失败（首产收口位
-     * 保持、定稿锚不覆写），用户重提即兜底。
+     * 一场改稿 run（#291 改稿同会话继续；#294 携发散度档位进 prompt）：同件设计
+     * 会话（审美上下文连续）、携意见原文产新代候选；收口判据＝对话收口（relaxed
+     * ——意见不涉改稿的回应也是合法收口，drafts 如实可能 0 稿；对偶修正
+     * finish_edit(changed=false)）。改稿失败发 {@code run-failed}（唯一失败终态）
+     * ——件状态不翻失败（首产收口位保持、定稿锚不覆写），用户重提即兜底。
      *
      * @return 收场事实（成败）
      */
     private CoderRunAttempts.RunResult runRevision(Project project, DesignItem item,
-            String feedback, String runId) {
+            String feedback, DesignDivergence divergence, String runId) {
         Long projectId = project.getId();
         CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
                 itemSession(projectId, item.getOrd()),
                 new CoderRunAttempts.Prompts(
-                        revisionPrompt(item.getTitle(), feedback),
+                        revisionPrompt(item.getTitle(), feedback, divergence),
                         errorScene -> revisionRetryPrompt(item.getTitle(), errorScene)),
                 (attemptRunId, attemptChanges) -> closeRevision(item, attemptRunId, attemptChanges),
                 CoderRunAttempts.DESIGN_LABEL, /* injectKnowledge= */ false,

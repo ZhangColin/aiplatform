@@ -60,14 +60,16 @@ public final class WorkspaceVersions {
      * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。排除名单
      * 写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用脚手架自带
      * 的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版生效）：
-     * 非交付名单＋机密之外，物料目录不入版本流（ADR-0027 版本化规则——刀＝可再生
-     * 性：上传物料是输入面，git 不跟踪；代价如实：「查看当时」对物料不快照、
-     * 回滚不触物料〔restore 只动 tracked 文件〕，物料以工作区卷为唯一正本随封存保全）。
+     * 非交付名单＋机密之外，物料目录与导出物目录不入版本流（ADR-0027 版本化规则
+     * ——刀＝可再生性：上传物料是输入面、exports/ 是可再生衍生〔#294 下载图位图化
+     * 落点，#297 设计资产包同面〕，git 不跟踪；代价如实：「查看当时」对两者不快照、
+     * 回滚不触〔restore 只动 tracked 文件〕，均以工作区卷为唯一正本随封存保全）。
      */
     public static String ensureRepoCommand() {
         String excludeEntries = Stream.concat(
                         WorkspaceLayout.NON_DELIVERABLE_DIRS.stream(),
-                        Stream.of(WorkspaceLayout.ENV_FILE, WorkspaceLayout.MATERIALS_DIR))
+                        Stream.of(WorkspaceLayout.ENV_FILE, WorkspaceLayout.MATERIALS_DIR,
+                                WorkspaceLayout.EXPORTS_DIR))
                 .map(name -> "'" + name + "'")
                 .collect(Collectors.joining(" "));
         return "cd " + WorkspaceLayout.ROOT

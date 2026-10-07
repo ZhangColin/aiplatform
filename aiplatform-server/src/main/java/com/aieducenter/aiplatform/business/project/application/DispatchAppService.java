@@ -14,6 +14,7 @@ import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
 import lombok.extern.slf4j.Slf4j;
@@ -125,13 +126,15 @@ public class DispatchAppService {
      *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
      *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
      *                              分类后拦）；PRJ_047 设计物不存在 / PRJ_048 件
-     *                              未产出稿（仅作用域形态）
+     *                              未产出稿（仅作用域形态）；divergence 非法值
+     *                              400（bean validation 面）
      */
     public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments,
-            Integer designItem) {
+            Integer designItem, String divergence) {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
         if (designItem != null) {
-            return dispatchDesignRevision(project, prompt, attachments, designItem);
+            return dispatchDesignRevision(project, prompt, attachments, designItem,
+                    DesignDivergence.of(divergence));
         }
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {
@@ -144,24 +147,24 @@ public class DispatchAppService {
     }
 
     /**
-     * 作用域改稿派发（#291）：发言落对话史（用户面照见）＋直达目标件设计会话。
-     * 排队时锚＝发言锚（runId 只作响应与事件挂载的链路锚，改稿 run 各带自身锚
-     * ——项目过滤订阅照常看见直播卡生长）。
+     * 作用域改稿派发（#291；#294 携发散度）：发言落对话史（用户面照见）＋直达
+     * 目标件设计会话。排队时锚＝发言锚（runId 只作响应与事件挂载的链路锚，改稿
+     * run 各带自身锚——项目过滤订阅照常看见直播卡生长）。
      */
     private DispatchRun dispatchDesignRevision(Project project, String prompt,
-            List<MessageAttachment> attachments, int designItem) {
+            List<MessageAttachment> attachments, int designItem, DesignDivergence divergence) {
         // 守卫先于落库（对齐意见轮口径）：拒绝即零副作用——不落幽灵发言
         designProcessAppService.requireRevisionableItem(project.getId(), designItem);
         String runId = EventsAppService.newRunId();
         conversationHistory.recordUserUtterance(project.getId(), runId, prompt, attachments);
         DesignProcessAppService.DesignRun run = designProcessAppService.reviseDesignItem(
-                project.getId(), designItem, prompt);
+                project.getId(), designItem, prompt, divergence);
         return new DispatchRun(run != null ? run.runId() : runId);
     }
 
     /** 无附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
     public DispatchRun dispatch(Long projectId, String prompt) {
-        return dispatch(projectId, prompt, MessageAttachment.NONE, null);
+        return dispatch(projectId, prompt, MessageAttachment.NONE, null, null);
     }
 
     /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */

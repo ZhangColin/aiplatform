@@ -61,6 +61,16 @@ class WorkspaceVersionsTest {
     }
 
     @Test
+    void given_workspace_when_ensure_repo_command_then_exports_dir_excluded_from_version_flow() {
+        // ADR-0027 版本化规则（#294 随下载图位图化接线补刀）：exports/ 是可再生衍生
+        // （下载图 PNG、#297 设计资产包）——不入版本流 git；文件区仍可见（交付面
+        // 不拦），「查看当时」对衍生如实不快照（正身在 design/ 照常快照）
+        String command = WorkspaceVersions.ensureRepoCommand();
+
+        assertThat(command).contains("'" + WorkspaceLayout.EXPORTS_DIR + "'");
+    }
+
+    @Test
     void given_closing_facts_when_commit_command_then_allow_empty_with_run_id_trailer() {
         String command = WorkspaceVersions.commitCommand("更新了系统", "1234567890");
 

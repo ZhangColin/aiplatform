@@ -178,6 +178,26 @@ function isDesignerWork(projectId: string, runId: string): boolean {
   return work?.seat === "designer" && work.runId === runId;
 }
 
+/** 设计轨的稿落盘动作工具面（#294 渐进长出的文件树失效口径）：写/改文件＋出图
+ * ——completed 即 design/ 有新事实（一张张到达不等齐的驱动源）。 */
+const DRAFT_WRITING_TOOLS: ReadonlySet<string> = new Set([
+  "write_file",
+  "edit_file",
+  "generate_image",
+]);
+
+/** 该部件事件是否设计轨的稿落盘完成（#294）：designer 锚定＋写动作族＋completed
+ * ——文件树失效的窄条件（编码轨照旧 run-finish 才失效、读类与失败动作不触发）。 */
+function isDesignerDraftWritten(projectId: string, runId: string, toolName: unknown,
+    state: unknown): boolean {
+  return (
+    isDesignerWork(projectId, runId)
+    && typeof toolName === "string"
+    && DRAFT_WRITING_TOOLS.has(toolName)
+    && state === "completed"
+  );
+}
+
 /**
  * 智能体事件 → chat store + generation store + 工作消息 store 分发（事件 id =
  * SSE 完整事件 id，React key 白拿）。run-start 携带智能体配置键（引擎信息归一）
@@ -343,6 +363,14 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       }
       case "part-action": {
         const { payload } = platform;
+        // 设计轨稿落盘完成 → 失效文件树（#294 渐进长出：画布在途稿随写随显——
+        // 树是新稿的存在性正本，窄条件只作用 designer 锚定的写动作收口）
+        if (isDesignerDraftWritten(payload.projectId, payload.runId,
+            payload.toolName, payload.state)) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.projects.files(payload.projectId),
+          });
+        }
         work.notePart(
           payload.projectId,
           { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id,

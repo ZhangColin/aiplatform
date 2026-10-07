@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useDesignScopeStore } from "@/lib/store/design-scope";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 import type { ChatState, ChatMessage } from "@/lib/store/chat";
@@ -340,5 +341,71 @@ describe("CommandArea · designer 直播卡计划区选送（#290 装配 seam：
     expect(screen.getByText("用户能注册登录")).toBeTruthy();
     expect(screen.queryByText("首页主视觉")).toBeNull();
     expect(screen.getByText("编写【订单管理】")).toBeTruthy(); // label 滚动（executor 口径）
+  });
+});
+
+describe("CommandArea · 设计改稿作用域＋发散度 chip（#294 点哪改哪）", () => {
+  beforeEach(() => {
+    useDesignScopeStore.setState({ scopes: {}, divergences: {} });
+  });
+
+  it("作用域在场：chip 行呈现（就「件」改＋三档）；发言携 designItem＋所选档位", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+    act(() => {
+      useDesignScopeStore.getState().pick("p1", { ord: 2, itemTitle: "品牌 logo" });
+    });
+    render(<CommandArea projectId="p1" />);
+
+    expect(screen.getByText("就「品牌 logo」改")).toBeTruthy();
+    for (const label of ["微调", "探索", "大胆"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+
+    fireEvent.change(inputOf(), { target: { value: "颜色再亮一点" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+
+    // 缺省档＝探索（EXPLORE）；designItem 路由该件设计会话
+    expect(postMutate).toHaveBeenCalledWith({
+      content: "颜色再亮一点",
+      attachments: [],
+      designItem: 2,
+      divergence: "EXPLORE",
+    });
+  });
+
+  it("调档即改：点「大胆」后发言携 REIMAGINE；作用域不清（连续改稿）", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+    act(() => {
+      useDesignScopeStore.getState().pick("p1", { ord: 1, itemTitle: "首页主视觉" });
+    });
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByText("大胆"));
+    fireEvent.change(inputOf(), { target: { value: "索性换个方向" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+
+    expect(postMutate).toHaveBeenCalledWith({
+      content: "索性换个方向",
+      attachments: [],
+      designItem: 1,
+      divergence: "REIMAGINE",
+    });
+    // 发送后作用域仍在（stitch 挑选语义——下一句继续改同一件零重复点选）
+    expect(useDesignScopeStore.getState().scopes.p1).toEqual({ ord: 1, itemTitle: "首页主视觉" });
+  });
+
+  it("X 退出作用域：chip 行退场，发言回常规三分类（不携 designItem/divergence）", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "开场" }]);
+    act(() => {
+      useDesignScopeStore.getState().pick("p1", { ord: 1, itemTitle: "首页主视觉" });
+    });
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByLabelText("取消作用域"));
+    expect(screen.queryByText("就「首页主视觉」改")).toBeNull();
+
+    fireEvent.change(inputOf(), { target: { value: "帮我看下进度" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+    expect(postMutate).toHaveBeenCalledWith({ content: "帮我看下进度", attachments: [] });
   });
 });

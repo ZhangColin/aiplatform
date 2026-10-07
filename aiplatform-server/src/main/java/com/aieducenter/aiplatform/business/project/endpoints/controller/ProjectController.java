@@ -128,6 +128,9 @@ public class ProjectController {
                     + "画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达"
                     + "该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代"
                     + "收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。"
+                    + "divergence（可选，#294 发散度 chip）：REFINE/EXPLORE/REIMAGINE"
+                    + "（微调/探索/大胆）——只随作用域发言生效，改稿 prompt 携档位"
+                    + "引导；非法值 400。"
                     + "空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；"
                     + "订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；"
                     + "挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑"
@@ -137,7 +140,7 @@ public class ProjectController {
             @Valid @RequestBody PostMessageCommand command) {
         return ApiResponse.ok(new InterviewTurnResponse(
                 dispatchAppService.dispatch(parseId(id), command.content(), command.attachments(),
-                        command.designItem())
+                        command.designItem(), command.divergence())
                         .runId()));
     }
 

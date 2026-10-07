@@ -46,6 +46,7 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
@@ -833,7 +834,7 @@ class DesignProcessAppServiceTest {
 
         // 空闲直达：作用域指件 1（跨件回溯——不是最近活跃的件 2）
         DesignProcessAppService.DesignRun run =
-                appService.reviseDesignItem(projectId, 1, "跨件回溯：logo 重出一版");
+                appService.reviseDesignItem(projectId, 1, "跨件回溯：logo 重出一版", null);
         assertThat(run).isNotNull();
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(1)).converse(commands.capture(), any());
@@ -844,7 +845,7 @@ class DesignProcessAppServiceTest {
         // 在途排队：手工占位轨道 → 作用域改稿排队（null）→ 释放后随派发受理
         clearInvocations(agentClient);
         assertThat(codingRunTrack.begin(projectId)).isTrue();
-        assertThat(appService.reviseDesignItem(projectId, 2, "海报文字加大"))
+        assertThat(appService.reviseDesignItem(projectId, 2, "海报文字加大", null))
                 .isNull();
         codingRunTrack.end(projectId);
         givenScriptedDesignSession(new FileChange("/design/poster-2.html", 70, 0));
@@ -855,6 +856,50 @@ class DesignProcessAppServiceTest {
         assertThat(commands.getValue().sessionId())
                 .isEqualTo(DesignProcessAppService.itemSession(projectId, 2));
         assertThat(commands.getValue().prompt()).contains("海报文字加大");
+    }
+
+    @Test
+    void given_divergence_when_revision_then_prompt_carries_tier_and_queue_rides_latest() {
+        // #294 发散度三档（chip 与自然语言同一语义通道——档位进改稿 prompt 的幅度
+        // 约定）；在途排队的意见档位随行，同件合并受理时最后表达覆盖早先（一场
+        // run 档位唯一）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrdContent(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null); // 两件收口
+
+        clearInvocations(agentClient);
+        givenScriptedDesignSession(new FileChange("/design/logo-5.html", 70, 0));
+
+        // 直达改稿携档位：微调 → prompt 携「微调」档位引导句（不是缺省幅度句）
+        appService.reviseDesignItem(projectId, 1, "色彩再柔和一点", DesignDivergence.REFINE);
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        assertThat(commands.getValue().prompt())
+                .contains("微调")
+                .contains(DesignDivergence.REFINE.guidance());
+
+        // 在途排队携档位随行：同件两条（REFINE → REIMAGINE），合并受理一场 run、
+        // 档位取最后表达
+        clearInvocations(agentClient);
+        assertThat(codingRunTrack.begin(projectId)).isTrue();
+        assertThat(appService.reviseDesignItem(projectId, 1, "文字再紧凑", DesignDivergence.REFINE))
+                .isNull();
+        assertThat(appService.reviseDesignItem(projectId, 1, "索性换个方向", DesignDivergence.REIMAGINE))
+                .isNull();
+        codingRunTrack.end(projectId);
+        givenScriptedDesignSession(new FileChange("/design/logo-6.html", 70, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        assertThat(commands.getValue().prompt())
+                .contains("文字再紧凑")
+                .contains("索性换个方向")
+                .contains("大胆")
+                .contains(DesignDivergence.REIMAGINE.guidance())
+                .doesNotContain(DesignDivergence.REFINE.guidance());
     }
 
     @Test

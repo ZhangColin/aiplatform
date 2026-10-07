@@ -12,12 +12,18 @@ import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.web.ErrorCodePrefix;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
+import com.aieducenter.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.RenderedFileResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceRenders;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -45,14 +51,22 @@ class ProjectRenderAppServiceTest {
     private ProjectRepository projectRepository;
 
     @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /** 渲染执行的容器缝：mock exec 断言命令与出口码口径。 */
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
+    /** #294 下载图位图化的字节回执钉子（PNG 魔数打头，形不对齐即可）。 */
+    private static final byte[] PNG_BYTES = {
+            (byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02};
+
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -165,5 +179,86 @@ class ProjectRenderAppServiceTest {
             return e;
         }
         throw new AssertionError("应抛 ApplicationException");
+    }
+
+    // ---------- #294 下载图位图化（支付门 → 稿面判定 → 渲 exports/ → 读字节） ----------
+
+    @Test
+    void given_unpaid_project_when_download_draft_png_then_ord_015_gate_before_any_exec() {
+        Long projectId = persistedProject(8210L).getId();
+
+        assertThatThrownBy(() -> appService.downloadableDraftPng(projectId, "/design/home.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_DOWNLOAD_NOT_PAID.message());
+        verify(workspaceLifecycleAppService, never()).exec(any(), any());
+        verify(workspaceLifecycleAppService, never()).execBinary(any(), any());
+    }
+
+    @Test
+    void given_paid_project_when_download_draft_png_then_renders_frame_sized_png_and_reads_bytes() {
+        long workspaceId = 8211L;
+        Long projectId = persistedProject(workspaceId).getId();
+        seedPaidOrder(projectId);
+        // 渲染回执（exit 0 + 字节数）→ 读字节回执（execBinary 字节通道）
+        when(workspaceLifecycleAppService.exec(eq(Long.toString(workspaceId)), any()))
+                .thenReturn(new ExecResultResponse("48213\n", "", 0));
+        when(workspaceLifecycleAppService.execBinary(eq(Long.toString(workspaceId)), any()))
+                .thenReturn(new BinaryExecResponse(PNG_BYTES, "", 0));
+
+        ProjectFileDownloadResponse png =
+                appService.downloadableDraftPng(projectId, "/design/home.html");
+
+        // 渲染命令正本（#284 内核契约）：exports/ 落点＋1280×800 固定画幅（所见即所下）
+        verify(workspaceLifecycleAppService).exec(eq(Long.toString(workspaceId)),
+                eq(new WorkspaceExecCommand(WorkspaceRenders.htmlToPngCommand(
+                        "design/home.html", "exports/home-1280x800.png",
+                        ProjectRenderAppService.DRAFT_PNG_WIDTH,
+                        ProjectRenderAppService.DRAFT_PNG_HEIGHT))));
+        // 产物读取走下载命令（无大小上限——带走语义）
+        verify(workspaceLifecycleAppService).execBinary(eq(Long.toString(workspaceId)),
+                eq(new WorkspaceExecCommand(ProjectFiles.downloadCommand(
+                        "exports/home-1280x800.png"))));
+        assertThat(png.contentType()).isEqualTo("image/png");
+        assertThat(png.content()).isEqualTo(PNG_BYTES);
+    }
+
+    @Test
+    void given_non_html_or_non_design_source_when_download_draft_png_then_path_invalid() {
+        Long projectId = persistedProject(8212L).getId();
+        seedPaidOrder(projectId);
+
+        // 平面类图片稿不走位图化（通用单文件下载面）；应用源码 HTML 非 design 锚定
+        assertThatThrownBy(() -> appService.downloadableDraftPng(projectId, "/design/logo.png"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting("codeMessage")
+                .isEqualTo(ProjectMessage.FILE_PATH_INVALID);
+        assertThatThrownBy(() -> appService.downloadableDraftPng(projectId, "/src/index.html"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting("codeMessage")
+                .isEqualTo(ProjectMessage.FILE_PATH_INVALID);
+        verify(workspaceLifecycleAppService, never()).exec(any(), any());
+    }
+
+    @Test
+    void given_render_failure_when_download_draft_png_then_render_failed() {
+        long workspaceId = 8213L;
+        Long projectId = persistedProject(workspaceId).getId();
+        seedPaidOrder(projectId);
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "HTML 渲染失败: 页面崩溃", 2));
+
+        assertThatThrownBy(() -> appService.downloadableDraftPng(projectId, "/design/home.html"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting("codeMessage")
+                .isEqualTo(ProjectMessage.RENDER_FAILED);
+        verify(workspaceLifecycleAppService, never()).execBinary(any(), any());
+    }
+
+    /** 已支付订单种子（门开放面）：place → quote → pay（领域转移链）。 */
+    private void seedPaidOrder(Long projectId) {
+        Order order = Order.place(projectId, 1L, "# PRD");
+        order.quote(10000L, null, null);
+        order.pay("PAY-RENDER-1");
+        orderRepository.save(order);
     }
 }

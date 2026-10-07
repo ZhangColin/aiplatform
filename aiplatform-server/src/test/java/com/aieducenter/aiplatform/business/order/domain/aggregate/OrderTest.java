@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import com.cartisan.core.exception.DomainException;
 
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
@@ -189,10 +190,18 @@ class OrderTest {
         assertThat(order.getPriceEntries().get(1).getOperatorName()).isEqualTo("运营·小刘");
     }
 
+    @Test
+    void given_null_deliverable_type_when_place_then_fields_incomplete() {
+        // #297 下单冻结面：交付物类型是必冻结维（缺＝订单字段不完整，聚合守卫）
+        assertThatThrownBy(() -> Order.place(1L, null, "# PRD\n\n需求", null))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining(OrderMessage.ORDER_FIELDS_INCOMPLETE.message());
+    }
+
     // ---------- 夹具（经公共入口驱动到目标态，不绕私有状态） ----------
 
     private static Order pendingQuoteOrder() {
-        return Order.place(1L, null, "# PRD\n\n需求");
+        return Order.place(1L, null, "# PRD\n\n需求", OrderDeliverableType.SYSTEM);
     }
 
     private static Order quotedOrder() {

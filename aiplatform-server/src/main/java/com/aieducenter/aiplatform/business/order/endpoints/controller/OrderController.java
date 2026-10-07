@@ -2,6 +2,11 @@ package com.aieducenter.aiplatform.business.order.endpoints.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,15 +22,16 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付）：确认下单（纯按钮零输入
- * ——读当前 PRD 冻结快照入单）/ 订单详情 / 取消 / mock 支付。后台机机面（清单/
- * 详情/源码包/报价改价）归 {@link BackofficeOrderController}（#29，
- * /api/backoffice/*，五头 HMAC）。路由横跨 /api/projects 与 /api/orders 两前缀
- * （spec API 面定盘），故不设类级 {@code @RequestMapping}、逐方法写全路径。
+ * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付 + #297 设计资产包取件）：
+ * 确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）/ 订单详情 / 取消 / mock
+ * 支付 / 设计资产包下载。后台机机面（清单/详情/源码包/报价改价）归
+ * {@link BackofficeOrderController}（#29，/api/backoffice/*，五头 HMAC）。路由横跨
+ * /api/projects 与 /api/orders 两前缀（spec API 面定盘），故不设类级
+ * {@code @RequestMapping}、逐方法写全路径。
  */
 @RestController
 @Validated
-@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付")
+@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付 / 设计资产包下载")
 public class OrderController {
 
     private final OrderAppService appService;
@@ -35,12 +41,17 @@ public class OrderController {
     }
 
     @PostMapping("/api/projects/{projectId}/orders")
-    @Operation(summary = "确认下单（冻结 PRD 快照入单）",
+    @Operation(summary = "确认下单（冻结 PRD 快照与交付物类型入单）",
             description = "纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，"
-                    + "取消再下 = 新单新快照），待报价起步。下单即冻结迭代——对话区停止受理意见"
-                    + "（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单"
-                    + "（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。"
-                    + "项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004")
+                    + "取消再下 = 新单新快照），待报价起步；交付物类型自项目终点类型一并冻结"
+                    + "（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。"
+                    + "设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态"
+                    + "＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝"
+                    + "下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），"
+                    + "取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张"
+                    + "未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落"
+                    + "（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档"
+                    + " 409 ORD_004；打包环境故障 WSP_002")
     public ApiResponse<OrderResponse> place(@PathVariable String projectId) {
         return ApiResponse.ok(appService.place(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
@@ -75,5 +86,26 @@ public class OrderController {
                     + "订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> cancel(@PathVariable String id) {
         return ApiResponse.ok(appService.cancel(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
+    }
+
+    @GetMapping("/api/orders/{id}/design-package")
+    @Operation(summary = "设计资产包下载（支付门，#297）",
+            description = "该单下单冻结件直取（交付物包按单定格——选件式 tar：选定稿自包含"
+                    + "形态＋DESIGN.md 设计规范＋帧衍生资产、落选稿不入；系统＋设计单＝统一"
+                    + "部件容器，源码整树与设计部件同包、目录即类型边界）。支付门与源码包/"
+                    + "单文件下载同口径：项目曾有已支付/已归档订单即开放，未付费 402 ORD_015"
+                    + "如实告知门语义（体验免费、带走才付费，ADR-0027）。守卫序＝订单存在 →"
+                    + "交付物类型（系统单 404 ORD_016 如实）→ 门 → 冻结件读取（缺失 404"
+                    + " PRJ_051 不以空产物顶替）。响应为二进制文件流（application/gzip，"
+                    + "本端点不走 ApiResponse JSON 信封，先例＝源码包端点）。订单不存在 404"
+                    + " ORD_001")
+    public ResponseEntity<ByteArrayResource> designPackage(@PathVariable String id) {
+        Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
+        byte[] bytes = appService.downloadableDesignPackage(orderId);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/gzip"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(orderId + "-design.tar.gz").build());
+        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(bytes));
     }
 }

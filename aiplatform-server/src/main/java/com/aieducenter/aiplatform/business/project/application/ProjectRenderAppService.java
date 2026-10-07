@@ -20,6 +20,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.RenderedFileResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignPackages;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignPrints;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceRenders;
@@ -39,10 +40,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class ProjectRenderAppService {
-
-    /** 界面类稿位图化下载的固定画幅（#294 所见即所下）：与画布帧同一画幅——1280×800。 */
-    public static final int DRAFT_PNG_WIDTH = 1280;
-    public static final int DRAFT_PNG_HEIGHT = 800;
 
     private final ProjectRepository projectRepository;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -146,9 +143,9 @@ public class ProjectRenderAppService {
         if (!ProjectFiles.isDraftHtml(relative)) {
             throw new ApplicationException(ProjectMessage.FILE_PATH_INVALID);
         }
-        String target = WorkspaceLayout.EXPORTS_DIR + "/" + pngStemOf(relative)
-                + "-" + DRAFT_PNG_WIDTH + "x" + DRAFT_PNG_HEIGHT + ".png";
-        renderHtmlPng(projectId, relative, target, DRAFT_PNG_WIDTH, DRAFT_PNG_HEIGHT);
+        String target = DesignPackages.framePngOf(DesignPackages.stemOf(relative));
+        renderHtmlPng(projectId, relative, target,
+                DesignPackages.FRAME_PNG_WIDTH, DesignPackages.FRAME_PNG_HEIGHT);
         BinaryExecResponse bytes = workspaceLifecycleAppService.execBinary(
                 Long.toString(project.getWorkspaceId()),
                 new WorkspaceExecCommand(ProjectFiles.downloadCommand(target)));
@@ -158,13 +155,6 @@ public class ProjectRenderAppService {
                     "下载图读取失败: " + bytes.stderr());
         }
         return new ProjectFileDownloadResponse(bytes.stdout(), "image/png");
-    }
-
-    /** 稿相对路径 → PNG 词干（文件名去扩展——产物名与稿同名异扩展）。 */
-    private static String pngStemOf(String relativePath) {
-        String name = relativePath.substring(relativePath.lastIndexOf('/') + 1);
-        int dot = name.lastIndexOf('.');
-        return dot > 0 ? name.substring(0, dot) : name;
     }
 
     /** 出入路径前置判定（PRJ_020 在任何容器交互之前，与文件读侧同口径）。 */

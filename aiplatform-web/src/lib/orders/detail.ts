@@ -6,6 +6,10 @@ export type OrderResponse = components["schemas"]["OrderResponse"];
 /** swagger PriceEntryResponse 原始形状。 */
 export type PriceEntryResponse = components["schemas"]["PriceEntryResponse"];
 
+/** OrderDeliverableType code（#297 下单冻结的交付物类型——订单面消费单点）。 */
+export const DELIVERABLE_DESIGN = 1;
+export const DELIVERABLE_SYSTEM_DESIGN = 3;
+
 /**
  * 消费口径的价目行（改价历史条目：时间 + 金额 + 备注）。后端 Long 全局序列化
  * 为字符串（schema 声明 number、线上实为 string），amount 在归一层容错折数。
@@ -22,7 +26,8 @@ export type OrderPriceEntry = {
  * 消费口径的订单详情（缺省字段防御归一）：状态面与时间戳组（#28）+ 金额面
  * （#29：总价/币种/后台备注/报价时点/改价历史——待报价态金额缺省、历史为空）
  * + 支付/归档时点（#30：已支付为事务内瞬态，paidAt 与 archivedAt 同拍——
- * 归档终态「完整记录」的一环）。
+ * 归档终态「完整记录」的一环）+ 交付物类型（#297：下单冻结，1=设计 2=系统
+ * 3=系统＋设计——归档终态下载口按类型分岔）。
  */
 export type OrderDetail = {
   id: string;
@@ -30,6 +35,9 @@ export type OrderDetail = {
   /** OrderStatus code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消。 */
   status?: number;
   statusName?: string;
+  /** OrderDeliverableType code：1=设计 2=系统 3=系统＋设计（下单冻结）。 */
+  deliverableType?: number;
+  deliverableTypeName?: string;
   /** 当前总价（分；待报价缺省）。 */
   amount?: number;
   /** 币种（v1 恒 CNY；待报价缺省）。 */
@@ -74,6 +82,8 @@ export function normalizeOrder(raw: OrderResponse): OrderDetail {
     projectId: raw.projectId,
     status: raw.status ?? undefined,
     statusName: raw.statusName,
+    deliverableType: raw.deliverableType ?? undefined,
+    deliverableTypeName: raw.deliverableTypeName,
     amount: toAmount(raw.amount),
     currency: raw.currency,
     note: raw.note,

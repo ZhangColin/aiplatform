@@ -24,15 +24,18 @@ import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.aieducenter.aiplatform.business.order.domain.entity.OrderPriceEntry;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 
 /**
  * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即拷贝 PRD 全文
- * 快照入单（自含，不依赖工作区存亡——源码不快照，交付经 source-package 实时取）；
- * 金额单位分（Long）、v1 恒 CNY，随报价落值。projectId 跨上下文软引用
- * （prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户查）。
+ * 快照＋冻结交付物类型入单（自含，不依赖工作区存亡）；系统单源码不快照（交付经
+ * source-package 实时取），设计面交付物在下单冻结时打包（#297 设计资产包——
+ * 暂存/落名编排归应用层，聚合只记类型）；金额单位分（Long）、v1 恒 CNY，随报价
+ * 落值。projectId 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余
+ * 下单账号（按用户查）。
  *
  * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代；运营取消
  * {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，#157）、{@link #quote}
@@ -73,6 +76,14 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
 
     @Column(name = "status", nullable = false)
     private OrderStatus status;
+
+    /**
+     * 交付物类型（#297，下单即冻结自项目终点类型；只插不改）：决定下单冻结面——
+     * 设计＝设计资产包、系统＋设计＝统一部件容器（源码＋选定设计稿）、系统＝
+     * 源码包实时取零冻结件。不参与交易机制（报价/改价/状态机/取消同一律）。
+     */
+    @Column(name = "deliverable_type", nullable = false, updatable = false)
+    private OrderDeliverableType deliverableType;
 
     /** 下单时 PRD 全文快照（交易标的；只插不改）。 */
     @Column(name = "prd_snapshot", nullable = false, updatable = false)
@@ -143,22 +154,26 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     protected Order() {
     }
 
-    private Order(Long projectId, Long ownerAccountId, String prdSnapshot) {
-        if (projectId == null || prdSnapshot == null || prdSnapshot.isBlank()) {
+    private Order(Long projectId, Long ownerAccountId, String prdSnapshot,
+            OrderDeliverableType deliverableType) {
+        if (projectId == null || prdSnapshot == null || prdSnapshot.isBlank()
+                || deliverableType == null) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
         this.projectId = projectId;
         this.ownerAccountId = ownerAccountId;
         this.status = OrderStatus.PENDING_QUOTE;
+        this.deliverableType = deliverableType;
         this.prdSnapshot = prdSnapshot;
     }
 
     /**
-     * 下单（确认动作的落库事实）：待报价起步，快照在此冻结——此后 PRD 修订
-     * 不影响本单（取消再下 = 新单新快照）。
+     * 下单（确认动作的落库事实）：待报价起步，快照与交付物类型在此冻结——此后
+     * PRD 修订与项目终点变更均不影响本单（取消再下 = 新单新快照新类型）。
      */
-    public static Order place(Long projectId, Long ownerAccountId, String prdSnapshot) {
-        return new Order(projectId, ownerAccountId, prdSnapshot);
+    public static Order place(Long projectId, Long ownerAccountId, String prdSnapshot,
+            OrderDeliverableType deliverableType) {
+        return new Order(projectId, ownerAccountId, prdSnapshot, deliverableType);
     }
 
     /** 是否终态（已归档/已取消）——未终结订单唯一性的判定口径。 */

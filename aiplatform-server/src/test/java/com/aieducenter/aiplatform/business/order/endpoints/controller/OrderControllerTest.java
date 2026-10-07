@@ -19,6 +19,7 @@ import com.cartisan.web.exception.GlobalExceptionHandler;
 
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -168,9 +169,9 @@ class OrderControllerTest {
         LocalDateTime paidAt = LocalDateTime.of(2026, 9, 1, 11, 0);
         LocalDateTime archivedAt = LocalDateTime.of(2026, 9, 1, 11, 0, 1);
         OrderResponse paid = new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
-                128000L, "CNY", "首版报价", LocalDateTime.of(2026, 9, 1, 10, 0),
-                java.util.List.of(), LocalDateTime.of(2026, 9, 1, 9, 0), null,
-                paidAt, archivedAt);
+                OrderDeliverableType.SYSTEM, "系统", 128000L, "CNY", "首版报价",
+                LocalDateTime.of(2026, 9, 1, 10, 0), java.util.List.of(),
+                LocalDateTime.of(2026, 9, 1, 9, 0), null, paidAt, archivedAt);
         when(appService.pay(900L)).thenReturn(paid);
 
         performAsUser(post("/api/orders/900/payment"))
@@ -219,7 +220,7 @@ class OrderControllerTest {
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
-                null, null, null, null, java.util.List.of(),
+                OrderDeliverableType.SYSTEM, "系统", null, null, null, null, java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt, null, null);
     }
 

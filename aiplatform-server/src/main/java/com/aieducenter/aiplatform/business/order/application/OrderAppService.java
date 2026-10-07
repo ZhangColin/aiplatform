@@ -12,24 +12,29 @@ import com.cartisan.core.exception.ApplicationException;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectKnowledgeAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#30 交易环③
  * mock 支付——#37/#39 支付原子化：支付原子（落已支付）与归档（订单 + 项目）拆
- * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发）：确认下单 = 冻结
- * 下单时 PRD 全文快照入单，待报价起步。项目事实（存在性/归档态/PRD 正文）经
- * {@code business.project} 应用层软引用——跨 BC 无 FK，同一口径。
+ * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发；#297 交付物类型
+ * ＋设计资产包下单冻结——交易机制零改版，下单多冻结一维）：确认下单 = 冻结
+ * 下单时 PRD 全文快照＋交付物类型入单，待报价起步。项目事实（存在性/归档态/
+ * PRD 正文/终点类型）经 {@code business.project} 应用层软引用——跨 BC 无 FK，
+ * 同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
@@ -53,6 +58,8 @@ public class OrderAppService {
     private final ProjectLifecycleAppService projectLifecycleAppService;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
+    private final DesignPackageAppService designPackageAppService;
+    private final OrderQueryAppService orderQueryAppService;
     private final PaymentPort paymentPort;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
@@ -62,6 +69,8 @@ public class OrderAppService {
                            ProjectLifecycleAppService projectLifecycleAppService,
                            ProjectKnowledgeAppService projectKnowledgeAppService,
                            ConversationHistoryAppService conversationHistoryAppService,
+                           DesignPackageAppService designPackageAppService,
+                           OrderQueryAppService orderQueryAppService,
                            PaymentPort paymentPort,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
@@ -70,29 +79,46 @@ public class OrderAppService {
         this.projectLifecycleAppService = projectLifecycleAppService;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
+        this.designPackageAppService = designPackageAppService;
+        this.orderQueryAppService = orderQueryAppService;
         this.paymentPort = paymentPort;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * 确认下单：读当前 PRD → 冻结快照入单（待报价）。下单即冻结迭代——对话区
-     * 停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。
+     * 确认下单：读当前 PRD → 冻结快照与交付物类型入单（待报价）。下单即冻结迭代
+     * ——对话区停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。交付物
+     * 类型自项目终点类型冻结（#297 一单一程——此后项目终点变更不影响本单，取消
+     * 再下 = 新单新类型）。设计面单（设计/系统＋设计）在下单时冻结设计资产包：
+     * <b>暂存打包先于落库</b>（打包失败＝下单失败零残留，不产生「有单无包」半成
+     * 态）、<b>落名在落库后</b>（以落库分配的订单 id 定格该单冻结件——同目录原子
+     * 改名，失败仅容器中途消亡可达，如实上抛）；系统单零打包（源码包实时取口径
+     * 不变）。取消不清理冻结件（后台取件正本，残留备案口径）。
      *
-     * @return 订单（待报价起步，快照已冻结）
+     * @return 订单（待报价起步，快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
      *                              （项目上下文原样透传）；ORD_004 项目已归档；
-     *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）
+     *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）；
+     *                              WSP_002 设计资产包打包失败（环境故障，零残留）
      */
     public OrderResponse place(Long projectId) {
-        if (projectQueryAppService.detail(projectId).archived()) {
+        ProjectDetailResponse project = projectQueryAppService.detail(projectId);
+        if (project.archived()) {
             throw new ApplicationException(OrderMessage.ORDER_PROJECT_ARCHIVED);
         }
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
             throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
         }
+        OrderDeliverableType deliverableType =
+                OrderDeliverableType.ofCode(project.endpointType().getCode());
+        // 廉价守卫前置：PRD 读取（PRJ_015 未产出先炸）先于昂贵的打包面（渲帧/写规范/tar）
+        String prdSnapshot = projectQueryAppService.prd(projectId).content();
+        DesignPackageAppService.StagedPackage staged = deliverableType.designInvolved()
+                ? designPackageAppService.stageForOrder(projectId)
+                : null;
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                projectQueryAppService.prd(projectId).content());
+                prdSnapshot, deliverableType);
         try {
             order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {
@@ -104,8 +130,31 @@ public class OrderAppService {
             }
             throw e;
         }
+        if (staged != null) {
+            designPackageAppService.sealForOrder(staged, order.getId());
+        }
         publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return OrderResponse.of(order);
+    }
+
+    /**
+     * 用户面设计资产包下载（#297，对偶源码包端点——订单锚取件：交付物包是
+     * 下单冻结件、按单定格）：守卫序＝订单存在 → 交付物类型（系统单无设计资产包
+     * ，ORD_016 如实）→ 支付门（{@link OrderQueryAppService#requireDownloadable}
+     * 单点：曾支付/已归档即开放，ORD_015）→ 冻结件读取（PRJ_051 缺失不顶替）。
+     * 文件名/HTTP 头归 REST 层。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_016 系统单交付物不含
+     *                              设计资产包；ORD_015 未支付（门语义）；PRJ_051
+     *                              冻结件缺失；WSP_002 读取失败（环境故障）
+     */
+    public byte[] downloadableDesignPackage(Long orderId) {
+        Order order = requireOrder(orderId);
+        if (!order.getDeliverableType().designInvolved()) {
+            throw new ApplicationException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE);
+        }
+        orderQueryAppService.requireDownloadable(order.getProjectId());
+        return designPackageAppService.frozenPackage(order.getProjectId(), orderId);
     }
 
     /**

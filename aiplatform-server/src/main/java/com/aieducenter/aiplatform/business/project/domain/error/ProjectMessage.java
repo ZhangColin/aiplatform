@@ -141,7 +141,11 @@ public enum ProjectMessage implements CodeMessage {
 
     /** 悬卡删除守卫（#293 画布整理）：已定稿的稿是成版锚与交付物包成员，不可删除
      * ——候选稿（未定稿）可删，画布整理不动定稿事实。 */
-    DESIGN_DRAFT_FINALIZED(409, "PRJ_050", "已定稿的设计稿不能删除");
+    DESIGN_DRAFT_FINALIZED(409, "PRJ_050", "已定稿的设计稿不能删除"),
+
+    /** 设计资产包取件（#297）：下单冻结件在工作区不存在——冻结未发生或导出物已被
+     *  外部清理，不以空产物顶替（对偶封存包 WSP_016 口径）。 */
+    DESIGN_PACKAGE_NOT_FOUND(404, "PRJ_051", "设计资产包不存在（下单冻结件缺失）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销
 

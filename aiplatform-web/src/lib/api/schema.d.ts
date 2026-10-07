@@ -254,8 +254,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 确认下单（冻结 PRD 快照入单）
-         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004
+         * 确认下单（冻结 PRD 快照与交付物类型入单）
+         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步；交付物类型自项目终点类型一并冻结（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004；打包环境故障 WSP_002
          */
         post: operations["place"];
         delete?: never;
@@ -1362,6 +1362,26 @@ export interface paths {
          * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
          */
         get: operations["detail_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orders/{id}/design-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 设计资产包下载（支付门，#297）
+         * @description 该单下单冻结件直取（交付物包按单定格——选件式 tar：选定稿自包含形态＋DESIGN.md 设计规范＋帧衍生资产、落选稿不入；系统＋设计单＝统一部件容器，源码整树与设计部件同包、目录即类型边界）。支付门与源码包/单文件下载同口径：项目曾有已支付/已归档订单即开放，未付费 402 ORD_015如实告知门语义（体验免费、带走才付费，ADR-0027）。守卫序＝订单存在 →交付物类型（系统单 404 ORD_016 如实）→ 门 → 冻结件读取（缺失 404 PRJ_051 不以空产物顶替）。响应为二进制文件流（application/gzip，本端点不走 ApiResponse JSON 信封，先例＝源码包端点）。订单不存在 404 ORD_001
+         */
+        get: operations["designPackage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2553,6 +2573,9 @@ export interface components {
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
             statusName?: string;
+            /** @description 1=设计, 2=系统, 3=系统＋设计 */
+            deliverableType?: number;
+            deliverableTypeName?: string;
             /** Format: int64 */
             amount?: number;
             currency?: string;
@@ -5384,6 +5407,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
+    designPackage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
         };

@@ -200,4 +200,91 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).toContain("报价记录（1 条）");
     expect(html).not.toContain("改价历史");
   });
+
+  // ---------- #297：归档终态下载口按交付物类型分岔 ----------
+
+  it("已归档设计单：下载口＝设计资产包（订单锚冻结件，非源码包端点）", () => {
+    seed.order = {
+      id: "o9",
+      projectId: "p1",
+      status: 4,
+      statusName: "已归档",
+      deliverableType: 1,
+      deliverableTypeName: "设计",
+      amount: 88000,
+      currency: "CNY",
+      note: "设计单首报",
+      quotedAt: "2026-10-01T02:00:00Z",
+      priceEntries: [
+        { id: "e1", amount: 88000, currency: "CNY", note: "设计单首报", createdAt: "2026-10-01T02:00:00Z" },
+      ],
+      createdAt: "2026-10-01T01:00:00Z",
+      cancelledAt: null,
+      paidAt: "2026-10-01T04:00:00Z",
+      archivedAt: "2026-10-01T04:00:00Z",
+    };
+
+    const html = renderPanel("o9");
+
+    expect(html).toContain('href="/api/orders/o9/design-package"');
+    expect(html).toContain("下载设计资产包");
+    expect(html).toContain("选定稿＋设计规范＋衍生");
+    expect(html).not.toContain("下载源码包");
+    expect(html).not.toContain('href="/api/projects/p1/source-package"');
+  });
+
+  it("已归档系统＋设计单：下载口＝交付物包（统一部件容器，同一订单锚端点）", () => {
+    seed.order = {
+      id: "o9",
+      projectId: "p1",
+      status: 4,
+      statusName: "已归档",
+      deliverableType: 3,
+      deliverableTypeName: "系统＋设计",
+      amount: 128000,
+      currency: "CNY",
+      note: "系统＋设计首报",
+      quotedAt: "2026-10-01T02:00:00Z",
+      priceEntries: [
+        { id: "e1", amount: 128000, currency: "CNY", note: "系统＋设计首报", createdAt: "2026-10-01T02:00:00Z" },
+      ],
+      createdAt: "2026-10-01T01:00:00Z",
+      cancelledAt: null,
+      paidAt: "2026-10-01T04:00:00Z",
+      archivedAt: "2026-10-01T04:00:00Z",
+    };
+
+    const html = renderPanel("o9");
+
+    expect(html).toContain('href="/api/orders/o9/design-package"');
+    expect(html).toContain("下载交付物包");
+    expect(html).toContain("系统源码＋选定设计稿同包");
+    expect(html).not.toContain("下载源码包");
+  });
+
+  it("已归档系统单（含缺省交付物类型＝存量单口径）：下载口照旧源码包", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 4,
+      statusName: "已归档",
+      amount: 128000,
+      currency: "CNY",
+      note: "首版报价",
+      quotedAt: "2026-09-01T02:00:00Z",
+      priceEntries: [
+        { id: "e1", amount: 128000, currency: "CNY", note: "首版报价", createdAt: "2026-09-01T02:00:00Z" },
+      ],
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+      paidAt: "2026-09-01T04:00:00Z",
+      archivedAt: "2026-09-01T04:00:00Z",
+    };
+
+    const html = renderPanel("o1");
+
+    expect(html).toContain('href="/api/projects/p1/source-package"');
+    expect(html).toContain("下载源码包");
+    expect(html).not.toContain("design-package");
+  });
 });

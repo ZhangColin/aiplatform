@@ -16,6 +16,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.Binary
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
@@ -23,6 +24,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Rend
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignPackages;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceRenders;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -212,8 +214,8 @@ class ProjectRenderAppServiceTest {
         verify(workspaceLifecycleAppService).exec(eq(Long.toString(workspaceId)),
                 eq(new WorkspaceExecCommand(WorkspaceRenders.htmlToPngCommand(
                         "design/home.html", "exports/home-1280x800.png",
-                        ProjectRenderAppService.DRAFT_PNG_WIDTH,
-                        ProjectRenderAppService.DRAFT_PNG_HEIGHT))));
+                        DesignPackages.FRAME_PNG_WIDTH,
+                        DesignPackages.FRAME_PNG_HEIGHT))));
         // 产物读取走下载命令（无大小上限——带走语义）
         verify(workspaceLifecycleAppService).execBinary(eq(Long.toString(workspaceId)),
                 eq(new WorkspaceExecCommand(ProjectFiles.downloadCommand(
@@ -256,7 +258,7 @@ class ProjectRenderAppServiceTest {
 
     /** 已支付订单种子（门开放面）：place → quote → pay（领域转移链）。 */
     private void seedPaidOrder(Long projectId) {
-        Order order = Order.place(projectId, 1L, "# PRD");
+        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
         order.quote(10000L, null, null);
         order.pay("PAY-RENDER-1");
         orderRepository.save(order);

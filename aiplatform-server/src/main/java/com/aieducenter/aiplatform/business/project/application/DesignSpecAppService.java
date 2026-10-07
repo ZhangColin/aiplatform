@@ -324,10 +324,19 @@ public class DesignSpecAppService {
                     + "调色板收窄跳过，规则文件与 lint 扫描照常", project.getId(),
                     DesignSpecs.BASELINE_GLOBALS_CSS);
         }
-        writeWorkspaceFile(workspaceId, WorkspaceLayout.DESIGN_MD, DesignSpecs.designRulesMarkdown(
-                spec.getSourceDraftPath(), spec.getTokens(), spec.getPalette(), spec.getStyle()));
+        materializeRulesFile(workspaceId, spec);
         writeWorkspaceFile(workspaceId, OXLINTRC, OXLINTRC_CONTENT);
         return true;
+    }
+
+    /**
+     * 规范文件单件落盘（#297 设计资产包冻结前接线——包内 DESIGN.md 与派发物化
+     * {@link #materializeAtDispatch} 同一物同一写面：正本直陈正文、确定性拼装）。
+     * 写入失败＝环境故障如实上抛（冻结链不静默缺席规范件）。
+     */
+    public void materializeRulesFile(String workspaceId, DesignSpec spec) {
+        writeWorkspaceFile(workspaceId, WorkspaceLayout.DESIGN_MD, DesignSpecs.designRulesMarkdown(
+                spec.getSourceDraftPath(), spec.getTokens(), spec.getPalette(), spec.getStyle()));
     }
 
     /**

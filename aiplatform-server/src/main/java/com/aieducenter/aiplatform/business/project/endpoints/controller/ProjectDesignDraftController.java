@@ -23,6 +23,7 @@ import com.aieducenter.aiplatform.business.project.application.DesignProcessAppS
 import com.aieducenter.aiplatform.business.project.application.ProjectRenderAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.model.DesignPackages;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
@@ -99,8 +100,8 @@ public class ProjectDesignDraftController {
         int dot = name.lastIndexOf('.');
         String stem = dot > 0 ? name.substring(0, dot) : name;
         String extension = "image/png".equals(contentType)
-                ? "-" + ProjectRenderAppService.DRAFT_PNG_WIDTH + "x"
-                        + ProjectRenderAppService.DRAFT_PNG_HEIGHT + ".png"
+                ? "-" + DesignPackages.FRAME_PNG_WIDTH + "x"
+                        + DesignPackages.FRAME_PNG_HEIGHT + ".png"
                 : dot > 0 ? name.substring(dot) : "";
         return (stem + extension).replaceAll("[\\p{Cntrl}\"]", "");
     }

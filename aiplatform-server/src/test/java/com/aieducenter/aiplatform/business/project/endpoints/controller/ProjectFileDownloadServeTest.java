@@ -28,6 +28,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepo
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSessionStore;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
@@ -132,21 +133,21 @@ class ProjectFileDownloadServeTest {
 
     /** 已报价（待支付）：place → quote。 */
     private void seedQuotedOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD");
+        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
         order.quote(10000L, null, null);
         orderRepository.save(order);
     }
 
     /** 已取消（未支付回迭代）：place → cancel。 */
     private void seedCancelledOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD");
+        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
         order.cancel();
         orderRepository.save(order);
     }
 
     /** 已支付（真实中间态，归档前即放行）：place → quote → pay。 */
     private void seedPaidOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD");
+        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
         order.quote(10000L, null, null);
         order.pay("PAY-TEST-1");
         orderRepository.save(order);
@@ -154,7 +155,7 @@ class ProjectFileDownloadServeTest {
 
     /** 已归档（终态）：place → quote → pay → archive。 */
     private void seedArchivedOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD");
+        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
         order.quote(10000L, null, null);
         order.pay("PAY-TEST-1");
         order.archive();
@@ -177,7 +178,7 @@ class ProjectFileDownloadServeTest {
     void given_unpaid_statuses_when_download_faces_then_ord_015() throws Exception {
         // 未支付三态同拦（两下载面同门）：待报价（place 即是）/已报价/已取消
         // （取消即回迭代，从未支付）
-        orderRepository.save(Order.place(projectId, 1L, "# PRD"));
+        orderRepository.save(Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM));
         assertThatGateClosedForBothDownloadFaces();
         cleanupOrders();
 

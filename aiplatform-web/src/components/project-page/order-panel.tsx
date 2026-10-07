@@ -15,7 +15,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useCancelOrder, useOrder, usePayOrder } from "@/hooks/use-order";
 import { errorText } from "@/lib/api/api-error";
 import { ORDER_STATUS } from "@/lib/orders/lock";
-import type { OrderDetail, OrderPriceEntry } from "@/lib/orders/detail";
+import {
+  DELIVERABLE_DESIGN,
+  DELIVERABLE_SYSTEM_DESIGN,
+  type OrderDetail,
+  type OrderPriceEntry,
+} from "@/lib/orders/detail";
 import { formatPrice } from "@/lib/orders/price";
 import { formatRelativeTime } from "@/lib/utils/time";
 
@@ -170,14 +175,17 @@ function QuotedFacts({ order }: { order: OrderDetail }) {
 
 /**
  * 归档终态「完整记录」（#30）：支付完成说明 + 全时间点组（下单/报价/支付/归档）
- * + 源码包下载（交付物经项目源码包端点实时取，排除 node_modules/.env）。
+ * + 交付物下载（#297 按下单冻结的交付物类型分岔：系统＝源码包实时取〔排除
+ * node_modules/.env〕、设计＝设计资产包冻结件、系统＋设计＝统一部件容器冻结件
+ * ——源码与选定设计稿同包，目录即类型边界）。
  */
 function ArchivedRecord({ order }: { order: OrderDetail }) {
   const paidAt = formatRelativeTime(order.paidAt) || formatRelativeTime(order.archivedAt);
+  const deliverable = deliverableDownloadOf(order);
   return (
     <div className="space-y-3">
       <p className="text-muted-foreground">
-        支付完成，订单与项目已归档。系统源码包可随时下载，完整记录保留如下。
+        支付完成，订单与项目已归档。{deliverable.hint}，完整记录保留如下。
       </p>
       <p className="text-xs text-muted-foreground/70">
         下单于 {formatRelativeTime(order.createdAt) || "未知时间"}
@@ -185,18 +193,42 @@ function ArchivedRecord({ order }: { order: OrderDetail }) {
         {paidAt ? ` · 支付于 ${paidAt}` : ""}
         {order.archivedAt ? ` · 归档于 ${formatRelativeTime(order.archivedAt) || "未知时间"}` : ""}
       </p>
-      {order.projectId ? (
+      {deliverable.href ? (
         <Button
           variant="outline"
           size="sm"
           nativeButton={false}
-          render={<a href={`/api/projects/${order.projectId}/source-package`} />}
+          render={<a href={deliverable.href} />}
         >
-          下载源码包
+          {deliverable.label}
         </Button>
       ) : null}
     </div>
   );
+}
+
+/** 归档终态下载口：按交付物类型出端点与文案（锚定形＝订单冻结件按单取；
+ * 缺省/未知＝系统——存量单口径）。 */
+function deliverableDownloadOf(order: OrderDetail): { href: string | null; label: string; hint: string } {
+  if (order.deliverableType === DELIVERABLE_DESIGN) {
+    return {
+      href: `/api/orders/${order.id}/design-package`,
+      label: "下载设计资产包",
+      hint: "设计资产包可随时下载（选定稿＋设计规范＋衍生）",
+    };
+  }
+  if (order.deliverableType === DELIVERABLE_SYSTEM_DESIGN) {
+    return {
+      href: `/api/orders/${order.id}/design-package`,
+      label: "下载交付物包",
+      hint: "交付物包可随时下载（系统源码＋选定设计稿同包）",
+    };
+  }
+  return {
+    href: order.projectId ? `/api/projects/${order.projectId}/source-package` : null,
+    label: "下载源码包",
+    hint: "系统源码包可随时下载",
+  };
 }
 
 /**

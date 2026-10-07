@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.Worksp
 import com.aieducenter.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.aieducenter.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
@@ -302,7 +303,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_paid_project_when_downloadable_source_package_then_bytes_returned() {
         Long projectId = persistedProject("9501");
-        Order paid = Order.place(projectId, null, "# PRD");
+        Order paid = Order.place(projectId, null, "# PRD", OrderDeliverableType.SYSTEM);
         paid.quote(10000L, null, null);
         paid.pay("PAY-TEST-1");
         orderRepository.save(paid);
@@ -316,7 +317,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_unpaid_project_when_downloadable_source_package_then_ord_015() {
         Long projectId = persistedProject("9502");
-        orderRepository.save(Order.place(projectId, null, "# PRD")); // 待报价＝未支付
+        orderRepository.save(Order.place(projectId, null, "# PRD", OrderDeliverableType.SYSTEM)); // 待报价＝未支付
 
         assertThatThrownBy(() -> appService.downloadableSourcePackage(projectId))
                 .isInstanceOf(ApplicationException.class)

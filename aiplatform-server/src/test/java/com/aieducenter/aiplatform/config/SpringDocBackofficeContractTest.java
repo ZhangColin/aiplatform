@@ -49,6 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>工具面清单与开关（#252，project 分组）：kind 三值对照（开关判定正本）、
  *       enabled 挂载语义（false＝在册但退出装配面）、槽位三键、开关命令 enabled
  *       必填语义自描述。</li>
+ *   <li>设计对接件（#298）：订单清单/详情 deliverableType（BaseEnum 房规＋取件
+ *       端点指路）、对话条目 sessionSource（2=设计会话判据与 null=主会话缺省
+ *       降级口径自描述）。</li>
  * </ul>
  */
 @IntegrationTest
@@ -154,6 +157,45 @@ class SpringDocBackofficeContractTest {
                     .as("%s.ownerExternalId 应渲染 type=string", surface[1])
                     .isEqualTo("string");
         }
+    }
+
+    @Test
+    void given_order_surfaces_when_read_schemas_then_deliverable_type_coded_and_self_described()
+            throws Exception {
+        // #298 交付物类型列加：订单清单/详情两读面 type=integer（BaseEnum 房规）＋
+        // 取值对照自描述＋取件端点指路（消费方按类型二选一取件）
+        for (String schema : List.of("BackofficeOrderSummaryResponse", "BackofficeOrderDetailResponse")) {
+            JsonNode deliverableType = property(fetchGroup("order"), schema, "deliverableType");
+            assertThat(deliverableType.path("type").asText(null))
+                    .as("%s.deliverableType 应渲染 type=integer（BaseEnum 房规）", schema)
+                    .isEqualTo("integer");
+            assertThat(deliverableType.path("description").asText(""))
+                    .as("%s.deliverableType 应自描述冻结语义与取件端点", schema)
+                    .contains("design-package")
+                    .contains("source-package");
+            assertThat(property(fetchGroup("order"), schema, "deliverableTypeName").isMissingNode())
+                    .as("%s.deliverableTypeName 中文名随行（#186 枚举出口配 *Name）", schema)
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void given_conversation_entry_schema_when_read_group_then_session_source_coded() throws Exception {
+        // #298 会话来源标识：type=integer＋设计会话判据与降级口径自描述——admin
+        // 对话史 tab 按来源分组消费，null 语义（主会话缺省）不得漂移
+        JsonNode sessionSource = property(fetchGroup("project"), "ConversationEntryResponse",
+                "sessionSource");
+        assertThat(sessionSource.path("type").asText(null))
+                .as("sessionSource 应渲染 type=integer（BaseEnum 房规）")
+                .isEqualTo("integer");
+        assertThat(sessionSource.path("description").asText(""))
+                .as("sessionSource 应自描述设计会话判据与降级口径")
+                .contains("2=设计会话")
+                .contains("null=主会话缺省");
+        assertThat(property(fetchGroup("project"), "ConversationEntryResponse", "sessionSourceName")
+                .isMissingNode())
+                .as("sessionSourceName 中文名随行（#186 枚举出口配 *Name）")
+                .isFalse();
     }
 
     @Test

@@ -1339,7 +1339,7 @@ export interface paths {
         };
         /**
          * 对话史（对话面全量，#89 前端水合源）
-         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）+ kindName 中文名随行（#186：枚举出口配 *Name，消费端零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
+         * @description 对话面全量落库的读口：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind 为 Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行（#186：枚举出口配 *Name，消费端零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答——刷新后问答卡可重建可作答）；closing = run-finish 收口扩载同载荷（#88 权威事实，版本锚定 #91 复用）。sessionSource 会话来源标识（#298，后台对接件随面携带）：2=设计会话（设计收尾卡携 drafts）、null=主会话缺省——用户面前端可忽略。归档项目照读（对话区只读终态）；项目不存在 404 PRJ_001
          */
         get: operations["conversation"];
         put?: never;
@@ -1842,8 +1842,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 对话史（后台面，全量同序）
-         * @description 口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide）+ kindName 中文名随行（#186：枚举出口配 *Name，后台直读零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）——排障时了解用户与系统的交互过程。需要机机签名；项目不存在 404 PRJ_001
+         * 对话史（后台面，全量同序，含设计会话）
+         * @description 口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）：用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent 3=question 4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行（#186：枚举出口配 *Name，后台直读零映射）；question = question-raised 事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口扩载同载荷（版本详情锚定的权威事实）。sessionSource 会话来源标识（#298）：2=设计会话（设计会话收尾卡——首产/改稿/定稿，closing 携 drafts 稿清单）、null=主会话缺省——设计会话按来源分组或标注；作用域改稿发言无结构标记不标注、设计会话完整稿本在智能体会话存储（存储不同构降级口径）。归档项目照读（对话区只读终态）——排障时了解用户与系统的交互过程（含设计过程始末）。需要机机签名；项目不存在 404 PRJ_001
          *
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
@@ -1866,7 +1866,7 @@ export interface paths {
         };
         /**
          * 订单清单（四维检索，分页）
-         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
+         * @description 运营工作清单：新单在前（TSID 倒序）。四维可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,5；1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）——签名协议按 query 参数名去重，同名重复参数（status=1&status=2）只有末值入签，勿用；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端，如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）与 deliverableType/deliverableTypeName 交付物类型（#298 列加——1=设计 2=系统 3=系统＋设计；筛选维度不加，设计单量小已备案）。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、非数值分页 400（带字段明细）、时间类型不匹配 404。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 400 BAD_REQUEST — Invalid request
@@ -1890,7 +1890,7 @@ export interface paths {
         };
         /**
          * 订单详情（后台面）
-         * @description 报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。需要机机签名；订单不存在 404 ORD_001
+         * @description 报价依据全量：状态、交付物类型（deliverableType/deliverableTypeName，#298——1=设计 2=系统 3=系统＋设计）、金额+最新备注、价目历史（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结；设计单快照即含设计物清单章）、项目名、下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。需要机机签名；订单不存在 404 ORD_001
          *
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
@@ -1920,6 +1920,32 @@ export interface paths {
          *     - 500 WSP_002 — 环境后端操作失败
          */
         get: operations["sourcePackage_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{id}/design-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单设计资产包（tar.gz 二进制流，下单冻结件直取）
+         * @description 设计面交付取件（#298，对偶源码包端点）：直取该单下单冻结时物化的设计资产包（选件式 tar：选定稿自包含形态＋DESIGN.md 设计规范＋帧衍生资产，落选稿不入；系统＋设计单＝统一部件容器）。交付物包按单定格——交付时拿到冻结时的样子，此后改稿/再定稿不漂移。<b>不按支付态门控</b>：后台是交付与排障面，用户支付门只盖用户面（未支付/已取消照取；取消残留不清理＝本端点正本）。守卫序＝订单存在 → 交付物类型（系统单 404 ORD_016 如实——交付物是源码包）→ 冻结件读取（缺失 404 PRJ_051 不以空产物顶替）。响应为二进制文件流（application/gzip，不走 ApiResponse JSON 信封，先例＝源码包端点）。需要机机签名；订单不存在 404 ORD_001；读取失败 500 WSP_002
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_016 — 该订单的交付物不含设计资产包（系统单交付物是源码包）
+         *     - 404 PRJ_051 — 设计资产包不存在（下单冻结件缺失）
+         *     - 500 WSP_002 — 环境后端操作失败
+         */
+        get: operations["designPackage_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3169,6 +3195,13 @@ export interface components {
             /** Format: int32 */
             kind?: number;
             kindName?: string;
+            /**
+             * Format: int32
+             * @description 会话来源标识（#298）：2=设计会话（每设计物一个——判据＝收尾卡携 drafts 稿清单：首产/改稿/定稿收尾卡）、null=主会话缺省（作用域改稿发言无结构标记不标注、设计会话完整稿本在智能体会话存储——存储不同构降级口径）。后台对话史按来源分组或标注；用户面前端可忽略
+             * @example 2
+             */
+            sessionSource?: number;
+            sessionSourceName?: string;
             runId?: string;
             text?: string;
             /**
@@ -3594,6 +3627,12 @@ export interface components {
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
             statusName?: string;
+            /**
+             * @description 交付物类型（#297 下单冻结自项目终点类型，此后不随项目变更；设计面单取件走 /{id}/design-package、系统单走 /{id}/source-package）（1=设计, 2=系统, 3=系统＋设计）
+             * @example 1
+             */
+            deliverableType?: number;
+            deliverableTypeName?: string;
             /** Format: int64 */
             amount?: number;
             currency?: string;
@@ -3628,6 +3667,12 @@ export interface components {
             /** @description 1=待报价, 2=已报价, 3=已支付, 4=已归档, 5=已取消 */
             status?: number;
             statusName?: string;
+            /**
+             * @description 交付物类型（#297 下单冻结自项目终点类型，此后不随项目变更；设计面单取件走 /{id}/design-package、系统单走 /{id}/source-package）（1=设计, 2=系统, 3=系统＋设计）
+             * @example 3
+             */
+            deliverableType?: number;
+            deliverableTypeName?: string;
             /** Format: int64 */
             amount?: number;
             currency?: string;
@@ -5917,6 +5962,28 @@ export interface operations {
         };
     };
     sourcePackage_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    designPackage_1: {
         parameters: {
             query?: never;
             header?: never;

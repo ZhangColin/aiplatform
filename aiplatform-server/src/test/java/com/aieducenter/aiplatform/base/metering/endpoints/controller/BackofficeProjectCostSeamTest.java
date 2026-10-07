@@ -265,6 +265,37 @@ class BackofficeProjectCostSeamTest {
                 .andExpect(jsonPath("$.data.total.input").value(0));
     }
 
+    @Test
+    void given_designer_image_events_when_drill_down_then_agent_kind_aggregable()
+            throws Exception {
+        // #298 成本观测 v1 零切分验收：按张事件 dims.agentKind=designer 落库可查
+        // ——下钻 byAgentKind 出设计执行体桶（agentKindName 经智能体配置回解），
+        // 张与 token 并列不混算（designer 桶 token 为零如实），按张成本进 cost 桶
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "qwen-image",
+                TokenKind.IMAGE, new BigDecimal("0.18"), "CNY", T0, null));
+        priceEntryRepository.save(PriceEntry.open(PROVIDER, "chat-model",
+                TokenKind.INPUT, new BigDecimal("0.000001"), "CNY", T0, null));
+        usageEventSink.report(new UsageEvent("evt-img-design", T1, "pc-design", "run-1",
+                "designer-pc-design-item-1", PROVIDER, "qwen-image",
+                Map.of("agentKind", "designer"), TokenUsage.ZERO, 2));
+        report("evt-tok-main", T1, "pc-design", "chat-model",
+                Map.of("agentKind", "main"), 1_000_000);
+
+        signedGet("/api/backoffice/costs/projects/pc-design")
+                .andExpect(status().isOk())
+                // 2 张 × ¥0.18 + 1M × ¥0.000001（=¥1）= ¥1.36（按张与 token 同桶相加）
+                .andExpect(jsonPath("$.data.cost.CNY").value(1.36))
+                .andExpect(jsonPath("$.data.unpriced").isEmpty())
+                // 分智能体：designer 桶在场（值序 designer < main）、中文名经
+                // 智能体配置回解；token 五档为零如实（张不入 token 量）
+                .andExpect(jsonPath("$.data.byAgentKind", hasSize(2)))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("designer"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindName").value("设计执行体"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].tokens.input").value(0))
+                .andExpect(jsonPath("$.data.byAgentKind[1].agentKind").value("main"))
+                .andExpect(jsonPath("$.data.byAgentKind[1].tokens.input").value(1000000));
+    }
+
     // ---------- 项目详情内嵌成本指针：与成本端点同数据源（跨域咬合） ----------
 
     @Test

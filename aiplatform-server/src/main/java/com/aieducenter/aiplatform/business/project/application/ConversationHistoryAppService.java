@@ -20,6 +20,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.command.Messa
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.ConversationEntry;
 import com.aieducenter.aiplatform.business.project.domain.enums.ConversationEntryKind;
+import com.aieducenter.aiplatform.business.project.domain.enums.ConversationSessionSource;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.ConversationEntryRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -191,7 +192,11 @@ public class ConversationHistoryAppService {
 
     /**
      * 对话史读口（水合载荷）：项目全量按 id 升序（写入序即对话序）。归档项目照读
-     * （对话区只读终态）。
+     * （对话区只读终态）。会话来源标识随行（#298 后台对接件——对话史含设计会话）：
+     * 设计会话收尾卡（closing 携 {@code drafts} 稿清单——SSE 收口扩载契约键，仅
+     * 设计轨道拼装）标设计会话来源；其余条目 null＝主会话缺省（作用域改稿发言无
+     * 结构标记、设计会话完整稿本在智能体会话存储——存储不同构，读面推导降级
+     * 口径见 {@link ConversationSessionSource}）。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
@@ -200,8 +205,17 @@ public class ConversationHistoryAppService {
             throw new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND);
         }
         return entries.findByProjectIdOrderByIdAsc(projectId).stream()
-                .map(ConversationEntryResponse::of)
+                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry)))
                 .toList();
+    }
+
+    /** 会话来源推导单点：设计收尾卡（closing 携 drafts）⇔ 设计会话；其余 null。 */
+    private static ConversationSessionSource sessionSourceOf(ConversationEntry entry) {
+        return entry.getKind() == ConversationEntryKind.CLOSING
+                && entry.getClosing() != null
+                && entry.getClosing().containsKey(CoderRunAttempts.CLOSING_DRAFTS_FIELD)
+                ? ConversationSessionSource.DESIGN
+                : null;
     }
 
     /**

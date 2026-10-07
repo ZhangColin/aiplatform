@@ -150,9 +150,7 @@ public class OrderAppService {
      */
     public byte[] downloadableDesignPackage(Long orderId) {
         Order order = requireOrder(orderId);
-        if (!order.getDeliverableType().designInvolved()) {
-            throw new ApplicationException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE);
-        }
+        order.requireDesignDeliverable();
         orderQueryAppService.requireDownloadable(order.getProjectId());
         return designPackageAppService.frozenPackage(order.getProjectId(), orderId);
     }

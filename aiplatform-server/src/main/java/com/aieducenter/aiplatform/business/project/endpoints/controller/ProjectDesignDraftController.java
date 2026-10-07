@@ -1,10 +1,7 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.ContentDisposition;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +21,7 @@ import com.aieducenter.aiplatform.business.project.application.ProjectRenderAppS
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignPackages;
+import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
@@ -81,12 +79,8 @@ public class ProjectDesignDraftController {
             @RequestParam String path) {
         ProjectFileDownloadResponse png = renderAppService.downloadableDraftPng(
                 Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND), path);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType(png.contentType()));
-        headers.setContentDisposition(ContentDisposition.attachment()
-                .filename(fileNameOf(path, png.contentType())).build());
-        headers.set("X-Content-Type-Options", "nosniff");
-        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(png.content()));
+        return BinaryResponses.attachment(png.content(), png.contentType(),
+                fileNameOf(path, png.contentType()));
     }
 
     /**

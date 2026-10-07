@@ -25,19 +25,22 @@ import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
+import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名四端点的三读端点）：
+ * 后台订单读面（#29 交易环②，/api/backoffice/* 机机签名端点的读腿）：
  * 四维检索分页拉单（运营工作清单，#156 扩）/ 详情（PRD 快照 + 项目名 + 下单
- * 账号摘要）/ 源码包（复用 project 上下文打包，排除 node_modules 等）。报价写
- * 动作归 {@link OrderAppService#submitQuote}。
+ * 账号摘要）/ 源码包（复用 project 上下文打包，排除 node_modules 等）/ 设计
+ * 资产包（#298 直取下单冻结件——后台面不受用户支付门约束，交付时拿到冻结时
+ * 的样子）。报价写动作归 {@link OrderAppService#submitQuote}。
  *
- * <p>跨 BC 事实（项目名/账号摘要/源码包/externalId 换算）经 project/identity
- * 应用层软引用——与 {@link OrderAppService} 同方向（order → project/identity），
- * 不与 project → {@link OrderQueryAppService} 的读面反向成环。</p>
+ * <p>跨 BC 事实（项目名/账号摘要/源码包/设计资产包/externalId 换算）经
+ * project/identity 应用层软引用——与 {@link OrderAppService} 同方向
+ * （order → project/identity），不与 project → {@link OrderQueryAppService}
+ * 的读面反向成环。</p>
  */
 @Service
 public class BackofficeOrderAppService {
@@ -45,15 +48,18 @@ public class BackofficeOrderAppService {
     private final OrderRepository orderRepository;
     private final ProjectQueryAppService projectQueryAppService;
     private final ProjectLifecycleAppService projectLifecycleAppService;
+    private final DesignPackageAppService designPackageAppService;
     private final AccountAppService accountAppService;
 
     public BackofficeOrderAppService(OrderRepository orderRepository,
                                      ProjectQueryAppService projectQueryAppService,
                                      ProjectLifecycleAppService projectLifecycleAppService,
+                                     DesignPackageAppService designPackageAppService,
                                      AccountAppService accountAppService) {
         this.orderRepository = orderRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
+        this.designPackageAppService = designPackageAppService;
         this.accountAppService = accountAppService;
     }
 
@@ -129,6 +135,24 @@ public class BackofficeOrderAppService {
     public byte[] sourcePackage(Long orderId) {
         Order order = requireOrder(orderId);
         return projectLifecycleAppService.sourcePackage(order.getProjectId());
+    }
+
+    /**
+     * 订单设计资产包（tar.gz，#298 后台取件）：直取该单下单冻结件（交付物包按单
+     * 定格，{@link DesignPackageAppService#frozenPackage} 共用内核）——<b>不按
+     * 支付态门控</b>：后台是交付与排障面，用户支付门（ORD_015）只盖用户面；
+     * 未支付/已取消照取（取消残留不清理＝后台取件正本，残留备案口径）。守卫序＝
+     * 订单存在 → 交付物类型（系统单交付物是源码包，ORD_016 如实）→ 冻结件读取
+     * （缺失 PRJ_051 不以空产物顶替）。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_016 系统单交付物不含
+     *                              设计资产包；PRJ_051 冻结件缺失；WSP_002 读取
+     *                              失败（环境故障）原样透传
+     */
+    public byte[] designPackage(Long orderId) {
+        Order order = requireOrder(orderId);
+        order.requireDesignDeliverable();
+        return designPackageAppService.frozenPackage(order.getProjectId(), orderId);
     }
 
     private Order requireOrder(Long orderId) {

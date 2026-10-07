@@ -25,10 +25,13 @@ import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRep
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
+import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
+import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,6 +80,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 无沉淀）→ 带操作者头签名重试归档 → 订单落已归档＋库列留痕 → 项目归档联动
  * → 知识块落库（sinkPrd 补调生效，素材登记同落）→ 后台详情呈现留痕 → 再触发
  * 被守卫拦（幂等、素材不重复）；待报价/已报价被 ORD_012 拦、联动不被触达。</p>
+ *
+ * <p>#298 设计对接件在本类钉死：设计单经真 place 落库（交付物类型冻结＝设计、
+ * 打包面 mock 收口——seam 不触 docker）→ 清单/详情带 deliverableType；
+ * design-package 端点对偶 source-package——<b>待报价单照取</b>（后台不受用户
+ * 支付门约束，灵魂断言）、系统单 ORD_016 如实、冻结件缺失 PRJ_051 不顶替。</p>
  */
 @BackofficeSeamTest
 class BackofficeOrderSeamTest {
@@ -113,6 +121,10 @@ class BackofficeOrderSeamTest {
     /** 跨 BC 唯一写交叉：项目归档联动（#158 卡单的造法＝支付链上让它抛错）。 */
     @MockitoBean
     private ProjectLifecycleAppService projectLifecycleAppService;
+
+    /** 设计资产包（#298）：真订单链路上冻结件打包/取件收口——docker 面不属 seam 依赖。 */
+    @MockitoBean
+    private DesignPackageAppService designPackageAppService;
 
     /** embedding 端口：mock 供给 512 维向量（沉淀入库的真向量面，本机 fastembed 不属测试依赖）。 */
     @MockitoBean
@@ -189,6 +201,80 @@ class BackofficeOrderSeamTest {
                         "/api/backoffice/orders/999999999/source-package", null))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("订单不存在"));
+    }
+
+    // ---------- #298：交付物类型列＋设计资产包取件（后台面口径） ----------
+
+    @Test
+    void given_design_order_when_signed_list_and_detail_then_deliverable_type_visible()
+            throws Exception {
+        OrderResponse order = placeDesignOrder(PROJECT_ID);
+        stubProjectName();
+
+        // 清单行带交付物类型（列加）：真 place → 真库 deliverable_type → 读面回显
+        mockMvc.perform(BackofficeSignatures.signed(get("/api/backoffice/orders"),
+                        "/api/backoffice/orders", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].deliverableType").value(1))
+                .andExpect(jsonPath("$.data.items[0].deliverableTypeName").value("设计"));
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id()),
+                        "/api/backoffice/orders/" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliverableType").value(1))
+                .andExpect(jsonPath("$.data.deliverableTypeName").value("设计"))
+                .andExpect(jsonPath("$.data.prdSnapshot").value(PRD));
+    }
+
+    @Test
+    void given_unpaid_design_order_when_signed_design_package_then_frozen_bytes_without_payment_gate()
+            throws Exception {
+        // 灵魂用例：待报价单（未支付）照取——后台是交付与排障面，用户支付门只盖
+        // 用户面；字节保真＋文件名锚订单号
+        OrderResponse order = placeDesignOrder(PROJECT_ID);
+        byte[] frozen = new byte[] {0x1f, (byte) 0x8b, 0x08, 0x00, (byte) 0xbe, 0x2f};
+        when(designPackageAppService.frozenPackage(PROJECT_ID, Long.parseLong(order.id())))
+                .thenReturn(frozen);
+
+        byte[] body = mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id() + "/design-package"),
+                        "/api/backoffice/orders/" + order.id() + "/design-package", null))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(body).containsExactly(frozen);
+        // 冻结件取件走共用内核（用户面 #297 同一 frozenPackage），守卫序在真服务内
+        verify(designPackageAppService).frozenPackage(PROJECT_ID, Long.parseLong(order.id()));
+    }
+
+    @Test
+    void given_system_order_when_signed_design_package_then_404_ord016() throws Exception {
+        // 系统单（存量口径）：交付物是源码包——ORD_016 如实，类型判定先于取件
+        OrderResponse order = placeOrder();
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id() + "/design-package"),
+                        "/api/backoffice/orders/" + order.id() + "/design-package", null))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(
+                        OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE.message()));
+        verify(designPackageAppService, never()).frozenPackage(anyLong(), anyLong());
+    }
+
+    @Test
+    void given_design_order_without_frozen_file_when_signed_design_package_then_404_prj051()
+            throws Exception {
+        // 冻结件缺失不以空产物顶替（对偶封存包 WSP_016 口径）
+        OrderResponse order = placeDesignOrder(PROJECT_ID);
+        when(designPackageAppService.frozenPackage(PROJECT_ID, Long.parseLong(order.id())))
+                .thenThrow(new ApplicationException(ProjectMessage.DESIGN_PACKAGE_NOT_FOUND));
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id() + "/design-package"),
+                        "/api/backoffice/orders/" + order.id() + "/design-package", null))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value(ProjectMessage.DESIGN_PACKAGE_NOT_FOUND.message()));
     }
 
     // ---------- #155：操作者留痕＋详情价目历史（一链断言） ----------
@@ -811,6 +897,23 @@ class BackofficeOrderSeamTest {
         }
     }
 
+    /** 设计单下单夹具（#298）：终点类型＝设计 → place 冻结交付物类型＋设计资产包
+     *  （暂存/落名收口在 mock——seam 不触 docker；真冻结序归 #297 服务测试）。 */
+    private OrderResponse placeDesignOrder(long projectId) {
+        stubProject(projectId, ProjectEndpointType.DESIGN);
+        when(designPackageAppService.stageForOrder(projectId))
+                .thenReturn(new DesignPackageAppService.StagedPackage("9100",
+                        "exports/design-package-staging.tar.gz"));
+        try {
+            return RequestContext.runFor(
+                    new RequestContext(null, null, null, null, /* userId */ DEFAULT_ACCOUNT_ID,
+                            null, null, null),
+                    () -> appService.place(projectId));
+        } catch (Exception e) {
+            throw new RuntimeException("设计单夹具绑定缺省账号失败", e);
+        }
+    }
+
     /** 以指定账号为下单人（RequestContext 会话内下单，ownerAccountId 落值）。 */
     private OrderResponse placeOrderAs(long projectId, Long accountId) throws Exception {
         stubProject(projectId);
@@ -824,9 +927,15 @@ class BackofficeOrderSeamTest {
 
     /** 项目读面桩（detail/prd 跨 BC 软引用收口——下单冻结快照所需）。 */
     private void stubProject(long projectId) {
+        stubProject(projectId, ProjectEndpointType.SYSTEM);
+    }
+
+    /** 项目读面桩（终点类型可调——#298 设计单夹具传 DESIGN）。 */
+    private void stubProject(long projectId, ProjectEndpointType endpointType) {
         when(projectQueryAppService.detail(projectId)).thenReturn(ProjectDetailResponseFixture
                 .detailOf(Long.toString(projectId), "seam 测试项目")
                 .workspaceId("9100")
+                .endpointType(endpointType)
                 .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z")));

@@ -7,9 +7,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +35,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Vers
 import com.aieducenter.aiplatform.business.project.application.dto.response.VersionResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatusFilter;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
@@ -125,16 +123,20 @@ public class BackofficeProjectController {
     }
 
     @GetMapping("/{id}/conversation")
-    @Operation(summary = "对话史（后台面，全量同序）",
+    @Operation(summary = "对话史（后台面，全量同序，含设计会话）",
             description = "口径照用户面对话史读口（同源委托同一应用服务——同源同序由构造保证）："
                     + "用户发言 / 智能体回复 / 问答卡 / 问答作答 / 收尾卡 / 平台轻引导，"
                     + "按写入序（id 升序 = 对话序）全量返回；过程明细（解说段 / 动作卡流水）"
                     + "不在其中（收尾卡已是凝聚物）。kind Integer code（1=user 2=agent "
-                    + "3=question 4=answer 5=closing 6=guide）+ kindName 中文名随行"
+                    + "3=question 4=answer 5=closing 6=guide 7=quote）+ kindName 中文名随行"
                     + "（#186：枚举出口配 *Name，后台直读零映射）；question = question-raised "
                     + "事件载荷原样（answered=false 即挂起待答）；closing = run-finish 收口"
-                    + "扩载同载荷（版本详情锚定的权威事实）。归档项目照读（对话区只读终态）"
-                    + "——排障时了解用户与系统的交互过程。需要机机签名；"
+                    + "扩载同载荷（版本详情锚定的权威事实）。sessionSource 会话来源标识"
+                    + "（#298）：2=设计会话（设计会话收尾卡——首产/改稿/定稿，closing 携 "
+                    + "drafts 稿清单）、null=主会话缺省——设计会话按来源分组或标注；"
+                    + "作用域改稿发言无结构标记不标注、设计会话完整稿本在智能体会话存储"
+                    + "（存储不同构降级口径）。归档项目照读（对话区只读终态）——排障时"
+                    + "了解用户与系统的交互过程（含设计过程始末）。需要机机签名；"
                     + "项目不存在 404 PRJ_001")
     @ErrorCodes({"PRJ_001"})
     public ApiResponse<List<ConversationEntryResponse>> conversation(@PathVariable String id) {
@@ -224,9 +226,6 @@ public class BackofficeProjectController {
         Long projectId = Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND);
         ProjectFilesPackage pkg = projectQueryAppService.filesPackage(projectId);
         String filename = projectId + (pkg.fromSealArchive() ? "-archive.tar.gz" : "-source.tar.gz");
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType("application/gzip"));
-        headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
-        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(pkg.content()));
+        return BinaryResponses.attachment(pkg.content(), "application/gzip", filename);
     }
 }

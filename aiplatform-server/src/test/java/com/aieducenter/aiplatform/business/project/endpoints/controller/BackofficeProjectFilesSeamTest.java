@@ -98,6 +98,41 @@ class BackofficeProjectFilesSeamTest {
                 .andExpect(jsonPath("$.data.files.length()").value(0));
     }
 
+    @Test
+    void given_design_artifacts_when_signed_files_then_quote_materials_surface() throws Exception {
+        // #298 报价素材承接面＝交付文件 tab（零新端点）：定稿稿（design/ 位图与
+        // HTML 双形态）、设计规范文件（DESIGN.md）、参数侧车（.spec.json）经
+        // 既有文件区自然可见——交付文件视图只剔除非交付物目录，设计面零加项；
+        // 落选稿同规则可见（不专门呈现也不隐藏）
+        Long id = newProject("设计素材项目").getId();
+        stubExec((command, out) -> {
+            if (command.startsWith("find ")) {
+                out.stdout = "8192\tDESIGN.md\n"
+                        + "4096\tdesign/poster.png\n"
+                        + "2048\tdesign/poster.html\n"
+                        + "512\tdesign/poster.spec.json\n"
+                        + "1024\tdesign/logo-old.png\n";
+            } else {
+                // 内容读取（点看 DESIGN.md）：大小首行＋正文（命令协议形）
+                out.stdout = "8192\n--brand-1: #1a4d2e; 圆角 8px\n";
+            }
+        });
+
+        signedGet("/api/backoffice/projects/" + id + "/files")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.files[*].path", contains(
+                        "DESIGN.md", "design/logo-old.png", "design/poster.html",
+                        "design/poster.png", "design/poster.spec.json")))
+                .andExpect(jsonPath("$.data.files[0].size").value(8192));
+
+        // 点看取件同面：规范文件内容可读（正道三件之三在此闭环——PRD 快照归
+        // 订单详情、设计资产包归订单端点）
+        signedGet("/api/backoffice/projects/" + id + "/files/content?path=DESIGN.md")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.path").value("DESIGN.md"))
+                .andExpect(jsonPath("$.data.content").value("--brand-1: #1a4d2e; 圆角 8px\n"));
+    }
+
     // ---------- 未下单项目（#163 排障缺口：文件区挂项目不挂订单） ----------
 
     @Test

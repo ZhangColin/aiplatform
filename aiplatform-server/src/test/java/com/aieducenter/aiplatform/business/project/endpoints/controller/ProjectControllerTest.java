@@ -307,18 +307,20 @@ class ProjectControllerTest {
     void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
         // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
         // code——1=user 3=question 5=closing 7=quote）、question/closing/quote
-        // 载荷原样、id 升序（写入序 = 对话序）
+        // 载荷原样、id 升序（写入序 = 对话序）；sessionSource 会话来源标识
+        // （#298，null＝主会话缺省）随面携带
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
-                new ConversationEntryResponse(1L, 1, "用户发言", "run-1", "做一个官网",
+                new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
                         null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
-                new ConversationEntryResponse(2L, 3, "问答卡", "run-1", null,
+                new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
                         null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
-                new ConversationEntryResponse(3L, 5, "收尾卡", "run-2", null, null,
+                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
                         null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
                 new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
+                        null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
                         false, LocalDateTime.of(2026, 9, 6, 9, 0))));
 

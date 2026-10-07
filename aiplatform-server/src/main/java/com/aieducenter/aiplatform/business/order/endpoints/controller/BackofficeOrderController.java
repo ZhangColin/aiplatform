@@ -7,9 +7,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,19 +33,22 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.OrderR
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
+import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 后台订单 REST 面（#29 交易环②，机机签名——五头 HMAC 强制闸，见
  * {@link com.aieducenter.aiplatform.config.WebMvcConfig}）。前端无任何后台操作
- * 入口，联调走 scripts/backoffice-quote.sh。错误码前缀 ORD_（订单不存在 ORD_001、
- * 报价守卫 ORD_007/008/009、运营取消 ORD_005/013/014、
- * 重试归档 ORD_012——项目已归档 PRJ_013 为跨 BC 既有码透传）。
+ * 入口，联调走 scripts/backoffice-quote.sh。清单/详情带交付物类型（#298 列加、
+ * 筛选不加——设计单量小已备案）；设计资产包取件对偶源码包（#298——直取下单
+ * 冻结件、不受用户支付门约束）。错误码前缀 ORD_（订单不存在 ORD_001、报价守卫
+ * ORD_007/008/009、运营取消 ORD_005/013/014、重试归档 ORD_012——项目已归档
+ * PRJ_013、系统单取设计包 ORD_016、冻结件缺失 PRJ_051 为跨 BC 既有码透传）。
  */
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 报价 / 运营取消 / 重试归档（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 设计资产包 / 报价 / 运营取消 / 重试归档（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -69,7 +69,9 @@ public class BackofficeOrderController {
                     + "如 2026-09-01T00:00:00）；③ externalId 下单账号（对外正身，服务端换算，"
                     + "换算不到＝该用户无建档→空清单 200）；④ orderId 订单号精确（TSID 十进制，"
                     + "查无/非数值→空清单 200）。行带 ownerExternalId/ownerDisplayName"
-                    + "（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）。"
+                    + "（下单账号可空/缺档为 null；externalId＝账号档案读口的寻址键）"
+                    + "与 deliverableType/deliverableTypeName 交付物类型（#298 列加"
+                    + "——1=设计 2=系统 3=系统＋设计；筛选维度不加，设计单量小已备案）。"
                     + "page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。"
                     + "过滤参数绑定失败走框架统一信封：非法状态 code 400（带合法取值表）、"
                     + "非数值分页 400（带字段明细）、时间类型不匹配 404。"
@@ -90,8 +92,10 @@ public class BackofficeOrderController {
 
     @GetMapping("/{id}")
     @Operation(summary = "订单详情（后台面）",
-            description = "报价依据全量：状态、金额+最新备注、价目历史（append-only 全量，新→旧，"
-                    + "每条带操作者——存量行操作者为空）、PRD 快照正文（下单冻结）、项目名、"
+            description = "报价依据全量：状态、交付物类型（deliverableType/deliverableTypeName，"
+                    + "#298——1=设计 2=系统 3=系统＋设计）、金额+最新备注、价目历史"
+                    + "（append-only 全量，新→旧，每条带操作者——存量行操作者为空）、"
+                    + "PRD 快照正文（下单冻结；设计单快照即含设计物清单章）、项目名、"
                     + "下单账号 externalId＋昵称（可空/缺档为 null）、状态时点组。"
                     + "需要机机签名；订单不存在 404 ORD_001")
     @ErrorCodes({"ORD_001"})
@@ -106,12 +110,27 @@ public class BackofficeOrderController {
     @ErrorCodes({"ORD_001", "WSP_002"})
     public ResponseEntity<ByteArrayResource> sourcePackage(@PathVariable String id) {
         Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
-        byte[] bytes = queryAppService.sourcePackage(orderId);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType("application/gzip"));
-        headers.setContentDisposition(ContentDisposition.attachment()
-                .filename(orderId + "-source.tar.gz").build());
-        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(bytes));
+        return BinaryResponses.attachment(queryAppService.sourcePackage(orderId),
+                "application/gzip", orderId + "-source.tar.gz");
+    }
+
+    @GetMapping("/{id}/design-package")
+    @Operation(summary = "订单设计资产包（tar.gz 二进制流，下单冻结件直取）",
+            description = "设计面交付取件（#298，对偶源码包端点）：直取该单下单冻结时物化的"
+                    + "设计资产包（选件式 tar：选定稿自包含形态＋DESIGN.md 设计规范＋帧"
+                    + "衍生资产，落选稿不入；系统＋设计单＝统一部件容器）。交付物包按单"
+                    + "定格——交付时拿到冻结时的样子，此后改稿/再定稿不漂移。<b>不按"
+                    + "支付态门控</b>：后台是交付与排障面，用户支付门只盖用户面（未支付/"
+                    + "已取消照取；取消残留不清理＝本端点正本）。守卫序＝订单存在 →"
+                    + " 交付物类型（系统单 404 ORD_016 如实——交付物是源码包）→ 冻结件"
+                    + "读取（缺失 404 PRJ_051 不以空产物顶替）。响应为二进制文件流"
+                    + "（application/gzip，不走 ApiResponse JSON 信封，先例＝源码包端点）。"
+                    + "需要机机签名；订单不存在 404 ORD_001；读取失败 500 WSP_002")
+    @ErrorCodes({"ORD_001", "ORD_016", "PRJ_051", "WSP_002"})
+    public ResponseEntity<ByteArrayResource> designPackage(@PathVariable String id) {
+        Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
+        return BinaryResponses.attachment(queryAppService.designPackage(orderId),
+                "application/gzip", orderId + "-design.tar.gz");
     }
 
     @PostMapping("/{id}/quote")

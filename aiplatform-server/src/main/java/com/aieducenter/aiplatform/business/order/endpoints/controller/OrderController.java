@@ -3,9 +3,6 @@ package com.aieducenter.aiplatform.business.order.endpoints.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +16,7 @@ import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
@@ -101,11 +99,7 @@ public class OrderController {
                     + " ORD_001")
     public ResponseEntity<ByteArrayResource> designPackage(@PathVariable String id) {
         Long orderId = Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND);
-        byte[] bytes = appService.downloadableDesignPackage(orderId);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType("application/gzip"));
-        headers.setContentDisposition(ContentDisposition.attachment()
-                .filename(orderId + "-design.tar.gz").build());
-        return ResponseEntity.ok().headers(headers).body(new ByteArrayResource(bytes));
+        return BinaryResponses.attachment(appService.downloadableDesignPackage(orderId),
+                "application/gzip", orderId + "-design.tar.gz");
     }
 }

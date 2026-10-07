@@ -195,6 +195,17 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
+     * 设计资产包可取守卫（#297 用户面下载 / #298 后台取件共用单点——纯判定先于
+     * 支付门与取件）：交付物含设计面（设计/系统＋设计）即过；系统单交付物是
+     * 源码包（实时取口径），ORD_016 如实——寻址成功而类型不符不假装有包。
+     */
+    public void requireDesignDeliverable() {
+        if (!deliverableType.designInvolved()) {
+            throw new DomainException(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE);
+        }
+    }
+
+    /**
      * 运营取消（#157 后台写口）：状态语义与用户取消完全一致——守卫复用
      * {@link #cancel}（仅待报价/已报价可达，已支付/已终结 ORD_005，不增设状态机
      * 回边），差异仅在必填取消原因＋操作者落痕。原因＝运营内部口径（不呈现用户

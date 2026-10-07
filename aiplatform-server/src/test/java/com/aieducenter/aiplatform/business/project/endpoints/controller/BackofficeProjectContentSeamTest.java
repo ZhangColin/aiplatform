@@ -122,6 +122,42 @@ class BackofficeProjectContentSeamTest {
     }
 
     @Test
+    void given_design_closing_entries_when_signed_conversation_then_session_source_tagged()
+            throws Exception {
+        // #298 会话来源标识（降级口径——存储不同构）：设计会话收尾卡（首产/改稿/
+        // 定稿，closing 携 drafts 稿清单）标 2=设计会话；编码收尾卡（无 drafts）
+        // 与其余条目 null＝主会话缺省——后台据此分组或标注设计过程始末
+        Long id = newProject("设计会话项目").getId();
+        entries.save(ConversationEntry.userUtterance(id, "run-1", "帮我做一张海报"));
+        entries.save(ConversationEntry.closing(id, "run-d1", Map.of(
+                "summary", "完成设计物：活动海报", "prdChanged", false,
+                "systemChanged", false, "files", List.of(), "durationMs", 60000L,
+                "drafts", List.of(Map.of("item", "活动海报", "media", "image",
+                        "path", "/design/poster.png")))));
+        entries.save(ConversationEntry.closing(id, "run-d2", Map.of(
+                "summary", "定稿设计物：活动海报", "prdChanged", false,
+                "systemChanged", false, "files", List.of(), "durationMs", 1000L,
+                "drafts", List.of(Map.of("item", "活动海报", "media", "image",
+                        "path", "/design/poster.png", "triggers", List.of())))));
+        entries.save(ConversationEntry.closing(id, "run-c1", Map.of(
+                "summary", "完成切片：首页", "prdChanged", false,
+                "systemChanged", true, "files", List.of(), "durationMs", 183420L)));
+
+        signedGet("/api/backoffice/projects/" + id + "/conversation")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(4))
+                // 设计会话收尾卡（首产/定稿两形）→ 2=设计会话＋中文名随行
+                .andExpect(jsonPath("$.data[1].sessionSource").value(2))
+                .andExpect(jsonPath("$.data[1].sessionSourceName").value("设计会话"))
+                .andExpect(jsonPath("$.data[2].sessionSource").value(2))
+                .andExpect(jsonPath("$.data[2].sessionSourceName").value("设计会话"))
+                // 编码收尾卡（无 drafts）与用户发言 → null＝主会话缺省不假装归属
+                .andExpect(jsonPath("$.data[3].sessionSource").value(nullValue()))
+                .andExpect(jsonPath("$.data[3].sessionSourceName").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].sessionSource").value(nullValue()));
+    }
+
+    @Test
     void given_archived_project_when_signed_content_reads_then_all_three_readable()
             throws Exception {
         Long id = archivedProject("已归档的项目").getId();

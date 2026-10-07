@@ -7,6 +7,7 @@ import java.util.Map;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import com.aieducenter.aiplatform.business.project.domain.aggregate.ConversationEntry;
+import com.aieducenter.aiplatform.business.project.domain.enums.ConversationSessionSource;
 
 /**
  * 对话史条目读面（#89 水合载荷）：kind 为 Integer code + kindName 中文名随行
@@ -14,12 +15,22 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Conversation
  * ——{@code ConversationEntryKind} 1=user 2=agent 3=question 4=answer 5=closing
  * 6=guide 7=quote），question / closing 为事件载荷 JSON 原样；attachments（#97
  * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
- * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）。
+ * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）；
+ * sessionSource（#298 会话来源标识）= 2=设计会话（设计收尾卡携 drafts 判据），
+ * null＝主会话缺省（含无结构标记的改稿发言——存储不同构降级口径，见
+ * {@link ConversationSessionSource}）。
  */
 public record ConversationEntryResponse(
         Long id,
         Integer kind,
         String kindName,
+        @Schema(description = "会话来源标识（#298）：2=设计会话（每设计物一个——判据＝收尾卡携 "
+                + "drafts 稿清单：首产/改稿/定稿收尾卡）、null=主会话缺省（作用域改稿发言无"
+                + "结构标记不标注、设计会话完整稿本在智能体会话存储——存储不同构降级口径）。"
+                + "后台对话史按来源分组或标注；用户面前端可忽略",
+                example = "2")
+        Integer sessionSource,
+        String sessionSourceName,
         String runId,
         String text,
         @Schema(description = "问答卡载荷（kind=3 question 携带，其余 kind 为 null）："
@@ -69,12 +80,16 @@ public record ConversationEntryResponse(
         boolean answered,
         LocalDateTime at) {
 
-    /** 实体 → 读面（kind 出 Integer code + kindName 中文名）。 */
-    public static ConversationEntryResponse of(ConversationEntry entry) {
+    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；sessionSource 可空
+     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点）。 */
+    public static ConversationEntryResponse of(ConversationEntry entry,
+            ConversationSessionSource sessionSource) {
         return new ConversationEntryResponse(
                 entry.getId(),
                 entry.getKind().getCode(),
                 entry.getKind().getName(),
+                sessionSource == null ? null : sessionSource.getCode(),
+                sessionSource == null ? null : sessionSource.getName(),
                 entry.getRunId(),
                 entry.getText(),
                 entry.getQuestion(),

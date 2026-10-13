@@ -98,13 +98,17 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
 
   // 设计轨起跑（live）自动开成果区并切「设计稿」——稿在画布上一张张长出来
   // （#293 主感知面；对偶编码 run 起跑切「系统」先例）。渲染期派生态同
-  // generating（锁存初始＝挂载时状态——挂载即在途〔断线补发重建〕不抢当前
-  // 查看面，同生成轨口径）；件间换 run（frozen 翻转）再度切面＝新一批稿到达
+  // generating；锁存初始恒 false——挂载即在途（SPA 离开再回：work store 全局
+  // 保留、tab 簇重置回缺省「系统」）同样切面。与生成轨「锁存初始＝挂载态、
+  // 不抢当前查看面」的分叉在此：设计轨缺省面（系统）≠主感知面（设计稿），
+  // 挂载即在途不切＝「正在出稿而 tab 停系统」的歧义；生成轨缺省面恰＝系统，
+  // 彼处不抢无感（照抄口径的教训：前提是缺省面＝主感知面）。件间换 run
+  // （frozen 翻转）再度切面＝新一批稿到达
   const designerWork = useWorkMessageStore(
     (state) => state.works[projectId],
   );
   const designing = designerWork?.seat === "designer" && !designerWork.frozen;
-  const [seenDesigning, setSeenDesigning] = useState(designing);
+  const [seenDesigning, setSeenDesigning] = useState(false);
   if (designing !== seenDesigning) {
     setSeenDesigning(designing);
     if (designing) openOutputsTo("design");

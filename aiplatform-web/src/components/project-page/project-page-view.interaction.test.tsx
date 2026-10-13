@@ -11,7 +11,8 @@ import { ProjectPageView } from "./project-page-view";
 // 设计稿 tab 的 live 切面（#293 验收①：设计过程启动→自动挂载点亮）：work store
 // 真实转移（桥的写入面）驱动——designer 会话起跑即开成果区并切「设计稿」（稿在
 // 画布上一张张长出来，对偶编码 run 起跑切「系统」先例）；收口后不再抢激活
-//（用户手动切回系统不被打扰）。回访只挂载不抢激活归 SSR 测试。数据口 mock 同
+//（用户手动切回系统不被打扰）。挂载即在途（SPA 离开再回）同切——缺省面≠主感知
+// 面的歧义防线。回访只挂载不抢激活归 SSR 测试。数据口 mock 同
 // project-page-view.test。
 
 const seed = vi.hoisted(() => ({ detail: undefined as ProjectDetail | undefined }));
@@ -111,5 +112,23 @@ describe("ProjectPageView · 设计稿 tab 的 live 切面（#293）", () => {
     });
     fireEvent.click(firstTab(/系统/));
     expect(firstTab(/系统/).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("挂载即在途（SPA 离开再回：store 保留、组件重挂载）：设计在跑，激活 tab 切「设计稿」而非缺省「系统」", () => {
+    // 前情：上一会话设计轨起跑过（用户看过画布），随后组件 unmount（去列表页
+    // 逛一圈）——work store 全局保留，tab 簇状态已随 unmount 丢失
+    useWorkMessageStore.getState().startWork("p1", "run-88", undefined, undefined, "designer");
+
+    mountView();
+
+    // 设计轨缺省面（系统）≠主感知面（设计稿）：挂载即在途不切＝「正在出稿而
+    // tab 停系统」的歧义（生成轨无此问题——缺省面恰＝系统）
+    expect(
+      screen
+        .getAllByRole("tab", { name: /设计稿/ })
+        .every((tab) => tab.getAttribute("aria-selected") === "true"),
+    ).toBe(true);
+    // 成果区随之呼出（画布在场）
+    expect(screen.getAllByText("设计稿会在这里长出来").length).toBeGreaterThan(0);
   });
 });

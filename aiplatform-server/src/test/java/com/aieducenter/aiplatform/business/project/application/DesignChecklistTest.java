@@ -156,6 +156,26 @@ class DesignChecklistTest {
     }
 
     @Test
+    void given_chapter_title_as_substring_when_parse_then_not_matched() {
+        // 受限宽容不做子串匹配（#304 修复口径）：以章名开头但不等值于章名的标题
+        // （「设计物清单说明」「设计物清单（初稿）」）仍拒——章名精确＋行尾锚定，
+        // 序号前缀放宽不等于把章名匹配放松成子串命中
+        String prd = """
+                # PRD
+
+                ## 六、设计物清单说明
+
+                1. 不该进清单的条目
+
+                ## 设计物清单（初稿）
+
+                2. 也不该进
+                """;
+        assertThat(DesignChecklist.parse(prd, ProjectEndpointType.DESIGN, null).items())
+                .isEmpty();
+    }
+
+    @Test
     void given_overlong_item_when_parse_then_truncated_to_column_limit() {
         // 超长条目截断保落库可行（与轨道表 title 列对齐）
         String longItem = "a".repeat(600);

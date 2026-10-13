@@ -57,6 +57,19 @@ describe("parseFeatureListItems", () => {
     expect(parseFeatureListItems(prd)).toEqual(["用户能注册登录", "用户能浏览商品下单"]);
   });
 
+  it("受限宽容不做子串匹配：以章名开头但不等值于章名的标题仍拒（章名精确＋行尾锚定）", () => {
+    const prd = [
+      "# PRD",
+      "",
+      "## 六、功能清单说明",
+      "1. 不该进清单的条目",
+      "",
+      "## 功能清单（初稿）",
+      "2. 也不该进",
+    ].join("\n");
+    expect(parseFeatureListItems(prd)).toEqual([]);
+  });
+
   it("设计形 PRD（设计物清单章）不产出功能清单条目", () => {
     const designPrd = "## 设计物清单\n1. 主视觉海报：用途…";
     expect(parseFeatureListItems(designPrd)).toEqual([]);

@@ -129,6 +129,33 @@ class DesignChecklistTest {
     }
 
     @Test
+    void given_numbered_chapter_heading_when_parse_then_items_extracted() {
+        // 真实走查事实（2026-10-12 项目 367868027623310018「巾上添花」）：PRD 技能
+        // 只钉章节名不钉标题行格式，主智能体按中文文档习惯给七章节加序号——
+        // 「## 六、设计物清单」是合规产出不是形态偏离（条目首行带 ** 强调与子项
+        // 缩进为真实原样）
+        String prd = """
+                # 毛巾图案花色设计 · 需求文档（PRD）
+
+                ## 五、关键约束
+                约束正文
+
+                ## 六、设计物清单
+
+                1. **款 A 图案平面稿（植物 · 热带绿植）**
+                   - 用途：确认风格与构图，作为全部衍生版本的基础图。
+                2. **款 B 图案平面稿（插画 · 海洋元素）**
+                   - 用途：确认风格与构图，作为全部衍生版本的基础图。
+
+                ## 七、待定项
+                暂无
+                """;
+        assertThat(DesignChecklist.parse(prd, ProjectEndpointType.DESIGN, null).items())
+                .containsExactly("**款 A 图案平面稿（植物 · 热带绿植）**",
+                        "**款 B 图案平面稿（插画 · 海洋元素）**");
+    }
+
+    @Test
     void given_overlong_item_when_parse_then_truncated_to_column_limit() {
         // 超长条目截断保落库可行（与轨道表 title 列对齐）
         String longItem = "a".repeat(600);

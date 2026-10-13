@@ -14,7 +14,8 @@ import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
  * 有序条目集（随 PRD 落库演进重产，对偶切片计划的生命周期、不另存正本）。
  *
  * <p>解析口径与前端 {@code feature-list.ts}（#285 设置 tab 勾选源）同源：章标题
- * 行（任意层级）定界、下一章止；编号条目行（1. / 1、等）取<b>首行全文</b>作
+ * 行（任意层级，可带中文/阿拉伯序号前缀——PRD 技能只钉章节名不钉标题行格式）
+ * 定界、下一章止；编号条目行（1. / 1、等）取<b>首行全文</b>作
  * 条目——条目文本是建议性锚不是稳定标识（PRD 演进措辞漂移由重产对照自然
  * 消化，对照不上按待跑重做，降级方向安全）。无 PRD／无该章／无编号条目 → 空
  * 清单（调用侧如实不派发，不造假清单）。</p>
@@ -28,6 +29,14 @@ public record DesignChecklist(List<String> items) {
 
     /** 章内任意层级标题行（章节边界）。 */
     private static final Pattern ANY_HEADING = Pattern.compile("^#{1,6}\\s+");
+
+    /**
+     * 章标题行的可选序号前缀（中文/阿拉伯序号＋可选分隔符——PRD 技能只钉章节名
+     * 不钉标题行格式，主智能体按中文文档习惯给七章节加序号「## 六、设计物清单」，
+     * 合规产出不是形态偏离）。
+     */
+    private static final String OPTIONAL_CHAPTER_ORDINAL =
+            "(?:[一二三四五六七八九十百零〇]+|\\d{1,3})?\\s*[、.．:：)）]?\\s*";
 
     /** 编号条目行（1. / 1、等，取全行文本）。 */
     private static final Pattern NUMBERED_ITEM = Pattern.compile("^\\s*(\\d{1,3})[.、．]\\s*(\\S.*)$");
@@ -63,8 +72,8 @@ public record DesignChecklist(List<String> items) {
 
     /** 章内编号条目（章标题行定界、下一章止；条目＝首行全文截长度上限）。 */
     private static List<String> chapterItems(String prdMarkdown, String chapterTitle) {
-        Pattern chapterHeading = Pattern.compile("^#{1,6}\\s*" + Pattern.quote(chapterTitle)
-                + "\\s*$");
+        Pattern chapterHeading = Pattern.compile("^#{1,6}\\s*" + OPTIONAL_CHAPTER_ORDINAL
+                + Pattern.quote(chapterTitle) + "\\s*$");
         List<String> items = new ArrayList<>();
         boolean inChapter = false;
         for (String line : prdMarkdown.split("\n", -1)) {

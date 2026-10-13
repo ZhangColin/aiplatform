@@ -40,6 +40,23 @@ describe("parseFeatureListItems", () => {
     expect(parseFeatureListItems("## 功能清单\n本章还没有条目。")).toEqual([]);
   });
 
+  it("章标题带序号前缀（「## 六、功能清单」）仍命中——真实走查事实：主智能体按中文文档习惯给七章节加序号", () => {
+    const prd = [
+      "# 门店系统 PRD",
+      "",
+      "## 五、关键约束",
+      "约束正文",
+      "",
+      "## 六、功能清单",
+      "1. 用户能注册登录",
+      "2. 用户能浏览商品下单",
+      "",
+      "## 七、待定项",
+      "暂无",
+    ].join("\n");
+    expect(parseFeatureListItems(prd)).toEqual(["用户能注册登录", "用户能浏览商品下单"]);
+  });
+
   it("设计形 PRD（设计物清单章）不产出功能清单条目", () => {
     const designPrd = "## 设计物清单\n1. 主视觉海报：用途…";
     expect(parseFeatureListItems(designPrd)).toEqual([]);

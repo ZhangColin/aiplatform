@@ -120,7 +120,9 @@ type AgentPayload = {
   sessionId?: string;
 };
 
-/** 收口扩载的文件条目（正本 closing.files 元素）：path = 工作区锚定形，行数为活动量口径。 */
+/** 收口扩载的文件条目（正本 closing.files 元素）：path = write_file/edit_file
+ *  参数原形（提示词示例为相对形、模型可携锚定形——两形自选，呈现面纯文本零语义
+ *  消费；稿清单 drafts.path 才是归一锚定形，#306），行数为活动量口径。 */
 export type SseClosingFile = {
   path: string;
   added: number;

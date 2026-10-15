@@ -342,6 +342,68 @@ class DesignProcessAppServiceTest {
                 });
     }
 
+    @Test
+    void given_relative_form_write_file_draft_when_close_then_criterion_passes_and_drafts_anchored() {
+        // 灵魂用例（#306＝#303 发现一 live 复现形）：界面类稿走 harness 内建
+        // write_file 件——落稿变更以工作区相对形 design/x.html 上报（FileChangeFacts
+        // 逐字记录工具参数、无前导斜杠；平面类 GenerateImageTool 才显式补锚定形），
+        // 收口判据须过（修复前 designAnchored 只认锚定形 → live 三次重试全败转终态
+        // 而稿全在盘——seam 测试此前 stub 锚定形绕开了真实上报形态）；稿清单归一
+        // 锚定形输出——收尾卡/定稿锚/SSE 契约单一形不变（前端零波及）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrdContent(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("design/logo-1.html", 80, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        // 零重试收口（判据以真实上报形命中）：两件各一会话、件状态均已收口
+        verify(agentClient, times(2)).converse(any(), any());
+        assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing = (Map<String, Object>) payloads.getAllValues().get(0)
+                .get(AgentEventTypes.CLOSING_FIELD);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> drafts =
+                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+        assertThat(drafts).containsExactly(
+                Map.of("item", "品牌主 logo——方形构图，扁平风格", "media", "html",
+                        "path", "/design/logo-1.html"));
+    }
+
+    @Test
+    void given_mixed_form_same_draft_when_close_then_deduped_to_anchored() {
+        // 同稿混形归一去重（#306）：write 后再 edit 同一文件——write_file 相对形＋
+        // 锚定形混报（谓词放宽后两形皆过滤），归一先于 distinct——原始形不同不裂成
+        // 两张稿卡；design/ 外（materials）仍不算稿
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrdContent(DESIGN_PRD);
+        givenScriptedDesignSession(
+                new FileChange("design/logo-1.html", 80, 0),
+                new FileChange("/design/logo-1.html", 12, 4),
+                new FileChange("/materials/ref.png", 10, 0));
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing = (Map<String, Object>) payloads.getAllValues().get(0)
+                .get(AgentEventTypes.CLOSING_FIELD);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> drafts =
+                (List<Map<String, Object>>) closing.get(CoderRunAttempts.CLOSING_DRAFTS_FIELD);
+        assertThat(drafts).containsExactly(
+                Map.of("item", "品牌主 logo——方形构图，扁平风格", "media", "html",
+                        "path", "/design/logo-1.html"));
+    }
+
     /** 单设计物 PRD（#292 出稿即渲用例——平面海报一件，渲命令数即稿数好数）。 */
     private static final String POSTER_PRD = """
             # 海报设计需求
@@ -1263,6 +1325,35 @@ class DesignProcessAppServiceTest {
                 argThat(command -> command != null && command.command().startsWith("rm -f ")));
 
         appService.deleteDesignDraft(projectId, "/design/logo-2.html"); // 候选可删
+    }
+
+    @Test
+    void given_relative_form_boundary_input_when_finalize_then_anchored_and_delete_guarded() {
+        // 守卫同宽口径（#306）：谓词放宽后 finalize/delete REST 面两形皆收（仍在
+        // design/ 前缀＋isViewable＋容器存在性三重守卫内）；定稿锚存储归一锚定形
+        // （单一形事实——包成员/帧衍生/收尾卡取件免形差）；定稿比较两形归一后比
+        // （PRJ_050 不因形差漏判——形差误删定稿稿是真缺陷面）
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceCommands(DESIGN_PRD);
+        givenScriptedDesignSession(new FileChange("/design/logo-1.html", 80, 0),
+                new FileChange("/design/logo-2.html", 82, 0));
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        // 相对形入参定稿：守卫过、存储归一锚定形
+        appService.finalizeDesignItem(projectId, 1, "design/logo-1.html");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT finalized_path FROM prj_design_items WHERE project_id = ? AND ord = 1",
+                String.class, projectId)).isEqualTo("/design/logo-1.html");
+
+        // 定稿比较跨形命中：相对形删除请求仍判已定稿（PRJ_050）且容器零触达
+        assertThatThrownBy(() -> appService.deleteDesignDraft(projectId, "design/logo-1.html"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.DESIGN_DRAFT_FINALIZED.message());
+        verify(workspaceLifecycleAppService, never()).exec(any(),
+                argThat(command -> command != null && command.command().startsWith("rm -f ")));
+
+        appService.deleteDesignDraft(projectId, "/design/logo-2.html"); // 候选照常可删
     }
 
     @Test

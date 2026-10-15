@@ -99,8 +99,10 @@ closing: {
   systemChanged: true | false       # 判定行·系统改没改（更新轮 = finish_edit 工具事实；生成轮 = 探活收口产出）
   systemNote:   "改了什么/为什么无需改"  # 可缺省（更新轮 = finish_edit 必带说明；生成轨道 = 本段叙事，与 summary 同值）
   files: [                         # 变更清单（文件清单级——服务端不产出 patch 类事件，清单由本扩载权威承载）
-    { path: "/src/App.jsx", added: 40, removed: 0 }   # path = 工作区锚定形；行数为
-    ...                                              # write_file（新文件行数）/ edit_file（新旧串行数）
+    { path: "src/App.jsx", added: 40, removed: 0 }    # path = write_file/edit_file 参数原形
+    ...                                              # （提示词示例为相对形、模型可携锚定形——两形自选，
+                                                     # 呈现面纯文本零语义消费，#306）；行数为
+                                                     # write_file（新文件行数）/ edit_file（新旧串行数）
   ],                               # 的活动量口径：同路径跨尝试合并、按路径排序；
                                    # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
                                    # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff

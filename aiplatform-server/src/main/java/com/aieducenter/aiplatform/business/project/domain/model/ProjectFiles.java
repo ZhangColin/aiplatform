@@ -64,6 +64,17 @@ public final class ProjectFiles {
     }
 
     /**
+     * 工作区相对形 → 锚定形（补前导 /）；锚定形/null 原样（null 透传——调用侧
+     * 守卫在后）。{@link #relativeFormOf} 的对偶：落稿变更两形并存的事实面
+     * （write_file 件上报相对形、GenerateImageTool 落盘补锚定形，#306）在消费
+     * 边界归一到锚定形单一形——稿清单/定稿锚/比较先过本归一，下游免形差。
+     */
+    public static String anchoredFormOf(String path) {
+        return path != null && !path.startsWith("/")
+                ? "/" + path : path;
+    }
+
+    /**
      * 路径是否可浏览：工作区锚定形（相对根、无 {@code ..} 逃逸、非空白）且首段
      * 不是根级非交付目录、路径不是根级 {@code .env} 机密。
      */
@@ -140,9 +151,10 @@ public final class ProjectFiles {
      * raw 路由 iframe 直渲；其余 HTML（应用源码等）不开伺服面（raw 只认图片与
      * 本判定）。
      *
-     * <p>design/ 锚定与轨道层 {@code CoderRunAttempts.designAnchored} 同律两形
-     * （彼收锚定形前导 {@code /}、本收相对形——本类在 domain 层不可上引
-     * application 包，无法共享单点；两处口径同改，互指为约）。</p>
+     * <p>design/ 锚定与轨道层 {@code CoderRunAttempts.designAnchored} 同律
+     * （彼两形兼容——write_file 件相对形＋落盘锚定形，#306；本收相对形，取件面
+     * 前置 {@link #relativeFormOf} 归一——本类在 domain 层不可上引 application
+     * 包，无法共享单点；两处口径同改，互指为约）。</p>
      */
     public static boolean isDraftHtml(String path) {
         if (path == null || !path.toLowerCase(Locale.ROOT)

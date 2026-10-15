@@ -533,16 +533,28 @@ class CoderRunAttempts {
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
      *  = 工作区布局常量表）。 */
     private static final String DESIGN_DIR_PREFIX = "/" + WorkspaceLayout.DESIGN_DIR + "/";
+    /** 同上相对形前缀（write_file 件上报工作区相对形——#306 两形兼容）。 */
+    private static final String DESIGN_DIR_RELATIVE_PREFIX =
+            WorkspaceLayout.DESIGN_DIR + "/";
 
     /**
      * design/ 锚定判定（#289 单点——稿清单派生与设计会话收口判据共用，两处口径
-     * 不许漂移）：path 为工作区锚定形（如 {@code /design/home-1.html}），大小写
-     * 不敏感（文件系统侧无大小写约定）。相对形同律判定在
+     * 不许漂移）：path 两形兼容——锚定形（{@code /design/home-1.html}）与工作区
+     * 相对形（{@code design/home-1.html}——write_file 件落稿变更的逐字上报形；
+     * 平面类 GenerateImageTool 落盘才显式补锚定形），大小写不敏感（文件系统侧无
+     * 大小写约定）。谓词只判锚定、不归一——清单与锚的归一在
+     * {@code DesignProcessAppService.designAnchoredPaths}（ProjectFiles.
+     * anchoredFormOf），消费面单一锚定形不变。相对形同律判定在
      * {@code ProjectFiles.isDraftHtml}（#293 稿伺服面——domain 层不可上引本包，
-     * 同律两形互指为约）。
+     * 同律互指为约）。
      */
     static boolean designAnchored(String path) {
-        return path != null && path.toLowerCase(Locale.ROOT).startsWith(DESIGN_DIR_PREFIX);
+        if (path == null) {
+            return false;
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        return lower.startsWith(DESIGN_DIR_PREFIX)
+                || lower.startsWith(DESIGN_DIR_RELATIVE_PREFIX);
     }
 
     /** 界面类稿扩展名（media 形态判据——平面类位图同目录落盘）。 */

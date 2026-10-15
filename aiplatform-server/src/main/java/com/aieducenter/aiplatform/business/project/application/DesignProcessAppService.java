@@ -643,12 +643,15 @@ public class DesignProcessAppService {
     /**
      * 本场新落的设计稿路径（锚定 design/、去重稳定序——渲前集合与稿清单的公共
      * 底座）。判定以平台可观察的文件变更事实为准（同收口判据口径），不解析执行体
-     * 自由文本。
+     * 自由文本。两形归一（#306）：write_file 件落稿变更携工作区相对形、
+     * GenerateImageTool 落盘携锚定形——归一到锚定形后再去重（同稿混形不裂卡），
+     * 收尾卡稿清单/渲前集合/定稿锚保持单一锚定形。
      */
     private static List<String> designAnchoredPaths(List<FileChange> changes) {
         return changes.stream()
                 .map(FileChange::path)
                 .filter(CoderRunAttempts::designAnchored)
+                .map(ProjectFiles::anchoredFormOf)
                 .distinct()
                 .sorted()
                 .toList();
@@ -771,7 +774,8 @@ public class DesignProcessAppService {
      * 覆盖项目正本、提炼无所得不刷新）→ 后续分岔派发 → 定稿收尾卡入对话流
      * （对话史落库＋run-finish 载 closing 直达——SSE 事件封闭零新增）。
      * 成版/落卡/提炼失败不反噬定稿（件状态是事实、回访经轨道表——quietly
-     * 留日志，同收口成版先例）。
+     * 留日志，同收口成版先例）。draftPath 守卫与存储两形皆收、锚归一（#306：
+     * 锚定形/工作区相对形过同一守卫集，定稿锚落锚定形单一形）。
      *
      * <p><b>后续分岔</b>（ADR-0024 触发律：定稿自动转后续、紧跟的门是冗余门）：
      * 系统在途（已生成＋设计类终点＝中途切换）自动起更新 run 按稿对齐（交接物
@@ -810,6 +814,9 @@ public class DesignProcessAppService {
         if (exists == null || exists.exitCode() != 0) {
             throw new ApplicationException(ProjectMessage.DESIGN_DRAFT_NOT_FOUND);
         }
+        // 守卫两形皆收（#306 同宽口径），定稿锚存储归一锚定形——包成员/帧衍生/
+        // 收尾卡取件的下游消费单一形
+        draftPath = ProjectFiles.anchoredFormOf(draftPath);
         Instant startedAt = Instant.now();
         // 定稿落位（先于成版——状态是事实源，成版/落卡失败不反噬）
         String runId = EventsAppService.newRunId();
@@ -843,7 +850,7 @@ public class DesignProcessAppService {
      * 无竞态面；无成版全量提交卷入问题）。对话史的稿清单是历史事实不回写
      * （回访画布以文件树存在性过滤，删稿即消卡）。定稿比较与锚定判定同宽
      * （大小写不敏感——designAnchored 先放宽了 {@code /DESIGN/} 变体，守卫
-     * 不留窄缝）。
+     * 不留窄缝；两形归一后比——#306 相对形/锚定形不因形差漏判 PRJ_050）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档；ORD_006
      *                              订单处理中；PRJ_020 路径不可浏览或非 design
@@ -863,7 +870,8 @@ public class DesignProcessAppService {
         }
         boolean finalizedDraft = designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
                 .anyMatch(item -> item.getFinalizedPath() != null
-                        && item.getFinalizedPath().equalsIgnoreCase(draftPath));
+                        && ProjectFiles.relativeFormOf(item.getFinalizedPath())
+                                .equalsIgnoreCase(ProjectFiles.relativeFormOf(draftPath)));
         if (finalizedDraft) {
             throw new ApplicationException(ProjectMessage.DESIGN_DRAFT_FINALIZED);
         }

@@ -47,6 +47,21 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.isViewable(null)).isFalse();
     }
 
+    // ---------- 路径形归一（锚定侧——#306 两形归一） ----------
+
+    @Test
+    void given_relative_or_anchored_paths_when_anchored_form_then_leading_slash_normalized() {
+        // relativeFormOf 的对偶：落稿变更两形并存（write_file 件上报工作区相对形、
+        // GenerateImageTool 落盘补锚定形）在消费边界归一到锚定形——锚定形/null
+        // 原样透传（null 守卫在调用侧）
+        assertThat(ProjectFiles.anchoredFormOf("design/home-1.html"))
+                .isEqualTo("/design/home-1.html");
+        assertThat(ProjectFiles.anchoredFormOf("/design/home-1.html"))
+                .isEqualTo("/design/home-1.html");
+        assertThat(ProjectFiles.anchoredFormOf("docs/PRD.md")).isEqualTo("/docs/PRD.md");
+        assertThat(ProjectFiles.anchoredFormOf(null)).isNull();
+    }
+
     // ---------- 树列表命令与输出解析 ----------
 
     @Test

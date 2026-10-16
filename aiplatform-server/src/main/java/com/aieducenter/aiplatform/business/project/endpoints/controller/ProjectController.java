@@ -60,6 +60,10 @@ import com.aieducenter.aiplatform.support.Tsid;
  * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 继续更新（更新
  * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
  * 源码包下载 → 预览 → 删除真删级联。
+ *
+ * <p>#325 owner 守卫：{@code /api/projects/{id}/**} 单项目寻址统一过归属判定
+ * （{@code ProjectOwnerInterceptor} 先于控制器）——非本人项目与不存在项目同 404
+ * PRJ_001，不泄露存在性；列表按当前登录账户过滤（见各端点注记）。</p>
  */
 @RestController
 @RequestMapping("/api/projects")
@@ -106,9 +110,11 @@ public class ProjectController {
     }
 
     @GetMapping
-    @Operation(summary = "项目列表（状态过滤）",
-            description = "创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/"
-                    + "3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）")
+    @Operation(summary = "项目列表（状态过滤；按当前登录账户过滤）",
+            description = "创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目"
+                    + "（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤"
+                    + "（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。"
+                    + "不合法取值 400（带合法取值表，框架统一信封）")
     public ApiResponse<List<ProjectResponse>> list(
             @RequestParam(required = false) ProjectStatusFilter status) {
         return ApiResponse.ok(queryAppService.list(status));
@@ -253,7 +259,8 @@ public class ProjectController {
             description = "名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。"
                     + "响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。"
                     + "空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；"
-                    + "单账号场景不设越权面、不发射 SSE（REST 响应即触达）")
+                    + "不发射 SSE（REST 响应即触达）。#325 起进 owner 守卫面"
+                    + "（/api/projects/{id}/** 统一归属判定，非本人 404 PRJ_001）")
     public ApiResponse<ProjectDetailResponse> rename(@PathVariable String id,
                                                      @Valid @RequestBody RenameProjectCommand command) {
         return ApiResponse.ok(appService.rename(parseId(id), command.name()));

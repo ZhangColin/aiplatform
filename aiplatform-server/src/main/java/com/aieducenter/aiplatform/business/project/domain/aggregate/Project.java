@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -27,7 +28,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 
 /**
  * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
- * dev 工作区引用 + 归属账号 + 归档终点。归档是单向终点动作（archived_at 落定）；
+ * dev 工作区引用 + 归属（owner 双列：账户/访客，逻辑互斥）+ 归档终点。归档是单向终点动作（archived_at 落定）；
  * 「进行中/已归档」即其全部派生态。一个项目 = 一个 dev 环境（workspaceId 软引用
  * wsp 表，级联清理由编排负责）。删除真删级联，无软删除——继承 Auditable 只取
  * 审计字段。
@@ -72,9 +73,20 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
 
-    /** 归属账号（A2：创建时填、v1 不过滤；测试/无会话上下文可空）。 */
+    /**
+     * 归属账号（A2 落列、#325 起进读面过滤与单项目守卫；测试/无会话上下文可空）。
+     * 与 {@link #ownerGuestId} 逻辑互斥（库层 CHECK 兜底，至多一方落值）。
+     */
     @Column(name = "owner_account_id", updatable = false)
     private Long ownerAccountId;
+
+    /**
+     * 归属访客（#325 建列、访客域 #326 挂载——本票只落列暂无写入方）：访客独立表
+     * 的软引用，皆可空；owner 过滤的访客维度（列表谓词与 SSE 路由键扩 guestId）
+     * 随 #326 接管，本聚合只承载列。
+     */
+    @Column(name = "owner_guest_id", updatable = false)
+    private Long ownerGuestId;
 
     /** 归档时间（单向终点；NULL = 未归档，归档动作归片5c）。 */
     @Column(name = "archived_at")
@@ -247,6 +259,16 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
      */
     public String ownerUserId() {
         return ownerAccountId != null ? ownerAccountId.toString() : null;
+    }
+
+    /**
+     * 归属判定（#325 owner 维度数据面——列表过滤与单项目守卫共用谓词）：账户侧
+     * 等值匹配，「无主对无主」放行（无账户上下文 × owner 未落的占位聚合——测试
+     * 直调/编排内部调用的容忍面），其余不匹配即 deny（deny-by-default：存量无
+     * 归属行对任何登录账户不可见）。访客维度（ownerGuestId）由 #326 扩本谓词。
+     */
+    public boolean ownedBy(Long accountId) {
+        return Objects.equals(ownerAccountId, accountId);
     }
 
     /**

@@ -2,7 +2,9 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -19,6 +21,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
+import com.aieducenter.aiplatform.business.identity.application.GuestAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.SwitchEndpointTypeCommand;
@@ -36,6 +39,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecR
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.web.GuestContext;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -76,6 +80,7 @@ public class ProjectLifecycleAppService {
     private final PrdVersionRepository prdVersions;
     private final SkillDraftAppService skillDrafts;
     private final OrderQueryAppService orderQueryAppService;
+    private final GuestAppService guestAppService;
     private final TransactionTemplate transactionTemplate;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
@@ -93,6 +98,7 @@ public class ProjectLifecycleAppService {
                                       PrdVersionRepository prdVersions,
                                       SkillDraftAppService skillDrafts,
                                       OrderQueryAppService orderQueryAppService,
+                                      GuestAppService guestAppService,
                                       TransactionTemplate transactionTemplate) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
@@ -109,25 +115,54 @@ public class ProjectLifecycleAppService {
         this.prdVersions = prdVersions;
         this.skillDrafts = skillDrafts;
         this.orderQueryAppService = orderQueryAppService;
+        this.guestAppService = guestAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * 建项目（requirement + 终点初值可空）：dev 工作区落定 → 一事务 Project
-     * （占位名 + 类型服务端缺省 + 终点初值入口两档定、缺省系统——#299 mode 进
-     * 载荷）→ SSE workspace-created → 异步 LLM 取名（不等结果，失败保占位）
-     * → 自动开始主智能体对话（经 {@link MainAgentAppService}，欢迎语 + 首个澄清
-     * 问题；设计主线访谈/PRD 清单形跟终点类型走，#285 已接线）。起跑失败不回滚
-     * 建项目（项目已成立，失败原因经 error 事件/日志表达）。
+     * 建项目（requirement + 终点初值可空；#326 起免注册访客可用）：dev 工作区落定
+     * → 一事务 Project（占位名 + 类型服务端缺省 + 终点初值入口两档定、缺省系统
+     * ——#299 mode 进载荷；归属 owner 双列：账户随会话、访客随凭证）→ SSE
+     * workspace-created → 异步 LLM 取名（不等结果，失败保占位）→ 自动开始主智能体
+     * 对话（经 {@link MainAgentAppService}，欢迎语 + 首个澄清问题；设计主线访谈/
+     * PRD 清单形跟终点类型走，#285 已接线）。起跑失败不回滚建项目（项目已成立，
+     * 失败原因经 error 事件/日志表达）。
+     *
+     * <p><b>访客惰性创建（#326）</b>：完全匿名（无账户会话、无有效访客凭证）且
+     * requirement 非空白＝「首条需求消息」——同事务建访客行＋发凭证（项目落库失败
+     * 同滚，「提交成功才建访客行」），凭证 cookie 随 {@link Creation} 交端点层
+     * Set-Cookie；纯附件/空输入不建（匿名空输入快败 PRJ_006——无归属可挂，
+     * 零副作用）、只逛零足迹（无提交不触本口）。已有有效访客凭证即挂既有访客（不另建行）；
+     * 账户会话在场恒挂账户（账户优先于访客凭证）。</p>
      */
-    public ProjectCreatedResponse create(CreateProjectCommand command) {
+    public Creation create(CreateProjectCommand command) {
+        Long accountId = RequestContext.getUserId();
+        Long guestId = GuestContext.guestId();
+        boolean anonymous = accountId == null && guestId == null;
+        boolean firstMessage = command.requirement() != null
+                && !command.requirement().isBlank();
+        if (anonymous && !firstMessage) {
+            // 纯附件/空输入不算首条需求消息（票面）——匿名无凭证无处挂归属：不建
+            // （快败零副作用；有账户/访客上下文的空输入照旧＝缺省开场提示）
+            throw new ApplicationException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE,
+                    "免注册建项目必须携带首条需求描述");
+        }
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        boolean lazyGuest = anonymous && firstMessage;
+        AtomicReference<GuestAppService.IssuedGuest> issuedGuest = new AtomicReference<>();
         Project project;
         try {
-            project = transactionTemplate.execute(status -> projectRepository.save(Project.create(
-                    Project.PLACEHOLDER_NAME, null, command.endpointType(),
-                    Long.parseLong(workspace.workspaceId()), RequestContext.getUserId())));
+            project = transactionTemplate.execute(status -> {
+                if (lazyGuest) {
+                    issuedGuest.set(guestAppService.registerNew()); // 同事务：项目落库失败访客行同滚
+                }
+                Long ownerGuestId = guestId != null ? guestId
+                        : issuedGuest.get() != null ? issuedGuest.get().guestId() : null;
+                return projectRepository.save(Project.create(
+                        Project.PLACEHOLDER_NAME, null, command.endpointType(),
+                        Long.parseLong(workspace.workspaceId()), accountId, ownerGuestId));
+            });
         } catch (RuntimeException e) {
             // 落库失败：回收已落定的工作区，不留与记录脱节的容器/卷（照片1b 兜底）
             log.error("项目记录入库失败，回收工作区 {}", workspace.workspaceId(), e);
@@ -141,7 +176,9 @@ public class ProjectLifecycleAppService {
                 ProjectEventTypes.PROJECT_NAME_FIELD, project.getName(),
                 ProjectEventTypes.CONTAINER_FIELD, workspace.containerName(),
                 ProjectEventTypes.PROJECT_TYPE_FIELD, project.getType().name(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId())));
 
         // 异步 LLM 取名（占位名先落，取名后台完成落位；空 requirement 不取名）
         namingService.nameAsync(project.getId(), command.requirement());
@@ -155,10 +192,26 @@ public class ProjectLifecycleAppService {
             run = mainAgentAppService.startConversation(project.getId(), prompt);
         } catch (RuntimeException e) {
             log.warn("项目 {} 自动对话起跑失败（项目已成立，不回滚）", project.getId(), e);
-            return new ProjectCreatedResponse(queryAppService.detail(project.getId()), null);
+            return new Creation(
+                    new ProjectCreatedResponse(queryAppService.detail(project.getId()), null),
+                    guestCookieOf(issuedGuest.get()));
         }
-        return new ProjectCreatedResponse(queryAppService.detail(project.getId()),
-                run.runId());
+        return new Creation(
+                new ProjectCreatedResponse(queryAppService.detail(project.getId()), run.runId()),
+                guestCookieOf(issuedGuest.get()));
+    }
+
+    /** 惰性建访客的凭证 cookie（未建访客＝null；装配契约归 identity 的 GuestAppService）。 */
+    private ResponseCookie guestCookieOf(GuestAppService.IssuedGuest issued) {
+        return issued != null ? guestAppService.credentialCookie(issued.credential()) : null;
+    }
+
+    /**
+     * 建项目结果（#326）：response 即 REST 面；guestCookie 非空＝本次惰性建了访客
+     * （端点层据此 Set-Cookie——凭证随首条需求消息发放）。
+     */
+    public record Creation(ProjectCreatedResponse response,
+                           org.springframework.http.ResponseCookie guestCookie) {
     }
 
     /**
@@ -300,7 +353,9 @@ public class ProjectLifecycleAppService {
         skillDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId())));
     }
 
     /**
@@ -330,7 +385,9 @@ public class ProjectLifecycleAppService {
         eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 ProjectEventTypes.URL_FIELD, url.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId())));
         return new ProjectPreviewResponse(url.toString());
     }
 

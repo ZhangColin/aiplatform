@@ -30,6 +30,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.business.project.endpoints.controller.ProjectController;
+import com.aieducenter.aiplatform.web.GuestContext;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -99,7 +100,7 @@ class ProjectOwnerInterceptorMvcTest {
 
     private void givenProjectOwnedBy(Long ownerAccountId) {
         when(projectRepository.findById(PROJECT_ID))
-                .thenReturn(Optional.of(Project.create("官网 demo", null, 900L, ownerAccountId)));
+                .thenReturn(Optional.of(Project.create("官网 demo", null, null, 900L, ownerAccountId, null)));
     }
 
     // ---------- 单项目寻址：归属守卫（404 不泄露存在性） ----------
@@ -171,12 +172,71 @@ class ProjectOwnerInterceptorMvcTest {
         verify(projectRepository, never()).findById(anyLong());
     }
 
+    // ---------- 访客维度守卫（#326 owner 双列：访客×账户/访客×访客互不可见） ----------
+
+    private static final long GUEST = 900L;
+    private static final long OTHER_GUEST = 901L;
+
+    private void givenProjectOwnedByGuest(Long guestId) {
+        when(projectRepository.findById(PROJECT_ID))
+                .thenReturn(Optional.of(Project.create("访客项目", null, null, 900L, null, guestId)));
+    }
+
+    /** 访客上下文直注（同 performAsUser 的 RequestContext 姿势，叠加 GuestContext 维度）。 */
+    private ResultActions performAsGuest(Long guestId, RequestBuilder request) throws Exception {
+        return GuestContext.runWith(guestId, () -> RequestContext.runFor(
+                new RequestContext(null, null, null, null, null, null, null, null),
+                () -> mockMvc.perform(request)));
+    }
+
+    @Test
+    void given_own_guest_project_when_guest_detail_then_passed_through() throws Exception {
+        givenProjectOwnedByGuest(GUEST);
+        when(queryAppService.detail(PROJECT_ID)).thenReturn(
+                ProjectDetailResponseFixture.detailOf(Long.toString(PROJECT_ID), "访客项目").build());
+
+        performAsGuest(GUEST, get("/api/projects/" + PROJECT_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(Long.toString(PROJECT_ID)));
+
+        verify(queryAppService).detail(PROJECT_ID);
+    }
+
+    @Test
+    void given_guest_project_when_other_guest_or_account_then_prj_001() throws Exception {
+        // 访客项目对别的访客与账户订阅者皆 404（不泄露存在性）；本人访客照常（上例）
+        givenProjectOwnedByGuest(GUEST);
+
+        performAsGuest(OTHER_GUEST, get("/api/projects/" + PROJECT_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001));
+
+        performAsUser(get("/api/projects/" + PROJECT_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001));
+
+        verify(queryAppService, never()).detail(anyLong());
+    }
+
+    @Test
+    void given_account_project_when_guest_viewer_then_prj_001() throws Exception {
+        // 账户项目对访客 404——维间互斥（凭证不越权看账户项目，绑定平移属 #328）
+        givenProjectOwnedBy(VIEWER);
+
+        performAsGuest(GUEST, get("/api/projects/" + PROJECT_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001));
+
+        verify(queryAppService, never()).detail(anyLong());
+    }
+
     // ---------- 集合端点不进守卫 ----------
 
     @Test
     void given_collection_endpoints_when_called_then_no_ownership_lookup() throws Exception {
         when(queryAppService.list(any())).thenReturn(List.of());
-
+        when(appService.create(any()))
+                .thenReturn(new ProjectLifecycleAppService.Creation(null, null));
         performAsUser(get("/api/projects")).andExpect(status().isOk());
         performAsUser(post("/api/projects")
                         .contentType(MediaType.APPLICATION_JSON)

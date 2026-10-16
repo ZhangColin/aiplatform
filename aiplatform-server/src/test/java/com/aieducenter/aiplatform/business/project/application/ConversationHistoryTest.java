@@ -122,8 +122,7 @@ class ConversationHistoryTest {
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("对话史项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("对话史项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();

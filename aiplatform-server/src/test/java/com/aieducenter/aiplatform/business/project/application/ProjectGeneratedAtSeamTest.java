@@ -81,7 +81,7 @@ class ProjectGeneratedAtSeamTest {
 
     private Project persisted() {
         Project project = projectRepository.save(
-                Project.create("生成时点缝测试", ProjectType.WEBSITE, 900200L, null));
+                Project.create("生成时点缝测试", ProjectType.WEBSITE, null, 900200L, null, null));
         projectId = project.getId();
         return project;
     }

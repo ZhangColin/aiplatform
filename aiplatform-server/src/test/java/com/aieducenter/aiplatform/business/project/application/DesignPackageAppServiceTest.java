@@ -99,7 +99,7 @@ class DesignPackageAppServiceTest {
     /** 建项目（终点类型随建随切）＋两件定稿（logo 平面类/hero 界面类）。 */
     private Project seedDesignProject(ProjectEndpointType endpointType) {
         Project project = projectRepository.save(
-                Project.create("资产包测试", null, WORKSPACE_ID, OWNER));
+                Project.create("资产包测试", null, null, WORKSPACE_ID, OWNER, null));
         project.switchEndpoint(endpointType, null);
         project = projectRepository.save(project);
         LocalDateTime anchor = LocalDateTime.now();

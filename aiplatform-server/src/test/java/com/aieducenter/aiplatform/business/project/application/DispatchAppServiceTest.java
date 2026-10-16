@@ -120,14 +120,12 @@ class DispatchAppServiceTest {
     }
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("派发项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("派发项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("派发项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("派发项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -275,8 +273,7 @@ class DispatchAppServiceTest {
     @Test
     void given_archived_project_when_dispatch_then_prj_013_before_classification() {
         // 全局守卫（归档 = 指令区物理关闭，咨询与兜底也停）先于分类：拒绝即零调用零事件
-        Project project = projectRepository.save(Project.create("归档项目", null,
-                9806L, OWNER));
+        Project project = projectRepository.save(Project.create("归档项目", null, null, 9806L, OWNER, null));
         project.archive();
         Long projectId = projectRepository.save(project).getId();
 
@@ -475,8 +472,7 @@ class DispatchAppServiceTest {
 
     /** 设计主线项目＋现行清单件行（closedOrd 件已收口、其余待跑；PRD 锚对齐）。 */
     private Long persistedDesignScopeProject(String workspaceId, int closedOrd, int total) {
-        Project project = Project.create("设计作用域项目", null, Long.parseLong(workspaceId),
-                OWNER);
+        Project project = Project.create("设计作用域项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.switchEndpoint(ProjectEndpointType.DESIGN, null);
         project.markPrdProduced();
         Long projectId = projectRepository.save(project).getId();

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,14 +29,16 @@ public class AgentEventBridge {
     }
 
     /**
-     * 事件桥 sink：关联字段（projectId + 归属路由键 ownerAccountId）逐事件注入后经
+     * 事件桥 sink：关联字段（projectId + 归属路由键双键）逐事件注入后经
      * 事件通道发射（发射失败只记日志不断流）。归属在 sink 创建时捕获一次（每会话/run
-     * 一次）——token 流热路径零查库（ADR-0018）。
+     * 一次）——token 流热路径零查库（ADR-0018；#326 归属扩 owner 双列）。
      */
-    public Consumer<AgentEvent> sink(Long projectId, Long ownerAccountId) {
+    public Consumer<AgentEvent> sink(Project project) {
         Map<String, Object> correlation = Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId));
+                EventsAppService.PROJECT_FIELD, project.getId().toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
         return event -> {
             try {
                 eventsAppService.publishAgentEvent(event.type(), withCorrelation(event.payload(), correlation));
@@ -54,10 +57,12 @@ public class AgentEventBridge {
      * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
      * 失败终态（重试全程静默，中间失败不出事件）。
      */
-    public void emitRunFailed(Long projectId, Long ownerAccountId, String runId) {
+    public void emitRunFailed(Project project, String runId) {
         eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId),
+                EventsAppService.PROJECT_FIELD, project.getId().toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId));
     }
 
@@ -67,10 +72,12 @@ public class AgentEventBridge {
      * 意见锚已消费、不自动重试，用户重提即兜底；锚定收口对话轮的 runId（对话面
      * 已登记，失败提示随对话呈现）。
      */
-    public void emitError(Long projectId, Long ownerAccountId, String runId, String message) {
+    public void emitError(Project project, String runId, String message) {
         eventsAppService.publishAgentEvent(AgentEventTypes.ERROR, Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId),
+                EventsAppService.PROJECT_FIELD, project.getId().toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId,
                 AgentEventTypes.ERROR_MESSAGE_FIELD, message));
     }
@@ -81,11 +88,13 @@ public class AgentEventBridge {
      * （随派发响应同值返回），prompt 随事件携带供重放重建对话面，label 为呈现
      * 标签（「平台」，非智能体角色）。
      */
-    public void emitGuideReply(Long projectId, Long ownerAccountId, String runId, String prompt,
+    public void emitGuideReply(Project project, String runId, String prompt,
             String label, String text) {
         eventsAppService.publishAgentEvent(AgentEventTypes.GUIDE_REPLY, Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId),
+                EventsAppService.PROJECT_FIELD, project.getId().toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId,
                 AgentEventTypes.GUIDE_PROMPT_FIELD, prompt,
                 AgentEventTypes.GUIDE_LABEL_FIELD, label,
@@ -99,10 +108,12 @@ public class AgentEventBridge {
      * run-finish / error 即收口）；发射走 {@link #publishQuietly}——失败只记日志
      * 不断受理（其余 emit* 是语义关键事件，失败如实上抛不静默）。
      */
-    public void emitAcceptanceStarted(Long projectId, Long ownerAccountId, String runId) {
+    public void emitAcceptanceStarted(Project project, String runId) {
         publishQuietly(AgentEventTypes.ACCEPTANCE_START, Map.of(
-                EventsAppService.PROJECT_FIELD, projectId.toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId),
+                EventsAppService.PROJECT_FIELD, project.getId().toString(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()),
                 EventsAppService.RUN_FIELD, runId));
     }
 
@@ -115,11 +126,14 @@ public class AgentEventBridge {
      * 非续跑锚）。发射走 {@link #publishQuietly}——呈现面失败不牵连定稿事实
      * （件状态与成版已落定，回访经对话史水合）。
      */
-    public void emitClosingCard(Long projectId, Long ownerAccountId, String runId,
+    public void emitClosingCard(Project project, String runId,
             String sessionId, Map<String, Object> closing) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put(EventsAppService.PROJECT_FIELD, projectId.toString());
-        payload.put(EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(ownerAccountId));
+        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
+        payload.put(EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()));
+        payload.put(EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
         payload.put(EventsAppService.RUN_FIELD, runId);
         payload.put(AgentEventTypes.SESSION_FIELD, sessionId);
         payload.put(AgentEventTypes.CLOSING_FIELD, closing);

@@ -1667,8 +1667,7 @@ class GenerationAppServiceTest {
     void given_prd_never_produced_when_generate_then_prj_018() {
         // 「无门」指待定项不设门；PRD 从未产出 = 动作成立的前置事实缺失——直连调用
         // 也拦（编码 run 的任务就是读 PRD，无 PRD 起跑只会空烧重试）
-        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null,
-                9816L, OWNER)).getId();
+        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null, null, 9816L, OWNER, null)).getId();
 
         assertThatThrownBy(() -> appService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -1710,7 +1709,7 @@ class GenerationAppServiceTest {
 
     /** 可生成形态的项目（PRD 已产出、未生成、未归档）。 */
     private Long persistedProject(String workspaceId) {
-        Project project = Project.create("生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
@@ -1723,7 +1722,7 @@ class GenerationAppServiceTest {
     }
 
     private Long persistedArchivedProject(String workspaceId) {
-        Project project = Project.create("归档生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("归档生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
         return projectRepository.save(project).getId();
     }
@@ -1788,7 +1787,7 @@ class GenerationAppServiceTest {
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */
     private Long persistedSystemDesignProject(String workspaceId) {
-        Project project = Project.create("设计先行项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("设计先行项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
@@ -1809,7 +1808,7 @@ class GenerationAppServiceTest {
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("已生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("已生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markGenerated();
         return projectRepository.save(project).getId();
     }

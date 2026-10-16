@@ -52,6 +52,8 @@ public class PrdArtifactAdapter {
         eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
                 ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD,
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                        EventsAppService.OWNER_GUEST_FIELD,
+                        EventsAppService.ownerPayload(project.getOwnerGuestId())));
     }
 }

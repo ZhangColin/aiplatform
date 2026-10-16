@@ -369,7 +369,7 @@ class BackofficeProjectContentSeamTest {
     /** 建项目（真库写入，workspaceId 占位自增、归属账号可空）。 */
     private Project newProject(String name) {
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, workspaceSeq++, null));
+                Project.create(name, ProjectType.WEBSITE, null, workspaceSeq++, null, null));
     }
 
     /** 已归档项目（真聚合 archive() 路径落 archived_at）。 */

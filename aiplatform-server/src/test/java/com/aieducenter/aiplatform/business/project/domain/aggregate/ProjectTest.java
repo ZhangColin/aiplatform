@@ -22,7 +22,7 @@ class ProjectTest {
 
     @Test
     void given_valid_fields_when_create_then_defaults_applied() {
-        Project project = Project.create("官网 demo", null, 100L, 200L);
+        Project project = Project.create("官网 demo", null, null, 100L, 200L, null);
 
         assertThat(project.getName()).isEqualTo("官网 demo");
         assertThat(project.getType()).isEqualTo(ProjectType.WEBSITE); // 类型缺省官网
@@ -35,16 +35,16 @@ class ProjectTest {
     @Test
     void given_design_endpoint_when_create_then_initial_type_kept() {
         // #299 入口两档定初值：终显形携终点、null 走缺省（orDefault）
-        Project design = Project.create("咖啡店视觉", null, ProjectEndpointType.DESIGN, 1L, null);
+        Project design = Project.create("咖啡店视觉", null, ProjectEndpointType.DESIGN, 1L, null, null);
         assertThat(design.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN);
 
-        Project mainline = Project.create("官网", null, null, 1L, null);
+        Project mainline = Project.create("官网", null, null, 1L, null, null);
         assertThat(mainline.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM);
     }
 
     @Test
     void given_explicit_type_when_create_then_kept() {
-        Project project = Project.create("商城", ProjectType.ECOMMERCE, 1L, null);
+        Project project = Project.create("商城", ProjectType.ECOMMERCE, null, 1L, null, null);
 
         assertThat(project.getType()).isEqualTo(ProjectType.ECOMMERCE);
         assertThat(project.getOwnerAccountId()).isNull(); // 归属可空（无会话上下文）
@@ -52,28 +52,28 @@ class ProjectTest {
 
     @Test
     void given_blank_name_when_create_then_domain_error() {
-        assertThatThrownBy(() -> Project.create(" ", ProjectType.WEBSITE, 1L, null))
+        assertThatThrownBy(() -> Project.create(" ", ProjectType.WEBSITE, null, 1L, null, null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NAME_BLANK.message());
     }
 
     @Test
     void given_null_workspace_when_create_then_domain_error() {
-        assertThatThrownBy(() -> Project.create("官网", ProjectType.WEBSITE, null, null))
+        assertThatThrownBy(() -> Project.create("官网", ProjectType.WEBSITE, null, null, null, null))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_FIELDS_INCOMPLETE.message());
     }
 
     @Test
     void given_new_project_when_create_then_prd_not_produced() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
 
         assertThat(project.getPrdProducedAt()).isNull(); // NULL = PRD 未产出（#41 状态位）
     }
 
     @Test
     void given_prd_saved_when_markPrdProduced_then_timestamp_set() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
 
         project.markPrdProduced();
 
@@ -83,14 +83,14 @@ class ProjectTest {
 
     @Test
     void given_new_project_when_create_then_not_generated() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
 
         assertThat(project.getGeneratedAt()).isNull(); // NULL = 未生成过
     }
 
     @Test
     void given_not_generated_when_markGenerated_then_first_time_set() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
 
         project.markGenerated();
 
@@ -100,7 +100,7 @@ class ProjectTest {
     @Test
     void given_generated_when_markGenerated_again_then_timestamp_kept() {
         // 首次生成时点单向置位：后续生成/迭代不刷新（与 prdProducedAt 的随写刷新相对）
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
         project.markGenerated();
         var first = project.getGeneratedAt();
 
@@ -122,7 +122,7 @@ class ProjectTest {
     @Test
     void given_llm_name_when_rename_then_name_changed() {
         // #39：LLM 取名完成落位（占位 → 生成名）；改名端点（#43）复用同一行为
-        Project project = Project.create(Project.PLACEHOLDER_NAME, null, 1L, null);
+        Project project = Project.create(Project.PLACEHOLDER_NAME, null, null, 1L, null, null);
 
         project.rename("品牌官网");
 
@@ -131,7 +131,7 @@ class ProjectTest {
 
     @Test
     void given_blank_name_when_rename_then_domain_error() {
-        Project project = Project.create(Project.PLACEHOLDER_NAME, null, 1L, null);
+        Project project = Project.create(Project.PLACEHOLDER_NAME, null, null, 1L, null, null);
 
         assertThatThrownBy(() -> project.rename(" "))
                 .isInstanceOf(DomainException.class)
@@ -140,7 +140,7 @@ class ProjectTest {
 
     @Test
     void given_placeholder_name_when_rename_if_placeholder_then_renamed_and_true() {
-        Project project = Project.create(Project.PLACEHOLDER_NAME, null, 1L, null);
+        Project project = Project.create(Project.PLACEHOLDER_NAME, null, null, 1L, null, null);
 
         boolean renamed = project.renameIfPlaceholder("品牌官网");
 
@@ -151,7 +151,7 @@ class ProjectTest {
     @Test
     void given_user_renamed_name_when_rename_if_placeholder_then_kept_and_false() {
         // 取名在飞时用户已改名（#43）→ 不覆写（守卫是聚合规则，非编排判断）
-        Project project = Project.create(Project.PLACEHOLDER_NAME, null, 1L, null);
+        Project project = Project.create(Project.PLACEHOLDER_NAME, null, null, 1L, null, null);
         project.rename("我起的名字");
 
         boolean renamed = project.renameIfPlaceholder("LLM 的名字");
@@ -162,7 +162,7 @@ class ProjectTest {
 
     @Test
     void given_unarchived_when_archive_then_archived_at_set() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
 
         project.archive();
 
@@ -171,7 +171,7 @@ class ProjectTest {
 
     @Test
     void given_archived_when_archive_again_then_domain_error() {
-        Project project = Project.create("官网 demo", ProjectType.WEBSITE, 1L, null);
+        Project project = Project.create("官网 demo", ProjectType.WEBSITE, null, 1L, null, null);
         project.archive();
 
         assertThatThrownBy(project::archive)
@@ -181,7 +181,7 @@ class ProjectTest {
 
     @Test
     void given_new_project_when_create_then_endpoint_defaults_system() {
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
         // 入口面（门面票）落地前一律缺省系统；终点类型随建即有（NOT NULL 列语义）
         assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.SYSTEM);
@@ -190,7 +190,7 @@ class ProjectTest {
 
     @Test
     void given_system_project_when_switch_to_system_design_then_scope_persisted() {
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
         project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN,
                 DesignScope.selected(List.of("首页：展示产品与入口", "订单管理：下单与查看订单")));
@@ -205,7 +205,7 @@ class ProjectTest {
     void given_system_project_when_switch_to_design_then_scope_not_persisted() {
         // 设计主线的计划对应物＝PRD 设计物清单章——范围不落库（防两处正本），
         // 作用域只作为切换指令的输入由编排消费（编排对设计目标传 null 进聚合）
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
         project.switchEndpoint(ProjectEndpointType.DESIGN, null);
 
@@ -216,7 +216,7 @@ class ProjectTest {
     @Test
     void given_design_project_when_switch_to_system_design_without_scope_then_allowed() {
         // 设计主线出身（转系统开发）：不由功能清单页面锚定，范围留空合法
-        Project project = Project.create("海报设计", null, 1L, null);
+        Project project = Project.create("海报设计", null, null, 1L, null, null);
         project.switchEndpoint(ProjectEndpointType.DESIGN, null);
 
         project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
@@ -243,7 +243,7 @@ class ProjectTest {
     @Test
     void given_non_design_target_when_switch_with_scope_then_domain_error() {
         // 范围只随系统＋设计落库——设计与系统目标携带范围即命令不完整
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
         assertThatThrownBy(() -> project.switchEndpoint(ProjectEndpointType.SYSTEM,
                 DesignScope.allPages()))
@@ -255,41 +255,75 @@ class ProjectTest {
 
     @Test
     void given_matching_account_when_owned_by_then_true() {
-        Project project = Project.create("官网 demo", null, 1L, 200L);
+        Project project = Project.create("官网 demo", null, null, 1L, 200L, null);
 
-        assertThat(project.ownedBy(200L)).isTrue();
+        assertThat(project.ownedBy(200L, null)).isTrue();
     }
 
     @Test
     void given_other_account_when_owned_by_then_false() {
         // 他人项目 deny——登录用户之间的隔离谓词
-        Project project = Project.create("官网 demo", null, 1L, 200L);
+        Project project = Project.create("官网 demo", null, null, 1L, 200L, null);
 
-        assertThat(project.ownedBy(201L)).isFalse();
+        assertThat(project.ownedBy(201L, null)).isFalse();
+    }
+
+    @Test
+    void given_matching_guest_when_owned_by_then_true() {
+        // 访客维等值（#326）：访客名下项目对持凭证访客可见
+        Project project = Project.create("访客项目", null, null, 1L, null, 900L);
+
+        assertThat(project.ownedBy(null, 900L)).isTrue();
+    }
+
+    @Test
+    void given_guest_project_when_other_guest_or_account_viewer_then_false() {
+        // 访客项目对别的访客与账户订阅者皆不可见（账户与访客项目互不可见）
+        Project project = Project.create("访客项目", null, null, 1L, null, 900L);
+
+        assertThat(project.ownedBy(null, 901L)).isFalse();
+        assertThat(project.ownedBy(200L, null)).isFalse();
+        assertThat(project.ownedBy(200L, 900L)).isFalse(); // 账户维度在场即按账户判（账户优先）
+    }
+
+    @Test
+    void given_account_project_when_guest_viewer_then_false() {
+        // 账户项目对访客不可见（维间互斥——凭证不越权看账户项目）
+        Project project = Project.create("账户项目", null, null, 1L, 200L, null);
+
+        assertThat(project.ownedBy(null, 900L)).isFalse();
     }
 
     @Test
     void given_no_viewer_and_unowned_project_when_owned_by_then_true() {
-        // 「无主对无主」放行：无账户上下文（测试直调/无会话形）× owner 未落的
+        // 「无主对无主」放行：无上下文（测试直调/无会话形）× owner 双列皆空的
         // 占位聚合——既有测试姿势与编排内部调用的容忍面
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
-        assertThat(project.ownedBy(null)).isTrue();
+        assertThat(project.ownedBy(null, null)).isTrue();
     }
 
     @Test
     void given_no_viewer_and_owned_project_when_owned_by_then_false() {
         // 有主项目对无上下文不可见（等值匹配——deny-by-default）
-        Project project = Project.create("官网 demo", null, 1L, 200L);
+        Project project = Project.create("官网 demo", null, null, 1L, 200L, null);
 
-        assertThat(project.ownedBy(null)).isFalse();
+        assertThat(project.ownedBy(null, null)).isFalse();
     }
 
     @Test
     void given_viewer_and_unowned_project_when_owned_by_then_false() {
         // 无主项目对任何登录账户不可见（存量无归属行＝不可见的安全缺省）
-        Project project = Project.create("官网 demo", null, 1L, null);
+        Project project = Project.create("官网 demo", null, null, 1L, null, null);
 
-        assertThat(project.ownedBy(200L)).isFalse();
+        assertThat(project.ownedBy(200L, null)).isFalse();
+    }
+
+    @Test
+    void given_both_owner_columns_when_create_then_domain_error() {
+        // owner 双列互斥的聚合守卫（库层 CHECK 兜底同语义，V33 前置在 V30）
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> Project.create("双主违规", null, null, 1L, 200L, 900L))
+                .isInstanceOf(com.cartisan.core.exception.DomainException.class);
     }
 }

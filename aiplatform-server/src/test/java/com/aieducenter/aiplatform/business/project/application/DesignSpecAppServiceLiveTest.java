@@ -256,8 +256,7 @@ class DesignSpecAppServiceLiveTest {
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
-        Project project = projectRepository.save(Project.create("规范提炼活体", null,
-                Long.parseLong(workspaceId), 3897654321098765404L));
+        Project project = projectRepository.save(Project.create("规范提炼活体", null, null, Long.parseLong(workspaceId), 3897654321098765404L, null));
         projectId = project.getId();
     }
 

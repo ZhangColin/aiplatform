@@ -15,8 +15,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
+import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
-import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,7 +40,7 @@ class BackofficeAccountSeamTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private AccountRepository accountRepository;
+    private AccountAppService accountAppService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -48,19 +48,21 @@ class BackofficeAccountSeamTest {
     @BeforeEach
     @AfterEach
     void cleanAccounts() {
-        // 测试库跨运行留存：前后各清一次，隔离历史残留行（本地持久 PG）
+        // 测试库跨运行留存：前后各清一次，隔离历史残留行（本地持久 PG）；
+        // 绑定行随账号清（#327 拆分后凭据住绑定表，残留会让同标识再建档撞 unique）
+        jdbcTemplate.update("DELETE FROM idn_account_bindings");
         jdbcTemplate.update("DELETE FROM idn_accounts");
     }
 
     @Test
     void given_persisted_account_when_signed_profile_then_four_fields_verbatim() throws Exception {
-        Account account = accountRepository.save(Account.register(EXTERNAL_ID, "运营查档·张三"));
+        Account account = accountAppService.upsertOidc(EXTERNAL_ID, "运营查档·张三");
         // 建档时点固定尾零微秒（#177 回归锁）：LocalDateTime.toString() 保留 (.114420)、
         // Jackson ISO 序列化裁尾零 (.11442)，原文比对必假红——断言按解析后的值对照
         // （日期部分无载荷，now() 只取当天）
         LocalDateTime createdAt = LocalDateTime.now().withNano(114_420_000);
-        jdbcTemplate.update("UPDATE idn_accounts SET created_at = ? WHERE external_id = ?",
-                Timestamp.valueOf(createdAt), EXTERNAL_ID);
+        jdbcTemplate.update("UPDATE idn_accounts SET created_at = ? WHERE id = ?",
+                Timestamp.valueOf(createdAt), account.getId());
 
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/accounts/" + EXTERNAL_ID),

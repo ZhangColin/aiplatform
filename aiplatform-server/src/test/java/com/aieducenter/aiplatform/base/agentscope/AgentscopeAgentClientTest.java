@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -44,6 +45,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -218,7 +220,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "ASSISTANT", true, false, null, null), event -> {
+                null, "42", Map.of(), null, null, "ASSISTANT", true, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -246,7 +248,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "main", false, false, null, null), event -> {
+                null, "42", Map.of(), null, null, "main", false, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -254,15 +256,16 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_usage_context_when_converse_then_metering_scope_entered_and_cleared() {
-        // #109 模型边界计量：本轮计量上下文（ThreadLocal）在 streamEvents 期间挂起、
-        // 收口摘除——主循环/压缩/记忆抽取共用同一模型实例据此归入本轮
+    void given_usage_context_when_converse_then_metering_scope_on_subscription_chain() {
+        // #109/#324 模型边界计量：本轮计量上下文写入订阅链（模型边界订阅态读取——
+        // 跨迭代/压缩/委派链的模型直调据此归入本轮，与装配线程无关）
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
-        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
-            duringStream.set(MeteringScope.current());
-            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
-        });
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.deferContextual(cv -> {
+                    duringStream.set(MeteringScope.fromContext(cv));
+                    return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+                }));
 
         client.converse(command("deepseek:deepseek-chat",
                         new UsageContext("prj-1", Map.of("agentKind", "ba"))),
@@ -270,18 +273,18 @@ class AgentscopeAgentClientTest {
                 });
 
         assertThat(duringStream.get()).isNotNull();
-        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test
     void given_no_usage_context_when_converse_then_no_metering_scope() {
-        // 无 usageContext 不挂计量上下文（底座不发明归属——不报用量）
+        // 无 usageContext 不写计量上下文（底座不发明归属——不报用量）
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
-        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
-            duringStream.set(MeteringScope.current());
-            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
-        });
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.deferContextual(cv -> {
+                    duringStream.set(MeteringScope.fromContext(cv));
+                    return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+                }));
 
         client.converse(command(null, null), event -> {
         });
@@ -484,7 +487,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, false, null, null), frames::add);
+                null, null, Map.of(), null, null, "CODER", false, false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -503,7 +506,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, false,
+                null, null, Map.of(), null, null, "CODER", false, false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -527,6 +530,49 @@ class AgentscopeAgentClientTest {
         assertThat(frames.get(1).payload()).containsEntry("message", "boom");
     }
 
+    /**
+     * 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更（工具结果
+     * 成功即提交口径）与已闭合区间的阶段耗时（未闭合区间不计口径）随失败上抛携带
+     * （{@link AgentTurnFailure}），外层尝试环据此把失败尝试的观察面与耗时账计入
+     * 本场累计；error 事件先行、失败消息照旧。
+     */
+    @Test
+    void given_partial_facts_before_stream_error_when_converse_then_failure_carries_observation() {
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.concat(
+                        Flux.fromIterable(List.<io.agentscope.core.event.AgentEvent>of(
+                                new ModelCallStartEvent("evt-1", ts(1_000), "reply-1"),
+                                new ModelCallEndEvent("evt-2", ts(1_300), "reply-1", null),
+                                new ToolCallDeltaEvent("evt-3", ts(1_300), "reply-1", "tc-1",
+                                        "write_file",
+                                        "{\"path\":\"src/App.tsx\",\"content\":\"a\\nb\"}"),
+                                new ToolCallEndEvent("evt-4", ts(1_310), "reply-1", "tc-1",
+                                        "write_file"),
+                                new ToolResultEndEvent("evt-5", ts(1_360), "reply-1", "tc-1",
+                                        "write_file", ToolResultState.SUCCESS))),
+                        Flux.error(new RuntimeException("mid-stream boom"))));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        AgentTurnFailure failure = catchThrowableOfType(
+                () -> client.converse(command(null, null), frames::add), AgentTurnFailure.class);
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.getMessage()).contains("智能体调用失败").contains("mid-stream boom");
+        // 部分观察不清零：已提交变更（write_file 成功落盘）+ 已闭合区间耗时
+        //（llm 300ms / write_file 50ms；崩断时在途区间不计——观察口径不变）
+        assertThat(failure.changes()).containsExactly(new FileChange("src/App.tsx", 2, 0));
+        assertThat(failure.durations().llmMs()).isEqualTo(300);
+        assertThat(failure.durations().toolsMs()).containsExactly(Map.entry("write_file", 50L));
+        // 失败表达照旧：过程事件（run-start 开场 + 工具动作部件）照发、error 收尾
+        assertThat(frames.stream().map(AgentEvent::type))
+                .first().isEqualTo(AgentEventTypes.RUN_START);
+        assertThat(frames.stream().map(AgentEvent::type))
+                .last().isEqualTo(AgentEventTypes.ERROR);
+        assertThat(frames.get(frames.size() - 1).payload())
+                .containsEntry("message", "mid-stream boom");
+    }
+
     @Test
     void given_startup_failure_when_converse_then_error_frame_then_exception_reraised() {
         // 起跑失败（如缺 API key 致模型客户端构建抛 IllegalStateException）原是
@@ -548,9 +594,10 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_stream_error_when_converse_then_metering_scope_cleared() {
-        // 失败轮也摘计量上下文（finally）——不残留跨轮污染；失败轮已耗 token 由
-        // MeteredModel 在 stream() 收口如实计量（见 MeteredModelTest）
+    void given_stream_error_when_converse_then_failed_turn_reported_as_error() {
+        // 失败轮已耗 token 由 MeteredModel 在 stream() 收口如实计量（见
+        // MeteredModelTest / AgentscopeMeteringReconcileTest）；计量上下文随订阅链
+        // 生命周期（run 收口即随链释放，无跨轮残留面）
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
                 .thenReturn(Flux.error(new RuntimeException("mid-stream boom")));
@@ -559,8 +606,6 @@ class AgentscopeAgentClientTest {
                         command(null, new UsageContext("prj-1", Map.of())), event -> {
                         }))
                 .isInstanceOf(IllegalStateException.class);
-
-        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test
@@ -700,5 +745,76 @@ class AgentscopeAgentClientTest {
         return Msg.builder().role(MsgRole.ASSISTANT).content(List.of(new ToolUseBlock(
                 "tc-1", "ask_user", Map.of("question", "目标用户是谁？"), null, null, state)))
                 .build();
+    }
+
+    // ---------- #322 活超时判定（attempt 级，生成轨静默判死阈值） ----------
+
+    /**
+     * 脚本化智能体剧本·控事件间隔：每个事件延迟 gap 后发射（concat 串行——前序
+     * 落定才起下段延迟，间隔即剧本节拍）。
+     */
+    private void givenSpacedEvents(Duration... gaps) {
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        Flux<io.agentscope.core.event.AgentEvent> script = Flux.empty();
+        for (Duration gap : gaps) {
+            script = script.concatWith(Flux
+                    .just(new TextBlockDeltaEvent("r-1", "b-1", "字"))
+                    .delayElements(gap));
+        }
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenReturn(script);
+    }
+
+    /** 带静默判死阈值的生成形命令（timeout 不设总墙钟——活超时接管）。 */
+    private AgentCommand commandWithSilence(Duration silence) {
+        return new AgentCommand("run-1", "生成", null, null, "s-1", "alice",
+                null, null, Map.of(), null, silence, null, false, false, null, null);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_silence_beyond_threshold_when_converse_then_killed_as_activity_timeout() {
+        // 纯静默超限判死（AC）：事件后 600ms 死寂超阈值 300ms——活超时判死进失败
+        // 处置，失败表达走既有 error 事件（SSE 封闭集零新增）
+        givenSpacedEvents(Duration.ofMillis(20), Duration.ofMillis(600));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        assertThatThrownBy(() -> client.converse(commandWithSilence(Duration.ofMillis(300)),
+                frames::add))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("活超时");
+        assertThat(frames.stream().map(AgentEvent::type)).contains(AgentEventTypes.ERROR);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_active_events_within_threshold_when_converse_then_survives_beyond_threshold_total() {
+        // 干活场景（AC「持续产出事件/工具动作的段不被总墙钟掐死」）：事件间隔 80ms
+        // 持续活跃、总时长 720ms ＞ 阈值 300ms（同值旧总墙钟语义下必死）——判死只看
+        // 静默不看总时长，活跃段不掐
+        givenSpacedEvents(Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
+
+        AgentReply reply = client.converse(commandWithSilence(Duration.ofMillis(300)),
+                event -> {
+                });
+
+        assertThat(reply.text()).isEqualTo("字".repeat(9));
+        assertThat(reply.suspension()).isNull();
+    }
+
+    @Test
+    @Timeout(30)
+    void given_legacy_timeout_only_when_converse_then_total_wall_clock_unchanged() {
+        // 生成轨外零变化：未设静默阈值（对话轮/判定轮现状），timeout 仍是一次性
+        // 总墙钟——同剧本（间隔 80ms 全活跃）总时长 720ms 超总限 300ms 即死，
+        // 与上一例对照钉死两种语义不混
+        properties.setTimeout(Duration.ofMillis(300));
+        givenSpacedEvents(Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
+
+        assertThatThrownBy(() -> client.converse(command(null, null), event -> {
+                })).isInstanceOf(IllegalStateException.class);
     }
 }

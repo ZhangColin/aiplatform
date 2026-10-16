@@ -171,9 +171,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     builder.workspace(local.root());
                 }
                 // 记忆钩子关闭（#109）：MemoryFlushMiddleware 的 fire-and-forget flush
-                // 跑 boundedElastic 线程、看不到本轮计量 ThreadLocal——其 model.stream
-                // 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact 同步承担（已计量），
-                // 关此周期 flush 不丢抽取；亦与项目工作区同口径（记忆不进包）。
+                // 另起订阅树（boundedElastic 线程）、不在本轮计量订阅链上——其
+                // model.stream 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact
+                // 同步承担（已计量），关此周期 flush 不丢抽取；亦与项目工作区同口径
+                // （记忆不进包）。
                 builder.disableMemoryHooks();
             }
             case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, containerFs);
@@ -365,8 +366,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * ——重试内圈（断流自动重试，{@link RetryingModel}）、计量外圈（#109
      * {@link MeteredModel}）。序有讲究：计量在外、重试在内——护栏不变式（任何
      * 发射只来自末次尝试）下整流收口上报与单次直调同形，重试不破坏既有计量
-     * 路径；重试的重订阅也无需跨越线程传播 MeteringScope ThreadLocal（重试在内
-     * 圈、raw 模型无计量依赖）。主模型与压缩模型共用此装配。
+     * 路径；重试的重订阅也无需跨线程传播计量上下文——计量 scope 经 Reactor 订阅链
+     * {@code Context} 传递（#324），重试在内圈重订阅不跨订阅链、raw 模型无计量依赖。
+     * 主模型与压缩模型共用此装配。
      */
     static Model streamLayer(Model resolved, String modelString, AgentscopeProperties properties) {
         return MeteredModel.wrap(RetryingModel.wrap(resolved, properties), modelString);

@@ -74,6 +74,17 @@ public class AgentscopeProperties {
     /** 模型流重试退避上限（指数退避封顶，缺省 30s）。 */
     private Duration modelStreamRetryMaxBackoff = Duration.ofSeconds(30);
 
+    /**
+     * 单条模型流总时长上限（#322 堵无界挂流）。缺省 15 分钟；null/零/负 = 不设上限。
+     * 取值依据：框架缺省 5 分钟 inter-signal 超时只掐「信号间隔」——滴漏挂流（块间隔
+     * 小于阈值、永不收口）不触发，实测现场 15–109 分钟级；合法单流（连续产出的长
+     * 生成）远小于此量级（30 tok/s × 15min ≈ 27K token 输出，已是超长单响应），
+     * 误掐代价＝一次可恢复的失败重试（外层尝试环原地修），不掐代价＝用户无界等待
+     * ——取掐。超限按失败处置进重试面（{@link ModelStreamDurationException}
+     * 可重试分类），已发块护栏照常治理。
+     */
+    private Duration modelStreamMaxDuration = Duration.ofMinutes(15);
+
     public String getAgentName() {
         return agentName;
     }
@@ -160,5 +171,13 @@ public class AgentscopeProperties {
 
     public void setModelStreamRetryMaxBackoff(Duration modelStreamRetryMaxBackoff) {
         this.modelStreamRetryMaxBackoff = modelStreamRetryMaxBackoff;
+    }
+
+    public Duration getModelStreamMaxDuration() {
+        return modelStreamMaxDuration;
+    }
+
+    public void setModelStreamMaxDuration(Duration modelStreamMaxDuration) {
+        this.modelStreamMaxDuration = modelStreamMaxDuration;
     }
 }

@@ -152,6 +152,7 @@ public class BackofficeSkillPrecheckAppService {
                 null, // 预检不读写任何工作区
                 Map.of(),
                 PRECHECK_TIMEOUT,
+                /* silenceTimeout= */ null,
                 null, // 一次性判定无配置语境：空工具面、无规格
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,

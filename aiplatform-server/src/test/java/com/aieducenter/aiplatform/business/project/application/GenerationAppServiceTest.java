@@ -41,6 +41,7 @@ import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.AgentTurnFailure;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
@@ -1003,7 +1004,9 @@ class GenerationAppServiceTest {
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
         assertThat(value.modelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
-        assertThat(value.timeout()).isEqualTo(properties.getTimeout());
+        // #322 活超时替换一次性总墙钟：编码命令只携静默判死阈值，不再携总时长上限
+        assertThat(value.timeout()).isNull();
+        assertThat(value.silenceTimeout()).isEqualTo(properties.getSilenceTimeout());
         assertThat(value.workspaceId()).isEqualTo("9805");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
@@ -1134,9 +1137,12 @@ class GenerationAppServiceTest {
                 .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
                         SINGLE_SLICE_PLAN));
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId()); // 重试内部 runId
-        assertThat(attempts.get(1).prompt()).isEqualTo(
-                GenerationAppService.generationRetryPrompt(SINGLE_SLICE_PLAN,
-                        GenerationAppService.STAGE0_RETRY_DESC, null, "首次尝试中断"));
+        assertThat(attempts.get(1).prompt())
+                .contains("错误现场：首次尝试中断")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时")
+                .contains("已落盘文件变更 尚无")
+                .endsWith(GenerationAppService.segmentContext(SINGLE_SLICE_PLAN, null));
         assertThat(attempts.get(2).prompt())
                 .isEqualTo(GenerationAppService.slicePrompt(SINGLE_SLICE_PLAN, 0,
                         "系统已生成"));
@@ -1354,8 +1360,9 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_first_attempt_fails_when_retry_then_breakdown_carries_each_attempt() {
-        // #111 静默重试代价可归因：每次尝试各自带分布——中段失败的尝试带墙钟与零桶
-        //（事实随异常弃置，口径见 StageDurationFacts）、成功尝试带完整桶
+        // #111 静默重试代价可归因：每次尝试各自带分布——本例用裸异常模拟无流段
+        // 观察可携的失败（前段/判据类），仍带墙钟与零桶；客户端流失败的部分观察
+        // 留账见 #323 灵魂例，成功尝试带完整桶
         Long projectId = persistedProject("9819");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -1405,6 +1412,100 @@ class GenerationAppServiceTest {
         assertThat(breakdown).containsEntry("llmMs", 7L);
         assertThat((Map<String, Object>) breakdown.get("toolsMs"))
                 .containsExactly(Map.entry("command", Map.of("test", 4L)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_failed_attempt_with_observation_when_retry_then_account_kept_and_scene_attached() {
+        // 灵魂用例（#323 失败留账＋重试携进展现场）：阶段 0 首试中段失败且失败携部分
+        // 观察（AgentTurnFailure：已提交文件变更＋已闭合区间阶段耗时；计划快照经
+        // 事件流观察）→ 静默重试成功收口——①收尾卡耗时分布：失败尝试带部分桶
+        //（不清零）、run 级桶跨尝试含失败尝试；②变更清单含失败尝试已落盘的文件；
+        // ③重试 prompt 携进展现场（已干多久/干到哪——累计用时、已落盘文件、计划
+        // 进度），裸异常原文不再是唯一现场（#221 错误现场仍在，原地修不回归）
+        Long projectId = persistedProject("9833");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                            Map.of("prompt", command.prompt())));
+                    sink.accept(scripted(AgentEventTypes.PART_PLAN, command.runId(),
+                            Map.of(AgentEventTypes.PART_PLAN_STEPS_FIELD, List.of(
+                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s1",
+                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "初始化项目",
+                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
+                                            AgentEventTypes.PART_PLAN_STATE_COMPLETED),
+                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s2",
+                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "实现注册页",
+                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
+                                            AgentEventTypes.PART_PLAN_STATE_IN_PROGRESS)))));
+                    throw new AgentTurnFailure(
+                            "智能体调用失败（runId=" + command.runId() + "）：切片1中断",
+                            new RuntimeException("切片1中断"),
+                            List.of(new FileChange("src/failed.tsx", 40, 2)),
+                            new StageDurations(3, Map.of("write_file", 7L), Map.of(), Map.of()));
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "系统已生成", null,
+                            List.of(new FileChange("src/lib.js", 10, 0)),
+                            new StageDurations(7, Map.of(), Map.of(), Map.of()));
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "切片完成");
+                });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 重试 prompt 携进展现场（#323）：错误现场＋已干多久/干到哪的平台可观测事实
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("错误现场：")
+                .contains("切片1中断")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时")
+                .contains("已落盘文件变更 1 件：src/failed.tsx（+40/-2）")
+                .contains("最近计划进度：")
+                .contains("✓ 初始化项目")
+                .contains("● 实现注册页")
+                .contains("不要重做");
+
+        // 阶段 0 收口收尾卡：失败尝试留账——部分桶不清零、run 级桶跨尝试含失败尝试、
+        // 变更清单含失败尝试已落盘的文件（活动量口径：同路径跨尝试〔含失败〕合并）
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> breakdown =
+                (Map<String, Object>) closing.get("durationBreakdown");
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) breakdown.get("attempts");
+        assertThat(attempts).hasSize(2);
+        assertThat(attempts.get(0))
+                .containsEntry("attempt", 1)
+                .containsEntry("llmMs", 3L);
+        assertThat((Map<String, Object>) attempts.get(0).get("toolsMs"))
+                .containsEntry("write_file", 7L);
+        assertThat(attempts.get(1))
+                .containsEntry("attempt", 2)
+                .containsEntry("llmMs", 7L);
+        assertThat(breakdown).containsEntry("llmMs", 10L); // run 级 = 失败 3 + 成功 7
+        assertThat((Map<String, Object>) breakdown.get("toolsMs"))
+                .containsEntry("write_file", 7L);
+        assertThat((List<Map<String, Object>>) closing.get("files"))
+                .extracting(file -> file.get("path"))
+                .containsExactlyInAnyOrder("src/failed.tsx", "src/lib.js");
     }
 
     // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------

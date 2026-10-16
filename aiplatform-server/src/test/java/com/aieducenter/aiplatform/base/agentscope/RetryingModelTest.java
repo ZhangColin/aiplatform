@@ -22,12 +22,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 
 /**
- * {@link RetryingModel}（#321 模型流断流自动重试）：单条模型流遇可重试错误
- * （HTTP 429/5xx，框架 {@code ExecutionConfig.RETRYABLE_ERRORS} 分类——真实形态
- * {@link OpenAIException}，实现 {@code ModelHttpException}）在流层有限次自动重试
- * 接续；非可重试错误（4xx 业务错）不重试如实上抛；重试耗尽上抛末次原始错误
- * （不裹 RetryExhaustedException——重试面不吞真错误）；已发块后失败不重试
- * （重订阅会重放已消费块、下游累积重复文本——护栏）。
+ * {@link RetryingModel}（#321 模型流断流自动重试 + #322 单条流总时长上限）：
+ * 单条模型流遇可重试错误（HTTP 429/5xx，框架 {@code ExecutionConfig.
+ * RETRYABLE_ERRORS} 分类——真实形态 {@link OpenAIException}，实现
+ * {@code ModelHttpException}）在流层有限次自动重试接续；非可重试错误（4xx 业务错）
+ * 不重试如实上抛；重试耗尽上抛末次原始错误（不裹 RetryExhaustedException——
+ * 重试面不吞真错误）；已发块后失败不重试（重订阅会重放已消费块、下游累积重复
+ * 文本——护栏）。总时长上限（#322）：{@code Flux.timeout} 语义是信号间隔不是
+ * 总时长（#321 取证），滴漏挂流（块间隔小于 inter-signal 阈值、永不收口）只有
+ * 总时长上限能掐——超限按失败处置进重试面（可重试分类，护栏照常治理）。
  */
 @ExtendWith(MockitoExtension.class)
 class RetryingModelTest {
@@ -143,5 +146,87 @@ class RetryingModelTest {
 
         verify(delegate, times(2)).stream(any(), any(), any());
         assertThat(received).hasSize(1);
+    }
+
+    // ---------- #322 单条流总时长上限 ----------
+
+    /** 快上限配置（测试不等生产 15 分钟）。 */
+    private static AgentscopeProperties capped(AgentscopeProperties properties, Duration cap) {
+        properties.setModelStreamMaxDuration(cap);
+        return properties;
+    }
+
+    @Test
+    void given_hung_stream_zero_emission_over_cap_when_stream_then_capped_into_retry_ring() {
+        // 灵魂例（AC「超出上限按失败处置进重试/尝试环」）：零发射挂流超上限＝可重试
+        // 失败（TimeoutException 分类）且在已发块护栏内 → 流层重试接续，第二发正常
+        // 收流成功——不再无限等
+        when(delegate.stream(any(), any(), any()))
+                .thenReturn(Flux.never())
+                .thenReturn(Flux.just(usageResponse(new ChatUsage(100, 40, 0, 0.5))));
+
+        List<ChatResponse> received = RetryingModel.wrap(delegate,
+                        capped(fastRetry(), Duration.ofMillis(200)))
+                .stream(List.of(), null, null)
+                .collectList()
+                .block(Duration.ofSeconds(5));
+
+        verify(delegate, times(2)).stream(any(), any(), any());
+        assertThat(received).hasSize(1);
+        assertThat(received.get(0).getUsage().getTotalTokens()).isEqualTo(140);
+    }
+
+    @Test
+    void given_dripping_stream_over_cap_when_stream_then_capped_error_surfaced_no_stream_retry() {
+        // 滴漏挂流（已发块后仍不收口——块间隔小于框架 inter-signal 阈值、总时长无界
+        // 的形态，15–109 分钟级现场同源）：超上限按失败处置，已发块护栏拦下流层重试
+        // （重订阅重放＝下游累积重复文本），末次错误如实上抛外层尝试环
+        when(delegate.stream(any(), any(), any())).thenReturn(
+                Flux.interval(Duration.ofMillis(50))
+                        .map(tick -> usageResponse(new ChatUsage(1, 1, 0, 0.0))));
+
+        assertThatThrownBy(() -> RetryingModel.wrap(delegate,
+                        capped(fastRetry(), Duration.ofMillis(300)))
+                .stream(List.of(), null, null)
+                .blockLast(Duration.ofSeconds(5)))
+                // 阻塞边界对受检异常包 ReactiveException（Exceptions.propagate）——
+                // 真错误以根因保真上抛，非重试机制的皮
+                .hasRootCauseInstanceOf(ModelStreamDurationException.class);
+
+        verify(delegate, times(1)).stream(any(), any(), any());
+    }
+
+    @Test
+    void given_fast_stream_within_cap_when_stream_then_no_interference() {
+        // 上限内正常流零干扰（上限不是信号间隔——连续发射照常过、恰单订阅）
+        when(delegate.stream(any(), any(), any())).thenReturn(Flux.just(
+                usageResponse(new ChatUsage(1, 1, 0, 0.0)),
+                usageResponse(new ChatUsage(2, 2, 0, 0.0))));
+
+        List<ChatResponse> received = RetryingModel.wrap(delegate,
+                        capped(fastRetry(), Duration.ofSeconds(2)))
+                .stream(List.of(), null, null)
+                .collectList()
+                .block(Duration.ofSeconds(5));
+
+        verify(delegate, times(1)).stream(any(), any(), any());
+        assertThat(received).hasSize(2);
+    }
+
+    @Test
+    void given_retry_disabled_but_cap_enabled_when_stream_then_cap_still_enforced() {
+        // 上限独立于重试开关（1=关闭流层重试直通，上限照常生效——堵无界挂流不依赖
+        // 重试是否开启）
+        AgentscopeProperties disabled = new AgentscopeProperties();
+        disabled.setModelStreamRetryMaxAttempts(1);
+        disabled.setModelStreamMaxDuration(Duration.ofMillis(150));
+        when(delegate.stream(any(), any(), any())).thenReturn(Flux.never());
+
+        assertThatThrownBy(() -> RetryingModel.wrap(delegate, disabled)
+                .stream(List.of(), null, null)
+                .blockLast(Duration.ofSeconds(5)))
+                .hasRootCauseInstanceOf(ModelStreamDurationException.class);
+
+        verify(delegate, times(1)).stream(any(), any(), any());
     }
 }

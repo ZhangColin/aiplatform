@@ -14,8 +14,12 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
  * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
  * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
- * 可空——本轮对话超时，为空取内核配置默认（对话轮 2 分钟量级，编码轮长任务
- * 另行指定）；{@code agentKey} 可空——该轮智能体的配置键（业务侧配置标识，
+ * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（对话轮 2 分钟量级）；
+ * {@code silenceTimeout} 可空——<b>活超时判定</b>（#322 生成轨）：事件流静默超过
+ * 此值即判死——还在干活就不掐（持续产出事件/工具动作的段无总时长死限），纯静默
+ * 超限才判死；非空即接管超时语义（{@code timeout} 总墙钟不再施加），为空沿用
+ * {@code timeout} 总墙钟（对话轮/判定轮调用面零变化）；{@code agentKey} 可空——
+ * 该轮智能体的配置键（业务侧配置标识，
  * 底座不解释），按配置发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；
  * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
  * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
@@ -41,6 +45,7 @@ public record AgentCommand(
         String workspaceId,
         Map<String, Object> streamCorrelation,
         Duration timeout,
+        Duration silenceTimeout,
         String agentKey,
         boolean workspaceReadOnly,
         boolean workspaceNoShell,
@@ -53,7 +58,8 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, null, false, false, null, null);
+                usageContext, workspaceId, streamCorrelation, null, null, null,
+                false, false, null, null);
     }
 
     /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
@@ -61,7 +67,8 @@ public record AgentCommand(
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
         this(runId, prompt, systemPrompt, modelString, sessionId, userId,
-                usageContext, workspaceId, streamCorrelation, null, agentKey, false, false, null, null);
+                usageContext, workspaceId, streamCorrelation, null, null, agentKey,
+                false, false, null, null);
     }
 
     public AgentCommand {

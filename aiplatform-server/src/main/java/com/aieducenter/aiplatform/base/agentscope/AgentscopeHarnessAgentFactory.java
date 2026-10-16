@@ -165,9 +165,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     builder.workspace(local.root());
                 }
                 // 记忆钩子关闭（#109）：MemoryFlushMiddleware 的 fire-and-forget flush
-                // 跑 boundedElastic 线程、看不到本轮计量 ThreadLocal——其 model.stream
-                // 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact 同步承担（已计量），
-                // 关此周期 flush 不丢抽取；亦与项目工作区同口径（记忆不进包）。
+                // 另起订阅树（boundedElastic 线程）、不在本轮计量订阅链上——其
+                // model.stream 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact
+                // 同步承担（已计量），关此周期 flush 不丢抽取；亦与项目工作区同口径
+                // （记忆不进包）。
                 builder.disableMemoryHooks();
             }
             case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, containerFs);

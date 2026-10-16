@@ -25,6 +25,7 @@ import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
+import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -42,7 +43,8 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 与压缩模型经 {@link MeteredModel} 包装、每次 {@code stream()} 收口直报
  * {@link UsageEventSink}（主循环每迭代 + 压缩摘要 + 记忆抽取全收口，取代只认
  * ModelCallEndEvent 的旧单一来源；含失败轮，已耗 token 如实计量），本轮计量上下文
- * 经 {@link MeteringScope} ThreadLocal 挂/摘（归属为空不发明、零用量不报）。
+ * 经 {@link MeteringScope} 随订阅链传播（#324 对账级修复：订阅态读取，跨迭代/压缩/
+ * 委派链的模型直调与装配线程无关；归属为空不发明、零用量不报）。
  *
  * <p><b>挂起与续跑（作答机制）</b>：AgentScope 的确认挂起
  * （RequireUserConfirmEvent——ask_user 提问，唯一挂起源）= 本轮流软终点——发
@@ -308,9 +310,9 @@ public class AgentscopeAgentClient {
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐个映射发射，挂起
      * （RequireUserConfirm）发 question-raised 后流终止且不发 run-finish；正常收口
-     * 发 run-finish；异常发 error 事件。用量由模型边界直报（本方法只挂/摘
-     * {@link MeteringScope} 计量上下文，幂等键前缀由调用方给）；超时取逐轮指定
-     * （可空 = 内核配置默认）。
+     * 发 run-finish；异常发 error 事件。用量由模型边界直报（本方法只把本轮
+     * {@link MeteringScope} 计量上下文写入订阅链，幂等键前缀由调用方给）；超时取
+     * 逐轮指定（可空 = 内核配置默认）。
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
@@ -319,16 +321,19 @@ public class AgentscopeAgentClient {
         AtomicReference<String> finish = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
         AgentscopeEventMapper mapper = prepared.mapper();
-        // 模型边界计量（#109）：本轮用量由 MeteredModel 在每次 stream() 收口直报，
-        // 此处只挂当前轮计量上下文（ThreadLocal）——主循环/压缩/记忆抽取共用同一模型
-        // 实例、据此归入本轮；无 usageContext 不挂（不上报，底座不发明归属）
+        // 模型边界计量（#109 / #324 对账级修复）：本轮用量由 MeteredModel 在每次
+        // stream() 收口直报，此处把计量上下文写入订阅链（contextWrite 订阅态传播）
+        // ——主循环每次迭代/压缩/记忆抽取/委派子智能体的模型直调共用同一模型实例、
+        // 据此归入本轮；无 usageContext 不写（不上报，底座不发明归属）
+        Flux<io.agentscope.core.event.AgentEvent> events =
+                prepared.agent().streamEvents(messages, prepared.ctx());
         if (usageContext != null) {
-            MeteringScope.enter(new MeteringScope(runId, prepared.ctx().getSessionId(),
-                    usageContext, clock, usageEventSink, usageIdempotencyKey));
+            MeteringScope scope = new MeteringScope(runId, prepared.ctx().getSessionId(),
+                    usageContext, clock, usageEventSink, usageIdempotencyKey);
+            events = events.contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, scope));
         }
         try {
-            prepared.agent().streamEvents(messages, prepared.ctx())
-                    .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
+            events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
                             prepared.fileChanges(), prepared.durations(),
                             sink, text, finish, suspended))
                     .blockLast(timeout != null ? timeout : properties.getTimeout());
@@ -349,10 +354,6 @@ public class AgentscopeAgentClient {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             return new TurnResult(text.toString(), null, e, List.of(), StageDurations.zero());
-        }
-
-        finally {
-            MeteringScope.exit();
         }
     }
 

@@ -4,26 +4,35 @@ import java.time.Clock;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.agentscope.core.model.ChatUsage;
+import reactor.util.context.ContextView;
 
 import com.aieducenter.aiplatform.base.metering.domain.model.TokenUsage;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 
 /**
- * 一轮对话的计量上下文（#109 模型边界计量）：主循环 + 压缩摘要 + 记忆抽取的 LLM
- * 调用统一经 {@link MeteredModel} 在每次 {@code stream()} 收口时报用量，而非只认
- * ReAct 管道的 {@code ModelCallEndEvent}（压缩/记忆抽取是框架 {@code model.stream}
- * 直调，绕开事件管道、usage 逃逸）。本类只承载「当前轮计量归哪里」的运行时事实：
- * 幂等键前缀（逐调用加序号防撞）、归属（subject/dims）、run/session 寻址、时间源
- * 与上报端口——由 {@link AgentscopeAgentClient} 在 run 起跑时挂 ThreadLocal，模型
- * 边界（同一模型实例被主循环/压缩/记忆抽取共用）据此归入本轮；fire-and-forget 的
- * 记忆钩子 flush（boundedElastic 线程）看不到本 ThreadLocal——其来源已在工厂侧
- * 关闭（记忆钩子全线 disable，见 {@link AgentscopeHarnessAgentFactory}）。
+ * 一轮对话的计量上下文（#109 模型边界计量 / #324 对账级修复）：主循环每次迭代 +
+ * 压缩摘要 + 记忆抽取 + 委派子智能体的 LLM 调用统一经 {@link MeteredModel} 在每次
+ * {@code stream()} 收口时报用量，而非只认 ReAct 管道的 {@code ModelCallEndEvent}
+ * （压缩/记忆抽取是框架 {@code model.stream} 直调，绕开事件管道、usage 逃逸）。
+ * 本类只承载「当前轮计量归哪里」的运行时事实：幂等键前缀（逐调用加序号防撞）、
+ * 归属（subject/dims）、run/session 寻址、时间源与上报端口。
+ *
+ * <p><b>传递机制（#324）：Reactor 订阅链 Context，非 ThreadLocal。</b>由
+ * {@link AgentscopeAgentClient} 在 run 起跑的订阅点写入（{@code contextWrite}），
+ * 模型边界在订阅态读取（{@code deferContextual}）。此前 ThreadLocal 挂在调用线程
+ * 上、模型边界在装配时刻读——但 ReAct 后续迭代/压缩链/委派链的模型直调发生在
+ * 信号线程（与首流装配线程不同），装配线程不见 ThreadLocal 即<b>静默漏计</b>
+ * （连成功 run 也只计首个模型流的现场即此形态）。订阅链 Context 随订阅传播——
+ * 框架内核把订阅者 context 全量续进智能体生命周期链（事件 sink 同款传递机制），
+ * 跨迭代/跨线程/子级链的模型流都可见。fire-and-forget 的记忆钩子 flush 不在本
+ * 订阅树——其来源已在工厂侧关闭（记忆钩子全线 disable，见
+ * {@link AgentscopeHarnessAgentFactory}）。</p>
  */
 final class MeteringScope {
 
-    /** 当前线程活跃轮（run 起跑挂、收口摘；框架直调同一模型实例时据此归属）。 */
-    private static final ThreadLocal<MeteringScope> CURRENT = new ThreadLocal<>();
+    /** 订阅链键：当前轮计量上下文（runTurn 订阅点写入、模型边界订阅态读取）。 */
+    static final Class<MeteringScope> CONTEXT_KEY = MeteringScope.class;
 
     private final String runId;
     private final String sessionId;
@@ -43,16 +52,9 @@ final class MeteringScope {
         this.idempotencyPrefix = idempotencyPrefix;
     }
 
-    static MeteringScope current() {
-        return CURRENT.get();
-    }
-
-    static void enter(MeteringScope scope) {
-        CURRENT.set(scope);
-    }
-
-    static void exit() {
-        CURRENT.remove();
+    /** 从订阅链读取当前轮计量上下文（订阅态调用——不在订阅树上的直调返回 null）。 */
+    static MeteringScope fromContext(ContextView context) {
+        return context.getOrDefault(CONTEXT_KEY, null);
     }
 
     /**

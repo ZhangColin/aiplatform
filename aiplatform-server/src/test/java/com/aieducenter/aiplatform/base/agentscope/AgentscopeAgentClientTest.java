@@ -254,15 +254,16 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_usage_context_when_converse_then_metering_scope_entered_and_cleared() {
-        // #109 模型边界计量：本轮计量上下文（ThreadLocal）在 streamEvents 期间挂起、
-        // 收口摘除——主循环/压缩/记忆抽取共用同一模型实例据此归入本轮
+    void given_usage_context_when_converse_then_metering_scope_on_subscription_chain() {
+        // #109/#324 模型边界计量：本轮计量上下文写入订阅链（模型边界订阅态读取——
+        // 跨迭代/压缩/委派链的模型直调据此归入本轮，与装配线程无关）
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
-        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
-            duringStream.set(MeteringScope.current());
-            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
-        });
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.deferContextual(cv -> {
+                    duringStream.set(MeteringScope.fromContext(cv));
+                    return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+                }));
 
         client.converse(command("deepseek:deepseek-chat",
                         new UsageContext("prj-1", Map.of("agentKind", "ba"))),
@@ -270,18 +271,18 @@ class AgentscopeAgentClientTest {
                 });
 
         assertThat(duringStream.get()).isNotNull();
-        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test
     void given_no_usage_context_when_converse_then_no_metering_scope() {
-        // 无 usageContext 不挂计量上下文（底座不发明归属——不报用量）
+        // 无 usageContext 不写计量上下文（底座不发明归属——不报用量）
         AtomicReference<MeteringScope> duringStream = new AtomicReference<>();
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
-        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenAnswer(inv -> {
-            duringStream.set(MeteringScope.current());
-            return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
-        });
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.deferContextual(cv -> {
+                    duringStream.set(MeteringScope.fromContext(cv));
+                    return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+                }));
 
         client.converse(command(null, null), event -> {
         });
@@ -548,9 +549,10 @@ class AgentscopeAgentClientTest {
     }
 
     @Test
-    void given_stream_error_when_converse_then_metering_scope_cleared() {
-        // 失败轮也摘计量上下文（finally）——不残留跨轮污染；失败轮已耗 token 由
-        // MeteredModel 在 stream() 收口如实计量（见 MeteredModelTest）
+    void given_stream_error_when_converse_then_failed_turn_reported_as_error() {
+        // 失败轮已耗 token 由 MeteredModel 在 stream() 收口如实计量（见
+        // MeteredModelTest / AgentscopeMeteringReconcileTest）；计量上下文随订阅链
+        // 生命周期（run 收口即随链释放，无跨轮残留面）
         when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
         when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
                 .thenReturn(Flux.error(new RuntimeException("mid-stream boom")));
@@ -559,8 +561,6 @@ class AgentscopeAgentClientTest {
                         command(null, new UsageContext("prj-1", Map.of())), event -> {
                         }))
                 .isInstanceOf(IllegalStateException.class);
-
-        assertThat(MeteringScope.current()).isNull();
     }
 
     @Test

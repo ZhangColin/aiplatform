@@ -43,6 +43,17 @@ is_registered() { # $1 = ws 编号；snap 等派生资源与主资源同编号�
   return 1
 }
 
+# 宽限窗（分钟）：刚创建的容器/卷可能尚在「置备中、注册表行未提交」窗口——此时任何库的
+# wsp_workspaces 都看不到它，按无主判删会把活体置备误杀（spec-320 并行实施实证：测试等门
+# 轮询触发本脚本误删窗口内置备容器）。新建资源一律放过，下轮清理再收。
+GRACE_MINUTES="${GRACE_MINUTES:-10}"
+now=$(date +%s)
+in_grace() { # $1 = RFC3339 创建时间（docker inspect 输出）
+  [ -n "$1" ] || return 1 # 拿不到创建时间＝无从判定，不按宽限放过
+  ts=$(date -j -f '%Y-%m-%dT%H:%M:%S' "${1%%+*}" +%s 2>/dev/null) || return 1
+  [ $((now - ts)) -lt $((GRACE_MINUTES * 60)) ]
+}
+
 removed_containers=0
 removed_volumes=0
 removed_images=0
@@ -54,6 +65,10 @@ else
   for c in $(docker ps -a --format '{{.Names}}' | grep -E '^ws-[0-9]+' || true); do
     id=$(printf '%s' "$c" | sed -E 's/^ws-([0-9]+).*/\1/')
     if ! is_registered "$id"; then
+      if in_grace "$(docker inspect -f '{{.Created}}' "$c" 2>/dev/null)"; then
+        echo "跳过新建容器（宽限窗内）: $c"
+        continue
+      fi
       docker rm -f "$c" >/dev/null 2>&1 && echo "容器已删: $c" && removed_containers=$((removed_containers + 1))
     fi
   done
@@ -61,6 +76,10 @@ else
   for v in $(docker volume ls --format '{{.Name}}' | grep -E '^vol-ws-[0-9]+$' || true); do
     id=${v#vol-ws-}
     if ! is_registered "$id"; then
+      if in_grace "$(docker volume inspect -f '{{.CreatedAt}}' "$v" 2>/dev/null)"; then
+        echo "跳过新建卷（宽限窗内）: $v"
+        continue
+      fi
       docker volume rm "$v" >/dev/null 2>&1 && echo "卷已删: $v" && removed_volumes=$((removed_volumes + 1))
     fi
   done

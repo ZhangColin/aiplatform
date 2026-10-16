@@ -72,6 +72,12 @@ app:
     # #compactionTriggerTokens / #compactionModel 注释——单点事实在此不重述）。
     compaction-trigger-tokens: 400000
     compaction-model: deepseek:deepseek-v4-flash
+    # 模型流断流自动重试（#321）：429/5xx 零发射失败流层接续、耗尽上抛外层尝试环；
+    # 平台层独占（框架内建重试已在 resolve 时关闭）——取值与依据见
+    # AgentscopeProperties#modelStreamRetryMaxAttempts 注释（单点事实在此不重述）。
+    model-stream-retry-max-attempts: 3
+    model-stream-retry-initial-backoff: 2s
+    model-stream-retry-max-backoff: 30s
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   # #171 · 闲置休眠（ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照

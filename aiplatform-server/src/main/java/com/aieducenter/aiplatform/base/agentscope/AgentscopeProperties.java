@@ -56,6 +56,24 @@ public class AgentscopeProperties {
      */
     private String compactionModel = "deepseek:deepseek-v4-flash";
 
+    /**
+     * 模型流断流自动重试次数上界（含首试；#321）。单条模型流遇可重试错误（HTTP
+     * 429/5xx，框架 {@code ExecutionConfig.RETRYABLE_ERRORS} 分类）在流层有限次
+     * 自动重试接续，耗尽才上抛进外层尝试环（CoderRunAttempts 维持最后防线）；1 =
+     * 关闭流层重试。缺省 3 = 首试 + 2 次重试。平台层独占流层重试（框架内建缺省
+     * 已在 resolve 时关闭，见工厂 innerRetryDisabledOptions——两层叠加会让次数
+     * 语义不可控）。已发块后的失败不重试（重订阅重放已消费块会让下游累积重复
+     * 文本——护栏在 {@link RetryingModel}）。流时长上限（堵无界挂流）不在此配
+     * ——属 #322 活超时线。
+     */
+    private Integer modelStreamRetryMaxAttempts = 3;
+
+    /** 模型流重试起始退避（指数退避起点，缺省 2s——429 限流场景给上游喘息）。 */
+    private Duration modelStreamRetryInitialBackoff = Duration.ofSeconds(2);
+
+    /** 模型流重试退避上限（指数退避封顶，缺省 30s）。 */
+    private Duration modelStreamRetryMaxBackoff = Duration.ofSeconds(30);
+
     public String getAgentName() {
         return agentName;
     }
@@ -118,5 +136,29 @@ public class AgentscopeProperties {
 
     public void setCompactionModel(String compactionModel) {
         this.compactionModel = compactionModel;
+    }
+
+    public Integer getModelStreamRetryMaxAttempts() {
+        return modelStreamRetryMaxAttempts;
+    }
+
+    public void setModelStreamRetryMaxAttempts(Integer modelStreamRetryMaxAttempts) {
+        this.modelStreamRetryMaxAttempts = modelStreamRetryMaxAttempts;
+    }
+
+    public Duration getModelStreamRetryInitialBackoff() {
+        return modelStreamRetryInitialBackoff;
+    }
+
+    public void setModelStreamRetryInitialBackoff(Duration modelStreamRetryInitialBackoff) {
+        this.modelStreamRetryInitialBackoff = modelStreamRetryInitialBackoff;
+    }
+
+    public Duration getModelStreamRetryMaxBackoff() {
+        return modelStreamRetryMaxBackoff;
+    }
+
+    public void setModelStreamRetryMaxBackoff(Duration modelStreamRetryMaxBackoff) {
+        this.modelStreamRetryMaxBackoff = modelStreamRetryMaxBackoff;
     }
 }

@@ -34,6 +34,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +73,7 @@ public class ProjectLifecycleAppService {
     private final GenerationSegmentRepository generationSegments;
     private final DesignItemRepository designItems;
     private final DesignSpecRepository designSpecs;
+    private final PrdVersionRepository prdVersions;
     private final SkillDraftAppService skillDrafts;
     private final OrderQueryAppService orderQueryAppService;
     private final TransactionTemplate transactionTemplate;
@@ -88,6 +90,7 @@ public class ProjectLifecycleAppService {
                                       GenerationSegmentRepository generationSegments,
                                       DesignItemRepository designItems,
                                       DesignSpecRepository designSpecs,
+                                      PrdVersionRepository prdVersions,
                                       SkillDraftAppService skillDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       TransactionTemplate transactionTemplate) {
@@ -103,6 +106,7 @@ public class ProjectLifecycleAppService {
         this.generationSegments = generationSegments;
         this.designItems = designItems;
         this.designSpecs = designSpecs;
+        this.prdVersions = prdVersions;
         this.skillDrafts = skillDrafts;
         this.orderQueryAppService = orderQueryAppService;
         this.transactionTemplate = transactionTemplate;
@@ -283,10 +287,16 @@ public class ProjectLifecycleAppService {
         destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
-        conversationHistory.purgeByProject(projectId);
-        generationSegments.deleteByProjectId(projectId);
-        designItems.deleteByProjectId(projectId);
-        designSpecs.deleteByProjectId(projectId);
+        // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
+        // 整组替换同款形制）——对话史/轨道/设计/PRD 版本行级联收进同一短事务
+        //（知识清理自带事务的 JDBC 直删，不在此列）
+        transactionTemplate.executeWithoutResult(status -> {
+            conversationHistory.purgeByProject(projectId);
+            generationSegments.deleteByProjectId(projectId);
+            designItems.deleteByProjectId(projectId);
+            designSpecs.deleteByProjectId(projectId);
+            prdVersions.deleteByProjectId(projectId);
+        });
         skillDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),

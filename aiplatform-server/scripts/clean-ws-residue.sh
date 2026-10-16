@@ -2,9 +2,12 @@
 # 清理测试泄漏的沙箱 Docker 残留（活体测试 @AfterEach 尽力而为，JVM 中断即漏）。
 #
 # 判定「残留」的唯一准绳：资源编号不在 wsp_workspaces 注册表里
-# （dev 库 aiplatform 与测试库 aiplatform_test 的并集）。
+# （本机全部 aiplatform% 库的并集：dev 库 aiplatform、测试库 aiplatform_test 及
+# spec-320 并行实施期的每票独立测试库 aiplatform_test_t*——新库在场时硬编码
+# 两库并集会漏看其注册表、误删活体测试容器，故动态枚举）。
 # 注册表里有 = 活跃/休眠/封存的工作区，一律不动——休眠保卷是用户数据（ADR-0016）。
-# 任一库连不上 → 容器/卷整体跳过不删（宁可漏删，不可误删）；镜像清理不受影响。
+# 任一库连不上（含新建未跑迁移、wsp_workspaces 尚不存在）→ 容器/卷整体跳过不删
+# （宁可漏删，不可误删）；镜像清理不受影响。
 #
 # 连接口径同 application-local.yml（postgres@18 本机 5432），可用环境变量覆盖。
 # 手动执行：aiplatform-server/scripts/clean-ws-residue.sh
@@ -19,10 +22,11 @@ SERVER_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # docker 没起就静默退出（CI/无 docker 环境零副作用）
 docker info >/dev/null 2>&1 || exit 0
 
-# ---- 1. 注册表并集（两库都可达才敢删容器/卷）----
+# ---- 1. 注册表并集（全部 aiplatform% 库都可达才敢删容器/卷）----
 registered=""
 db_ok=0
-for db in aiplatform aiplatform_test; do
+for db in $(PGPASSWORD="$PGPASSWORD" psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
+    -d postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'aiplatform%'" 2>/dev/null); do
   if names=$(PGPASSWORD="$PGPASSWORD" psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
       -d "$db" -tAc "SELECT container_name FROM wsp_workspaces" 2>/dev/null); then
     registered="$registered $names"

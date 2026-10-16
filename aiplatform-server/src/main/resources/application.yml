@@ -145,6 +145,16 @@ app:
       base-url: https://dashscope.aliyuncs.com
       api-key: ${DASHSCOPE_API_KEY:}
       model: qwen-image-3.0
+  # #327 · business.identity 验证码登录（M01）：频控/有效期/试错上限全参数化（上线
+  # 参数）；通道机制双开、上线先邮箱（手机开关位在，翻配置即开）。发送服务商＝上线
+  # 参数（spec-320 Out of scope）——接口位在 VerificationCodeSender，当前日志适配器
+  # 先行（码落服务端日志，排障第一现场），接真通道换实现零结构改动。
+  verification-code:
+    code-ttl-seconds: ${VERIFICATION_CODE_TTL_SECONDS:300}
+    send-cooldown-seconds: ${VERIFICATION_CODE_COOLDOWN_SECONDS:60}
+    max-verify-attempts: ${VERIFICATION_CODE_MAX_ATTEMPTS:5}
+    email-channel-enabled: ${VERIFICATION_EMAIL_ENABLED:true}
+    phone-channel-enabled: ${VERIFICATION_PHONE_ENABLED:false}
 
 # A2 · business.identity：OIDC BFF 认证（sso.* 七项，照 identity demo SsoProperties）。
 # 凭据只落本地环境变量（.env.local，gitignored），不进 git——见 docs/guide/本地开发启动.md。

@@ -18,7 +18,7 @@ import com.cartisan.core.context.RequestContext;
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
-import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
+import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
@@ -62,7 +62,7 @@ class BackofficeProjectSeamTest {
     private ProjectRepository projectRepository;
 
     @Autowired
-    private AccountRepository accountRepository;
+    private AccountAppService accountAppService;
 
     @Autowired
     private OrderAppService orderAppService;
@@ -81,6 +81,8 @@ class BackofficeProjectSeamTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_projects");
         jdbcTemplate.update("DELETE FROM ord_orders");
+        // 绑定行随账号清（#327 拆分后凭据住绑定表）
+        jdbcTemplate.update("DELETE FROM idn_account_bindings");
         jdbcTemplate.update("DELETE FROM idn_accounts");
     }
 
@@ -154,8 +156,7 @@ class BackofficeProjectSeamTest {
     void given_projects_owned_when_filter_by_external_id_then_rows_with_owner_name()
             throws Exception {
         // 真账号 + 有主项目 + 一个无主项目（测试/无会话上下文可空）
-        Account owner = accountRepository.save(
-                Account.register("sub-159-a", "运营查档·王五"));
+        Account owner = accountAppService.upsertOidc("sub-159-a", "运营查档·王五");
         Project owned = newProject("有主的项目", owner.getId());
         Project anonymous = newProject("无主的项目", null);
 
@@ -207,7 +208,7 @@ class BackofficeProjectSeamTest {
         // 账号已删：externalId 换算必落空 → 过滤面同「未建档」语义＝空清单；
         // 项目本身仍是交付记录（不带账号维度看），取档容缺 ownerExternalId/
         // ownerDisplayName 落 null 不炸（有主项目悬空引用＋无主项目，两行皆 null）
-        accountRepository.deleteById(owner.getId());
+        accountAppService.accountByIdentifier("sub-159-a").ifPresent(a -> jdbcTemplate.update("DELETE FROM idn_accounts WHERE id = ?", a.getId()));
         signedGet("/api/backoffice/projects?externalId=sub-159-a")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items").isEmpty())

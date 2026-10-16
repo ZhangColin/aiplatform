@@ -153,15 +153,15 @@ public class GenerationAppService {
     }
 
     /**
-     * 重试续作 prompt（#104 分段口径；#221 原地修——携带错误现场）：同工作区不丢
-     * 数据——已落盘成果保留、不重做已对的工作，针对上次错误在现有成果上继续修完
-     * <b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段由平台顺序派 run 决定，
-     * 重试不替执行体跨到下一片（「做一点展示一点」的完整性优先）。segmentDesc 即
-     * 本段任务描述（与首试 prompt 同口径）；errorScene = 上次尝试的错误现场
-     * （尝试环捕获的异常事实，平台不加工）。
+     * 重试续作 prompt（#104 分段口径；#221 原地修——携带错误现场；#323 重试携
+     * 进展现场）：同工作区不丢数据——已落盘成果保留、不重做已对的工作，针对上次
+     * 错误在现有成果上继续修完 <b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段
+     * 由平台顺序派 run 决定，重试不替执行体跨到下一片（「做一点展示一点」的完整性
+     * 优先）。segmentDesc 即本段任务描述（与首试 prompt 同口径）；retryScene =
+     * 上次失败的重试现场（尝试环拼装——错误事实＋已干多久/干到哪的进展事实）。
      */
-    static String retryRunPrompt(String segmentDesc, String errorScene) {
-        return "上一次尝试失败了（错误现场：" + errorScene + "）。工作区内已完成的成果"
+    static String retryRunPrompt(String segmentDesc, String retryScene) {
+        return "上一次尝试失败。\n" + retryScene + "\n工作区内已完成的成果"
                 + "仍然有效——不要重做已对的工作。请先检查现状（代码、依赖、数据、8081 "
                 + "端口服务是否在跑），针对该错误在现有成果上继续修复、完成本段任务"
                 + "（" + segmentDesc + "），收口前确认 8081 端口服务在跑、curl 可访问。";
@@ -253,10 +253,10 @@ public class GenerationAppService {
                 + segmentContext(plan, previousHandoff);
     }
 
-    /** 生成轨重试续作 prompt（#114；#221 重试携带错误现场）：续作任务 + 片级上下文（与首试同上下文）。 */
+    /** 生成轨重试续作 prompt（#114；#221/#323 重试现场）：续作任务 + 片级上下文（与首试同上下文）。 */
     static String generationRetryPrompt(BuildPlan plan, String segmentDesc, String previousHandoff,
-            String errorScene) {
-        return retryRunPrompt(segmentDesc, errorScene) + segmentContext(plan, previousHandoff);
+            String retryScene) {
+        return retryRunPrompt(segmentDesc, retryScene) + segmentContext(plan, previousHandoff);
     }
 
     /** 生成轨会话寻址（#114 每片新会话）：段号 0 = 阶段 0，1..N = 切片，重试续本段会话。 */

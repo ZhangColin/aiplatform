@@ -159,11 +159,12 @@ public class DesignProcessAppService {
     }
 
     /**
-     * 重试续作 prompt（原地修口径，对偶生成轨 #221）：携带错误现场、不重做已对
+     * 重试续作 prompt（原地修口径，对偶生成轨 #221；#323 重试携进展现场——
+     * retryScene 为尝试环拼装的错误事实＋已干多久/干到哪的进展事实）：不重做已对
      * 的工作——收口判据（design/ 有新稿）照旧。
      */
-    static String retryPrompt(String item, String errorScene) {
-        return "上一次尝试失败了（错误现场：" + errorScene + "）。已落盘的设计稿仍然有效"
+    static String retryPrompt(String item, String retryScene) {
+        return "上一次尝试失败。\n" + retryScene + "\n已落盘的设计稿仍然有效"
                 + "——不要重做已对的工作。请针对该错误继续完成设计物「" + item
                 + "」的设计稿产出（本场至少一稿新落 design/ 目录才算完成）。";
     }
@@ -193,9 +194,9 @@ public class DesignProcessAppService {
                 + GenerationAppService.NARRATION_CONVENTION;
     }
 
-    /** 改稿重试续作 prompt（#221 原地修同构——携带错误现场，relaxed 判据照旧）。 */
-    static String revisionRetryPrompt(String item, String errorScene) {
-        return "上一次改稿尝试失败了（错误现场：" + errorScene + "）。已落盘的设计稿"
+    /** 改稿重试续作 prompt（#221 原地修同构；#323 重试现场——错误＋进展事实，relaxed 判据照旧）。 */
+    static String revisionRetryPrompt(String item, String retryScene) {
+        return "上一次改稿尝试失败。\n" + retryScene + "\n已落盘的设计稿"
                 + "仍然有效——不要重做已对的工作。请继续完成设计物「" + item
                 + "」的本次改稿（若用户意见已满足，用一段话说明即可）。";
     }

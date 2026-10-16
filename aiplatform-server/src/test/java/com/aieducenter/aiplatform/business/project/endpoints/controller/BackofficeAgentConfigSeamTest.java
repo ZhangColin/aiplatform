@@ -152,8 +152,9 @@ class BackofficeAgentConfigSeamTest {
     @Test
     void given_override_cleared_when_get_and_assembly_then_back_to_enum_defaults()
             throws Exception {
+        // #341 起 Demo 阶段（executor）缺省＝快模型档，覆盖档取强模型档以示覆盖值≠缺省值
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"deepseek-v4-flash\"}"
+                "{\"systemPrompt\": \"%s\", \"modelId\": \"deepseek-v4-pro\"}"
                         .formatted(EXECUTOR_PROMPT_V1))
                 .andExpect(status().isOk());
         assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).systemPrompt())

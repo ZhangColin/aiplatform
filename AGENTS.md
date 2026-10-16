@@ -15,3 +15,7 @@ Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威（子项目旧词�
 ### Skill audit guide
 
 技能安装/更新/指派/自产晋升的审核正本（后台运营口径：双向边界判断＋安装清单＋重叠处置＋自产草稿审核四要素）。见 `docs/agents/skill-audit-guide.md`。
+
+### Demo 阶段模型档
+
+Demo 阶段（首 Demo ＋ 迭代，run 执行体承载）模型档的初档与改档 SOP（运营配置面改档即生效、不发版、进行中 run 不定格）。见 `docs/agents/demo-stage-model-tier.md`。

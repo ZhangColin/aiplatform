@@ -66,6 +66,26 @@ class AgentProfileTest {
     }
 
     @Test
+    void given_demo_stage_when_executor_tier_then_fast_model_default() {
+        // #341 Demo 阶段快模型档：Demo 阶段（首 Demo = PRD 确认触发的首个生成 run ＋
+        // 迭代 = 更新 run）由 run 执行体承载，其缺省档 ＝ 快模型档（spec⑤「Demo 阶段
+        // 激进用快模型，质量靠验证兜底」）——Demo 与正式生产同轨同协议，档位在既有
+        // 智能体运营配置机制上人工定档（本票＝配置态初档；路由判定机制归 #354）。
+        assertThat(AgentProfile.EXECUTOR.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(AgentProfile.EXECUTOR.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
+    }
+
+    @Test
+    void given_seats_when_model_tier_then_independent_per_seat() {
+        // #341 首 Demo/迭代任务模型档可独立于正式生产档配置：三座智能体各持自身
+        // 缺省档位（运营配置面按 agentKey 各自覆盖——改一座不牵连他座），Demo 阶段
+        // 缺省快模型档（本票），设计执行体不在本票范围（设计线独立、档位另配）。
+        assertThat(AgentProfile.DESIGNER.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(AgentProfile.EXECUTOR.modelId())
+                .isNotEqualTo(AgentProfile.DESIGNER.modelId());
+    }
+
+    @Test
     void given_main_prompt_when_capability_boundary_then_discipline_and_inventory_present() {
         // #216 能力边界正本：纪律条款（禁无验证的平台级断言 + 如实描述替代路径）+
         // 终态能力清单（抓取/调研/问答等全部已具备能力的边界描述终稿）

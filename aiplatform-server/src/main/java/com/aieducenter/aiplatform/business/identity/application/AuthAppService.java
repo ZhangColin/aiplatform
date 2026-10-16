@@ -7,14 +7,12 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.error.IdentityMessage;
 import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.domain.model.IdTokenClaims;
 import com.aieducenter.aiplatform.business.identity.domain.model.OauthTransaction;
-import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 import com.aieducenter.aiplatform.business.identity.infrastructure.oidc.IdTokenRejectedException;
 import com.aieducenter.aiplatform.business.identity.infrastructure.oidc.OidcClient;
 import com.aieducenter.aiplatform.business.identity.infrastructure.oidc.SsoProperties;
@@ -29,8 +27,9 @@ import lombok.extern.slf4j.Slf4j;
  * OIDC BFF 认证用例（A2 §2 + #32 returnTo 增量）：登录发起 / 回调换 token 建档建会话 /
  * 登出（RP-Initiated）。
  *
- * <p>事务形态：identity 远程调用（换 token / 验签）一律在事务外，账号 upsert 单独收进
- * 短事务（照 WorkspaceLifecycleAppService 模式）。错误姿态照 identity demo：state 不符
+ * <p>事务形态：identity 远程调用（换 token / 验签）一律在事务外，账号 upsert
+ * （#327 起凭据住绑定表，经 {@link AccountAppService#upsertOidc}）自持短事务
+ * （照 WorkspaceLifecycleAppService 模式）。错误姿态照 identity demo：state 不符
  * → {@code /?error=state_mismatch}，换 token / 验签失败 → {@code /?error=exchange_failed}，
  * 具体原因只进日志（不漏内部细节给前端）。</p>
  */
@@ -41,26 +40,21 @@ public class AuthAppService {
     private final SsoProperties properties;
     private final OidcClient oidcClient;
     private final BffSessionStore sessionStore;
-    private final AccountRepository accountRepository;
-    private final TransactionTemplate transactionTemplate;
+    private final AccountAppService accountAppService;
     private final Clock clock;
 
     @Autowired
     public AuthAppService(SsoProperties properties, OidcClient oidcClient,
-            BffSessionStore sessionStore, AccountRepository accountRepository,
-            TransactionTemplate transactionTemplate) {
-        this(properties, oidcClient, sessionStore, accountRepository, transactionTemplate,
-                Clock.systemUTC());
+            BffSessionStore sessionStore, AccountAppService accountAppService) {
+        this(properties, oidcClient, sessionStore, accountAppService, Clock.systemUTC());
     }
 
     AuthAppService(SsoProperties properties, OidcClient oidcClient, BffSessionStore sessionStore,
-            AccountRepository accountRepository, TransactionTemplate transactionTemplate,
-            Clock clock) {
+            AccountAppService accountAppService, Clock clock) {
         this.properties = properties;
         this.oidcClient = oidcClient;
         this.sessionStore = sessionStore;
-        this.accountRepository = accountRepository;
-        this.transactionTemplate = transactionTemplate;
+        this.accountAppService = accountAppService;
         this.clock = clock;
     }
 
@@ -110,7 +104,7 @@ public class AuthAppService {
             return failure("error=exchange_failed");
         }
 
-        Account account = transactionTemplate.execute(status -> upsertAccount(claims));
+        Account account = accountAppService.upsertOidc(claims.subject(), claims.displayName());
 
         String sessionId = OauthTransaction.randomToken();
         Instant expiresAt = tokens.expiresIn() != null
@@ -166,22 +160,7 @@ public class AuthAppService {
     }
 
     /**
-     * 账号 upsert（A2 §3）：按 external_id 找，无则建，显示名有变则更新。
-     * 并发同 sub 首登撞唯一索引的窄路径由 uk_idn_accounts_external_id 兜底（罕见，v1 不重试）。
-     */
-    private Account upsertAccount(IdTokenClaims claims) {
-        return accountRepository.findByExternalId(claims.subject())
-                .map(existing -> {
-                    if (existing.syncDisplayName(claims.displayName())) {
-                        return accountRepository.save(existing);
-                    }
-                    return existing;
-                })
-                .orElseGet(() -> accountRepository.save(
-                        Account.register(claims.subject(), claims.displayName())));
-    }
-
-    /** 登录发起结果：authorize 跳转 URL + 事务 cookie（Set-Cookie 就绪形态） */
+     * 登录发起结果：authorize 跳转 URL + 事务 cookie（Set-Cookie 就绪形态） */
     public record LoginRedirect(String authorizeUrl, ResponseCookie txnCookie) {
     }
 

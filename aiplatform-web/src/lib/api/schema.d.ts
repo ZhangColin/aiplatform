@@ -188,8 +188,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目列表（状态过滤）
-         * @description 创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
+         * 项目列表（状态过滤；按当前登录账户过滤）
+         * @description 创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
          */
         get: operations["list"];
         put?: never;
@@ -333,7 +333,7 @@ export interface paths {
         put?: never;
         /**
          * 改名（需求端右栏「项目信息」inline 改名）
-         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；单账号场景不设越权面、不发射 SSE（REST 响应即触达）
+         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；不发射 SSE（REST 响应即触达）。#325 起进 owner 守卫面（/api/projects/{id}/** 统一归属判定，非本人 404 PRJ_001）
          */
         post: operations["rename"];
         delete?: never;
@@ -356,6 +356,26 @@ export interface paths {
          * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认此版 PRD（确认即成版：工作区 PRD 全文冻结为不可变快照）
+         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。响应即回执（versionNo/content/confirmedAt）——版本号是下游（#332 确认后自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
+         */
+        post: operations["confirmPrd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1242,6 +1262,46 @@ export interface paths {
          * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PRD 已确认版本清单（最新在前，轻量形不含全文）
+         * @description 项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
+         */
+        get: operations["prdVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/versions/{versionNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PRD 版本详情（含全文快照）
+         * @description 单版详情（#330）：{projectId, versionNo, content, confirmedAt}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动不影响）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
+         */
+        get: operations["prdVersion"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2690,6 +2750,22 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        ApiResponsePrdVersionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PrdVersionResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PrdVersionResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            content?: string;
+            /** Format: date-time */
+            confirmedAt?: string;
+        };
         AnnotationAnchor: {
             selector?: string;
             text?: string;
@@ -3156,6 +3232,21 @@ export interface components {
             content?: string;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        ApiResponseListPrdVersionSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PrdVersionSummaryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PrdVersionSummaryResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            /** Format: date-time */
+            confirmedAt?: string;
         };
         ApiResponseProjectFilesResponse: {
             /** Format: int32 */
@@ -4400,6 +4491,28 @@ export interface operations {
             };
         };
     };
+    confirmPrd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
+                };
+            };
+        };
+    };
     postMessage: {
         parameters: {
             query?: never;
@@ -5319,6 +5432,51 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponsePrdResponse"];
+                };
+            };
+        };
+    };
+    prdVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListPrdVersionSummaryResponse"];
+                };
+            };
+        };
+    };
+    prdVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                versionNo: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
                 };
             };
         };

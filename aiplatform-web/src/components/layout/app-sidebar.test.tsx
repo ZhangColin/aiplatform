@@ -67,11 +67,14 @@ describe("AppSidebar（#76 侧栏定稿形态）", () => {
     assertNoNestedButton(html);
   });
 
-  it("展开态品牌行 = 品牌 + 收起按钮（收起按钮在品牌名之后）", () => {
+  it("展开态品牌行 = 品牌徽标（深色圆底）＋站名「语义引力」＋收起按钮（在后）", () => {
     const html = renderSidebar(true);
+    // 导航位 logo（#342 品牌落位：深色圆底＝浅色场合缺省）
+    expect(html).toContain('src="/brand/logo-dark-round.svg"');
     const collapseAt = html.indexOf('aria-label="收起菜单"');
     expect(collapseAt).toBeGreaterThan(-1);
-    expect(collapseAt).toBeGreaterThan(html.indexOf("AI 开发平台"));
+    expect(collapseAt).toBeGreaterThan(html.indexOf("语义引力"));
+    expect(html).not.toContain("AI 开发平台"); // 旧站名不残留
   });
 
   it("收起态 = 图标条：Logo/空白处展开、导航图标仍可导航", () => {

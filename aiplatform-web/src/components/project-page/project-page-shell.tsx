@@ -9,15 +9,16 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { SidebarInset } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
- * 项目页框架（issue #17 单站壳 → #79 对话主角式定稿）：顶栏 + resizable 双槽
- * （左对话区居中当主角 / 右成果区呼出式——有成果自动滑出、可收起、宽度可拖）
- * + <lg 双页签退化。outputs 缺省 = 闲聊期单槽（对话区占满全宽，成果区未长——
- * 判据 = PRD 产出，issue #19）。成果区开合归装配层（outputsOpen）：收起后顶栏
- * 出「成果」呼出键；滑入动效即状态切换反馈。槽位内容全由场景层注入。
+ * 项目页框架（issue #17 单站壳 → #79 对话主角式定稿 → #343 入项目空间新壳）：
+ * 页级二级 header + resizable 双槽（左对话区居中当主角 / 右成果区呼出式——
+ * 有成果自动滑出、可收起、宽度可拖）+ <lg 双页签退化。outputs 缺省 = 闲聊期
+ * 单槽（对话区占满全宽，成果区未长——判据 = PRD 产出，issue #19）。成果区开合
+ * 归装配层（outputsOpen）：收起后顶栏出「成果」呼出键；滑入动效即状态切换
+ * 反馈。槽位内容全由场景层注入。高度自管（新壳顶栏 h-16 之下的剩余视口），
+ * 不再挂旧侧栏 inset 上下文。
  */
 export type ProjectPageShellProps = {
   /** 顶栏内容：项目名等。 */
@@ -56,7 +57,7 @@ export function ProjectPageShell({
   const outputsExists = outputs !== undefined;
 
   return (
-    <SidebarInset className="h-svh min-h-0 flex-col">
+    <div className="flex h-[calc(100svh-4rem)] min-h-0 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         {header}
         <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -121,6 +122,6 @@ export function ProjectPageShell({
           </Tabs>
         </>
       )}
-    </SidebarInset>
+    </div>
   );
 }

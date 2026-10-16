@@ -17,6 +17,7 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
+import com.aieducenter.aiplatform.web.GuestContext;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
@@ -118,7 +119,7 @@ public class OrderAppService {
                 ? designPackageAppService.stageForOrder(projectId)
                 : null;
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                prdSnapshot, deliverableType);
+                GuestContext.guestId(), prdSnapshot, deliverableType);
         try {
             order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {
@@ -311,7 +312,8 @@ public class OrderAppService {
 
     /**
      * 通知族发射（payload 两事件同形：projectId/orderId/status/statusName，不含金额；
-     * 归属路由键 ownerAccountId 取自订单聚合——含后台路径，非操作者上下文，ADR-0018）。
+     * 归属路由键双键（ownerAccountId/ownerGuestId）取自订单聚合——含后台路径，非操作者
+     * 上下文，ADR-0018；#326 访客名下订单走访客键）。
      */
     private void publishNotification(String eventType, Order order) {
         eventsAppService.publishNotification(eventType, Map.of(
@@ -319,7 +321,9 @@ public class OrderAppService {
                 OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
                 OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),
                 OrderEventTypes.STATUS_NAME_FIELD, order.getStatus().getName(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId())));
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(order.getOwnerGuestId())));
     }
 
     private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {

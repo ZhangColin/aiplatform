@@ -141,7 +141,7 @@ class ProjectPreviewWakePendingTest {
     // ---------- 测试数据 ----------
 
     private void seedProject(boolean generated) {
-        Project project = Project.create("唤醒待期测试", null, 900L, 1L);
+        Project project = Project.create("唤醒待期测试", null, null, 900L, 1L, null);
         if (generated) {
             project.markGenerated();
         }

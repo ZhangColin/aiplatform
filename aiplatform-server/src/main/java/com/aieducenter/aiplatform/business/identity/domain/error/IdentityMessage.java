@@ -18,7 +18,10 @@ public enum IdentityMessage implements CodeMessage {
 
     TOKEN_EXCHANGE_FAILED(502, "IDN_003", "identity 令牌端点调用失败"),
 
-    ACCOUNT_NOT_FOUND(404, "IDN_004", "账号不存在");
+    ACCOUNT_NOT_FOUND(404, "IDN_004", "账号不存在"),
+
+    /** #326 访客域：建档/续期参数不完整（防御面——常规编排不可达）。 */
+    GUEST_FIELDS_INCOMPLETE(400, "IDN_005", "访客字段不完整");
 
     private final int httpStatus;
     private final String code;

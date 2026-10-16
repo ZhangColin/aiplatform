@@ -130,7 +130,7 @@ class OrderAppServiceTest {
         stubProject(ProjectStatus.IN_PROGRESS);
         appService.place(PROJECT_ID);
 
-        assertThatThrownBy(() -> orderRepository.save(Order.place(PROJECT_ID, null, PRD, OrderDeliverableType.SYSTEM)))
+        assertThatThrownBy(() -> orderRepository.save(Order.place(PROJECT_ID, null, null, PRD, OrderDeliverableType.SYSTEM)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 

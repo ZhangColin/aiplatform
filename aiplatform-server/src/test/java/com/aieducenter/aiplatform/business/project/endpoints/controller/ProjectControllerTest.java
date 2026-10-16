@@ -124,9 +124,9 @@ class ProjectControllerTest {
 
     @Test
     void given_valid_command_when_create_then_wrapped_with_ba_run() throws Exception {
-        when(appService.create(any())).thenReturn(
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
                 new ProjectCreatedResponse(detailOf("100", ProjectStatus.IN_PROGRESS, false),
-                        "run-1"));
+                        "run-1"), null));
 
         // 一句话创建：请求体只传 requirement（name/type/engine 从契约面消失）
         performAsUser(post("/api/projects")
@@ -143,6 +143,47 @@ class ProjectControllerTest {
         verify(appService).create(argThat(cmd -> "做一个官网".equals(cmd.requirement())));
     }
 
+    // ---------- #326 凭证端点契约：惰性建访客的 Set-Cookie 面 ----------
+
+    @Test
+    void given_anonymous_first_message_when_create_then_guest_credential_cookie_issued()
+            throws Exception {
+        // 首条需求消息提交成功才建访客＋发凭证：Set-Cookie 随建项目响应（契约形：
+        // aiplatform_guest=值即凭证；HttpOnly+SameSite=Lax+Path=/；MaxAge 对齐保留期）
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("700", ProjectStatus.IN_PROGRESS, false),
+                        "run-g"),
+                org.springframework.http.ResponseCookie.from(
+                        com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies.GUEST_COOKIE_NAME,
+                        "cred-token-x").httpOnly(true).sameSite("Lax")
+                        .path("/").maxAge(java.time.Duration.ofDays(30)).build()));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"免注册先用一句话\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("aiplatform_guest=cred-token-x"),
+                        org.hamcrest.Matchers.containsString("HttpOnly"),
+                        org.hamcrest.Matchers.containsString("SameSite=Lax"),
+                        org.hamcrest.Matchers.containsString("Path=/"),
+                        org.hamcrest.Matchers.containsString("Max-Age=2592000"))));
+    }
+
+    @Test
+    void given_no_lazy_guest_when_create_then_no_set_cookie_header() throws Exception {
+        // 归属既有身份（账户或既有访客，guestCookie null）：不落 Set-Cookie 头
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("701", ProjectStatus.IN_PROGRESS, false),
+                        "run-1"), null));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Set-Cookie"));
+    }
+
     @Test
     void given_oversized_requirement_when_create_then_rejected_as_400() throws Exception {
         // requirement 是创建唯一入参（可空）；长度上限 5000 仍守门
@@ -154,9 +195,9 @@ class ProjectControllerTest {
 
     @Test
     void given_design_endpoint_when_create_then_initial_type_bound() throws Exception {
-        when(appService.create(any())).thenReturn(
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
                 new ProjectCreatedResponse(detailOf("300", ProjectStatus.IN_PROGRESS, false),
-                        "run-9"));
+                        "run-9"), null));
 
         // #299 mode 进载荷（ADR-0029）：入口选「做设计」携终点初值 Integer code
         performAsUser(post("/api/projects")

@@ -176,6 +176,6 @@ class BackofficeProjectFilesPackageSeamTest {
         }
         workspaceRepository.save(workspace);
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, workspaceId, null));
+                Project.create(name, ProjectType.WEBSITE, null, workspaceId, null, null));
     }
 }

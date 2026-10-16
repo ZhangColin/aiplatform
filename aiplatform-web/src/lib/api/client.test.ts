@@ -16,11 +16,29 @@ async function importClient(): Promise<Client> {
   return await import("./client");
 }
 
-/** buildUrl 依赖 window.location，node 环境补最小 stub。 */
+/** 薄 client 依赖 window.location 与事件目标（#326 401 出口），node 环境补最小 stub。 */
 function stubWindow() {
-  vi.stubGlobal("window", {
-    location: { origin: "http://localhost:3333", pathname: "/", search: "", href: "" },
-  });
+  vi.stubGlobal("window", makeWindowStub());
+}
+
+function makeWindowStub() {
+  const location = { origin: "http://localhost:3333", pathname: "/", search: "", href: "" };
+  // #326：401 出口事件化（window.dispatchEvent）——node stub 补最小事件目标。
+  const listeners = new Map<string, Set<(e: unknown) => void>>();
+  return {
+    location,
+    addEventListener: (name: string, fn: (e: unknown) => void) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(fn);
+    },
+    removeEventListener: (name: string, fn: (e: unknown) => void) => {
+      listeners.get(name)?.delete(fn);
+    },
+    dispatchEvent: (event: { type: string }) => {
+      for (const fn of listeners.get(event.type) ?? []) fn(event);
+      return true;
+    },
+  };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -149,14 +167,14 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
     expect(fetchMock.mock.calls[0][1]?.signal).toBeUndefined();
   });
 
-  it("401 路径不受去重影响：共享方一起拒绝 + 全局出口整页跳", async () => {
-    const { api } = await importClient();
+  it("401 路径不受去重影响：共享方一起拒绝 + 出口事件化不整页跳（#326）", async () => {
+    const { api, UNAUTHORIZED_EVENT } = await importClient();
     const hrefSetter = vi.fn();
     Object.defineProperty(window, "location", {
       value: {
         origin: "http://localhost:3333",
         pathname: "/projects/p1",
-        search: "",
+        search: "?tab=logs",
         get href() {
           return "";
         },
@@ -166,14 +184,25 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
       },
       configurable: true,
     });
+    const details: unknown[] = [];
+    const listener = (e: Event) => details.push((e as CustomEvent).detail);
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
     stubFetch().mockImplementation(always({ message: "unauthorized" }, 401));
 
-    const [a, b] = await Promise.allSettled([api.get("/me"), api.get("/me")]);
+    try {
+      const [a, b] = await Promise.allSettled([api.get("/me"), api.get("/me")]);
 
-    expect(a.status).toBe("rejected");
-    expect(b.status).toBe("rejected");
-    expect(hrefSetter).toHaveBeenCalledTimes(1);
-    expect(hrefSetter.mock.calls[0][0]).toContain("/auth/login");
+      // 共享方一起拒绝（401 同走去重）；出口只发事件（M01 弹窗挂点，#327/#328
+      // 订阅），不再整页跳登录——访客可用面不断体验
+      expect(a.status).toBe("rejected");
+      expect(b.status).toBe("rejected");
+      expect(hrefSetter).not.toHaveBeenCalled();
+      expect(details).toEqual([
+        { path: "/api/me", returnTo: "/projects/p1?tab=logs" },
+      ]);
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+    }
   });
 
   it("生产构建不去重（行为零变化）：并发同参 GET 各发各的", async () => {

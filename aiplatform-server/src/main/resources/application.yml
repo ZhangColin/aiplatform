@@ -99,6 +99,12 @@ app:
   # 部署配法（配重档则每条消息烧一次重模型）。
   dispatch:
     classification-model: deepseek:deepseek-v4-flash
+  # #326 · business.identity 访客域：保留期缺省走配置（自最近活跃起算，逾此凭证
+  # 不认、数据不删）与续期写节流窗口（距最近活跃达此值才写——读多写少，有效性
+  # 窗口实际落在 [retention, retention + threshold]）。
+  guest:
+    retention-period: 30d
+    renew-threshold: 15d
   # #213 · business.project 外部资料抓取：响应大小上限（字节，超此截断——缺省
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
   external-content:

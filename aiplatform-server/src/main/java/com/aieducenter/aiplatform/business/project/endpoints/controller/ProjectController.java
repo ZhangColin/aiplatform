@@ -96,7 +96,7 @@ public class ProjectController {
     }
 
     @PostMapping
-    @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理）",
+    @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理；免注册访客可用）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，"
@@ -104,15 +104,26 @@ public class ProjectController {
                     + "不合法 code 400（框架统一信封）。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
-                    + "SSE：workspace-created → 智能体事件")
-    public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
-        return ApiResponse.ok(appService.create(command));
+                    + "SSE：workspace-created → 智能体事件。"
+                    + "#326 免注册访客：完全匿名（无会话无访客凭证）且 requirement 非空＝首条需求消息——"
+                    + "提交成功惰性建访客并随响应 Set-Cookie aiplatform_guest（HttpOnly+SameSite=Lax，"
+                    + "值即凭证）；空输入不建访客（项目落无主行）、纯浏览零足迹。"
+                    + "已有有效访客凭证或账户会话：归属随既有身份（账户优先），不发新凭证")
+    public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command,
+            jakarta.servlet.http.HttpServletResponse response) {
+        ProjectLifecycleAppService.Creation creation = appService.create(command);
+        if (creation.guestCookie() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, creation.guestCookie().toString());
+        }
+        return ApiResponse.ok(creation.response());
     }
 
     @GetMapping
-    @Operation(summary = "项目列表（状态过滤；按当前登录账户过滤）",
-            description = "创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目"
-                    + "（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤"
+    @Operation(summary = "项目列表（状态过滤；按归属过滤：账户或访客）",
+            description = "创建时间倒序，#325/#326 起按请求归属过滤（账户会话优先、"
+                    + "访客凭证次之）——只见自己的项目（他人项目、账户与访客项目互不可见；"
+                    + "单账号全量返回的既有缺口收口）。访客多项目同口全量返回（创建倒序，"
+                    + "首项即「继续上次项目」的最近一个）。status 过滤"
                     + "（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。"
                     + "不合法取值 400（带合法取值表，框架统一信封）")
     public ApiResponse<List<ProjectResponse>> list(

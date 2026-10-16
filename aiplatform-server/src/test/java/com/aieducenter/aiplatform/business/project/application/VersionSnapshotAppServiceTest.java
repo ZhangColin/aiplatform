@@ -58,7 +58,7 @@ class VersionSnapshotAppServiceTest {
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
     private Project project() {
-        return Project.create("快照项目", null, Long.parseLong(WORKSPACE_ID), OWNER);
+        return Project.create("快照项目", null, null, Long.parseLong(WORKSPACE_ID), OWNER, null);
     }
 
     private void stubWorkspace(long projectId) {

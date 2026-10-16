@@ -335,9 +335,9 @@ class ProjectQueryAppServiceTest {
     @Test
     void given_no_filter_when_list_then_desc_order_with_derived_status() {
         projectRepository.save(Project
-                .create("老项目", ProjectType.WEBSITE, 1L, null));
+                .create("老项目", ProjectType.WEBSITE, null, 1L, null, null));
         projectRepository.save(Project
-                .create("新项目", ProjectType.ECOMMERCE, 2L, null));
+                .create("新项目", ProjectType.ECOMMERCE, null, 2L, null, null));
 
         List<ProjectResponse> list = appService.list(null);
 
@@ -647,6 +647,6 @@ class ProjectQueryAppServiceTest {
     /** 携归属的项目夹具（#325 owner 过滤测试用）。 */
     private Project persistedProject(long workspaceId, String name, Long ownerAccountId) {
         return projectRepository.save(Project
-                .create(name, ProjectType.WEBSITE, workspaceId, ownerAccountId));
+                .create(name, ProjectType.WEBSITE, null, workspaceId, ownerAccountId, null));
     }
 }

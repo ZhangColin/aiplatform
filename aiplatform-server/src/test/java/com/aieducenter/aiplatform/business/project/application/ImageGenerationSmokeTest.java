@@ -93,8 +93,7 @@ class ImageGenerationSmokeTest {
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
-        Project project = projectRepository.save(Project.create("出图真跑冒烟", null,
-                Long.parseLong(workspaceId), null));
+        Project project = projectRepository.save(Project.create("出图真跑冒烟", null, null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
 
         ImageGenerationOutcome outcome = imageGeneration.generate(workspaceId, null,

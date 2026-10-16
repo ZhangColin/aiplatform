@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { SidebarInset } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProject } from "@/hooks/use-project";
 import { errorText } from "@/lib/api/api-error";
@@ -138,7 +137,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
 
   if (isError) {
     return (
-      <SidebarInset className="flex h-svh min-h-0 flex-col">
+      <div className="flex h-[calc(100svh-4rem)] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           <p>{errorText(error, "项目加载失败")}</p>
           <div className="flex gap-2">
@@ -155,7 +154,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
             </Button>
           </div>
         </div>
-      </SidebarInset>
+      </div>
     );
   }
 

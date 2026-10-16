@@ -27,6 +27,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,6 +83,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private DesignSpecRepository designSpecs;
+
+    @Mock
+    private PrdVersionRepository prdVersions;
 
     @Mock
     private SkillDraftAppService skillDrafts;
@@ -205,7 +209,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, designItems, designSpecs, skillDrafts,
-                orderQueryAppService, guestAppService, transactionTemplate);
+                conversationHistory, generationSegments, designItems, designSpecs, prdVersions,
+                skillDrafts, orderQueryAppService, guestAppService, transactionTemplate);
     }
 }

@@ -250,4 +250,46 @@ class ProjectTest {
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_FIELDS_INCOMPLETE.message());
     }
+
+    // ---------- owner 归属判定（#325 owner 维度数据面：列表过滤与单项目守卫共用谓词） ----------
+
+    @Test
+    void given_matching_account_when_owned_by_then_true() {
+        Project project = Project.create("官网 demo", null, 1L, 200L);
+
+        assertThat(project.ownedBy(200L)).isTrue();
+    }
+
+    @Test
+    void given_other_account_when_owned_by_then_false() {
+        // 他人项目 deny——登录用户之间的隔离谓词
+        Project project = Project.create("官网 demo", null, 1L, 200L);
+
+        assertThat(project.ownedBy(201L)).isFalse();
+    }
+
+    @Test
+    void given_no_viewer_and_unowned_project_when_owned_by_then_true() {
+        // 「无主对无主」放行：无账户上下文（测试直调/无会话形）× owner 未落的
+        // 占位聚合——既有测试姿势与编排内部调用的容忍面
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        assertThat(project.ownedBy(null)).isTrue();
+    }
+
+    @Test
+    void given_no_viewer_and_owned_project_when_owned_by_then_false() {
+        // 有主项目对无上下文不可见（等值匹配——deny-by-default）
+        Project project = Project.create("官网 demo", null, 1L, 200L);
+
+        assertThat(project.ownedBy(null)).isFalse();
+    }
+
+    @Test
+    void given_viewer_and_unowned_project_when_owned_by_then_false() {
+        // 无主项目对任何登录账户不可见（存量无归属行＝不可见的安全缺省）
+        Project project = Project.create("官网 demo", null, 1L, null);
+
+        assertThat(project.ownedBy(200L)).isFalse();
+    }
 }

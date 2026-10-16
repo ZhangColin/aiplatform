@@ -34,10 +34,13 @@ import com.aieducenter.aiplatform.business.project.application.IterationAppServi
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -114,6 +117,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
+
+    @MockitoBean
+    private PrdVersionAppService prdVersionAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -622,6 +628,73 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4015))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    // ---------- PRD 确认版本（#330「确认即成版」：确认动作＋版本列表/详情） ----------
+
+    @Test
+    void given_draft_prd_when_confirm_then_version_returned() throws Exception {
+        when(prdVersionAppService.confirm(100L)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0)));
+
+        // 确认即成版：回执携带版本号（#332 生成加门的挂点——确认后自动派 Demo run 消费）
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"));
+    }
+
+    @Test
+    void given_prd_not_produced_when_confirm_then_prj_015_as_404() throws Exception {
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4015))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    @Test
+    void given_confirmed_versions_when_list_then_newest_first_without_content() throws Exception {
+        when(prdVersionAppService.versions(100L)).thenReturn(List.of(
+                new PrdVersionSummaryResponse("100", 2,
+                        LocalDateTime.of(2026, 10, 17, 9, 0)),
+                new PrdVersionSummaryResponse("100", 1,
+                        LocalDateTime.of(2026, 10, 16, 12, 0))));
+
+        // 清单轻量形（不含全文——全文走单版详情）；versionNo 是小整数版本号（非 TSID，数值形）
+        performAsUser(get("/api/projects/100/prd/versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].confirmedAt").value("2026-10-17T09:00:00"))
+                .andExpect(jsonPath("$.data[1].versionNo").value(1))
+                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T12:00:00"));
+    }
+
+    @Test
+    void given_version_no_when_detail_then_full_text_returned() throws Exception {
+        when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0)));
+
+        performAsUser(get("/api/projects/100/prd/versions/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"));
+    }
+
+    @Test
+    void given_no_such_version_when_detail_then_prj_052_as_404() throws Exception {
+        when(prdVersionAppService.version(100L, 7))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/prd/versions/7"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4052))
+                .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
     }
 
     // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------

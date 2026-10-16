@@ -188,8 +188,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目列表（状态过滤）
-         * @description 创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
+         * 项目列表（状态过滤；按当前登录账户过滤）
+         * @description 创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
          */
         get: operations["list"];
         put?: never;
@@ -333,7 +333,7 @@ export interface paths {
         put?: never;
         /**
          * 改名（需求端右栏「项目信息」inline 改名）
-         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；单账号场景不设越权面、不发射 SSE（REST 响应即触达）
+         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；不发射 SSE（REST 响应即触达）。#325 起进 owner 守卫面（/api/projects/{id}/** 统一归属判定，非本人 404 PRJ_001）
          */
         post: operations["rename"];
         delete?: never;

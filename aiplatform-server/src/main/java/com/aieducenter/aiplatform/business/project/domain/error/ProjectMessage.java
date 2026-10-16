@@ -150,9 +150,14 @@ public enum ProjectMessage implements CodeMessage {
     // ========== PRD 确认版本（#330「确认即成版」，spec #320 实施序③） ==========
 
     /** 版本详情守卫：项目内无该版本号（从未确认或号越界——含非正整数入参）。 */
-    PRD_VERSION_NOT_FOUND(404, "PRJ_052", "PRD 版本不存在");
+    PRD_VERSION_NOT_FOUND(404, "PRJ_052", "PRD 版本不存在"),
 
-    // PRJ_016 曾是需求确认门谓词，随门概念删除注销
+    /** 确认门两级拦截（#331 待定项两级门）：「验收与待确认」章有阻碍核心流程缺项
+     * ——须先在对话区补齐再确认（解析缺失 fail-open 不拦：误拦即用户死锁，漏拦
+     * 可经迭代补救）。 */
+    PRD_CONFIRM_BLOCKING_PENDING(409, "PRJ_053", "PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认");
+
+    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 
     private final int httpStatus;
     private final String code;

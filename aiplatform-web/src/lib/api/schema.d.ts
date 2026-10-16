@@ -372,8 +372,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 确认此版 PRD（确认即成版：工作区 PRD 全文冻结为不可变快照）
-         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。响应即回执（versionNo/content/confirmedAt）——版本号是下游（#332 确认后自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
+         * 确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）
+         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）：「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层承载，确认动作本身不携带标记）。响应即回执（versionNo/content/confirmedAt/readiness）——版本号是下游（#332 确认后自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
          */
         post: operations["confirmPrd"];
         delete?: never;
@@ -1259,7 +1259,7 @@ export interface paths {
         };
         /**
          * PRD 读（当前版 markdown，直读工作区）
-         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
+         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪（判定与确认门同源）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
         put?: never;
@@ -1299,7 +1299,7 @@ export interface paths {
         };
         /**
          * PRD 版本详情（含全文快照）
-         * @description 单版详情（#330）：{projectId, versionNo, content, confirmedAt}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动不影响）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
+         * @description 单版详情（#330）：{projectId, versionNo, content, confirmedAt, readiness}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手即解析）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
          */
         get: operations["prdVersion"];
         put?: never;
@@ -2758,6 +2758,19 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        DimensionStatus: {
+            dimension?: string;
+            status?: string;
+        };
+        PendingItem: {
+            dimension?: string;
+            text?: string;
+        };
+        PrdReadinessResponse: {
+            blocking?: components["schemas"]["PendingItem"][];
+            minor?: components["schemas"]["PendingItem"][];
+            dimensions?: components["schemas"]["DimensionStatus"][];
+        };
         PrdVersionResponse: {
             projectId?: string;
             /** Format: int32 */
@@ -2765,6 +2778,7 @@ export interface components {
             content?: string;
             /** Format: date-time */
             confirmedAt?: string;
+            readiness?: components["schemas"]["PrdReadinessResponse"];
         };
         AnnotationAnchor: {
             selector?: string;
@@ -3232,6 +3246,7 @@ export interface components {
             content?: string;
             /** Format: date-time */
             updatedAt?: string;
+            readiness?: components["schemas"]["PrdReadinessResponse"];
         };
         ApiResponseListPrdVersionSummaryResponse: {
             /** Format: int32 */

@@ -9,6 +9,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.PrdVersion;
@@ -32,6 +34,13 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * （「库唯一约束＋服务端事务内判定」防重同款，生产承接先例）。生成触发门
  * （确认后自动派 Demo run）挂 #332——本用例确认成功返回版本号即干净挂点。</p>
  *
+ * <p><b>两级门（#331 待定项两级门）</b>：确认前解析「验收与待确认」章——有
+ * 阻碍核心流程缺项即拦（PRJ_053，用户不可绕过、须先在对话区补齐）；解析缺失
+ * （章缺失/形态漂移——含存量项目旧「待定项」章）fail-open 放行；仅次要未知
+ * 放行成版，回执带未解决事项（两段式摘要层数据面）。门判定与 PRD 读面收敛度
+ * 投影同源（{@link PrdReadiness} 单一解析器，判定语义归主智能体提示词、门的
+ * 执行归平台代码）。</p>
+ *
  * <p>版本行不可变＝只插不改：本用例无任何历史行更新路径；「快照不可变」的
  * 行为面等价物＝确认后改草稿再读历史版本，原文不动（集测钉）。</p>
  */
@@ -54,11 +63,16 @@ public class PrdVersionAppService {
     }
 
     /**
-     * 确认此版 PRD：工作区 PRD 全文冻结成版（重复确认无新草稿＝幂等返回既有版）。
+     * 确认此版 PRD：过两级门（#331）后工作区 PRD 全文冻结成版（重复确认无新
+     * 草稿＝幂等返回既有版）。门＝「验收与待确认」章解析有阻碍核心流程缺项即拦
+     * （用户不可绕过——须先在对话区补齐）；解析缺失 fail-open 不拦（误拦即用户
+     * 死锁、漏拦可经迭代补救）；仅次要未知放行，回执带未解决事项（两段式摘要层
+     * 的确认动作即本端点——「已看过摘要」标记由呈现层承载，后端不另设标记）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 已归档（对话区
      *                              关闭即全停，历史版本照读）；PRJ_015 PRD 尚未
      *                              产出（产出锚未落或工作区无 docs/PRD.md）；
+     *                              PRJ_053 有阻碍核心流程的待确认项（两级门拦截）；
      *                              WSP_002 环境故障
      */
     public PrdVersionResponse confirm(Long projectId) {
@@ -69,32 +83,39 @@ public class PrdVersionAppService {
         if (project.getPrdProducedAt() == null) {
             throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
         }
-        String draft = projectQueryAppService.prd(projectId).content();
-        return confirmSnapshot(project, draft);
+        PrdResponse prd = projectQueryAppService.prd(projectId);
+        String draft = prd.content();
+        // 两级门（#331）：判定与 PRD 读面同源（读面已解析一次，确认复用同一份
+        // readiness——门拦截与投影同一事实），阻碍级在场即拦、不成版
+        if (!prd.readiness().blocking().isEmpty()) {
+            throw new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING);
+        }
+        return confirmSnapshot(project, draft, prd.readiness());
     }
 
     /** 成版（短事务：最新版比对→幂等返回或插新行；唯一约束竞态败者幂等回读）。 */
-    private PrdVersionResponse confirmSnapshot(Project project, String draft) {
+    private PrdVersionResponse confirmSnapshot(Project project, String draft,
+            PrdReadinessResponse readiness) {
         try {
             return transactionTemplate.execute(tx -> {
                 List<PrdVersion> existing =
                         prdVersions.findByProjectIdOrderByVersionNoDesc(project.getId());
                 if (!existing.isEmpty() && existing.get(0).getContent().equals(draft)) {
-                    return toResponse(project.getId(), existing.get(0));
+                    return toResponse(project.getId(), existing.get(0), readiness);
                 }
                 int nextVersionNo = existing.isEmpty() ? 1 : existing.get(0).getVersionNo() + 1;
                 // saveAndFlush：把唯一约束违反压进事务内（翻译可靠，catch 面确定性）
                 PrdVersion saved = prdVersions.saveAndFlush(PrdVersion.confirmed(
                         project.getId(), nextVersionNo, draft,
                         LocalDateTime.now(), project.getPrdProducedAt()));
-                return toResponse(project.getId(), saved);
+                return toResponse(project.getId(), saved, readiness);
             });
         }
         catch (DataIntegrityViolationException e) {
             return prdVersions.findByProjectIdOrderByVersionNoDesc(project.getId()).stream()
                     .findFirst()
                     .filter(latest -> latest.getContent().equals(draft))
-                    .map(latest -> toResponse(project.getId(), latest))
+                    .map(latest -> toResponse(project.getId(), latest, readiness))
                     .orElseThrow(() -> e);
         }
     }
@@ -114,15 +135,17 @@ public class PrdVersionAppService {
     }
 
     /**
-     * 版本详情（含全文快照）。归档项目照读。
+     * 版本详情（含全文快照＋收敛度投影——对快照全文即时解析，草稿后续改动不污染
+     * 已确认版本的读面）。归档项目照读。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_052 版本不存在
      */
     public PrdVersionResponse version(Long projectId, int versionNo) {
         Project project = requireProject(projectId);
-        return toResponse(project.getId(), prdVersions
-                .findByProjectIdAndVersionNo(project.getId(), versionNo)
-                .orElseThrow(() -> new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND)));
+        PrdVersion version = prdVersions.findByProjectIdAndVersionNo(project.getId(), versionNo)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
+        return toResponse(project.getId(), version,
+                PrdReadinessResponse.from(PrdReadiness.parse(version.getContent())));
     }
 
     private Project requireProject(Long projectId) {
@@ -130,8 +153,9 @@ public class PrdVersionAppService {
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
     }
 
-    private PrdVersionResponse toResponse(Long projectId, PrdVersion version) {
+    private PrdVersionResponse toResponse(Long projectId, PrdVersion version,
+            PrdReadinessResponse readiness) {
         return new PrdVersionResponse(projectId.toString(), version.getVersionNo(),
-                version.getContent(), version.getConfirmedAt());
+                version.getContent(), version.getConfirmedAt(), readiness);
     }
 }

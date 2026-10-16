@@ -34,6 +34,8 @@ import com.aieducenter.aiplatform.business.project.application.IterationAppServi
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
@@ -605,17 +607,41 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_prd_in_workspace_when_get_prd_then_content_and_updated_at_returned() throws Exception {
+    void given_prd_in_workspace_when_get_prd_then_content_updated_at_and_readiness_returned() throws Exception {
+        // #331：PRD 读面带收敛度投影（分级缺项＋五维维度态——stub 用真实解析同构，
+        // 不手捏形态：#306 契约钉真实形态教训）
+        String prd = """
+                # 官网 PRD
+
+                ## 验收与待确认
+
+                ### 次要未知
+
+                1. 【验收】首屏文案口径未确认（假设：先出后改）
+                """;
         when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
-                "# 官网 PRD\n\n目标：三页官网。\n", Instant.ofEpochSecond(1756100000)));
+                prd, Instant.ofEpochSecond(1756100000),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
 
         performAsUser(get("/api/projects/100/prd"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.projectId").value("100"))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.content").value(prd))
                 // Instant → ISO-8601（Jackson2ObjectMapperBuilder 缺省关时间戳）
                 .andExpect(jsonPath("$.data.updatedAt")
-                        .value(Instant.ofEpochSecond(1756100000).toString()));
+                        .value(Instant.ofEpochSecond(1756100000).toString()))
+                // 收敛度投影：阻碍级空（门放行态）、次要条目（dimension 呈现词＋文本）、
+                // 五维固定序（验收维 minor=⚡、其余 ready=✓——「n/5」呈现面自数）
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.minor.length()").value(1))
+                .andExpect(jsonPath("$.data.readiness.minor[0].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.minor[0].text")
+                        .value("首屏文案口径未确认（假设：先出后改）"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].dimension").value("目标与角色"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].status").value("ready"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].status").value("minor"));
     }
 
     @Test
@@ -635,15 +661,19 @@ class ProjectControllerTest {
     @Test
     void given_draft_prd_when_confirm_then_version_returned() throws Exception {
         when(prdVersionAppService.confirm(100L)).thenReturn(new PrdVersionResponse("100", 1,
-                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0)));
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
 
         // 确认即成版：回执携带版本号（#332 生成加门的挂点——确认后自动派 Demo run 消费）
+        // ＋收敛度投影（fail-open 空态：无「验收与待确认」章——五维全 ready）
         performAsUser(post("/api/projects/100/prd/confirm"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.projectId").value("100"))
                 .andExpect(jsonPath("$.data.versionNo").value(1))
                 .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
-                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"));
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"))
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
     }
 
     @Test
@@ -655,6 +685,19 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4015))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    @Test
+    void given_blocking_pending_when_confirm_then_prj_053_as_409() throws Exception {
+        // 两级门拦截（#331）：阻碍核心流程缺项在场——确认被拦，前端认数字码 4053
+        //（缺项明细经 PRD 读面 readiness 拉取呈现，信封只载码＋消息）
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4053))
+                .andExpect(jsonPath("$.message").value("PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认"));
     }
 
     @Test
@@ -678,12 +721,14 @@ class ProjectControllerTest {
     @Test
     void given_version_no_when_detail_then_full_text_returned() throws Exception {
         when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
-                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0)));
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
 
         performAsUser(get("/api/projects/100/prd/versions/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.versionNo").value(1))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"));
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
     }
 
     @Test

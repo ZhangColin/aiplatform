@@ -25,6 +25,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -194,8 +195,11 @@ public class ProjectQueryAppService {
         int newline = result.stdout().indexOf('\n');
         try {
             long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
-            return new PrdResponse(projectId.toString(),
-                    result.stdout().substring(newline + 1), Instant.ofEpochSecond(mtimeSeconds));
+            String content = result.stdout().substring(newline + 1);
+            // 收敛度投影（#331）：对正文即时解析——确认门（PrdVersionAppService）与
+            // 收敛卡/摘要层（#346/#332 呈现面）同源判定，草稿演进投影随之
+            return new PrdResponse(projectId.toString(), content,
+                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
         } catch (RuntimeException e) {
             // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,

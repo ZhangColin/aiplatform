@@ -46,6 +46,40 @@ class PrdVersionAppServiceTest {
     /** 新草稿正文（改需求回路的产物形态——确认成 v2 的全文源）。 */
     private static final String PRD_V2 = "# 巾上添花 PRD\n\n## 功能清单\n\n1. 首页——品牌展示\n2. 下单页——微信支付\n";
 
+    /** 带阻碍级缺项的草稿（#331 两级门的拦截面——确认被拦、版本行不落）。 */
+    private static final String PRD_BLOCKING = """
+            # 巾上添花 PRD
+
+            ## 功能清单
+
+            1. 首页——品牌展示
+
+            ## 七、验收与待确认
+
+            ### 阻碍核心流程
+
+            1. 【主流程】下单后的发货方式未确认（自提还是快递）
+
+            ### 次要未知
+
+            2. 【验收】列表默认排序偏好未确认（假设：按创建时间倒序）
+            """;
+
+    /** 仅次要待定的草稿（两段式的放行面——可确认、回执带未解决事项）。 */
+    private static final String PRD_MINOR = """
+            # 巾上添花 PRD
+
+            ## 功能清单
+
+            1. 首页——品牌展示
+
+            ## 七、验收与待确认
+
+            ### 次要未知
+
+            1. 【验收】列表默认排序偏好未确认（假设：按创建时间倒序）
+            """;
+
     @Autowired
     private PrdVersionAppService appService;
 
@@ -137,6 +171,82 @@ class PrdVersionAppServiceTest {
         assertThat(appService.versions(projectId))
                 .extracting(PrdVersionSummaryResponse::versionNo)
                 .containsExactly(2, 1);
+    }
+
+    // ---------- 两级门（#331）：阻碍级在场→拦截；仅次要/章缺失→放行 ----------
+
+    @Test
+    void given_blocking_pending_when_confirm_then_prj_053_and_no_version_row() {
+        Long projectId = persistedPrdProject(PRD_BLOCKING);
+
+        // 门用户不可绕过：阻碍核心流程的缺项须先在对话区补齐——确认拦截
+        assertThatThrownBy(() -> appService.confirm(projectId))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING.message());
+        // 拦截即不成版：版本行零落库
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_prd_versions WHERE project_id = ?", Integer.class, projectId);
+        assertThat(count).isZero();
+    }
+
+    @Test
+    void given_minor_only_pending_when_confirm_then_confirmed_with_unresolved_minor() {
+        Long projectId = persistedPrdProject(PRD_MINOR);
+
+        PrdVersionResponse version = appService.confirm(projectId);
+
+        // 仅次要未知→放行成版（两段式摘要层的确认动作本身）
+        assertThat(version.versionNo()).isEqualTo(1);
+        // 回执带未解决事项（摘要层数据面）：次要条目在场、阻碍级为空
+        assertThat(version.readiness().blocking()).isEmpty();
+        assertThat(version.readiness().minor()).hasSize(1);
+        assertThat(version.readiness().minor().get(0).dimension()).isEqualTo("验收");
+        assertThat(version.readiness().minor().get(0).text())
+                .isEqualTo("列表默认排序偏好未确认（假设：按创建时间倒序）");
+        // 维度态投影：验收维 ⚡（minor）、其余 ✓（ready）——「n/5 维度就绪」供呈现自数
+        assertThat(version.readiness().dimensions()).extracting(d -> d.status())
+                .containsExactly("ready", "ready", "ready", "ready", "minor");
+    }
+
+    @Test
+    void given_blocking_resolved_draft_when_confirm_then_passes_gate() {
+        // 门拦的是当前草稿：阻碍级补齐（重写为仅次要）后同项目确认放行——补稿回路
+        Long projectId = persistedPrdProject(PRD_BLOCKING);
+        assertThatThrownBy(() -> appService.confirm(projectId)).isInstanceOf(ApplicationException.class);
+
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_MINOR, "", 0));
+        PrdVersionResponse version = appService.confirm(projectId);
+
+        assertThat(version.versionNo()).isEqualTo(1);
+        assertThat(version.readiness().blocking()).isEmpty();
+    }
+
+    @Test
+    void given_legacy_prd_without_readiness_chapter_when_confirm_then_fallopen_confirmed() {
+        // PRD_V1 无「验收与待确认」章（存量旧「待定项」形）——解析缺失 fail-open 放行
+        Long projectId = persistedPrdProject(PRD_V1);
+
+        PrdVersionResponse version = appService.confirm(projectId);
+
+        assertThat(version.versionNo()).isEqualTo(1);
+        // fail-open 形：零条目＋全维度就绪
+        assertThat(version.readiness().blocking()).isEmpty();
+        assertThat(version.readiness().minor()).isEmpty();
+        assertThat(version.readiness().dimensions())
+                .allSatisfy(state -> assertThat(state.status()).isEqualTo("ready"));
+    }
+
+    @Test
+    void given_confirmed_version_when_detail_then_readiness_from_snapshot() {
+        Long projectId = persistedPrdProject(PRD_MINOR);
+        appService.confirm(projectId);
+
+        // 版本详情的维度态来自快照全文（草稿后续改动不污染已确认版本的读面）
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0));
+        assertThat(appService.version(projectId, 1).readiness().minor()).hasSize(1);
+        assertThat(appService.version(projectId, 1).readiness().blocking()).isEmpty();
     }
 
     // ---------- 守卫：未产出 / 已归档 / 项目不存在 / 版本不存在 ----------

@@ -23,6 +23,8 @@ import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
@@ -399,7 +401,8 @@ class BackofficeProjectSeamTest {
                 .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
-                Instant.parse("2026-09-13T01:00:00Z")));
+                Instant.parse("2026-09-13T01:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n需求背景：后台项目 seam。"))));
         try {
             // 下单绑定缺省账号会话——owner 路由键非空（发布口强制校验）
             return RequestContext.runFor(

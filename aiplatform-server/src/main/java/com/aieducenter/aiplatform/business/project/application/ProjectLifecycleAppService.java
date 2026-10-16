@@ -287,10 +287,11 @@ public class ProjectLifecycleAppService {
         destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
-        conversationHistory.purgeByProject(projectId);
         // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
-        // 整组替换同款形制）——轨道/设计/PRD 版本四表行级联收进同一短事务
+        // 整组替换同款形制）——对话史/轨道/设计/PRD 版本行级联收进同一短事务
+        //（知识清理自带事务的 JDBC 直删，不在此列）
         transactionTemplate.executeWithoutResult(status -> {
+            conversationHistory.purgeByProject(projectId);
             generationSegments.deleteByProjectId(projectId);
             designItems.deleteByProjectId(projectId);
             designSpecs.deleteByProjectId(projectId);

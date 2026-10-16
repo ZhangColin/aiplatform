@@ -372,6 +372,11 @@ class ProjectLifecycleAppServiceTest {
                 + " VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,"
                 + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 920099900000000001L, projectId);
+        // 对话史在场（真实项目必有）：级联清走事务外派生删除曾在带行时炸
+        // No EntityManager（删除带对话史的项目必失败）——收进短事务后随删
+        jdbcTemplate.update("INSERT INTO prj_conversation_entries (project_id, kind, text,"
+                + " created_at, updated_at) VALUES (?, 1, '你好', CURRENT_TIMESTAMP,"
+                + " CURRENT_TIMESTAMP)", projectId);
 
         appService.delete(projectId);
 
@@ -382,6 +387,9 @@ class ProjectLifecycleAppServiceTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM prj_prd_versions WHERE project_id = ?", Long.class,
                 projectId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ?",
+                Long.class, projectId)).isZero();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
     }

@@ -62,6 +62,21 @@ class MeteredModelTest {
                 CLOCK, sink, "agent-usage-" + runId);
     }
 
+    /** 有界等待 doFinally 收口首条上报（跨线程收口消竞态；captor 在 verify 时才填充，此处直查 mock 调用计数）。 */
+    private void awaitReported() {
+        long deadline = System.currentTimeMillis() + 2000;
+        while (org.mockito.Mockito.mockingDetails(sink).getInvocations().isEmpty()
+                && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(5);
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     /** 订阅链带计量上下文的订阅（runTurn 订阅点的传递形态）。 */
     private void subscribeWithScope(String runId, Map<String, String> dims,
             Flux<ChatResponse> stream) {
@@ -121,6 +136,9 @@ class MeteredModelTest {
         subscribeWithScope("run-1", Map.of(),
                 MeteredModel.wrap(delegate, "deepseek:deepseek-v4-flash").stream(List.of(), null, null));
 
+        // doFinally 计量收口跑在信号线程、与下游终端信号（主线程 verify 处）无 happens-before
+        // ——等待收口再断言（超时未收口则 captor 断言自然红，同 #321 awaitCondition 口径）
+        awaitReported();
         verify(sink).report(usageCaptor.capture());
         assertThat(usageCaptor.getValue().eventId()).isEqualTo("agent-usage-run-1-1");
     }
@@ -153,6 +171,8 @@ class MeteredModelTest {
                 .onErrorComplete()
                 .blockLast();
 
+        // 同跨线程收口竞态（错误流同走 doFinally）——等收口再断言
+        awaitReported();
         verify(sink).report(usageCaptor.capture());
         assertThat(usageCaptor.getValue().tokens().input()).isEqualTo(100);
         assertThat(usageCaptor.getValue().tokens().output()).isEqualTo(40);

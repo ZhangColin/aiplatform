@@ -71,7 +71,6 @@ class ModelStreamRetryInjectionTest {
         if (server != null) {
             server.stop(0);
         }
-        MeteringScope.exit();
     }
 
     private void handle(HttpExchange exchange) throws java.io.IOException {
@@ -123,14 +122,15 @@ class ModelStreamRetryInjectionTest {
     }
 
     private List<ChatResponse> streamWithScope(ModelComposition composition) {
-        MeteringScope.enter(new MeteringScope("run-live", "s-live",
-                new UsageContext("prj-live", Map.of()),
-                Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC),
-                composition.sink(), "prefix-live"));
+        // 计量上下文随订阅链传递（#324）：订阅点 contextWrite 写入（runTurn 同形态）
         return AgentscopeHarnessAgentFactory
                 .streamLayer(composition.raw(), "deepseek:deepseek-v4-flash",
                         composition.properties())
                 .stream(List.of(), null, null)
+                .contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, new MeteringScope(
+                        "run-live", "s-live", new UsageContext("prj-live", Map.of()),
+                        Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC),
+                        composition.sink(), "prefix-live")))
                 .collectList()
                 .block(Duration.ofSeconds(30));
     }

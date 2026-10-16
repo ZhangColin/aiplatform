@@ -688,21 +688,18 @@ class AgentscopeHarnessAgentFactoryTest {
         properties.setModelStreamRetryInitialBackoff(java.time.Duration.ofMillis(10));
         properties.setModelStreamRetryMaxBackoff(java.time.Duration.ofMillis(50));
 
-        MeteringScope.enter(new MeteringScope("run-1", "s-1",
-                new UsageContext("prj-1", Map.of()), CLOCK, sink, "prefix-run-1"));
-        try {
-            AgentscopeHarnessAgentFactory
-                    .streamLayer(raw, "deepseek:deepseek-v4-flash", properties)
-                    .stream(List.of(), null, null)
-                    .blockLast();
-            // doFinally 计量收口与下游终端信号跨线程——有界等待消竞态
-            long deadline = System.currentTimeMillis() + 2000;
-            while (events.isEmpty() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(5);
-            }
-        }
-        finally {
-            MeteringScope.exit();
+        // 计量上下文随订阅链传递（#324）：订阅点 contextWrite 写入（runTurn 同形态）
+        AgentscopeHarnessAgentFactory
+                .streamLayer(raw, "deepseek:deepseek-v4-flash", properties)
+                .stream(List.of(), null, null)
+                .contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, new MeteringScope(
+                        "run-1", "s-1", new UsageContext("prj-1", Map.of()), CLOCK, sink,
+                        "prefix-run-1")))
+                .blockLast();
+        // doFinally 计量收口与下游终端信号跨线程——有界等待消竞态
+        long deadline = System.currentTimeMillis() + 2000;
+        while (events.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5);
         }
 
         verify(raw, times(2)).stream(any(), any(), any());

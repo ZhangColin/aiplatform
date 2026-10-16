@@ -57,6 +57,8 @@ class ModelStreamRetryInjectionTest {
     private HttpServer server;
     private final AtomicInteger requests = new AtomicInteger();
     private volatile int[] statusScript;
+    /** -1 = 首流挂起：200 头后零数据永不收口（#322 活体挂流注入）。 */
+    private volatile int[] responseDelayMillisScript = new int[0];
 
     @BeforeEach
     void startEndpoint() throws Exception {
@@ -75,7 +77,26 @@ class ModelStreamRetryInjectionTest {
 
     private void handle(HttpExchange exchange) throws java.io.IOException {
         int attempt = requests.incrementAndGet();
-        int status = statusScript[Math.min(attempt - 1, statusScript.length - 1)];
+        int index = Math.min(attempt - 1, statusScript.length - 1);
+        boolean hang = responseDelayMillisScript.length > 0
+                && index < responseDelayMillisScript.length
+                && responseDelayMillisScript[index] < 0;
+        if (hang) {
+            // 挂流注入（#322 单流总时长上限的活体 seam）：200 头 + text/event-stream，
+            // 此后零数据、永不收口——真框架传输栈挂住，只有总时长上限能掐（框架
+            // inter-signal 超时是信号间隔语义、等不到信号不触发）
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try {
+                Thread.sleep(2000);
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+            return;
+        }
+        int status = statusScript[index];
         if (status == 200) {
             byte[] body = SSE_SUCCESS.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
@@ -188,5 +209,31 @@ class ModelStreamRetryInjectionTest {
         assertThat(requests.get()).isEqualTo(3);
         // 恒败零数据块 → 计量面零事件（无 usage 可报，不发明零事件——路径未被破坏）
         assertThat(composition.events()).isEmpty();
+    }
+
+    @Test
+    @Timeout(60)
+    void given_hung_stream_over_cap_when_stream_then_capped_and_retried_over_real_http()
+            throws InterruptedException {
+        // 首流挂起（200 头后零数据永不收口）、次流正常——总时长上限掐首流、进重试环续跑
+        statusScript = new int[] {200, 200};
+        responseDelayMillisScript = new int[] {-1, 0};
+        ModelComposition composition = composition();
+        // 上限远小于假端点挂起时长（2s）：唯总时长上限能掐（框架 inter-signal 超时等不到信号不触发）
+        composition.properties().setModelStreamMaxDuration(Duration.ofMillis(300));
+
+        List<ChatResponse> received = streamWithScope(composition);
+        awaitCondition(2000, () -> !composition.events().isEmpty());
+
+        // 掐首流后重试接续成功：恰 2 发（挂起那发零数据块）
+        assertThat(requests.get()).isEqualTo(2);
+        String text = received.stream()
+                .flatMap(r -> r.getContent().stream())
+                .filter(TextBlock.class::isInstance)
+                .map(block -> ((TextBlock) block).getText())
+                .reduce("", String::concat);
+        assertThat(text).isEqualTo("重试接续成功");
+        // 成功尝试的 usage 照常入账（上限触发是零数据块、计量真伪未被破坏）
+        assertThat(composition.events()).hasSize(1);
     }
 }

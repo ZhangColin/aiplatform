@@ -78,6 +78,10 @@ app:
     model-stream-retry-max-attempts: 3
     model-stream-retry-initial-backoff: 2s
     model-stream-retry-max-backoff: 30s
+    # 单条模型流总时长上限（#322）：堵滴漏挂流（信号间隔小于内建超时、永不收口），
+    # 超限按可重试失败进流层重试/外层尝试环；null/零/负可关——取值与依据见
+    # AgentscopeProperties#modelStreamMaxDuration 注释（单点事实在此不重述）。
+    model-stream-max-duration: 15m
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   # #171 · 闲置休眠（ADR-0016）：闲置阈值（last-touch 逾此即休眠，工作区与快照
@@ -94,12 +98,14 @@ app:
     seal-threshold: 30d
     seal-archive-dir: seal-archives
     readiness-timeout: 10m
-  # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试超时
-  # （编码是长任务，区别于 agentscope.timeout 的对话轮默认）；超限转终态失败，
-  # 用户「继续生成」断点续跑兜底（#221；#22 重试次数/超时值实施期定）。
+  # 片2-1 · business.project 生成编排：编码 run 尝试上界（含首试）与单次尝试的
+  # 活超时判死阈值（#322——纯静默超限才判死，持续产出事件/工具动作的活跃段不掐；
+  # 取代旧一次性 30m 总墙钟）。超限进重试/尝试环，重试耗尽转终态失败，用户
+  # 「继续生成」断点续跑兜底（#221）。单条模型流总时长上限另配
+  # app.agentscope.model-stream-max-duration。
   generation:
     max-attempts: 3
-    timeout: 30m
+    silence-timeout: 10m
   # #51 · business.project 派发编排：入口三分类的分类模型档专用键——每条指令区
   # 消息必经的轻调用，缺省 flash 由代码保证，不吃 agentscope.default-model 的
   # 部署配法（配重档则每条消息烧一次重模型）。

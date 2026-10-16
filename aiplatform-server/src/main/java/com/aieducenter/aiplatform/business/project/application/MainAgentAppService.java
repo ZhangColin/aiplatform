@@ -607,6 +607,7 @@ public class MainAgentAppService {
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId),
                 null,
+                /* silenceTimeout= */ null,
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,

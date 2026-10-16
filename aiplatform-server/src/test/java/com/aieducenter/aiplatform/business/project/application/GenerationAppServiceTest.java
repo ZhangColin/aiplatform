@@ -1004,7 +1004,9 @@ class GenerationAppServiceTest {
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
         assertThat(value.modelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
-        assertThat(value.timeout()).isEqualTo(properties.getTimeout());
+        // #322 活超时替换一次性总墙钟：编码命令只携静默判死阈值，不再携总时长上限
+        assertThat(value.timeout()).isNull();
+        assertThat(value.silenceTimeout()).isEqualTo(properties.getSilenceTimeout());
         assertThat(value.workspaceId()).isEqualTo("9805");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,

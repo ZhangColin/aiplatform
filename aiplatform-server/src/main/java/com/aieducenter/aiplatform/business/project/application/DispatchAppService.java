@@ -226,6 +226,7 @@ public class DispatchAppService {
                 null, // 本地兜底工作区：分类不读写项目工作区
                 Map.of(),
                 CLASSIFY_TIMEOUT,
+                /* silenceTimeout= */ null,
                 null,
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,

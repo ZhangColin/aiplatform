@@ -45,6 +45,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -219,7 +220,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "ASSISTANT", true, false, null, null), event -> {
+                null, "42", Map.of(), null, null, "ASSISTANT", true, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -247,7 +248,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, "main", false, false, null, null), event -> {
+                null, "42", Map.of(), null, null, "main", false, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -486,7 +487,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, false, null, null), frames::add);
+                null, null, Map.of(), null, null, "CODER", false, false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -505,7 +506,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, "CODER", false, false,
+                null, null, Map.of(), null, null, "CODER", false, false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -744,5 +745,76 @@ class AgentscopeAgentClientTest {
         return Msg.builder().role(MsgRole.ASSISTANT).content(List.of(new ToolUseBlock(
                 "tc-1", "ask_user", Map.of("question", "目标用户是谁？"), null, null, state)))
                 .build();
+    }
+
+    // ---------- #322 活超时判定（attempt 级，生成轨静默判死阈值） ----------
+
+    /**
+     * 脚本化智能体剧本·控事件间隔：每个事件延迟 gap 后发射（concat 串行——前序
+     * 落定才起下段延迟，间隔即剧本节拍）。
+     */
+    private void givenSpacedEvents(Duration... gaps) {
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        Flux<io.agentscope.core.event.AgentEvent> script = Flux.empty();
+        for (Duration gap : gaps) {
+            script = script.concatWith(Flux
+                    .just(new TextBlockDeltaEvent("r-1", "b-1", "字"))
+                    .delayElements(gap));
+        }
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenReturn(script);
+    }
+
+    /** 带静默判死阈值的生成形命令（timeout 不设总墙钟——活超时接管）。 */
+    private AgentCommand commandWithSilence(Duration silence) {
+        return new AgentCommand("run-1", "生成", null, null, "s-1", "alice",
+                null, null, Map.of(), null, silence, null, false, false, null, null);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_silence_beyond_threshold_when_converse_then_killed_as_activity_timeout() {
+        // 纯静默超限判死（AC）：事件后 600ms 死寂超阈值 300ms——活超时判死进失败
+        // 处置，失败表达走既有 error 事件（SSE 封闭集零新增）
+        givenSpacedEvents(Duration.ofMillis(20), Duration.ofMillis(600));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        assertThatThrownBy(() -> client.converse(commandWithSilence(Duration.ofMillis(300)),
+                frames::add))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("活超时");
+        assertThat(frames.stream().map(AgentEvent::type)).contains(AgentEventTypes.ERROR);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_active_events_within_threshold_when_converse_then_survives_beyond_threshold_total() {
+        // 干活场景（AC「持续产出事件/工具动作的段不被总墙钟掐死」）：事件间隔 80ms
+        // 持续活跃、总时长 720ms ＞ 阈值 300ms（同值旧总墙钟语义下必死）——判死只看
+        // 静默不看总时长，活跃段不掐
+        givenSpacedEvents(Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
+
+        AgentReply reply = client.converse(commandWithSilence(Duration.ofMillis(300)),
+                event -> {
+                });
+
+        assertThat(reply.text()).isEqualTo("字".repeat(9));
+        assertThat(reply.suspension()).isNull();
+    }
+
+    @Test
+    @Timeout(30)
+    void given_legacy_timeout_only_when_converse_then_total_wall_clock_unchanged() {
+        // 生成轨外零变化：未设静默阈值（对话轮/判定轮现状），timeout 仍是一次性
+        // 总墙钟——同剧本（间隔 80ms 全活跃）总时长 720ms 超总限 300ms 即死，
+        // 与上一例对照钉死两种语义不混
+        properties.setTimeout(Duration.ofMillis(300));
+        givenSpacedEvents(Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
+
+        assertThatThrownBy(() -> client.converse(command(null, null), event -> {
+                })).isInstanceOf(IllegalStateException.class);
     }
 }

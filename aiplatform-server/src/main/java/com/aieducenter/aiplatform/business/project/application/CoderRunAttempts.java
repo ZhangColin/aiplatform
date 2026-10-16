@@ -295,7 +295,8 @@ class CoderRunAttempts {
                                     sessionId)),
                     Long.toString(project.getWorkspaceId()),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
-                    properties.getTimeout(),
+                    /* timeout= */ null, // #322 活超时替换一次性总墙钟
+                    properties.getSilenceTimeout(),
                     seat.profile().key(),
                     /* workspaceReadOnly= */ false,
                     seat.workspaceNoShell(),

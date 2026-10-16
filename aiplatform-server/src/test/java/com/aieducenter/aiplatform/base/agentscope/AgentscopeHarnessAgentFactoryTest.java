@@ -664,7 +664,7 @@ class AgentscopeHarnessAgentFactoryTest {
         assertThat(config.getModel()).isNull();
     }
 
-    // ---------- #321 模型流层平台包装（断流自动重试 + 计量边界） ----------
+    // ---------- #321/#322 模型流层平台包装（断流重试 + 总时长上限 + 计量边界） ----------
 
     /**
      * 模型流层装配序（#321）：{@code MeteredModel(RetryingModel(raw))}——重试内圈
@@ -722,6 +722,33 @@ class AgentscopeHarnessAgentFactoryTest {
         assertThat(config.getMaxAttempts()).isEqualTo(1);
         assertThat(config.getTimeout())
                 .isEqualTo(io.agentscope.core.model.ExecutionConfig.MODEL_DEFAULTS.getTimeout());
+    }
+
+    /**
+     * 总时长上限装配（#322）：同一 streamLayer 单点同时承载重试与上限——零发射挂流
+     * 超上限转可重试失败，第二发正常收流；行为级钉「工厂生产装配真实带上限」而非
+     * 只测 RetryingModel 孤件。
+     */
+    @Test
+    void given_hung_stream_over_cap_when_stream_layer_then_capped_and_retried() {
+        Model raw = mock(Model.class);
+        when(raw.stream(any(), any(), any()))
+                .thenReturn(Flux.never())
+                .thenReturn(Flux.just(ChatResponse.builder()
+                        .usage(new ChatUsage(100, 40, 0, 0.5))
+                        .build()));
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setModelStreamRetryInitialBackoff(java.time.Duration.ofMillis(10));
+        properties.setModelStreamRetryMaxBackoff(java.time.Duration.ofMillis(50));
+        properties.setModelStreamMaxDuration(java.time.Duration.ofMillis(150));
+
+        ChatResponse received = AgentscopeHarnessAgentFactory
+                .streamLayer(raw, "deepseek:deepseek-v4-flash", properties)
+                .stream(List.of(), null, null)
+                .blockLast(java.time.Duration.ofSeconds(5));
+
+        verify(raw, times(2)).stream(any(), any(), any());
+        assertThat(received.getUsage().getTotalTokens()).isEqualTo(140);
     }
 
 

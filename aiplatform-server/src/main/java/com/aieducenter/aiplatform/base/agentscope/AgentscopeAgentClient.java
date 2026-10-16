@@ -27,6 +27,7 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
@@ -139,7 +140,7 @@ public class AgentscopeAgentClient {
         }
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
-                command.timeout(), sink);
+                command.timeout(), command.silenceTimeout(), sink);
         // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
         // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
         // 是真实工作区事实，外层尝试环据此留账）
@@ -184,7 +185,7 @@ public class AgentscopeAgentClient {
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
-                resume.usageContext(), null, sink);
+                resume.usageContext(), null, null, sink);
         // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
         // 同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
@@ -317,10 +318,17 @@ public class AgentscopeAgentClient {
      * 发 run-finish；异常发 error 事件。用量由模型边界直报（本方法只把本轮
      * {@link MeteringScope} 计量上下文写入订阅链，幂等键前缀由调用方给）；超时取
      * 逐轮指定（可空 = 内核配置默认）。
+     *
+     * <p><b>超时两语义（#322）</b>：{@code silenceTimeout} 非空＝活超时判定——
+     * {@code Flux.timeout} 的信号间隔语义按事件逐个重置，纯静默（无事件/工具动作）
+     * 超阈值才判死（还在干活就不掐，活跃 run 无总时长死限——生成轨长任务口径，
+     * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast，对话轮/
+     * 判定轮现状零变化）。判死失败走既有 error 事件表达（SSE 封闭集零新增），
+     * 错误现场带中文口径（外层尝试环 #221 原地修据此续作）。</p>
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
-            Consumer<AgentEvent> sink) {
+            Duration silenceTimeout, Consumer<AgentEvent> sink) {
         StringBuilder text = new StringBuilder();
         AtomicReference<String> finish = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
@@ -337,10 +345,27 @@ public class AgentscopeAgentClient {
             events = events.contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, scope));
         }
         try {
-            events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                            prepared.fileChanges(), prepared.durations(),
-                            sink, text, finish, suspended))
-                    .blockLast(timeout != null ? timeout : properties.getTimeout());
+            // 活超时判定（#322）：silenceTimeout 非空 → Flux.timeout 按事件逐个重置，
+            // 纯静默超阈值才判死（还在干活就不掐）；为空 → 维持一次性总墙钟（对话轮/
+            // 判定轮）。计量上下文已在 events 上挂好（#324 订阅链），此处仅套超时/观测
+            if (silenceTimeout != null) {
+                events = events
+                        .timeout(silenceTimeout)
+                        .onErrorMap(java.util.concurrent.TimeoutException.class, e ->
+                                new IllegalStateException("活超时判死：" + silenceTimeout
+                                        + " 内无事件/工具动作进展（纯静默超限）", e));
+            }
+            events = events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
+                    prepared.fileChanges(), prepared.durations(),
+                    sink, text, finish, suspended));
+            if (silenceTimeout != null) {
+                // 活超时模式无总墙钟——blockLast(null) 会对空参数 toNanos NPE（Reactor
+                // 的 null 不代表无超时），显式走无参阻塞终态
+                events.blockLast();
+            }
+            else {
+                events.blockLast(timeout != null ? timeout : properties.getTimeout());
+            }
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
             drainParts(prepared.parts(), sink);
             RequireUserConfirmEvent suspension = suspended.get();

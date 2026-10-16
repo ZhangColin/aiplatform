@@ -23,6 +23,7 @@ import com.aieducenter.aiplatform.business.project.application.DispatchAppServic
 import com.aieducenter.aiplatform.business.project.application.GenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.MainAgentAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -84,6 +85,10 @@ class ProjectOwnerInterceptorMvcTest {
 
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
+
+    /** #330 起进 ProjectController 构造的 PRD 版本服务（切片装配补齐）。 */
+    @MockitoBean
+    private PrdVersionAppService prdVersionAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {

@@ -8,6 +8,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import com.aieducenter.aiplatform.business.identity.endpoints.interceptor.ApiAuthInterceptor;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
+import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.business.project.endpoints.interceptor.ProjectOwnerInterceptor;
 import com.aieducenter.aiplatform.business.project.endpoints.interceptor.ProjectTouchInterceptor;
 
 /**
@@ -34,14 +36,22 @@ import com.aieducenter.aiplatform.business.project.endpoints.interceptor.Project
  * last-touch + 异步探查沙箱实态，容器缺失/被杀自动唤醒（用户可见面只有待期
  * 「系统启动中」）。项目编排 bean 经 {@link ObjectProvider} 延迟解析：@WebMvcTest
  * 窄切片（不含 project BC）无此 bean 时跳过注册，切片语义本就不含触碰自愈。</p>
+ *
+ * <p>#325 owner 守卫：{@code /api/projects/**} 在触碰之前追加归属拦截
+ * （{@code ProjectOwnerInterceptor}，仓储同经 {@link ObjectProvider} 延迟解析）
+ * ——单项目寻址非本人即 404 PRJ_001，先于触碰故越权请求不触发他人沙箱唤醒。</p>
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final ObjectProvider<ProjectLifecycleAppService> projectLifecycleAppService;
 
-    public WebMvcConfig(ObjectProvider<ProjectLifecycleAppService> projectLifecycleAppService) {
+    private final ObjectProvider<ProjectRepository> projectRepository;
+
+    public WebMvcConfig(ObjectProvider<ProjectLifecycleAppService> projectLifecycleAppService,
+                        ObjectProvider<ProjectRepository> projectRepository) {
         this.projectLifecycleAppService = projectLifecycleAppService;
+        this.projectRepository = projectRepository;
     }
 
     @Override
@@ -54,6 +64,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new ApiAuthInterceptor())
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/backoffice/**");
+        // #325 owner 守卫先于触碰：越权请求 404 在前，不触发他人沙箱的唤醒副作用；
+        // 仓储经 ObjectProvider 延迟解析（@WebMvcTest 窄切片无此 bean 时跳过注册，
+        // 切片语义本就不含数据面守卫——守卫契约归 ProjectOwnerInterceptorMvcTest
+        // 以 mock 仓储装配钉）
+        ProjectRepository projects = projectRepository.getIfAvailable();
+        if (projects != null) {
+            registry.addInterceptor(new ProjectOwnerInterceptor(projects))
+                    .addPathPatterns("/api/projects/**");
+        }
         ProjectLifecycleAppService lifecycle = projectLifecycleAppService.getIfAvailable();
         if (lifecycle != null) {
             registry.addInterceptor(new ProjectTouchInterceptor(lifecycle))

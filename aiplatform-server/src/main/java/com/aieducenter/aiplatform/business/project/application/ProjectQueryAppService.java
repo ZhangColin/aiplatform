@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
@@ -123,9 +124,15 @@ public class ProjectQueryAppService {
      * 项目列表（创建时间倒序）+ 状态过滤（Integer code，框架 converter 绑定）：
      * ACTIVE（未归档）/ ARCHIVED（已归档）；缺省 all。不合法 code 在端点层
      * 400（框架统一信封，带合法取值表），本层只收合法枚举。
+     *
+     * <p>#325 起 owner 过滤（修「单账号假设全量返回」缺口）：按当前账户上下文
+     * （{@code RequestContext.getUserId()}，等值匹配 {@link Project#ownedBy}）
+     * 只见自己的项目——他人项目不可见；无账户上下文（测试直调/无会话形）只见
+     * 无主项目（无主对无主的等值端，deny-by-default；访客维度 #326 接管）。
+     * 后台机机面不经本口（{@code BackofficeProjectAppService} 独立全量读面）。</p>
      */
     public List<ProjectResponse> list(ProjectStatusFilter status) {
-        List<Project> projects = projectsNewestFirst();
+        List<Project> projects = projectsNewestFirst(RequestContext.getUserId());
         Map<Long, OrderBriefResponse> activeOrders =
                 orderQueryAppService.activeOrdersOf(projects.stream().map(Project::getId).toList());
         return projects.stream()
@@ -343,9 +350,12 @@ public class ProjectQueryAppService {
 
     // ---------- 装载与过滤 ----------
 
-    /** 全量项目，创建时间倒序。 */
-    private List<Project> projectsNewestFirst() {
-        return projectRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
+    /** owner 名下（无账户上下文＝无主）的项目，创建时间倒序（#325 owner 过滤）。 */
+    private List<Project> projectsNewestFirst(Long ownerAccountId) {
+        Sort newestFirst = Sort.by(Sort.Direction.DESC, "createdAt");
+        return ownerAccountId == null
+                ? projectRepository.findByOwnerAccountIdIsNull(newestFirst)
+                : projectRepository.findByOwnerAccountId(ownerAccountId, newestFirst);
     }
 
     private boolean matches(Project project, ProjectStatusFilter filter) {

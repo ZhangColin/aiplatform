@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.IntegrationTest;
@@ -373,6 +374,34 @@ class ProjectQueryAppServiceTest {
     // 非法过滤 code 的 400（框架统一信封）口径在端点层（ProjectControllerTest 兜底测试）；
     // 枚举签名后应用层不再可能收到非法值。
 
+    // ---------- 列表：owner 过滤（#325 登录用户之间隔离） ----------
+
+    @Test
+    void given_account_context_when_list_then_only_own_projects() throws Exception {
+        // 他人项目与无主项目皆不可见——「单账号全量返回」既有缺口的收口
+        persistedProject(8701L, "我的项目", 8801L);
+        persistedProject(8702L, "别人的项目", 8802L);
+        persistedProject(8703L, "无主项目", null);
+
+        List<ProjectResponse> list = RequestContext.runFor(
+                new RequestContext(null, null, null, null, 8801L, "账户甲", null, null),
+                () -> appService.list(null));
+
+        assertThat(list).extracting(ProjectResponse::name).containsExactly("我的项目");
+    }
+
+    @Test
+    void given_no_account_context_when_list_then_only_unowned_projects() {
+        // 无账户上下文（测试直调/无会话形）＝等值匹配的另一端：只见无主项目，
+        // 有主项目对无上下文不可见（deny-by-default；#326 访客维度接管后收口）
+        persistedProject(8704L, "无主项目", null);
+        persistedProject(8705L, "有主项目", 8805L);
+
+        List<ProjectResponse> list = appService.list(null);
+
+        assertThat(list).extracting(ProjectResponse::name).containsExactly("无主项目");
+    }
+
     // ---------- usage ----------
 
     @Test
@@ -612,7 +641,12 @@ class ProjectQueryAppServiceTest {
     // ---------- 测试数据 ----------
 
     private Project persistedProject(long workspaceId, String name) {
+        return persistedProject(workspaceId, name, null);
+    }
+
+    /** 携归属的项目夹具（#325 owner 过滤测试用）。 */
+    private Project persistedProject(long workspaceId, String name, Long ownerAccountId) {
         return projectRepository.save(Project
-                .create(name, ProjectType.WEBSITE, workspaceId, null));
+                .create(name, ProjectType.WEBSITE, workspaceId, ownerAccountId));
     }
 }

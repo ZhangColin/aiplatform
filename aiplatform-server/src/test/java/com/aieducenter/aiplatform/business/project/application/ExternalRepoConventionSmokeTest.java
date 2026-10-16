@@ -153,8 +153,7 @@ class ExternalRepoConventionSmokeTest {
             frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
             return null;
         }).when(eventsAppService).publishAgentEvent(any(), any());
-        Project project = projectRepository.save(Project.create("外部仓库冒烟", null,
-                Long.parseLong(workspaceId), null));
+        Project project = projectRepository.save(Project.create("外部仓库冒烟", null, null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
         placePrd();

@@ -164,8 +164,7 @@ class DesignPackageAppServiceLiveTest {
         WorkspaceResponse workspace = workspaceLifecycleAppService
                 .create(new CreateWorkspaceCommand(EnvKind.DEV));
         workspaceId = workspace.workspaceId();
-        Project project = projectRepository.save(Project.create("资产包活体", null,
-                Long.parseLong(workspaceId), 3897654321098765405L));
+        Project project = projectRepository.save(Project.create("资产包活体", null, null, Long.parseLong(workspaceId), 3897654321098765405L, null));
         project.switchEndpoint(endpointType, null);
         project = projectRepository.save(project);
         projectId = project.getId();

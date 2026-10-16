@@ -104,7 +104,7 @@ class OrderDesignPackageServeTest {
                 "ws-" + workspaceSeq, "previewnet")));
         workspaceRepository.save(ready);
         projectId = projectRepository.save(
-                Project.create("资产包下载测试", null, workspaceSeq, 1L)).getId();
+                Project.create("资产包下载测试", null, null, workspaceSeq, 1L, null)).getId();
     }
 
     @AfterEach
@@ -128,13 +128,12 @@ class OrderDesignPackageServeTest {
 
     /** 待报价设计单（place 即是）。 */
     private Long seedPendingDesignOrder() {
-        return orderRepository.save(Order.place(projectId, 1L, "# PRD",
-                OrderDeliverableType.DESIGN)).getId();
+        return orderRepository.save(Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.DESIGN)).getId();
     }
 
     /** 已支付设计单（真实中间态，归档前即放行）。 */
     private Long seedPaidDesignOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.DESIGN);
+        Order order = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.DESIGN);
         order.quote(10000L, null, null);
         order.pay("PAY-TEST-1");
         return orderRepository.save(order).getId();
@@ -142,7 +141,7 @@ class OrderDesignPackageServeTest {
 
     /** 已归档设计单（终态）。 */
     private Long seedArchivedDesignOrder() {
-        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.DESIGN);
+        Order order = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.DESIGN);
         order.quote(10000L, null, null);
         order.pay("PAY-TEST-1");
         order.archive();
@@ -159,13 +158,13 @@ class OrderDesignPackageServeTest {
         assertThatGateClosed(orderId);
         cleanupOrders();
 
-        Order quoted = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.DESIGN);
+        Order quoted = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.DESIGN);
         quoted.quote(10000L, null, null);
         orderId = orderRepository.save(quoted).getId();
         assertThatGateClosed(orderId);
         cleanupOrders();
 
-        Order cancelled = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.DESIGN);
+        Order cancelled = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.DESIGN);
         cancelled.cancel();
         orderId = orderRepository.save(cancelled).getId();
         assertThatGateClosed(orderId);
@@ -219,7 +218,7 @@ class OrderDesignPackageServeTest {
     void given_system_order_when_download_then_ord_016_before_gate() throws Exception {
         // 系统单交付物不含设计资产包：类型判定（纯）先于支付门（未付费也吃 404
         // ORD_016 而非 402——寻址成功而交付物类型不符，如实不假装有包）
-        Order system = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
+        Order system = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.SYSTEM);
         Long orderId = orderRepository.save(system).getId();
 
         performAsUser(get(designPackageUrl(orderId)))

@@ -137,7 +137,9 @@ public class ProjectNamingAppService implements DisposableBean {
                 eventsAppService.publishNotification(ProjectEventTypes.PROJECT_RENAMED, Map.of(
                         ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                         ProjectEventTypes.PROJECT_NAME_FIELD, project.getName(),
-                        EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                        EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                        EventsAppService.OWNER_GUEST_FIELD,
+                        EventsAppService.ownerPayload(project.getOwnerGuestId())));
             } else {
                 log.info("项目 {} 已非占位名（用户改名或取名已完成），本次取名不覆写", projectId);
             }

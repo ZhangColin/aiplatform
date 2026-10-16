@@ -48,11 +48,29 @@ class FakeEventSource {
   }
 }
 
-/** 薄 client 依赖 window.location 构造 URL，node 环境补最小 stub。 */
+/** 薄 client 依赖 window.location 与事件目标（#326 401 出口），node 环境补最小 stub。 */
 function stubWindow() {
-  vi.stubGlobal("window", {
-    location: { origin: "http://localhost:3333", pathname: "/", search: "", href: "" },
-  });
+  vi.stubGlobal("window", makeWindowStub());
+}
+
+function makeWindowStub() {
+  const location = { origin: "http://localhost:3333", pathname: "/", search: "", href: "" };
+  // #326：401 出口事件化（window.dispatchEvent）——node stub 补最小事件目标。
+  const listeners = new Map<string, Set<(e: unknown) => void>>();
+  return {
+    location,
+    addEventListener: (name: string, fn: (e: unknown) => void) => {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(fn);
+    },
+    removeEventListener: (name: string, fn: (e: unknown) => void) => {
+      listeners.get(name)?.delete(fn);
+    },
+    dispatchEvent: (event: { type: string }) => {
+      for (const fn of listeners.get(event.type) ?? []) fn(event);
+      return true;
+    },
+  };
 }
 
 /** /api/me 探针的 fetch stub：status 可控，默认 200。 */

@@ -123,7 +123,7 @@ class ImageGenerationAppServiceTest {
                 "ws-" + workspaceSeq, "previewnet")));
         workspaceRepository.save(ready);
         Project project = projectRepository.save(
-                Project.create("出图测试", null, workspaceSeq, 1L));
+                Project.create("出图测试", null, null, workspaceSeq, 1L, null));
         projectId = project.getId();
         workspaceId = Long.toString(workspaceSeq);
         when(providers.active()).thenReturn(Optional.of(provider));

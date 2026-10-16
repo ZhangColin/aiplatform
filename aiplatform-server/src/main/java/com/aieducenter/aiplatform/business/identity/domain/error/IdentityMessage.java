@@ -34,7 +34,14 @@ public enum IdentityMessage implements CodeMessage {
     VERIFICATION_CODE_MISMATCH(400, "IDN_008", "验证码错误或已过期"),
 
     /** #327 绑定聚合：字段不完整（编程性守卫，不经 REST 直出） */
-    BINDING_FIELDS_INCOMPLETE(400, "IDN_009", "账号绑定字段不完整");
+    BINDING_FIELDS_INCOMPLETE(400, "IDN_009", "账号绑定字段不完整"),
+
+    /**
+     * #326 访客域：建档/续期参数不完整（防御面——常规编排不可达）。
+     * 取 IDN_010：本票先行占 IDN_005 未对外（并行合并树尚绿），与 #327 撞号时
+     * 让号给已对外验证码端点契约（域码登记制不重排已冻结面，未冻结自避）。
+     */
+    GUEST_FIELDS_INCOMPLETE(400, "IDN_010", "访客字段不完整");
 
     private final int httpStatus;
     private final String code;

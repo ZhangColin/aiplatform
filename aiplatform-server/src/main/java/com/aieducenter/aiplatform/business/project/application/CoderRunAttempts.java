@@ -284,7 +284,7 @@ class CoderRunAttempts {
                     agent.toolSpec());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
-                        eventBridge.sink(projectId, project.getOwnerAccountId()));
+                        eventBridge.sink(project));
                 // run-finish 押后到收口判据落定（#84 假完成不闪收口）：converse 正常
                 // 返回 ≠ 收口（判据在 onSuccess——8081 核验 / finish_edit 事实），判据
                 // 不过即该次尝试失败走重试——中场 run-finish 若出用户面，工作消息定格

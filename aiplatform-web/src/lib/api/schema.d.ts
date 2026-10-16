@@ -94,6 +94,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 验码登录（不存在即静默建账户）
+         * @description M01 弹窗第二步：验码即登录——无密码，账户不存在则静默建档（显示名缺省＝
+         *     标识原文）＋种 aiplatform_session 会话 cookie（契约与 OIDC 登录同源）。
+         *     验过即消费（一次性）。目标形态无效 400→6005；验证码错误或已过期
+         *     （含超次作废、无在途码，不区分错环节）400→6008。回执＝当前账号
+         *     （MeResponse 同形）。
+         */
+        post: operations["verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -110,6 +134,29 @@ export interface paths {
          *     post_logout_redirect_uri 白名单 302 回前端首页。前端以 form POST 姿态调用。
          */
         post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发码（手机号/邮箱）
+         * @description M01 弹窗第一步：输入手机号/邮箱（单输入，通道按形态判定）发六位数字验证码。
+         *     有效期/发码冷却窗/试错上限走配置（回执带有效期秒数）。错误信封数字业务码：
+         *     目标形态无效 400→6005；通道未开放（上线先邮箱，手机号开关位在配置）
+         *     403→6006；频控 429→6007。发送服务商＝上线参数（机制先行、配置驱动）。
+         */
+        post: operations["sendCode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2489,6 +2536,65 @@ export interface components {
              */
             updatedAt?: string;
         };
+        /** @description 验码登录命令 */
+        VerifyCodeLoginCommand: {
+            /**
+             * @description 收码目标（手机号/邮箱）
+             * @example user@example.com
+             */
+            target?: string;
+            /**
+             * @description 验证码（六位数字）
+             * @example 123456
+             */
+            code?: string;
+        };
+        ApiResponseMeResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["MeResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 当前登录账号 */
+        MeResponse: {
+            /**
+             * @description 账号 id（内部 TSID，字符串承载——超出 JS 安全整数范围）
+             * @example 3897654321098765432
+             */
+            accountId?: string;
+            /**
+             * @description 显示名（nickname→name→preferred_username→sub 推导）
+             * @example 张三
+             */
+            displayName?: string;
+        };
+        /** @description 发码命令 */
+        SendVerificationCodeCommand: {
+            /**
+             * @description 收码目标（手机号/邮箱）
+             * @example user@example.com
+             */
+            target?: string;
+        };
+        ApiResponseCodeSentResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["CodeSentResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 发码回执 */
+        CodeSentResponse: {
+            /**
+             * Format: int64
+             * @description 验证码有效期（秒）
+             * @example 300
+             */
+            expiresInSeconds?: number;
+        };
         CreateWorkspaceCommand: {
             /** @description 1=开发, 2=测试, 3=生产 */
             kind?: number;
@@ -3414,27 +3520,6 @@ export interface components {
             /** Format: date-time */
             at?: string;
         };
-        ApiResponseMeResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["MeResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        /** @description 当前登录账号 */
-        MeResponse: {
-            /**
-             * @description 账号 id（内部 TSID，字符串承载——超出 JS 安全整数范围）
-             * @example 3897654321098765432
-             */
-            accountId?: string;
-            /**
-             * @description 显示名（nickname→name→preferred_username→sub 推导）
-             * @example 张三
-             */
-            displayName?: string;
-        };
         SseEmitter: {
             /** Format: int64 */
             timeout?: number;
@@ -4189,6 +4274,30 @@ export interface operations {
             };
         };
     };
+    verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyCodeLoginCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMeResponse"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -4206,6 +4315,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    sendCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendVerificationCodeCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCodeSentResponse"];
+                };
             };
         };
     };

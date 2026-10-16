@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -525,6 +526,49 @@ class AgentscopeAgentClientTest {
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.ERROR);
         assertThat(frames.get(1).payload()).containsEntry("message", "boom");
+    }
+
+    /**
+     * 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更（工具结果
+     * 成功即提交口径）与已闭合区间的阶段耗时（未闭合区间不计口径）随失败上抛携带
+     * （{@link AgentTurnFailure}），外层尝试环据此把失败尝试的观察面与耗时账计入
+     * 本场累计；error 事件先行、失败消息照旧。
+     */
+    @Test
+    void given_partial_facts_before_stream_error_when_converse_then_failure_carries_observation() {
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.concat(
+                        Flux.fromIterable(List.<io.agentscope.core.event.AgentEvent>of(
+                                new ModelCallStartEvent("evt-1", ts(1_000), "reply-1"),
+                                new ModelCallEndEvent("evt-2", ts(1_300), "reply-1", null),
+                                new ToolCallDeltaEvent("evt-3", ts(1_300), "reply-1", "tc-1",
+                                        "write_file",
+                                        "{\"path\":\"src/App.tsx\",\"content\":\"a\\nb\"}"),
+                                new ToolCallEndEvent("evt-4", ts(1_310), "reply-1", "tc-1",
+                                        "write_file"),
+                                new ToolResultEndEvent("evt-5", ts(1_360), "reply-1", "tc-1",
+                                        "write_file", ToolResultState.SUCCESS))),
+                        Flux.error(new RuntimeException("mid-stream boom"))));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        AgentTurnFailure failure = catchThrowableOfType(
+                () -> client.converse(command(null, null), frames::add), AgentTurnFailure.class);
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.getMessage()).contains("智能体调用失败").contains("mid-stream boom");
+        // 部分观察不清零：已提交变更（write_file 成功落盘）+ 已闭合区间耗时
+        //（llm 300ms / write_file 50ms；崩断时在途区间不计——观察口径不变）
+        assertThat(failure.changes()).containsExactly(new FileChange("src/App.tsx", 2, 0));
+        assertThat(failure.durations().llmMs()).isEqualTo(300);
+        assertThat(failure.durations().toolsMs()).containsExactly(Map.entry("write_file", 50L));
+        // 失败表达照旧：过程事件（run-start 开场 + 工具动作部件）照发、error 收尾
+        assertThat(frames.stream().map(AgentEvent::type))
+                .first().isEqualTo(AgentEventTypes.RUN_START);
+        assertThat(frames.stream().map(AgentEvent::type))
+                .last().isEqualTo(AgentEventTypes.ERROR);
+        assertThat(frames.get(frames.size() - 1).payload())
+                .containsEntry("message", "mid-stream boom");
     }
 
     @Test

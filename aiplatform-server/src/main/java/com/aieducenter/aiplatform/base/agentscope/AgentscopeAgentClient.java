@@ -51,7 +51,8 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 挂起事实随返回值 {@link AgentReply#suspension()} 上浮；业务编排以 {@link #resume}
  * 续跑（同一 (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，
  * 访谈上下文不丢），续跑流可再挂起（一 run 多问答点）或正常收口。失败上抛
- * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
+ * {@link AgentTurnFailure}（IllegalStateException 族，携失败流段的部分观察面——
+ * #323 失败留账；异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
  *
  * <p>工作区解析：命令带 workspaceId → 项目工作区（容器文件面，docker exec
  * 读写，写入即落项目工作区；只读面只关内核文件/shell 工具，业务侧工具自带
@@ -137,14 +138,15 @@ public class AgentscopeAgentClient {
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
                 command.timeout(), sink);
-        // 平台工具落盘事实（#292）取走并进变更事实流——错误分支弃取（失败尝试的
-        // 变更不进收口清单，#84 口径）
+        // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
+        // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
+        // 是真实工作区事实，外层尝试环据此留账）
         List<FileChange> changes = new ArrayList<>(result.changes());
         changes.addAll(landedFiles.drain(command.runId()));
         if (result.error() != null) {
-            throw new IllegalStateException("智能体调用失败（runId=" + command.runId()
+            throw new AgentTurnFailure("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
-                    + result.error().getMessage(), result.error());
+                    + result.error().getMessage(), result.error(), changes, result.durations());
         }
         return new AgentReply(command.runId(), result.text(), result.suspension(),
                 changes, result.durations());
@@ -181,13 +183,14 @@ public class AgentscopeAgentClient {
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), null, sink);
-        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流
+        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
+        // 同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
         changes.addAll(landedFiles.drain(resume.runId()));
         if (result.error() != null) {
-            throw new IllegalStateException("智能体续跑失败（runId=" + resume.runId()
+            throw new AgentTurnFailure("智能体续跑失败（runId=" + resume.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
-                    + result.error().getMessage(), result.error());
+                    + result.error().getMessage(), result.error(), changes, result.durations());
         }
         return new AgentReply(resume.runId(), result.text(), result.suspension(),
                 changes, result.durations());
@@ -234,7 +237,8 @@ public class AgentscopeAgentClient {
 
     /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败；
      *  changes = 本流段成功的文件变更事实、durations = 本流段的阶段耗时事实——
-     *  #88/#111 收口扩载的观察面；失败段两观察面都弃置——上流抛异常，事实随弃）。 */
+     *  #88/#111 收口扩载的观察面；失败段携<b>部分观察</b>（#323 失败留账）：已提交
+     *  变更与已闭合区间照携，经 {@link AgentTurnFailure} 上浮，不清零弃置）。 */
     private record TurnResult(String text, AgentSuspension suspension, Throwable error,
             List<FileChange> changes, StageDurations durations) {
     }
@@ -348,7 +352,11 @@ public class AgentscopeAgentClient {
         catch (Exception e) {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
-            return new TurnResult(text.toString(), null, e, List.of(), StageDurations.zero());
+            // 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更与
+            // 已闭合区间的阶段耗时随失败携出（观察器全程在流上累积，此处取快照；
+            // 崩断时在途的未闭合区间仍不计——StageDurationFacts 口径不变）
+            return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
+                    prepared.durations().snapshot());
         }
 
         finally {

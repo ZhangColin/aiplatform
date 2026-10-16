@@ -30,6 +30,7 @@ import com.aieducenter.aiplatform.business.project.application.GenerationAppServ
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
@@ -40,6 +41,8 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.FixR
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -58,13 +61,13 @@ import com.aieducenter.aiplatform.support.Tsid;
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
  * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 继续更新（更新
- * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
- * 源码包下载 → 预览 → 删除真删级联。
+ * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / PRD 确认成版与
+ * 版本清单详情（#330 确认即成版）/ 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -74,6 +77,7 @@ public class ProjectController {
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
+    private final PrdVersionAppService prdVersionAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
@@ -81,7 +85,8 @@ public class ProjectController {
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
-                             ConversationHistoryAppService conversationHistoryAppService) {
+                             ConversationHistoryAppService conversationHistoryAppService,
+                             PrdVersionAppService prdVersionAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
@@ -89,6 +94,7 @@ public class ProjectController {
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
+        this.prdVersionAppService = prdVersionAppService;
     }
 
     @PostMapping
@@ -296,6 +302,42 @@ public class ProjectController {
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.prd(parseId(id)));
+    }
+
+    @PostMapping("/{id}/prd/confirm")
+    @Operation(summary = "确认此版 PRD（确认即成版：工作区 PRD 全文冻结为不可变快照）",
+            description = "「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）"
+                    + "全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号"
+                    + "（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是"
+                    + "活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认"
+                    + "（无新草稿＝全文未变）幂等返回既有版、不产生新版本。响应即回执"
+                    + "（versionNo/content/confirmedAt）——版本号是下游（#332 确认后"
+                    + "自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 "
+                    + "PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；"
+                    + "环境故障 WSP_002")
+    public ApiResponse<PrdVersionResponse> confirmPrd(@PathVariable String id) {
+        return ApiResponse.ok(prdVersionAppService.confirm(parseId(id)));
+    }
+
+    @GetMapping("/{id}/prd/versions")
+    @Operation(summary = "PRD 已确认版本清单（最新在前，轻量形不含全文）",
+            description = "项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, "
+                    + "confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现"
+                    + "最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」"
+                    + "徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001")
+    public ApiResponse<List<PrdVersionSummaryResponse>> prdVersions(@PathVariable String id) {
+        return ApiResponse.ok(prdVersionAppService.versions(parseId(id)));
+    }
+
+    @GetMapping("/{id}/prd/versions/{versionNo}")
+    @Operation(summary = "PRD 版本详情（含全文快照）",
+            description = "单版详情（#330）：{projectId, versionNo, content, confirmedAt}"
+                    + "——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动"
+                    + "不影响）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；"
+                    + "项目不存在 404 PRJ_001")
+    public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
+            @PathVariable int versionNo) {
+        return ApiResponse.ok(prdVersionAppService.version(parseId(id), versionNo));
     }
 
     @GetMapping("/{id}/files")

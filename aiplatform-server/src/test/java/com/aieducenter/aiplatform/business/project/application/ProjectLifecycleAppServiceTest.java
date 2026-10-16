@@ -113,6 +113,7 @@ class ProjectLifecycleAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
@@ -365,6 +366,12 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_project_when_delete_then_workspace_destroyed_rows_gone_sse_emitted() {
         Long projectId = persistedProject("9200");
+        // 已确认 PRD 版本在场（#330）：版本行随项目真删级联（软引用显式清，同轨道表）
+        jdbcTemplate.update("INSERT INTO prj_prd_versions (id, project_id, version_no, content,"
+                + " confirmed_at, prd_produced_at, created_at, updated_at)"
+                + " VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,"
+                + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                920099900000000001L, projectId);
 
         appService.delete(projectId);
 
@@ -372,6 +379,9 @@ class ProjectLifecycleAppServiceTest {
         verify(workspaceLifecycleAppService).destroy("9200");
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_prd_versions WHERE project_id = ?", Long.class,
+                projectId)).isZero();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
     }

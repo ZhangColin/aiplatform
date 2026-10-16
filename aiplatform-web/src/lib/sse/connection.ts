@@ -40,8 +40,9 @@ const RESEED_DELAY_MS = 3_000;
 
 /**
  * 探会话（EventSource 读不到状态码，会话过期只表现为反复 error）：
- * 401 → false（薄 client 的全局 401 出口已接管整页跳）；其余（200 / 404 / 网络错）
- * → true，按会话未知处理、继续原生重连。
+ * 401 → false（薄 client 的 401 出口已事件化——#326 起不再整页跳，弹窗归 M01；
+ * 本探针只决定 SSE 停手）；其余（200 / 404 / 网络错）→ true，按会话未知处理、
+ * 继续原生重连。
  */
 export async function probeSessionAlive(): Promise<boolean> {
   try {
@@ -88,7 +89,7 @@ export class SseConnection {
       this.failures = 0;
       void probeSessionAlive().then((alive) => {
         if (!alive) {
-          this.close(); // 401：停手，全局 401 出口已在薄 client 内触发整页跳
+          this.close(); // 401：停手——401 出口已在薄 client 内事件化（#326，弹窗归 M01）
         } else if (gaveUp) {
           this.scheduleReseed(es);
         }

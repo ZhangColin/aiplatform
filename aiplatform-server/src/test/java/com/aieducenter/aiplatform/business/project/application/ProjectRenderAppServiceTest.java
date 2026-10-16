@@ -171,7 +171,7 @@ class ProjectRenderAppServiceTest {
 
     private Project persistedProject(long workspaceId) {
         return projectRepository.save(Project
-                .create("渲染项目" + workspaceId, ProjectType.WEBSITE, workspaceId, null));
+                .create("渲染项目" + workspaceId, ProjectType.WEBSITE, null, workspaceId, null, null));
     }
 
     private ApplicationException catchException(Runnable action) {
@@ -258,7 +258,7 @@ class ProjectRenderAppServiceTest {
 
     /** 已支付订单种子（门开放面）：place → quote → pay（领域转移链）。 */
     private void seedPaidOrder(Long projectId) {
-        Order order = Order.place(projectId, 1L, "# PRD", OrderDeliverableType.SYSTEM);
+        Order order = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.SYSTEM);
         order.quote(10000L, null, null);
         order.pay("PAY-RENDER-1");
         orderRepository.save(order);

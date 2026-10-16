@@ -203,8 +203,7 @@ class MainAgentAppServiceTest {
 
     /** 已生成形态的项目（迭代期收口派修正的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("迭代访谈项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("迭代访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
@@ -1318,8 +1317,7 @@ class MainAgentAppServiceTest {
 
     /** 已生成＋设计类终点的项目（中途切换形态——设计先行承接的路由前提）。 */
     private Long persistedGeneratedDesignProject(String workspaceId, ProjectEndpointType endpoint) {
-        Project project = projectRepository.save(Project.create("中途切换项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("中途切换项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.switchEndpoint(endpoint, null);
         project.markPrdProduced();
         project.markGenerated();
@@ -1361,22 +1359,19 @@ class MainAgentAppServiceTest {
     }
 
     private Long persistedProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         return project.getId();
     }
 
     /** PRD 已产出、未生成的项目（#101 生成无门：收口自动派首次生成的前置事实）。 */
     private Long persistedPrdProject(String workspaceId) {
-        Project project = projectRepository.save(Project.create("访谈项目", null,
-                Long.parseLong(workspaceId), OWNER));
+        Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
 
     private Long persistedArchivedProject(String workspaceId) {
-        Project project = Project.create("归档访谈项目", null,
-                Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("归档访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
         return projectRepository.save(project).getId();
     }

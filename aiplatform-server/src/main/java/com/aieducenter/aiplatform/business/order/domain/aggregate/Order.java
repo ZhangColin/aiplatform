@@ -74,6 +74,14 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     @Column(name = "owner_account_id", updatable = false)
     private Long ownerAccountId;
 
+    /**
+     * 下单访客（#326 访客域：idn_guests 软引用；与 {@link #ownerAccountId} 逻辑互斥
+     * ——库层 CHECK 兜底，至多一方落值）。下单者身份的访客腿——SSE 归属路由与
+     * 账面归属（访客免注册可下单，绑定平移属 #328）。
+     */
+    @Column(name = "owner_guest_id", updatable = false)
+    private Long ownerGuestId;
+
     @Column(name = "status", nullable = false)
     private OrderStatus status;
 
@@ -154,14 +162,16 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     protected Order() {
     }
 
-    private Order(Long projectId, Long ownerAccountId, String prdSnapshot,
+    private Order(Long projectId, Long ownerAccountId, Long ownerGuestId, String prdSnapshot,
             OrderDeliverableType deliverableType) {
         if (projectId == null || prdSnapshot == null || prdSnapshot.isBlank()
-                || deliverableType == null) {
+                || deliverableType == null
+                || (ownerAccountId != null && ownerGuestId != null)) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
         this.projectId = projectId;
         this.ownerAccountId = ownerAccountId;
+        this.ownerGuestId = ownerGuestId;
         this.status = OrderStatus.PENDING_QUOTE;
         this.deliverableType = deliverableType;
         this.prdSnapshot = prdSnapshot;
@@ -170,10 +180,11 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /**
      * 下单（确认动作的落库事实）：待报价起步，快照与交付物类型在此冻结——此后
      * PRD 修订与项目终点变更均不影响本单（取消再下 = 新单新快照新类型）。
+     * 下单者归属 owner 双列（账户/访客互斥，随请求上下文其一，#326）。
      */
-    public static Order place(Long projectId, Long ownerAccountId, String prdSnapshot,
-            OrderDeliverableType deliverableType) {
-        return new Order(projectId, ownerAccountId, prdSnapshot, deliverableType);
+    public static Order place(Long projectId, Long ownerAccountId, Long ownerGuestId,
+            String prdSnapshot, OrderDeliverableType deliverableType) {
+        return new Order(projectId, ownerAccountId, ownerGuestId, prdSnapshot, deliverableType);
     }
 
     /** 是否终态（已归档/已取消）——未终结订单唯一性的判定口径。 */

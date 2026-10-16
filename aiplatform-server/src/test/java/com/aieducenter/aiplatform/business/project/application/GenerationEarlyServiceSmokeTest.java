@@ -165,8 +165,7 @@ class GenerationEarlyServiceSmokeTest {
                     System.nanoTime()));
             return null;
         }).when(eventsAppService).publishNotification(any(), any());
-        Project project = projectRepository.save(Project.create("渐进起服冒烟", null,
-                Long.parseLong(workspaceId), null));
+        Project project = projectRepository.save(Project.create("渐进起服冒烟", null, null, Long.parseLong(workspaceId), null, null));
         projectId = project.getId();
         coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
         placePrd();

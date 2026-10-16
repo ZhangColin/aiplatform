@@ -786,8 +786,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_never_generated_or_archived_or_missing_when_fix_then_rejected() {
-        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null,
-                9906L, OWNER)).getId();
+        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null, null, 9906L, OWNER, null)).getId();
         Long archivedId = persistedArchivedGeneratedProject("9907");
 
         assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下", null))
@@ -951,14 +950,14 @@ class IterationAppServiceTest {
 
     /** 已生成形态的项目（迭代的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("迭代项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
     }
 
     private Long persistedArchivedGeneratedProject(String workspaceId) {
-        Project project = Project.create("归档迭代项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("归档迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         project.archive();

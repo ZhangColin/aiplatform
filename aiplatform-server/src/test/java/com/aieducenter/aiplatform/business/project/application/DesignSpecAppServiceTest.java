@@ -476,7 +476,7 @@ class DesignSpecAppServiceTest {
     private final Map<String, String> workspaceFiles = new LinkedHashMap<>();
 
     private Project persistedProject() {
-        return projectRepository.save(Project.create("规范提炼项目", null, 971901L, OWNER));
+        return projectRepository.save(Project.create("规范提炼项目", null, null, 971901L, OWNER, null));
     }
 
     /** 带规范正本的项目（界面类直提建行——遵守面测试的既有事实底座）。 */

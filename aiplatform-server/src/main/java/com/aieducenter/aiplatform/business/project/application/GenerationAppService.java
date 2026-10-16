@@ -810,7 +810,7 @@ public class GenerationAppService {
                 if (result.lastError() != null) {
                     terminalFailureScenes.put(projectId, result.lastError());
                 }
-                eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
+                eventBridge.emitRunFailed(project, runId);
                 return;
             }
             // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
@@ -922,7 +922,9 @@ public class GenerationAppService {
             eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
                     ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
                     ProjectEventTypes.URL_FIELD, url.toString(),
-                    EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId())));
+                    EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                        EventsAppService.OWNER_GUEST_FIELD,
+                        EventsAppService.ownerPayload(project.getOwnerGuestId())));
         }
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} preview-ready 推送失败（UI 面，不断流）：{}",

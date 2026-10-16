@@ -40,7 +40,7 @@ class ProjectFactsToolTest {
 
     @Test
     void given_generated_project_when_call_then_fact_sheet_with_preview_url() {
-        Project project = Project.create("品牌官网", null, 42L, 77L);
+        Project project = Project.create("品牌官网", null, null, 42L, 77L, null);
         project.markPrdProduced();
         project.markGenerated();
         when(projectRepository.findByWorkspaceId(42L)).thenReturn(Optional.of(project));
@@ -60,7 +60,7 @@ class ProjectFactsToolTest {
     void given_fresh_project_when_call_then_not_yet_states_stated_as_such() {
         // 未产出/未生成如实呈现（「查不到就答不知，不编造」的事实面）
         when(projectRepository.findByWorkspaceId(43L)).thenReturn(Optional.of(
-                Project.create("新项目", null, 43L, 77L)));
+                Project.create("新项目", null, null, 43L, 77L, null)));
         when(workspaceLifecycleAppService.previewUrl("43"))
                 .thenReturn(URI.create("http://43.localhost/"));
 
@@ -72,7 +72,7 @@ class ProjectFactsToolTest {
     @Test
     void given_handle_failure_when_call_then_url_stated_unknown_not_fabricated() {
         when(projectRepository.findByWorkspaceId(44L)).thenReturn(Optional.of(
-                Project.create("环境异常项目", null, 44L, 77L)));
+                Project.create("环境异常项目", null, null, 44L, 77L, null)));
         when(workspaceLifecycleAppService.previewUrl("44"))
                 .thenThrow(new IllegalStateException("工作区不在"));
 

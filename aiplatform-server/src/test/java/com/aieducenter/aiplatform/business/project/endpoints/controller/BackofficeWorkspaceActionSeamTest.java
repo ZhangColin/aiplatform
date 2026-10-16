@@ -356,7 +356,7 @@ class BackofficeWorkspaceActionSeamTest {
 
     /** 工作区名下建项目（软引用无 FK），返回已保存实体供进一步迁移。 */
     private Project linkProject(long workspaceId, String name) {
-        Project project = Project.create(name, ProjectType.WEBSITE, workspaceId, null);
+        Project project = Project.create(name, ProjectType.WEBSITE, null, workspaceId, null, null);
         project.markGenerated();
         return projectRepository.save(project);
     }

@@ -14,6 +14,7 @@ import com.cartisan.event.ApplicationEventPublisher;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
+import com.aieducenter.aiplatform.business.identity.application.GuestAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
@@ -91,6 +92,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private OrderQueryAppService orderQueryAppService;
+
+    @Mock
+    private GuestAppService guestAppService;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -194,7 +198,7 @@ class ProjectLifecycleAppServiceTouchTest {
     // ---------- 测试数据 ----------
 
     private Project project(boolean generated) {
-        Project project = Project.create("测试项目", null, 900L, 1L);
+        Project project = Project.create("测试项目", null, null, 900L, 1L, null);
         if (generated) {
             project.markGenerated();
         }
@@ -206,6 +210,6 @@ class ProjectLifecycleAppServiceTouchTest {
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
                 conversationHistory, generationSegments, designItems, designSpecs, prdVersions,
-                skillDrafts, orderQueryAppService, transactionTemplate);
+                skillDrafts, orderQueryAppService, guestAppService, transactionTemplate);
     }
 }

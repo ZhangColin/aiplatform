@@ -20,6 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.cartisan.core.context.RequestContext;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.web.GuestContext;
 
 /**
  * SSE 事件端点（单端点单流，ADR-0001 + #82 通道合并）：{@code GET /api/events}
@@ -66,8 +67,9 @@ public class EventsController {
 
             信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
             智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
-            对象、内禁 type 键名）。payload 另携 `ownerAccountId` 归属路由键（两族共
-            有；前端不消费——路由键非内容）。心跳：每 15s 发注释行 `:ping`。
+            对象、内禁 type 键名）。payload 另携 `ownerAccountId`/`ownerGuestId` 归属
+            路由键（两族共有、双列互斥恰带其一；前端不消费——路由键非内容）。心跳：
+            每 15s 发注释行 `:ping`。
 
             订阅：订阅握手绑定登录账号，投递按「事件归属 == 订阅者」隔离（未过滤订阅 =
             我的全部通知；他人 projectId 过滤订阅 = 静默空流、连接不断）。`?projectId=`
@@ -102,10 +104,13 @@ public class EventsController {
                     + "不补发（对话史经 REST 水合，平台状态以查询收敛）")
             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         // 新连/重连分野：空串视同无值（新连接）——浏览器只在真见过事件后才带非空值
-        // 订阅握手绑定登录账号（匿名 401 已由 /api/** 拦截面保证——归属路由键，非内容）
+        // 订阅握手绑定订阅者归属（#326 双维：账户或访客，/api/** 拦截面保证至少其一
+        // 在场——匿名 401；归属路由键，非内容）
         String ownerAccountId = RequestContext.getUserId() == null ? null
                 : RequestContext.getUserId().toString();
-        return appService.subscribe(ownerAccountId, projectId, runId,
+        String ownerGuestId = GuestContext.guestId() == null ? null
+                : GuestContext.guestId().toString();
+        return appService.subscribe(ownerAccountId, ownerGuestId, projectId, runId,
                 lastEventId != null && !lastEventId.isBlank() ? lastEventId : null);
     }
 

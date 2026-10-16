@@ -99,8 +99,7 @@ class PreviewReadyRelayTest {
 
     private Long persistedProject(String workspaceId) {
         Project project = projectRepository.save(Project
-                .create("转发对象", ProjectType.WEBSITE,
-                        Long.parseLong(workspaceId), null));
+                .create("转发对象", ProjectType.WEBSITE, null, Long.parseLong(workspaceId), null, null));
         return project.getId();
     }
 }

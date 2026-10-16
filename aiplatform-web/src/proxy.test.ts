@@ -90,13 +90,24 @@ describe("proxy · 会话判定", () => {
     );
   });
 
-  it("无 cookie 访问根路径 → 302，returnTo=%2F", () => {
+  it("无 cookie 访问根路径 → 放行（#326 访客入口：匿名可逛首页、只逛零足迹）", () => {
     const res = proxy(request("/"));
 
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("无 cookie 访问非首页业务路由 → 仍 302（访客入口只开首页）", () => {
+    const res = proxy(request("/projects"));
+
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(
-      "http://localhost:3333/auth/login?returnTo=%2F",
-    );
+  });
+
+  it("有 aiplatform_guest 凭证 cookie（#326 访客）→ 放行（访客项目面刷新可恢复）", () => {
+    const res = proxy(request("/projects/p123", "aiplatform_guest=cred-x"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
   });
 
   it("有 aiplatform_session cookie → 放行（只验存在性，spec 0004 §4）", () => {
@@ -106,13 +117,13 @@ describe("proxy · 会话判定", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("有其它 cookie 但无 aiplatform_session → 仍 302", () => {
+  it("有其它 cookie 但无会话/访客凭证 → 仍 302", () => {
     const res = proxy(request("/projects/p123", "theme=dark; other=1"));
 
     expect(res.status).toBe(302);
   });
 
-  it("认证回调失败落地页 /?error=exchange_failed 应放行，避免死循环", () => {
+  it("认证回调失败落地页 /?error=exchange_failed 放行（首页开放面自然覆盖）", () => {
     const res = proxy(request("/?error=exchange_failed"));
 
     expect(res.status).toBe(200);

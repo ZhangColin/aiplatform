@@ -1,5 +1,3 @@
-import { buildLoginRedirectUrl } from "@/lib/auth/login-redirect";
-
 import { ApiError, type ApiEnvelopeMeta } from "./api-error";
 
 /** 后端统一信封（aiplatform-server ADR-0001）。实际字段以首个对接 issue 首跑 gen:api 实测为准。 */
@@ -23,16 +21,26 @@ type RequestOptions = {
   query?: Record<string, QueryValue | QueryValue[] | undefined>;
 };
 
-/** 401 全局出口的并发去重：整页跳转期间可能并发触发多个 401。spec 0004 §3。 */
-let redirecting = false;
+/**
+ * 401 全局出口事件名（#326）：出口不再整页跳登录——改为在 window 上发本事件，
+ * 由 M01 登录与项目绑定弹窗（#327/#328）订阅弹窗。detail 携带失败请求路径与
+ * returnTo（登录后回跳锚）。匿名访客面（首页）与访客凭证过期的 401 同走本
+ * 事件：无订阅者时请求保持 error 态（查询面按未登录呈现），不跳转。
+ */
+export const UNAUTHORIZED_EVENT = "api:unauthorized";
 
-function redirectToLogin() {
-  if (redirecting) return;
-  redirecting = true;
-  // 有意整页跳而非 client router：会话过期需丢弃全部内存态。spec 0004 §3
-  window.location.href = buildLoginRedirectUrl(
-    window.location.pathname,
-    window.location.search,
+export type UnauthorizedEventDetail = {
+  /** 失败请求的 API 路径（如 /me、/projects）。 */
+  path: string;
+  /** 登录后回跳锚（当前页面 pathname+search，M01 弹窗消费）。 */
+  returnTo: string;
+};
+
+function emitUnauthorized(path: string) {
+  window.dispatchEvent(
+    new CustomEvent<UnauthorizedEventDetail>(UNAUTHORIZED_EVENT, {
+      detail: { path, returnTo: window.location.pathname + window.location.search },
+    }),
   );
 }
 
@@ -96,8 +104,10 @@ async function runRequest<T>(url: URL, options: RequestOptions & { method: strin
   if (!res.ok) {
     const payload: ApiResponse<unknown> | null = await res.json().catch(() => null);
     if (res.status === 401) {
-      // 一个出口、零分支：无 toast、无确认，整页跳 BFF 登录并带 returnTo 回跳。
-      redirectToLogin();
+      // 一个出口、零分支（#326 起事件化）：不再整页跳登录——访客可用面（匿名逛
+      // 首页、访客凭证过期）不因 401 断体验；M01（#327/#328）订阅本事件弹登录
+      // 弹窗，无订阅者时请求保持 error 态（查询面按未登录呈现）。
+      emitUnauthorized(url.pathname + url.search);
     }
     throw new ApiError({
       status: res.status,

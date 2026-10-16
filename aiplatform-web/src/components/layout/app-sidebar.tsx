@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AccountMenu } from "@/components/account-menu";
+import { BrandLogo } from "@/components/brand/brand-logo";
 import { ProjectAvatar } from "@/components/project-avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,9 +24,9 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useRecentProjects } from "@/hooks/use-projects";
+import { SITE_NAME } from "@/lib/brand";
 import { PLATFORM_MODES } from "@/lib/modes";
 import { useEntryModeStore } from "@/lib/store/entry-mode";
-import { cn } from "@/lib/utils";
 
 /**
  * 侧栏定稿形态（#72 / #76）：新建项目 + 首页 +「能做这些」模式位 + 历史项目
@@ -68,14 +69,16 @@ export function AppSidebar() {
                 aria-label="展开菜单"
                 onClick={() => setOpen(true)}
               >
-                <BrandMark />
-                <BrandName />
+                <BrandLogo />
+                <span className="text-sm font-semibold">{SITE_NAME}</span>
               </SidebarMenuButton>
             ) : (
               <div className="flex w-full items-center gap-1">
                 <SidebarMenuButton size="lg" className="min-w-0 flex-1 gap-2">
-                  <BrandMark />
-                  <BrandName className="truncate" />
+                  <BrandLogo />
+                  <span className="truncate text-sm font-semibold">
+                    {SITE_NAME}
+                  </span>
                 </SidebarMenuButton>
                 <Button
                   variant="ghost"
@@ -198,20 +201,6 @@ export function AppSidebar() {
       </SidebarFooter>
     </Sidebar>
   );
-}
-
-/** 品牌位 Logo（展开/收起两分支共用；收起态文字被 collapsible=icon 样式裁掉）。 */
-function BrandMark() {
-  return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-      AI
-    </span>
-  );
-}
-
-/** 品牌名（两分支共用；展开分支补 truncate）。 */
-function BrandName({ className }: { className?: string }) {
-  return <span className={cn("text-sm font-semibold", className)}>AI 开发平台</span>;
 }
 
 /** 非项目页同壳：页头（标题 + 说明）由各页自带，收起/展开归品牌行。 */

@@ -1,14 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* 视觉 token 基座（#342）：原子层 @theme＋组件层 :root，正本＝DESIGN.md */
+@import "./tokens.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  /* CJK 回退 PingFang SC（DESIGN.md Typography），保留字重校准 */
+  --font-sans:
+    var(--font-sans), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    system-ui, sans-serif;
+  /* 等宽＝JetBrains Mono（DESIGN.md：负载检视/代码用字） */
+  --font-mono: var(--font-jetbrains-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -39,64 +45,57 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
   /* 中文排印阶梯（#72 定稿，#76 全局基线）：正文 14/行高 1.75 —— text-sm
      的行高随正文基准一并放宽，控件单行由自身固定高度兜底不受影响。 */
   --text-sm--line-height: 1.75;
 }
 
 /*
- * 双主题定稿（#72 原型四轮 → #76 落地）：
- * - Light：暖白底（stone 系）+ 纯白浮起卡片 + 蓝主色；
- * - Dark：同层次深色档（页底最深、卡片浮一档）；
+ * 双主题（浅色档已随 #342 切到语义引力 Luminous Electric；正本＝
+ * docs/stitch_prd/luminous_electric_ai/DESIGN.md，原子 token 见 tokens.css）：
+ * - Light：晨雾冷调画布＋玻璃卡面＋电靛主色（语义变量＝兼容层，既有基件与
+ *   存量页面零结构破坏，视觉随各页重建票迁移）；
+ * - Dark：旧双主题深色档留存（DESIGN.md 仅浅色档；深色随各页票评估）；
  * - 语义色约定：绿 = 完成、琥珀 = 「当时/更新」（时间性）——状态语义通道
- *   专用（收尾卡、版本标记等）；头像/模板卡等装饰色板不受此约束；
- * - 排印阶梯：标题不收字距；正文 14/1.75；辅助说明 13；仅时间戳/角标 12；
- *   区段标签 medium；全库禁 10–11px 微字。
+ *   专用（收尾卡、版本标记等）；头像/模板卡等装饰色板不受此约束。
  */
 /* 浅色档单源两用（#80 预览浅色锁定）：:root 是平台浅色主题；.light-lock 把
    同一组语义变量钉在子树上——预览里的系统是用户产物，html.dark 也翻转不了它
    （预览舞台用）。 */
 :root,
 .light-lock {
-  --background: oklch(0.985 0.001 106);
-  --foreground: oklch(0.216 0.006 56);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.216 0.006 56);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.216 0.006 56);
-  --primary: oklch(0.632 0.162 252.1);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0.001 106);
-  --secondary-foreground: oklch(0.216 0.006 56);
-  --muted: oklch(0.97 0.001 106);
-  --muted-foreground: oklch(0.553 0.012 56);
-  --accent: oklch(0.97 0.001 106);
-  --accent-foreground: oklch(0.216 0.006 56);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.923 0.003 48);
-  --input: oklch(0.923 0.003 48);
-  --ring: oklch(0.632 0.162 252.1);
+  --background: var(--color-canvas-base);
+  --foreground: var(--color-ink-primary);
+  --card: var(--color-glass-card);
+  --card-foreground: var(--color-ink-primary);
+  --popover: var(--color-glass-modal);
+  --popover-foreground: var(--color-ink-primary);
+  --primary: var(--color-electric-indigo);
+  --primary-foreground: #ffffff;
+  --secondary: rgba(255, 255, 255, 0.85);
+  --secondary-foreground: var(--color-ink-primary);
+  --muted: var(--color-surface-dawn);
+  --muted-foreground: var(--color-ink-muted);
+  --accent: var(--color-surface-mist);
+  --accent-foreground: var(--color-ink-primary);
+  --destructive: var(--color-error);
+  --border: var(--color-subtle-blue);
+  --input: var(--color-slate-soft);
+  --ring: var(--color-electric-indigo);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.978 0.001 106);
-  --sidebar-foreground: oklch(0.216 0.006 56);
-  --sidebar-primary: oklch(0.216 0.006 56);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0.001 106);
-  --sidebar-accent-foreground: oklch(0.216 0.006 56);
-  --sidebar-border: oklch(0.923 0.003 48);
-  --sidebar-ring: oklch(0.632 0.162 252.1);
+  --radius: 0.5rem;
+  --sidebar: var(--color-canvas-base);
+  --sidebar-foreground: var(--color-ink-primary);
+  --sidebar-primary: var(--color-electric-indigo);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--color-surface-mist);
+  --sidebar-accent-foreground: var(--color-ink-primary);
+  --sidebar-border: var(--color-slate-soft);
+  --sidebar-ring: var(--color-electric-indigo);
 }
 
 .dark {
@@ -162,11 +161,20 @@
        工具类字号为准。 */
     font-size: 14px;
     line-height: 1.75;
+    /* DESIGN.md Typography：数字/指标/金额一律表格数字（列对齐） */
+    font-variant-numeric: tabular-nums;
+    /* L0 画布光晕（DESIGN.md Elevation Level 0：顶部晨雾径向光） */
+    background-image: radial-gradient(
+      ellipse at top,
+      var(--color-surface-mist) 0%,
+      transparent 60%
+    );
   }
   html {
     @apply font-sans;
   }
-  /* 标题不收字距（CJK 无字距收紧习惯，#72 中文排印定稿）。 */
+  /* 标题不收字距（CJK 无字距收紧习惯，#72 中文排印定稿）；DESIGN.md 标题
+     负字距经 text-headline-* 工具类施加（utilities 层优先于此基线）。 */
   h1,
   h2,
   h3,

@@ -1,0 +1,150 @@
+/*
+ * 语义引力视觉 token 基座（#342）——单一事实源＝
+ * docs/stitch_prd/luminous_electric_ai/DESIGN.md（spec #320 ⑥：原型 html
+ * 数值偏移不取）。三层分工：
+ *   1) 原子层（本文件 @theme）：DESIGN.md frontmatter 色板/字号阶/圆角/阴影
+ *      → 生成 Tailwind 工具类（bg-electric-indigo、text-headline-xl…）；
+ *   2) 组件层（本文件 :root）：DESIGN.md Components/Elevation 段的组件级
+ *      token（栅格沟槽/页缘）；
+ *   3) 语义映射（globals.css :root）：既有基件继续消费 --primary/--muted…
+ *      ——兼容层，存量页面零结构破坏、视觉随各页重建票迁移。
+ *
+ * 间距不另立 token：4/8px 基数＝Tailwind 原生 spacing 阶（DESIGN space-xs/
+ * sm/md/lg/xl ↔ 1/2/3/5/8）；间距语义用原生工具类。12 列栅格断点＝原生
+ * md(768px)/xl(1280px)，本文件只补沟槽/页缘变量（附媒体查询三档）。
+ */
+
+@theme {
+  /* —— 色板（DESIGN.md frontmatter 逐名对齐）—— */
+  --color-electric-indigo: #4f46e5;
+  --color-tech-blue: #2563eb;
+  --color-electric-blue-light: #3b82f6;
+  --color-mint-teal: #06b6d4;
+  --color-emerald-active: #10b981;
+
+  --color-canvas-base: #f8fafc;
+  --color-surface-dawn: #f0f4f8;
+  --color-surface-mist: #eff6ff;
+  --color-surface-violet-tint: #f5f3ff;
+  --color-subtle-blue: #e0e7ff; /* frontmatter border-subtle-blue（发光描边） */
+  --color-slate-soft: #e2e8f0; /* frontmatter border-slate-soft（次级分隔） */
+
+  --color-ink-primary: #0f172a;
+  --color-ink-secondary: #1e293b;
+  --color-ink-muted: #475569;
+  --color-ink-faint: #64748b;
+
+  --color-error: #ba1a1a; /* frontmatter error */
+
+  /* 组件级色（DESIGN.md Components 段；frontmatter 未列）*/
+  --color-glass-border-hover: #c7d2fe; /* 玻璃次钮 hover 描边 */
+  --color-success-deep: #047857; /* Success pill 文字 */
+  --color-warning: #f59e0b; /* Warning pill 基色（rgba(245,158,11,…)) */
+  --color-warning-strong: #b45309; /* Warning pill 文字 */
+
+  /* 玻璃表面与遮罩（Elevation 段；1px 描边色走上面两支 border token）*/
+  --color-glass-panel: rgba(255, 255, 255, 0.75); /* L1 磨砂面板（配 blur 12px）*/
+  --color-glass-card: rgba(255, 255, 255, 0.8); /* 默认卡面 */
+  --color-glass-input: rgba(255, 255, 255, 0.85); /* 输入框（配 blur 8px）*/
+  --color-glass-float: rgba(255, 255, 255, 0.9); /* L2 悬停浮层 */
+  --color-glass-modal: rgba(255, 255, 255, 0.94); /* L3 命令框/抽屉（配 blur 16px）*/
+  --color-scrim: rgba(15, 23, 42, 0.2); /* 遮罩（配 blur 4px）*/
+
+  /* —— 圆角：控件 8 / 卡片 16 / 外框 24 / 胶囊（DESIGN Shapes）。
+     注：组件规格「控件标准化 8px」为正——frontmatter rounded md=12 档无消费
+     面不取；radius-lg 保持 8px 是既有基件（button/input）的控件消费面。 */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 1.5rem;
+
+  /* —— elevation（L0 画布光晕挂 body 见 globals；L1–L3 环境投影）—— */
+  --shadow-e1:
+    0 2px 8px -2px rgba(79, 70, 229, 0.05), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-e2:
+    0 8px 20px -4px rgba(79, 70, 229, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.03);
+  --shadow-e3:
+    0 20px 30px -8px rgba(15, 23, 42, 0.08),
+    0 10px 14px -6px rgba(79, 70, 229, 0.06);
+  /* 交互光晕（Components 段：主钮 hover / 输入 focus / 主钮内嵌高光）*/
+  --shadow-glow-primary: 0 4px 14px 0 rgba(79, 70, 229, 0.35);
+  --shadow-focus-halo: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  --shadow-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+
+  /* —— 字号阶（Geist 正文/标题＋JetBrains Mono 代码；字重随阶）。
+     移动变体（*-mobile）供 <768px 消费面取用；CJK 回退见 globals --font-sans。 */
+  --text-headline-xl: 36px;
+  --text-headline-xl--line-height: 44px;
+  --text-headline-xl--letter-spacing: -0.03em;
+  --text-headline-xl--font-weight: 600;
+  --text-headline-xl-mobile: 28px;
+  --text-headline-xl-mobile--line-height: 36px;
+  --text-headline-xl-mobile--letter-spacing: -0.025em;
+  --text-headline-xl-mobile--font-weight: 600;
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-lg--letter-spacing: -0.025em;
+  --text-headline-lg--font-weight: 600;
+  --text-headline-lg-mobile: 20px;
+  --text-headline-lg-mobile--line-height: 28px;
+  --text-headline-lg-mobile--letter-spacing: -0.02em;
+  --text-headline-lg-mobile--font-weight: 600;
+  --text-headline-md: 18px;
+  --text-headline-md--line-height: 26px;
+  --text-headline-md--letter-spacing: -0.02em;
+  --text-headline-md--font-weight: 600;
+  --text-headline-sm: 15px;
+  --text-headline-sm--line-height: 22px;
+  --text-headline-sm--letter-spacing: -0.015em;
+  --text-headline-sm--font-weight: 600;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-body-lg--letter-spacing: -0.01em;
+  --text-body-lg--font-weight: 400;
+  --text-body-md: 14px;
+  --text-body-md--line-height: 20px;
+  --text-body-md--letter-spacing: -0.005em;
+  --text-body-md--font-weight: 400;
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 18px;
+  --text-body-sm--font-weight: 400;
+  --text-label-md: 13px;
+  --text-label-md--line-height: 18px;
+  --text-label-md--font-weight: 500;
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 16px;
+  --text-label-sm--letter-spacing: 0.02em;
+  --text-label-sm--font-weight: 500;
+  --text-code-md: 13px;
+  --text-code-md--line-height: 20px;
+  --text-code-md--letter-spacing: -0.01em;
+  --text-code-md--font-weight: 400;
+  --text-code-sm: 11px;
+  --text-code-sm--line-height: 16px;
+  --text-code-sm--font-weight: 400;
+}
+
+/* —— 12 列栅格沟槽/页缘（DESIGN Layout & Spacing：desktop ≥1280 沟槽 24/
+   页缘 32；tablet 768–1279 沟槽 16/页缘 24；mobile <768 均 16）。断点＝
+   原生 md(48rem)/xl(80rem)；页面栅格 12/8/4 列随各页重建票消费。 */
+:root {
+  --grid-gutter: 1rem;
+  --grid-page-margin: 1rem;
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --grid-gutter: 1rem;
+    --grid-page-margin: 1.5rem;
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --grid-gutter: 1.5rem;
+    --grid-page-margin: 2rem;
+  }
+}

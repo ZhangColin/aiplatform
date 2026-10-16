@@ -8,13 +8,17 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // 三态对齐 DESIGN.md Buttons（#342）：主钮＝电靛→科技蓝 135° 渐变＋
+        // 内嵌高光＋hover 光晕；次钮＝玻璃；幽灵钮＝透明弱墨。深色档经语义
+        // 变量自适应（--secondary/--muted/--accent），渐变主钮两档同形。
+        default:
+          "bg-linear-to-br from-electric-indigo to-tech-blue text-primary-foreground shadow-inset-highlight hover:shadow-glow-primary",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "border-border bg-secondary text-secondary-foreground hover:border-glass-border-hover hover:bg-accent aria-expanded:bg-secondary aria-expanded:text-secondary-foreground dark:hover:border-input",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",

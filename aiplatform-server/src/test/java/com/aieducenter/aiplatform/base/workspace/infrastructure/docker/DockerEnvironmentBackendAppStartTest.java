@@ -91,6 +91,13 @@ class DockerEnvironmentBackendAppStartTest {
             assertThat(c).doesNotContain("serve.js");
             assertThat(c).doesNotContain("DATABASE_URL=");
         });
+        // #340 演示种子施用：拉起链路起服前施用（apply.sh 恒退 0 不阻断拉起），
+        // 先于判据链与 nohup（应用首屏即有内容）
+        String startCommand = backend.commands.stream()
+                .filter(c -> c.contains("nohup")).findFirst().orElse("");
+        assertThat(startCommand).contains("sh /opt/seed/apply.sh");
+        assertThat(startCommand.indexOf("/opt/seed/apply.sh"))
+                .isLessThan(startCommand.indexOf("nohup"));
     }
 
     @Test

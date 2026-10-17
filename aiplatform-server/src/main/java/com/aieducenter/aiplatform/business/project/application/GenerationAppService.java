@@ -439,6 +439,7 @@ public class GenerationAppService {
     private final DesignSpecAppService designSpecs;
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
+    private final DemoSeedAppService demoSeed;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -473,7 +474,8 @@ public class GenerationAppService {
             ConversationHistoryAppService conversationHistory,
             DesignSpecAppService designSpecs,
             BuildDispatchPolicy buildDispatchPolicy,
-            DemoVersionAppService demoVersionAppService) {
+            DemoVersionAppService demoVersionAppService,
+            DemoSeedAppService demoSeed) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -489,6 +491,7 @@ public class GenerationAppService {
         this.designSpecs = designSpecs;
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
+        this.demoSeed = demoSeed;
     }
 
     /**
@@ -946,6 +949,12 @@ public class GenerationAppService {
             boolean markGenerated, String runId, String summary, Integer prdVersionNo) {
         requireReachable(project);
         requireEntryFileComplete(project);
+        if (markGenerated) {
+            // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
+            // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型
+            // 自检）；先于 preview-ready，用户首屏即有内容。失败不阻断收口。
+            demoSeed.seedSandbox(project);
+        }
         emitPreviewReady(project);
         closeSegment(project.getId(), ord, runId);
         if (markGenerated) {

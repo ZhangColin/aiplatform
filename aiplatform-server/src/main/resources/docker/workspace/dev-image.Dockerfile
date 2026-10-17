@@ -66,6 +66,14 @@ ENV RENDER_CHROMIUM=/opt/chrome/chrome-linux/chrome
 COPY baseline/ /opt/baseline/
 RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store
 
+# 演示种子数据（#340）：通用示例集引擎 seed.sql（只补空表、按列形合成）＋幂等
+# 施用入口 apply.sh。三处调用——init-workspace.sh（容器自愈，初始化脚本扩位）、
+# 应用拉起命令（appStartCommand）、平台 run 收口（DemoSeedAppService exec；首跑
+# 的应用表在收口前才成形，纯起跑点注不进首跑）。资源正本在 classpath
+# docker/workspace/seed/，调示例内容改 seed.sql 配置区后随镜像版本重建生效。
+COPY seed/ /opt/seed/
+RUN chmod +x /opt/seed/apply.sh
+
 # 工作区自愈入口：布局骨架 + 基座模板就位 + 容器内 pg/redis 幂等起服务后 exec 交还启动命令
 COPY init-workspace.sh /opt/init-workspace.sh
 RUN chmod +x /opt/init-workspace.sh

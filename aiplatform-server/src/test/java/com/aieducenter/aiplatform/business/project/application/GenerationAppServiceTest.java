@@ -359,6 +359,53 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_slices_when_generate_then_demo_seed_applied_once_at_last_closing() {
+        // #340 演示种子预置：生成轨道只有末段收口（Demo 将可见前一刻、表已由 run 长出）
+        // 施用种子——中段收口不种（不扰动后续片的模型自检），全场一次；施用先于
+        // 末次 preview-ready（用户首屏即有内容可看）
+        Long projectId = persistedProject("9833");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9833"), execs.capture());
+        List<String> seedExecs = execs.getAllValues().stream()
+                .map(WorkspaceExecCommand::command)
+                .filter(cmd -> cmd.contains("/opt/seed/apply.sh"))
+                .toList();
+        // 阶段 0 + 2 片 = 3 次收口，只在末段种一次
+        assertThat(seedExecs).hasSize(1);
+        // 施用先于末次 preview-ready（seed → exposePreview 的相对序）
+        InOrder order = inOrder(workspaceLifecycleAppService);
+        order.verify(workspaceLifecycleAppService).exec(eq("9833"),
+                argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh")));
+        order.verify(workspaceLifecycleAppService).exposePreview(anyString());
+    }
+
+    @Test
+    void given_seed_exec_fails_when_generate_then_last_closing_not_blocked() {
+        // #340 失败不阻断：种子施用抛错也不影响收口（片全收口、首版落位照常）
+        Long projectId = persistedProject("9834");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
+                .thenThrow(new IllegalStateException("容器 exec 失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录")));
+
+        assertThat(generatedAt(projectId)).isNotNull();
+        verify(eventsAppService, times(2)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
+                anyMap());
+    }
+
+    @Test
     void given_slice_closes_when_generate_then_preview_ready_pushed_with_url() {
         // #105 URL 事件驱动：切片收口（阶段 0 + 每片，8081 探活通过后）推
         // preview-ready(URL)——前端 bridge 写预览查询缓存，免 3s 轮询拿 URL

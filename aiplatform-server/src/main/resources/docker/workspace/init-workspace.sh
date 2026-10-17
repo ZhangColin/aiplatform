@@ -45,6 +45,11 @@ if [ -n "${WORKSPACE_DB:-}" ] && ! su postgres -c \
   su postgres -c "$PG_BIN/createdb -h localhost -U postgres -O '$WORKSPACE_DB' '$WORKSPACE_DB'"
 fi
 
+# 3.5) 演示种子数据预置（#340，初始化脚本扩位；幂等、失败不阻断）：通用示例集
+#      补空表。首建卷此刻尚无应用表（run 生成中建表）自然空转；重建/重启的既有
+#      卷上有表时补位。首跑的注入点在 run 收口（DemoSeedAppService）。
+sh /opt/seed/apply.sh || true
+
 # 4) redis：纯缓存不落盘（无持久化文件），未在跑则起（回环绑定，无对外端口）。
 if ! redis-cli -h localhost -p "$REDIS_PORT" ping >/dev/null 2>&1; then
   redis-server --daemonize yes --bind 127.0.0.1 --port "$REDIS_PORT" \

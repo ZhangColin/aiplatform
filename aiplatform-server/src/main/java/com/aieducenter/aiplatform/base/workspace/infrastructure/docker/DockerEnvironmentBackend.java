@@ -63,17 +63,20 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
-     * 0.12（#296）：基座 devDependencies 增 @shadcn/lint＋oxlint（遵守三件套③——
-     * 带规范项目收口 token 合规扫描的容器内执行件）＋基座骨架页改语义 token（调色板
-     * 收窄兼容）＋渲染层前移（基座依赖演进不触发 chromium 重下载）。0.11（#284）：
-     * 镜像内置位图出口渲染器（/opt/render——chromium＋Playwright HTML→PNG 保真
-     * 渲染、resvg SVG→PNG 零浏览器旁路，ADR-0026/0027；压缩体积 +0.4–0.5GB、
-     * Playwright 版本强绑定）。0.10（#283）：init-workspace.sh 增设计线三目录骨架
-     * （materials/design/exports，ADR-0027）。0.9（#264 T6）：撤 skills 骨架位
-     * （ADR-0022）。升版强制重建镜像，存量项目经既有幂等重建（唤醒/重建容器即用
-     * 新镜像）自愈。
+     * 0.13（#340）：镜像增 /opt/seed 演示种子资产（seed.sql 通用示例集引擎＋
+     * apply.sh 幂等施用入口），init-workspace.sh 增种子施用步、appStartCommand
+     * 拉起前施用（run 收口侧由 DemoSeedAppService exec——首跑的应用表在收口前才
+     * 成形，纯起跑点注不进首跑）。0.12（#296）：基座 devDependencies 增
+     * @shadcn/lint＋oxlint（遵守三件套③——带规范项目收口 token 合规扫描的容器内
+     * 执行件）＋基座骨架页改语义 token（调色板收窄兼容）＋渲染层前移（基座依赖
+     * 演进不触发 chromium 重下载）。0.11（#284）：镜像内置位图出口渲染器
+     * （/opt/render——chromium＋Playwright HTML→PNG 保真渲染、resvg SVG→PNG 零
+     * 浏览器旁路，ADR-0026/0027；压缩体积 +0.4–0.5GB、Playwright 版本强绑定）。
+     * 0.10（#283）：init-workspace.sh 增设计线三目录骨架（materials/design/exports，
+     * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
+     * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.12";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.13";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
@@ -419,16 +422,19 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * 容器内起服命令（与快照 {@link #snapshotAppStartCommand} 同款判据链的主容器版）：
      * 先按需重装依赖（#172 深度唤醒：封存包排除 node_modules，解包后缺失则
      * {@code pnpm install}——基座包管理器与 store-dir 约定见镜像 Dockerfile，锁文件
-     * 随包、装完与判据链同窗等待）；再 server.js → node server.js；package.json →
-     * npm start；无入口静默退出（exit 0、不输出 started 哨兵——调用方以此区分
-     * 「拉了等起服」与「无入口不拉」。注意 shell 优先级：{@code &} 是命令分隔符会把
-     * 整段后台化，哨兵必须经 {@code { …& } &&} 前台条件执行，否则 exit 0 后哨兵仍
-     * 输出）。差异：不注入 DATABASE_URL/REDIS_URL（主容器 .env 在位、应用自读，
-     * #45 口径平台不代起静态兜底，故无 serve.js 兜底分支）、日志落卷内 .app.log。
+     * 随包、装完与判据链同窗等待）；再演示种子施用（#340：幂等补空表，拉起前一刻
+     * 补位——apply.sh 恒退 0 不阻断拉起）；再 server.js → node server.js；
+     * package.json → npm start；无入口静默退出（exit 0、不输出 started 哨兵——
+     * 调用方以此区分「拉了等起服」与「无入口不拉」。注意 shell 优先级：{@code &}
+     * 是命令分隔符会把整段后台化，哨兵必须经 {@code { …& } &&} 前台条件执行，
+     * 否则 exit 0 后哨兵仍输出）。差异：不注入 DATABASE_URL/REDIS_URL（主容器
+     * .env 在位、应用自读，#45 口径平台不代起静态兜底，故无 serve.js 兜底分支）、
+     * 日志落卷内 .app.log。
      */
     private String appStartCommand() {
         return "cd " + WorkspaceLayout.ROOT
                 + " && if test -f package.json && ! test -d node_modules; then pnpm install; fi"
+                + " && sh /opt/seed/apply.sh"
                 + " && if test -f server.js; then APP='node server.js';"
                 + " elif test -f package.json; then APP='npm start';"
                 + " else exit 0; fi"
@@ -619,6 +625,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
             copyResourceTree("docker/workspace/baseline", dir.resolve("baseline"));
             copyResourceTree("docker/workspace/render", dir.resolve("render"));
+            copyResourceTree("docker/workspace/seed", dir.resolve("seed"));
             run("docker", "build", "-t", DEV_IMAGE, dir.toString());
         } catch (ApplicationException e) {
             throw e;

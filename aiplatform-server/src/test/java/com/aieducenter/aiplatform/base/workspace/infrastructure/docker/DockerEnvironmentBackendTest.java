@@ -164,6 +164,43 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_workspace_with_empty_table_when_container_restarts_then_demo_seed_applied() {
+        // #340 演示种子预置（spec #320 容器内可观察结果 seam）：初始化脚本扩位——
+        // 容器自愈链路（重启/重建）对既有卷的空表确定性补种通用示例集。首建卷时
+        // 应用表尚不存在（run 生成中建表），该侧由 run 收口补位（见
+        // GenerationAppService/IterationAppService 收口缝），此处验自愈侧。
+        requireDockerDaemon();
+        WorkspaceId workspaceId = WorkspaceId.generate();
+        provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
+        String db = "ws" + workspaceId.value();
+        WorkspaceHandle handle = provision.handle();
+
+        // 镜像内置种子资产（引擎 + 施用入口）
+        assertThat(execIn(handle, "test -f /opt/seed/seed.sql").exitCode())
+                .as("镜像应内置演示种子引擎").isZero();
+        assertThat(execIn(handle, "test -f /opt/seed/apply.sh").exitCode())
+                .as("镜像应内置种子施用入口").isZero();
+
+        // 模拟「模型已建表、未放数据」的空业务表
+        assertThat(psql(handle.containerName(), db,
+                "CREATE TABLE demo_orders(id serial PRIMARY KEY, title text NOT NULL)").exitCode())
+                .as("空业务表应可建").isZero();
+        assertThat(psql(handle.containerName(), db, "SELECT count(*) FROM demo_orders")
+                .stdout().trim()).isEqualTo("0");
+
+        // 容器重启 → 入口脚本自愈（pg 起回）→ 种子施用步补空表
+        docker("restart", handle.containerName());
+        awaitPgReady(handle.containerName());
+
+        assertThat(psql(handle.containerName(), db, "SELECT count(*) FROM demo_orders")
+                .stdout().trim()).as("重启后空表应被补上通用示例行").isEqualTo("10");
+        assertThat(psql(handle.containerName(), db,
+                        "SELECT count(*) FROM demo_orders WHERE title IS NULL OR length(title) = 0")
+                .stdout().trim()).as("示例行应有内容（列表页非空可看）").isEqualTo("0");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_created_workspace_when_exec_then_command_output_captured() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
@@ -461,6 +498,23 @@ class DockerEnvironmentBackendTest {
     private static ExecResult psql(String containerName, String db, String sql) {
         return docker("exec", containerName, "sh", "-c",
                 "psql -h localhost -U postgres -d " + db + " -tAc '" + sql + "'");
+    }
+
+    /** 轮询容器内 pg 就绪（容器重启后自愈入口起回 pg，最长 60s）。 */
+    private static void awaitPgReady(String containerName) {
+        long deadline = System.currentTimeMillis() + 60_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (docker("exec", containerName, "pg_isready", "-h", "localhost").ok()) {
+                return;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("等待 pg 就绪被中断", e);
+            }
+        }
+        throw new AssertionError("容器重启后 pg 未在期限内就绪");
     }
 
     /** 幂等 init + 成版提交（照 WorkspaceVersions 纯函数——exclude 挡住 data/pg 重物）。 */

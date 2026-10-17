@@ -104,6 +104,7 @@ public class IterationAppService {
     private final DesignSpecAppService designSpecs;
     private final DemoVersionAppService demoVersionAppService;
     private final PrdDraftBaseline prdDraftBaseline;
+    private final DemoSeedAppService demoSeed;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -121,7 +122,8 @@ public class IterationAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             DesignSpecAppService designSpecs,
             DemoVersionAppService demoVersionAppService,
-            PrdDraftBaseline prdDraftBaseline) {
+            PrdDraftBaseline prdDraftBaseline,
+            DemoSeedAppService demoSeed) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -132,6 +134,7 @@ public class IterationAppService {
         this.designSpecs = designSpecs;
         this.demoVersionAppService = demoVersionAppService;
         this.prdDraftBaseline = prdDraftBaseline;
+        this.demoSeed = demoSeed;
     }
 
     /**
@@ -364,6 +367,9 @@ public class IterationAppService {
                         project.getId(), e.toString());
             }
         }
+        // 演示种子预置（#340）：迭代收口补位——系统实动后可能有新空表（幂等引擎
+        // 只补空表，未动系统的收口自然空转）；失败不阻断收工。
+        demoSeed.seedSandbox(project);
         List<String> prdNotes = handoff.rounds().stream()
                 .map(FixHandoff.Round::prdRevisionSummary)
                 .filter(summary -> summary != null && !summary.isBlank())

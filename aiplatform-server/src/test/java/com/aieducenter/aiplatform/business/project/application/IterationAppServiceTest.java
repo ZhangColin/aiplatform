@@ -384,6 +384,26 @@ class IterationAppServiceTest {
     // ---------- 结束工具收口（#46：finish_edit 事实观测；判定呈现归 #88 收口扩载） ----------
 
     @Test
+    void given_fix_run_when_closes_then_demo_seed_applied_and_failure_not_blocking() {
+        // #340 演示种子预置：迭代收口（系统实动后可能有新空表）施用种子——changed
+        // 真假两态都收口不炸；施用失败也不阻断收工（轨道释放、下一场可派）
+        Long projectId = persistedGeneratedProject("9916");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseFinishing(true, "已按意见修正");
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh"))))
+                .thenThrow(new IllegalStateException("容器 exec 失败"));
+
+        appService.startFixRun(projectId, "列表页加一列状态", null);
+        tracks.remove(0).run();
+
+        // 施用确已发起（exec 命中种子入口）且失败被吞——轨道正常收工
+        verify(workspaceLifecycleAppService, times(1)).exec(eq("9916"),
+                argThat(cmd -> cmd != null && cmd.command().contains("/opt/seed/apply.sh")));
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+    }
+
+    @Test
     void given_finish_edit_changed_false_when_fix_closes_then_normal_close_no_unchanged_frame() {
         // 灵魂用例（#46 → #82 收缩）：脚本化结束工具 changed=false = 正常收口——
         // 判定结果的呈现归收口扩载权威化（#88 收尾卡判定行），本层零事件

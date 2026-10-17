@@ -39,7 +39,14 @@ public enum OrderMessage implements CodeMessage {
     ORDER_DOWNLOAD_NOT_PAID(402, "ORD_015", "还未支付，暂不能下载：平台上可随意浏览和预览，带走文件需先完成订单支付"),
 
     /** 设计资产包取件的类型面（#297）：系统单交付物不含设计资产包（源码包实时取）——订单寻址成功而交付物类型不符，如实 404 不假装有包。 */
-    ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE(404, "ORD_016", "该订单的交付物不含设计资产包（系统单交付物是源码包）");
+    ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE(404, "ORD_016", "该订单的交付物不含设计资产包（系统单交付物是源码包）"),
+
+    /**
+     * 签约门（#328）：未登录绑定（访客身份）走下单入口被拦——签约前置＝账号绑定
+     * （M01 登录与项目绑定），联系人/签约主体顺势收集。前端认本码弹 M01；
+     * 绑定后重试放行（账户会话在场即过闸）。
+     */
+    ORDER_BINDING_REQUIRED(403, "ORD_017", "签约前请先登录绑定账号（保存项目可跨设备继续并签署合同）");
 
     private final int httpStatus;
     private final String code;

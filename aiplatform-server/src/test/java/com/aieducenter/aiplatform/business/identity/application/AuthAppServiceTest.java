@@ -119,7 +119,7 @@ class AuthAppServiceTest {
         stubExchangeAndVerify(txn.nonce(), claims("张三"));
 
         LoginCompletion completion = appService.completeLogin("code-1", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.sessionCookie()).isNotNull();
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/projects");
@@ -143,13 +143,13 @@ class AuthAppServiceTest {
         OauthTransaction first = OauthTransaction.issue("/");
         stubExchangeAndVerify(first.nonce(), claims("张三"));
         LoginCompletion firstCompletion =
-                appService.completeLogin("code-1", first.state(), first.cookieValue());
+                appService.completeLogin("code-1", first.state(), first.cookieValue(), null);
         Long firstAccountId = accountAppService.accountByIdentifier(sub).orElseThrow().getId();
 
         OauthTransaction second = OauthTransaction.issue("/next");
         stubExchangeAndVerify(second.nonce(), claims("李四"));
         LoginCompletion secondCompletion =
-                appService.completeLogin("code-2", second.state(), second.cookieValue());
+                appService.completeLogin("code-2", second.state(), second.cookieValue(), null);
 
         assertThat(secondCompletion.sessionCookie()).isNotNull();
         assertThat(secondCompletion.redirectTo()).isEqualTo(APP_BASE + "/next");
@@ -166,7 +166,7 @@ class AuthAppServiceTest {
 
     @Test
     void given_no_txn_cookie_when_complete_then_state_mismatch_and_no_session() {
-        LoginCompletion completion = appService.completeLogin("code-1", "some-state", null);
+        LoginCompletion completion = appService.completeLogin("code-1", "some-state", null, null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=state_mismatch");
         assertThat(completion.sessionCookie()).isNull();
@@ -178,7 +178,7 @@ class AuthAppServiceTest {
         OauthTransaction txn = OauthTransaction.issue("/");
 
         LoginCompletion completion = appService.completeLogin("code-1", "attacker-state",
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=state_mismatch");
         assertThat(completion.sessionCookie()).isNull();
@@ -190,7 +190,7 @@ class AuthAppServiceTest {
         OauthTransaction txn = OauthTransaction.issue("/");
 
         LoginCompletion completion = appService.completeLogin(null, txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();
@@ -204,7 +204,7 @@ class AuthAppServiceTest {
                         "{\"error\":\"invalid_grant\"}", null));
 
         LoginCompletion completion = appService.completeLogin("bad-code", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();
@@ -220,7 +220,7 @@ class AuthAppServiceTest {
                 .thenThrow(new IdTokenRejectedException("RS256 验签失败"));
 
         LoginCompletion completion = appService.completeLogin("code-1", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();

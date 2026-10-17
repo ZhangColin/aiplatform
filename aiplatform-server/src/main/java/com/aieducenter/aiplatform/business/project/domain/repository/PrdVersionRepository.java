@@ -17,6 +17,9 @@ public interface PrdVersionRepository extends BaseRepository<PrdVersion, Long> {
     /** 项目已确认版本清单（version_no 倒序——最新在前；空 = 从未确认）。 */
     List<PrdVersion> findByProjectIdOrderByVersionNoDesc(Long projectId);
 
+    /** 存在已确认版本？（#332 生成加门：收口观测判据——存在即首个构建 run 触发条件满足）。 */
+    boolean existsByProjectId(Long projectId);
+
     /** 单版寻址（详情/成版判定「最新版」取件）。 */
     Optional<PrdVersion> findByProjectIdAndVersionNo(Long projectId, int versionNo);
 

@@ -3,6 +3,10 @@ package com.aieducenter.aiplatform.business.project.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -92,6 +96,11 @@ class PrdVersionAppServiceTest {
     /** PRD 直读工作区的执行缝（确认的全文来源＝PRD 读端点同缝）。 */
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
+    /** 生成加门（#332）次生派发缝：确认成版后自动派首个 Demo run——本用例只核
+     * 「确认动作触发了派发」，派发本身的行为归 {@link GenerationAppServiceTest}。 */
+    @MockitoBean
+    private GenerationAppService generationAppService;
 
     @AfterEach
     void tearDown() {
@@ -247,6 +256,56 @@ class PrdVersionAppServiceTest {
                 .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0));
         assertThat(appService.version(projectId, 1).readiness().minor()).hasSize(1);
         assertThat(appService.version(projectId, 1).readiness().blocking()).isEmpty();
+    }
+
+    // ---------- 生成加门（#332）：确认成版后自动派首个 Demo run ----------
+
+    @Test
+    void given_draft_prd_when_confirm_then_first_demo_dispatched() {
+        // 灵魂例（#332）：确认动作过门成版后，平台自动派首个构建 run——「确认此版
+        // PRD 并生成 Demo」是首个构建 run 的唯一触发（确认缝触发派发）
+        Long projectId = persistedPrdProject(PRD_V1);
+
+        appService.confirm(projectId);
+
+        verify(generationAppService).dispatchFirstDemoOnConfirm(projectId);
+    }
+
+    @Test
+    void given_repeated_confirm_without_new_draft_when_again_then_dispatch_invoked_each_time() {
+        // 重确认（幂等返回既有版）仍触发派发——派发侧幂等（已生成/在途静默跳过），
+        // 确认只管「触发」，重复点击不产生新版本但每次都尝试起 Demo（首个未生成时有效）
+        Long projectId = persistedPrdProject(PRD_V1);
+        appService.confirm(projectId);
+
+        appService.confirm(projectId);
+
+        verify(generationAppService, org.mockito.Mockito.times(2))
+                .dispatchFirstDemoOnConfirm(projectId);
+    }
+
+    @Test
+    void given_blocking_pending_when_confirm_then_no_dispatch() {
+        // 门拦截（PRJ_053）即不成版、更不派——派发只在确认成功后发生
+        Long projectId = persistedPrdProject(PRD_BLOCKING);
+
+        assertThatThrownBy(() -> appService.confirm(projectId))
+                .isInstanceOf(ApplicationException.class);
+
+        verify(generationAppService, never()).dispatchFirstDemoOnConfirm(anyLong());
+    }
+
+    @Test
+    void given_dispatch_fails_when_confirm_then_version_still_confirmed() {
+        // 派发是次生事实、失败不反噬确认回执（版本已落库，用户重确认即再触发）
+        Long projectId = persistedPrdProject(PRD_V1);
+        doThrow(new IllegalStateException("环境故障"))
+                .when(generationAppService).dispatchFirstDemoOnConfirm(projectId);
+
+        PrdVersionResponse version = appService.confirm(projectId);
+
+        assertThat(version.versionNo()).isEqualTo(1);
+        assertThat(version.content()).isEqualTo(PRD_V1);
     }
 
     // ---------- 守卫：未产出 / 已归档 / 项目不存在 / 版本不存在 ----------

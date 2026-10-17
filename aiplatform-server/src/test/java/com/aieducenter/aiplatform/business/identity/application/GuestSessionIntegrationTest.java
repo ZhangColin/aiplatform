@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
 
@@ -305,30 +304,25 @@ class GuestSessionIntegrationTest {
         assertThat(throttled.getResponse().getHeader("Set-Cookie")).isNull();
     }
 
-    // ---------- 访客下单：归属访客列＋订单事件发布不炸 ----------
+    // ---------- 签约门（#328）：未登录绑定的访客走下单入口被拦 ----------
 
     @Test
-    void given_guest_project_with_prd_when_place_order_then_owned_by_guest() throws Exception {
+    void given_guest_project_with_prd_when_place_order_then_blocked_by_binding_gate()
+            throws Exception {
         issueGuestWithProject("访客下单项目");
         Long projectId = firstGuestProjectId();
         jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?",
                 projectId);
 
-        // place 内同步走 publishNotification（归属路由键 fail-fast）——访客键在场不炸
-        MvcResult placed = mockMvc.perform(post("/api/projects/" + projectId + "/orders")
+        // 签约门：访客身份（有效凭证、无账户会话）走下单入口被拦——403 ORD_017
+        // （数字码 5017），前端认码弹 M01；零下单副作用（无订单行）
+        mockMvc.perform(post("/api/projects/" + projectId + "/orders")
                         .cookie(new Cookie(AuthCookies.GUEST_COOKIE_NAME, credential)))
-                .andExpect(status().isOk())
-                .andReturn();
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(5017));
 
-        JsonNode order = objectMapper.readTree(placed.getResponse().getContentAsString())
-                .path("data");
-        Long orderId = Long.parseLong(order.path("id").asText());
-        Long orderGuest = jdbcTemplate.queryForObject(
-                "SELECT owner_guest_id FROM ord_orders WHERE id = ?", Long.class, orderId);
-        assertThat(orderGuest).isEqualTo(guestId);
-        Long orderAccount = jdbcTemplate.queryForObject(
-                "SELECT owner_account_id FROM ord_orders WHERE id = ?", Long.class, orderId);
-        assertThat(orderAccount).isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM ord_orders", Long.class))
+                .isEqualTo(0L);
     }
 
     // ---------- SSE 订阅握手：访客凭证过 /api/events 拦截面 ----------

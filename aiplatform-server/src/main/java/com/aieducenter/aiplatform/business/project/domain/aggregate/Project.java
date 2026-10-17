@@ -76,17 +76,20 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     /**
      * 归属账号（A2 落列、#325 起进读面过滤与单项目守卫；测试/无会话上下文可空）。
      * 与 {@link #ownerGuestId} 逻辑互斥（聚合守卫＋库层 CHECK 兜底，至多一方落值）。
+     * #328 起可更新——绑定平移（{@link #transferToAccount}）把访客项目过户到账户，
+     * 唯一写路径即该动作（聚合无其他 setter；#325 的 updatable=false 曾使「创建即
+     * 定格」，本票的平移是首个再入职责，故解禁）。
      */
-    @Column(name = "owner_account_id", updatable = false)
+    @Column(name = "owner_account_id")
     private Long ownerAccountId;
 
     /**
      * 归属访客（#325 建列、#326 挂载写入方——首条需求消息惰性建访客后随建项目
      * 落列）：访客独立表 idn_guests 的软引用；与 {@link #ownerAccountId} 逻辑
      * 互斥（聚合守卫＋库层 CHECK 双保险）；owner 过滤的访客维度（列表谓词与
-     * SSE 路由键 ownerGuestId）同源本列。
+     * SSE 路由键 ownerGuestId）同源本列。#328 平移时清空（{@link #transferToAccount}）。
      */
-    @Column(name = "owner_guest_id", updatable = false)
+    @Column(name = "owner_guest_id")
     private Long ownerGuestId;
 
     /** 归档时间（单向终点；NULL = 未归档，归档动作归片5c）。 */
@@ -273,6 +276,21 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
             return Objects.equals(ownerGuestId, guestId);
         }
         return ownerAccountId == null && ownerGuestId == null;
+    }
+
+    /**
+     * 归属平移（#328 绑定平移）：访客项目过户给账户——owner_account_id 落值、
+     * owner_guest_id 清空（owner 双列逻辑互斥不变量在聚合；库层 CHECK 兜底）。
+     * 守卫：目标账户非空、且当前确为访客归属（owner_guest_id 非空）——已平移过
+     * （owner_guest_id 已清）不可再平移（幂等由调用方按 owner_guest_id 查询保证，
+     * 聚合层拒绝二次平移）。
+     */
+    public void transferToAccount(Long accountId) {
+        if (accountId == null || ownerGuestId == null) {
+            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
+        }
+        this.ownerAccountId = accountId;
+        this.ownerGuestId = null;
     }
 
     /**

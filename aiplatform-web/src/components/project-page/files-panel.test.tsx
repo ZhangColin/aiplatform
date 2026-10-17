@@ -38,6 +38,12 @@ vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => seed.prd,
 }));
 
+// 确认门数据口（#332）：PrdDoc 内嵌 PrdConfirmGate 消费本 hook——同「数据口全
+// mock」口径打桩（不真连 react-query，本用例只核文件树呈现）。
+vi.mock("@/hooks/use-confirm-prd", () => ({
+  useConfirmPrd: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 vi.mock("@/hooks/use-project-file-content", () => ({
   useProjectFileContent: (_projectId: string, path: string | null) =>
     seed.content.byPath[path ?? ""] ?? { isPending: true },

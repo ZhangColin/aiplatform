@@ -2,12 +2,14 @@ package com.aieducenter.aiplatform.business.identity.endpoints.controller;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.cartisan.web.response.ApiResponse;
 
+import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.application.CodeLoginAppService;
 import com.aieducenter.aiplatform.business.identity.application.dto.command.SendVerificationCodeCommand;
 import com.aieducenter.aiplatform.business.identity.application.dto.command.VerifyCodeLoginCommand;
@@ -47,14 +49,21 @@ public class CodeLoginController {
     @Operation(summary = "验码登录（不存在即静默建账户）", description = """
             M01 弹窗第二步：验码即登录——无密码，账户不存在则静默建档（显示名缺省＝
             标识原文）＋种 aiplatform_session 会话 cookie（契约与 OIDC 登录同源）。
-            验过即消费（一次性）。目标形态无效 400→6005；验证码错误或已过期
-            （含超次作废、无在途码，不区分错环节）400→6008。回执＝当前账号
-            （MeResponse 同形）。""")
+            登录即自动平移（#328）：请求携带有效访客凭证（aiplatform_guest）时把访客
+            名下未绑定项目过户给账户并作废访客行，响应清访客凭证 cookie；凭证无效/过期
+            仅清 cookie 不平移，不阻断登录。验过即消费（一次性）。目标形态无效
+            400→6005；验证码错误或已过期（含超次作废、无在途码，不区分错环节）400→6008。
+            回执＝当前账号（MeResponse 同形）。""")
     public ResponseEntity<ApiResponse<MeResponse>> verify(
-            @RequestBody VerifyCodeLoginCommand command, HttpServletResponse response) {
+            @RequestBody VerifyCodeLoginCommand command,
+            @CookieValue(value = AuthCookies.GUEST_COOKIE_NAME, required = false) String guestCredential,
+            HttpServletResponse response) {
         CodeLoginAppService.CodeLoginCompletion completion =
-                appService.verifyAndLogin(command.target(), command.code());
+                appService.verifyAndLogin(command.target(), command.code(), guestCredential);
         response.addHeader(HttpHeaders.SET_COOKIE, completion.sessionCookie().toString());
+        if (completion.guestClearCookie() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, completion.guestClearCookie().toString());
+        }
         return ResponseEntity.ok(ApiResponse.ok(completion.account()));
     }
 }

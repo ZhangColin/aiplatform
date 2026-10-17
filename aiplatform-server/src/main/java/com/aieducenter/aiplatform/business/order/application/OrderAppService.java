@@ -33,9 +33,11 @@ import lombok.extern.slf4j.Slf4j;
  * mock 支付——#37/#39 支付原子化：支付原子（落已支付）与归档（订单 + 项目）拆
  * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发；#297 交付物类型
  * ＋设计资产包下单冻结——交易机制零改版，下单多冻结一维）：确认下单 = 冻结
- * 下单时 PRD 全文快照＋交付物类型入单，待报价起步。项目事实（存在性/归档态/
- * PRD 正文/终点类型）经 {@code business.project} 应用层软引用——跨 BC 无 FK，
- * 同一口径。
+ * 下单时 PRD 全文快照＋交付物类型入单，待报价起步。下单快照的上游＝PRD 确认
+ * 版本（#330 确认即成版、#332 生成加门：确认是首个构建 run 与下单的共同引用锚；
+ * 本处行为不变仍读当前 PRD 正文，下单改「引用已确认版本」的引用语义随 #335 承接）。
+ * 项目事实（存在性/归档态/PRD 正文/终点类型）经 {@code business.project} 应用
+ * 层软引用——跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
@@ -99,11 +101,19 @@ public class OrderAppService {
      *
      * @return 订单（待报价起步，快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
-     *                              （项目上下文原样透传）；ORD_004 项目已归档；
-     *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）；
-     *                              WSP_002 设计资产包打包失败（环境故障，零残留）
+     *                              （项目上下文原样透传）；ORD_017 签约门——未登录
+     *                              绑定（访客身份）走下单入口被拦；ORD_004 项目已
+     *                              归档；ORD_003 该项目已有未终结订单（预检或并发
+     *                              撞索引）；WSP_002 设计资产包打包失败（环境故障，
+     *                              零残留）
      */
     public OrderResponse place(Long projectId) {
+        // 签约门（#328，spec 段②）：进下单/签约流程即要求绑定——访客身份（有效
+        // 访客凭证、无账户会话）被拦，前端认 ORD_017 弹 M01；绑定（登录即平移）
+        // 后账户会话在场即过闸。守卫最前：未绑定者不触任何下单副作用。
+        if (GuestContext.guestId() != null) {
+            throw new ApplicationException(OrderMessage.ORDER_BINDING_REQUIRED);
+        }
         ProjectDetailResponse project = projectQueryAppService.detail(projectId);
         if (project.archived()) {
             throw new ApplicationException(OrderMessage.ORDER_PROJECT_ARCHIVED);

@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProjectDetail } from "@/lib/projects/detail";
+import { ApiError } from "@/lib/api/api-error";
+import { useM01Store } from "@/lib/store/m01";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
 import { ProjectPageView } from "./project-page-view";
@@ -16,6 +18,10 @@ import { ProjectPageView } from "./project-page-view";
 // project-page-view.test。
 
 const seed = vi.hoisted(() => ({ detail: undefined as ProjectDetail | undefined }));
+/** usePlaceOrder 的 mutate 选项捕获（签约门用例手工触发 onError）。 */
+const order = vi.hoisted(() => ({
+  options: undefined as { onError?: (e: unknown) => void } | undefined,
+}));
 
 vi.mock("@/hooks/use-project", () => ({
   useProject: () => ({
@@ -51,7 +57,12 @@ vi.mock("@/hooks/use-project-preview", () => ({
   useProjectPreview: () => ({ data: undefined, isPending: false, isError: false }),
 }));
 vi.mock("@/hooks/use-order", () => ({
-  usePlaceOrder: () => ({ isPending: false, mutate: vi.fn() }),
+  usePlaceOrder: () => ({
+    isPending: false,
+    mutate: (_v: unknown, options?: { onError?: (e: unknown) => void }) => {
+      order.options = options;
+    },
+  }),
   useOrder: () => ({ data: undefined, isPending: false }),
   useCancelOrder: () => ({ isPending: false, mutate: vi.fn() }),
 }));
@@ -64,6 +75,8 @@ vi.mock("@/lib/sse/provider", () => ({
 afterEach(() => {
   cleanup();
   useWorkMessageStore.setState({ works: {} });
+  useM01Store.setState({ open: false, trigger: null, resume: null });
+  order.options = undefined;
 });
 
 function mountView() {
@@ -130,5 +143,56 @@ describe("ProjectPageView · 设计稿 tab 的 live 切面（#293）", () => {
     ).toBe(true);
     // 成果区随之呼出（画布在场）
     expect(screen.getAllByText("设计稿会在这里长出来").length).toBeGreaterThan(0);
+  });
+});
+
+describe("ProjectPageView · 签约门（#328）", () => {
+  it("未绑定访客确认下单被拦（ORD_017/5017）→ 弹 M01（stage-gate 携续跑回调）", () => {
+    seed.detail = {
+      id: "p1",
+      name: "项目",
+      prdProducedAt: "2026-10-01T08:00:00Z",
+      generatedAt: "2026-10-01T08:00:00Z",
+    };
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProjectPageView projectId="p1" />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "确认下单" }));
+    expect(order.options).toBeDefined();
+
+    // 后端拦下（访客未绑定）→ 调用侧 onError 收到业务码 5017 → 开门 stage-gate
+    act(() => {
+      order.options?.onError?.(
+        new ApiError({ status: 403, code: 5017, message: "签约前请先登录绑定账号" }),
+      );
+    });
+
+    expect(useM01Store.getState().open).toBe(true);
+    expect(useM01Store.getState().trigger).toBe("stage-gate");
+    expect(typeof useM01Store.getState().resume).toBe("function"); // 绑定后放行：续跑本单
+  });
+
+  it("非签约门错误（如 409 已有未终结订单）不弹 M01", () => {
+    seed.detail = {
+      id: "p1",
+      name: "项目",
+      prdProducedAt: "2026-10-01T08:00:00Z",
+      generatedAt: "2026-10-01T08:00:00Z",
+    };
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ProjectPageView projectId="p1" />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "确认下单" }));
+    act(() => {
+      order.options?.onError?.(new ApiError({ status: 409, code: 5003, message: "已有未终结订单" }));
+    });
+
+    expect(useM01Store.getState().open).toBe(false);
   });
 });

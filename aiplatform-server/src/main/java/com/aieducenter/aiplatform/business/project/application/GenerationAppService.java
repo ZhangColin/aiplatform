@@ -41,11 +41,12 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 生成编排（#22 片2-1；#101 生成无门自动发起——「开始做系统」按钮退役，生成
- * 触发权归平台；#104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
- * 主智能体产出 PRD 后意见轮收口即自动派首次生成轨
- * （{@link #dispatchGenerationOnTurnClose}），显式端点（POST /generate）与中断
- * 「继续生成」兜底走同一编排（{@link #startGeneration}——重发即断点续跑，#221）。
+ * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门——「确认此版 PRD
+ * 并生成 Demo」成为首个构建 run 的唯一触发，旧「PRD 出即自动起」口径退役；
+ * #104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
+ * 首次生成由确认动作触发（{@link #dispatchFirstDemoOnConfirm}，确认即成版后自动
+ * 派首个 Demo run），显式端点（POST /generate）与中断「继续生成」兜底走同一编排
+ * （{@link #startGeneration}——重发即断点续跑，#221）。
  * run 执行体与主智能体
  * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
  * 极薄），仅资产与工具不同：会话每片/每 run 换新（#114 会话有界——每片新会话
@@ -82,8 +83,11 @@ import lombok.extern.slf4j.Slf4j;
  * 缺口；措辞漂移即对照不上、按待跑重做（降级方向安全：多跑不漏做）。PRD 已演进
  * 的换锚重产（表内有旧片行）不适用存量对照——整组替换重置、从头来是既定口径。</p>
  *
- * <p><b>纯动作无门</b>：待定项未清也可发起（守卫只有项目存在 / 未归档 /
- * 未生成过 / PRD 已产出）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
+ * <p><b>生成加门（#332）</b>：首个构建 run 的唯一触发＝确认此版 PRD
+ * （{@link #dispatchFirstDemoOnConfirm}）——PRD 产出不再自动起（旧口径退役，
+ * ADR-0008 改写为确认门口径）。确认动作过两级门（#331）成版后自动派；未生成＋
+ * 已确认版本在场，用户重确认即再触发。确认后的小迭代照旧无门（受理即派、沿用
+ * 当前已确认 PRD）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
  *
  * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡）随全部智能体
  * 事件流产出（parts 契约，前端长成工作消息）。</p>
@@ -433,6 +437,7 @@ public class GenerationAppService {
     private final MainAgentAppService mainAgentAppService;
     private final ConversationHistoryAppService conversationHistory;
     private final DesignSpecAppService designSpecs;
+    private final BuildDispatchPolicy buildDispatchPolicy;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -465,7 +470,8 @@ public class GenerationAppService {
             TransactionTemplate transactionTemplate,
             @Lazy MainAgentAppService mainAgentAppService,
             ConversationHistoryAppService conversationHistory,
-            DesignSpecAppService designSpecs) {
+            DesignSpecAppService designSpecs,
+            BuildDispatchPolicy buildDispatchPolicy) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -479,13 +485,14 @@ public class GenerationAppService {
         this.mainAgentAppService = mainAgentAppService;
         this.conversationHistory = conversationHistory;
         this.designSpecs = designSpecs;
+        this.buildDispatchPolicy = buildDispatchPolicy;
     }
 
     /**
-     * 触发生成的显式入口（#101 生成无门后为中断「继续生成」兜底——POST /generate
-     * 端点与收口自动派发共用同一编排；#221 断点续跑：轨道表已有收口/失败片即从
-     * 断点脏续、已收口片不重做）：守卫 → AGENTS.md 资产就位 → 异步提交编码
-     * run（首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
+     * 触发生成的显式入口（#332 生成加门后为中断「继续生成」出口的载体——POST
+     * /generate 端点与收口自动派发共用同一编排；#221 断点续跑：轨道表已有收口/
+     * 失败片即从断点脏续、已收口片不重做）：守卫 → AGENTS.md 资产就位 → 异步提交
+     * 编码 run（首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
      *
      * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
      *                              PRJ_017 已生成或生成在途（重复发起）；
@@ -504,13 +511,16 @@ public class GenerationAppService {
     }
 
     /**
-     * 意见轮收口自动派首次生成（#101 生成无门自动发起）：主智能体产出 PRD 后，
-     * 平台在意见轮收口处观测「未生成 && 已产出 PRD」即自动派首次生成 run，用户
-     * 无需确认或点击。守卫沿用 {@link #startGeneration}（存在 / 未归档 / 未生成过
-     * / PRD 已产出——{@link #requireGeneratableProject} 单点），差异只在在途口径：
-     * 生成进行中静默跳过（不派不报错——此时用户新意见照旧随对话收口，不触发
-     * 重复生成）；按钮路径在途拒绝 PRJ_017。run-failed 后项目仍「未生成」，用户
-     * 重提一句即经本入口再触发，不自动重试（防空烧 token）。
+     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门）：
+     * #332 起系统终点的首个构建 run 唯一触发＝确认此版 PRD
+     * （{@link #dispatchFirstDemoOnConfirm}），本入口不再承担系统终点的自动起
+     * （{@link MainAgentAppService} 收口观测对系统终点改判据为「未生成＋存在已
+     * 确认版本」，无确认不派）；本入口仍承担设计类轨迹的首个构建（设计全部定稿
+     * 后经此起构建，设计轨触发律不改）与系统终点已确认后的重触发。守卫沿用
+     * {@link #startGeneration}（存在 / 未归档 / 未生成过 / PRD 已产出——
+     * {@link #requireGeneratableProject} 单点），差异只在在途口径：生成进行中静默
+     * 跳过（不派不报错——此时用户新意见照旧随对话收口，不触发重复生成）；按钮
+     * 路径在途拒绝 PRJ_017。
      *
      * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 本轮未产出——沿用
      *             表内现行计划〔PRD 锚一致才有效〕，仍无则计划缺失走补产兜底）
@@ -523,6 +533,31 @@ public class GenerationAppService {
     public GenerationRun dispatchGenerationOnTurnClose(Long projectId, BuildPlan plan) {
         Project project = requireGeneratableProject(projectId);
         return dispatchGeneration(project, /* rejectInFlight= */ false, plan);
+    }
+
+    /**
+     * 确认触发首个 Demo run（#332 生成加门；spec #320 实施序③）：PRD 确认动作过
+     * 两级门成版后，平台经本入口派首个构建 run——「确认此版 PRD 并生成 Demo」
+     * 成为首个构建 run 的<b>唯一触发</b>（推翻 #101「生成无门、PRD 出即起」旧口径，
+     * ADR-0008 改写）。确认即成版（{@link PrdVersionAppService}）已先行落库；本
+     * 入口只负责派发。
+     *
+     * <p>幂等/重发同口径：已生成或生成在途静默跳过返回 null（首个 Demo 已起或在
+     * 跑，确认不重复派）；未生成且（调用方已确认）版本在场即派——run-failed 后
+     * 项目仍「未生成」，用户重确认（或经「继续生成」）即再触发，不自动重试（防空烧）。
+     * 切片计划缺失走既有补产链（{@link #dispatchPlanProduction}，主智能体按 PRD
+     * 补产）——确认前的计划事实随访谈轮收口消费，不跨轮保留。</p>
+     *
+     * @return 派发的 run 标识；已生成 / 在途 / 计划缺失未派返回 null——调用方不
+     *         据此报错（确认回执以版本号为准，派发是次生事实）
+     */
+    public GenerationRun dispatchFirstDemoOnConfirm(Long projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getArchivedAt() != null
+                || project.getGeneratedAt() != null) {
+            return null; // 首个 Demo 已生成 / 归档——确认只负责首个，不重复派
+        }
+        return dispatchGeneration(project, /* rejectInFlight= */ false, /* plan= */ null);
     }
 
     /**
@@ -579,6 +614,16 @@ public class GenerationAppService {
         } catch (RuntimeException e) {
             codingRunTrack.end(projectId);
             throw e;
+        }
+
+        // 额度/收费通用缝（#332）：构建任务派发前「规则说明位＋执行前确认位」两挂点
+        // ——v1 缺省免费不限次（说明位空、确认位不激活＝直接派发，行为无感）。结构在
+        // 位：说明位激活后拼入起跑上下文/呈现面；确认位激活后此处拦下待用户确认。
+        buildDispatchPolicy.ruleNotice(projectId);
+        if (buildDispatchPolicy.requiresPreExecutionConfirmation(projectId)) {
+            log.info("[generate] 项目 {} 构建派发前需执行前确认（规则缝激活），本次不派", projectId);
+            codingRunTrack.end(projectId);
+            return null;
         }
 
         String firstRunId = EventsAppService.newRunId();

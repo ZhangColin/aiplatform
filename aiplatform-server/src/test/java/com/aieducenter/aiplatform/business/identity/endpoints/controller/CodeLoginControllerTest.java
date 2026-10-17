@@ -87,12 +87,13 @@ class CodeLoginControllerTest {
     @Test
     void given_correct_code_when_post_verify_then_session_cookie_planted_and_me_envelope()
             throws Exception {
-        when(appService.verifyAndLogin("user@example.com", "123456")).thenReturn(
+        when(appService.verifyAndLogin("user@example.com", "123456", null)).thenReturn(
                 new CodeLoginCompletion(
                         new MeResponse("3897654321098765432", "user@example.com"),
                         org.springframework.http.ResponseCookie.from(
                                 AuthCookies.SESSION_COOKIE_NAME, "sid-9")
-                                .httpOnly(true).sameSite("Lax").path("/").build()));
+                                .httpOnly(true).sameSite("Lax").path("/").build(),
+                        null));
 
         mockMvc.perform(post("/auth/verify")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -112,8 +113,36 @@ class CodeLoginControllerTest {
     }
 
     @Test
+    void given_guest_credential_carried_when_post_verify_then_guest_clear_cookie_set()
+            throws Exception {
+        // #328 登录即自动平移：请求携带访客凭证时验证码登录响应清访客凭证 cookie
+        // （账户会话接管；平移副作用归应用层——此处钉端点层 Set-Cookie 契约）
+        when(appService.verifyAndLogin("user@example.com", "123456", "guest-cred-1")).thenReturn(
+                new CodeLoginCompletion(
+                        new MeResponse("3897654321098765432", "user@example.com"),
+                        org.springframework.http.ResponseCookie.from(
+                                AuthCookies.SESSION_COOKIE_NAME, "sid-9")
+                                .httpOnly(true).path("/").build(),
+                        org.springframework.http.ResponseCookie.from(
+                                AuthCookies.GUEST_COOKIE_NAME, "")
+                                .httpOnly(true).sameSite("Lax").path("/").maxAge(0).build()));
+
+        mockMvc.perform(post("/auth/verify")
+                        .cookie(new jakarta.servlet.http.Cookie(
+                                AuthCookies.GUEST_COOKIE_NAME, "guest-cred-1"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"target\":\"user@example.com\",\"code\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(
+                        result.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                        .anySatisfy(cookie -> assertThat(cookie)
+                                .startsWith(AuthCookies.GUEST_COOKIE_NAME + "=;")
+                                .contains("Max-Age=0")));
+    }
+
+    @Test
     void given_wrong_code_when_post_verify_then_400_with_numeric_code_6008() throws Exception {
-        when(appService.verifyAndLogin("user@example.com", "000000"))
+        when(appService.verifyAndLogin("user@example.com", "000000", null))
                 .thenThrow(new ApplicationException(IdentityMessage.VERIFICATION_CODE_MISMATCH));
 
         mockMvc.perform(post("/auth/verify")

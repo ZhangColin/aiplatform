@@ -40,6 +40,7 @@ public class CodeLoginAppService {
     private final VerificationCodeStore codeStore;
     private final VerificationCodeSender sender;
     private final AccountAppService accountAppService;
+    private final GuestBindingAppService guestBindingAppService;
     private final BffSessionStore sessionStore;
     private final SsoProperties ssoProperties;
     private final Clock clock;
@@ -48,18 +49,21 @@ public class CodeLoginAppService {
     @Autowired
     public CodeLoginAppService(VerificationCodeProperties properties, VerificationCodeStore codeStore,
             VerificationCodeSender sender, AccountAppService accountAppService,
-            BffSessionStore sessionStore, SsoProperties ssoProperties) {
-        this(properties, codeStore, sender, accountAppService, sessionStore, ssoProperties,
-                Clock.systemUTC());
+            GuestBindingAppService guestBindingAppService, BffSessionStore sessionStore,
+            SsoProperties ssoProperties) {
+        this(properties, codeStore, sender, accountAppService, guestBindingAppService, sessionStore,
+                ssoProperties, Clock.systemUTC());
     }
 
     CodeLoginAppService(VerificationCodeProperties properties, VerificationCodeStore codeStore,
             VerificationCodeSender sender, AccountAppService accountAppService,
-            BffSessionStore sessionStore, SsoProperties ssoProperties, Clock clock) {
+            GuestBindingAppService guestBindingAppService, BffSessionStore sessionStore,
+            SsoProperties ssoProperties, Clock clock) {
         this.properties = properties;
         this.codeStore = codeStore;
         this.sender = sender;
         this.accountAppService = accountAppService;
+        this.guestBindingAppService = guestBindingAppService;
         this.sessionStore = sessionStore;
         this.ssoProperties = ssoProperties;
         this.clock = clock;
@@ -84,11 +88,14 @@ public class CodeLoginAppService {
     }
 
     /**
-     * 验码登录：验过即消费（一次性）→ 登录即注册 upsert（绑定表）→ 种会话。
-     * 会话 cookie 契约与 OIDC 流同源（aiplatform_session；Secure 随
-     * sso.cookie-secure——同契约同开关，两处装配形见 AuthAppService）。
+     * 验码登录：验过即消费（一次性）→ 登录即注册 upsert（绑定表）→ 种会话 →
+     * 登录即自动平移（#328：请求携带有效访客凭证即把访客未绑定项目过户给账户，
+     * 幂等；过期/无效凭证仅清 cookie 不平移，不阻断登录）。会话 cookie 契约与
+     * OIDC 流同源（aiplatform_session；Secure 随 sso.cookie-secure——同契约同
+     * 开关，两处装配形见 AuthAppService）。
      */
-    public CodeLoginCompletion verifyAndLogin(String rawTarget, String code) {
+    public CodeLoginCompletion verifyAndLogin(String rawTarget, String code,
+            String guestCredential) {
         VerificationTarget target = parseTarget(rawTarget);
         if (code == null || code.isBlank()
                 || !codeStore.verifyAndConsume(target.channel(), target.identifier(), code,
@@ -102,9 +109,12 @@ public class CodeLoginAppService {
         sessionStore.put(sessionId, new BffSession(
                 account.getId(), account.getDisplayName(), null, null, null, null));
 
+        GuestBindingAppService.BindingOutcome binding =
+                guestBindingAppService.bindOnLogin(guestCredential, account.getId());
+
         return new CodeLoginCompletion(
                 new MeResponse(account.getId().toString(), account.getDisplayName()),
-                sessionCookie(sessionId));
+                sessionCookie(sessionId), binding.guestClearCookie());
     }
 
     private VerificationTarget parseTarget(String rawTarget) {
@@ -131,7 +141,8 @@ public class CodeLoginAppService {
                 .build();
     }
 
-    /** 登录完成：账号面（MeResponse 同形）＋会话 cookie（Set-Cookie 就绪形态） */
-    public record CodeLoginCompletion(MeResponse account, ResponseCookie sessionCookie) {
+    /** 登录完成：账号面（MeResponse 同形）＋会话 cookie＋清访客凭证 cookie（#328 绑定平移后置；无凭证为 null，端点层据此落 Set-Cookie） */
+    public record CodeLoginCompletion(MeResponse account, ResponseCookie sessionCookie,
+            ResponseCookie guestClearCookie) {
     }
 }

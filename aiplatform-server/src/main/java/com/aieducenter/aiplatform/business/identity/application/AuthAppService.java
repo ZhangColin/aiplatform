@@ -41,20 +41,25 @@ public class AuthAppService {
     private final OidcClient oidcClient;
     private final BffSessionStore sessionStore;
     private final AccountAppService accountAppService;
+    private final GuestBindingAppService guestBindingAppService;
     private final Clock clock;
 
     @Autowired
     public AuthAppService(SsoProperties properties, OidcClient oidcClient,
-            BffSessionStore sessionStore, AccountAppService accountAppService) {
-        this(properties, oidcClient, sessionStore, accountAppService, Clock.systemUTC());
+            BffSessionStore sessionStore, AccountAppService accountAppService,
+            GuestBindingAppService guestBindingAppService) {
+        this(properties, oidcClient, sessionStore, accountAppService, guestBindingAppService,
+                Clock.systemUTC());
     }
 
     AuthAppService(SsoProperties properties, OidcClient oidcClient, BffSessionStore sessionStore,
-            AccountAppService accountAppService, Clock clock) {
+            AccountAppService accountAppService, GuestBindingAppService guestBindingAppService,
+            Clock clock) {
         this.properties = properties;
         this.oidcClient = oidcClient;
         this.sessionStore = sessionStore;
         this.accountAppService = accountAppService;
+        this.guestBindingAppService = guestBindingAppService;
         this.clock = clock;
     }
 
@@ -71,9 +76,12 @@ public class AuthAppService {
 
     /**
      * 回调：state 精确比对（防 CSRF）→ 换 token → id_token 全量校验（nonce 防重放）→
-     * 账号 upsert → 建会话（token 三件套只存服务端）→ 回跳 returnTo。
+     * 账号 upsert → 建会话（token 三件套只存服务端）→ 登录即自动平移（#328：请求
+     * 携带有效访客凭证即把访客未绑定项目过户给账户，幂等；无效/过期仅清 cookie
+     * 不平移，不阻断登录）→ 回跳 returnTo。
      */
-    public LoginCompletion completeLogin(String code, String stateParam, String txnCookieValue) {
+    public LoginCompletion completeLogin(String code, String stateParam, String txnCookieValue,
+            String guestCredential) {
         Optional<OauthTransaction> parsed = OauthTransaction.parse(txnCookieValue);
         if (parsed.isEmpty() || stateParam == null
                 || !parsed.get().state().equals(stateParam)) {
@@ -114,15 +122,19 @@ public class AuthAppService {
                 account.getId(), claims.displayName(),
                 tokens.idToken(), tokens.accessToken(), tokens.refreshToken(), expiresAt));
 
+        GuestBindingAppService.BindingOutcome binding =
+                guestBindingAppService.bindOnLogin(guestCredential, account.getId());
+
         return new LoginCompletion(
                 properties.getAppBaseUrl() + transaction.returnTo(),
-                sessionCookie(sessionId).build(), txnCookie("", 0));
+                sessionCookie(sessionId).build(), txnCookie("", 0),
+                binding.guestClearCookie());
     }
 
     /** 回调失败统一兜底：回前端错误页 + 清事务 cookie（具体原因已在日志里） */
     private LoginCompletion failure(String errorQuery) {
         return new LoginCompletion(properties.getAppBaseUrl() + "/?" + errorQuery,
-                null, txnCookie("", 0));
+                null, txnCookie("", 0), null);
     }
 
     /**
@@ -167,10 +179,12 @@ public class AuthAppService {
     /**
      * 回调结果：redirectTo 为绝对跳转（成功 = appBaseUrl+returnTo；失败 = 错误页查询参数）；
      * sessionCookie 非空表示会话建立（controller 据此 Set-Cookie）；txnClearCookie 恒有
-     * （事务 cookie 一次性，成功失败皆清——比 identity demo 多清 state_mismatch 场景）。
+     * （事务 cookie 一次性，成功失败皆清——比 identity demo 多清 state_mismatch 场景）；
+     * guestClearCookie 为登录即自动平移（#328）后置的访客凭证清除指令（成功路径且
+     * 请求携带访客凭证时非空，失败路径 null）。
      */
     public record LoginCompletion(String redirectTo, ResponseCookie sessionCookie,
-            ResponseCookie txnClearCookie) {
+            ResponseCookie txnClearCookie, ResponseCookie guestClearCookie) {
     }
 
     /** 登出结果：identity /logout 跳转 URL + 业务 cookie 清除指令（Set-Cookie 就绪形态） */

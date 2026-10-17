@@ -95,6 +95,21 @@ public class GuestAppService {
                 .build();
     }
 
+    /**
+     * 清凭证 cookie（#328 绑定平移）：MaxAge=0 同值清——登录完成自动平移后
+     * 丢弃浏览器侧访客凭证（账户会话接管）；契约名/属性与 {@link #credentialCookie}
+     * 同源（HttpOnly + SameSite=Lax + Path=/，Secure 随 sso.cookie-secure）。
+     */
+    public ResponseCookie clearCredentialCookie() {
+        return ResponseCookie.from(AuthCookies.GUEST_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(ssoProperties.isCookieSecure())
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(Duration.ZERO)
+                .build();
+    }
+
     /** 发放结果（访客行 id＋凭证值——值即凭证，cookie 由端点层落头）。 */
     public record IssuedGuest(Long guestId, String credential) {
     }

@@ -69,10 +69,10 @@ class AuthControllerTest {
     @Test
     void given_completed_login_when_callback_then_session_cookie_set_and_txn_cleared()
             throws Exception {
-        when(appService.completeLogin(any(), any(), any())).thenReturn(
+        when(appService.completeLogin(any(), any(), any(), any())).thenReturn(
                 new LoginCompletion(APP_BASE + "/projects",
                         cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-9", -1),
-                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0)));
+                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0), null));
 
         mockMvc.perform(get("/auth/callback").queryParam("code", "c").queryParam("state", "st"))
                 .andExpect(status().isFound())
@@ -82,10 +82,36 @@ class AuthControllerTest {
     }
 
     @Test
+    void given_guest_credential_carried_when_callback_then_guest_clear_cookie_set()
+            throws Exception {
+        // #328 登录即自动平移（OIDC 路）：回调请求携带访客凭证 → 应用层返回清
+        // 访客凭证 cookie 指令，控制器落 Set-Cookie；访客凭证透传给应用层。
+        when(appService.completeLogin(any(), any(), any(), any())).thenReturn(
+                new LoginCompletion(APP_BASE + "/projects",
+                        cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-9", -1),
+                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0),
+                        cookie(AuthCookies.GUEST_COOKIE_NAME, "", 0)));
+
+        mockMvc.perform(get("/auth/callback").queryParam("code", "c").queryParam("state", "st")
+                        .cookie(new jakarta.servlet.http.Cookie(
+                                AuthCookies.GUEST_COOKIE_NAME, "guest-cred-1")))
+                .andExpect(status().isFound())
+                .andExpect(this::assertSessionCookiePlanted)
+                .andExpect(this::assertTxnCookieCleared)
+                .andExpect(result -> assertThat(
+                        result.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                        .anySatisfy(cookie -> assertThat(cookie)
+                                .startsWith("aiplatform_guest=;")
+                                .contains("Max-Age=0")));
+
+        verify(appService).completeLogin("c", "st", null, "guest-cred-1");
+    }
+
+    @Test
     void given_failed_login_when_callback_then_no_session_cookie_but_txn_cleared() throws Exception {
-        when(appService.completeLogin(any(), any(), any())).thenReturn(
+        when(appService.completeLogin(any(), any(), any(), any())).thenReturn(
                 new LoginCompletion(APP_BASE + "/?error=state_mismatch", null,
-                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0)));
+                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0), null));
 
         mockMvc.perform(get("/auth/callback").queryParam("code", "c").queryParam("state", "st"))
                 .andExpect(status().isFound())
@@ -119,14 +145,14 @@ class AuthControllerTest {
     @Test
     void given_missing_txn_cookie_when_callback_then_app_service_invoked_with_null_txn()
             throws Exception {
-        when(appService.completeLogin(any(), any(), any())).thenReturn(
+        when(appService.completeLogin(any(), any(), any(), any())).thenReturn(
                 new LoginCompletion(APP_BASE + "/?error=state_mismatch", null,
-                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0)));
+                        cookie(AuthCookies.TXN_COOKIE_NAME, "", 0), null));
 
         mockMvc.perform(get("/auth/callback").queryParam("code", "c").queryParam("state", "st"))
                 .andExpect(status().isFound());
 
-        verify(appService).completeLogin("c", "st", null);
+        verify(appService).completeLogin("c", "st", null, null);
     }
 
     // -------- 断言工具 --------

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api/client";
 import { queryKeys } from "@/lib/api/keys";
 import { errorText } from "@/lib/api/api-error";
+import { isBindingGateError } from "@/lib/orders/binding-gate";
 import { normalizeOrder, type OrderResponse } from "@/lib/orders/detail";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 
@@ -47,6 +48,8 @@ export function usePlaceOrder(projectId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
     },
     onError: (error) => {
+      // 签约门（#328）：ORD_017 归调用侧弹 M01 并续跑——此处不 toast（免与弹窗双提示）
+      if (isBindingGateError(error)) return;
       toast.error(errorText(error, "下单失败，请稍后重试"));
     },
   });

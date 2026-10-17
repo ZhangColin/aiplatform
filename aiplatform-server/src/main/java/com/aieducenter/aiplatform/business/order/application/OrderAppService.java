@@ -101,11 +101,19 @@ public class OrderAppService {
      *
      * @return 订单（待报价起步，快照与交付物类型已冻结）
      * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
-     *                              （项目上下文原样透传）；ORD_004 项目已归档；
-     *                              ORD_003 该项目已有未终结订单（预检或并发撞索引）；
-     *                              WSP_002 设计资产包打包失败（环境故障，零残留）
+     *                              （项目上下文原样透传）；ORD_017 签约门——未登录
+     *                              绑定（访客身份）走下单入口被拦；ORD_004 项目已
+     *                              归档；ORD_003 该项目已有未终结订单（预检或并发
+     *                              撞索引）；WSP_002 设计资产包打包失败（环境故障，
+     *                              零残留）
      */
     public OrderResponse place(Long projectId) {
+        // 签约门（#328，spec 段②）：进下单/签约流程即要求绑定——访客身份（有效
+        // 访客凭证、无账户会话）被拦，前端认 ORD_017 弹 M01；绑定（登录即平移）
+        // 后账户会话在场即过闸。守卫最前：未绑定者不触任何下单副作用。
+        if (GuestContext.guestId() != null) {
+            throw new ApplicationException(OrderMessage.ORDER_BINDING_REQUIRED);
+        }
         ProjectDetailResponse project = projectQueryAppService.detail(projectId);
         if (project.archived()) {
             throw new ApplicationException(OrderMessage.ORDER_PROJECT_ARCHIVED);

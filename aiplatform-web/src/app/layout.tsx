@@ -5,6 +5,7 @@ import { QueryProvider } from "@/components/query-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { M01Dialog } from "@/components/auth/m01-dialog";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/brand";
 import { SseProvider } from "@/lib/sse/provider";
 
@@ -48,6 +49,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <SseProvider>
               <TooltipProvider>{children}</TooltipProvider>
             </SseProvider>
+            <M01Dialog />
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

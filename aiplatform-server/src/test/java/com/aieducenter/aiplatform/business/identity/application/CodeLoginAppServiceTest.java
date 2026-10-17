@@ -65,7 +65,7 @@ class CodeLoginAppServiceTest {
         appService.sendCode(email);
 
         String code = capturedCode();
-        CodeLoginCompletion completion = appService.verifyAndLogin(email, code);
+        CodeLoginCompletion completion = appService.verifyAndLogin(email, code, null);
 
         // 登录即注册：账号静默建档（显示名缺省=标识原文）＋email 绑定行
         assertThat(completion.account().accountId()).isEqualTo(
@@ -89,7 +89,7 @@ class CodeLoginAppServiceTest {
 
         // 归一形态（小写）发码——同一人不同大小写输入不裂成两个收码目标
         verify(sender).send(eq(AccountBindingProvider.EMAIL), eq(mixed.toLowerCase()), eq(code));
-        CodeLoginCompletion completion = appService.verifyAndLogin(mixed.toUpperCase(), code);
+        CodeLoginCompletion completion = appService.verifyAndLogin(mixed.toUpperCase(), code, null);
         assertThat(completion.account().displayName()).isEqualTo(mixed.toLowerCase());
     }
 
@@ -106,12 +106,12 @@ class CodeLoginAppServiceTest {
     void given_wrong_code_when_verify_then_mismatch_and_correct_code_still_usable() {
         appService.sendCode(email);
 
-        assertThatThrownBy(() -> appService.verifyAndLogin(email, "000000"))
+        assertThatThrownBy(() -> appService.verifyAndLogin(email, "000000", null))
                 .isInstanceOfSatisfying(ApplicationException.class,
                         e -> assertThat(e.getCodeMessage().code()).isEqualTo("IDN_008"));
 
         // 未超次：正确码仍可验（一次错码不作废）
-        assertThat(appService.verifyAndLogin(email, capturedCode()).account()).isNotNull();
+        assertThat(appService.verifyAndLogin(email, capturedCode(), null).account()).isNotNull();
     }
 
     @Test
@@ -120,12 +120,12 @@ class CodeLoginAppServiceTest {
         String code = capturedCode();
 
         for (int i = 0; i < 5; i++) { // 缺省 max-verify-attempts=5：五次错码即作废
-            assertThatThrownBy(() -> appService.verifyAndLogin(email, "000000"))
+            assertThatThrownBy(() -> appService.verifyAndLogin(email, "000000", null))
                     .isInstanceOfSatisfying(ApplicationException.class,
                             e -> assertThat(e.getCodeMessage().code()).isEqualTo("IDN_008"));
         }
 
-        assertThatThrownBy(() -> appService.verifyAndLogin(email, code))
+        assertThatThrownBy(() -> appService.verifyAndLogin(email, code, null))
                 .isInstanceOfSatisfying(ApplicationException.class,
                         e -> assertThat(e.getCodeMessage().code()).isEqualTo("IDN_008"));
     }
@@ -137,14 +137,14 @@ class CodeLoginAppServiceTest {
 
         Thread.sleep(1500); // ttl=1s（本测试类的参数）：真等到过期
 
-        assertThatThrownBy(() -> appService.verifyAndLogin(email, code))
+        assertThatThrownBy(() -> appService.verifyAndLogin(email, code, null))
                 .isInstanceOfSatisfying(ApplicationException.class,
                         e -> assertThat(e.getCodeMessage().code()).isEqualTo("IDN_008"));
     }
 
     @Test
     void given_never_sent_code_when_verify_then_mismatch() {
-        assertThatThrownBy(() -> appService.verifyAndLogin(email, "123456"))
+        assertThatThrownBy(() -> appService.verifyAndLogin(email, "123456", null))
                 .isInstanceOfSatisfying(ApplicationException.class,
                         e -> assertThat(e.getCodeMessage().code()).isEqualTo("IDN_008"));
     }

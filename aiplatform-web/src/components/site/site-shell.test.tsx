@@ -26,35 +26,14 @@ vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
 }));
 
-/** 侧边栏导航锚（菜单项与新建项目按钮均为 render Link 的 <a>）——不含 footer 触发钮。 */
-function navAnchors(html: string): { href: string; text: string }[] {
-  return (html.match(/<a\b[^>]*href="[^"]*"[^>]*>[\s\S]*?<\/a>/g) ?? []).map((tag) => ({
-    href: /href="([^"]*)"/.exec(tag)?.[1] ?? "",
-    text: tag.replace(/<[^>]+>/g, "").trim(),
-  }));
-}
-
-describe("SiteShell（#76 侧栏定稿形态装配——首页/列表共存窗口）", () => {
-  it("导航锚 = 新建项目 / 首页 / 历史项目直列 / 全部项目", () => {
+describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", () => {
+  it("首页无侧栏（#345，spec #320 ⑥「首页无侧栏」）：仅渲染内容位，旧侧栏件不在", () => {
     pathSeed.path = "/";
     const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
-    const anchors = navAnchors(html);
-    // href 序（新建项目按钮、首页项与「能做这些」两档同指 /；历史项目首字色块会
-    // 并入文本，取 href 序断言）
-    expect(anchors.map((a) => a.href)).toEqual([
-      "/",
-      "/",
-      "/",
-      "/",
-      "/projects/p1",
-      "/projects",
-    ]);
-    expect(anchors[0].text).toBe("新建项目");
-    expect(anchors[1].text).toBe("首页");
-    expect(anchors[2].text).toBe("做系统");
-    expect(anchors[3].text).toBe("做设计");
-    expect(anchors[4].text).toContain("巷口花店小程序");
-    expect(anchors[5].text).toBe("全部项目");
+    expect(html).toBe("x");
+    expect(html).not.toContain("新建项目");
+    expect(html).not.toContain("能做这些");
+    expect(html).not.toContain("历史项目");
   });
 
   it("/projects（列表）：仍旧壳（P08 重建归 #349）", () => {

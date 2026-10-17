@@ -90,8 +90,8 @@ export function GlobalTopbar({ projectId, nav }: { projectId: string; nav: Stage
   );
 }
 
-/** 保存状态胶囊（#316 三态话术；已保存态文案逐字照原型）。 */
-function SaveStatusPill() {
+/** 保存状态胶囊（#316 三态话术；已保存态文案逐字照原型）。导出＝首页顶栏（#345）同源复用。 */
+export function SaveStatusPill() {
   const state = useSaveStateStore((s) => s.state);
   if (state === "saving") {
     return (
@@ -120,7 +120,7 @@ function SaveStatusPill() {
 }
 
 /** 「保存项目」（照原型）——M01 登录与项目绑定弹窗的触发挂点（#327/#328 消费）。 */
-function SaveProjectButton() {
+export function SaveProjectButton() {
   const openM01 = useM01Store((s) => s.openM01);
   return (
     <Button
@@ -136,8 +136,8 @@ function SaveProjectButton() {
   );
 }
 
-/** 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」文字入口。 */
-function TopbarAvatar() {
+/** 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」文字入口。导出＝首页顶栏（#345）同源复用。 */
+export function TopbarAvatar() {
   const { data: me, isPending } = useMe();
   const pathname = usePathname();
 

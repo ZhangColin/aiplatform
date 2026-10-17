@@ -15,11 +15,14 @@ import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 import { FileDownloadButton } from "./file-download";
+import { PrdConfirmGate } from "./prd-confirm-gate";
 
 /**
  * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文）：markdown 正文 +
  * 修订「已更新」标记 + markSeen 兜底。文档范式（默认挂载）与文件树模式
  * （PRD 选中）共用同一篇。用户面不带角色署名（ADR 0006 方向：一个「它」）。
+ * #332 生成加门：PRD 在场即出「确认此版 PRD 并生成 Demo」主 CTA（首个构建 run
+ * 的唯一触发）——机制与呈现同票落地，不留「门关了没按钮」的中间态。
  */
 export function PrdDoc({
   projectId,
@@ -63,6 +66,11 @@ export function PrdDoc({
                   : "随访谈整理"
                 : "平台正在和你梳理需求；整理好的需求文档会出现在这里，随时可以提意见让它更新。"}
             </p>
+            {/* 确认门（#330/#332）：PRD 在场即出门（首个构建 run 的唯一触发）——
+                未产出（prd.data 为 null）不出，但不留「门关了没按钮」的中间态 */}
+            {prd.data ? (
+              <PrdConfirmGate projectId={projectId} readiness={prd.data.readiness} />
+            ) : null}
           </header>
           {prd.data ? (
             <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>

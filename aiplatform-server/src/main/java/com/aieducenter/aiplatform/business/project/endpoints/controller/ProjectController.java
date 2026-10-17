@@ -187,9 +187,9 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/generate")
-    @Operation(summary = "继续生成（断点续跑；首次发起同入口）",
-            description = "生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成"
-                    + " run，本端点是「继续生成」出口的载体——run-failed 或生成中断后项目仍"
+    @Operation(summary = "继续生成（断点续跑；首个 Demo 由确认触发）",
+            description = "#332 生成加门后，首个构建 run 由「确认此版 PRD」触发——本端点是"
+                    + "「继续生成」出口的载体（run-failed 或生成中断后仍可用）——run-failed 或生成中断后项目仍"
                     + "「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/"
                     + "中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状"
                     + "盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与"
@@ -212,7 +212,8 @@ public class ProjectController {
                     + "唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
-                    + "PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；"
+                    + "PRD 从未产出 409 PRJ_018（系统终点首个 Demo 由确认触发，本端点服务"
+                    + "「继续生成」，本守卫拦未产出直连调用）；"
                     + "设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、"
                     + "系统＋设计设计先行——构建从定稿设计稿长出）；"
                     + "项目不存在 404 PRJ_001")
@@ -339,9 +340,11 @@ public class ProjectController {
                     + "先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/"
                     + "形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执"
                     + "readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层"
-                    + "承载，确认动作本身不携带标记）。响应即回执"
-                    + "（versionNo/content/confirmedAt/readiness）——版本号是下游（#332 确认后"
-                    + "自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 "
+                    + "承载，确认动作本身不携带标记）。<b>生成加门（#332）</b>：确认成版后"
+                    + "平台自动派首个 Demo run——「确认此版 PRD 并生成 Demo」成为首个构建 run "
+                    + "的唯一触发（已生成/在途静默跳过；派发是次生事实）。响应即回执"
+                    + "（versionNo/content/confirmedAt/readiness）——版本号是派发的挂点。"
+                    + "项目不存在 404 PRJ_001；已归档 409 "
                     + "PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；"
                     + "环境故障 WSP_002")
     public ApiResponse<PrdVersionResponse> confirmPrd(@PathVariable String id) {

@@ -142,6 +142,7 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -1808,6 +1809,88 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
+    // ---------- 生成加门（#332）：确认触发首个 Demo run ----------
+
+    @Test
+    void given_confirmed_no_plan_when_dispatch_first_demo_then_redispatch_plan_then_runs() {
+        // 灵魂例（#332 确认后派首个 Demo run）：确认时刻无既有计划——走补产链闭环
+        // （补产轮产计划 → 收口自动派生成 → 阶段 0 + 逐片 → generated_at 落位）
+        Long projectId = persistedProject("9880");
+        seedConfirmedVersion(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), produced);
+                return new AgentReply(command.runId(), "已按 PRD 拟好实施计划");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        GenerationAppService.GenerationRun run = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(run).isNotNull();
+        assertThat(appService.planOf(projectId)).isEqualTo(produced);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_generated_when_dispatch_first_demo_then_null_no_repeat() {
+        // 已生成＝首个 Demo 已起，确认只负责首个——不重复派、零编码 run
+        Long projectId = persistedGeneratedProject("9881");
+
+        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+    }
+
+    @Test
+    void given_archived_when_dispatch_first_demo_then_null() {
+        // 归档＝对话区关闭即全停——确认不派
+        Long projectId = persistedArchivedProject("9882");
+
+        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+    }
+
+    @Test
+    void given_first_demo_failed_when_reconfirm_then_redispatch_from_track() {
+        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」，用户
+        // 重确认（「继续生成」同路）即再触发——计划已在轨道表，从断点续跑（不重产计划）
+        Long projectId = persistedProject("9883");
+        seedConfirmedVersion(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null; // matcher 空参调用（重打桩触发旧 answer）直接过
+            }
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
+                return new AgentReply(command.runId(), "计划已定");
+            }
+            throw new IllegalStateException("起服失败"); // 审核段失败（重试耗尽转终态）
+        });
+
+        GenerationAppService.GenerationRun first = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(first).isNotNull();
+        assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
+        // 重确认（重发）：计划在轨道表，续跑即完成（重打桩的 matcher 空参调用触发旧
+        // answer——旧桩对 null 命令直接过，同既有先例）
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return command != null ? new AgentReply(command.runId(), "完成") : null;
+        });
+        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(again).isNotNull();
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
     // ---------- 测试数据 ----------
 
     /** 可生成形态的项目（PRD 已产出、未生成、未归档）。 */
@@ -1815,6 +1898,18 @@ class GenerationAppServiceTest {
         Project project = Project.create("生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
+    }
+
+    /** 已确认 PRD 版本在场（#332 生成加门：{@link
+     * GenerationAppService#dispatchFirstDemoOnConfirm} 的调用前提——经确认缝触发时
+     * 版本必已落库；收口观测判据只看存在性，内容不参与）。 */
+    private void seedConfirmedVersion(Long projectId) {
+        Project project = projectOf(projectId);
+        jdbcTemplate.update("""
+                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
+                    prd_produced_at, created_at, updated_at)
+                VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, project.getPrdProducedAt());
     }
 
     /** 模拟 PRD 修订落定（savePrd 写出后的库事实）：刷新 prd_produced_at——版本锚换新值。 */

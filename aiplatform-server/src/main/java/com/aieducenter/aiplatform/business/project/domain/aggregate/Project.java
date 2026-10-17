@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -27,7 +28,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 
 /**
  * 项目聚合根（{@code prj_projects}）：用户一次定制需求的全程载体——业务字段 +
- * dev 工作区引用 + 归属账号 + 归档终点。归档是单向终点动作（archived_at 落定）；
+ * dev 工作区引用 + 归属（owner 双列：账户/访客，逻辑互斥）+ 归档终点。归档是单向终点动作（archived_at 落定）；
  * 「进行中/已归档」即其全部派生态。一个项目 = 一个 dev 环境（workspaceId 软引用
  * wsp 表，级联清理由编排负责）。删除真删级联，无软删除——继承 Auditable 只取
  * 审计字段。
@@ -72,9 +73,24 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     @Column(name = "workspace_id", nullable = false, updatable = false)
     private Long workspaceId;
 
-    /** 归属账号（A2：创建时填、v1 不过滤；测试/无会话上下文可空）。 */
-    @Column(name = "owner_account_id", updatable = false)
+    /**
+     * 归属账号（A2 落列、#325 起进读面过滤与单项目守卫；测试/无会话上下文可空）。
+     * 与 {@link #ownerGuestId} 逻辑互斥（聚合守卫＋库层 CHECK 兜底，至多一方落值）。
+     * #328 起可更新——绑定平移（{@link #transferToAccount}）把访客项目过户到账户，
+     * 唯一写路径即该动作（聚合无其他 setter；#325 的 updatable=false 曾使「创建即
+     * 定格」，本票的平移是首个再入职责，故解禁）。
+     */
+    @Column(name = "owner_account_id")
     private Long ownerAccountId;
+
+    /**
+     * 归属访客（#325 建列、#326 挂载写入方——首条需求消息惰性建访客后随建项目
+     * 落列）：访客独立表 idn_guests 的软引用；与 {@link #ownerAccountId} 逻辑
+     * 互斥（聚合守卫＋库层 CHECK 双保险）；owner 过滤的访客维度（列表谓词与
+     * SSE 路由键 ownerGuestId）同源本列。#328 平移时清空（{@link #transferToAccount}）。
+     */
+    @Column(name = "owner_guest_id")
+    private Long ownerGuestId;
 
     /** 归档时间（单向终点；NULL = 未归档，归档动作归片5c）。 */
     @Column(name = "archived_at")
@@ -117,11 +133,12 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     }
 
     private Project(String name, ProjectType type, ProjectEndpointType endpointType,
-                    Long workspaceId, Long ownerAccountId) {
+                    Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
         if (name == null || name.isBlank()) {
             throw new DomainException(ProjectMessage.PROJECT_NAME_BLANK);
         }
-        if (workspaceId == null) {
+        if (workspaceId == null
+                || (ownerAccountId != null && ownerGuestId != null)) {
             throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
         }
         this.name = name;
@@ -129,27 +146,19 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         this.endpointType = ProjectEndpointType.orDefault(endpointType);
         this.workspaceId = workspaceId;
         this.ownerAccountId = ownerAccountId;
+        this.ownerGuestId = ownerGuestId;
     }
 
     /**
-     * 建项目（主链路缺省系统形，编排在工作区副作用落定后调用，短事务落库）：
-     * 入口不携终点初值——「生成无门」主链路建项目恒系统（终显形见
-     * {@link #create(String, ProjectType, ProjectEndpointType, Long, Long)}）。
-     */
-    public static Project create(String name, ProjectType type,
-                                 Long workspaceId, Long ownerAccountId) {
-        return create(name, type, null, workspaceId, ownerAccountId);
-    }
-
-    /**
-     * 建项目（终点初值形，#299 入口两档显式选择定初值，ADR-0029 mode 进载荷）：
-     * 入口选「做设计」携 {@link ProjectEndpointType#DESIGN}、做系统/不选传 null
-     * 走缺省（主链路零变化）；此后项目内变更归 {@link #switchEndpoint}
-     * （设置 tab 唯一位）。
+     * 建项目（#326 收编单一形——owner 双列与终点初值全显形；#299 备案触发器「下一
+     * 职责再入聚合时收编删重载」已燃，四参/五参重载删除、调用方逐自声明）：终点
+     * 初值入口两档显式选择（#299，做设计携 {@link ProjectEndpointType#DESIGN}、
+     * 缺省传 null 走系统）；归属 owner 双列至多一方落值（互斥——聚合守卫与库层
+     * CHECK 双保险，账户随会话、访客随凭证惰性创建后挂列，皆可空＝无主占位形）。
      */
     public static Project create(String name, ProjectType type, ProjectEndpointType endpointType,
-                                 Long workspaceId, Long ownerAccountId) {
-        return new Project(name, type, endpointType, workspaceId, ownerAccountId);
+                                 Long workspaceId, Long ownerAccountId, Long ownerGuestId) {
+        return new Project(name, type, endpointType, workspaceId, ownerAccountId, ownerGuestId);
     }
 
     /**
@@ -242,11 +251,46 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
 
     /**
      * owner 的智能体会话寻址 userId（cat_agent_state 槽位 (userId, sessionId) 的
-     * userId 腿）：owner 未落的占位形（测试/无会话上下文）容忍 null——与各编排
-     * 处自行展开的三元同义，收拢为聚合单点。
+     * userId 腿）：谁的 owner 就 stringify 谁（账户或访客——访客项目恒有主，不再
+     * 落 null）；无主占位形（测试/无会话上下文）容忍 null——与各编排处自行展开的
+     * 三元同义，收拢为聚合单点。
      */
     public String ownerUserId() {
-        return ownerAccountId != null ? ownerAccountId.toString() : null;
+        return ownerAccountId != null ? ownerAccountId.toString()
+                : ownerGuestId != null ? ownerGuestId.toString() : null;
+    }
+
+    /**
+     * 归属判定（#325/#326 owner 双维数据面——列表过滤与单项目守卫共用谓词）：
+     * 请求上下文有账户维度按账户等值、否则有访客维度按访客等值（账户会话优先
+     * 于访客凭证——两维不同时判）；两维皆空＝无上下文，「无主对无主」放行（无主
+     * × owner 双列皆空的占位聚合——测试直调/编排内部调用的容忍面），其余不匹配
+     * 即 deny（deny-by-default：存量无归属行对任何账户/访客不可见，账户与访客
+     * 项目互不可见）。
+     */
+    public boolean ownedBy(Long accountId, Long guestId) {
+        if (accountId != null) {
+            return Objects.equals(ownerAccountId, accountId);
+        }
+        if (guestId != null) {
+            return Objects.equals(ownerGuestId, guestId);
+        }
+        return ownerAccountId == null && ownerGuestId == null;
+    }
+
+    /**
+     * 归属平移（#328 绑定平移）：访客项目过户给账户——owner_account_id 落值、
+     * owner_guest_id 清空（owner 双列逻辑互斥不变量在聚合；库层 CHECK 兜底）。
+     * 守卫：目标账户非空、且当前确为访客归属（owner_guest_id 非空）——已平移过
+     * （owner_guest_id 已清）不可再平移（幂等由调用方按 owner_guest_id 查询保证，
+     * 聚合层拒绝二次平移）。
+     */
+    public void transferToAccount(Long accountId) {
+        if (accountId == null || ownerGuestId == null) {
+            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
+        }
+        this.ownerAccountId = accountId;
+        this.ownerGuestId = null;
     }
 
     /**

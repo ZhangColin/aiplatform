@@ -24,11 +24,13 @@ import com.aieducenter.aiplatform.business.project.infrastructure.PrdArtifactAda
  * 观测「改没改、改了什么」入交接物，#52）。落盘/回调任一失败回错误结果（模型
  * 可见，可再次调用重试）；summary 漏传校验报错逼补（对齐 finish_edit 必调哲学）。
  *
- * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，无最终版一说
- * （唯一不可逆门 = 确认下单的快照冻结）。仅随项目只读工作区注册
- * （{@link ProfileToolkitSupplier}，#86 主智能体对话姿态）。执行体阻塞
- * （docker exec + 置位事务），框架 ToolExecutor 缺省 boundedElastic 调度，
- * 阻塞安全。</p>
+ * <p>无需用户确认（权限自检恒放行）：PRD 产出是访谈协议的预期终点，保存动作本身
+ * 不设工具点确认——确认门是用户在工作区 PRD 面板的显式动作（「确认此版 PRD 并
+ * 生成 Demo」过两级门后冻结成版，#330/#331/#332：确认即成版，首个构建 run 的
+ * 唯一触发＝确认而非保存；旧「无最终版、唯一不可逆门＝下单快照」说已随生成加门
+ * 作废）。仅随项目只读工作区注册（{@link ProfileToolkitSupplier}，#86 主智能体
+ * 对话姿态）。执行体阻塞（docker exec + 置位事务），框架 ToolExecutor 缺省
+ * boundedElastic 调度，阻塞安全。</p>
  */
 public class SavePrdTool extends ToolBase {
 
@@ -82,8 +84,9 @@ public class SavePrdTool extends ToolBase {
     @Override
     public Mono<PermissionDecision> checkPermissions(Map<String, Object> toolInput,
             io.agentscope.core.permission.PermissionContextState context) {
-        // 产出是访谈的预期终点（无确认门概念），工具点不放确认
-        return Mono.just(PermissionDecision.allow("PRD 产出是访谈的预期终点，无需确认"));
+        // 产出是访谈的预期终点：工具点不放确认（确认门是用户面板上的显式动作，
+        // 非工具点权限；#332 生成加门）
+        return Mono.just(PermissionDecision.allow("PRD 产出是访谈的预期终点，工具点无需确认"));
     }
 
     @Override

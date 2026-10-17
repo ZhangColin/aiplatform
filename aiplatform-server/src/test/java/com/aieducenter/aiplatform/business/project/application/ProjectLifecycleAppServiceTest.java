@@ -113,6 +113,7 @@ class ProjectLifecycleAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
@@ -126,12 +127,12 @@ class ProjectLifecycleAppServiceTest {
         stubWorkspace("9101", "aiplatform-dev-101");
         stubInterviewAccepted("run-1");
 
-        ProjectCreatedResponse response = RequestContext.runFor(
+        var creation = RequestContext.runFor(
                 new RequestContext(null, null, null, null, 3897654321098765432L,
                         "归属测试", null, null),
                 () -> appService.create(new CreateProjectCommand("做一个官网", null)));
 
-        assertThat(projectRepository.findById(Long.parseLong(response.project().id())))
+        assertThat(projectRepository.findById(Long.parseLong(creation.response().project().id())))
                 .hasValueSatisfying(project -> assertThat(project.getOwnerAccountId())
                         .isEqualTo(3897654321098765432L));
     }
@@ -141,23 +142,23 @@ class ProjectLifecycleAppServiceTest {
         stubWorkspace("9100", "aiplatform-dev-100");
         stubInterviewAccepted("run-1");
 
-        ProjectCreatedResponse response = appService.create(
+        var creation = appService.create(
                 new CreateProjectCommand("做一个官网", null));
 
         // 工作区副作用先行：dev 工作区
         verify(workspaceLifecycleAppService).create(new CreateWorkspaceCommand(EnvKind.DEV));
 
         // 一事务 Project：创建即落占位名（响应不等取名），类型服务端定
-        Long projectId = Long.parseLong(response.project().id());
+        Long projectId = Long.parseLong(creation.response().project().id());
         assertThat(projectRepository.findById(projectId)).isPresent();
-        assertThat(response.project().name()).isEqualTo(Project.PLACEHOLDER_NAME);
+        assertThat(creation.response().project().name()).isEqualTo(Project.PLACEHOLDER_NAME);
         assertThat(projectRepository.findById(projectId)).hasValueSatisfying(
                 project -> assertThat(project.getName()).isEqualTo(Project.PLACEHOLDER_NAME));
-        assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 单模板服务端缺省
-        assertThat(response.project().endpointType()).isEqualTo(ProjectEndpointType.SYSTEM); // 不携终点＝缺省系统（主链路零变化）
-        assertThat(response.project().workspaceId()).isEqualTo("9100");
-        assertThat(response.project().status()).isEqualTo(ProjectStatus.IN_PROGRESS);
-        assertThat(response.runId()).isEqualTo("run-1"); // 自动开场运行标识随响应返回
+        assertThat(creation.response().project().type()).isEqualTo(ProjectType.WEBSITE); // 单模板服务端缺省
+        assertThat(creation.response().project().endpointType()).isEqualTo(ProjectEndpointType.SYSTEM); // 不携终点＝缺省系统（主链路零变化）
+        assertThat(creation.response().project().workspaceId()).isEqualTo("9100");
+        assertThat(creation.response().project().status()).isEqualTo(ProjectStatus.IN_PROGRESS);
+        assertThat(creation.response().runId()).isEqualTo("run-1"); // 自动开场运行标识随响应返回
 
         // SSE（副作用落定后）：workspace-created
         ArgumentCaptor<Map<String, Object>> created =
@@ -184,42 +185,44 @@ class ProjectLifecycleAppServiceTest {
 
         // #299 入口两档 mode 进载荷：选「做设计」→ 终点初值随建项目落库（缺省主链路
         // 仍系统——上一用例隐含），访谈/PRD 清单形跟终点类型走（#285 已接线）
-        ProjectCreatedResponse response = appService.create(
+        var creation = appService.create(
                 new CreateProjectCommand("给我的咖啡店设计一个 logo", ProjectEndpointType.DESIGN));
 
-        Long projectId = Long.parseLong(response.project().id());
+        Long projectId = Long.parseLong(creation.response().project().id());
         assertThat(projectRepository.findById(projectId)).hasValueSatisfying(
                 project -> assertThat(project.getEndpointType()).isEqualTo(ProjectEndpointType.DESIGN));
-        assertThat(response.project().endpointType()).isEqualTo(ProjectEndpointType.DESIGN);
-        assertThat(response.project().endpointTypeName()).isEqualTo("设计");
+        assertThat(creation.response().project().endpointType()).isEqualTo(ProjectEndpointType.DESIGN);
+        assertThat(creation.response().project().endpointTypeName()).isEqualTo("设计");
     }
 
     @Test
-    void given_blank_requirement_when_create_then_default_kickoff_prompt_and_no_naming() {
+    void given_blank_requirement_when_create_then_default_kickoff_prompt_and_no_naming() throws Exception {
         stubWorkspace("9101", "aiplatform-dev-101");
         stubInterviewAccepted("run-2");
 
-        ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand(" ", null));
+        var creation = RequestContext.runFor(
+                new RequestContext(null, null, null, null, 1L, "空输入测试", null, null),
+                () -> appService.create(new CreateProjectCommand(" ", null)));
 
-        assertThat(response.project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
+        assertThat(creation.response().project().type()).isEqualTo(ProjectType.WEBSITE); // 服务端缺省
         // 空需求描述 → 缺省开场提示（对话展开起点）；取名守卫在命名服务内
         //（blank 不发起轻调用，见 ProjectNamingAppServiceTest）
         verify(mainAgentAppService).startConversation(
-                Long.parseLong(response.project().id()), AgentProfile.DEFAULT_KICKOFF_PROMPT);
+                Long.parseLong(creation.response().project().id()), AgentProfile.DEFAULT_KICKOFF_PROMPT);
     }
 
     @Test
-    void given_auto_ba_failure_when_create_then_project_kept_and_run_id_absent() {
+    void given_auto_ba_failure_when_create_then_project_kept_and_run_id_absent() throws Exception {
         stubWorkspace("9102", "aiplatform-dev-102");
         when(mainAgentAppService.startConversation(any(), any()))
                 .thenThrow(new RuntimeException("对话智能体不可用"));
 
-        ProjectCreatedResponse response = appService.create(
-                new CreateProjectCommand(null, null));
+        var creation = RequestContext.runFor(
+                new RequestContext(null, null, null, null, 1L, "空输入测试", null, null),
+                () -> appService.create(new CreateProjectCommand(null, null)));
 
         // 起跑失败不回滚建项目（项目已成立，runId 缺席表达起跑未成）
-        assertThat(response.runId()).isNull();
+        assertThat(creation.response().runId()).isNull();
         assertThat(projectRepository.count()).isEqualTo(1);
     }
 
@@ -322,7 +325,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_paid_project_when_downloadable_source_package_then_bytes_returned() {
         Long projectId = persistedProject("9501");
-        Order paid = Order.place(projectId, null, "# PRD", OrderDeliverableType.SYSTEM);
+        Order paid = Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM);
         paid.quote(10000L, null, null);
         paid.pay("PAY-TEST-1");
         orderRepository.save(paid);
@@ -336,7 +339,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_unpaid_project_when_downloadable_source_package_then_ord_015() {
         Long projectId = persistedProject("9502");
-        orderRepository.save(Order.place(projectId, null, "# PRD", OrderDeliverableType.SYSTEM)); // 待报价＝未支付
+        orderRepository.save(Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM)); // 待报价＝未支付
 
         assertThatThrownBy(() -> appService.downloadableSourcePackage(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -365,6 +368,17 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_project_when_delete_then_workspace_destroyed_rows_gone_sse_emitted() {
         Long projectId = persistedProject("9200");
+        // 已确认 PRD 版本在场（#330）：版本行随项目真删级联（软引用显式清，同轨道表）
+        jdbcTemplate.update("INSERT INTO prj_prd_versions (id, project_id, version_no, content,"
+                + " confirmed_at, prd_produced_at, created_at, updated_at)"
+                + " VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,"
+                + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                920099900000000001L, projectId);
+        // 对话史在场（真实项目必有）：级联清走事务外派生删除曾在带行时炸
+        // No EntityManager（删除带对话史的项目必失败）——收进短事务后随删
+        jdbcTemplate.update("INSERT INTO prj_conversation_entries (project_id, kind, text,"
+                + " created_at, updated_at) VALUES (?, 1, '你好', CURRENT_TIMESTAMP,"
+                + " CURRENT_TIMESTAMP)", projectId);
 
         appService.delete(projectId);
 
@@ -372,6 +386,12 @@ class ProjectLifecycleAppServiceTest {
         verify(workspaceLifecycleAppService).destroy("9200");
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_prd_versions WHERE project_id = ?", Long.class,
+                projectId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ?",
+                Long.class, projectId)).isZero();
         verify(eventsAppService).publishNotification(eq(ProjectEventTypes.WORKSPACE_DESTROYED),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))));
     }
@@ -458,8 +478,7 @@ class ProjectLifecycleAppServiceTest {
     private Long persistedProject(String workspaceId) {
         Project project =
                 projectRepository.save(Project
-                        .create("删除对象", ProjectType.WEBSITE,
-                                Long.parseLong(workspaceId), null));
+                        .create("删除对象", ProjectType.WEBSITE, null, Long.parseLong(workspaceId), null, null));
         return project.getId();
     }
 

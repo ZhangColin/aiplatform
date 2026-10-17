@@ -327,7 +327,10 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.fixRetryPrompt("修正尝试中断"));
+                .contains("错误现场：修正尝试中断")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时")
+                .contains("已落盘文件变更 尚无");
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
 
@@ -429,7 +432,9 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(1).prompt())
-                .isEqualTo(IterationAppService.fixRetryPrompt("修正 run 未以 finish_edit 结束工具收口"));
+                .contains("错误现场：修正 run 未以 finish_edit 结束工具收口")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时");
         // 未正常收口按重试口径静默（#82/#84）：无 error、无重试信号（与 converse
         // 异常的重试同一口径——run 失败为唯一失败终态）
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
@@ -781,8 +786,7 @@ class IterationAppServiceTest {
 
     @Test
     void given_never_generated_or_archived_or_missing_when_fix_then_rejected() {
-        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null,
-                9906L, OWNER)).getId();
+        Long notGeneratedId = projectRepository.save(Project.create("未生成项目", null, null, 9906L, OWNER, null)).getId();
         Long archivedId = persistedArchivedGeneratedProject("9907");
 
         assertThatThrownBy(() -> appService.startFixRun(notGeneratedId, "改一下", null))
@@ -946,14 +950,14 @@ class IterationAppServiceTest {
 
     /** 已生成形态的项目（迭代的前提事实）。 */
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("迭代项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         return projectRepository.save(project).getId();
     }
 
     private Long persistedArchivedGeneratedProject(String workspaceId) {
-        Project project = Project.create("归档迭代项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("归档迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         project.archive();

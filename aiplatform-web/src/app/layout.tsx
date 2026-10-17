@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, JetBrains_Mono } from "next/font/google";
 
 import { QueryProvider } from "@/components/query-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { M01Dialog } from "@/components/auth/m01-dialog";
+import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/brand";
 import { SseProvider } from "@/lib/sse/provider";
 
 import "./globals.css";
@@ -14,18 +16,19 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// 等宽＝JetBrains Mono（#342 DESIGN.md：负载/代码检视用字；Geist 保留正文/标题）
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
 });
 
-/** 平台 title：首页无前缀，内页「页面 · AI 开发平台」。 */
+/** 平台 title（#342 品牌落位）：首页无前缀，内页「页面 · 语义引力」。 */
 export const metadata: Metadata = {
   title: {
-    default: "AI 开发平台",
-    template: "%s · AI 开发平台",
+    default: SITE_NAME,
+    template: `%s · ${SITE_NAME}`,
   },
-  description: "从一句话需求到系统与设计的定制交易平台",
+  description: SITE_DESCRIPTION,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -33,7 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <ThemeProvider
@@ -46,6 +49,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <SseProvider>
               <TooltipProvider>{children}</TooltipProvider>
             </SseProvider>
+            <M01Dialog />
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

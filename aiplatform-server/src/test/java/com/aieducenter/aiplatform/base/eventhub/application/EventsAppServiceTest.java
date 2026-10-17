@@ -119,7 +119,7 @@ class EventsAppServiceTest {
 
     @Test
     void given_both_families_published_when_subscribed_then_single_stream_carries_both() {
-        SseEmitter subscriber = appService.subscribe(OWNER, "p1", null, null);
+        SseEmitter subscriber = appService.subscribe(OWNER, null, "p1", null, null);
 
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "p1", "projectName", "新名字", EventsAppService.OWNER_FIELD, OWNER));
@@ -135,7 +135,7 @@ class EventsAppServiceTest {
     @Test
     void given_subscribe_without_project_id_when_publish_any_project_then_own_notifications_all_received() {
         // 通知族缺省全量（ADR-0001 寻址：开发平台视角）——ADR-0018 起 = 我的全部通知
-        SseEmitter subscriber = appService.subscribe(OWNER, null, null, null);
+        SseEmitter subscriber = appService.subscribe(OWNER, null, null, null, null);
 
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "p1", "projectName", "名字一", EventsAppService.OWNER_FIELD, OWNER));
@@ -147,7 +147,7 @@ class EventsAppServiceTest {
 
     @Test
     void given_subscribe_with_project_id_when_publish_other_project_then_filtered_out() {
-        SseEmitter subscriber = appService.subscribe(OWNER, "p1", null, null);
+        SseEmitter subscriber = appService.subscribe(OWNER, null, "p1", null, null);
 
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "p2", "projectName", "名字二", EventsAppService.OWNER_FIELD, OWNER));
@@ -165,7 +165,7 @@ class EventsAppServiceTest {
     void given_unfiltered_subscription_when_agent_events_published_then_not_delivered() {
         // 站点级常开连接（无过滤）只收通知族——智能体过程细节是项目内事实，
         // 不进未过滤订阅（也不进其重放，见下）
-        SseEmitter siteWide = appService.subscribe(OWNER, null, null, "run-0:0");
+        SseEmitter siteWide = appService.subscribe(OWNER, null, null, null, "run-0:0");
 
         appService.publishAgentEvent("run-start", Map.of(
                 "runId", "run-1", "projectId", "p1", "prompt", "x",
@@ -181,7 +181,7 @@ class EventsAppServiceTest {
     @Test
     void given_run_filter_when_publish_other_run_then_filtered_out() {
         // 「看某个运行才挂」：?runId= 过滤（与 payload 关联字段同名）
-        SseEmitter subscriber = appService.subscribe(OWNER, null, "run-1", null);
+        SseEmitter subscriber = appService.subscribe(OWNER, null, null, "run-1", null);
 
         appService.publishAgentEvent("run-start", Map.of(
                 "runId", "run-2", "prompt", "x", EventsAppService.OWNER_FIELD, OWNER));
@@ -196,7 +196,7 @@ class EventsAppServiceTest {
     @Test
     void given_project_and_run_filters_when_publish_then_both_must_match() {
         // projectId 是业务桥接注入的透传字段——过滤位 AND 语义
-        SseEmitter subscriber = appService.subscribe(OWNER, "proj-1", "run-1", null);
+        SseEmitter subscriber = appService.subscribe(OWNER, null, "proj-1", "run-1", null);
 
         appService.publishAgentEvent("run-start", Map.of(
                 "runId", "run-1", "prompt", "x", EventsAppService.OWNER_FIELD, OWNER));
@@ -213,7 +213,7 @@ class EventsAppServiceTest {
     @Test
     void given_unfiltered_subscription_of_owner_when_publish_other_owner_then_not_delivered() {
         // 站点级常开订阅（未过滤）只收「我的」通知——别人项目（owner 不同）不达
-        SseEmitter mine = appService.subscribe(OWNER, null, null, null);
+        SseEmitter mine = appService.subscribe(OWNER, null, null, null, null);
 
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "p-other", "projectName", "别人的项目", EventsAppService.OWNER_FIELD, OTHER_OWNER));
@@ -228,7 +228,7 @@ class EventsAppServiceTest {
     @Test
     void given_other_owner_subscribes_with_my_project_filter_when_own_events_published_then_silent_empty_stream() {
         // 第二泄漏面收口：别人用我的 projectId 建过滤订阅 = 静默空流（连接不断）
-        SseEmitter intruder = appService.subscribe(OTHER_OWNER, "p-mine", null, null);
+        SseEmitter intruder = appService.subscribe(OTHER_OWNER, null, "p-mine", null, null);
 
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "p-mine", "projectName", "我的项目", EventsAppService.OWNER_FIELD, OWNER));
@@ -242,7 +242,7 @@ class EventsAppServiceTest {
     @Test
     void given_my_project_filter_subscription_when_publish_own_both_families_then_received() {
         // 本人 projectId 过滤订阅照常收到该项目的两族（隔离不伤既有过滤语义）
-        SseEmitter mine = appService.subscribe(OWNER, "p-mine", null, null);
+        SseEmitter mine = appService.subscribe(OWNER, null, "p-mine", null, null);
 
         appService.publishNotification("preview-ready", Map.of(
                 "projectId", "p-mine", "url", "http://localhost:30080",
@@ -254,6 +254,84 @@ class EventsAppServiceTest {
         assertThat(sender.eventFramesOf(mine))
                 .extracting(SseServerEvent::id)
                 .containsExactly("p-mine:1", "run-mine:1");
+    }
+
+    // ---------- 订阅者归属隔离·访客维度（#326，ADR-0018 注记扩 guestId） ----------
+
+    /** 测试访客订阅者的归属（与 OWNER 账户维度的隔离断言两端）。 */
+    private static final String GUEST = "g-1";
+    private static final String OTHER_GUEST = "g-2";
+
+    @Test
+    void given_guest_owned_event_when_guest_subscribe_then_delivered() {
+        // 访客名下事件（访客键非空、账户键空串）只达访客订阅者
+        SseEmitter guest = appService.subscribe(null, GUEST, null, null, null);
+
+        appService.publishNotification("workspace-created", Map.of(
+                "projectId", "p-guest",
+                EventsAppService.OWNER_FIELD, "",
+                EventsAppService.OWNER_GUEST_FIELD, GUEST));
+
+        assertThat(sender.eventFramesOf(guest)).hasSize(1);
+    }
+
+    @Test
+    void given_guest_owned_event_when_account_subscriber_or_other_guest_then_not_delivered() {
+        // 访客事件不达账户订阅者（账户键空串不匹配）也不达别的访客
+        SseEmitter account = appService.subscribe(OWNER, null, null, null, null);
+        SseEmitter otherGuest = appService.subscribe(null, OTHER_GUEST, null, null, null);
+
+        appService.publishNotification("workspace-created", Map.of(
+                "projectId", "p-guest",
+                EventsAppService.OWNER_FIELD, "",
+                EventsAppService.OWNER_GUEST_FIELD, GUEST));
+
+        assertThat(sender.eventFramesOf(account)).isEmpty();
+        assertThat(sender.eventFramesOf(otherGuest)).isEmpty();
+    }
+
+    @Test
+    void given_account_owned_event_when_guest_subscribe_then_not_delivered() {
+        // 账户事件（访客键缺席）不达访客订阅者——键缺席视空串归一、双键皆须同值
+        SseEmitter guest = appService.subscribe(null, GUEST, null, null, null);
+
+        appService.publishNotification("project-renamed", Map.of(
+                "projectId", "p-account", "projectName", "账户项目",
+                EventsAppService.OWNER_FIELD, OWNER));
+
+        assertThat(sender.eventFramesOf(guest)).isEmpty();
+    }
+
+    @Test
+    void given_guest_owned_agent_event_when_guest_reconnect_then_replayed() {
+        // 断线补发同谓词：访客维度的智能体事件进缓冲，重连只补到本人访客
+        appService.publishAgentEvent(AgentEventTypes.PART_TEXT, Map.of(
+                EventsAppService.PROJECT_FIELD, "7",
+                EventsAppService.RUN_FIELD, "run-g",
+                EventsAppService.OWNER_FIELD, "",
+                EventsAppService.OWNER_GUEST_FIELD, GUEST,
+                "text", "访客项目的对话内容"));
+
+        SseEmitter reconnected = appService.subscribe(null, GUEST, "7", null, "run-0:0");
+
+        assertThat(sender.eventFramesOf(reconnected)).hasSize(1);
+    }
+
+    @Test
+    void given_payload_with_guest_key_only_when_publish_then_not_rejected() {
+        // 发布口归属校验＝双键至少其一非空：访客键单独在场即放行（访客名下事件
+        // 不因账户键空串被「漏传」拒发）
+        appService.publishNotification("workspace-created", Map.of(
+                "projectId", "p-guest",
+                EventsAppService.OWNER_FIELD, "",
+                EventsAppService.OWNER_GUEST_FIELD, GUEST));
+
+        appService.publishAgentEvent("run-start", Map.of(
+                "runId", "run-g",
+                EventsAppService.OWNER_FIELD, "",
+                EventsAppService.OWNER_GUEST_FIELD, GUEST,
+                "prompt", "x"));
+        // 两次发布皆不炸即通过
     }
 
     // ---------- 合并通道不合并语义：智能体族断线补发、通知族永不补发 ----------
@@ -276,7 +354,7 @@ class EventsAppServiceTest {
                 EventsAppService.OWNER_FIELD, OWNER,
                 "message", "别的项目的事件"));
 
-        SseEmitter subscription = appService.subscribe(OWNER, "7", null, "run-0:0");
+        SseEmitter subscription = appService.subscribe(OWNER, null, "7", null, "run-0:0");
 
         assertThat(sender.eventFramesOf(subscription)).hasSize(1);
         SseServerEvent frame = sender.eventFramesOf(subscription).get(0);
@@ -305,7 +383,7 @@ class EventsAppServiceTest {
                 EventsAppService.OWNER_FIELD, OWNER,
                 "text", "我的对话内容"));
 
-        SseEmitter subscription = appService.subscribe(OWNER, "7", null, "run-0:0");
+        SseEmitter subscription = appService.subscribe(OWNER, null, "7", null, "run-0:0");
 
         assertThat(sender.eventFramesOf(subscription)).hasSize(1);
         EventEnvelope envelope = (EventEnvelope) sender.eventFramesOf(subscription).get(0).data();
@@ -321,7 +399,7 @@ class EventsAppServiceTest {
         appService.publishNotification("project-renamed", Map.of(
                 "projectId", "7", "projectName", "名字", EventsAppService.OWNER_FIELD, OWNER));
 
-        SseEmitter latecomer = appService.subscribe(OWNER, "7", null, "run-0:0");
+        SseEmitter latecomer = appService.subscribe(OWNER, null, "7", null, "run-0:0");
 
         assertThat(sender.eventFramesOf(latecomer)).isEmpty();
     }
@@ -333,7 +411,7 @@ class EventsAppServiceTest {
         appService.publishAgentEvent("run-start", Map.of(
                 "runId", "run-1", "prompt", "x", EventsAppService.OWNER_FIELD, OWNER));
 
-        SseEmitter fresh = appService.subscribe(OWNER, null, "run-1", null);
+        SseEmitter fresh = appService.subscribe(OWNER, null, null, "run-1", null);
 
         assertThat(sender.eventFramesOf(fresh)).isEmpty();
     }
@@ -374,7 +452,7 @@ class EventsAppServiceTest {
                     EventsAppService.OWNER_FIELD, OWNER));
         }
 
-        SseEmitter late = shallow.subscribe(OWNER, null, "run-1", "run-0:0");
+        SseEmitter late = shallow.subscribe(OWNER, null, null, "run-1", "run-0:0");
 
         assertThat(sender.eventFramesOf(late))
                 .extracting(SseServerEvent::id)

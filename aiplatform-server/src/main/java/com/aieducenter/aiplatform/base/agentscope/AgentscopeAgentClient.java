@@ -6,10 +6,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.RequireUserConfirmEvent;
@@ -27,6 +30,8 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import reactor.core.publisher.Flux;
+
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -42,7 +47,8 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 与压缩模型经 {@link MeteredModel} 包装、每次 {@code stream()} 收口直报
  * {@link UsageEventSink}（主循环每迭代 + 压缩摘要 + 记忆抽取全收口，取代只认
  * ModelCallEndEvent 的旧单一来源；含失败轮，已耗 token 如实计量），本轮计量上下文
- * 经 {@link MeteringScope} ThreadLocal 挂/摘（归属为空不发明、零用量不报）。
+ * 经 {@link MeteringScope} 随订阅链传播（#324 对账级修复：订阅态读取，跨迭代/压缩/
+ * 委派链的模型直调与装配线程无关；归属为空不发明、零用量不报）。
  *
  * <p><b>挂起与续跑（作答机制）</b>：AgentScope 的确认挂起
  * （RequireUserConfirmEvent——ask_user 提问，唯一挂起源）= 本轮流软终点——发
@@ -51,7 +57,8 @@ import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleA
  * 挂起事实随返回值 {@link AgentReply#suspension()} 上浮；业务编排以 {@link #resume}
  * 续跑（同一 (userId, sessionId) 从 AgentStateStore 恢复上下文——平台重启后可续，
  * 访谈上下文不丢），续跑流可再挂起（一 run 多问答点）或正常收口。失败上抛
- * IllegalStateException（异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
+ * {@link AgentTurnFailure}（IllegalStateException 族，携失败流段的部分观察面——
+ * #323 失败留账；异步轨道由会话执行器吞掉记日志，失败表达归 error 事件）。</p>
  *
  * <p>工作区解析：命令带 workspaceId → 项目工作区（容器文件面，docker exec
  * 读写，写入即落项目工作区；只读面只关内核文件/shell 工具，业务侧工具自带
@@ -136,15 +143,16 @@ public class AgentscopeAgentClient {
         }
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
-                command.timeout(), sink);
-        // 平台工具落盘事实（#292）取走并进变更事实流——错误分支弃取（失败尝试的
-        // 变更不进收口清单，#84 口径）
+                command.timeout(), command.silenceTimeout(), sink);
+        // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
+        // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
+        // 是真实工作区事实，外层尝试环据此留账）
         List<FileChange> changes = new ArrayList<>(result.changes());
         changes.addAll(landedFiles.drain(command.runId()));
         if (result.error() != null) {
-            throw new IllegalStateException("智能体调用失败（runId=" + command.runId()
+            throw new AgentTurnFailure("智能体调用失败（runId=" + command.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
-                    + result.error().getMessage(), result.error());
+                    + result.error().getMessage(), result.error(), changes, result.durations());
         }
         return new AgentReply(command.runId(), result.text(), result.suspension(),
                 changes, result.durations());
@@ -180,14 +188,15 @@ public class AgentscopeAgentClient {
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
-                resume.usageContext(), null, sink);
-        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流
+                resume.usageContext(), null, null, sink);
+        // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
+        // 同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
         changes.addAll(landedFiles.drain(resume.runId()));
         if (result.error() != null) {
-            throw new IllegalStateException("智能体续跑失败（runId=" + resume.runId()
+            throw new AgentTurnFailure("智能体续跑失败（runId=" + resume.runId()
                     + ", model=" + prepared.modelRef().toModelString() + "）："
-                    + result.error().getMessage(), result.error());
+                    + result.error().getMessage(), result.error(), changes, result.durations());
         }
         return new AgentReply(resume.runId(), result.text(), result.suspension(),
                 changes, result.durations());
@@ -234,7 +243,8 @@ public class AgentscopeAgentClient {
 
     /** 一轮流的结果（挂起轮 text 为已生成部分、suspension 非空；error 非空 = 失败；
      *  changes = 本流段成功的文件变更事实、durations = 本流段的阶段耗时事实——
-     *  #88/#111 收口扩载的观察面；失败段两观察面都弃置——上流抛异常，事实随弃）。 */
+     *  #88/#111 收口扩载的观察面；失败段携<b>部分观察</b>（#323 失败留账）：已提交
+     *  变更与已闭合区间照携，经 {@link AgentTurnFailure} 上浮，不清零弃置）。 */
     private record TurnResult(String text, AgentSuspension suspension, Throwable error,
             List<FileChange> changes, StageDurations durations) {
     }
@@ -308,30 +318,57 @@ public class AgentscopeAgentClient {
     /**
      * 一轮流的公共体（converse 首轮与 resume 续跑共用）：事件逐个映射发射，挂起
      * （RequireUserConfirm）发 question-raised 后流终止且不发 run-finish；正常收口
-     * 发 run-finish；异常发 error 事件。用量由模型边界直报（本方法只挂/摘
-     * {@link MeteringScope} 计量上下文，幂等键前缀由调用方给）；超时取逐轮指定
-     * （可空 = 内核配置默认）。
+     * 发 run-finish；异常发 error 事件。用量由模型边界直报（本方法只把本轮
+     * {@link MeteringScope} 计量上下文写入订阅链，幂等键前缀由调用方给）；超时取
+     * 逐轮指定（可空 = 内核配置默认）。
+     *
+     * <p><b>超时两语义（#322）</b>：{@code silenceTimeout} 非空＝活超时判定——
+     * {@code Flux.timeout} 的信号间隔语义按事件逐个重置，纯静默（无事件/工具动作）
+     * 超阈值才判死（还在干活就不掐，活跃 run 无总时长死限——生成轨长任务口径，
+     * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast，对话轮/
+     * 判定轮现状零变化）。判死失败走既有 error 事件表达（SSE 封闭集零新增），
+     * 错误现场带中文口径（外层尝试环 #221 原地修据此续作）。</p>
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
-            Consumer<AgentEvent> sink) {
+            Duration silenceTimeout, Consumer<AgentEvent> sink) {
         StringBuilder text = new StringBuilder();
         AtomicReference<String> finish = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
         AgentscopeEventMapper mapper = prepared.mapper();
-        // 模型边界计量（#109）：本轮用量由 MeteredModel 在每次 stream() 收口直报，
-        // 此处只挂当前轮计量上下文（ThreadLocal）——主循环/压缩/记忆抽取共用同一模型
-        // 实例、据此归入本轮；无 usageContext 不挂（不上报，底座不发明归属）
+        // 模型边界计量（#109 / #324 对账级修复）：本轮用量由 MeteredModel 在每次
+        // stream() 收口直报，此处把计量上下文写入订阅链（contextWrite 订阅态传播）
+        // ——主循环每次迭代/压缩/记忆抽取/委派子智能体的模型直调共用同一模型实例、
+        // 据此归入本轮；无 usageContext 不写（不上报，底座不发明归属）
+        Flux<io.agentscope.core.event.AgentEvent> events =
+                prepared.agent().streamEvents(messages, prepared.ctx());
         if (usageContext != null) {
-            MeteringScope.enter(new MeteringScope(runId, prepared.ctx().getSessionId(),
-                    usageContext, clock, usageEventSink, usageIdempotencyKey));
+            MeteringScope scope = new MeteringScope(runId, prepared.ctx().getSessionId(),
+                    usageContext, clock, usageEventSink, usageIdempotencyKey);
+            events = events.contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, scope));
         }
         try {
-            prepared.agent().streamEvents(messages, prepared.ctx())
-                    .doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                            prepared.fileChanges(), prepared.durations(),
-                            sink, text, finish, suspended))
-                    .blockLast(timeout != null ? timeout : properties.getTimeout());
+            // 活超时判定（#322）：silenceTimeout 非空 → Flux.timeout 按事件逐个重置，
+            // 纯静默超阈值才判死（还在干活就不掐）；为空 → 维持一次性总墙钟（对话轮/
+            // 判定轮）。计量上下文已在 events 上挂好（#324 订阅链），此处仅套超时/观测
+            if (silenceTimeout != null) {
+                events = events
+                        .timeout(silenceTimeout)
+                        .onErrorMap(TimeoutException.class, e ->
+                                new IllegalStateException("活超时判死：" + silenceTimeout
+                                        + " 内无事件/工具动作进展（纯静默超限）", e));
+            }
+            events = events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
+                    prepared.fileChanges(), prepared.durations(),
+                    sink, text, finish, suspended));
+            if (silenceTimeout != null) {
+                // 活超时模式无总墙钟——blockLast(null) 会对空参数 toNanos NPE（Reactor
+                // 的 null 不代表无超时），显式走无参阻塞终态
+                events.blockLast();
+            }
+            else {
+                events.blockLast(timeout != null ? timeout : properties.getTimeout());
+            }
             // 部件解说尾段先出（收口事件前），挂起轮已随挂起事件出尾——解说不因流形态丢尾
             drainParts(prepared.parts(), sink);
             RequireUserConfirmEvent suspension = suspended.get();
@@ -348,11 +385,11 @@ public class AgentscopeAgentClient {
         catch (Exception e) {
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
-            return new TurnResult(text.toString(), null, e, List.of(), StageDurations.zero());
-        }
-
-        finally {
-            MeteringScope.exit();
+            // 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更与
+            // 已闭合区间的阶段耗时随失败携出（观察器全程在流上累积，此处取快照；
+            // 崩断时在途的未闭合区间仍不计——StageDurationFacts 口径不变）
+            return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
+                    prepared.durations().snapshot());
         }
     }
 

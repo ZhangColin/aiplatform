@@ -321,7 +321,7 @@ class WorkspaceHibernationIntegrationTest {
         WorkspaceId id = seedReadyWorkspace(LocalDateTime.now().minusMinutes(5));
 
         // 归档 + 已生成项目挂同名工作区：归档与休眠正交——归档项目不筛、同一判定
-        Project archived = Project.create("已归档项目", ProjectType.WEBSITE, id.id(), null);
+        Project archived = Project.create("已归档项目", ProjectType.WEBSITE, null, id.id(), null, null);
         archived.markGenerated();
         archived.archive();
         projectRepository.save(archived);

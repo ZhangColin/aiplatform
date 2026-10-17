@@ -62,11 +62,12 @@ import lombok.extern.slf4j.Slf4j;
 public class IterationAppService {
 
     /**
-     * 重试续作 prompt（修正轨的重试口径；#221 原地修——携带错误现场）：同工作区
-     * 不丢数据、不重做已对的工作，针对上次错误在现有成果上继续修完本轮修正。
+     * 重试续作 prompt（修正轨的重试口径；#221 原地修——携带错误现场；#323 重试携
+     * 进展现场——retryScene 为尝试环拼装的错误事实＋已干多久/干到哪的进展事实）：
+     * 同工作区不丢数据、不重做已对的工作，针对上次错误在现有成果上继续修完本轮修正。
      */
-    static String fixRetryPrompt(String errorScene) {
-        return "上一次修正尝试失败了（错误现场：" + errorScene + "）。工作区内已完成的成果"
+    static String fixRetryPrompt(String retryScene) {
+        return "上一次修正尝试失败。\n" + retryScene + "\n工作区内已完成的成果"
                 + "仍然有效——不要重做已对的工作。请先检查现状（代码、依赖、数据、8081 "
                 + "端口服务是否在跑），针对该错误在现有成果上继续修复、完成本轮修正，"
                 + "直至修正落实、服务在 8081 端口可访问，最后调用 finish_edit 工具收口"
@@ -284,7 +285,7 @@ public class IterationAppService {
                         // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
                         // 不发（轨道仍在途，「重新修改」零闪现）。锚 = 该场 run 的
                         // 用户面标识（首试 runId，#84 重试不换新锚）
-                        eventBridge.emitRunFailed(projectId, project.getOwnerAccountId(), runId);
+                        eventBridge.emitRunFailed(project, runId);
                     }
                     return;
                 }

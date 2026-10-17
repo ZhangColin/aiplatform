@@ -16,7 +16,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 - SSE name 恒为 `event`，前端每条连接一个 listener。
 - `payload` 恒为对象，必带关联字段；**payload 内禁用 `type` 键名**。
 - `ts` 为 ISO-8601 信封时间戳：前端唯一消费 = run 级「已运行」时钟锚（[#225](https://github.com/ZhangColin/aiplatform/issues/225)——run-start 起锚、run-finish / run-failed 定格，ADR-0010 窄修订），其余消费不依赖。
-- **归属路由键（[ADR-0018](../adr/0018-sse-delivery-user-isolation.md)，#208）**：payload 另携 `ownerAccountId`（两族共有，字符串，与 projectId/runId 同 idiom）——发布侧从聚合注入，投递按「事件归属 == 订阅者」隔离。**路由键非内容，前端不消费**（隔离修后只见自己的 accountId）。
+- **归属路由键（[ADR-0018](../adr/0018-sse-delivery-user-isolation.md)，#208；#326 扩访客键）**：payload 另携 `ownerAccountId`/`ownerGuestId` 双键（两族共有，字符串，与 projectId/runId 同 idiom；owner 双列互斥，事件恰带其一非空、未落侧空串）——发布侧从聚合注入，投递按「事件归属 == 订阅者」双键匹配隔离（账户/访客互不可见）。**路由键非内容，前端不消费**。
 - 心跳：每 15s 发注释行 `:ping`（不进 listener，仅保活）。
 - 订阅：`GET /api/events?projectId=xxx&runId=xxx`（过滤参数与 payload 关联字段同名，多参数 AND；缺省 = 只收通知族）。订阅握手绑定登录账号；过滤参数维持纯兴趣选择——他人 projectId 的过滤订阅 = 静默空流（连接不断）。
 - **族投递规则**：智能体事件族只投递给带过滤（`projectId` 或 `runId`）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤订阅（站点级常开连接）只收平台通知族。未过滤订阅语义 = **我的全部通知**（对他人 deny-by-default）。
@@ -166,8 +166,9 @@ closing: {
     closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
     attempts: [                    #   逐尝试分布（静默重试代价可归因）——attempt / durationMs
       { attempt: 1, durationMs: 61000, llmMs: 52000, toolsMs: {...}, selfTestMs: 9000 }
-    ]                              #   （尝试墙钟）+ 该尝试三桶；中段崩的尝试桶为零
-                                   #   （阶段耗时事实随异常弃置）、墙钟照记
+    ]                              #   （尝试墙钟）+ 该尝试三桶；中段崩的尝试带已闭合区间的
+                                   #   部分观察（#323 失败留账——AgentTurnFailure 携带；前段失败/
+                                   #   判据回调抛错无可携事实仍零桶）、墙钟照记
     # 一致性口径：桶计 + 未归因差值（平台管道 / 判据未过的核验）≈ durationMs——
     # 量级不符即埋点有洞（缝测守卫）；closingMs 含成版而 durationMs 窗口不含（小正偏差）
   }

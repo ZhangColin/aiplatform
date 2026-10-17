@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
+import com.cartisan.core.context.RequestContext;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageSummary;
@@ -24,6 +25,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -50,6 +52,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.web.GuestContext;
 
 /**
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +
@@ -123,9 +126,18 @@ public class ProjectQueryAppService {
      * 项目列表（创建时间倒序）+ 状态过滤（Integer code，框架 converter 绑定）：
      * ACTIVE（未归档）/ ARCHIVED（已归档）；缺省 all。不合法 code 在端点层
      * 400（框架统一信封，带合法取值表），本层只收合法枚举。
+     *
+     * <p>#325/#326 起 owner 双维过滤（修「单账号假设全量返回」缺口）：按请求
+     * 上下文归属（账户维度 {@code RequestContext.getUserId()} 优先、访客维度
+     * {@code GuestContext.guestId()} 次之，等值匹配 {@link Project#ownedBy}）
+     * 只见自己的项目——他人项目、账户与访客项目互不可见；两维皆空（测试直调/
+     * 无会话形）只见无主项目（无主对无主的等值端，deny-by-default）。后台机机面
+     * 不经本口（{@code BackofficeProjectAppService} 独立全量读面）。访客多项目
+     * 同口回全量自己名下（创建倒序——首项即「继续上次项目」的最近一个）。</p>
      */
     public List<ProjectResponse> list(ProjectStatusFilter status) {
-        List<Project> projects = projectsNewestFirst();
+        List<Project> projects = projectsNewestFirst(
+                RequestContext.getUserId(), GuestContext.guestId());
         Map<Long, OrderBriefResponse> activeOrders =
                 orderQueryAppService.activeOrdersOf(projects.stream().map(Project::getId).toList());
         return projects.stream()
@@ -187,8 +199,11 @@ public class ProjectQueryAppService {
         int newline = result.stdout().indexOf('\n');
         try {
             long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
-            return new PrdResponse(projectId.toString(),
-                    result.stdout().substring(newline + 1), Instant.ofEpochSecond(mtimeSeconds));
+            String content = result.stdout().substring(newline + 1);
+            // 收敛度投影（#331）：对正文即时解析——确认门（PrdVersionAppService）与
+            // 收敛卡/摘要层（#346/#332 呈现面）同源判定，草稿演进投影随之
+            return new PrdResponse(projectId.toString(), content,
+                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
         } catch (RuntimeException e) {
             // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
@@ -343,9 +358,19 @@ public class ProjectQueryAppService {
 
     // ---------- 装载与过滤 ----------
 
-    /** 全量项目，创建时间倒序。 */
-    private List<Project> projectsNewestFirst() {
-        return projectRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
+    /**
+     * owner 名下（账户优先、访客次之、双空＝无主）的项目，创建时间倒序
+     * （#325/#326 owner 双维过滤）。
+     */
+    private List<Project> projectsNewestFirst(Long ownerAccountId, Long ownerGuestId) {
+        Sort newestFirst = Sort.by(Sort.Direction.DESC, "createdAt");
+        if (ownerAccountId != null) {
+            return projectRepository.findByOwnerAccountId(ownerAccountId, newestFirst);
+        }
+        if (ownerGuestId != null) {
+            return projectRepository.findByOwnerGuestId(ownerGuestId, newestFirst);
+        }
+        return projectRepository.findByOwnerAccountIdIsNullAndOwnerGuestIdIsNull(newestFirst);
     }
 
     private boolean matches(Project project, ProjectStatusFilter filter) {

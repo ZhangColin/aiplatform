@@ -53,7 +53,8 @@ public class AuthController {
     @GetMapping("/auth/callback")
     @Operation(summary = "授权码回调", description = """
             identity 302 落点（经前端 3333 同源代理）。state 与事务 cookie 精确比对 →
-            换 token（含 JWKS RS256 验签 + iss/aud/exp/nonce）→ 账号 upsert → 种
+            换 token（含 JWKS RS256 验签 + iss/aud/exp/nonce）→ 账号 upsert → 登录即
+            自动平移（#328：请求携带有效访客凭证时把访客未绑定项目过户给账户）→ 种
             aiplatform_session 并 302 回 returnTo。失败 302 回 /?error=state_mismatch
             或 /?error=exchange_failed（identity 拒绝授权只带 error 不带 code 时同走
             exchange_failed；具体原因只进服务端日志）。""")
@@ -61,12 +62,16 @@ public class AuthController {
             @RequestParam(value = "code", required = false) String code,
             @RequestParam(value = "state", required = false) String state,
             @CookieValue(value = AuthCookies.TXN_COOKIE_NAME, required = false) String txn,
+            @CookieValue(value = AuthCookies.GUEST_COOKIE_NAME, required = false) String guestCredential,
             HttpServletResponse response) {
-        LoginCompletion completion = appService.completeLogin(code, state, txn);
+        LoginCompletion completion = appService.completeLogin(code, state, txn, guestCredential);
         if (completion.sessionCookie() != null) {
             response.addHeader(HttpHeaders.SET_COOKIE, completion.sessionCookie().toString());
         }
         response.addHeader(HttpHeaders.SET_COOKIE, completion.txnClearCookie().toString());
+        if (completion.guestClearCookie() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, completion.guestClearCookie().toString());
+        }
         return redirect(completion.redirectTo());
     }
 

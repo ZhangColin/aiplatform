@@ -2,7 +2,10 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.middleware.MiddlewareBase;
+import io.agentscope.core.model.ExecutionConfig;
+import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.model.ModelCreationContext;
 import io.agentscope.core.model.ModelRegistry;
 import io.agentscope.core.skill.repository.AgentSkillRepository;
 import io.agentscope.core.state.AgentStateStore;
@@ -116,10 +119,13 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             String name, String sysPrompt, String modelString, AgentWorkspace workspace,
             String agentKey, String toolSpec, AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
-        // 模型边界计量（#109）：主模型经 MeteredModel 包装——主循环每次迭代
-        // 的 stream() 收口报用量（取代只认 ModelCallEndEvent 的旧源）；子智能体
+        // 模型流层平台包装（#109 计量 + #321 断流自动重试）：主模型解析即关内层
+        // 缺省重试（见 innerRetryDisabledOptions）、经 streamLayer 包装——重试
+        // 内圈（429/5xx 零发射失败流层接续）、计量外圈（主循环每次迭代的
+        // stream() 收口报用量，取代只认 ModelCallEndEvent 的旧源）；子智能体
         // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）
-        Model model = MeteredModel.wrap(ModelRegistry.resolve(modelString), modelString);
+        Model model = streamLayer(
+                ModelRegistry.resolve(modelString, INNER_RETRY_DISABLED), modelString, properties);
         // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
@@ -165,9 +171,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     builder.workspace(local.root());
                 }
                 // 记忆钩子关闭（#109）：MemoryFlushMiddleware 的 fire-and-forget flush
-                // 跑 boundedElastic 线程、看不到本轮计量 ThreadLocal——其 model.stream
-                // 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact 同步承担（已计量），
-                // 关此周期 flush 不丢抽取；亦与项目工作区同口径（记忆不进包）。
+                // 另起订阅树（boundedElastic 线程）、不在本轮计量订阅链上——其
+                // model.stream 用量逃逸计量。记忆抽取仍由压缩链 flushBeforeCompact
+                // 同步承担（已计量），关此周期 flush 不丢抽取；亦与项目工作区同口径
+                // （记忆不进包）。
                 builder.disableMemoryHooks();
             }
             case AgentWorkspace.ProjectDev dev -> projectSandbox(builder, containerFs);
@@ -355,11 +362,60 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     /**
+     * 模型流层平台包装（#321 装配单点）：{@code MeteredModel(RetryingModel(raw))}
+     * ——重试内圈（断流自动重试，{@link RetryingModel}）、计量外圈（#109
+     * {@link MeteredModel}）。序有讲究：计量在外、重试在内——护栏不变式（任何
+     * 发射只来自末次尝试）下整流收口上报与单次直调同形，重试不破坏既有计量
+     * 路径；重试的重订阅也无需跨线程传播计量上下文——计量 scope 经 Reactor 订阅链
+     * {@code Context} 传递（#324），重试在内圈重订阅不跨订阅链、raw 模型无计量依赖。
+     * 主模型与压缩模型共用此装配。
+     */
+    static Model streamLayer(Model resolved, String modelString, AgentscopeProperties properties) {
+        return MeteredModel.wrap(RetryingModel.wrap(resolved, properties), modelString);
+    }
+
+    /**
+     * 内层（框架模型内建）重试关闭的执行配置（#321）：agentscope 2.0.1 的
+     * {@code OpenAIChatModel.Builder.build()} 经 {@code ensureDefaultExecutionConfig}
+     * 把 {@code ExecutionConfig.MODEL_DEFAULTS} 烧进 configuredOptions——内层
+     * retryWhen 默认开启，但（a）平台无控制面（次数/backoff 不可配），（b）无
+     * 已发块护栏——中途断流重订阅重放已消费块、下游逐 chunk 累积即回复文本
+     * 重复拼接，（c）耗尽后上抛 reactor {@code RetryExhaustedException}——真错误
+     * 被重试机制的皮裹走（外层尝试环 #221 错误现场拿到的是重试耗尽文案而非
+     * 模型错误）。此处显式供值（presence 即跳过缺省注入）关内层重试
+     * （{@code maxAttempts=1}）、保留缺省 inter-signal 超时（{@code timeout}
+     * 取 MODEL_DEFAULTS 同值——除重试维度外不改既有行为，流时长上限属 #322），
+     * 流层重试由 {@link RetryingModel} 平面独占（可配、有护栏、分类接线、耗尽
+     * 如实上抛）。
+     */
+    static GenerateOptions innerRetryDisabledOptions() {
+        return GenerateOptions.builder()
+                .executionConfig(ExecutionConfig.builder()
+                        .timeout(ExecutionConfig.MODEL_DEFAULTS.getTimeout())
+                        .maxAttempts(1)
+                        .build())
+                .build();
+    }
+
+    /**
+     * 解析上下文（#321）：携内层重试关闭的执行配置进模型解析——生成方
+     * （DeepSeekModelProvider 等）把 context 的 GenerateOptions 组件并进
+     * configuredOptions，模型实例的全部调用路径（主循环 reasoning / 压缩摘要 /
+     * 记忆抽取直调 stream()）一致生效；cachePolicy 缺省 DEFAULT 不进注册表缓存
+     * （模型解析本就只发生在 agent 构建一次，实例缓存由本工厂承担）。
+     */
+    private static final ModelCreationContext INNER_RETRY_DISABLED =
+            ModelCreationContext.builder()
+                    .component(GenerateOptions.class, innerRetryDisabledOptions())
+                    .build();
+
+    /**
      * 压缩配置装配：把配置的触发阈值 + 压缩模型档落到 {@link CompactionConfig}，空值
      * 回框架缺省（保留量/裁剪亦走框架缺省）——取值与依据见 {@link AgentscopeProperties}
-     * （#108 / ADR-0012）。压缩（摘要）模型同样经 {@link MeteredModel} 包装（#109）：
-     * 压缩链的摘要与 flushBeforeCompact 记忆抽取共用该模型实例直调 stream()，包装
-     * 后用量归入当前轮计量（flash 档与主模型 pro 档各自归位）。
+     * （#108 / ADR-0012）。压缩（摘要）模型同经 {@link #streamLayer} 包装（#109
+     * 计量 + #321 断流重试，内层重试同关）：压缩链的摘要与 flushBeforeCompact
+     * 记忆抽取共用该模型实例直调 stream()，包装后用量归入当前轮计量（flash 档与
+     * 主模型 pro 档各自归位）、断流同获流层重试。
      */
     static CompactionConfig compactionConfig(AgentscopeProperties properties) {
         CompactionConfig.Builder config = CompactionConfig.builder();
@@ -368,7 +424,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         }
         String compactionModel = properties.getCompactionModel();
         if (compactionModel != null && !compactionModel.isBlank()) {
-            config.model(MeteredModel.wrap(ModelRegistry.resolve(compactionModel), compactionModel));
+            config.model(streamLayer(
+                    ModelRegistry.resolve(compactionModel, INNER_RETRY_DISABLED), compactionModel,
+                    properties));
         }
         return config.build();
     }

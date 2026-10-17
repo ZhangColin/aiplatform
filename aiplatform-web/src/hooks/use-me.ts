@@ -13,11 +13,14 @@ export type Me = Required<components["schemas"]["MeResponse"]>;
 /**
  * 会话身份（spec 0004 §5）：staleTime Infinity——会话内不重拉，
  * 失效感知交给 401 全局出口（client.ts），此处不设 error 分支。
+ * {@code enabled=false}＝匿名可逛面（首页无凭证 cookie）：不发 /me 请求
+ *（「只逛零足迹」——匿名首访不该因背景查询弹登录框）。
  */
-export function useMe() {
+export function useMe(enabled = true) {
   return useQuery({
     queryKey: queryKeys.me,
     queryFn: () => api.get<Me>("/me"),
     staleTime: Infinity,
+    enabled,
   });
 }

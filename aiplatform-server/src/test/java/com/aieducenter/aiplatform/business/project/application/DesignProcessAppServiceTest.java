@@ -233,7 +233,7 @@ class DesignProcessAppServiceTest {
     }
 
     private Long persistedDesignProject(ProjectEndpointType endpointType, DesignScope scope) {
-        Project project = Project.create("设计项目", null, 971900L, OWNER);
+        Project project = Project.create("设计项目", null, null, 971900L, OWNER, null);
         project.switchEndpoint(endpointType, scope);
         project.markPrdProduced();
         return projectRepository.save(project).getId();

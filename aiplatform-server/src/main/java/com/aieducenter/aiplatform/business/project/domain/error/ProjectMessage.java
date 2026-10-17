@@ -145,9 +145,19 @@ public enum ProjectMessage implements CodeMessage {
 
     /** 设计资产包取件（#297）：下单冻结件在工作区不存在——冻结未发生或导出物已被
      *  外部清理，不以空产物顶替（对偶封存包 WSP_016 口径）。 */
-    DESIGN_PACKAGE_NOT_FOUND(404, "PRJ_051", "设计资产包不存在（下单冻结件缺失）");
+    DESIGN_PACKAGE_NOT_FOUND(404, "PRJ_051", "设计资产包不存在（下单冻结件缺失）"),
 
-    // PRJ_016 曾是需求确认门谓词，随门概念删除注销
+    // ========== PRD 确认版本（#330「确认即成版」，spec #320 实施序③） ==========
+
+    /** 版本详情守卫：项目内无该版本号（从未确认或号越界——含非正整数入参）。 */
+    PRD_VERSION_NOT_FOUND(404, "PRJ_052", "PRD 版本不存在"),
+
+    /** 确认门两级拦截（#331 待定项两级门）：「验收与待确认」章有阻碍核心流程缺项
+     * ——须先在对话区补齐再确认（解析缺失 fail-open 不拦：误拦即用户死锁，漏拦
+     * 可经迭代补救）。 */
+    PRD_CONFIRM_BLOCKING_PENDING(409, "PRJ_053", "PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认");
+
+    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 
     private final int httpStatus;
     private final String code;

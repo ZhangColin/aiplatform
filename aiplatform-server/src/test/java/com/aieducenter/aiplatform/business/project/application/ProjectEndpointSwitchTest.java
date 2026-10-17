@@ -358,8 +358,7 @@ class ProjectEndpointSwitchTest {
 
     /** PRD 已产出（可未生成——生成中断态）形态的项目。 */
     private Long persistedProject(boolean prdProduced, boolean generated) {
-        Project project = projectRepository.save(Project.create("终点切换项目", null,
-                970900L + System.nanoTime() % 1000, OWNER));
+        Project project = projectRepository.save(Project.create("终点切换项目", null, null, 970900L + System.nanoTime() % 1000, OWNER, null));
         if (prdProduced) {
             project.markPrdProduced();
         }

@@ -94,10 +94,23 @@ class EventsControllerSseTest {
 
     /** lastEventId 非空 = 浏览器断线重连姿态（自动携带 Last-Event-ID 请求头）。 */
     private SseClient connect(String query, String lastEventId) throws Exception {
-        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt",
-                Instant.now().plusSeconds(600)));
+        return connectAs(1L, query, lastEventId);
+    }
+
+    /**
+     * 指定订阅者账户的连接（#325 两账户订阅隔离）：每账户独立会话行（同 key 互覆），
+     * 订阅握手经 BFF 会话绑定该归属——投递谓词的「事件归属 == 订阅者」匹配端。
+     */
+    private SseClient connectAs(long accountId, String query) throws Exception {
+        return connectAs(accountId, query, null);
+    }
+
+    private SseClient connectAs(long accountId, String query, String lastEventId) throws Exception {
+        String sessionId = TEST_SESSION_ID + "-" + accountId;
+        sessionStore.put(sessionId, new BffSession(accountId, "sse-test-" + accountId,
+                "idt", "at", "rt", Instant.now().plusSeconds(600)));
         SseClient client = SseClient.connect(port, query,
-                AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID, lastEventId);
+                AuthCookies.SESSION_COOKIE_NAME + "=" + sessionId, lastEventId);
         clients.add(client);
         return client;
     }
@@ -366,6 +379,27 @@ class EventsControllerSseTest {
         SseClient client = connect("?runId=run-blank-9", "");
 
         assertThat(client.nextNonCommentLine(1500)).isNull();
+    }
+
+    // ---------- 两账户订阅互不可见（#325 集测·订阅面，ADR-0018 归属路由键） ----------
+
+    /**
+     * 订阅互不可见：账户乙以账户甲的 projectId 建过滤订阅——订阅握手绑定乙的
+     * 归属（BFF 会话 → ownerAccountId），甲项目事件不达乙（静默空流，与
+     * 「项目不存在」的订阅同形——存在性不泄露）；甲本人订阅照常收到。真实 HTTP
+     * 线上的两账户隔离（通道语义面见 EventsAppServiceTest，本缝钉会话绑定端）。
+     */
+    @Test
+    void given_other_account_subscribes_with_my_project_filter_when_my_events_published_then_silent_empty_stream()
+            throws Exception {
+        SseClient intruder = connectAs(2L, "?projectId=p-mine");
+        SseClient mine = connectAs(1L, "?projectId=p-mine");
+
+        publishNotification("project-renamed", Map.of("projectId", "p-mine", "projectName", "甲的项目"));
+
+        assertThat(mine.nextNonCommentLine()).isEqualTo("id:p-mine:1");
+        mine.skipEventBody();
+        assertThat(intruder.nextNonCommentLine(1500)).isNull();
     }
 
     // ---------- 部件契约线格式 ----------

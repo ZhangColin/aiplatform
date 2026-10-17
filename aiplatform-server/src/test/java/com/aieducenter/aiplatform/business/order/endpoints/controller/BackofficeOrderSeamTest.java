@@ -21,7 +21,7 @@ import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 import com.aieducenter.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
-import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
+import com.aieducenter.aiplatform.business.identity.application.AccountAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
@@ -30,6 +30,8 @@ import com.aieducenter.aiplatform.business.project.application.DesignPackageAppS
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -110,7 +112,7 @@ class BackofficeOrderSeamTest {
     private OrderAppService appService;
 
     @Autowired
-    private AccountRepository accountRepository;
+    private AccountAppService accountAppService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -133,6 +135,8 @@ class BackofficeOrderSeamTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        // 绑定行随账号清（#327 拆分后凭据住绑定表）
+        jdbcTemplate.update("DELETE FROM idn_account_bindings");
         jdbcTemplate.update("DELETE FROM idn_accounts");
         // 知识块/素材登记按项目清（#158 沉淀断言面；knw 表仅卡单补偿链写入）
         jdbcTemplate.update("DELETE FROM knw_chunks WHERE project_id = ?",
@@ -585,7 +589,7 @@ class BackofficeOrderSeamTest {
     void given_order_placed_by_known_account_when_filter_by_external_id_then_row_with_owner_name()
             throws Exception {
         // 真账号 + 该账号会话上下文里下单（ownerAccountId 落值）+ 一笔无主单
-        Account owner = accountRepository.save(Account.register("sub-156-a", "运营查档·李四"));
+        Account owner = accountAppService.upsertOidc("sub-156-a", "运营查档·李四");
         OrderResponse owned = placeOrderAs(910301L, owner.getId());
         OrderResponse anonymous = placeOrder(910302L);
 
@@ -619,7 +623,7 @@ class BackofficeOrderSeamTest {
         // 账号已删：externalId 换算必落空 → 过滤面同「未建档」语义＝空清单；
         // 订单本身是交易记录仍可见（不带账号维度看），取名容缺 ownerDisplayName
         // 落 null 不炸（有主单悬空引用＋无主单，两行皆 null）
-        accountRepository.deleteById(owner.getId());
+        accountAppService.accountByIdentifier("sub-156-a").ifPresent(a -> jdbcTemplate.update("DELETE FROM idn_accounts WHERE id = ?", a.getId()));
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/orders").queryParam("externalId", "sub-156-a"),
                         "/api/backoffice/orders?externalId=sub-156-a", null))
@@ -701,7 +705,7 @@ class BackofficeOrderSeamTest {
         // 真账号下单（ownerAccountId 落值）＋一笔无主单：清单/详情的 ownerExternalId
         // 有主带值、无主 null；账号删除后悬空软引用容缺 null——与 ownerDisplayName
         // 同语义（externalId 过滤面同 #156：换算不到＝空清单）
-        Account owner = accountRepository.save(Account.register("sub-243-a", "运营查档·钱七"));
+        Account owner = accountAppService.upsertOidc("sub-243-a", "运营查档·钱七");
         OrderResponse owned = placeOrderAs(910801L, owner.getId());
         OrderResponse anonymous = placeOrder(910802L);
 
@@ -737,8 +741,10 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.items[0].ownerDisplayName").value(nullValue()));
 
         // 账号已删：悬空软引用容缺——ownerExternalId 与 displayName 同落 null；
-        // externalId 过滤面同「未建档」语义＝空清单（同 #156 口径）
-        accountRepository.deleteById(owner.getId());
+        // externalId 过滤面同「未建档」语义＝空清单（同 #156 口径；绑定行残留
+        // ＝悬空软引用的另一面，换算/摘要两 face 均容缺不放大）
+        accountAppService.accountByIdentifier("sub-243-a")
+                .ifPresent(a -> jdbcTemplate.update("DELETE FROM idn_accounts WHERE id = ?", a.getId()));
         mockMvc.perform(BackofficeSignatures.signed(
                         get("/api/backoffice/orders").queryParam("externalId", "sub-243-a"),
                         "/api/backoffice/orders?externalId=sub-243-a", null))
@@ -938,7 +944,8 @@ class BackofficeOrderSeamTest {
                 .endpointType(endpointType)
                 .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
-                Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z")));
+                Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
     }
 
     /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */

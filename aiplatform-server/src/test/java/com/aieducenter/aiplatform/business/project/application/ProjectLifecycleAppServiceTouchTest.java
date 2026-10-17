@@ -14,6 +14,7 @@ import com.cartisan.event.ApplicationEventPublisher;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.skills.application.SkillDraftAppService;
+import com.aieducenter.aiplatform.business.identity.application.GuestAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
@@ -26,6 +27,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,10 +85,16 @@ class ProjectLifecycleAppServiceTouchTest {
     private DesignSpecRepository designSpecs;
 
     @Mock
+    private PrdVersionRepository prdVersions;
+
+    @Mock
     private SkillDraftAppService skillDrafts;
 
     @Mock
     private OrderQueryAppService orderQueryAppService;
+
+    @Mock
+    private GuestAppService guestAppService;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -190,7 +198,7 @@ class ProjectLifecycleAppServiceTouchTest {
     // ---------- 测试数据 ----------
 
     private Project project(boolean generated) {
-        Project project = Project.create("测试项目", null, 900L, 1L);
+        Project project = Project.create("测试项目", null, null, 900L, 1L, null);
         if (generated) {
             project.markGenerated();
         }
@@ -201,7 +209,7 @@ class ProjectLifecycleAppServiceTouchTest {
         return new ProjectLifecycleAppService(workspaceLifecycleAppService,
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
-                conversationHistory, generationSegments, designItems, designSpecs, skillDrafts,
-                orderQueryAppService, transactionTemplate);
+                conversationHistory, generationSegments, designItems, designSpecs, prdVersions,
+                skillDrafts, orderQueryAppService, guestAppService, transactionTemplate);
     }
 }

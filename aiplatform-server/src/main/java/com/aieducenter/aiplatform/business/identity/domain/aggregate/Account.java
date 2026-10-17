@@ -15,11 +15,11 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.aiplatform.business.identity.domain.error.IdentityMessage;
 
 /**
- * 账号聚合根（{@code idn_accounts}，A2 §3 最小版）。
- *
- * <p>首次登录按外部 ID（OIDC {@code sub}）自动建档，无 issuer 列（v1 单 IdP）、
- * 无角色列（角色票再加）。不软删除（Auditable 只取审计字段）。外部 ID 唯一索引
- * 是「同 sub 不重复建档」的最终防线，常态路径靠 callback 的 upsert 编排。</p>
+ * 账号聚合根（{@code idn_accounts}，#327 绑定表拆分后瘦身形）：业务档案极简——
+ * id＋显示名＋时间戳，凭据一律住绑定表（{@link AccountBinding}），「迁 SSO 只动
+ * 绑定表」由此成立。无 issuer/provider 列（供数方差异在绑定行）、无角色列（角色
+ * 票再加）。不软删除（Auditable 只取审计字段）。首次登录自动建档，唯一性防线在
+ * 绑定表 unique(provider, identifier)，常态路径靠登录 upsert 编排。
  */
 @Entity
 @Table(name = "idn_accounts")
@@ -27,16 +27,11 @@ import com.aieducenter.aiplatform.business.identity.domain.error.IdentityMessage
 @Getter
 public class Account extends Auditable implements AggregateRoot<Account, Long> {
 
-    /** 与库列宽对齐（V5 迁移） */
-    public static final int EXTERNAL_ID_MAX_LENGTH = 100;
     public static final int DISPLAY_NAME_MAX_LENGTH = 200;
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
     private Long id;
-
-    @Column(name = "external_id", nullable = false, updatable = false, length = EXTERNAL_ID_MAX_LENGTH)
-    private String externalId;
 
     @Column(name = "display_name", nullable = false, length = DISPLAY_NAME_MAX_LENGTH)
     private String displayName;
@@ -44,23 +39,21 @@ public class Account extends Auditable implements AggregateRoot<Account, Long> {
     protected Account() {
     }
 
-    private Account(String externalId, String displayName) {
-        if (externalId == null || externalId.isBlank()
-                || externalId.length() > EXTERNAL_ID_MAX_LENGTH
-                || displayName == null || displayName.isBlank()
+    private Account(String displayName) {
+        if (displayName == null || displayName.isBlank()
                 || displayName.length() > DISPLAY_NAME_MAX_LENGTH) {
             throw new DomainException(IdentityMessage.ACCOUNT_FIELDS_INCOMPLETE);
         }
         this.id = TsidGenerator.newInstance().generate();
-        this.externalId = externalId;
         this.displayName = displayName;
     }
 
     /**
-     * 首次登录建档（callback 换 token + 验签成功后调用）。
+     * 首次登录建档（OIDC 回调换 token 验签成功后 / 验证码登录验码通过后，经
+     * AccountAppService 的两档 upsert 调用，绑定行同事务落）。
      */
-    public static Account register(String externalId, String displayName) {
-        return new Account(externalId, displayName);
+    public static Account register(String displayName) {
+        return new Account(displayName);
     }
 
     /**

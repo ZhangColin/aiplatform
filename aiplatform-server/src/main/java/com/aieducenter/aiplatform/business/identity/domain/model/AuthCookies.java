@@ -12,6 +12,13 @@ public final class AuthCookies {
     /** BFF 业务会话 cookie（不透明 sessionId；HttpOnly + SameSite=Lax，会话级无 maxAge） */
     public static final String SESSION_COOKIE_NAME = "aiplatform_session";
 
+    /**
+     * 访客凭证 cookie（#326 访客域）：值即凭证（服务端按 idn_guests.credential 直查，
+     * 无状态校验）；HttpOnly + SameSite=Lax，MaxAge 对齐保留期、随滑动续期（写节流）
+     * 刷新。Secure 随 {@code sso.cookie-secure}（与账户会话 cookie 同一取舍）。
+     */
+    public static final String GUEST_COOKIE_NAME = "aiplatform_guest";
+
     /** OAuth 往返事务 cookie（"{state}:{nonce}:{returnTo}"，600s） */
     public static final String TXN_COOKIE_NAME = "oauth_txn";
 

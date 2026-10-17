@@ -3,27 +3,35 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
+import { ProjectSpaceShell } from "@/components/shell/project-space-shell";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
 /**
- * 站点场景装配（#76 侧栏定稿形态 / #79 项目页 icon rail 接入）：新建项目 /
- * 首页 /「能做这些」模式位 / 历史项目（数据驱动）/ 个人菜单全部内建在
- * AppSidebar。项目页默认收成 icon rail（Tooltip、可展开——对话与成果让出
- * 最大空间）；其余面默认展开。key 按档分：跨档导航（首页↔项目页）重挂
- * provider 使缺省态随页生效；同档内（项目↔项目）不重挂，保留当次收展。
+ * 站点场景装配（#76 侧栏定稿形态 / #343 项目空间新壳分流 / #345 首页去侧栏）：
+ * 项目空间（/projects/[id] 及阶段子路径）走阶段侧栏＋全局顶栏的新壳（spec #320
+ * ⑥ 全局壳重建）；首页 P01 无侧栏、顶栏照首页形（自管顶栏，归 #345）；列表页
+ * 仍旧壳（共存窗口——我的项目 P08 归 #349）。
  */
 
-/** 项目详情路由（/projects/[id]）——侧栏收成 icon rail 的档。 */
-function isProjectPage(pathname: string): boolean {
-  return /^\/projects\/[^/]+$/.test(pathname);
+/** 项目空间路由（/projects/[id] 与其下阶段页路径段）——新壳档。 */
+function projectIdInSpace(pathname: string): string | null {
+  const match = /^\/projects\/([^/]+)(?:\/.*)?$/.exec(pathname);
+  return match ? (match[1] as string) : null;
 }
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const rail = isProjectPage(pathname);
+  const spaceProjectId = projectIdInSpace(pathname);
+  if (spaceProjectId) {
+    return <ProjectSpaceShell projectId={spaceProjectId}>{children}</ProjectSpaceShell>;
+  }
+  // 首页无侧栏（#345）：自管顶栏（HomeHeader），外壳不再装配旧侧栏。
+  if (pathname === "/") {
+    return <>{children}</>;
+  }
   return (
-    <SidebarProvider key={rail ? "rail" : "wide"} defaultOpen={!rail}>
+    <SidebarProvider defaultOpen>
       <AppSidebar />
       {children}
     </SidebarProvider>

@@ -25,6 +25,8 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 
@@ -99,7 +101,8 @@ class OrderPaymentArchiveTest {
         when(projectQueryAppService.namesOf(List.of(PROJECT_ID)))
                 .thenReturn(Map.of(PROJECT_ID, "宠物店官网")); // 沉淀取名面（namesOf 单查询）
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
-                Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z")));
+                Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
     }
 
     @AfterEach

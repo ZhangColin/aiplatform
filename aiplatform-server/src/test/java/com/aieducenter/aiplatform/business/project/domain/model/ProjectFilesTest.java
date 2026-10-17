@@ -62,6 +62,38 @@ class ProjectFilesTest {
         assertThat(ProjectFiles.anchoredFormOf(null)).isNull();
     }
 
+    // ---------- 入口文件完整性（#339 首屏界面先行＋入口一次写全） ----------
+
+    @Test
+    void given_entry_with_truncation_placeholder_when_scan_then_incomplete() {
+        // 灵魂例（#339）：执行体「其余代码略」式残缺产出——逐字命中强信号短语即判残缺
+        assertThat(ProjectFiles.hasTruncationPlaceholder(
+                "export default function Home() {\n  return <main>{/* 其余代码略 */}</main>;\n}"))
+                .isTrue();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("// 以下省略")).isTrue();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("/* 其余部分略 */")).isTrue();
+        // 独占一行的纯省略号注释（截断占位——非 JS/TS 展开运算符）
+        assertThat(ProjectFiles.hasTruncationPlaceholder("const x = 1;\n// ...\n")).isTrue();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("{/* ... */}")).isTrue();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("// rest of code omitted")).isTrue();
+    }
+
+    @Test
+    void given_complete_entry_when_scan_then_not_incomplete() {
+        // 负向（#304 先例：解析防线带负例，防未来收紧误伤）——合法的展开运算符
+        // （... 与表达式同现、非独占注释行）、空/缺内容不误判为残缺
+        assertThat(ProjectFiles.hasTruncationPlaceholder(
+                "export default function Home() {\n  const x = {...props};\n"
+                        + "  return <main>{x.title}</main>;\n}"))
+                .isFalse();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("export const items = [...a, ...b];"))
+                .isFalse();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("// 这里按业务需要处理各分支"))
+                .isFalse();
+        assertThat(ProjectFiles.hasTruncationPlaceholder("")).isFalse();
+        assertThat(ProjectFiles.hasTruncationPlaceholder(null)).isFalse();
+    }
+
     // ---------- 树列表命令与输出解析 ----------
 
     @Test

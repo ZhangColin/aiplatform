@@ -5,13 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { SidebarInset } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProject } from "@/hooks/use-project";
 import { errorText } from "@/lib/api/api-error";
+import { isBindingGateError } from "@/lib/orders/binding-gate";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 import { coderStatusOf, useGenerationStore } from "@/lib/store/generation";
+import { useM01Store } from "@/lib/store/m01";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 
@@ -50,6 +51,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   /** 成果区呼出态：有成果自动滑出一次（含回访）；用户可收起、顶栏「成果」呼出。 */
   const [outputsOpen, setOutputsOpen] = useState(false);
   const placeOrder = usePlaceOrder(projectId);
+  const openM01 = useM01Store((s) => s.openM01);
 
   useAgentEventChannel(projectId);
   const agentStatus = useSseStatus("agent");
@@ -138,7 +140,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
 
   if (isError) {
     return (
-      <SidebarInset className="flex h-svh min-h-0 flex-col">
+      <div className="flex h-[calc(100svh-4rem)] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           <p>{errorText(error, "项目加载失败")}</p>
           <div className="flex gap-2">
@@ -155,7 +157,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
             </Button>
           </div>
         </div>
-      </SidebarInset>
+      </div>
     );
   }
 
@@ -178,6 +180,22 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   const orderCardId =
     detail?.activeOrder?.id ?? (detail?.archived ? (detail?.latestOrder?.id ?? null) : null);
 
+  // 确认下单（#328 签约门）：未登录绑定的访客被后端拦（ORD_017/5017）——弹 M01
+  // 登录绑定携 resume 续跑本单（绑定后放行，免二次点击）；其余错误归 usePlaceOrder
+  // 的 onError toast（不重复提示）。
+  const confirmOrder = () =>
+    placeOrder.mutate(undefined, {
+      onSuccess: () => {
+        // 本单的自动挂载（mount+切换）在此发生——记入锁存，免得 detail 失效重拉
+        // 落地时回访挂载把用户刚关掉的 tab 再挂回（#205 边角）
+        setSeenActiveOrder(true);
+        openOutputsTo("order");
+      },
+      onError: (error) => {
+        if (isBindingGateError(error)) openM01("stage-gate", confirmOrder);
+      },
+    });
+
   return (
     <ProjectPageShell
       header={
@@ -191,18 +209,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
       }
       headerActions={
         showConfirmOrder ? (
-          <ConfirmOrderButton
-            onConfirm={() =>
-              placeOrder.mutate(undefined, {
-                onSuccess: () => {
-                  // 本单的自动挂载（mount+切换）在此发生——记入锁存，免得 detail
-                  // 失效重拉落地时回访挂载把用户刚关掉的 tab 再挂回（#205 边角）
-                  setSeenActiveOrder(true);
-                  openOutputsTo("order");
-                },
-              })
-            }
-          />
+          <ConfirmOrderButton onConfirm={confirmOrder} />
         ) : null
       }
       chat={

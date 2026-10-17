@@ -354,7 +354,7 @@ class BackofficeProjectCostSeamTest {
     /** 建项目（真库写入，跨域咬合夹具；workspaceId 占位自增）。 */
     private Project newProject(String name) {
         return projectRepository.save(
-                Project.create(name, ProjectType.WEBSITE, workspaceSeq++, null));
+                Project.create(name, ProjectType.WEBSITE, null, workspaceSeq++, null, null));
     }
 
     private void report(String eventId, Instant ts, String subject, String model,

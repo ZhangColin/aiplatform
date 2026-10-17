@@ -14,11 +14,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
+import com.aieducenter.aiplatform.base.agentscope.AgentTurnFailure;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
@@ -63,6 +65,14 @@ import lombok.extern.slf4j.Slf4j;
  * 不复存在（#219）；重试耗尽转终态失败，末次错误现场随 {@link RunResult#lastError}
  * 回传轨道层（生成轨续跑现状盘点的「中断原因」旁证）。</p>
  *
+ * <p><b>失败留账与重试携进展现场（#323）</b>：失败尝试的耗时账与观察面不清零
+ * 弃置——客户端流失败经 {@link AgentTurnFailure} 携部分观察（已提交文件变更＋
+ * 已闭合区间阶段耗时）上浮，本环计入本场累计（收口清单与耗时分布跨尝试含失败
+ * 尝试）；重试上文＝{@link #retryScene}（错误事实＋进展现场——已干多久/干到哪的
+ * 平台可观测事实：累计用时、已落盘文件变更、最近计划快照），裸异常原文不再是
+ * 唯一现场。超限转终态时耗时账随终态日志留档（平台观测面——用户面呈现归等待态
+ * 线，#314）。</p>
+ *
  * <p><b>破坏性命令直通（#219 透明面化）</b>：执行体命令走内核 shell 工具
  * （无确认自检——沙箱可随时销毁重建，确认机制连代码带概念已删），过程照常经
  * 动作部件播报（命令原值滚动行，#228）对用户透明可见。</p>
@@ -75,9 +85,9 @@ class CoderRunAttempts {
     public static final String SESSION_PREFIX = "coder-";
 
     /**
-     * 一场编码 run 的 prompt 对（首试 + 重试续作轨）。重试 prompt 由上次尝试的
-     * <b>错误现场</b>现拼（#221 原地修——新尝试携带错误现场继续修，不丢弃本段
-     * 已对的工作；错误事实由本环捕获传入，轨道层只给拼装函数）。
+     * 一场编码 run 的 prompt 对（首试 + 重试续作轨）。重试 prompt 的入参是
+     * <b>重试现场</b>（{@link #retryScene}——#221 错误现场 + #323 进展现场：已干
+     * 多久/干到哪的平台可观测事实），轨道层只给拼装函数（现场拼装归本环单点）。
      */
     record Prompts(String first, UnaryOperator<String> retry) {
     }
@@ -177,8 +187,10 @@ class CoderRunAttempts {
      * 一次尝试的耗时账（#111 阶段耗时分布）：尝试序号 + 尝试墙钟 + 该尝试跨流段
      * （converse + 续跑）合并的阶段耗时事实。墙钟口径：成功/判据未过的尝试 =
      * converse 起跑 → 续跑落定（核验前——核验起计收口尾序桶，判据未过的核验时间
-     * 未归因，探活类量级小）；中段崩的尝试 = 起跑到异常点（含全部在途），桶为零
-     * （阶段耗时事实随异常弃置——观察面口径见 StageDurationFacts）。
+     * 未归因，探活类量级小）；中段崩的尝试 = 起跑到异常点（含全部在途），桶 =
+     * 该流段已闭合区间的部分观察（#323 失败留账——AgentTurnFailure 携带；非客户
+     * 端失败〔前段失败/判据回调抛错〕无可携事实仍零桶，观察面口径见
+     * StageDurationFacts）。
      */
     private record AttemptDuration(int attempt, long wallMs, StageDurations durations) {
     }
@@ -252,6 +264,10 @@ class CoderRunAttempts {
         // 阶段耗时分布（#111）：每次尝试各起一账——尝试墙钟 + 跨流段合并的阶段耗时
         // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）
         List<AttemptDuration> attemptDurations = new ArrayList<>();
+        // 最近计划快照（#323 重试携进展现场）：执行体自产计划（part-plan 全量快照）
+        // 的最新一帧——重试续本会话、计划跨尝试连续，失败后重试现场据此携带
+        //「干到哪」（✓●○ 计划状态是平台可观测事实，不由模型自报）
+        AtomicReference<List<Map<String, Object>>> planSteps = new AtomicReference<>();
         // lint 违规修轮已用标记（#296 有限自动重试一轮）：一场 run 至多一轮——首轮
         // 收口扫描违规即喂回执行体原地修，之后（修净或仍违规）如实收口
         boolean lintFixRoundUsed = false;
@@ -266,7 +282,10 @@ class CoderRunAttempts {
             AgentCommand command = new AgentCommand(
                     attemptRunId,
                     attempt == 1 ? knowledgePrefix + prompts.first()
-                            : prompts.retry().apply(previousError),
+                            : prompts.retry().apply(retryScene(previousError, attempt - 1,
+                                    maxAttempts,
+                                    Duration.between(runStartedAt, Instant.now()).toMillis(),
+                                    runChanges, planSteps.get())),
                     agent.systemPrompt(),
                     agent.chatModelString(),
                     sessionId,
@@ -276,7 +295,8 @@ class CoderRunAttempts {
                                     sessionId)),
                     Long.toString(project.getWorkspaceId()),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
-                    properties.getTimeout(),
+                    /* timeout= */ null, // #322 活超时替换一次性总墙钟
+                    properties.getSilenceTimeout(),
                     seat.profile().key(),
                     /* workspaceReadOnly= */ false,
                     seat.workspaceNoShell(),
@@ -284,7 +304,7 @@ class CoderRunAttempts {
                     agent.toolSpec());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
-                        eventBridge.sink(projectId, project.getOwnerAccountId()));
+                        eventBridge.sink(project));
                 // run-finish 押后到收口判据落定（#84 假完成不闪收口）：converse 正常
                 // 返回 ≠ 收口（判据在 onSuccess——8081 核验 / finish_edit 事实），判据
                 // 不过即该次尝试失败走重试——中场 run-finish 若出用户面，工作消息定格
@@ -302,6 +322,7 @@ class CoderRunAttempts {
                         return;
                     }
                     observeSelfTest(event, selfTestCommands);
+                    observePlanSteps(event, planSteps);
                     projection.accept(event);
                 };
                 List<FileChange> attemptChanges = new ArrayList<>();
@@ -394,9 +415,17 @@ class CoderRunAttempts {
             }
             catch (RuntimeException e) {
                 previousError = errorScene(e);
+                if (e instanceof AgentTurnFailure failure) {
+                    // 失败留账（#323）：失败流段的部分观察面（已提交文件变更＋已闭合
+                    // 区间阶段耗时）计入本场累计——收口清单与耗时分布跨尝试含失败
+                    // 尝试，不清零弃置（已落盘的写是真实工作区事实）
+                    durations.accumulateAndGet(failure.durations(), StageDurations::plus);
+                    runChanges.addAll(failure.changes());
+                }
                 if (!attemptAccounted) {
-                    // 中段失败（converse/续跑抛错）：阶段耗时事实随异常弃置——尝试账
-                    // 带墙钟与零桶（事实观察面的口径：失败段不携出，见 StageDurationFacts）
+                    // 中段失败（converse/续跑抛错）：尝试账带墙钟与该流段已闭合区间
+                    // 的部分观察（AgentTurnFailure 携带；非客户端失败无可携事实仍
+                    // 零桶——观察面口径见 StageDurationFacts）
                     attemptDurations.add(new AttemptDuration(attempt,
                             Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                             durations.get()));
@@ -405,8 +434,15 @@ class CoderRunAttempts {
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
             }
         }
-        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
-                what, projectId, maxAttempts);
+        // 终态留档（#323 失败留账）：超限转终态、没有成功收尾卡时，耗时账与观察面
+        // 仍随终态日志留档（平台观测面）——累计墙钟＋逐尝试墙钟与桶＋已落盘文件
+        // 清单，失败看得见成本；SSE 封闭集与 run-failed 载荷不变
+        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——本场留账：累计 {}、"
+                        + "逐尝试 {}、已落盘文件变更 {}。用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
+                what, projectId, maxAttempts,
+                humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
+                attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
+                filePayloads(runChanges));
         return RunResult.failed(previousError);
     }
 
@@ -416,6 +452,106 @@ class CoderRunAttempts {
      */
     private static String errorScene(RuntimeException e) {
         return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    }
+
+    /**
+     * 进展现场列出的文件上限（防长清单刷屏——完整清单以重试起手的现状盘点为准，
+     * 对偶 {@code MAX_LINT_LISTED} 截断先例）。
+     */
+    private static final int SCENE_FILES_LISTED = 15;
+
+    /**
+     * 重试现场（#323 重试携进展现场，{@link Prompts#retry} 的入参拼装单点）：
+     * 错误事实（#221 原地修携带物）＋平台可观测的进展事实——已干多久（本场累计
+     * 墙钟＋已失败尝试计数）/ 干到哪（跨尝试〔含失败尝试〕已落盘的文件变更＋最近
+     * 计划快照的 ✓●○ 状态）。事实源全在本环（墙钟 / 累计变更账 / part-plan 事件
+     * 观察），不由模型自报；裸异常原文不再是重试上文的唯一现场。
+     */
+    private static String retryScene(String errorScene, int failedAttempts, int maxAttempts,
+            long elapsedMs, List<FileChange> changes, List<Map<String, Object>> planSteps) {
+        StringBuilder scene = new StringBuilder("错误现场：").append(errorScene);
+        scene.append("\n进展现场（平台可观测事实）：本场已累计用时 ")
+                .append(humanDuration(elapsedMs))
+                .append("（已失败 ").append(failedAttempts).append('/').append(maxAttempts)
+                .append(" 次尝试）；已落盘文件变更 ").append(sceneFiles(changes));
+        if (planSteps != null && !planSteps.isEmpty()) {
+            scene.append("；最近计划进度：").append(planProgress(planSteps));
+        }
+        return scene.toString();
+    }
+
+    /**
+     * 计划快照观察（#323 进展现场「干到哪」）：part-plan 事件载全量快照
+     * （快照式整表替换），取最新一帧存用——重试续本会话、计划跨尝试连续，最新
+     * 快照即当前进度（与 {@link #observeSelfTest} 同族的 sink 观察，事件面事实）。
+     */
+    @SuppressWarnings("unchecked")
+    private static void observePlanSteps(AgentEvent event,
+            AtomicReference<List<Map<String, Object>>> latest) {
+        if (!AgentEventTypes.PART_PLAN.equals(event.type())) {
+            return;
+        }
+        Object steps = event.payload().get(AgentEventTypes.PART_PLAN_STEPS_FIELD);
+        if (steps instanceof List<?> list) {
+            latest.set(list.stream()
+                    .filter(step -> step instanceof Map)
+                    .map(step -> (Map<String, Object>) step)
+                    .toList());
+        }
+    }
+
+    /** 进展现场的文件清单：同路径合并行数（活动量口径同收口清单），截 {@link SCENE_FILES_LISTED} 件。 */
+    private static String sceneFiles(List<FileChange> changes) {
+        Map<String, int[]> merged = new TreeMap<>();
+        for (FileChange change : changes) {
+            int[] lines = merged.computeIfAbsent(change.path(), key -> new int[2]);
+            lines[0] += change.added();
+            lines[1] += change.removed();
+        }
+        if (merged.isEmpty()) {
+            return "尚无";
+        }
+        StringBuilder files = new StringBuilder().append(merged.size()).append(" 件：");
+        int listed = 0;
+        for (Map.Entry<String, int[]> entry : merged.entrySet()) {
+            if (listed == SCENE_FILES_LISTED) {
+                files.append("…共 ").append(merged.size()).append(" 件（其余见工作区现状）");
+                break;
+            }
+            if (listed > 0) {
+                files.append("、");
+            }
+            files.append(entry.getKey()).append("（+").append(entry.getValue()[0])
+                    .append("/-").append(entry.getValue()[1]).append("）");
+            listed++;
+        }
+        return files.toString();
+    }
+
+    /** 进展现场的计划进度：逐步骤 ✓/●/○ ＋ 标题（状态词表即部件契约三态）。 */
+    private static String planProgress(List<Map<String, Object>> steps) {
+        return steps.stream()
+                .map(step -> {
+                    String state = String.valueOf(
+                            step.get(AgentEventTypes.PART_PLAN_STEP_STATE_FIELD));
+                    String mark = AgentEventTypes.PART_PLAN_STATE_COMPLETED.equals(state) ? "✓"
+                            : AgentEventTypes.PART_PLAN_STATE_IN_PROGRESS.equals(state) ? "●" : "○";
+                    return mark + " " + step.get(AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD);
+                })
+                .collect(Collectors.joining(" / "));
+    }
+
+    /** 人读时长（进展现场与终态留档共用）：秒 → 分秒 → 时分，向下取整。 */
+    private static String humanDuration(long millis) {
+        long seconds = Math.max(0, millis / 1000);
+        if (seconds < 60) {
+            return seconds + " 秒";
+        }
+        long minutes = seconds / 60;
+        if (minutes < 60) {
+            return minutes + " 分 " + seconds % 60 + " 秒";
+        }
+        return minutes / 60 + " 小时 " + minutes % 60 + " 分";
     }
 
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */

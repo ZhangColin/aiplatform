@@ -26,6 +26,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -81,6 +82,7 @@ public class MainAgentAppService {
     public static final String SESSION_PREFIX = "main-";
 
     private final ProjectRepository projectRepository;
+    private final PrdVersionRepository prdVersions;
     private final AgentscopeAgentClient agentClient;
     private final AgentEventBridge eventBridge;
     private final AgentSessionExecutor sessionExecutor;
@@ -117,6 +119,7 @@ public class MainAgentAppService {
     }
 
     public MainAgentAppService(ProjectRepository projectRepository,
+            PrdVersionRepository prdVersions,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, OrderQueryAppService orderQueryAppService,
@@ -125,6 +128,7 @@ public class MainAgentAppService {
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ConversationHistoryAppService conversationHistory) {
         this.projectRepository = projectRepository;
+        this.prdVersions = prdVersions;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
@@ -228,7 +232,7 @@ public class MainAgentAppService {
         // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
         sessionExecutor.submit(sessionId, () -> {
             ConversationHistoryAppService.TurnRecorder recorder =
-                    conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                    conversationHistory.recorder(projectId, eventBridge.sink(project));
             AgentReply reply = agentClient.converse(command, recorder);
             recorder.settle(runId, reply);
         });
@@ -275,7 +279,7 @@ public class MainAgentAppService {
                 main.toolSpec());
         appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
-                conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                conversationHistory.recorder(projectId, eventBridge.sink(project));
         sessionExecutor.submit(sessionId, () -> {
             try {
                 AgentReply reply = agentClient.resume(resume, recorder);
@@ -289,7 +293,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
         });
     }
 
@@ -330,7 +334,7 @@ public class MainAgentAppService {
             buildPlanFacts.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
                 AgentReply reply = agentClient.converse(command, recorder);
                 settleSuspendedQuestion(sessionId, runId, reply);
                 recorder.settle(runId, reply);
@@ -342,7 +346,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
         });
         return new MainAgentRun(runId);
     }
@@ -353,8 +357,10 @@ public class MainAgentAppService {
      */
     static final String BUILD_PLAN_REQUEST_PROMPT =
             "平台请求：本项目还没有切片计划。请阅读工作区 docs/PRD.md（需求正本），"
-                    + "把系统拆成有序的纵向切片（每片一句用户语言「用户能 X」，从用户操作到"
-                    + "后端落库端到端走通，按实现的自然顺序排列，宁粗勿碎），并调用 "
+                    + "把系统拆成有序的纵向切片——第一片固定为界面先行：先做出可点的界面"
+                    + "（把主要页面与导航的界面骨架一次搭出来、可交互、预览立即可点），此片"
+                    + "先不接数据与后端逻辑；自第二片起每片一句用户语言「用户能 X」，从用户"
+                    + "操作到后端落库端到端走通。按实现的自然顺序排列，宁粗勿碎——并调用 "
                     + "saveBuildPlan 工具保存切片计划。不要修改 PRD（本请求只补产计划）。"
                     + "保存成功后，向用户简短说明已按 PRD 拟好实施计划、系统即将开始生成。";
 
@@ -422,7 +428,7 @@ public class MainAgentAppService {
             buildPlanFacts.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
                 AgentReply reply = agentClient.converse(command, recorder);
                 settleSuspendedQuestion(sessionId, runId, reply);
                 recorder.settle(runId, reply);
@@ -434,7 +440,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
         });
         return new MainAgentRun(runId);
     }
@@ -543,7 +549,7 @@ public class MainAgentAppService {
         // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
         // 轮走 {@link #answerInquiry}，场景矩阵均无卡
         if (project.isGenerated()) {
-            eventBridge.emitAcceptanceStarted(projectId, project.getOwnerAccountId(), runId);
+            eventBridge.emitAcceptanceStarted(project, runId);
         }
         AgentCommand command = mainCommand(project, runId, annotated);
         sessionExecutor.submit(sessionId, () -> {
@@ -558,7 +564,7 @@ public class MainAgentAppService {
             buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
-                        conversationHistory.recorder(projectId, eventBridge.sink(projectId, project.getOwnerAccountId()));
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
                 AgentReply reply = agentClient.converse(command, recorder);
                 settleSuspendedQuestion(sessionId, runId, reply);
                 recorder.settle(runId, reply);
@@ -570,7 +576,7 @@ public class MainAgentAppService {
                 suspendedQuestions.remove(sessionId);
                 throw e;
             }
-            dispatchOnTurnClose(projectId, sessionId, runId);
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
         });
         return new MainAgentRun(runId);
     }
@@ -607,6 +613,7 @@ public class MainAgentAppService {
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId),
                 null,
+                /* silenceTimeout= */ null,
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,
@@ -620,18 +627,31 @@ public class MainAgentAppService {
     }
 
     /**
-     * 链必达收口观测（#43，#101 生成无门自动发起）：意见轮落定（对话轮收口或
-     * 问答续跑收口）后观测链的走向——会话有挂起问答 = 本轮未收口（答复后续跑再判，
-     * 意见锚保留）；收口前归档 = 竞态守卫，静默不派。落定即按项目态自动派发：
-     * 已生成派更新 run（交接物 = {@link #opinionExchanges} 中的意见原文及追问答复
-     * + {@link #prdRevisions} 中的 PRD 修订事实——本轮 savePrd 调用的 summary 终值，
-     * 无调用事实即 null「未修订」）；未生成但已产出 PRD 派首次生成 run（生成无门，
-     * 意见锚与修订事实同「收口即消费」清掉——生成读的是工作区 PRD 正本，不进
-     * 交接物）；未产出 PRD 止于对话（访谈期常态）。主智能体无派发权：模型存没存
-     * PRD、调没调任何工具都不影响派发——链的收口在平台代码。派发失败不炸对话
-     * 轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——用户重提即兜底。
+     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门）：轮落定
+     * （对话轮收口或问答续跑收口）后观测链的走向——会话有挂起问答 = 本轮未收口
+     * （答复后续跑再判，意见锚保留）；收口前归档 = 竞态守卫，静默不派。落定即按
+     * 项目态自动派发：已生成派更新 run（交接物 = {@link #opinionExchanges} 中的
+     * 意见原文及追问答复 + {@link #prdRevisions} 中的 PRD 修订事实——本轮 savePrd
+     * 调用的 summary 终值，无调用事实即 null「未修订」）；<b>未生成但已产出 PRD</b>
+     * ——系统终点改判据（#332 生成加门）：存在已确认 PRD 版本才派首个构建 run
+     * （「确认此版 PRD 并生成 Demo」是唯一触发——用户意见轮「重提即再触发」同此
+     * 判据），未确认静默待确认；设计类终点保持原触发律（未定稿起设计过程、全部
+     * 定稿起构建，入口已收起）。意见锚与修订事实同「收口即消费」清掉——生成读的是
+     * 工作区 PRD 正本，不进交接物；未产出 PRD 止于对话（访谈期常态）。主智能体无
+     * 派发权：模型存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。
+     * 派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——
+     * 用户重提即兜底。
+     *
+     * <p><b>平台轮与生成加门（#332）</b>：{@code platformRound} 区分平台发起的需求侧
+     * 轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
+     * 与用户对话轮。生成加门（未生成＋存在已确认版本才起首个构建）只拦<b>用户对话轮</b>
+     * 的直接自动起（旧「PRD 出即起」退役点）；平台轮是确认/继续生成「确认后派」「补产
+     * 再派」的达成机制（补产轮收口即链必达再派生成），不经该门——否则确认/存量恢复
+     * 的补产链被自己的门拦死。判据单一：用户轮＝存在已确认版本（确认动作的次生事实），
+     * 平台轮＝直接放行。</p>
      */
-    private void dispatchOnTurnClose(Long projectId, String sessionId, String runId) {
+    private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
+            boolean platformRound) {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
             if (project == null
@@ -673,8 +693,22 @@ public class MainAgentAppService {
                         }
                         return;
                     }
-                    // 系统终点、或设计类终点全部定稿（#291 定稿→构建经计划补产链
-                    // 自然恢复——构建从定稿设计稿长出）——首次生成同律
+                    // 生成加门（#332）：系统终点的首个构建 run 唯一触发＝确认此版
+                    // PRD——用户对话轮 PRD 出不再自动起（旧「生成无门、PRD 出即起」
+                    // 口径退役，ADR-0008 改写）。无已确认版本即静默待确认（不派、不
+                    // 报错），不落轨道片行（未确认不呈现「生成中断」态）；切片计划
+                    // 事实随本轮消费清掉——确认派发时计划缺失走既有补产链。平台轮
+                    // （补产/终点切换）是确认与继续生成的达成机制，不经此门直接放行
+                    // （否则确认后的补产链被自己的门拦死）。设计类终点（含全部定稿）
+                    // 保持原触发律（设计轨分岔代码保留、入口已收起）。
+                    if (!platformRound && !project.getEndpointType().designInvolved()
+                            && !prdVersions.existsByProjectId(projectId)) {
+                        log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
+                                + "（生成加门：待确认此版 PRD）", projectId);
+                        return;
+                    }
+                    // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
+                    // 计划补产链自然恢复——构建从定稿设计稿长出）
                     GenerationAppService.GenerationRun run =
                             generationAppService.dispatchGenerationOnTurnClose(projectId, plan);
                     if (run != null) {
@@ -714,10 +748,10 @@ public class MainAgentAppService {
             // 意见锚已消费（不恢复）、不自动重试，用户重提即兜底——失败信号归 error
             // 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
             try {
-                // 派发失败路径（非热）：归属重查一次取 owner——正常路径在 try 内已携聚合
-                Long ownerAccountId = projectRepository.findById(projectId)
-                        .map(Project::getOwnerAccountId).orElse(null);
-                eventBridge.emitError(projectId, ownerAccountId, runId, "意见派发失败，请重新发送");
+                // 派发失败路径（非热）：归属重查一次携聚合——正常路径在 try 内已携
+                projectRepository.findById(projectId).ifPresentOrElse(
+                        project -> eventBridge.emitError(project, runId, "意见派发失败，请重新发送"),
+                        () -> log.warn("[main-close] 项目 {} 派发失败且事件锚项目缺档，error 事件免发", projectId));
             }
             catch (RuntimeException emitFailure) {
                 log.warn("[main-close] 项目 {} 派发失败事件发射失败：{}", projectId,

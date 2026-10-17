@@ -205,7 +205,11 @@ class ProfileSkillRepositorySupplierTest {
             assertThat(skill).isNotNull();
             assertThat(skill.getSkillContent())
                     .contains("需求背景", "目标用户", "核心场景", "范围边界",
-                            "关键约束", "功能清单", "待定项");
+                            "关键约束", "功能清单", "验收与待确认")
+                    // #331 两级门：第七章由「待定项」升级为「验收与待确认」分级
+                    //（判定语义归提示词——分级两级与五维词表随技能正文钉住）
+                    .contains("阻碍核心流程", "次要未知", "目标与角色", "主流程",
+                            "功能与边界", "数据与约束", "验收");
         }
     }
 

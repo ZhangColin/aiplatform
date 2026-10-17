@@ -310,7 +310,7 @@ class BackofficeMaterialSeamTest {
     void given_material_with_real_source_project_when_signed_delete_then_gone_and_project_untouched()
             throws Exception {
         Project source = projectRepository.save(
-                Project.create("bk 来源项目", ProjectType.WEBSITE, WORKSPACE_ID, null));
+                Project.create("bk 来源项目", ProjectType.WEBSITE, null, WORKSPACE_ID, null, null));
         plantedProjectIds.add(source.getId());
         long id = plant(source.getId().toString(), "bk 来源项目", List.of("独有内容块"), hot(0));
         when(embeddingClient.embed(List.of("独有内容"))).thenReturn(List.of(hot(0)));

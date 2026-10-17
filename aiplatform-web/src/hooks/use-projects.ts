@@ -12,22 +12,30 @@ import { normalizeProjectSummary, type ProjectResponse } from "@/lib/projects/li
  * 返回最新详情，播种 + 失效项目域（use-project.ts 的 seedAndInvalidate）。
  */
 
-/** 列表（全量；过滤视图由消费端 projectListSections 分区）。 */
-export function useProjectList() {
+/**
+ * 列表（全量；过滤视图由消费端 projectListSections 分区）。{@code enabled=false}
+ * 供匿名可逛面（首页「只逛零足迹」）：无凭证 cookie 时背景查询不发请求，
+ * 401 出口也就无从弹登录框。
+ */
+export function useProjectList(enabled = true) {
   return useQuery({
     queryKey: queryKeys.projects.list(),
     queryFn: ({ signal }) =>
       api
         .get<ProjectResponse[]>("/projects", { signal })
         .then((items) => (items ?? []).map(normalizeProjectSummary)),
+    enabled,
   });
 }
 
 export type { ProjectSummary } from "@/lib/projects/list";
 
-/** 首页「最近的项目」= 未归档项目（三活态并集，已归档只留在列表页折叠分组）。 */
-export function useRecentProjects() {
-  const { data } = useProjectList();
+/**
+ * 首页「最近的项目」= 未归档项目（三活态并集，已归档只留在列表页折叠分组）。
+ * {@code enabled=false}＝匿名首访：不发列表请求、无草稿恢复横幅。
+ */
+export function useRecentProjects(enabled = true) {
+  const { data } = useProjectList(enabled);
   return (data ?? []).filter((p) => !p.archived);
 }
 

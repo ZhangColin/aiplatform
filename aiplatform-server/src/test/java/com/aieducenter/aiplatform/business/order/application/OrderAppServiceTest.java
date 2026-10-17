@@ -30,6 +30,8 @@ import com.aieducenter.aiplatform.business.order.domain.repository.OrderReposito
 import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -130,7 +132,7 @@ class OrderAppServiceTest {
         stubProject(ProjectStatus.IN_PROGRESS);
         appService.place(PROJECT_ID);
 
-        assertThatThrownBy(() -> orderRepository.save(Order.place(PROJECT_ID, null, PRD, OrderDeliverableType.SYSTEM)))
+        assertThatThrownBy(() -> orderRepository.save(Order.place(PROJECT_ID, null, null, PRD, OrderDeliverableType.SYSTEM)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -569,6 +571,7 @@ class OrderAppServiceTest {
                 .endpointType(endpointType)
                 .build());
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
-                Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z")));
+                Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
     }
 }

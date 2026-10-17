@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -30,6 +31,7 @@ import com.aieducenter.aiplatform.business.project.application.GenerationAppServ
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.PostMessageCommand;
@@ -40,6 +42,8 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.FixR
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
@@ -58,13 +62,17 @@ import com.aieducenter.aiplatform.support.Tsid;
 /**
  * 项目 REST 面：一句话建项目（建即自动开主智能体对话）→ 对话区发言（入口三分类
  * 派发）/ 问答卡作答 / 继续生成（断点续跑，中断兜底）→ 继续更新（更新
- * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / 文件树只读浏览 →
- * 源码包下载 → 预览 → 删除真删级联。
+ * run 超限终态恢复出口）→ 归档 / 改名 / 详情 / 列表 / 用量 / PRD 读 / PRD 确认成版与
+ * 版本清单详情（#330 确认即成版）/ 文件树只读浏览 → 源码包下载 → 预览 → 删除真删级联。
+ *
+ * <p>#325 owner 守卫：{@code /api/projects/{id}/**} 单项目寻址统一过归属判定
+ * （{@code ProjectOwnerInterceptor} 先于控制器）——非本人项目与不存在项目同 404
+ * PRJ_001，不泄露存在性；列表按当前登录账户过滤（见各端点注记）。</p>
  */
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -74,6 +82,7 @@ public class ProjectController {
     private final GenerationAppService generationAppService;
     private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
+    private final PrdVersionAppService prdVersionAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
@@ -81,7 +90,8 @@ public class ProjectController {
                              MainAgentAppService mainAgentAppService,
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
-                             ConversationHistoryAppService conversationHistoryAppService) {
+                             ConversationHistoryAppService conversationHistoryAppService,
+                             PrdVersionAppService prdVersionAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
@@ -89,10 +99,11 @@ public class ProjectController {
         this.generationAppService = generationAppService;
         this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
+        this.prdVersionAppService = prdVersionAppService;
     }
 
     @PostMapping
-    @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理）",
+    @Operation(summary = "建项目（一句话创建：建即自动开主智能体需求梳理；免注册访客可用）",
             description = "创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——"
                     + "响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，"
                     + "失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，"
@@ -100,15 +111,28 @@ public class ProjectController {
                     + "不合法 code 400（框架统一信封）。"
                     + "单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。"
                     + "响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。"
-                    + "SSE：workspace-created → 智能体事件")
-    public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command) {
-        return ApiResponse.ok(appService.create(command));
+                    + "SSE：workspace-created → 智能体事件。"
+                    + "#326 免注册访客：完全匿名（无会话无访客凭证）且 requirement 非空＝首条需求消息——"
+                    + "提交成功惰性建访客并随响应 Set-Cookie aiplatform_guest（HttpOnly+SameSite=Lax，"
+                    + "值即凭证）；空输入不建访客（项目落无主行）、纯浏览零足迹。"
+                    + "已有有效访客凭证或账户会话：归属随既有身份（账户优先），不发新凭证")
+    public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command,
+            HttpServletResponse response) {
+        ProjectLifecycleAppService.Creation creation = appService.create(command);
+        if (creation.guestCookie() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, creation.guestCookie().toString());
+        }
+        return ApiResponse.ok(creation.response());
     }
 
     @GetMapping
-    @Operation(summary = "项目列表（状态过滤）",
-            description = "创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/"
-                    + "3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）")
+    @Operation(summary = "项目列表（状态过滤；按归属过滤：账户或访客）",
+            description = "创建时间倒序，#325/#326 起按请求归属过滤（账户会话优先、"
+                    + "访客凭证次之）——只见自己的项目（他人项目、账户与访客项目互不可见；"
+                    + "单账号全量返回的既有缺口收口）。访客多项目同口全量返回（创建倒序，"
+                    + "首项即「继续上次项目」的最近一个）。status 过滤"
+                    + "（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。"
+                    + "不合法取值 400（带合法取值表，框架统一信封）")
     public ApiResponse<List<ProjectResponse>> list(
             @RequestParam(required = false) ProjectStatusFilter status) {
         return ApiResponse.ok(queryAppService.list(status));
@@ -164,9 +188,9 @@ public class ProjectController {
     }
 
     @PostMapping("/{id}/generate")
-    @Operation(summary = "继续生成（断点续跑；首次发起同入口）",
-            description = "生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成"
-                    + " run，本端点是「继续生成」出口的载体——run-failed 或生成中断后项目仍"
+    @Operation(summary = "继续生成（断点续跑；首个 Demo 由确认触发）",
+            description = "#332 生成加门后，首个构建 run 由「确认此版 PRD」触发——本端点是"
+                    + "「继续生成」出口的载体（run-failed 或生成中断后仍可用）——run-failed 或生成中断后项目仍"
                     + "「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/"
                     + "中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状"
                     + "盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与"
@@ -189,7 +213,8 @@ public class ProjectController {
                     + "唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。"
                     + "run 成功收口落 generated_at（首次生成时点，单向置位）。"
                     + "已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；"
-                    + "PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；"
+                    + "PRD 从未产出 409 PRJ_018（系统终点首个 Demo 由确认触发，本端点服务"
+                    + "「继续生成」，本守卫拦未产出直连调用）；"
                     + "设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、"
                     + "系统＋设计设计先行——构建从定稿设计稿长出）；"
                     + "项目不存在 404 PRJ_001")
@@ -253,7 +278,8 @@ public class ProjectController {
             description = "名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。"
                     + "响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。"
                     + "空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；"
-                    + "单账号场景不设越权面、不发射 SSE（REST 响应即触达）")
+                    + "不发射 SSE（REST 响应即触达）。#325 起进 owner 守卫面"
+                    + "（/api/projects/{id}/** 统一归属判定，非本人 404 PRJ_001）")
     public ApiResponse<ProjectDetailResponse> rename(@PathVariable String id,
                                                      @Valid @RequestBody RenameProjectCommand command) {
         return ApiResponse.ok(appService.rename(parseId(id), command.name()));
@@ -289,13 +315,63 @@ public class ProjectController {
     @GetMapping("/{id}/prd")
     @Operation(summary = "PRD 读（当前版 markdown，直读工作区）",
             description = "PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，"
-                    + "v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，"
-                    + "updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）"
+                    + "v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, "
+                    + "updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。"
+                    + "readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, "
+                    + "dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、"
+                    + "text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与"
+                    + "边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 "
+                    + "维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪"
+                    + "（判定与确认门同源）。未产出（工作区无该文件）"
                     + "404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
                     + "写出/更新时通知通道（/api/events?projectId=）发 document-updated"
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.prd(parseId(id)));
+    }
+
+    @PostMapping("/{id}/prd/confirm")
+    @Operation(summary = "确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）",
+            description = "「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）"
+                    + "全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号"
+                    + "（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是"
+                    + "活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认"
+                    + "（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）："
+                    + "「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，"
+                    + "先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/"
+                    + "形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执"
+                    + "readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层"
+                    + "承载，确认动作本身不携带标记）。<b>生成加门（#332）</b>：确认成版后"
+                    + "平台自动派首个 Demo run——「确认此版 PRD 并生成 Demo」成为首个构建 run "
+                    + "的唯一触发（已生成/在途静默跳过；派发是次生事实）。响应即回执"
+                    + "（versionNo/content/confirmedAt/readiness）——版本号是派发的挂点。"
+                    + "项目不存在 404 PRJ_001；已归档 409 "
+                    + "PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；"
+                    + "环境故障 WSP_002")
+    public ApiResponse<PrdVersionResponse> confirmPrd(@PathVariable String id) {
+        return ApiResponse.ok(prdVersionAppService.confirm(parseId(id)));
+    }
+
+    @GetMapping("/{id}/prd/versions")
+    @Operation(summary = "PRD 已确认版本清单（最新在前，轻量形不含全文）",
+            description = "项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, "
+                    + "confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现"
+                    + "最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」"
+                    + "徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001")
+    public ApiResponse<List<PrdVersionSummaryResponse>> prdVersions(@PathVariable String id) {
+        return ApiResponse.ok(prdVersionAppService.versions(parseId(id)));
+    }
+
+    @GetMapping("/{id}/prd/versions/{versionNo}")
+    @Operation(summary = "PRD 版本详情（含全文快照）",
+            description = "单版详情（#330）：{projectId, versionNo, content, confirmedAt, "
+                    + "readiness}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动"
+                    + "不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿"
+                    + "读面同构——不落库，快照在手即解析）。归档项目照读。"
+                    + "版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001")
+    public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
+            @PathVariable int versionNo) {
+        return ApiResponse.ok(prdVersionAppService.version(parseId(id), versionNo));
     }
 
     @GetMapping("/{id}/files")

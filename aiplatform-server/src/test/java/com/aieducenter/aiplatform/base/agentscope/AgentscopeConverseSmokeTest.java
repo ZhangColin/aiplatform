@@ -96,8 +96,10 @@ class AgentscopeConverseSmokeTest {
         assertThat(reply.runId()).isEqualTo(runId);
         assertThat(reply.text()).isNotBlank();
 
-        // 计量（#109 模型边界计量）：单轮对话 = 一次主循环模型调用 → 恰一条 UsageEvent
-        // （幂等键 event_id = agent-usage-{runId}-{seq}，按 run_id 寻址不看键形状）
+        // 计量（#109 模型边界计量 / #324 对账级）：单轮纯文本对话 = 一次主循环模型
+        // 调用 → 恰一条 UsageEvent（幂等键 event_id = agent-usage-{runId}-{seq}，按
+        // run_id 寻址不看键形状；多迭代/失败流的全量对账见
+        // AgentscopeMeteringReconcileTest / MeteringReconciliationIntegrationTest）
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT subject, provider, input, output "
                         + "FROM met_usage_events WHERE run_id = ?", runId);

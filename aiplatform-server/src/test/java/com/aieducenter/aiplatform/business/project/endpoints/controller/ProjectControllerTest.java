@@ -34,10 +34,15 @@ import com.aieducenter.aiplatform.business.project.application.IterationAppServi
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
+import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
@@ -115,6 +120,9 @@ class ProjectControllerTest {
     @MockitoBean
     private ConversationHistoryAppService conversationHistoryAppService;
 
+    @MockitoBean
+    private PrdVersionAppService prdVersionAppService;
+
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(
@@ -124,9 +132,9 @@ class ProjectControllerTest {
 
     @Test
     void given_valid_command_when_create_then_wrapped_with_ba_run() throws Exception {
-        when(appService.create(any())).thenReturn(
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
                 new ProjectCreatedResponse(detailOf("100", ProjectStatus.IN_PROGRESS, false),
-                        "run-1"));
+                        "run-1"), null));
 
         // 一句话创建：请求体只传 requirement（name/type/engine 从契约面消失）
         performAsUser(post("/api/projects")
@@ -143,6 +151,47 @@ class ProjectControllerTest {
         verify(appService).create(argThat(cmd -> "做一个官网".equals(cmd.requirement())));
     }
 
+    // ---------- #326 凭证端点契约：惰性建访客的 Set-Cookie 面 ----------
+
+    @Test
+    void given_anonymous_first_message_when_create_then_guest_credential_cookie_issued()
+            throws Exception {
+        // 首条需求消息提交成功才建访客＋发凭证：Set-Cookie 随建项目响应（契约形：
+        // aiplatform_guest=值即凭证；HttpOnly+SameSite=Lax+Path=/；MaxAge 对齐保留期）
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("700", ProjectStatus.IN_PROGRESS, false),
+                        "run-g"),
+                org.springframework.http.ResponseCookie.from(
+                        com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies.GUEST_COOKIE_NAME,
+                        "cred-token-x").httpOnly(true).sameSite("Lax")
+                        .path("/").maxAge(java.time.Duration.ofDays(30)).build()));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"免注册先用一句话\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("aiplatform_guest=cred-token-x"),
+                        org.hamcrest.Matchers.containsString("HttpOnly"),
+                        org.hamcrest.Matchers.containsString("SameSite=Lax"),
+                        org.hamcrest.Matchers.containsString("Path=/"),
+                        org.hamcrest.Matchers.containsString("Max-Age=2592000"))));
+    }
+
+    @Test
+    void given_no_lazy_guest_when_create_then_no_set_cookie_header() throws Exception {
+        // 归属既有身份（账户或既有访客，guestCookie null）：不落 Set-Cookie 头
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("701", ProjectStatus.IN_PROGRESS, false),
+                        "run-1"), null));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Set-Cookie"));
+    }
+
     @Test
     void given_oversized_requirement_when_create_then_rejected_as_400() throws Exception {
         // requirement 是创建唯一入参（可空）；长度上限 5000 仍守门
@@ -154,9 +203,9 @@ class ProjectControllerTest {
 
     @Test
     void given_design_endpoint_when_create_then_initial_type_bound() throws Exception {
-        when(appService.create(any())).thenReturn(
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
                 new ProjectCreatedResponse(detailOf("300", ProjectStatus.IN_PROGRESS, false),
-                        "run-9"));
+                        "run-9"), null));
 
         // #299 mode 进载荷（ADR-0029）：入口选「做设计」携终点初值 Integer code
         performAsUser(post("/api/projects")
@@ -599,17 +648,41 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_prd_in_workspace_when_get_prd_then_content_and_updated_at_returned() throws Exception {
+    void given_prd_in_workspace_when_get_prd_then_content_updated_at_and_readiness_returned() throws Exception {
+        // #331：PRD 读面带收敛度投影（分级缺项＋五维维度态——stub 用真实解析同构，
+        // 不手捏形态：#306 契约钉真实形态教训）
+        String prd = """
+                # 官网 PRD
+
+                ## 验收与待确认
+
+                ### 次要未知
+
+                1. 【验收】首屏文案口径未确认（假设：先出后改）
+                """;
         when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
-                "# 官网 PRD\n\n目标：三页官网。\n", Instant.ofEpochSecond(1756100000)));
+                prd, Instant.ofEpochSecond(1756100000),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
 
         performAsUser(get("/api/projects/100/prd"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.projectId").value("100"))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.content").value(prd))
                 // Instant → ISO-8601（Jackson2ObjectMapperBuilder 缺省关时间戳）
                 .andExpect(jsonPath("$.data.updatedAt")
-                        .value(Instant.ofEpochSecond(1756100000).toString()));
+                        .value(Instant.ofEpochSecond(1756100000).toString()))
+                // 收敛度投影：阻碍级空（门放行态）、次要条目（dimension 呈现词＋文本）、
+                // 五维固定序（验收维 minor=⚡、其余 ready=✓——「n/5」呈现面自数）
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.minor.length()").value(1))
+                .andExpect(jsonPath("$.data.readiness.minor[0].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.minor[0].text")
+                        .value("首屏文案口径未确认（假设：先出后改）"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].dimension").value("目标与角色"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].status").value("ready"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].status").value("minor"));
     }
 
     @Test
@@ -622,6 +695,92 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4015))
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    // ---------- PRD 确认版本（#330「确认即成版」：确认动作＋版本列表/详情） ----------
+
+    @Test
+    void given_draft_prd_when_confirm_then_version_returned() throws Exception {
+        when(prdVersionAppService.confirm(100L)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
+
+        // 确认即成版：回执携带版本号（#332 生成加门的挂点——确认后自动派 Demo run 消费）
+        // ＋收敛度投影（fail-open 空态：无「验收与待确认」章——五维全 ready）
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"))
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
+    }
+
+    @Test
+    void given_prd_not_produced_when_confirm_then_prj_015_as_404() throws Exception {
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4015))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    @Test
+    void given_blocking_pending_when_confirm_then_prj_053_as_409() throws Exception {
+        // 两级门拦截（#331）：阻碍核心流程缺项在场——确认被拦，前端认数字码 4053
+        //（缺项明细经 PRD 读面 readiness 拉取呈现，信封只载码＋消息）
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4053))
+                .andExpect(jsonPath("$.message").value("PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认"));
+    }
+
+    @Test
+    void given_confirmed_versions_when_list_then_newest_first_without_content() throws Exception {
+        when(prdVersionAppService.versions(100L)).thenReturn(List.of(
+                new PrdVersionSummaryResponse("100", 2,
+                        LocalDateTime.of(2026, 10, 17, 9, 0)),
+                new PrdVersionSummaryResponse("100", 1,
+                        LocalDateTime.of(2026, 10, 16, 12, 0))));
+
+        // 清单轻量形（不含全文——全文走单版详情）；versionNo 是小整数版本号（非 TSID，数值形）
+        performAsUser(get("/api/projects/100/prd/versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].confirmedAt").value("2026-10-17T09:00:00"))
+                .andExpect(jsonPath("$.data[1].versionNo").value(1))
+                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T12:00:00"));
+    }
+
+    @Test
+    void given_version_no_when_detail_then_full_text_returned() throws Exception {
+        when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
+
+        performAsUser(get("/api/projects/100/prd/versions/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
+    }
+
+    @Test
+    void given_no_such_version_when_detail_then_prj_052_as_404() throws Exception {
+        when(prdVersionAppService.version(100L, 7))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/prd/versions/7"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4052))
+                .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
     }
 
     // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------

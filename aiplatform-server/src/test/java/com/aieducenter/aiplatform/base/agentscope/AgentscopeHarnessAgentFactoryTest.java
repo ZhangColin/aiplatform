@@ -2,12 +2,15 @@ package com.aieducenter.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.agentscope.core.middleware.MiddlewareBase;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
@@ -15,12 +18,21 @@ import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
+import io.agentscope.extensions.model.openai.exception.OpenAIException;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import reactor.core.publisher.Flux;
+
+import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
+import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 
 /**
  * {@link AgentscopeHarnessAgentFactory} 实例缓存与生命周期：HarnessAgent 无状态可
@@ -45,6 +57,10 @@ class AgentscopeHarnessAgentFactoryTest {
     /** 恒空平台中间件（中间件装配另有缝测，工厂测试只验内核接线）。 */
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES =
             (agentKey, workspace) -> List.of();
+
+    /** 计量缝测试用固定时钟（#321 streamLayer 装配测）。 */
+    private static final Clock CLOCK =
+            Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC);
 
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created) {
         return factoryWith(created, new InMemoryAgentStateStore());
@@ -647,6 +663,94 @@ class AgentscopeHarnessAgentFactoryTest {
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
         assertThat(config.getModel()).isNull();
     }
+
+    // ---------- #321/#322 模型流层平台包装（断流重试 + 总时长上限 + 计量边界） ----------
+
+    /**
+     * 模型流层装配序（#321）：{@code MeteredModel(RetryingModel(raw))}——重试内圈
+     * （429/5xx 零发射失败流层接续）、计量外圈（整流收口上报）。护栏不变式（任何
+     * 发射只来自末次尝试）下重试合并为一轮上报＝与单次直调完全同形——重试期间
+     * 计量路径不被破坏（AC 对账口径）。行为级钉装配：重试真发生（raw 两次直调）+
+     * 计量真入账（恰一条 usage 事件、deepseek 归属）。
+     */
+    @Test
+    void given_429_then_success_when_stream_layer_then_retried_and_metered_once()
+            throws InterruptedException {
+        Model raw = mock(Model.class);
+        when(raw.stream(any(), any(), any()))
+                .thenReturn(Flux.error(new OpenAIException("HTTP 429", 429, null)))
+                .thenReturn(Flux.just(ChatResponse.builder()
+                        .usage(new ChatUsage(100, 40, 0, 0.5))
+                        .build()));
+        List<UsageEvent> events = new ArrayList<>();
+        UsageEventSink sink = events::add;
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setModelStreamRetryInitialBackoff(java.time.Duration.ofMillis(10));
+        properties.setModelStreamRetryMaxBackoff(java.time.Duration.ofMillis(50));
+
+        // 计量上下文随订阅链传递（#324）：订阅点 contextWrite 写入（runTurn 同形态）
+        AgentscopeHarnessAgentFactory
+                .streamLayer(raw, "deepseek:deepseek-v4-flash", properties)
+                .stream(List.of(), null, null)
+                .contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, new MeteringScope(
+                        "run-1", "s-1", new UsageContext("prj-1", Map.of()), CLOCK, sink,
+                        "prefix-run-1")))
+                .blockLast();
+        // doFinally 计量收口与下游终端信号跨线程——有界等待消竞态
+        long deadline = System.currentTimeMillis() + 2000;
+        while (events.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5);
+        }
+
+        verify(raw, times(2)).stream(any(), any(), any());
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).tokens().input()).isEqualTo(100);
+        assertThat(events.get(0).tokens().output()).isEqualTo(40);
+    }
+
+    /**
+     * 内层重试关闭契约（#321）：resolve 注入的执行配置＝重试关（maxAttempts=1，
+     * presence 即跳过框架 builder 的 MODEL_DEFAULTS 缺省注入）＋缺省 inter-signal
+     * 超时保留（timeout 取 MODEL_DEFAULTS 同值——除重试维度外不改既有行为，
+     * 流时长上限属 #322）。平台层（RetryingModel）独占流层重试。
+     */
+    @Test
+    void given_inner_retry_disabled_options_when_built_then_retry_off_and_default_timeout_kept() {
+        io.agentscope.core.model.ExecutionConfig config =
+                AgentscopeHarnessAgentFactory.innerRetryDisabledOptions().getExecutionConfig();
+
+        assertThat(config.getMaxAttempts()).isEqualTo(1);
+        assertThat(config.getTimeout())
+                .isEqualTo(io.agentscope.core.model.ExecutionConfig.MODEL_DEFAULTS.getTimeout());
+    }
+
+    /**
+     * 总时长上限装配（#322）：同一 streamLayer 单点同时承载重试与上限——零发射挂流
+     * 超上限转可重试失败，第二发正常收流；行为级钉「工厂生产装配真实带上限」而非
+     * 只测 RetryingModel 孤件。
+     */
+    @Test
+    void given_hung_stream_over_cap_when_stream_layer_then_capped_and_retried() {
+        Model raw = mock(Model.class);
+        when(raw.stream(any(), any(), any()))
+                .thenReturn(Flux.never())
+                .thenReturn(Flux.just(ChatResponse.builder()
+                        .usage(new ChatUsage(100, 40, 0, 0.5))
+                        .build()));
+        AgentscopeProperties properties = new AgentscopeProperties();
+        properties.setModelStreamRetryInitialBackoff(java.time.Duration.ofMillis(10));
+        properties.setModelStreamRetryMaxBackoff(java.time.Duration.ofMillis(50));
+        properties.setModelStreamMaxDuration(java.time.Duration.ofMillis(150));
+
+        ChatResponse received = AgentscopeHarnessAgentFactory
+                .streamLayer(raw, "deepseek:deepseek-v4-flash", properties)
+                .stream(List.of(), null, null)
+                .blockLast(java.time.Duration.ofSeconds(5));
+
+        verify(raw, times(2)).stream(any(), any(), any());
+        assertThat(received.getUsage().getTotalTokens()).isEqualTo(140);
+    }
+
 
     // ---------- #252 构建后工具面校正（框架 WebTools 恒注入 vs 平台供数方） ----------
 

@@ -20,6 +20,7 @@ import org.springframework.http.ResponseCookie;
 import com.aieducenter.aiplatform.business.identity.domain.aggregate.Account;
 import com.aieducenter.aiplatform.business.identity.domain.model.IdTokenClaims;
 import com.aieducenter.aiplatform.business.identity.domain.model.OauthTransaction;
+import com.aieducenter.aiplatform.business.identity.domain.repository.AccountBindingRepository;
 import com.aieducenter.aiplatform.business.identity.domain.repository.AccountRepository;
 import com.aieducenter.aiplatform.business.identity.infrastructure.oidc.IdTokenRejectedException;
 import com.aieducenter.aiplatform.business.identity.infrastructure.oidc.OidcClient;
@@ -58,6 +59,12 @@ class AuthAppServiceTest {
     private BffSessionStore sessionStore;
 
     @Autowired
+    private AccountAppService accountAppService;
+
+    @Autowired
+    private AccountBindingRepository bindingRepository;
+
+    @Autowired
     private AccountRepository accountRepository;
 
     @MockitoBean
@@ -68,8 +75,13 @@ class AuthAppServiceTest {
 
     @AfterEach
     void cleanUp() {
-        accountRepository.findByExternalId(sub)
-                .ifPresent(account -> accountRepository.deleteAll(List.of(account)));
+        // 建档走 upsertOidc（账号＋oidc 绑定两行），清理两行一起（绑定残留会让
+        // 下次同 sub 命中已删账号）
+        accountAppService.accountByIdentifier(sub).ifPresent(account -> {
+            bindingRepository.deleteAll(
+                    bindingRepository.findByAccountIdIn(List.of(account.getId())));
+            accountRepository.delete(account);
+        });
     }
 
     // -------- 登录发起（#32 returnTo） --------
@@ -107,12 +119,12 @@ class AuthAppServiceTest {
         stubExchangeAndVerify(txn.nonce(), claims("张三"));
 
         LoginCompletion completion = appService.completeLogin("code-1", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.sessionCookie()).isNotNull();
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/projects");
 
-        Account account = accountRepository.findByExternalId(sub).orElseThrow();
+        Account account = accountAppService.accountByIdentifier(sub).orElseThrow();
         assertThat(account.getDisplayName()).isEqualTo("张三");
 
         BffSession session = sessionStore.get(completion.sessionCookie().getValue()).orElseThrow();
@@ -131,18 +143,18 @@ class AuthAppServiceTest {
         OauthTransaction first = OauthTransaction.issue("/");
         stubExchangeAndVerify(first.nonce(), claims("张三"));
         LoginCompletion firstCompletion =
-                appService.completeLogin("code-1", first.state(), first.cookieValue());
-        Long firstAccountId = accountRepository.findByExternalId(sub).orElseThrow().getId();
+                appService.completeLogin("code-1", first.state(), first.cookieValue(), null);
+        Long firstAccountId = accountAppService.accountByIdentifier(sub).orElseThrow().getId();
 
         OauthTransaction second = OauthTransaction.issue("/next");
         stubExchangeAndVerify(second.nonce(), claims("李四"));
         LoginCompletion secondCompletion =
-                appService.completeLogin("code-2", second.state(), second.cookieValue());
+                appService.completeLogin("code-2", second.state(), second.cookieValue(), null);
 
         assertThat(secondCompletion.sessionCookie()).isNotNull();
         assertThat(secondCompletion.redirectTo()).isEqualTo(APP_BASE + "/next");
         // 同 sub 不重复建档：id 不变，显示名更新
-        Account account = accountRepository.findByExternalId(sub).orElseThrow();
+        Account account = accountAppService.accountByIdentifier(sub).orElseThrow();
         assertThat(account.getId()).isEqualTo(firstAccountId);
         assertThat(account.getDisplayName()).isEqualTo("李四");
         // 两次登录两个独立会话
@@ -154,11 +166,11 @@ class AuthAppServiceTest {
 
     @Test
     void given_no_txn_cookie_when_complete_then_state_mismatch_and_no_session() {
-        LoginCompletion completion = appService.completeLogin("code-1", "some-state", null);
+        LoginCompletion completion = appService.completeLogin("code-1", "some-state", null, null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=state_mismatch");
         assertThat(completion.sessionCookie()).isNull();
-        assertThat(accountRepository.findByExternalId(sub)).isEmpty();
+        assertThat(accountAppService.accountByIdentifier(sub)).isEmpty();
     }
 
     @Test
@@ -166,7 +178,7 @@ class AuthAppServiceTest {
         OauthTransaction txn = OauthTransaction.issue("/");
 
         LoginCompletion completion = appService.completeLogin("code-1", "attacker-state",
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=state_mismatch");
         assertThat(completion.sessionCookie()).isNull();
@@ -178,7 +190,7 @@ class AuthAppServiceTest {
         OauthTransaction txn = OauthTransaction.issue("/");
 
         LoginCompletion completion = appService.completeLogin(null, txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();
@@ -192,11 +204,11 @@ class AuthAppServiceTest {
                         "{\"error\":\"invalid_grant\"}", null));
 
         LoginCompletion completion = appService.completeLogin("bad-code", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();
-        assertThat(accountRepository.findByExternalId(sub)).isEmpty();
+        assertThat(accountAppService.accountByIdentifier(sub)).isEmpty();
     }
 
     @Test
@@ -208,12 +220,12 @@ class AuthAppServiceTest {
                 .thenThrow(new IdTokenRejectedException("RS256 验签失败"));
 
         LoginCompletion completion = appService.completeLogin("code-1", txn.state(),
-                txn.cookieValue());
+                txn.cookieValue(), null);
 
         assertThat(completion.redirectTo()).isEqualTo(APP_BASE + "/?error=exchange_failed");
         assertThat(completion.sessionCookie()).isNull();
         // 验签不过不建档（sub 未受信任）
-        assertThat(accountRepository.findByExternalId(sub)).isEmpty();
+        assertThat(accountAppService.accountByIdentifier(sub)).isEmpty();
     }
 
     // -------- 登出（先取 hint 再删会话；post_logout_redirect_uri 独立白名单值） --------

@@ -94,6 +94,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 验码登录（不存在即静默建账户）
+         * @description M01 弹窗第二步：验码即登录——无密码，账户不存在则静默建档（显示名缺省＝
+         *     标识原文）＋种 aiplatform_session 会话 cookie（契约与 OIDC 登录同源）。
+         *     验过即消费（一次性）。目标形态无效 400→6005；验证码错误或已过期
+         *     （含超次作废、无在途码，不区分错环节）400→6008。回执＝当前账号
+         *     （MeResponse 同形）。
+         */
+        post: operations["verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -110,6 +134,29 @@ export interface paths {
          *     post_logout_redirect_uri 白名单 302 回前端首页。前端以 form POST 姿态调用。
          */
         post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发码（手机号/邮箱）
+         * @description M01 弹窗第一步：输入手机号/邮箱（单输入，通道按形态判定）发六位数字验证码。
+         *     有效期/发码冷却窗/试错上限走配置（回执带有效期秒数）。错误信封数字业务码：
+         *     目标形态无效 400→6005；通道未开放（上线先邮箱，手机号开关位在配置）
+         *     403→6006；频控 429→6007。发送服务商＝上线参数（机制先行、配置驱动）。
+         */
+        post: operations["sendCode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -188,8 +235,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目列表（状态过滤）
-         * @description 创建时间倒序。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
+         * 项目列表（状态过滤；按当前登录账户过滤）
+         * @description 创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
          */
         get: operations["list"];
         put?: never;
@@ -333,7 +380,7 @@ export interface paths {
         put?: never;
         /**
          * 改名（需求端右栏「项目信息」inline 改名）
-         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；单账号场景不设越权面、不发射 SSE（REST 响应即触达）
+         * @description 名称后改的显式动作（占位名/生成名/已具名均可改，含已归档项目）。响应与详情端点同构——前端改名成功后 invalidate projects 域刷新列表/顶栏。空白拒绝 400 PRJ_005（与建项目同口径），长度上限 100 超限 400；不发射 SSE（REST 响应即触达）。#325 起进 owner 守卫面（/api/projects/{id}/** 统一归属判定，非本人 404 PRJ_001）
          */
         post: operations["rename"];
         delete?: never;
@@ -356,6 +403,26 @@ export interface paths {
          * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）
+         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）：「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层承载，确认动作本身不携带标记）。响应即回执（versionNo/content/confirmedAt/readiness）——版本号是下游（#332 确认后自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
+         */
+        post: operations["confirmPrd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1239,9 +1306,49 @@ export interface paths {
         };
         /**
          * PRD 读（当前版 markdown，直读工作区）
-         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt}，updatedAt = 文件 mtime（ISO-8601，秒精度）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
+         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪（判定与确认门同源）。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PRD 已确认版本清单（最新在前，轻量形不含全文）
+         * @description 项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
+         */
+        get: operations["prdVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/prd/versions/{versionNo}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PRD 版本详情（含全文快照）
+         * @description 单版详情（#330）：{projectId, versionNo, content, confirmedAt, readiness}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手即解析）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
+         */
+        get: operations["prdVersion"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2429,6 +2536,65 @@ export interface components {
              */
             updatedAt?: string;
         };
+        /** @description 验码登录命令 */
+        VerifyCodeLoginCommand: {
+            /**
+             * @description 收码目标（手机号/邮箱）
+             * @example user@example.com
+             */
+            target?: string;
+            /**
+             * @description 验证码（六位数字）
+             * @example 123456
+             */
+            code?: string;
+        };
+        ApiResponseMeResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["MeResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 当前登录账号 */
+        MeResponse: {
+            /**
+             * @description 账号 id（内部 TSID，字符串承载——超出 JS 安全整数范围）
+             * @example 3897654321098765432
+             */
+            accountId?: string;
+            /**
+             * @description 显示名（nickname→name→preferred_username→sub 推导）
+             * @example 张三
+             */
+            displayName?: string;
+        };
+        /** @description 发码命令 */
+        SendVerificationCodeCommand: {
+            /**
+             * @description 收码目标（手机号/邮箱）
+             * @example user@example.com
+             */
+            target?: string;
+        };
+        ApiResponseCodeSentResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["CodeSentResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        /** @description 发码回执 */
+        CodeSentResponse: {
+            /**
+             * Format: int64
+             * @description 验证码有效期（秒）
+             * @example 300
+             */
+            expiresInSeconds?: number;
+        };
         CreateWorkspaceCommand: {
             /** @description 1=开发, 2=测试, 3=生产 */
             kind?: number;
@@ -2689,6 +2855,36 @@ export interface components {
             data?: Record<string, never>;
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
+        };
+        ApiResponsePrdVersionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PrdVersionResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        DimensionStatus: {
+            dimension?: string;
+            status?: string;
+        };
+        PendingItem: {
+            dimension?: string;
+            text?: string;
+        };
+        PrdReadinessResponse: {
+            blocking?: components["schemas"]["PendingItem"][];
+            minor?: components["schemas"]["PendingItem"][];
+            dimensions?: components["schemas"]["DimensionStatus"][];
+        };
+        PrdVersionResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            content?: string;
+            /** Format: date-time */
+            confirmedAt?: string;
+            readiness?: components["schemas"]["PrdReadinessResponse"];
         };
         AnnotationAnchor: {
             selector?: string;
@@ -3156,6 +3352,22 @@ export interface components {
             content?: string;
             /** Format: date-time */
             updatedAt?: string;
+            readiness?: components["schemas"]["PrdReadinessResponse"];
+        };
+        ApiResponseListPrdVersionSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PrdVersionSummaryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PrdVersionSummaryResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            /** Format: date-time */
+            confirmedAt?: string;
         };
         ApiResponseProjectFilesResponse: {
             /** Format: int32 */
@@ -3307,27 +3519,6 @@ export interface components {
             answered?: boolean;
             /** Format: date-time */
             at?: string;
-        };
-        ApiResponseMeResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["MeResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        /** @description 当前登录账号 */
-        MeResponse: {
-            /**
-             * @description 账号 id（内部 TSID，字符串承载——超出 JS 安全整数范围）
-             * @example 3897654321098765432
-             */
-            accountId?: string;
-            /**
-             * @description 显示名（nickname→name→preferred_username→sub 推导）
-             * @example 张三
-             */
-            displayName?: string;
         };
         SseEmitter: {
             /** Format: int64 */
@@ -4083,6 +4274,30 @@ export interface operations {
             };
         };
     };
+    verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyCodeLoginCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMeResponse"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -4100,6 +4315,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    sendCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendVerificationCodeCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCodeSentResponse"];
+                };
             };
         };
     };
@@ -4396,6 +4635,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    confirmPrd: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
                 };
             };
         };
@@ -5319,6 +5580,51 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponsePrdResponse"];
+                };
+            };
+        };
+    };
+    prdVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListPrdVersionSummaryResponse"];
+                };
+            };
+        };
+    };
+    prdVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                versionNo: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
                 };
             };
         };

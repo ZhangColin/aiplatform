@@ -12,8 +12,10 @@
  *       AgentEventTypes，映射表单点 AgentscopeEventMapper）</li>
  *   <li>会话恢复：AgentState 落 PostgreSQL（cat_agent_state 承载全部智能体会话，
  *       (userId, sessionId) 槽位）——平台重启后同一会话标识恢复续跑</li>
- *   <li>用量埋点（模型边界计量 #109：每次 {@code stream()} 收口 → UsageEvent，
- *       主循环 + 压缩摘要 + 记忆抽取全收口，取代只认 ModelCallEndEvent 的旧源）</li>
+ *   <li>用量埋点（模型边界计量 #109 / #324 对账级：每次 {@code stream()} 收口 →
+ *       UsageEvent，主循环每迭代 + 压缩摘要 + 记忆抽取 + 委派子智能体全收口、
+ *       失败流已耗照报，取代只认 ModelCallEndEvent 的旧源；计量上下文随订阅链
+ *       传播——跨迭代/跨线程的模型直调不漏计）</li>
  *   <li>会话级任务执行器（同会话一次一轮串行、跨会话并行）</li>
  *   <li>工具集 SPI（AgentToolkitSupplier）：智能体资产（ask_user / savePrd 等业务
  *       工具）归业务侧注入，本包不供工具；工具面规格串（#252 增强工具开关的装配腿）

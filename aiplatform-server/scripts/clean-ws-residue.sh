@@ -2,9 +2,12 @@
 # 清理测试泄漏的沙箱 Docker 残留（活体测试 @AfterEach 尽力而为，JVM 中断即漏）。
 #
 # 判定「残留」的唯一准绳：资源编号不在 wsp_workspaces 注册表里
-# （dev 库 aiplatform 与测试库 aiplatform_test 的并集）。
+# （本机全部 aiplatform% 库的并集：dev 库 aiplatform、测试库 aiplatform_test 及
+# spec-320 并行实施期的每票独立测试库 aiplatform_test_t*——新库在场时硬编码
+# 两库并集会漏看其注册表、误删活体测试容器，故动态枚举）。
 # 注册表里有 = 活跃/休眠/封存的工作区，一律不动——休眠保卷是用户数据（ADR-0016）。
-# 任一库连不上 → 容器/卷整体跳过不删（宁可漏删，不可误删）；镜像清理不受影响。
+# 任一库连不上（含新建未跑迁移、wsp_workspaces 尚不存在）→ 容器/卷整体跳过不删
+# （宁可漏删，不可误删）；镜像清理不受影响。
 #
 # 连接口径同 application-local.yml（postgres@18 本机 5432），可用环境变量覆盖。
 # 手动执行：aiplatform-server/scripts/clean-ws-residue.sh
@@ -19,10 +22,11 @@ SERVER_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # docker 没起就静默退出（CI/无 docker 环境零副作用）
 docker info >/dev/null 2>&1 || exit 0
 
-# ---- 1. 注册表并集（两库都可达才敢删容器/卷）----
+# ---- 1. 注册表并集（全部 aiplatform% 库都可达才敢删容器/卷）----
 registered=""
 db_ok=0
-for db in aiplatform aiplatform_test; do
+for db in $(PGPASSWORD="$PGPASSWORD" psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
+    -d postgres -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'aiplatform%'" 2>/dev/null); do
   if names=$(PGPASSWORD="$PGPASSWORD" psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" \
       -d "$db" -tAc "SELECT container_name FROM wsp_workspaces" 2>/dev/null); then
     registered="$registered $names"
@@ -39,6 +43,17 @@ is_registered() { # $1 = ws 编号；snap 等派生资源与主资源同编号�
   return 1
 }
 
+# 宽限窗（分钟）：刚创建的容器/卷可能尚在「置备中、注册表行未提交」窗口——此时任何库的
+# wsp_workspaces 都看不到它，按无主判删会把活体置备误杀（spec-320 并行实施实证：测试等门
+# 轮询触发本脚本误删窗口内置备容器）。新建资源一律放过，下轮清理再收。
+GRACE_MINUTES="${GRACE_MINUTES:-10}"
+now=$(date +%s)
+in_grace() { # $1 = RFC3339 创建时间（docker inspect 输出）
+  [ -n "$1" ] || return 1 # 拿不到创建时间＝无从判定，不按宽限放过
+  ts=$(date -j -f '%Y-%m-%dT%H:%M:%S' "${1%%+*}" +%s 2>/dev/null) || return 1
+  [ $((now - ts)) -lt $((GRACE_MINUTES * 60)) ]
+}
+
 removed_containers=0
 removed_volumes=0
 removed_images=0
@@ -50,6 +65,10 @@ else
   for c in $(docker ps -a --format '{{.Names}}' | grep -E '^ws-[0-9]+' || true); do
     id=$(printf '%s' "$c" | sed -E 's/^ws-([0-9]+).*/\1/')
     if ! is_registered "$id"; then
+      if in_grace "$(docker inspect -f '{{.Created}}' "$c" 2>/dev/null)"; then
+        echo "跳过新建容器（宽限窗内）: $c"
+        continue
+      fi
       docker rm -f "$c" >/dev/null 2>&1 && echo "容器已删: $c" && removed_containers=$((removed_containers + 1))
     fi
   done
@@ -57,6 +76,10 @@ else
   for v in $(docker volume ls --format '{{.Name}}' | grep -E '^vol-ws-[0-9]+$' || true); do
     id=${v#vol-ws-}
     if ! is_registered "$id"; then
+      if in_grace "$(docker volume inspect -f '{{.CreatedAt}}' "$v" 2>/dev/null)"; then
+        echo "跳过新建卷（宽限窗内）: $v"
+        continue
+      fi
       docker volume rm "$v" >/dev/null 2>&1 && echo "卷已删: $v" && removed_volumes=$((removed_volumes + 1))
     fi
   done

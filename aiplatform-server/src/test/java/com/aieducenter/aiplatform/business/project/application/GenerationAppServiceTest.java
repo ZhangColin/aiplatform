@@ -41,6 +41,7 @@ import com.aieducenter.aiplatform.IntegrationTest;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.aieducenter.aiplatform.base.agentscope.AgentTurnFailure;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.FileChange;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
@@ -61,6 +62,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -73,6 +75,10 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * <p><b>生成轨道（#104）</b>：阶段 0（先起服白底页）固定前置，其后按切片计划顺序逐片
  * 派 run——轨道顺序派 N run、阶段 0 先于切片、每片收口发 run-finish（收口扩载）、
  * 失败不跳片（某片超限转终态 run-failed、generated_at 落最后一片收口）。</p>
+ *
+ * <p><b>首屏界面先行与入口文件写全（#339）</b>：首片语义＝先出可点的界面（首片
+ * prompt 界面先行、其后各片端到端纵向切片）；收口判据＝8081 可达＋入口文件完整
+ * （残缺「其余代码略」式占位不收口、静默重试修全）。</p>
  */
 @IntegrationTest
 class GenerationAppServiceTest {
@@ -141,6 +147,7 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
@@ -1003,7 +1010,9 @@ class GenerationAppServiceTest {
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("0.0.0.0:8081").contains("docs/PRD.md");
         assertThat(value.modelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
-        assertThat(value.timeout()).isEqualTo(properties.getTimeout());
+        // #322 活超时替换一次性总墙钟：编码命令只携静默判死阈值，不再携总时长上限
+        assertThat(value.timeout()).isNull();
+        assertThat(value.silenceTimeout()).isEqualTo(properties.getSilenceTimeout());
         assertThat(value.workspaceId()).isEqualTo("9805");
         assertThat(value.usageContext().subject()).isEqualTo(projectId.toString());
         assertThat(value.usageContext().dims()).isEqualTo(UsageDims.of(projectId,
@@ -1017,6 +1026,8 @@ class GenerationAppServiceTest {
     void given_executor_config_override_when_generate_then_stage0_command_carries_library_values() {
         // #251 装配断言（真命令构建缝，ADR-0021 库值优先）：设执行体运营配置库行后
         // 编码命令实取库值（prompt 与模型档位两腿）；缺省回落腿由上方枚举默认断言钉死。
+        // #341 起 Demo 阶段（executor）缺省＝快模型档，故覆盖档取强模型档以示库值
+        // 优先（覆盖值≠缺省值，断言才有别于回落腿）。
         // #252 增强工具开关同批编入 toolSpec（执行体槽无增强件，规格恒缺省开——
         // 进缓存键保持规格一致）
         Long projectId = persistedProject("9870");
@@ -1025,7 +1036,7 @@ class GenerationAppServiceTest {
         givenConverseSucceeds("已生成");
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id)
-                VALUES ('executor', ?, 'deepseek-v4-flash')
+                VALUES ('executor', ?, 'deepseek-v4-pro')
                 """, "执行体覆盖协议：开工先列步骤。");
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
@@ -1034,7 +1045,7 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(command.capture(), any());
         AgentCommand stage0 = command.getAllValues().get(0);
         assertThat(stage0.systemPrompt()).isEqualTo("执行体覆盖协议：开工先列步骤。");
-        assertThat(stage0.modelString()).isEqualTo("deepseek:deepseek-v4-flash");
+        assertThat(stage0.modelString()).isEqualTo("deepseek:deepseek-v4-pro");
         assertThat(stage0.toolSpec()).isEqualTo("ws=true,fu=true");
     }
 
@@ -1134,9 +1145,12 @@ class GenerationAppServiceTest {
                 .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
                         SINGLE_SLICE_PLAN));
         assertThat(attempts.get(1).runId()).isNotEqualTo(run.runId()); // 重试内部 runId
-        assertThat(attempts.get(1).prompt()).isEqualTo(
-                GenerationAppService.generationRetryPrompt(SINGLE_SLICE_PLAN,
-                        GenerationAppService.STAGE0_RETRY_DESC, null, "首次尝试中断"));
+        assertThat(attempts.get(1).prompt())
+                .contains("错误现场：首次尝试中断")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时")
+                .contains("已落盘文件变更 尚无")
+                .endsWith(GenerationAppService.segmentContext(SINGLE_SLICE_PLAN, null));
         assertThat(attempts.get(2).prompt())
                 .isEqualTo(GenerationAppService.slicePrompt(SINGLE_SLICE_PLAN, 0,
                         "系统已生成"));
@@ -1178,6 +1192,111 @@ class GenerationAppServiceTest {
         // 重发（断点续跑自阶段 0 重跑）= 阶段 0 + 切片各一次 converse
         verify(agentClient, times(properties.getMaxAttempts() + 2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    // ---------- 首屏界面先行与入口文件写全（#339） ----------
+
+    @Test
+    void given_first_slice_when_generate_then_prompt_ui_first_and_later_slices_vertical() {
+        // #339 首屏界面先行：第一片 prompt 语义＝先出可点的界面（界面骨架、预览
+        // 立即可点、此片先不接数据与后端逻辑）；第二片起才是端到端纵向切片
+        Long projectId = persistedProject("9833");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("首页与主要页面骨架", "用户能注册登录")));
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        // 阶段 0（先起服骨架）语义不变
+        assertThat(all.get(0).prompt()).contains("先起服");
+        // 第一片：界面先行语义（非端到端纵向切片）
+        assertThat(all.get(1).prompt())
+                .contains("界面先行")
+                .contains("先做出可点的界面")
+                .contains("预览立即可点");
+        assertThat(all.get(1).prompt()).doesNotContain("数据落库端到端走通");
+        // 第二片起：既有端到端纵向切片语义
+        assertThat(all.get(2).prompt()).contains("端到端走通");
+        assertThat(all.get(2).prompt()).doesNotContain("界面先行");
+    }
+
+    @Test
+    void given_entry_file_truncated_when_generate_then_not_closed_within_attempts() {
+        // #339 收口判据含入口文件完整性：入口文件残缺（「其余代码略」式）不收口
+        // ——8081 探活可达也不算真收口（收口判据两件），尝试环静默重试耗尽转终态
+        // 失败、generated_at 不落
+        Long projectId = persistedProject("9834");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse(
+                        "export default function Home(){ return <main>{/* 其余代码略 */}</main>; }",
+                        "", 0));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    @Test
+    void given_entry_file_truncated_then_fixed_when_generate_then_retries_and_closes() {
+        // #339 有限重试修全：入口文件首次残缺不收口（驱动原位修补），重试补齐即收口
+        // ——阶段 0 首试残→重试全→阶段 0 收口，随后切片一次收口（共 3 次 converse）
+        Long projectId = persistedProject("9835");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse("// 其余代码略", "", 0))
+                .thenReturn(new ExecResultResponse(
+                        "export default function Home(){ return <main>首页</main>; }", "", 0));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(3)).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_entry_file_missing_when_generate_then_not_closed() {
+        // #339 入口文件取件失败（缺失）＝残缺——不收口（缺件也是首屏打不开），
+        // 静默重试耗尽转终态、generated_at 不落
+        Long projectId = persistedProject("9836");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse("", "No such file or directory", 1));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
+        // #339 协议面（经运营配置面可调）：主智能体切片计划约定与补产提示词同向
+        // 承载首片界面先行；执行体协议承载入口文件写全约定
+        assertThat(AgentProfile.MAIN.systemPrompt())
+                .contains("先做出可点的界面")
+                .contains("界面骨架")
+                .contains("预览立即可点");
+        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT).contains("先做出可点的界面");
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("入口文件")
+                .contains(ProjectFiles.BASELINE_ENTRY)
+                .contains("其余代码略");
     }
 
     @Test
@@ -1354,8 +1473,9 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_first_attempt_fails_when_retry_then_breakdown_carries_each_attempt() {
-        // #111 静默重试代价可归因：每次尝试各自带分布——中段失败的尝试带墙钟与零桶
-        //（事实随异常弃置，口径见 StageDurationFacts）、成功尝试带完整桶
+        // #111 静默重试代价可归因：每次尝试各自带分布——本例用裸异常模拟无流段
+        // 观察可携的失败（前段/判据类），仍带墙钟与零桶；客户端流失败的部分观察
+        // 留账见 #323 灵魂例，成功尝试带完整桶
         Long projectId = persistedProject("9819");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -1405,6 +1525,100 @@ class GenerationAppServiceTest {
         assertThat(breakdown).containsEntry("llmMs", 7L);
         assertThat((Map<String, Object>) breakdown.get("toolsMs"))
                 .containsExactly(Map.entry("command", Map.of("test", 4L)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_failed_attempt_with_observation_when_retry_then_account_kept_and_scene_attached() {
+        // 灵魂用例（#323 失败留账＋重试携进展现场）：阶段 0 首试中段失败且失败携部分
+        // 观察（AgentTurnFailure：已提交文件变更＋已闭合区间阶段耗时；计划快照经
+        // 事件流观察）→ 静默重试成功收口——①收尾卡耗时分布：失败尝试带部分桶
+        //（不清零）、run 级桶跨尝试含失败尝试；②变更清单含失败尝试已落盘的文件；
+        // ③重试 prompt 携进展现场（已干多久/干到哪——累计用时、已落盘文件、计划
+        // 进度），裸异常原文不再是唯一现场（#221 错误现场仍在，原地修不回归）
+        Long projectId = persistedProject("9833");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                            Map.of("prompt", command.prompt())));
+                    sink.accept(scripted(AgentEventTypes.PART_PLAN, command.runId(),
+                            Map.of(AgentEventTypes.PART_PLAN_STEPS_FIELD, List.of(
+                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s1",
+                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "初始化项目",
+                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
+                                            AgentEventTypes.PART_PLAN_STATE_COMPLETED),
+                                    Map.of(AgentEventTypes.PART_PLAN_STEP_ID_FIELD, "s2",
+                                            AgentEventTypes.PART_PLAN_STEP_TITLE_FIELD, "实现注册页",
+                                            AgentEventTypes.PART_PLAN_STEP_STATE_FIELD,
+                                            AgentEventTypes.PART_PLAN_STATE_IN_PROGRESS)))));
+                    throw new AgentTurnFailure(
+                            "智能体调用失败（runId=" + command.runId() + "）：切片1中断",
+                            new RuntimeException("切片1中断"),
+                            List.of(new FileChange("src/failed.tsx", 40, 2)),
+                            new StageDurations(3, Map.of("write_file", 7L), Map.of(), Map.of()));
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "系统已生成", null,
+                            List.of(new FileChange("src/lib.js", 10, 0)),
+                            new StageDurations(7, Map.of(), Map.of(), Map.of()));
+                })
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0);
+                    Consumer<AgentEvent> sink = invocation.getArgument(1);
+                    sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                            Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+                    return new AgentReply(command.runId(), "切片完成");
+                });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 重试 prompt 携进展现场（#323）：错误现场＋已干多久/干到哪的平台可观测事实
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("错误现场：")
+                .contains("切片1中断")
+                .contains("进展现场（平台可观测事实）")
+                .contains("已累计用时")
+                .contains("已落盘文件变更 1 件：src/failed.tsx（+40/-2）")
+                .contains("最近计划进度：")
+                .contains("✓ 初始化项目")
+                .contains("● 实现注册页")
+                .contains("不要重做");
+
+        // 阶段 0 收口收尾卡：失败尝试留账——部分桶不清零、run 级桶跨尝试含失败尝试、
+        // 变更清单含失败尝试已落盘的文件（活动量口径：同路径跨尝试〔含失败〕合并）
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> breakdown =
+                (Map<String, Object>) closing.get("durationBreakdown");
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) breakdown.get("attempts");
+        assertThat(attempts).hasSize(2);
+        assertThat(attempts.get(0))
+                .containsEntry("attempt", 1)
+                .containsEntry("llmMs", 3L);
+        assertThat((Map<String, Object>) attempts.get(0).get("toolsMs"))
+                .containsEntry("write_file", 7L);
+        assertThat(attempts.get(1))
+                .containsEntry("attempt", 2)
+                .containsEntry("llmMs", 7L);
+        assertThat(breakdown).containsEntry("llmMs", 10L); // run 级 = 失败 3 + 成功 7
+        assertThat((Map<String, Object>) breakdown.get("toolsMs"))
+                .containsEntry("write_file", 7L);
+        assertThat((List<Map<String, Object>>) closing.get("files"))
+                .extracting(file -> file.get("path"))
+                .containsExactlyInAnyOrder("src/failed.tsx", "src/lib.js");
     }
 
     // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
@@ -1667,8 +1881,7 @@ class GenerationAppServiceTest {
     void given_prd_never_produced_when_generate_then_prj_018() {
         // 「无门」指待定项不设门；PRD 从未产出 = 动作成立的前置事实缺失——直连调用
         // 也拦（编码 run 的任务就是读 PRD，无 PRD 起跑只会空烧重试）
-        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null,
-                9816L, OWNER)).getId();
+        Long projectId = projectRepository.save(Project.create("无 PRD 项目", null, null, 9816L, OWNER, null)).getId();
 
         assertThatThrownBy(() -> appService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
@@ -1706,13 +1919,107 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
+    // ---------- 生成加门（#332）：确认触发首个 Demo run ----------
+
+    @Test
+    void given_confirmed_no_plan_when_dispatch_first_demo_then_redispatch_plan_then_runs() {
+        // 灵魂例（#332 确认后派首个 Demo run）：确认时刻无既有计划——走补产链闭环
+        // （补产轮产计划 → 收口自动派生成 → 阶段 0 + 逐片 → generated_at 落位）
+        Long projectId = persistedProject("9880");
+        seedConfirmedVersion(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), produced);
+                return new AgentReply(command.runId(), "已按 PRD 拟好实施计划");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        GenerationAppService.GenerationRun run = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(run).isNotNull();
+        assertThat(appService.planOf(projectId)).isEqualTo(produced);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_generated_when_dispatch_first_demo_then_null_no_repeat() {
+        // 已生成＝首个 Demo 已起，确认只负责首个——不重复派、零编码 run
+        Long projectId = persistedGeneratedProject("9881");
+
+        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+    }
+
+    @Test
+    void given_archived_when_dispatch_first_demo_then_null() {
+        // 归档＝对话区关闭即全停——确认不派
+        Long projectId = persistedArchivedProject("9882");
+
+        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+    }
+
+    @Test
+    void given_first_demo_failed_when_reconfirm_then_redispatch_from_track() {
+        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」，用户
+        // 重确认（「继续生成」同路）即再触发——计划已在轨道表，从断点续跑（不重产计划）
+        Long projectId = persistedProject("9883");
+        seedConfirmedVersion(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null; // matcher 空参调用（重打桩触发旧 answer）直接过
+            }
+            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
+                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
+                return new AgentReply(command.runId(), "计划已定");
+            }
+            throw new IllegalStateException("起服失败"); // 审核段失败（重试耗尽转终态）
+        });
+
+        GenerationAppService.GenerationRun first = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(first).isNotNull();
+        assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
+        // 重确认（重发）：计划在轨道表，续跑即完成（重打桩的 matcher 空参调用触发旧
+        // answer——旧桩对 null 命令直接过，同既有先例）
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return command != null ? new AgentReply(command.runId(), "完成") : null;
+        });
+        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnConfirm(projectId);
+
+        assertThat(again).isNotNull();
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
     // ---------- 测试数据 ----------
 
     /** 可生成形态的项目（PRD 已产出、未生成、未归档）。 */
     private Long persistedProject(String workspaceId) {
-        Project project = Project.create("生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
+    }
+
+    /** 已确认 PRD 版本在场（#332 生成加门：{@link
+     * GenerationAppService#dispatchFirstDemoOnConfirm} 的调用前提——经确认缝触发时
+     * 版本必已落库；收口观测判据只看存在性，内容不参与）。 */
+    private void seedConfirmedVersion(Long projectId) {
+        Project project = projectOf(projectId);
+        jdbcTemplate.update("""
+                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
+                    prd_produced_at, created_at, updated_at)
+                VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, project.getPrdProducedAt());
     }
 
     /** 模拟 PRD 修订落定（savePrd 写出后的库事实）：刷新 prd_produced_at——版本锚换新值。 */
@@ -1723,7 +2030,7 @@ class GenerationAppServiceTest {
     }
 
     private Long persistedArchivedProject(String workspaceId) {
-        Project project = Project.create("归档生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("归档生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.archive();
         return projectRepository.save(project).getId();
     }
@@ -1788,7 +2095,7 @@ class GenerationAppServiceTest {
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */
     private Long persistedSystemDesignProject(String workspaceId) {
-        Project project = Project.create("设计先行项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("设计先行项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.switchEndpoint(ProjectEndpointType.SYSTEM_DESIGN, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
@@ -1809,7 +2116,7 @@ class GenerationAppServiceTest {
     }
 
     private Long persistedGeneratedProject(String workspaceId) {
-        Project project = Project.create("已生成项目", null, Long.parseLong(workspaceId), OWNER);
+        Project project = Project.create("已生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markGenerated();
         return projectRepository.save(project).getId();
     }

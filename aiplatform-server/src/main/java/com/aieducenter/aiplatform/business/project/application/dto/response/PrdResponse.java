@@ -3,17 +3,20 @@ package com.aieducenter.aiplatform.business.project.application.dto.response;
 import java.time.Instant;
 
 /**
- * PRD 读响应（#41）：当前版 PRD——markdown 正文 + 更新时间，v1 无版本链只最新版。
- * 事实源是项目 dev 工作区的 {@code docs/PRD.md}（本端点直读，读不到 = 未产出 404
- * PRJ_015，不在此载体表达）。
+ * PRD 读响应（#41；#331 增收敛度读面）：当前版 PRD——markdown 正文 + 更新时间 +
+ * 「验收与待确认」章分级解析投影。事实源是项目 dev 工作区的 {@code docs/PRD.md}
+ * （本端点直读，读不到 = 未产出 404 PRJ_015，不在此载体表达）；readiness 对
+ * 正文即时解析（不落库，确认门与收敛卡同源判定——草稿随对话演进、投影随之）。
  *
  * @param projectId 项目标识（TSID 十进制字符串）
  * @param content   markdown 正文（工作区文件原样）
  * @param updatedAt 最近写出时间（工作区文件 mtime，秒精度——与正文同一事实源）
+ * @param readiness 收敛度投影（#331：分级缺项＋五维维度态；章缺失 fail-open 全就绪）
  */
 public record PrdResponse(
         String projectId,
         String content,
-        Instant updatedAt
+        Instant updatedAt,
+        PrdReadinessResponse readiness
 ) {
 }

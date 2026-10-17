@@ -33,6 +33,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -181,6 +182,21 @@ public class GenerationAppService {
     }
 
     /**
+     * 首片 prompt（#339 首屏界面先行）：第一片先出可点的界面——主要页面与导航的
+     * 界面骨架一次搭出来（页面成型、可交互、预览立即可点），此片先不接数据与后端
+     * 逻辑、保持系统可运行；此后各片再逐片补数据与逻辑（{@link #sliceRunPrompt}
+     * 纵向切片形）。与主智能体的切片计划约定同向（{@link AgentProfile#MAIN} 第 5 条
+     * ／{@code MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT}）——让用户尽早看到
+     * 系统长出来，而非等全部片完才见东西。
+     */
+    static String firstSliceRunPrompt(int total, String slice) {
+        return "系统增量（切片 1/" + total + "，界面先行）：请在现有系统上先做出可点的界面"
+                + "——「" + slice + "」：把主要页面与导航的界面骨架一次搭出来（页面成型、"
+                + "可交互、预览立即可点），本片先不接数据与后端逻辑、保持系统可运行；"
+                + "收口前确认 8081 端口服务在跑、curl 可访问。" + NARRATION_CONVENTION;
+    }
+
+    /**
      * 交接摘要产出约定（#114 片间交接）：每片/阶段 0 收口前，执行体自产交接摘要
      * 作为最后一段话——平台取其收口终文（{@link CoderRunAttempts.RunResult#closingText}）
      * 落 .platform/ 并注入下一片 prompt。三要素（做了什么/关键文件/下一片须知）由
@@ -246,11 +262,17 @@ public class GenerationAppService {
         return STAGE0_RUN_PROMPT + segmentContext(plan, null);
     }
 
-    /** 切片首试 prompt（#114）：切片任务 + 片级上下文。 */
+    /**
+     * 切片首试 prompt（#114）：切片任务 + 片级上下文；#339 首片分岔——index 0 走
+     * {@link #firstSliceRunPrompt 界面先行}，此后各片走 {@link #sliceRunPrompt}
+     * 端到端纵向切片。
+     */
     static String slicePrompt(BuildPlan plan, int index, String previousHandoff) {
         String slice = plan.slices().get(index);
-        return sliceRunPrompt(index + 1, plan.slices().size(), slice)
-                + segmentContext(plan, previousHandoff);
+        String task = index == 0
+                ? firstSliceRunPrompt(plan.slices().size(), slice)
+                : sliceRunPrompt(index + 1, plan.slices().size(), slice);
+        return task + segmentContext(plan, previousHandoff);
     }
 
     /** 生成轨重试续作 prompt（#114；#221/#323 重试现场）：续作任务 + 片级上下文（与首试同上下文）。 */
@@ -387,6 +409,16 @@ public class GenerationAppService {
      * 线程不被无响应对端挂死。
      */
     static final String CLOSING_PROBE = "curl -s --max-time 2 -o /dev/null http://localhost:8081";
+
+    /**
+     * 入口文件完整性探针（#339）：读预览入口文件（{@link ProjectFiles#BASELINE_ENTRY}
+     * 基座首页）内容——收口判据的第二件。取件退出码非 0 = 入口文件缺失（残缺），
+     * 内容含 {@link ProjectFiles#hasTruncationPlaceholder 「其余代码略」式截断占位}
+     * 也判残缺：残缺即不收口、驱动尝试环静默重试修全。命令全常量（路径平台固定，
+     * 无用户可控片段）。
+     */
+    static final String ENTRY_FILE_PROBE =
+            "cat '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ENTRY) + "'";
 
     private final ProjectRepository projectRepository;
     private final AgentSessionExecutor sessionExecutor;
@@ -847,8 +879,9 @@ public class GenerationAppService {
     }
 
     /**
-     * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达才收口——converse 无异常
-     * 不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
+     * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达＋入口文件完整
+     * （#339 首屏界面先行）才收口——converse 无异常不构成成功（智能体可能道歉式
+     * 放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 self-test 兜
      * （收口扩载 selfTest 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
@@ -858,6 +891,7 @@ public class GenerationAppService {
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
             boolean markGenerated, String runId, String summary) {
         requireReachable(project);
+        requireEntryFileComplete(project);
         emitPreviewReady(project);
         closeSegment(project.getId(), ord, runId);
         if (markGenerated) {
@@ -904,6 +938,26 @@ public class GenerationAppService {
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(CLOSING_PROBE));
         if (result.exitCode() != 0) {
             throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
+        }
+    }
+
+    /**
+     * 入口文件完整性核验（#339 首屏界面先行＋入口一次写全，收口判据第二件）：
+     * 预览入口文件（基座首页）取件失败（缺失）或内容含「其余代码略」式截断占位即
+     * 判残缺——残缺不收口，抛异常驱动尝试环静默重试（重试携错误现场、在同一工作区
+     * 上把入口补全），重试耗尽才转终态失败。8081 探活是「服务在跑」，本判据是
+     * 「首屏写全」——两者皆过才算该段真收口。
+     */
+    private void requireEntryFileComplete(Project project) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(ENTRY_FILE_PROBE));
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("入口文件缺失（" + ProjectFiles.BASELINE_ENTRY
+                    + " 取件失败，退出码 " + result.exitCode() + "）");
+        }
+        if (ProjectFiles.hasTruncationPlaceholder(result.stdout())) {
+            throw new IllegalStateException("入口文件残缺（" + ProjectFiles.BASELINE_ENTRY
+                    + " 含「其余代码略」式截断占位，未一次写全）");
         }
     }
 

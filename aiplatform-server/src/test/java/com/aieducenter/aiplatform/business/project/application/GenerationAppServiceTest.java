@@ -62,6 +62,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
+import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -74,6 +75,10 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
  * <p><b>生成轨道（#104）</b>：阶段 0（先起服白底页）固定前置，其后按切片计划顺序逐片
  * 派 run——轨道顺序派 N run、阶段 0 先于切片、每片收口发 run-finish（收口扩载）、
  * 失败不跳片（某片超限转终态 run-failed、generated_at 落最后一片收口）。</p>
+ *
+ * <p><b>首屏界面先行与入口文件写全（#339）</b>：首片语义＝先出可点的界面（首片
+ * prompt 界面先行、其后各片端到端纵向切片）；收口判据＝8081 可达＋入口文件完整
+ * （残缺「其余代码略」式占位不收口、静默重试修全）。</p>
  */
 @IntegrationTest
 class GenerationAppServiceTest {
@@ -1186,6 +1191,111 @@ class GenerationAppServiceTest {
         // 重发（断点续跑自阶段 0 重跑）= 阶段 0 + 切片各一次 converse
         verify(agentClient, times(properties.getMaxAttempts() + 2)).converse(any(), any());
         assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    // ---------- 首屏界面先行与入口文件写全（#339） ----------
+
+    @Test
+    void given_first_slice_when_generate_then_prompt_ui_first_and_later_slices_vertical() {
+        // #339 首屏界面先行：第一片 prompt 语义＝先出可点的界面（界面骨架、预览
+        // 立即可点、此片先不接数据与后端逻辑）；第二片起才是端到端纵向切片
+        Long projectId = persistedProject("9833");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("首页与主要页面骨架", "用户能注册登录")));
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        // 阶段 0（先起服骨架）语义不变
+        assertThat(all.get(0).prompt()).contains("先起服");
+        // 第一片：界面先行语义（非端到端纵向切片）
+        assertThat(all.get(1).prompt())
+                .contains("界面先行")
+                .contains("先做出可点的界面")
+                .contains("预览立即可点");
+        assertThat(all.get(1).prompt()).doesNotContain("数据落库端到端走通");
+        // 第二片起：既有端到端纵向切片语义
+        assertThat(all.get(2).prompt()).contains("端到端走通");
+        assertThat(all.get(2).prompt()).doesNotContain("界面先行");
+    }
+
+    @Test
+    void given_entry_file_truncated_when_generate_then_not_closed_within_attempts() {
+        // #339 收口判据含入口文件完整性：入口文件残缺（「其余代码略」式）不收口
+        // ——8081 探活可达也不算真收口（收口判据两件），尝试环静默重试耗尽转终态
+        // 失败、generated_at 不落
+        Long projectId = persistedProject("9834");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse(
+                        "export default function Home(){ return <main>{/* 其余代码略 */}</main>; }",
+                        "", 0));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    @Test
+    void given_entry_file_truncated_then_fixed_when_generate_then_retries_and_closes() {
+        // #339 有限重试修全：入口文件首次残缺不收口（驱动原位修补），重试补齐即收口
+        // ——阶段 0 首试残→重试全→阶段 0 收口，随后切片一次收口（共 3 次 converse）
+        Long projectId = persistedProject("9835");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse("// 其余代码略", "", 0))
+                .thenReturn(new ExecResultResponse(
+                        "export default function Home(){ return <main>首页</main>; }", "", 0));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(3)).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_entry_file_missing_when_generate_then_not_closed() {
+        // #339 入口文件取件失败（缺失）＝残缺——不收口（缺件也是首屏打不开），
+        // 静默重试耗尽转终态、generated_at 不落
+        Long projectId = persistedProject("9836");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains(ProjectFiles.BASELINE_ENTRY))))
+                .thenReturn(new ExecResultResponse("", "No such file or directory", 1));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
+        // #339 协议面（经运营配置面可调）：主智能体切片计划约定与补产提示词同向
+        // 承载首片界面先行；执行体协议承载入口文件写全约定
+        assertThat(AgentProfile.MAIN.systemPrompt())
+                .contains("先做出可点的界面")
+                .contains("界面骨架")
+                .contains("预览立即可点");
+        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT).contains("先做出可点的界面");
+        assertThat(AgentProfile.EXECUTOR.systemPrompt())
+                .contains("入口文件")
+                .contains(ProjectFiles.BASELINE_ENTRY)
+                .contains("其余代码略");
     }
 
     @Test

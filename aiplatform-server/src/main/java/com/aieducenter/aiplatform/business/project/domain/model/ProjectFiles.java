@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 
@@ -18,7 +19,8 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
  * 在容器侧先行，巨文件不进内存）、find 输出解析。#283 起点看判定对图片放行
  * （ADR-0027）：图片扩展名走 raw 直出（inline 大图），判定与命令构造同收此处；
  * #293 起 raw 直出面扩设计稿 HTML（稿伺服通道——设计稿画布固定画幅帧取件，
- * design/ 锚定单开判定）＋设计稿删除命令（悬卡删除）。纯函数无依赖。
+ * design/ 锚定单开判定）＋设计稿删除命令（悬卡删除）；#339 起收入口文件截断判定
+ * （{@link #hasTruncationPlaceholder}——「其余代码略」式残缺产出的字面形）。纯函数无依赖。
  */
 public final class ProjectFiles {
 
@@ -49,7 +51,52 @@ public final class ProjectFiles {
     public record Entry(String path, long size) {
     }
 
+    /**
+     * 基座预览入口文件（Next.js App Router 首页，工作区根相对形）：用户打开预览
+     * 看到的首屏——#339「首屏界面先行＋入口一次写全」的取件锚（与
+     * {@code DesignSpecs.BASELINE_GLOBALS_CSS} 同为基座固定位）。
+     */
+    public static final String BASELINE_ENTRY = "src/app/page.tsx";
+
+    /**
+     * 入口文件截断占位短语（#339 受限宽容名单）：执行体「其余代码略」式残缺产出的
+     * <b>字面形</b>——只收强信号短语（含「其余/代码/以下/此处」等截断语境词，
+     * 不误伤「略」的常用义如「策略/略高于」）。逐字命中即判残缺。
+     */
+    private static final List<String> TRUNCATION_PLACEHOLDERS = List.of(
+            "其余代码略", "其余代码省略", "其余略", "其余省略", "其余部分略",
+            "省略其余", "以下省略", "此处省略", "代码略", "代码省略",
+            "rest of the code", "rest of code", "code omitted",
+            "rest omitted", "omitted for brevity", "existing code omitted");
+
+    /**
+     * 纯省略号注释行（整行仅注释包裹的省略号／「…」）：截断占位的强信号——JS/TS
+     * 展开运算符（{@code ...}）必与表达式同现、不独占整行为注释，故不误伤展开。
+     */
+    private static final Pattern ELLIPSIS_COMMENT_LINE = Pattern.compile(
+            "(?m)^\\s*(?://|/\\*|\\{/\\*)\\s*(\\.\\.\\.|…)\\s*(\\*/)?\\s*\\}?\\s*$");
+
     private ProjectFiles() {
+    }
+
+    /**
+     * 入口文件截断判定（#339 首屏界面先行＋入口一次写全）：内容含 {@link
+     * #TRUNCATION_PLACEHOLDERS 「其余代码略」式短语}或独占一行的纯省略号注释即判
+     * 残缺（逐字命中、大小写不敏感）。空内容/null 不判残缺——本判据裁的是模型
+     * 「写一半留占位」的截断形态（残缺即不收口、重试修全）；缺件由取件退出码在
+     * 调用侧覆盖，空件非本票点名的截断形态（仍由 8081 探活/片内 self-test 兜）。
+     */
+    public static boolean hasTruncationPlaceholder(String content) {
+        if (content == null) {
+            return false;
+        }
+        String lower = content.toLowerCase(Locale.ROOT);
+        for (String marker : TRUNCATION_PLACEHOLDERS) {
+            if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return ELLIPSIS_COMMENT_LINE.matcher(content).find();
     }
 
     /**

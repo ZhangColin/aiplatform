@@ -384,7 +384,7 @@ class BackofficeOrderControllerTest {
 
     private static OrderResponse quotedOrder() {
         return new OrderResponse("900", "100", OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM, "系统", 99000L, "CNY", "调整：去掉导入功能",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 99000L, "CNY", "调整：去掉导入功能",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(
                         new PriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
@@ -397,7 +397,7 @@ class BackofficeOrderControllerTest {
     /** #157 取消回执：用户面同构（无取消原因——运营内部口径不进用户面响应形）。 */
     private static OrderResponse cancelledOrder() {
         return new OrderResponse("900", "100", OrderStatus.CANCELLED, "已取消",
-                OrderDeliverableType.SYSTEM, "系统", 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                         LocalDateTime.of(2026, 9, 1, 10, 0))),
@@ -408,7 +408,7 @@ class BackofficeOrderControllerTest {
     /** #158 重试归档回执：用户面同构（归档操作者不进用户面响应形）。 */
     private static OrderResponse archivedOrder() {
         return new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
-                OrderDeliverableType.SYSTEM, "系统", 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                         LocalDateTime.of(2026, 9, 1, 10, 0))),

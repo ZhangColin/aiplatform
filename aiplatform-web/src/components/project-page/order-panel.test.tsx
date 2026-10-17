@@ -46,7 +46,7 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).not.toContain("确认下单");
   });
 
-  it("待报价：状态 + 等待文案 + 下单时间 + 取消按钮（不出价格与去支付）", () => {
+  it("待报价：状态 + 「待确认报价」占位态 + 下单时间 + 取消按钮（不出价格与去支付）", () => {
     seed.order = {
       id: "o1",
       projectId: "p1",
@@ -59,11 +59,47 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     const html = renderPanel("o1");
 
     expect(html).toContain("待报价");
-    expect(html).toContain("已收到您的订单，后台正在评估报价");
+    // 「待确认报价」占位呈现态（#335）：价格位以待定态名占位——不以 0 元或示例价代替
+    expect(html).toContain("待确认报价");
+    expect(html).toContain("后台正在评估范围与报价");
+    expect(html).not.toContain("¥"); // 无金额呈现
     expect(html).toContain("取消订单");
     expect(html).toContain("取消后回到迭代，可继续修改再重新下单");
     expect(html).not.toContain("去支付");
     expect(html).not.toContain("改价历史");
+  });
+
+  it("待报价带双版本引用：下单基准行呈现（#335 随单冻结）", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 1,
+      statusName: "待报价",
+      prdVersionNo: 3,
+      demoVersionNo: 2,
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+    };
+
+    const html = renderPanel("o1");
+
+    expect(html).toContain("基准 PRD v3 · Demo v2");
+  });
+
+  it("遗留单无版本引用：下单基准行不虚构（确认制前订单）", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 1,
+      statusName: "待报价",
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+    };
+
+    const html = renderPanel("o1");
+
+    expect(html).not.toContain("基准 PRD");
+    expect(html).not.toContain("Demo v");
   });
 
   it("已报价（=待支付）：总价 + 后台备注 + 可点的去支付（确认弹窗归交互测试）+ 取消", () => {

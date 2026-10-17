@@ -28,12 +28,16 @@ import { PanelPlaceholder } from "./panel-placeholder";
 import { PayConfirmDialog } from "./pay-confirm-dialog";
 
 /**
- * 订单面板（#28 交易环① + #29 交易环② + #30 交易环③，项目模式主区域）：待报价 =
- * 状态 + 等待文案 + 取消；已报价（=待支付）= 总价 + 后台备注 + 去支付（确认弹窗
- * → mock 支付端点）+ 折叠改价历史 + 取消；已归档终态 = 支付完成说明 + 完整记录
- * （总价/全时间点组/报价记录）+ 源码包下载。后台报/改价经机机接口（无前端入口，
- * 联调走脚本），等待期详情轮询使新价实时可见。订单态变化的 toast 归 SSE 桥
- * （#30），本组件只出动作反馈（失败）与终态呈现。
+ * 订单面板（#28 交易环① + #29 交易环② + #30 交易环③，项目模式主区域；#335
+ * 待确认报价呈现态＋下单基准行）：待报价 = 状态 + 「待确认报价」占位态（价格
+ * 位以待定态名占位，不以 0 元或示例价代替；报价落定后翻价格）+ 下单基准
+ * （随单冻结的 PRD/Demo 确认版本）+ 取消；已报价（=待支付）= 总价 + 后台备注 +
+ * 去支付（确认弹窗 → mock 支付端点）+ 折叠改价历史 + 取消；已归档终态 = 支付
+ * 完成说明 + 完整记录（总价/全时间点组/报价记录）+ 源码包下载。内容向三子步骤
+ * （核对范围与报价/签署合同/付款）重组的完整呈现归签约付款页重建（#348），
+ * 本面板承数据面最小呈现。后台报/改价经机机接口（无前端入口，联调走脚本），
+ * 等待期详情轮询使新价实时可见。订单态变化的 toast 归 SSE 桥（#30），本组件
+ * 只出动作反馈（失败）与终态呈现。
  */
 export function OrderPanel({
   orderId,
@@ -108,9 +112,14 @@ function OrderCard({ orderId }: { orderId: string }) {
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {waitingQuote ? (
-            <p className="text-muted-foreground">
-              已收到您的订单，后台正在评估报价；报价出来后会在这里呈现价格与说明。
-            </p>
+            <div className="space-y-2">
+              {/* 「待确认报价」占位呈现态（#335）：价格位以待定态名占位——不以
+                  0 元或示例价代替；后台落定报价（＋范围文本，#336 起）后翻价格 */}
+              <p className="text-2xl font-semibold">待确认报价</p>
+              <p className="text-muted-foreground">
+                已收到您的订单，后台正在评估范围与报价；报价确认后会在这里呈现价格与说明。
+              </p>
+            </div>
           ) : (
             <QuotedFacts order={order} />
           )}
@@ -119,6 +128,7 @@ function OrderCard({ orderId }: { orderId: string }) {
           ) : (
             <p className="text-xs text-muted-foreground/70">
               下单于 {formatRelativeTime(order.createdAt) || "未知时间"}
+              {orderBasisSuffixOf(order)}
               {order.quotedAt ? ` · 报价于 ${formatRelativeTime(order.quotedAt) || "未知时间"}` : ""}
               {order.cancelledAt ? " · 已取消" : ""}
             </p>
@@ -174,6 +184,17 @@ function QuotedFacts({ order }: { order: OrderDetail }) {
 }
 
 /**
+ * 下单基准后缀（#335 双版本引用——「核对范围与报价」子步骤的数据面）：随单
+ * 冻结的 PRD/Demo 确认版本号；确认制前遗留单缺省不虚构（空串）。
+ */
+function orderBasisSuffixOf(order: OrderDetail): string {
+  if (order.prdVersionNo == null || order.demoVersionNo == null) {
+    return "";
+  }
+  return ` · 基准 PRD v${order.prdVersionNo} · Demo v${order.demoVersionNo}`;
+}
+
+/**
  * 归档终态「完整记录」（#30）：支付完成说明 + 全时间点组（下单/报价/支付/归档）
  * + 交付物下载（#297 按下单冻结的交付物类型分岔：系统＝源码包实时取〔排除
  * node_modules/.env〕、设计＝设计资产包冻结件、系统＋设计＝统一部件容器冻结件
@@ -189,6 +210,7 @@ function ArchivedRecord({ order }: { order: OrderDetail }) {
       </p>
       <p className="text-xs text-muted-foreground/70">
         下单于 {formatRelativeTime(order.createdAt) || "未知时间"}
+        {orderBasisSuffixOf(order)}
         {order.quotedAt ? ` · 报价于 ${formatRelativeTime(order.quotedAt) || "未知时间"}` : ""}
         {paidAt ? ` · 支付于 ${paidAt}` : ""}
         {order.archivedAt ? ` · 归档于 ${formatRelativeTime(order.archivedAt) || "未知时间"}` : ""}

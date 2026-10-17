@@ -150,6 +150,7 @@ class GuestBindingIntegrationTest {
      */
     private void purgeGuestDomainTables() {
         jdbcTemplate.update("DELETE FROM ord_orders");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_projects");
         jdbcTemplate.update("DELETE FROM idn_guests");
     }
@@ -368,6 +369,15 @@ class GuestBindingIntegrationTest {
     void given_bound_guest_project_when_account_place_order_then_released() throws Exception {
         Long projectId = createAnonymousProject("绑定后下单项目");
         jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?", projectId);
+        // 下单前置双确认（#335，真实链路过门夹具）：已确认 PRD 版本行＋Demo 确认指针
+        jdbcTemplate.update(
+                "INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at, "
+                        + "prd_produced_at, created_at, updated_at) "
+                        + "VALUES (910000000000000001, ?, 1, '# PRD\n\n绑定后下单的正身。', NOW(), NOW(), NOW(), NOW())",
+                projectId);
+        jdbcTemplate.update(
+                "UPDATE prj_projects SET confirmed_demo_version_no = 1, confirmed_demo_at = NOW() "
+                        + "WHERE id = ?", projectId);
 
         // 登录即绑定（未走端点，直调应用层）：项目过户给 ACCOUNT、访客行作废
         bindingAppService.bindOnLogin(credential, ACCOUNT);

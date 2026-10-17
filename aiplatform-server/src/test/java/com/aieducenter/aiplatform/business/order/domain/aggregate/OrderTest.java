@@ -193,7 +193,7 @@ class OrderTest {
     @Test
     void given_null_deliverable_type_when_place_then_fields_incomplete() {
         // #297 下单冻结面：交付物类型是必冻结维（缺＝订单字段不完整，聚合守卫）
-        assertThatThrownBy(() -> Order.place(1L, null, null, "# PRD\n\n需求", null))
+        assertThatThrownBy(() -> Order.place(1L, null, null, "# PRD\n\n需求", null, 1, 1))
                 .isInstanceOf(DomainException.class)
                 .hasMessageContaining(OrderMessage.ORDER_FIELDS_INCOMPLETE.message());
     }
@@ -207,14 +207,14 @@ class OrderTest {
                 .hasMessageContaining(OrderMessage.ORDER_DESIGN_PACKAGE_NOT_DELIVERABLE.message());
         for (OrderDeliverableType design : List.of(
                 OrderDeliverableType.DESIGN, OrderDeliverableType.SYSTEM_DESIGN)) {
-            Order.place(1L, null, null, "# PRD\n\n需求", design).requireDesignDeliverable(); // 不抛即过
+            Order.place(1L, null, null, "# PRD\n\n需求", design, 1, 1).requireDesignDeliverable(); // 不抛即过
         }
     }
 
     // ---------- 夹具（经公共入口驱动到目标态，不绕私有状态） ----------
 
     private static Order pendingQuoteOrder() {
-        return Order.place(1L, null, null, "# PRD\n\n需求", OrderDeliverableType.SYSTEM);
+        return Order.place(1L, null, null, "# PRD\n\n需求", OrderDeliverableType.SYSTEM, 1, 1);
     }
 
     private static Order quotedOrder() {

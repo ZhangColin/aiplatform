@@ -326,7 +326,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_paid_project_when_downloadable_source_package_then_bytes_returned() {
         Long projectId = persistedProject("9501");
-        Order paid = Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM);
+        Order paid = Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM, 1, 1);
         paid.quote(10000L, null, null);
         paid.pay("PAY-TEST-1");
         orderRepository.save(paid);
@@ -340,7 +340,7 @@ class ProjectLifecycleAppServiceTest {
     @Test
     void given_unpaid_project_when_downloadable_source_package_then_ord_015() {
         Long projectId = persistedProject("9502");
-        orderRepository.save(Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM)); // 待报价＝未支付
+        orderRepository.save(Order.place(projectId, null, null, "# PRD", OrderDeliverableType.SYSTEM, 1, 1)); // 待报价＝未支付
 
         assertThatThrownBy(() -> appService.downloadableSourcePackage(projectId))
                 .isInstanceOf(ApplicationException.class)

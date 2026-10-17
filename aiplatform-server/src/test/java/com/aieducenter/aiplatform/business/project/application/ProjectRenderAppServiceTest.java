@@ -258,7 +258,7 @@ class ProjectRenderAppServiceTest {
 
     /** 已支付订单种子（门开放面）：place → quote → pay（领域转移链）。 */
     private void seedPaidOrder(Long projectId) {
-        Order order = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.SYSTEM);
+        Order order = Order.place(projectId, 1L, null, "# PRD", OrderDeliverableType.SYSTEM, 1, 1);
         order.quote(10000L, null, null);
         order.pay("PAY-RENDER-1");
         orderRepository.save(order);

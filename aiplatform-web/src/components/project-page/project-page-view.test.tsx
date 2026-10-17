@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProjectDetail } from "@/lib/projects/detail";
 
@@ -8,7 +8,15 @@ import { ProjectPageView } from "./project-page-view";
 // 项目页装配的双态切换（#20 验收口径）：闲聊期（prdProducedAt 未落）对话区
 // 占满全宽、成果区不渲染；PRD 产出后成果区长出（三模式 + PRD 正文）、对话区
 // 退为左槽。数据/SSE 面 mock 掉——壳层结构断言，PRD 正文经 use-prd mock 直出。
-const seed = vi.hoisted(() => ({ detail: undefined as ProjectDetail | undefined }));
+const seed = vi.hoisted(() => ({
+  detail: undefined as ProjectDetail | undefined,
+  demoVersions: [] as unknown[] | undefined,
+}));
+
+// 门开按钮测试间的版本清单复位（#335）：各测试自带 detail，版本清单按例重置
+beforeEach(() => {
+  seed.demoVersions = [];
+});
 
 vi.mock("@/hooks/use-project", () => ({
   useProject: () => ({
@@ -40,7 +48,8 @@ vi.mock("@/hooks/use-prd", () => ({
 }));
 // Demo 版本 chip（#333）：SystemPanel 浏览器条挂点——默认空（不出 chip）
 vi.mock("@/hooks/use-demo-version", () => ({
-  useDemoVersions: () => ({ data: [] }),
+  useDemoVersions: () => ({ data: seed.demoVersions ?? [] }),
+  useConfirmDemoVersion: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 vi.mock("@/hooks/use-project-files", () => ({
@@ -206,6 +215,59 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />)).not.toContain("确认下单");
   });
 
+  // ---------- 「确认此版本，准备签约」门开按钮装配（#335：下单入口的门开动作） ----------
+
+  it("已生成且最新 Demo 版本未确认：门开按钮与「确认下单」相邻成漏斗", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+    seed.demoVersions = [
+      { versionNo: 2, prdVersionNo: 1, runId: "r-2", confirmedAt: null },
+      { versionNo: 1, prdVersionNo: 1, runId: "r-1", confirmedAt: "2026-09-01T01:00:00Z" },
+    ];
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    // 确认落在旧版（v1）而最新版（v2）未确认＝换选语义：确认最新版的门照开
+    expect(html).toContain("确认此版本，准备签约");
+    expect(html).toContain("确认下单"); // 下单按钮同在（后端 ORD_019 拦截兜底）
+  });
+
+  it("最新版已确认：门开按钮退场（门开事实已在版本面可见）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+    seed.demoVersions = [
+      { versionNo: 2, prdVersionNo: 1, runId: "r-2", confirmedAt: "2026-09-02T01:00:00Z" },
+    ];
+
+    const html = renderToStaticMarkup(<ProjectPageView projectId="p1" />);
+
+    expect(html).not.toContain("确认此版本，准备签约");
+    expect(html).toContain("确认下单");
+  });
+
+  it("从未成版 / 挂着未终结订单：不出门开按钮（无版可确认 / 下单面已退场）", () => {
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+    });
+    seed.demoVersions = [];
+    expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />))
+        .not.toContain("确认此版本，准备签约");
+
+    seed.demoVersions = [{ versionNo: 1, prdVersionNo: 1, runId: "r-1", confirmedAt: null }];
+    seed.detail = detail({
+      prdProducedAt: "2026-08-31T08:00:00Z",
+      generatedAt: "2026-08-31T09:00:00Z",
+      activeOrder: { id: "o1", status: 1, statusName: "待报价" },
+    });
+    expect(renderToStaticMarkup(<ProjectPageView projectId="p1" />))
+        .not.toContain("确认此版本，准备签约");
+  });
+
   // ---------- 订单 tab 回访自动挂载（#205 三面渗透：挂载 + 状态点，不切换） ----------
 
   /** 成果区 tablist 切片（tab 条起至「新标签页」触发器——mobile 双页签也有
@@ -230,7 +292,7 @@ describe("ProjectPageView · 闲聊态 ↔ 成果区长出（#20）", () => {
     expect((strip.match(/role="tab" aria-selected="true"/g) ?? []).length).toBe(1);
     const selectedAt = strip.indexOf('role="tab" aria-selected="true"');
     expect(strip.slice(selectedAt, selectedAt + 800)).toContain("系统");
-    expect(html).not.toContain("已收到您的订单，后台正在评估报价");
+    expect(html).not.toContain("后台正在评估范围与报价");
     // 状态点：待报价 = 琥珀等待
     expect(html).toMatch(/data-slot="order-status-dot" title="待报价" aria-hidden="true" class="[^"]*bg-amber-500/);
   });

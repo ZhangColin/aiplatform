@@ -34,6 +34,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
@@ -43,6 +44,7 @@ import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectArtifacts;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,6 +71,9 @@ class ProjectQueryAppServiceTest {
     private ProjectRepository projectRepository;
 
     @Autowired
+    private PrdVersionRepository prdVersionRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /** 计量查询缝：mock 用例本体（MeteringLocalAdapter 是 sink+query 双端口 bean，整替会断 sink 注入）。 */
@@ -85,6 +90,7 @@ class ProjectQueryAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
         jdbcTemplate.update("DELETE FROM prj_design_items");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
 
@@ -234,6 +240,61 @@ class ProjectQueryAppServiceTest {
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 9_400_000_000_000_000L + projectId % 1_000_000L * 10 + ord, projectId, ord,
                 description, status, runId, Timestamp.valueOf(prdProducedAt));
+    }
+
+    // ---------- #335：下单冻结面（confirmedVersionRefs——双确认引用集） ----------
+
+    @Test
+    void given_confirmed_versions_when_confirmed_version_refs_then_refs_with_full_text() {
+        // 已确认 PRD 版本（多版取最新）＋Demo 确认指针 → 引用集：版本号＋确认版
+        // 全文（冗余拷贝源＝版本行正文）＋Demo 版本号
+        Project project = persistedProject(8501L, "双确认项目");
+        prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 1,
+                "# PRD v1\n\n旧版。", LocalDateTime.now(), LocalDateTime.now()));
+        PrdVersion latest = prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 2,
+                "# PRD v2\n\n下单引用的最新确认版全文。", LocalDateTime.now(), LocalDateTime.now()));
+        project.confirmDemoVersion(3);
+        projectRepository.save(project);
+
+        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(project.getId());
+
+        assertThat(refs.prdVersionNo()).isEqualTo(2);
+        assertThat(refs.prdContent()).isEqualTo(latest.getContent());
+        assertThat(refs.demoVersionNo()).isEqualTo(3);
+    }
+
+    @Test
+    void given_unconfirmed_project_when_confirmed_version_refs_then_nulls_reported() {
+        // 从未确认 PRD 版本/未确认 Demo（含确认制前遗留项目）：如实上报 null——
+        // 门判定归订单侧，本口不虚构引用
+        Long projectId = persistedProject(8502L, "未确认项目").getId();
+
+        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(projectId);
+
+        assertThat(refs.prdVersionNo()).isNull();
+        assertThat(refs.prdContent()).isNull();
+        assertThat(refs.demoVersionNo()).isNull();
+    }
+
+    @Test
+    void given_prd_confirmed_demo_not_when_confirmed_version_refs_then_partial_refs() {
+        // 单腿确认：PRD 已确认而 Demo 未确认——各腿如实上报（订单侧逐腿拦截）
+        Long projectId = persistedProject(8503L, "单腿项目").getId();
+        prdVersionRepository.save(PrdVersion.confirmed(projectId, 1, "# PRD v1",
+                LocalDateTime.now(), LocalDateTime.now()));
+
+        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(projectId);
+
+        assertThat(refs.prdVersionNo()).isEqualTo(1);
+        assertThat(refs.prdContent()).isEqualTo("# PRD v1");
+        assertThat(refs.demoVersionNo()).isNull();
+    }
+
+    @Test
+    void given_missing_project_when_confirmed_version_refs_then_prj_001() {
+        assertThatThrownBy(() -> appService.confirmedVersionRefs(-1L))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }
 
     // ---------- #290 设计轨道件清单读模型（计划区对偶透出） ----------

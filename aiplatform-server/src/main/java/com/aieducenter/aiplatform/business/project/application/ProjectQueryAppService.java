@@ -39,6 +39,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Proj
 import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.aggregate.PrdVersion;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignScopeType;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectStatus;
@@ -51,6 +52,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
+import com.aieducenter.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.aieducenter.aiplatform.web.GuestContext;
 
@@ -84,6 +86,7 @@ public class ProjectQueryAppService {
     private final GenerationSegmentRepository generationSegments;
     private final DesignItemRepository designItems;
     private final CodingRunTrack codingRunTrack;
+    private final PrdVersionRepository prdVersionRepository;
 
     public ProjectQueryAppService(ProjectRepository projectRepository,
                                   UsageQueryPort usageQueryPort,
@@ -91,7 +94,8 @@ public class ProjectQueryAppService {
                                   OrderQueryAppService orderQueryAppService,
                                   GenerationSegmentRepository generationSegments,
                                   DesignItemRepository designItems,
-                                  CodingRunTrack codingRunTrack) {
+                                  CodingRunTrack codingRunTrack,
+                                  PrdVersionRepository prdVersionRepository) {
         this.projectRepository = projectRepository;
         this.usageQueryPort = usageQueryPort;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -99,6 +103,7 @@ public class ProjectQueryAppService {
         this.generationSegments = generationSegments;
         this.designItems = designItems;
         this.codingRunTrack = codingRunTrack;
+        this.prdVersionRepository = prdVersionRepository;
     }
 
     /**
@@ -108,6 +113,38 @@ public class ProjectQueryAppService {
      */
     public ProjectDetailResponse detail(Long projectId) {
         return toDetail(loadProject(projectId));
+    }
+
+    /**
+     * 下单冻结面（#335，spec #320 实施序④）：下单前置双确认的引用集——最新已
+     * 确认 PRD 版本（版本号＋确认版全文＝订单快照的冗余拷贝源，订单自含不依赖
+     * 版本表存亡）＋项目确认指针的 Demo 版本号（「确认此版本，准备签约」的定格
+     * 值）。未确认事实如实上报 {@code null}——门判定（ORD_018/ORD_019 拦截）归
+     * 订单侧，本口只报事实（判定跟职责走）；工作区活草稿不进本面（快照源＝
+     * 已确认版本，非工作区正文）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在
+     */
+    public ConfirmedVersionRefs confirmedVersionRefs(Long projectId) {
+        Project project = loadProject(projectId);
+        PrdVersion latestConfirmed = prdVersionRepository
+                .findFirstByProjectIdOrderByVersionNoDesc(projectId).orElse(null);
+        boolean neverConfirmed = latestConfirmed == null;
+        return new ConfirmedVersionRefs(
+                neverConfirmed ? null : latestConfirmed.getVersionNo(),
+                neverConfirmed ? null : latestConfirmed.getContent(),
+                project.getConfirmedDemoVersionNo());
+    }
+
+    /**
+     * 下单冻结面的引用集形状（跨 BC 内部端口形——对偶
+     * {@code DesignPackageAppService.StagedPackage} 先例，不进 REST 面）。
+     *
+     * @param prdVersionNo  最新已确认 PRD 版本号（null＝从未确认——确认制前遗留）
+     * @param prdContent    已确认版本全文（冗余拷贝源；与版本号同空同在）
+     * @param demoVersionNo 项目确认指针的 Demo 版本号（null＝未确认任何 Demo 版本）
+     */
+    public record ConfirmedVersionRefs(Integer prdVersionNo, String prdContent, Integer demoVersionNo) {
     }
 
     /**

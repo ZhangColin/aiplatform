@@ -66,7 +66,12 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.id").value("900"))
                 .andExpect(jsonPath("$.data.projectId").value("100"))
                 .andExpect(jsonPath("$.data.status").value(1)) // PENDING_QUOTE → Integer code
-                .andExpect(jsonPath("$.data.statusName").value("待报价"));
+                .andExpect(jsonPath("$.data.statusName").value("待报价"))
+                // 双版本引用随单冻结（#335）＋待报价缺省无金额（「待确认报价」占位
+                // 态的数据面——不以 0 元或示例价代替）
+                .andExpect(jsonPath("$.data.prdVersionNo").value(3))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(2))
+                .andExpect(jsonPath("$.data.amount").doesNotExist());
 
         verify(appService).place(100L);
     }
@@ -84,15 +89,43 @@ class OrderControllerTest {
     }
 
     @Test
-    void given_prd_never_produced_when_post_project_orders_then_prj015_passthrough()
+    void given_missing_project_when_post_project_orders_then_prj001_passthrough()
             throws Exception {
-        // 项目上下文错误原样透传（跨 BC 软引用口径）：PRD 未产出 404 PRJ_015
+        // 项目上下文错误原样透传（跨 BC 软引用口径）：项目不存在 404 PRJ_001
+        // （#335 起下单不再读工作区 PRD——PRJ_015 不再可能是下单障碍，快照源＝
+        // 已确认版本全文）
         when(appService.place(100L)).thenThrow(
-                new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+                new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
 
         performAsUser(post("/api/projects/100/orders"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_no_confirmed_prd_version_when_post_project_orders_then_409_ord018() throws Exception {
+        // 下单前置门·PRD 腿（#335 拦截与提示）：信封数字码 5018，前端 toast message
+        when(appService.place(100L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_PRD_VERSION_REQUIRED));
+
+        performAsUser(post("/api/projects/100/orders"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5018))
+                .andExpect(jsonPath("$.message")
+                        .value(OrderMessage.ORDER_PRD_VERSION_REQUIRED.message()));
+    }
+
+    @Test
+    void given_demo_unconfirmed_when_post_project_orders_then_409_ord019() throws Exception {
+        // 下单前置门·Demo 腿（#335 拦截与提示）：信封数字码 5019
+        when(appService.place(100L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_DEMO_VERSION_REQUIRED));
+
+        performAsUser(post("/api/projects/100/orders"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5019))
+                .andExpect(jsonPath("$.message")
+                        .value(OrderMessage.ORDER_DEMO_VERSION_REQUIRED.message()));
     }
 
     @Test
@@ -169,7 +202,7 @@ class OrderControllerTest {
         LocalDateTime paidAt = LocalDateTime.of(2026, 9, 1, 11, 0);
         LocalDateTime archivedAt = LocalDateTime.of(2026, 9, 1, 11, 0, 1);
         OrderResponse paid = new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
-                OrderDeliverableType.SYSTEM, "系统", 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
                 LocalDateTime.of(2026, 9, 1, 10, 0), java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), null, paidAt, archivedAt);
         when(appService.pay(900L)).thenReturn(paid);
@@ -220,7 +253,7 @@ class OrderControllerTest {
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
-                OrderDeliverableType.SYSTEM, "系统", null, null, null, null, java.util.List.of(),
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, null, null, null, null, java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt, null, null);
     }
 

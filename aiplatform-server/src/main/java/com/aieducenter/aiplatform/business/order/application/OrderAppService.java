@@ -32,11 +32,13 @@ import lombok.extern.slf4j.Slf4j;
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#30 交易环③
  * mock 支付——#37/#39 支付原子化：支付原子（落已支付）与归档（订单 + 项目）拆
  * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发；#297 交付物类型
- * ＋设计资产包下单冻结——交易机制零改版，下单多冻结一维）：确认下单 = 冻结
- * 下单时 PRD 全文快照＋交付物类型入单，待报价起步。下单快照的上游＝PRD 确认
- * 版本（#330 确认即成版、#332 生成加门：确认是首个构建 run 与下单的共同引用锚；
- * 本处行为不变仍读当前 PRD 正文，下单改「引用已确认版本」的引用语义随 #335 承接）。
- * 项目事实（存在性/归档态/PRD 正文/终点类型）经 {@code business.project} 应用
+ * ＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与订单
+ * 语义重对位基座）：确认下单 = 过双确认门（已确认 PRD 版本＋Demo 确认版本）
+ * 后冻结 PRD 确认版全文冗余拷贝＋双版本引用＋交付物类型入单，待报价起步
+ * （「待确认报价」占位态）。下单快照的上游＝PRD 确认版本（#330 确认即成版、
+ * #332 生成加门：确认是首个构建 run 与下单的共同引用锚——#335 起快照不再读
+ * 工作区正文、引用语义落位）。
+ * 项目事实（存在性/归档态/双确认引用/终点类型）经 {@code business.project} 应用
  * 层软引用——跨 BC 无 FK，同一口径。
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
@@ -90,21 +92,28 @@ public class OrderAppService {
     }
 
     /**
-     * 确认下单：读当前 PRD → 冻结快照与交付物类型入单（待报价）。下单即冻结迭代
-     * ——对话区停止受理意见（project 上下文冻结守卫，{@code ORD_006}）。交付物
-     * 类型自项目终点类型冻结（#297 一单一程——此后项目终点变更不影响本单，取消
-     * 再下 = 新单新类型）。设计面单（设计/系统＋设计）在下单时冻结设计资产包：
-     * <b>暂存打包先于落库</b>（打包失败＝下单失败零残留，不产生「有单无包」半成
-     * 态）、<b>落名在落库后</b>（以落库分配的订单 id 定格该单冻结件——同目录原子
-     * 改名，失败仅容器中途消亡可达，如实上抛）；系统单零打包（源码包实时取口径
-     * 不变）。取消不清理冻结件（后台取件正本，残留备案口径）。
+     * 确认下单（#335 引用语义落位）：下单前置门＝存在已确认 PRD 版本＋Demo 确认
+     * 版本（「确认此版本，准备签约」＝下单入口——现「确认下单」按钮语义改挂；
+     * 无确认如实拦截 ORD_018/ORD_019，前端 toast 提示）；过门即冻结双版本引用＋
+     * PRD 确认版全文冗余拷贝（快照源＝已确认版本，非工作区正文——订单自含）＋
+     * 交付物类型入单（待报价起步，「待确认报价」占位态——后台落定报价〔＋范围
+     * 文本，#336 起〕后翻已报价）。下单即冻结迭代——对话区停止受理意见（project
+     * 上下文冻结守卫，{@code ORD_006}）。交付物类型自项目终点类型冻结（#297
+     * 一单一程——此后项目终点变更不影响本单，取消再下 = 新单新类型）。设计面单
+     * （设计/系统＋设计）在下单时冻结设计资产包：<b>暂存打包先于落库</b>（打包
+     * 失败＝下单失败零残留，不产生「有单无包」半成态）、<b>落名在落库后</b>（以
+     * 落库分配的订单 id 定格该单冻结件——同目录原子改名，失败仅容器中途消亡可
+     * 达，如实上抛）；系统单零打包（源码包实时取口径不变）。取消不清理冻结件
+     * （后台取件正本，残留备案口径）。
      *
-     * @return 订单（待报价起步，快照与交付物类型已冻结）
-     * @throws ApplicationException PRJ_001 项目不存在 / PRJ_015 PRD 未产出
-     *                              （项目上下文原样透传）；ORD_017 签约门——未登录
-     *                              绑定（访客身份）走下单入口被拦；ORD_004 项目已
+     * @return 订单（待报价起步，双版本引用＋快照与交付物类型已冻结）
+     * @throws ApplicationException PRJ_001 项目不存在（项目上下文原样透传）；
+     *                              ORD_017 签约门——未登录绑定（访客身份）走下单
+     *                              入口被拦，前端认 ORD_017 弹 M01；ORD_004 项目已
      *                              归档；ORD_003 该项目已有未终结订单（预检或并发
-     *                              撞索引）；WSP_002 设计资产包打包失败（环境故障，
+     *                              撞索引，先于版本门——重复下单的主导事实）；
+     *                              ORD_018 无已确认 PRD 版本；ORD_019 未确认 Demo
+     *                              版本；WSP_002 设计资产包打包失败（环境故障，
      *                              零残留）
      */
     public OrderResponse place(Long projectId) {
@@ -121,15 +130,27 @@ public class OrderAppService {
         if (orderRepository.findActiveByProject(projectId).isPresent()) {
             throw new ApplicationException(OrderMessage.ORDER_ALREADY_ACTIVE);
         }
+        // 下单前置门（#335，spec #320 ④「加门」）：双版本确认缺一即拦（先于昂贵
+        // 的打包面——廉价库读守卫前置惯例）。引用集一次取齐：版本号＋确认版全文。
+        ProjectQueryAppService.ConfirmedVersionRefs refs =
+                projectQueryAppService.confirmedVersionRefs(projectId);
+        if (refs.prdVersionNo() == null) {
+            throw new ApplicationException(OrderMessage.ORDER_PRD_VERSION_REQUIRED);
+        }
+        if (refs.demoVersionNo() == null) {
+            throw new ApplicationException(OrderMessage.ORDER_DEMO_VERSION_REQUIRED);
+        }
         OrderDeliverableType deliverableType =
                 OrderDeliverableType.ofCode(project.endpointType().getCode());
-        // 廉价守卫前置：PRD 读取（PRJ_015 未产出先炸）先于昂贵的打包面（渲帧/写规范/tar）
-        String prdSnapshot = projectQueryAppService.prd(projectId).content();
+        // 快照源＝已确认版本全文（冗余拷贝，#335）——不读工作区（过门即必有确认
+        // 版全文，PRJ_015 未产出不再可能是下单障碍）
+        String prdSnapshot = refs.prdContent();
         DesignPackageAppService.StagedPackage staged = deliverableType.designInvolved()
                 ? designPackageAppService.stageForOrder(projectId)
                 : null;
         Order order = Order.place(projectId, RequestContext.getUserId(),
-                GuestContext.guestId(), prdSnapshot, deliverableType);
+                GuestContext.guestId(), prdSnapshot, deliverableType,
+                refs.prdVersionNo(), refs.demoVersionNo());
         try {
             order = orderRepository.save(order);
         } catch (DataIntegrityViolationException e) {

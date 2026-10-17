@@ -17,10 +17,12 @@ import { useWorkMessageStore } from "@/lib/store/work-message";
 import { confirmOrderVisible } from "@/lib/projects/confirm-order";
 
 import { CommandArea } from "./command-area";
+import { ConfirmDemoVersionButton } from "./confirm-demo-version-button";
 import { ConfirmOrderButton } from "./confirm-order-button";
 import { OutputsArea, useOutputsTabs } from "./outputs-area";
 import { ProjectPageShell } from "./project-page-shell";
 import { usePlaceOrder } from "@/hooks/use-order";
+import { useConfirmDemoVersion, useDemoVersions } from "@/hooks/use-demo-version";
 import { lockRowOf } from "@/lib/orders/lock";
 import { planAreaOfDesignItems } from "@/lib/projects/detail";
 import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
@@ -51,6 +53,8 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
   /** 成果区呼出态：有成果自动滑出一次（含回访）；用户可收起、顶栏「成果」呼出。 */
   const [outputsOpen, setOutputsOpen] = useState(false);
   const placeOrder = usePlaceOrder(projectId);
+  const confirmDemoVersion = useConfirmDemoVersion(projectId);
+  const { data: demoVersions } = useDemoVersions(projectId);
   const openM01 = useM01Store((s) => s.openM01);
 
   useAgentEventChannel(projectId);
@@ -172,6 +176,16 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
     activeOrderId: detail?.activeOrder?.id ?? null,
   });
 
+  // 「确认此版本，准备签约」＝下单入口的门开动作（#335）：最新 Demo 版本在场且
+  // 未确认时呈现（已确认版本落在旧版＝换选语义，确认最新版的门照开）；点击打
+  // 确认标记（#333 选定动作），解锁下单前置门（后端 ORD_019 拦截＋toast 提示为
+  // 兜底——前端不重复预判）。原型壳确认卡归 Demo 体验页重建（#347）。
+  const latestDemoVersion = demoVersions?.[0];
+  const showConfirmDemoVersion =
+    showConfirmOrder &&
+    latestDemoVersion != null &&
+    latestDemoVersion.confirmedAt == null;
+
   // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——对话区禁用+提示、成果区只读
   const lock = lockRowOf({ archived: detail?.archived, activeOrder: detail?.activeOrder });
 
@@ -208,9 +222,18 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
         )
       }
       headerActions={
-        showConfirmOrder ? (
-          <ConfirmOrderButton onConfirm={confirmOrder} />
-        ) : null
+        <>
+          {showConfirmDemoVersion ? (
+            <ConfirmDemoVersionButton
+              pending={confirmDemoVersion.isPending}
+              onConfirm={() => {
+                if (latestDemoVersion?.versionNo == null) return;
+                confirmDemoVersion.mutate(latestDemoVersion.versionNo);
+              }}
+            />
+          ) : null}
+          {showConfirmOrder ? <ConfirmOrderButton onConfirm={confirmOrder} /> : null}
+        </>
       }
       chat={
         <CommandArea

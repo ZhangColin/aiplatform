@@ -2814,6 +2814,10 @@ export interface components {
             /** @description 1=设计, 2=系统, 3=系统＋设计 */
             deliverableType?: number;
             deliverableTypeName?: string;
+            /** Format: int32 */
+            prdVersionNo?: number;
+            /** Format: int32 */
+            demoVersionNo?: number;
             /** Format: int64 */
             amount?: number;
             currency?: string;

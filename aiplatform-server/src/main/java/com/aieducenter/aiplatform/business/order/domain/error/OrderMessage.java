@@ -46,7 +46,22 @@ public enum OrderMessage implements CodeMessage {
      * （M01 登录与项目绑定），联系人/签约主体顺势收集。前端认本码弹 M01；
      * 绑定后重试放行（账户会话在场即过闸）。
      */
-    ORDER_BINDING_REQUIRED(403, "ORD_017", "签约前请先登录绑定账号（保存项目可跨设备继续并签署合同）");
+    ORDER_BINDING_REQUIRED(403, "ORD_017", "签约前请先登录绑定账号（保存项目可跨设备继续并签署合同）"),
+
+    /**
+     * 下单前置门·PRD 腿（#335，spec #320 ④「加门」）：名下无已确认 PRD 版本
+     * （prj_prd_versions 无行——确认制前的遗留项目）不可下单——如实拦截并指路
+     * 确认动作（按钮语对齐正本「确认此版 PRD 并生成 Demo」），前端 toast 提示
+     * （拦截与提示）。
+     */
+    ORDER_PRD_VERSION_REQUIRED(409, "ORD_018", "下单前请先确认 PRD 版本（点「确认此版 PRD 并生成 Demo」后再下单）"),
+
+    /**
+     * 下单前置门·Demo 腿（#335，「确认此版本，准备签约」＝下单入口）：项目无
+     * Demo 确认版本（prj_projects 确认指针空）不可下单——如实拦截并指路确认
+     * 动作（Demo 版本上的确认标记，#333 选定动作）。
+     */
+    ORDER_DEMO_VERSION_REQUIRED(409, "ORD_019", "下单前请先确认 Demo 版本（「确认此版本，准备签约」后再下单）");
 
     private final int httpStatus;
     private final String code;

@@ -103,6 +103,9 @@ class OrderPaymentArchiveTest {
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z"),
                 PrdReadinessResponse.from(PrdReadiness.parse(PRD)), /* draftChangeSummary= */ null));
+        // 下单前置双确认缺省桩（#335）：已确认 PRD v1＋Demo v1
+        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.ConfirmedVersionRefs(1, PRD, 1));
     }
 
     @AfterEach

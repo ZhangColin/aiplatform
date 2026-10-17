@@ -28,6 +28,18 @@ describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
     expect(html).toContain("Demo v2");
     expect(html).toContain("基于 PRD v1 快照");
     expect(html).not.toContain("Demo v1");
+    expect(html).not.toContain("已确认"); // 最新版未确认：无确认缀
+  });
+
+  it("最新版带确认标记：缀「已确认」（#335 确认态在版本可见处可见）", () => {
+    givenVersions([
+      { versionNo: 2, prdVersionNo: 1, runId: "r-2", confirmedAt: "2026-10-17T10:00:00Z" },
+    ]);
+
+    const html = renderToStaticMarkup(<DemoVersionChip projectId="p1" />);
+
+    expect(html).toContain("Demo v2");
+    expect(html).toContain("已确认");
   });
 
   it("无确认版起跑（legacy/设计类）：锚空只出版本号，不虚构 PRD 关联", () => {

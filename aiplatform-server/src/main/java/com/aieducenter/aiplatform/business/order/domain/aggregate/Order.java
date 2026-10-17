@@ -30,18 +30,22 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 
 /**
- * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即拷贝 PRD 全文
- * 快照＋冻结交付物类型入单（自含，不依赖工作区存亡）；系统单源码不快照（交付经
- * source-package 实时取），设计面交付物在下单冻结时打包（#297 设计资产包——
- * 暂存/落名编排归应用层，聚合只记类型）；金额单位分（Long）、v1 恒 CNY，随报价
- * 落值。projectId 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余
- * 下单账号（按用户查）。
+ * 订单聚合根（{@code ord_orders}）：确认下单后的交易载体。下单即冻结双版本
+ * 引用＋PRD 确认版全文冗余拷贝＋交付物类型入单（#335 引用语义——订单自含，
+ * 不依赖版本表与工作区存亡）；系统单源码不快照（交付经 source-package 实时
+ * 取），设计面交付物在下单冻结时打包（#297 设计资产包——暂存/落名编排归应用
+ * 层，聚合只记类型）；金额单位分（Long）、v1 恒 CNY，随报价落值。projectId
+ * 跨上下文软引用（prj_projects，无 FK）；ownerAccountId 冗余下单账号（按用户
+ * 查）。
  *
- * <p>状态机（五态单向）：{@link #cancel}（未支付态取消即回迭代；运营取消
- * {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，#157）、{@link #quote}
- * （报价/改价，已报价态重复调用 = 改价）、{@link #pay}（待支付 → 已支付，落
- * {@code paidAt}/{@code paymentNo}）与 {@link #archive}（已支付 → 已归档，落
- * {@code archivedAt}——归档为支付后的独立步骤，编排归应用层，#37/#39；运营重试
+ * <p>状态机（五态单向，骨架不动、语义重对位见 {@link OrderStatus}）：{@link
+ * #cancel}（取消门——现门＝未支付态；合同签署完成后关门的收窄判定位归 #338
+ * 接通；运营取消 {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，
+ * #157）、{@link #quote}（报价/改价，已报价态重复调用 = 改价）、{@link #pay}
+ * （待支付 → 已支付，落 {@code paidAt}/{@code paymentNo}——重对位判定位：
+ * 已支付＝开工条件满足，实际判定挂 #338 接通）与 {@link #archive}（已支付 →
+ * 已归档，落 {@code archivedAt}——重对位判定位：已归档＝后台人工终局〔交付
+ * 完成、尾款核验后〕不再自动，接通归 #338；编排归应用层，#37/#39；运营重试
  * 归档 {@link #archiveByBackoffice} 同守卫带操作者留痕，#158）；终态判定
  * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用预检与
  * 库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一索引，
@@ -96,6 +100,22 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 下单时 PRD 全文快照（交易标的；只插不改）。 */
     @Column(name = "prd_snapshot", nullable = false, updatable = false)
     private String prdSnapshot;
+
+    /**
+     * 下单时已确认 PRD 版本引用（#335：prj_prd_versions 软引用）——{@link #prdSnapshot}
+     * 的语义正身＝该版本全文的冗余拷贝（订单自含，不依赖版本表存亡）。只插不改；
+     * null＝确认制（V32）之前下的遗留单，如实缺省不虚构引用。
+     */
+    @Column(name = "prd_version_no", updatable = false)
+    private Integer prdVersionNo;
+
+    /**
+     * 下单时已确认 Demo 版本引用（#335：下单时项目确认指针〔prj_projects.
+     * confirmed_demo_version_no〕的定格值——「确认此版本，准备签约」随单冻结）。
+     * 只插不改；null＝遗留单同 {@link #prdVersionNo}。
+     */
+    @Column(name = "demo_version_no", updatable = false)
+    private Integer demoVersionNo;
 
     /** 当前总价（分；待报价 NULL，报价落值、改价取最新价目行）。 */
     @Column(name = "amount")
@@ -163,10 +183,11 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     private Order(Long projectId, Long ownerAccountId, Long ownerGuestId, String prdSnapshot,
-            OrderDeliverableType deliverableType) {
+            OrderDeliverableType deliverableType, int prdVersionNo, int demoVersionNo) {
         if (projectId == null || prdSnapshot == null || prdSnapshot.isBlank()
                 || deliverableType == null
-                || (ownerAccountId != null && ownerGuestId != null)) {
+                || (ownerAccountId != null && ownerGuestId != null)
+                || prdVersionNo <= 0 || demoVersionNo <= 0) {
             throw new DomainException(OrderMessage.ORDER_FIELDS_INCOMPLETE);
         }
         this.projectId = projectId;
@@ -175,16 +196,24 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
         this.status = OrderStatus.PENDING_QUOTE;
         this.deliverableType = deliverableType;
         this.prdSnapshot = prdSnapshot;
+        this.prdVersionNo = prdVersionNo;
+        this.demoVersionNo = demoVersionNo;
     }
 
     /**
-     * 下单（确认动作的落库事实）：待报价起步，快照与交付物类型在此冻结——此后
-     * PRD 修订与项目终点变更均不影响本单（取消再下 = 新单新快照新类型）。
-     * 下单者归属 owner 双列（账户/访客互斥，随请求上下文其一，#326）。
+     * 下单（确认动作的落库事实，#335 引用语义）：待报价起步，PRD 快照＋双版本
+     * 引用＋交付物类型在此冻结——{@code prdSnapshot}＝{@code prdVersionNo} 指向的
+     * 已确认版本全文的冗余拷贝（订单自含，不依赖版本表与工作区存亡），{@code
+     * demoVersionNo}＝下单时项目确认指针的 Demo 版本（下单前置门在应用层，聚合
+     * 只收已过门的正整数版本号）。此后 PRD 修订与项目终点变更均不影响本单
+     * （取消再下 = 新单新快照新引用新类型）。下单者归属 owner 双列（账户/访客
+     * 互斥，随请求上下文其一，#326）。
      */
     public static Order place(Long projectId, Long ownerAccountId, Long ownerGuestId,
-            String prdSnapshot, OrderDeliverableType deliverableType) {
-        return new Order(projectId, ownerAccountId, ownerGuestId, prdSnapshot, deliverableType);
+            String prdSnapshot, OrderDeliverableType deliverableType,
+            int prdVersionNo, int demoVersionNo) {
+        return new Order(projectId, ownerAccountId, ownerGuestId, prdSnapshot, deliverableType,
+                prdVersionNo, demoVersionNo);
     }
 
     /** 是否终态（已归档/已取消）——未终结订单唯一性的判定口径。 */
@@ -193,9 +222,13 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
-     * 取消（未支付态的显式动作，取消即解冻回迭代）：自任何未支付态（待报价/
+     * 取消（取消门的显式动作，取消即解冻回迭代）：现门＝任何未支付态（待报价/
      * 已报价）可达；已支付（真实中间态，支付后归档前）与已终结（已归档/已取消）
-     * 拒绝。取消后同项目可再下新单（重新购买 = 新单新快照）。
+     * 拒绝。<b>取消边界收窄判定位（#335 立、#338 接通）</b>：重对位后门＝「合同
+     * 不存在或合同签署完成前非终态」、签署完成后关门（需求变化走对话区变更沟通）
+     * ——合同域不在场的现下与未支付门等价（{@link OrderStatus#isUnpaid} 单点），
+     * 合同在场后在守卫接「活跃合同签署态」判定，取消订单时活跃合同联动作废留痕
+     * 同归 #338。取消后同项目可再下新单（重新购买 = 新单新快照新引用）。
      */
     public void cancel() {
         if (!status.isUnpaid()) {

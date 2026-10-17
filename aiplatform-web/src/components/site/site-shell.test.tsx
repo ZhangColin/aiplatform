@@ -29,6 +29,10 @@ vi.mock("@/hooks/use-me", () => ({
 vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: [] }),
 }));
+// Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
+vi.mock("@/hooks/use-demo-version", () => ({
+  useDemoVersions: () => ({ data: [] }),
+}));
 
 describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", () => {
   it("首页无侧栏（#345，spec #320 ⑥「首页无侧栏」）：仅渲染内容位，旧侧栏件不在", () => {

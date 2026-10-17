@@ -24,6 +24,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
+import com.aieducenter.aiplatform.business.project.domain.repository.DemoVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
@@ -86,6 +87,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private PrdVersionRepository prdVersions;
+
+    @Mock
+    private DemoVersionRepository demoVersions;
 
     @Mock
     private SkillDraftAppService skillDrafts;
@@ -210,6 +214,7 @@ class ProjectLifecycleAppServiceTouchTest {
                 workspaceConvergenceAppService, mainAgentAppService, projectRepository,
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
                 conversationHistory, generationSegments, designItems, designSpecs, prdVersions,
-                skillDrafts, orderQueryAppService, guestAppService, transactionTemplate);
+                demoVersions, skillDrafts, orderQueryAppService, guestAppService,
+                transactionTemplate);
     }
 }

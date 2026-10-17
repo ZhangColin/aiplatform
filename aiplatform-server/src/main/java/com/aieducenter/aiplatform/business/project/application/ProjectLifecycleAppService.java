@@ -34,6 +34,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointT
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.DesignScope;
+import com.aieducenter.aiplatform.business.project.domain.repository.DemoVersionRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignSpecRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
@@ -78,6 +79,7 @@ public class ProjectLifecycleAppService {
     private final DesignItemRepository designItems;
     private final DesignSpecRepository designSpecs;
     private final PrdVersionRepository prdVersions;
+    private final DemoVersionRepository demoVersions;
     private final SkillDraftAppService skillDrafts;
     private final OrderQueryAppService orderQueryAppService;
     private final GuestAppService guestAppService;
@@ -96,6 +98,7 @@ public class ProjectLifecycleAppService {
                                       DesignItemRepository designItems,
                                       DesignSpecRepository designSpecs,
                                       PrdVersionRepository prdVersions,
+                                      DemoVersionRepository demoVersions,
                                       SkillDraftAppService skillDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       GuestAppService guestAppService,
@@ -113,6 +116,7 @@ public class ProjectLifecycleAppService {
         this.designItems = designItems;
         this.designSpecs = designSpecs;
         this.prdVersions = prdVersions;
+        this.demoVersions = demoVersions;
         this.skillDrafts = skillDrafts;
         this.orderQueryAppService = orderQueryAppService;
         this.guestAppService = guestAppService;
@@ -341,14 +345,15 @@ public class ProjectLifecycleAppService {
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);
         // 派生 deleteBy 是「先查后 remove」，需在事务内执行（DesignProcessAppService
-        // 整组替换同款形制）——对话史/轨道/设计/PRD 版本行级联收进同一短事务
-        //（知识清理自带事务的 JDBC 直删，不在此列）
+        // 整组替换同款形制）——对话史/轨道/设计/PRD 版本/Demo 版本行级联收进同一
+        // 短事务（知识清理自带事务的 JDBC 直删，不在此列）
         transactionTemplate.executeWithoutResult(status -> {
             conversationHistory.purgeByProject(projectId);
             generationSegments.deleteByProjectId(projectId);
             designItems.deleteByProjectId(projectId);
             designSpecs.deleteByProjectId(projectId);
             prdVersions.deleteByProjectId(projectId);
+            demoVersions.deleteByProjectId(projectId);
         });
         skillDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(

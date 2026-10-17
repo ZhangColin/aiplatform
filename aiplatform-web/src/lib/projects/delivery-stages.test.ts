@@ -103,12 +103,25 @@ describe("stageGateFactsOf（REST 项目事实 → 门事实投影）", () => {
     ).toBe(true);
   });
 
-  it("Demo 确认待 #333 版本化：未落地前诚实映射 false", () => {
-    const facts = stageGateFactsOf(
-      { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail,
-      [{ versionNo: 1 }],
-    );
-    expect(facts.demoConfirmed).toBe(false);
+  it("Demo 确认接 #333 确认标记：有 confirmedAt 的版本在场＝门开", () => {
+    const detail = { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail;
+    const prdVersions = [{ versionNo: 1 }];
+    // 无版本列表/空列表/全未确认＝门关（从未成版或已确认版本但未打确认标记）
+    expect(stageGateFactsOf(detail, prdVersions).demoConfirmed).toBe(false);
+    expect(stageGateFactsOf(detail, prdVersions, []).demoConfirmed).toBe(false);
+    expect(
+      stageGateFactsOf(detail, prdVersions, [
+        { versionNo: 2 },
+        { versionNo: 1 },
+      ]).demoConfirmed,
+    ).toBe(false);
+    // 任一版本带确认标记（confirmedAt）＝门开——标记归项目单指针、清单投影到行
+    expect(
+      stageGateFactsOf(detail, prdVersions, [
+        { versionNo: 2, confirmedAt: "2026-10-17T10:00:00" },
+        { versionNo: 1 },
+      ]).demoConfirmed,
+    ).toBe(true);
   });
 
   it("已支付订单在场＝付款门开", () => {

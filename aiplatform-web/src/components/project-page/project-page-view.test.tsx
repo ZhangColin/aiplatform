@@ -38,6 +38,10 @@ vi.mock("@/hooks/use-prd", () => ({
     isPending: false,
   }),
 }));
+// Demo 版本 chip（#333）：SystemPanel 浏览器条挂点——默认空（不出 chip）
+vi.mock("@/hooks/use-demo-version", () => ({
+  useDemoVersions: () => ({ data: [] }),
+}));
 
 vi.mock("@/hooks/use-project-files", () => ({
   useProjectFiles: () => ({

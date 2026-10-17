@@ -95,6 +95,7 @@ public class IterationAppService {
     private final CodingRunTrack codingRunTrack;
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final DesignSpecAppService designSpecs;
+    private final DemoVersionAppService demoVersionAppService;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -110,7 +111,8 @@ public class IterationAppService {
             FinishEditFacts finishFacts, AgentEventBridge eventBridge,
             CodingRunTrack codingRunTrack,
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
-            DesignSpecAppService designSpecs) {
+            DesignSpecAppService designSpecs,
+            DemoVersionAppService demoVersionAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -119,6 +121,7 @@ public class IterationAppService {
         this.codingRunTrack = codingRunTrack;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.designSpecs = designSpecs;
+        this.demoVersionAppService = demoVersionAppService;
     }
 
     /**
@@ -251,12 +254,15 @@ public class IterationAppService {
             while (true) {
                 // 循环内再赋值的局部不进 lambda：本场交接物取逐轮快照（判定行随场）
                 FixHandoff currentHandoff = handoff;
+                // Demo 版本锚捕获（#333）：本场起跑时已确认 PRD 版本——迭代基准＝
+                // 当前已确认版本（确认新版才切基准；在途场照跑完收口绑起跑时版本）
+                Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
                 CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
                         fixSession(projectId, runId),
                         new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
                                 IterationAppService::fixRetryPrompt),
                         (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                currentHandoff),
+                                currentHandoff, prdVersionNo),
                         "fix", true, CoderRunAttempts.RunSeat.executor(),
                         RunHeading.titled(FIX_TITLE));
                 List<FixHandoff> queued;
@@ -314,9 +320,14 @@ public class IterationAppService {
      * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
      * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
      * （#88 收尾卡判定行），本层只记事实日志。
+     *
+     * <p><b>Demo 版本化（#333）</b>：系统实动（changed=true）的收口即迭代轮成版
+     * ——递增插 Demo 版本行、锚本场起跑时已确认 PRD 版本；changed=false 无新系统
+     * 状态即无新版本。成版 best-effort：失败记日志不反噬收口判定（版本缺位由下轮
+     * 收口补位，markGenerated 同口径）。</p>
      */
     private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
-            FixHandoff handoff) {
+            FixHandoff handoff, Integer prdVersionNo) {
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
@@ -327,6 +338,15 @@ public class IterationAppService {
         if (!fact.changed()) {
             log.info("[fix] 项目 {} 修正收口：系统未动（{}）——判定呈现归收口扩载（#88）",
                     project.getId(), fact.text());
+        }
+        else {
+            try {
+                demoVersionAppService.closeOnIteration(project.getId(), attemptRunId, prdVersionNo);
+            }
+            catch (RuntimeException e) {
+                log.warn("[fix] 项目 {} Demo 版本成版失败（不反噬收口，下轮补位）：{}",
+                        project.getId(), e.toString());
+            }
         }
         List<String> prdNotes = handoff.rounds().stream()
                 .map(FixHandoff.Round::prdRevisionSummary)

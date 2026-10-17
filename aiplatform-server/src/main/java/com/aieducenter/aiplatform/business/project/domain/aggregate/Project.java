@@ -114,6 +114,19 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private LocalDateTime generatedAt;
 
     /**
+     * 确认标记所在 Demo 版本（#333 单指针，NULL = 未确认任何版本）：「确认此
+     * 版本，准备签约」＝既有版本上打标记（选定动作、不产生新版本号——版本行
+     * 不可变，标记归本指针；换确认版本＝指针移动，旧标记随移）。下单/合同冻结
+     * 引用（#335）与签约门投影消费本位。
+     */
+    @Column(name = "confirmed_demo_version_no")
+    private Integer confirmedDemoVersionNo;
+
+    /** 确认标记落位时点（与 {@link #confirmedDemoVersionNo} 同刻写，随指针移动刷新）。 */
+    @Column(name = "confirmed_demo_at")
+    private LocalDateTime confirmedDemoAt;
+
+    /**
      * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
      * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
      * 设计主线出身不由页面锚定时为 NULL。
@@ -247,6 +260,16 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
         if (generatedAt == null) {
             this.generatedAt = LocalDateTime.now();
         }
+    }
+
+    /**
+     * Demo 版本确认标记移动（#333「确认此版本，准备签约」）：既有版本上打标记
+     * ——不产生新版本号（版本行不可变，标记归本聚合单指针），换确认版本＝指针
+     * 随移（旧标记自然失效）。目标版本存在性守卫归应用层（PRJ_054）。
+     */
+    public void confirmDemoVersion(int versionNo) {
+        this.confirmedDemoVersionNo = versionNo;
+        this.confirmedDemoAt = LocalDateTime.now();
     }
 
     /**

@@ -107,9 +107,11 @@ export interface paths {
          * 验码登录（不存在即静默建账户）
          * @description M01 弹窗第二步：验码即登录——无密码，账户不存在则静默建档（显示名缺省＝
          *     标识原文）＋种 aiplatform_session 会话 cookie（契约与 OIDC 登录同源）。
-         *     验过即消费（一次性）。目标形态无效 400→6005；验证码错误或已过期
-         *     （含超次作废、无在途码，不区分错环节）400→6008。回执＝当前账号
-         *     （MeResponse 同形）。
+         *     登录即自动平移（#328）：请求携带有效访客凭证（aiplatform_guest）时把访客
+         *     名下未绑定项目过户给账户并作废访客行，响应清访客凭证 cookie；凭证无效/过期
+         *     仅清 cookie 不平移，不阻断登录。验过即消费（一次性）。目标形态无效
+         *     400→6005；验证码错误或已过期（含超次作废、无在途码，不区分错环节）400→6008。
+         *     回执＝当前账号（MeResponse 同形）。
          */
         post: operations["verify"];
         delete?: never;
@@ -235,14 +237,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 项目列表（状态过滤；按当前登录账户过滤）
-         * @description 创建时间倒序，#325 起按当前登录账户过滤——只见自己的项目（他人项目不可见；单账号全量返回的既有缺口收口）。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
+         * 项目列表（状态过滤；按归属过滤：账户或访客）
+         * @description 创建时间倒序，#325/#326 起按请求归属过滤（账户会话优先、访客凭证次之）——只见自己的项目（他人项目、账户与访客项目互不可见；单账号全量返回的既有缺口收口）。访客多项目同口全量返回（创建倒序，首项即「继续上次项目」的最近一个）。status 过滤（Integer code）：1=ACTIVE（进行中）/3=ARCHIVED（已归档）；缺省 all。不合法取值 400（带合法取值表，框架统一信封）
          */
         get: operations["list"];
         put?: never;
         /**
-         * 建项目（一句话创建：建即自动开主智能体需求梳理）
-         * @description 创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，#299 入口两档 mode 进载荷）：入口选「做设计」携 1、缺省/做系统＝2 系统（主链路零变化）；不合法 code 400（框架统一信封）。单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。SSE：workspace-created → 智能体事件
+         * 建项目（一句话创建：建即自动开主智能体需求梳理；免注册访客可用）
+         * @description 创建精简：只传 requirement（可空 = 缺省开场提示）。项目名由 LLM 异步生成——响应即返（名称 = 占位「未命名项目」），取名后台完成后详情/列表自然见新名（禁截取派生，失败保占位经改名端点可改）；类型单模板服务端缺省。endpointType 可选（Integer code，#299 入口两档 mode 进载荷）：入口选「做设计」携 1、缺省/做系统＝2 系统（主链路零变化）；不合法 code 400（框架统一信封）。单容器沙箱就绪（应用与 pg/redis 同容器，数据落工作区卷）。响应携带自动开场运行 runId（挂 /api/events?runId= 的锚）。SSE：workspace-created → 智能体事件。#326 免注册访客：完全匿名（无会话无访客凭证）且 requirement 非空＝首条需求消息——提交成功惰性建访客并随响应 Set-Cookie aiplatform_guest（HttpOnly+SameSite=Lax，值即凭证）；空输入不建访客（项目落无主行）、纯浏览零足迹。已有有效访客凭证或账户会话：归属随既有身份（账户优先），不发新凭证
          */
         post: operations["create_1"];
         delete?: never;
@@ -420,7 +422,7 @@ export interface paths {
         put?: never;
         /**
          * 确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）
-         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）：「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层承载，确认动作本身不携带标记）。响应即回执（versionNo/content/confirmedAt/readiness）——版本号是下游（#332 确认后自动派 Demo run）的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
+         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）：「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层承载，确认动作本身不携带标记）。<b>生成加门（#332）</b>：确认成版后平台自动派首个 Demo run——「确认此版 PRD 并生成 Demo」成为首个构建 run 的唯一触发（已生成/在途静默跳过；派发是次生事实）。响应即回执（versionNo/content/confirmedAt/readiness）——版本号是派发的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
          */
         post: operations["confirmPrd"];
         delete?: never;
@@ -459,8 +461,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 继续生成（断点续跑；首次发起同入口）
-         * @description 生成无门自动发起（#101）后，主智能体产出 PRD 即平台自动派首次生成 run，本端点是「继续生成」出口的载体——run-failed 或生成中断后项目仍「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（生成无门后前端无入口，本守卫拦直连调用）；设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、系统＋设计设计先行——构建从定稿设计稿长出）；项目不存在 404 PRJ_001
+         * 继续生成（断点续跑；首个 Demo 由确认触发）
+         * @description #332 生成加门后，首个构建 run 由「确认此版 PRD」触发——本端点是「继续生成」出口的载体（run-failed 或生成中断后仍可用）——run-failed 或生成中断后项目仍「未生成」，重发此端点即断点续跑（#221）：跳过已收口片、只重跑失败/中断片（断点以生成轨道表为准——表中最深收口片），续跑 run 起手带现状盘点（工作区现状指引、切片进度、中断原因、中断前摘要——交接机制与片间交接同构），不从头重做。纯动作无门——PRD 已产出即可发起（待定项未清也可）。切片计划与片进度落生成轨道表（#220：计划跟 PRD 版本走，重发沿用表内现行计划——已收口片状态保留；PRD 修订即计划重产、从头再来——推倒重来是经对话区改 PRD 的显式选择）；计划缺失（或 PRD 已修订致旧计划过期）时不造假计划——平台重派主智能体按 PRD 补产切片计划，本端点返回补产轮 runId（主智能体对话轮，补产收口自动再派生成；同一 PRD 版本已补产过则 409 PRJ_017——重复触发口径，用户重提意见即兜底）。平台先把工作区布局资产就位（AGENTS.md 平台约定幂等覆写），随后下发 run 执行体（coder-{projectId} 会话，AgentScope 单栈，读 docs/PRD.md 在沙箱实现系统并起 8081 端口服务）。异步提交即返回，runId = 首试运行标识（挂 /api/events?runId= 的锚），过程事件经 SSE（run-start agent=executor 起工作消息）。失败自动静默重试有限次＝原地修（app.generation.max-attempts，默认 3 次含首试——新尝试携带错误现场继续修、不重做已对的工作，中间失败不出用户面事件），超限转终态发 run-failed 收口事件（前端「继续生成」出口只认本事件——run 失败为唯一失败终态）、由用户继续生成脏续兜底（同断点续跑，不重头）。run 成功收口落 generated_at（首次生成时点，单向置位）。已归档 409 PRJ_013；已生成或生成在途 409 PRJ_017；PRD 从未产出 409 PRJ_018（系统终点首个 Demo 由确认触发，本端点服务「继续生成」，本守卫拦未产出直连调用）；设计类终点（设计/系统＋设计，#285）409 PRJ_042（设计主线交付设计资产包、系统＋设计设计先行——构建从定稿设计稿长出）；项目不存在 404 PRJ_001
          */
         post: operations["generate"];
         delete?: never;
@@ -503,6 +505,26 @@ export interface paths {
          * @description 终点类型（Integer code：1=设计 2=系统 3=系统＋设计）下单前可变、下单即冻结（转轨是对话之外类型变更的一等入口，ADR-0024）。切换落库后平台派主智能体切换重产轮：PRD 已产出即重产清单章（形态随终点类型走——设计＝设计物清单、系统/系统＋设计＝功能清单〔后者设计硬约束入关键约束〕），访谈期即转向通告；过程经 SSE agent=main 可见。作用域：系统→设计类切换（PRD 已产出、功能清单在）必带 scopeType（1=全部页面 2=勾选页面，缺选 400 PRJ_040），勾选形 scopePages（功能清单条目标签）非空（空集 400 PRJ_041）；范围仅系统＋设计落库（设计主线由 PRD 设计物清单章承载）。同目标幂等无操作。已归档 409 PRJ_013；订单处理中 409 ORD_006（取消订单即解冻）；挂起问答待答 409 PRJ_024（指路作答）；项目不存在 404 PRJ_001
          */
         post: operations["switchEndpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/demo-versions/{versionNo}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认此版本，准备签约（既有 Demo 版本上打确认标记）
+         * @description 「确认此版本，准备签约」（#333）＝既有版本上打确认标记——选定动作、<b>不产生新版本号</b>（版本行不可变，标记归项目单指针confirmed_demo_version_no）；换确认版本＝指针随移（旧标记自然失效，重复确认同版幂等刷新确认时间）。响应＝所确认版本的清单形（含confirmedAt）——下单前置「Demo 确认版本在场」的消费面（#335）。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；版本不存在（含非正整数）404 PRJ_054
+         */
+        post: operations["confirmDemoVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1101,7 +1123,8 @@ export interface paths {
         /**
          * 授权码回调
          * @description identity 302 落点（经前端 3333 同源代理）。state 与事务 cookie 精确比对 →
-         *     换 token（含 JWKS RS256 验签 + iss/aud/exp/nonce）→ 账号 upsert → 种
+         *     换 token（含 JWKS RS256 验签 + iss/aud/exp/nonce）→ 账号 upsert → 登录即
+         *     自动平移（#328：请求携带有效访客凭证时把访客未绑定项目过户给账户）→ 种
          *     aiplatform_session 并 302 回 returnTo。失败 302 回 /?error=state_mismatch
          *     或 /?error=exchange_failed（identity 拒绝授权只带 error 不带 code 时同走
          *     exchange_failed；具体原因只进服务端日志）。
@@ -1437,6 +1460,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{id}/demo-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Demo 版本清单（最新在前）
+         * @description 项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口递增），prdVersionNo＝起跑时已确认 PRD 版本锚（「Demo vN（基于 PRD vM 快照）」式关联；null＝无确认版起跑——legacy/设计类），runId＝收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = 从未成版（未生成/生成中）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
+         */
+        get: operations["demoVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/conversation": {
         parameters: {
             query?: never;
@@ -1538,8 +1581,9 @@ export interface paths {
          *
          *     信封：SSE name 恒为 `event`；id = `{streamId}:{seq}`（通知 streamId=projectId、
          *     智能体事件 streamId=runId）；data = `{"type","payload","ts"}`（payload 恒为
-         *     对象、内禁 type 键名）。payload 另携 `ownerAccountId` 归属路由键（两族共
-         *     有；前端不消费——路由键非内容）。心跳：每 15s 发注释行 `:ping`。
+         *     对象、内禁 type 键名）。payload 另携 `ownerAccountId`/`ownerGuestId` 归属
+         *     路由键（两族共有、双列互斥恰带其一；前端不消费——路由键非内容）。心跳：
+         *     每 15s 发注释行 `:ping`。
          *
          *     订阅：订阅握手绑定登录账号，投递按「事件归属 == 订阅者」隔离（未过滤订阅 =
          *     我的全部通知；他人 projectId 过滤订阅 = 静默空流、连接不断）。`?projectId=`
@@ -2960,6 +3004,26 @@ export interface components {
             scopeType?: number;
             scopePages?: string[];
         };
+        ApiResponseDemoVersionSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["DemoVersionSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        DemoVersionSummaryResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            /** Format: int32 */
+            prdVersionNo?: number;
+            runId?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            confirmedAt?: string;
+        };
         ApiResponseBackofficeWorkspaceDetailResponse: {
             /** Format: int32 */
             code?: number;
@@ -3397,6 +3461,14 @@ export interface components {
         ProjectFileContentResponse: {
             path?: string;
             content?: string;
+        };
+        ApiResponseListDemoVersionSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["DemoVersionSummaryResponse"][];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
         };
         ApiResponseListConversationEntryResponse: {
             /** Format: int32 */
@@ -4279,7 +4351,9 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                aiplatform_guest?: string;
+            };
         };
         requestBody: {
             content: {
@@ -4753,6 +4827,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectDetailResponse"];
+                };
+            };
+        };
+    };
+    confirmDemoVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                versionNo: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDemoVersionSummaryResponse"];
                 };
             };
         };
@@ -5324,6 +5421,7 @@ export interface operations {
             path?: never;
             cookie?: {
                 oauth_txn?: string;
+                aiplatform_guest?: string;
             };
         };
         requestBody?: never;
@@ -5719,6 +5817,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseProjectFileContentResponse"];
+                };
+            };
+        };
+    };
+    demoVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListDemoVersionSummaryResponse"];
                 };
             };
         };

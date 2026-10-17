@@ -114,6 +114,7 @@ class ProjectLifecycleAppServiceTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
+        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
         // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
@@ -374,6 +375,11 @@ class ProjectLifecycleAppServiceTest {
                 + " VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,"
                 + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 920099900000000001L, projectId);
+        // Demo 版本在场（#333）：版本行随项目真删级联（软引用显式清，同款）
+        jdbcTemplate.update("INSERT INTO prj_demo_versions (id, project_id, version_no,"
+                + " prd_version_no, run_id, created_at, updated_at)"
+                + " VALUES (?, ?, 1, 1, 'r-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                920099900000000002L, projectId);
         // 对话史在场（真实项目必有）：级联清走事务外派生删除曾在带行时炸
         // No EntityManager（删除带对话史的项目必失败）——收进短事务后随删
         jdbcTemplate.update("INSERT INTO prj_conversation_entries (project_id, kind, text,"
@@ -388,6 +394,9 @@ class ProjectLifecycleAppServiceTest {
         verifyNoRows();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM prj_prd_versions WHERE project_id = ?", Long.class,
+                projectId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_demo_versions WHERE project_id = ?", Long.class,
                 projectId)).isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ?",

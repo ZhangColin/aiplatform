@@ -117,6 +117,8 @@ class IterationAppServiceTest {
     @AfterEach
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
+        jdbcTemplate.update("DELETE FROM prj_prd_versions");
+        jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -956,11 +958,67 @@ class IterationAppServiceTest {
         return projectRepository.save(project).getId();
     }
 
+    /** 已确认 PRD 版本在场（#333 Demo 版本锚——迭代起跑时的基准版本）。 */
+    private void seedConfirmedPrdVersion(Long projectId, int versionNo) {
+        jdbcTemplate.update("""
+                INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
+                    prd_produced_at, created_at, updated_at)
+                VALUES (?, ?, ?, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, System.nanoTime(), projectId, versionNo);
+    }
+
     private Long persistedArchivedGeneratedProject(String workspaceId) {
         Project project = Project.create("归档迭代项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         project.markGenerated();
         project.archive();
         return projectRepository.save(project).getId();
+    }
+
+    // ---------- Demo 版本化（#333）：迭代轮收口自动成版 ----------
+
+    @Test
+    void given_changed_fix_runs_when_close_then_demo_versions_increment_with_prd_anchor() {
+        // 灵魂例（#333 迭代每轮自动成版）：changed=true 收口即递增成版、锚本场起跑时
+        // 已确认 PRD 版本——v1（PRD v1 基准）→ 确认 v2 后下一轮 v2 锚（迭代成版链）
+        Long projectId = persistedGeneratedProject("9950");
+        seedConfirmedPrdVersion(projectId, 1);
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表按时间倒序", null);
+        tracks.remove(0).run();
+        // 改需求回路后：PRD 确认 v2（确认新版才切迭代基准）
+        seedConfirmedPrdVersion(projectId, 2);
+        IterationAppService.FixDispatch second = appService.startFixRun(projectId, "加筛选", null);
+        tracks.remove(0).run();
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT version_no, prd_version_no, run_id FROM prj_demo_versions"
+                        + " WHERE project_id = ? ORDER BY version_no",
+                projectId);
+        assertThat(rows).extracting(row -> row.get("version_no")).containsExactly(1, 2);
+        // 各版 PRD 关联正确：v1 锚 v1、v2 锚 v2；run 锚＝各场修正 run
+        assertThat(rows.get(0)).containsEntry("prd_version_no", 1)
+                .containsEntry("run_id", first.runId());
+        assertThat(rows.get(1)).containsEntry("prd_version_no", 2)
+                .containsEntry("run_id", second.runId());
+    }
+
+    @Test
+    void given_unchanged_fix_run_when_close_then_no_demo_version() {
+        // changed=false＝无新系统状态即无新版本（判定无需改动不成版——不造空版本）
+        Long projectId = persistedGeneratedProject("9951");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseFinishing(false, "现状已满足意见");
+
+        appService.startFixRun(projectId, "列表按时间倒序", null);
+        tracks.remove(0).run();
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_demo_versions WHERE project_id = ?", Integer.class,
+                projectId);
+        assertThat(count).isZero();
     }
 }

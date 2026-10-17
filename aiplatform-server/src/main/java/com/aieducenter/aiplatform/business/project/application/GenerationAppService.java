@@ -438,6 +438,7 @@ public class GenerationAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final DesignSpecAppService designSpecs;
     private final BuildDispatchPolicy buildDispatchPolicy;
+    private final DemoVersionAppService demoVersionAppService;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -471,7 +472,8 @@ public class GenerationAppService {
             @Lazy MainAgentAppService mainAgentAppService,
             ConversationHistoryAppService conversationHistory,
             DesignSpecAppService designSpecs,
-            BuildDispatchPolicy buildDispatchPolicy) {
+            BuildDispatchPolicy buildDispatchPolicy,
+            DemoVersionAppService demoVersionAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -486,6 +488,7 @@ public class GenerationAppService {
         this.conversationHistory = conversationHistory;
         this.designSpecs = designSpecs;
         this.buildDispatchPolicy = buildDispatchPolicy;
+        this.demoVersionAppService = demoVersionAppService;
     }
 
     /**
@@ -626,10 +629,13 @@ public class GenerationAppService {
             return null;
         }
 
+        // Demo 版本锚捕获（#333）：起跑时已确认 PRD 版本——在途 Demo 照跑完收口绑
+        // 本锚（此后新确认不漂移旧版关联）；无确认版项目（设计类起跑/legacy）为 null
+        Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
         String firstRunId = EventsAppService.newRunId();
         sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
             try {
-                runGenerationTrack(project, firstRunId, resolved);
+                runGenerationTrack(project, firstRunId, resolved, prdVersionNo);
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -809,7 +815,8 @@ public class GenerationAppService {
      * 收口/失败状态随片落轨道表（#220）。知识命中前置注入只在阶段 0 的 run（一次
      * 切入一次注入，#114——续跑断点在阶段 0 时同注入，断点在切片则不注入）。</p>
      */
-    private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan) {
+    private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan,
+            Integer prdVersionNo) {
         Long projectId = project.getId();
         List<String> slices = plan.slices();
         List<GenerationSegment> segments =
@@ -829,7 +836,7 @@ public class GenerationAppService {
             // 片全收口即生成完成（末片收口而 generated_at 落位失败的补落 + 存量对照
             // 标满的空缺口边角，#223）
             terminalFailureScenes.remove(projectId);
-            markGenerated(projectId);
+            markGenerated(projectId, firstRunId, prdVersionNo);
             return;
         }
         int startOrd = openOrds.get(0);
@@ -877,8 +884,9 @@ public class GenerationAppService {
                     new CoderRunAttempts.Prompts(
                             designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
                             errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
-                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last, runId,
-                            stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice)),
+                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
+                            runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
+                            prdVersionNo),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()));
@@ -931,16 +939,17 @@ public class GenerationAppService {
      * （收口扩载 selfTest 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
      * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
-     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）。
+     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）——且与
+     * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
-            boolean markGenerated, String runId, String summary) {
+            boolean markGenerated, String runId, String summary, Integer prdVersionNo) {
         requireReachable(project);
         requireEntryFileComplete(project);
         emitPreviewReady(project);
         closeSegment(project.getId(), ord, runId);
         if (markGenerated) {
-            markGenerated(project.getId());
+            markGenerated(project.getId(), runId, prdVersionNo);
         }
         // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
@@ -1031,17 +1040,18 @@ public class GenerationAppService {
         }
     }
 
-    /** 首次生成时点落位：重载置位（单向），失败记日志不炸异步轨道（run 已成功）。 */
-    private void markGenerated(Long projectId) {
+    /**
+     * 首次生成时点落位＋Demo 首版成版（#333 同刻原子——{@link
+     * DemoVersionAppService#closeOnGeneration} 短事务）：失败记日志不炸异步轨道
+     * （run 已成功；片全收口的补落路径下次派发自愈，两落 either-or）。
+     */
+    private void markGenerated(Long projectId, String runId, Integer prdVersionNo) {
         try {
-            projectRepository.findById(projectId).ifPresentOrElse(project -> {
-                project.markGenerated();
-                projectRepository.save(project);
-            }, () -> log.warn("[generate] 项目 {} 生成成功但记录已不存在（generated_at 无处落）",
-                    projectId));
+            demoVersionAppService.closeOnGeneration(projectId, runId, prdVersionNo);
         }
         catch (RuntimeException e) {
-            log.warn("[generate] 项目 {} generated_at 落位失败：{}", projectId, e.toString());
+            log.warn("[generate] 项目 {} generated_at/Demo 首版落位失败：{}", projectId,
+                    e.toString());
         }
     }
 

@@ -20,6 +20,10 @@ public interface PrdVersionRepository extends BaseRepository<PrdVersion, Long> {
     /** 存在已确认版本？（#332 生成加门：收口观测判据——存在即首个构建 run 触发条件满足）。 */
     boolean existsByProjectId(Long projectId);
 
+    /** 最新已确认版本（#333 Demo 版本锚取件：起跑时已确认 PRD 版本号——单行取件，
+     * 不拉全表全文快照）。 */
+    Optional<PrdVersion> findFirstByProjectIdOrderByVersionNoDesc(Long projectId);
+
     /** 单版寻址（详情/成版判定「最新版」取件）。 */
     Optional<PrdVersion> findByProjectIdAndVersionNo(Long projectId, int versionNo);
 

@@ -36,8 +36,10 @@ import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppSe
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
+import com.aieducenter.aiplatform.business.project.application.DemoVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.DesignItemResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
@@ -122,6 +124,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private PrdVersionAppService prdVersionAppService;
+
+    @MockitoBean
+    private DemoVersionAppService demoVersionAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -781,6 +786,56 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(4052))
                 .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
+    }
+
+    // ---------- Demo 版本（#333「版本化与确认标记」：清单＋确认动作） ----------
+
+    @Test
+    void given_demo_versions_when_list_then_newest_first_with_anchor_and_marker() throws Exception {
+        when(demoVersionAppService.versions(100L)).thenReturn(List.of(
+                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
+                        LocalDateTime.of(2026, 10, 17, 9, 0), null),
+                new DemoVersionSummaryResponse("100", 1, 1, "r-1",
+                        LocalDateTime.of(2026, 10, 16, 12, 0),
+                        LocalDateTime.of(2026, 10, 16, 13, 0))));
+
+        // 清单最新在前；prdVersionNo＝「Demo vN（基于 PRD vM 快照）」关联锚；confirmedAt
+        // 仅确认标记所在版非空（标记投影到行）
+        performAsUser(get("/api/projects/100/demo-versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].prdVersionNo").value(1))
+                .andExpect(jsonPath("$.data[0].runId").value("r-2"))
+                .andExpect(jsonPath("$.data[0].confirmedAt").doesNotExist())
+                .andExpect(jsonPath("$.data[1].versionNo").value(1))
+                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T13:00:00"));
+    }
+
+    @Test
+    void given_version_when_confirm_demo_then_summary_with_confirmed_at() throws Exception {
+        when(demoVersionAppService.confirm(100L, 2)).thenReturn(
+                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
+                        LocalDateTime.of(2026, 10, 17, 9, 0),
+                        LocalDateTime.of(2026, 10, 17, 10, 0)));
+
+        // 「确认此版本，准备签约」：既有版本上打标记——回执＝所确认版本清单形
+        performAsUser(post("/api/projects/100/demo-versions/2/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(2))
+                .andExpect(jsonPath("$.data.prdVersionNo").value(1))
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-17T10:00:00"));
+    }
+
+    @Test
+    void given_no_such_demo_version_when_confirm_then_prj_054_as_404() throws Exception {
+        when(demoVersionAppService.confirm(100L, 7))
+                .thenThrow(new ApplicationException(ProjectMessage.DEMO_VERSION_NOT_FOUND));
+
+        performAsUser(post("/api/projects/100/demo-versions/7/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4054))
+                .andExpect(jsonPath("$.message").value("Demo 版本不存在"));
     }
 
     // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------

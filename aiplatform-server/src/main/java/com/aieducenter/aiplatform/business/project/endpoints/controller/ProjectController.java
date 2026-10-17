@@ -31,6 +31,7 @@ import com.aieducenter.aiplatform.business.project.application.GenerationAppServ
 import com.aieducenter.aiplatform.business.project.application.IterationAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectLifecycleAppService;
 import com.aieducenter.aiplatform.business.project.application.ProjectQueryAppService;
+import com.aieducenter.aiplatform.business.project.application.DemoVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdVersionAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AnswerQuestionCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.CreateProjectCommand;
@@ -43,6 +44,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.response.Gene
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
@@ -72,7 +74,7 @@ import com.aieducenter.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/projects")
 @Validated
-@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / 文件树 / 源码包 / 预览 / 删除")
+@Tag(name = "Projects", description = "项目：建项目 / 对话区发言（三分类派发）/ 问答作答 / 生成 / 继续更新 / 列表 / 详情 / 归档 / 改名 / 用量 / PRD / PRD 确认与版本 / Demo 版本与确认标记 / 文件树 / 源码包 / 预览 / 删除")
 public class ProjectController {
 
     private final ProjectLifecycleAppService appService;
@@ -83,6 +85,7 @@ public class ProjectController {
     private final IterationAppService iterationAppService;
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final PrdVersionAppService prdVersionAppService;
+    private final DemoVersionAppService demoVersionAppService;
 
     public ProjectController(ProjectLifecycleAppService appService,
                              ProjectQueryAppService queryAppService,
@@ -91,7 +94,8 @@ public class ProjectController {
                              GenerationAppService generationAppService,
                              IterationAppService iterationAppService,
                              ConversationHistoryAppService conversationHistoryAppService,
-                             PrdVersionAppService prdVersionAppService) {
+                             PrdVersionAppService prdVersionAppService,
+                             DemoVersionAppService demoVersionAppService) {
         this.appService = appService;
         this.queryAppService = queryAppService;
         this.dispatchAppService = dispatchAppService;
@@ -100,6 +104,7 @@ public class ProjectController {
         this.iterationAppService = iterationAppService;
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.prdVersionAppService = prdVersionAppService;
+        this.demoVersionAppService = demoVersionAppService;
     }
 
     @PostMapping
@@ -372,6 +377,36 @@ public class ProjectController {
     public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
             @PathVariable int versionNo) {
         return ApiResponse.ok(prdVersionAppService.version(parseId(id), versionNo));
+    }
+
+    @GetMapping("/{id}/demo-versions")
+    @Operation(summary = "Demo 版本清单（最新在前）",
+            description = "项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, "
+                    + "prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口"
+                    + "自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口"
+                    + "递增），prdVersionNo＝起跑时已确认 PRD 版本锚（「Demo vN（基于 "
+                    + "PRD vM 快照）」式关联；null＝无确认版起跑——legacy/设计类），runId＝"
+                    + "收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；"
+                    + "confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。"
+                    + "versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = "
+                    + "从未成版（未生成/生成中）。归档项目照读（历史可追溯）。"
+                    + "项目不存在 404 PRJ_001")
+    public ApiResponse<List<DemoVersionSummaryResponse>> demoVersions(@PathVariable String id) {
+        return ApiResponse.ok(demoVersionAppService.versions(parseId(id)));
+    }
+
+    @PostMapping("/{id}/demo-versions/{versionNo}/confirm")
+    @Operation(summary = "确认此版本，准备签约（既有 Demo 版本上打确认标记）",
+            description = "「确认此版本，准备签约」（#333）＝既有版本上打确认标记——选定"
+                    + "动作、<b>不产生新版本号</b>（版本行不可变，标记归项目单指针"
+                    + "confirmed_demo_version_no）；换确认版本＝指针随移（旧标记自然失效，"
+                    + "重复确认同版幂等刷新确认时间）。响应＝所确认版本的清单形（含"
+                    + "confirmedAt）——下单前置「Demo 确认版本在场」的消费面（#335）。"
+                    + "项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；"
+                    + "版本不存在（含非正整数）404 PRJ_054")
+    public ApiResponse<DemoVersionSummaryResponse> confirmDemoVersion(@PathVariable String id,
+            @PathVariable int versionNo) {
+        return ApiResponse.ok(demoVersionAppService.confirm(parseId(id), versionNo));
     }
 
     @GetMapping("/{id}/files")

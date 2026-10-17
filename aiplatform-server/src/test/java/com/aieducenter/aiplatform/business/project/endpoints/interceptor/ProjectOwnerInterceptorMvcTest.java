@@ -91,6 +91,10 @@ class ProjectOwnerInterceptorMvcTest {
     @MockitoBean
     private PrdVersionAppService prdVersionAppService;
 
+    /** #333 起进 ProjectController 构造的 Demo 版本服务（切片装配补齐）。 */
+    @MockitoBean
+    private com.aieducenter.aiplatform.business.project.application.DemoVersionAppService demoVersionAppService;
+
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(

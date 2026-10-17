@@ -24,6 +24,10 @@ vi.mock("@/hooks/use-project", () => ({
 vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: seed.prdVersions }),
 }));
+// Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
+vi.mock("@/hooks/use-demo-version", () => ({
+  useDemoVersions: () => ({ data: [] }),
+}));
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
 }));

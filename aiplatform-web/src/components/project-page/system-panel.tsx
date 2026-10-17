@@ -37,6 +37,7 @@ import {
 import { PreviewToolbar } from "./preview-toolbar";
 import { RestartUpdateButton } from "./restart-update";
 import { ResumeGenerationButton } from "./resume-generation";
+import { DemoVersionChip } from "./demo-version-chip";
 
 /**
  * 系统范式主区域（#22 片2-1 + #26 迭代环① + #45 渐进预览第一片 + #48 更新
@@ -229,6 +230,7 @@ export function SystemPanel({
           />
         </form>
         <DeviceToggle device={device} onDeviceChange={setDevice} />
+        <DemoVersionChip projectId={projectId} />
         <button
           type="button"
           disabled={!pageLive}

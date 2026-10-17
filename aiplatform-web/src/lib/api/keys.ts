@@ -28,6 +28,12 @@ export const queryKeys = {
     files: (id: string) => ["projects", "files", id] as const,
     /** 文本文件内容（文件模式点看；换文件即换 key，不缓存旁路）。 */
     fileContent: (id: string, path: string) => ["projects", "file-content", id, path] as const,
+    /**
+     * Demo 构建版本列表（#333；空＝从未成版——版本 chip 与阶段门「Demo 已确认」
+     * 的事实源）。挂 projects 域：编码 run 收口（run-finish）即新版本落库，桥失效
+     * 本域随项目域刷新。
+     */
+    demoVersions: (id: string) => ["projects", "demo-versions", id] as const,
   },
   /**
    * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件

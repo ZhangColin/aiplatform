@@ -9,11 +9,11 @@ import { normalizeOrder, type OrderResponse } from "@/lib/orders/detail";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 
 /**
- * 订单数据层（#28 交易环① + #29 交易环② + #30 交易环③）：详情查询 +
- * 下单/取消/支付三动作。三动作都改变「项目挂着未终结订单」或项目归档态这一
- * 事实（详情 activeOrder/latestOrder/archived 嵌入 = 锁定式矩阵与归档终态的
+ * 订单数据层（#28 交易环① + #29 交易环②）：详情查询 + 下单/取消两动作。两动作
+ * 都改变「项目挂着未终结订单」这一事实（详情 activeOrder 嵌入 = 锁定式矩阵的
  * 推导输入），成功即失效整项目域——对话区锁定/解锁、订单卡进出、列表四态分区
- * 随重拉自愈；订单域自身也失效（旧订单详情不再被引用）。
+ * 随重拉自愈；订单域自身也失效（旧订单详情不再被引用）。支付动作已随 #337
+ * mock 支付闭环退役（付款数据层归 use-payment——凭证核验路径）。
  */
 
 /** 报价等待期的详情轮询间隔（v1 无推送——spec：订单状态经详情拉取）。 */
@@ -66,24 +66,6 @@ export function useCancelOrder() {
     },
     onError: (error) => {
       toast.error(errorText(error, "取消订单失败，请稍后重试"));
-    },
-  });
-}
-
-/**
- * mock 支付（已报价态，#30）：确认弹窗 → 支付端点 → 同步成功——订单与项目一并
- * 归档（后端一事务），成功即失效两域（项目转归档终态、订单转完整记录）。
- */
-export function usePayOrder() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (orderId: string) => api.post<OrderResponse>(`/orders/${orderId}/payment`),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
-    },
-    onError: (error) => {
-      toast.error(errorText(error, "支付失败，请稍后重试"));
     },
   });
 }

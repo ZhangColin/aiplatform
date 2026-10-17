@@ -8,35 +8,43 @@
  *       自含不依赖工作区存亡）</li>
  *   <li>同项目至多一个未终结订单（应用服务预检 + 库侧部分唯一索引兜底）</li>
  *   <li>价目留痕（append-only：首次报价与每次改价各一行，订单当前金额取最新行）</li>
- *   <li>mock 支付与归档（#30 落支付位；#37/#39 支付原子化：支付成功落「已支付」
- *       真实态，订单归档 + 项目归档为支付后的独立步骤，提交后知识沉淀 + 订单态
- *       变化通知两发；PaymentPort = 真实接入切换边界）</li>
+ *   <li>合同域（#336 六态人工推进留痕＋范围快照冻结集；确认范围并准备合同＝
+ *       合同创建口）与付款域（#337 付款计划随合同冻结同刻创建＋节点五态凭证
+ *       核验路径：用户上传凭证→后台核验到账/打回、留痕 append-only）</li>
+ *   <li>归档（重试归档补卡单：订单＋项目一事务、提交后知识沉淀 + 订单态变化
+ *       通知；PaymentPort = 真实渠道接入切换边界，#337 起维持现状不加宽）</li>
  * </ul>
  *
  * <h3>限界上下文</h3>
- * <p>交易载体 BC（#4 决议）：下单后的报价/改价/支付/归档编排。与 project 的
- * 唯一写交叉 = 支付成功后订单归档 + 项目归档（#37/#39 拆两事务，ADR-0002）；项目事实
- * （存在性/PRD 快照源）经 {@code business.project} 应用层软引用（projectId 无
- * FK，同 workspace 口径）。表前缀 {@code ord_}，错误码前缀 {@code ORD_}。v1
- * 支付为平台内 mock，PaymentPort 是真实接入的切换边界（不建支付尝试表）。</p>
+ * <p>交易载体 BC（#4 决议）：下单后的报价/改价/合同/付款/归档编排。与 project 的
+ * 唯一写交叉 = 归档时订单归档 + 项目归档（ADR-0002）；项目事实（存在性/PRD 快照源）
+ * 经 {@code business.project} 应用层软引用（projectId 无 FK，同 workspace 口径）。
+ * 表前缀 {@code ord_}，错误码前缀 {@code ORD_}。v1 支付走付款节点凭证核验路径
+ * （线下转账），PaymentPort 是真实渠道接入的切换边界（维持现状不加宽——渠道
+ * 扩展位由付款节点上的渠道类型枚举＋流水号字段承载）。</p>
  *
  * <h3>包结构</h3>
  * <ul>
  *   <li>domain：Order 聚合（价目留痕随单）、OrderPriceEntry 实体（操作者两列
- *       落痕，#155）、Operator 值对象（admin 侧操作者，落空口径）、OrderStatus
- *       枚举、仓储接口、PaymentPort（真实支付切换边界）、错误码</li>
- *   <li>application：OrderAppService（下单/详情/取消/报价与改价/mock 支付——
- *       支付原子落「已支付」→ 归档独立步骤（订单 + 项目），提交后知识沉淀 + 订单态
- *       变化通知两发；运营取消 cancelByBackoffice 同守卫带必填原因＋操作者留痕，
- *       #157；重试归档 retryArchive 卡单补归档同守卫带操作者留痕＋沉淀跟随归档
- *       成功，#158）+
+ *       落痕，#155）、Contract 聚合＋ContractTransition 留痕（#336）、PaymentPlan
+ *       聚合＋PaymentNode/PaymentVerification（#337）、PaymentVoucher/PaymentVoucherFile
+ *       （凭证行＋字节伴行）、Operator 值对象（admin 侧操作者，落空口径）、
+ *       状态/渠道/动作枚举、仓储接口、PaymentPort（真实支付切换边界）、错误码</li>
+ *   <li>application：OrderAppService（下单/详情/取消/报价与改价；运营取消
+ *       cancelByBackoffice 同守卫带必填原因＋操作者留痕，#157；重试归档
+ *       retryArchive 卡单补归档同守卫带操作者留痕＋沉淀跟随归档成功，#158）+
+ *       ContractAppService（#336 六态人工推进＋草稿重录；#337 起合同与付款计划
+ *       同事务创建）+ PaymentPlanAppService（#337 节点录入/凭证上传/到账核验/
+ *       打回＋两面读面）+
  *       OrderQueryAppService（未终结订单读面——项目详情/列表嵌入与冻结守卫的
  *       供给方 + 最近订单嵌入）+ BackofficeOrderAppService（后台三读端点：清单/
  *       详情/源码包；跨 BC 项目名/用户昵称/打包经 project、identity 应用层软引用）
  *       + OrderEventTypes（平台通知事件名册常量）</li>
- *   <li>infrastructure：MockPaymentAdapter（v1 平台内 mock 支付适配器）</li>
- *   <li>endpoints：用户面 REST（下单/订单详情/取消/mock 支付）；后台机机面
- *       {@code /api/backoffice/*}（cartisan-openapi 五头 HMAC 签名闸，#29）</li>
+ *   <li>infrastructure：MockPaymentAdapter（#337 起 mock 支付闭环退役、无调用方
+ *       ——端口留作渠道真接缝）</li>
+ *   <li>endpoints：用户面 REST（下单/订单详情/取消/合同确认与预览/付款计划与
+ *       凭证上传）；后台机机面 {@code /api/backoffice/*}（cartisan-openapi
+ *       五头 HMAC 签名闸，#29——订单/合同/付款三面）</li>
  * </ul>
  *
  * @since 0.1.0

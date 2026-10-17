@@ -57,6 +57,8 @@ export const queryKeys = {
     detail: (id: string) => ["orders", "detail", id] as const,
     /** 订单名下最近合同（#336 合同预览卡；无合同 404 在 hook 归一为 null）。 */
     contract: (orderId: string) => ["orders", "contract", orderId] as const,
+    /** 订单名下活跃付款计划（#337 付款面板；无计划 404 在 hook 归一为 null）。 */
+    paymentPlan: (orderId: string) => ["orders", "payment-plan", orderId] as const,
   },
   /**
    * 对话史域（#89 对话史落库④）：对话面全量的水合源（用户发言/智能体回复/

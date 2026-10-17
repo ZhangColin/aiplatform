@@ -551,7 +551,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orders/{id}/payment": {
+    "/api/orders/{id}/payment-nodes/{nodeId}/vouchers": {
         parameters: {
             query?: never;
             header?: never;
@@ -561,10 +561,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * mock 支付（确认后同步成功，订单与项目一并归档）
-         * @description v1 平台内模拟支付，只走成功路径（真实渠道接入归 PaymentPort 切换边界，#32）。支付成功在一个事务内完成：订单 已支付→已归档（paidAt/archivedAt/paymentNo 落值）+ 项目归档（ADR-0002）；提交后知识沉淀（取归档时最新 PRD 入知识库，失败降级不影响支付）+ 订单态变化 SSE 通知。归档后界面转只读终态（对话区关闭、源码包可取、完整记录含改价历史）。仅已报价（=待支付）态可支付；非待支付 409 ORD_011；订单不存在 404 ORD_001；项目已被手动归档 409 PRJ_013（事务回滚，订单留待支付态）
+         * 上传转账凭证（凭证核验路径第一跳）
+         * @description 线下转账后上传银行电子回单/水单（multipart 单文件，part 名 file）：节点翻「线下转账待核验」，后台核验后转已到账或打回——上传仅代表已提交、不构成到账事实；多次上传追加保留不覆盖。待支付/待核验态可传（已到账 409 ORD_038）；凭证收 pdf/png/jpg/jpeg、单文件 ≤10MB（超限 400 ORD_040 如实报错不静默压缩）。响应＝更新后的付款计划（面板整卡刷新）。节点不存在或不属活跃计划 404 ORD_037（旧计划节点随旧合同留痕、不可动作）；已终结订单（已归档/已取消）409 ORD_038；订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_036 — 付款计划不存在
+         *     - 404 ORD_037 — 付款节点不存在
+         *     - 409 ORD_038 — 付款节点当前状态不允许该操作
+         *     - 400 ORD_040 — 凭证文件无效（支持 PDF/PNG/JPG，至多 10MB）
          */
-        post: operations["pay"];
+        post: operations["uploadVoucher"];
         delete?: never;
         options?: never;
         head?: never;
@@ -993,6 +1000,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/orders/{orderId}/payment-plan/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 付款节点录入（整组替换，含开工门设定）
+         * @description 「付款节点录入/开工门设定」后台承接口：整组提交——每条＝名称/金额（绝对额〔分〕）/开工门标志（布尔、录入时定；开工款≠默认全款）。序号按列表序派生（录入序即展示序）、附言码自合同号定格（<合同号>-K<序>）、渠道起步线下转账（v1 唯一走通路径，扫码占位）。支付活动未开始（全部待支付且无凭证无留痕）是重录唯一窗口，已开始 409 ORD_044（变动走合同侧撤回重建）；录入无效 400 ORD_039。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_036 — 付款计划不存在
+         *     - 400 ORD_039 — 付款节点录入无效（至少一条、名称必填、金额为正）
+         *     - 409 ORD_044 — 付款节点已开始支付，不可重新录入
+         */
+        post: operations["enterNodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{orderId}/payment-nodes/{nodeId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 到账核验录入（全额判定，依据留痕）
+         * @description 凭证核验路径第二跳（后台人工录入）：实到金额（分，正数）/实到时间（ISO-8601 业务时间）/关联凭证（可空，须属该节点——404 ORD_045）/渠道流水号（可空落值）/备注（可空）随行 append-only 留痕。全额判定＝累计核到账 ≥ 节点金额：足额转「已到账」（receivedAt＝实到时间）；不足留痕＋回「待支付」（累计不清零，前台 remainingAmount 推导还需支付）。仅「线下转账待核验」态可达（409 ORD_038）；录入无效 400 ORD_041；操作者必携（X-User-Id/X-User-Name 透传头，400 ORD_043）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_036 — 付款计划不存在
+         *     - 404 ORD_037 — 付款节点不存在
+         *     - 409 ORD_038 — 付款节点当前状态不允许该操作
+         *     - 400 ORD_041 — 核验录入无效（实到金额须为正、实到时间必填）
+         *     - 400 ORD_043 — 操作者必填（付款核验动作须携带操作者身份）
+         *     - 404 ORD_045 — 凭证不存在或不属于该节点
+         */
+        post: operations["verify_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/orders/{orderId}/payment-nodes/{nodeId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 打回（依据必填留痕，回待支付）
+         * @description 凭证主张被否（回单不清、对不上账）：回「待支付」＋依据必填留痕（400 ORD_042——打回依据是审计正身）；关联凭证可空（同核验校验，404 ORD_045）。打回不动累计已核到账（核到账只经核验录入累积）。仅「线下转账待核验」态可达（409 ORD_038）；操作者必携（ORD_043）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_036 — 付款计划不存在
+         *     - 404 ORD_037 — 付款节点不存在
+         *     - 409 ORD_038 — 付款节点当前状态不允许该操作
+         *     - 400 ORD_042 — 打回依据必填（人工核验打回须填写依据留痕）
+         *     - 400 ORD_043 — 操作者必填（付款核验动作须携带操作者身份）
+         *     - 404 ORD_045 — 凭证不存在或不属于该节点
+         */
+        post: operations["reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/orders/{id}/scope": {
         parameters: {
             query?: never;
@@ -1297,6 +1386,7 @@ export interface paths {
          *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
          *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
          *     - 409 ORD_027 — 双方尚未全部签署，不能标记签署完成
+         *     - 400 ORD_035 — 操作者必填（合同人工动作须携带操作者身份）
          */
         post: operations["advance"];
         delete?: never;
@@ -1753,6 +1843,30 @@ export interface paths {
          * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）+ 下单/取消时点 + 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
          */
         get: operations["detail_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orders/{id}/payment-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 付款计划（订单名下活跃计划，付款面板取数面）
+         * @description 挂订单下、随合同冻结同刻创建（#337）：节点清单（录入序）——每节点序号/名称/金额（绝对额〔分〕＋占比整数百分比展示换算）/五态（1=待支付 2=支付处理中 3=支付失败或关闭 4=线下转账待核验 5=已到账）/附言码（<合同号>-K<序>，转账回执关联位）/开工门标志/渠道类型＋流水号（可空）/累计已核到账与 remainingAmount（「还需支付金额与对应节点」的推导面）＋本人凭证清单（追加保留、上传仅代表已提交）。总额/累计已核到账在计划面。活跃计划＝订单名下最新行（撤回重建/范围重冻后即新行）。节点空表＝待后台录入。订单名下无付款计划（尚无合同）404 ORD_036（前端缺席＝不渲染面板）；订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_036 — 付款计划不存在
+         */
+        get: operations["paymentPlan"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2273,6 +2387,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/payment-vouchers/{voucherId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 凭证内容（后台核验看证，二进制直出）
+         * @description 凭证文件字节直出（元数据行上的 fileName/contentType 随行）——后台核验前看证的唯一触字节口。响应为二进制文件流（不走 ApiResponse JSON 信封，先例＝源码包端点）。凭证不存在 404 ORD_045。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_045 — 凭证不存在或不属于该节点
+         */
+        get: operations["voucherContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/orders": {
         parameters: {
             query?: never;
@@ -2297,6 +2434,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/orders/{orderId}/payment-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 付款计划详情（核验承接全量面）
+         * @description 订单名下活跃计划（最新行）全量：节点五态/金额/附言码/开工门标志/渠道位/累计已核到账＋凭证清单（追加保留）＋核验留痕时间线（新 → 旧：到账核验〔实到金额/实到时间/关联凭证/依据〕与打回各一行 append-only）＋历史计划行摘要（撤回重建/范围重冻后旧计划随旧合同留痕）。无付款计划 404 ORD_036；订单不存在 404 ORD_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_036 — 付款计划不存在
+         */
+        get: operations["detail_5"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/orders/{id}": {
         parameters: {
             query?: never;
@@ -2311,7 +2472,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_5"];
+        get: operations["detail_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2408,7 +2569,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        get: operations["detail_6"];
+        get: operations["detail_7"];
         put?: never;
         post?: never;
         /**
@@ -2555,7 +2716,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_020 — 合同不存在
          */
-        get: operations["detail_7"];
+        get: operations["detail_8"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3343,6 +3504,63 @@ export interface components {
             /** Format: date-time */
             confirmedAt?: string;
         };
+        ApiResponsePaymentPlanResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PaymentPlanResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PaymentNodeResponse: {
+            id?: string;
+            /** Format: int32 */
+            seq?: number;
+            name?: string;
+            /** Format: int64 */
+            amount?: number;
+            /** Format: int32 */
+            percentage?: number;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            remarkCode?: string;
+            kickoffGate?: boolean;
+            /** Format: int32 */
+            channelType?: number;
+            channelTypeName?: string;
+            channelRefNo?: string;
+            /** Format: int64 */
+            settledAmount?: number;
+            /** Format: int64 */
+            remainingAmount?: number;
+            /** Format: date-time */
+            receivedAt?: string;
+            vouchers?: components["schemas"]["PaymentVoucherResponse"][];
+        };
+        PaymentPlanResponse: {
+            id?: string;
+            orderId?: string;
+            contractId?: string;
+            contractNo?: string;
+            /** Format: int64 */
+            totalAmount?: number;
+            /** Format: int64 */
+            totalSettled?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            nodes?: components["schemas"]["PaymentNodeResponse"][];
+        };
+        PaymentVoucherResponse: {
+            id?: string;
+            nodeId?: string;
+            fileName?: string;
+            contentType?: string;
+            /** Format: int64 */
+            byteSize?: number;
+            /** Format: date-time */
+            createdAt?: string;
+        };
         ApiResponseContractResponse: {
             /** Format: int32 */
             code?: number;
@@ -3630,6 +3848,28 @@ export interface components {
         UnitPriceEntryRepriceResponse: {
             closed?: components["schemas"]["UnitPriceEntryResponse"];
             opened?: components["schemas"]["UnitPriceEntryResponse"];
+        };
+        EnterPaymentNodesCommand: {
+            nodes?: components["schemas"]["PaymentNodeSpec"][];
+        };
+        PaymentNodeSpec: {
+            name?: string;
+            /** Format: int64 */
+            amount?: number;
+            kickoffGate?: boolean;
+        };
+        VerifyPaymentCommand: {
+            /** Format: int64 */
+            actualAmount?: number;
+            /** Format: date-time */
+            arrivedAt?: string;
+            voucherId?: string;
+            channelRefNo?: string;
+            basis?: string;
+        };
+        RejectPaymentCommand: {
+            voucherId?: string;
+            basis?: string;
         };
         EnterScopeCommand: {
             scopeDeliverables?: string;
@@ -4298,6 +4538,53 @@ export interface components {
             page?: number;
             /** Format: int32 */
             size?: number;
+        };
+        ApiResponseBackofficePaymentPlanDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficePaymentPlanDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficePaymentPlanDetailResponse: {
+            plan?: components["schemas"]["PaymentPlanResponse"];
+            trails?: components["schemas"]["PaymentVerificationResponse"][];
+            history?: components["schemas"]["HistoryPlanResponse"][];
+        };
+        HistoryPlanResponse: {
+            id?: string;
+            contractId?: string;
+            contractNo?: string;
+            /** Format: int32 */
+            nodeCount?: number;
+            /** Format: int64 */
+            totalAmount?: number;
+            /** Format: int64 */
+            totalSettled?: number;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        PaymentVerificationResponse: {
+            id?: string;
+            nodeId?: string;
+            /** Format: int32 */
+            action?: number;
+            actionName?: string;
+            /** Format: int32 */
+            fromStatus?: number;
+            /** Format: int32 */
+            toStatus?: number;
+            /** Format: int64 */
+            actualAmount?: number;
+            /** Format: date-time */
+            arrivedAt?: string;
+            voucherId?: string;
+            basis?: string;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         ApiResponseBackofficeOrderDetailResponse: {
             /** Format: int32 */
@@ -5321,16 +5608,24 @@ export interface operations {
             };
         };
     };
-    pay: {
+    uploadVoucher: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 id: string;
+                nodeId: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -5338,7 +5633,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                    "*/*": components["schemas"]["ApiResponsePaymentPlanResponse"];
                 };
             };
         };
@@ -5735,6 +6030,86 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseUnitPriceEntryResponse"];
+                };
+            };
+        };
+    };
+    enterNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnterPaymentNodesCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePaymentPlanResponse"];
+                };
+            };
+        };
+    };
+    verify_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyPaymentCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePaymentPlanResponse"];
+                };
+            };
+        };
+    };
+    reject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectPaymentCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePaymentPlanResponse"];
                 };
             };
         };
@@ -6558,6 +6933,28 @@ export interface operations {
             };
         };
     };
+    paymentPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePaymentPlanResponse"];
+                };
+            };
+        };
+    };
     designPackage: {
         parameters: {
             query?: never;
@@ -7034,6 +7431,28 @@ export interface operations {
             };
         };
     };
+    voucherContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                voucherId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
     orders: {
         parameters: {
             query?: {
@@ -7064,6 +7483,28 @@ export interface operations {
         };
     };
     detail_5: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficePaymentPlanDetailResponse"];
+                };
+            };
+        };
+    };
+    detail_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7157,7 +7598,7 @@ export interface operations {
             };
         };
     };
-    detail_6: {
+    detail_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -7327,7 +7768,7 @@ export interface operations {
             };
         };
     };
-    detail_7: {
+    detail_8: {
         parameters: {
             query?: never;
             header?: never;

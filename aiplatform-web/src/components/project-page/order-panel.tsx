@@ -1,7 +1,6 @@
 "use client";
 
 import { Archive, ChevronRight, CircleCheck, Hourglass, PackageCheck } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,8 @@ import {
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirmScope, useContract } from "@/hooks/use-contract";
-import { useCancelOrder, useOrder, usePayOrder } from "@/hooks/use-order";
+import { usePaymentPlan } from "@/hooks/use-payment";
+import { useCancelOrder, useOrder } from "@/hooks/use-order";
 import { errorText } from "@/lib/api/api-error";
 import { ORDER_STATUS } from "@/lib/orders/lock";
 import {
@@ -27,21 +27,21 @@ import { formatRelativeTime } from "@/lib/utils/time";
 
 import { ContractCard } from "./contract-card";
 import { PanelPlaceholder } from "./panel-placeholder";
-import { PayConfirmDialog } from "./pay-confirm-dialog";
+import { PaymentPanel } from "./payment-panel";
 
 /**
- * 订单面板（#28 交易环① + #29 交易环② + #30 交易环③，项目模式主区域；#335
- * 待确认报价呈现态＋下单基准行；#336 范围确认面＋合同预览卡）：待报价 = 状态
- * + 「待确认报价」占位态（价格位以待定态名占位，不以 0 元或示例价代替；报价
- * 落定后翻价格）+ 下单基准（随单冻结的 PRD/Demo 确认版本）+ 取消；已报价
- * （=待支付）= 总价 + 后台备注 + 范围文本三段与「确认范围并准备合同」（确认
- * 即冻结范围快照＋创建合同）+ 去支付（确认弹窗 → mock 支付端点）+ 折叠改价
- * 历史 + 取消 + 合同预览卡（六态/签署位/预览字段集）；已归档终态 = 支付完成
- * 说明 + 完整记录（总价/全时间点组/报价记录）+ 源码包下载。内容向三子步骤
- * （核对范围与报价/签署合同/付款）重组的完整呈现归签约付款页重建（#348），
- * 本面板承数据面最小呈现。后台报/改价经机机接口（无前端入口，联调走脚本），
- * 等待期详情轮询使新价实时可见。订单态变化的 toast 归 SSE 桥（#30），本组件
- * 只出动作反馈（失败）与终态呈现。
+ * 订单面板（#28 交易环① + #29 交易环②，项目模式主区域；#335 待确认报价
+ * 呈现态＋下单基准行；#336 范围确认面＋合同预览卡；#337 付款面板·mock 支付
+ * 闭环退役）：待报价 = 状态 + 「待确认报价」占位态（价格位以待定态名占位，
+ * 不以 0 元或示例价代替；报价落定后翻价格）+ 下单基准（随单冻结的 PRD/Demo
+ * 确认版本）+ 取消；已报价（=待支付）= 总价 + 后台备注 + 范围文本三段与
+ * 「确认范围并准备合同」（确认即冻结范围快照＋创建合同）+ 折叠改价历史 +
+ * 取消 + 合同预览卡（六态/签署位/预览字段集）+ 付款面板（节点五态/凭证上传，
+ * 支付唯一用户面）；已归档终态 = 支付完成说明 + 完整记录（总价/全时间点组/
+ * 报价记录）+ 源码包下载。内容向三子步骤（核对范围与报价/签署合同/付款）
+ * 重组的完整呈现归签约付款页重建（#348），本面板承数据面最小呈现。后台报/
+ * 改价经机机接口（无前端入口，联调走脚本），等待期详情轮询使新价实时可见。
+ * 订单态变化的 toast 归 SSE 桥（#30），本组件只出动作反馈（失败）与终态呈现。
  */
 export function OrderPanel({
   orderId,
@@ -71,9 +71,10 @@ function OrderCard({ orderId }: { orderId: string }) {
   // 非终态挂轮询（后台人工推进六态）
   const { data: contract } = useContract(orderId);
   const cancel = useCancelOrder();
-  const pay = usePayOrder();
   const confirmScope = useConfirmScope();
-  const [payOpen, setPayOpen] = useState(false);
+  // 付款域（#337）：无计划 404 在 hook 归一为 null（缺席＝不渲染面板）；
+  // 有未到账节点挂轮询（后台人工核验）
+  const { data: paymentPlan } = usePaymentPlan(orderId, order?.status);
 
   if (isPending || !order) {
     return (
@@ -95,13 +96,6 @@ function OrderCard({ orderId }: { orderId: string }) {
     order.status === ORDER_STATUS.pendingQuote || order.status === ORDER_STATUS.quoted;
   const waitingQuote = order.status === ORDER_STATUS.pendingQuote;
   const archived = order.status === ORDER_STATUS.archived;
-
-  const onPay = () => {
-    setPayOpen(false);
-    // 确认即收弹窗触支付：成功反馈归 SSE 桥的订单态 toast + 本卡转终态呈现
-    // （失效重拉），失败全局 error toast——不双报
-    pay.mutate(orderId, { onError: (error) => toast.error(errorText(error)) });
-  };
 
   return (
     <div className="h-full min-h-0 overflow-y-auto p-4">
@@ -158,11 +152,6 @@ function OrderCard({ orderId }: { orderId: string }) {
           )}
           {unpaid ? (
             <div className="flex items-center gap-2">
-              {!waitingQuote ? (
-                <Button size="sm" onClick={() => setPayOpen(true)}>
-                  去支付
-                </Button>
-              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -187,13 +176,8 @@ function OrderCard({ orderId }: { orderId: string }) {
       {/* 合同预览卡（#336 最小呈现）：订单名下最近合同（含终态定格呈现） */}
       {contract ? <ContractCard contract={contract} /> : null}
 
-      {/* mock 支付确认（v1 平台内模拟）：确认即同步成功——订单与项目一并归档 */}
-      <PayConfirmDialog
-        open={payOpen}
-        onOpenChange={setPayOpen}
-        price={formatPrice(order.amount, order.currency)}
-        onConfirm={onPay}
-      />
+      {/* 付款面板（#337 凭证核验路径）：支付的唯一用户面（mock 支付弹窗已退役） */}
+      {paymentPlan ? <PaymentPanel plan={paymentPlan} /> : null}
     </div>
   );
 }

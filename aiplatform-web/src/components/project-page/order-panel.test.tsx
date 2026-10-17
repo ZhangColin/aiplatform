@@ -4,13 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { OrderPanel } from "./order-panel";
 
-// 订单面板（#28 交易环① + #29 交易环② + #30 交易环③）：无未终结订单 = 引导
-// 占位；待报价 = 等待文案 + 取消；已报价 = 价格面 + 去支付（确认弹窗归交互测试）
-// + 改价历史；已归档终态 = 支付完成说明 + 完整记录 + 源码包下载。订单详情查询
-// mock 掉（契约面归 hooks 与后端测试）。
+// 订单面板（#28 交易环① + #29 交易环②）：无未终结订单 = 引导占位；待报价 =
+// 等待文案 + 取消；已报价 = 价格面 + 取消 + 改价历史（付款走付款面板·凭证
+// 核验路径，#337 起去支付入口退役）；已归档终态 = 支付完成说明 + 完整记录 +
+// 源码包下载。订单详情查询 mock 掉（契约面归 hooks 与后端测试）。
 const seed = vi.hoisted(() => ({
   order: undefined as Record<string, unknown> | undefined,
   contract: null as Record<string, unknown> | null,
+  paymentPlan: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock("@/hooks/use-order", () => ({
@@ -19,13 +20,17 @@ vi.mock("@/hooks/use-order", () => ({
     isPending: seed.order === undefined,
   }),
   useCancelOrder: () => ({ isPending: false, mutate: vi.fn() }),
-  usePayOrder: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 // 合同域（#336）：无合同＝null（hook 已把 404 归一），契约面归 hooks 测试
 vi.mock("@/hooks/use-contract", () => ({
   useContract: () => ({ data: seed.contract }),
   useConfirmScope: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
+// 付款域（#337）：无计划＝null（hook 已把 404 归一），面板契约归 interaction 测试
+vi.mock("@/hooks/use-payment", () => ({
+  usePaymentPlan: () => ({ data: seed.paymentPlan ?? null }),
 }));
 
 function renderPanel(orderId?: string, projectArchived = false) {
@@ -194,7 +199,7 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).not.toContain("确认范围并准备合同"); // 合同已建，确认动作退场
   });
 
-  it("已报价（=待支付）：总价 + 后台备注 + 可点的去支付（确认弹窗归交互测试）+ 取消", () => {
+  it("已报价（=待支付）：总价 + 后台备注 + 取消（去支付入口已随 mock 支付闭环退役）", () => {
     seed.order = {
       id: "o1",
       projectId: "p1",
@@ -216,8 +221,8 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).toContain("已报价");
     expect(html).toContain("¥1,280"); // 总价（分 → 元）
     expect(html).toContain("后台说明：首版报价：含三个页面");
-    expect(html).toContain("去支付");
-    expect(html).not.toContain("在线支付即将开通"); // #30 起 enabled，不再是占位
+    expect(html).not.toContain("去支付"); // mock 支付入口退役——付款走付款面板
+    expect(html).not.toContain("在线支付即将开通");
     expect(html).toContain("取消订单");
     expect(html).not.toContain("改价历史"); // 仅一次报价，无改价不展示历史
   });
@@ -247,7 +252,7 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).toContain("aria-label=\"展开价格历史\"");
   });
 
-  it("非未支付态：不出取消按钮（支付态的主操作归 #30）", () => {
+  it("非未支付态：不出取消按钮（支付态的主操作归付款面板）", () => {
     seed.order = {
       id: "o1",
       projectId: "p1",

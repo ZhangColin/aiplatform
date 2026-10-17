@@ -43,14 +43,15 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * 接通；运营取消 {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，
  * #157）、{@link #quote}（报价/改价，已报价态重复调用 = 改价）、{@link #pay}
  * （待支付 → 已支付，落 {@code paidAt}/{@code paymentNo}——重对位判定位：
- * 已支付＝开工条件满足，实际判定挂 #338 接通）与 {@link #archive}（已支付 →
- * 已归档，落 {@code archivedAt}——重对位判定位：已归档＝后台人工终局〔交付
- * 完成、尾款核验后〕不再自动，接通归 #338；编排归应用层，#37/#39；运营重试
- * 归档 {@link #archiveByBackoffice} 同守卫带操作者留痕，#158）；终态判定
- * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用预检与
- * 库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一索引，
- * 聚合不做跨行查重。改价留痕在 {@link OrderPriceEntry}（append-only，
- * {@link #amount} 恒等于最新价目行金额）。</p>
+ * 已支付＝开工条件满足，实际判定挂 #338 接通；#337 起平台内 mock 支付入口
+ * 已退役，本方法暂无生产调用方＝#338 判定接通的领域事实构造口）与
+ * {@link #archive}（已支付 → 已归档，落 {@code archivedAt}——重对位判定位：
+ * 已归档＝后台人工终局〔交付完成、尾款核验后〕不再自动，接通归 #338；编排归
+ * 应用层，#37/#39；运营重试归档 {@link #archiveByBackoffice} 同守卫带操作者
+ * 留痕，#158）；终态判定（{@link OrderStatus#isTerminal}——「同项目至多一个
+ * 未终结订单」的应用预检与库侧部分唯一索引共用该口径）。同项目并发下单的
+ * 最终防线 = 库侧唯一索引，聚合不做跨行查重。改价留痕在
+ * {@link OrderPriceEntry}（append-only，{@link #amount} 恒等于最新价目行金额）。</p>
  */
 @Entity
 @Table(name = "ord_orders")

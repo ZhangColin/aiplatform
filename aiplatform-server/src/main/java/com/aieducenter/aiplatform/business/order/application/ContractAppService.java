@@ -11,6 +11,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.data.jpa.specification.ConditionSpecifications;
@@ -23,6 +24,7 @@ import com.aieducenter.aiplatform.business.order.application.dto.response.Backof
 import com.aieducenter.aiplatform.business.order.application.dto.response.ContractResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Contract;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.aggregate.PaymentPlan;
 import com.aieducenter.aiplatform.business.order.domain.entity.OrderPriceEntry;
 import com.aieducenter.aiplatform.business.order.domain.enums.ContractParty;
 import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
@@ -31,6 +33,7 @@ import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
 import com.aieducenter.aiplatform.business.order.domain.repository.ContractRepository;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
+import com.aieducenter.aiplatform.business.order.domain.repository.PaymentPlanRepository;
 import com.aieducenter.aiplatform.support.Tsid;
 
 import lombok.extern.slf4j.Slf4j;
@@ -62,18 +65,26 @@ public class ContractAppService {
 
     private final ContractRepository contractRepository;
     private final OrderRepository orderRepository;
+    private final PaymentPlanRepository paymentPlanRepository;
+    private final TransactionTemplate transactionTemplate;
 
-    public ContractAppService(ContractRepository contractRepository, OrderRepository orderRepository) {
+    public ContractAppService(ContractRepository contractRepository, OrderRepository orderRepository,
+            PaymentPlanRepository paymentPlanRepository, TransactionTemplate transactionTemplate) {
         this.contractRepository = contractRepository;
         this.orderRepository = orderRepository;
+        this.paymentPlanRepository = paymentPlanRepository;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /**
-     * 确认范围并准备合同（#336 合同创建口）：用户确认动作（「确认范围并准备
-     * 合同」）与后台重建（撤回/作废后换新号再立）共用——冻结集一次取齐（最新
-     * 价目行＋范围文本三段现值＋PRD/Demo 双版本引用冗余），起步准备中。前置
-     * 门：已报价（ORD_025）＋范围文本齐备（ORD_026）＋订单活跃（已报价态，
-     * ORD_021——已支付蕴含已签、已取消无合同流）＋无活跃合同（ORD_024）。
+     * 确认范围并准备合同（#336 合同创建口；#337 起付款计划同刻冻结创建）：用户
+     * 确认动作（「确认范围并准备合同」）与后台重建（撤回/作废后换新号再立）
+     * 共用——冻结集一次取齐（最新价目行＋范围文本三段现值＋PRD/Demo 双版本
+     * 引用冗余），起步准备中；<b>合同行与付款计划行同一事务落库</b>（#337：
+     * 计划挂订单下、合同号定格在行上——撤回重建走本口即新计划行、旧计划随旧
+     * 合同留痕）。前置门：已报价（ORD_025）＋范围文本齐备（ORD_026）＋订单
+     * 活跃（已报价态，ORD_021——已支付蕴含已签、已取消无合同流）＋无活跃合同
+     * （ORD_024）。
      *
      * @throws ApplicationException ORD_001 订单不存在；ORD_025 尚无报价；
      *                              ORD_026 范围文本未录入；ORD_021 订单非活跃
@@ -97,7 +108,12 @@ public class ContractAppService {
         }
         Contract contract = Contract.create(order, quote);
         try {
-            contract = contractRepository.save(contract);
+            // 合同＋付款计划同一事务（#337 同刻冻结创建）——约束撞错（活跃合同
+            // 唯一索引）在事务边界抛出，catch 翻译口径不变
+            transactionTemplate.executeWithoutResult(status -> {
+                Contract saved = contractRepository.save(contract);
+                paymentPlanRepository.save(PaymentPlan.create(order, saved));
+            });
         } catch (DataIntegrityViolationException e) {
             // 并发创建撞部分唯一索引（预检漏过）：后到者拒绝，同口径翻译；
             // 非本索引的完整性违例不冒名，原样上抛（同 OrderAppService.place 形制）
@@ -165,7 +181,8 @@ public class ContractAppService {
 
     /**
      * 草稿重录（「需更新」处置正路）：同号＋内容整组录入＋冻结集取订单现值
-     * 重新定格＋版本 +1。仅草稿态（准备中/待核对与签署）。
+     * 重新定格＋版本 +1；<b>范围重冻→新付款计划</b>（#337——新计划行即活跃，
+     * 旧计划随旧冻结集留痕、节点定格不可付）。仅草稿态（准备中/待核对与签署）。
      *
      * @throws ApplicationException ORD_020 合同不存在；ORD_031 非草稿态；
      *                              ORD_032 内容超长；ORD_022/023 依据缺失/超长
@@ -176,7 +193,12 @@ public class ContractAppService {
         // 重冻取订单现值——加载一次贯穿动作与响应（「需更新」对照同源不二读）
         Order order = currentOrderOf(contract);
         contract.record(partyA, partyB, projectScope, paymentPlan, order, operator, basis);
-        return ContractResponse.of(contractRepository.save(contract), order);
+        // 重冻与新计划同一事务（#337 范围重冻→新付款计划）
+        transactionTemplate.executeWithoutResult(status -> {
+            contractRepository.save(contract);
+            paymentPlanRepository.save(PaymentPlan.create(order, contract));
+        });
+        return ContractResponse.of(contract, order);
     }
 
     /**

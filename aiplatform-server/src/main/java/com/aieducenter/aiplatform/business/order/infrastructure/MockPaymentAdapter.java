@@ -7,9 +7,10 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
 
 /**
- * 平台内 mock 支付适配器（v1 唯一实现，#30）：不接任何渠道——生成支付流水号、
- * 同步返回成功（spec：只走成功路径，不模拟失败/超时）。真实渠道接入（#32）时
- * 本适配器整体替换，端口签名随二维码闭环 reshape（ADR 0003：git 历史即回退面）。
+ * 平台内 mock 支付适配器（#30；#337 起支付走付款节点凭证核验路径、本适配器
+ * 无调用方——mock 支付闭环退役，端口按票面「维持现状不加宽」留作渠道真接
+ * 缝）：不接任何渠道——生成支付流水号、同步返回成功。真实渠道接入时本适配器
+ * 整体替换，端口签名随二维码闭环 reshape（ADR 0003：git 历史即回退面）。
  */
 @Adapter(PortType.CLIENT)
 public class MockPaymentAdapter implements PaymentPort {

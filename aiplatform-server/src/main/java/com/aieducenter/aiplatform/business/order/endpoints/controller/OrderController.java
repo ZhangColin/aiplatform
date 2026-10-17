@@ -23,19 +23,21 @@ import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付 + #297 设计资产包取件
- * + #336 合同确认与预览）：确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）
- * / 订单详情（含范围文本三段）/ 取消 / mock 支付 / 设计资产包下载 / 确认范围并
- * 准备合同（范围快照冻结·合同创建口）/ 合同预览（订单名下最近合同）。后台机机
- * 面（清单/详情/源码包/报价改价/范围录入）归 {@link BackofficeOrderController}
- * （#29，/api/backoffice/*，五头 HMAC）；合同承接面归
- * {@link BackofficeContractController}。路由横跨 /api/projects 与 /api/orders
- * 两前缀（spec API 面定盘），故不设类级 {@code @RequestMapping}、逐方法写全
- * 路径。
+ * 订单 REST 面（#28 交易环①用户面 + #297 设计资产包取件 + #336 合同确认与
+ * 预览）：确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）/ 订单详情（含
+ * 范围文本三段）/ 取消 / 设计资产包下载 / 确认范围并准备合同（范围快照冻结·
+ * 合同创建口）/ 合同预览（订单名下最近合同）。后台机机面（清单/详情/源码包/
+ * 报价改价/范围录入）归 {@link BackofficeOrderController}（#29，
+ * /api/backoffice/*，五头 HMAC）；合同承接面归
+ * {@link BackofficeContractController}；付款面（计划查询/凭证上传）归
+ * {@link OrderPaymentController}。mock 支付端点已随 #337 退役（支付语义并入
+ * 付款节点凭证核验路径——不留两轨并存）。路由横跨 /api/projects 与
+ * /api/orders 两前缀（spec API 面定盘），故不设类级
+ * {@code @RequestMapping}、逐方法写全路径。
  */
 @RestController
 @Validated
-@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付 / 设计资产包下载 / 确认范围并准备合同 / 合同预览")
+@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / 设计资产包下载 / 确认范围并准备合同 / 合同预览")
 public class OrderController {
 
     private final OrderAppService appService;
@@ -101,19 +103,6 @@ public class OrderController {
     public ApiResponse<ContractResponse> contract(@PathVariable String id) {
         return ApiResponse.ok(contractAppService.latestByOrder(
                 Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
-    }
-
-    @PostMapping("/api/orders/{id}/payment")
-    @Operation(summary = "mock 支付（确认后同步成功，订单与项目一并归档）",
-            description = "v1 平台内模拟支付，只走成功路径（真实渠道接入归 PaymentPort 切换边界，"
-                    + "#32）。支付成功在一个事务内完成：订单 已支付→已归档（paidAt/archivedAt/"
-                    + "paymentNo 落值）+ 项目归档（ADR-0002）；提交后知识沉淀（取归档时最新 PRD "
-                    + "入知识库，失败降级不影响支付）+ 订单态变化 SSE 通知。归档后界面转只读终态"
-                    + "（对话区关闭、源码包可取、完整记录含改价历史）。仅已报价（=待支付）态可支付；"
-                    + "非待支付 409 ORD_011；订单不存在 404 ORD_001；项目已被手动归档 409 PRJ_013"
-                    + "（事务回滚，订单留待支付态）")
-    public ApiResponse<OrderResponse> pay(@PathVariable String id) {
-        return ApiResponse.ok(appService.pay(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 
     @PostMapping("/api/orders/{id}/cancel")

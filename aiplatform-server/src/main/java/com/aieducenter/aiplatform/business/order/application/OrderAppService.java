@@ -16,7 +16,6 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableTy
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
-import com.aieducenter.aiplatform.business.order.domain.port.PaymentPort;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
@@ -29,11 +28,11 @@ import com.aieducenter.aiplatform.web.GuestContext;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#30 交易环③
- * mock 支付——#37/#39 支付原子化：支付原子（落已支付）与归档（订单 + 项目）拆
- * 两个事务，知识沉淀归档后 best-effort + 订单态变化通知两发；#297 交付物类型
- * ＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与订单
- * 语义重对位基座）：确认下单 = 过双确认门（已确认 PRD 版本＋Demo 确认版本）
+ * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#297 交付物
+ * 类型＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与
+ * 订单语义重对位基座）。#337 起 mock 支付闭环退役（同步支付端点与
+ * {@code #pay} 用例连代码删除——支付语义并入付款节点凭证核验路径，不留两轨
+ * 并存；已支付＝开工条件满足的判定接通归 #338，本服务不再有「支付」入口）：确认下单 = 过双确认门（已确认 PRD 版本＋Demo 确认版本）
  * 后冻结 PRD 确认版全文冗余拷贝＋双版本引用＋交付物类型入单，待报价起步
  * （「待确认报价」占位态）。下单快照的上游＝PRD 确认版本（#330 确认即成版、
  * #332 生成加门：确认是首个构建 run 与下单的共同引用锚——#335 起快照不再读
@@ -45,11 +44,10 @@ import lombok.extern.slf4j.Slf4j;
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
  * place/cancel/submitQuote 刻意不加 {@code @Transactional}：单行插入由仓储自带
  * 事务保证；约束撞错的吸收（catch 后翻译）要求 save 的事务已独立结束，不处在
- * 外层事务中（同 MeteringAppService.report 形制）。唯 {@link #pay} 用
- * {@link TransactionTemplate} 收两个短事务——①支付原子独立落「已支付」；②归档
- * 独立事务，失败留「已支付」不抹支付事实（#37/#39；卡单补偿归 {@link #retryArchive}
- * #158 后台手动写口）；知识沉淀与 SSE 在事务提交后（#5 决议：「支付成功归档
- * 动作之后」；沉淀降级不炸——embedding 不可用不允许回滚已成功的支付）。</p>
+ * 外层事务中（同 MeteringAppService.report 形制）。{@link #retryArchive}（#158
+ * 后台手动补归档口）用 {@link TransactionTemplate} 收「订单＋项目」一个事务，
+ * 失败异常上抛（运营须看见拦截原因）；知识沉淀与 SSE 在事务提交后（#5 决议；
+ * 沉淀降级不炸——embedding 不可用不允许回滚已成功的归档）。</p>
  */
 @Service
 @Slf4j
@@ -65,7 +63,6 @@ public class OrderAppService {
     private final ConversationHistoryAppService conversationHistoryAppService;
     private final DesignPackageAppService designPackageAppService;
     private final OrderQueryAppService orderQueryAppService;
-    private final PaymentPort paymentPort;
     private final EventsAppService eventsAppService;
     private final TransactionTemplate transactionTemplate;
 
@@ -76,7 +73,6 @@ public class OrderAppService {
                            ConversationHistoryAppService conversationHistoryAppService,
                            DesignPackageAppService designPackageAppService,
                            OrderQueryAppService orderQueryAppService,
-                           PaymentPort paymentPort,
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
         this.orderRepository = orderRepository;
@@ -86,7 +82,6 @@ public class OrderAppService {
         this.conversationHistoryAppService = conversationHistoryAppService;
         this.designPackageAppService = designPackageAppService;
         this.orderQueryAppService = orderQueryAppService;
-        this.paymentPort = paymentPort;
         this.eventsAppService = eventsAppService;
         this.transactionTemplate = transactionTemplate;
     }
@@ -276,55 +271,10 @@ public class OrderAppService {
     }
 
     /**
-     * mock 支付（#37/#39 支付原子化）：已报价（=待支付）态同步只走成功路径，支付
-     * 成功即订单落「已支付」真实中间态。拆两个事务——①支付原子（{@link Order#pay}
-     * + save，独立短事务，落 paidAt/paymentNo）；②归档（{@link Order#archive} +
-     * save + {@link ProjectLifecycleAppService#archive} 项目归档，独立事务）——
-     * 归档失败 catch 留「已支付」不抹支付事实（补偿归后续批次）。通知两发：
-     * 支付落定发「已支付」、归档落定发「已归档」，归档失败只发前者；通知以库内
-     * 真值为准（归档事务回滚不还原内存对象，失败路径不得误发「已归档」）。知识
-     * 沉淀在归档后 best-effort（取归档时最新版 PRD 入库；沉淀跟随归档成功——本
-     * 支付链与 {@link #retryArchive} 重试归档皆触发，收尾共用 {@link #settleArchive}；
-     * 内部降级不炸，丢失容忍）。
-     *
-     * @return 订单（归档成功 = 已归档终态；归档失败 = 已支付中间态，paidAt/
-     *         paymentNo 已落、archivedAt 未落）
-     * @throws ApplicationException ORD_001 订单不存在；ORD_011 非待支付状态
-     *                              （聚合守卫，含已支付/已归档/已取消）
-     */
-    public OrderResponse pay(Long orderId) {
-        Order order = requireOrder(orderId);
-        order.requirePayable(); // 非待支付不触支付端口（ORD_011）
-        String paymentNo = paymentPort.pay(order.getId(), order.getAmount(), order.getCurrency());
-        Long projectId = order.getProjectId();
-
-        // ① 支付原子（独立短事务）：已支付真实落库——支付成功即原子事实
-        transactionTemplate.executeWithoutResult(status -> {
-            order.pay(paymentNo);
-            orderRepository.save(order);
-        });
-        publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order); // 支付落定发「已支付」
-
-        // ② 归档（独立事务）：失败留已支付、日志留痕，不抹支付事实（补偿归后续批次）
-        try {
-            transactionTemplate.executeWithoutResult(status -> {
-                order.archive();
-                orderRepository.save(order);
-                projectLifecycleAppService.archive(projectId);
-            });
-        } catch (RuntimeException e) {
-            log.warn("订单 {} 支付成功但归档失败（留已支付，补偿归后续批次）：{}",
-                    orderId, e.getMessage());
-        }
-        return settleArchive(orderId, projectId);
-    }
-
-    /**
      * 重试归档（#158 后台写口，经 BackofficeOrderController 进入）：对「已支付但
-     * 归档失败」的卡单手动补归档。归档事务与 {@link #pay} 的②同款（订单＋项目一
-     * 事务，守卫复用：非已支付 ORD_012、项目重复归档 PRJ_013），差异在失败处置
-     * ——无支付事实可保，异常原样上抛（运营须看见拦截原因，不留静默半成态；与
-     * pay 的 catch 留已支付有意不同）。成功收尾同款 {@link #settleArchive}：重读
+     * 归档失败」的卡单手动补归档。归档事务＝订单＋项目一事务（守卫复用：非已
+     * 支付 ORD_012、项目重复归档 PRJ_013），失败异常原样上抛（运营须看见拦截
+     * 原因，不留静默半成态）。成功收尾同款 {@link #settleArchive}：重读
      * 库定真，已归档发「已归档」通知并触发知识沉淀（沉淀跟随归档成功——支付链
      * 与本口皆触发）。操作者留痕落订单行（缺头落空；支付链自动归档为 NULL）。
      * 不做自动 Scheduled 补偿（隐藏状态机，v1 单量不值当）。
@@ -383,7 +333,7 @@ public class OrderAppService {
     }
 
     private Order requireOrder(Long orderId) {
-        // 带价目历史：detail/cancel/submitQuote/pay 的响应拼装要读价目集合，取齐再出会话
+        // 带价目历史：detail/cancel/submitQuote 的响应拼装要读价目集合，取齐再出会话
         return orderRepository.findWithHistory(orderId)
                 .orElseThrow(() -> new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
     }

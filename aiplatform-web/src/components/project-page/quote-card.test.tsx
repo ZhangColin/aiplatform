@@ -29,7 +29,6 @@ const quotedOrder: Record<string, unknown> = {
 
 vi.mock("@/hooks/use-order", () => ({
   useOrder: () => ({ data: seed.order, isPending: seed.order === undefined }),
-  usePayOrder: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 function renderCard(order: Record<string, unknown> | undefined, event = "quoted") {
@@ -42,13 +41,13 @@ function renderCard(order: Record<string, unknown> | undefined, event = "quoted"
 }
 
 describe("QuoteCard · 视镜取数与状态呈现（#203）", () => {
-  it("已报价（待支付）：报价已出 + 当前金额 + 后台备注 + 去支付与查看订单详情", () => {
+  it("已报价（待支付）：报价已出 + 当前金额 + 后台备注 + 查看订单详情（付款走付款面板）", () => {
     const html = renderCard(quotedOrder);
 
     expect(html).toContain("报价已出");
     expect(html).toContain("¥1,280"); // 金额经订单详情取当前态（128000 分）
     expect(html).toContain("首版报价：含三个页面"); // 后台备注
-    expect(html).toContain("去支付");
+    expect(html).not.toContain("去支付"); // #337 起付款走订单面付款面板
     expect(html).toContain("查看订单详情");
   });
 
@@ -66,7 +65,7 @@ describe("QuoteCard · 视镜取数与状态呈现（#203）", () => {
     expect(html).toContain("报价已更新");
     expect(html).not.toContain("报价已出");
     expect(html).toContain("¥1,280"); // 视镜取数与首报卡同源
-    expect(html).toContain("去支付"); // 待支付态照常可支付
+    expect(html).not.toContain("去支付"); // #337 起付款走订单面付款面板
   });
 
   it("已支付：原地转已支付态，不残留去支付入口", () => {

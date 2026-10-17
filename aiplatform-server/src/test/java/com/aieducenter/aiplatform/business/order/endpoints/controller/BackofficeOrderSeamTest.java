@@ -112,6 +112,9 @@ class BackofficeOrderSeamTest {
     private OrderAppService appService;
 
     @Autowired
+    private com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository orderRepository;
+
+    @Autowired
     private AccountAppService accountAppService;
 
     @Autowired
@@ -120,7 +123,7 @@ class BackofficeOrderSeamTest {
     @MockitoBean
     private ProjectQueryAppService projectQueryAppService;
 
-    /** 跨 BC 唯一写交叉：项目归档联动（#158 卡单的造法＝支付链上让它抛错）。 */
+    /** 跨 BC 唯一写交叉：项目归档联动（#158 重试归档事务内的联动面）。 */
     @MockitoBean
     private ProjectLifecycleAppService projectLifecycleAppService;
 
@@ -773,10 +776,10 @@ class BackofficeOrderSeamTest {
         when(projectQueryAppService.namesOf(List.of(STUCK_PROJECT_ID)))
                 .thenReturn(Map.of(STUCK_PROJECT_ID, "卡单补偿项目")); // 沉淀取名面
         stubEmbeddingOk();
-        when(projectLifecycleAppService.archive(anyLong()))
-                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
-                .thenReturn(null); // 首调（支付链）失败造卡单，次调（重试）恢复
-        appService.pay(Long.parseLong(order.id()));
+        // 已支付卡单夹具（聚合正身直落——#337 mock 支付链退役，重试归档的入口态）
+        com.aieducenter.aiplatform.business.order.domain.aggregate.Order paid = orderRepository.findWithHistory(Long.parseLong(order.id())).orElseThrow();
+        paid.pay("TEST-" + order.id());
+        orderRepository.save(paid);
         assertThat(jdbcTemplate.queryForMap(
                 "SELECT status, archived_at FROM ord_orders WHERE id = ?",
                 Long.parseLong(order.id())))
@@ -803,8 +806,8 @@ class BackofficeOrderSeamTest {
         assertThat(row.get("archived_at")).isNotNull();
         assertThat(row.get("archive_operator_id")).isEqualTo(OPERATOR_ID_STR);
         assertThat(row.get("archive_operator_name")).isEqualTo(OPERATOR_NAME);
-        // 项目归档联动两触：支付链一次（失败）＋重试一次（成功）
-        verify(projectLifecycleAppService, times(2)).archive(STUCK_PROJECT_ID);
+        // 项目归档联动一触（重试归档事务内——支付链已退役）
+        verify(projectLifecycleAppService, times(1)).archive(STUCK_PROJECT_ID);
         // 知识块落库（sinkPrd 补调生效）：kind=PRD、幂等键=projectId；素材登记行同落
         List<Map<String, Object>> chunks = jdbcTemplate.queryForList(
                 "SELECT kind, source_ref FROM knw_chunks WHERE project_id = ?",

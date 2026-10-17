@@ -1,10 +1,7 @@
 package com.aieducenter.aiplatform.business.identity.application;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
 
@@ -42,25 +39,15 @@ public class AuthAppService {
     private final BffSessionStore sessionStore;
     private final AccountAppService accountAppService;
     private final GuestBindingAppService guestBindingAppService;
-    private final Clock clock;
 
-    @Autowired
     public AuthAppService(SsoProperties properties, OidcClient oidcClient,
             BffSessionStore sessionStore, AccountAppService accountAppService,
             GuestBindingAppService guestBindingAppService) {
-        this(properties, oidcClient, sessionStore, accountAppService, guestBindingAppService,
-                Clock.systemUTC());
-    }
-
-    AuthAppService(SsoProperties properties, OidcClient oidcClient, BffSessionStore sessionStore,
-            AccountAppService accountAppService, GuestBindingAppService guestBindingAppService,
-            Clock clock) {
         this.properties = properties;
         this.oidcClient = oidcClient;
         this.sessionStore = sessionStore;
         this.accountAppService = accountAppService;
         this.guestBindingAppService = guestBindingAppService;
-        this.clock = clock;
     }
 
     /**
@@ -115,12 +102,9 @@ public class AuthAppService {
         Account account = accountAppService.upsertOidc(claims.subject(), claims.displayName());
 
         String sessionId = OauthTransaction.randomToken();
-        Instant expiresAt = tokens.expiresIn() != null
-                ? clock.instant().plusSeconds(tokens.expiresIn())
-                : null;
         sessionStore.put(sessionId, new BffSession(
                 account.getId(), claims.displayName(),
-                tokens.idToken(), tokens.accessToken(), tokens.refreshToken(), expiresAt));
+                tokens.idToken(), tokens.accessToken(), tokens.refreshToken()));
 
         GuestBindingAppService.BindingOutcome binding =
                 guestBindingAppService.bindOnLogin(guestCredential, account.getId());

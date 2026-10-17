@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.identity.application;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -102,7 +101,7 @@ class GuestSessionIntegrationTest {
     void seed() throws Exception {
         purgeGuestDomainTables();
         sessionStore.put(SESSION_ACCOUNT, new BffSession(
-                ACCOUNT, "对照账户", null, null, null, Instant.now().plusSeconds(3600)));
+                ACCOUNT, "对照账户", null, null, null));
         when(workspaceLifecycleAppService.create(any())).thenAnswer(invocation -> {
             long workspaceId = workspaceSeq.incrementAndGet();
             return new WorkspaceResponse(Long.toString(workspaceId), EnvKind.DEV, "开发环境",

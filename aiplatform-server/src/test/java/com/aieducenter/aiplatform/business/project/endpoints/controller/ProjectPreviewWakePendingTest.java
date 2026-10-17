@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import java.time.Instant;
 
 import jakarta.servlet.http.Cookie;
 
@@ -76,7 +75,7 @@ class ProjectPreviewWakePendingTest {
     @BeforeEach
     void seedSession() {
         sessionStore.put(SESSION_ID, new BffSession(
-                1L, "唤醒待期测试", null, null, null, Instant.now().plusSeconds(3600)));
+                1L, "唤醒待期测试", null, null, null));
     }
 
     @AfterEach

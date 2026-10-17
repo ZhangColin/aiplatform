@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import java.time.Instant;
 
 import jakarta.servlet.http.Cookie;
 
@@ -99,7 +98,7 @@ class ProjectMaterialUploadTest {
     @BeforeEach
     void seed() {
         sessionStore.put(SESSION_ID, new BffSession(
-                1L, "物料上传测试", null, null, null, Instant.now().plusSeconds(3600)));
+                1L, "物料上传测试", null, null, null));
         Workspace ready = Workspace.registerPending(
                 WorkspaceId.of(Long.toString(workspaceSeq)), EnvKind.DEV);
         ready.complete(WorkspaceProvision.of(WorkspaceHandle.dev(

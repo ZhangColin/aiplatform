@@ -6,7 +6,6 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -30,7 +29,10 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub;
 import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
+import com.aieducenter.aiplatform.business.identity.endpoints.scheduler.BffSessionCleanupScheduler;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSessionStore;
+import com.aieducenter.aiplatform.business.identity.infrastructure.session.InMemoryBffSessionStore;
+import org.springframework.context.annotation.FilterType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -73,8 +75,7 @@ class AgentEventDeadSocketTest {
     @Test
     void given_dead_socket_when_broadcast_in_race_window_then_caller_unaffected()
             throws Exception {
-        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt",
-                Instant.now().plusSeconds(600)));
+        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt"));
 
         AtomicBoolean anyPingReceived = new AtomicBoolean(false);
         // 多轮撞窗口：onError 移除是异步的，单次未必命中
@@ -104,8 +105,7 @@ class AgentEventDeadSocketTest {
     @Test
     void given_dead_socket_when_async_error_dispatch_then_no_global_handler_error_noise()
             throws Exception {
-        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt",
-                Instant.now().plusSeconds(600)));
+        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt"));
 
         Logger globalHandlerLogger = (Logger) org.slf4j.LoggerFactory
                 .getLogger("com.cartisan.web.exception.GlobalExceptionHandler");
@@ -142,8 +142,7 @@ class AgentEventDeadSocketTest {
     @Test
     void given_two_dead_sockets_when_concurrent_broadcasts_then_caller_unaffected()
             throws Exception {
-        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt",
-                Instant.now().plusSeconds(600)));
+        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt"));
 
         for (int i = 0; i < 8; i++) {
             RawSseClient first = RawSseClient.connect(port,
@@ -242,7 +241,8 @@ class AgentEventDeadSocketTest {
     }
 
     /**
-     * 窄上下文入口（同 EventsControllerSseTest 形态）：不依赖本机 PG。
+     * 窄上下文入口（同 EventsControllerSseTest 形态）：不依赖本机 PG。会话 store
+     * 落 PG 后依赖 JPA（#329）——本上下文排除数据面，真 store 与清扫器换内存替身。
      */
     @SpringBootConfiguration
     @EnableAutoConfiguration
@@ -250,8 +250,19 @@ class AgentEventDeadSocketTest {
             "com.aieducenter.aiplatform.config",
             "com.aieducenter.aiplatform.web",
             "com.aieducenter.aiplatform.base.eventhub",
-            "com.aieducenter.aiplatform.business.identity.infrastructure.session"})
+            "com.aieducenter.aiplatform.business.identity.infrastructure.session"},
+            excludeFilters = {
+                    // 真 store/清扫器落 PG 依赖 JPA（#329）——窄上下文排除数据面，换内存替身
+                    @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                            classes = {BffSessionStore.class, BffSessionCleanupScheduler.class}),
+                    // 同包另一测试类的窄入口也会被扫描捡起（其 @Bean 会与本类撞名）——
+                    // 显式注册的入口类不经过滤器，只挡交叉捡拾
+                    @ComponentScan.Filter(type = FilterType.REGEX, pattern = ".*NarrowApp")})
     static class NarrowApp {
         // 通道两件套与控制器随 eventhub 包扫描装配（无重复显式 @Bean）
+        @org.springframework.context.annotation.Bean
+        BffSessionStore sessionStore() {
+            return new InMemoryBffSessionStore();
+        }
     }
 }

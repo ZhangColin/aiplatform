@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import java.time.Instant;
 
 import jakarta.servlet.http.Cookie;
 
@@ -93,7 +92,7 @@ class ProjectFileRawServeTest {
     @BeforeEach
     void seed() {
         sessionStore.put(SESSION_ID, new BffSession(
-                1L, "图片直出测试", null, null, null, Instant.now().plusSeconds(3600)));
+                1L, "图片直出测试", null, null, null));
         Workspace ready = Workspace.registerPending(
                 WorkspaceId.of(Long.toString(workspaceSeq)), EnvKind.DEV);
         ready.complete(WorkspaceProvision.of(WorkspaceHandle.dev(

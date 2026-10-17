@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.identity.endpoints.controller;
 
-import java.time.Instant;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -40,8 +39,7 @@ class MeControllerTest {
     void given_session_cookie_when_get_me_then_account_id_and_display_name_in_envelope()
             throws Exception {
         when(sessionStore.get("sid-1")).thenReturn(Optional.of(
-                new BffSession(3897654321098765432L, "张三", "idt", "at", "rt",
-                        Instant.now().plusSeconds(60))));
+                new BffSession(3897654321098765432L, "张三", "idt", "at", "rt")));
 
         mockMvc.perform(get("/api/me")
                         .cookie(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-1")))

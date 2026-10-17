@@ -41,7 +41,10 @@ public enum IdentityMessage implements CodeMessage {
      * 取 IDN_010：本票先行占 IDN_005 未对外（并行合并树尚绿），与 #327 撞号时
      * 让号给已对外验证码端点契约（域码登记制不重排已冻结面，未冻结自避）。
      */
-    GUEST_FIELDS_INCOMPLETE(400, "IDN_010", "访客字段不完整");
+    GUEST_FIELDS_INCOMPLETE(400, "IDN_010", "访客字段不完整"),
+
+    /** #329 会话持久化：种会话参数不完整（防御面——常规编排不可达） */
+    SESSION_FIELDS_INCOMPLETE(400, "IDN_011", "会话字段不完整");
 
     private final int httpStatus;
     private final String code;

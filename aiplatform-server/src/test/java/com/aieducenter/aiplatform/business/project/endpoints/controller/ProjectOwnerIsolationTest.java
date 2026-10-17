@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -107,9 +106,9 @@ class ProjectOwnerIsolationTest {
     @BeforeEach
     void seed() throws Exception {
         sessionStore.put(SESSION_A, new BffSession(
-                ACCOUNT_A, "账户甲", null, null, null, Instant.now().plusSeconds(3600)));
+                ACCOUNT_A, "账户甲", null, null, null));
         sessionStore.put(SESSION_B, new BffSession(
-                ACCOUNT_B, "账户乙", null, null, null, Instant.now().plusSeconds(3600)));
+                ACCOUNT_B, "账户乙", null, null, null));
         when(workspaceLifecycleAppService.create(any())).thenAnswer(invocation -> {
             long workspaceId = workspaceSeq.incrementAndGet();
             return new WorkspaceResponse(Long.toString(workspaceId), EnvKind.DEV, "开发环境",

@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.identity.infrastructure.session;
 
-import java.time.Instant;
 import java.util.Optional;
 
 import com.cartisan.core.context.RequestContext;
@@ -26,10 +25,13 @@ import static org.mockito.Mockito.when;
  * （含洗掉透传的 X-User-* 头）、会话 id 未知视同无会话；#326 起访客维度装配
  * （无账户会话时凭证直查绑定 GuestContext、账户会话优先、滑动续期随节流写刷新
  * cookie 寿命）。
+ *
+ * <p>store 以 mock 注入（未桩定的 get 一律 empty——#329 起 store 落 PG，真行为
+ * 归 BffSessionStoreIntegrationTest；本类只测过滤器的装配与洗头逻辑）。</p>
  */
 class BffSessionContextFilterTest {
 
-    private final BffSessionStore sessionStore = new BffSessionStore();
+    private final BffSessionStore sessionStore = mock(BffSessionStore.class);
     private final GuestAppService guestAppService = mock(GuestAppService.class);
     private final BffSessionContextFilter filter =
             new BffSessionContextFilter(providerOf(sessionStore), providerOf(guestAppService));
@@ -71,8 +73,7 @@ class BffSessionContextFilterTest {
     @Test
     void given_valid_session_cookie_when_filter_then_user_bound_with_account_id_and_display_name()
             throws Exception {
-        sessionStore.put("sid-1",
-                new BffSession(42L, "张三", "idt", "at", "rt", Instant.now().plusSeconds(3600)));
+        when(sessionStore.get("sid-1")).thenReturn(Optional.of(session(42L, "张三")));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/me");
         request.setCookies(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-1"));
 
@@ -92,7 +93,7 @@ class BffSessionContextFilterTest {
 
     @Test
     void given_unknown_session_id_when_filter_then_user_cleared() throws Exception {
-        sessionStore.put("sid-1", session(1L, "张三"));
+        // 未桩定的 get 一律 empty（mock 缺省）：cookie 值无行可查＝未知会话
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/me");
         request.setCookies(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "other"));
 
@@ -139,7 +140,7 @@ class BffSessionContextFilterTest {
             throws Exception {
         // 签名面以透传头为准：即便请求捎带了用户会话 cookie 也不参与装配
         // （机机调用无会话，cookie 只可能是串味——头明示信任、会话不越权）
-        sessionStore.put("sid-1", session(42L, "张三"));
+        when(sessionStore.get("sid-1")).thenReturn(Optional.of(session(42L, "张三")));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/backoffice/orders");
         request.addHeader("X-User-Id", "700100");
         request.addHeader("X-User-Name", "运营·小刘");
@@ -168,7 +169,7 @@ class BffSessionContextFilterTest {
 
     @Test
     void given_valid_session_over_forged_header_when_filter_then_session_wins() throws Exception {
-        sessionStore.put("sid-1", session(42L, "张三"));
+        when(sessionStore.get("sid-1")).thenReturn(Optional.of(session(42L, "张三")));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/me");
         request.addHeader("X-User-Id", "999");
         request.setCookies(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-1"));
@@ -208,7 +209,7 @@ class BffSessionContextFilterTest {
     void given_account_session_and_guest_credential_when_filter_then_account_wins_guest_unbound()
             throws Exception {
         // 账户会话优先于访客凭证（spec 段②）：会话在场即不解析访客——不绑、不查库
-        sessionStore.put("sid-1", session(42L, "张三"));
+        when(sessionStore.get("sid-1")).thenReturn(Optional.of(session(42L, "张三")));
         givenGuestCredential("cred-1", 88L, false);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/projects");
         request.setCookies(
@@ -293,8 +294,7 @@ class BffSessionContextFilterTest {
     private Captured captured;
 
     private static BffSession session(Long accountId, String displayName) {
-        return new BffSession(accountId, displayName, "idt", "at", "rt",
-                Instant.now().plusSeconds(3600));
+        return new BffSession(accountId, displayName, "idt", "at", "rt");
     }
 
     /** 过滤后由下游链条读取 RequestContext（模拟 interceptor/controller 视角） */

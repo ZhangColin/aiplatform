@@ -26,8 +26,8 @@ import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSe
 /**
  * 验证码登录用例（#327，M01 弹窗后端链路）：平台内自建发码/验码/建账户/种会话
  * ——无密码、登录即注册（验码即 upsert，不存在静默建账户）；不走 identity 侧
- * 加通道。会话按现有机制种（BffSessionStore 内存态——持久化属 #329，本票不越界；
- * token 三件套无值，code 登录无 token 语义）。
+ * 加通道。会话与 OIDC 流同口种（BffSessionStore 落 {@code idn_sessions}，#329 起
+ * 持久化；token 三件套无值，code 登录无 token 语义）。
  *
  * <p>守卫序（发码）：形态（IDN_005）→ 通道开关（IDN_006，机制双开上线先邮箱）
  * → 频控（IDN_007，冷却窗）→ 落码后经端口发出。验码（IDN_008）统一口径
@@ -107,7 +107,7 @@ public class CodeLoginAppService {
 
         String sessionId = OauthTransaction.randomToken();
         sessionStore.put(sessionId, new BffSession(
-                account.getId(), account.getDisplayName(), null, null, null, null));
+                account.getId(), account.getDisplayName(), null, null, null));
 
         GuestBindingAppService.BindingOutcome binding =
                 guestBindingAppService.bindOnLogin(guestCredential, account.getId());

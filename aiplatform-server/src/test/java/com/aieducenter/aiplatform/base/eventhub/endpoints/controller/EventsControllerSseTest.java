@@ -33,7 +33,10 @@ import org.springframework.http.MediaType;
 
 import com.aieducenter.aiplatform.business.identity.domain.model.AuthCookies;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSession;
+import com.aieducenter.aiplatform.business.identity.endpoints.scheduler.BffSessionCleanupScheduler;
 import com.aieducenter.aiplatform.business.identity.infrastructure.session.BffSessionStore;
+import com.aieducenter.aiplatform.business.identity.infrastructure.session.InMemoryBffSessionStore;
+import org.springframework.context.annotation.FilterType;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 
@@ -108,7 +111,7 @@ class EventsControllerSseTest {
     private SseClient connectAs(long accountId, String query, String lastEventId) throws Exception {
         String sessionId = TEST_SESSION_ID + "-" + accountId;
         sessionStore.put(sessionId, new BffSession(accountId, "sse-test-" + accountId,
-                "idt", "at", "rt", Instant.now().plusSeconds(600)));
+                "idt", "at", "rt"));
         SseClient client = SseClient.connect(port, query,
                 AuthCookies.SESSION_COOKIE_NAME + "=" + sessionId, lastEventId);
         clients.add(client);
@@ -572,7 +575,19 @@ class EventsControllerSseTest {
             "com.aieducenter.aiplatform.config",
             "com.aieducenter.aiplatform.web",
             "com.aieducenter.aiplatform.base.eventhub",
-            "com.aieducenter.aiplatform.business.identity.infrastructure.session"})
+            "com.aieducenter.aiplatform.business.identity.infrastructure.session"},
+            excludeFilters = {
+                    // 真 store/清扫器落 PG 依赖 JPA（#329）——窄上下文排除数据面，换内存替身
+                    @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
+                            classes = {BffSessionStore.class, BffSessionCleanupScheduler.class}),
+                    // 同包另一测试类的窄入口也会被扫描捡起（其 @Bean 会与本类撞名）——
+                    // 显式注册的入口类不经过滤器，只挡交叉捡拾
+                    @ComponentScan.Filter(type = FilterType.REGEX, pattern = ".*NarrowApp")})
     static class NarrowApp {
+        // 会话 store 落 PG 后依赖 JPA（#329）——本上下文排除数据面，换内存替身
+        @org.springframework.context.annotation.Bean
+        BffSessionStore sessionStore() {
+            return new InMemoryBffSessionStore();
+        }
     }
 }

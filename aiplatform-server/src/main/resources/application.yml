@@ -117,6 +117,12 @@ app:
   guest:
     retention-period: 30d
     renew-threshold: 15d
+  # #329 · business.identity 登录会话持久化（idn_sessions）：会话 TTL（创建即定
+  # now+ttl，过即不认、定时扫描清行）与清扫节奏（@Scheduled 占位符消费，DELETE
+  # 幂等——多实例并发清扫安全）。
+  session:
+    ttl: 14d
+    cleanup-interval: 1h
   # #213 · business.project 外部资料抓取：响应大小上限（字节，超此截断——缺省
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
   external-content:

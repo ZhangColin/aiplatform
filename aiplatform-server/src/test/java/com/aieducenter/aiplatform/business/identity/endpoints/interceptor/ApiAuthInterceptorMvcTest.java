@@ -86,8 +86,7 @@ class ApiAuthInterceptorMvcTest {
     void given_session_cookie_when_request_api_then_filter_binds_context_and_allowed() throws Exception {
         // 走真实链路：BffSessionContextFilter 凭 cookie 绑定上下文 → 拦截器放行
         when(sessionStore.get("sid-1")).thenReturn(Optional.of(
-                new BffSession(7L, "张三", "idt", "at", "rt",
-                        java.time.Instant.now().plusSeconds(3600))));
+                new BffSession(7L, "张三", "idt", "at", "rt")));
 
         mockMvc.perform(get("/api/probe")
                         .cookie(new jakarta.servlet.http.Cookie(AuthCookies.SESSION_COOKIE_NAME, "sid-1")))

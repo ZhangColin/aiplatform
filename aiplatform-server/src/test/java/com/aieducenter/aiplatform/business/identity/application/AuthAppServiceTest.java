@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.identity.application;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -9,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.aieducenter.aiplatform.IntegrationTest;
@@ -67,6 +67,9 @@ class AuthAppServiceTest {
     @Autowired
     private AccountRepository accountRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @MockitoBean
     private OidcClient oidcClient;
 
@@ -76,8 +79,9 @@ class AuthAppServiceTest {
     @AfterEach
     void cleanUp() {
         // 建档走 upsertOidc（账号＋oidc 绑定两行），清理两行一起（绑定残留会让
-        // 下次同 sub 命中已删账号）
+        // 下次同 sub 命中已删账号）；会话行随账号一并清（#329 起落库）
         accountAppService.accountByIdentifier(sub).ifPresent(account -> {
+            jdbcTemplate.update("DELETE FROM idn_sessions WHERE account_id = ?", account.getId());
             bindingRepository.deleteAll(
                     bindingRepository.findByAccountIdIn(List.of(account.getId())));
             accountRepository.delete(account);
@@ -133,9 +137,6 @@ class AuthAppServiceTest {
         assertThat(session.idToken()).isEqualTo("idt-value");
         assertThat(session.accessToken()).isEqualTo("at-value");
         assertThat(session.refreshToken()).isEqualTo("rt-value");
-        assertThat(session.expiresAt())
-                .isAfter(Instant.now().plusSeconds(3500))
-                .isBefore(Instant.now().plusSeconds(3700));
     }
 
     @Test
@@ -232,8 +233,7 @@ class AuthAppServiceTest {
 
     @Test
     void given_live_session_when_logout_then_hint_taken_before_removal_and_session_gone() {
-        sessionStore.put("sid-1", new BffSession(1L, "张三", "idt-hint", "at", "rt",
-                Instant.now().plusSeconds(60)));
+        sessionStore.put("sid-1", new BffSession(1L, "张三", "idt-hint", "at", "rt"));
         when(oidcClient.logoutUrl(anyString(), anyString(), eq("idt-hint")))
                 .thenReturn("http://identity.localhost:10001/logout?...");
 

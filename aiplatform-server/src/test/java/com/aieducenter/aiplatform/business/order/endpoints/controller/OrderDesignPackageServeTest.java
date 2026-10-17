@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.order.endpoints.controller;
 
-import java.time.Instant;
 
 import jakarta.servlet.http.Cookie;
 
@@ -96,7 +95,7 @@ class OrderDesignPackageServeTest {
     @BeforeEach
     void seed() {
         sessionStore.put(SESSION_ID, new BffSession(
-                1L, "资产包下载测试", null, null, null, Instant.now().plusSeconds(3600)));
+                1L, "资产包下载测试", null, null, null));
         Workspace ready = Workspace.registerPending(
                 WorkspaceId.of(Long.toString(workspaceSeq)), EnvKind.DEV);
         ready.complete(WorkspaceProvision.of(WorkspaceHandle.dev(

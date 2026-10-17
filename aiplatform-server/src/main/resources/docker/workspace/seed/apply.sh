@@ -8,11 +8,15 @@
 # 速度触发器留档（票面）：实测落库对 Demo 速度影响非常大时再议降形态方案。
 set -u
 
+# PG 客户端路径（与 init-workspace.sh 的 PG_BIN 同源——镜像 postgresql-15；镜像
+# 升 PG 版本两处同改）
+PG_BIN=/usr/lib/postgresql/15/bin
+
 [ -n "${WORKSPACE_DB:-}" ] || exit 0
 pg_isready -h localhost -q || exit 0
 mkdir -p /workspace/.platform/logs
 {
   echo "--- seed $(date '+%F %T') ---"
-  su postgres -c "/usr/lib/postgresql/15/bin/psql -h localhost -q -v ON_ERROR_STOP=0 -d '$WORKSPACE_DB' -f /opt/seed/seed.sql"
+  su postgres -c "$PG_BIN/psql -h localhost -q -v ON_ERROR_STOP=0 -d '$WORKSPACE_DB' -f /opt/seed/seed.sql"
 } >> /workspace/.platform/logs/seed.log 2>&1 || true
 exit 0

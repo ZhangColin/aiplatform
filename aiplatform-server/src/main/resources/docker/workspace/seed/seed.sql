@@ -27,6 +27,8 @@ DECLARE
     pool_amount  numeric[] := ARRAY[199,299,399,599,899,1299,1999,2999,3999,4999,5999,6999];
 
     -- ---------- 引擎区（按列形合成通用示例行，勿动） ----------
+    re_person  text := '(customer|client|guest|contact|member|user|student|teacher|applicant|owner|assignee|handler|客户|顾客|会员|联系人|用户|学员|申请人|负责|经办|员工|人员)';
+    re_company text := '(company|corp|org|supplier|vendor|merchant|tenant|school|企业|公司|单位|机构|部门|供应商|商家)';
     tab record;
     colr record;
     has_rows boolean;
@@ -145,9 +147,9 @@ BEGIN
                             v := CASE
                                 WHEN lower(colr.colname) ~ '(name|title|subject|label|名称|标题|主题|事项|昵称)' THEN
                                     CASE
-                                        WHEN lower(colr.colname) ~ '(customer|client|guest|contact|member|user|student|teacher|applicant|owner|assignee|handler|客户|顾客|会员|联系人|用户|学员|申请人|负责|经办|员工|人员)' THEN
+                                        WHEN lower(colr.colname) ~ re_person THEN
                                             pool_person[((i - 1) % array_length(pool_person, 1)) + 1]
-                                        WHEN lower(colr.colname) ~ '(company|corp|org|supplier|vendor|merchant|tenant|school|企业|公司|单位|机构|部门|供应商|商家)' THEN
+                                        WHEN lower(colr.colname) ~ re_company THEN
                                             pool_company[((i - 1) % array_length(pool_company, 1)) + 1]
                                         ELSE pool_title[((i - 1) % array_length(pool_title, 1)) + 1]
                                     END
@@ -166,9 +168,9 @@ BEGIN
                                 WHEN lower(colr.colname) ~ '(url|link|avatar|image|img|icon|photo|cover|链接|头像|图片|封面)' THEN
                                     'https://example.com/asset-' || i || '.png'
                                 -- 裸人位/机构位列（无 name 后缀，看板 assignee、owner 等常见形）
-                                WHEN lower(colr.colname) ~ '(customer|client|guest|contact|member|user|student|teacher|applicant|owner|assignee|handler|负责人|经办人|联系人|客户|顾客|会员|用户|学员|申请人|员工|人员)' THEN
+                                WHEN lower(colr.colname) ~ re_person THEN
                                     pool_person[((i - 1) % array_length(pool_person, 1)) + 1]
-                                WHEN lower(colr.colname) ~ '(company|corp|org|supplier|vendor|merchant|tenant|school|企业|公司|单位|机构|部门|供应商|商家)' THEN
+                                WHEN lower(colr.colname) ~ re_company THEN
                                     pool_company[((i - 1) % array_length(pool_company, 1)) + 1]
                                 ELSE NULL
                             END;

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +25,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DemoSeedAppService {
 
-    /** 种子施用命令（镜像内幂等入口，内部自吞失败、恒退 0）。 */
-    static final String SEED_COMMAND = "sh /opt/seed/apply.sh";
+    /** 种子施用命令（镜像内幂等入口 {@link WorkspaceLayout#SEED_APPLY_ENTRY}——路径契约单点，与 appStartCommand 共用防漂移）。 */
+    static final String SEED_COMMAND = "sh " + WorkspaceLayout.SEED_APPLY_ENTRY;
 
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
 

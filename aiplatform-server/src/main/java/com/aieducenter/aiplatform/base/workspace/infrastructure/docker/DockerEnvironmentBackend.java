@@ -434,7 +434,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private String appStartCommand() {
         return "cd " + WorkspaceLayout.ROOT
                 + " && if test -f package.json && ! test -d node_modules; then pnpm install; fi"
-                + " && sh /opt/seed/apply.sh"
+                + " && sh " + WorkspaceLayout.SEED_APPLY_ENTRY
                 + " && if test -f server.js; then APP='node server.js';"
                 + " elif test -f package.json; then APP='npm start';"
                 + " else exit 0; fi"

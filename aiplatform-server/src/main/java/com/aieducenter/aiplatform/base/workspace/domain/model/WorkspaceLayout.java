@@ -106,6 +106,14 @@ public final class WorkspaceLayout {
     /** 约定三：.env——平台向工作区注入连接串的唯一通道。 */
     public static final String ENV_FILE = ".env";
 
+    /**
+     * 演示种子施用入口（#340）：镜像内 /opt/seed/apply.sh（幂等补空表、恒退 0）。
+     * 镜像层资产而非卷内布局，进本表是路径契约单点化（Java 侧两处调用——
+     * appStartCommand 拉起前、DemoSeedAppService run 收口——共用此常量防漂移；
+     * sh 侧调用方 init-workspace.sh 与 Dockerfile 随镜像同源）。
+     */
+    public static final String SEED_APPLY_ENTRY = "/opt/seed/apply.sh";
+
     /** 版本元数据目录（#91 容器内 git 仓库——版本正本 git log 落点，随卷持久）。 */
     public static final String GIT_DIR = ".git";
 

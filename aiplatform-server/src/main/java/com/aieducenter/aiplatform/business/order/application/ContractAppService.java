@@ -66,13 +66,16 @@ public class ContractAppService {
     private final ContractRepository contractRepository;
     private final OrderRepository orderRepository;
     private final PaymentPlanRepository paymentPlanRepository;
+    private final KickoffAppService kickoffAppService;
     private final TransactionTemplate transactionTemplate;
 
     public ContractAppService(ContractRepository contractRepository, OrderRepository orderRepository,
-            PaymentPlanRepository paymentPlanRepository, TransactionTemplate transactionTemplate) {
+            PaymentPlanRepository paymentPlanRepository, KickoffAppService kickoffAppService,
+            TransactionTemplate transactionTemplate) {
         this.contractRepository = contractRepository;
         this.orderRepository = orderRepository;
         this.paymentPlanRepository = paymentPlanRepository;
+        this.kickoffAppService = kickoffAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -103,6 +106,13 @@ public class ContractAppService {
         if (order.getStatus() != OrderStatus.QUOTED) {
             throw new ApplicationException(OrderMessage.CONTRACT_ACTION_NOT_ALLOWED);
         }
+        // 已签守卫（#338 收口 #336 遗留缝）：最近合同已签署完成（终态——活跃
+        // 预检查不到）即拒再建——已签走变更沟通不碰原合同；此守卫同时保证开工
+        // 判定的「最近合同」读面不被新草稿污染（签署后等待付款的常态窗口）
+        if (contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId)
+                .filter(latest -> latest.getStatus() == ContractStatus.SIGNED).isPresent()) {
+            throw new ApplicationException(OrderMessage.CONTRACT_ACTION_NOT_ALLOWED);
+        }
         if (contractRepository.findActiveByOrderId(orderId).isPresent()) {
             throw new ApplicationException(OrderMessage.CONTRACT_ALREADY_ACTIVE);
         }
@@ -128,13 +138,19 @@ public class ContractAppService {
 
     /**
      * 推进（线性单步：准备中 → 待核对与签署 → 签署进行中 → 签署完成——末边带
-     * 双方均签守卫）。依据必填、操作者随行落痕。
+     * 双方均签守卫）。依据必填、操作者随行落痕。<b>推进到「签署完成」即触发
+     * 开工判定</b>（#338 双门禁之合同腿：save 落库后判定，付款腿未满足则空转
+     * ——订单留已签合同的等待窗口）。
      *
      * @throws ApplicationException ORD_020 合同不存在；ORD_021 无推进边/双方未
      *                              均签；ORD_022/023 依据缺失/超长
      */
     public ContractResponse advance(Long contractId, String basis, Operator operator) {
-        return act(contractId, contract -> contract.advance(basis, operator));
+        ContractResponse response = act(contractId, contract -> contract.advance(basis, operator));
+        if (response.status() == ContractStatus.SIGNED) {
+            kickoffAppService.settle(Long.parseLong(response.orderId()));
+        }
+        return response;
     }
 
     /**

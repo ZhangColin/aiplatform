@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.order.application;
 
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -11,11 +12,14 @@ import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
+import com.aieducenter.aiplatform.business.order.domain.aggregate.Contract;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.Operator;
+import com.aieducenter.aiplatform.business.order.domain.repository.ContractRepository;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
 import com.aieducenter.aiplatform.business.project.application.ConversationHistoryAppService;
 import com.aieducenter.aiplatform.business.project.application.DesignPackageAppService;
@@ -30,9 +34,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 订单写用例（#18 落下单缝；#28 交易环①详情/取消；#29 报价与改价；#297 交付物
  * 类型＋设计资产包下单冻结——交易机制零改版，下单多冻结一维；#335 下单改版与
- * 订单语义重对位基座）。#337 起 mock 支付闭环退役（同步支付端点与
- * {@code #pay} 用例连代码删除——支付语义并入付款节点凭证核验路径，不留两轨
- * 并存；已支付＝开工条件满足的判定接通归 #338，本服务不再有「支付」入口）：确认下单 = 过双确认门（已确认 PRD 版本＋Demo 确认版本）
+ * 订单语义重对位基座；#338 取消边界收窄＋归档取版对齐）。#337 起 mock 支付闭环
+ * 退役（同步支付端点与 {@code #pay} 用例连代码删除——支付语义并入付款节点凭证
+ * 核验路径，不留两轨并存；「已支付＝开工条件满足」的判定器＝{@link
+ * KickoffAppService}〔#338 接通〕，本服务不再有「支付」入口）：确认下单 = 过双确认门（已确认 PRD 版本＋Demo 确认版本）
  * 后冻结 PRD 确认版全文冗余拷贝＋双版本引用＋交付物类型入单，待报价起步
  * （「待确认报价」占位态）。下单快照的上游＝PRD 确认版本（#330 确认即成版、
  * #332 生成加门：确认是首个构建 run 与下单的共同引用锚——#335 起快照不再读
@@ -42,12 +47,15 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>「同项目至多一个未终结订单」双保险：预检（{@code findActiveByProject}，
  * 409 ORD_003）+ 库侧部分唯一索引兜底（并发漏过预检时约束拒绝，同译 ORD_003）。
- * place/cancel/submitQuote 刻意不加 {@code @Transactional}：单行插入由仓储自带
- * 事务保证；约束撞错的吸收（catch 后翻译）要求 save 的事务已独立结束，不处在
- * 外层事务中（同 MeteringAppService.report 形制）。{@link #retryArchive}（#158
- * 后台手动补归档口）用 {@link TransactionTemplate} 收「订单＋项目」一个事务，
- * 失败异常上抛（运营须看见拦截原因）；知识沉淀与 SSE 在事务提交后（#5 决议；
- * 沉淀降级不炸——embedding 不可用不允许回滚已成功的归档）。</p>
+ * place/submitQuote 刻意不加 {@code @Transactional}：单行插入由仓储自带事务
+ * 保证；约束撞错的吸收（catch 后翻译）要求 save 的事务已独立结束，不处在
+ * 外层事务中（同 MeteringAppService.report 形制）。{@link #cancel}/
+ * {@link #cancelByBackoffice}（#338 收窄后）用 {@link TransactionTemplate} 收
+ * 「订单取消＋活跃合同联动作废」一个事务；{@link #retryArchive}（#158 后台
+ * 手动补归档口——已归档＝后台人工终局的唯一触发）同款收「订单＋项目」一个
+ * 事务，失败异常上抛（运营须看见拦截原因）；知识沉淀与 SSE 在事务提交后
+ * （#5 决议；沉淀降级不炸——embedding 不可用不允许回滚已成功的归档；取版
+ * ＝合同冻结 PRD 优先、无合同回退最新确认版）。</p>
  */
 @Service
 @Slf4j
@@ -56,7 +64,14 @@ public class OrderAppService {
     /** 未终结订单唯一索引名（约束撞错的判别键，与 V1__baseline.sql 对齐）。 */
     private static final String ACTIVE_ORDER_INDEX = "uk_ord_orders_active";
 
+    /**
+     * 取消联动作废的系统操作者（#338）：用户取消路径无操作者，而作废留痕要求
+     * 操作者非空（ORD_035 审计本体）——系统身份如实落痕，不放松聚合守卫。
+     */
+    private static final Operator CANCEL_LINKAGE_OPERATOR = new Operator("system", "订单取消联动");
+
     private final OrderRepository orderRepository;
+    private final ContractRepository contractRepository;
     private final ProjectQueryAppService projectQueryAppService;
     private final ProjectLifecycleAppService projectLifecycleAppService;
     private final ProjectKnowledgeAppService projectKnowledgeAppService;
@@ -67,6 +82,7 @@ public class OrderAppService {
     private final TransactionTemplate transactionTemplate;
 
     public OrderAppService(OrderRepository orderRepository,
+                           ContractRepository contractRepository,
                            ProjectQueryAppService projectQueryAppService,
                            ProjectLifecycleAppService projectLifecycleAppService,
                            ProjectKnowledgeAppService projectKnowledgeAppService,
@@ -76,6 +92,7 @@ public class OrderAppService {
                            EventsAppService eventsAppService,
                            TransactionTemplate transactionTemplate) {
         this.orderRepository = orderRepository;
+        this.contractRepository = contractRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.projectLifecycleAppService = projectLifecycleAppService;
         this.projectKnowledgeAppService = projectKnowledgeAppService;
@@ -193,34 +210,82 @@ public class OrderAppService {
 
     /**
      * 取消订单（未支付态取消即解冻回迭代）：自待报价/已报价可达，已支付与
-     * 已终结拒绝（聚合守卫 ORD_005）。事务取舍同 {@link #place}——单行状态
-     * 更新由仓储自带事务保证，刻意不加 {@code @Transactional}。
+     * 已终结拒绝（聚合守卫 ORD_005）。<b>取消边界收窄（#338 接通，spec #320
+     * ④）</b>：最近合同已签署完成后关门（ORD_047——需求变化走对话区变更沟通，
+     * 不建平台机制；聚合读不到合同，守卫在本应用层）；取消时活跃（非终态）
+     * 合同联动作废留痕（同事务，系统操作者落痕——用户取消无操作者，不放松
+     * 聚合 ORD_035 审计守卫）。无合同单（含遗留）行为不变。
      *
-     * @throws ApplicationException ORD_001 订单不存在；ORD_005 已支付或已终结
+     * @throws ApplicationException ORD_001 订单不存在；ORD_005 已支付或已终结；
+     *                              ORD_047 合同已签署完成
      */
     public OrderResponse cancel(Long orderId) {
         Order order = requireOrder(orderId);
-        order.cancel();
-        OrderResponse response = OrderResponse.of(orderRepository.save(order));
+        requireCancellable(order);
+        cancelWithContractLinkage(order, Order::cancel, CANCEL_LINKAGE_OPERATOR,
+                "用户取消订单，活跃合同联动作废");
+        OrderResponse response = OrderResponse.of(order);
         publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return response;
     }
 
     /**
      * 运营取消订单（#157 后台写口，经 BackofficeOrderController 进入）：状态
-     * 语义与用户取消 {@link #cancel} 完全一致（守卫 ORD_005、通知同发、解冻
-     * 回迭代可再下单），差异仅在必填取消原因＋操作者留痕落订单行（运营内部
-     * 口径，不呈现用户面读面）。事务取舍同 {@link #cancel}。
+     * 语义与用户取消 {@link #cancel} 完全一致（守卫 ORD_005/ORD_047、通知同发、
+     * 取消联动同款、解冻回迭代可再下单），差异仅在必填取消原因＋操作者留痕
+     * 落订单行（运营内部口径，不呈现用户面读面）——联动作废留痕溯操作者本人
+     * （缺头落系统操作者，不放松聚合守卫）。
      *
      * @throws ApplicationException ORD_001 订单不存在；ORD_005 已支付或已终结；
-     *                              ORD_013 原因缺失；ORD_014 原因超长
+     *                              ORD_047 合同已签署完成；ORD_013 原因缺失；
+     *                              ORD_014 原因超长
      */
     public OrderResponse cancelByBackoffice(Long orderId, String reason, Operator operator) {
         Order order = requireOrder(orderId);
-        order.cancelByBackoffice(reason, operator);
-        OrderResponse response = OrderResponse.of(orderRepository.save(order));
+        requireCancellable(order);
+        cancelWithContractLinkage(order, o -> o.cancelByBackoffice(reason, operator),
+                operator == null ? CANCEL_LINKAGE_OPERATOR : operator,
+                "后台取消订单：" + reason);
+        OrderResponse response = OrderResponse.of(order);
         publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, order);
         return response;
+    }
+
+    /**
+     * 取消门收窄守卫（#338，应用层——聚合读不到合同）：最近合同已签署完成
+     * 即拒（ORD_047）。非未支付态先归聚合守卫（ORD_005 既有语义正身，先到
+     * 先得——已支付蕴含签署完成，报「已支付不可取消」语义更准）。
+     */
+    private void requireCancellable(Order order) {
+        if (!order.getStatus().isUnpaid()) {
+            return;
+        }
+        contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(order.getId())
+                .filter(contract -> contract.getStatus() == ContractStatus.SIGNED)
+                .ifPresent(contract -> {
+                    throw new ApplicationException(OrderMessage.ORDER_CANCEL_SIGNED);
+                });
+    }
+
+    /**
+     * 取消＋活跃合同联动作废（#338，同事务——先例 {@link #retryArchive} 形制）：
+     * 订单取消动作与合同作废一起落库（半成态不留），无活跃合同时退化为单行
+     * 取消（行为与收窄前一致）。作废依据必含「取消订单」语、操作者随行留痕。
+     * 合同在事务内带留痕加载（懒集合并发初始化安全，同付款域事务取舍）。
+     */
+    private void cancelWithContractLinkage(Order order, Consumer<Order> cancelAction,
+            Operator voidOperator, String voidBasis) {
+        Long activeContractId = contractRepository.findActiveByOrderId(order.getId())
+                .map(Contract::getId).orElse(null);
+        transactionTemplate.executeWithoutResult(status -> {
+            cancelAction.accept(order);
+            orderRepository.save(order);
+            if (activeContractId != null) {
+                Contract activeContract = contractRepository.findWithTrail(activeContractId).orElseThrow();
+                activeContract.voidContract(voidBasis, voidOperator);
+                contractRepository.save(activeContract);
+            }
+        });
     }
 
     /**
@@ -297,15 +362,29 @@ public class OrderAppService {
     /**
      * 归档收尾（#158 起支付链与重试归档共用）：重读库定真——归档事务回滚不还原
      * 内存对象，通知与沉淀以库内真值为准（已归档才发「已归档」通知并触发知识
-     * 沉淀；沉淀 best-effort，降级不炸的既有口径不变）。
+     * 沉淀；沉淀 best-effort，降级不炸的既有口径不变）。沉淀取版对齐（#338）：
+     * 合同冻结的 PRD 确认版优先（签约双方约定的正身），无合同回退最新确认版。
      */
     private OrderResponse settleArchive(Long orderId, Long projectId) {
         Order persisted = requireOrder(orderId);
         if (persisted.getStatus() == OrderStatus.ARCHIVED) {
             publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, persisted); // 归档落定发「已归档」
-            projectKnowledgeAppService.sinkPrd(projectId);
+            projectKnowledgeAppService.sinkPrd(projectId, archivePrdContent(orderId, projectId));
         }
         return OrderResponse.of(persisted);
+    }
+
+    /**
+     * 归档沉淀取版（#338）：订单最近合同已签署完成 → 合同冻结的 PRD 确认版全文
+     * （合同自含冗余拷贝，签约即定格）；无已签合同（mock 时代遗留单/异常路径）
+     * → 回退项目最新已确认版（confirmedVersionRefs）。两源都不在场（确认制前
+     * 遗留）如实 null——sinkPrd 空内容跳过。
+     */
+    private String archivePrdContent(Long orderId, Long projectId) {
+        return contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId)
+                .filter(contract -> contract.getStatus() == ContractStatus.SIGNED)
+                .map(Contract::getPrdSnapshot)
+                .orElseGet(() -> projectQueryAppService.confirmedVersionRefs(projectId).prdContent());
     }
 
     /**

@@ -75,6 +75,10 @@ class OrderPaymentArchiveTest {
     @Autowired
     private OrderAppService appService;
 
+    /** 合同域应用服务（#338 取版对齐用例的合同夹具——真链路推进到签署完成）。 */
+    @Autowired
+    private ContractAppService contractAppService;
+
     @Autowired
     private OrderRepository orderRepository;
 
@@ -258,6 +262,80 @@ class OrderPaymentArchiveTest {
         assertThatThrownBy(() -> appService.retryArchive(900999L, null))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_NOT_FOUND.message());
+    }
+
+    // ---------- #338：知识沉淀取版对齐——合同冻结版优先、无合同回退最新确认版 ----------
+
+    @Test
+    void given_signed_contract_when_archive_then_sunk_prd_from_contract_freeze_not_latest() {
+        // 合同路径（正身）：沉淀内容＝合同冻结的 PRD 确认版全文——下单/签约后
+        // 工作区与确认版再演进（此处以换桩模拟）不入沉淀；夹具先签后付（聚合
+        // 直落已支付——开工判定对 PAID 空转，不建承接，聚焦取版本体）
+        stubEmbeddingOk();
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
+        appService.enterScope(Long.parseLong(orderId), "交付清单：管理后台",
+                "验收方式：按 PRD 验收", "工期口径：4 周");
+        contractAppService.confirmScope(Long.parseLong(orderId));
+        Long contractId = Long.parseLong(contractAppService.latestByOrder(Long.parseLong(orderId)).id());
+        for (String step : List.of("内容核对完毕，送用户签署", "用户已核对，开始签署")) {
+            contractAppService.advance(contractId, step, new Operator("700100", "运营·小刘"));
+        }
+        contractAppService.sign(contractId, com.aieducenter.aiplatform.business.order.domain.enums.ContractParty.PARTY_A,
+                "甲方盖章", new Operator("700100", "运营·小刘"));
+        contractAppService.sign(contractId, com.aieducenter.aiplatform.business.order.domain.enums.ContractParty.PARTY_B,
+                "乙方盖章", new Operator("700100", "运营·小刘"));
+        contractAppService.advance(contractId, "双方落签，合同完成", new Operator("700100", "运营·小刘"));
+        Order paid = orderRepository.findWithHistory(Long.parseLong(orderId)).orElseThrow();
+        paid.pay("TEST-" + orderId);
+        orderRepository.save(paid);
+        // 签约后工作区与确认版都再演进（双换桩＝模拟归档时点的两个「最新」源）
+        // ——均不应入沉淀（合同冻结版是唯一正身）
+        when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
+                Long.toString(PROJECT_ID), "# PRD\n\n签约后的工作区新稿",
+                Instant.parse("2026-10-01T01:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n签约后的工作区新稿")),
+                /* draftChangeSummary= */ null));
+        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.ConfirmedVersionRefs(9, "# PRD v9\n\n签约后的新演进版", 1));
+
+        appService.retryArchive(Long.parseLong(orderId), new Operator("700100", "运营·小刘"));
+
+        List<String> chunks = jdbcTemplate.queryForList(
+                "SELECT chunk FROM knw_chunks WHERE project_id = ? AND kind = 'PRD'",
+                String.class, Long.toString(PROJECT_ID));
+        assertThat(chunks).isNotEmpty();
+        assertThat(String.join("\n", chunks)).contains(PRD); // 合同冻结版＝下单时确认版全文
+        assertThat(String.join("\n", chunks)).doesNotContain("签约后的新演进版");
+        assertThat(String.join("\n", chunks)).doesNotContain("工作区新稿");
+    }
+
+    @Test
+    void given_no_contract_when_archive_then_sunk_prd_falls_back_to_latest_confirmed() {
+        // 无合同回退腿（遗留 mock 时代单/异常路径）：沉淀内容＝最新确认版全文
+        // （confirmedVersionRefs——归档链不再 docker exec 读工作区）
+        stubEmbeddingOk();
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
+        Order paid = orderRepository.findWithHistory(Long.parseLong(orderId)).orElseThrow();
+        paid.pay("TEST-" + orderId);
+        orderRepository.save(paid);
+        when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
+                Long.toString(PROJECT_ID), "# PRD\n\n归档时点的工作区草稿",
+                Instant.parse("2026-10-01T01:00:00Z"),
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n归档时点的工作区草稿")),
+                /* draftChangeSummary= */ null));
+        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.ConfirmedVersionRefs(9, "# PRD v9\n\n回退腿最新确认版", 1));
+
+        appService.retryArchive(Long.parseLong(orderId), new Operator("700100", "运营·小刘"));
+
+        List<String> chunks = jdbcTemplate.queryForList(
+                "SELECT chunk FROM knw_chunks WHERE project_id = ? AND kind = 'PRD'",
+                String.class, Long.toString(PROJECT_ID));
+        assertThat(chunks).isNotEmpty();
+        assertThat(String.join("\n", chunks)).contains("回退腿最新确认版");
+        assertThat(String.join("\n", chunks)).doesNotContain("工作区草稿");
     }
 
     // ---------- 夹具 ----------

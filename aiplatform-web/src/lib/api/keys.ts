@@ -59,6 +59,12 @@ export const queryKeys = {
     contract: (orderId: string) => ["orders", "contract", orderId] as const,
     /** 订单名下活跃付款计划（#337 付款面板；无计划 404 在 hook 归一为 null）。 */
     paymentPlan: (orderId: string) => ["orders", "payment-plan", orderId] as const,
+    /**
+     * 项目交付状态（#338 前台六态纯推导投影；无未终结订单 404 在 hook 归一为
+     * null）。挂 orders 域：order-status-changed SSE（开工判定转已支付）即随
+     * 域失效重拉；承接/标志变化经轮询兜底。
+     */
+    deliveryStatus: (projectId: string) => ["orders", "delivery-status", projectId] as const,
   },
   /**
    * 对话史域（#89 对话史落库④）：对话面全量的水合源（用户发言/智能体回复/

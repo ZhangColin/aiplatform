@@ -130,6 +130,28 @@ class ContractAppServiceTest {
     }
 
     @Test
+    void given_signed_latest_contract_when_confirm_scope_then_rejected_ord_021() {
+        // #336 遗留缝收口（#338）：最近合同已签署完成（终态——活跃预检查不到）
+        // 后拒再建合同：已签走变更沟通不碰原合同，新草稿不污染开工判定的
+        // 「最近合同」读面。订单仍 QUOTED（开工门未满足的常态等待窗口）
+        Order order = confirmedOrder();
+        Contract contract = activeContract(order);
+        appService.advance(contract.getId(), "内容核对完毕，送用户签署", OPERATOR);
+        appService.advance(contract.getId(), "用户已核对，开始签署", OPERATOR);
+        appService.sign(contract.getId(), ContractParty.PARTY_A, "甲方盖章", OPERATOR);
+        appService.sign(contract.getId(), ContractParty.PARTY_B, "乙方盖章", OPERATOR);
+        appService.advance(contract.getId(), "双方落签，合同完成", OPERATOR);
+
+        assertThatThrownBy(() -> appService.confirmScope(order.getId()))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.CONTRACT_ACTION_NOT_ALLOWED.message());
+        // 单合同不增行（已签正身不被新草稿覆盖）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ord_contracts WHERE order_id = ?", Integer.class,
+                order.getId())).isEqualTo(1);
+    }
+
+    @Test
     void given_active_contract_when_second_insert_bypasses_precheck_then_unique_index_rejects() {
         // 活跃唯一·库侧兜底腿：绕过应用预检直插第二行（并发漏过预检的等价形态），
         // 部分唯一索引拒绝——「同订单至多一份活跃合同」的最终防线在库不在代码

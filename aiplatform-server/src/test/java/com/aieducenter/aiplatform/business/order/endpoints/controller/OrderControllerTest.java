@@ -55,6 +55,9 @@ class OrderControllerTest {
     @MockitoBean
     private ContractAppService contractAppService;
 
+    @MockitoBean
+    private com.aieducenter.aiplatform.business.order.application.DeliveryStatusAppService deliveryStatusAppService;
+
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
         return RequestContext.runFor(
@@ -285,6 +288,52 @@ class OrderControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(5020))
                 .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_CONTRACT_NOT_FOUND.message()));
+    }
+
+    // ---------- #338：交付状态读口（前台六态）＋取消收窄透传 ----------
+
+    @Test
+    void given_delivery_status_when_get_then_six_state_envelope() throws Exception {
+        when(deliveryStatusAppService.statusOf(100L)).thenReturn(
+                new com.aieducenter.aiplatform.business.order.application.dto.response.DeliveryStatusResponse(
+                        "900", 3, "已支付",
+                        com.aieducenter.aiplatform.business.order.domain.enums.DeliveryState.AWAITING_PRODUCTION,
+                        "待安排生产", false,
+                        new com.aieducenter.aiplatform.business.order.application.dto.response.DeliveryStatusResponse.HandoffView(
+                                1, "待安排生产", "李经理", "准备服务器环境", "已完成方案拆解",
+                                LocalDateTime.of(2026, 10, 20, 9, 0))));
+
+        performAsUser(get("/api/projects/100/delivery-status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.state").value(4))
+                .andExpect(jsonPath("$.data.stateName").value("待安排生产"))
+                .andExpect(jsonPath("$.data.orderStatus").value(3))
+                .andExpect(jsonPath("$.data.needsUserSupplement").value(false))
+                .andExpect(jsonPath("$.data.handoff.status").value(1))
+                .andExpect(jsonPath("$.data.handoff.contact").value("李经理"))
+                .andExpect(jsonPath("$.data.handoff.estimatedStartAt").value("2026-10-20T09:00:00"));
+    }
+
+    @Test
+    void given_no_active_order_when_get_delivery_status_then_404_ord001() throws Exception {
+        // 前端认 5001/404 判「无交付生命周期」缺席态——不渲染生产状态卡
+        when(deliveryStatusAppService.statusOf(100L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/delivery-status"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(5001));
+    }
+
+    @Test
+    void given_signed_contract_when_cancel_then_409_ord047() throws Exception {
+        when(appService.cancel(900L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_CANCEL_SIGNED));
+
+        performAsUser(post("/api/orders/900/cancel"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5047))
+                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_CANCEL_SIGNED.message()));
     }
 
     // ---------- 夹具 ----------

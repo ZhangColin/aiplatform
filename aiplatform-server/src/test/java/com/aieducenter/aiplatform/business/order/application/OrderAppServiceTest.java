@@ -22,6 +22,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+import com.aieducenter.aiplatform.business.order.domain.enums.ContractParty;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
@@ -73,6 +74,13 @@ class OrderAppServiceTest {
 
     @Autowired
     private OrderRepository orderRepository;
+
+    /** 合同域应用服务（#338 取消收窄用例的合同夹具——真链路建合同推进六态）。 */
+    @Autowired
+    private ContractAppService contractAppService;
+
+    @Autowired
+    private com.aieducenter.aiplatform.business.order.domain.repository.ContractRepository contractRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -422,6 +430,72 @@ class OrderAppServiceTest {
         assertThat(json).doesNotContain("cancelReason").doesNotContain("内部口径");
     }
 
+    // ---------- #338：取消边界收窄——签署完成后关门＋活跃合同联动作废留痕 ----------
+
+    @Test
+    void given_signed_latest_contract_when_cancel_then_rejected_ord_047_both_legs() {
+        // 签署完成后取消关门（用户端与 backoffice 两腿同关）：需求变化走对话区
+        // 变更沟通。最近合同已 SIGNED＝终态，活跃预检查不到——守卫读「最近合同」
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = signedContractOrder();
+
+        assertThatThrownBy(() -> appService.cancel(Long.parseLong(orderId)))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_CANCEL_SIGNED.message());
+        assertThatThrownBy(() -> appService.cancelByBackoffice(Long.parseLong(orderId),
+                "想强取消", new Operator("700100", "运营·小刘")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_CANCEL_SIGNED.message());
+        // 订单与合同两行都不动（拦截零副作用）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ord_orders WHERE id = ?", Integer.class, Long.parseLong(orderId)))
+                .isEqualTo(OrderStatus.QUOTED.getCode());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ord_contracts WHERE order_id = ?", Integer.class,
+                Long.parseLong(orderId))).isEqualTo(4);
+    }
+
+    @Test
+    void given_active_contract_when_cancel_then_order_cancelled_and_contract_voided_with_trail() {
+        // 取消联动：活跃（非终态）合同随单作废＋依据留痕；用户取消无操作者——
+        // 系统操作者落痕（不放松聚合 ORD_035 守卫）
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = quotedOrderWithSigningContract();
+
+        OrderResponse cancelled = appService.cancel(Long.parseLong(orderId));
+
+        assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ord_contracts WHERE order_id = ?", Integer.class,
+                Long.parseLong(orderId))).isEqualTo(6); // 已撤回或作废
+        Map<String, Object> trail = jdbcTemplate.queryForMap(
+                "SELECT action, basis, operator_id FROM ord_contract_transitions t"
+                        + " JOIN ord_contracts c ON c.id = t.contract_id WHERE c.order_id = ?"
+                        + " ORDER BY t.id DESC LIMIT 1",
+                Long.parseLong(orderId));
+        assertThat(trail.get("action")).isEqualTo(3); // 作废
+        assertThat((String) trail.get("basis")).contains("取消订单");
+        assertThat(trail.get("operator_id")).isEqualTo("system");
+    }
+
+    @Test
+    void given_active_contract_when_cancel_by_backoffice_then_void_trail_traces_operator() {
+        // 运营取消腿：联动作废留痕溯操作者本人（非系统占位）
+        stubProject(ProjectStatus.IN_PROGRESS);
+        String orderId = quotedOrderWithSigningContract();
+
+        appService.cancelByBackoffice(Long.parseLong(orderId), "用户重复下单",
+                new Operator("700100", "运营·小刘"));
+
+        Map<String, Object> trail = jdbcTemplate.queryForMap(
+                "SELECT operator_id, operator_name FROM ord_contract_transitions t"
+                        + " JOIN ord_contracts c ON c.id = t.contract_id WHERE c.order_id = ?"
+                        + " ORDER BY t.id DESC LIMIT 1",
+                Long.parseLong(orderId));
+        assertThat(trail.get("operator_id")).isEqualTo("700100");
+        assertThat(trail.get("operator_name")).isEqualTo("运营·小刘");
+    }
+
     @Test
     void given_placed_order_when_detail_then_response_shape() {
         stubProject(ProjectStatus.IN_PROGRESS);
@@ -630,6 +704,35 @@ class OrderAppServiceTest {
 
     private void stubProject(ProjectStatus status) {
         stubProject(status, PRD);
+    }
+
+    /** 已报价＋范围齐备＋活跃合同在签署进行中（取消联动用例的合同在场形）。 */
+    private String quotedOrderWithSigningContract() {
+        String orderId = appService.place(PROJECT_ID).id();
+        appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
+        appService.enterScope(Long.parseLong(orderId), "交付清单：管理后台",
+                "验收方式：按 PRD v3 验收", "工期口径：4 周");
+        contractAppService.confirmScope(Long.parseLong(orderId));
+        Long contractId = contractRepository
+                .findActiveByOrderId(Long.parseLong(orderId)).orElseThrow().getId();
+        contractAppService.advance(contractId, "内容核对完毕，送用户签署", new Operator("700100", "运营·小刘"));
+        contractAppService.advance(contractId, "用户已核对，开始签署", new Operator("700100", "运营·小刘"));
+        return orderId;
+    }
+
+    /**
+     * 已报价＋最近合同已签署完成（订单仍 QUOTED——开工门未满足的常态等待窗口，
+     * #338 取消关门与 confirmScope 已签守卫的夹具正身）。无付款节点＝判定空转，
+     * 订单不转已支付。
+     */
+    private String signedContractOrder() {
+        String orderId = quotedOrderWithSigningContract();
+        Long contractId = contractRepository
+                .findFirstByOrderIdOrderByCreatedAtDescIdDesc(Long.parseLong(orderId)).orElseThrow().getId();
+        contractAppService.sign(contractId, ContractParty.PARTY_A, "甲方盖章", new Operator("700100", "运营·小刘"));
+        contractAppService.sign(contractId, ContractParty.PARTY_B, "乙方盖章", new Operator("700100", "运营·小刘"));
+        contractAppService.advance(contractId, "双方落签，合同完成", new Operator("700100", "运营·小刘"));
+        return orderId;
     }
 
     private void stubProject(ProjectStatus status, String prd) {

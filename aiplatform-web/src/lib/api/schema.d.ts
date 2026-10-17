@@ -916,6 +916,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/projects/{projectId}/production-handoff/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 信息更新（整组替换，依据必填留痕）
+         * @description 交付联系人/下一步说明/进展更新（人工措辞、不上工程术语）/预计开始时间整组替换——未录入段传 null 即清空（预计开始时间清空＝回待安排呈现，「仅真实值显示」）。状态不动（留痕行 from=to）。依据必填 400 PRJ_057；字段超长 400 PRJ_058；操作者必携 400 PRJ_059（X-User-Id/X-User-Name 透传头）；无承接 404 PRJ_055。需要机机签名
+         *
+         *     错误码：
+         *     - 404 PRJ_055 — 生产承接记录不存在
+         *     - 400 PRJ_057 — 生产承接动作依据必填（人工推进留痕须填写依据）
+         *     - 400 PRJ_058 — 生产承接字段超长
+         *     - 400 PRJ_059 — 操作者必填（生产承接动作须携带操作者身份）
+         */
+        post: operations["update_2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{projectId}/production-handoff/needs-user-supplement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 「需用户补充」置位/清零（前台六态盖帽标志）
+         * @description 生产承接期间需用户补资料/确认事项时置位（required=true——前台六态盖帽「需用户补充」，处理入口在对话区沟通）；处理完清零（required=false）。置位语义归后台人工判定，平台只落标志。项目不存在 404 PRJ_001。需要机机签名
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        post: operations["setNeedsUserSupplement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{projectId}/production-handoff/advance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 推进（待安排生产 → 生产中，依据必填留痕）
+         * @description 两态唯一迁移边（生产中是稳态，再推进 409 PRJ_056）。依据必填 400 PRJ_057；操作者必携 400 PRJ_059；无承接 404 PRJ_055。需要机机签名
+         *
+         *     错误码：
+         *     - 404 PRJ_055 — 生产承接记录不存在
+         *     - 409 PRJ_056 — 生产承接当前状态不允许该操作
+         *     - 400 PRJ_057 — 生产承接动作依据必填（人工推进留痕须填写依据）
+         *     - 400 PRJ_059 — 操作者必填（生产承接动作须携带操作者身份）
+         */
+        post: operations["advance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/price-entries": {
         parameters: {
             query?: never;
@@ -1388,7 +1463,7 @@ export interface paths {
          *     - 409 ORD_027 — 双方尚未全部签署，不能标记签署完成
          *     - 400 ORD_035 — 操作者必填（合同人工动作须携带操作者身份）
          */
-        post: operations["advance"];
+        post: operations["advance_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1553,6 +1628,30 @@ export interface paths {
          *     - 500 WSP_002 — 环境后端操作失败
          */
         get: operations["downloadPng"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/delivery-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 交付状态（前台六态纯推导，#338）
+         * @description 项目维度一次读齐订单＋合同＋付款＋生产承接四源现算的交付生命周期视图（不存储）。六态（Integer code）：1=待签约（合同未签署完成——无/草稿/签署中/旁落终态待重建）2=待付款（合同已签、开工门节点未全到账）3=款项核验中（有节点处线下转账待核验）4=待安排生产（开工条件满足＝已支付〔新语义〕，承接待排期；无承接的遗留已支付单同归此态）5=生产中（承接已推进）6=需用户补充（项目级标志盖帽——needsUserSupplement true 同报，处理入口在对话区）。state null＝待报价（六态不覆盖，订单面「待确认报价」占位态照旧）；handoff null＝承接未建。订单终态不进本口（订单面按终态呈现）。项目不存在 404 PRJ_001；无未终结订单 404 ORD_001（前端缺席＝不渲染卡片）
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         *     - 404 ORD_001 — 订单不存在
+         */
+        get: operations["deliveryStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2190,6 +2289,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/projects/{projectId}/production-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 生产承接详情（承接全量面）
+         * @description 按项目寻址（承接挂项目唯一）：承接字段（交付联系人/下一步说明/进展更新/预计开始时间——可空段如实 null，呈现层「仅真实值显示」）＋两态（1=待安排生产 2=生产中）＋动作留痕时间线（新 → 旧，append-only 全量——动作/两侧状态/依据/操作者/时间；创建行＝开工判定系统操作者）。无承接记录 404 PRJ_055（开工判定未触发）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_055 — 生产承接记录不存在
+         */
+        get: operations["detail_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects/{id}": {
         parameters: {
             query?: never;
@@ -2204,7 +2326,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
          */
-        get: operations["detail_4"];
+        get: operations["detail_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2449,7 +2571,7 @@ export interface paths {
          *     - 404 ORD_001 — 订单不存在
          *     - 404 ORD_036 — 付款计划不存在
          */
-        get: operations["detail_5"];
+        get: operations["detail_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2472,7 +2594,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_6"];
+        get: operations["detail_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2569,7 +2691,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        get: operations["detail_7"];
+        get: operations["detail_8"];
         put?: never;
         post?: never;
         /**
@@ -2716,7 +2838,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_020 — 合同不存在
          */
-        get: operations["detail_8"];
+        get: operations["detail_9"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3785,6 +3907,60 @@ export interface components {
             overlap?: string;
             resolution?: string;
         };
+        UpdateProductionHandoffCommand: {
+            contact?: string;
+            nextStep?: string;
+            progressNote?: string;
+            /** Format: date-time */
+            estimatedStartAt?: string;
+            basis?: string;
+        };
+        ApiResponseBackofficeProductionHandoffResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeProductionHandoffResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeProductionHandoffResponse: {
+            id?: string;
+            projectId?: string;
+            orderId?: string;
+            /** @description 1=待安排生产, 2=生产中 */
+            status?: number;
+            statusName?: string;
+            contact?: string;
+            nextStep?: string;
+            progressNote?: string;
+            /** Format: date-time */
+            estimatedStartAt?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            transitions?: components["schemas"]["TransitionView"][];
+        };
+        TransitionView: {
+            /** @description 1=创建, 2=推进, 3=信息更新 */
+            action?: number;
+            actionName?: string;
+            /** @description 1=待安排生产, 2=生产中 */
+            fromStatus?: number;
+            fromStatusName?: string;
+            /** @description 1=待安排生产, 2=生产中 */
+            toStatus?: number;
+            toStatusName?: string;
+            basis?: string;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        SetNeedsUserSupplementCommand: {
+            required?: boolean;
+        };
+        ProductionHandoffActionCommand: {
+            basis?: string;
+        };
         OpenPriceEntryCommand: {
             provider?: string;
             model?: string;
@@ -3975,6 +4151,35 @@ export interface components {
             closing?: {
                 [key: string]: Record<string, never>;
             };
+        };
+        ApiResponseDeliveryStatusResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["DeliveryStatusResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        DeliveryStatusResponse: {
+            orderId?: string;
+            /** Format: int32 */
+            orderStatus?: number;
+            orderStatusName?: string;
+            /** @description 1=待签约, 2=待付款, 3=款项核验中, 4=待安排生产, 5=生产中, 6=需用户补充 */
+            state?: number;
+            stateName?: string;
+            needsUserSupplement?: boolean;
+            handoff?: components["schemas"]["HandoffView"];
+        };
+        HandoffView: {
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            contact?: string;
+            nextStep?: string;
+            progressNote?: string;
+            /** Format: date-time */
+            estimatedStartAt?: string;
         };
         AgentKindUsage: {
             agentKind?: string;
@@ -5936,6 +6141,84 @@ export interface operations {
             };
         };
     };
+    update_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProductionHandoffCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeProductionHandoffResponse"];
+                };
+            };
+        };
+    };
+    setNeedsUserSupplement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetNeedsUserSupplementCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    advance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionHandoffActionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeProductionHandoffResponse"];
+                };
+            };
+        };
+    };
     entries: {
         parameters: {
             query?: {
@@ -6388,7 +6671,7 @@ export interface operations {
             };
         };
     };
-    advance: {
+    advance_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -6592,6 +6875,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": string;
+                };
+            };
+        };
+    };
+    deliveryStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDeliveryStatusResponse"];
                 };
             };
         };
@@ -7257,6 +7562,28 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeProductionHandoffResponse"];
+                };
+            };
+        };
+    };
+    detail_5: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
                 id: string;
             };
             cookie?: never;
@@ -7482,7 +7809,7 @@ export interface operations {
             };
         };
     };
-    detail_5: {
+    detail_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -7504,7 +7831,7 @@ export interface operations {
             };
         };
     };
-    detail_6: {
+    detail_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -7598,7 +7925,7 @@ export interface operations {
             };
         };
     };
-    detail_7: {
+    detail_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -7768,7 +8095,7 @@ export interface operations {
             };
         };
     };
-    detail_8: {
+    detail_9: {
         parameters: {
             query?: never;
             header?: never;

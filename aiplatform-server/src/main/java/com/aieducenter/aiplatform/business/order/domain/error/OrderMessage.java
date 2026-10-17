@@ -141,7 +141,14 @@ public enum OrderMessage implements CodeMessage {
     PAYMENT_VOUCHER_NOT_FOUND(404, "ORD_045", "凭证不存在或不属于该节点"),
 
     /** 付款字段长度（#337）：渠道流水号至多 100 字、依据/备注至多 1000 字（付款域专用，不混用合同依据码）。 */
-    PAYMENT_FIELD_TOO_LONG(400, "ORD_046", "付款字段超长（渠道流水号至多 100 字，依据至多 1000 字）");
+    PAYMENT_FIELD_TOO_LONG(400, "ORD_046", "付款字段超长（渠道流水号至多 100 字，依据至多 1000 字）"),
+
+    /**
+     * 取消门收窄守卫（#338，spec #320 ④「取消边界收窄」）：最近合同已签署完成
+     * ——取消关门，需求变化走对话区变更沟通（不建平台机制）。应用层守卫（聚合
+     * 读不到合同）；非未支付态先归聚合 ORD_005（既有语义正身，先到先得）。
+     */
+    ORDER_CANCEL_SIGNED(409, "ORD_047", "合同已签署完成，订单无法取消；需求变化请在对话区沟通");
 
     private final int httpStatus;
     private final String code;

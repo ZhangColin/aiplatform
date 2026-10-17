@@ -13,6 +13,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirmScope, useContract } from "@/hooks/use-contract";
 import { usePaymentPlan } from "@/hooks/use-payment";
+import { useDeliveryStatus } from "@/hooks/use-production";
 import { useCancelOrder, useOrder } from "@/hooks/use-order";
 import { errorText } from "@/lib/api/api-error";
 import { ORDER_STATUS } from "@/lib/orders/lock";
@@ -28,20 +29,22 @@ import { formatRelativeTime } from "@/lib/utils/time";
 import { ContractCard } from "./contract-card";
 import { PanelPlaceholder } from "./panel-placeholder";
 import { PaymentPanel } from "./payment-panel";
+import { ProductionCard } from "./production-card";
 
 /**
  * 订单面板（#28 交易环① + #29 交易环②，项目模式主区域；#335 待确认报价
  * 呈现态＋下单基准行；#336 范围确认面＋合同预览卡；#337 付款面板·mock 支付
- * 闭环退役）：待报价 = 状态 + 「待确认报价」占位态（价格位以待定态名占位，
+ * 闭环退役；#338 生产状态卡·前台六态）：待报价 = 状态 + 「待确认报价」占位态（价格位以待定态名占位，
  * 不以 0 元或示例价代替；报价落定后翻价格）+ 下单基准（随单冻结的 PRD/Demo
  * 确认版本）+ 取消；已报价（=待支付）= 总价 + 后台备注 + 范围文本三段与
  * 「确认范围并准备合同」（确认即冻结范围快照＋创建合同）+ 折叠改价历史 +
  * 取消 + 合同预览卡（六态/签署位/预览字段集）+ 付款面板（节点五态/凭证上传，
- * 支付唯一用户面）；已归档终态 = 支付完成说明 + 完整记录（总价/全时间点组/
- * 报价记录）+ 源码包下载。内容向三子步骤（核对范围与报价/签署合同/付款）
- * 重组的完整呈现归签约付款页重建（#348），本面板承数据面最小呈现。后台报/
- * 改价经机机接口（无前端入口，联调走脚本），等待期详情轮询使新价实时可见。
- * 订单态变化的 toast 归 SSE 桥（#30），本组件只出动作反馈（失败）与终态呈现。
+ * 支付唯一用户面）+ 生产状态卡（前台六态/承接字段仅真实值显示）；已归档
+ * 终态 = 支付完成说明 + 完整记录（总价/全时间点组/报价记录）+ 源码包下载。
+ * 内容向三子步骤（核对范围与报价/签署合同/付款）重组的完整呈现归签约付款
+ * 页重建（#348），本面板承数据面最小呈现。后台报/改价经机机接口（无前端
+ * 入口，联调走脚本），等待期详情轮询使新价实时可见。订单态变化的 toast 归
+ * SSE 桥（#30），本组件只出动作反馈（失败）与终态呈现。
  */
 export function OrderPanel({
   orderId,
@@ -75,6 +78,10 @@ function OrderCard({ orderId }: { orderId: string }) {
   // 付款域（#337）：无计划 404 在 hook 归一为 null（缺席＝不渲染面板）；
   // 有未到账节点挂轮询（后台人工核验）
   const { data: paymentPlan } = usePaymentPlan(orderId, order?.status);
+  // 交付状态（#338 前台六态）：无未终结订单 404 归一为 null、待报价 state
+  // null（缺席＝不渲染生产状态卡）；开工转已支付经 SSE 随 orders 域失效、
+  // 承接推进经轮询兜底
+  const { data: deliveryStatus } = useDeliveryStatus(order?.projectId ?? null);
 
   if (isPending || !order) {
     return (
@@ -178,6 +185,11 @@ function OrderCard({ orderId }: { orderId: string }) {
 
       {/* 付款面板（#337 凭证核验路径）：支付的唯一用户面（mock 支付弹窗已退役） */}
       {paymentPlan ? <PaymentPanel plan={paymentPlan} /> : null}
+
+      {/* 生产状态卡（#338 前台六态·最小呈现）：state 缺席（待报价/无单）不渲染 */}
+      {deliveryStatus && deliveryStatus.state != null ? (
+        <ProductionCard status={deliveryStatus} />
+      ) : null}
     </div>
   );
 }

@@ -148,6 +148,17 @@ public class ProjectQueryAppService {
     }
 
     /**
+     * 「需用户补充」项目级标志（#338 前台六态源之一，交付状态投影消费）：后台
+     * 置位/清零（{@code ProductionHandoffAppService#setNeedsUserSupplement}），
+     * 本口只报事实——盖帽判定归订单侧六态推导（判定跟职责走）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在
+     */
+    public boolean needsUserSupplement(Long projectId) {
+        return loadProject(projectId).isNeedsUserSupplement();
+    }
+
+    /**
      * 一批项目 → 项目名（跨 BC 查名面：order 上下文后台订单视图嵌入用）：缺档
      * 项目不在映射中，调用方容缺呈现（软引用无 FK，历史行缺档是合法状态）。
      */

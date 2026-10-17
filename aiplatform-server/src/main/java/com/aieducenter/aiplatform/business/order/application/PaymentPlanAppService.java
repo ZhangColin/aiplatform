@@ -55,16 +55,18 @@ public class PaymentPlanAppService {
     private final PaymentVoucherRepository voucherRepository;
     private final PaymentVoucherFileRepository voucherFileRepository;
     private final OrderRepository orderRepository;
+    private final KickoffAppService kickoffAppService;
     private final TransactionTemplate transactionTemplate;
 
     public PaymentPlanAppService(PaymentPlanRepository paymentPlanRepository,
             PaymentVoucherRepository voucherRepository,
             PaymentVoucherFileRepository voucherFileRepository, OrderRepository orderRepository,
-            TransactionTemplate transactionTemplate) {
+            KickoffAppService kickoffAppService, TransactionTemplate transactionTemplate) {
         this.paymentPlanRepository = paymentPlanRepository;
         this.voucherRepository = voucherRepository;
         this.voucherFileRepository = voucherFileRepository;
         this.orderRepository = orderRepository;
+        this.kickoffAppService = kickoffAppService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -144,6 +146,9 @@ public class PaymentPlanAppService {
      * 到账核验（#337 凭证路径第二跳·后台人工录入）：实到金额/实到时间/关联
      * 凭证随行留痕、渠道流水号可空落值。全额判定＝累计核到账 ≥ 节点金额：
      * 足额转已到账，不足回待支付留痕（累计不清零，前台推导差额）。
+     * <b>核验落库后即触发开工判定</b>（#338 双门禁之付款腿：开工门节点全部
+     * 到账且合同已签即开工——{@code KickoffAppService#settle} 自带幂等空转面，
+     * 不足额/非开工门核验自然空转）。
      *
      * @throws ApplicationException ORD_036 无付款计划；ORD_037 节点不存在；
      *                              ORD_038 非待核验态；ORD_041 录入无效；
@@ -159,7 +164,9 @@ public class PaymentPlanAppService {
                     voucherId, command.channelRefNo(), command.basis(), operator);
             return paymentPlanRepository.save(current);
         });
-        return responseOf(plan);
+        PaymentPlanResponse response = responseOf(plan);
+        kickoffAppService.settle(orderId); // 付款腿触发点（save 落库后判定）
+        return response;
     }
 
     /**

@@ -39,19 +39,20 @@ import com.aieducenter.aiplatform.business.order.domain.model.Operator;
  * 查）。
  *
  * <p>状态机（五态单向，骨架不动、语义重对位见 {@link OrderStatus}）：{@link
- * #cancel}（取消门——现门＝未支付态；合同签署完成后关门的收窄判定位归 #338
- * 接通；运营取消 {@link #cancelByBackoffice} 同守卫带必填原因＋操作者留痕，
- * #157）、{@link #quote}（报价/改价，已报价态重复调用 = 改价）、{@link #pay}
- * （待支付 → 已支付，落 {@code paidAt}/{@code paymentNo}——重对位判定位：
- * 已支付＝开工条件满足，实际判定挂 #338 接通；#337 起平台内 mock 支付入口
- * 已退役，本方法暂无生产调用方＝#338 判定接通的领域事实构造口）与
- * {@link #archive}（已支付 → 已归档，落 {@code archivedAt}——重对位判定位：
- * 已归档＝后台人工终局〔交付完成、尾款核验后〕不再自动，接通归 #338；编排归
- * 应用层，#37/#39；运营重试归档 {@link #archiveByBackoffice} 同守卫带操作者
- * 留痕，#158）；终态判定（{@link OrderStatus#isTerminal}——「同项目至多一个
- * 未终结订单」的应用预检与库侧部分唯一索引共用该口径）。同项目并发下单的
- * 最终防线 = 库侧唯一索引，聚合不做跨行查重。改价留痕在
- * {@link OrderPriceEntry}（append-only，{@link #amount} 恒等于最新价目行金额）。</p>
+ * #cancel}（取消门＝未支付态聚合腿；合同签署完成后关门＋取消联动活跃合同
+ * 作废留痕的收窄守卫在应用层，#338；运营取消 {@link #cancelByBackoffice}
+ * 同守卫带必填原因＋操作者留痕，#157）、{@link #quote}（报价/改价，已报价
+ * 态重复调用 = 改价）、{@link #pay}（待支付 → 已支付，落 {@code paidAt}/
+ * {@code paymentNo}——<b>新语义＝开工条件满足</b>，#338 起唯一生产调用方＝
+ * 开工判定器〔双门禁：合同签署完成 && 开工门节点全部到账〕，mock 支付闭环
+ * 已随 #337 退役）与 {@link #archive}（已支付 → 已归档，落 {@code
+ * archivedAt}——后台人工终局〔交付完成、尾款核验后〕不再自动，触发只剩
+ * {@code retryArchive} 后台口；编排归应用层，#37/#39；运营重试归档
+ * {@link #archiveByBackoffice} 同守卫带操作者留痕，#158）；终态判定
+ * （{@link OrderStatus#isTerminal}——「同项目至多一个未终结订单」的应用
+ * 预检与库侧部分唯一索引共用该口径）。同项目并发下单的最终防线 = 库侧唯一
+ * 索引，聚合不做跨行查重。改价留痕在 {@link OrderPriceEntry}（append-only，
+ * {@link #amount} 恒等于最新价目行金额）。</p>
  */
 @Entity
 @Table(name = "ord_orders")
@@ -149,7 +150,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     @Column(name = "quoted_at")
     private LocalDateTime quotedAt;
 
-    /** 支付成功时点。 */
+    /** 支付成功时点（#338 重对位：＝开工条件满足时点——双门禁判定落定刻）。 */
     @Column(name = "paid_at")
     private LocalDateTime paidAt;
 
@@ -184,7 +185,7 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     @Column(name = "cancel_operator_name", length = 200)
     private String cancelOperatorName;
 
-    /** 支付流水号（mock 平台内生成；真实接入为渠道单号）。 */
+    /** 支付流水号（#338 起＝合同号——开工判定的溯源正身；渠道真接后为渠道单号）。 */
     @Column(name = "payment_no", length = 100)
     private String paymentNo;
 
@@ -242,13 +243,12 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
-     * 取消（取消门的显式动作，取消即解冻回迭代）：现门＝任何未支付态（待报价/
-     * 已报价）可达；已支付（真实中间态，支付后归档前）与已终结（已归档/已取消）
-     * 拒绝。<b>取消边界收窄判定位（#335 立、#338 接通）</b>：重对位后门＝「合同
-     * 不存在或合同签署完成前非终态」、签署完成后关门（需求变化走对话区变更沟通）
-     * ——合同域不在场的现下与未支付门等价（{@link OrderStatus#isUnpaid} 单点），
-     * 合同在场后在守卫接「活跃合同签署态」判定，取消订单时活跃合同联动作废留痕
-     * 同归 #338。取消后同项目可再下新单（重新购买 = 新单新快照新引用）。
+     * 取消（取消门的显式动作，取消即解冻回迭代）：聚合腿门＝任何未支付态
+     * （待报价/已报价）可达；已支付与已终结拒绝（ORD_005）。<b>取消边界收窄
+     * （#338 接通）</b>：合同签署完成后关门的守卫在应用层（聚合读不到合同，
+     * {@code OrderAppService#requireCancellable}——ORD_047）；取消时活跃合同
+     * 联动作废留痕同在应用层事务内（系统/操作者留痕）。取消后同项目可再下新单
+     * （重新购买 = 新单新快照新引用）。
      */
     public void cancel() {
         if (!status.isUnpaid()) {
@@ -374,11 +374,14 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
-     * 支付成功（#37/#39 支付原子化的领域事实）：已报价（=待支付）→ 已支付，落
-     * {@code paidAt} 与支付流水号。「已支付」为真实落库中间态（非事务内瞬态）——
-     * 支付成功即原子事实，后续归档是独立步骤，归档失败不抹支付事实。
+     * 支付成功（#37/#39 支付原子化的领域事实；#338 起唯一生产调用方＝开工判定
+     * {@code KickoffAppService}）：已报价（=待支付）→ 已支付（<b>新语义＝开工
+     * 条件满足</b>：合同签署完成且开工门节点全部到账），落 {@code paidAt}（＝
+     * 开工条件满足时点）与支付流水号（判定路径传合同号——无渠道流水的开工溯源
+     * 正身）。「已支付」为真实落库中间态（非事务内瞬态）——开工即原子事实，
+     * 后续归档是独立步骤（后台人工终局），归档失败不抹开工事实。
      *
-     * @param paymentNo 支付流水号（mock 平台内生成；真实接入为渠道单号）
+     * @param paymentNo 支付流水号（开工判定传合同号；渠道真接后为渠道单号）
      */
     public void pay(String paymentNo) {
         requirePayable();

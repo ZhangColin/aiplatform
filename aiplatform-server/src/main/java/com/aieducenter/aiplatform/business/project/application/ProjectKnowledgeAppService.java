@@ -149,21 +149,25 @@ public class ProjectKnowledgeAppService {
 
     /**
      * 成交 PRD 沉淀（#30；#158 起沉淀跟随归档成功——支付链与重试归档两路触发、
-     * 本口唯一）：取归档时最新版 PRD（直读工作区事实源，与下单快照各自独立——
-     * 沉淀的是归档时点的最新内容）段落分块入库；幂等键 =
-     * {@code (PRD, projectId)} 删后插——同项目再成交自然覆盖旧块。失败降级记
-     * 日志不炸（丢失容忍，A5 §1）：归档事务已成功，沉淀不允许把它拖回滚。
-     * 项目名经 {@code namesOf} 单查询取（缺档即降级跳过，不走 detail 全量拼装）。
+     * 本口唯一；#338 取版对齐）：沉淀内容由调用方（归档链）裁决——合同冻结的
+     * PRD 确认版优先（签约双方约定的正身），无合同（遗留/异常路径）回退最新
+     * 确认版；本口只管分块入库，不再读工作区（归档链的 docker exec 依赖点
+     * 随之退场）。幂等键 = {@code (PRD, projectId)} 删后插——同项目再成交自然
+     * 覆盖旧块。失败降级记日志不炸（丢失容忍，A5 §1）：归档事务已成功，沉淀
+     * 不允许把它拖回滚。项目名经 {@code namesOf} 单查询取（缺档即降级跳过，
+     * 不走 detail 全量拼装）。
+     *
+     * @param projectId  所属项目
+     * @param prdContent 沉淀正身全文（合同冻结版或最新确认版；空内容即跳过）
      */
-    public void sinkPrd(Long projectId) {
+    public void sinkPrd(Long projectId, String prdContent) {
         try {
             String projectName = projectQueryAppService.namesOf(List.of(projectId)).get(projectId);
             if (projectName == null) {
                 log.warn("[knowledge] 项目 {} 缺档，成交 PRD 沉淀跳过", projectId);
                 return;
             }
-            String prd = projectQueryAppService.prd(projectId).content();
-            List<String> chunks = chunkByParagraph(prd);
+            List<String> chunks = chunkByParagraph(prdContent);
             if (chunks.isEmpty()) {
                 log.info("[knowledge] 项目 {} 成交 PRD 为空，沉淀跳过", projectId);
                 return;

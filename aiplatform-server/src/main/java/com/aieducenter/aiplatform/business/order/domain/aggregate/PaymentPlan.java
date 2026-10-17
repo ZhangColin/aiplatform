@@ -24,6 +24,7 @@ import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.aieducenter.aiplatform.business.order.domain.entity.PaymentNode;
+import com.aieducenter.aiplatform.business.order.domain.enums.PaymentNodeStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.order.domain.model.PaymentNodeSpec;
 
@@ -148,6 +149,30 @@ public class PaymentPlan extends Auditable implements AggregateRoot<PaymentPlan,
     /** 累计已核到账（分）＝节点 settled 合计（前台「已付」推导面）。 */
     public Long totalSettled() {
         return nodes.stream().mapToLong(PaymentNode::getSettledAmount).sum();
+    }
+
+    /**
+     * 开工门判定·付款腿（#338 双门禁谓词单源——开工判定器与六态推导共用）：
+     * 开工门节点全部已到账才过门。<b>未录节点≠过门</b>（空计划/零节点 false
+     * ——等待录入/等待付款同呈现）；录了节点但无任何开工门标志＝空真 true
+     * （没设门＝无款门，门＝仅合同腿）。
+     */
+    public boolean kickoffGatesPassed() {
+        if (nodes.isEmpty()) {
+            return false;
+        }
+        return nodes.stream()
+                .filter(PaymentNode::isKickoffGate)
+                .allMatch(node -> node.getStatus() == PaymentNodeStatus.RECEIVED);
+    }
+
+    /**
+     * 是否有节点处线下转账待核验（#338 前台六态「款项核验中」判定——用户刚
+     * 上传凭证等后台核验，感知最近动作优先显示）。
+     */
+    public boolean anyNodeAwaitingVerification() {
+        return nodes.stream()
+                .anyMatch(node -> node.getStatus() == PaymentNodeStatus.AWAITING_VERIFICATION);
     }
 
     /**

@@ -14,8 +14,10 @@ import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
 import com.aieducenter.aiplatform.business.order.application.ContractAppService;
+import com.aieducenter.aiplatform.business.order.application.DeliveryStatusAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.ContractResponse;
+import com.aieducenter.aiplatform.business.order.application.dto.response.DeliveryStatusResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -42,10 +44,31 @@ public class OrderController {
 
     private final OrderAppService appService;
     private final ContractAppService contractAppService;
+    private final DeliveryStatusAppService deliveryStatusAppService;
 
-    public OrderController(OrderAppService appService, ContractAppService contractAppService) {
+    public OrderController(OrderAppService appService, ContractAppService contractAppService,
+            DeliveryStatusAppService deliveryStatusAppService) {
         this.appService = appService;
         this.contractAppService = contractAppService;
+        this.deliveryStatusAppService = deliveryStatusAppService;
+    }
+
+    @GetMapping("/api/projects/{projectId}/delivery-status")
+    @Operation(summary = "交付状态（前台六态纯推导，#338）",
+            description = "项目维度一次读齐订单＋合同＋付款＋生产承接四源现算的交付生命周期视图"
+                    + "（不存储）。六态（Integer code）：1=待签约（合同未签署完成——无/草稿/"
+                    + "签署中/旁落终态待重建）2=待付款（合同已签、开工门节点未全到账）"
+                    + "3=款项核验中（有节点处线下转账待核验）4=待安排生产（开工条件满足＝"
+                    + "已支付〔新语义〕，承接待排期；无承接的遗留已支付单同归此态）5=生产中"
+                    + "（承接已推进）6=需用户补充（项目级标志盖帽——needsUserSupplement "
+                    + "true 同报，处理入口在对话区）。state null＝待报价（六态不覆盖，订单面"
+                    + "「待确认报价」占位态照旧）；handoff null＝承接未建。订单终态不进本口"
+                    + "（订单面按终态呈现）。项目不存在 404 PRJ_001；无未终结订单 404 ORD_001"
+                    + "（前端缺席＝不渲染卡片）")
+    @ErrorCodes({"PRJ_001", "ORD_001"})
+    public ApiResponse<DeliveryStatusResponse> deliveryStatus(@PathVariable String projectId) {
+        return ApiResponse.ok(deliveryStatusAppService.statusOf(
+                Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
 
     @PostMapping("/api/projects/{projectId}/orders")

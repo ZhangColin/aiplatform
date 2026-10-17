@@ -12,6 +12,7 @@ const seed = vi.hoisted(() => ({
   order: undefined as Record<string, unknown> | undefined,
   contract: null as Record<string, unknown> | null,
   paymentPlan: undefined as Record<string, unknown> | undefined,
+  deliveryStatus: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock("@/hooks/use-order", () => ({
@@ -31,6 +32,12 @@ vi.mock("@/hooks/use-contract", () => ({
 // 付款域（#337）：无计划＝null（hook 已把 404 归一），面板契约归 interaction 测试
 vi.mock("@/hooks/use-payment", () => ({
   usePaymentPlan: () => ({ data: seed.paymentPlan ?? null }),
+}));
+
+// 交付状态域（#338）：无未终结订单＝null（hook 已把 404 归一），卡片契约归
+// production-card 测试
+vi.mock("@/hooks/use-production", () => ({
+  useDeliveryStatus: () => ({ data: seed.deliveryStatus ?? null }),
 }));
 
 function renderPanel(orderId?: string, projectArchived = false) {
@@ -419,5 +426,38 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
     expect(html).toContain('href="/api/projects/p1/source-package"');
     expect(html).toContain("下载源码包");
     expect(html).not.toContain("design-package");
+  });
+
+  it("生产状态卡（#338）：六态在场即挂载（付款面板之后）、缺席不渲染", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 3,
+      statusName: "已支付",
+      amount: 128000,
+      currency: "CNY",
+      priceEntries: [],
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+      paidAt: "2026-09-01T04:00:00Z",
+    };
+    seed.deliveryStatus = {
+      orderId: "o1",
+      orderStatus: 3,
+      state: 4,
+      stateName: "待安排生产",
+      needsUserSupplement: false,
+      handoff: null,
+    };
+
+    const html = renderPanel("o1");
+
+    expect(html).toContain("生产承接");
+    expect(html).toContain("待安排生产");
+
+    // 缺席态（无未终结订单/待报价 state null）：卡不渲染
+    seed.deliveryStatus = undefined;
+    const absent = renderPanel("o1");
+    expect(absent).not.toContain("生产承接");
   });
 });

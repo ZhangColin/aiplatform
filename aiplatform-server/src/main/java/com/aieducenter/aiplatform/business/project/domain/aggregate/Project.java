@@ -140,6 +140,14 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private String prdDraftSummary;
 
     /**
+     * 「需用户补充」项目级标志（#338 前台六态源之一）：生产承接期间需用户补
+     * 资料/确认事项时后台置位、处理完清零——六态推导以本标志盖帽（非终态订单
+     * 最高优先级），置位依据归后台人工口径不落库。
+     */
+    @Column(name = "needs_user_supplement", nullable = false)
+    private boolean needsUserSupplement;
+
+    /**
      * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
      * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
      * 设计主线出身不由页面锚定时为 NULL。
@@ -303,6 +311,14 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     public void clearPrdDraftChange() {
         this.prdDraftOpinion = null;
         this.prdDraftSummary = null;
+    }
+
+    /**
+     * 「需用户补充」置位/清零（#338 后台动作）：纯属性落位——置位语义（何时需要
+     * 用户补充、补充什么）归后台人工判定，聚合只承载标志与幂等落值。
+     */
+    public void flagNeedsUserSupplement(boolean required) {
+        this.needsUserSupplement = required;
     }
 
     /**

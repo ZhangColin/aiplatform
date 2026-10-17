@@ -10,6 +10,7 @@ import { OrderPanel } from "./order-panel";
 // mock 掉（契约面归 hooks 与后端测试）。
 const seed = vi.hoisted(() => ({
   order: undefined as Record<string, unknown> | undefined,
+  contract: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/hooks/use-order", () => ({
@@ -19,6 +20,12 @@ vi.mock("@/hooks/use-order", () => ({
   }),
   useCancelOrder: () => ({ isPending: false, mutate: vi.fn() }),
   usePayOrder: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
+// 合同域（#336）：无合同＝null（hook 已把 404 归一），契约面归 hooks 测试
+vi.mock("@/hooks/use-contract", () => ({
+  useContract: () => ({ data: seed.contract }),
+  useConfirmScope: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 function renderPanel(orderId?: string, projectArchived = false) {
@@ -100,6 +107,91 @@ describe("OrderPanel · 项目模式订单面（#28 + #29 + #30）", () => {
 
     expect(html).not.toContain("基准 PRD");
     expect(html).not.toContain("Demo v");
+  });
+
+  it("已报价＋范围录入＋无合同：范围三段＋「确认范围并准备合同」（#336 确认面）", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 2,
+      statusName: "已报价",
+      amount: 128000,
+      currency: "CNY",
+      note: "首版报价",
+      scopeDeliverables: "交付清单：管理后台＋小程序",
+      scopeAcceptance: "验收方式：按 PRD v3 验收",
+      scopeTimeline: "工期口径：4 周",
+      priceEntries: [],
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+    };
+    seed.contract = null;
+
+    const html = renderPanel("o1");
+
+    expect(html).toContain("范围与报价");
+    expect(html).toContain("交付清单：管理后台＋小程序");
+    expect(html).toContain("验收方式：按 PRD v3 验收");
+    expect(html).toContain("工期口径：4 周");
+    expect(html).toContain("确认范围并准备合同");
+    expect(html).not.toContain("SG-"); // 无合同不渲染预览卡（编号缺席＝卡缺席）
+  });
+
+  it("已报价无范围文本：确认面不出（等后台录入范围）", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 2,
+      statusName: "已报价",
+      amount: 128000,
+      currency: "CNY",
+      priceEntries: [],
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+    };
+    seed.contract = null;
+
+    const html = renderPanel("o1");
+
+    expect(html).not.toContain("确认范围并准备合同");
+  });
+
+  it("合同在场：预览卡挂载＋确认面退场（范围以合同快照为准）", () => {
+    seed.order = {
+      id: "o1",
+      projectId: "p1",
+      status: 2,
+      statusName: "已报价",
+      amount: 128000,
+      currency: "CNY",
+      scopeDeliverables: "交付清单：管理后台＋小程序",
+      scopeAcceptance: "验收方式：按 PRD v3 验收",
+      scopeTimeline: "工期口径：4 周",
+      priceEntries: [],
+      createdAt: "2026-09-01T01:00:00Z",
+      cancelledAt: null,
+    };
+    seed.contract = {
+      id: "c1",
+      contractNo: "SG-3ukqz0c0",
+      status: 1,
+      statusName: "准备中",
+      version: 1,
+      needsUpdate: false,
+      scopeDeliverables: "交付清单：管理后台＋小程序",
+      scopeAcceptance: "验收方式：按 PRD v3 验收",
+      scopeTimeline: "工期口径：4 周",
+      amount: 128000,
+      currency: "CNY",
+      partyASigned: false,
+      partyBSigned: false,
+    };
+
+    const html = renderPanel("o1");
+
+    expect(html).toContain("SG-3ukqz0c0");
+    expect(html).toContain("准备中");
+    expect(html).not.toContain("确认范围并准备合同"); // 合同已建，确认动作退场
   });
 
   it("已报价（=待支付）：总价 + 后台备注 + 可点的去支付（确认弹窗归交互测试）+ 取消", () => {

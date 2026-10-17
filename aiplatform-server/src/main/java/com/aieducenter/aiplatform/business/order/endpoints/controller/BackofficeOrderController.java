@@ -26,6 +26,7 @@ import com.cartisan.web.response.PageResponse;
 import com.aieducenter.aiplatform.business.order.application.BackofficeOrderAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.command.CancelOrderCommand;
+import com.aieducenter.aiplatform.business.order.application.dto.command.EnterScopeCommand;
 import com.aieducenter.aiplatform.business.order.application.dto.command.SubmitQuoteCommand;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderDetailResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.BackofficeOrderSummaryResponse;
@@ -48,7 +49,7 @@ import com.aieducenter.aiplatform.support.Tsid;
 @RestController
 @RequestMapping("/api/backoffice/orders")
 @RequireSignature
-@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 设计资产包 / 报价 / 运营取消 / 重试归档（机机签名）")
+@Tag(name = "Backoffice Orders", description = "后台订单：四维清单 / 详情 / 源码包 / 设计资产包 / 报价 / 范围录入 / 运营取消 / 重试归档（机机签名）")
 public class BackofficeOrderController {
 
     private final BackofficeOrderAppService queryAppService;
@@ -145,6 +146,20 @@ public class BackofficeOrderController {
                                             @RequestBody SubmitQuoteCommand command) {
         return ApiResponse.ok(appService.submitQuote(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND),
                 command.amount(), command.note(), currentOperator()));
+    }
+
+    @PostMapping("/{id}/scope")
+    @Operation(summary = "录入范围文本（三段整组替换，#336）",
+            description = "范围文本工作副本录入（交付清单/验收方式/工期口径，后台结构化录入、"
+                    + "每次整组替换）——用户「确认范围并准备合同」确认面的数据源；确认后本副本"
+                    + "仍可改（触发草稿合同「需更新」派生标志，后台重录重新冻结）。限未支付态："
+                    + "已支付/已终结 409 ORD_033；三段缺失 400 ORD_029；超长（每段至多 2000 字）"
+                    + "400 ORD_030。需要机机签名")
+    @ErrorCodes({"ORD_001", "ORD_029", "ORD_030", "ORD_033"})
+    public ApiResponse<OrderResponse> scope(@PathVariable String id,
+                                            @RequestBody EnterScopeCommand command) {
+        return ApiResponse.ok(appService.enterScope(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND),
+                command.scopeDeliverables(), command.scopeAcceptance(), command.scopeTimeline()));
     }
 
     @PostMapping("/{id}/cancel")

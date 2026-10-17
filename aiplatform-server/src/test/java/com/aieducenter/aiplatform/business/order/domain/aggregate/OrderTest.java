@@ -211,6 +211,46 @@ class OrderTest {
         }
     }
 
+    // ---------- #336：范围文本录入（后台工作副本，整组替换） ----------
+
+    @Test
+    void given_unpaid_order_when_enter_scope_then_full_replacement() {
+        // 整组替换语义：不收半组；待报价/已报价两未支付态都可录
+        for (Order order : List.of(pendingQuoteOrder(), quotedOrder())) {
+            order.enterScope("交付清单：管理后台", "验收方式：按 PRD 验收", "工期口径：4 周");
+            assertThat(order.getScopeDeliverables()).isEqualTo("交付清单：管理后台");
+            assertThat(order.getScopeAcceptance()).isEqualTo("验收方式：按 PRD 验收");
+            assertThat(order.getScopeTimeline()).isEqualTo("工期口径：4 周");
+            assertThat(order.scopeEntered()).isTrue();
+
+            order.enterScope("交付清单：管理后台＋小程序", "验收方式：按 PRD 验收", "工期口径：6 周");
+            assertThat(order.getScopeDeliverables()).isEqualTo("交付清单：管理后台＋小程序");
+        }
+    }
+
+    @Test
+    void given_paid_or_terminal_order_when_enter_scope_then_rejected_ord_033() {
+        // 已支付蕴含合同签署完成、约定已定——不再受理范围录入（同报价守卫口径）
+        for (Order order : List.of(paidOrder(), archivedOrder(), cancelledOrder())) {
+            assertThatThrownBy(() -> order.enterScope("清单", "验收", "工期"))
+                    .isInstanceOf(DomainException.class)
+                    .hasMessageContaining(OrderMessage.ORDER_SCOPE_NOT_ALLOWED.message());
+            assertThat(order.getScopeDeliverables()).isNull(); // 不落半截
+        }
+    }
+
+    @Test
+    void given_blank_or_overlong_scope_when_enter_scope_then_rejected() {
+        Order order = pendingQuoteOrder();
+        for (String blank : new String[] {null, "", " "}) {
+            assertThatThrownBy(() -> order.enterScope(blank, "验收", "工期"))
+                    .hasMessageContaining(OrderMessage.ORDER_SCOPE_INCOMPLETE.message());
+        }
+        assertThatThrownBy(() -> order.enterScope("长".repeat(Order.SCOPE_MAX_LENGTH + 1), "验收", "工期"))
+                .hasMessageContaining(OrderMessage.ORDER_SCOPE_TOO_LONG.message());
+        assertThat(order.scopeEntered()).isFalse(); // 首次未录入＝确认范围门不开
+    }
+
     // ---------- 夹具（经公共入口驱动到目标态，不绕私有状态） ----------
 
     private static Order pendingQuoteOrder() {

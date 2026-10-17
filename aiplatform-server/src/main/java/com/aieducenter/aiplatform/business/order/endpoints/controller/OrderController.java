@@ -10,9 +10,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
+import com.aieducenter.aiplatform.business.order.application.ContractAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
+import com.aieducenter.aiplatform.business.order.application.dto.response.ContractResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -20,22 +23,27 @@ import com.aieducenter.aiplatform.support.BinaryResponses;
 import com.aieducenter.aiplatform.support.Tsid;
 
 /**
- * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付 + #297 设计资产包取件）：
- * 确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）/ 订单详情 / 取消 / mock
- * 支付 / 设计资产包下载。后台机机面（清单/详情/源码包/报价改价）归
- * {@link BackofficeOrderController}（#29，/api/backoffice/*，五头 HMAC）。路由横跨
- * /api/projects 与 /api/orders 两前缀（spec API 面定盘），故不设类级
- * {@code @RequestMapping}、逐方法写全路径。
+ * 订单 REST 面（#28 交易环①用户面 + #30 交易环③支付 + #297 设计资产包取件
+ * + #336 合同确认与预览）：确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）
+ * / 订单详情（含范围文本三段）/ 取消 / mock 支付 / 设计资产包下载 / 确认范围并
+ * 准备合同（范围快照冻结·合同创建口）/ 合同预览（订单名下最近合同）。后台机机
+ * 面（清单/详情/源码包/报价改价/范围录入）归 {@link BackofficeOrderController}
+ * （#29，/api/backoffice/*，五头 HMAC）；合同承接面归
+ * {@link BackofficeContractController}。路由横跨 /api/projects 与 /api/orders
+ * 两前缀（spec API 面定盘），故不设类级 {@code @RequestMapping}、逐方法写全
+ * 路径。
  */
 @RestController
 @Validated
-@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付 / 设计资产包下载")
+@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / mock 支付 / 设计资产包下载 / 确认范围并准备合同 / 合同预览")
 public class OrderController {
 
     private final OrderAppService appService;
+    private final ContractAppService contractAppService;
 
-    public OrderController(OrderAppService appService) {
+    public OrderController(OrderAppService appService, ContractAppService contractAppService) {
         this.appService = appService;
+        this.contractAppService = contractAppService;
     }
 
     @PostMapping("/api/projects/{projectId}/orders")
@@ -57,11 +65,42 @@ public class OrderController {
     @GetMapping("/api/orders/{id}")
     @Operation(summary = "订单详情（用户面）",
             description = "状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）"
-                    + "+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点"
-                    + "+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。"
-                    + "订单不存在 404 ORD_001")
+                    + "+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段"
+                    + "（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）"
+                    + "+ 下单/取消时点 + 支付/归档时点（#30——已支付为瞬态，paidAt 与 "
+                    + "archivedAt 同拍）。订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
+    }
+
+    @PostMapping("/api/orders/{id}/confirm-scope")
+    @Operation(summary = "确认范围并准备合同（范围快照冻结，合同创建口）",
+            description = "三子步骤「核对范围与报价」的确认动作（#336）：确认即冻结报价版本引用"
+                    + "＋范围文本不可变副本（范围快照），同刻创建合同（准备中起步，编号 SG- "
+                    + "风格全局唯一）——后台人工推进六态、双方签署位未签起步。前置门：尚无报价"
+                    + " 409 ORD_025（后台落定报价后再确认）；范围文本未录入 409 ORD_026；已有"
+                    + "活跃合同 409 ORD_024；订单非活跃报价态 409 ORD_021。确认后改价/改范围不"
+                    + "回写快照——草稿合同转「需更新」标志，由后台重录重新冻结。订单不存在"
+                    + " 404 ORD_001")
+    @ErrorCodes({"ORD_001", "ORD_021", "ORD_024", "ORD_025", "ORD_026"})
+    public ApiResponse<ContractResponse> confirmScope(@PathVariable String id) {
+        return ApiResponse.ok(contractAppService.confirmScope(
+                Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
+    }
+
+    @GetMapping("/api/orders/{id}/contract")
+    @Operation(summary = "合同预览（订单名下最近合同）",
+            description = "合同预览卡取数面（#336 最小呈现）：预览字段集（双方主体/项目范围/交付物"
+                    + "〔范围快照·交付清单〕/验收标准〔范围快照·验收方式〕/费用〔冻结金额〕/"
+                    + "付款计划/交期约定〔范围快照·工期口径〕/合同版本）＋六态（1=准备中 "
+                    + "2=待核对与签署 3=签署进行中 4=签署完成 5=签署失败或过期 6=已撤回或作废）"
+                    + "＋双方签署位＋「需更新」派生标志（改价/改范围后待后台重录）。活跃合同在场"
+                    + "即最新；终态合同永不物理删除（签署完成后仍可见）。订单名下无合同 404 "
+                    + "ORD_020（前端缺席＝不渲染卡片）。订单不存在 404 ORD_001")
+    @ErrorCodes({"ORD_001", "ORD_020"})
+    public ApiResponse<ContractResponse> contract(@PathVariable String id) {
+        return ApiResponse.ok(contractAppService.latestByOrder(
+                Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }
 
     @PostMapping("/api/orders/{id}/payment")

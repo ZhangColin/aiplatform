@@ -259,6 +259,23 @@ public class OrderAppService {
     }
 
     /**
+     * 录入范围文本（#336 后台动作，机机面经 BackofficeOrderController 进入）：
+     * 三段（交付清单/验收方式/工期口径）整组替换落订单工作副本（聚合守卫
+     * ORD_029/030/033）。工作副本永远领先快照——确认范围后改本副本触发草稿
+     * 合同「需更新」派生标志（对照现算，不在此落任何标志）。事务取舍同
+     * {@link #cancel}：单聚合更新由仓储自带事务保证。
+     *
+     * @throws ApplicationException ORD_001 订单不存在；ORD_029 三段缺失；
+     *                              ORD_030 超长；ORD_033 已支付或已终结
+     */
+    public OrderResponse enterScope(Long orderId, String scopeDeliverables,
+            String scopeAcceptance, String scopeTimeline) {
+        Order order = requireOrder(orderId);
+        order.enterScope(scopeDeliverables, scopeAcceptance, scopeTimeline);
+        return OrderResponse.of(orderRepository.save(order));
+    }
+
+    /**
      * mock 支付（#37/#39 支付原子化）：已报价（=待支付）态同步只走成功路径，支付
      * 成功即订单落「已支付」真实中间态。拆两个事务——①支付原子（{@link Order#pay}
      * + save，独立短事务，落 paidAt/paymentNo）；②归档（{@link Order#archive} +

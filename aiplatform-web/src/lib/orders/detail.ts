@@ -1,4 +1,5 @@
 import type { components } from "@/lib/api/schema";
+import { toAmount } from "@/lib/orders/price";
 
 /** swagger OrderResponse 原始形状（字段全可缺）。 */
 export type OrderResponse = components["schemas"]["OrderResponse"];
@@ -48,6 +49,12 @@ export type OrderDetail = {
   currency?: string;
   /** 当前后台备注（最新价目行 note；待报价缺省）。 */
   note?: string;
+  /** 范围文本·交付清单（#336 后台录入工作副本；未录入缺省——确认面前置）。 */
+  scopeDeliverables?: string;
+  /** 范围文本·验收方式（#336；未录入缺省）。 */
+  scopeAcceptance?: string;
+  /** 范围文本·工期口径（#336；未录入缺省）。 */
+  scopeTimeline?: string;
   /** 首次报价时点（改价不刷新；待报价缺省）。 */
   quotedAt?: string;
   /** 改价历史（新 → 旧，后端排序口径；只追加不改写）。 */
@@ -59,15 +66,6 @@ export type OrderDetail = {
   /** 归档时点（未归档缺省）。 */
   archivedAt?: string;
 };
-
-/** Long 字段线上实为字符串（Jackson Long→String），容错折数。 */
-function toAmount(value: number | string | null | undefined): number | undefined {
-  if (value == null) {
-    return undefined;
-  }
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 function normalizeEntry(raw: PriceEntryResponse): OrderPriceEntry {
   return {
@@ -93,6 +91,9 @@ export function normalizeOrder(raw: OrderResponse): OrderDetail {
     amount: toAmount(raw.amount),
     currency: raw.currency,
     note: raw.note,
+    scopeDeliverables: raw.scopeDeliverables,
+    scopeAcceptance: raw.scopeAcceptance,
+    scopeTimeline: raw.scopeTimeline,
     quotedAt: raw.quotedAt,
     priceEntries: (raw.priceEntries ?? []).map(normalizeEntry),
     createdAt: raw.createdAt,

@@ -27,6 +27,10 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
  * @param amount              当前总价（分；待报价 NULL，改价取最新价目行）
  * @param currency            币种（v1 恒 CNY；待报价 NULL）
  * @param note                当前后台备注（最新价目行 note；待报价 NULL）
+ * @param scopeDeliverables   范围文本·交付清单（#336 后台录入工作副本；未录入
+ *                            NULL——「确认范围并准备合同」确认面数据）
+ * @param scopeAcceptance     范围文本·验收方式（#336；未录入 NULL）
+ * @param scopeTimeline       范围文本·工期口径（#336；未录入 NULL）
  * @param quotedAt            首次报价时点（改价不刷新；待报价 NULL）
  * @param priceEntries        改价历史（新 → 旧：时间 + 金额 + 备注，只追加）
  * @param createdAt           下单时间（快照冻结时点）
@@ -46,6 +50,9 @@ public record OrderResponse(
         Long amount,
         String currency,
         String note,
+        String scopeDeliverables,
+        String scopeAcceptance,
+        String scopeTimeline,
         LocalDateTime quotedAt,
         List<PriceEntryResponse> priceEntries,
         LocalDateTime createdAt,
@@ -68,6 +75,9 @@ public record OrderResponse(
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),
+                order.getScopeDeliverables(),
+                order.getScopeAcceptance(),
+                order.getScopeTimeline(),
                 order.getQuotedAt(),
                 order.priceHistoryNewestFirst().stream()
                         .map(PriceEntryResponse::of)

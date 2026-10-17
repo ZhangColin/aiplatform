@@ -571,6 +571,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orders/{id}/confirm-scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认范围并准备合同（范围快照冻结，合同创建口）
+         * @description 三子步骤「核对范围与报价」的确认动作（#336）：确认即冻结报价版本引用＋范围文本不可变副本（范围快照），同刻创建合同（准备中起步，编号 SG- 风格全局唯一）——后台人工推进六态、双方签署位未签起步。前置门：尚无报价 409 ORD_025（后台落定报价后再确认）；范围文本未录入 409 ORD_026；已有活跃合同 409 ORD_024；订单非活跃报价态 409 ORD_021。确认后改价/改范围不回写快照——草稿合同转「需更新」标志，由后台重录重新冻结。订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 409 ORD_024 — 该订单已有活跃合同（至多一份非终态合同）
+         *     - 409 ORD_025 — 尚无报价，无法确认范围（后台落定报价后再确认）
+         *     - 409 ORD_026 — 范围文本未录入（后台录入交付清单/验收方式/工期口径后再确认）
+         */
+        post: operations["confirmScope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orders/{id}/cancel": {
         parameters: {
             query?: never;
@@ -966,6 +993,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/orders/{id}/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 录入范围文本（三段整组替换，#336）
+         * @description 范围文本工作副本录入（交付清单/验收方式/工期口径，后台结构化录入、每次整组替换）——用户「确认范围并准备合同」确认面的数据源；确认后本副本仍可改（触发草稿合同「需更新」派生标志，后台重录重新冻结）。限未支付态：已支付/已终结 409 ORD_033；三段缺失 400 ORD_029；超长（每段至多 2000 字）400 ORD_030。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 400 ORD_029 — 范围文本三段必填（交付清单/验收方式/工期口径）
+         *     - 400 ORD_030 — 范围文本超长（每段至多 2000 字）
+         *     - 409 ORD_033 — 订单已支付或已终结，无法录入范围
+         */
+        post: operations["scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/orders/{id}/retry-archive": {
         parameters: {
             query?: never;
@@ -1085,6 +1138,194 @@ export interface paths {
          *     - 400 KNW_006 — 操作者不能为空
          */
         post: operations["disable_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 撤回（旁落终态，依据必填留痕）
+         * @description 自任何非终态可达——此后换新号重建（POST /orders/{orderId}）。终态再动 409 ORD_021。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         */
+        post: operations["withdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 作废（旁落终态，依据必填留痕）
+         * @description 守卫与去向同撤回（同一终态「已撤回或作废」，动作语义分立——区分只在留痕行 action）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         */
+        post: operations["voidContract"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 签署标记（落一方签署位，依据必填留痕）
+         * @description 电子签渠道真接前的后台承接口径：仅签署进行中态（409 ORD_021），落一方签署位＋时点；已落签的签署位幂等拒（ORD_028）。不自动迁移——「签署完成」由 advance 显式推进（双方均签守卫 ORD_027）。party：1=甲方（客户方） 2=乙方（服务方）。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         *     - 409 ORD_028 — 该方已签署（签署位已落）
+         */
+        post: operations["sign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 草稿重录（同号重新冻结＋版本递增，依据必填留痕）
+         * @description 「需更新」处置正路：改价/改范围后对草稿（准备中/待核对与签署）同号重录——预览字段集整组录入＋冻结集取订单现值重新定格＋合同版本 +1＋「需更新」清零。签署进行中起 409 ORD_031（变动走撤回/作废重建）；内容超长 400 ORD_032。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         *     - 409 ORD_025 — 尚无报价，无法确认范围（后台落定报价后再确认）
+         *     - 409 ORD_026 — 范围文本未录入（后台录入交付清单/验收方式/工期口径后再确认）
+         *     - 409 ORD_031 — 内容重录仅限草稿态（签署进行中起走撤回/作废重建）
+         *     - 400 ORD_032 — 合同内容字段超长（主体至多 200 字，其余至多 2000 字）
+         */
+        post: operations["record"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/fail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 失败或过期（旁落终态，依据必填留痕）
+         * @description 自待核对与签署/签署进行中可达（用户放弃核对或超期未签的如实终局）；其余态 409 ORD_021。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         */
+        post: operations["fail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}/advance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 推进（线性单步，依据必填留痕）
+         * @description 准备中 → 待核对与签署 → 签署进行中 → 签署完成（末边须双方签署位均已落签）。每次推进 append-only 留痕（X-User-Id/X-User-Name 透传头自动落痕，缺头落空）。无推进边（终态）409 ORD_021；双方未均签 409 ORD_027；依据缺失 400 ORD_022；依据超长 400 ORD_023。需要机机签名
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 400 ORD_022 — 操作依据必填（人工推进须填写依据留痕）
+         *     - 400 ORD_023 — 操作依据超长（至多 1000 字）
+         *     - 409 ORD_027 — 双方尚未全部签署，不能标记签署完成
+         */
+        post: operations["advance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/orders/{orderId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 创建/重建合同（确认范围冻结集取现值）
+         * @description 撤回/作废后的重建口（新号新合同、旧合同终态保留）——与用户「确认范围并准备合同」共用同一创建正本：冻结集取现值（最新价目行＋范围文本工作副本）。前置门同款：订单未报价 409 ORD_025；范围未录入 409 ORD_026；已有活跃合同 409 ORD_024（预检或并发撞部分唯一索引同译）。需要机机签名；订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 409 ORD_021 — 合同当前状态不允许该操作
+         *     - 409 ORD_024 — 该订单已有活跃合同（至多一份非终态合同）
+         *     - 409 ORD_025 — 尚无报价，无法确认范围（后台落定报价后再确认）
+         *     - 409 ORD_026 — 范围文本未录入（后台录入交付清单/验收方式/工期口径后再确认）
+         */
+        post: operations["createForOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1509,7 +1750,7 @@ export interface paths {
         };
         /**
          * 订单详情（用户面）
-         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 下单/取消时点+ 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
+         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）+ 下单/取消时点 + 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
          */
         get: operations["detail_1"];
         put?: never;
@@ -1532,6 +1773,30 @@ export interface paths {
          * @description 该单下单冻结件直取（交付物包按单定格——选件式 tar：选定稿自包含形态＋DESIGN.md 设计规范＋帧衍生资产、落选稿不入；系统＋设计单＝统一部件容器，源码整树与设计部件同包、目录即类型边界）。支付门与源码包/单文件下载同口径：项目曾有已支付/已归档订单即开放，未付费 402 ORD_015如实告知门语义（体验免费、带走才付费，ADR-0027）。守卫序＝订单存在 →交付物类型（系统单 404 ORD_016 如实）→ 门 → 冻结件读取（缺失 404 PRJ_051 不以空产物顶替）。响应为二进制文件流（application/gzip，本端点不走 ApiResponse JSON 信封，先例＝源码包端点）。订单不存在 404 ORD_001
          */
         get: operations["designPackage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orders/{id}/contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 合同预览（订单名下最近合同）
+         * @description 合同预览卡取数面（#336 最小呈现）：预览字段集（双方主体/项目范围/交付物〔范围快照·交付清单〕/验收标准〔范围快照·验收方式〕/费用〔冻结金额〕/付款计划/交期约定〔范围快照·工期口径〕/合同版本）＋六态（1=准备中 2=待核对与签署 3=签署进行中 4=签署完成 5=签署失败或过期 6=已撤回或作废）＋双方签署位＋「需更新」派生标志（改价/改范围后待后台重录）。活跃合同在场即最新；终态合同永不物理删除（签署完成后仍可见）。订单名下无合同 404 ORD_020（前端缺席＝不渲染卡片）。订单不存在 404 ORD_001
+         *
+         *     错误码：
+         *     - 404 ORD_001 — 订单不存在
+         *     - 404 ORD_020 — 合同不存在
+         */
+        get: operations["contract"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2252,6 +2517,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 合同清单（多维检索，分页）
+         * @description 运营工作清单：新合同在前（TSID 倒序）。维度可组合、均可缺省（缺省＝全量）：① status 状态多选，Integer code 逗号分隔单值（如 status=1,3；1=准备中 2=待核对与签署 3=签署进行中 4=签署完成 5=签署失败或过期 6=已撤回或作废）；② createdFrom/createdTo 创建时间区间（ISO-8601，含两端）；③ orderId 所属订单精确（TSID 十进制，非数值→空清单 200）；④ contractNo 合同号精确（SG- 串）。行带编号/状态/版本/冻结金额。page 1 基（缺省 1）、size 缺省 20（上界 100），排序服务端定死不开放。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         *     - 404 NOT_FOUND — Resource not found
+         */
+        get: operations["contracts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/contracts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 合同详情（后台承接全量面）
+         * @description 全字段（含「需更新」派生标志与范围快照冻结面）＋PRD 冻结全文冗余拷贝＋动作留痕时间线（新 → 旧，append-only 全量——动作/两侧状态/依据/操作者/时间）。需要机机签名；合同不存在 404 ORD_020
+         *
+         *     错误码：
+         *     - 404 ORD_020 — 合同不存在
+         */
+        get: operations["detail_7"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/agent-tools": {
         parameters: {
             query?: never;
@@ -2822,6 +3134,9 @@ export interface components {
             amount?: number;
             currency?: string;
             note?: string;
+            scopeDeliverables?: string;
+            scopeAcceptance?: string;
+            scopeTimeline?: string;
             /** Format: date-time */
             quotedAt?: string;
             priceEntries?: components["schemas"]["PriceEntryResponse"][];
@@ -3027,6 +3342,47 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             confirmedAt?: string;
+        };
+        ApiResponseContractResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["ContractResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        ContractResponse: {
+            id?: string;
+            contractNo?: string;
+            orderId?: string;
+            /** @description 1=准备中, 2=待核对与签署, 3=签署进行中, 4=签署完成, 5=签署失败或过期, 6=已撤回或作废 */
+            status?: number;
+            statusName?: string;
+            /** Format: int32 */
+            version?: number;
+            needsUpdate?: boolean;
+            partyA?: string;
+            partyB?: string;
+            projectScope?: string;
+            paymentPlan?: string;
+            scopeDeliverables?: string;
+            scopeAcceptance?: string;
+            scopeTimeline?: string;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            /** Format: int32 */
+            prdVersionNo?: number;
+            /** Format: int32 */
+            demoVersionNo?: number;
+            partyASigned?: boolean;
+            /** Format: date-time */
+            partyASignedAt?: string;
+            partyBSigned?: boolean;
+            /** Format: date-time */
+            partyBSignedAt?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         ApiResponseBackofficeWorkspaceDetailResponse: {
             /** Format: int32 */
@@ -3275,6 +3631,11 @@ export interface components {
             closed?: components["schemas"]["UnitPriceEntryResponse"];
             opened?: components["schemas"]["UnitPriceEntryResponse"];
         };
+        EnterScopeCommand: {
+            scopeDeliverables?: string;
+            scopeAcceptance?: string;
+            scopeTimeline?: string;
+        };
         SubmitQuoteCommand: {
             /** Format: int64 */
             amount?: number;
@@ -3304,6 +3665,21 @@ export interface components {
             sunkAt?: string;
             operatorId?: string;
             operatorName?: string;
+        };
+        ContractActionCommand: {
+            basis?: string;
+        };
+        SignContractCommand: {
+            /** @description 1=甲方, 2=乙方 */
+            party?: number;
+            basis?: string;
+        };
+        RecordContractCommand: {
+            partyA?: string;
+            partyB?: string;
+            projectScope?: string;
+            paymentPlan?: string;
+            basis?: string;
         };
         ApiResponseListProjectResponse: {
             /** Format: int32 */
@@ -3950,6 +4326,9 @@ export interface components {
             amount?: number;
             currency?: string;
             note?: string;
+            scopeDeliverables?: string;
+            scopeAcceptance?: string;
+            scopeTimeline?: string;
             priceEntries?: components["schemas"]["BackofficePriceEntryResponse"][];
             prdSnapshot?: string;
             /** Format: date-time */
@@ -4127,6 +4506,67 @@ export interface components {
             };
             byModel?: components["schemas"]["ModelUsage"][];
             byAgentKind?: components["schemas"]["AgentKindUsage"][];
+        };
+        ApiResponsePageResponseBackofficeContractSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeContractSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeContractSummaryResponse: {
+            id?: string;
+            contractNo?: string;
+            orderId?: string;
+            /** @description 1=准备中, 2=待核对与签署, 3=签署进行中, 4=签署完成, 5=签署失败或过期, 6=已撤回或作废 */
+            status?: number;
+            statusName?: string;
+            /** Format: int32 */
+            version?: number;
+            /** Format: int64 */
+            amount?: number;
+            currency?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        PageResponseBackofficeContractSummaryResponse: {
+            items?: components["schemas"]["BackofficeContractSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+        };
+        ApiResponseBackofficeContractDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeContractDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeContractDetailResponse: {
+            contract?: components["schemas"]["ContractResponse"];
+            prdSnapshot?: string;
+            transitions?: components["schemas"]["ContractTransitionResponse"][];
+        };
+        ContractTransitionResponse: {
+            /** @description 1=推进, 2=撤回, 3=作废, 4=签署标记, 5=草稿重录, 6=失败或过期 */
+            action?: number;
+            actionName?: string;
+            /** @description 1=准备中, 2=待核对与签署, 3=签署进行中, 4=签署完成, 5=签署失败或过期, 6=已撤回或作废 */
+            fromStatus?: number;
+            fromStatusName?: string;
+            /** @description 1=准备中, 2=待核对与签署, 3=签署进行中, 4=签署完成, 5=签署失败或过期, 6=已撤回或作废 */
+            toStatus?: number;
+            toStatusName?: string;
+            basis?: string;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         ApiResponseListBackofficeAgentToolSlotResponse: {
             /** Format: int32 */
@@ -4903,6 +5343,28 @@ export interface operations {
             };
         };
     };
+    confirmScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
     cancel: {
         parameters: {
             query?: never;
@@ -5277,6 +5739,32 @@ export interface operations {
             };
         };
     };
+    scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnterScopeCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+        };
+    };
     retryArchive: {
         parameters: {
             query?: never;
@@ -5391,6 +5879,184 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeMaterialSummaryResponse"];
+                };
+            };
+        };
+    };
+    withdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractActionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    voidContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractActionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    sign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignContractCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    record: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordContractCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    fail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractActionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    advance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractActionCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
+                };
+            };
+        };
+    };
+    createForOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
                 };
             };
         };
@@ -5910,6 +6576,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": string;
+                };
+            };
+        };
+    };
+    contract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseContractResponse"];
                 };
             };
         };
@@ -6606,6 +7294,57 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeCostOverviewResponse"];
+                };
+            };
+        };
+    };
+    contracts: {
+        parameters: {
+            query?: {
+                status?: number[];
+                createdFrom?: string;
+                createdTo?: string;
+                orderId?: string;
+                contractNo?: string;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeContractSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_7: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeContractDetailResponse"];
                 };
             };
         };

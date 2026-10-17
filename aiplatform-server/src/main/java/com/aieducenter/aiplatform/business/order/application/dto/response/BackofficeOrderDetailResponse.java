@@ -29,6 +29,10 @@ import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
  * @param amount              当前总价（分；待报价 NULL）
  * @param currency            币种（v1 恒 CNY；待报价 NULL）
  * @param note                当前后台备注（最新价目行；待报价 NULL）
+ * @param scopeDeliverables   范围文本·交付清单（#336 后台录入工作副本；未录入
+ *                            null——范围录入端点的现值回显）
+ * @param scopeAcceptance     范围文本·验收方式（#336；未录入 null）
+ * @param scopeTimeline       范围文本·工期口径（#336；未录入 null）
  * @param priceEntries        价目历史（新 → 旧，append-only 全量；带操作者，存量行
  *                            操作者为空；待报价空表）
  * @param prdSnapshot         下单时 PRD 全文快照（交易标的，只插不改）
@@ -62,6 +66,9 @@ public record BackofficeOrderDetailResponse(
         Long amount,
         String currency,
         String note,
+        String scopeDeliverables,
+        String scopeAcceptance,
+        String scopeTimeline,
         List<BackofficePriceEntryResponse> priceEntries,
         String prdSnapshot,
         LocalDateTime createdAt,
@@ -92,6 +99,9 @@ public record BackofficeOrderDetailResponse(
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),
+                order.getScopeDeliverables(),
+                order.getScopeAcceptance(),
+                order.getScopeTimeline(),
                 order.priceHistoryNewestFirst().stream()
                         .map(BackofficePriceEntryResponse::of)
                         .toList(),

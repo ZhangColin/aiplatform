@@ -372,6 +372,7 @@ class BackofficeOrderControllerTest {
         return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.QUOTED, "已报价",
                 OrderDeliverableType.SYSTEM_DESIGN, "系统＋设计", 128000L, "CNY", "首版报价",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 List.of(
                         new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
                                 "700100", "运营·小刘", LocalDateTime.of(2026, 9, 1, 11, 0)),
@@ -385,6 +386,7 @@ class BackofficeOrderControllerTest {
     private static OrderResponse quotedOrder() {
         return new OrderResponse("900", "100", OrderStatus.QUOTED, "已报价",
                 OrderDeliverableType.SYSTEM, "系统", 3, 2, 99000L, "CNY", "调整：去掉导入功能",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(
                         new PriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",
@@ -398,6 +400,7 @@ class BackofficeOrderControllerTest {
     private static OrderResponse cancelledOrder() {
         return new OrderResponse("900", "100", OrderStatus.CANCELLED, "已取消",
                 OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                         LocalDateTime.of(2026, 9, 1, 10, 0))),
@@ -409,6 +412,7 @@ class BackofficeOrderControllerTest {
     private static OrderResponse archivedOrder() {
         return new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
                 OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0),
                 List.of(new PriceEntryResponse("901", 128000L, "CNY", "首版报价",
                         LocalDateTime.of(2026, 9, 1, 10, 0))),

@@ -64,6 +64,9 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 报价备注上限（与 {@code ord_price_entries.note} 列宽对齐）。 */
     public static final int QUOTE_NOTE_MAX_LENGTH = 1000;
 
+    /** 范围文本每段上限（#336，与 {@code ord_orders.scope_*} 列宽对齐）。 */
+    public static final int SCOPE_MAX_LENGTH = 2000;
+
     /** 取消原因上限（与 {@code ord_orders.cancel_reason} 列宽对齐，#157）。 */
     public static final int CANCEL_REASON_MAX_LENGTH = 1000;
 
@@ -120,6 +123,22 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     /** 当前总价（分；待报价 NULL，报价落值、改价取最新价目行）。 */
     @Column(name = "amount")
     private Long amount;
+
+    /**
+     * 范围文本·交付清单（#336 工作副本，后台结构化录入、整组可替换）——「确认
+     * 范围并准备合同」时定格为合同上的不可变副本（范围快照）；确认后本副本仍可
+     * 改（变动触发草稿合同「需更新」派生标志），快照不漂移。
+     */
+    @Column(name = "scope_deliverables", length = SCOPE_MAX_LENGTH)
+    private String scopeDeliverables;
+
+    /** 范围文本·验收方式（#336，口径同 {@link #scopeDeliverables}）。 */
+    @Column(name = "scope_acceptance", length = SCOPE_MAX_LENGTH)
+    private String scopeAcceptance;
+
+    /** 范围文本·工期口径（#336，口径同 {@link #scopeDeliverables}）。 */
+    @Column(name = "scope_timeline", length = SCOPE_MAX_LENGTH)
+    private String scopeTimeline;
 
     /** ISO 4217 币种（v1 恒 CNY；随报价落）。 */
     @Column(name = "currency", length = 10)
@@ -304,6 +323,46 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     }
 
     /**
+     * 录入范围文本（#336 后台动作，整组替换语义）：三段（交付清单/验收方式/工期
+     * 口径）必填、每次整组落值。限未支付态（口径同报价，ORD_033）——已支付蕴含
+     * 合同签署完成、约定已定，不再受理。工作副本永远领先快照：确认范围后本副本
+     * 仍可改，草稿合同的「需更新」标志由对照派生（快照不漂移）。
+     *
+     * @param scopeDeliverables 交付清单（必填；空白抛 ORD_029，超长抛 ORD_030）
+     * @param scopeAcceptance   验收方式（必填；校验同上）
+     * @param scopeTimeline     工期口径（必填；校验同上）
+     */
+    public void enterScope(String scopeDeliverables, String scopeAcceptance, String scopeTimeline) {
+        if (isBlank(scopeDeliverables) || isBlank(scopeAcceptance) || isBlank(scopeTimeline)) {
+            throw new DomainException(OrderMessage.ORDER_SCOPE_INCOMPLETE);
+        }
+        if (isOverlong(scopeDeliverables) || isOverlong(scopeAcceptance) || isOverlong(scopeTimeline)) {
+            throw new DomainException(OrderMessage.ORDER_SCOPE_TOO_LONG);
+        }
+        if (!status.isUnpaid()) {
+            throw new DomainException(OrderMessage.ORDER_SCOPE_NOT_ALLOWED);
+        }
+        this.scopeDeliverables = scopeDeliverables.trim();
+        this.scopeAcceptance = scopeAcceptance.trim();
+        this.scopeTimeline = scopeTimeline.trim();
+    }
+
+    /**
+     * 范围文本三段是否齐备（#336 确认范围前置·范围腿的判定单点）。
+     */
+    public boolean scopeEntered() {
+        return !isBlank(scopeDeliverables) && !isBlank(scopeAcceptance) && !isBlank(scopeTimeline);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static boolean isOverlong(String value) {
+        return value != null && value.length() > SCOPE_MAX_LENGTH;
+    }
+
+    /**
      * 待支付（已报价）守卫（#37/#39）：支付端口调用前的状态预检面——非待
      * 支付态不触支付（ORD_011）。
      */
@@ -362,6 +421,14 @@ public class Order extends Auditable implements AggregateRoot<Order, Long> {
     public String currentQuoteNote() {
         return priceEntries.isEmpty() ? null
                 : priceEntries.get(priceEntries.size() - 1).getNote();
+    }
+
+    /**
+     * 最新价目行（未报价为 {@code null}）：合同冻结集取「冻结时点报价版本」的
+     * 单点（#336）。
+     */
+    public OrderPriceEntry latestPriceEntry() {
+        return priceEntries.isEmpty() ? null : priceEntries.get(priceEntries.size() - 1);
     }
 
     /**

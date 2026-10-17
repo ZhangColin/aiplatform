@@ -38,6 +38,12 @@ vi.mock("@/hooks/use-order", () => ({
   usePayOrder: () => ({ isPending: false, mutate: payMutate }),
 }));
 
+// 合同域（#336）：无合同＝null（支付交互面与合同无关，mock 收口不出网）
+vi.mock("@/hooks/use-contract", () => ({
+  useContract: () => ({ data: null }),
+  useConfirmScope: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
 function renderPanel() {
   render(
     <QueryClientProvider client={new QueryClient()}>

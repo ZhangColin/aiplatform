@@ -4,6 +4,18 @@
  * 千分位分组（zh-CN locale）。
  */
 
+/**
+ * Long 字段线上实为字符串（Jackson Long→String，schema 声明 number）——消费
+ * 层容错折数的共享单点（订单/合同的金额归一共用）。
+ */
+export function toAmount(value: number | string | null | undefined): number | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 /** 分 → 用户面价格文案（如 128000 → "¥1,280"、128050 → "¥1,280.50"）。 */
 export function formatPrice(amount: number | undefined | null, currency?: string): string | undefined {
   if (amount == null || !Number.isFinite(amount)) {

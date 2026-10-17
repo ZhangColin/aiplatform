@@ -55,6 +55,8 @@ export const queryKeys = {
     all: ["orders"] as const,
     /** 订单详情（状态 + 时间戳组 + 报价面：金额/备注/改价历史，#29）。 */
     detail: (id: string) => ["orders", "detail", id] as const,
+    /** 订单名下最近合同（#336 合同预览卡；无合同 404 在 hook 归一为 null）。 */
+    contract: (orderId: string) => ["orders", "contract", orderId] as const,
   },
   /**
    * 对话史域（#89 对话史落库④）：对话面全量的水合源（用户发言/智能体回复/

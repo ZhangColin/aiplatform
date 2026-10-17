@@ -12,6 +12,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useConfirmScope, useContract } from "@/hooks/use-contract";
 import { useCancelOrder, useOrder, usePayOrder } from "@/hooks/use-order";
 import { errorText } from "@/lib/api/api-error";
 import { ORDER_STATUS } from "@/lib/orders/lock";
@@ -24,16 +25,19 @@ import {
 import { formatPrice } from "@/lib/orders/price";
 import { formatRelativeTime } from "@/lib/utils/time";
 
+import { ContractCard } from "./contract-card";
 import { PanelPlaceholder } from "./panel-placeholder";
 import { PayConfirmDialog } from "./pay-confirm-dialog";
 
 /**
  * 订单面板（#28 交易环① + #29 交易环② + #30 交易环③，项目模式主区域；#335
- * 待确认报价呈现态＋下单基准行）：待报价 = 状态 + 「待确认报价」占位态（价格
- * 位以待定态名占位，不以 0 元或示例价代替；报价落定后翻价格）+ 下单基准
- * （随单冻结的 PRD/Demo 确认版本）+ 取消；已报价（=待支付）= 总价 + 后台备注 +
- * 去支付（确认弹窗 → mock 支付端点）+ 折叠改价历史 + 取消；已归档终态 = 支付
- * 完成说明 + 完整记录（总价/全时间点组/报价记录）+ 源码包下载。内容向三子步骤
+ * 待确认报价呈现态＋下单基准行；#336 范围确认面＋合同预览卡）：待报价 = 状态
+ * + 「待确认报价」占位态（价格位以待定态名占位，不以 0 元或示例价代替；报价
+ * 落定后翻价格）+ 下单基准（随单冻结的 PRD/Demo 确认版本）+ 取消；已报价
+ * （=待支付）= 总价 + 后台备注 + 范围文本三段与「确认范围并准备合同」（确认
+ * 即冻结范围快照＋创建合同）+ 去支付（确认弹窗 → mock 支付端点）+ 折叠改价
+ * 历史 + 取消 + 合同预览卡（六态/签署位/预览字段集）；已归档终态 = 支付完成
+ * 说明 + 完整记录（总价/全时间点组/报价记录）+ 源码包下载。内容向三子步骤
  * （核对范围与报价/签署合同/付款）重组的完整呈现归签约付款页重建（#348），
  * 本面板承数据面最小呈现。后台报/改价经机机接口（无前端入口，联调走脚本），
  * 等待期详情轮询使新价实时可见。订单态变化的 toast 归 SSE 桥（#30），本组件
@@ -63,8 +67,12 @@ export function OrderPanel({
 
 function OrderCard({ orderId }: { orderId: string }) {
   const { data: order, isPending } = useOrder(orderId);
+  // 合同域（#336）：无合同 404 在 hook 归一为 null（缺席＝不渲染卡片）；
+  // 非终态挂轮询（后台人工推进六态）
+  const { data: contract } = useContract(orderId);
   const cancel = useCancelOrder();
   const pay = usePayOrder();
+  const confirmScope = useConfirmScope();
   const [payOpen, setPayOpen] = useState(false);
 
   if (isPending || !order) {
@@ -123,6 +131,21 @@ function OrderCard({ orderId }: { orderId: string }) {
           ) : (
             <QuotedFacts order={order} />
           )}
+          {/* 范围文本（#336 三子步骤「核对范围与报价」的确认面）：未支付态＋
+              范围录入后呈现，尚无合同时带确认动作（确认即冻结范围快照＋创建
+              合同——已支付/终态同后端门收口，不再出确认入口）；合同进场后范围
+              以合同预览卡的范围快照为准，不再重复 */}
+          {unpaid && !waitingQuote && order.scopeDeliverables && !contract ? (
+            <ScopeFacts
+              order={order}
+              confirmPending={confirmScope.isPending}
+              onConfirm={() =>
+                confirmScope.mutate(orderId, {
+                  // 前置门拦截（ORD_025/026）已在 hook 出 toast，此处不双报
+                })
+              }
+            />
+          ) : null}
           {archived ? (
             <ArchivedRecord order={order} />
           ) : (
@@ -161,6 +184,9 @@ function OrderCard({ orderId }: { orderId: string }) {
       </Card>
       {!waitingQuote ? <PriceHistory order={order} terminal={archived} /> : null}
 
+      {/* 合同预览卡（#336 最小呈现）：订单名下最近合同（含终态定格呈现） */}
+      {contract ? <ContractCard contract={contract} /> : null}
+
       {/* mock 支付确认（v1 平台内模拟）：确认即同步成功——订单与项目一并归档 */}
       <PayConfirmDialog
         open={payOpen}
@@ -169,6 +195,49 @@ function OrderCard({ orderId }: { orderId: string }) {
         onConfirm={onPay}
       />
     </div>
+  );
+}
+
+/**
+ * 范围文本确认面（#336）：交付清单/验收方式/工期口径三段（后台结构化录入的
+ * 工作副本）＋「确认范围并准备合同」动作——确认即冻结范围快照＋报价版本引用
+ * 并创建合同（此后合同六态在预览卡推进）。范围未录入时本节不出（等待后台）。
+ */
+function ScopeFacts({
+  order,
+  confirmPending,
+  onConfirm,
+}: {
+  order: OrderDetail;
+  confirmPending: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <p className="text-xs font-medium text-muted-foreground">范围与报价</p>
+      <ul className="space-y-1 text-sm">
+        <ScopeRow label="交付清单" value={order.scopeDeliverables} />
+        <ScopeRow label="验收方式" value={order.scopeAcceptance} />
+        <ScopeRow label="工期口径" value={order.scopeTimeline} />
+      </ul>
+      <div className="flex items-center gap-2 pt-1">
+        <Button size="sm" disabled={confirmPending} onClick={onConfirm}>
+          确认范围并准备合同
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          确认后冻结范围与报价版本，平台开始准备合同
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ScopeRow({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <li className="flex items-baseline justify-between gap-4">
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-right break-words">{value?.trim() || "—"}</span>
+    </li>
   );
 }
 

@@ -17,8 +17,11 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.core.exception.DomainException;
 import com.cartisan.web.exception.GlobalExceptionHandler;
 
+import com.aieducenter.aiplatform.business.order.application.ContractAppService;
 import com.aieducenter.aiplatform.business.order.application.OrderAppService;
+import com.aieducenter.aiplatform.business.order.application.dto.response.ContractResponse;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
+import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
@@ -47,6 +50,9 @@ class OrderControllerTest {
 
     @MockitoBean
     private OrderAppService appService;
+
+    @MockitoBean
+    private ContractAppService contractAppService;
 
     /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
     private ResultActions performAsUser(RequestBuilder request) throws Exception {
@@ -203,6 +209,7 @@ class OrderControllerTest {
         LocalDateTime archivedAt = LocalDateTime.of(2026, 9, 1, 11, 0, 1);
         OrderResponse paid = new OrderResponse("900", "100", OrderStatus.ARCHIVED, "已归档",
                 OrderDeliverableType.SYSTEM, "系统", 3, 2, 128000L, "CNY", "首版报价",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 LocalDateTime.of(2026, 9, 1, 10, 0), java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), null, paidAt, archivedAt);
         when(appService.pay(900L)).thenReturn(paid);
@@ -249,11 +256,109 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.message").value("订单不存在"));
     }
 
+    // ---------- #336：确认范围并准备合同（合同创建口）＋合同预览 ----------
+
+    @Test
+    void given_quoted_scoped_order_when_confirm_scope_then_contract_envelope() throws Exception {
+        when(contractAppService.confirmScope(900L)).thenReturn(contract(ContractStatus.PREPARING, false));
+
+        performAsUser(post("/api/orders/900/confirm-scope"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.contractNo").value("SG-3ukqz0c0"))
+                .andExpect(jsonPath("$.data.status").value(1)) // PREPARING → Integer code
+                .andExpect(jsonPath("$.data.statusName").value("准备中"))
+                .andExpect(jsonPath("$.data.version").value(1))
+                .andExpect(jsonPath("$.data.needsUpdate").value(false))
+                // 冻结面：范围快照三段＋冻结金额（Long → string 信封同款）
+                .andExpect(jsonPath("$.data.scopeDeliverables").value("交付清单：管理后台"))
+                .andExpect(jsonPath("$.data.scopeAcceptance").value("验收方式：按 PRD v3 验收"))
+                .andExpect(jsonPath("$.data.scopeTimeline").value("工期口径：4 周"))
+                .andExpect(jsonPath("$.data.amount").value(128000))
+                .andExpect(jsonPath("$.data.prdVersionNo").value(3))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(2))
+                .andExpect(jsonPath("$.data.partyASigned").value(false))
+                .andExpect(jsonPath("$.data.partyBSigned").value(false));
+
+        verify(contractAppService).confirmScope(900L);
+    }
+
+    @Test
+    void given_unquoted_order_when_confirm_scope_then_409_ord025() throws Exception {
+        // 前置门·报价腿：toast 提示 message（拦截与提示）
+        when(contractAppService.confirmScope(900L)).thenThrow(
+                new ApplicationException(OrderMessage.CONTRACT_QUOTE_REQUIRED));
+
+        performAsUser(post("/api/orders/900/confirm-scope"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5025))
+                .andExpect(jsonPath("$.message").value(OrderMessage.CONTRACT_QUOTE_REQUIRED.message()));
+    }
+
+    @Test
+    void given_scope_missing_when_confirm_scope_then_409_ord026() throws Exception {
+        when(contractAppService.confirmScope(900L)).thenThrow(
+                new ApplicationException(OrderMessage.CONTRACT_SCOPE_REQUIRED));
+
+        performAsUser(post("/api/orders/900/confirm-scope"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5026));
+    }
+
+    @Test
+    void given_active_contract_when_confirm_scope_again_then_409_ord024() throws Exception {
+        when(contractAppService.confirmScope(900L)).thenThrow(
+                new ApplicationException(OrderMessage.CONTRACT_ALREADY_ACTIVE));
+
+        performAsUser(post("/api/orders/900/confirm-scope"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5024));
+    }
+
+    @Test
+    void given_latest_contract_when_get_order_contract_then_preview_envelope() throws Exception {
+        when(contractAppService.latestByOrder(900L)).thenReturn(contract(ContractStatus.SIGNING, false));
+
+        performAsUser(get("/api/orders/900/contract"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(3)) // SIGNING
+                .andExpect(jsonPath("$.data.statusName").value("签署进行中"))
+                .andExpect(jsonPath("$.data.partyA").value("张三"))
+                .andExpect(jsonPath("$.data.paymentPlan").value("开工款 50%，验收 50%"));
+
+        verify(contractAppService).latestByOrder(900L);
+    }
+
+    @Test
+    void given_no_contract_when_get_order_contract_then_404_ord020() throws Exception {
+        // 前端认 5020/404 判「无合同」缺席态——不渲染卡片
+        when(contractAppService.latestByOrder(900L)).thenThrow(
+                new ApplicationException(OrderMessage.ORDER_CONTRACT_NOT_FOUND));
+
+        performAsUser(get("/api/orders/900/contract"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(5020))
+                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_CONTRACT_NOT_FOUND.message()));
+    }
+
     // ---------- 夹具 ----------
+
+    /** 合同回执夹具（status/needsUpdate 按用例变参，其余定格）。 */
+    private static ContractResponse contract(ContractStatus status, boolean needsUpdate) {
+        return new ContractResponse("910", "SG-3ukqz0c0", "900",
+                status, status.getName(),
+                1, needsUpdate, "张三", "语义引力（北京）科技有限公司",
+                "管理后台＋小程序全量交付", "开工款 50%，验收 50%",
+                "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
+                128000L, "CNY", 3, 2,
+                false, null, false, null,
+                LocalDateTime.of(2026, 10, 17, 9, 0));
+    }
 
     private static OrderResponse order(String id, OrderStatus status, LocalDateTime cancelledAt) {
         return new OrderResponse(id, "100", status, status.getName(),
-                OrderDeliverableType.SYSTEM, "系统", 3, 2, null, null, null, null, java.util.List.of(),
+                OrderDeliverableType.SYSTEM, "系统", 3, 2, null, null, null,
+                null, null, null, null, java.util.List.of(),
                 LocalDateTime.of(2026, 9, 1, 9, 0), cancelledAt, null, null);
     }
 

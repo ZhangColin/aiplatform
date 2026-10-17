@@ -1,16 +1,12 @@
 package com.aieducenter.aiplatform.business.order.application;
 
-import java.util.List;
-
 import org.springframework.stereotype.Service;
 
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.business.order.application.dto.response.DeliveryStatusResponse;
-import com.aieducenter.aiplatform.business.order.domain.aggregate.Contract;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.PaymentPlan;
-import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
 import com.aieducenter.aiplatform.business.order.domain.enums.DeliveryState;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
@@ -64,12 +60,12 @@ public class DeliveryStatusAppService {
         boolean needsSupplement = projectQueryAppService.needsUserSupplement(projectId);
         Order order = orderRepository.findActiveByProject(projectId)
                 .orElseThrow(() -> new ApplicationException(OrderMessage.ORDER_NOT_FOUND));
-        Contract latestContract = contractRepository
-                .findFirstByOrderIdOrderByCreatedAtDescIdDesc(order.getId()).orElse(null);
-        PaymentPlan plan = activePlanOf(order.getId());
+        boolean contractSigned = contractRepository
+                .findLatestSignedByOrderId(order.getId()).isPresent();
+        PaymentPlan plan = paymentPlanRepository.findActiveWithNodesByOrderId(order.getId()).orElse(null);
         ProductionHandoffAppService.ProductionHandoffFacts handoff =
                 productionHandoffAppService.handoffFactsOf(projectId);
-        DeliveryState state = derive(order, latestContract, plan, handoff, needsSupplement);
+        DeliveryState state = derive(order, contractSigned, plan, handoff, needsSupplement);
         return DeliveryStatusResponse.of(order, state, needsSupplement, handoff);
     }
 
@@ -85,7 +81,7 @@ public class DeliveryStatusAppService {
      *                    其余（无计划/未录节点/门未到账）→ 待付款
      * </pre>
      */
-    private static DeliveryState derive(Order order, Contract latestContract, PaymentPlan plan,
+    private static DeliveryState derive(Order order, boolean contractSigned, PaymentPlan plan,
             ProductionHandoffAppService.ProductionHandoffFacts handoff, boolean needsSupplement) {
         if (needsSupplement) {
             return DeliveryState.NEEDS_USER_SUPPLEMENT;
@@ -97,7 +93,7 @@ public class DeliveryStatusAppService {
         if (order.getStatus() == OrderStatus.PENDING_QUOTE) {
             return null;
         }
-        if (latestContract == null || latestContract.getStatus() != ContractStatus.SIGNED) {
+        if (!contractSigned) {
             return DeliveryState.AWAITING_CONTRACT;
         }
         if (plan != null && plan.anyNodeAwaitingVerification()) {
@@ -107,11 +103,5 @@ public class DeliveryStatusAppService {
             return DeliveryState.AWAITING_PRODUCTION;
         }
         return DeliveryState.AWAITING_PAYMENT;
-    }
-
-    /** 活跃付款计划（订单名下最新行，带节点；无计划即 null）。 */
-    private PaymentPlan activePlanOf(Long orderId) {
-        List<PaymentPlan> plans = paymentPlanRepository.findWithNodesByOrderId(orderId);
-        return plans.isEmpty() ? null : plans.get(0);
     }
 }

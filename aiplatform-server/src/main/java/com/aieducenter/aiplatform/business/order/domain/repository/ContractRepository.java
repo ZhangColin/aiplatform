@@ -37,6 +37,18 @@ public interface ContractRepository extends BaseRepository<Contract, Long> {
     Optional<Contract> findFirstByOrderIdOrderByCreatedAtDescIdDesc(Long orderId);
 
     /**
+     * 订单名下最近一份合同（<b>含终态</b>）已签署完成（SIGNED）——「最近合同已签」
+     * 谓词/取数单点（#338 收敛五处改写）：SIGNED 是终态、活跃查询查不到已签合同，
+     * 须走 {@link #findFirstByOrderIdOrderByCreatedAtDescIdDesc} 再判状态。在场即
+     * 该订单合同腿的既成事实（取消关门 ORD_047/再建合同拒绝/开工判定合同腿/归档
+     * 取版/六态推导共用口径）；不在场＝空（无合同或最近合同非 SIGNED）。
+     */
+    default Optional<Contract> findLatestSignedByOrderId(Long orderId) {
+        return findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId)
+                .filter(contract -> contract.getStatus() == ContractStatus.SIGNED);
+    }
+
+    /**
      * 带留痕行的单笔查询：详情拼装（后台详情/留痕时间线）在仓储事务之外，
      * JOIN FETCH 一次取齐，避免懒加载在会话外炸开（同
      * {@code OrderRepository#findWithHistory} 形制）。

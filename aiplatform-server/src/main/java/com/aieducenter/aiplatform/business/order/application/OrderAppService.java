@@ -1,6 +1,5 @@
 package com.aieducenter.aiplatform.business.order.application;
 
-import java.util.Map;
 import java.util.function.Consumer;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -14,7 +13,6 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderResponse;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Contract;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
-import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.error.OrderMessage;
@@ -253,18 +251,17 @@ public class OrderAppService {
 
     /**
      * 取消门收窄守卫（#338，应用层——聚合读不到合同）：最近合同已签署完成
-     * 即拒（ORD_047）。非未支付态先归聚合守卫（ORD_005 既有语义正身，先到
-     * 先得——已支付蕴含签署完成，报「已支付不可取消」语义更准）。
+     * 即拒（ORD_047，谓词单点＝{@code findLatestSignedByOrderId}）。非未支付态
+     * 先归聚合守卫（ORD_005 既有语义正身，先到先得——已支付蕴含签署完成，报
+     * 「已支付不可取消」语义更准）。
      */
     private void requireCancellable(Order order) {
         if (!order.getStatus().isUnpaid()) {
             return;
         }
-        contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(order.getId())
-                .filter(contract -> contract.getStatus() == ContractStatus.SIGNED)
-                .ifPresent(contract -> {
-                    throw new ApplicationException(OrderMessage.ORDER_CANCEL_SIGNED);
-                });
+        if (contractRepository.findLatestSignedByOrderId(order.getId()).isPresent()) {
+            throw new ApplicationException(OrderMessage.ORDER_CANCEL_SIGNED);
+        }
     }
 
     /**
@@ -381,26 +378,19 @@ public class OrderAppService {
      * 遗留）如实 null——sinkPrd 空内容跳过。
      */
     private String archivePrdContent(Long orderId, Long projectId) {
-        return contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId)
-                .filter(contract -> contract.getStatus() == ContractStatus.SIGNED)
+        return contractRepository.findLatestSignedByOrderId(orderId)
                 .map(Contract::getPrdSnapshot)
                 .orElseGet(() -> projectQueryAppService.confirmedVersionRefs(projectId).prdContent());
     }
 
     /**
-     * 通知族发射（payload 两事件同形：projectId/orderId/status/statusName，不含金额；
-     * 归属路由键双键（ownerAccountId/ownerGuestId）取自订单聚合——含后台路径，非操作者
+     * 通知族发射（payload 构造单点＝{@code OrderEventTypes#notificationPayload}，
+     * #338 收敛——两事件同形：projectId/orderId/status/statusName，不含金额；归属
+     * 路由键双键（ownerAccountId/ownerGuestId）取自订单聚合——含后台路径，非操作者
      * 上下文，ADR-0018；#326 访客名下订单走访客键）。
      */
     private void publishNotification(String eventType, Order order) {
-        eventsAppService.publishNotification(eventType, Map.of(
-                OrderEventTypes.PROJECT_ID_FIELD, order.getProjectId().toString(),
-                OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
-                OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),
-                OrderEventTypes.STATUS_NAME_FIELD, order.getStatus().getName(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(order.getOwnerGuestId())));
+        eventsAppService.publishNotification(eventType, OrderEventTypes.notificationPayload(order));
     }
 
     private static boolean violatesActiveOrderIndex(DataIntegrityViolationException e) {

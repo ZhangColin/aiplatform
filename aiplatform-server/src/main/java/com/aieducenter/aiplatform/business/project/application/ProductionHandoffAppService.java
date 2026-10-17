@@ -27,9 +27,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ProductionHandoffAppService {
 
-    /** 承接唯一索引名（约束撞错的判别键，与 V40__production_handoff.sql 对齐）。 */
-    private static final String HANDOFF_UNIQUE_INDEX = "uk_prj_production_handoffs_project";
-
     private final ProductionHandoffRepository handoffRepository;
     private final ProjectRepository projectRepository;
 
@@ -51,7 +48,7 @@ public class ProductionHandoffAppService {
             try {
                 return handoffRepository.save(ProductionHandoff.createForKickoff(projectId, orderId));
             } catch (DataIntegrityViolationException e) {
-                if (violatesHandoffIndex(e)) {
+                if (ProductionHandoffRepository.violatesUniqueProjectIndex(e)) {
                     // 并发建单撞唯一索引（预检漏过）：后到者幂等回读既有行，不重复建单
                     log.info("项目 {} 并发建生产承接撞唯一索引，幂等回读", projectId);
                     return handoffRepository.findByProjectId(projectId).orElseThrow();
@@ -59,6 +56,16 @@ public class ProductionHandoffAppService {
                 throw e;
             }
         });
+    }
+
+    /**
+     * 完整性违例是否撞承接唯一索引（跨 BC 读面，#338 收敛单点＝
+     * {@link ProductionHandoffRepository#violatesUniqueProjectIndex}）：订单侧
+     * 开工判定器（{@code KickoffAppService}）事务边界的并发兜底腿经本口判别
+     * ——两事务都过预检时后到者撞索引整体回滚，判别后吸收为幂等空转。
+     */
+    public boolean violatesUniqueIndex(DataIntegrityViolationException e) {
+        return ProductionHandoffRepository.violatesUniqueProjectIndex(e);
     }
 
     /**
@@ -142,13 +149,5 @@ public class ProductionHandoffAppService {
      */
     public record ProductionHandoffFacts(Integer status, String statusName, boolean inProduction,
             String contact, String nextStep, String progressNote, LocalDateTime estimatedStartAt) {
-    }
-
-    private static boolean violatesHandoffIndex(DataIntegrityViolationException e) {
-        return mentions(e.getMessage()) || mentions(e.getMostSpecificCause().getMessage());
-    }
-
-    private static boolean mentions(String message) {
-        return message != null && message.contains(HANDOFF_UNIQUE_INDEX);
     }
 }

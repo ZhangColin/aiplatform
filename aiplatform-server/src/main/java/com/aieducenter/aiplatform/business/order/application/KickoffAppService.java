@@ -1,8 +1,5 @@
 package com.aieducenter.aiplatform.business.order.application;
 
-import java.util.List;
-import java.util.Map;
-
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -11,7 +8,6 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Contract;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
 import com.aieducenter.aiplatform.business.order.domain.aggregate.PaymentPlan;
-import com.aieducenter.aiplatform.business.order.domain.enums.ContractStatus;
 import com.aieducenter.aiplatform.business.order.domain.enums.OrderStatus;
 import com.aieducenter.aiplatform.business.order.domain.repository.ContractRepository;
 import com.aieducenter.aiplatform.business.order.domain.repository.OrderRepository;
@@ -34,9 +30,9 @@ import lombok.extern.slf4j.Slf4j;
  * 触发两个事务都过预检时，后到者撞索引整体回滚（订单 pay 与承接同事务，
  * 回滚不丢先行者成果），catch 吸收为幂等空转（同
  * {@code ContractAppService#confirmScope} 撞活跃唯一索引形制）。门判定读
- * 「最近合同」（{@code findFirstByOrderIdOrderByCreatedAtDescIdDesc}）——
- * SIGNED 是终态、活跃查询查不到已签合同；配套防线＝confirmScope 对已签订单
- * 拒再建合同（新草稿不污染最近合同读面）。</p>
+ * 「最近合同」（{@code ContractRepository#findLatestSignedByOrderId} 单点，
+ * 含终态——SIGNED 是终态、活跃查询查不到已签合同）；配套防线＝confirmScope
+ * 对已签订单拒再建合同（新草稿不污染最近合同读面）。</p>
  *
  * <p>开工门节点集合口径：{@code kickoffGate} 标志过滤、全部已到账才过门；
  * <b>计划未录节点≠过门</b>（等待录入/等待付款同呈现「待付款」）；录了节点但
@@ -47,9 +43,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class KickoffAppService {
-
-    /** 承接唯一索引名（并发兜底腿的判别键，与 V40__production_handoff.sql 对齐）。 */
-    private static final String HANDOFF_UNIQUE_INDEX = "uk_prj_production_handoffs_project";
 
     private final OrderRepository orderRepository;
     private final ContractRepository contractRepository;
@@ -81,11 +74,11 @@ public class KickoffAppService {
         if (order == null || order.getStatus() != OrderStatus.QUOTED) {
             return; // 幂等门①：已支付/终结态不二转；订单缺档＝触发链异常，空转不炸
         }
-        Contract contract = latestContractOf(orderId);
-        if (contract == null || contract.getStatus() != ContractStatus.SIGNED) {
-            return; // 合同腿未满足
+        Contract contract = contractRepository.findLatestSignedByOrderId(orderId).orElse(null);
+        if (contract == null) {
+            return; // 合同腿未满足（谓词单点＝findLatestSignedByOrderId，含终态）
         }
-        PaymentPlan plan = activePlanOf(orderId);
+        PaymentPlan plan = paymentPlanRepository.findActiveWithNodesByOrderId(orderId).orElse(null);
         if (plan == null || !plan.kickoffGatesPassed()) {
             return; // 付款腿未满足（谓词单源＝PaymentPlan#kickoffGatesPassed）
         }
@@ -98,8 +91,9 @@ public class KickoffAppService {
             });
         } catch (DataIntegrityViolationException e) {
             // 幂等门③：并发双触发撞承接唯一索引（两事务都过预检的后到者）——
-            // 整体回滚（先行者已落支付与承接，无丢失），吸收为幂等空转
-            if (violatesHandoffIndex(e)) {
+            // 整体回滚（先行者已落支付与承接，无丢失），吸收为幂等空转（判别
+            // 单点在 project BC 承接仓储，经应用服务跨 BC 读）
+            if (productionHandoffAppService.violatesUniqueIndex(e)) {
                 log.info("订单 {} 并发开工判定撞承接唯一索引，后到者幂等空转", orderId);
                 return;
             }
@@ -108,37 +102,12 @@ public class KickoffAppService {
         publishNotification(order);
     }
 
-    /** 最近合同（任意状态——SIGNED 是终态，活跃查询查不到已签合同）。 */
-    private Contract latestContractOf(Long orderId) {
-        return contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId).orElse(null);
-    }
-
-    /** 活跃付款计划（订单名下最新行，带节点；无计划即 null）。 */
-    private PaymentPlan activePlanOf(Long orderId) {
-        List<PaymentPlan> plans = paymentPlanRepository.findWithNodesByOrderId(orderId);
-        return plans.isEmpty() ? null : plans.get(0);
-    }
-
     /**
-     * 「已支付」通知（口径同 {@code OrderAppService} 通知族：payload 两事件
-     * 同形、归属路由键取自订单聚合——含后台触发路径，ADR-0018）。
+     * 「已支付」通知（payload 构造单点＝{@code OrderEventTypes#notificationPayload}，
+     * 与 {@code OrderAppService} 通知族同形同源——归属路由键取自订单聚合，ADR-0018）。
      */
     private void publishNotification(Order order) {
-        eventsAppService.publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED, Map.of(
-                OrderEventTypes.PROJECT_ID_FIELD, order.getProjectId().toString(),
-                OrderEventTypes.ORDER_ID_FIELD, order.getId().toString(),
-                OrderEventTypes.STATUS_FIELD, order.getStatus().getCode(),
-                OrderEventTypes.STATUS_NAME_FIELD, order.getStatus().getName(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(order.getOwnerGuestId())));
-    }
-
-    private static boolean violatesHandoffIndex(DataIntegrityViolationException e) {
-        return mentions(e.getMessage()) || mentions(e.getMostSpecificCause().getMessage());
-    }
-
-    private static boolean mentions(String message) {
-        return message != null && message.contains(HANDOFF_UNIQUE_INDEX);
+        eventsAppService.publishNotification(OrderEventTypes.ORDER_STATUS_CHANGED,
+                OrderEventTypes.notificationPayload(order));
     }
 }

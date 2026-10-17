@@ -1,10 +1,16 @@
 package com.aieducenter.aiplatform.business.order.application;
 
+import java.util.Map;
+
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.business.order.domain.aggregate.Order;
+
 /**
  * 平台通知事件名册常量（#30 交易环③，ADR-0001：代码侧每 BC 一个 EventTypes
  * 常量类，禁止字符串字面量散落；正本见 docs/spec/SSE事件清单.md·平台通知族）。订单
  * 上下文在状态变化副作用真实落定后发射（base 不发 SSE）；前端消费 = toast
  * （点击直达项目页）+ 失效订单/项目/对话史域重查（#203 报价卡经对话史重查入流）。
+ * 两事件的 payload 同形，构造单点＝{@link #notificationPayload}（#338 收敛）。
  */
 public final class OrderEventTypes {
 
@@ -37,6 +43,23 @@ public final class OrderEventTypes {
 
     /** 状态名（用户面文案兜底）。 */
     public static final String STATUS_NAME_FIELD = "statusName";
+
+    /**
+     * 订单域平台通知 payload（{@link #ORDER_STATUS_CHANGED} 与 {@link
+     * #ORDER_REPRICED} 两事件同形的构造单点，#338 自 OrderAppService/
+     * KickoffAppService 双份逐字重复收敛）：关联字段＋状态面＋归属路由键双键
+     * （ownerAccountId/ownerGuestId——取自订单聚合而非操作者上下文，含后台触发
+     * 路径，ADR-0018；#326 访客名下订单走访客键）。不含金额（#203 视镜语义）。
+     */
+    public static Map<String, Object> notificationPayload(Order order) {
+        return Map.of(
+                PROJECT_ID_FIELD, order.getProjectId().toString(),
+                ORDER_ID_FIELD, order.getId().toString(),
+                STATUS_FIELD, order.getStatus().getCode(),
+                STATUS_NAME_FIELD, order.getStatus().getName(),
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(order.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD, EventsAppService.ownerPayload(order.getOwnerGuestId()));
+    }
 
     private OrderEventTypes() {
     }

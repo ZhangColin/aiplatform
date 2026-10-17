@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.order.domain.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -25,4 +26,14 @@ public interface PaymentPlanRepository extends BaseRepository<PaymentPlan, Long>
     @Query("SELECT DISTINCT p FROM PaymentPlan p LEFT JOIN FETCH p.nodes "
             + "WHERE p.orderId = :orderId ORDER BY p.createdAt DESC, p.id DESC")
     List<PaymentPlan> findWithNodesByOrderId(@Param("orderId") Long orderId);
+
+    /**
+     * 订单名下活跃计划（带节点一次取齐）＝全部计划行的首行，无计划即空（#338
+     * 收敛：开工判定/六态推读写面共用——语义同 {@link #findWithNodesByOrderId}
+     * 的「首行＝活跃计划」，取首档免散落）。
+     */
+    default Optional<PaymentPlan> findActiveWithNodesByOrderId(Long orderId) {
+        List<PaymentPlan> plans = findWithNodesByOrderId(orderId);
+        return plans.isEmpty() ? Optional.empty() : Optional.of(plans.get(0));
+    }
 }

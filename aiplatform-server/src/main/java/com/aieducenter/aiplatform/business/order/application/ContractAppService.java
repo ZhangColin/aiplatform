@@ -107,10 +107,10 @@ public class ContractAppService {
             throw new ApplicationException(OrderMessage.CONTRACT_ACTION_NOT_ALLOWED);
         }
         // 已签守卫（#338 收口 #336 遗留缝）：最近合同已签署完成（终态——活跃
-        // 预检查不到）即拒再建——已签走变更沟通不碰原合同；此守卫同时保证开工
-        // 判定的「最近合同」读面不被新草稿污染（签署后等待付款的常态窗口）
-        if (contractRepository.findFirstByOrderIdOrderByCreatedAtDescIdDesc(orderId)
-                .filter(latest -> latest.getStatus() == ContractStatus.SIGNED).isPresent()) {
+        // 预检查不到，谓词单点＝findLatestSignedByOrderId）即拒再建——已签走变更
+        // 沟通不碰原合同；此守卫同时保证开工判定的「最近合同」读面不被新草稿
+        // 污染（签署后等待付款的常态窗口）
+        if (contractRepository.findLatestSignedByOrderId(orderId).isPresent()) {
             throw new ApplicationException(OrderMessage.CONTRACT_ACTION_NOT_ALLOWED);
         }
         if (contractRepository.findActiveByOrderId(orderId).isPresent()) {
@@ -146,11 +146,11 @@ public class ContractAppService {
      *                              均签；ORD_022/023 依据缺失/超长
      */
     public ContractResponse advance(Long contractId, String basis, Operator operator) {
-        ContractResponse response = act(contractId, contract -> contract.advance(basis, operator));
-        if (response.status() == ContractStatus.SIGNED) {
-            kickoffAppService.settle(Long.parseLong(response.orderId()));
+        ActionResult result = act(contractId, contract -> contract.advance(basis, operator));
+        if (result.contract().getStatus() == ContractStatus.SIGNED) {
+            kickoffAppService.settle(result.contract().getOrderId()); // 合同腿触发点
         }
-        return response;
+        return responseOf(result);
     }
 
     /**
@@ -160,7 +160,7 @@ public class ContractAppService {
      *                              ORD_022/023 依据缺失/超长
      */
     public ContractResponse markFailed(Long contractId, String basis, Operator operator) {
-        return act(contractId, contract -> contract.markFailed(basis, operator));
+        return responseOf(act(contractId, contract -> contract.markFailed(basis, operator)));
     }
 
     /**
@@ -170,7 +170,7 @@ public class ContractAppService {
      *                              ORD_022/023 依据缺失/超长
      */
     public ContractResponse withdraw(Long contractId, String basis, Operator operator) {
-        return act(contractId, contract -> contract.withdraw(basis, operator));
+        return responseOf(act(contractId, contract -> contract.withdraw(basis, operator)));
     }
 
     /**
@@ -180,7 +180,7 @@ public class ContractAppService {
      *                              ORD_022/023 依据缺失/超长
      */
     public ContractResponse voidContract(Long contractId, String basis, Operator operator) {
-        return act(contractId, contract -> contract.voidContract(basis, operator));
+        return responseOf(act(contractId, contract -> contract.voidContract(basis, operator)));
     }
 
     /**
@@ -192,7 +192,7 @@ public class ContractAppService {
      *                              ORD_028 该方已签；ORD_022/023 依据缺失/超长
      */
     public ContractResponse sign(Long contractId, ContractParty party, String basis, Operator operator) {
-        return act(contractId, contract -> contract.sign(party, basis, operator));
+        return responseOf(act(contractId, contract -> contract.sign(party, basis, operator)));
     }
 
     /**
@@ -268,13 +268,25 @@ public class ContractAppService {
 
     // ---------- 内部：动作共用骨架（加载→动作→保存→响应，同事务取舍） ----------
 
-    private ContractResponse act(Long contractId, Consumer<Contract> action) {
+    /**
+     * 动作结果（已落库聚合＋响应拼装已取齐的订单）。act 不再返回 REST 响应
+     * DTO（#338 收敛）——advance 的开工判定读聚合本体（状态/orderId），REST
+     * Long→string 序列化是出口约定、不回穿应用层内用；响应组装归各动作口。
+     */
+    private record ActionResult(Contract contract, Order order) {
+    }
+
+    private ActionResult act(Long contractId, Consumer<Contract> action) {
         Contract contract = requireContract(contractId);
         // 重录要读订单现值（重新冻结）；其余动作读面只需 needsUpdate 对照——
         // 统一带订单取齐再出会话（findWithHistory 一次取齐价目与范围）
         action.accept(contract);
         Order order = requireOrder(contract.getOrderId());
-        return ContractResponse.of(contractRepository.save(contract), order);
+        return new ActionResult(contractRepository.save(contract), order);
+    }
+
+    private ContractResponse responseOf(ActionResult result) {
+        return ContractResponse.of(result.contract(), result.order());
     }
 
     private Contract requireContract(Long contractId) {

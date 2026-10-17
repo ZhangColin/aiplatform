@@ -403,7 +403,8 @@ class BackofficeProjectSeamTest {
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), "# PRD\n\n需求背景：后台项目 seam。",
                 Instant.parse("2026-09-13T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n需求背景：后台项目 seam。"))));
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n需求背景：后台项目 seam。")),
+                /* draftChangeSummary= */ null));
         try {
             // 下单绑定缺省账号会话——owner 路由键非空（发布口强制校验）
             return RequestContext.runFor(

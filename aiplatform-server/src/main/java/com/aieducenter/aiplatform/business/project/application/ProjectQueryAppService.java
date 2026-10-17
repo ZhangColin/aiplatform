@@ -201,9 +201,12 @@ public class ProjectQueryAppService {
             long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
             String content = result.stdout().substring(newline + 1);
             // 收敛度投影（#331）：对正文即时解析——确认门（PrdVersionAppService）与
-            // 收敛卡/摘要层（#346/#332 呈现面）同源判定，草稿演进投影随之
+            // 收敛卡/摘要层（#346/#332 呈现面）同源判定，草稿演进投影随之；
+            // 差异摘要（#334 改需求回路）：范围级草稿停驻列直读（null = 无待确认
+            // 新草稿——对话区提示与确认门摘要层据此派生）
             return new PrdResponse(projectId.toString(), content,
-                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
+                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)),
+                    project.getPrdDraftSummary());
         } catch (RuntimeException e) {
             // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,

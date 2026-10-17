@@ -224,6 +224,7 @@ export function ProjectPageView({ projectId }: { projectId: string }) {
           designPlan={planAreaOfDesignItems(detail?.designItems)}
           onSeePrd={() => openOutputsTo("docs")}
           onSeeOrder={() => openOutputsTo("order")}
+          generated={!!detail?.generatedAt}
         />
       }
       outputs={

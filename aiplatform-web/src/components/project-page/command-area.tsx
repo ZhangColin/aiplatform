@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
+import { usePrd } from "@/hooks/use-prd";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
@@ -72,7 +73,9 @@ type StageKey = keyof typeof STAGE_HINTS["system"];
  * 收口定格。发送框 = 共享 Composer（首页/项目页同一
  * 组件，#76）；Enter 路由：有待答问题时即当前问题的答复（可与已勾选合并），
  * 否则即新发言。输入条上方挂「PRD 有更新 · 去看看」胶囊（点击认领并回调
- * 场景层跳成果区）。输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
+ * 场景层跳成果区）；范围级新草稿待确认（#334 改需求回路，已生成项目）时升级为
+ * 「PRD 已更新，确认新版后生成下一版 Demo」提示（REST 派生态，跳文档面过确认门）。
+ * 输入可用性吃锁定式矩阵（#28）：locked（订单处理中）禁用
  * 输入并出锁定提示，closed（归档终态）关闭。对话史 = chat store（SSE 桥喂，
  * 重放可重建近期轮）。
  */
@@ -85,6 +88,7 @@ export function CommandArea({
   designPlan,
   onSeePrd,
   onSeeOrder,
+  generated,
 }: {
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
@@ -101,11 +105,18 @@ export function CommandArea({
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
   onSeeOrder?: () => void;
+  /** 系统已生成（#334 改需求回路提示的分野：范围级新草稿待确认只在迭代期出「确认新版」提示）。 */
+  generated?: boolean;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
+  // 范围级新草稿停驻（#334 改需求回路）：已生成项目＋差异摘要在场＝待确认——
+  // 「PRD 已更新，确认新版后生成下一版 Demo」提示（REST 派生态，确认前常驻）。
+  // 仅已生成才查（生成蕴含 PRD 在场，不空跑 404）
+  const prd = usePrd(projectId, { enabled: generated });
+  const scopeDraftPending = generated && !!prd.data?.draftChangeSummary;
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
   // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）；designer 座席（#290
   // 设计会话）同骨架异语料——计划区换设计物清单
@@ -266,7 +277,22 @@ export function CommandArea({
       </div>
 
       <div className="shrink-0 p-3">
-        {prdUpdate && !disabled ? (
+        {scopeDraftPending && !disabled ? (
+          // 范围级新草稿待确认（#334）：升级版提示取代通用胶囊——跳 PRD 文档面
+          // 过确认门（「确认此版 PRD 并生成 Demo」）。REST 派生态：确认成功（清停驻）
+          // 后自然退场，无需认领
+          <div className="mb-2 flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-full text-xs"
+              onClick={() => onSeePrd?.()}
+            >
+              <FileText className="size-3.5" />
+              PRD 已更新，确认新版后生成下一版 Demo
+            </Button>
+          </div>
+        ) : prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
               variant="outline"

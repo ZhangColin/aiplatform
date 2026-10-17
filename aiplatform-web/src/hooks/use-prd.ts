@@ -11,13 +11,20 @@ type PrdVersionSummary = components["schemas"]["PrdVersionSummaryResponse"];
 
 /**
  * 当前版 PRD（#20 成果区文件模式）：`GET …/prd` = 项目工作区 docs/PRD.md
- * 直读（markdown + updatedAt，v1 无版本链只最新版，主智能体的 savePrd 写出）。
- * **未产出是正常态**——后端以 404 PRJ_015 区分「工作区无该文件」与项目不存在
- * （PRJ_001），这里把前者归一为 null（面板据 null 呈引导占位），其余错误照抛。
- * 实时性失效源 = 通知通道 document-updated（桥失效 documents 域）；断线走
- * 门控轮询兜底。
+ * 直读（markdown + updatedAt + readiness + draftChangeSummary，主智能体的
+ * savePrd 写出）。**未产出是正常态**——后端以 404 PRJ_015 区分「工作区无该
+ * 文件」与项目不存在（PRJ_001），这里把前者归一为 null（面板据 null 呈引导
+ * 占位），其余错误照抛。draftChangeSummary（#334 改需求回路）＝范围级新草稿
+ * 停驻待确认的差异摘要（null = 无）——对话区「PRD 已更新，确认新版后生成
+ * 下一版 Demo」提示与确认门摘要层的数据面。实时性失效源 = 通知通道
+ * document-updated（桥失效 documents 域）；断线走门控轮询兜底。
+ * options.enabled 供「只在 PRD 必在场时才查」的消费面关闭 404 空跑（如对话区
+ * 仅已生成项目读差异摘要）。
  */
-export function usePrd(projectId: string | undefined) {
+export function usePrd(
+  projectId: string | undefined,
+  options?: { enabled?: boolean },
+) {
   const fallbackPolling = useSseFallbackPolling("notification");
   return useQuery({
     queryKey: queryKeys.documents.prd(projectId ?? ""),
@@ -30,7 +37,7 @@ export function usePrd(projectId: string | undefined) {
           if (error instanceof ApiError && error.code === 4015) return null;
           throw error;
         }),
-    enabled: projectId !== undefined,
+    enabled: projectId !== undefined && (options?.enabled ?? true),
     refetchInterval: fallbackPolling,
   });
 }

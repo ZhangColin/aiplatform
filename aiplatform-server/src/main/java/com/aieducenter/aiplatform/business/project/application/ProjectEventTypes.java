@@ -17,9 +17,12 @@ public final class ProjectEventTypes {
     public static final String WORKSPACE_DESTROYED = "workspace-destroyed";
 
     /**
-     * 文档已更新：工作区文档产物写出/修订落定后广播（v1 唯一写入方 = 主智能体的
-     * savePrd 工具，落盘成功经 PrdArtifactAdapter 发射，每次执行必发）。前端按
-     * 失效为主模式消费——invalidate 文档域后重拉 REST，不携带内容增量。
+     * 文档已更新：工作区文档产物写出/修订落定后广播（写入方两处——主智能体的
+     * savePrd 工具，落盘成功经 PrdArtifactAdapter 发射，每次执行必发；改需求
+     * 回路的停驻落定（#334）：范围级意见轮收口停驻差异摘要时经
+     * PrdVersionAppService 发射——PRD 读面有新事实〔draftChangeSummary〕，复用
+     * 本事件广播失效重拉，事件封闭集零新增）。前端按失效为主模式消费——
+     * invalidate 文档域后重拉 REST，不携带内容增量。
      */
     public static final String DOCUMENT_UPDATED = "document-updated";
 

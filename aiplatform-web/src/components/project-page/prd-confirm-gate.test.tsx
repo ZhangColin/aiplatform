@@ -23,4 +23,6 @@ describe("PrdConfirmGate · 确认门呈现（#330/#332）", () => {
     expect(html).not.toContain("开始做系统");
     expect(html).not.toContain("开始生成");
   });
+
+  // 差异摘要（#334）的摘要层呈现归 interaction 测试（Dialog 默认关、静态面不渲染）。
 });

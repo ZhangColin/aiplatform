@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -9,6 +10,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
@@ -47,6 +49,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>版本行不可变＝只插不改：本用例无任何历史行更新路径；「快照不可变」的
  * 行为面等价物＝确认后改草稿再读历史版本，原文不动（集测钉）。</p>
+ *
+ * <p><b>改需求回路（#334）</b>：范围级意见（新增角色/主流程/交付范围——判定
+ * 归主智能体提示词、从 savePrd 修订事实观测）出新草稿后不停驻不派——{@link
+ * #parkDraftChange} 停驻意见与差异摘要（重启不丢），用户过确认门（新版本号）
+ * 才派下一版 Demo：已生成项目＝修正 run 携停驻交接物、未生成项目＝首个 Demo
+ * 全新构建；小反馈照旧受理即迭代（不停驻、基准判定归 {@link PrdDraftBaseline}）。</p>
  */
 @Service
 @Slf4j
@@ -57,17 +65,23 @@ public class PrdVersionAppService {
     private final PrdVersionRepository prdVersions;
     private final TransactionTemplate transactionTemplate;
     private final GenerationAppService generationAppService;
+    private final IterationAppService iterationAppService;
+    private final EventsAppService eventsAppService;
 
     public PrdVersionAppService(ProjectRepository projectRepository,
             ProjectQueryAppService projectQueryAppService,
             PrdVersionRepository prdVersions,
             TransactionTemplate transactionTemplate,
-            GenerationAppService generationAppService) {
+            GenerationAppService generationAppService,
+            IterationAppService iterationAppService,
+            EventsAppService eventsAppService) {
         this.projectRepository = projectRepository;
         this.projectQueryAppService = projectQueryAppService;
         this.prdVersions = prdVersions;
         this.transactionTemplate = transactionTemplate;
         this.generationAppService = generationAppService;
+        this.iterationAppService = iterationAppService;
+        this.eventsAppService = eventsAppService;
     }
 
     /**
@@ -100,7 +114,7 @@ public class PrdVersionAppService {
         if (!prd.readiness().blocking().isEmpty()) {
             throw new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING);
         }
-        PrdVersionResponse response = confirmSnapshot(project, draft, prd.readiness());
+        Confirmation confirmation = confirmSnapshot(project, draft, prd.readiness());
         // 生成加门（#332）：确认即成版后自动派首个 Demo run——「确认此版 PRD 并
         // 生成 Demo」是首个构建 run 的唯一触发（推翻 #101「PRD 出即起」）。已生成/
         // 在途静默跳过；派发是次生事实、失败不反噬确认回执（版本已落库，用户可重
@@ -112,32 +126,101 @@ public class PrdVersionAppService {
             log.warn("[prd-confirm] 项目 {} 确认成版但首个 Demo run 派发失败"
                     + "（确认不反噬，用户重确认即再触发）：{}", projectId, e.toString());
         }
-        return response;
+        // 改需求回路（#334）：确认成功即消费停驻的范围级交接物——新版本号落库且
+        // 项目已生成时携停驻意见与差异摘要派修正 run（下一版 Demo）；未生成项目
+        // 由首个 Demo 全新构建消化（生成读工作区新确认正本）。停驻清位与派发同为
+        // 次生事实，失败不反噬确认回执（重提意见即兜底——草稿==已确认版，照旧
+        // 受理即迭代）。
+        consumeParkedDraftChange(projectId, confirmation.newVersion());
+        return confirmation.response();
+    }
+
+    /**
+     * 范围级草稿停驻（#334 改需求回路）：意见轮收口判定为范围级（savePrd 修订
+     * 事实＋草稿≠已确认版，判定缝在 {@link MainAgentAppService} 轮收口）时，
+     * 平台停派更新 run，把意见原文与差异摘要（savePrd 的 summary 终值——改稿时
+     * 产出的 markdown 变更说明）停驻到项目行——「不落库缺口最小方案」：重启后
+     * 确认时的派发与对话区提示（「PRD 已更新，确认新版后生成下一版 Demo」）不丢
+     * 事实。停驻取终值（新一轮覆盖写）；停驻即 PRD 读面有新事实（差异摘要入
+     * {@code GET /{id}/prd}），复用 document-updated 广播前端失效重拉（事件
+     * 封闭集零新增）。
+     */
+    public void parkDraftChange(Long projectId, String opinion, String changeSummary) {
+        Project project = transactionTemplate.execute(tx -> {
+            Project loaded = requireProject(projectId);
+            loaded.parkPrdDraftChange(opinion, changeSummary);
+            return projectRepository.save(loaded);
+        });
+        eventsAppService.publishNotification(ProjectEventTypes.DOCUMENT_UPDATED, Map.of(
+                ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
+                ProjectEventTypes.DOCUMENT_TYPE_FIELD, ProjectEventTypes.DOCUMENT_TYPE_PRD,
+                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId())));
+    }
+
+    /** 确认成版结果（回执＋是否产生了新版本号——#334 下一版 Demo 只在新版本号上派）。 */
+    private record Confirmation(PrdVersionResponse response, boolean newVersion) {
+    }
+
+    /** 停驻的范围级交接物（确认时取走即清）。 */
+    private record ParkedDraftChange(String opinion, String changeSummary) {
+    }
+
+    /** 确认成功的停驻消费：清位恒做（停驻描述待确认草稿，确认后即过期）；派发只在新版本号＋已生成项目。 */
+    private void consumeParkedDraftChange(Long projectId, boolean newVersion) {
+        ParkedDraftChange parked = transactionTemplate.execute(tx -> {
+            Project project = requireProject(projectId);
+            if (project.getPrdDraftOpinion() == null) {
+                return null;
+            }
+            ParkedDraftChange change = new ParkedDraftChange(
+                    project.getPrdDraftOpinion(), project.getPrdDraftSummary());
+            project.clearPrdDraftChange();
+            projectRepository.save(project);
+            return change;
+        });
+        if (parked == null || !newVersion
+                || requireProject(projectId).getGeneratedAt() == null) {
+            return;
+        }
+        try {
+            iterationAppService.startFixRun(projectId, parked.opinion(), parked.changeSummary());
+            log.info("[prd-confirm] 项目 {} 确认新版，携停驻交接物派下一版 Demo（修正 run）",
+                    projectId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[prd-confirm] 项目 {} 确认新版但下一版 Demo 派发失败"
+                    + "（确认不反噬，重提意见即兜底）：{}", projectId, e.toString());
+        }
     }
 
     /** 成版（短事务：最新版比对→幂等返回或插新行；唯一约束竞态败者幂等回读）。 */
-    private PrdVersionResponse confirmSnapshot(Project project, String draft,
+    private Confirmation confirmSnapshot(Project project, String draft,
             PrdReadinessResponse readiness) {
         try {
             return transactionTemplate.execute(tx -> {
                 List<PrdVersion> existing =
                         prdVersions.findByProjectIdOrderByVersionNoDesc(project.getId());
                 if (!existing.isEmpty() && existing.get(0).getContent().equals(draft)) {
-                    return toResponse(project.getId(), existing.get(0), readiness);
+                    return new Confirmation(toResponse(project.getId(), existing.get(0), readiness),
+                            /* newVersion= */ false);
                 }
                 int nextVersionNo = existing.isEmpty() ? 1 : existing.get(0).getVersionNo() + 1;
                 // saveAndFlush：把唯一约束违反压进事务内（翻译可靠，catch 面确定性）
                 PrdVersion saved = prdVersions.saveAndFlush(PrdVersion.confirmed(
                         project.getId(), nextVersionNo, draft,
                         LocalDateTime.now(), project.getPrdProducedAt()));
-                return toResponse(project.getId(), saved, readiness);
+                return new Confirmation(toResponse(project.getId(), saved, readiness),
+                        /* newVersion= */ true);
             });
         }
         catch (DataIntegrityViolationException e) {
             return prdVersions.findByProjectIdOrderByVersionNoDesc(project.getId()).stream()
                     .findFirst()
                     .filter(latest -> latest.getContent().equals(draft))
-                    .map(latest -> toResponse(project.getId(), latest, readiness))
+                    .map(latest -> new Confirmation(toResponse(project.getId(), latest, readiness),
+                            /* newVersion= */ false))
                     .orElseThrow(() -> e);
         }
     }

@@ -127,6 +127,19 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     private LocalDateTime confirmedDemoAt;
 
     /**
+     * 改需求回路停驻的意见原文（#334，NULL = 无范围级草稿待确认）：范围级意见轮
+     * 收口停派更新 run 时，本轮意见原文停驻于此——确认新版时（新版本号落库）由
+     * 平台取出随修正 run（下一版 Demo）下发。停驻取终值（新一轮覆盖写），确认成功
+     * 即清；载体归本聚合、漂移判定不在此（正本＝快照全文比对，见 PrdDraftBaseline）。
+     */
+    @Column(name = "prd_draft_opinion")
+    private String prdDraftOpinion;
+
+    /** 改需求回路停驻的差异摘要（#334）：savePrd 的 summary 终值＝改稿时产出的 markdown 变更说明。 */
+    @Column(name = "prd_draft_summary")
+    private String prdDraftSummary;
+
+    /**
      * 设计范围作用域（#285）：仅系统＋设计项目落值（设计范围＝功能清单页面集的
      * 锚定口径——全部/勾选）；设计主线（计划对应物＝PRD 设计物清单章）与系统/
      * 设计主线出身不由页面锚定时为 NULL。
@@ -270,6 +283,26 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
     public void confirmDemoVersion(int versionNo) {
         this.confirmedDemoVersionNo = versionNo;
         this.confirmedDemoAt = LocalDateTime.now();
+    }
+
+    /**
+     * 范围级草稿停驻（#334 改需求回路）：意见轮收口判定为范围级（savePrd 事实＋
+     * 草稿≠已确认版）时停派更新 run，意见原文与差异摘要停驻待确认——新一轮覆盖
+     * 写（草稿单一，停驻取终值）。确认成功即经 {@link #clearPrdDraftChange} 清位。
+     */
+    public void parkPrdDraftChange(String opinion, String changeSummary) {
+        if (opinion == null || opinion.isBlank()
+                || changeSummary == null || changeSummary.isBlank()) {
+            throw new DomainException(ProjectMessage.PROJECT_FIELDS_INCOMPLETE);
+        }
+        this.prdDraftOpinion = opinion;
+        this.prdDraftSummary = changeSummary;
+    }
+
+    /** 停驻清位（#334）：确认成功即消费——已生成项目携停驻交接物派修正 run、未生成项目由首个 Demo 全新构建消化。 */
+    public void clearPrdDraftChange() {
+        this.prdDraftOpinion = null;
+        this.prdDraftSummary = null;
     }
 
     /**

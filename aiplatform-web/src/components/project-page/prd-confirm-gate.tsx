@@ -33,9 +33,13 @@ type PendingItem = components["schemas"]["PendingItem"];
 export function PrdConfirmGate({
   projectId,
   readiness,
+  changeSummary,
 }: {
   projectId: string;
   readiness?: PrdReadiness;
+  /** 差异摘要（#334 改需求回路）：范围级新草稿停驻待确认的 markdown 变更说明——
+   * 摘要层「本版更新内容」节（null = 无新草稿待确认，节不渲染）。 */
+  changeSummary?: string | null;
 }) {
   const confirm = useConfirmPrd(projectId);
   const [open, setOpen] = useState(false);
@@ -84,6 +88,16 @@ export function PrdConfirmGate({
                     已梳理 {readyCount}/{dimensions.length || 5} 个维度。
                   </p>
                 </section>
+                {changeSummary ? (
+                  // 本版更新内容（#334 改需求回路）：范围级新草稿的差异摘要——确认
+                  // 前看到这版改了什么（改稿时产出的 markdown 变更说明，原样呈现）
+                  <section className="space-y-1">
+                    <h3 className="font-medium">本版更新内容</h3>
+                    <p className="whitespace-pre-wrap text-muted-foreground">
+                      {changeSummary}
+                    </p>
+                  </section>
+                ) : null}
                 {minor.length > 0 ? (
                   <section className="space-y-1">
                     <h3 className="font-medium">未解决事项（不阻碍生成）</h3>
@@ -119,7 +133,9 @@ export function PrdConfirmGate({
               <DialogHeader>
                 <DialogTitle>确认并生成 Demo？</DialogTitle>
                 <DialogDescription>
-                  确认即冻结本版需求为不可变版本，平台随即开始生成首个 Demo。
+                  {changeSummary
+                    ? "确认即冻结本版需求为新版本，平台随即按新版生成下一版 Demo。"
+                    : "确认即冻结本版需求为不可变版本，平台随即开始生成首个 Demo。"}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

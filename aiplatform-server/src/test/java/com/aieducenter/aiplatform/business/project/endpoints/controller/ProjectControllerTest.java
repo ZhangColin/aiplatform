@@ -667,7 +667,8 @@ class ProjectControllerTest {
                 """;
         when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
                 prd, Instant.ofEpochSecond(1756100000),
-                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
+                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
+                /* draftChangeSummary= */ null));
 
         performAsUser(get("/api/projects/100/prd"))
                 .andExpect(status().isOk())
@@ -688,6 +689,23 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.readiness.dimensions[0].status").value("ready"))
                 .andExpect(jsonPath("$.data.readiness.dimensions[4].dimension").value("验收"))
                 .andExpect(jsonPath("$.data.readiness.dimensions[4].status").value("minor"));
+    }
+
+    @Test
+    void given_parked_draft_change_when_get_prd_then_change_summary_returned() throws Exception {
+        // #334 改需求回路：范围级新草稿停驻待确认——PRD 读面带差异摘要（对话区
+        // 「PRD 已更新，确认新版后生成下一版 Demo」提示与确认门摘要层的数据面；
+        // 无停驻为 null，不占形）
+        String prd = "# 官网 PRD\n";
+        when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
+                prd, Instant.ofEpochSecond(1756100000),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
+                "功能清单新增管理后台章：管理员可管理商品与订单"));
+
+        performAsUser(get("/api/projects/100/prd"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftChangeSummary")
+                        .value("功能清单新增管理后台章：管理员可管理商品与订单"));
     }
 
     @Test

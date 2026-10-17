@@ -95,6 +95,8 @@ public class MainAgentAppService {
     private final PrdRevisionFacts prdRevisions;
     private final BuildPlanFacts buildPlanFacts;
     private final ConversationHistoryAppService conversationHistory;
+    private final PrdDraftBaseline prdDraftBaseline;
+    private final PrdVersionAppService prdVersionAppService;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -126,7 +128,8 @@ public class MainAgentAppService {
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
-            ConversationHistoryAppService conversationHistory) {
+            ConversationHistoryAppService conversationHistory,
+            PrdDraftBaseline prdDraftBaseline, PrdVersionAppService prdVersionAppService) {
         this.projectRepository = projectRepository;
         this.prdVersions = prdVersions;
         this.agentClient = agentClient;
@@ -141,6 +144,8 @@ public class MainAgentAppService {
         this.prdRevisions = prdRevisions;
         this.buildPlanFacts = buildPlanFacts;
         this.conversationHistory = conversationHistory;
+        this.prdDraftBaseline = prdDraftBaseline;
+        this.prdVersionAppService = prdVersionAppService;
     }
 
     /**
@@ -627,20 +632,22 @@ public class MainAgentAppService {
     }
 
     /**
-     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门）：轮落定
-     * （对话轮收口或问答续跑收口）后观测链的走向——会话有挂起问答 = 本轮未收口
-     * （答复后续跑再判，意见锚保留）；收口前归档 = 竞态守卫，静默不派。落定即按
-     * 项目态自动派发：已生成派更新 run（交接物 = {@link #opinionExchanges} 中的
-     * 意见原文及追问答复 + {@link #prdRevisions} 中的 PRD 修订事实——本轮 savePrd
-     * 调用的 summary 终值，无调用事实即 null「未修订」）；<b>未生成但已产出 PRD</b>
-     * ——系统终点改判据（#332 生成加门）：存在已确认 PRD 版本才派首个构建 run
-     * （「确认此版 PRD 并生成 Demo」是唯一触发——用户意见轮「重提即再触发」同此
-     * 判据），未确认静默待确认；设计类终点保持原触发律（未定稿起设计过程、全部
-     * 定稿起构建，入口已收起）。意见锚与修订事实同「收口即消费」清掉——生成读的是
-     * 工作区 PRD 正本，不进交接物；未产出 PRD 止于对话（访谈期常态）。主智能体无
-     * 派发权：模型存没存 PRD、调没调任何工具都不影响派发——链的收口在平台代码。
-     * 派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、不自动重试——
-     * 用户重提即兜底。
+     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门→#334 改需求
+     * 回路）：轮落定（对话轮收口或问答续跑收口）后观测链的走向——会话有挂起问答
+     * = 本轮未收口（答复后续跑再判，意见锚保留）；收口前归档 = 竞态守卫，静默
+     * 不派。落定即按项目态自动派发：<b>已生成派更新 run</b>（交接物 = {@link
+     * #opinionExchanges} 中的意见原文及追问答复 + {@link #prdRevisions} 中的
+     * PRD 修订事实——本轮 savePrd 调用的 summary 终值，无调用事实即 null
+     * 「未修订」），范围级变更（修订事实＋草稿≠已确认版）例外——#334 停派停驻
+     * 待确认（确认过门才派下一版 Demo）；<b>未生成但已产出 PRD</b>——系统终点
+     * 改判据（#332 生成加门）：存在已确认 PRD 版本才派首个构建 run（「确认此版
+     * PRD 并生成 Demo」是唯一触发——用户意见轮「重提即再触发」同此判据），未确认
+     * 静默待确认；本轮范围级新草稿在场同待确认（#334）。设计类终点保持原触发律
+     * （未定稿起设计过程、全部定稿起构建，入口已收起）。意见锚与修订事实同
+     * 「收口即消费」清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD
+     * 止于对话（访谈期常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具
+     * 都不影响派发——链的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚
+     * （收口即消费语义保持）、不自动重试——用户重提即兜底。
      *
      * <p><b>平台轮与生成加门（#332）</b>：{@code platformRound} 区分平台发起的需求侧
      * 轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
@@ -676,7 +683,7 @@ public class MainAgentAppService {
                 // 改稿受理）；生成路径不需要（生成读工作区 PRD 正本）——其余锚照
                 // 「收口即消费」清掉
                 String opinion = opinionExchanges.remove(sessionId);
-                prdRevisions.clear(workspaceId);
+                String prdRevisionSummary = prdRevisions.consume(workspaceId);
                 if (project.getPrdProducedAt() != null) {
                     if (project.getEndpointType().designInvolved()
                             && !designProcessAppService.designFinalized(project)) {
@@ -705,6 +712,15 @@ public class MainAgentAppService {
                             && !prdVersions.existsByProjectId(projectId)) {
                         log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
                                 + "（生成加门：待确认此版 PRD）", projectId);
+                        return;
+                    }
+                    // 改需求回路（#334）：已确认版本在场但本轮出范围级新草稿（savePrd
+                    // 修订事实＋草稿≠已确认版——大改小改分流，判定从工具调用事实观测）
+                    // → 新草稿不自动触发 Demo：停驻待确认（意见＋差异摘要），用户过
+                    // 确认门（新版本号）后才派。平台轮不经此门（#332 豁免同口径）。
+                    if (!platformRound && !project.getEndpointType().designInvolved()
+                            && prdRevisionSummary != null
+                            && parkScopeDraftOrAwait(projectId, opinion, prdRevisionSummary)) {
                         return;
                     }
                     // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
@@ -737,6 +753,16 @@ public class MainAgentAppService {
                 return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
             }
             String prdRevisionSummary = prdRevisions.consume(workspaceId);
+            // 改需求回路（#334 大改小改分流，判定归主智能体提示词、执行归平台）：
+            // 本轮有 savePrd 修订事实且草稿≠已确认版（{@link PrdDraftBaseline} 漂移
+            // 判定）＝范围级变更——不派更新 run：意见与差异摘要停驻待确认，用户过
+            // 确认门（新版本号）后才由确认动作派下一版 Demo。同文重存（草稿==已确认
+            // 版——派发失败后重提等）不属新草稿，照旧受理即迭代（修订说明进交接物）。
+            if (parkScopeDraftOrAwait(projectId, task, prdRevisionSummary)) {
+                return;
+            }
+            // 小反馈照旧受理即迭代（无修订事实，或草稿==已确认版的同文重存）：
+            // 迭代基准＝当前已确认版本的判定归迭代轨起跑（runFixTrack 逐场取基准）
             IterationAppService.FixDispatch dispatch =
                     iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
             log.info("[main-close] 项目 {} 意见轮收口，平台自动派更新 run（{}，{}）",
@@ -768,6 +794,30 @@ public class MainAgentAppService {
         opinionExchanges.remove(sessionId);
         prdRevisions.clear(workspaceId);
         buildPlanFacts.clear(workspaceId);
+    }
+
+    /**
+     * 改需求回路停派判定与停驻（#334，未生成/已生成两分支共用单点）：本轮 savePrd
+     * 修订事实在场且工作区草稿偏离最新已确认版（{@link PrdDraftBaseline} 全文
+     * 比对）＝范围级新草稿——停驻意见与差异摘要待确认并返回 true（调用方停派：
+     * 新草稿不自动触发 Demo，确认过门〔新版本号〕才派下一版）。意见锚缺失
+     * （进程内理论不可达的防御边角——锚随任务落先于收口）时停派不停驻，只记
+     * 日志待确认（不派不错派）。无修订事实或草稿==已确认版（同文重存——派发
+     * 失败后重提等）返回 false：照旧受理即迭代。
+     */
+    private boolean parkScopeDraftOrAwait(Long projectId, String opinion,
+            String prdRevisionSummary) {
+        if (prdRevisionSummary == null
+                || prdDraftBaseline.driftedFrom(projectId).isEmpty()) {
+            return false;
+        }
+        boolean parked = opinion != null && !opinion.isBlank();
+        if (parked) {
+            prdVersionAppService.parkDraftChange(projectId, opinion, prdRevisionSummary);
+        }
+        log.info("[main-close] 项目 {} 范围级意见收口：PRD 新草稿待确认，停派待确认门（#334——确认过门才派下一版 Demo）{}",
+                projectId, parked ? "" : "；意见锚缺失仅停派（防御边角）");
+        return true;
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；

@@ -21,6 +21,9 @@ const seed = vi.hoisted(() => ({ state: { chats: {} } as Pick<ChatState, "chats"
 const postMutate = vi.hoisted(() => vi.fn());
 const answerMutate = vi.hoisted(() => vi.fn());
 const seePrd = vi.hoisted(() => vi.fn());
+const prdSeed = vi.hoisted(() => ({
+  data: undefined as { draftChangeSummary?: string | null } | undefined,
+}));
 const uploadMaterial = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -34,6 +37,11 @@ vi.mock("@/lib/store/chat", async (importOriginal) => {
 
 vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
+}));
+
+// PRD 读面（#334 改需求回路提示的数据面）：快照直读种子——差异摘要在场＝待确认
+vi.mock("@/hooks/use-prd", () => ({
+  usePrd: () => ({ data: prdSeed.data }),
 }));
 
 vi.mock("@/hooks/use-upload-material", () => ({
@@ -149,6 +157,7 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
     usePrdNoticesStore.setState({ seen: {}, pending: {} });
     seed.state = { chats: {} };
     seePrd.mockClear();
+    prdSeed.data = undefined;
   });
 
   it("点击「去看看」：认领（pending 清）+ 跳转回调，胶囊即逝", () => {
@@ -160,6 +169,20 @@ describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
     expect(usePrdNoticesStore.getState().pending.p1).toBeUndefined();
     expect(seePrd).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: /PRD 有更新/ })).toBeNull();
+  });
+
+  it("范围级新草稿待确认（#334）：点击「确认新版」提示＝跳转文档面，不认领（REST 派生态、确认前常驻）", () => {
+    usePrdNoticesStore.setState({ seen: { p1: true }, pending: { p1: true } });
+    prdSeed.data = { draftChangeSummary: "功能清单新增管理后台章" };
+    render(<CommandArea projectId="p1" onSeePrd={seePrd} generated />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /PRD 已更新，确认新版后生成下一版 Demo/ }),
+    );
+
+    expect(seePrd).toHaveBeenCalledTimes(1);
+    // 不认领通用胶囊（pending 留存）；范围级提示是 REST 派生态——确认成功（清停驻）才退场
+    expect(usePrdNoticesStore.getState().pending.p1).toBe(true);
   });
 });
 

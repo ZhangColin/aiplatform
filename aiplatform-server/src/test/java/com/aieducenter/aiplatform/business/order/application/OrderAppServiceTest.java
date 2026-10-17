@@ -572,6 +572,6 @@ class OrderAppServiceTest {
                 .build());
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
+                PrdReadinessResponse.from(PrdReadiness.parse(prd)), /* draftChangeSummary= */ null));
     }
 }

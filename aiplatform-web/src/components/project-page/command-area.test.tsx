@@ -13,6 +13,7 @@ const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
+  prd: { data: undefined as { draftChangeSummary?: string | null } | undefined },
 }));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -44,6 +45,12 @@ vi.mock("@/lib/store/work-message", async (importOriginal) => {
 
 vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
+}));
+
+// PRD 读面（#334 改需求回路提示的数据面）：服务端直读种子渲染，无 QueryClient
+// 可挂——差异摘要（draftChangeSummary）在场与否即提示分野
+vi.mock("@/hooks/use-prd", () => ({
+  usePrd: () => ({ data: seed.prd.data }),
 }));
 
 vi.mock("@/hooks/use-upload-material", () => ({
@@ -301,6 +308,33 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
 
     seed.notices = { seen: { p1: true }, pending: {} };
     expect(renderToStaticMarkup(<CommandArea projectId="p1" />)).not.toContain("去看看");
+  });
+
+  it("范围级新草稿待确认（#334）：已生成＋差异摘要在场 →「PRD 已更新，确认新版后生成下一版 Demo」提示在位，通用胶囊退场", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "PRD 已按你的意见更新。" }]);
+    seed.notices = { seen: { p1: true }, pending: { p1: true } };
+    seed.prd.data = { draftChangeSummary: "功能清单新增管理后台章" };
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" generated />);
+    expect(html).toContain("PRD 已更新，确认新版后生成下一版 Demo");
+    expect(html).not.toContain("去看看");
+
+    seed.prd.data = undefined;
+  });
+
+  it("差异摘要不在场或未生成（#334）：不出「确认新版」提示——通用胶囊照旧", () => {
+    seedChat([{ kind: "agent", id: "b1", text: "已按你的意见修订。" }]);
+    seed.notices = { seen: { p1: true }, pending: { p1: true } };
+    // 摘要在场但未生成（首个 Demo 未起）：范围级提示不出
+    seed.prd.data = { draftChangeSummary: "交付范围补小程序端" };
+    const notGenerated = renderToStaticMarkup(<CommandArea projectId="p1" />);
+    expect(notGenerated).toContain("PRD 有更新 · 去看看");
+    expect(notGenerated).not.toContain("确认新版");
+    // 已生成但无停驻摘要：通用胶囊照旧
+    seed.prd.data = undefined;
+    expect(renderToStaticMarkup(<CommandArea projectId="p1" generated />)).toContain(
+      "PRD 有更新 · 去看看",
+    );
   });
 
   it("订单锁定（#28）：待报价行——输入禁用、锁定提示与占位都指向「取消订单」", () => {

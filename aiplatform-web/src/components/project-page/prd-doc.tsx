@@ -67,9 +67,14 @@ export function PrdDoc({
                 : "平台正在和你梳理需求；整理好的需求文档会出现在这里，随时可以提意见让它更新。"}
             </p>
             {/* 确认门（#330/#332）：PRD 在场即出门（首个构建 run 的唯一触发）——
-                未产出（prd.data 为 null）不出，但不留「门关了没按钮」的中间态 */}
+                未产出（prd.data 为 null）不出，但不留「门关了没按钮」的中间态；
+                范围级新草稿停驻时摘要层带差异摘要（#334） */}
             {prd.data ? (
-              <PrdConfirmGate projectId={projectId} readiness={prd.data.readiness} />
+              <PrdConfirmGate
+                projectId={projectId}
+                readiness={prd.data.readiness}
+                changeSummary={prd.data.draftChangeSummary}
+              />
             ) : null}
           </header>
           {prd.data ? (

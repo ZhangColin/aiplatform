@@ -960,12 +960,17 @@ class IterationAppServiceTest {
 
     /** 已确认 PRD 版本在场（#333 Demo 版本锚——迭代起跑时的基准版本）。 */
     private void seedConfirmedPrdVersion(Long projectId, int versionNo) {
+        seedConfirmedPrdVersionContent(projectId, versionNo, "# PRD");
+    }
+
+    /** 已确认 PRD 版本在场（#334 起跑基准——自定义全文：漂移比对的工作区对侧事实）。 */
+    private void seedConfirmedPrdVersionContent(Long projectId, int versionNo, String content) {
         jdbcTemplate.update("""
                 INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
                     prd_produced_at, created_at, updated_at)
-                VALUES (?, ?, ?, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, System.nanoTime(), projectId, versionNo);
+                """, System.nanoTime(), projectId, versionNo, content);
     }
 
     private Long persistedArchivedGeneratedProject(String workspaceId) {
@@ -984,6 +989,8 @@ class IterationAppServiceTest {
         // 已确认 PRD 版本——v1（PRD v1 基准）→ 确认 v2 后下一轮 v2 锚（迭代成版链）
         Long projectId = persistedGeneratedProject("9950");
         seedConfirmedPrdVersion(projectId, 1);
+        // 工作区草稿==已确认版（#334：无范围级草稿在场——迭代基准＝已确认版、无漂移）
+        givenWorkspacePrd("# PRD");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
@@ -1020,5 +1027,80 @@ class IterationAppServiceTest {
                 "SELECT COUNT(*) FROM prj_demo_versions WHERE project_id = ?", Integer.class,
                 projectId);
         assertThat(count).isZero();
+    }
+
+    // ---------- 改需求回路（#334）：小迭代基准＝当前已确认版本 ----------
+
+    /** 已确认版全文（基准断言用的独特正文——区别于草稿与占位）。 */
+    private static final String CONFIRMED_PRD_V1 = "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n";
+
+    /** 范围级新草稿（≠已确认 v1——漂移在工作区的事实面）。 */
+    private static final String SCOPE_PENDING_DRAFT =
+            "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
+
+    /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文——覆盖 AGENTS.md 桩，写路径只看退出码）。 */
+    private void givenWorkspacePrd(String prdMarkdown) {
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100000\n" + prdMarkdown, "", 0));
+    }
+
+    @Test
+    void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_confirmed_version() {
+        // 灵魂例（#334 小迭代基准不漂移）：范围级新草稿在场（未被确认）时小迭代
+        // 仍按旧确认版起跑——修正任务以已确认版全文为基准，工作区草稿明确不作
+        // 本轮依据（确认新版才切基准）
+        Long projectId = persistedGeneratedProject("9960");
+        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
+        givenWorkspacePrd(SCOPE_PENDING_DRAFT);
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).prompt())
+                .contains("本轮需求基准")
+                .contains(CONFIRMED_PRD_V1)
+                .doesNotContain("需求正本 = 工作区");
+    }
+
+    @Test
+    void given_draft_equals_confirmed_when_iteration_runs_then_prompt_reads_workspace() {
+        // 草稿==已确认版（无新草稿在场，含确认动作后的范围级修正 run）：照旧以
+        // 工作区正本为需求正本（不内联快照——确认后工作区即确认版）
+        Long projectId = persistedGeneratedProject("9961");
+        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
+        givenWorkspacePrd(CONFIRMED_PRD_V1);
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).prompt())
+                .contains("需求正本 = 工作区")
+                .doesNotContain("本轮需求基准");
+    }
+
+    @Test
+    void given_no_confirmed_version_when_iteration_runs_then_prompt_reads_workspace() {
+        // legacy（无确认版起跑）：不虚构确认制——照旧以工作区正本为需求正本
+        Long projectId = persistedGeneratedProject("9962");
+        givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).prompt())
+                .contains("需求正本 = 工作区")
+                .doesNotContain("本轮需求基准");
     }
 }

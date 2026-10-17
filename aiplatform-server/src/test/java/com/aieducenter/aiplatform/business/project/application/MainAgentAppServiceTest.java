@@ -1082,6 +1082,101 @@ class MainAgentAppServiceTest {
         }
     }
 
+    // ---------- 改需求回路（#334）：大改小改分流——轮收口停派 or 照旧迭代 ----------
+
+    /** 范围级新草稿（≠已确认 v1 全文——漂移判定的工作区事实）。 */
+    private static final String SCOPE_DRAFT =
+            "# PRD\n\n## 功能清单\n\n1. 首页\n2. 管理后台——管理员可管理商品与订单\n";
+
+    /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文）。 */
+    private void givenWorkspacePrd(String prdMarkdown) {
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100000\n" + prdMarkdown, "", 0));
+    }
+
+    @Test
+    void given_scope_opinion_revises_prd_when_turn_closes_then_no_fix_run_and_draft_change_parked() {
+        // 灵魂例（#334）：范围级意见（savePrd 修订事实＋草稿≠已确认版——判定从
+        // 工具调用事实观测）→ 轮收口<b>不派</b>更新 run，意见与差异摘要停驻待确认
+        // （确认过门出新版本号后才派下一版 Demo）；对话区提示事实面＝停驻列
+        Long projectId = persistedGeneratedProject("9761");
+        markPrdConfirmed(projectId);
+        givenWorkspacePrd(SCOPE_DRAFT);
+        givenSessionExecutorRunsInline();
+        givenConverseMainSavesPrdAndExecutorFinishes("功能清单新增管理后台章");
+
+        appService.runOpinionTurn(projectId, "加一个管理后台角色");
+
+        // 新草稿不自动触发 Demo：唯一一轮主智能体对话、零编码 run
+        verify(agentClient, times(1)).converse(any(), any());
+        // 停驻落库（事实链可观测）：意见原文＋差异摘要（savePrd summary 终值）
+        Map<String, Object> parked = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion, prd_draft_summary FROM prj_projects WHERE id = ?",
+                projectId);
+        assertThat(parked.get("prd_draft_opinion")).isEqualTo("加一个管理后台角色");
+        assertThat(parked.get("prd_draft_summary")).isEqualTo("功能清单新增管理后台章");
+    }
+
+    @Test
+    void given_small_feedback_with_pending_draft_when_turn_closes_then_fix_run_as_usual() {
+        // 小反馈照旧受理即迭代：新草稿在场不影响旧确认版上的小迭代——无 savePrd
+        // 事实即小反馈，收口照旧派更新 run（本轮基准＝已确认版的判定归迭代轨起跑）
+        Long projectId = persistedGeneratedProject("9762");
+        markPrdConfirmed(projectId);
+        givenWorkspacePrd(SCOPE_DRAFT); // 范围级草稿在场（未被确认）
+        givenSessionExecutorRunsInline();
+        givenConverseMainRepliesAndExecutorFinishes("好的，会改的");
+
+        appService.runOpinionTurn(projectId, "按钮改成蓝色");
+
+        // 照旧派更新 run：main 轮＋修正 run 两轮 converse；未新增停驻（小反馈不动版本）
+        verify(agentClient, times(2)).converse(any(), any());
+        Map<String, Object> parked = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(parked.get("prd_draft_opinion")).isNull();
+    }
+
+    @Test
+    void given_save_prd_with_unchanged_draft_when_turn_closes_then_fix_run_with_summary() {
+        // 同文重存（草稿==已确认版，如派发失败后重提、智能体重存同文）＝无新草稿：
+        // 照旧受理即迭代，修订说明照进交接物——重提即兜底不落「停驻→幂等确认死锁」
+        Long projectId = persistedGeneratedProject("9763");
+        markPrdConfirmed(projectId);
+        givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n"); // 与 v1 全文一致
+        givenSessionExecutorRunsInline();
+        givenConverseMainSavesPrdAndExecutorFinishes("按意见重申了首页要点");
+
+        appService.runOpinionTurn(projectId, "首页再强调一下品牌感");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("PRD 已修订")
+                .contains("按意见重申了首页要点");
+        Map<String, Object> parked = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(parked.get("prd_draft_opinion")).isNull();
+    }
+
+    @Test
+    void given_un_generated_with_confirmed_and_scope_draft_when_turn_closes_then_no_first_demo() {
+        // 未生成形态（首个 Demo 未起——run 失败后改需求）：确认版在场但本轮出范围级
+        // 新草稿 → 不自动起首个 Demo（新草稿不自动触发），停驻待重确认过门
+        Long projectId = persistedPrdProject("9764");
+        markPrdConfirmed(projectId);
+        givenWorkspacePrd(SCOPE_DRAFT);
+        givenSessionExecutorRunsInline();
+        givenConverseMainSavesPrdAndExecutorFinishes("交付范围扩大");
+
+        appService.runOpinionTurn(projectId, "交付范围加一个小程序端");
+
+        // 停派：只有主智能体一轮对话，无生成 run／补产轮（新草稿优先于补产链）
+        verify(agentClient, times(1)).converse(any(), any());
+        Map<String, Object> parked = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(parked.get("prd_draft_opinion")).isEqualTo("交付范围加一个小程序端");
+    }
+
     @Test
     void given_pending_question_after_turn_when_close_then_no_dispatch_until_answer_settles() {
         // 追问挂起 = 本轮未收口：意见不派；答复续跑再挂起（多轮追问）也不派；

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,9 +22,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.cartisan.core.exception.ApplicationException;
 
 import com.aieducenter.aiplatform.IntegrationTest;
+import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.aieducenter.aiplatform.business.project.application.ProjectEventTypes;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
@@ -101,6 +105,15 @@ class PrdVersionAppServiceTest {
      * 「确认动作触发了派发」，派发本身的行为归 {@link GenerationAppServiceTest}。 */
     @MockitoBean
     private GenerationAppService generationAppService;
+
+    /** 改需求回路（#334）次生派发缝：已生成项目确认新版后派修正 run（下一版
+     * Demo，携停驻交接物）——同上，只核「确认动作触发派发＋交接物内容」。 */
+    @MockitoBean
+    private IterationAppService iterationAppService;
+
+    /** 平台通知发射缝（#334 park 的 document-updated 复用发射断言用）。 */
+    @MockitoBean
+    private EventsAppService eventsAppService;
 
     @AfterEach
     void tearDown() {
@@ -357,12 +370,149 @@ class PrdVersionAppServiceTest {
                 .hasMessageContaining(ProjectMessage.PRD_VERSION_NOT_FOUND.message());
     }
 
+    // ---------- 改需求回路（#334）：范围级停驻·确认时消费派下一版 ----------
+
+    @Test
+    void given_scope_round_when_park_then_opinion_and_summary_persisted_and_prd_domain_notified() {
+        // 停驻落库（不落库缺口最小方案）：意见原文＋差异摘要（savePrd summary 终值）
+        // 停驻 prj_projects 两列——重启后确认时派发与对话区提示不丢事实；
+        // 停驻即 PRD 读面有新事实（差异摘要），复用 document-updated 广播重拉
+        Long projectId = persistedPrdProject(PRD_V1);
+
+        appService.parkDraftChange(projectId, "加一个管理后台角色", "新增「管理后台」章：管理员可管理商品与订单");
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion, prd_draft_summary FROM prj_projects WHERE id = ?",
+                projectId);
+        assertThat(row.get("prd_draft_opinion")).isEqualTo("加一个管理后台角色");
+        assertThat(row.get("prd_draft_summary"))
+                .isEqualTo("新增「管理后台」章：管理员可管理商品与订单");
+        verify(eventsAppService).publishNotification(
+                eq(ProjectEventTypes.DOCUMENT_UPDATED), argThat(payload ->
+                        projectId.toString().equals(payload.get(ProjectEventTypes.PROJECT_ID_FIELD))
+                                && ProjectEventTypes.DOCUMENT_TYPE_PRD.equals(
+                                        payload.get(ProjectEventTypes.DOCUMENT_TYPE_FIELD))));
+    }
+
+    @Test
+    void given_scope_round_again_when_park_then_latest_wins() {
+        // 停驻取终值（草稿单一）：确认前再提范围级意见 → 新一轮意见与差异摘要
+        // 覆盖停驻（终稿草稿承载全部变更，停驻取最新一轮）
+        Long projectId = persistedPrdProject(PRD_V1);
+        appService.parkDraftChange(projectId, "加管理后台", "新增管理后台章");
+        appService.parkDraftChange(projectId, "再加数据导出", "在管理后台章补数据导出");
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(row.get("prd_draft_opinion")).isEqualTo("再加数据导出");
+    }
+
+    @Test
+    void given_generated_with_parked_draft_when_confirm_new_version_then_next_demo_dispatched_with_handoff() {
+        // 灵魂例（#334）：已生成项目过确认门（新版本号 v2）→ 平台才派下一版 Demo
+        // ＝修正 run，交接物＝停驻的意见原文＋差异摘要；停驻即清（消费语义）
+        Long projectId = persistedGeneratedPrdProject(PRD_V1);
+        appService.confirm(projectId); // v1（首个 Demo 派发对已生成项目为 no-op）
+        org.mockito.Mockito.clearInvocations(iterationAppService, generationAppService);
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0)); // 范围级新草稿
+        appService.parkDraftChange(projectId, "加一个下单页", "功能清单新增下单页（微信支付）");
+
+        PrdVersionResponse v2 = appService.confirm(projectId);
+
+        assertThat(v2.versionNo()).isEqualTo(2);
+        verify(iterationAppService).startFixRun(projectId, "加一个下单页", "功能清单新增下单页（微信支付）");
+        // 停驻即清（消费）：确认后两列回空
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion, prd_draft_summary FROM prj_projects WHERE id = ?",
+                projectId);
+        assertThat(row.get("prd_draft_opinion")).isNull();
+        assertThat(row.get("prd_draft_summary")).isNull();
+    }
+
+    @Test
+    void given_generated_without_parking_when_confirm_new_version_then_no_fix_run() {
+        // 新版确认但无停驻交接物（草稿漂移未经范围级轮停驻——边角）→ 不派修正
+        // run：确认只负责成版，交接物缺失时无下一版 Demo 可派（重提意见即兜底）
+        Long projectId = persistedGeneratedPrdProject(PRD_V1);
+        appService.confirm(projectId);
+        org.mockito.Mockito.clearInvocations(iterationAppService);
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0));
+
+        appService.confirm(projectId);
+
+        verify(iterationAppService, never()).startFixRun(anyLong(), any(), any());
+    }
+
+    @Test
+    void given_generated_when_idempotent_reconfirm_without_new_draft_then_no_fix_run() {
+        // 幂等确认（无新草稿＝内容未变，不产生新版本号）→ 不过门不派下一版：
+        // 门只在版本确认点（新版本号），重复点击不空烧修正 run
+        Long projectId = persistedGeneratedPrdProject(PRD_V1);
+        appService.confirm(projectId);
+        org.mockito.Mockito.clearInvocations(iterationAppService);
+
+        appService.confirm(projectId); // 草稿未变——幂等返回 v1
+
+        verify(iterationAppService, never()).startFixRun(anyLong(), any(), any());
+    }
+
+    @Test
+    void given_fix_dispatch_fails_when_confirm_new_version_then_version_still_confirmed_and_parking_cleared() {
+        // 派发是次生事实、失败不反噬确认回执（首个 Demo 派发同口径）：停驻已清、
+        // 版本已落库，用户重提意见即兜底（草稿==已确认版 → 照旧受理即迭代）
+        Long projectId = persistedGeneratedPrdProject(PRD_V1);
+        appService.confirm(projectId);
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100099\n" + PRD_V2, "", 0));
+        appService.parkDraftChange(projectId, "加一个下单页", "功能清单新增下单页");
+        doThrow(new IllegalStateException("环境故障"))
+                .when(iterationAppService).startFixRun(anyLong(), any(), any());
+
+        PrdVersionResponse v2 = appService.confirm(projectId);
+
+        assertThat(v2.versionNo()).isEqualTo(2);
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(row.get("prd_draft_opinion")).isNull();
+    }
+
+    @Test
+    void given_not_generated_with_parking_when_confirm_then_parking_cleared_and_first_demo_dispatched() {
+        // 未生成项目（首个 Demo 未起——run 失败后改需求）：停驻由首个 Demo 全新
+        // 构建消化（生成读工作区新确认正本，无需修正 run）——确认即清停驻、
+        // 照旧派首个 Demo run
+        Long projectId = persistedPrdProject(PRD_V1);
+        appService.parkDraftChange(projectId, "交付范围加一个小程序端", "交付范围补小程序端说明");
+
+        PrdVersionResponse v1 = appService.confirm(projectId);
+
+        assertThat(v1.versionNo()).isEqualTo(1);
+        verify(generationAppService).dispatchFirstDemoOnConfirm(projectId);
+        verify(iterationAppService, never()).startFixRun(anyLong(), any(), any());
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
+        assertThat(row.get("prd_draft_opinion")).isNull();
+    }
+
     // ---------- 辅件 ----------
 
     /** 已产出 PRD 的项目＋工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文）。 */
     private Long persistedPrdProject(String prdMarkdown) {
         Project project = Project.create("PRD 确认项目", null, null, 971800L, OWNER, null);
         project.markPrdProduced();
+        Long projectId = projectRepository.save(project).getId();
+        when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
+                .thenReturn(new ExecResultResponse("1756100000\n" + prdMarkdown, "", 0));
+        return projectId;
+    }
+
+    /** 已产出 PRD 且已生成的项目（#334 改需求回路的主场景——迭代期项目）。 */
+    private Long persistedGeneratedPrdProject(String prdMarkdown) {
+        Project project = Project.create("改需求项目", null, null, 971801L, OWNER, null);
+        project.markPrdProduced();
+        project.markGenerated();
         Long projectId = projectRepository.save(project).getId();
         when(workspaceLifecycleAppService.exec(any(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("1756100000\n" + prdMarkdown, "", 0));

@@ -18,8 +18,10 @@ afterEach(() => {
   mutate.mockReset();
 });
 
-function renderGate(readiness: PrdReadiness) {
-  return render(<PrdConfirmGate projectId="p1" readiness={readiness} />);
+function renderGate(readiness: PrdReadiness, changeSummary?: string | null) {
+  return render(
+    <PrdConfirmGate projectId="p1" readiness={readiness} changeSummary={changeSummary} />,
+  );
 }
 
 describe("PrdConfirmGate · 两段式摘要层（#332 生成加门）", () => {
@@ -61,5 +63,29 @@ describe("PrdConfirmGate · 两段式摘要层（#332 生成加门）", () => {
       screen.getByRole("button", { name: "继续" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("差异摘要在场（#334 改需求回路）：摘要层带「本版更新内容」节——确认前看到这版改了什么；层内确认段如实说「下一版」", () => {
+    renderGate(
+      { blocking: [], minor: [], dimensions: [] },
+      "功能清单新增「管理后台」：管理员可管理商品与订单",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /确认此版 PRD 并生成 Demo/ }));
+
+    expect(screen.getByText("本版更新内容")).toBeTruthy();
+    expect(screen.getByText("功能清单新增「管理后台」：管理员可管理商品与订单")).toBeTruthy();
+
+    // 确认段措辞分野（#334）：停驻草稿确认＝出新版本、按新版生成下一版（非「首个」）
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    expect(screen.getByText("确认即冻结本版需求为新版本，平台随即按新版生成下一版 Demo。")).toBeTruthy();
+  });
+
+  it("无停驻摘要（#334）：摘要层不出「本版更新内容」节（不占形）", () => {
+    renderGate({ blocking: [], minor: [], dimensions: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: /确认此版 PRD 并生成 Demo/ }));
+
+    expect(screen.queryByText("本版更新内容")).toBeNull();
   });
 });

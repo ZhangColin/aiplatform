@@ -945,7 +945,7 @@ class BackofficeOrderSeamTest {
                 .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD)), /* draftChangeSummary= */ null));
     }
 
     /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */

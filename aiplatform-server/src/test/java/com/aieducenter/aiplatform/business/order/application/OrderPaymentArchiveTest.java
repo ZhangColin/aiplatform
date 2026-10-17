@@ -102,7 +102,7 @@ class OrderPaymentArchiveTest {
                 .thenReturn(Map.of(PROJECT_ID, "宠物店官网")); // 沉淀取名面（namesOf 单查询）
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD)), /* draftChangeSummary= */ null));
     }
 
     @AfterEach

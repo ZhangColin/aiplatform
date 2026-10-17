@@ -321,13 +321,16 @@ public class ProjectController {
     @Operation(summary = "PRD 读（当前版 markdown，直读工作区）",
             description = "PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，"
                     + "v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, "
-                    + "updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。"
+                    + "updatedAt, readiness, draftChangeSummary}，updatedAt = 文件 mtime"
+                    + "（ISO-8601，秒精度）。"
                     + "readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, "
                     + "dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、"
                     + "text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与"
                     + "边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 "
                     + "维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪"
-                    + "（判定与确认门同源）。未产出（工作区无该文件）"
+                    + "（判定与确认门同源）。draftChangeSummary（#334 改需求回路）＝范围级"
+                    + "新草稿停驻待确认的差异摘要（改稿时产出的 markdown 变更说明），"
+                    + "null = 无新草稿待确认。未产出（工作区无该文件）"
                     + "404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
                     + "写出/更新时通知通道（/api/events?projectId=）发 document-updated"
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")

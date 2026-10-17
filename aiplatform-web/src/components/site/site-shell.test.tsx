@@ -28,10 +28,21 @@ vi.mock("@/hooks/use-me", () => ({
 // 阶段门「PRD 已确认」事实源（#330 版本列表）——壳装配只测分流，桩空列表
 vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: [] }),
+  // 版本记录抽屉（#344）条目详情面——壳装配只测分流，桩空
+  usePrdVersion: () => ({ data: null, isPending: false }),
 }));
 // Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: [] }),
+}));
+// 抽屉 Demo 条目「查看当时」动作面（#344）——壳装配只测分流，桩空
+vi.mock("@/hooks/use-version", () => ({
+  useGitVersions: () => ({ data: [], isPending: false, isError: false }),
+  useVersionViewSession: () => ({
+    startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
+    start: vi.fn(),
+    finish: vi.fn(),
+  }),
 }));
 
 describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", () => {

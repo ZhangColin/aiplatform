@@ -15,7 +15,7 @@ import {
   RotateCcw,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import {
   AlertDialog,
@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useRollbackVersion, useStartVersionView, useStopVersionView } from "@/hooks/use-version";
+import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
 import type { ClosingDraft, DesignLintClosing, WorkClosing } from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
 import { cn } from "@/lib/utils";
@@ -244,46 +244,24 @@ export function ClosingCard({
   const drafts = closing.drafts;
   const design = !!drafts;
 
-  // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁）；回滚 = 追加新版本
+  // 版本动作（#92/#93）：查看当时 = 起快照（关窗即销毁——起服/销毁生命周期归
+  // useVersionViewSession 单点，#344 收敛）；回滚 = 追加新版本
   const version = closing.version;
   const [viewOpen, setViewOpen] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
-  const startView = useStartVersionView(projectId);
-  const stopView = useStopVersionView(projectId);
+  const { startView, start, finish } = useVersionViewSession(projectId);
   const rollback = useRollbackVersion(projectId);
-  // 起服中关窗（data 未就绪）→ 记下，待快照就绪即销毁——防起服完成却无人关闭的孤儿快照
-  const closePendingView = useRef(false);
 
   function openView() {
     if (!version) return;
-    closePendingView.current = false;
     setViewOpen(true);
-    startView.mutate(version);
+    start(version);
   }
 
   function handleViewOpenChange(open: boolean) {
-    if (!open) {
-      // schema 字段可选：viewId 在场才销毁（起服结果契约上必带）
-      const viewId = startView.data?.viewId;
-      if (viewId && version) {
-        stopView.mutate({ version, viewId });
-        startView.reset();
-      } else {
-        closePendingView.current = true;
-      }
-    }
+    if (!open) finish();
     setViewOpen(open);
   }
-
-  // 快照就绪时若窗口已关（起服中关窗）→ 立即销毁，不留孤儿
-  useEffect(() => {
-    const viewId = startView.data?.viewId;
-    if (closePendingView.current && viewId && version) {
-      stopView.mutate({ version, viewId });
-      startView.reset();
-      closePendingView.current = false;
-    }
-  }, [startView.data, version, stopView, startView]);
 
   return (
     <div className="rounded-xl border border-green-600/25 bg-green-500/[0.06] p-3">

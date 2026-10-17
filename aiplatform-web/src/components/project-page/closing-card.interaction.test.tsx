@@ -18,6 +18,11 @@ vi.mock("@/hooks/use-version", () => ({
   }),
   useStopVersionView: () => ({ mutate: vi.fn() }),
   useRollbackVersion: () => ({ mutate: vi.fn() }),
+  useVersionViewSession: () => ({
+    startView: { isPending: false, isError: false, data: undefined, mutate: vi.fn(), reset: vi.fn() },
+    start: vi.fn(),
+    finish: vi.fn(),
+  }),
 }));
 
 /** 设计会话收尾载荷（#289 closing.drafts 扩载形）。 */

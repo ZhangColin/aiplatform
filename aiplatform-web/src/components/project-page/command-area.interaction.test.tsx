@@ -53,16 +53,19 @@ vi.mock("@/hooks/use-chat", () => ({
 }));
 
 // 收尾卡版本动作请求面（仅「查看当时」链路用例消费）：起快照直读就绪态
-// （data 即回 previewUrl），请求面归 use-version 与后端测试
+// （会话 startView.data 即回 previewUrl），请求面归 use-version 与后端测试
 vi.mock("@/hooks/use-version", () => ({
-  useStartVersionView: () => ({
-    isPending: false,
-    isError: false,
-    data: { viewId: "v1", previewUrl: "about:blank" },
-    mutate: vi.fn(),
-    reset: vi.fn(),
+  useVersionViewSession: () => ({
+    startView: {
+      isPending: false,
+      isError: false,
+      data: { viewId: "v1", previewUrl: "about:blank" },
+      mutate: vi.fn(),
+      reset: vi.fn(),
+    },
+    start: vi.fn(),
+    finish: vi.fn(),
   }),
-  useStopVersionView: () => ({ mutate: vi.fn(), isPending: false }),
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 

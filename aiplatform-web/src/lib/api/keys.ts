@@ -34,6 +34,12 @@ export const queryKeys = {
      * 本域随项目域刷新。
      */
     demoVersions: (id: string) => ["projects", "demo-versions", id] as const,
+    /**
+     * run 收口版本表（#91 版本层：git log 即正本，commitHash×runId 锚）。版本
+     * 记录抽屉 Demo 条目经 runId→commitHash 映射接「查看当时」（#344）；挂
+     * projects 域随 run-finish 失效刷新。
+     */
+    versions: (id: string) => ["projects", "versions", id] as const,
   },
   /**
    * 工作文档产物域：`document-updated` SSE 的失效目标之一（#20 成果区文件
@@ -46,6 +52,12 @@ export const queryKeys = {
     prd: (id: string) => ["documents", "prd", id] as const,
     /** 已确认 PRD 版本列表（#330；空列表＝从未确认——阶段门「PRD 已确认」事实源）。 */
     prdVersions: (id: string) => ["documents", "prd-versions", id] as const,
+    /**
+     * 单版 PRD 详情（含全文快照，#330）：版本记录抽屉条目点开时随用随查
+     * （#344）——挂 documents 域随确认失效刷新。
+     */
+    prdVersion: (id: string, versionNo: number) =>
+      ["documents", "prd-version", id, String(versionNo)] as const,
   },
   /**
    * 订单域（#28 交易环①）：订单卡按 id 拉详情；下单/取消动作连带失效

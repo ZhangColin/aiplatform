@@ -65,14 +65,17 @@ vi.mock("@/hooks/use-chat", () => ({
 // 收尾卡用例只断言呈现序，版本动作不发请求
 vi.mock("@/hooks/use-version", () => ({
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useStartVersionView: () => ({
-    mutate: vi.fn(),
-    isPending: false,
-    isError: false,
-    data: undefined,
-    reset: vi.fn(),
+  useVersionViewSession: () => ({
+    startView: {
+      mutate: vi.fn(),
+      isPending: false,
+      isError: false,
+      data: undefined,
+      reset: vi.fn(),
+    },
+    start: vi.fn(),
+    finish: vi.fn(),
   }),
-  useStopVersionView: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 function question(overrides: Partial<Extract<ChatMessage, { kind: "question" }>> = {}) {

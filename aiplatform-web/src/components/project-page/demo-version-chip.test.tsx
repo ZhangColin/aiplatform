@@ -1,10 +1,15 @@
+// @vitest-environment happy-dom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { useVersionRecordStore } from "@/lib/store/version-record";
 
 import { DemoVersionChip } from "./demo-version-chip";
 
-// Demo 版本 chip（#333 最小呈现）：数据面 hook mock 掉——SSR 断言呈现形态，
-// 交互（点开抽屉/确认标记按钮）归 #347/#347 Demo 体验页重建。
+// Demo 版本 chip（#333 最小呈现／#344 点开版本记录抽屉）：数据面 hook mock
+// 掉——呈现形态走 SSR 断言（happy-dom 环境下同样可用），点开抽屉（#344 双挂点
+// 之二，与顶栏「版本记录」同一 store 契约）走交互断言。
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: vi.fn(),
 }));
@@ -14,6 +19,11 @@ import { useDemoVersions } from "@/hooks/use-demo-version";
 function givenVersions(versions: unknown[] | undefined) {
   vi.mocked(useDemoVersions).mockReturnValue({ data: versions } as never);
 }
+
+afterEach(() => {
+  cleanup();
+  useVersionRecordStore.setState({ open: false });
+});
 
 describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
   it("最新版在场：出「Demo vN · 基于 PRD vM 快照」（收口自动成版＋起跑时 PRD 锚）", () => {
@@ -57,5 +67,18 @@ describe("DemoVersionChip · 版本 chip 呈现（#333）", () => {
 
     givenVersions(undefined);
     expect(renderToStaticMarkup(<DemoVersionChip projectId="p1" />)).toBe("");
+  });
+});
+
+describe("DemoVersionChip · 点开版本记录抽屉（#344 双挂点之二）", () => {
+  it("点 chip → 开抽屉（同一 store 契约——与顶栏「版本记录」同一抽屉）", () => {
+    givenVersions([
+      { versionNo: 2, prdVersionNo: 1, runId: "r-2", createdAt: "2026-10-17T09:00:00" },
+    ]);
+    render(<DemoVersionChip projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Demo v2/ }));
+
+    expect(useVersionRecordStore.getState().open).toBe(true);
   });
 });

@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectDetail } from "@/lib/projects/detail";
 import { useM01Store } from "@/lib/store/m01";
 import { useSaveStateStore } from "@/lib/store/save-state";
+import { useVersionRecordStore } from "@/lib/store/version-record";
 
 import { ProjectSpaceShell } from "./project-space-shell";
 
 // 壳装配的交互面（#343）：灰置点击说明原因、保存胶囊三态（store 真实转移）、
-// 「保存项目」→M01 触发挂点、五行导航与侧栏的阶段重复面。项目详情桩＝门全关
-//（今日真实投影：PRD/Demo 确认机制未落地）；登录态桩＝已登录。
+// 「保存项目」→M01 触发挂点、五行导航与侧栏的阶段重复面；#344 增「版本记录」
+// 抽屉挂载＋顶栏挂点。项目详情桩＝门全关（今日真实投影：PRD/Demo 确认机制
+// 未落地）；登录态桩＝已登录。
 
 const seed = vi.hoisted(() => ({
   detail: {} as ProjectDetail,
@@ -23,10 +25,21 @@ vi.mock("@/hooks/use-project", () => ({
 }));
 vi.mock("@/hooks/use-prd", () => ({
   usePrdVersions: () => ({ data: seed.prdVersions }),
+  // 版本记录抽屉（#344）条目详情面——壳测试不出条目弹窗，桩空
+  usePrdVersion: () => ({ data: null, isPending: false }),
 }));
 // Demo 版本列表（#333）：门事实投影输入——默认空（无确认标记，Demo 确认门关）
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: [] }),
+}));
+// 抽屉 Demo 条目「查看当时」动作面（#344）——壳测试不点条目，桩空
+vi.mock("@/hooks/use-version", () => ({
+  useGitVersions: () => ({ data: [], isPending: false, isError: false }),
+  useVersionViewSession: () => ({
+    startView: { mutate: vi.fn(), reset: vi.fn(), data: undefined, isPending: false, isError: false },
+    start: vi.fn(),
+    finish: vi.fn(),
+  }),
 }));
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
@@ -41,6 +54,7 @@ afterEach(() => {
   cleanup();
   useSaveStateStore.setState({ state: "saved" });
   useM01Store.setState({ open: false, trigger: null });
+  useVersionRecordStore.setState({ open: false });
 });
 
 function mountShell() {
@@ -117,5 +131,22 @@ describe("ProjectSpaceShell · 五行导航与侧栏重复面（原型如此）"
     expect(screen.getByText("页面内容")).toBeTruthy();
     expect(screen.getByText("首页")).toBeTruthy();
     expect(screen.getByText("我的项目")).toBeTruthy();
+  });
+});
+
+describe("ProjectSpaceShell · 版本记录抽屉挂载与顶栏挂点（#344）", () => {
+  it("顶栏出「版本记录」；点击开抽屉（store 契约＝Demo chip 双挂点共用）", () => {
+    mountShell();
+    fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
+    expect(useVersionRecordStore.getState().open).toBe(true);
+  });
+
+  it("壳挂载抽屉本体：store 开后两组在场（PRD/Demo）", () => {
+    mountShell();
+    fireEvent.click(screen.getByRole("button", { name: "版本记录" }));
+    // 抽屉标题（heading 位）——顶栏按钮同名不误伤
+    expect(screen.getByRole("heading", { name: "版本记录" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "PRD 版本" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Demo 版本" })).toBeTruthy();
   });
 });

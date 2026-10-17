@@ -8,6 +8,7 @@ import { useSseFallbackPolling } from "@/lib/sse/provider";
 
 type PrdResponse = components["schemas"]["PrdResponse"];
 type PrdVersionSummary = components["schemas"]["PrdVersionSummaryResponse"];
+type PrdVersionDetail = components["schemas"]["PrdVersionResponse"];
 
 /**
  * 当前版 PRD（#20 成果区文件模式）：`GET …/prd` = 项目工作区 docs/PRD.md
@@ -53,5 +54,23 @@ export function usePrdVersions(projectId: string | undefined) {
     queryFn: ({ signal }) =>
       api.get<PrdVersionSummary[]>(`/projects/${projectId ?? ""}/prd/versions`, { signal }),
     enabled: projectId !== undefined,
+  });
+}
+
+/**
+ * 单版 PRD 详情（含全文快照，#330）：版本记录抽屉 PRD 条目点开时随用随查
+ * （#344）——content＝确认时工作区 PRD 全文的不可变快照。版本行不可变，
+ * staleTime Infinity 即事实缓存（键随版本号，永不复用于别版）。
+ */
+export function usePrdVersion(projectId: string | undefined, versionNo: number | null) {
+  return useQuery({
+    queryKey: queryKeys.documents.prdVersion(projectId ?? "", versionNo ?? 0),
+    queryFn: ({ signal }) =>
+      api.get<PrdVersionDetail>(
+        `/projects/${projectId ?? ""}/prd/versions/${versionNo ?? 0}`,
+        { signal },
+      ),
+    enabled: projectId !== undefined && versionNo !== null,
+    staleTime: Infinity,
   });
 }

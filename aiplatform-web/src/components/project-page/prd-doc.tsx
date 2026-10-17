@@ -78,7 +78,7 @@ export function PrdDoc({
             ) : null}
           </header>
           {prd.data ? (
-            <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <Markdown remarkPlugins={[remarkGfm]} components={prdMarkdownComponents}>
               {prd.data.content ?? ""}
             </Markdown>
           ) : (
@@ -95,9 +95,10 @@ export function PrdDoc({
 /**
  * markdown 元素样式（GFM：表格 / 删除线 / 任务列表等随 remark-gfm 启用；
  * react-markdown 默认不渲染内嵌 HTML、URL 白名单转换，主智能体产物安全呈现）。
- * 覆写只解构需要的 props——注入的 node 等不透传 DOM。
+ * 覆写只解构需要的 props——注入的 node 等不透传 DOM。导出＝PRD 快照全文弹窗
+ * （#344 版本记录抽屉）同源复用——PRD 呈现样式单点。
  */
-const markdownComponents: Components = {
+export const prdMarkdownComponents: Components = {
   h1: ({ children }) => <h1 className="mt-6 text-xl font-semibold first:mt-0">{children}</h1>,
   h2: ({ children }) => <h2 className="mt-6 text-lg font-semibold first:mt-0">{children}</h2>,
   h3: ({ children }) => <h3 className="mt-5 text-base font-semibold first:mt-0">{children}</h3>,

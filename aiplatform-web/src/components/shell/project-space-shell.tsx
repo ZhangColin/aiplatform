@@ -13,13 +13,16 @@ import {
 
 import { GlobalTopbar } from "./global-topbar";
 import { StageSidebar } from "./stage-sidebar";
+import { VersionRecordDrawer } from "./version-record-drawer";
 
 /**
  * 项目空间壳装配（#343，spec #320 ⑥）：阶段侧栏＋全局顶栏＋阶段页内容位。
  * 可达性判定的单点推导在此——项目详情＋已确认 PRD 版本列表＋Demo 版本列表
  * （真实 REST 事实）→ 门事实（stageGateFactsOf）→ 导航行（deliveryStageNav）
  * → 侧栏/顶栏同源消费；PRD 确认门接 #330 版本列表、Demo 确认门接 #333 确认
- * 标记（清单行 confirmedAt 投影）。内容位自带滚动（各阶段页自管粘性二级 header）。
+ * 标记（清单行 confirmedAt 投影）。内容位自带滚动（各阶段页自管粘性二级
+ * header）。版本记录抽屉（#344）挂壳上——顶栏与 Demo chip 双挂点共用同一
+ * 抽屉本体（开合走 store 契约）。
  */
 export function ProjectSpaceShell({
   projectId,
@@ -39,6 +42,7 @@ export function ProjectSpaceShell({
       <StageSidebar projectId={projectId} nav={nav} currentStage={currentStageOf(facts)} />
       <GlobalTopbar projectId={projectId} nav={nav} />
       <main className="pt-16 lg:pl-64">{children}</main>
+      <VersionRecordDrawer projectId={projectId} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Save } from "lucide-react";
+import { History, Save } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,6 +15,7 @@ import {
 } from "@/lib/projects/delivery-stages";
 import { useM01Store } from "@/lib/store/m01";
 import { useSaveStateStore } from "@/lib/store/save-state";
+import { useVersionRecordStore } from "@/lib/store/version-record";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +23,8 @@ import { cn } from "@/lib/utils";
  * 四阶段——与侧栏重复亦保留，原型如此设计）＋保存状态胶囊（真实三态）＋
  * 「我的项目」＋「保存项目」（触发 M01）＋头像（访客态＝「登录」文字入口；
  * 个人菜单自旧侧栏迁入）。可达性判定输入与侧栏同源（壳装配层单点推导）。
+ * 「版本记录」（#344，交接包 §5.2 要求、原型未画→补建）＝版本记录抽屉的
+ * 顶栏挂点——与 Demo 版本 chip 同一抽屉（store 开合契约）。
  */
 
 export function GlobalTopbar({ projectId, nav }: { projectId: string; nav: StageNavItem[] }) {
@@ -83,6 +86,7 @@ export function GlobalTopbar({ projectId, nav }: { projectId: string; nav: Stage
         >
           我的项目
         </Link>
+        <VersionRecordButton />
         <SaveProjectButton />
         <TopbarAvatar />
       </div>
@@ -116,6 +120,23 @@ export function SaveStatusPill() {
         浏览器已自动保存 · 绑定可跨设备
       </span>
     </span>
+  );
+}
+
+/** 「版本记录」（#344 补建，交接包 §5.2）：项目级版本记录抽屉的顶栏挂点。 */
+export function VersionRecordButton() {
+  const openVersionRecord = useVersionRecordStore((s) => s.openVersionRecord);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-8 gap-1.5 rounded-lg text-label-md font-medium"
+      onClick={openVersionRecord}
+    >
+      <History className="size-4 text-ink-faint" aria-hidden="true" />
+      版本记录
+    </Button>
   );
 }
 

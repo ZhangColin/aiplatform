@@ -57,6 +57,7 @@ export function VersionViewDialog({
   previewUrl,
   round,
   summary,
+  title,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,6 +68,8 @@ export function VersionViewDialog({
   round?: number;
   /** 收尾摘要（标题语境源二：closing.summary 服务端权威事实，恒在场）。 */
   summary?: string;
+  /** 标题覆写（#344 版本记录抽屉 Demo 条目：「Demo vN 当时的系统」版本语境）。 */
+  title?: string;
 }) {
   const [device, setDevice] = useState<PreviewDevice>("desktop");
 
@@ -75,7 +78,9 @@ export function VersionViewDialog({
       {/* sm:max-w-[1600px] 同档压掉基座 sm:max-w-sm（见组件注释①）；w/h 吃满屏 */}
       <DialogContent className="flex h-[90vh] w-[94vw] max-w-[1600px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1600px]">
         <DialogHeader className="flex-row items-center gap-2 border-b px-4 py-3 pr-12">
-          <DialogTitle className="min-w-0 flex-1 truncate">{viewThenTitle(round, summary)}</DialogTitle>
+          <DialogTitle className="min-w-0 flex-1 truncate">
+            {title ?? viewThenTitle(round, summary)}
+          </DialogTitle>
           <DeviceToggle device={device} onDeviceChange={setDevice} />
           {/* 与系统 tab 新窗口钮不同身、不进共享件（#201 钉住）：系统 tab 三入口带
               #182 触碰先行（refetch 预览查询经后端触碰拦截器唤醒休眠沙箱）；本弹窗

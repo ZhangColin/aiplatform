@@ -1,12 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { hasCredentialCookie } from "@/lib/auth/cookies";
 import { buildLoginRedirectUrl } from "@/lib/auth/login-redirect";
-
-/** BFF 会话 cookie（A2：不透明 sessionId，HttpOnly + SameSite=Lax）。 */
-const SESSION_COOKIE = "aiplatform_session";
-
-/** 访客凭证 cookie（#326：值即凭证，HttpOnly + SameSite=Lax，MaxAge 对齐保留期）。 */
-const GUEST_COOKIE = "aiplatform_guest";
 
 /** 被删旧路由前缀（issue #17 前端清场）：书签 / 外链 302 回 /，不带 returnTo。 */
 const DELETED_ROUTE_PREFIXES = ["/dev", "/opc", "/admin", "/prototype"];
@@ -44,7 +39,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (request.cookies.has(SESSION_COOKIE) || request.cookies.has(GUEST_COOKIE)) {
+  if (hasCredentialCookie(request.cookies)) {
     return NextResponse.next();
   }
 

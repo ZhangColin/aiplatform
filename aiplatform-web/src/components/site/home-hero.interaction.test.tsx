@@ -48,7 +48,7 @@ function cta(): HTMLButtonElement {
 
 describe("HomeHero（首页 P01 照原型）", () => {
   it("示例 chip 点击填入全文：点「做一个预约系统」填入原型 fillPrompt 完整需求句", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     fireEvent.click(screen.getByRole("button", { name: /做一个预约系统/ }));
     expect(input().value).toBe(
       "做一个移动端客户预约系统，支持顾问日历排期、客户时段预约、短信通知与现场二维码核销",
@@ -56,7 +56,7 @@ describe("HomeHero（首页 P01 照原型）", () => {
   });
 
   it("示例 chip 点击填入全文：点「把表格流程做成工具」同样填入完整需求句", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     fireEvent.click(screen.getByRole("button", { name: /把表格流程做成工具/ }));
     expect(input().value).toBe(
       "把我们目前的Excel分散销售统计与审批流重构为一套结构化企业内部协作系统，包含权限分配和实时数据报表",
@@ -64,14 +64,14 @@ describe("HomeHero（首页 P01 照原型）", () => {
   });
 
   it("空输入发送不可用：CTA 禁用，点不触发建项目", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());
     expect(mutate).not.toHaveBeenCalled();
   });
 
   it("一句话提交建项目：Enter → POST 载荷（主链路零变化，不含终点字段）→ 直进项目空间新壳", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     fireEvent.change(input(), { target: { value: "做一个餐厅扫码点单系统" } });
     fireEvent.keyDown(input(), { key: "Enter", shiftKey: false });
 
@@ -81,7 +81,7 @@ describe("HomeHero（首页 P01 照原型）", () => {
 
   it("提交中防重复：pending 时 CTA 禁用，点击不重复发起", () => {
     state.pending = true;
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     fireEvent.change(input(), { target: { value: "做个预约页" } });
     expect(cta().disabled).toBe(true);
     fireEvent.click(cta());
@@ -90,20 +90,20 @@ describe("HomeHero（首页 P01 照原型）", () => {
 
   it("草稿恢复横幅真会话数据：有最近项目 → 项目名在场、「继续梳理」指到该项目", () => {
     state.projects = [{ id: "p1", name: "企业内部CRM与智能工单管理系统" }];
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     expect(screen.getByText("企业内部CRM与智能工单管理系统")).toBeTruthy();
     const link = screen.getByRole("link", { name: /继续梳理/ });
     expect(link.getAttribute("href")).toBe("/projects/p1");
   });
 
   it("无会话不呈现：无最近项目 → 无草稿恢复横幅", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     expect(screen.queryByText("草稿恢复")).toBeNull();
     expect(screen.queryByText("继续梳理")).toBeNull();
   });
 
   it("模式切换 pill 已删：无「先做设计」次入口（回单档呈现，PLATFORM_MODES 机制保留）", () => {
-    render(<HomeHero />);
+    render(<HomeHero credentialPresent />);
     expect(screen.queryByRole("button", { name: "先做设计" })).toBeNull();
     expect(screen.queryByRole("button", { name: "先做系统" })).toBeNull();
   });

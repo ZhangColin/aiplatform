@@ -38,6 +38,8 @@ export const queryKeys = {
     all: ["documents"] as const,
     /** 当前版 PRD（markdown + updatedAt；未产出 404 PRJ_015 在 hook 归一为 null）。 */
     prd: (id: string) => ["documents", "prd", id] as const,
+    /** 已确认 PRD 版本列表（#330；空列表＝从未确认——阶段门「PRD 已确认」事实源）。 */
+    prdVersions: (id: string) => ["documents", "prd-versions", id] as const,
   },
   /**
    * 订单域（#28 交易环①）：订单卡按 id 拉详情；下单/取消动作连带失效

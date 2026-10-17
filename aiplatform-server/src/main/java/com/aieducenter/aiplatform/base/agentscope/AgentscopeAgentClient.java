@@ -6,10 +6,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.RequireUserConfirmEvent;
@@ -25,10 +28,10 @@ import io.agentscope.core.message.UserMessage;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.harness.agent.HarnessAgent;
-import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import reactor.core.publisher.Flux;
+
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -351,7 +354,7 @@ public class AgentscopeAgentClient {
             if (silenceTimeout != null) {
                 events = events
                         .timeout(silenceTimeout)
-                        .onErrorMap(java.util.concurrent.TimeoutException.class, e ->
+                        .onErrorMap(TimeoutException.class, e ->
                                 new IllegalStateException("活超时判死：" + silenceTimeout
                                         + " 内无事件/工具动作进展（纯静默超限）", e));
             }

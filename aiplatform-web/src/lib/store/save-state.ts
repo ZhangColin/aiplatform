@@ -4,17 +4,16 @@ import { create } from "zustand";
  * 保存状态（#343，spec #320 ⑥ 顶栏保存胶囊 / #316 呈现口径）：全局壳顶栏
  * 胶囊真实三态的唯一状态源——「保存中 / 已保存 / 保存失败，请重试」。
  *
- * <p>接线挂点：访客会话保存事实（#326 访客会话域）落地前无人写「保存中/
- * 失败」转移，胶囊停在缺省「已保存」（登录会话下平台侧即时落库，原型静态
- * 形即此态）；#326 在保存动作处调 {@link SaveStateState.markSaving}/
- * {@link SaveStateState.markFailed} 即接真。不在此存「何时保存了什么」——
- * 胶囊只读档位，保存事实本体在会话域。</p>
+ * <p>接线挂点（B2 已接真）：项目内发消息/作答的持久化动作——use-chat 的两处
+ * mutation 在 onMutate 调 {@link SaveStateState.markSaving}、成功 markSaved、
+ * 失败 markFailed，顶栏胶囊三态随真实提交走。不在此存「何时保存了什么」——
+ * 胶囊只读档位，保存事实本体在服务端会话域。</p>
  */
 export type SaveState = "saving" | "saved" | "failed";
 
 export type SaveStateState = {
   state: SaveState;
-  /** 保存动作开始（访客会话写穿透前）。 */
+  /** 保存动作开始（提交持久化动作发出前）。 */
   markSaving: () => void;
   /** 保存落定（含平台侧自动保存确认）。 */
   markSaved: () => void;

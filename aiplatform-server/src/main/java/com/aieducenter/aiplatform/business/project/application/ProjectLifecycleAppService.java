@@ -211,7 +211,7 @@ public class ProjectLifecycleAppService {
      * （端点层据此 Set-Cookie——凭证随首条需求消息发放）。
      */
     public record Creation(ProjectCreatedResponse response,
-                           org.springframework.http.ResponseCookie guestCookie) {
+                           ResponseCookie guestCookie) {
     }
 
     /**

@@ -136,12 +136,16 @@ export function SaveProjectButton() {
   );
 }
 
-/** 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」文字入口。导出＝首页顶栏（#345）同源复用。 */
-export function TopbarAvatar() {
-  const { data: me, isPending } = useMe();
+/**
+ * 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」文字入口。导出＝首页顶栏
+ *（#345）同源复用。{@code meEnabled=false}＝首页匿名可逛面（无凭证 cookie）：
+ * 不发 /me、直接呈现「登录」入口，不落探明前占位。
+ */
+export function TopbarAvatar({ meEnabled = true }: { meEnabled?: boolean }) {
+  const { data: me, isPending } = useMe(meEnabled);
   const pathname = usePathname();
 
-  if (isPending) {
+  if (meEnabled && isPending) {
     // 会话探明前占位（不出「登录」闪烁——登录墙下静候既有会话）
     return (
       <span

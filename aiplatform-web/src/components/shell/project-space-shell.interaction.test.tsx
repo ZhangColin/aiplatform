@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProjectDetail } from "@/lib/projects/detail";
 import { useM01Store } from "@/lib/store/m01";
@@ -12,15 +12,26 @@ import { ProjectSpaceShell } from "./project-space-shell";
 // 「保存项目」→M01 触发挂点、五行导航与侧栏的阶段重复面。项目详情桩＝门全关
 //（今日真实投影：PRD/Demo 确认机制未落地）；登录态桩＝已登录。
 
-const seed = vi.hoisted(() => ({ detail: {} as ProjectDetail }));
+const seed = vi.hoisted(() => ({
+  detail: {} as ProjectDetail,
+  prdVersions: [] as { versionNo?: number }[],
+}));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1" }));
 vi.mock("@/hooks/use-project", () => ({
   useProject: () => ({ data: seed.detail, isPending: false }),
 }));
+vi.mock("@/hooks/use-prd", () => ({
+  usePrdVersions: () => ({ data: seed.prdVersions }),
+}));
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
 }));
+
+beforeEach(() => {
+  seed.detail = {} as ProjectDetail;
+  seed.prdVersions = [];
+});
 
 afterEach(() => {
   cleanup();
@@ -54,6 +65,14 @@ describe("ProjectSpaceShell · 灰置点击说明原因", () => {
     mountShell();
     fireEvent.click(screen.getAllByText("生产承接")[0]);
     expect(await screen.findByText(/付款完成后开放/)).toBeTruthy();
+  });
+
+  it("#343 验收闭合：PRD 已确认（#330 版本列表非空）→ Demo 体验不再灰置、指到阶段页", () => {
+    seed.prdVersions = [{ versionNo: 1 }];
+    mountShell();
+    const demo = screen.getAllByText("Demo 体验")[0];
+    expect(demo.closest("a")?.getAttribute("href")).toBe("/projects/p1/demo");
+    expect(screen.queryByText(/PRD 确认后开放/)).toBeNull();
   });
 });
 

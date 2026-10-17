@@ -21,9 +21,13 @@ import { recentProjects } from "@/lib/projects/list";
  * 保存状态胶囊/「我的项目」/「保存项目」/头像（访客＝「登录」文字入口，与项目
  * 空间顶栏 #343 同源件复用）。首页无项目上下文：阶段导航指向最近项目的阶段页
  * （有则指过去，无则回首页）。
+ *
+ * <p>{@code credentialPresent}＝服务端 cookie 面判定的凭证存在性（首页
+ * Server Component 下传）：false 时最近项目/会话身份查询不发请求——匿名首访
+ * 「只逛零足迹」，不因背景查询弹 M01。</p>
  */
-export function HomeHeader() {
-  const recent = recentProjects(useRecentProjects(), 1)[0];
+export function HomeHeader({ credentialPresent }: { credentialPresent: boolean }) {
+  const recent = recentProjects(useRecentProjects(credentialPresent), 1)[0];
 
   return (
     <header className="fixed top-0 right-0 left-0 z-40 flex h-16 items-center justify-between gap-4 border-b border-slate-soft/80 bg-glass-card px-4 shadow-e1 backdrop-blur-md lg:px-8">
@@ -80,7 +84,7 @@ export function HomeHeader() {
           我的项目
         </Link>
         <SaveProjectButton />
-        <TopbarAvatar />
+        <TopbarAvatar meEnabled={credentialPresent} />
       </div>
     </header>
   );

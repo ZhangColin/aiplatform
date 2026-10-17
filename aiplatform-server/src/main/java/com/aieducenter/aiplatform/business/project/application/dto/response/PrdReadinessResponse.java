@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application.dto.response;
 
 import java.util.List;
+import java.util.Locale;
 
 import com.aieducenter.aiplatform.business.project.application.PrdReadiness;
 
@@ -41,7 +42,7 @@ public record PrdReadinessResponse(
                         .toList(),
                 readiness.dimensions().stream()
                         .map(state -> new DimensionStatus(state.dimension().label(),
-                                state.status().name().toLowerCase(java.util.Locale.ROOT)))
+                                state.status().name().toLowerCase(Locale.ROOT)))
                         .toList());
     }
 }

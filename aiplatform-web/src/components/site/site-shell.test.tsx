@@ -25,6 +25,10 @@ vi.mock("@/hooks/use-project", () => ({
 vi.mock("@/hooks/use-me", () => ({
   useMe: () => ({ data: { displayName: "测试用户" }, isPending: false }),
 }));
+// 阶段门「PRD 已确认」事实源（#330 版本列表）——壳装配只测分流，桩空列表
+vi.mock("@/hooks/use-prd", () => ({
+  usePrdVersions: () => ({ data: [] }),
+}));
 
 describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", () => {
   it("首页无侧栏（#345，spec #320 ⑥「首页无侧栏」）：仅渲染内容位，旧侧栏件不在", () => {

@@ -23,14 +23,14 @@ beforeEach(() => {
 
 describe("HomeHero（首页 Hero 文案逐字照原型）", () => {
   it("徽章/主标/副标逐字照原型", () => {
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).toContain("SEMANTIC GRAVITY · AI NATIVE DELIVERY OS");
     expect(html).toContain("你想做一个什么产品？");
     expect(html).toContain("聊清需求，形成 PRD，再体验你的专属 Demo。所见即所得，零盲盒交付。");
   });
 
   it("大输入卡：附加资料 + 免注册提示 + CTA「开始梳理需求」＋ placeholder 逐字", () => {
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).toContain("附加资料");
     expect(html).toContain("免注册即可开始 · 私有云自动隔离保存");
     expect(html).toContain("开始梳理需求");
@@ -40,7 +40,7 @@ describe("HomeHero（首页 Hero 文案逐字照原型）", () => {
   });
 
   it("示例 chip×3 题目/概述逐字照原型", () => {
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).toContain("做一个预约系统");
     expect(html).toContain("移动端选时、日历排期与自动化核销看板");
     expect(html).toContain("把表格流程做成工具");
@@ -50,7 +50,7 @@ describe("HomeHero（首页 Hero 文案逐字照原型）", () => {
   });
 
   it("三件删除：无模式切换 pill、无模板卡、无最近项目卡区", () => {
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).not.toContain("先做设计");
     expect(html).not.toContain("先做系统");
     expect(html).not.toContain("点模板一句话开工");
@@ -59,7 +59,7 @@ describe("HomeHero（首页 Hero 文案逐字照原型）", () => {
 
   it("草稿恢复横幅：有最近项目 → 项目名 + 继续梳理 + 指到该项目", () => {
     seed.projects = [{ id: "p1", name: "企业内部CRM与智能工单管理系统" }];
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).toContain("草稿恢复");
     expect(html).toContain("企业内部CRM与智能工单管理系统");
     expect(html).toContain("继续梳理");
@@ -67,7 +67,7 @@ describe("HomeHero（首页 Hero 文案逐字照原型）", () => {
   });
 
   it("无会话不呈现：无最近项目 → 无草稿恢复横幅", () => {
-    const html = renderToStaticMarkup(<HomeHero />);
+    const html = renderToStaticMarkup(<HomeHero credentialPresent />);
     expect(html).not.toContain("草稿恢复");
   });
 });

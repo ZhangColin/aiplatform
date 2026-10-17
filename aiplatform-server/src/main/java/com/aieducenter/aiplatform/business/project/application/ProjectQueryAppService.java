@@ -19,7 +19,6 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.Worksp
 import com.aieducenter.aiplatform.business.order.application.OrderQueryAppService;
 import com.aieducenter.aiplatform.business.order.application.dto.response.OrderBriefResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
-import com.aieducenter.aiplatform.web.GuestContext;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.BinaryExecResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
@@ -53,6 +52,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.aieducenter.aiplatform.web.GuestContext;
 
 /**
  * 项目读侧用例：详情、列表（状态过滤 ACTIVE/ARCHIVED/缺省 all）+ 用量（总量 +

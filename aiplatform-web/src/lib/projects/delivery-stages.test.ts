@@ -93,9 +93,21 @@ describe("currentStageOf（当前阶段＝首个未完成）", () => {
 });
 
 describe("stageGateFactsOf（REST 项目事实 → 门事实投影）", () => {
-  it("无确认机制事实（#330/#333 落地前）：PRD/Demo 确认诚实映射 false——门不开", () => {
-    const facts = stageGateFactsOf({ prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail);
-    expect(facts.prdConfirmed).toBe(false);
+  it("PRD 确认接 #330 版本列表：有已确认版本＝门开；空列表/缺省＝未确认", () => {
+    const detail = { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail;
+    expect(stageGateFactsOf(detail).prdConfirmed).toBe(false);
+    expect(stageGateFactsOf(detail, []).prdConfirmed).toBe(false);
+    expect(stageGateFactsOf(detail, [{ versionNo: 1 }]).prdConfirmed).toBe(true);
+    expect(
+      stageGateFactsOf(detail, [{ versionNo: 2 }, { versionNo: 1 }]).prdConfirmed,
+    ).toBe(true);
+  });
+
+  it("Demo 确认待 #333 版本化：未落地前诚实映射 false", () => {
+    const facts = stageGateFactsOf(
+      { prdProducedAt: "2026-10-01T00:00:00Z" } as ProjectDetail,
+      [{ versionNo: 1 }],
+    );
     expect(facts.demoConfirmed).toBe(false);
   });
 

@@ -2,6 +2,7 @@ package com.aieducenter.aiplatform.business.project.endpoints.controller;
 
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -116,7 +117,7 @@ public class ProjectController {
                     + "值即凭证）；空输入不建访客（项目落无主行）、纯浏览零足迹。"
                     + "已有有效访客凭证或账户会话：归属随既有身份（账户优先），不发新凭证")
     public ApiResponse<ProjectCreatedResponse> create(@Valid @RequestBody CreateProjectCommand command,
-            jakarta.servlet.http.HttpServletResponse response) {
+            HttpServletResponse response) {
         ProjectLifecycleAppService.Creation creation = appService.create(command);
         if (creation.guestCookie() != null) {
             response.addHeader(HttpHeaders.SET_COOKIE, creation.guestCookie().toString());

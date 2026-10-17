@@ -19,6 +19,12 @@ type RequestOptions = {
   signal?: AbortSignal;
   /** URL query 参数，undefined / 空数组 的键会被丢弃。 */
   query?: Record<string, QueryValue | QueryValue[] | undefined>;
+  /**
+   * 静默 401：只按 error 态返回、不发全局 {@link UNAUTHORIZED_EVENT}。用于
+   * 匿名可逛面上的背景探针（如 SSE 会话探活）——探活失败不代表用户动作被拦，
+   * 不该弹 M01。
+   */
+  silentUnauthorized?: boolean;
 };
 
 /**
@@ -76,7 +82,9 @@ async function request<T>(path: string, options: RequestOptions & { method: stri
   const url = buildUrl(path, query);
 
   if (method === "GET" && inFlightGets) {
-    const key = url.toString();
+    // 静默开关进键：silent 探针与非静默查询是同 URL 的不同语义（401 时是否发
+    // 全局出口事件）——共享会误吞或误发事件。
+    const key = `${url.toString()}|${options.silentUnauthorized ? "silent" : "loud"}`;
     const existing = inFlightGets.get(key);
     if (existing) return existing as Promise<T>;
     const shared = runRequest<T>(url, { ...options, signal: undefined }).finally(() => {
@@ -90,7 +98,7 @@ async function request<T>(path: string, options: RequestOptions & { method: stri
 }
 
 async function runRequest<T>(url: URL, options: RequestOptions & { method: string; body?: unknown }): Promise<T> {
-  const { method, body, signal } = options;
+  const { method, body, signal, silentUnauthorized } = options;
   // FormData（multipart 上传）原样直传——浏览器自带 boundary 的 Content-Type
   // 不能手设；JSON body 照旧显式标 application/json
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
@@ -103,10 +111,11 @@ async function runRequest<T>(url: URL, options: RequestOptions & { method: strin
 
   if (!res.ok) {
     const payload: ApiResponse<unknown> | null = await res.json().catch(() => null);
-    if (res.status === 401) {
+    if (res.status === 401 && !silentUnauthorized) {
       // 一个出口、零分支（#326 起事件化）：不再整页跳登录——访客可用面（匿名逛
       // 首页、访客凭证过期）不因 401 断体验；M01（#327/#328）订阅本事件弹登录
-      // 弹窗，无订阅者时请求保持 error 态（查询面按未登录呈现）。
+      // 弹窗，无订阅者时请求保持 error 态（查询面按未登录呈现）。背景探针显式
+      // 静默（silentUnauthorized）：首页匿名访问不为一次探活弹登录框。
       emitUnauthorized(url.pathname + url.search);
     }
     throw new ApiError({

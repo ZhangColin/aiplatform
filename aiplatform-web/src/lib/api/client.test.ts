@@ -205,6 +205,23 @@ describe("薄 client：dev in-flight GET 去重（issue #60）", () => {
     }
   });
 
+  it("silentUnauthorized：背景探针 401 不发全局出口事件（仍抛 ApiError）", async () => {
+    const { api, UNAUTHORIZED_EVENT } = await importClient();
+    const details: unknown[] = [];
+    const listener = (e: Event) => details.push((e as CustomEvent).detail);
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
+    stubFetch().mockImplementation(always({ message: "unauthorized" }, 401));
+
+    try {
+      await expect(
+        api.get("/me", { silentUnauthorized: true }),
+      ).rejects.toMatchObject({ status: 401 });
+      expect(details).toEqual([]); // 匿名首页探活：不弹 M01（A1）
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+    }
+  });
+
   it("生产构建不去重（行为零变化）：并发同参 GET 各发各的", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { api } = await importClient();

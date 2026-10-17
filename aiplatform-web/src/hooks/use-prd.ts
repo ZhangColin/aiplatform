@@ -7,6 +7,7 @@ import type { components } from "@/lib/api/schema";
 import { useSseFallbackPolling } from "@/lib/sse/provider";
 
 type PrdResponse = components["schemas"]["PrdResponse"];
+type PrdVersionSummary = components["schemas"]["PrdVersionSummaryResponse"];
 
 /**
  * 当前版 PRD（#20 成果区文件模式）：`GET …/prd` = 项目工作区 docs/PRD.md
@@ -31,5 +32,19 @@ export function usePrd(projectId: string | undefined) {
         }),
     enabled: projectId !== undefined,
     refetchInterval: fallbackPolling,
+  });
+}
+
+/**
+ * 已确认 PRD 版本列表（#330）：versionNo 倒序、空列表＝从未确认。阶段门
+ * 「PRD 已确认」事实源（#343 验收闭合）——不伪造确认概念；确认动作成功后
+ * 由 useConfirmPrd 失效本域（确认不写 docs/PRD.md，document-updated 不触发）。
+ */
+export function usePrdVersions(projectId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.documents.prdVersions(projectId ?? ""),
+    queryFn: ({ signal }) =>
+      api.get<PrdVersionSummary[]>(`/projects/${projectId ?? ""}/prd/versions`, { signal }),
+    enabled: projectId !== undefined,
   });
 }

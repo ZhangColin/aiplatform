@@ -29,6 +29,10 @@ export function useConfirmPrd(projectId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.documents.prd(projectId),
       });
+      // 阶段门「PRD 已确认」事实源（#343）：确认成版即刷新版本列表
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.documents.prdVersions(projectId),
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
     },
     onError: (error) => {

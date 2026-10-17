@@ -37,6 +37,9 @@ import { formatRelativeTime } from "@/lib/utils/time";
  * 新壳（#343）。主链路载荷零变化——本票删除模式切换 pill/模板卡/最近项目卡区
  * 三件（#310 设计收起），回单档（做系统）呈现、不再携终点字段；PLATFORM_MODES
  * 注册表/live 位（lib/modes）机制保留不动。
+ *
+ * <p>{@code credentialPresent}＝服务端 cookie 面判定的凭证存在性：匿名首访不发
+ * 最近项目背景查询（只逛零足迹——横幅无数据自然不呈现），也不因背景 401 弹 M01。</p>
  */
 
 /** 首页快速起步样例（照原型：chip 题目 + 概述 + 点击填入输入框的完整需求句
@@ -78,14 +81,15 @@ const HOME_EXAMPLES: HomeExample[] = [
 /** 本地挂载附件条目（首页无上传管道——#280 入口票；选即挂 chip、随发即弃）。 */
 type LocalAttachment = { id: string; name: string; sizeLabel: string };
 
-export function HomeHero() {
+export function HomeHero({ credentialPresent }: { credentialPresent: boolean }) {
   const router = useRouter();
   const [requirement, setRequirement] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const createProject = useCreateProject();
   // 草稿恢复＝有效会话（owner 过滤后的列表）里最近一次的未归档项目；无则不呈现。
-  const recent = recentProjects(useRecentProjects(), 1)[0];
+  // 匿名首访（无凭证 cookie）不发列表请求——「只逛零足迹」。
+  const recent = recentProjects(useRecentProjects(credentialPresent), 1)[0];
   const draftAge = recent ? formatRelativeTime(lastTouchedAt(recent)) : "";
 
   const canSubmit = requirement.trim().length > 0 && !createProject.isPending;

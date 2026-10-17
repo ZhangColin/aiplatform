@@ -9,12 +9,13 @@ import type { ProjectDetail } from "@/lib/projects/detail";
  * 前置＝Demo 已确认（Demo 确认门 #333）、生产承接前置＝付款完成（已支付＝
  * 开工条件满足，ADR-0002 重对位）。
  *
- * <p>门事实（{@link StageGateFacts}）是语义正本位；从 REST 项目详情的投影
- * （{@link stageGateFactsOf}）只接现有事实——PRD/Demo 确认机制落地前诚实
- * 映射 false（无确认概念不伪造，#330/#333/#335 落地后在投影处接真事实，
- * 判定函数不动）。阶段页路由约定：需求分析＝项目页本路由，其余阶段页＝
- * 项目路由下路径段（/projects/[id]/demo｜contract｜production——#347/#348/
- * #349 各自落页）。</p>
+ * <p>门事实（{@link StageGateFacts}）是语义正本位；从 REST 事实的投影
+ * （{@link stageGateFactsOf}）只接现有事实——PRD 已确认＝已确认版本列表非空
+ * （#330 已落地的 GET …/prd/versions）；Demo 确认（#333 Demo 版本化）尚未
+ * 落地，诚实映射 false（无确认概念不伪造，落地后在投影处接真）；付款门接
+ * 现有订单事实。判定函数不动。阶段页路由约定：需求分析＝项目页本路由，其余
+ * 阶段页＝项目路由下路径段（/projects/[id]/demo｜contract｜production——
+ * #347/#348/#349 各自落页）。</p>
  */
 
 /** 四阶段词表（序号/名称逐字照原型；segment＝项目空间路径段）。 */
@@ -46,15 +47,22 @@ const LOCK_REASONS: Partial<Record<DeliveryStageKey, string>> = {
   production: "付款完成后开放：请先完成签约付款",
 };
 
+/** 已确认 PRD 版本列表的最小消费形状（versionNo 只用于存在性，不在此呈现）。 */
+type PrdVersionPresence = readonly { versionNo?: number }[];
+
 /**
- * REST 项目详情 → 门事实投影（接现有项目状态事实）：确认两门在机制落地前
- * 诚实映射 false；付款门接现有订单事实——未终结单已支付、或项目/最近单已
- * 归档（支付完成归档即终点，生产承接页仍可回访）。
+ * REST 事实 → 门事实投影：PRD 已确认＝已确认版本列表非空（#330 接真——空/缺省
+ * 即从未确认）；Demo 确认待 #333 Demo 版本化，诚实映射 false；付款门接现有订单
+ * 事实——未终结单已支付、或项目/最近单已归档（支付完成归档即终点，生产承接页
+ * 仍可回访）。
  */
-export function stageGateFactsOf(detail: ProjectDetail | undefined | null): StageGateFacts {
+export function stageGateFactsOf(
+  detail: ProjectDetail | undefined | null,
+  prdVersions?: PrdVersionPresence | null,
+): StageGateFacts {
   const status = detail?.activeOrder?.status ?? detail?.latestOrder?.status;
   return {
-    prdConfirmed: false,
+    prdConfirmed: (prdVersions?.length ?? 0) > 0,
     demoConfirmed: false,
     orderPaid:
       !!detail?.archived ||

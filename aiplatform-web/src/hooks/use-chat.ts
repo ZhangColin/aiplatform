@@ -7,6 +7,7 @@ import { errorText } from "@/lib/api/api-error";
 import { parseAnnotationAttachment } from "@/lib/preview/annotation";
 import { parseImageAttachment } from "@/lib/projects/materials";
 import { useChatStore } from "@/lib/store/chat";
+import { useSaveStateStore } from "@/lib/store/save-state";
 
 /**
  * 对话区两发送口（issue #19 需求环①）：发言（POST /api/projects/{id}/messages，
@@ -25,6 +26,8 @@ export function usePostMessage(projectId: string) {
     mutationFn: (command: PostMessageCommand) =>
       api.post<InterviewTurnResponse>(`/projects/${projectId}/messages`, command),
     onMutate: ({ content, attachments }) => {
+      // 保存胶囊接真（B2）：发言提交即持久化动作——保存中 → 成功已保存 / 失败已失败
+      useSaveStateStore.getState().markSaving();
       // 乐观落用户气泡（含圈注/图片物料 chip）+ 起轮；runId 回来即入对话登记
       const chat = useChatStore.getState();
       // schema 字段全可选：两形态容错收窄（同对话史水合口径，坏形状丢弃）
@@ -41,9 +44,11 @@ export function usePostMessage(projectId: string) {
       return { messageId };
     },
     onSuccess: (result) => {
+      useSaveStateStore.getState().markSaved();
       if (result?.runId) useChatStore.getState().markRunIngested(projectId, result.runId);
     },
     onError: (error, _command, context) => {
+      useSaveStateStore.getState().markFailed();
       const chat = useChatStore.getState();
       if (context?.messageId) chat.removeMessage(projectId, context.messageId);
       chat.removeTrailingAcceptance(projectId); // #87：受理事件已到而提交失败（REST 500）——尾卡随气泡同撤，不悬转
@@ -58,11 +63,17 @@ export function useAnswerQuestion(projectId: string) {
     mutationFn: (input: { qid: string; command: AnswerQuestionCommand }) =>
       api.post<void>(`/projects/${projectId}/questions/${input.qid}/answer`, input.command),
     onMutate: ({ command }) => {
+      // 作答同样是持久化动作：保存胶囊接真（B2）
+      useSaveStateStore.getState().markSaving();
       // 作答气泡锚定挂起轮 runId（水合退位的合并锚，#89）
       const messageId = useChatStore.getState().submitAnswer(projectId, command.answer, command.runId);
       return { messageId };
     },
+    onSuccess: () => {
+      useSaveStateStore.getState().markSaved();
+    },
     onError: (error, _input, context) => {
+      useSaveStateStore.getState().markFailed();
       const chat = useChatStore.getState();
       if (context?.messageId) chat.removeMessage(projectId, context.messageId);
       chat.reopenQuestion(projectId);

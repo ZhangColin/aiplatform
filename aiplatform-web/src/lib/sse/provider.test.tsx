@@ -102,6 +102,32 @@ describe("SseProvider：StrictMode 双挂载（issue #60）", () => {
   });
 });
 
+describe("SseProvider：匿名探活不弹登录（A1 回归）", () => {
+  it("/api/me 401 → 不建连、不发 401 全局出口事件（首页只逛零足迹）", async () => {
+    const { UNAUTHORIZED_EVENT } = await import("@/lib/api/client");
+    const listener = vi.fn();
+    window.addEventListener(UNAUTHORIZED_EVENT, listener);
+
+    try {
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <SseProvider>
+            <div />
+          </SseProvider>
+        </QueryClientProvider>,
+      );
+      await act(async () => {
+        probe.resolve(new Response(JSON.stringify({ code: 4001 }), { status: 401 }));
+      });
+
+      expect(FakeEventSource.instances).toHaveLength(0);
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, listener);
+    }
+  });
+});
+
 describe("SseProvider：路由上下文登记（#206 toast 分流）", () => {
   it("挂载即登记当前路由与 router.push——桥的组件内跳转由此取用", () => {
     render(

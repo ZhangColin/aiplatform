@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, LoaderCircle, Monitor, RotateCw, TriangleAlert } from "lucide-react";
+import { ExternalLink, FolderCode, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -26,6 +26,7 @@ import {
 import type { GenerationState } from "@/lib/projects/detail";
 import { useAnnotationStore } from "@/lib/store/annotation";
 import { useProjectPreview } from "@/hooks/use-project-preview";
+import { cn } from "@/lib/utils";
 
 import {
   BAR_BUTTON_CLASS,
@@ -36,6 +37,7 @@ import {
 } from "./device-frame";
 import { PreviewToolbar } from "./preview-toolbar";
 import { RestartUpdateButton } from "./restart-update";
+import { formatClock } from "./work-message";
 import { ResumeGenerationButton } from "./resume-generation";
 import { DemoVersionChip } from "./demo-version-chip";
 
@@ -68,6 +70,8 @@ export function SystemPanel({
   generationState,
   coderStatus,
   onGenerated,
+  onOpenFiles,
+  variant = "default",
 }: {
   projectId: string;
   /** 生成态四态投影（REST 事实；缺省 = 后端未透出）。 */
@@ -76,9 +80,15 @@ export function SystemPanel({
   coderStatus?: CoderRunStatus;
   /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
   onGenerated: () => void;
+  /** Demo 页文件辅助抽屉挂点；缺省不出文件按钮。 */
+  onOpenFiles?: () => void;
+  /** Demo 阶段页原型壳；缺省保留旧成果区浏览器条。 */
+  variant?: "default" | "demo";
 }) {
   const epoch = useGenerationStore((s) => previewEpochOf(s, projectId));
   const parts = useWorkMessageStore((s) => workPartsOf(s, projectId));
+  const workStartedAt = useWorkMessageStore((s) => s.works[projectId]?.startedAt);
+  const workEndedAt = useWorkMessageStore((s) => s.works[projectId]?.endedAt);
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   /** 手动刷新节拍：并入预览纪元的重挂 key（自动刷新外的唯一手动机制）。 */
   const [refreshTick, setRefreshTick] = useState(0);
@@ -182,28 +192,91 @@ export function SystemPanel({
     setAddressDraft(null); // 命中：navigatedUrl 驱动 frameUrl 回显新地址；拒绝：回显当前地址
   };
 
+  const refreshButton = (
+    <button
+      type="button"
+      disabled={!pageLive}
+      onClick={() =>
+        // 刷新 = 回到应用 base 地址重挂（清导航覆盖与草稿）；触碰先行（#182）
+        touchThenLoad(() => {
+          setNavigatedUrl(undefined);
+          setAddressDraft(null);
+          setRefreshTick((t) => t + 1);
+        })
+      }
+      title="刷新预览"
+      aria-label="刷新预览"
+      className={cn(
+        BAR_BUTTON_CLASS,
+        variant === "demo" && "inline-flex size-8 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn p-0",
+      )}
+    >
+      <RotateCw className="size-3.5" />
+    </button>
+  );
+  const openButton = (
+    <button
+      type="button"
+      disabled={!pageLive}
+      onClick={() => touchThenLoad(() => window.open(url, "_blank", "noopener"))}
+      title="在新窗口打开预览"
+      aria-label="在新窗口打开预览"
+      className={cn(
+        BAR_BUTTON_CLASS,
+        variant === "demo" && "inline-flex size-8 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn p-0",
+      )}
+    >
+      <ExternalLink className="size-3.5" />
+    </button>
+  );
+
   return (
     // 平铺无圆角（#79 成果区口径）：与对话列同墙同地，不再套浮起卡片
     <div className="flex h-full min-h-0 flex-col">
-      {/* 浏览器条（#80）：刷新 + 地址框 + 设备切换 + 新窗口 */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-muted/60 px-3">
-        <button
-          type="button"
-          disabled={!pageLive}
-          onClick={() =>
-            // 刷新 = 回到应用 base 地址重挂（清导航覆盖与草稿）；触碰先行（#182）
-            touchThenLoad(() => {
-              setNavigatedUrl(undefined);
-              setAddressDraft(null);
-              setRefreshTick((t) => t + 1);
-            })
-          }
-          title="刷新预览"
-          aria-label="刷新预览"
-          className={BAR_BUTTON_CLASS}
-        >
-          <RotateCw className="size-3.5" />
-        </button>
+      {variant === "demo" ? (
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-soft/70 bg-white p-2.5 shadow-e1">
+          <DeviceToggle device={device} onDeviceChange={setDevice} showLabels />
+          <span className="flex items-center gap-1.5 rounded-lg border border-electric-indigo/20 bg-surface-mist/60 px-3 py-1 text-label-sm font-medium text-ink-muted">
+            <ShieldCheck className="size-4 text-electric-indigo" aria-hidden="true" />
+            沙箱演示环境 · 隔离运行不产生正式扣款
+          </span>
+          <div className="flex items-center gap-1">
+            {onOpenFiles ? (
+              <button
+                type="button"
+                onClick={onOpenFiles}
+                title="查看源码文件"
+                aria-label="查看源码文件"
+                className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn text-ink-muted transition-colors hover:bg-surface-mist hover:text-ink-primary"
+              >
+                <FolderCode className="size-3.5" aria-hidden="true" />
+              </button>
+            ) : null}
+            {refreshButton}
+            {openButton}
+          </div>
+        </div>
+      ) : null}
+      <div
+        role={variant === "demo" ? "region" : undefined}
+        aria-label={variant === "demo" ? "Demo 沙箱窗口" : undefined}
+        className={variant === "demo" ? "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-soft/80 bg-white shadow-e2" : "contents"}
+      >
+      {/* 浏览器条（#80）：Demo 壳迁入交通灯＋真实地址框；旧壳布局保持不变。 */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2 border-b px-3",
+          variant === "demo" ? "h-11 gap-4 border-slate-soft/70 bg-surface-dawn/80" : "h-9 bg-muted/60",
+        )}
+      >
+        {variant === "demo" ? (
+          <div className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
+            <span className="size-2.5 rounded-full bg-rose-400/80" />
+            <span className="size-2.5 rounded-full bg-amber-400/80" />
+            <span className="size-2.5 rounded-full bg-emerald-400/80" />
+          </div>
+        ) : null}
+        {variant === "default" ? refreshButton : null}
         {updatingNotice ? (
           // 更新中轻状态（#124）：收进浏览器条内联——spinner + 文案，不再悬浮叠预览
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -212,12 +285,16 @@ export function SystemPanel({
           </span>
         ) : null}
         <form
-          className="mx-auto flex w-full max-w-md min-w-0 items-center"
+          className={cn(
+            "mx-auto flex w-full max-w-md min-w-0 items-center",
+            variant === "demo" && "mx-0 max-w-none flex-1 gap-2 rounded-lg border border-slate-soft/70 bg-white px-3 py-1 shadow-xs",
+          )}
           onSubmit={(e) => {
             e.preventDefault();
             submitAddress();
           }}
         >
+          {variant === "demo" ? <Lock className="size-3.5 shrink-0 text-emerald-600" aria-hidden="true" /> : null}
           <input
             type="text"
             value={addressDraft ?? frameUrl}
@@ -226,21 +303,24 @@ export function SystemPanel({
             aria-label="预览地址"
             title="输入应用内路径跳转"
             placeholder={active ? "正在接通系统…" : "你的系统"}
-            className="w-full truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60"
+            className={cn(
+              "w-full truncate rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-60",
+              variant === "demo" && "rounded-none border-0 bg-transparent p-0 font-mono focus-visible:ring-0",
+            )}
           />
+          {variant === "demo" ? (
+            <span className="ml-auto shrink-0 rounded border border-electric-indigo/20 bg-surface-violet-tint px-1.5 py-0.5 font-mono text-[10px] font-semibold text-electric-indigo">
+              PROTOTYPE
+            </span>
+          ) : null}
         </form>
-        <DeviceToggle device={device} onDeviceChange={setDevice} />
-        <DemoVersionChip projectId={projectId} />
-        <button
-          type="button"
-          disabled={!pageLive}
-          onClick={() => touchThenLoad(() => window.open(url, "_blank", "noopener"))}
-          title="在新窗口打开预览"
-          aria-label="在新窗口打开预览"
-          className={BAR_BUTTON_CLASS}
-        >
-          <ExternalLink className="size-3.5" />
-        </button>
+        {variant === "default" ? (
+          <>
+            <DeviceToggle device={device} onDeviceChange={setDevice} />
+            <DemoVersionChip projectId={projectId} />
+            {openButton}
+          </>
+        ) : null}
       </div>
 
       {/* 内容区 */}
@@ -279,16 +359,35 @@ export function SystemPanel({
         ) : (
           <div className={LIGHT_LOCK_STAGE_CLASS}>
             {phase.kind === "hint" ? (
-              <PanelHint>
-                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
-                <p className="max-w-full truncate">{phase.text}</p>
-              </PanelHint>
+              variant === "demo" ? (
+                <DemoWaitingHint
+                  status={phase.text}
+                  startedAt={workStartedAt}
+                  endedAt={workEndedAt}
+                />
+              ) : (
+                <PanelHint>
+                  <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+                  <p className="max-w-full truncate">{phase.text}</p>
+                </PanelHint>
+              )
             ) : phase.kind === "failed" ? (
-              <PanelHint>
-                <TriangleAlert className="size-5 text-destructive" />
-                <p>{phase.text}</p>
-                {recoveryAction(phase.recovery)}
-              </PanelHint>
+              variant === "demo" ? (
+                <DemoWaitingHint
+                  status={phase.text}
+                  startedAt={workStartedAt}
+                  endedAt={workEndedAt}
+                  failed
+                >
+                  {recoveryAction(phase.recovery)}
+                </DemoWaitingHint>
+              ) : (
+                <PanelHint>
+                  <TriangleAlert className="size-5 text-destructive" />
+                  <p>{phase.text}</p>
+                  {recoveryAction(phase.recovery)}
+                </PanelHint>
+              )
             ) : phase.kind === "connecting" ? (
               <PanelHint>
                 {phase.trouble ? (
@@ -322,7 +421,59 @@ export function SystemPanel({
           />
         ) : null}
       </div>
+      </div>
     </div>
+  );
+}
+
+/** Demo P04 同页等待态：只呈现真实 run 时钟与当前工作消息，不造进度百分比。 */
+function DemoWaitingHint({
+  status,
+  startedAt,
+  endedAt,
+  failed = false,
+  children,
+}: {
+  status: string;
+  startedAt?: number;
+  endedAt?: number;
+  failed?: boolean;
+  children?: ReactNode;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt == null || endedAt != null || failed) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [startedAt, endedAt, failed]);
+
+  return (
+    <PanelHint>
+      <div className="flex items-center gap-3">
+        {failed ? (
+          <TriangleAlert className="size-5 text-destructive" />
+        ) : (
+          <LoaderCircle className="size-5 animate-spin text-electric-indigo" />
+        )}
+        <p className="font-semibold text-ink-primary">
+          {failed ? "生成未能完成" : "正在为您生成系统"}
+        </p>
+      </div>
+      <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-soft/70 bg-white/80 p-4 text-left shadow-xs">
+        <div className="flex items-center justify-between gap-3 text-label-sm">
+          <span className="font-mono text-ink-secondary">
+            {startedAt == null
+              ? "已等待时间待同步"
+              : `已等待 ${formatClock((endedAt ?? now) - startedAt)}`}
+          </span>
+        </div>
+        <div className="flex items-start justify-between gap-3 text-label-sm">
+          <span className="shrink-0 text-ink-faint">当前状态</span>
+          <span className="text-right text-ink-secondary">{status}</span>
+        </div>
+      </div>
+      {children}
+    </PanelHint>
   );
 }
 

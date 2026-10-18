@@ -35,8 +35,11 @@ import { PrdDoc } from "./prd-doc";
  */
 export function FilesPanel({
   projectId,
+  hideConfirmGate = false,
 }: {
   projectId: string;
+  /** Demo 页文件抽屉等只读场景：PRD 早确认，隐藏 PRD 确认门写动作（#347）。 */
+  hideConfirmGate?: boolean;
 }) {
   const files = useProjectFiles(projectId);
   const [selectedByUser, setSelectedByUser] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export function FilesPanel({
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         {selected === PRD_PATH ? (
-          <PrdDoc projectId={projectId} />
+          <PrdDoc projectId={projectId} hideConfirmGate={hideConfirmGate} />
         ) : selected !== null && isImagePath(selected) ? (
           <ImageView
             projectId={projectId}

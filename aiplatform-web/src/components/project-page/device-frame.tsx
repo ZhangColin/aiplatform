@@ -87,9 +87,12 @@ export function DeviceFrame({
 export function DeviceToggle({
   device,
   onDeviceChange,
+  showLabels = false,
 }: {
   device: PreviewDevice;
   onDeviceChange: (device: PreviewDevice) => void;
+  /** Demo 原型壳显宽度文案；旧浏览器条保持纯图标。 */
+  showLabels?: boolean;
 }) {
   return (
     <ToggleGroup
@@ -107,6 +110,7 @@ export function DeviceToggle({
         className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
       >
         <Monitor className="size-3.5" />
+        {showLabels ? <span>桌面 1440px</span> : null}
       </ToggleGroupItem>
       <ToggleGroupItem
         value="mobile"
@@ -114,6 +118,7 @@ export function DeviceToggle({
         className="h-7 px-2 data-pressed:bg-background data-pressed:shadow-sm"
       >
         <Smartphone className="size-3.5" />
+        {showLabels ? <span>手机 390px</span> : null}
       </ToggleGroupItem>
     </ToggleGroup>
   );

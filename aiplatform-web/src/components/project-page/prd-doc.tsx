@@ -26,8 +26,11 @@ import { PrdConfirmGate } from "./prd-confirm-gate";
  */
 export function PrdDoc({
   projectId,
+  hideConfirmGate = false,
 }: {
   projectId: string;
+  /** Demo 页文件抽屉等只读场景：PRD 早已确认，不再出「确认此版 PRD」写动作。 */
+  hideConfirmGate?: boolean;
 }) {
   const prd = usePrd(projectId);
   const hasUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
@@ -69,7 +72,7 @@ export function PrdDoc({
             {/* 确认门（#330/#332）：PRD 在场即出门（首个构建 run 的唯一触发）——
                 未产出（prd.data 为 null）不出，但不留「门关了没按钮」的中间态；
                 范围级新草稿停驻时摘要层带差异摘要（#334） */}
-            {prd.data ? (
+            {prd.data && !hideConfirmGate ? (
               <PrdConfirmGate
                 projectId={projectId}
                 readiness={prd.data.readiness}

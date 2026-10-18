@@ -114,6 +114,16 @@ describe("FilesPanel · 文件树浏览（#27）", () => {
     expect(container.textContent).toContain("export default function Page() {}");
   });
 
+  it("缺省 PRD 篇带确认门；hideConfirmGate 只在只读场景收起（#347 Demo 文件抽屉）", () => {
+    const { container, unmount } = render(<FilesPanel projectId="p1" />);
+    expect(container.textContent).toContain("确认此版 PRD 并生成 Demo");
+    unmount();
+
+    const readOnly = render(<FilesPanel projectId="p1" hideConfirmGate />);
+    expect(readOnly.container.textContent).not.toContain("确认此版 PRD 并生成 Demo");
+    expect(readOnly.container.textContent).toContain("给宠物医院做预约管理系统。");
+  });
+
   it("点图片（#283）→ inline 大图呈现（raw 直链），不走文本内容端点", () => {
     const { container } = render(<FilesPanel projectId="p1" />);
 

@@ -326,3 +326,58 @@ describe("Composer · 圈注 chip 行（#135 序号化）", () => {
     expect(submit).toHaveBeenCalledWith("第 1 条改颜色", [], annotations);
   });
 });
+
+describe("Composer · 澄清形（#346 需求分析页：submitLabel＋数据模板钮照原型位）", () => {
+  function setupClarify({ onDataTemplate }: { onDataTemplate?: () => void } = {}) {
+    render(
+      <Composer
+        value="客户工单服务费不含备件费"
+        onValueChange={change}
+        onSubmit={submit}
+        submitLabel="提交澄清"
+        onDataTemplate={onDataTemplate}
+        placeholder="补充您的约束逻辑或回答 AI 提问"
+      />,
+    );
+  }
+
+  it("submitLabel 在场＝文本发送键（原型逐字「提交澄清」），点击 = onSubmit", () => {
+    setupClarify();
+
+    fireEvent.click(screen.getByRole("button", { name: /提交澄清/ }));
+
+    expect(submit).toHaveBeenCalledWith("客户工单服务费不含备件费", [], []);
+  });
+
+  it("onDataTemplate 在场＝数据模板钮呈现（语音/附件/数据模板照原型位），点击回调、不污染输入", () => {
+    const insertTemplate = vi.fn();
+    setupClarify({ onDataTemplate: insertTemplate });
+
+    fireEvent.click(screen.getByRole("button", { name: "插入数据模板" }));
+
+    expect(insertTemplate).toHaveBeenCalledTimes(1);
+    // 插入动作归调用侧（受控输入），组件不动文本
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it("照原型位：语音/附件/数据模板居左成组、文本发送键居右（DOM 序锁位）", () => {
+    setupClarify({ onDataTemplate: vi.fn() });
+
+    const mic = screen.getByRole("button", { name: "语音输入" });
+    const attach = screen.getByRole("button", { name: "附件" });
+    const template = screen.getByRole("button", { name: "插入数据模板" });
+    const submitBtn = screen.getByRole("button", { name: /提交澄清/ });
+    const before = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(mic.compareDocumentPosition(attach) & before).toBeTruthy();
+    expect(attach.compareDocumentPosition(template) & before).toBeTruthy();
+    expect(template.compareDocumentPosition(submitBtn) & before).toBeTruthy();
+  });
+
+  it("缺省形不漂移：无 submitLabel＝圆形发送键、无数据模板钮（首页/过渡桥同构件）", () => {
+    setup({ value: "做点什么" });
+
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "插入数据模板" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /提交澄清/ })).toBeNull();
+  });
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -67,9 +67,15 @@ export function PrdConfirmGate({
 
   return (
     <>
-      <Button size="sm" onClick={openGate}>
-        <Check className="size-4" />
+      {/* 主 CTA 照原型（#346 需求分析页 header）：电靛→科技蓝渐变＋arrow 图标；
+          话术＝交接包正本形「确认此版 PRD 并生成 Demo」（spec 既定例外③，不取原型简写） */}
+      <Button
+        size="sm"
+        onClick={openGate}
+        className="group h-9 gap-2 rounded-xl bg-linear-to-r from-electric-indigo to-tech-blue px-5 text-label-md font-semibold shadow-md transition-all hover:brightness-105 active:scale-[0.99]"
+      >
         确认此版 PRD 并生成 Demo
+        <ArrowRight className="size-4.5 transition-transform group-hover:translate-x-0.5" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

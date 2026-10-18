@@ -2,6 +2,7 @@
 
 import {
   ArrowUp,
+  Braces,
   Check,
   ChevronDown,
   FileText,
@@ -10,6 +11,7 @@ import {
   Mic,
   MousePointer2,
   Paperclip,
+  Send,
   Sparkles,
   SquareDashed,
   TriangleAlert,
@@ -114,6 +116,8 @@ export function Composer({
   mode,
   onModeChange,
   placeholder = "说说你想做什么…",
+  submitLabel,
+  onDataTemplate,
 }: {
   /** hero = 首页居中大框（加大一号）；项目页常规尺寸。 */
   hero?: boolean;
@@ -144,12 +148,31 @@ export function Composer({
   /** 类型下拉切换（传＝呈现下拉——首页 hero 分流位；不传＝不呈现，项目页口径）。 */
   onModeChange?: (mode: EntryMode) => void;
   placeholder?: string;
+  /** 澄清形（#346 需求分析页澄清输入，照原型）：文本发送键（如「提交澄清」）＋
+   *  工具行序换 语音/附件/数据模板；不传＝缺省形（圆形发送键）。 */
+  submitLabel?: string;
+  /** 数据模板钮（澄清形照原型位）：点击回调——插入动作归调用侧（受控输入）。 */
+  onDataTemplate?: () => void;
 }) {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const fileInputId = useId();
   // 下拉触发面显示档（受控缺省＝首档做系统）
   const activeMode = mode ?? PLATFORM_MODES[0].label;
+  /** 澄清形（#346）：submitLabel 在场即澄清形态——工具行序与发送键形换原型位。 */
+  const clarify = submitLabel !== undefined;
+  /** 语音钮（占位未开通——两形共用，澄清形居左/缺省形居右）。 */
+  const micButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-8 rounded-full text-muted-foreground"
+      aria-label="语音输入"
+      disabled
+    >
+      <Mic className="size-4" />
+    </Button>
+  );
 
   // 自动增高：随输入长高、上限后内部滚动（create-project-form 既有口径迁入）。
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -346,6 +369,8 @@ export function Composer({
       ) : null}
 
       <div className={cn("flex items-center gap-1", hero ? "mt-3" : "mt-2")}>
+        {/* 澄清形（#346 照原型位）：语音/附件/数据模板居左、文本发送键居右 */}
+        {clarify ? micButton : null}
         {attachmentsEnabled ? (
         <Popover open={materialsOpen} onOpenChange={setMaterialsOpen}>
           <PopoverTrigger
@@ -432,27 +457,47 @@ export function Composer({
           </DropdownMenuContent>
         </DropdownMenu>
         ) : null}
+        {/* 数据模板钮（澄清形照原型位：语音/附件/数据模板居左成组） */}
+        {clarify && onDataTemplate ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 rounded-full text-muted-foreground"
+            aria-label="插入数据模板"
+            title="插入数据模板"
+            disabled={disabled}
+            onClick={onDataTemplate}
+          >
+            <Braces className="size-4" />
+          </Button>
+        ) : null}
 
         <span className="ml-auto" />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 rounded-full text-muted-foreground"
-          aria-label="语音输入"
-          disabled
-        >
-          <Mic className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          className={cn("rounded-full transition-transform active:scale-90", hero ? "size-9" : "size-8")}
-          disabled={!canSubmit}
-          onClick={submit}
-          aria-label="发送"
-        >
-          {submitPending ? <Spinner className="size-4" /> : <ArrowUp className="size-4" />}
-        </Button>
+        {!clarify ? micButton : null}
+        {clarify ? (
+          <Button
+            type="button"
+            size="sm"
+            className="rounded-xl px-4 font-semibold transition-transform active:scale-[0.98]"
+            disabled={!canSubmit}
+            onClick={submit}
+          >
+            {submitPending ? <Spinner className="size-4" /> : null}
+            {submitLabel}
+            <Send className="size-3.5" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="icon"
+            className={cn("rounded-full transition-transform active:scale-90", hero ? "size-9" : "size-8")}
+            disabled={!canSubmit}
+            onClick={submit}
+            aria-label="发送"
+          >
+            {submitPending ? <Spinner className="size-4" /> : <ArrowUp className="size-4" />}
+          </Button>
+        )}
       </div>
     </div>
   );

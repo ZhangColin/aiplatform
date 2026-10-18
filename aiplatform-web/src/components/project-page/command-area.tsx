@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, FileText, Inbox, Lock, TriangleAlert, X } from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, FileText, Inbox, Lock, RefreshCcw, Sparkles, TriangleAlert, User, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { Composer, type ComposerAttachment } from "@/components/composer/composer";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -61,6 +61,16 @@ type ChatTrack = keyof typeof STAGE_HINTS;
 /** 阶段两态（两轨道同键集）。 */
 type StageKey = keyof typeof STAGE_HINTS["system"];
 
+/** 数据模板钮插入的模板片段（#346 澄清输入照原型位；最小实现＝向输入框插入
+ *  数据描述骨架，用户照着填——数据模板的最小可用形态，实施期定）。 */
+export const DATA_TEMPLATE_SNIPPET = [
+  "【数据模板】",
+  "· 数据名称：",
+  "· 字段清单：字段名（含义／示例），每行一个",
+  "· 数据量与更新频率：",
+  "· 来源（现有表格／系统／手工）：",
+].join("\n");
+
 /**
  * 对话区（issue #19 需求环① + #20 修订回路 + #26 迭代环① + #28 订单锁定 +
  * #47 入口三分类；#79 起居中当主角；#86 单会话收敛）：项目页全程常开的对话区，
@@ -89,6 +99,8 @@ export function CommandArea({
   onSeePrd,
   onSeeOrder,
   generated,
+  variant = "default",
+  inputRef: externalInputRef,
 }: {
   projectId: string;
   /** 锁定式矩阵行（缺省 = 进行中全功能）。 */
@@ -107,6 +119,13 @@ export function CommandArea({
   onSeeOrder?: () => void;
   /** 系统已生成（#334 改需求回路提示的分野：范围级新草稿待确认只在迭代期出「确认新版」提示）。 */
   generated?: boolean;
+  /** 呈现形态（#346）：default＝对话区（成果区呼出式布局内，过渡桥用）；
+   *  stage＝阶段页形态（P02/P03 需求分析页——时间流与澄清输入各自成卡照
+   *  原型左栏构图、PRD 更新胶囊迁移为时间流内系统横幅、澄清输入照原型
+   * 「提交澄清」＋数据模板钮）。 */
+  variant?: "default" | "stage";
+  /** 输入框外接 ref（「对话调优」聚焦挂点；缺省内部自持）。 */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const messages = useChatStore((s) => s.chats[projectId]?.messages ?? EMPTY_MESSAGES);
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
@@ -155,11 +174,13 @@ export function CommandArea({
   const [selection, setSelection] = useState<string[]>([]);
   /** 勾选归属的问题 id（新问题到达即清上一问勾选——渲染期派生态重置，不用 effect）。 */
   const [selectionFor, setSelectionFor] = useState<string | undefined>(undefined);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const internalInputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = externalInputRef ?? internalInputRef;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const chatInput = lock?.chatInput ?? "open";
   const disabled = chatInput !== "open";
+  const staged = variant === "stage";
 
   const pendingId = pending?.id;
   if (pendingId !== undefined && selectionFor !== pendingId) {
@@ -170,7 +191,7 @@ export function CommandArea({
   // 问题到达：聚焦输入框（自由输入作答入口，不错过在等你的问题）
   useEffect(() => {
     if (pendingId && !disabled) inputRef.current?.focus();
-  }, [pendingId, disabled]);
+  }, [pendingId, disabled, inputRef]);
 
   // 新内容自动滚底（消息流增长、工作消息长部件或打字指示出现）
   useEffect(() => {
@@ -184,7 +205,9 @@ export function CommandArea({
     ? "对话区已锁定"
     : pending
       ? "回答上面的问题，回车发送（可与已勾选合并）"
-      : "和平台聊聊你的想法…";
+      : staged
+        ? "补充您的约束逻辑或回答 AI 提问 (例如：客户工单服务费是否包含备件费用结算？)..."
+        : "和平台聊聊你的想法…";
 
   function answer(text: string) {
     if (!pending || disabled) return;
@@ -241,9 +264,18 @@ export function CommandArea({
   }
 
   return (
-    // 居中当主角（#79）：对话列限宽居中，宽屏不散读
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+    // 居中当主角（#79）：对话列限宽居中，宽屏不散读；阶段页形态（#346）＝
+    // 时间流与澄清输入各自成卡填满左栏（照原型左栏三卡构图，无限宽居中）
+    <div className={staged ? "flex h-full min-h-0 w-full flex-col gap-4" : "mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col"}>
+      <div
+        ref={scrollRef}
+        data-frame={staged ? "timeline-card" : undefined}
+        className={
+          staged
+            ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-slate-soft/80 bg-white px-4 py-4 shadow-e1"
+            : "min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
+        }
+      >
         <p className="pt-2 text-center text-xs text-muted-foreground">{STAGE_HINTS[track][stage]}</p>
         {messages.map((message, index) => (
           <Fragment key={message.id}>
@@ -264,6 +296,13 @@ export function CommandArea({
           </Fragment>
         ))}
         {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={workPlan} /> : null}
+        {/* PRD 更新呈现迁移位（#346 阶段页形态）：时间流内系统横幅照原型
+            （「PRD 规范已增量刷新」＝旧「PRD 有更新 · 去看看」胶囊的迁移位——
+            文档面常驻右栏，横幅只报事实不带跳转；范围级停驻草稿＝指路确认门） */}
+        {staged && scopeDraftPending && !disabled ? <ScopeDraftBanner /> : null}
+        {staged && !scopeDraftPending && prdUpdate && !disabled ? (
+          <PrdRefreshBanner onDismiss={() => usePrdNoticesStore.getState().acknowledge(projectId)} />
+        ) : null}
         {turnActive ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex gap-1">
@@ -276,8 +315,11 @@ export function CommandArea({
         ) : null}
       </div>
 
-      <div className="shrink-0 p-3">
-        {scopeDraftPending && !disabled ? (
+      <div
+        data-frame={staged ? "composer-card" : undefined}
+        className={staged ? "shrink-0 rounded-2xl border border-slate-soft/80 bg-white p-3 shadow-e1" : "shrink-0 p-3"}
+      >
+        {!staged && scopeDraftPending && !disabled ? (
           // 范围级新草稿待确认（#334）：升级版提示取代通用胶囊——跳 PRD 文档面
           // 过确认门（「确认此版 PRD 并生成 Demo」）。REST 派生态：确认成功（清停驻）
           // 后自然退场，无需认领
@@ -292,7 +334,7 @@ export function CommandArea({
               PRD 已更新，确认新版后生成下一版 Demo
             </Button>
           </div>
-        ) : prdUpdate && !disabled ? (
+        ) : !staged && prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
               variant="outline"
@@ -360,6 +402,18 @@ export function CommandArea({
           onAnnotationRemove={(id) => useAnnotationStore.getState().remove(projectId, id)}
           inputRef={inputRef}
           placeholder={placeholder}
+          {...(staged
+            ? {
+                // 澄清输入照原型（#346）：「提交澄清」文本键＋语音/附件/数据模板钮
+                submitLabel: "提交澄清",
+                onDataTemplate: () => {
+                  setInput((prev) =>
+                    prev.trim() ? `${prev}\n${DATA_TEMPLATE_SNIPPET}` : DATA_TEMPLATE_SNIPPET,
+                  );
+                  inputRef.current?.focus();
+                },
+              }
+            : {})}
         />
       </div>
     </div>
@@ -383,7 +437,9 @@ function closingRoundOf(messages: ChatMessage[], message: ChatMessage): number |
   return undefined;
 }
 
-/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/受理动作卡/错误提示/平台引导左对齐。 */
+/** 对话行布局：用户右对齐、智能体（无署名）/问答卡/收尾卡/报价卡/受理动作卡/错误提示/平台引导左对齐。
+ *  气泡形态照原型（#346）：用户气泡削右上角（rounded-tr-sm）＋用户头像视觉锚；智能体气泡削
+ *  左上角（rounded-tl-sm）＋渐变头像锚——头像只作视觉锚，不落角色名（ADR 0006 无角色署名口径）。 */
 function MessageRow({ message, children, projectId, round, onSeeOrder }: { message: ChatMessage; children?: ReactNode; projectId: string; round?: number; onSeeOrder?: () => void }) {
   if (message.kind === "question") {
     return <div className="flex w-full justify-start">{children}</div>;
@@ -417,9 +473,9 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
   }
   if (message.kind === "user") {
     return (
-      <div className="flex w-full justify-end">
+      <div className="flex w-full items-start justify-end gap-2">
         <Bubble variant="tinted" align="end">
-          <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
+          <BubbleContent className="whitespace-pre-wrap rounded-2xl rounded-tr-sm shadow-xs">{message.text}</BubbleContent>
           {message.annotations && message.annotations.length > 0 ? (
             <div className="mt-1.5 flex flex-wrap justify-end gap-1">
               {message.annotations.map((a, i) => (
@@ -456,19 +512,35 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
             </div>
           ) : null}
         </Bubble>
+        <span
+          data-avatar="user"
+          aria-hidden="true"
+          className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-slate-soft bg-surface-dawn text-ink-muted"
+        >
+          <User className="size-3.5" />
+        </span>
       </div>
     );
   }
   // 智能体话语无署名（#86：界面上只有一个「它」）；平台轻引导（#47）自带
   // 「平台」署名——平台自己说话，非智能体角色
   return (
-    <div className="flex w-full flex-col items-start gap-1">
-      {message.label ? (
-        <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
-      ) : null}
-      <Bubble variant="muted" align="start">
-        <BubbleContent className="whitespace-pre-wrap">{message.text}</BubbleContent>
-      </Bubble>
+    <div className="flex w-full items-start gap-2">
+      <span
+        data-avatar="agent"
+        aria-hidden="true"
+        className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-linear-to-tr from-electric-indigo to-mint-teal text-white shadow-xs"
+      >
+        <Sparkles className="size-3.5" />
+      </span>
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        {message.label ? (
+          <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
+        ) : null}
+        <Bubble variant="muted" align="start">
+          <BubbleContent className="whitespace-pre-wrap rounded-2xl rounded-tl-sm border-electric-indigo/15 shadow-xs">{message.text}</BubbleContent>
+        </Bubble>
+      </div>
     </div>
   );
 }
@@ -479,6 +551,58 @@ function Dot({ delay }: { delay: string }) {
       className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70"
       style={{ animationDelay: delay }}
     />
+  );
+}
+
+/**
+ * 「PRD 规范已增量刷新并重算基线」系统横幅（#346 阶段页形态迁移位——旧
+ * 「PRD 有更新 · 去看看」胶囊的迁移形态，照原型：渐变底＋sync 图标块）：
+ * 只报事实不带跳转（文档面常驻右栏、已实时刷新），X 关闭即认领（ack）。
+ */
+function PrdRefreshBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-electric-indigo/25 bg-linear-to-r from-surface-violet-tint via-surface-mist/40 to-white p-3.5 shadow-xs">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-xl bg-electric-indigo text-white shadow-xs">
+        <RefreshCcw className="size-4" aria-hidden="true" />
+      </div>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-label-md font-bold text-electric-indigo">PRD 规范已增量刷新并重算基线</span>
+        <span className="text-body-sm leading-relaxed text-ink-muted">
+          右侧 PRD 文档已实时增量刷新。
+        </span>
+      </div>
+      <button
+        type="button"
+        aria-label="知道了"
+        onClick={onDismiss}
+        className="ml-auto shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-surface-dawn hover:text-ink-primary"
+      >
+        <X className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * 范围级新草稿停驻横幅（#334 改需求回路的阶段页形态）：指路确认门——主 CTA
+ * 常驻粘性 header（「确认此版 PRD 并生成 Demo」），横幅只说明事实与去向；
+ * REST 派生态（draftChangeSummary 在场即在），确认成功自然退场，无认领位。
+ */
+function ScopeDraftBanner() {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-electric-indigo/25 bg-linear-to-r from-surface-violet-tint via-surface-mist/40 to-white p-3.5 shadow-xs">
+      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-xl bg-electric-indigo text-white shadow-xs">
+        <FileText className="size-4" aria-hidden="true" />
+      </div>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-label-md font-bold text-electric-indigo">
+          PRD 已更新，确认新版后生成下一版 Demo
+        </span>
+        <span className="text-body-sm leading-relaxed text-ink-muted">
+          本版更新内容已并入右侧 PRD 文档；点右上角「确认此版 PRD 并生成 Demo」查看差异并确认。
+        </span>
+      </div>
+    </div>
   );
 }
 

@@ -151,6 +151,27 @@
   }
 }
 
+/* PRD 导出「打印 / 存为 PDF」（#346 需求分析页，最小可用形态＝浏览器打印）：
+   只留 PRD 正文（#prd-print-root），其余界面元素隐藏；正文脱离文档流铺满
+   打印页，并解除面板内部滚动容器的高度钳制（否则只打出首屏）。 */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #prd-print-root,
+  #prd-print-root * {
+    visibility: visible;
+  }
+  #prd-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

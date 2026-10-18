@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 
-import { ProjectPageView } from "@/components/project-page/project-page-view";
+import { RequirementAnalysisPage } from "@/components/requirement-analysis/requirement-analysis-page";
 
-export const metadata: Metadata = { title: "项目" };
+export const metadata: Metadata = { title: "需求分析" };
 
-/** 项目页 = 对话区 + 成果区两槽位壳（issue #17 单站三路由之一）。 */
+/** 需求分析页 P02/P03（#346，spec #320 ⑥ IA 全量重建）：项目页本路由＝交付
+ *  生命周期第一阶段「需求分析 (PRD)」的阶段页。 */
 export default async function ProjectPage(props: PageProps<"/projects/[id]">) {
   const { id } = await props.params;
-  return <ProjectPageView projectId={id} />;
+  return <RequirementAnalysisPage projectId={id} />;
 }

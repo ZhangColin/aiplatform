@@ -1,13 +1,14 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 
-/**
- * 签约付款阶段页（P06）的【过渡桥】（#346）：签约付款页重建归 #348——过渡期
- * 内本路由回落到 /demo 过渡桥（订单面板/下单入口暂挂彼处，阶段侧栏链接不空转）。
- * #348 落页时整页替换本文件。
- */
-export default async function ContractStagePage(
+import { ContractStagePage } from "@/components/contract-stage/contract-stage-page";
+
+export const metadata: Metadata = { title: "签约付款" };
+
+/** 签约付款阶段页 P06（#348，spec #320 实施序⑥）：阶段头卡＋三子步＋黄金门禁
+ *  横幅＋范围与报价/合同/付款三子步重组新建，替换 #346 的过渡桥。 */
+export default async function ContractStagePageRoute(
   props: PageProps<"/projects/[id]/contract">,
 ) {
   const { id } = await props.params;
-  redirect(`/projects/${id}/demo`);
+  return <ContractStagePage projectId={id} />;
 }

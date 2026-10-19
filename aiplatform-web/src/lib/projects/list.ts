@@ -1,11 +1,12 @@
 import type { components } from "@/lib/api/schema";
 
 import { ORDER_STATUS } from "@/lib/orders/lock";
+import { currentStageOf, type DeliveryStageKey } from "@/lib/projects/delivery-stages";
 
 /**
- * 项目列表四态视图（issue #21 骨架 + #28 订单态接线）：全量拉取 + 本地分区
- * （v1 不分页，过滤/折叠消化规模）。四态是用户面口径，与后端两态派生状态
- * （status/statusName）分属两层——本文件是四态唯一推导点。
+ * 我的项目 P08 读模型：全量拉取后在本地完成生命周期阶段、交易副行、待办、
+ * 最近更新排序与归档折叠。阶段门序复用项目空间壳的 currentStageOf，本文件是
+ * 列表呈现的唯一推导点；后端两态 status/statusName 不直接作用户面阶段词表。
  */
 
 /** swagger ProjectResponse 原始形状（字段全可缺）。 */
@@ -18,8 +19,14 @@ export type ProjectSummary = {
   archived: boolean;
   createdAt?: string;
   updatedAt?: string;
-  /** 未终结订单状态（#28：缺省 = 无订单；待报价/待支付态的推导输入）。 */
+  /** 未终结订单状态（#28：缺省 = 无订单；交易子态与付款门推导输入）。 */
   activeOrderStatus?: number;
+  /** 已确认 PRD 版本存在性（P08 生命周期阶段推导输入；缺省 = 旧后端/未确认）。 */
+  prdConfirmed?: boolean;
+  /** Demo 确认指针是否落位（P08 生命周期阶段推导输入）。 */
+  demoConfirmed?: boolean;
+  /** 项目级「需用户补充」标志（P08 待用户处理事项优先项）。 */
+  needsUserSupplement?: boolean;
   /** 终点类型 code（#299 项目卡弱标识取数面：1=设计 2=系统 3=系统＋设计；缺省 =
    * 旧后端，弱标识不出）。 */
   endpointType?: number;
@@ -35,51 +42,83 @@ export function normalizeProjectSummary(raw: ProjectResponse): ProjectSummary {
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     activeOrderStatus: raw.activeOrder?.status ?? undefined,
+    prdConfirmed: raw.prdConfirmed === true,
+    demoConfirmed: raw.demoConfirmed === true,
+    needsUserSupplement: raw.needsUserSupplement === true,
     endpointType: raw.endpointType,
     endpointTypeName: raw.endpointTypeName,
   };
 }
 
-/** 四态标签（单一事实源；呈现序见 PROJECT_STAGES）。 */
+/** P08 阶段徽标词表：交易子态不再占用主阶段位。 */
 const STAGE_LABELS = {
-  in_progress: "进行中",
-  awaiting_quote: "待报价",
-  awaiting_payment: "待支付",
+  prd: "需求分析",
+  demo: "Demo 体验",
+  contract: "签约付款",
+  production: "生产承接",
   archived: "已归档",
-} as const satisfies Record<string, string>;
+} as const;
 
-export type ProjectStageKey = keyof typeof STAGE_LABELS;
+export type ProjectStageKey = DeliveryStageKey | "archived";
 
 export function stageLabel(stage: ProjectStageKey): string {
   return STAGE_LABELS[stage];
 }
 
-/** 过滤位呈现序（#21）：活跃三态在前、归档殿后。 */
-export const PROJECT_STAGES: ReadonlyArray<{ key: ProjectStageKey; label: string }> = (
-  ["in_progress", "awaiting_quote", "awaiting_payment", "archived"] as const
-).map((key) => ({ key, label: STAGE_LABELS[key] }));
-
-/**
- * 四态推导口径（#28 订单态接线）：已归档优先；未终结订单在 → 待报价（1）/
- * 待支付（2=已报价）；否则进行中。订单状态缺省/未知按进行中兜底（与详情
- * 嵌入的防御归一同口径）。
- */
-export function projectStage(project: Pick<ProjectSummary, "archived" | "activeOrderStatus">): ProjectStageKey {
+/** 当前阶段与项目空间壳共用门序；已归档作为独立保留态优先。 */
+export function projectStage(
+  project: Pick<ProjectSummary, "archived" | "activeOrderStatus" | "prdConfirmed" | "demoConfirmed">,
+): ProjectStageKey {
   if (project.archived) return "archived";
-  if (project.activeOrderStatus === ORDER_STATUS.pendingQuote) return "awaiting_quote";
-  if (project.activeOrderStatus === ORDER_STATUS.quoted) return "awaiting_payment";
-  return "in_progress";
+  // 订单是已经走到签约/生产的直接事实：存量单缺双确认版本时不得回判前置阶段。
+  if (project.activeOrderStatus === ORDER_STATUS.pendingQuote
+    || project.activeOrderStatus === ORDER_STATUS.quoted) return "contract";
+  if (project.activeOrderStatus === ORDER_STATUS.paid
+    || project.activeOrderStatus === ORDER_STATUS.archived) return "production";
+  return currentStageOf({
+    prdConfirmed: project.prdConfirmed === true,
+    demoConfirmed: project.demoConfirmed === true,
+    orderPaid: false,
+  });
 }
 
-/** 列表页分区：主网格 = 选中态项目；历史归档折叠分组 = 已归档项目（选中态已
- * 是归档时主网格即全量，分组不重复出）。 */
+/** 交易子态只作「签约付款」阶段副行；其他阶段不占位。 */
+export function projectTransactionSubstate(project: ProjectSummary): string | undefined {
+  if (projectStage(project) !== "contract") return undefined;
+  if (project.activeOrderStatus === ORDER_STATUS.pendingQuote) return "待报价";
+  if (project.activeOrderStatus === ORDER_STATUS.quoted) return "待支付";
+  return undefined;
+}
+
+/** P08「待用户处理事项」：需补充盖帽；等待平台/交付时如实写暂无，不伪造成用户动作。 */
+export function projectPendingAction(project: ProjectSummary): string {
+  if (project.archived) return "已归档，无待处理事项";
+  if (project.needsUserSupplement) return "补充资料或确认事项";
+  switch (projectStage(project)) {
+    case "prd":
+      return "继续梳理需求";
+    case "demo":
+      return "体验并确认 Demo 版本";
+    case "contract":
+      if (project.activeOrderStatus == null) return "进入签约付款";
+      if (project.activeOrderStatus === ORDER_STATUS.pendingQuote) return "暂无，等待平台报价";
+      if (project.activeOrderStatus === ORDER_STATUS.quoted) return "核对范围并完成签约付款";
+      return "查看签约付款进展";
+    case "production":
+      return "暂无，等待交付更新";
+    case "archived":
+      return "已归档，无待处理事项";
+  }
+}
+
+/** P08 列表分区：未归档主网格＋已归档折叠组；两组默认按最后更新新到旧。 */
 export function projectListSections<
-  T extends Pick<ProjectSummary, "archived" | "activeOrderStatus">,
->(items: T[], stage: ProjectStageKey): { main: T[]; archivedGroup: T[] } {
+  T extends Pick<ProjectSummary, "archived" | "createdAt" | "updatedAt">,
+>(items: T[]): { main: T[]; archivedGroup: T[] } {
+  const sorted = recentProjects(items, items.length);
   return {
-    main: items.filter((p) => projectStage(p) === stage),
-    archivedGroup:
-      stage === "archived" ? [] : items.filter((p) => projectStage(p) === "archived"),
+    main: sorted.filter((project) => !project.archived),
+    archivedGroup: sorted.filter((project) => project.archived),
   };
 }
 

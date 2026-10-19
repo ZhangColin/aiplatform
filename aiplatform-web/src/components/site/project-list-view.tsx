@@ -1,9 +1,10 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
-import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-import { AppSidebarContent } from "@/components/layout/app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -12,69 +13,37 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useProjectList } from "@/hooks/use-projects";
 import { errorText } from "@/lib/api/api-error";
-import {
-  PROJECT_STAGES,
-  projectListSections,
-  type ProjectStageKey,
-  type ProjectSummary,
-} from "@/lib/projects/list";
+import { projectListSections, recentProjects, type ProjectSummary } from "@/lib/projects/list";
 
 import { ProjectCard } from "./project-card";
 
-/**
- * 项目列表页（issue #21 四态重组）：四态过滤（进行中/待报价/待支付/已归档；
- * 后两态为空壳过滤位，订单态接线归交易环）+ 卡片网格 + 「历史归档 (N)」默认
- * 折叠分组。全量拉取本地分区，v1 不分页；选中已归档时主网格即归档全量、
- * 折叠分组不再重复出。
- */
-
-const EMPTY_COPY: Record<ProjectStageKey, string> = {
-  in_progress: "没有进行中的项目，先去聊一个想做的吧",
-  awaiting_quote: "没有待报价的项目",
-  awaiting_payment: "没有待支付的项目",
-  archived: "还没有归档的项目",
-};
-
-export function ProjectListView() {
-  const [stage, setStage] = useState<ProjectStageKey>("in_progress");
+/** 我的项目 P08：生命周期阶段与待办列表，默认按最后更新排序，归档保留折叠组。
+ * 未绑定访客只回当前会话的最近项目；绑定账号后才呈现全量列表。 */
+export function ProjectListView({ guestOnly = false }: { guestOnly?: boolean }) {
+  const router = useRouter();
   const list = useProjectList();
-  const { main, archivedGroup } = projectListSections(list.data ?? [], stage);
+  const items = list.data ?? [];
+  const { main, archivedGroup } = projectListSections(items);
+  const currentGuestProject = guestOnly ? recentProjects(items, 1)[0] : undefined;
+
+  useEffect(() => {
+    if (guestOnly && currentGuestProject) {
+      router.replace(`/projects/${currentGuestProject.id}`);
+    }
+  }, [currentGuestProject, guestOnly, router]);
+
+  const returningGuest = guestOnly && currentGuestProject != null;
 
   return (
-    <AppSidebarContent>
-      <div className="mx-auto max-w-5xl p-6">
-        {/* 非项目页页头：标题 + 说明（收起归品牌行） */}
-        <header className="mb-5 flex items-center gap-2">
-          <div>
-            <h1 className="text-lg font-semibold">我的项目</h1>
-            <p className="text-xs text-muted-foreground">每个项目承载一次定制需求的全程</p>
-          </div>
+    <div className="mx-auto max-w-6xl p-4 py-6 lg:px-8">
+        <header className="mb-6">
+          <h1 className="text-headline-lg font-bold text-ink-primary">我的项目</h1>
+          <p className="mt-1 text-body-sm text-ink-faint">查看每个交付项目的当前阶段与待处理事项</p>
         </header>
 
-        <ToggleGroup
-          variant="outline"
-          spacing={0}
-          value={[stage]}
-          onValueChange={(values) => {
-            // base-ui 受控值为数组（multiple=false 单选）；空数组 = 点掉当前项，保持不变
-            const next = values.at(-1);
-            const found = next && PROJECT_STAGES.find((s) => s.key === next);
-            if (found) setStage(found.key);
-          }}
-          className="mb-4"
-          aria-label="项目过滤"
-        >
-          {PROJECT_STAGES.map((s) => (
-            <ToggleGroupItem key={s.key} value={s.key} className="text-xs">
-              {s.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-
-        {list.isPending ? (
+        {list.isPending || returningGuest ? (
           <ProjectListSkeleton />
         ) : list.isError ? (
           <div className="flex flex-col items-center gap-3 py-16 text-sm text-muted-foreground">
@@ -83,26 +52,33 @@ export function ProjectListView() {
               重试
             </Button>
           </div>
-        ) : main.length === 0 ? (
-          <div className="rounded-xl border border-dashed py-16 text-center text-sm text-muted-foreground">
-            {EMPTY_COPY[stage]}
+        ) : main.length === 0 && archivedGroup.length === 0 ? (
+          <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-soft px-4 py-16 text-center">
+            <p className="text-body-md text-ink-faint">还没有项目，从一句话开始梳理你的产品需求。</p>
+            <Link
+              href="/"
+              className="mt-5 inline-flex items-center justify-center rounded-lg bg-linear-to-br from-electric-indigo to-tech-blue px-4 py-2 text-label-md font-semibold text-white shadow-inset-highlight"
+            >
+              开始一个新需求
+            </Link>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {main.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
+          <>
+            {main.length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {main.map((project) => (
+                  <ProjectCard key={project.id} project={project} />
+                ))}
+              </div>
+            ) : null}
+            {archivedGroup.length > 0 ? <ArchivedGroup projects={archivedGroup} /> : null}
+          </>
         )}
-
-        {archivedGroup.length > 0 && <ArchivedGroup projects={archivedGroup} />}
-      </div>
-    </AppSidebarContent>
+    </div>
   );
 }
 
-/** 历史归档分组：默认折叠只露计数，点开摊出归档卡（选中已归档时不出）。
- * defaultOpen 供 SSR 断言注入展开态（node 环境点不了 trigger）。 */
+/** 历史归档分组：默认折叠只露计数，点开摊出归档卡。 */
 export function ArchivedGroup({
   projects,
   defaultOpen = false,
@@ -120,7 +96,7 @@ export function ArchivedGroup({
         <span className="font-medium">历史归档 ({projects.length})</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <ProjectCard key={project.id} project={project} />
           ))}
@@ -132,7 +108,7 @@ export function ArchivedGroup({
 
 function ProjectListSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {[0, 1, 2].map((i) => (
         <Card key={i} className="gap-3 py-5">
           <CardHeader>

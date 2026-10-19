@@ -17,6 +17,7 @@ import { formatPrice } from "@/lib/orders/price";
 export function ContractSignCard({ contract }: { contract: ContractDetail | null }) {
   return (
     <section
+      id="contract"
       aria-label="签署合同"
       className="flex flex-col gap-4 rounded-2xl border border-slate-soft/80 bg-white p-5 shadow-e1"
     >

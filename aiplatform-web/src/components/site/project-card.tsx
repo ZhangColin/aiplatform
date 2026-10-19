@@ -25,23 +25,27 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useArchiveProject } from "@/hooks/use-projects";
 import { errorText } from "@/lib/api/api-error";
-import { projectStage, type ProjectSummary } from "@/lib/projects/list";
+import {
+  lastTouchedAt,
+  projectPendingAction,
+  projectStage,
+  projectTransactionSubstate,
+  type ProjectSummary,
+} from "@/lib/projects/list";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 import { EndpointMark } from "./endpoint-mark";
 import { StageBadge } from "./stage-badge";
 
-/**
- * 项目列表卡（issue #21）：项目名 + 四态徽标（#205 纯文本升级，待支付最强档、
- * 不带金额）+ 终点弱标识（#299 文字级小标签）+ 创建/更新时间（无动态摘要行），
- * 归档走下拉菜单 + 二次确认。已归档卡灰态、无菜单。
- */
+/** P08 项目卡：项目名称、生命周期阶段（交易子态副行）、最后更新与待用户处理事项。 */
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const archive = useArchiveProject(project.id);
   const archived = project.archived;
+  const transactionSubstate = projectTransactionSubstate(project);
+  const updated = formatRelativeTime(lastTouchedAt(project)) || "未知时间";
 
   const onArchive = () => {
     setConfirmOpen(false);
@@ -87,16 +91,27 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex items-center gap-1.5">
-          <StageBadge stage={projectStage(project)} />
-          {/* 终点弱标识（#299）：文字级小标签，不抢四态徽标焦点、不加过滤维度 */}
-          <EndpointMark
-            endpointType={project.endpointType}
-            endpointTypeName={project.endpointTypeName}
-          />
+      <CardContent className="space-y-4">
+        <div>
+          <div className="flex items-center gap-1.5">
+            <StageBadge stage={projectStage(project)} />
+            <EndpointMark
+              endpointType={project.endpointType}
+              endpointTypeName={project.endpointTypeName}
+            />
+          </div>
+          {transactionSubstate ? (
+            <p className="mt-1.5 text-xs font-medium text-muted-foreground">{transactionSubstate}</p>
+          ) : null}
         </div>
-        <p className="text-xs text-muted-foreground/70">{timeLine(project)}</p>
+        <p className="text-xs text-muted-foreground">
+          <span>最后更新</span>
+          <span className="ml-1.5">{updated}</span>
+        </p>
+        <div className="border-t border-border/60 pt-3">
+          <p className="text-xs text-muted-foreground">待用户处理事项</p>
+          <p className="mt-1 text-sm text-foreground">{projectPendingAction(project)}</p>
+        </div>
       </CardContent>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -117,16 +132,4 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       </AlertDialog>
     </Card>
   );
-}
-
-/** 时间行：创建于 X；更新晚于创建时追加「更新于 Y」（未真更新过不刷屏）。 */
-function timeLine({ createdAt, updatedAt }: Pick<ProjectSummary, "createdAt" | "updatedAt">) {
-  const created = formatRelativeTime(createdAt) || "未知时间";
-  const updated = formatRelativeTime(updatedAt);
-  const later =
-    updated !== "" &&
-    createdAt !== undefined &&
-    updatedAt !== undefined &&
-    Date.parse(updatedAt) > Date.parse(createdAt);
-  return later ? `创建于 ${created} · 更新于 ${updated}` : `创建于 ${created}`;
 }

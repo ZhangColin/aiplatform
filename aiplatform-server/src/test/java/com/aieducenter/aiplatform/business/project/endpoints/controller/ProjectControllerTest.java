@@ -236,12 +236,14 @@ class ProjectControllerTest {
         when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
                         ProjectType.WEBSITE, "官网",
                         ProjectEndpointType.SYSTEM, "系统", "900",
-                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null),
+                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null,
+                        false, false, false),
                 new ProjectResponse("101", "已下单官网",
                         ProjectType.WEBSITE, "官网",
                         ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计", "901",
                         ProjectStatus.IN_PROGRESS, "进行中", false, null, null,
-                        new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"))));
+                        new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"),
+                        true, true, false)));
 
         performAsUser(get("/api/projects"))
                 .andExpect(status().isOk())
@@ -255,7 +257,13 @@ class ProjectControllerTest {
                 // #28：未终结订单嵌入（四态列表「待报价」的推导输入）
                 .andExpect(jsonPath("$.data[1].activeOrder.id").value("900"))
                 .andExpect(jsonPath("$.data[1].activeOrder.status").value(1))
-                .andExpect(jsonPath("$.data[1].activeOrder.statusName").value("待报价"));
+                .andExpect(jsonPath("$.data[1].activeOrder.statusName").value("待报价"))
+                .andExpect(jsonPath("$.data[0].prdConfirmed").value(false))
+                .andExpect(jsonPath("$.data[0].demoConfirmed").value(false))
+                .andExpect(jsonPath("$.data[0].needsUserSupplement").value(false))
+                .andExpect(jsonPath("$.data[1].prdConfirmed").value(true))
+                .andExpect(jsonPath("$.data[1].demoConfirmed").value(true))
+                .andExpect(jsonPath("$.data[1].needsUserSupplement").value(false));
     }
 
     @Test

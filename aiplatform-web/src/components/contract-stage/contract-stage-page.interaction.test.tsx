@@ -22,6 +22,7 @@ const seed = vi.hoisted(() => ({
   contract: undefined as ContractDetail | null | undefined,
   paymentPlan: undefined as PaymentPlan | null | undefined,
   deliveryStatus: undefined as DeliveryStatus | null | undefined,
+  orderQueryId: undefined as string | null | undefined,
   me: undefined as { accountId: string; displayName: string } | undefined,
   mePending: false,
   confirmMutate: vi.fn(),
@@ -40,7 +41,10 @@ vi.mock("@/hooks/use-project", () => ({
 }));
 
 vi.mock("@/hooks/use-order", () => ({
-  useOrder: () => ({ data: seed.order }),
+  useOrder: (orderId: string | null | undefined) => {
+    seed.orderQueryId = orderId;
+    return { data: seed.order };
+  },
   useCancelOrder: () => ({ mutate: seed.cancelMutate, isPending: false }),
 }));
 
@@ -177,6 +181,7 @@ beforeEach(() => {
   seed.contract = null;
   seed.paymentPlan = null;
   seed.deliveryStatus = null;
+  seed.orderQueryId = undefined;
   seed.me = { accountId: "a1", displayName: "张三" };
   seed.mePending = false;
   seed.confirmMutate.mockReset();
@@ -255,6 +260,30 @@ describe("签约付款页 P06 · 原型结构（#348）", () => {
     renderPage();
 
     expect(screen.getByText(/当前没有进行中的订单/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "确认范围并准备合同" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消订单" })).toBeNull();
+  });
+
+  it("归档项目从 P07 回看：改取最近订单的合同与付款记录，上传与签约动作关闭", () => {
+    seed.detail = seedProject({
+      activeOrder: undefined,
+      latestOrder: { id: "o9", status: ORDER_STATUS.archived },
+      archived: true,
+    });
+    seed.order = {
+      ...seedQuotedOrder(),
+      id: "o9",
+      status: ORDER_STATUS.archived,
+      statusName: "已归档",
+    };
+    seed.contract = seedSignedContract();
+    seed.paymentPlan = { ...seedPlan({ kickoffStatus: PAYMENT_NODE_STATUS.received }), orderId: "o9" };
+    renderPage();
+
+    expect(seed.orderQueryId).toBe("o9");
+    expect(screen.getByText("版本 v1")).toBeTruthy();
+    expect(screen.getByText("首期开工款结算节点")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /上传转账凭证|再传一张凭证/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "确认范围并准备合同" })).toBeNull();
     expect(screen.queryByRole("button", { name: "取消订单" })).toBeNull();
   });

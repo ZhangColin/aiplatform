@@ -9,8 +9,7 @@ import { ProjectCard } from "./project-card";
 // ProjectCard 点卡跳转走 useRouter（app router 上下文在 node 环境不存在）
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-// 项目列表卡（#205 三面渗透）：阶段纯文本升级为四态徽标——待支付最强档、
-// 其余三态次级、均不带金额；时间行/归档灰态等既有呈现不劣化。
+// P08 项目卡：生命周期阶段主徽标＋交易子态副行＋最后更新＋待用户处理事项。
 /** 归档 mutation 挂 QueryClient，SSR 断言包一层。 */
 function renderCard(overrides: Partial<ProjectSummary> = {}) {
   const project: ProjectSummary = {
@@ -28,35 +27,34 @@ function renderCard(overrides: Partial<ProjectSummary> = {}) {
   );
 }
 
-describe("ProjectCard · 阶段徽标（#205 纯文本升级）", () => {
-  it("待支付：显眼徽标最强档（primary 实底）、不带金额", () => {
-    const html = renderCard({ activeOrderStatus: 2 });
+describe("ProjectCard · P08 阶段与字段（#349）", () => {
+  it("签约付款：交易子态待支付降为副行，主徽标不再显示交易状态", () => {
+    const html = renderCard({ prdConfirmed: true, demoConfirmed: true, activeOrderStatus: 2 });
+    expect(html).toContain("签约付款");
     expect(html).toContain("待支付");
-    expect(html).toContain("bg-primary text-primary-foreground");
-    expect(html).not.toContain("bg-secondary");
-    expect(html).not.toContain("¥"); // 路标层只报状态，金额进项目语境内看
+    expect(html).not.toContain("进行中");
+    expect(html).not.toContain("¥");
   });
 
-  it("进行中/待报价：次级档徽标（呈现不劣化）", () => {
-    const inProgress = renderCard();
-    expect(inProgress).toContain("进行中");
-    expect(inProgress).toContain("bg-secondary");
-
-    const awaitingQuote = renderCard({ activeOrderStatus: 1 });
-    expect(awaitingQuote).toContain("待报价");
-    expect(awaitingQuote).toContain("bg-secondary");
+  it("需求分析 / Demo 体验 / 生产承接按确认与付款事实呈现", () => {
+    expect(renderCard()).toContain("需求分析");
+    expect(renderCard({ prdConfirmed: true })).toContain("Demo 体验");
+    expect(renderCard({ prdConfirmed: true, demoConfirmed: true, activeOrderStatus: 3 }))
+      .toContain("生产承接");
   });
 
   it("已归档：徽标如实标注、卡灰态（既有口径不动）", () => {
     const html = renderCard({ archived: true });
     expect(html).toContain("已归档");
     expect(html).toContain("bg-secondary");
-    expect(html).toContain("opacity-60"); // 归档卡灰态不劣化
+    expect(html).toContain("opacity-60");
   });
 
-  it("时间行仍在（创建于 X），徽标升级不挤掉既有信息", () => {
-    const html = renderCard();
-    expect(html).toContain("创建于");
+  it("最后更新与待用户处理事项在场；需补充优先于普通待办", () => {
+    const html = renderCard({ needsUserSupplement: true });
+    expect(html).toContain("最后更新");
+    expect(html).toContain("待用户处理事项");
+    expect(html).toContain("补充资料或确认事项");
   });
 });
 

@@ -55,11 +55,12 @@ describe("SiteShell（#76 侧栏定稿形态装配 / #345 首页去侧栏）", (
     expect(html).not.toContain("历史项目");
   });
 
-  it("/projects（列表）：仍旧壳（P08 重建归 #349）", () => {
+  it("/projects（P08）：旧侧栏退役，仅渲染内容位，避免访客看见全量历史项目", () => {
     pathSeed.path = "/projects";
     const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
-    expect(html).toContain("历史项目");
-    expect(html).not.toContain('data-collapsible="icon"');
+    expect(html).toBe("x");
+    expect(html).not.toContain("历史项目");
+    expect(html).not.toContain("能做这些");
   });
 });
 

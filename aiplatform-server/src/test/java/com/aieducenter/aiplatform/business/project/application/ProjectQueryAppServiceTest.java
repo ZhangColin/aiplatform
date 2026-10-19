@@ -174,6 +174,37 @@ class ProjectQueryAppServiceTest {
         assertThat(list.stream().filter(item -> item.activeOrder() != null)).hasSize(1);
     }
 
+    @Test
+    void given_lifecycle_facts_when_list_then_p08_stage_inputs_embedded() {
+        Project requirement = persistedProject(8118L, "需求分析项目");
+        Project demo = persistedProject(8119L, "Demo 体验项目");
+        Project supplement = persistedProject(8120L, "待补充项目");
+        for (Project project : List.of(demo, supplement)) {
+            prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 1,
+                    "# PRD\n\n已确认范围。", LocalDateTime.now(), LocalDateTime.now()));
+        }
+        supplement.confirmDemoVersion(1);
+        supplement.flagNeedsUserSupplement(true);
+        projectRepository.save(supplement);
+
+        List<ProjectResponse> list = appService.list(null);
+
+        ProjectResponse requirementRow = list.stream()
+                .filter(item -> item.id().equals(requirement.getId().toString())).findFirst().orElseThrow();
+        ProjectResponse demoRow = list.stream()
+                .filter(item -> item.id().equals(demo.getId().toString())).findFirst().orElseThrow();
+        ProjectResponse supplementRow = list.stream()
+                .filter(item -> item.id().equals(supplement.getId().toString())).findFirst().orElseThrow();
+        assertThat(requirementRow.prdConfirmed()).isFalse();
+        assertThat(requirementRow.demoConfirmed()).isFalse();
+        assertThat(requirementRow.needsUserSupplement()).isFalse();
+        assertThat(demoRow.prdConfirmed()).isTrue();
+        assertThat(demoRow.demoConfirmed()).isFalse();
+        assertThat(supplementRow.prdConfirmed()).isTrue();
+        assertThat(supplementRow.demoConfirmed()).isTrue();
+        assertThat(supplementRow.needsUserSupplement()).isTrue();
+    }
+
     /** 直插订单行（跨 BC 库事实，绕开 place 的项目读面依赖）。 */
     private void insertOrder(long orderId, Long projectId, int status) {
         jdbcTemplate.update(

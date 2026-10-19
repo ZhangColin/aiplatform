@@ -1,7 +1,11 @@
 package com.aieducenter.aiplatform.business.project.domain.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.cartisan.data.jpa.repository.BaseRepository;
 
@@ -19,6 +23,10 @@ public interface PrdVersionRepository extends BaseRepository<PrdVersion, Long> {
 
     /** 存在已确认版本？（#332 生成加门：收口观测判据——存在即首个构建 run 触发条件满足）。 */
     boolean existsByProjectId(Long projectId);
+
+    /** 一批项目中有已确认 PRD 版本的项目 id（#349 P08 列表批量读，不加载版本正文）。 */
+    @Query("SELECT v.projectId FROM PrdVersion v WHERE v.projectId IN (:projectIds)")
+    List<Long> findProjectIdsByProjectIdIn(@Param("projectIds") Collection<Long> projectIds);
 
     /** 最新已确认版本（#333 Demo 版本锚取件：起跑时已确认 PRD 版本号——单行取件，
      * 不拉全表全文快照）。 */

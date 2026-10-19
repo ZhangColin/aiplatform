@@ -4124,6 +4124,9 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
             activeOrder?: components["schemas"]["OrderBriefResponse"];
+            prdConfirmed?: boolean;
+            demoConfirmed?: boolean;
+            needsUserSupplement?: boolean;
         };
         ApiResponseListVersionResponse: {
             /** Format: int32 */

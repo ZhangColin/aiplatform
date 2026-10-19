@@ -20,7 +20,7 @@ export const queryKeys = {
     all: ["projects"] as const,
     /** 详情。 */
     detail: (id: string) => ["projects", id] as const,
-    /** 列表（全量一份；四态过滤/归档折叠在消费端本地分区——#21）。 */
+    /** 列表（全量一份；P08 生命周期阶段、最近更新排序与归档折叠在消费端推导）。 */
     list: () => ["projects", "list"] as const,
     /** 系统预览地址（#45：run 开始即轮询，探活通过才返回 URL、取到即停）。 */
     preview: (id: string) => ["projects", "preview", id] as const,

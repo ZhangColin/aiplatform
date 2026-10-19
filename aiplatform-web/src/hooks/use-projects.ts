@@ -7,13 +7,13 @@ import type { ProjectDetailResponse } from "@/lib/projects/detail";
 import { normalizeProjectSummary, type ProjectResponse } from "@/lib/projects/list";
 
 /**
- * 项目列表与归档（issue #21 四态重组）。列表全量拉取一份（v1 不分页），四态
- * 过滤与归档折叠在消费端本地分区（lib/projects/list）；归档为单向终点——200
+ * 项目列表与归档。列表全量拉取一份（v1 不分页），P08 生命周期阶段、最近更新
+ * 排序与归档折叠在消费端本地推导（lib/projects/list）；归档为单向终点——200
  * 返回最新详情，播种 + 失效项目域（use-project.ts 的 seedAndInvalidate）。
  */
 
 /**
- * 列表（全量；过滤视图由消费端 projectListSections 分区）。{@code enabled=false}
+ * 列表（全量；P08 阶段与排序由消费端 lib/projects/list 推导）。{@code enabled=false}
  * 供匿名可逛面（首页「只逛零足迹」）：无凭证 cookie 时背景查询不发请求，
  * 401 出口也就无从弹登录框。
  */
@@ -31,7 +31,7 @@ export function useProjectList(enabled = true) {
 export type { ProjectSummary } from "@/lib/projects/list";
 
 /**
- * 首页「最近的项目」= 未归档项目（三活态并集，已归档只留在列表页折叠分组）。
+ * 首页「最近的项目」= 未归档项目（已归档只留在列表页折叠分组）。
  * {@code enabled=false}＝匿名首访：不发列表请求、无草稿恢复横幅。
  */
 export function useRecentProjects(enabled = true) {

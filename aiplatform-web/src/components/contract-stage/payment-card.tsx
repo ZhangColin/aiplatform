@@ -35,7 +35,7 @@ import { cn } from "@/lib/utils";
  * （未到账节点 remainingAmount 合计）。银行账号/开户行＝原型虚构演示数据照搬
  * （正式对公账户待业务方案确定）；v1 渠道只走线下转账（扫码占位不出入口）。
  */
-export function PaymentCard({ plan }: { plan: PaymentPlan }) {
+export function PaymentCard({ plan, readOnly = false }: { plan: PaymentPlan; readOnly?: boolean }) {
   const [method, setMethod] = useState<"bank" | "qr">("bank");
   const outstanding = outstandingPaymentOf(plan);
   const kickoffNode = plan.nodes.find((node) => node.kickoffGate) ?? plan.nodes[0];
@@ -46,6 +46,7 @@ export function PaymentCard({ plan }: { plan: PaymentPlan }) {
 
   return (
     <section
+      id="payment"
       aria-label="开工款支付与核验"
       className="flex flex-col gap-4 rounded-2xl border border-slate-soft/80 bg-white p-5 shadow-e1"
     >
@@ -98,7 +99,7 @@ export function PaymentCard({ plan }: { plan: PaymentPlan }) {
           <OutstandingNote outstanding={outstanding} nodeCount={plan.nodes.length} />
           <ul className="flex flex-col gap-3">
             {plan.nodes.map((node) => (
-              <PaymentNodeRow key={node.id} node={node} orderId={plan.orderId ?? ""} />
+              <PaymentNodeRow key={node.id} node={node} orderId={plan.orderId ?? ""} readOnly={readOnly} />
             ))}
           </ul>
           <p className="text-label-sm text-ink-faint">
@@ -269,7 +270,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** 节点行：五态＋附言码＋凭证清单＋上传入口＋差额补齐提示（#337 口径迁移）。 */
-function PaymentNodeRow({ node, orderId }: { node: PaymentNode; orderId: string }) {
+function PaymentNodeRow({ node, orderId, readOnly }: { node: PaymentNode; orderId: string; readOnly: boolean }) {
   const upload = useUploadVoucher(orderId);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -333,7 +334,7 @@ function PaymentNodeRow({ node, orderId }: { node: PaymentNode; orderId: string 
         </ul>
       ) : null}
 
-      {nodeAcceptsVoucher(node) ? (
+      {!readOnly && nodeAcceptsVoucher(node) ? (
         <>
           <input
             ref={inputRef}

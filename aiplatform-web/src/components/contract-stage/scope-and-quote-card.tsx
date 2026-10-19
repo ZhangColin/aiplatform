@@ -34,6 +34,7 @@ export function ScopeAndQuoteCard({
   onConfirmScope,
   onCancelOrder,
   cancelPending,
+  readOnly = false,
 }: {
   projectName: string;
   order?: OrderDetail | null;
@@ -43,6 +44,7 @@ export function ScopeAndQuoteCard({
   onConfirmScope: () => void;
   onCancelOrder: () => void;
   cancelPending: boolean;
+  readOnly?: boolean;
 }) {
   const openVersionRecord = useVersionRecordStore((s) => s.openVersionRecord);
 
@@ -103,6 +105,7 @@ export function ScopeAndQuoteCard({
           onConfirmScope={onConfirmScope}
           onCancelOrder={onCancelOrder}
           cancelPending={cancelPending}
+          readOnly={readOnly}
         />
       )}
     </section>
@@ -200,12 +203,14 @@ function QuotedScopeState({
   onConfirmScope,
   onCancelOrder,
   cancelPending,
+  readOnly = false,
 }: {
   order: OrderDetail;
   confirmPending: boolean;
   onConfirmScope: () => void;
   onCancelOrder: () => void;
   cancelPending: boolean;
+  readOnly?: boolean;
 }) {
   const price = formatPrice(order.amount, order.currency);
   return (
@@ -224,31 +229,35 @@ function QuotedScopeState({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        <Button
-          size="sm"
-          disabled={confirmPending || !order.scopeDeliverables}
-          onClick={onConfirmScope}
-        >
-          {confirmPending ? "正在准备合同…" : "确认范围并准备合同"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={cancelPending}
-          onClick={() => {
-            if (window.confirm("取消订单后回到迭代，可继续修改再重新下单；确定取消？")) {
-              onCancelOrder();
-            }
-          }}
-        >
-          <RotateCcw className="size-3.5" aria-hidden="true" />
-          {cancelPending ? "取消中…" : "取消订单"}
-        </Button>
-      </div>
-      <p className="text-label-sm text-ink-faint">
-        确认后冻结范围与报价版本，平台开始准备合同；对范围或价格有意见可取消订单回到迭代继续沟通。
-      </p>
+      {!readOnly ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              disabled={confirmPending || !order.scopeDeliverables}
+              onClick={onConfirmScope}
+            >
+              {confirmPending ? "正在准备合同…" : "确认范围并准备合同"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={cancelPending}
+              onClick={() => {
+                if (window.confirm("取消订单后回到迭代，可继续修改再重新下单；确定取消？")) {
+                  onCancelOrder();
+                }
+              }}
+            >
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              {cancelPending ? "取消中…" : "取消订单"}
+            </Button>
+          </div>
+          <p className="text-label-sm text-ink-faint">
+            确认后冻结范围与报价版本，平台开始准备合同；对范围或价格有意见可取消订单回到迭代继续沟通。
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }

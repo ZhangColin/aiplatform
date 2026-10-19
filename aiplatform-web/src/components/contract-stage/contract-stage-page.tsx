@@ -34,9 +34,10 @@ import { ScopeAndQuoteCard } from "./scope-and-quote-card";
  */
 export function ContractStagePage({ projectId }: { projectId: string }) {
   const { data: detail, isPending, isError, error, refetch } = useProject(projectId);
-  // 只取未终结订单（待报价/已报价）——已取消/已归档没有签约付款动作面（取消回迭代、
-  // 归档转生产承接），latestOrder 的终态单不落此页（不呈现可动作态）。
-  const orderId = detail?.activeOrder?.id ?? null;
+  // 活跃流程只取未终结订单；归档项目从 P07 成果入口回访时改取最近订单，只读回看
+  // 合同与付款记录（已取消但没有归档的项目不落入此面）。
+  const readOnly = detail?.archived === true && detail.activeOrder == null;
+  const orderId = detail?.activeOrder?.id ?? (readOnly ? detail.latestOrder?.id ?? null : null);
   const { data: order } = useOrder(orderId);
   const { data: contract } = useContract(orderId);
   const { data: paymentPlan } = usePaymentPlan(orderId, order?.status);
@@ -117,6 +118,7 @@ export function ContractStagePage({ projectId }: { projectId: string }) {
                 if (orderId) cancelOrder.mutate(orderId);
               }}
               cancelPending={cancelOrder.isPending}
+              readOnly={readOnly}
             />
           )}
           <ContractSignCard contract={contract ?? null} />
@@ -124,7 +126,7 @@ export function ContractStagePage({ projectId }: { projectId: string }) {
 
         <div className="flex flex-col gap-5 xl:col-span-7">
           {paymentPlan ? (
-            <PaymentCard plan={paymentPlan} />
+            <PaymentCard plan={paymentPlan} readOnly={readOnly} />
           ) : (
             <section
               aria-label="开工款支付与核验"

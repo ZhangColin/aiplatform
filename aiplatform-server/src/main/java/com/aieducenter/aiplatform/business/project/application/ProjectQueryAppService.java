@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Sort;
@@ -186,11 +187,15 @@ public class ProjectQueryAppService {
     public List<ProjectResponse> list(ProjectStatusFilter status) {
         List<Project> projects = projectsNewestFirst(
                 RequestContext.getUserId(), GuestContext.guestId());
-        Map<Long, OrderBriefResponse> activeOrders =
-                orderQueryAppService.activeOrdersOf(projects.stream().map(Project::getId).toList());
+        List<Long> projectIds = projects.stream().map(Project::getId).toList();
+        Map<Long, OrderBriefResponse> activeOrders = orderQueryAppService.activeOrdersOf(projectIds);
+        Set<Long> prdConfirmedProjectIds = projectIds.isEmpty() ? Set.of()
+                : prdVersionRepository.findProjectIdsByProjectIdIn(projectIds).stream()
+                        .collect(Collectors.toSet());
         return projects.stream()
                 .filter(project -> matches(project, status))
-                .map(project -> toResponse(project, activeOrders.get(project.getId())))
+                .map(project -> toResponse(project, activeOrders.get(project.getId()),
+                        prdConfirmedProjectIds.contains(project.getId())))
                 .toList();
     }
 
@@ -443,7 +448,8 @@ public class ProjectQueryAppService {
      * + 设计轨道件清单（#290 计划区，对偶片清单）。 */
     private ProjectDetailResponse toDetail(Project project) {
         ProjectResponse base = toResponse(project,
-                orderQueryAppService.activeOrderOf(project.getId()).orElse(null));
+                orderQueryAppService.activeOrderOf(project.getId()).orElse(null),
+                prdVersionRepository.existsByProjectId(project.getId()));
         GenerationState generationState = generationStateOf(project);
         return new ProjectDetailResponse(base.id(), base.name(), base.type(), base.typeName(),
                 project.getEndpointType(), project.getEndpointType().getName(),
@@ -527,8 +533,10 @@ public class ProjectQueryAppService {
                 : GenerationState.NEVER_GENERATED;
     }
 
-    /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要。 */
-    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder) {
+    /** 列表项拼装：派生项目状态（归档 > 进行中）+ 终点类型（列表卡弱标识）+ 未终结订单摘要
+     * + P08 生命周期阶段与待补事实（PRD 确认集合由列表批量读、详情单点存在性读）。 */
+    private ProjectResponse toResponse(Project project, OrderBriefResponse activeOrder,
+            boolean prdConfirmed) {
         boolean archived = project.getArchivedAt() != null;
         ProjectStatus status = archived ? ProjectStatus.ARCHIVED : ProjectStatus.IN_PROGRESS;
         return new ProjectResponse(
@@ -544,7 +552,10 @@ public class ProjectQueryAppService {
                 archived,
                 project.getCreatedAt(),
                 project.getUpdatedAt(),
-                activeOrder);
+                activeOrder,
+                prdConfirmed,
+                project.getConfirmedDemoVersionNo() != null,
+                project.isNeedsUserSupplement());
     }
 
     private Project loadProject(Long projectId) {

@@ -1,0 +1,156 @@
+[IMG: 语义引力_原PPT深色圆底Logo.png]
+语义引力
+DELIVERY PIPELINE
+交付生命周期阶段
+1
+需求分析 (PRD)
+chevron_right
+2
+Demo 体验
+chevron_right
+3
+签约付款
+chevron_right
+4
+生产承接
+chevron_right
+工作空间
+folder_managed
+我的交付项目
+terminal
+系统架构与规约
+调度引擎状态
+GRAVITY-CORE v4.1
+首页
+需求分析 (PRD)
+Demo 体验
+签约付款
+生产承接
+浏览器已自动保存 · 绑定可跨设备
+我的项目
+save
+保存项目
+person
+PROJECT
+智能企业客户预约系统
+/
+bookmark
+Demo v1.0
+(基于 PRD v1.2 快照)
+预览运行中 (Ready)
+cloud_done
+阶段存盘
+确认此版本，准备签约
+arrow_forward
+desktop_windows
+桌面 1440px
+smartphone
+手机 390px
+shield_lock
+沙箱演示环境 · 隔离运行不产生正式扣款
+refresh
+open_in_new
+lock
+https://sandbox.semantic-gravity.run/v1.0/enterprise-booking-dispatch
+PROTOTYPE
+tune
+more_vert
+企业服务日历与调度中台
+已接入 3 位签约现场技工 · 自动化冲突消解规则实时常驻
+event
+2025年05月22日 (今天)
+add
++ 新建排班
+今日预约待履约
+14
++2 临时插单
+calendar_today
+技工负载率
+86%
+高负荷运行
+speed
+冲突告警拦截
+0
+已全部重规划
+verified_user
+技工排程时间轴矩阵
+08:00 - 18:00 (实时仿真交互)
+touch_app
+提示：点击工单卡片可触发“状态切换仿真”
+签约技工
+09:00
+11:00
+13:00
+15:00
+17:00
+张
+张卫华
+高级调度工程师
+09:30 - 11:30
+执行中
+华东金融云专线巡查
+14:00 - 16:30
+状态良好
+空闲可用窗口 · 随时派单
+李
+李志鹏
+专家现场架构师
+hotel 上午轮休备勤
+13:30 - 15:30
+已锁定
+智能边缘节点部署
+陈
+陈雨霏
+资深交付工程师
+10:00 - 12:00
+已完成
+客户现场安防集成验收
+16:00 待签
+需签收
+设备调优工单
+info
+已进入交互沙箱：点击任意排班卡片可即时模拟生命周期状态跃迁。
+SANDBOX LOG #048
+fact_check
+版本交付基准
+PRD v1.2 对齐
+✓
+客户在线预约日历排班引擎
+✓
+智能技工时间冲突自动检测与拦截
+✓
+工单多状态联动与流转 (待签/执行/归档)
+历史版本生成流流水
+ALL GREEN
+[01/03] 自动化沙箱环境初始化
+✓ 100%
+[02/03] 搭建核心日历与调度逻辑模块
+✓ 100%
+[03/03] 验收链路运行通过
+✓ READY
+rate_review
+反馈与需求迭代
+围绕此 Demo 提建议
+问题或调整类型
+功能不符
+流程调整
+外观调整
+其他建议
+反馈详情描述
+38 / 500 例如：技工被预约后，希望日历上的色块能变成橙色警示；另外支持工单导出。
+published_with_changes
+提交反馈并迭代 Demo
+提交后将基于当前 PRD 生成 Demo v1.1，历史版本依然可查。
+task_alt
+确认此版本进入签约
+Demo 满足业务初设后，即可推进至合同签署与排期承接阶段，锁定开发节点。
+1
+PRD 确定
+arrow_forward
+2
+Demo 确定
+arrow_forward
+3
+签约付款
+确认当前版本 · 进入签约流程
+arrow_forward

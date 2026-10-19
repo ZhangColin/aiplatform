@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="820" viewBox="0 0 2000 820"><rect width="2000" height="820" fill="white"/>
+<text x="90" y="74" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="52" font-weight="600" text-anchor="start" dominant-baseline="central">语义引力 · 网站业务流程</text>
+<text x="90" y="140" fill="#65758A" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="34" font-weight="400" text-anchor="start" dominant-baseline="central">从需求对话到 Demo 确认，再衔接签约与生产</text>
+<rect x="90" y="270" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="240" y="325" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">需求输入</text>
+<rect x="470" y="270" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="620" y="325" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">问答澄清</text>
+<rect x="850" y="270" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="1000" y="325" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">PRD 确认</text>
+<rect x="1230" y="270" width="300" height="110" rx="14" fill="#EDF4FC" stroke="#6485AD" stroke-width="2"/>
+<text x="1380" y="325" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="600" text-anchor="middle" dominant-baseline="central">1 个 Demo</text>
+<rect x="1610" y="270" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="1760" y="325" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">反馈迭代</text>
+<path d="M390 325 L470 325" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="470,325 455,316 455,334" fill="#67788B"/>
+<path d="M770 325 L850 325" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="850,325 835,316 835,334" fill="#67788B"/>
+<path d="M1150 325 L1230 325" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="1230,325 1215,316 1215,334" fill="#67788B"/>
+<path d="M1530 325 L1610 325" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="1610,325 1595,316 1595,334" fill="#67788B"/>
+<path d="M1760 270 L1760 205 L1380 205 L1380 270" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="1380,270 1371,255 1389,255" fill="#67788B"/>
+<text x="1570" y="178" fill="#65758A" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="32" font-weight="400" text-anchor="middle" dominant-baseline="central">按反馈更新 Demo</text>
+<path d="M1380 380 L1380 550" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="1380,550 1371,535 1389,535" fill="#67788B"/>
+<text x="1420" y="462" fill="#65758A" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="34" font-weight="400" text-anchor="start" dominant-baseline="central">认可后确认</text>
+<rect x="1230" y="550" width="300" height="110" rx="14" fill="#EDF4FC" stroke="#6485AD" stroke-width="2"/>
+<text x="1380" y="605" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">确认版本</text>
+<rect x="850" y="550" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="1000" y="605" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">合同签署</text>
+<rect x="470" y="550" width="300" height="110" rx="14" fill="#F6F8FB" stroke="#A6B4C4" stroke-width="2"/>
+<text x="620" y="605" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="400" text-anchor="middle" dominant-baseline="central">开工款核验</text>
+<rect x="90" y="550" width="300" height="110" rx="14" fill="#F0F7F3" stroke="#91AA9C" stroke-width="2"/>
+<text x="240" y="605" fill="#172B40" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="42" font-weight="600" text-anchor="middle" dominant-baseline="central">待安排生产</text>
+<path d="M1230 605 L1150 605" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="1150,605 1165,596 1165,614" fill="#67788B"/>
+<path d="M850 605 L770 605" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="770,605 785,596 785,614" fill="#67788B"/>
+<path d="M470 605 L390 605" fill="none" stroke="#67788B" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="390,605 405,596 405,614" fill="#67788B"/>
+<line x1="90" y1="715" x2="1910" y2="715" stroke="#DCE3EB" stroke-width="2"/>
+<text x="1000" y="762" fill="#42566B" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="central">合同要求的签署完成且开工付款条件满足后，才进入生产。</text>
+</svg>

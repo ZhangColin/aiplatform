@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_standard" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "emerald-active": "#10B981",
+          "on-secondary-fixed-variant": "#004e5c",
+          "inverse-primary": "#c3c0ff",
+          "on-primary-fixed": "#0f0069",
+          "outline-variant": "#c7c4d8",
+          "on-background": "#131b2e",
+          "tertiary-fixed": "#6ffbbe",
+          "error": "#ba1a1a",
+          "primary-container": "#4f46e5",
+          "electric-indigo": "#4F46E5",
+          "on-surface": "#0F172A",
+          "secondary-container": "#57dffe",
+          "tech-blue": "#2563EB",
+          "inverse-surface": "#283044",
+          "surface-dawn": "#F0F4F8",
+          "on-error-container": "#93000a",
+          "surface-container-highest": "#dae2fd",
+          "on-secondary-fixed": "#001f26",
+          "surface-mist": "#EFF6FF",
+          "on-tertiary": "#ffffff",
+          "on-tertiary-fixed-variant": "#005236",
+          "surface-dim": "#d2d9f4",
+          "error-container": "#ffdad6",
+          "surface-bright": "#faf8ff",
+          "tertiary": "#005338",
+          "ink-faint": "#64748B",
+          "electric-blue-light": "#3B82F6",
+          "on-surface-variant": "#475569",
+          "surface-container-high": "#e2e7ff",
+          "surface-tint": "#4d44e3",
+          "tertiary-container": "#006e4b",
+          "border-subtle-blue": "#E0E7FF",
+          "surface": "#F8FAFC",
+          "on-error": "#ffffff",
+          "on-secondary": "#ffffff",
+          "on-tertiary-container": "#67f4b7",
+          "surface-violet-tint": "#F5F3FF",
+          "surface-variant": "#dae2fd",
+          "on-tertiary-fixed": "#002113",
+          "canvas-base": "#F8FAFC",
+          "tertiary-fixed-dim": "#4edea3",
+          "on-primary-container": "#dad7ff",
+          "secondary-fixed-dim": "#4cd7f6",
+          "ink-muted": "#475569",
+          "mint-teal": "#06B6D4",
+          "outline": "#777587",
+          "primary-fixed-dim": "#c3c0ff",
+          "secondary-fixed": "#acedff",
+          "surface-container": "#F1F5F9",
+          "surface-container-lowest": "#ffffff",
+          "border-slate-soft": "#E2E8F0",
+          "on-primary-fixed-variant": "#3323cc",
+          "primary": "#4F46E5",
+          "on-primary": "#ffffff",
+          "primary-fixed": "#e2dfff",
+          "on-secondary-container": "#006172",
+          "inverse-on-surface": "#eef0ff",
+          "ink-primary": "#0F172A",
+          "ink-secondary": "#1E293B",
+          "secondary": "#475569",
+          "surface-container-low": "#F8FAFC",
+          "background": "#F8FAFC"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.25rem",
+          "lg": "0.5rem",
+          "xl": "0.75rem",
+          "2xl": "1rem",
+          "3xl": "1.5rem",
+          "full": "9999px"
+        },
+        "spacing": {
+          "space-xs": "0.25rem",
+          "space-sm": "0.5rem",
+          "gutter-desktop": "1.5rem",
+          "gutter": "1rem",
+          "space-xl": "2rem",
+          "margin-desktop": "2rem",
+          "margin": "1rem",
+          "margin-tablet": "1.5rem",
+          "space-md": "0.75rem",
+          "space-lg": "1.25rem"
+        },
+        "fontFamily": {
+          "body-lg": ["Geist", "system-ui", "sans-serif"],
+          "headline-xl-mobile": ["Geist", "system-ui", "sans-serif"],
+          "label-md": ["Geist", "system-ui", "sans-serif"],
+          "code-md": ["JetBrains Mono", "monospace"],
+          "label-sm": ["Geist", "system-ui", "sans-serif"],
+          "body-md": ["Geist", "system-ui", "sans-serif"],
+          "headline-xl": ["Geist", "system-ui", "sans-serif"],
+          "code-sm": ["JetBrains Mono", "monospace"],
+          "headline-sm": ["Geist", "system-ui", "sans-serif"],
+          "headline-lg": ["Geist", "system-ui", "sans-serif"],
+          "headline-md": ["Geist", "system-ui", "sans-serif"],
+          "headline-lg-mobile": ["Geist", "system-ui", "sans-serif"],
+          "body-sm": ["Geist", "system-ui", "sans-serif"]
+        },
+        "fontSize": {
+          "body-lg": ["16px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "400"}],
+          "headline-xl-mobile": ["28px", {"lineHeight": "36px", "letterSpacing": "-0.025em", "fontWeight": "600"}],
+          "label-md": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}],
+          "code-md": ["13px", {"lineHeight": "20px", "letterSpacing": "-0.01em", "fontWeight": "400"}],
+          "label-sm": ["11px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+          "body-md": ["14px", {"lineHeight": "20px", "letterSpacing": "-0.005em", "fontWeight": "400"}],
+          "headline-xl": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.03em", "fontWeight": "600"}],
+          "code-sm": ["11px", {"lineHeight": "16px", "letterSpacing": "0em", "fontWeight": "400"}],
+          "headline-sm": ["15px", {"lineHeight": "22px", "letterSpacing": "-0.015em", "fontWeight": "600"}],
+          "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.025em", "fontWeight": "600"}],
+          "headline-md": ["18px", {"lineHeight": "26px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+          "headline-lg-mobile": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+          "body-sm": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400"}]
+        }
+      }
+    }
+  };
+</script></head><body class="bg-[#F8FAFC] font-body-md text-body-md text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900"><header class="fixed top-0 left-0 right-0 z-50 bg-white/85 backdrop-blur-md border-b border-slate-200/80 shadow-[0_2px_16px_-4px_rgba(37,99,235,0.06)]"><div class="h-16 w-full px-gutter-desktop flex items-center justify-between gap-space-lg"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-md"><div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500/10 via-cyan-500/15 to-blue-500/10 border border-indigo-100 flex items-center justify-center p-1.5 shadow-sm overflow-hidden"><img alt="语义引力_原PPT深色圆底Logo.png" class="h-7 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1UYnvL2ipiVH4RJUj-U-6Y-Y3HxEscXWcDEmW70aXuU6cQu9D1-Muuu5J1T6Fiz8oUpg-yWcbijy7Lw9hpgqTyq9UvQHG_9KupmtLALTUDTGJNm3Va0X6aZoZtTHo15F-kqkD3bV71a2Z-T7pJHYVyz2iIJIz2G6DBVf-rfzSPVUrtlxju2M3GKtL4Wjkf87-7gNhec0KNFHeyBtQ96pO5gjs3VSbu81xmu_8-AxN7X_bD1MbhZWZHNzUrtK_2L5GW3zDWw1Q1B"/></div><div class="flex flex-col"><div class="flex items-center gap-space-xs"><span class="font-headline-sm text-headline-sm text-slate-900 font-semibold tracking-tight">语义引力</span><span class="font-label-sm text-label-sm px-1.5 py-0.5 rounded-full bg-gradient-to-r from-indigo-50 to-blue-50 text-indigo-600 border border-indigo-200/60 font-semibold tracking-wide">OS</span></div><span class="font-code-sm text-[11px] text-slate-400 font-medium uppercase tracking-wider">Semantic Gravity · Delivery OS</span></div></div><nav class="hidden xl:flex items-center gap-1 bg-slate-100/80 border border-slate-200/60 p-1 rounded-xl shadow-inner" data-active-classes="bg-white text-indigo-600 font-medium shadow-sm"><a aria-current="page" class="px-space-md py-1.5 rounded-lg transition-all bg-white text-indigo-600 font-medium shadow-sm border border-slate-200/40" data-path="home" href="#">首页</a><a class="px-space-md py-1.5 rounded-lg text-slate-600 font-label-md text-label-md hover:text-indigo-600 hover:bg-white/60 transition-colors" data-path="prd-analysis" href="#">需求分析 (PRD)</a><a class="px-space-md py-1.5 rounded-lg text-slate-600 font-label-md text-label-md hover:text-indigo-600 hover:bg-white/60 transition-colors" data-path="demo-experience" href="#">Demo 体验</a><a class="px-space-md py-1.5 rounded-lg text-slate-600 font-label-md text-label-md hover:text-indigo-600 hover:bg-white/60 transition-colors" data-path="contract-and-payment" href="#">签约付款</a><a class="px-space-md py-1.5 rounded-lg text-slate-600 font-label-md text-label-md hover:text-indigo-600 hover:bg-white/60 transition-colors" data-path="production-delivery" href="#">生产承接</a></nav></div><div class="flex items-center gap-space-md"><div class="hidden md:flex items-center gap-space-xs px-space-md py-1.5 rounded-full bg-cyan-50/70 border border-cyan-100"><span class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span><span class="font-label-sm text-label-sm text-cyan-800 font-medium">浏览器已自动保存 · 绑定可跨设备</span></div><a class="font-label-md text-label-md text-slate-600 hover:text-indigo-600 px-space-sm py-1.5 transition-colors" data-path="my-projects" href="#">我的项目</a><button class="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-label-md text-label-md rounded-lg shadow-sm hover:shadow-[0_4px_12px_rgba(79,70,229,0.25)] transition-all" type="button"><span class="material-symbols-outlined text-[16px]">save</span><span>保存项目</span></button><div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 text-white flex items-center justify-center shadow-sm ring-2 ring-white"><span class="material-symbols-outlined text-[18px]">person</span></div></div></div></header><main class="w-full pt-16 bg-[#F8FAFC] min-h-[calc(100vh-64px)]"><div class="flex flex-col w-full">
+<!-- Fresh Atmospheric ambient backdrop -->
+<div class="relative w-full overflow-hidden">
+<div class="absolute -top-36 left-1/2 -translate-x-1/2 w-[1100px] h-[520px] bg-gradient-to-b from-blue-100/60 via-indigo-50/50 to-transparent rounded-full blur-3xl pointer-events-none -z-10"></div>
+<div class="absolute top-24 right-1/4 w-80 h-80 bg-cyan-100/40 rounded-full blur-3xl pointer-events-none -z-10"></div>
+<div class="absolute top-48 left-12 w-72 h-72 bg-emerald-100/30 rounded-full blur-3xl pointer-events-none -z-10"></div>
+<!-- MAIN HERO CONTAINER -->
+<section class="w-full max-w-6xl mx-auto px-margin-tablet lg:px-margin-desktop pt-14 pb-16 flex flex-col items-center text-center">
+<!-- Top Badge -->
+<div class="inline-flex items-center gap-space-xs px-3.5 py-1 rounded-full bg-white/80 border border-indigo-100 shadow-[0_2px_8px_rgba(79,70,229,0.06)] mb-6 backdrop-blur-md">
+<span class="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-ping"></span>
+<span class="font-code-sm text-[11px] tracking-wider uppercase bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent font-semibold">SEMANTIC GRAVITY · AI NATIVE DELIVERY OS</span>
+</div>
+<!-- Hero Heading -->
+<h1 class="font-headline-xl text-headline-xl md:text-[56px] md:leading-[64px] font-semibold tracking-tight text-slate-900 max-w-4xl">
+        你想做一个什么产品？
+      </h1>
+<p class="font-body-lg text-body-lg text-slate-500 mt-4 max-w-2xl text-center">
+        聊清需求，形成 PRD，再体验你的专属 Demo。所见即所得，零盲盒交付。
+      </p>
+<!-- Recovery Banner / Returning Session Notice -->
+<div class="mt-8 w-full max-w-3xl flex items-center justify-between px-space-md py-2.5 rounded-xl bg-white/90 backdrop-blur-sm border border-slate-200/80 shadow-[0_4px_16px_-4px_rgba(37,99,235,0.06)] text-left hover:border-indigo-200 transition-colors">
+<div class="flex items-center gap-space-sm min-w-0">
+<div class="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-indigo-600 text-[18px]">history</span>
+</div>
+<div class="flex items-center gap-space-xs min-w-0">
+<span class="font-label-sm text-[11px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100/60 shrink-0">草稿恢复</span>
+<span class="font-body-sm text-body-sm text-slate-700 truncate font-medium">企业内部CRM与智能工单管理系统</span>
+<span class="font-code-sm text-[11px] text-slate-400 hidden sm:inline shrink-0">· 2小时前自动暂存</span>
+</div>
+</div>
+<a class="font-label-md text-label-md text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-0.5 shrink-0 pl-3 group" data-path="prd-analysis" href="#">
+<span>继续梳理</span>
+<span class="material-symbols-outlined text-[16px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+</a>
+</div>
+<!-- Large Command Input Box -->
+<div class="mt-4 w-full max-w-3xl bg-white rounded-2xl border border-slate-200/90 shadow-[0_16px_36px_-10px_rgba(79,70,229,0.08),0_4px_12px_-4px_rgba(37,99,235,0.04)] focus-within:border-indigo-500 focus-within:shadow-[0_0_0_4px_rgba(79,70,229,0.12),0_16px_36px_-10px_rgba(79,70,229,0.12)] transition-all flex flex-col text-left">
+<div class="p-space-lg pb-space-sm">
+<label class="sr-only" for="demand-input">产品需求描述</label>
+<textarea class="w-full bg-transparent resize-none outline-none font-body-lg text-body-lg text-slate-800 placeholder:text-slate-400" id="demand-input" placeholder="说说你想解决的问题，比如做一个客户预约系统，支持移动端日历选择、顾问分配和核销统计……" rows="4"></textarea>
+</div>
+<!-- Input Box Bottom Bar -->
+<div class="px-space-lg py-space-sm bg-gradient-to-r from-slate-50/80 via-white to-blue-50/30 border-t border-slate-100 rounded-b-2xl flex flex-wrap items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<button class="inline-flex items-center gap-1.5 text-slate-600 hover:text-indigo-600 font-label-md text-label-md px-2.5 py-1.5 rounded-lg hover:bg-slate-100/70 border border-transparent hover:border-slate-200/60 transition-all" type="button">
+<span class="material-symbols-outlined text-[18px] text-slate-400">attach_file</span>
+<span>附加资料</span>
+</button>
+<div class="hidden sm:flex items-center gap-1.5 text-slate-500 font-label-sm text-label-sm bg-white/70 px-2.5 py-1 rounded-md border border-slate-200/40">
+<span class="material-symbols-outlined text-[15px] text-emerald-600">verified_user</span>
+<span>免注册即可开始 · 私有云自动隔离保存</span>
+</div>
+</div>
+<button class="inline-flex items-center gap-space-xs px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-headline-sm text-headline-sm font-semibold shadow-[0_4px_14px_rgba(79,70,229,0.35)] hover:shadow-[0_6px_20px_rgba(79,70,229,0.45)] transition-all group" id="btn-start" type="button">
+<span>开始梳理需求</span>
+<span class="material-symbols-outlined text-[18px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Quick Start Prompt Chips -->
+<div class="mt-6 w-full max-w-3xl flex flex-col sm:flex-row items-stretch gap-space-md">
+<button class="flex-1 bg-white hover:bg-gradient-to-b hover:from-white hover:to-blue-50/40 border border-slate-200/80 p-space-md rounded-2xl text-left transition-all hover:border-indigo-300 hover:shadow-[0_8px_20px_-6px_rgba(37,99,235,0.12)] group flex flex-col justify-between" onclick="fillPrompt('做一个移动端客户预约系统，支持顾问日历排期、客户时段预约、短信通知与现场二维码核销')" type="button">
+<div class="flex items-center justify-between mb-1.5">
+<span class="font-headline-sm text-headline-sm text-slate-800 group-hover:text-indigo-600 transition-colors flex items-center gap-2">
+<span class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100/60"><span class="material-symbols-outlined text-[18px]">calendar_clock</span></span>
+              做一个预约系统
+            </span>
+<span class="material-symbols-outlined text-[16px] text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all">north_east</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 line-clamp-2">移动端选时、日历排期与自动化核销看板</p>
+</button>
+<button class="flex-1 bg-white hover:bg-gradient-to-b hover:from-white hover:to-indigo-50/40 border border-slate-200/80 p-space-md rounded-2xl text-left transition-all hover:border-indigo-300 hover:shadow-[0_8px_20px_-6px_rgba(79,70,229,0.12)] group flex flex-col justify-between" onclick="fillPrompt('把我们目前的Excel分散销售统计与审批流重构为一套结构化企业内部协作系统，包含权限分配和实时数据报表')" type="button">
+<div class="flex items-center justify-between mb-1.5">
+<span class="font-headline-sm text-headline-sm text-slate-800 group-hover:text-indigo-600 transition-colors flex items-center gap-2">
+<span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/60"><span class="material-symbols-outlined text-[18px]">table_convert</span></span>
+              把表格流程做成工具
+            </span>
+<span class="material-symbols-outlined text-[16px] text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all">north_east</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 line-clamp-2">多表分散统计转为结构化协同与权限系统</p>
+</button>
+<button class="flex-1 bg-white hover:bg-gradient-to-b hover:from-white hover:to-cyan-50/40 border border-slate-200/80 p-space-md rounded-2xl text-left transition-all hover:border-cyan-300 hover:shadow-[0_8px_20px_-6px_rgba(6,182,212,0.12)] group flex flex-col justify-between" onclick="fillPrompt('我目前只有一个粗略构想：想做一个面向自由职业者的AI财务合规助手。请先通过多轮提问帮我理清业务路径和核心功能')" type="button">
+<div class="flex items-center justify-between mb-1.5">
+<span class="font-headline-sm text-headline-sm text-slate-800 group-hover:text-cyan-700 transition-colors flex items-center gap-2">
+<span class="w-7 h-7 rounded-lg bg-cyan-50 text-cyan-600 flex items-center justify-center border border-cyan-100/60"><span class="material-symbols-outlined text-[18px]">psychology</span></span>
+              我有想法，帮我理清
+            </span>
+<span class="material-symbols-outlined text-[16px] text-slate-400 group-hover:text-cyan-700 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all">north_east</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 line-clamp-2">语义启发式对齐，层层拆解直接生成结构化PRD</p>
+</button>
+</div>
+</section>
+<!-- SECTION: WORKFLOW PIPELINE ARCHITECTURE -->
+<section class="w-full bg-gradient-to-b from-slate-100/60 via-blue-50/30 to-slate-100/60 border-y border-slate-200/80 py-16">
+<div class="w-full max-w-6xl mx-auto px-margin-tablet lg:px-margin-desktop flex flex-col">
+<div class="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+<span class="font-code-sm text-code-sm uppercase tracking-wider text-indigo-600 font-semibold">Operational Workflow</span>
+</div>
+<h2 class="font-headline-xl text-headline-xl text-slate-900 font-semibold tracking-tight">
+              从需求对话到可交互 Demo，再衔接签约与生产
+            </h2>
+<p class="font-body-lg text-body-lg text-slate-500 mt-1">
+              全流程严谨闭环 · 验证认可后付款开工 · 零盲盒交付机制
+            </p>
+</div>
+<div class="flex items-center gap-2 shrink-0">
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200/80 shadow-sm font-label-sm text-label-sm text-slate-700 font-medium">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span> 契约驱动
+            </span>
+<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200/80 shadow-sm font-label-sm text-label-sm text-slate-700 font-medium">
+<span class="w-2 h-2 rounded-full bg-indigo-600"></span> 1:1高保真Demo
+            </span>
+</div>
+</div>
+<!-- Flow Visual Board -->
+<div class="w-full bg-white/90 backdrop-blur-sm rounded-3xl border border-slate-200/80 p-6 md:p-8 shadow-[0_12px_32px_-8px_rgba(79,70,229,0.06)]">
+<!-- Phase 1: Semantic Exploration & Demo Validation -->
+<div class="mb-10">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-2.5">
+<span class="font-code-sm text-code-sm px-2.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-200/60 text-indigo-600 font-semibold">PHASE 01</span>
+<span class="font-headline-sm text-headline-sm text-slate-900 font-semibold">阶段一：语义探索与可交互验证</span>
+</div>
+<span class="font-code-sm text-code-sm text-slate-500 hidden sm:inline">纯自然语言对齐 · 毫秒级生成验证</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-5 gap-3 relative">
+<!-- Step 1 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-indigo-200 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 01</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">需求输入</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">文本 / 脑图 / 表格</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">edit_note</span>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-indigo-200 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 02</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">问答澄清</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">启发式补齐逻辑缺口</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">forum</span>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-indigo-200 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 03</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">PRD 确认</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">自动化规范文档生成</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">description</span>
+</div>
+</div>
+<!-- Step 4 (CORE HIGHLIGHT) -->
+<div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-600 to-blue-600 text-white border border-indigo-500 flex flex-col justify-between shadow-[0_8px_24px_rgba(79,70,229,0.3)] relative group">
+<div class="absolute -top-2.5 right-3 bg-gradient-to-r from-emerald-400 to-teal-300 text-slate-900 font-code-sm text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider shadow-sm">
+                  CORE ARTIFACT
+                </div>
+<div>
+<span class="font-code-sm text-code-sm text-indigo-200">STEP 04</span>
+<div class="font-headline-md text-headline-md text-white font-bold mt-1 flex items-center gap-1.5">
+<span>1 个 Demo</span>
+<span class="material-symbols-outlined text-[20px] text-cyan-200">smart_display</span>
+</div>
+</div>
+<div class="mt-4 pt-3 border-t border-white/20 flex items-center justify-between text-indigo-100">
+<span class="font-label-sm text-label-sm font-medium">真实可点击、全交互体验</span>
+<span class="material-symbols-outlined text-[18px] text-teal-300">verified</span>
+</div>
+</div>
+<!-- Step 5 (Loop back) -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between relative hover:bg-white hover:border-indigo-200 hover:shadow-sm transition-all">
+<div>
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 05</span>
+<span class="font-label-sm text-[10px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 font-medium border border-cyan-100">反馈循环</span>
+</div>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">反馈迭代</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">按反馈毫秒更新Demo</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">autorenew</span>
+</div>
+</div>
+</div>
+<!-- Inter-step directional indication in Phase 1 -->
+<div class="hidden md:flex items-center justify-between px-6 mt-3 text-slate-500 font-code-sm text-[12px]">
+<span class="flex items-center gap-1">输入直达 <span class="material-symbols-outlined text-[14px] text-slate-400">trending_flat</span></span>
+<span class="flex items-center gap-1">对齐逻辑 <span class="material-symbols-outlined text-[14px] text-slate-400">trending_flat</span></span>
+<span class="flex items-center gap-1">输出规格 <span class="material-symbols-outlined text-[14px] text-slate-400">trending_flat</span></span>
+<span class="flex items-center gap-1 font-semibold text-indigo-600 bg-indigo-50/80 px-2 py-0.5 rounded-md border border-indigo-100">← 按反馈重编译 / 满意则进入签约 →</span>
+</div>
+</div>
+<!-- Connecting Divider with Lock Milestone -->
+<div class="relative my-8 border-t border-slate-200/80 flex items-center justify-center">
+<span class="bg-white px-4 py-1 rounded-full border border-slate-200/80 shadow-sm font-label-md text-label-md text-slate-700 font-medium flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-emerald-600">check_circle</span>
+              认可Demo后锁定版本 · 开启履约通道
+            </span>
+</div>
+<!-- Phase 2: Contract Locking & Formal Production Delivery -->
+<div>
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-2.5">
+<span class="font-code-sm text-code-sm px-2.5 py-0.5 rounded-md bg-cyan-50 border border-cyan-200/60 text-cyan-700 font-semibold">PHASE 02</span>
+<span class="font-headline-sm text-headline-sm text-slate-900 font-semibold">阶段二：契约锁定与履约保障</span>
+</div>
+<span class="font-code-sm text-code-sm text-slate-500 hidden sm:inline">法务级电子合同 · 资金存管核验</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+<!-- Step 6 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-cyan-300 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 06</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">确认版本</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">固化PRD与UI交互拓扑</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">lock</span>
+</div>
+</div>
+<!-- Step 7 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-cyan-300 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 07</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">合同签署</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">规范权责与生产周期</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">draw</span>
+</div>
+</div>
+<!-- Step 8 -->
+<div class="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 flex flex-col justify-between hover:bg-white hover:border-cyan-300 hover:shadow-sm transition-all">
+<div>
+<span class="font-code-sm text-[11px] text-slate-400 font-semibold">STEP 08</span>
+<div class="font-headline-sm text-headline-sm text-slate-900 font-semibold mt-1">开工款核验</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-slate-500">
+<span class="font-label-sm text-label-sm">对公打款/网银直连对账</span>
+<span class="material-symbols-outlined text-[16px] text-slate-400">receipt_long</span>
+</div>
+</div>
+<!-- Step 9 (Production Delivery Outcome) -->
+<div class="p-4 rounded-2xl bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 border border-emerald-200 flex flex-col justify-between shadow-[0_4px_16px_rgba(16,185,129,0.12)]">
+<div>
+<span class="font-code-sm text-[11px] text-emerald-700 font-bold uppercase tracking-wider">STEP 09 · FINAL</span>
+<div class="font-headline-md text-headline-md text-emerald-900 font-bold mt-1 flex items-center gap-1.5">
+<span>待安排生产</span>
+<span class="material-symbols-outlined text-[20px] text-emerald-600">precision_manufacturing</span>
+</div>
+</div>
+<div class="mt-4 pt-3 border-t border-emerald-200/60 flex items-center justify-between text-emerald-800">
+<span class="font-label-sm text-label-sm font-semibold">生产集群排期接入</span>
+<span class="material-symbols-outlined text-[18px] text-emerald-600">rocket_launch</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Assurance Note -->
+<div class="mt-8 p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50/70 border border-indigo-100 flex items-start gap-3.5">
+<div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[20px]">shield</span>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-sm text-headline-sm text-slate-900 font-semibold">语义引力核心保障机制</span>
+<p class="font-body-md text-body-md text-slate-600 mt-0.5">
+                合同要求的签署完成且开工付款条件满足后，才正式划入生产排期。在此之前，需求沟通、PRD文档梳理以及 1 个高保真 Demo 的迭代验证均无需承担不可预期的盲盒风险。
+              </p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- SECTION: KEY VALUE METRICS GRID -->
+<section class="w-full max-w-6xl mx-auto px-margin-tablet lg:px-margin-desktop py-16">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-lg">
+<!-- Metric 1 -->
+<div class="bg-white p-space-lg rounded-2xl border border-slate-200/80 shadow-[0_4px_16px_-4px_rgba(79,70,229,0.06)] hover:border-indigo-200 hover:shadow-[0_8px_24px_-4px_rgba(79,70,229,0.12)] transition-all flex flex-col justify-between">
+<div>
+<div class="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100/80 text-indigo-600 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[22px]">timer</span>
+</div>
+<div class="font-headline-xl text-headline-xl text-slate-900 font-semibold tracking-tight">15<span class="text-indigo-600 text-headline-md ml-1 font-bold">min</span></div>
+<div class="font-headline-sm text-headline-sm text-slate-800 font-semibold mt-1">PRD 快速对齐生成</div>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 mt-3 pt-3 border-t border-slate-100">
+            多轮自然语言提问澄清，自动结构化生成标准化软件规格书。
+          </p>
+</div>
+<!-- Metric 2 -->
+<div class="bg-white p-space-lg rounded-2xl border border-slate-200/80 shadow-[0_4px_16px_-4px_rgba(37,99,235,0.06)] hover:border-blue-200 hover:shadow-[0_8px_24px_-4px_rgba(37,99,235,0.12)] transition-all flex flex-col justify-between">
+<div>
+<div class="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100/80 text-blue-600 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[22px]">devices</span>
+</div>
+<div class="font-headline-xl text-headline-xl text-slate-900 font-semibold tracking-tight">1:1<span class="text-blue-600 text-headline-md ml-1 font-bold">仿真</span></div>
+<div class="font-headline-sm text-headline-sm text-slate-800 font-semibold mt-1">真实可操作 DEMO 验证</div>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 mt-3 pt-3 border-t border-slate-100">
+            拒绝静态原型画饼，直接体验完整的前后端交互与业务链路。
+          </p>
+</div>
+<!-- Metric 3 -->
+<div class="bg-white p-space-lg rounded-2xl border border-slate-200/80 shadow-[0_4px_16px_-4px_rgba(16,185,129,0.06)] hover:border-emerald-200 hover:shadow-[0_8px_24px_-4px_rgba(16,185,129,0.12)] transition-all flex flex-col justify-between">
+<div>
+<div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100/80 text-emerald-600 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[22px]">gavel</span>
+</div>
+<div class="font-headline-xl text-headline-xl text-slate-900 font-semibold tracking-tight">100<span class="text-emerald-600 text-headline-md ml-0.5 font-bold">%</span></div>
+<div class="font-headline-sm text-headline-sm text-slate-800 font-semibold mt-1">认可后启动付款开工</div>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 mt-3 pt-3 border-t border-slate-100">
+            PRD 与 Demo 双重确认，契约严格锁定生产交付边界与周期。
+          </p>
+</div>
+<!-- Metric 4 -->
+<div class="bg-white p-space-lg rounded-2xl border border-slate-200/80 shadow-[0_4px_16px_-4px_rgba(6,182,212,0.06)] hover:border-cyan-200 hover:shadow-[0_8px_24px_-4px_rgba(6,182,212,0.12)] transition-all flex flex-col justify-between">
+<div>
+<div class="w-10 h-10 rounded-xl bg-cyan-50 border border-cyan-100/80 text-cyan-600 flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-[22px]">chat_bubble_outline</span>
+</div>
+<div class="font-headline-xl text-headline-xl text-slate-900 font-semibold tracking-tight">0<span class="text-cyan-600 text-headline-md ml-1 font-bold">门槛</span></div>
+<div class="font-headline-sm text-headline-sm text-slate-800 font-semibold mt-1">纯自然语言即可发起</div>
+</div>
+<p class="font-body-sm text-body-sm text-slate-500 mt-3 pt-3 border-t border-slate-100">
+            无需专业技术背景或编写文档，对话即可将业务灵感转化为系统工程。
+          </p>
+</div>
+</div>
+</section>
+<!-- BOTTOM COMPLIANCE & PROTOCOL STRIP -->
+<section class="w-full bg-white/70 border-t border-slate-200/70 py-8 backdrop-blur-sm">
+<div class="w-full max-w-6xl mx-auto px-margin-tablet lg:px-margin-desktop flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-500">
+<div class="flex items-center gap-space-md">
+<span class="font-code-sm text-code-sm font-semibold tracking-wider text-slate-600">SECURITY AUDITED</span>
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+<span class="font-body-sm text-body-sm">企业级私有化数据隔离 · 全链路传输加密</span>
+</div>
+<div class="flex items-center gap-space-lg">
+<a class="font-label-sm text-label-sm hover:text-indigo-600 transition-colors" href="#">服务协议</a>
+<a class="font-label-sm text-label-sm hover:text-indigo-600 transition-colors" href="#">隐私政策</a>
+<a class="font-label-sm text-label-sm hover:text-indigo-600 transition-colors" href="#">免责说明</a>
+<a class="font-label-sm text-label-sm hover:text-indigo-600 transition-colors" href="#">交付规范标准 (SLA)</a>
+</div>
+</div>
+</section>
+</div>
+</div>
+<script>
+  function fillPrompt(text) {
+    const textarea = document.getElementById('demand-input');
+    if (!textarea) return;
+    textarea.value = text;
+    textarea.focus();
+    // highlight visual state
+    textarea.parentElement.parentElement.classList.add('ring-4', 'ring-indigo-500/20', 'border-indigo-500');
+    setTimeout(() => {
+      textarea.parentElement.parentElement.classList.remove('ring-4', 'ring-indigo-500/20');
+    }, 800);
+  }
+
+  document.getElementById('btn-start')?.addEventListener('click', function() {
+    const textarea = document.getElementById('demand-input');
+    const val = textarea ? textarea.value.trim() : '';
+    if (!val) {
+      textarea?.focus();
+      textarea?.setAttribute('placeholder', '请先输入您的产品想法或业务问题...');
+      return;
+    }
+    // Simulate progression to PRD analysis phase
+    const btn = this;
+    btn.innerHTML = '<span class="material-symbols-outlined text-[18px] animate-spin">refresh</span><span>正在接入智能对齐引擎...</span>';
+    btn.classList.add('opacity-90', 'pointer-events-none');
+    setTimeout(() => {
+      // route to prd analysis
+      const prdLink = document.querySelector('nav a[data-path="prd-analysis"]');
+      if (prdLink) {
+        prdLink.click();
+      } else {
+        window.location.hash = '#prd-analysis';
+      }
+    }, 600);
+  });
+</script></main><footer class="w-full bg-white border-t border-slate-200/80 py-space-xl"><div class="w-full px-gutter-desktop flex flex-col md:flex-row items-center justify-between gap-space-md"><div class="flex items-center gap-space-sm"><div class="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center"><img alt="语义引力_原PPT深色圆底Logo.png" class="h-5 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1UYnvL2ipiVH4RJUj-U-6Y-Y3HxEscXWcDEmW70aXuU6cQu9D1-Muuu5J1T6Fiz8oUpg-yWcbijy7Lw9hpgqTyq9UvQHG_9KupmtLALTUDTGJNm3Va0X6aZoZtTHo15F-kqkD3bV71a2Z-T7pJHYVyz2iIJIz2G6DBVf-rfzSPVUrtlxju2M3GKtL4Wjkf87-7gNhec0KNFHeyBtQ96pO5gjs3VSbu81xmu_8-AxN7X_bD1MbhZWZHNzUrtK_2L5GW3zDWw1Q1B"/></div><span class="font-label-md text-label-md text-slate-800 font-semibold tracking-tight">语义引力 SEMANTIC GRAVITY</span><span class="font-code-sm text-[11px] text-slate-400 font-medium">· AI NATIVE DELIVERY OS</span></div><p class="font-body-sm text-body-sm text-slate-400">© 2025 语义引力 (Semantic Gravity) AI Native Delivery Machine. All rights reserved.</p><div class="flex items-center gap-space-lg"><a class="font-label-sm text-label-sm text-slate-500 hover:text-indigo-600 transition-colors" href="#">安全与合规</a><a class="font-label-sm text-label-sm text-slate-500 hover:text-indigo-600 transition-colors" href="#">工程规范</a><a class="font-label-sm text-label-sm text-slate-500 hover:text-indigo-600 transition-colors" href="#">API 状态</a></div></div></footer></body></html>

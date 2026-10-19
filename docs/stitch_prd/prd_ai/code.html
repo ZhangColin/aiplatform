@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="web_dashboard" name="shell-type"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<style>
+    @layer base {
+      html, body { margin: 0; padding: 0; }
+      body { overscroll-behavior: none; }
+      main > :first-child { margin-top: 0 !important; }
+      main > :last-child { margin-bottom: 0 !important; }
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "canvas-base": "#F8FAFC",
+            "surface-dawn": "#F0F4F8",
+            "surface-mist": "#EFF6FF",
+            "border-slate-soft": "#E2E8F0",
+            "border-subtle-blue": "#E0E7FF",
+            "ink-primary": "#0F172A",
+            "ink-secondary": "#1E293B",
+            "ink-muted": "#475569",
+            "ink-faint": "#64748B",
+            "electric-indigo": "#4F46E5",
+            "tech-blue": "#2563EB",
+            "mint-teal": "#06B6D4",
+            "emerald-active": "#10B981",
+            "surface-violet-tint": "#F5F3FF",
+            "primary": "#3525cd",
+            "primary-container": "#4f46e5",
+            "on-primary": "#ffffff",
+            "tertiary": "#005338",
+            "tertiary-container": "#006e4b",
+            "surface": "#F8FAFC",
+            "surface-container": "#F1F5F9",
+            "surface-container-low": "#F8FAFC",
+            "surface-container-lowest": "#ffffff"
+          },
+          fontFamily: {
+            sans: ["Geist", "system-ui", "-apple-system", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-[#F8FAFC] font-sans text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900">
+<!-- LEFT SIDEBAR -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-white/90 backdrop-blur-md border-r border-slate-200/80 z-50 flex flex-col justify-between shadow-[2px_0_16px_-4px_rgba(15,23,42,0.04)]">
+<div class="flex flex-col">
+<!-- Logo Header -->
+<div class="h-16 px-5 border-b border-slate-100 flex items-center gap-3 bg-gradient-to-r from-white via-indigo-50/20 to-transparent">
+<div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 p-[1.5px] shadow-sm flex items-center justify-center shrink-0">
+<div class="w-full h-full bg-white rounded-[10px] flex items-center justify-center overflow-hidden p-0.5">
+<img alt="语义引力 Logo" class="h-7 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1UYnvL2ipiVH4RJUj-U-6Y-Y3HxEscXWcDEmW70aXuU6cQu9D1-Muuu5J1T6Fiz8oUpg-yWcbijy7Lw9hpgqTyq9UvQHG_9KupmtLALTUDTGJNm3Va0X6aZoZtTHo15F-kqkD3bV71a2Z-T7pJHYVyz2iIJIz2G6DBVf-rfzSPVUrtlxju2M3GKtL4Wjkf87-7gNhec0KNFHeyBtQ96pO5gjs3VSbu81xmu_8-AxN7X_bD1MbhZWZHNzUrtK_2L5GW3zDWw1Q1B"/>
+</div>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="text-[15px] font-bold text-slate-900 tracking-tight leading-tight">语义引力</span>
+<span class="font-mono text-[10px] text-indigo-600 font-semibold tracking-wider uppercase">DELIVERY PIPELINE</span>
+</div>
+</div>
+<!-- Lifecycle Stage Section -->
+<div class="px-5 pt-5 pb-2">
+<span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">交付生命周期阶段</span>
+</div>
+<nav class="flex flex-col gap-1 px-3">
+<!-- Stage 1 Active -->
+<a aria-current="page" class="group flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all duration-200 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-medium shadow-md shadow-indigo-500/20" data-path="prd-analysis" href="#">
+<div class="flex items-center gap-2.5">
+<span class="w-5 h-5 rounded-full bg-white/20 text-white text-[11px] font-mono flex items-center justify-center font-semibold">1</span>
+<span class="text-[13px] tracking-tight">需求分析 (PRD)</span>
+</div>
+<span class="material-symbols-outlined text-[16px] text-white/80 group-hover:translate-x-0.5 transition-transform">chevron_right</span>
+</a>
+<!-- Stage 2 -->
+<a class="group flex items-center justify-between px-3.5 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 transition-all" data-path="demo-experience" href="#">
+<div class="flex items-center gap-2.5">
+<span class="w-5 h-5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-mono flex items-center justify-center font-medium group-hover:bg-slate-200">2</span>
+<span class="text-[13px] tracking-tight">Demo 体验</span>
+</div>
+<span class="material-symbols-outlined text-[16px] text-slate-400">chevron_right</span>
+</a>
+<!-- Stage 3 -->
+<a class="group flex items-center justify-between px-3.5 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 transition-all" data-path="contract-and-payment" href="#">
+<div class="flex items-center gap-2.5">
+<span class="w-5 h-5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-mono flex items-center justify-center font-medium group-hover:bg-slate-200">3</span>
+<span class="text-[13px] tracking-tight">签约付款</span>
+</div>
+<span class="material-symbols-outlined text-[16px] text-slate-400">chevron_right</span>
+</a>
+<!-- Stage 4 -->
+<a class="group flex items-center justify-between px-3.5 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 transition-all" data-path="production-delivery" href="#">
+<div class="flex items-center gap-2.5">
+<span class="w-5 h-5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-mono flex items-center justify-center font-medium group-hover:bg-slate-200">4</span>
+<span class="text-[13px] tracking-tight">生产承接</span>
+</div>
+<span class="material-symbols-outlined text-[16px] text-slate-400">chevron_right</span>
+</a>
+</nav>
+<!-- Workspace Section -->
+<div class="px-5 pt-6 pb-2">
+<span class="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">工作空间</span>
+</div>
+<nav class="flex flex-col gap-1 px-3">
+<a class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 text-[13px] font-medium transition-colors" data-path="my-projects" href="#">
+<span class="material-symbols-outlined text-[18px] text-slate-400">folder_managed</span>
+<span>我的交付项目</span>
+</a>
+<a class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 text-[13px] font-medium transition-colors" data-path="engineering-spec" href="#">
+<span class="material-symbols-outlined text-[18px] text-slate-400">terminal</span>
+<span>系统架构与规约</span>
+</a>
+</nav>
+</div>
+<!-- Engine Status Bottom Card -->
+<div class="p-4 border-t border-slate-100">
+<div class="p-3 rounded-2xl bg-gradient-to-br from-slate-50 to-indigo-50/40 border border-slate-200/60 flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="text-[11px] font-medium text-slate-500">调度引擎状态</span>
+<span class="flex items-center gap-1.5">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+</span>
+<span class="text-[10px] font-semibold font-mono text-emerald-600">ONLINE</span>
+</span>
+</div>
+<div class="flex items-baseline justify-between">
+<span class="font-mono text-[12px] text-slate-900 font-semibold tracking-tight">GRAVITY-CORE</span>
+<span class="text-[10px] font-mono text-indigo-600 font-medium">v4.1</span>
+</div>
+<div class="w-full bg-slate-200/80 h-1.5 rounded-full overflow-hidden">
+<div class="bg-gradient-to-r from-indigo-500 to-cyan-400 h-full w-4/5 rounded-full"></div>
+</div>
+</div>
+</div>
+</aside>
+<!-- MAIN AREA (OFFSET 64) -->
+<div class="pl-64">
+<!-- Top Global Header -->
+<header class="fixed top-0 left-64 right-0 h-16 bg-white/85 backdrop-blur-md border-b border-slate-200/80 z-40 flex items-center justify-between px-8 shadow-[0_1px_12px_rgba(15,23,42,0.03)]">
+<!-- Breadcrumb Nav -->
+<nav class="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+<a class="px-3 py-1 rounded-lg text-slate-600 text-[13px] font-medium hover:text-slate-900 transition-colors" data-path="home" href="#">首页</a>
+<a aria-current="page" class="px-3.5 py-1 rounded-lg bg-white text-indigo-600 shadow-sm border border-slate-200/50 text-[13px] font-semibold transition-all" data-path="prd-analysis" href="#">需求分析 (PRD)</a>
+<a class="px-3 py-1 rounded-lg text-slate-600 text-[13px] font-medium hover:text-slate-900 transition-colors" data-path="demo-experience" href="#">Demo 体验</a>
+<a class="px-3 py-1 rounded-lg text-slate-600 text-[13px] font-medium hover:text-slate-900 transition-colors" data-path="contract-and-payment" href="#">签约付款</a>
+<a class="px-3 py-1 rounded-lg text-slate-600 text-[13px] font-medium hover:text-slate-900 transition-colors" data-path="production-delivery" href="#">生产承接</a>
+</nav>
+<!-- Top Right Status & Actions -->
+<div class="flex items-center gap-4">
+<div class="hidden lg:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50/80 border border-emerald-200/60">
+<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+<span class="text-[12px] font-medium text-emerald-800">浏览器已自动保存 · 绑定可跨设备</span>
+</div>
+<a class="text-[13px] font-medium text-slate-600 hover:text-slate-900 px-2 py-1 transition-colors" data-path="my-projects" href="#">我的项目</a>
+<button class="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-[13px] font-medium rounded-xl border border-slate-200/80 shadow-xs transition-all" type="button">
+<span class="material-symbols-outlined text-[16px] text-slate-500">save</span>
+<span>保存项目</span>
+</button>
+<div class="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-600 to-indigo-400 p-[1.5px] shadow-sm">
+<div class="w-full h-full bg-white rounded-full flex items-center justify-center text-indigo-600 font-semibold text-xs">
+<span class="material-symbols-outlined text-[18px]">person</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main View Workspace -->
+<main class="relative pt-16 min-h-screen bg-[#F8FAFC]">
+<div class="flex flex-col w-full">
+<!-- Top Command Context Bar -->
+<header class="px-8 py-4 bg-white/95 backdrop-blur-sm border-b border-slate-200/70 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-16 z-30">
+<div class="flex items-center gap-4 flex-wrap min-w-0">
+<div class="flex items-center gap-1.5 text-slate-500 font-mono text-[12px] bg-slate-100/70 px-2.5 py-1 rounded-lg border border-slate-200/60">
+<span class="font-medium text-slate-800">SG-PRJ-20261015-0881</span>
+<span class="text-slate-400">/</span>
+<span class="text-indigo-600 font-semibold">STAGE-01</span>
+</div>
+<div class="h-4 w-[1px] bg-slate-200 hidden sm:block"></div>
+<div class="flex items-center gap-3 min-w-0">
+<h1 class="text-[18px] font-bold text-slate-900 truncate tracking-tight">智能企业客户预约与工单调度系统</h1>
+<span class="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60 text-[11px] font-semibold shrink-0">
+                PRD v1.2 (草稿待确认)
+              </span>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="flex items-center gap-2.5 shrink-0">
+<button class="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-medium border border-slate-200/80 shadow-xs transition-all flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[17px] text-slate-500">forum</span>
+<span>对话调优</span>
+</button>
+<button class="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-[13px] font-medium border border-slate-200/80 shadow-xs transition-all flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[17px] text-slate-500">download</span>
+<span>导出 (PDF/Word)</span>
+</button>
+<button class="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-600 to-tech-blue text-white text-[13px] font-semibold shadow-md shadow-indigo-500/25 hover:shadow-indigo-500/35 hover:brightness-105 active:scale-[0.99] transition-all flex items-center gap-2 group" id="generate-demo-btn" type="button">
+<span>确认并生成 Demo</span>
+<span class="material-symbols-outlined text-[18px] transition-transform group-hover:translate-x-0.5">arrow_forward</span>
+</button>
+</div>
+</header>
+<!-- Dual-Column Workspace Grid -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-6 p-8 min-h-[calc(100vh-8.5rem)]">
+<!-- LEFT PANEL: AI Clarification & Convergence Engine (5 cols) -->
+<div class="xl:col-span-5 flex flex-col gap-4">
+<!-- Flow Convergence Tracker Card -->
+<div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.05)] flex flex-col gap-3.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="relative flex h-2.5 w-2.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
+</span>
+<span class="text-[15px] font-bold text-slate-900 tracking-tight">逐步澄清与收敛流水线</span>
+</div>
+<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-cyan-500/10 via-emerald-500/10 to-indigo-500/10 border border-cyan-200/60 text-cyan-700 font-mono text-[12px] font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+<span>收敛度 92%</span>
+</div>
+</div>
+<!-- Metric Progress Bar -->
+<div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden p-0.5 border border-slate-200/50">
+<div class="bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-500 h-full rounded-full transition-all duration-700 ease-out shadow-xs" style="width: 92%;"></div>
+</div>
+<!-- Status Stage Tag Pills -->
+<div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+<span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200/70 text-[11px] font-medium flex items-center gap-1 shadow-xs">
+<span class="text-emerald-600 font-bold">✓</span> 目标与角色
+                </span>
+<span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200/70 text-[11px] font-medium flex items-center gap-1 shadow-xs">
+<span class="text-emerald-600 font-bold">✓</span> 主流程
+                </span>
+<span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200/70 text-[11px] font-medium flex items-center gap-1 shadow-xs">
+<span class="text-emerald-600 font-bold">✓</span> 功能与边界
+                </span>
+<span class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-[11px] flex items-center gap-1 shadow-xs animate-pulse">
+<span class="text-indigo-600 font-bold">⚡</span> 约束条件
+                </span>
+<span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 border border-slate-200/70 text-[11px] font-medium">
+                  验收方式
+                </span>
+</div>
+</div>
+<!-- Dialogue Timeline Stream -->
+<div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.05)] flex flex-col gap-4 flex-1 overflow-y-auto max-h-[620px]">
+<!-- User Initial Requirement Card -->
+<div class="flex flex-col items-end gap-1.5">
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-medium text-slate-400">客户业务架构师 · 10:24</span>
+<div class="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-mono text-[11px] flex items-center justify-center font-bold">U</div>
+</div>
+<div class="max-w-[92%] p-4 rounded-2xl rounded-tr-sm bg-slate-50 border border-slate-200/70 text-slate-800 shadow-xs text-[13px] leading-relaxed">
+                  我们需要为大型售后及驻场维保团队设计一套调度引擎。要求技工收到微信小程序派单后可以一键签到，并自动计算距离客户现场的最优路线与冲突提醒。
+                  <div class="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center gap-2">
+<div class="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200/80 flex items-center gap-2 shadow-xs">
+<span class="material-symbols-outlined text-[16px] text-indigo-600">attachment</span>
+<span class="font-mono text-[11px] text-slate-700 truncate max-w-[190px]">field-dispatch-matrix-v1.sketch</span>
+<span class="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">1.4MB</span>
+</div>
+</div>
+</div>
+</div>
+<!-- AI Gravity Clarifier Bubble (AI Glow Aesthetic) -->
+<div class="flex flex-col items-start gap-1.5">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow-xs">
+<span class="material-symbols-outlined text-[13px]">auto_awesome</span>
+</div>
+<span class="text-[12px] font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 bg-clip-text text-transparent">Gravity Clarifier (架构顾问)</span>
+<span class="text-[11px] font-mono text-slate-400">10:26</span>
+</div>
+<div class="max-w-[95%] p-4 rounded-2xl rounded-tl-sm bg-gradient-to-br from-indigo-50/70 via-white to-cyan-50/50 border border-indigo-100/90 shadow-[0_4px_16px_-4px_rgba(79,70,229,0.08)] flex flex-col gap-3">
+<p class="text-[13px] text-slate-800 leading-relaxed">
+                    需求结构已建档。为了锁定排期核心算法的复杂度边界，本轮向您澄清 <span class="font-bold text-indigo-600 underline decoration-indigo-300 decoration-2 underline-offset-2">2 个核心异常与规则策略</span>：
+                  </p>
+<div class="p-3 rounded-xl bg-white/90 border border-indigo-100 text-[12px] font-semibold text-slate-900 shadow-xs flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+<span>Q1: 当技工在途发生交通堵塞或上一单超时，是否允许调度中台自动跨半径抢单/改派？</span>
+</div>
+<!-- Clarification Options -->
+<div class="grid grid-cols-1 gap-2 mt-0.5">
+<label class="p-3 rounded-xl bg-white/80 border border-slate-200/70 hover:border-slate-300 cursor-pointer transition-all flex items-start gap-3">
+<input class="mt-0.5 text-indigo-600 focus:ring-0 border-slate-300" disabled="" name="opt_reassign" type="radio"/>
+<div class="flex flex-col">
+<span class="text-[12px] font-semibold text-slate-800">策略 A: 支持全自动跨区改派</span>
+<span class="text-[11px] text-slate-500 mt-0.5">调度引擎实时置换次优技工，并在企业微信通知受影响双方。</span>
+</div>
+</label>
+<label class="p-3 rounded-xl bg-gradient-to-r from-indigo-50/90 to-cyan-50/70 border border-indigo-300/80 ring-2 ring-indigo-500/10 flex items-start gap-3 shadow-xs">
+<input checked="" class="mt-0.5 text-indigo-600 focus:ring-0 border-indigo-400" name="opt_reassign" type="radio"/>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<span class="text-[12px] font-bold text-indigo-900">策略 B: 仅触发预警，由调度专员手工介入</span>
+<span class="px-2 py-0.5 rounded-md bg-emerald-500 text-white font-mono text-[10px] font-semibold shadow-xs">已采纳</span>
+</div>
+<span class="text-[11px] text-slate-600 mt-0.5">高亮异常状态工单，优先稳妥并由人工调度专员二次一键指派。</span>
+</div>
+</label>
+</div>
+</div>
+</div>
+<!-- User Confirmation Bubble -->
+<div class="flex flex-col items-end gap-1.5">
+<div class="flex items-center gap-2">
+<span class="text-[11px] font-medium text-slate-400">客户业务架构师 · 10:29</span>
+<div class="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-mono text-[11px] flex items-center justify-center font-bold">U</div>
+</div>
+<div class="max-w-[92%] p-4 rounded-2xl rounded-tr-sm bg-slate-50 border border-slate-200/70 text-slate-800 shadow-xs text-[13px] leading-relaxed">
+                  选择策略 B：前期优先稳妥，仅触发高亮预警并由人工调度专员一键重派。另外，必须在移动端提供无网络离线签到功能，等网络恢复再补传数据。
+                </div>
+</div>
+<!-- AI Synced PRD Notification Banner -->
+<div class="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50 via-cyan-50/40 to-white border border-indigo-200/70 flex items-start gap-3 shadow-xs">
+<div class="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+<span class="material-symbols-outlined text-[16px]">sync_saved_locally</span>
+</div>
+<div class="flex flex-col gap-0.5 min-w-0">
+<span class="text-[12px] font-bold text-indigo-900">PRD 规范已增量刷新并重算基线</span>
+<span class="text-[12px] text-slate-600 leading-relaxed">
+                    已将「弱网/离线签到」标记为 <span class="text-rose-600 font-bold bg-rose-50 px-1 py-0.5 rounded border border-rose-200">P0 核心特性</span>，异常工单流转规则已更新为「人工重派兜底模式」。右侧 PRD 文档已实时增量刷新。
+                  </span>
+</div>
+</div>
+</div>
+<!-- Dialogue Clarification Input Box -->
+<div class="bg-white rounded-2xl p-3 border border-slate-200/80 shadow-[0_4px_20px_-4px_rgba(15,23,42,0.05)] flex flex-col gap-2">
+<textarea class="w-full bg-transparent resize-none p-2 text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none" placeholder="补充您的约束逻辑或回答 AI 提问 (例如：客户工单服务费是否包含备件费用结算？)..." rows="2"></textarea>
+<div class="flex items-center justify-between pt-1 border-t border-slate-100">
+<div class="flex items-center gap-1">
+<button class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" title="语音录入" type="button">
+<span class="material-symbols-outlined text-[19px]">mic</span>
+</button>
+<button class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" title="上传附件" type="button">
+<span class="material-symbols-outlined text-[19px]">attach_file</span>
+</button>
+<button class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" title="插入数据模板" type="button">
+<span class="material-symbols-outlined text-[19px]">data_array</span>
+</button>
+</div>
+<button class="px-4 py-1.5 rounded-xl bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 flex items-center gap-1.5 shadow-sm shadow-indigo-500/20 active:scale-[0.98] transition-all" type="button">
+<span>提交澄清</span>
+<span class="material-symbols-outlined text-[15px]">send</span>
+</button>
+</div>
+</div>
+</div>
+<!-- RIGHT PANEL: Structured PRD Specification Viewer (7 cols) -->
+<div class="xl:col-span-7 flex flex-col gap-4">
+<div class="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_24px_-4px_rgba(15,23,42,0.06)] flex flex-col flex-1 overflow-hidden">
+<!-- Document Meta Header -->
+<div class="p-5 bg-gradient-to-b from-slate-50/80 to-white border-b border-slate-200/70 flex flex-col gap-3">
+<div class="flex items-center justify-between flex-wrap gap-2">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-200/80 flex items-center justify-center text-indigo-600 shadow-xs">
+<span class="material-symbols-outlined text-[20px]">description</span>
+</div>
+<div class="flex flex-col">
+<h2 class="text-[16px] font-bold text-slate-900 tracking-tight">结构化需求规格说明书 (PRD)</h2>
+<span class="font-mono text-[10px] text-slate-400">ISO/IEC/IEEE 29148:2018</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-mono text-[11px] font-semibold flex items-center gap-1.5 shadow-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+<span>核心功能已收敛</span>
+</span>
+<span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/80 font-mono text-[11px] font-medium shadow-xs">
+                      2项次要指标待确认
+                    </span>
+</div>
+</div>
+<!-- Section Jump Anchor Navigation Pills -->
+<div class="flex items-center gap-1.5 overflow-x-auto pt-1 pb-0.5">
+<a class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-[12px] font-semibold shadow-xs whitespace-nowrap" href="#sec-1">1. 文档信息</a>
+<a class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-[12px] font-medium whitespace-nowrap transition-colors" href="#sec-2">2. 业务背景与指标</a>
+<a class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-[12px] font-medium whitespace-nowrap transition-colors" href="#sec-3">3. 范围与优先级</a>
+<a class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-[12px] font-medium whitespace-nowrap transition-colors" href="#sec-4">4. 核心调度流程</a>
+<a class="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-[12px] font-medium whitespace-nowrap transition-colors" href="#sec-5">5. 验收标准</a>
+</div>
+</div>
+<!-- Spec Body Content -->
+<div class="p-6 flex flex-col gap-6 overflow-y-auto max-h-[720px]">
+<!-- Section 1.0 Document Metadata -->
+<section class="flex flex-col gap-3" id="sec-1">
+<div class="flex items-center justify-between pb-1 border-b border-slate-100">
+<span class="text-[14px] font-bold text-slate-900 tracking-tight">1.0 文档元数据 (Metadata)</span>
+<span class="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">BASELINE_LOCK: NO</span>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+<div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 flex flex-col">
+<span class="text-[11px] font-medium text-slate-400">项目编号</span>
+<span class="font-mono text-[13px] font-semibold text-slate-900 truncate mt-0.5">SG-FSD-09</span>
+</div>
+<div class="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-200/70 flex flex-col">
+<span class="text-[11px] font-medium text-indigo-600">当前基线版本</span>
+<span class="font-mono text-[13px] font-bold text-indigo-700 truncate mt-0.5">v1.2 (Pending Lock)</span>
+</div>
+<div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 flex flex-col">
+<span class="text-[11px] font-medium text-slate-400">建议实现周期</span>
+<span class="font-mono text-[13px] font-semibold text-slate-900 truncate mt-0.5">3 周 (快速原型)</span>
+</div>
+<div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 flex flex-col">
+<span class="text-[11px] font-medium text-slate-400">协同负责人</span>
+<span class="font-mono text-[13px] font-semibold text-slate-900 truncate mt-0.5">Gravity Clarifier / CPO</span>
+</div>
+</div>
+</section>
+<!-- Section 2.0 Business Target & Metrics -->
+<section class="flex flex-col gap-3" id="sec-2">
+<div class="flex items-center justify-between pb-1 border-b border-slate-100">
+<span class="text-[14px] font-bold text-slate-900 tracking-tight">2.0 业务背景与量化指标 (OKRs)</span>
+<span class="font-mono text-[11px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60">3 KPI METRICS ACTIVE</span>
+</div>
+<p class="text-[13px] text-slate-600 leading-relaxed">
+                    解决全国驻场维保业务派单滞后、路线重叠率高、异常拥堵无预警等瓶颈。通过启发式空间索引算法实现分钟级运力匹配。
+                  </p>
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+<div class="p-4 rounded-xl bg-gradient-to-br from-indigo-50/60 to-white border border-indigo-100 flex flex-col gap-1 shadow-xs">
+<span class="text-[11px] font-medium text-indigo-600">响应时效指标</span>
+<span class="text-[24px] font-bold text-indigo-600 tracking-tight">≤ 8 <span class="text-[13px] text-slate-500 font-normal">分钟</span></span>
+<span class="text-[11px] text-slate-500">自客户下单至算法派单完成</span>
+</div>
+<div class="p-4 rounded-xl bg-gradient-to-br from-emerald-50/60 to-white border border-emerald-100 flex flex-col gap-1 shadow-xs">
+<span class="text-[11px] font-medium text-emerald-700">同城空驶里程率</span>
+<span class="text-[24px] font-bold text-emerald-600 tracking-tight">≤ 18%</span>
+<span class="text-[11px] text-slate-500">动态聚类路线压缩 22% 损耗</span>
+</div>
+<div class="p-4 rounded-xl bg-gradient-to-br from-cyan-50/60 to-white border border-cyan-100 flex flex-col gap-1 shadow-xs">
+<span class="text-[11px] font-medium text-cyan-700">履约准时交付率</span>
+<span class="text-[24px] font-bold text-slate-900 tracking-tight">99.2%</span>
+<span class="text-[11px] text-slate-500">支持离线暂存及双向时戳验证</span>
+</div>
+</div>
+</section>
+<!-- Section 3.0 Scope & Priority Matrix -->
+<section class="flex flex-col gap-3" id="sec-3">
+<div class="flex items-center justify-between pb-1 border-b border-slate-100">
+<span class="text-[14px] font-bold text-slate-900 tracking-tight">3.0 交付范围与优先级矩阵 (Scope &amp; Priority)</span>
+<span class="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">MoSCoW FRAMEWORK</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<!-- In-Scope Card -->
+<div class="p-4 rounded-xl bg-emerald-50/40 border border-emerald-200/80 flex flex-col gap-3 shadow-xs">
+<div class="flex items-center gap-2 text-emerald-800 font-bold text-[13px]">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span>In-Scope (本期必须包含 - P0/P1)</span>
+</div>
+<div class="flex flex-col gap-2">
+<div class="p-3 rounded-xl bg-white border border-emerald-100 shadow-xs flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 font-mono text-[10px] font-bold">P0</span>
+<span class="text-[13px] font-bold text-slate-900">客户预约微信微应用</span>
+</div>
+<span class="text-[12px] text-slate-600 mt-1">支持服务品类选型、多地址簿及期望时间窗槽位预定。</span>
+</div>
+<div class="p-3 rounded-xl bg-white border border-emerald-100 shadow-xs flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 font-mono text-[10px] font-bold">P0</span>
+<span class="text-[13px] font-bold text-slate-900">智能排班调度总控看板</span>
+</div>
+<span class="text-[12px] text-slate-600 mt-1">技工实时负荷甘特图、同城运力热力图与人工调配工作台。</span>
+</div>
+<div class="p-3 rounded-xl bg-white border-2 border-indigo-200 shadow-xs flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200 font-mono text-[10px] font-bold">P0</span>
+<span class="text-[13px] font-bold text-indigo-700">移动履约端 (支持弱网/离线签到)</span>
+</div>
+<span class="text-[12px] text-slate-600 mt-1">基于 SQLite 本地暂存 GPS 时戳，连网后自动化幂等补传。</span>
+</div>
+<div class="p-3 rounded-xl bg-white border border-emerald-100 shadow-xs flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200 font-mono text-[10px] font-bold">P1</span>
+<span class="text-[13px] font-bold text-slate-900">多渠道服务触发提醒通知</span>
+</div>
+<span class="text-[12px] text-slate-600 mt-1">企微应用消息推送、SMS 关键节点短信通知与客户工单订阅。</span>
+</div>
+</div>
+</div>
+<!-- Out-of-Scope Card -->
+<div class="p-4 rounded-xl bg-rose-50/30 border border-rose-200/60 flex flex-col gap-3 shadow-xs">
+<div class="flex items-center gap-2 text-rose-700 font-bold text-[13px]">
+<span class="w-2 h-2 rounded-full bg-rose-400"></span>
+<span>Out-of-Scope (明确排除 - 延后阶段)</span>
+</div>
+<div class="flex flex-col gap-2">
+<div class="p-3 rounded-xl bg-white/90 border border-rose-100 shadow-xs flex items-start gap-2.5">
+<span class="material-symbols-outlined text-[17px] text-rose-500 shrink-0 mt-0.5">block</span>
+<div class="flex flex-col">
+<span class="text-[12px] font-semibold text-slate-800">SAP ERP 备件存货实时账期冲抵</span>
+<span class="text-[11px] text-slate-500 mt-0.5">本期采用 CSV 格式手工对账，待 Phase 2 再实施 RFC 接口对接。</span>
+</div>
+</div>
+<div class="p-3 rounded-xl bg-white/90 border border-rose-100 shadow-xs flex items-start gap-2.5">
+<span class="material-symbols-outlined text-[17px] text-rose-500 shrink-0 mt-0.5">block</span>
+<div class="flex flex-col">
+<span class="text-[12px] font-semibold text-slate-800">C 端终端用户直连微信/支付宝收银</span>
+<span class="text-[11px] text-slate-500 mt-0.5">当前客户群体限定为 B2B 签约大客户，不开放零散个人散户直接微信支付。</span>
+</div>
+</div>
+<div class="p-3 rounded-xl bg-white/90 border border-rose-100 shadow-xs flex items-start gap-2.5">
+<span class="material-symbols-outlined text-[17px] text-rose-500 shrink-0 mt-0.5">block</span>
+<div class="flex flex-col">
+<span class="text-[12px] font-semibold text-slate-800">跨城市航空/干线冷链调度集成</span>
+<span class="text-[11px] text-slate-500 mt-0.5">算法模型仅聚焦同城半径 50km 内的技工与备件仓路径。</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 4.0 Core Workflow Architecture -->
+<section class="flex flex-col gap-3" id="sec-4">
+<div class="flex items-center justify-between pb-1 border-b border-slate-100">
+<span class="text-[14px] font-bold text-slate-900 tracking-tight">4.0 核心调度状态机模型 (State Machine)</span>
+<span class="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">STATE_FLOW_DIAGRAM</span>
+</div>
+<!-- Flow Steps with Modern Connected Line -->
+<div class="p-4 rounded-xl bg-gradient-to-r from-slate-50 via-indigo-50/30 to-slate-50 border border-slate-200/80">
+<div class="grid grid-cols-1 sm:grid-cols-4 gap-3 relative">
+<div class="p-3.5 rounded-xl bg-white border border-slate-200/70 shadow-xs flex flex-col gap-1.5 relative z-10">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[11px] font-bold text-slate-400">01 / DRAFT</span>
+<span class="w-2 h-2 rounded-full bg-slate-400"></span>
+</div>
+<span class="text-[13px] font-bold text-slate-900">工单初创</span>
+<span class="text-[11px] text-slate-500 leading-normal">客户微应用提交或企业客响台录入</span>
+</div>
+<div class="p-3.5 rounded-xl bg-white border-2 border-indigo-300 shadow-xs flex flex-col gap-1.5 relative z-10">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[11px] font-bold text-indigo-600">02 / MATCHED</span>
+<span class="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>
+</div>
+<span class="text-[13px] font-bold text-indigo-900">算法派单</span>
+<span class="text-[11px] text-slate-600 leading-normal">距离/技能/忙闲评分计算最优推荐</span>
+</div>
+<div class="p-3.5 rounded-xl bg-white border border-emerald-300 shadow-xs flex flex-col gap-1.5 relative z-10">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[11px] font-bold text-emerald-600">03 / IN_TRANSIT</span>
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+</div>
+<span class="text-[13px] font-bold text-slate-900">签到履约</span>
+<span class="text-[11px] text-slate-500 leading-normal">移动端打卡签到 (支持离线签名同步)</span>
+</div>
+<div class="p-3.5 rounded-xl bg-white border border-slate-200/70 shadow-xs flex flex-col gap-1.5 relative z-10">
+<div class="flex items-center justify-between">
+<span class="font-mono text-[11px] font-bold text-slate-500">04 / CLOSED</span>
+<span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+</div>
+<span class="text-[13px] font-bold text-slate-900">工单闭环</span>
+<span class="text-[11px] text-slate-500 leading-normal">客户电子回单签署与满意度评价</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Sticky Bottom Parser Audit Indicator -->
+<div class="p-4 bg-slate-50/90 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+<div class="flex items-center gap-3 flex-wrap">
+<div class="flex items-center gap-1.5 font-mono text-[11px] text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200/70 shadow-xs">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span class="font-bold text-slate-800">SPEC_PARSER: ACTIVE</span>
+</div>
+<span class="text-slate-300 hidden sm:inline">|</span>
+<span class="font-mono text-[11px] text-slate-600">收敛规则数: <strong class="text-indigo-600">18</strong> 条已锁定</span>
+<span class="text-slate-300 hidden sm:inline">|</span>
+<span class="font-mono text-[11px] text-slate-500 truncate">基线语义哈希: <span class="text-slate-700">0x4a9b7e92c28f01b</span></span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[11px] text-slate-400 font-medium">已准备生成下一阶段工程原语</span>
+<button class="px-3 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-semibold transition-all shadow-xs" type="button">
+                    核对规则表
+                  </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Micro-interaction JS -->
+<script>
+        document.getElementById('generate-demo-btn')?.addEventListener('click', function() {
+          const btn = this;
+          const originalText = btn.innerHTML;
+          btn.innerHTML = `<span class="material-symbols-outlined text-[18px] animate-spin">refresh</span><span>调度引擎生成中...</span>`;
+          btn.classList.add('opacity-90', 'pointer-events-none');
+          
+          setTimeout(() => {
+            alert('已确认 PRD v1.2 需求规格！系统正在调度 Gravity 编译器生成高保真交互 Demo 原型。');
+            btn.innerHTML = originalText;
+            btn.classList.remove('opacity-90', 'pointer-events-none');
+          }, 1200);
+        });
+      </script>
+</main>
+</div>
+</body></html>

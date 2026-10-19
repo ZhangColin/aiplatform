@@ -1,0 +1,134 @@
+[IMG: 语义引力_原PPT深色圆底Logo.png]
+语义引力
+OS
+Semantic Gravity · Delivery OS
+首页
+需求分析 (PRD)
+Demo 体验
+签约付款
+生产承接
+浏览器已自动保存 · 绑定可跨设备
+我的项目
+save
+保存项目
+person
+SEMANTIC GRAVITY · AI NATIVE DELIVERY OS
+你想做一个什么产品？
+聊清需求，形成 PRD，再体验你的专属 Demo。所见即所得，零盲盒交付。
+history
+草稿恢复
+企业内部CRM与智能工单管理系统
+· 2小时前自动暂存
+继续梳理
+arrow_forward
+产品需求描述
+attach_file
+附加资料
+verified_user
+免注册即可开始 · 私有云自动隔离保存
+开始梳理需求
+arrow_forward
+calendar_clock 做一个预约系统
+north_east
+移动端选时、日历排期与自动化核销看板
+table_convert 把表格流程做成工具
+north_east
+多表分散统计转为结构化协同与权限系统
+psychology 我有想法，帮我理清
+north_east
+语义启发式对齐，层层拆解直接生成结构化PRD
+Operational Workflow
+从需求对话到可交互 Demo，再衔接签约与生产
+全流程严谨闭环 · 验证认可后付款开工 · 零盲盒交付机制
+契约驱动
+1:1高保真Demo
+PHASE 01
+阶段一：语义探索与可交互验证
+纯自然语言对齐 · 毫秒级生成验证
+STEP 01
+需求输入
+文本 / 脑图 / 表格
+edit_note
+STEP 02
+问答澄清
+启发式补齐逻辑缺口
+forum
+STEP 03
+PRD 确认
+自动化规范文档生成
+description
+CORE ARTIFACT
+STEP 04
+1 个 Demo
+smart_display
+真实可点击、全交互体验
+verified
+STEP 05
+反馈循环
+反馈迭代
+按反馈毫秒更新Demo
+autorenew
+输入直达
+trending_flat
+对齐逻辑
+trending_flat
+输出规格
+trending_flat
+← 按反馈重编译 / 满意则进入签约 →
+check_circle 认可Demo后锁定版本 · 开启履约通道
+PHASE 02
+阶段二：契约锁定与履约保障
+法务级电子合同 · 资金存管核验
+STEP 06
+确认版本
+固化PRD与UI交互拓扑
+lock
+STEP 07
+合同签署
+规范权责与生产周期
+draw
+STEP 08
+开工款核验
+对公打款/网银直连对账
+receipt_long
+STEP 09 · FINAL
+待安排生产
+precision_manufacturing
+生产集群排期接入
+rocket_launch
+shield
+语义引力核心保障机制
+合同要求的签署完成且开工付款条件满足后，才正式划入生产排期。在此之前，需求沟通、PRD文档梳理以及 1 个高保真 Demo 的迭代验证均无需承担不可预期的盲盒风险。
+timer
+15
+min
+PRD 快速对齐生成
+多轮自然语言提问澄清，自动结构化生成标准化软件规格书。
+devices
+1:1
+仿真
+真实可操作 DEMO 验证
+拒绝静态原型画饼，直接体验完整的前后端交互与业务链路。
+gavel
+100
+%
+认可后启动付款开工
+PRD 与 Demo 双重确认，契约严格锁定生产交付边界与周期。
+chat_bubble_outline
+0
+门槛
+纯自然语言即可发起
+无需专业技术背景或编写文档，对话即可将业务灵感转化为系统工程。
+SECURITY AUDITED
+企业级私有化数据隔离 · 全链路传输加密
+服务协议
+隐私政策
+免责说明
+交付规范标准 (SLA)
+[IMG: 语义引力_原PPT深色圆底Logo.png]
+语义引力 SEMANTIC GRAVITY
+· AI NATIVE DELIVERY OS
+© 2025 语义引力 (Semantic Gravity) AI Native Delivery Machine. All rights reserved.
+安全与合规
+工程规范
+API 状态

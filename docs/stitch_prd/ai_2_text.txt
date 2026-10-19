@@ -1,0 +1,165 @@
+[IMG: 语义引力 Logo]
+语义引力
+DELIVERY PIPELINE
+交付生命周期阶段
+✓
+需求分析 (PRD)
+chevron_right
+✓
+Demo 体验
+chevron_right
+3
+签约付款
+4
+生产承接
+chevron_right
+工作空间
+folder_managed
+我的交付项目
+terminal
+系统架构与规约
+调度引擎状态
+GRAVITY-CORE v4.1
+首页
+需求分析 (PRD)
+Demo 体验
+签约付款
+生产承接
+浏览器已自动保存 · 绑定可跨设备
+我的项目
+save
+保存项目
+person
+verified STAGE P06 / P07 · SG-DELIVERY-PROTOCOL-STRICT
+TRANSACTION ID:
+SG-TX-20261015-883A
+存证时间戳:
+2026-10-15 14:38:22 UTC+8
+合同签署与开工款承接校验
+企业级双重准入保障
+商业协议已双向存证锚定，通过双重门禁阻断机制保障交付工程准入，资金与权益全流程合规受护
+清算节点自动轮询中 (10s)
+check
+Step 01 · 商业基线已冻结
+核对范围与报价
+✓
+check
+Step 02 · 双方签署完毕
+签署电子合同
+✓
+03
+Step 03 · 当前阶段
+开工款支付与核验
+核验中
+shield_locked
+严正开工法则 (DELIVERY GOLDEN GATE)
+双重门禁阻断机制
+【允许进入生产】 = 合同要求的全部签署完成
+(已达标 ✓) ＆＆ 合同约定的开工付款条件已满足
+(待上传核验)
+DISPATCH LOCKED
+lock_reset
+交付范围与合同冻结快照
+已定版不可逆
+项目名称
+SG-20261015-089
+智能企业客户预约系统
+PRD v1.2 不可变需求快照
+north_east
+/
+Demo v1.1 终审交互沙盒
+north_east
+交付成果清单 (DELIVERABLES)
+check_circle
+全部前、后端微服务源代码 (含独立商用授权交付与 Git Commit 归档)
+check_circle
+容器化一键部署包 (Docker Compose / K8s manifests) 及生产配置字典
+check_circle
+API Swagger 详细文档、架构运维手册与故障自愈流程说明
+check_circle
+14个工作日专属生产级维保支持 (紧急 Bug 4小时内响应承接)
+财务阶段结算计划
+固定总价包干制
+项目总金额
+¥ 48,000.00
+首期开工款 (40%)
+本次应付
+¥ 19,200.00
+中期验收款 (40%)
+¥ 19,200.00
+尾款结算 (20%)
+¥ 9,600.00
+verified_user
+电子签名存证状态
+双方全部盖章有效
+甲方签署人 (客户方)
+张峰 (授权代表)
+check_circle
+已验签 · 2026-10-15
+乙方签署人 (交付方)
+语义引力数字交付中心
+check_circle
+已验签 · 法人电子印章
+SHA-256 哈希存证证书
+E-SIGN ANCHOR VERIFIED
+7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069
+file_download
+存证证书 ⬇
+payments
+首期开工款结算节点
+清算系统将根据专属子账号与附言自动完成银企互联核账
+当前应付总额
+¥ 19,200.00
+account_balance
+企业公对公转账 (推荐)
+qr_code_2
+微信 / 支付宝企业扫码
+专属企业虚拟结算账户 (自动核账匹配)
+银企直连即时监听
+开户全称
+北京语义引力数字交付科技有限公司
+开户银行
+招商银行北京分行大运村支行
+专属银行子账号
+content_copy 复制账号
+8102 9482 9103 8102 94
+转账汇款附言 (必填)
+content_copy 复制附言
+SG-20261015-089-K1
+系统将在入账后 10 秒内自动触发核对
+企业级聚合网关
+支持微信支付企业版、支付宝企业账户及主流手机银行银联扫码。单笔限额视付款行限额而定。
+交易附言已内嵌
+扫码即时承兑
+汇款凭证上传与核验触发
+上传银行转账电子回单 / 水单 (支持 PDF, PNG, JPG 最大15MB)
+待上传
+cloud_upload
+点击上传银行电子转账回执单
+或将回单文件拖拽至此处，系统自动OCR识别核验流水
+款项等待发起 (请完成对公汇款或扫码)
+系统实时轮询人民银行清算系统状态
+verified
+上传凭证并模拟核验
+rocket_launch
+生产承接工作站 (PRODUCTION TRACK)
+PENDING CLEARANCE
+李明
+李明
+高级交付总监
+stars 历史项目按时交付率 99.4% · 交付架构委员会委员
+生产就绪状态
+待款项核验后自动建仓排期
+预计排期: 7个工作日内完成主线部署
+开工门禁就绪指标 CHECKLIST
+check_circle
+PRD v1.2 范围锁定与架构评估基线完成
+已满足 ✓
+check_circle
+双方数字电子签署与存证书链锁定
+已满足 ✓
+hourglass_empty
+首期开工款 (40% ¥19,200.00) 账户核验到账
+待确认 ⏱️
+info 触发开工后系统将自动下发 GitHub 研发组织协同邀请与每日交付看板权限。
+进入生产看板 →

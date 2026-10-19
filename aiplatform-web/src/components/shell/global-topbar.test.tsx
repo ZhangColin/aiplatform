@@ -27,7 +27,7 @@ const nav = deliveryStageNav("p1", {
 });
 
 function renderTopbar() {
-  return renderToStaticMarkup(<GlobalTopbar projectId="p1" nav={nav} />);
+  return renderToStaticMarkup(<GlobalTopbar projectId="p1" nav={nav} onOpenNav={() => {}} />);
 }
 
 describe("GlobalTopbar（项目空间新壳·顶栏）", () => {
@@ -71,7 +71,7 @@ describe("GlobalTopbar（项目空间新壳·顶栏）", () => {
 
   it("访客态＝「登录」文字入口（me 无数据），不出头像菜单", () => {
     meSeed.me = undefined;
-    const html = renderToStaticMarkup(<GlobalTopbar projectId="p1" nav={nav} />);
+    const html = renderToStaticMarkup(<GlobalTopbar projectId="p1" nav={nav} onOpenNav={() => {}} />);
     expect(html).toContain("登录");
     expect(html).not.toContain('aria-label="个人菜单"');
   });

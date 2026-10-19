@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, FolderCode, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ExternalLink, FolderCode, LoaderCircle, Lock, Monitor, RotateCw, ShieldCheck, Smartphone, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -183,6 +183,8 @@ export function SystemPanel({
     void preview.refetch();
     load();
   };
+  /** 新窗口打开应用真实地址（触碰先行；浏览器条与手机说明位两入口同动作）。 */
+  const openInNewWindow = () => touchThenLoad(() => window.open(url, "_blank", "noopener"));
   /** 地址提交（#125）：解析草稿 → origin 内命中则导航（跨源/空/无 origin 拒绝，回显当前）。 */
   const submitAddress = () => {
     if (!url) return;
@@ -218,7 +220,7 @@ export function SystemPanel({
     <button
       type="button"
       disabled={!pageLive}
-      onClick={() => touchThenLoad(() => window.open(url, "_blank", "noopener"))}
+      onClick={openInNewWindow}
       title="在新窗口打开预览"
       aria-label="在新窗口打开预览"
       className={cn(
@@ -255,6 +257,29 @@ export function SystemPanel({
             {refreshButton}
             {openButton}
           </div>
+        </div>
+      ) : null}
+      {/* 手机体验主动说明（#350，交接包 13.2「Demo 不适配手机时给出新窗口或桌面
+          体验说明」）：生成的 Demo 以桌面为主场景，窄屏（<xl）有真页面即出说明——
+          新窗口全屏或桌面浏览器两出口；按钮与浏览器条新窗口同动作（触碰先行） */}
+      {variant === "demo" && pageLive ? (
+        <div
+          role="note"
+          aria-label="手机体验说明"
+          className="mb-3 flex shrink-0 items-center gap-2.5 rounded-xl border border-tech-blue/25 bg-surface-mist/70 px-3.5 py-2.5 shadow-xs xl:hidden"
+        >
+          <Smartphone className="size-4 shrink-0 text-tech-blue" aria-hidden="true" />
+          <p className="min-w-0 flex-1 text-label-sm leading-relaxed text-ink-secondary">
+            Demo 以桌面体验为主——手机上建议新窗口打开全屏体验，或改用桌面浏览器。
+          </p>
+          <button
+            type="button"
+            onClick={openInNewWindow}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-tech-blue/30 bg-white px-2.5 py-1 text-label-sm font-semibold text-tech-blue transition-colors hover:bg-surface-mist"
+          >
+            <ExternalLink className="size-3.5" aria-hidden="true" />
+            新窗口打开
+          </button>
         </div>
       ) : null}
       <div

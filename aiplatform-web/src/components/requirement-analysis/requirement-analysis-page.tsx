@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MobileAreaSwitch } from "@/components/shell/mobile-area-switch";
 import { useProject } from "@/hooks/use-project";
 import { usePrd, usePrdVersions } from "@/hooks/use-prd";
 import { errorText } from "@/lib/api/api-error";
@@ -17,6 +18,7 @@ import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
 import { usePrdNoticesStore } from "@/lib/store/prd-notices";
+import { cn } from "@/lib/utils";
 
 import { CommandArea } from "../project-page/command-area";
 import { ConvergenceCard } from "./convergence-card";
@@ -54,6 +56,19 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
     if (prd.data) markSeen(projectId);
   }, [prd.data, projectId, markSeen]);
 
+  // 闲聊期（尚无产物）＝对话占全宽；PRD 产出后右栏滑出（判据 = prdProducedAt）。
+  // 移动单区域切换（#350，交接包 13.2——手机以对话为主、切换查看文档）：窄屏
+  //（<xl）双栏退化为「对话/文档」单区域；首产 PRD 自动切文档区一次（右栏滑出
+  // 的移动等价物——渲染期派生态，同 seenOutputs 先例：挂载即在档不重切）。
+  //（hooks 序：chatOnly 与派生态须在下方 isError 早退前——detail 未达按无 PRD 推）
+  const chatOnly = !detail?.prdProducedAt;
+  const [mobileArea, setMobileArea] = useState<"chat" | "doc">("chat");
+  const [seenPrdProduced, setSeenPrdProduced] = useState(!chatOnly);
+  if (!chatOnly !== seenPrdProduced) {
+    setSeenPrdProduced(!chatOnly);
+    if (!chatOnly) setMobileArea("doc");
+  }
+
   // 「断线」语义 = 连上过再掉线（装配口径沿旧项目页）：通道从未连上不武装计时
   const wasConnected = useRef(false);
   useEffect(() => {
@@ -86,8 +101,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
     );
   }
 
-  // 闲聊期（尚无产物）：对话占全宽；PRD 产出后右栏滑出（判据 = prdProducedAt）
-  const chatOnly = !detail?.prdProducedAt;
   const draftPending = !!prd.data?.draftChangeSummary;
   const badge = prdBadgeOf({
     hasPrd: !!detail?.prdProducedAt,
@@ -123,7 +136,9 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
   );
 
   return (
-    <div className="flex min-h-0 flex-col xl:h-[calc(100svh-4rem)]">
+    // 移动同档固定高壳（#350）：各区域独立滚动（长文档独立滚动 13.2）、软键盘
+    // 弹起时壳随视觉视口收缩（interactive-widget=resizes-content 已配根 layout）
+    <div className="flex h-[calc(100svh-4rem)] min-h-0 flex-col">
       <RequirementAnalysisHeader
         projectId={projectId}
         projectName={detail?.name ?? ""}
@@ -139,20 +154,42 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
       {chatOnly ? (
         // 闲聊期：对话占全宽（收敛卡 0/5 全灰兜底在场——五维流水线先行可见）
         <div className="min-h-0 flex-1 p-4 lg:px-8 lg:py-6">
-          <div className="mx-auto flex h-[70svh] max-w-3xl flex-col gap-4 xl:h-full">
+          <div className="mx-auto flex h-full max-w-3xl flex-col gap-4">
             <ConvergenceCard dimensions={prd.data?.readiness?.dimensions} />
             <div className="min-h-0 flex-1">{chat}</div>
           </div>
         </div>
       ) : (
-        // 双栏 5:7（照原型 12 列栅格）；窄屏堆叠（移动端收口归 #350）
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 p-4 lg:p-8 xl:grid-cols-12">
-          <div className="flex h-[70svh] min-h-0 flex-col gap-4 xl:col-span-5 xl:h-auto">
+        // 双栏 5:7（照原型 12 列栅格，≥xl）；窄屏单区域切换（对话/文档，#350）
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:p-8 xl:grid xl:grid-cols-12 xl:gap-6">
+          <div className="shrink-0 xl:hidden">
+            <MobileAreaSwitch
+              areas={[
+                { key: "chat", label: "对话" },
+                { key: "doc", label: "文档" },
+              ]}
+              value={mobileArea}
+              onChange={setMobileArea}
+            />
+          </div>
+          <div
+            data-area="chat"
+            className={cn(
+              "min-h-0 flex-1 flex-col gap-4 xl:col-span-5 xl:flex",
+              mobileArea === "chat" ? "flex" : "hidden",
+            )}
+          >
             <ConvergenceCard dimensions={prd.data?.readiness?.dimensions} />
             <div className="min-h-0 flex-1">{chat}</div>
           </div>
           {/* 首产滑出：滑入动效即状态切换反馈（成果区 outputs-slide-in 同款） */}
-          <div className="h-[80svh] min-h-0 xl:col-span-7 xl:h-auto [animation:outputs-slide-in_.22s_ease-out]">
+          <div
+            data-area="doc"
+            className={cn(
+              "min-h-0 flex-1 xl:col-span-7 xl:block [animation:outputs-slide-in_.22s_ease-out]",
+              mobileArea === "doc" ? "block" : "hidden",
+            )}
+          >
             {prd.isPending ? (
               <Skeleton className="h-full w-full rounded-2xl" />
             ) : prd.data ? (

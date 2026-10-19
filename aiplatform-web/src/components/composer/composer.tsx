@@ -290,6 +290,14 @@ export function Composer({
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onFocus={(e) => {
+          // 软键盘遮挡兜底（#350，交接包 13.2「主要操作不被软键盘遮挡」）：
+          // Chromium 归根 layout 的 interactive-widget=resizes-content（布局视口
+          // 随键盘收缩）；iOS Safari 不支持该属性——键盘弹起动画落幅（~300ms）后
+          // 把输入框滚回视口，桌面已在视口内时 block:nearest 天然零位移
+          const el = e.currentTarget;
+          setTimeout(() => el.scrollIntoView({ block: "nearest", behavior: "smooth" }), 300);
+        }}
         placeholder={placeholder}
         rows={hero ? 3 : 2}
         disabled={disabled}

@@ -90,7 +90,9 @@ export function RequirementAnalysisHeader({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2.5">
+      {/* 动作行：窄屏可换行（#350——对话调优/导出/确认门 CTA 合计超 390px，
+          不换行即横向出血）；≥md 恢复单行收缩 */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2.5 md:flex-nowrap">
         <button
           type="button"
           onClick={onFocusChat}

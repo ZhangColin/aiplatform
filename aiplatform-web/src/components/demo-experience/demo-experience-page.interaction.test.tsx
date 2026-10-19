@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { components } from "@/lib/api/schema";
+import { ApiError } from "@/lib/api/api-error";
 import type { ProjectDetail } from "@/lib/projects/detail";
+import { useM01Store } from "@/lib/store/m01";
 import { useVersionRecordStore } from "@/lib/store/version-record";
 
 import { DemoExperiencePage } from "./demo-experience-page";
@@ -16,6 +18,12 @@ const seed = vi.hoisted(() => ({
   demoVersions: [] as DemoVersion[],
   prdVersions: [] as { versionNo: number }[],
   confirmMutate: vi.fn(),
+  confirmOptions: undefined as { onSuccess?: () => void } | undefined,
+  orderMutate: vi.fn(),
+  orderOptions: undefined as
+    | { onSuccess?: () => void; onError?: (e: unknown) => void }
+    | undefined,
+  routerPush: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-project", () => ({
@@ -30,7 +38,27 @@ vi.mock("@/hooks/use-project", () => ({
 
 vi.mock("@/hooks/use-demo-version", () => ({
   useDemoVersions: () => ({ data: seed.demoVersions }),
-  useConfirmDemoVersion: () => ({ mutate: seed.confirmMutate, isPending: false }),
+  useConfirmDemoVersion: () => ({
+    mutate: (versionNo: number, options?: { onSuccess?: () => void }) => {
+      seed.confirmOptions = options;
+      seed.confirmMutate(versionNo, options);
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock("@/hooks/use-order", () => ({
+  usePlaceOrder: () => ({
+    mutate: (_input?: unknown, options?: { onSuccess?: () => void; onError?: (e: unknown) => void }) => {
+      seed.orderOptions = options;
+      seed.orderMutate();
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: seed.routerPush }),
 }));
 
 vi.mock("@/hooks/use-prd", () => ({
@@ -93,7 +121,12 @@ function renderPage() {
 
 beforeEach(() => {
   seedReadyProject();
-  seed.confirmMutate.mockReset();
+  seed.confirmMutate.mockClear();
+  seed.confirmOptions = undefined;
+  seed.orderMutate.mockClear();
+  seed.orderOptions = undefined;
+  seed.routerPush.mockClear();
+  useM01Store.getState().closeM01();
   useVersionRecordStore.getState().closeVersionRecord();
 });
 
@@ -140,8 +173,8 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认当前版本 · 进入签约流程" }));
 
     expect(seed.confirmMutate).toHaveBeenCalledTimes(2);
-    expect(seed.confirmMutate).toHaveBeenNthCalledWith(1, 1);
-    expect(seed.confirmMutate).toHaveBeenNthCalledWith(2, 1);
+    expect(seed.confirmMutate).toHaveBeenNthCalledWith(1, 1, expect.anything());
+    expect(seed.confirmMutate).toHaveBeenNthCalledWith(2, 1, expect.anything());
   });
 
   it("横幅 Demo 版本 chip 打开项目壳共用的版本记录抽屉", () => {
@@ -179,5 +212,115 @@ describe("Demo 体验页 P05 · 原型结构（#347）", () => {
 
     expect(screen.getByText("项目文件与源码")).toBeTruthy();
     expect(screen.getByText("源码树与文件内容")).toBeTruthy();
+  });
+});
+
+describe("Demo 体验页 · 确认门并入下单（#350：顶栏旧「确认下单」退役的并入位）", () => {
+  it("确认标记成功 → 建单 → 建单成功自动跳签约页", () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认此版本，准备签约" }));
+    expect(seed.confirmMutate).toHaveBeenCalledWith(1, expect.anything());
+    // 确认未收口前不建单（ORD_019 前置：无 Demo 确认版本不可下单）
+    expect(seed.orderMutate).not.toHaveBeenCalled();
+
+    act(() => seed.confirmOptions?.onSuccess?.());
+    expect(seed.orderMutate).toHaveBeenCalledTimes(1);
+    expect(seed.routerPush).not.toHaveBeenCalled();
+
+    act(() => seed.orderOptions?.onSuccess?.());
+    expect(seed.routerPush).toHaveBeenCalledWith("/projects/p1/contract");
+  });
+
+  it("建单被签约门拦（ORD_017/5017）→ 弹 M01（stage-gate），续跑回调重试建单", () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认此版本，准备签约" }));
+    act(() => seed.confirmOptions?.onSuccess?.());
+    act(() => {
+      seed.orderOptions?.onError?.(
+        new ApiError({ status: 403, code: 5017, message: "签约前请先登录绑定账号" }),
+      );
+    });
+
+    expect(useM01Store.getState().open).toBe(true);
+    expect(useM01Store.getState().trigger).toBe("stage-gate");
+    // 绑定后放行：续跑只重建单（版本确认标记已落，不重复打）
+    const resume = useM01Store.getState().resume;
+    expect(typeof resume).toBe("function");
+    seed.orderMutate.mockClear();
+    act(() => resume?.());
+    expect(seed.orderMutate).toHaveBeenCalledTimes(1);
+    expect(seed.confirmMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("建单遇非签约门错误不弹 M01（归 hook toast）", () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认此版本，准备签约" }));
+    act(() => seed.confirmOptions?.onSuccess?.());
+    act(() => {
+      seed.orderOptions?.onError?.(
+        new ApiError({ status: 409, code: 5003, message: "已有未终结订单" }),
+      );
+    });
+
+    expect(useM01Store.getState().open).toBe(false);
+    expect(seed.routerPush).not.toHaveBeenCalled();
+  });
+
+  it("已确认未建单（确认后建单失败/存量）：按钮转「重新提交订单」——入口不死路", () => {
+    renderPage();
+
+    // 确认标记落库、建单失败（非 5017）→ 详情重拉后 confirmedAt 在场、无未终结订单
+    fireEvent.click(screen.getByRole("button", { name: "确认此版本，准备签约" }));
+    act(() => seed.confirmOptions?.onSuccess?.());
+    act(() => {
+      seed.orderOptions?.onError?.(new ApiError({ status: 500, code: 5000, message: "服务繁忙" }));
+    });
+    cleanup(); // 重拉后的新挂载（旧实例退场，防双挂假性多按钮）
+
+    seed.demoVersions = [{ ...seed.demoVersions[0]!, confirmedAt: "2026-10-18T03:00:00Z" }];
+    renderPage();
+
+    const retryButtons = screen.getAllByRole("button", { name: /重新提交订单/ });
+    expect(retryButtons.length).toBeGreaterThanOrEqual(2); // 横幅＋确认卡双位
+    for (const btn of retryButtons) expect(btn.hasAttribute("disabled")).toBe(false);
+
+    // 重试＝直建单（不重复打确认标记）；成功照跳签约页
+    fireEvent.click(retryButtons[0]!);
+    expect(seed.orderMutate).toHaveBeenCalledTimes(2);
+    expect(seed.confirmMutate).toHaveBeenCalledTimes(1);
+    act(() => seed.orderOptions?.onSuccess?.());
+    expect(seed.routerPush).toHaveBeenCalledWith("/projects/p1/contract");
+  });
+
+  it("已确认且已有未终结订单：维持「当前版本已确认」禁用（不出重试位）", () => {
+    seed.demoVersions = [{ ...seed.demoVersions[0]!, confirmedAt: "2026-10-18T03:00:00Z" }];
+    seed.detail = {
+      ...seed.detail!,
+      activeOrder: { id: "o1", status: 1 },
+    } as ProjectDetail;
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: /重新提交订单/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "当前版本已确认" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("Demo 体验页 · 移动单区域切换（#350，交接包 13.2：对话/预览单区域切换）", () => {
+  const areaOf = (name: string) => document.querySelector(`[data-area="${name}"]`);
+
+  it("移动切换件出「预览/对话」两区：默认预览区可见、对话区收起；点「对话」切换", () => {
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "预览" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "对话" }).getAttribute("aria-pressed")).toBe("false");
+    expect(areaOf("preview")?.className).not.toContain("hidden");
+    expect(areaOf("chat")?.className).toContain("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(areaOf("chat")?.className).not.toContain("hidden");
+    expect(areaOf("preview")?.className).toContain("hidden");
   });
 });

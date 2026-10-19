@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "./composer";
@@ -379,5 +379,23 @@ describe("Composer · 澄清形（#346 需求分析页：submitLabel＋数据模
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "插入数据模板" })).toBeNull();
     expect(screen.queryByRole("button", { name: /提交澄清/ })).toBeNull();
+  });
+});
+
+describe("Composer · 软键盘聚焦兜底（#350，交接包 13.2：主要操作不被软键盘遮挡）", () => {
+  it("聚焦输入框延迟滚入视口（iOS 键盘弹起动画后归位；Chromium 归 interactive-widget）", () => {
+    vi.useFakeTimers();
+    const scrollSpy = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const textarea = setup();
+
+    fireEvent.focus(textarea);
+    expect(scrollSpy).not.toHaveBeenCalled(); // 等键盘动画落幅再滚
+    act(() => vi.advanceTimersByTime(300));
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+
+    scrollSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

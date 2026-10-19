@@ -6,11 +6,18 @@ export function DemoConfirmCard({
   pending,
   confirmed,
   onConfirm,
+  orderMissing = false,
+  retryPending = false,
+  onRetryOrder,
 }: {
   disabled: boolean;
   pending: boolean;
   confirmed: boolean;
   onConfirm: () => void;
+  /** 已确认未建单重试位（#350）：按钮转「重新提交订单」直建单（不重打确认标记）。 */
+  orderMissing?: boolean;
+  retryPending?: boolean;
+  onRetryOrder?: () => void;
 }) {
   return (
     <section
@@ -40,11 +47,19 @@ export function DemoConfirmCard({
       </div>
       <button
         type="button"
-        disabled={disabled || pending || confirmed}
-        onClick={onConfirm}
+        disabled={orderMissing ? retryPending : disabled || pending || confirmed}
+        onClick={orderMissing ? onRetryOrder : onConfirm}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-electric-indigo via-electric-indigo to-tech-blue px-4 py-3 text-headline-sm font-bold text-white shadow-md transition-all hover:brightness-105 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
       >
-        {pending ? "正在确认当前版本…" : confirmed ? "当前版本已确认" : "确认当前版本 · 进入签约流程"}
+        {orderMissing
+          ? retryPending
+            ? "正在提交订单…"
+            : "重新提交订单 · 进入签约流程"
+          : pending
+            ? "正在确认当前版本…"
+            : confirmed
+              ? "当前版本已确认"
+              : "确认当前版本 · 进入签约流程"}
         <ArrowRight className="size-4.5" aria-hidden="true" />
       </button>
     </section>

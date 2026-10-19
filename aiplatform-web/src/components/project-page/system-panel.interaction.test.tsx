@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useGenerationStore } from "@/lib/store/generation";
@@ -16,8 +16,8 @@ type HappyDOMWindow = Window & {
 /**
  * 系统面板浏览器条交互契约（#80 验收锚）：桌面/手机宽度切换不重挂 iframe
  * （用户的系统不因换设备丢状态）、手动刷新强制重挂（本地节拍并入预览纪元）、
- * 新窗口打开应用真实地址（window.open(url)，noopener，#126）。沿 outputs-area.interaction
- * 先例（happy-dom 逐文件例外）；断言用原生属性。数据口 mock 掉；假地址用
+ * 新窗口打开应用真实地址（window.open(url)，noopener，#126）。happy-dom 逐文件
+ * 例外；断言用原生属性。数据口 mock 掉；假地址用
  * about:blank——happy-dom 会真去 fetch iframe 的 src，真地址会发网络请求。
  */
 // 预览地址读口换可摆变量：默认 about:blank（happy-dom 不真去 fetch），
@@ -84,7 +84,7 @@ describe("SystemPanel · 设备宽度切换（#80）", () => {
 
     const after = frame();
     expect(after).toBe(before); // 同一 DOM 节点：宽度是样式切换不是重建
-    expect(after.parentElement!.className).toContain("w-[390px]");
+    expect(after.parentElement!.className).toContain("w-[min(390px,100%)]");
   });
 
   it("切回桌面宽度：手机框撤下，iframe 仍不重挂", () => {
@@ -95,7 +95,7 @@ describe("SystemPanel · 设备宽度切换（#80）", () => {
     fireEvent.click(screen.getByRole("button", { name: "桌面预览" }));
 
     expect(frame()).toBe(before);
-    expect(frame().parentElement!.className).not.toContain("w-[390px]");
+    expect(frame().parentElement!.className).not.toContain("w-[min(390px,100%)]");
   });
 });
 
@@ -383,5 +383,29 @@ describe("SystemPanel · 圈注锚回收（#136：区域锚进发送框附件区
     });
 
     expect(useAnnotationStore.getState().annotations.p1).toBeUndefined();
+  });
+});
+
+describe("SystemPanel · Demo 手机说明位（#350，交接包 13.2：Demo 不适配手机时给新窗口或桌面体验说明）", () => {
+  it("Demo 壳出主动说明（窄屏限定 xl:hidden），说明内新窗口打开按钮开应用真实地址", () => {
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SystemPanel
+          projectId="p1"
+          generationState="generating"
+          coderStatus="running"
+          onGenerated={() => {}}
+          variant="demo"
+        />
+      </QueryClientProvider>,
+    );
+
+    const notice = screen.getByRole("note", { name: "手机体验说明" });
+    expect(notice.className).toContain("xl:hidden");
+    expect(notice.textContent).toContain("桌面浏览器");
+
+    fireEvent.click(within(notice).getByRole("button", { name: "新窗口打开" }));
+    expect(openSpy).toHaveBeenCalledWith("about:blank", "_blank", "noopener");
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Save } from "lucide-react";
+import { History, Menu, Save } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -27,12 +27,30 @@ import { cn } from "@/lib/utils";
  * 顶栏挂点——与 Demo 版本 chip 同一抽屉（store 开合契约）。
  */
 
-export function GlobalTopbar({ projectId, nav }: { projectId: string; nav: StageNavItem[] }) {
+export function GlobalTopbar({
+  projectId,
+  nav,
+  onOpenNav,
+}: {
+  projectId: string;
+  nav: StageNavItem[];
+  /** 移动导航抽屉的打开动作（#350 破点①消解——窄屏侧栏抽屉的打开入口）。 */
+  onOpenNav: () => void;
+}) {
   const pathname = usePathname();
   const activeStage = activeStageOf(projectId, pathname);
 
   return (
     <header className="fixed top-0 right-0 left-0 z-40 flex h-16 items-center justify-between gap-4 border-b border-slate-soft/80 bg-glass-card px-4 backdrop-blur-md shadow-e1 lg:left-64 lg:px-8">
+      {/* 移动导航抽屉打开键（窄屏限定——≥lg 阶段侧栏固栏在位） */}
+      <button
+        type="button"
+        onClick={onOpenNav}
+        aria-label="打开导航"
+        className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-slate-soft/60 bg-surface-dawn/80 text-ink-muted transition-colors hover:bg-surface-mist hover:text-ink-primary lg:hidden"
+      >
+        <Menu className="size-4.5" aria-hidden="true" />
+      </button>
       {/* 五行导航（照原型：与侧栏重复亦保留） */}
       <nav
         className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-xl border border-slate-soft/60 bg-surface-dawn/80 p-1"

@@ -22,7 +22,9 @@ import { cn } from "@/lib/utils";
  */
 
 /**
- * 预览设备宽度档：手机档 = 390px 手机框居中，桌面档全幅。
+ * 预览设备宽度档：手机档 = 390px 手机框居中（窄视口不破——框宽 min(390px,100%)，
+ * #350 破点②消解：原固定 390px 在 390/360px 视口两侧被裁；version-view-dialog
+ * 复用同框同消），桌面档全幅。
  * （单源——原系统 tab PreviewDevice 与弹窗 ViewDevice 两份抄本归一。）
  */
 export type PreviewDevice = "desktop" | "mobile";
@@ -68,7 +70,7 @@ export function DeviceFrame({
           className={cn(
             "h-full",
             device === "mobile"
-              ? "w-[390px] shrink-0 overflow-hidden rounded-2xl border shadow-sm"
+              ? "w-[min(390px,100%)] shrink-0 overflow-hidden rounded-2xl border shadow-sm"
               : "w-full",
           )}
         >

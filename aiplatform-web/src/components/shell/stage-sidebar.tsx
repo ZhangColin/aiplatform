@@ -7,6 +7,11 @@ import { usePathname } from "next/navigation";
 import { BrandHeader } from "@/components/brand/brand-header";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   activeStageOf,
   type DeliveryStageKey,
   type StageNavItem,
@@ -21,28 +26,79 @@ import { cn } from "@/lib/utils";
  * （GRAVITY-CORE v4.1＋4/5 进度条，静态照原型）。可达性判定输入
  * （{@link StageNavItem}）由壳装配层单点推导（deliveryStageNav），侧栏只
  * 呈现；个人菜单迁顶栏头像、能做这些已删（#318 拆解）。
+ *
+ * <p>窄屏（&lt;lg）形态＝抽屉（#350 破点①消解——原「抽屉无打开入口」：
+ * 顶栏汉堡键开门，壳持开合态；抽屉内点导航链接即关）。桌面 ≥lg 固栏
+ * 不变；两形态共用同一份内容（StageSidebarContent）。</p>
  */
 
 export function StageSidebar({
   projectId,
   nav,
   currentStage,
+  mobileOpen = false,
+  onMobileOpenChange,
 }: {
   projectId: string;
   nav: StageNavItem[];
   /** 当前阶段（首个未完成——脉冲位）。 */
   currentStage: DeliveryStageKey;
+  /** 移动抽屉开合（壳持态）；缺省＝纯桌面栏（proto/测试直挂面）。 */
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (open: boolean) => void;
 }) {
   const pathname = usePathname();
   const activeStage = activeStageOf(projectId, pathname);
 
   return (
-    <aside className="fixed left-0 top-0 z-50 hidden h-full w-64 flex-col justify-between border-r border-slate-soft/80 bg-glass-card backdrop-blur-md lg:flex shadow-e1">
+    <>
+      <aside className="fixed left-0 top-0 z-50 hidden h-full w-64 flex-col justify-between border-r border-slate-soft/80 bg-glass-card backdrop-blur-md lg:flex shadow-e1">
+        <StageSidebarContent nav={nav} currentStage={currentStage} activeStage={activeStage} />
+      </aside>
+
+      {/* 窄屏抽屉（打开入口＝顶栏汉堡键）；视口长大到 lg 时让位桌面栏 */}
+      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        <SheetContent
+          side="left"
+          aria-label="项目导航"
+          className="w-64 gap-0 border-slate-soft/80 bg-canvas-base p-0 lg:hidden"
+        >
+          <SheetTitle className="sr-only">项目导航</SheetTitle>
+          <div className="flex h-full min-h-0 flex-col justify-between">
+            <StageSidebarContent
+              nav={nav}
+              currentStage={currentStage}
+              activeStage={activeStage}
+              onNavigate={() => onMobileOpenChange?.(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+/** 侧栏内容单源（桌面固栏与移动抽屉共用）：品牌头＋阶段组＋工作空间组＋调度卡。 */
+function StageSidebarContent({
+  nav,
+  currentStage,
+  activeStage,
+  onNavigate,
+}: {
+  nav: StageNavItem[];
+  currentStage: DeliveryStageKey;
+  activeStage: DeliveryStageKey | null;
+  /** 抽屉形态导航后关闭（链接点击即关）；桌面固栏不传。 */
+  onNavigate?: () => void;
+}) {
+  return (
+    <>
       <div className="flex min-h-0 flex-col overflow-y-auto">
         {/* 品牌头＝回首页（新建项目的去向） */}
         <Link
           href="/"
           aria-label="回首页"
+          onClick={onNavigate}
           className="flex h-16 shrink-0 items-center border-b border-slate-soft/60 px-5"
         >
           <BrandHeader />
@@ -60,6 +116,7 @@ export function StageSidebar({
               item={item}
               active={activeStage === item.key}
               current={currentStage === item.key}
+              onNavigate={onNavigate}
             />
           ))}
         </nav>
@@ -72,6 +129,7 @@ export function StageSidebar({
         <nav className="flex flex-col gap-1 px-3" aria-label="工作空间">
           <Link
             href="/projects"
+            onClick={onNavigate}
             className="flex items-center gap-2.5 rounded-xl px-3.5 py-2 text-label-md font-medium text-ink-muted transition-colors hover:bg-surface-dawn/70 hover:text-ink-primary"
           >
             <FolderCog className="size-4.5 text-ink-faint" aria-hidden="true" />
@@ -112,7 +170,7 @@ export function StageSidebar({
           </div>
         </div>
       </div>
-    </aside>
+    </>
   );
 }
 
@@ -121,10 +179,13 @@ function StageRow({
   item,
   active,
   current,
+  onNavigate,
 }: {
   item: StageNavItem;
   active: boolean;
   current: boolean;
+  /** 抽屉形态：点可达链接后关抽屉。 */
+  onNavigate?: () => void;
 }) {
   // 当前阶段脉冲位（原型 ai_2 形：脉冲点替代 chevron）
   const tail = current ? (
@@ -199,7 +260,12 @@ function StageRow({
   }
 
   return (
-    <Link href={item.href} aria-current={active ? "page" : undefined} className={rowClass}>
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      onClick={onNavigate}
+      className={rowClass}
+    >
       {content}
     </Link>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useDemoVersions } from "@/hooks/use-demo-version";
 import { usePrdVersions } from "@/hooks/use-prd";
@@ -22,7 +22,8 @@ import { VersionRecordDrawer } from "./version-record-drawer";
  * → 侧栏/顶栏同源消费；PRD 确认门接 #330 版本列表、Demo 确认门接 #333 确认
  * 标记（清单行 confirmedAt 投影）。内容位自带滚动（各阶段页自管粘性二级
  * header）。版本记录抽屉（#344）挂壳上——顶栏与 Demo chip 双挂点共用同一
- * 抽屉本体（开合走 store 契约）。
+ * 抽屉本体（开合走 store 契约）。移动导航抽屉（#350）开合态持于壳——顶栏
+ * 汉堡键开门、侧栏抽屉本体消费（抽屉内点导航即关）。
  */
 export function ProjectSpaceShell({
   projectId,
@@ -36,11 +37,18 @@ export function ProjectSpaceShell({
   const { data: demoVersions } = useDemoVersions(projectId);
   const facts = stageGateFactsOf(detail, prdVersions, demoVersions);
   const nav = deliveryStageNav(projectId, facts);
+  const [navOpen, setNavOpen] = useState(false);
 
   return (
     <div className="min-h-svh bg-canvas-base">
-      <StageSidebar projectId={projectId} nav={nav} currentStage={currentStageOf(facts)} />
-      <GlobalTopbar projectId={projectId} nav={nav} />
+      <StageSidebar
+        projectId={projectId}
+        nav={nav}
+        currentStage={currentStageOf(facts)}
+        mobileOpen={navOpen}
+        onMobileOpenChange={setNavOpen}
+      />
+      <GlobalTopbar projectId={projectId} nav={nav} onOpenNav={() => setNavOpen(true)} />
       <main className="pt-16 lg:pl-64">{children}</main>
       <VersionRecordDrawer projectId={projectId} />
     </div>

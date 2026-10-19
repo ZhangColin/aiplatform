@@ -581,7 +581,7 @@ function DraftCard({
         {!incoming ? (
           <span
             data-no-drag
-            className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-background/85 text-muted-foreground opacity-0 backdrop-blur transition-opacity group-hover:opacity-100"
+            className="absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-background/85 text-muted-foreground opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 hover-none:opacity-100"
             title={draft.media === "html" ? "点开看大图" : "看大图"}
           >
             <button
@@ -615,7 +615,7 @@ function DraftCard({
               <PopoverTrigger
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                className="rounded p-1 text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-destructive"
+                className="rounded p-1 text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover-none:opacity-100 hover:text-destructive"
                 aria-label={`删除${name}`}
               >
                 <Trash2 className="size-3.5" />

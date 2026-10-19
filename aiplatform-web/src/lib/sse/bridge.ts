@@ -92,7 +92,7 @@ const NOTIFICATION_PAYLOAD_WRITERS: Partial<
   // 订单态变化 toast（#30 + #206 分流）：状态文案归纯函数单点
   // （lib/orders/status）。在场分流——首次报价（quoted）在项目页在场时不弹：
   // 失效水合已让报价卡实时入流，toast 即冗余；其余状态无入流对等面，维持即时
-  // 呈现（订单卡支付/取消的成功反馈依赖本 toast，order-panel 口径）
+  // 呈现（订单卡支付/取消的成功反馈依赖本 toast）
   "order-status-changed": (event) => {
     if (event.type !== "order-status-changed") return;
     const { projectId, status, statusName } = event.payload;

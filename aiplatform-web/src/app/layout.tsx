@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, JetBrains_Mono } from "next/font/google";
 
 import { QueryProvider } from "@/components/query-provider";
@@ -29,6 +29,13 @@ export const metadata: Metadata = {
     template: `%s · ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
+};
+
+/** 软键盘交互适配（#350，交接包 13.2「主要操作不被软键盘遮挡」）：Chromium 系
+ *  键盘弹起即收缩布局视口（固定高壳与钉底输入区随升）；iOS Safari 不支持本
+ *  属性——聚焦滚动兜底在共享 Composer。 */
+export const viewport: Viewport = {
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

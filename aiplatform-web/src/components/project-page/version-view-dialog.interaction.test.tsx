@@ -66,7 +66,7 @@ describe("VersionViewDialog · 设备宽度切换（#140，同预览 #80 口径�
 
     const after = screen.getByTitle("当时系统快照");
     expect(after).toBe(before); // 同一 DOM 节点：宽度是样式切换不是重建
-    expect(after.parentElement!.className).toContain("w-[390px]");
+    expect(after.parentElement!.className).toContain("w-[min(390px,100%)]");
   });
 
   it("切回桌面宽度：手机框撤下，iframe 仍不重挂", () => {
@@ -77,7 +77,7 @@ describe("VersionViewDialog · 设备宽度切换（#140，同预览 #80 口径�
     fireEvent.click(screen.getByRole("button", { name: "桌面预览" }));
 
     expect(screen.getByTitle("当时系统快照")).toBe(before);
-    expect(screen.getByTitle("当时系统快照").parentElement!.className).not.toContain("w-[390px]");
+    expect(screen.getByTitle("当时系统快照").parentElement!.className).not.toContain("w-[min(390px,100%)]");
   });
 });
 

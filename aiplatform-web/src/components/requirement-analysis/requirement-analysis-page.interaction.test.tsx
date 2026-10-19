@@ -227,3 +227,52 @@ describe("需求分析页 · 首产 PRD 双栏滑出", () => {
     expect(document.activeElement).toBe(screen.getByLabelText(/补充您的约束逻辑/));
   });
 });
+
+describe("需求分析页 · 移动单区域切换（#350，交接包 13.2：对话/文档单区域切换）", () => {
+  const areaOf = (name: string) => document.querySelector(`[data-area="${name}"]`);
+
+  it("PRD 在场：移动切换件出「对话/文档」两区，默认对话区可见、文档区收起", () => {
+    seedPrdProducedProject();
+    render(<RequirementAnalysisPage projectId="p1" />);
+
+    const switcher = screen.getByRole("group", { name: "阶段页区域切换" });
+    expect(switcher).toBeTruthy();
+    expect(screen.getByRole("button", { name: "对话" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "文档" }).getAttribute("aria-pressed")).toBe("false");
+    expect(areaOf("chat")?.className).not.toContain("hidden");
+    expect(areaOf("doc")?.className).toContain("hidden");
+  });
+
+  it("点「文档」切文档区可见、对话区收起；再点「对话」切回", () => {
+    seedPrdProducedProject();
+    render(<RequirementAnalysisPage projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "文档" }));
+    expect(areaOf("doc")?.className).not.toContain("hidden");
+    expect(areaOf("chat")?.className).toContain("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "对话" }));
+    expect(areaOf("chat")?.className).not.toContain("hidden");
+    expect(areaOf("doc")?.className).toContain("hidden");
+  });
+
+  it("首产 PRD 自动切到文档区一次（右栏滑出的移动等价物）", () => {
+    const { rerender } = render(<RequirementAnalysisPage projectId="p1" />);
+    // 闲聊期：无切换件（对话占全宽）
+    expect(screen.queryByRole("group", { name: "阶段页区域切换" })).toBeNull();
+
+    seedPrdProducedProject();
+    rerender(<RequirementAnalysisPage projectId="p1" />);
+
+    expect(areaOf("doc")?.className).not.toContain("hidden");
+    expect(areaOf("chat")?.className).toContain("hidden");
+  });
+
+  it("粘性 header 动作行窄屏可换行（390 不横向出血——浏览器腿实测 471px 越界回压）", () => {
+    seedPrdProducedProject();
+    render(<RequirementAnalysisPage projectId="p1" />);
+
+    const actionsRow = screen.getByRole("button", { name: /对话调优/ }).parentElement;
+    expect(actionsRow?.className).toContain("flex-wrap");
+  });
+});

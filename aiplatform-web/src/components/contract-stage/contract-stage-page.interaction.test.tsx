@@ -326,6 +326,17 @@ describe("签约付款页 P06 · 原型结构（#348）", () => {
     fireEvent.click(screen.getByText("PRD v2 不可变需求快照"));
     expect(useVersionRecordStore.getState().open).toBe(true);
   });
+
+  it("合同预览长字段区窄屏独立滚动（#350，交接包 13.2：长文档和合同支持独立滚动）", () => {
+    seed.contract = seedSignedContract();
+    renderPage();
+
+    const dl = screen.getByText("项目范围").closest("dl");
+    expect(dl?.className).toContain("overflow-y-auto");
+    expect(dl?.className).toContain("overscroll-contain");
+    // 窄屏限高独立滚动；≥xl 解除（桌面页滚不受内层框）
+    expect(dl?.className).toContain("xl:max-h-none");
+  });
 });
 
 describe("签约付款页 P06 · M01 登录门（#348）", () => {

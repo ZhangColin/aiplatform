@@ -67,7 +67,10 @@ export function ContractSignCard({ contract }: { contract: ContractDetail | null
             />
           </div>
 
-          <dl className="flex flex-col gap-2">
+          {/* 预览字段长文本区（#350，交接包 13.2「合同支持独立滚动」）：窄屏
+              限高独立滚动——范围/交付物/验收等长字段不顶破页流，签署位与状态
+              保持可达；≥xl 解除限高（桌面页滚，不套内层框） */}
+          <dl className="flex max-h-[55svh] flex-col gap-2 overflow-y-auto overscroll-contain xl:max-h-none xl:overflow-visible">
             <PreviewRow label="项目范围" value={contract.projectScope} />
             <PreviewRow label="交付物" value={contract.scopeDeliverables} />
             <PreviewRow label="验收标准" value={contract.scopeAcceptance} />

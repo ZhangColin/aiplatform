@@ -9,8 +9,8 @@ import type { SwitchEndpointTypePayload } from "@/hooks/use-endpoint-type";
  * 设置 tab 终点控件交互契约（#285，ADR-0025）：三档单选不即点即切（确认区出
  * 确认才切）；系统→设计类（PRD 在）受理时选作用域——全部页面或从功能清单勾选
  * （勾选源＝PRD 功能清单条目解析）；下单即冻结（locked 全禁用）；同目标不出
- * 确认；访谈期（无 PRD）不问范围。沿 outputs-area.interaction 先例（happy-dom
- * 逐文件例外；断言用原生属性）。数据口 mock 掉。
+ * 确认；访谈期（无 PRD）不问范围。happy-dom 逐文件例外；断言用原生属性。
+ * 数据口 mock 掉。
  */
 const mutate = vi.fn();
 

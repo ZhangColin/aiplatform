@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProjectDetail } from "@/lib/projects/detail";
@@ -148,5 +148,35 @@ describe("ProjectSpaceShell · 版本记录抽屉挂载与顶栏挂点（#344）
     expect(screen.getByRole("heading", { name: "版本记录" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "PRD 版本" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Demo 版本" })).toBeTruthy();
+  });
+});
+
+describe("ProjectSpaceShell · 移动导航抽屉（#350 破点①消解：窄屏侧栏抽屉补打开入口）", () => {
+  // 断言走文本计数不走 role：抽屉是 modal（背景对 AT aria-hidden），role 查询
+  // 只回抽屉内节点是 base-ui 实现细节；「第三份进场/收回」以文本拷贝数锁定
+  it("顶栏汉堡键（窄屏限定 lg:hidden）开抽屉：阶段导航第三份进场", async () => {
+    mountShell();
+    const trigger = screen.getByRole("button", { name: "打开导航" });
+    expect(trigger.className).toContain("lg:hidden");
+
+    fireEvent.click(trigger);
+
+    // 抽屉开出第三份阶段导航（桌面侧栏＋顶栏两份既在）
+    expect((await screen.findAllByText("Demo 体验")).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText("需求分析 (PRD)").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("抽屉内点导航链接即关抽屉（收回第三份）", async () => {
+    mountShell();
+    fireEvent.click(screen.getByRole("button", { name: "打开导航" }));
+    expect((await screen.findAllByText("Demo 体验")).length).toBeGreaterThanOrEqual(3);
+
+    const drawerLink = screen.getAllByText("需求分析 (PRD)").at(-1)!.closest("a");
+    expect(drawerLink).toBeTruthy();
+    fireEvent.click(drawerLink!);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("需求分析 (PRD)").length).toBe(2);
+    });
   });
 });

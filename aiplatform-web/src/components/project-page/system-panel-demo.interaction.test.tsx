@@ -123,7 +123,7 @@ describe("SystemPanel · Demo 原型壳视口工具条（#347）", () => {
     fireEvent.click(screen.getByRole("button", { name: "手机预览" }));
     const afterDeviceChange = container.querySelector("iframe");
     expect(afterDeviceChange).toBe(initial);
-    expect(afterDeviceChange?.parentElement?.className).toContain("w-[390px]");
+    expect(afterDeviceChange?.parentElement?.className).toContain("w-[min(390px,100%)]");
 
     fireEvent.click(screen.getByRole("button", { name: "刷新预览" }));
     expect(container.querySelector("iframe")).not.toBe(afterDeviceChange);

@@ -17,6 +17,7 @@ export function DemoHeader({
   loading = false,
   confirmDisabled,
   confirmPending,
+  confirmLabel,
   onConfirm,
   onStageSave,
 }: {
@@ -26,6 +27,8 @@ export function DemoHeader({
   loading?: boolean;
   confirmDisabled: boolean;
   confirmPending: boolean;
+  /** 主按钮文案覆盖（#350 重试位＝「重新提交订单」）；缺省「确认此版本，准备签约」。 */
+  confirmLabel?: string;
   onConfirm: () => void;
   onStageSave: () => void;
 }) {
@@ -91,7 +94,7 @@ export function DemoHeader({
           onClick={onConfirm}
           className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-electric-indigo to-tech-blue px-3.5 py-1.5 text-label-md font-semibold text-white shadow-xs transition-all hover:brightness-105 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-45"
         >
-          {confirmPending ? "正在确认…" : "确认此版本，准备签约"}
+          {confirmPending ? "正在确认…" : (confirmLabel ?? "确认此版本，准备签约")}
           <ArrowRight className="size-4" aria-hidden="true" />
         </button>
       </div>

@@ -173,6 +173,10 @@ describe("DesignCanvas · 全系统画布 SSR（#293）", () => {
     expect(html).toContain('data-preview-open="/design/home-1.html"');
   });
 
+  it("预览/删除口触屏常显（#350 破点③消解：hover 现身入口在触屏设备常显可达）", () => {
+    expect(renderCanvas()).toContain("hover-none:opacity-100");
+  });
+
   it("件计数行：N/M 件已定稿", () => {
     expect(renderCanvas()).toContain("1/2 件已定稿");
   });

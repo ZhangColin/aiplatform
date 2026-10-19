@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.project.application;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -670,9 +671,19 @@ public class GenerationAppService {
         if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
             return null;
         }
-        return new BuildPlan(
-                segments.stream().skip(1).map(GenerationSegment::getDescription).toList(),
-                segments.stream().skip(1).map(GenerationSegment::dependsOnOrds).toList());
+        List<GenerationSegment> sliceRows = segments.stream().skip(1).toList();
+        List<String> descriptions =
+                sliceRows.stream().map(GenerationSegment::getDescription).toList();
+        List<Set<Integer>> dependsOn = new ArrayList<>(sliceRows.size());
+        for (int i = 0; i < sliceRows.size(); i++) {
+            if (sliceRows.get(i).getDependsOn() == null) {
+                // 存量旧片行（V41 前，depends_on 未设）：恢复全串行语义——依赖前一片
+                dependsOn.add(i == 0 ? Set.of() : Set.of(i));
+            } else {
+                dependsOn.add(sliceRows.get(i).dependsOnOrds());
+            }
+        }
+        return new BuildPlan(descriptions, dependsOn);
     }
 
     /**
@@ -995,18 +1006,24 @@ public class GenerationAppService {
             String previousHandoff, String designContext, Integer prdVersionNo, boolean resumed,
             int startOrd, String resumePrefix, int lastOrd, String firstRunId) {
         Long projectId = project.getId();
-        List<ForkSliceOutcome> outcomes = runnable.stream().map(ord -> {
-            CompletableFuture<ForkSliceOutcome> future = CompletableFuture.supplyAsync(
-                    () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
-                            resumed, startOrd, resumePrefix, firstRunId),
-                    sliceParallelExecutor.pool());
+        // 先全部提交再统一等待（真并行）：若在流内逐元素 supplyAsync 后立即 join，会退化为
+        // 逐个 fork 串行跑——下一片要等上一片 join 返回才提交（并发不成立）
+        List<CompletableFuture<ForkSliceOutcome>> futures = runnable.stream()
+                .map(ord -> CompletableFuture.supplyAsync(
+                        () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
+                                resumed, startOrd, resumePrefix, firstRunId),
+                        sliceParallelExecutor.pool()))
+                .toList();
+        List<ForkSliceOutcome> outcomes = new ArrayList<>(futures.size());
+        for (int i = 0; i < futures.size(); i++) {
+            int ord = runnable.get(i);
             try {
-                return future.join();
+                outcomes.add(futures.get(i).join());
             } catch (RuntimeException e) {
-                return ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
-                        EventsAppService.newRunId(), null, errorText(e));
+                outcomes.add(ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
+                        EventsAppService.newRunId(), null, errorText(e)));
             }
-        }).toList();
+        }
         for (ForkSliceOutcome outcome : outcomes) {
             if (!outcome.succeeded()) {
                 failSegment(projectId, outcome.ord(), outcome.runId());
@@ -1062,7 +1079,7 @@ public class GenerationAppService {
                             designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
                             errorScene -> designContext + prefix
                                     + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene)),
-                    (attemptRunId, attemptChanges) -> closeForkSlice(forkId, runId,
+                    (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
                             sliceClosingSummary(slice)),
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                     RunHeading.slice(slice, ord, plan.slices().size()));
@@ -1071,14 +1088,13 @@ public class GenerationAppService {
             }
             return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError());
         } catch (RuntimeException e) {
-            destroyForkQuietly(forkWorkspaceId);
+            // fork 释放统一归调用方（runParallelWave 失败分支 / mergeFork finally），此处不销毁
             return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e));
         }
     }
 
     /** fork 片收口判据（#351）：fork 内 8081 可达 + 入口文件完整——只核验不落表不推预览。 */
-    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String runId,
-            String summary) {
+    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary) {
         requireReachable(forkWorkspaceId);
         requireEntryFileComplete(forkWorkspaceId);
         return CoderRunAttempts.ClosingJudgment.generation(summary);
@@ -1097,9 +1113,13 @@ public class GenerationAppService {
             ExecResultResponse diff = workspaceLifecycleAppService.exec(outcome.workspaceId(),
                     new WorkspaceExecCommand(WorkspaceVersions.forkDiffCommand()));
             if (diff.exitCode() != 0) {
-                log.warn("[generate] 项目 {} 片 {} fork diff 取失败（{}），按无改动合并",
+                // fork 成版缺失/取 diff 失败 = 本片产物拿不到——如实判失败（不伪装「无改动」
+                // 闭片成功，否则片产物静默丢失、轨道记为已收口）
+                log.warn("[generate] 项目 {} 片 {} fork diff 取失败（{}），按合并失败处置",
                         projectId, outcome.ord(), diff.stderr());
-                return true;
+                failSegment(projectId, outcome.ord(), outcome.runId());
+                eventBridge.emitRunFailed(project, outcome.runId());
+                return false;
             }
             if (!diff.stdout().isBlank()) {
                 ExecResultResponse applied = workspaceLifecycleAppService.execWithStdin(

@@ -338,6 +338,35 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_legacy_null_depends_when_plan_of_then_sequential_not_parallel() {
+        // 存量旧片行（V41 前，depends_on 未设 = NULL）还原为全串行——不误判为「全无
+        // 依赖可并行」（旧计划语义 = 每片依赖前一片）
+        Long projectId = persistedProject("9842");
+        LocalDateTime prdAnchor = projectRepository.findById(projectId).orElseThrow().getPrdProducedAt();
+        long ts = System.nanoTime();
+        jdbcTemplate.update("INSERT INTO prj_generation_segments "
+                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
+                + "VALUES (?, ?, 0, '系统初始化', 1, ?, NULL)", ts, projectId, prdAnchor);
+        jdbcTemplate.update("INSERT INTO prj_generation_segments "
+                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
+                + "VALUES (?, ?, 1, '首片', 1, ?, NULL)", ts + 1, projectId, prdAnchor);
+        jdbcTemplate.update("INSERT INTO prj_generation_segments "
+                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
+                + "VALUES (?, ?, 2, '第二片', 1, ?, NULL)", ts + 2, projectId, prdAnchor);
+        jdbcTemplate.update("INSERT INTO prj_generation_segments "
+                + "(id, project_id, ord, description, status, prd_produced_at, depends_on) "
+                + "VALUES (?, ?, 3, '第三片', 1, ?, NULL)", ts + 3, projectId, prdAnchor);
+
+        BuildPlan plan = appService.planOf(projectId);
+
+        assertThat(plan.dependsOn(0)).isEmpty();
+        assertThat(plan.dependsOn(1)).isEqualTo(Set.of(1));
+        assertThat(plan.dependsOn(2)).isEqualTo(Set.of(2));
+        assertThat(SliceSchedule.parallelWaves(plan))
+                .containsExactly(List.of(2), List.of(3));
+    }
+
+    @Test
     void given_executor_protocol_when_inspect_then_external_repo_convention_anchored() {
         // #214 外部仓库流程指令写进执行体工作协议：起手先 clone 进 external/ 再读，
         // 物理规则指路 AGENTS.md——与工作区平台约定分工（物理规则进 AGENTS.md 正本）

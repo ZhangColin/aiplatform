@@ -101,10 +101,14 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
         return parseDeps(dependsOn);
     }
 
-    /** 依赖序列化：逗号分隔升序片序；空/null = NULL（无依赖）。 */
+    /**
+     * 依赖序列化：逗号分隔升序片序；空 = 空串（显式「无依赖、可并行」）。NULL 专指
+     * 未设（V41 前的旧片行——全串行计划），与空串语义分道（见 {@link #parseDeps}
+     * 与 GenerationAppService 的存量还原口径）。
+     */
     static String serializeDeps(Set<Integer> ords) {
         if (ords == null || ords.isEmpty()) {
-            return null;
+            return "";
         }
         return ords.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
     }

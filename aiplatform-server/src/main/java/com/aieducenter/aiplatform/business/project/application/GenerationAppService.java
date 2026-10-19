@@ -866,8 +866,6 @@ public class GenerationAppService {
                 previousHandoff = readSliceHandoff(project, handoffSource);
             }
         }
-        // 轨道逐段（阶段 0 起跑时 ord=0）：断点段 = 本轨首 run（首试 runId 即用户面
-        // 首 run 身份），此后逐片新 runId；某片失败不自动跳下一片（完整性优先）。
         // 末段 = 最深待跑段（其后段已收口——存量对照的分布边角，全收口即落位）
         int lastOrd = openOrds.get(openOrds.size() - 1);
         // 定稿设计稿引用块（#291 稿入起跑上下文）：设计类终点门开后的构建，每段
@@ -876,7 +874,9 @@ public class GenerationAppService {
                 designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
                         .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
                         .toList());
-        for (int index = startOrd; index <= slices.size(); index++) {
+
+        // ---- 序前段（#339 首屏先行）：阶段 0 + 首片，串行、跑主工作区（预览先活）----
+        for (int index = startOrd; index <= Math.min(1, slices.size()); index++) {
             int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
             if (closedOrds.contains(ord)) {
                 continue; // 已收口片不重做（#221 断点续跑 / #223 存量对照）
@@ -910,11 +910,290 @@ public class GenerationAppService {
                 eventBridge.emitRunFailed(project, runId);
                 return;
             }
-            // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一片
+            // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一段
             previousHandoff = result.closingText();
             placeSliceHandoff(project, ord, previousHandoff);
         }
+
+        // ---- 并行段（#351）：切片 2..N 按拓扑波，同波无依赖片各拿 fork 隔离同跑、按序合并 ----
+        closedOrds = reloadClosedOrds(projectId); // 序前段收口后刷新（依赖判定的事实源）
+        List<List<Integer>> waves = SliceSchedule.parallelWaves(plan);
+        for (List<Integer> wave : waves) {
+            Set<Integer> currentClosed = closedOrds; // 波内快照（lambda 捕获需实际最终）
+            List<Integer> runnable = wave.stream()
+                    .filter(ord -> !currentClosed.contains(ord))
+                    .filter(ord -> depsAllClosed(ord, plan, currentClosed))
+                    .toList();
+            if (runnable.isEmpty()) {
+                continue; // 波内片已收口（续跑）或依赖未满足（被失败片阻塞，续跑再补）
+            }
+            if (runnable.size() == 1) {
+                // 单片波：无并行收益，退化主工作区串行（既有口径不变）
+                int ord = runnable.get(0);
+                String slice = slices.get(ord - 1);
+                boolean last = ord == lastOrd;
+                boolean resumeTarget = ord == startOrd;
+                String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
+                String prefix = resumeTarget ? resumePrefix : "";
+                String handoff = previousHandoff;
+                String segmentDesc = "实现切片「" + slice + "」";
+                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
+                        resumed && resumeTarget
+                                ? resumeSession(projectId, ord, runId)
+                                : sliceSession(projectId, ord),
+                        new CoderRunAttempts.Prompts(
+                                designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
+                                errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                        (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
+                                runId, sliceClosingSummary(slice), prdVersionNo),
+                        CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                        RunHeading.slice(slice, ord, slices.size()));
+                if (!result.succeeded()) {
+                    failSegment(projectId, ord, runId);
+                    if (result.lastError() != null) {
+                        terminalFailureScenes.put(projectId, result.lastError());
+                    }
+                    eventBridge.emitRunFailed(project, runId);
+                    return;
+                }
+                previousHandoff = result.closingText();
+                placeSliceHandoff(project, ord, previousHandoff);
+            } else {
+                runParallelWave(project, plan, runnable, previousHandoff, designContext,
+                        prdVersionNo, resumed, startOrd, resumePrefix, lastOrd, firstRunId);
+            }
+            closedOrds = reloadClosedOrds(projectId);
+        }
         terminalFailureScenes.remove(projectId);
+    }
+
+    /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
+    private boolean depsAllClosed(int ord, BuildPlan plan, Set<Integer> closedOrds) {
+        return plan.dependsOn(ord - 1).stream().allMatch(closedOrds::contains);
+    }
+
+    /** 重载已收口片集（#351 波间刷新——合并后闭片，后续波据此判定依赖满足）。 */
+    private Set<Integer> reloadClosedOrds(Long projectId) {
+        return generationSegments.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                .map(GenerationSegment::getOrd).collect(Collectors.toUnmodifiableSet());
+    }
+
+    /** 全片已收口探针（#351 末波落位门槛——有失败片则 generated_at 不落位）。 */
+    private boolean allSlicesClosed(Long projectId) {
+        return generationSegments.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .allMatch(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED);
+    }
+
+    /**
+     * 一场并行波（#351）：波内各片各拿 fork 副本隔离同跑（独立线程池并行），落定后按
+     * ord 序合并回主工作区（冲突机器查 → 子智能体解）；失败片跳过不拖垮其余片。
+     * 波收口统一探活主工作区 + 推送预览；末波（含 lastOrd）且全片已收口才种数据 +
+     * 落 generated_at（口径不变——有失败片不落位）。
+     */
+    private void runParallelWave(Project project, BuildPlan plan, List<Integer> runnable,
+            String previousHandoff, String designContext, Integer prdVersionNo, boolean resumed,
+            int startOrd, String resumePrefix, int lastOrd, String firstRunId) {
+        Long projectId = project.getId();
+        List<ForkSliceOutcome> outcomes = runnable.stream().map(ord -> {
+            CompletableFuture<ForkSliceOutcome> future = CompletableFuture.supplyAsync(
+                    () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
+                            resumed, startOrd, resumePrefix, firstRunId),
+                    sliceParallelExecutor.pool());
+            try {
+                return future.join();
+            } catch (RuntimeException e) {
+                return ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
+                        EventsAppService.newRunId(), null, errorText(e));
+            }
+        }).toList();
+        for (ForkSliceOutcome outcome : outcomes) {
+            if (!outcome.succeeded()) {
+                failSegment(projectId, outcome.ord(), outcome.runId());
+                if (outcome.error() != null) {
+                    terminalFailureScenes.put(projectId, outcome.error());
+                }
+                eventBridge.emitRunFailed(project, outcome.runId());
+                destroyForkQuietly(outcome.workspaceId()); // 失败片不留 fork 孤儿
+                continue;
+            }
+            if (mergeFork(project, outcome)) {
+                closeSegment(projectId, outcome.ord(), outcome.runId());
+                placeSliceHandoff(project, outcome.ord(), outcome.closingText());
+            }
+        }
+        requireReachable(project.getWorkspaceId());
+        requireEntryFileComplete(project.getWorkspaceId());
+        emitPreviewReady(project);
+        if (runnable.contains(lastOrd) && allSlicesClosed(projectId)) {
+            demoSeed.seedSandbox(project);
+            String finalRunId = outcomes.stream().filter(o -> o.ord() == lastOrd)
+                    .map(ForkSliceOutcome::runId).findFirst().orElse(firstRunId);
+            markGenerated(projectId, finalRunId, prdVersionNo);
+        }
+    }
+
+    /**
+     * fork 副本跑一片（#351）：fork 主工作区当前 HEAD → 执行体在 fork 上实现本片（收口
+     * 判据 = fork 内 8081 探活 + 入口文件完整 + fork 内 git 成版）。成功回交 fork
+     * workspaceId（供合并）与收口终文（供交接）；失败/异常回交失败现场，fork 由合并
+     * 侧（或此处异常路径）释放。
+     */
+    private ForkSliceOutcome runForkSlice(Project project, BuildPlan plan, int ord,
+            String previousHandoff, String designContext, boolean resumed, int startOrd,
+            String resumePrefix, String firstRunId) {
+        Long projectId = project.getId();
+        String slice = plan.slices().get(ord - 1);
+        String forkWorkspaceId = null;
+        String runId = (resumed && ord == startOrd) ? firstRunId : EventsAppService.newRunId();
+        try {
+            forkWorkspaceId = workspaceLifecycleAppService.fork(
+                    Long.toString(project.getWorkspaceId()));
+            Long forkId = Long.parseLong(forkWorkspaceId);
+            boolean resumeTarget = ord == startOrd;
+            String prefix = resumeTarget ? resumePrefix : "";
+            String segmentDesc = "实现切片「" + slice + "」";
+            String sessionId = resumed && resumeTarget
+                    ? resumeSession(projectId, ord, runId)
+                    : sliceSession(projectId, ord);
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, forkId, runId,
+                    sessionId,
+                    new CoderRunAttempts.Prompts(
+                            designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
+                            errorScene -> designContext + prefix
+                                    + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene)),
+                    (attemptRunId, attemptChanges) -> closeForkSlice(forkId, runId,
+                            sliceClosingSummary(slice)),
+                    CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                    RunHeading.slice(slice, ord, plan.slices().size()));
+            if (result.succeeded()) {
+                return ForkSliceOutcome.ok(ord, slice, runId, forkWorkspaceId, result.closingText());
+            }
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError());
+        } catch (RuntimeException e) {
+            destroyForkQuietly(forkWorkspaceId);
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e));
+        }
+    }
+
+    /** fork 片收口判据（#351）：fork 内 8081 可达 + 入口文件完整——只核验不落表不推预览。 */
+    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String runId,
+            String summary) {
+        requireReachable(forkWorkspaceId);
+        requireEntryFileComplete(forkWorkspaceId);
+        return CoderRunAttempts.ClosingJudgment.generation(summary);
+    }
+
+    /**
+     * 按序合并一片 fork 回主工作区（#351）：取 fork 相对基线的 diff → {@code git apply
+     * --3way} 三方合并（机器查：冲突返回非 0）→ 主工作区 git 成版。冲突转子智能体裁决
+     * （{@link #resolveConflict}）。成功返回 true（含无改动 no-op）；合并/裁决失败返回
+     * false（已落 failSegment + run-failed）。fork 在 finally 释放（不残留短命容器）。
+     */
+    private boolean mergeFork(Project project, ForkSliceOutcome outcome) {
+        Long projectId = project.getId();
+        Long mainWorkspaceId = project.getWorkspaceId();
+        try {
+            ExecResultResponse diff = workspaceLifecycleAppService.exec(outcome.workspaceId(),
+                    new WorkspaceExecCommand(WorkspaceVersions.forkDiffCommand()));
+            if (diff.exitCode() != 0) {
+                log.warn("[generate] 项目 {} 片 {} fork diff 取失败（{}），按无改动合并",
+                        projectId, outcome.ord(), diff.stderr());
+                return true;
+            }
+            if (!diff.stdout().isBlank()) {
+                ExecResultResponse applied = workspaceLifecycleAppService.execWithStdin(
+                        Long.toString(mainWorkspaceId),
+                        new WorkspaceExecCommand(WorkspaceVersions.applyPatchCommand()),
+                        diff.stdout().getBytes(StandardCharsets.UTF_8));
+                if (applied.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 片 {} 合并冲突（机器查命中），转子智能体裁决",
+                            projectId, outcome.ord());
+                    return resolveConflict(project, outcome);
+                }
+            }
+            versions.commitAtClosing(mainWorkspaceId, projectId, outcome.runId(),
+                    sliceClosingSummary(outcome.slice()));
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
+            failSegment(projectId, outcome.ord(), outcome.runId());
+            eventBridge.emitRunFailed(project, outcome.runId());
+            return false;
+        } finally {
+            destroyForkQuietly(outcome.workspaceId());
+        }
+    }
+
+    /**
+     * 合并冲突子智能体裁决（#351 冲突裁决出口）：主工作区处于冲突/半应用态，新派一个
+     * 执行体 run 读两侧改动、按用户目标裁决合并，收口判据 = 主工作区 8081 探活 + 入口
+     * 文件完整。裁决成功即其收口成版落主工作区（默认 {@code run} 目标 = 项目主工作区）。
+     * 失败落 failSegment + run-failed（用户续跑兜底）。
+     */
+    private boolean resolveConflict(Project project, ForkSliceOutcome outcome) {
+        Long projectId = project.getId();
+        String resolveRunId = EventsAppService.newRunId();
+        String sessionId = "coder-" + projectId + "-merge-" + outcome.ord();
+        String prompt = "合并切片「" + outcome.slice() + "」的代码时与主工作区现有代码产生冲突"
+                + "（工作区可能留有冲突标记、.rej 拒绝文件或半应用状态）。请先检查工作区现状，"
+                + "理解两侧改动意图，按用户目标裁决合并——保留两侧功能、消除重复定义、合并重复"
+                + "逻辑；不要重做已完成的其它切片，解决冲突后确认 8081 端口服务在跑、curl 可访问。"
+                + NARRATION_CONVENTION;
+        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, resolveRunId, sessionId,
+                new CoderRunAttempts.Prompts(prompt,
+                        errorScene -> retryRunPrompt("解决合并冲突（切片「" + outcome.slice() + "」）",
+                                errorScene)),
+                (attemptRunId, attemptChanges) -> {
+                    requireReachable(project.getWorkspaceId());
+                    requireEntryFileComplete(project.getWorkspaceId());
+                    return CoderRunAttempts.ClosingJudgment.generation(
+                            "解决合并冲突：完成切片「" + outcome.slice() + "」");
+                },
+                CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                RunHeading.titled("解决合并冲突"));
+        if (!result.succeeded()) {
+            failSegment(projectId, outcome.ord(), outcome.runId());
+            if (result.lastError() != null) {
+                terminalFailureScenes.put(projectId, result.lastError());
+            }
+            eventBridge.emitRunFailed(project, outcome.runId());
+            return false;
+        }
+        return true;
+    }
+
+    /** 释放 fork 副本（#351 短命工作区级联清理；失败只记日志不阻断合并收口）。 */
+    private void destroyForkQuietly(String forkWorkspaceId) {
+        if (forkWorkspaceId == null) {
+            return;
+        }
+        try {
+            workspaceLifecycleAppService.destroy(forkWorkspaceId);
+        } catch (RuntimeException e) {
+            log.warn("[generate] fork {} 释放失败（孤儿由残渣扫描兜底）：{}",
+                    forkWorkspaceId, e.toString());
+        }
+    }
+
+    /** 异常现场归一（fork 片失败回交的错误事实）。 */
+    private static String errorText(RuntimeException e) {
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    }
+
+    /** fork 切片跑的结果（#351）：成败 + fork 寻址 + 收口终文 + 失败现场。 */
+    private record ForkSliceOutcome(int ord, String slice, String runId, String workspaceId,
+            String closingText, String error, boolean succeeded) {
+
+        static ForkSliceOutcome ok(int ord, String slice, String runId, String workspaceId,
+                String closingText) {
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, closingText, null, true);
+        }
+
+        static ForkSliceOutcome failed(int ord, String slice, String runId, String workspaceId,
+                String error) {
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, null, error, false);
+        }
     }
 
     /**

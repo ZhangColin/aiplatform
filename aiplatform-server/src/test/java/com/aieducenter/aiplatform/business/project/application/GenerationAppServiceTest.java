@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -261,6 +262,79 @@ class GenerationAppServiceTest {
                 .contains("关键节点");
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("关键节点才解说");
+    }
+
+    @Test
+    void given_independent_slices_when_generate_then_run_in_parallel_on_forks() {
+        // #351 切片并行：无依赖独立切片同波，各拿 fork 副本隔离同跑——fork 片的 run 目标
+        // = fork 工作区（非项目主工作区）、计量仍归项目账；全片收口才落 generated_at
+        Long projectId = persistedProject("9840");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+
+        // 首片(1) → 切片 2、3 无互依赖（同波并行）；切片 4 依赖 2、3（单片波主工作区串行）
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        verify(workspaceLifecycleAppService, times(2)).fork(anyString());
+        verify(workspaceLifecycleAppService, times(2)).destroy(anyString());
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(5)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        // 阶段 0 + 首片 + 切片 2、3（fork）+ 切片 4（单片波）= 5 场 run
+        assertThat(all).hasSize(5);
+        // fork 片 run 目标 = fork 工作区（9001/9002），其余 = 项目主工作区
+        Project project = projectRepository.findById(projectId).orElseThrow();
+        List<String> forkWorkspaces = all.stream()
+                .map(AgentCommand::workspaceId)
+                .filter(ws -> !ws.equals(Long.toString(project.getWorkspaceId())))
+                .toList();
+        assertThat(forkWorkspaces).containsExactlyInAnyOrder("9001", "9002");
+        // 计量归项目账（fork 片 usageContext.subject = projectId，不随 fork 漂移）
+        assertThat(all).allSatisfy(cmd ->
+                assertThat(cmd.usageContext().subject()).isEqualTo(Long.toString(projectId)));
+        // 全片收口 → generated_at 落位、轨道表 5 行全已收口
+        assertThat(generatedAt(projectId)).isNotNull();
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2, 2);
+    }
+
+    @Test
+    void given_failed_fork_slice_when_generate_then_other_slices_merged_and_track_incomplete() {
+        // #351 失败副本处置（重试耗尽→跳过不拖垮整轨）：同波内一片失败、其余片照常合并
+        // 收口；有失败片则 generated_at 不落位（续跑只补失败片及其下游）
+        Long projectId = persistedProject("9841");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // 切片 3 的 fork 片反复失败（重试耗尽转终态），其余片照常收口
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().endsWith("-slice-3")) {
+                throw new IllegalStateException("切片3失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 切片 2 照常合并收口、切片 3 转失败；有失败片 → generated_at 不落位
+        assertThat(generatedAt(projectId)).isNull();
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 3, 1);
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
     @Test

@@ -252,6 +252,17 @@ class CoderRunAttempts {
     RunResult run(Project project, String firstRunId, String sessionId, Prompts prompts,
             BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess, String what,
             boolean injectKnowledge, RunSeat seat, RunHeading heading) {
+        return run(project, project.getWorkspaceId(), firstRunId, sessionId, prompts, onSuccess,
+                what, injectKnowledge, seat, heading);
+    }
+
+    /**
+     * 同 {@link #run}，但显式指定执行工作区（#351 切片并行——fork 副本 run 的执行面
+     * 与收口成版落在 fork 工作区，非项目主工作区）；计量/事件归属仍用 projectId。
+     */
+    RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
+            Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
+            String what, boolean injectKnowledge, RunSeat seat, RunHeading heading) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
                 ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
@@ -293,7 +304,7 @@ class CoderRunAttempts {
                     new UsageContext(Long.toString(projectId),
                             UsageDims.of(projectId, UsageDims.kindOf(seat.profile()),
                                     sessionId)),
-                    Long.toString(project.getWorkspaceId()),
+                    Long.toString(workspaceId),
                     Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                     /* timeout= */ null, // #322 活超时替换一次性总墙钟
                     properties.getSilenceTimeout(),
@@ -395,8 +406,8 @@ class CoderRunAttempts {
                     // （缺 version 键 = 本轮未成版，run 收口不受影响）。设计会话
                     // 不成版（ADR-0025 候选与版本两套语义不打通——只有定稿成版）
                     if (seat.commitVersionAtClosing()) {
-                        String versionHash = versions.commitAtClosing(project, firstRunId,
-                                (String) closing.get(CLOSING_SUMMARY_FIELD));
+                        String versionHash = versions.commitAtClosing(workspaceId, projectId,
+                                firstRunId, (String) closing.get(CLOSING_SUMMARY_FIELD));
                         if (versionHash != null) {
                             closing.put(CLOSING_VERSION_FIELD, versionHash);
                         }

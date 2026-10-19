@@ -1,7 +1,10 @@
 package com.aieducenter.aiplatform.business.project.domain.aggregate;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -62,6 +65,11 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
     @Column(name = "prd_produced_at", nullable = false, updatable = false)
     private LocalDateTime prdProducedAt;
 
+    /** 依赖声明（#351 切片并行）：逗号分隔的 1-based 片序（1 = 首片）；NULL = 无依赖
+     *  （阶段 0 恒 NULL）。片行不可变（updatable=false，同 description）。 */
+    @Column(name = "depends_on", updatable = false)
+    private String dependsOn;
+
     protected GenerationSegment() {
     }
 
@@ -77,7 +85,40 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
     /** 待跑片行（计划落库/重产的整组替换式插入；状态随后由收口/失败落位推进）。 */
     public static GenerationSegment pending(Long projectId, int ord, String description,
             LocalDateTime prdProducedAt) {
-        return new GenerationSegment(projectId, ord, description, prdProducedAt);
+        return pending(projectId, ord, description, prdProducedAt, Set.of());
+    }
+
+    /** 待跑片行（#351 携带依赖声明——1-based 片序；空 = 无依赖可并行）。 */
+    public static GenerationSegment pending(Long projectId, int ord, String description,
+            LocalDateTime prdProducedAt, Set<Integer> dependsOn) {
+        GenerationSegment segment = new GenerationSegment(projectId, ord, description, prdProducedAt);
+        segment.dependsOn = serializeDeps(dependsOn);
+        return segment;
+    }
+
+    /** 依赖片序读形（1-based；空 = 无依赖）。 */
+    public Set<Integer> dependsOnOrds() {
+        return parseDeps(dependsOn);
+    }
+
+    /** 依赖序列化：逗号分隔升序片序；空/null = NULL（无依赖）。 */
+    static String serializeDeps(Set<Integer> ords) {
+        if (ords == null || ords.isEmpty()) {
+            return null;
+        }
+        return ords.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
+    }
+
+    /** 依赖反序列化：NULL/空串 = 空集；容忍空段（去空格）。 */
+    static Set<Integer> parseDeps(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
+                .map(Integer::parseInt)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /**

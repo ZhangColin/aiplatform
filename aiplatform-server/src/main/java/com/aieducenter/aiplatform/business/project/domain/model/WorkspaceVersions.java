@@ -133,6 +133,35 @@ public final class WorkspaceVersions {
     }
 
     /**
+     * fork 副本切片改动 diff（#351 合并输入）：fork 收口成版后 HEAD 即切片 commit、
+     * HEAD^ 即克隆基线（fork 只多这一次提交）——输出统一 diff（含完整 blob 哈希，
+     * {@code --full-index} 供 {@code git apply --3way} 三方合并定位基线）。stdout =
+     * patch 文本。
+     */
+    public static String forkDiffCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git diff --full-index HEAD^ HEAD";
+    }
+
+    /**
+     * fork 副本切片改动文件清单（#351 结构冲突机器查的输入）：{@code --name-only}，
+     * stdout 逐行 = 改动文件路径（工作区锚定形）。同一波内两片改同一路径 = 结构冲突。
+     */
+    public static String forkChangedFilesCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git diff --name-only HEAD^ HEAD";
+    }
+
+    /**
+     * 应用 fork patch 到主工作区（#351 按序合并的机器查/执行）：{@code git apply
+     * --3way -}——patch 经 stdin 灌入（{@code execWithStdin}），三方合并（fork 与主
+     * 共享基线 blob，冲突才退）。exitCode 0 = 干净应用（或三方合并成功）；非 0 =
+     * 冲突（转子智能体裁决）。应用后改动在未暂存工作树，由调用方 {@code commitAtClosing}
+     * 提交成版。
+     */
+    public static String applyPatchCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git apply --3way -";
+    }
+
+    /**
      * 是否存未提交的 tracked 改动（#100）：{@code git restore} 只动 tracked 文件，
      * 故 untracked（{@code ??} 行）不算会被丢弃的改动；其余任何行（modified /
      * staged / deleted / added 等）都表示 restore 会静默丢弃的未提交 tracked 改动。

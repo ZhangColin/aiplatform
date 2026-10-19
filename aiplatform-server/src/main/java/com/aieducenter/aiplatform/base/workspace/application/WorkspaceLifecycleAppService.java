@@ -32,6 +32,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceNaming;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.aieducenter.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.aieducenter.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.aieducenter.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
@@ -107,6 +108,23 @@ public class WorkspaceLifecycleAppService {
         // 事务提交后异步置备（此时记录已可见，置备线程可接回并落库收口）
         provisioner.provision(workspaceId, kind);
         return response;
+    }
+
+    /**
+     * 派生工作区副本（#351 切片并行）：从源工作区当前 HEAD 克隆可写 fork 容器并注册
+     * 为短命 READY 工作区（正常 workspaceId → 容器寻址——run 执行体经它 exec 读写 fork，
+     * 收口 git commit 落 fork 内）。并行切片各拿一 fork 隔离同跑、按序合并回源工作区；
+     * 用完经 {@link #destroy} 级联清理。
+     *
+     * @param sourceWorkspaceId 源（主）工作区标识
+     * @return fork 工作区标识（字符串形——生成编排用它作 run 的 workspaceId）
+     */
+    public String fork(String sourceWorkspaceId) {
+        Workspace source = requireWorkspace(sourceWorkspaceId);
+        WorkspaceId forkId = WorkspaceId.generate();
+        WorkspaceProvision provision = environmentBackend.forkWorkspace(source.toHandle(), forkId);
+        workspaceRepository.save(Workspace.register(provision));
+        return forkId.value();
     }
 
     /**

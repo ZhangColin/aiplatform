@@ -133,6 +133,75 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         cascadeCleanup(handle.workspaceId(), handle.containerName());
     }
 
+    @Override
+    public WorkspaceProvision forkWorkspace(WorkspaceHandle main, WorkspaceId forkId) {
+        String forkName = WorkspaceNaming.containerName(forkId);
+        String forkVol = volumeOf(forkName);
+        // 幂等预清：fork 容器/卷是短命物，同名残留先清（不留半成品）
+        runSilently("docker", "rm", "-f", forkName);
+        runSilently("docker", "volume", "rm", forkVol);
+        try {
+            run("docker", "volume", "create", forkVol);
+            ensureDevImage();
+            ensurePreviewNetwork();
+            // 入口旁路（--entrypoint sleep）：fork 的 pg/redis 由 forkPopulateCommand 手工
+            // 起（PGDATA 是从 main 拷来的数据副本，不走 init-workspace.sh 的空白库自愈）。
+            // 主卷 :ro 挂 /main-ro 供 git clone + node_modules/PGDATA 拷贝。
+            run("docker", "run", "-d", "--name", forkName,
+                    "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                    "--entrypoint", "sleep",
+                    "-v", forkVol + ":" + WorkspaceLayout.ROOT,
+                    "-v", volumeOf(main.containerName()) + ":/main-ro:ro",
+                    DEV_IMAGE, "infinity");
+            runIn(forkName, forkPopulateCommand());
+            // 库名随数据（PGDATA 从 main 拷来，库名 = main 库名——与快照 #92 同口径）；
+            // .env 指副本库（回环 localhost），应用侧零适配
+            String dbName = WorkspaceNaming.databaseName(main.workspaceId());
+            String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
+            String redisUrl = "redis://localhost:6379";
+            waitForReady(() -> execIn(forkName, "pg_isready -h localhost -U postgres"),
+                    "fork PostgreSQL " + forkName);
+            waitForReady(() -> execIn(forkName, "redis-cli -h localhost ping"),
+                    "fork Redis " + forkName);
+            writeEnvFile(forkName, "DATABASE_URL=" + databaseUrl + "\nREDIS_URL=" + redisUrl + "\n");
+            List<ProvisionedResource> resources = List.of(
+                    new ProvisionedResource(MiddlewareKind.POSTGRESQL, forkName, 0, databaseUrl),
+                    new ProvisionedResource(MiddlewareKind.REDIS, forkName, 0, redisUrl));
+            log.info("[workspace] fork {} 就绪（源 {}，代码 HEAD + 数据副本 + 独立中间件）",
+                    forkName, main.containerName());
+            return WorkspaceProvision.of(
+                    WorkspaceHandle.dev(forkId, forkName, WorkspaceNaming.PREVIEW_NETWORK),
+                    resources.toArray(new ProvisionedResource[0]));
+        } catch (RuntimeException e) {
+            // 派生中途失败：已落定的容器/卷级联回滚，不留孤儿（同 createWorkspace #57 口径）
+            log.error("[workspace] fork {} 派生失败，级联回滚已落定资源", forkId.value(), e);
+            cascadeCleanup(forkId, forkName);
+            throw e;
+        }
+    }
+
+    /**
+     * fork 容器落料（#351）：git clone 主仓库（含 .git——收口成版要提交）+ node_modules
+     * 复用 + PGDATA 数据副本（清陈旧 pid 后起库）+ redis。代码只克隆 git 跟踪面
+     * （node_modules/data 已被 .gitignore 排除，clone 天然不含）。库名随数据：PGDATA
+     * 从 main 拷来，内含 main 库——fork 的 .env 指向它（见 {@link #forkWorkspace}）。
+     */
+    private String forkPopulateCommand() {
+        String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
+        String nodeModules = WorkspaceLayout.absolute("node_modules");
+        return "git clone -q /main-ro " + WorkspaceLayout.ROOT
+                + " && cd " + WorkspaceLayout.ROOT
+                + " && if test -d /main-ro/node_modules && ! test -e " + nodeModules
+                + "; then cp -a /main-ro/node_modules " + nodeModules + "; fi"
+                + " && mkdir -p " + WorkspaceLayout.absolute(WorkspaceLayout.DATA_DIR)
+                + " && cp -a /main-ro/data/pg " + pgData
+                + " && rm -f " + pgData + "/postmaster.pid"
+                + " && su postgres -c '" + PG_BIN + "/pg_ctl -D " + pgData
+                + " -l " + pgData + "/startup.log -w start'"
+                + " && redis-server --daemonize yes --bind 127.0.0.1 --port 6379"
+                + " --save '' --appendonly no";
+    }
+
     /**
      * 级联清理：容器 → 快照容器 → 卷（pg 数据在卷内，随卷走）；尽力而为但不静默
      * （#179）：真失败 warn 带 stderr——删失败的资源无 DB 行、永远不在 #171 扫描

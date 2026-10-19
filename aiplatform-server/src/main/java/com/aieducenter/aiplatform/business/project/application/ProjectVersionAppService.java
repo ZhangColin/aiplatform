@@ -67,15 +67,23 @@ public class ProjectVersionAppService {
      * @return 成版 commit hash；成版失败返回 null（quietly——不绑架 run 收口）
      */
     public String commitAtClosing(Project project, String runId, String summary) {
-        String workspaceId = Long.toString(project.getWorkspaceId());
+        return commitAtClosing(project.getWorkspaceId(), project.getId(), runId, summary);
+    }
+
+    /**
+     * 显式工作区成版（#351 切片并行——fork 副本收口提交到 fork 工作区，非项目主
+     * 工作区）：同一 git 管道（幂等 init → 全量提交携 Run-Id trailer → 回读 hash），
+     * 仅 exec 目标换为 fork 容器。失败 quietly 只记日志（同 {@link #commitAtClosing}）。
+     */
+    public String commitAtClosing(Long workspaceId, Long projectId, String runId, String summary) {
         try {
-            execOrThrow(workspaceId, WorkspaceVersions.ensureRepoCommand(), "仓库初始化");
+            execOrThrow(Long.toString(workspaceId), WorkspaceVersions.ensureRepoCommand(), "仓库初始化");
             ExecResultResponse commit =
-                    execOrThrow(workspaceId, WorkspaceVersions.commitCommand(summary, runId), "成版提交");
+                    execOrThrow(Long.toString(workspaceId), WorkspaceVersions.commitCommand(summary, runId), "成版提交");
             return commit.stdout().trim();
         } catch (RuntimeException e) {
             log.error("[version] 项目 {} 收口成版失败（runId={}，run 收口不受影响）：{}",
-                    project.getId(), runId, e.toString());
+                    projectId, runId, e.toString());
             return null;
         }
     }

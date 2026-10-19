@@ -7,6 +7,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -34,6 +35,7 @@ import com.aieducenter.aiplatform.business.project.domain.enums.GenerationSegmen
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.ProjectFiles;
+import com.aieducenter.aiplatform.business.project.domain.model.WorkspaceVersions;
 import com.aieducenter.aiplatform.business.project.domain.repository.DesignItemRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
@@ -440,6 +442,8 @@ public class GenerationAppService {
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
     private final DemoSeedAppService demoSeed;
+    private final ProjectVersionAppService versions;
+    private final SliceParallelExecutor sliceParallelExecutor;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -475,7 +479,9 @@ public class GenerationAppService {
             DesignSpecAppService designSpecs,
             BuildDispatchPolicy buildDispatchPolicy,
             DemoVersionAppService demoVersionAppService,
-            DemoSeedAppService demoSeed) {
+            DemoSeedAppService demoSeed,
+            ProjectVersionAppService versions,
+            SliceParallelExecutor sliceParallelExecutor) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -492,6 +498,8 @@ public class GenerationAppService {
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
         this.demoSeed = demoSeed;
+        this.versions = versions;
+        this.sliceParallelExecutor = sliceParallelExecutor;
     }
 
     /**
@@ -662,8 +670,9 @@ public class GenerationAppService {
         if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
             return null;
         }
-        return new BuildPlan(segments.stream().skip(1)
-                .map(GenerationSegment::getDescription).toList());
+        return new BuildPlan(
+                segments.stream().skip(1).map(GenerationSegment::getDescription).toList(),
+                segments.stream().skip(1).map(GenerationSegment::dependsOnOrds).toList());
     }
 
     /**
@@ -692,7 +701,7 @@ public class GenerationAppService {
             generationSegments.save(stage0);
             for (int index = 0; index < plan.slices().size(); index++) {
                 GenerationSegment segment = GenerationSegment.pending(projectId, index + 1,
-                        plan.slices().get(index), prdAnchor);
+                        plan.slices().get(index), prdAnchor, plan.dependsOn(index));
                 markLegacyClosed(segment, legacyClosed);
                 generationSegments.save(segment);
             }
@@ -947,8 +956,8 @@ public class GenerationAppService {
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
             boolean markGenerated, String runId, String summary, Integer prdVersionNo) {
-        requireReachable(project);
-        requireEntryFileComplete(project);
+        requireReachable(project.getWorkspaceId());
+        requireEntryFileComplete(project.getWorkspaceId());
         if (markGenerated) {
             // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
             // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型
@@ -996,9 +1005,9 @@ public class GenerationAppService {
     }
 
     /** 8081 可达核验（#35 收口判据探针）：不可达即抛异常（驱动尝试环重试/终态）。 */
-    private void requireReachable(Project project) {
+    private void requireReachable(Long workspaceId) {
         ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(CLOSING_PROBE));
+                Long.toString(workspaceId), new WorkspaceExecCommand(CLOSING_PROBE));
         if (result.exitCode() != 0) {
             throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
         }
@@ -1011,9 +1020,9 @@ public class GenerationAppService {
      * 上把入口补全），重试耗尽才转终态失败。8081 探活是「服务在跑」，本判据是
      * 「首屏写全」——两者皆过才算该段真收口。
      */
-    private void requireEntryFileComplete(Project project) {
+    private void requireEntryFileComplete(Long workspaceId) {
         ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(ENTRY_FILE_PROBE));
+                Long.toString(workspaceId), new WorkspaceExecCommand(ENTRY_FILE_PROBE));
         if (result.exitCode() != 0) {
             throw new IllegalStateException("入口文件缺失（" + ProjectFiles.BASELINE_ENTRY
                     + " 取件失败，退出码 " + result.exitCode() + "）");

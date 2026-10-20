@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { useGenerationStore } from "./generation";
+import { failureReasonOf, useGenerationStore } from "./generation";
 
 /**
  * 生成面 store「静默重试 vs 终态」判定（#56 → #82/#84 收紧）：终态只有一个写入口
@@ -28,6 +28,22 @@ describe("generation store · 静默重试与终态判定（#56/#84）", () => {
     givenCoderRunStarted("p1", "run1");
     useGenerationStore.getState().noteCoderFailed("p1");
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+  });
+
+  it("失败原因随 noteCoderFailed 落 store（#355 载荷 message），重派起跑即清", () => {
+    givenCoderRunStarted("p1", "run1");
+    const store = useGenerationStore.getState();
+    store.noteCoderFailed("p1", "应用服务未能启动");
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+    expect(failureReasonOf(useGenerationStore.getState(), "p1")).toBe("应用服务未能启动");
+
+    // 同载荷重放幂等（不闪变）；无载荷重放保留既有（不回退）；重派起跑即清
+    store.noteCoderFailed("p1", "应用服务未能启动");
+    expect(failureReasonOf(useGenerationStore.getState(), "p1")).toBe("应用服务未能启动");
+    store.noteCoderFailed("p1");
+    expect(failureReasonOf(useGenerationStore.getState(), "p1")).toBe("应用服务未能启动");
+    store.noteCoderRun("p1", "run-restart");
+    expect(failureReasonOf(useGenerationStore.getState(), "p1")).toBeUndefined();
   });
 
   it("终态后恢复出口重派起跑：新 run 登记即回 running（重派链路状态复位）", () => {

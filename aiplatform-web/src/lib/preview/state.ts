@@ -59,6 +59,8 @@ export type PanelNotice = {
   text: string;
   /** 恢复入口（RecoveryAction 同源）。 */
   recovery?: RecoveryAction;
+  /** 失败原因行（#355 run-failed 载荷 message；失败档可缺省）。 */
+  reason?: string;
 };
 
 /** 系统面板呈现档位。 */
@@ -67,8 +69,9 @@ export type SystemPanelPhase =
   | { kind: "idle" }
   /** 第一档（无应用，run 中）：随工作消息部件推进的步骤提示。 */
   | { kind: "hint"; text: string }
-  /** 生成中断（无页面）：中断提示 +「继续生成」入口；更新轮失败给「继续更新」。 */
-  | { kind: "failed"; text: string; recovery?: RecoveryAction }
+  /** 生成中断（无页面）：中断提示 +「继续生成」入口；更新轮失败给「继续更新」。
+   * reason = 失败原因行（#355 run-failed 载荷 message，可缺省）。 */
+  | { kind: "failed"; text: string; recovery?: RecoveryAction; reason?: string }
   /** 已有生成事实但 URL 未到：接通中；trouble = 真故障（非未就绪）。 */
   | { kind: "connecting"; trouble: boolean }
   /** 第二档（应用可访问）：真页面 + 进行中轻提示（可缺省）。 */
@@ -171,18 +174,20 @@ export function systemPanelPhase(input: {
   error?: unknown;
   /** 当前工作消息部件（占位提示信号源）。 */
   parts: readonly WorkPart[];
+  /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
+  failureReason?: string;
 }): SystemPanelPhase {
-  const { generationState, coderStatus, url, error, parts } = input;
+  const { generationState, coderStatus, url, error, parts, failureReason } = input;
 
   // 有 URL 即上页面（跨会话直接显示系统现状；重试静默期间不退占位——不闪断）
   if (url) {
-    return { kind: "page", notice: noticeOf(generationState, coderStatus) };
+    return { kind: "page", notice: noticeOf(generationState, coderStatus, failureReason) };
   }
 
   // 会话内失败终态先行呈现（#56 run 失败为唯一失败终态；REST 投影随失效重拉收敛
   // ——run-failed 即 invalidate 项目域）：已生成 → 更新失败口径，否则生成中断口径
   if (coderStatus === "error") {
-    return { kind: "failed", ...failedOutcome(generationState) };
+    return { kind: "failed", reason: failureReason, ...failedOutcome(generationState) };
   }
 
   if (generationState === "generating" || coderStatus === "running") {
@@ -211,13 +216,14 @@ export function systemPanelPhase(input: {
 function noticeOf(
   generationState: GenerationState | undefined,
   coderStatus: CoderRunStatus | undefined,
+  failureReason?: string,
 ): PanelNotice | undefined {
   // 进行中优先（「继续生成」点击后的乐观起跑——投影仍中断时会话信号先行回进行中）
   if (coderStatus === "running" || generationState === "generating") {
     return { failed: false, text: UPDATING_NOTICE };
   }
   if (coderStatus === "error") {
-    return { failed: true, ...failedOutcome(generationState) };
+    return { failed: true, reason: failureReason, ...failedOutcome(generationState) };
   }
   if (generationState === "interrupted") {
     // 中断 + 有页面（部分切片已收口、应用在跑）：细条带「继续生成」，页面保留

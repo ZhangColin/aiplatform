@@ -106,6 +106,9 @@ app:
   generation:
     max-attempts: 3
     silence-timeout: 10m
+    # 工具执行窗的活超时预算（#355）：长命令（依赖安装/测试）执行中引擎无事件，
+    # 给延长预算防静默阈值误杀；任何事件到达即回落 silence-timeout
+    tool-silence-timeout: 30m
   # #51 · business.project 派发编排：入口三分类的分类模型档专用键——每条指令区
   # 消息必经的轻调用，缺省 flash 由代码保证，不吃 agentscope.default-model 的
   # 部署配法（配重档则每条消息烧一次重模型）。

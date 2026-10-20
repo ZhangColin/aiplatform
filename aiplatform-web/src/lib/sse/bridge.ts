@@ -261,7 +261,7 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         // 异常防御位，同其他 coder 事件）
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderFailed(payload.projectId);
+          generation.noteCoderFailed(payload.projectId, payload.message);
           // 四态投影回「生成中断」（#222）：终态落轨道表即失效项目域——「继续
           // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });

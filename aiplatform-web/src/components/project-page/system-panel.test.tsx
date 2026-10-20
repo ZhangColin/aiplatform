@@ -68,6 +68,7 @@ function renderPanel({
   parts = [],
   url,
   error,
+  failureReason,
 }: {
   generationState?: GenerationState;
   coderStatus?: CoderRunStatus;
@@ -75,6 +76,7 @@ function renderPanel({
   parts?: WorkPart[];
   url?: string;
   error?: unknown;
+  failureReason?: string;
 }) {
   useGenerationStore.setState({
     generations: { p1: { coderRunIds: [], coderStatus, previewEpoch: epoch, seenFinishEventIds: [] } },
@@ -91,6 +93,7 @@ function renderPanel({
         projectId="p1"
         generationState={generationState}
         coderStatus={coderStatus}
+        failureReason={failureReason}
         onGenerated={() => {}}
       />
     </QueryClientProvider>,
@@ -165,6 +168,20 @@ describe("SystemPanel · 系统模式主区域（#45 门禁解除 + #222 四态�
 
     expect(html).toContain("生成中断了");
     expect(html).toContain("继续生成");
+  });
+
+  it("失败原因随 run-failed 载荷呈现（#355 终态零原因补齐）：原因行入失败档，无原因不出行", () => {
+    const html = renderPanel({
+      generationState: "generating",
+      coderStatus: "error",
+      failureReason: "应用服务未能启动",
+    });
+
+    expect(html).toContain("生成中断了");
+    expect(html).toContain("应用服务未能启动");
+
+    const without = renderPanel({ generationState: "generating", coderStatus: "error" });
+    expect(without).not.toContain("原因");
   });
 
   // ---------- 第二档：应用可访问（探活通过出 URL），页面 + 一套轻提示 ----------

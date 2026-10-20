@@ -69,6 +69,7 @@ export function SystemPanel({
   projectId,
   generationState,
   coderStatus,
+  failureReason,
   onGenerated,
   onOpenFiles,
   variant = "default",
@@ -78,6 +79,8 @@ export function SystemPanel({
   generationState?: GenerationState;
   /** 本会话编码 run 状态（更新轨信号——更新中/更新失败）。 */
   coderStatus?: CoderRunStatus;
+  /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
+  failureReason?: string;
   /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
   onGenerated: () => void;
   /** Demo 页文件辅助抽屉挂点；缺省不出文件按钮。 */
@@ -155,6 +158,7 @@ export function SystemPanel({
     url,
     error: preview.error,
     parts,
+    failureReason,
   });
   const pageLive = phase.kind === "page" && !!url;
   // 页面档两类提示（#124 移出遮挡）：进行中 = 浏览器条内联轻状态（不叠预览）、
@@ -354,7 +358,12 @@ export function SystemPanel({
           // 失败态细条（#124）：非悬浮顶部占位——占自己高度、把预览下推，不叠预览
           <div className="flex shrink-0 items-center justify-center gap-2 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
             <TriangleAlert className="size-3.5 shrink-0" />
-            {failedNotice.text}
+            <span>
+              {failedNotice.text}
+              {failedNotice.reason && (
+                <span className="ml-2 text-destructive/70">{failedNotice.reason}</span>
+              )}
+            </span>
             {recoveryAction(failedNotice.recovery)}
           </div>
         ) : null}
@@ -402,6 +411,7 @@ export function SystemPanel({
                   status={phase.text}
                   startedAt={workStartedAt}
                   endedAt={workEndedAt}
+                  reason={phase.reason}
                   failed
                 >
                   {recoveryAction(phase.recovery)}
@@ -409,7 +419,12 @@ export function SystemPanel({
               ) : (
                 <PanelHint>
                   <TriangleAlert className="size-5 text-destructive" />
-                  <p>{phase.text}</p>
+                  <div className="flex flex-col gap-1">
+                    <p>{phase.text}</p>
+                    {phase.reason && (
+                      <p className="text-label-sm text-ink-faint">{phase.reason}</p>
+                    )}
+                  </div>
                   {recoveryAction(phase.recovery)}
                 </PanelHint>
               )
@@ -457,12 +472,15 @@ function DemoWaitingHint({
   startedAt,
   endedAt,
   failed = false,
+  reason,
   children,
 }: {
   status: string;
   startedAt?: number;
   endedAt?: number;
   failed?: boolean;
+  /** 失败原因行（#355 run-failed 载荷 message——终态失败原因可理解）。 */
+  reason?: string;
   children?: ReactNode;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -496,6 +514,12 @@ function DemoWaitingHint({
           <span className="shrink-0 text-ink-faint">当前状态</span>
           <span className="text-right text-ink-secondary">{status}</span>
         </div>
+        {failed && reason && (
+          <div className="flex items-start justify-between gap-3 text-label-sm">
+            <span className="shrink-0 text-ink-faint">原因</span>
+            <span className="text-right text-ink-secondary">{reason}</span>
+          </div>
+        )}
       </div>
       {children}
     </PanelHint>

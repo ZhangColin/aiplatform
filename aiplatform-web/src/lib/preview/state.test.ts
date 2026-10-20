@@ -151,6 +151,25 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
     ).toEqual({ kind: "failed", text: "更新遇到了问题", recovery: "restart-update" });
   });
 
+  it("失败原因随 phase 透出（#355 run-failed 载荷 message），缺省不出原因行", () => {
+    expect(
+      systemPanelPhase({
+        generationState: "generating",
+        coderStatus: "error",
+        parts: [],
+        failureReason: "应用服务未能启动",
+      }),
+    ).toEqual({
+      kind: "failed",
+      text: INTERRUPTED_NOTICE,
+      recovery: "resume",
+      reason: "应用服务未能启动",
+    });
+    expect(
+      systemPanelPhase({ generationState: "generating", coderStatus: "error", parts: [] }),
+    ).toEqual({ kind: "failed", text: INTERRUPTED_NOTICE, recovery: "resume" });
+  });
+
   it("正常态无任何手动触发：生成中/已生成均不带恢复入口", () => {
     expect(phaseOf("generating")).toEqual({ kind: "hint", text: "正在初始化" });
     expect(phaseOf("generated", { url: "http://localhost:42659" })).toEqual({

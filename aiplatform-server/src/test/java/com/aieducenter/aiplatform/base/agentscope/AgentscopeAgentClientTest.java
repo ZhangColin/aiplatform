@@ -220,7 +220,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
         client.converse(new AgentCommand("run-1", "咨询", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, null, "ASSISTANT", true, false, null, null), event -> {
+                null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -248,7 +248,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
         client.converse(new AgentCommand("run-1", "梳理需求", null, null, "s-1", "alice",
-                null, "42", Map.of(), null, null, "main", false, false, null, null), event -> {
+                null, "42", Map.of(), null, null, null, "main", false, false, null, null), event -> {
                 });
 
         verify(factory).obtain(any(), any(), any(),
@@ -487,7 +487,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, null, "CODER", false, false, null, null), frames::add);
+                null, null, Map.of(), null, null, null, "CODER", false, false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
         assertThat(frames.get(0).payload()).containsEntry("agent", "CODER");
@@ -506,7 +506,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(new AgentCommand("run-1", "做系统", null, null, "s-1", "alice",
-                null, null, Map.of(), null, null, "CODER", false, false,
+                null, null, Map.of(), null, null, null, "CODER", false, false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -767,7 +767,7 @@ class AgentscopeAgentClientTest {
     /** 带静默判死阈值的生成形命令（timeout 不设总墙钟——活超时接管）。 */
     private AgentCommand commandWithSilence(Duration silence) {
         return new AgentCommand("run-1", "生成", null, null, "s-1", "alice",
-                null, null, Map.of(), null, silence, null, false, false, null, null);
+                null, null, Map.of(), null, silence, null, null, false, false, null, null);
     }
 
     @Test
@@ -816,5 +816,67 @@ class AgentscopeAgentClientTest {
 
         assertThatThrownBy(() -> client.converse(command(null, null), event -> {
                 })).isInstanceOf(IllegalStateException.class);
+    }
+
+    // ---------- #355 工具执行窗预算（长命令不被静默阈值误杀） ----------
+
+    /** 带静默判死阈值与工具窗预算的生成形命令（#355）。 */
+    private AgentCommand commandWithSilence(Duration silence, Duration toolSilence) {
+        return new AgentCommand("run-1", "生成", null, null, "s-1", "alice",
+                null, null, Map.of(), null, silence, toolSilence, null, false, false, null, null);
+    }
+
+    /** 工具执行窗剧本（#355 长命令现场）：参数落定→执行窗零事件→结果返回。 */
+    private void givenToolWindow(Duration startGap, Duration window, Duration afterGap,
+            boolean keepOpen) {
+        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        Flux<io.agentscope.core.event.AgentEvent> script = Flux
+                .<io.agentscope.core.event.AgentEvent>just(
+                        new TextBlockDeltaEvent("r-1", "b-1", "字"))
+                .concatWith(Flux
+                        .<io.agentscope.core.event.AgentEvent>just(
+                                new ToolCallEndEvent("r-1", "tc-1", "execute"))
+                        .delayElements(startGap))
+                .concatWith(Flux
+                        .<io.agentscope.core.event.AgentEvent>just(
+                                new ToolResultEndEvent("r-1", "tc-1", "execute",
+                                        ToolResultState.SUCCESS))
+                        .delayElements(window));
+        if (keepOpen) {
+            script = script.concatWith(Flux.never()); // 死寂尾段（判死断言用）
+        }
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class))).thenReturn(script);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_tool_window_beyond_silence_within_budget_when_converse_then_survives() {
+        // 执行窗 800ms ＞静默阈值 300ms（旧语义必误杀）、＜工具预算 1500ms——
+        // 「还在干活就不掐」：长命令（依赖安装/测试）不被判死，流正常收口
+        givenToolWindow(Duration.ofMillis(100), Duration.ofMillis(800),
+                Duration.ZERO, /* keepOpen= */ false);
+
+        AgentReply reply = client.converse(
+                commandWithSilence(Duration.ofMillis(300), Duration.ofMillis(1500)),
+                event -> {
+                });
+
+        assertThat(reply.text()).isEqualTo("字");
+    }
+
+    @Test
+    @Timeout(30)
+    void given_silence_after_tool_window_when_converse_then_resets_to_silence_budget() {
+        // 结果事件到达即回落常规预算：执行窗 400ms 内存活（＜工具预算），结果后
+        // 死寂 600ms ＞静默阈值 300ms——后半程照常判死（回落钉死，预算不滞留）
+        givenToolWindow(Duration.ofMillis(100), Duration.ofMillis(400),
+                Duration.ofMillis(600), /* keepOpen= */ true);
+
+        assertThatThrownBy(() -> client.converse(
+                commandWithSilence(Duration.ofMillis(300), Duration.ofMillis(1500)),
+                event -> {
+                }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("活超时");
     }
 }

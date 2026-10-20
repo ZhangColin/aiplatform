@@ -185,11 +185,22 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * 复用 + PGDATA 数据副本（清陈旧 pid 后起库）+ redis。代码只克隆 git 跟踪面
      * （node_modules/data 已被 .gitignore 排除，clone 天然不含）。库名随数据：PGDATA
      * 从 main 拷来，内含 main 库——fork 的 .env 指向它（见 {@link #forkWorkspace}）。
+     *
+     * <p><b>克隆目标不直取工作区根（#355 活体实测修复）</b>：DEV 镜像把
+     * {@code .pnpm-store} 烤进工作区卷（pnpm 提速），新卷首挂时 Docker 会把镜像
+     * 卷内容灌入——工作区根恒非空，{@code git clone} 直取报「not an empty
+     * directory」、fork 派生秒败（实测切片并行波两片全炸、连续两次同败）。改
+     * 克隆到临时目录再整树铺进根（保留镜像种子面，克隆面照旧只含 git 跟踪面）。
+     * 主仓 git 未初始（收口成版前的空工作区）则整树直拷——fork 不依赖主仓已
+     * 有版本（#353 无 HEAD 锚口径同源）。</p>
      */
     private String forkPopulateCommand() {
         String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
         String nodeModules = WorkspaceLayout.absolute("node_modules");
-        return "git clone -q /main-ro " + WorkspaceLayout.ROOT
+        return "if test -d /main-ro/.git; then git clone -q /main-ro /tmp/fork-src"
+                + " && cp -a /tmp/fork-src/. " + WorkspaceLayout.ROOT + "/"
+                + " && rm -rf /tmp/fork-src; else cp -a /main-ro/. " + WorkspaceLayout.ROOT
+                + "/; fi"
                 + " && cd " + WorkspaceLayout.ROOT
                 + " && if test -d /main-ro/node_modules && ! test -e " + nodeModules
                 + "; then cp -a /main-ro/node_modules " + nodeModules + "; fi"

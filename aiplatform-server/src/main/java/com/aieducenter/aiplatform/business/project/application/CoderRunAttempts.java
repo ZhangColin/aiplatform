@@ -416,6 +416,7 @@ class CoderRunAttempts {
                         Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
                         /* timeout= */ null, // #322 活超时替换一次性总墙钟
                         properties.getSilenceTimeout(),
+                        properties.getToolSilenceTimeout(), // #355 工具执行窗延长预算
                         seat.profile().key(),
                         /* workspaceReadOnly= */ false,
                         seat.workspaceNoShell(),

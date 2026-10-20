@@ -23,10 +23,13 @@ import com.aieducenter.aiplatform.base.agentscope.AgentSessionExecutor;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.RunHeading;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
+import com.aieducenter.aiplatform.base.workspace.application.ConvergenceFace;
+import com.aieducenter.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
 import com.aieducenter.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.aieducenter.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
 import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
@@ -457,6 +460,7 @@ public class GenerationAppService {
     private final DemoSeedAppService demoSeed;
     private final ProjectVersionAppService versions;
     private final SliceParallelExecutor sliceParallelExecutor;
+    private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
 
     /**
      * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
@@ -494,7 +498,8 @@ public class GenerationAppService {
             DemoVersionAppService demoVersionAppService,
             DemoSeedAppService demoSeed,
             ProjectVersionAppService versions,
-            SliceParallelExecutor sliceParallelExecutor) {
+            SliceParallelExecutor sliceParallelExecutor,
+            WorkspaceConvergenceAppService workspaceConvergenceAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
@@ -513,6 +518,7 @@ public class GenerationAppService {
         this.demoSeed = demoSeed;
         this.versions = versions;
         this.sliceParallelExecutor = sliceParallelExecutor;
+        this.workspaceConvergenceAppService = workspaceConvergenceAppService;
     }
 
     /**
@@ -881,6 +887,20 @@ public class GenerationAppService {
         String resumePrefix = "";
         String previousHandoff = null;
         if (resumed) {
+            // 续跑保预览活（#355 活体实测）：容器重启/休眠后主工作区 8081 应用进程死，
+            // 而续跑跳过序前段（起服位）——波末统一探活会把整轨判死、用户再点一次
+            // 「继续生成」。续跑起手先确保应用在跑（startApp 幂等：已在服直回；
+            // 同步面 ADMIN——轨道等就绪，探活失败不再误杀整轨）。尽力而为：
+            // 收敛不成（工作区异常态等）回落旧行为，探活仍是收口硬门
+            try {
+                workspaceConvergenceAppService.convergeBlocking(
+                        WorkspaceId.of(Long.toString(project.getWorkspaceId())),
+                        ConvergenceFace.ADMIN, /* startAppOnWake= */ true);
+            }
+            catch (RuntimeException e) {
+                log.warn("[generate] 项目 {} 续跑起手应用确保未成（探活仍为收口硬门）：{}",
+                        projectId, e.toString());
+            }
             resumePrefix = resumeInventoryBlock(startOrd, segments,
                     terminalFailureScenes.get(projectId));
             int handoffSource = closedOrds.stream()
@@ -939,7 +959,7 @@ public class GenerationAppService {
                 if (result.lastError() != null) {
                     terminalFailureScenes.put(projectId, result.lastError());
                 }
-                eventBridge.emitRunFailed(project, runId);
+                eventBridge.emitRunFailed(project, runId, result.lastError());
                 return;
             }
             // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一段
@@ -991,7 +1011,7 @@ public class GenerationAppService {
                     if (result.lastError() != null) {
                         terminalFailureScenes.put(projectId, result.lastError());
                     }
-                    eventBridge.emitRunFailed(project, runId);
+                    eventBridge.emitRunFailed(project, runId, result.lastError());
                     return;
                 }
                 previousHandoff = result.closingText();
@@ -1001,6 +1021,16 @@ public class GenerationAppService {
                         prdVersionNo, resumed, startOrd, resumePrefix, lastOrd, firstRunId);
             }
             closedOrds = reloadClosedOrds(projectId);
+        }
+        // 末片收口补落（#355 活体实测）：末片（lastOrd）在并行波内先收口、后续波
+        // 仍有片时，波末统一的全片收口条件不成立——generated_at/Demo 首版无人落位，
+        // 轨道收尾全片已收口仍显示「生成中断」。循环后补查补落（读库回最新值——
+        // 本方法的 project 聚合是起跑时装载的旧投影；closeOnGeneration 幂等：
+        // generated_at 在场直跳；种子幂等只补空表）
+        Project current = projectRepository.findById(projectId).orElse(null);
+        if (current != null && current.getGeneratedAt() == null && allSlicesClosed(projectId)) {
+            demoSeed.seedSandbox(project);
+            markGenerated(projectId, firstRunId, prdVersionNo);
         }
         terminalFailureScenes.remove(projectId);
     }
@@ -1152,7 +1182,7 @@ public class GenerationAppService {
                 if (outcome.error() != null) {
                     terminalFailureScenes.put(projectId, outcome.error());
                 }
-                eventBridge.emitRunFailed(project, outcome.runId());
+                eventBridge.emitRunFailed(project, outcome.runId(), outcome.error());
                 destroyForkQuietly(outcome.workspaceId()); // 失败片不留 fork 孤儿
                 continue;
             }
@@ -1250,7 +1280,7 @@ public class GenerationAppService {
                         projectId, outcome.ord(), diff.stderr());
                 rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
                 failSegment(projectId, outcome.ord(), outcome.runId());
-                eventBridge.emitRunFailed(project, outcome.runId());
+                eventBridge.emitRunFailed(project, outcome.runId(), "系统产物合并失败");
                 return false;
             }
             if (!diff.stdout().isBlank()) {
@@ -1276,7 +1306,7 @@ public class GenerationAppService {
             log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
             rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
             failSegment(projectId, outcome.ord(), outcome.runId());
-            eventBridge.emitRunFailed(project, outcome.runId());
+            eventBridge.emitRunFailed(project, outcome.runId(), errorText(e));
             return false;
         } finally {
             destroyForkQuietly(outcome.workspaceId());
@@ -1340,7 +1370,7 @@ public class GenerationAppService {
             if (result.lastError() != null) {
                 terminalFailureScenes.put(projectId, result.lastError());
             }
-            eventBridge.emitRunFailed(project, outcome.runId());
+            eventBridge.emitRunFailed(project, outcome.runId(), result.lastError());
             return false;
         }
         return true;

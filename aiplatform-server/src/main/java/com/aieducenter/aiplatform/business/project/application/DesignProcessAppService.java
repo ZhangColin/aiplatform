@@ -454,7 +454,7 @@ public class DesignProcessAppService {
                     RunHeading.slice(itemTitle, item.getOrd(), total));
             if (!result.succeeded()) {
                 failDesignItem(projectId, item.getOrd(), runId);
-                eventBridge.emitRunFailed(project, runId);
+                eventBridge.emitRunFailed(project, runId, result.lastError());
                 return; // 残队不排空（#291）：随下次派发合并受理
             }
             sweepQueuedRevisions(project, item.getOrd(), null);
@@ -591,7 +591,7 @@ public class DesignProcessAppService {
         if (!result.succeeded()) {
             log.warn("[design] 项目 {} 件 {} 改稿超限转终态（runId={}）——件状态保持，用户重提即兜底",
                     projectId, item.getOrd(), runId);
-            eventBridge.emitRunFailed(project, runId);
+            eventBridge.emitRunFailed(project, runId, result.lastError());
         }
         return result;
     }

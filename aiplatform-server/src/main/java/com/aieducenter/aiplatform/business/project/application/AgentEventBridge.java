@@ -56,14 +56,55 @@ public class AgentEventBridge {
      * runId = 该场 run 的用户面标识（首试 runId——#84 静默重试：重试不换新锚，
      * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
      * 失败终态（重试全程静默，中间失败不出事件）。
+     *
+     * <p><b>失败原因随事件（#355 机制检查）</b>：{@code lastError}（末次尝试的
+     * 错误现场，原样留档于终态日志/失败留账）经
+     * {@link #userFacingRunFailure(String)} 映射为一句用户面原因随
+     * {@code message} 键携带（映射不中则截断原文首行；空则缺省不带）——终态
+     * 失败不再零原因，用户可分辨「模型没写好」与「服务侧故障」。</p>
      */
-    public void emitRunFailed(Project project, String runId) {
-        eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, Map.of(
-                EventsAppService.PROJECT_FIELD, project.getId().toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()),
-                EventsAppService.RUN_FIELD, runId));
+    public void emitRunFailed(Project project, String runId, String lastError) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
+        payload.put(EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()));
+        payload.put(EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
+        payload.put(EventsAppService.RUN_FIELD, runId);
+        String reason = userFacingRunFailure(lastError);
+        if (reason != null) {
+            payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
+        }
+        eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
+    }
+
+    /**
+     * 终态失败的用户面原因映射（#355）：常见内部错误形态映射为一句人话定型
+     * （机制检查口径——机制为体验服务：失败终态必须「原因可理解」，用户借此
+     * 分辨该点重试还是找服务）；未命中形态截首行定宽 120（#229 失败留痕同款
+     * 截断口径）。平台分析口径的原文原样走终态日志与失败留账，不经本映射。
+     */
+    static String userFacingRunFailure(String lastError) {
+        if (lastError == null || lastError.isBlank()) {
+            return null;
+        }
+        if (lastError.contains("活超时判死") || lastError.contains("纯静默超限")) {
+            return "生成长时间没有进展，已自动停止";
+        }
+        if (lastError.contains("单条模型流总时长超上限")) {
+            return "模型响应超时，已自动停止";
+        }
+        if (lastError.contains("8081 不可达")) {
+            return "应用服务未能启动";
+        }
+        if (lastError.contains("入口文件缺失") || lastError.contains("入口文件残缺")) {
+            return "预览入口页面未写完整";
+        }
+        if (lastError.toLowerCase().contains("api key")) {
+            return "模型服务凭证异常，请稍后再试";
+        }
+        String firstLine = lastError.split("\\R", 2)[0].strip();
+        return firstLine.length() <= 120 ? firstLine : firstLine.substring(0, 119) + "…";
     }
 
     /**

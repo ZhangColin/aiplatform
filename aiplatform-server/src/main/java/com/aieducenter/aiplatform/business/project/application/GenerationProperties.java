@@ -27,6 +27,14 @@ public class GenerationProperties {
      */
     private Duration silenceTimeout = Duration.ofMinutes(10);
 
+    /**
+     * 工具执行窗的活超时预算（#355 机制检查）：工具执行中（参数落定→结果返回）
+     * 引擎无任何事件，长命令（依赖安装/测试超 10 分钟）会被静默阈值误杀——
+     * 「还在干活就不掐」意图落空。执行窗给延长预算（缺省 30 分钟），任何事件
+     * 到达即回落常规静默阈值；空值/非正回落同静默阈值（不放大预算）。
+     */
+    private Duration toolSilenceTimeout = Duration.ofMinutes(30);
+
     public int getMaxAttempts() {
         return maxAttempts;
     }
@@ -41,5 +49,13 @@ public class GenerationProperties {
 
     public void setSilenceTimeout(Duration silenceTimeout) {
         this.silenceTimeout = silenceTimeout;
+    }
+
+    public Duration getToolSilenceTimeout() {
+        return toolSilenceTimeout;
+    }
+
+    public void setToolSilenceTimeout(Duration toolSilenceTimeout) {
+        this.toolSilenceTimeout = toolSilenceTimeout;
     }
 }

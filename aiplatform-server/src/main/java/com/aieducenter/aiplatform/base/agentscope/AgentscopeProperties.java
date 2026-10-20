@@ -35,7 +35,8 @@ public class AgentscopeProperties {
      * 内核缺省 10：对话轮够用（主智能体每轮以 ask_user 挂起收尾，远到不了 10），编码
      * turn 远不够（#25 活体对照实测：一次中等 PRD 的系统生成单 turn 需约 160 次迭代，
      * 10 次即被掐断成 exceed_max_iters「假完成」）。取值给足余量（实测需求 ×2 弱），
-     * 失控保护以墙钟为主界（app.generation.timeout），本上限只作次级护栏。
+     * 编码轨失控保护以活超时判死为主界（app.generation.silence-timeout，#322），
+     * 本上限只作次级护栏。
      */
     private Integer maxIters;
 

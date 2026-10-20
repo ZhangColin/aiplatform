@@ -622,6 +622,7 @@ public class MainAgentAppService {
                 correlationOf(projectId),
                 null,
                 /* silenceTimeout= */ null,
+                /* toolSilenceTimeout= */ null, // 对话轮总墙钟语义，无工具窗预算
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,

@@ -24,6 +24,8 @@ type ProjectGeneration = {
   coderRunIds: string[];
   /** 最近一次编码 run 的状态；undefined = 本会话未见编码 run。 */
   coderStatus?: CoderRunStatus;
+  /** 失败终态的用户面原因（#355 run-failed 载荷 message；新一轮 run 起跑即清）。 */
+  failureReason?: string;
   /** 预览重挂纪元（编码 run 每次收口 +1，重放去重）。 */
   previewEpoch: number;
   /** 已计过纪元的 run-finish 事件 id（重放去重锚，有界）。 */
@@ -40,9 +42,9 @@ export type GenerationState = {
   /**
    * 编码 run 的 run-failed（轨道终态收口事件）：状态 → error。终态的唯一写入口
    * （#56/#84）——重试全程静默、中间失败不出事件（run 失败为唯一失败终态），
-   * 恢复出口零闪现。
+   * 恢复出口零闪现。reason = 载荷 message（#355 用户面失败原因；缺省保留既有）。
    */
-  noteCoderFailed: (projectId: string) => void;
+  noteCoderFailed: (projectId: string, reason?: string) => void;
 };
 
 /** runId 登记集软上限（agent 流重放缓冲 ~1000 事件）。 */
@@ -91,9 +93,9 @@ export const useGenerationStore = create<GenerationState>((set) => ({
       const registered = generation.coderRunIds.includes(runId)
         ? generation
         : { ...generation, coderRunIds: pushCapped(generation.coderRunIds, runId) };
-      return registered.coderStatus === "running"
+      return registered.coderStatus === "running" && registered.failureReason === undefined
         ? registered
-        : { ...registered, coderStatus: "running" };
+        : { ...registered, coderStatus: "running", failureReason: undefined };
     }),
 
   noteCoderFinish: (projectId, eventId) =>
@@ -102,23 +104,37 @@ export const useGenerationStore = create<GenerationState>((set) => ({
         // 重放已计过：状态收敛即可，纪元不再递增（iframe 不因回页重挂）
         return generation.coderStatus === "finished"
           ? generation
-          : { ...generation, coderStatus: "finished" };
+          : { ...generation, coderStatus: "finished", failureReason: undefined };
       }
       const seen = [...generation.seenFinishEventIds, eventId];
       return {
         ...generation,
         coderStatus: "finished",
+        failureReason: undefined,
         previewEpoch: generation.previewEpoch + 1,
         seenFinishEventIds:
           seen.length > MAX_EVENT_IDS ? seen.slice(seen.length - MAX_EVENT_IDS) : seen,
       };
     }),
 
-  noteCoderFailed: (projectId) =>
-    updateGeneration(set, projectId, (generation) =>
-      generation.coderStatus === "error" ? generation : { ...generation, coderStatus: "error" },
-    ),
+  noteCoderFailed: (projectId, reason) =>
+    updateGeneration(set, projectId, (generation) => {
+      // 缺省保留既有原因（重放/无载荷不回退），带原因随新事件更新；终态幂等
+      const next = reason ?? generation.failureReason;
+      if (generation.coderStatus === "error" && generation.failureReason === next) {
+        return generation;
+      }
+      return { ...generation, coderStatus: "error", failureReason: next };
+    }),
 }));
+
+/** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行呈现源）。 */
+export function failureReasonOf(
+  state: Pick<GenerationState, "generations">,
+  projectId: string,
+): string | undefined {
+  return state.generations[projectId]?.failureReason;
+}
 
 /** 编码 run 判定（bridge 侧用：登记过的 runId 即编码 run）。 */
 export function isCoderRun(

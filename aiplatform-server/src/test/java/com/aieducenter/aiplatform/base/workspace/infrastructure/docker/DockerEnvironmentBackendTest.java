@@ -115,6 +115,31 @@ class DockerEnvironmentBackendTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_dev_workspace_when_forked_then_fork_populates_code_and_preserves_image_seed() {
+        // #355 活体修复回归（切片并行 fork 派生秒败）：DEV 镜像把 .pnpm-store 烤进
+        // 工作区卷，新卷首挂即被镜像种子填充——git clone 直取工作区根报「not an
+        // empty directory」、fork 全灭。修复口径：克隆走临时目录整树铺进根——
+        // 基座工程落在 fork 内、镜像种子面（.pnpm-store）保留；主仓 git 未初始
+        // （收口成版前）走整树直拷不依赖版本（已收口主仓的 git HEAD 面由全链
+        // 活体轮验证——切片并行波 fork 就绪）。pg 数据副本随 fork 起库。
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+        WorkspaceProvision forked = backend.forkWorkspace(provision.handle(),
+                WorkspaceId.generate());
+        try {
+            assertThat(execIn(forked.handle(), "test -d /workspace/.pnpm-store").exitCode())
+                    .as("镜像种子面应保留（fork 落料不先清根）").isZero();
+            assertThat(execIn(forked.handle(), "test -f /workspace/package.json").exitCode())
+                    .as("fork 内应有基座工程（baseline 脚手架）").isZero();
+            assertThat(execIn(forked.handle(), "pg_isready -h localhost -U postgres")
+                    .stdout()).contains("accepting connections");
+        } finally {
+            backend.destroyWorkspace(forked.handle());
+        }
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_created_workspace_when_baseline_seeded_then_skeleton_page_serves_on_8081() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);

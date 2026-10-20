@@ -260,7 +260,11 @@ export type PlatformAgentEvent =
        * 不出用户面）。
        */
       type: "run-failed";
-      payload: AgentPayload;
+      payload: AgentPayload & {
+        /** 用户面失败原因（#355 机制检查·终态零原因补齐）：桥映射的一句人话
+         * （末次错误现场定型/截断）；缺省不携带——前端失败档原因行消费。 */
+        message?: string;
+      };
     }
   | {
       /**

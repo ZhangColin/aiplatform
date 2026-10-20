@@ -227,6 +227,7 @@ public class DispatchAppService {
                 Map.of(),
                 CLASSIFY_TIMEOUT,
                 /* silenceTimeout= */ null,
+                /* toolSilenceTimeout= */ null,
                 null,
                 /* workspaceReadOnly= */ false,
                 /* workspaceNoShell= */ false,

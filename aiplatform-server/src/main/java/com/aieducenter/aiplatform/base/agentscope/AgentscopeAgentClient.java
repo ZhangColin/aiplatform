@@ -31,6 +31,7 @@ import io.agentscope.harness.agent.HarnessAgent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.metering.domain.port.UsageEventSink;
@@ -143,7 +144,7 @@ public class AgentscopeAgentClient {
         }
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
-                command.timeout(), command.silenceTimeout(), sink);
+                command.timeout(), command.silenceTimeout(), command.toolSilenceTimeout(), sink);
         // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
         // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
         // 是真实工作区事实，外层尝试环据此留账）
@@ -188,7 +189,7 @@ public class AgentscopeAgentClient {
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
-                resume.usageContext(), null, null, sink);
+                resume.usageContext(), null, null, null, sink);
         // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
         // 同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
@@ -331,7 +332,7 @@ public class AgentscopeAgentClient {
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
-            Duration silenceTimeout, Consumer<AgentEvent> sink) {
+            Duration silenceTimeout, Duration toolSilenceTimeout, Consumer<AgentEvent> sink) {
         StringBuilder text = new StringBuilder();
         AtomicReference<String> finish = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> suspended = new AtomicReference<>();
@@ -348,15 +349,26 @@ public class AgentscopeAgentClient {
             events = events.contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, scope));
         }
         try {
-            // 活超时判定（#322）：silenceTimeout 非空 → Flux.timeout 按事件逐个重置，
+            // 活超时判定（#322）：silenceTimeout 非空 → 按事件逐个重置的静默计时，
             // 纯静默超阈值才判死（还在干活就不掐）；为空 → 维持一次性总墙钟（对话轮/
-            // 判定轮）。计量上下文已在 events 上挂好（#324 订阅链），此处仅套超时/观测
+            // 判定轮）。工具执行窗（#355）：ToolCallEndEvent 起引擎无事件（模型等
+            // 工具结果），长命令会被静默阈值误杀——执行窗给延长预算，任何事件到达
+            // 即回落常规阈值。计量上下文已在 events 上挂好（#324 订阅链），此处仅套超时/观测
             if (silenceTimeout != null) {
+                Duration toolBudget = toolSilenceTimeout != null
+                        && !toolSilenceTimeout.isZero() && !toolSilenceTimeout.isNegative()
+                                ? toolSilenceTimeout
+                                : silenceTimeout; // 空值/非正回落同静默阈值（不放大预算）
                 events = events
-                        .timeout(silenceTimeout)
+                        .timeout(
+                                Mono.delay(silenceTimeout),
+                                (io.agentscope.core.event.AgentEvent next) -> Mono
+                                        .delay(silenceBudgetFor(next, silenceTimeout,
+                                                toolBudget)))
                         .onErrorMap(TimeoutException.class, e ->
-                                new IllegalStateException("活超时判死：" + silenceTimeout
-                                        + " 内无事件/工具动作进展（纯静默超限）", e));
+                                new IllegalStateException("活超时判死：静默超阈值（常规 "
+                                        + silenceTimeout + "，工具执行窗 " + toolBudget
+                                        + "）——纯静默超限", e));
             }
             events = events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
                     prepared.fileChanges(), prepared.durations(),
@@ -391,6 +403,18 @@ public class AgentscopeAgentClient {
             return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
                     prepared.durations().snapshot());
         }
+    }
+
+    /**
+     * 活超时的单事件预算（#355 机制检查）：{@code ToolCallEndEvent}（参数落定、
+     * 工具开始执行）起的执行窗内引擎不产事件（模型在等工具结果，计时源与
+     * {@code StageDurationFacts} 工具窗同口径）——长命令（依赖安装/测试超静默阈值）
+     * 会被误判死，「还在干活就不掐」意图落空。执行窗给延长预算（toolSilence），
+     * 任何事件到达即回落常规预算（静默阈值）。
+     */
+    private static Duration silenceBudgetFor(io.agentscope.core.event.AgentEvent event,
+            Duration silence, Duration toolSilence) {
+        return event instanceof ToolCallEndEvent ? toolSilence : silence;
     }
 
     /**

@@ -236,4 +236,72 @@ class WorkspaceVersionsTest {
 
         assertThat(versions).hasSize(1);
     }
+
+    // ---------- 段失败回滚（#353：回滚本段起点——留账 + git 干净回退） ----------
+
+    @Test
+    void given_workspace_when_head_ref_command_then_verify_head() {
+        String command = WorkspaceVersions.headRefCommand();
+
+        // 段起点捕获：--verify 让「无 HEAD」（全新工作区首段）以非 0 退出与脏输出分道
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git rev-parse --verify HEAD");
+    }
+
+    @Test
+    void given_no_head_when_anchor_start_command_then_full_commit_without_trailer() {
+        String command = WorkspaceVersions.anchorStartCommand();
+
+        // 无 HEAD 的段起点锚：全量提交把基座钉成起点（无 trailer——版本序列只收
+        // Run-Id / Rollback-From，锚 commit 不进版本流）；--allow-empty 兜空工作区
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git add -A");
+        assertThat(command).contains("git commit -q --allow-empty");
+        assertThat(command).doesNotContain("Run-Id").doesNotContain("Rollback-From");
+        assertThat(command).contains("git rev-parse HEAD");
+    }
+
+    @Test
+    void given_ref_and_scene_path_when_record_failure_scene_then_staged_diff_landed() {
+        String command = WorkspaceVersions.recordFailureSceneCommand("a1b2c3d",
+                ".platform/failed-scene-segment-2-1700000000000.patch");
+
+        // 留账（回滚不丢证据）：add -A 让新建文件进索引（--cached diff 才可见）→
+        // 全量 diff 段起点落盘 patch（git 排除面〔数据/依赖/平台产物〕天然不进场）
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git add -A");
+        assertThat(command).contains("git diff --cached 'a1b2c3d'");
+        assertThat(command).contains(
+                "> '" + WorkspaceLayout.ROOT + "/.platform/failed-scene-segment-2-1700000000000.patch'");
+    }
+
+    @Test
+    void given_non_hex_ref_when_record_failure_scene_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.recordFailureSceneCommand("main; rm -rf /", ".platform/x.patch"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.recordFailureSceneCommand("$(id)", ".platform/x.patch"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void given_ref_when_reset_to_segment_start_then_hard_reset_and_clean_untracked() {
+        String command = WorkspaceVersions.resetToSegmentStartCommand("a1b2c3d");
+
+        // git 干净回退：reset --hard 回段起点（段内野 commit 一并脱落，前段收口
+        // commit 在起点链上不动）＋ clean -fd 清未跟踪新文件（排除面不扫——数据/
+        // 依赖/平台产物/.env 不在回滚面）
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git reset --hard 'a1b2c3d'");
+        assertThat(command).contains("git clean -fd");
+        // 回滚不追加 commit、不改写用户面版本序列（区别于 #93「回滚到此」的追加式）
+        assertThat(command).doesNotContain("git commit");
+    }
+
+    @Test
+    void given_non_hex_ref_when_reset_to_segment_start_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.resetToSegmentStartCommand("main; rm -rf /"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.resetToSegmentStartCommand("$(id)"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

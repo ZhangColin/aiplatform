@@ -192,6 +192,68 @@ class WorkspaceVersionsLiveTest {
         assertThat(WorkspaceVersions.hasUncommittedTrackedChanges(dirty.stdout())).isTrue();
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_segment_failure_scene_when_reset_to_segment_start_then_scene_recorded_and_workspace_clean() {
+        // #353 段失败回滚全链（容器活体）：无 HEAD → 锚定段起点 → 前段收口成版 →
+        // 段内改坏（tracked 改 + 野 commit 新文件 + 未提交新文件 + 数据面写入）→
+        // 留账落盘 → 干净回退——前段成果不动、证据可查、数据面不触、版本序列不染
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 全新工作区无 HEAD：段起点捕获以非 0 分道 → 锚 commit 钉起点（无 trailer）
+        exec(WorkspaceVersions.ensureRepoCommand());
+        ExecResult noHead = exec(WorkspaceVersions.headRefCommand());
+        assertThat(noHead.exitCode()).as("无 HEAD 应以非 0 退出").isNotZero();
+        ExecResult anchored = exec(WorkspaceVersions.anchorStartCommand());
+        assertThat(anchored.exitCode()).as("锚 commit 应成功：%s", anchored.stderr()).isZero();
+        assertThat(anchored.stdout().trim()).as("锚 commit 应回读 hash").isNotEmpty();
+
+        // 前段收口成版（阶段 0）：段起点 = 前段收口 commit
+        exec("echo '<html>stage0</html>' > /workspace/index.html");
+        String stage0 = commit("起服了系统骨架", "111");
+
+        // 段内改坏（切片失败现场）：tracked 改坏 + 野 commit（含新文件）+ 未提交新文件
+        // + 数据面写入（回滚不触面）
+        exec("echo '<html>broken</html>' > /workspace/index.html");
+        exec("mkdir -p /workspace/src && echo 'broken-page' > /workspace/src/broken.tsx");
+        exec("cd /workspace && git add -A && git commit -q -m '执行体野 commit'");
+        exec("echo 'uncommitted-new' > /workspace/uncommitted-new.txt");
+        exec("mkdir -p /workspace/data && echo 'kept' > /workspace/data/keep.txt");
+
+        // 留账（回滚前）：失败现场相对段起点的全量 diff 落盘
+        String scenePath = ".platform/failed-scene-segment-1-1.patch";
+        ExecResult recorded = exec(WorkspaceVersions.recordFailureSceneCommand(stage0, scenePath));
+        assertThat(recorded.exitCode()).as("留账应成功：%s", recorded.stderr()).isZero();
+
+        // 回滚：工作树干净回退段起点
+        ExecResult reset = exec(WorkspaceVersions.resetToSegmentStartCommand(stage0));
+        assertThat(reset.exitCode()).as("回滚应成功：%s", reset.stderr()).isZero();
+
+        // ① 前段成果不动：tracked 回前段内容、HEAD = 段起点（野 commit 脱落）
+        assertThat(exec("cat /workspace/index.html").stdout().trim())
+                .as("tracked 文件应回前段内容").isEqualTo("<html>stage0</html>");
+        assertThat(exec("cd /workspace && git rev-parse HEAD").stdout().trim())
+                .as("HEAD 应回段起点（野 commit 脱落）").isEqualTo(stage0);
+        // ② 段内新文件两路清除：野 commit 内的由 reset 清、未提交的由 clean 清
+        assertThat(exec("test -f /workspace/src/broken.tsx").exitCode())
+                .as("野 commit 新文件应随 reset 脱落").isNotZero();
+        assertThat(exec("test -f /workspace/uncommitted-new.txt").exitCode())
+                .as("未提交新文件应被 clean 清掉").isNotZero();
+        // ③ 数据面不动（git 排除面不在回滚面）
+        assertThat(exec("cat /workspace/data/keep.txt").stdout().trim())
+                .as("业务数据应保留").isEqualTo("kept");
+        // ④ 失败现场可查（回滚不丢证据）：patch 落 .platform/、含改坏内容
+        ExecResult scene = exec("cat '/workspace/" + scenePath + "'");
+        assertThat(scene.stdout()).as("留账 patch 应含失败现场")
+                .contains("broken").contains("broken.tsx");
+        // ⑤ 版本序列不染：锚 commit 与野 commit 都不进版本流（只收 trailer 成版）
+        ExecResult log = exec(WorkspaceVersions.listCommand());
+        var versions = WorkspaceVersions.parseLog(log.stdout());
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).commitHash()).isEqualTo(stage0);
+    }
+
     // ---------- 工具 ----------
 
     /** 幂等 init + 成版提交（两道命令串联，回读 HEAD hash）。 */

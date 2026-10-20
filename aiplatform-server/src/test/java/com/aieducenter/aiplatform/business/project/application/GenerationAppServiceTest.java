@@ -848,14 +848,18 @@ class GenerationAppServiceTest {
                 GenerationAppService.resumeSession(projectId, 2, resume.runId()))
                 .isNotEqualTo(GenerationAppService.sliceSession(projectId, 2));
         assertThat(slice2.runId()).isEqualTo(resume.runId());
-        // 现状盘点（AC②）：已收口进度 + 中断原因（重试耗尽 + 错误现场）+ 脏续纪律；
-        // 断点片任务本体仍在（不是只有盘点）
+        // 现状盘点（AC②）：已收口进度 + 中断原因（重试耗尽 + 错误现场）+ 续跑纪律；
+        // 断点片任务本体仍在（不是只有盘点）；#353 失败段干净重做口径（失败现场已
+        // 回滚本段起点——续跑从干净现场从头重做，不是坏现场叠修）
         assertThat(slice2.prompt())
                 .contains("续跑现状盘点")
                 .contains("系统初始化")
                 .contains("切片 1/3「用户能注册登录」")
                 .contains("自动重试耗尽后失败")
                 .contains("切片2起服失败")
+                .contains("回滚到本段起点")
+                .contains("从头重做")
+                .doesNotContain("保留已对的工作")
                 .contains("不要重做")
                 .contains("切片 2/3")
                 .contains("用户能下单支付");
@@ -916,6 +920,303 @@ class GenerationAppServiceTest {
                 .doesNotContain("上一片交接摘要")
                 .contains("整体切片计划");
         assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    // ---------- 失败回滚本段起点（#353：重试耗尽→留账+回滚段起点+新会话重跑一轮） ----------
+
+    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
+    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
+
+    /**
+     * 段起点捕获可得的 git 桩（#353 生产形态）：rev-parse / 锚 commit 回假 hash
+     * （段起跑恒能捕获段起点），其余 exec 全通。缺省桩（{@link #givenAgentsMdWriteSucceeds}
+     * 的空 stdout）走「捕获不到段起点」的降级路径（不重跑、直接终态）——既有失败
+     * 测试即该路径的断言面。
+     */
+    private void givenWorkspaceGitReady() {
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            if (cmd.command().contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
+    }
+
+    @Test
+    void given_slice_retries_exhausted_when_generate_then_rollback_and_rerun_round_saves_it() {
+        // #353 灵魂用例：切片首轮重试耗尽（原地修三连败）→ 失败现场留账落盘（回滚
+        // 不丢证据）＋ 工作区 git 回滚本段起点（前段成果不动）＋ 新会话重跑一轮——
+        // 重跑成功即照常收口（坏现场不叠修）；重跑首试 prompt 原样重放（干净起点、
+        // 不携错误现场）
+        Long projectId = persistedProject("9870");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录"));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("越修越乱"))
+                .thenThrow(new IllegalStateException("越修越乱"))
+                .thenThrow(new IllegalStateException("越修越乱"))
+                .thenReturn(new AgentReply("s1r", "切片1重跑完成"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 5 场 converse：阶段 0 + 切片 1 首轮 3 连败 + 重跑轮首试即救活
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(5)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        AgentCommand rerun = all.get(4);
+        // 重跑轮新会话（旧会话带失败循环历史不续）；首试 prompt 原样重放——干净起点
+        // 不携错误现场（非原地修的续作 prompt）
+        assertThat(rerun.sessionId())
+                .isEqualTo(GenerationAppService.sliceSession(projectId, 1) + "-rr")
+                .isNotEqualTo(all.get(1).sessionId());
+        assertThat(rerun.prompt())
+                .isEqualTo(all.get(1).prompt())
+                .doesNotContain("错误现场");
+        // 重跑轮 attemptRunId 全新——计量幂等键（USAGE_EVENT_PREFIX+runId）不撞首轮
+        assertThat(all).extracting(AgentCommand::runId).doesNotHaveDuplicates();
+        // 留账先于回滚：失败现场 diff 落盘 .platform/（回滚不丢证据）→ reset --hard
+        // 段起点 + clean（干净回退；段起点 = 捕获桩假 hash）
+        InOrder rollbackOrder = inOrder(workspaceLifecycleAppService);
+        rollbackOrder.verify(workspaceLifecycleAppService).exec(eq("9870"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git diff --cached '" + FAKE_SEGMENT_START + "'")
+                        && cmd.command().contains(".platform/failed-scene-segment-1-")));
+        rollbackOrder.verify(workspaceLifecycleAppService).exec(eq("9870"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")
+                        && cmd.command().contains("git clean -fd")));
+        // 救活后照常收口：片全收口、generated_at 落位、零失败终态
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    @Test
+    void given_rerun_round_also_fails_when_generate_then_terminal_with_workspace_rolled_back_twice() {
+        // #353 两轮皆败→终态：首轮耗尽回滚重跑、重跑轮再耗尽仍转终态（预算一轮）——
+        // 终态前再回滚一次（不变式：终态时工作区 = 段起点，用户续跑从干净现场起）；
+        // run-failed 锚失败片首试 runId、片落 FAILED、后片不派、generated_at 不落
+        Long projectId = persistedProject("9871");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("切片失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 阶段 0 (1) + 切片 1 两轮各 3 连败 = 7 次 converse；切片 2 不派
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1 + 2 * properties.getMaxAttempts()))
+                .converse(commands.capture(), any());
+        String slice1RunId = commands.getAllValues().get(1).runId();
+        // 回滚两次（重跑前 + 终态前）：reset --hard 段起点各一次
+        verify(workspaceLifecycleAppService, times(2)).exec(eq("9871"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")));
+        // 留账两次（两轮失败现场各落一盘——回滚不丢证据）
+        verify(workspaceLifecycleAppService, times(2)).exec(eq("9871"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains(".platform/failed-scene-segment-1-")));
+        // 终态口径不变：run-failed 锚失败片首试 runId、片落 FAILED、后片待跑不派
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                slice1RunId.equals(payload.get(EventsAppService.RUN_FIELD))));
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 3, 1);
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_rerun_round_when_generate_then_user_facing_run_start_not_republished() {
+        // #353 重跑轮用户面静默（#84 投影同律延伸）：重跑轮 run-start 滤掉（run 身份
+        // 全程 = 首试 runId 不换锚）、重跑轮事件归锚首试 runId——用户面只见工作消息
+        // 正常生长，不见「重新开始」
+        Long projectId = persistedProject("9872");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        AtomicInteger calls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            if (calls.incrementAndGet() <= 4) {
+                // 阶段 0 成功（1 次）+ 切片 1 首轮 3 连败
+                if (calls.get() > 1) {
+                    throw new IllegalStateException("切片失败");
+                }
+            }
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录")));
+
+        // run-start 恰好 2 次（阶段 0 首试 + 切片 1 首轮首试）——重跑轮 run-start 被滤
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_START), anyMap());
+        // 切片 1 的 run-finish（重跑轮真收口发出）归锚其首轮首试 runId——用户面
+        // run 身份全程不变
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(5)).converse(commands.capture(), any());
+        String slice1FirstRunId = commands.getAllValues().get(1).runId();
+        ArgumentCaptor<Map<String, Object>> finishPayloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                finishPayloads.capture());
+        assertThat(finishPayloads.getAllValues().get(1)
+                .get(EventsAppService.RUN_FIELD)).isEqualTo(slice1FirstRunId);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_fork_slice_retries_exhausted_when_generate_then_fork_rolled_back_rerun_and_merged() {
+        // #353 fork 片回滚重跑：并行波内切片首轮重试耗尽 → fork 内留账＋回滚 fork
+        // 起点（fork 时主工作区 HEAD）＋ 新会话重跑——成功即照常按序合并回主工作区
+        // （并行片同样不在坏现场叠修）；全片收口照常落 generated_at
+        Long projectId = persistedProject("9873");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // 切片 3 首轮连败（会话 -slice-3），重跑轮（-slice-3-rr）成功
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().endsWith("-slice-3")) {
+                throw new IllegalStateException("切片3失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // fork 内回滚事实（切片 3 的 fork = 9002）：留账 + reset --hard 段起点
+        verify(workspaceLifecycleAppService).exec(eq("9002"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains(".platform/failed-scene-segment-3-")));
+        verify(workspaceLifecycleAppService).exec(eq("9002"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")));
+        // 重跑轮新会话（-rr 后缀）跑在 fork 工作区
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(6)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues())
+                .anySatisfy(cmd -> {
+                    assertThat(cmd.sessionId()).endsWith("-slice-3-rr");
+                    assertThat(cmd.workspaceId()).isEqualTo("9002");
+                });
+        // 重跑救活后照常合并：全片收口、generated_at 落位、零失败终态
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    @Test
+    void given_merge_conflict_resolution_fails_when_generate_then_main_workspace_rolled_back() {
+        // #353 合并失败的残留清理：fork 片成功但合并冲突（机器查命中）→ 冲突裁决
+        // run 失败 → 主工作区回滚 merge 前 HEAD（不留半应用/冲突标记残留——后续
+        // 合并与续跑在干净主工作区上进行）；失败片落 FAILED、generated_at 不落
+        Long projectId = persistedProject("9874");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            String command = cmd.command();
+            if (command.contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (command.contains("git diff --full-index")) {
+                return new ExecResultResponse("fake-patch-bytes", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
+        // apply --3way 冲突（机器查命中）；裁决 run（-merge- 会话）原地修连败
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "conflict", 1));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().contains("-merge-")) {
+                throw new IllegalStateException("裁决失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 主工作区回滚到 merge 前 HEAD（两 fork 片合并失败各清一次——不留冲突残留）
+        verify(workspaceLifecycleAppService, times(2)).exec(eq("9874"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")
+                        && cmd.command().contains("git clean -fd")));
+        // 两片合并失败落 FAILED、下游片待跑、generated_at 不落
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 3, 3, 1);
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_rollback_fails_when_closing_check_never_passes_then_failed_check_still_emitted() {
+        // #353 降级路径的自检播报（#85 口径不破）：有钩但回滚失败（reset exec 非 0
+        // → 不重跑直接终态）——末次核验未过照样出 ❌（部件不悬挂「检查中」），
+        // ❌ 先于 run-failed 到达
+        Long projectId = persistedProject("9875");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            String command = cmd.command();
+            if (command.contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (command.contains("curl")) {
+                return new ExecResultResponse("", "refused", 7); // 8081 核验恒未过
+            }
+            if (command.contains("git reset")) {
+                return new ExecResultResponse("", "rollback broke", 1); // 回滚失败→不重跑
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> new AgentReply(
+                ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
+
+        // 阶段 0 三轮核验未过 + 回滚失败不重跑 = 3 次 converse 即终态
+        verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
+        // ❌ 照发（降级终态不悬挂）：CHECKING×3 + FAILED×1，且 ❌ 先于 run-failed
+        ArgumentCaptor<Map<String, Object>> checks = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(properties.getMaxAttempts() + 1))
+                .publishAgentEvent(eq(AgentEventTypes.PART_CHECK), checks.capture());
+        assertThat(checks.getAllValues())
+                .extracting(payload -> payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))
+                .containsExactly(
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_CHECKING,
+                        AgentEventTypes.PART_CHECK_STATE_FAILED);
+        InOrder closeOrder = inOrder(eventsAppService);
+        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.PART_CHECK),
+                argThat(payload -> AgentEventTypes.PART_CHECK_STATE_FAILED.equals(
+                        payload.get(AgentEventTypes.PART_CHECK_STATE_FIELD))));
+        closeOrder.verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
     }
 
     // ---------- 存量恢复（#223：无表项目对照收尾卡标已完片、只补缺口） ----------
@@ -1137,7 +1438,11 @@ class GenerationAppServiceTest {
         assertThat(inventory)
                 .contains("自动重试耗尽后失败")
                 .doesNotContain("最近错误现场")
-                .contains("已收口进度：尚无");
+                .contains("已收口进度：尚无")
+                // #353 失败段干净重做口径：失败现场已回滚本段起点——从头完成而非脏续
+                .contains("回滚到本段起点")
+                .contains("从头完成本段任务")
+                .doesNotContain("保留已对的工作");
     }
 
     // ---------- 命令与资产 ----------

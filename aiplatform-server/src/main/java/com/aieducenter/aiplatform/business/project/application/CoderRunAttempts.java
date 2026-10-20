@@ -63,6 +63,15 @@ import lombok.extern.slf4j.Slf4j;
  * 不复存在（#219）；重试耗尽转终态失败，末次错误现场随 {@link RunResult#lastError}
  * 回传轨道层（生成轨续跑现状盘点的「中断原因」旁证）。</p>
  *
+ * <p><b>段失败回滚重跑（#353 外环——生成轨传 {@link SegmentRollback} 钩时生效）</b>：
+ * 原地修重试耗尽不在坏现场叠修——回调轨道层「失败现场留账（.platform patch
+ * 落盘——回滚不丢证据）＋工作区 git 干净回退本段起点」，然后以原首试 prompt
+ * （干净起点重放——不携错误现场、知识注入不重复）换会话重跑一轮（预算一轮，
+ * 防烧护栏；重跑轮所有尝试走重试投影——attemptRunId 全新保计量幂等键、run-start
+ * 滤掉、事件归锚首试 runId，用户面零感知）。重跑轮再败则二次回滚后转终态——
+ * 「终态时工作区 = 段起点」不变式，用户续跑从干净现场起。修正/设计/合并裁决轨
+ * 不传钩（各轨既有失败处置口径不变）。</p>
+ *
  * <p><b>失败留账与重试携进展现场（#323）</b>：失败尝试的耗时账与观察面不清零
  * 弃置——客户端流失败经 {@link AgentTurnFailure} 携部分观察（已提交文件变更＋
  * 已闭合区间阶段耗时）上浮，本环计入本场累计（收口清单与耗时分布跨尝试含失败
@@ -160,6 +169,21 @@ class CoderRunAttempts {
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts, lint);
         }
+    }
+
+    /**
+     * 段级失败回滚钩（#353 失败回滚本段起点）：尝试环（原地修重试，#221）耗尽后由
+     * 环回调——轨道层实现「失败现场留账（.platform patch 落盘——回滚不丢证据）＋
+     * 工作区 git 干净回退本段起点（前段收口 commit 不动）」；返回重跑轮的<b>新会话
+     * 寻址</b>（旧会话带失败循环历史不续，同 #221 续跑新会话口径），{@code null} =
+     * 回滚不成（段起点缺失/exec 失败）不重跑、直接终态。环至多重跑一轮（防烧预算；
+     * 再败则二次回调回滚——「终态时工作区 = 段起点」不变式，用户续跑从干净现场起
+     * ——然后转终态）。钩不在场（修正/设计/合并裁决轨）行为与既有口径一致。
+     */
+    interface SegmentRollback {
+
+        /** 留账 + 回滚本段起点；返回重跑轮新会话寻址（null = 回滚不成不重跑）。 */
+        String rollback();
     }
 
     /**
@@ -263,11 +287,29 @@ class CoderRunAttempts {
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
             String what, boolean injectKnowledge, RunSeat seat, RunHeading heading) {
+        return run(project, workspaceId, firstRunId, sessionId, prompts, onSuccess, what,
+                injectKnowledge, seat, heading, null);
+    }
+
+    /**
+     * 全参形（#353 段失败回滚）：{@code rollback} 在场时，首轮尝试环耗尽 → 回调轨道层
+     * 留账＋回滚本段起点 → 以原首试 prompt（干净起点重放——不携错误现场、知识注入
+     * 不重复）换会话重跑一轮；重跑轮所有尝试走重试投影（attemptRunId 全新——计量
+     * 幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。重跑轮
+     * 再耗尽则二次回滚后终态（不变式：终态时工作区 = 段起点，续跑从干净现场起）。
+     * {@code null} = 无段级回滚（修正/设计/合并裁决轨——既有口径不变）。
+     */
+    RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
+            Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
+            String what, boolean injectKnowledge, RunSeat seat, RunHeading heading,
+            SegmentRollback rollback) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
                 ? knowledgeAppService.dispatchInjection(prompts.first()) : "";
         int maxAttempts = properties.getMaxAttempts();
         Instant runStartedAt = Instant.now();
+        // 本场变更账（成果面）：收口清单的事实源。重跑轮起跑清空——回滚后首轮改动
+        // 已不在工作区，收口清单只认重跑轮真实增量（首轮现场证据在轨道层留账 patch）
         List<FileChange> runChanges = new ArrayList<>();
         // 验证事实清残留（#352）：本轨验证统计从零起算——上一轨/生成 run 的遗留
         // 不进本轨收尾卡（生命周期对偶 FinishEditFacts 的轨道起跑清残留）
@@ -276,46 +318,83 @@ class CoderRunAttempts {
         // 每次失败刷新为该次的错误事实
         String previousError = null;
         // 阶段耗时分布（#111）：每次尝试各起一账——尝试墙钟 + 跨流段合并的阶段耗时
-        // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）
+        // 事实（收口判据核验起的时间计收口尾序桶，成功尝试才进）。跨轮累计（成本面
+        // 不随回滚抹去——失败留账 #323 口径）
         List<AttemptDuration> attemptDurations = new ArrayList<>();
         // 最近计划快照（#323 重试携进展现场）：执行体自产计划（part-plan 全量快照）
         // 的最新一帧——重试续本会话、计划跨尝试连续，失败后重试现场据此携带
         //「干到哪」（✓●○ 计划状态是平台可观测事实，不由模型自报）
         AtomicReference<List<Map<String, Object>>> planSteps = new AtomicReference<>();
-        // lint 违规修轮已用标记（#296 有限自动重试一轮）：一场 run 至多一轮——首轮
-        // 收口扫描违规即喂回执行体原地修，之后（修净或仍违规）如实收口
+        // lint 违规修轮已用标记（#296 有限自动重试一轮）：一轮内至多一次——首轮
+        // 收口扫描违规即喂回执行体原地修，之后（修净或仍违规）如实收口。重跑轮重置
         boolean lintFixRoundUsed = false;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            Instant attemptStartedAt = Instant.now();
-            AtomicReference<StageDurations> durations =
-                    new AtomicReference<>(StageDurations.zero());
-            boolean attemptAccounted = false;
-            String attemptRunId = attempt == 1 ? firstRunId : EventsAppService.newRunId();
-            AgentConfigAppService.EffectiveConfig agent =
-                    agentConfigs.effectiveOf(seat.profile());
-            AgentCommand command = new AgentCommand(
-                    attemptRunId,
-                    attempt == 1 ? knowledgePrefix + prompts.first()
-                            : prompts.retry().apply(retryScene(previousError, attempt - 1,
-                                    maxAttempts,
-                                    Duration.between(runStartedAt, Instant.now()).toMillis(),
-                                    runChanges, planSteps.get())),
-                    agent.systemPrompt(),
-                    agent.chatModelString(),
-                    sessionId,
-                    project.ownerUserId(),
-                    new UsageContext(Long.toString(projectId),
-                            UsageDims.of(projectId, UsageDims.kindOf(seat.profile()),
-                                    sessionId)),
-                    Long.toString(workspaceId),
-                    Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
-                    /* timeout= */ null, // #322 活超时替换一次性总墙钟
-                    properties.getSilenceTimeout(),
-                    seat.profile().key(),
-                    /* workspaceReadOnly= */ false,
-                    seat.workspaceNoShell(),
-                    heading,
-                    agent.toolSpec());
+        // 段级外环（#353）：钩在场时至多重跑一轮（预算 1——回滚重跑还不行说明不是
+        // 现场脏的问题，转终态让人介入）；无钩恒一轮（既有口径）
+        int maxRounds = rollback != null ? 2 : 1;
+        String roundSessionId = sessionId;
+        boolean reran = false;
+        // 待决核验失败播报（#85 口径随 #353 外环延展）：末次尝试核验未过只记待决——
+        // 首轮末次不过还有重跑轮（信号不外泄，部件停「检查中」）；确定终态（降级
+        // break 或全轮耗尽）才补发 ❌（降级路径不悬挂）
+        boolean failedCheckPending = false;
+        Consumer<AgentEvent> failedCheckProjection = null;
+        AgentCommand failedCheckCommand = null;
+        for (int round = 1; round <= maxRounds; round++) {
+            if (round > 1) {
+                String rerunSession = rollback.rollback();
+                if (rerunSession == null) {
+                    break; // 回滚不成（段起点缺失/exec 失败）——不重跑，照首轮现场终态
+                }
+                reran = true;
+                roundSessionId = rerunSession;
+                // 重跑轮起跑面重置：验证统计（本论验证从零起算）/ 错误现场（首试纯净
+                // 重放）/ 计划快照（新会话新计划）/ lint 修轮（新一轮预算）/ 成果变更账
+                verificationFacts.clear(Long.toString(workspaceId));
+                runChanges.clear();
+                previousError = null;
+                planSteps.set(null);
+                lintFixRoundUsed = false;
+                // 首轮的待决 ❌ 作废（新一轮重跑——重跑核验再发「检查中」前端幂等）
+                failedCheckPending = false;
+                failedCheckProjection = null;
+                failedCheckCommand = null;
+                log.info("[{}] 项目 {} 首轮重试耗尽——工作区已回滚本段起点，新会话重跑一轮",
+                        what, projectId);
+            }
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                Instant attemptStartedAt = Instant.now();
+                AtomicReference<StageDurations> durations =
+                        new AtomicReference<>(StageDurations.zero());
+                boolean attemptAccounted = false;
+                // 重跑轮全部尝试（含首试）用新内部 runId：计量幂等键（runId 前缀）不撞
+                // 首轮，且投影层按「重试尝试」滤 run-start、归锚（用户面零感知）
+                String attemptRunId = round == 1 && attempt == 1
+                        ? firstRunId : EventsAppService.newRunId();
+                AgentConfigAppService.EffectiveConfig agent =
+                        agentConfigs.effectiveOf(seat.profile());
+                AgentCommand command = new AgentCommand(
+                        attemptRunId,
+                        attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
+                                : prompts.retry().apply(retryScene(previousError, attempt - 1,
+                                        maxAttempts,
+                                        Duration.between(runStartedAt, Instant.now()).toMillis(),
+                                        runChanges, planSteps.get())),
+                        agent.systemPrompt(),
+                        agent.chatModelString(),
+                        roundSessionId,
+                        project.ownerUserId(),
+                        new UsageContext(Long.toString(projectId),
+                                UsageDims.of(projectId, UsageDims.kindOf(seat.profile()),
+                                        roundSessionId)),
+                        Long.toString(workspaceId),
+                        Map.of(EventsAppService.PROJECT_FIELD, projectId.toString()),
+                        /* timeout= */ null, // #322 活超时替换一次性总墙钟
+                        properties.getSilenceTimeout(),
+                        seat.profile().key(),
+                        /* workspaceReadOnly= */ false,
+                        seat.workspaceNoShell(),
+                        heading,
+                        agent.toolSpec());
             try {
                 Consumer<AgentEvent> projection = userFacingProjection(firstRunId, attemptRunId,
                         eventBridge.sink(project));
@@ -355,9 +434,10 @@ class CoderRunAttempts {
                 // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
                 // 「检查中」、落定出结果，位于被押后的 run-finish 之前（收口前播报）。
                 // 静默重试同构口径：尝试间核验未过不出 ❌（部件停在「检查中」——重试
-                // 信号不外泄，重试核验再发「检查中」前端幂等）；❌ 仅在末次尝试未过
-                //（超限转终态）时出，与轨道层 run-failed 同窗口。状态终值 = 探活结果，
-                // 随智能体事件族进重放缓冲，可被收尾统计消费（#88 轮末统计行）
+                // 信号不外泄，重试核验再发「检查中」前端幂等）；末次尝试核验未过记
+                // 待决（#353 重跑轮在场不算终态），终态落定时补发 ❌、与轨道层
+                // run-failed 同窗口。状态终值 = 探活结果，随智能体事件族进重放缓冲，
+                // 可被收尾统计消费（#88 轮末统计行）
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_CHECKING);
                 Instant closingStartedAt = Instant.now(); // 收口尾序起表（探活 → 样式扫描 → 成版）
                 ClosingJudgment judgment;
@@ -365,8 +445,12 @@ class CoderRunAttempts {
                     judgment = onSuccess.apply(attemptRunId, runChanges);
                 }
                 catch (RuntimeException e) {
+                    // 末次尝试核验未过只记待决 ❌（重跑轮在场不算终态——确定终态时
+                    // 由外环补发，降级 break 不悬挂）
                     if (attempt == maxAttempts) {
-                        emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_FAILED);
+                        failedCheckPending = true;
+                        failedCheckProjection = projection;
+                        failedCheckCommand = command;
                     }
                     throw e;
                 }
@@ -443,12 +527,26 @@ class CoderRunAttempts {
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
             }
         }
+        }
+        // 终态前再回滚（#353 不变式：终态时工作区 = 段起点——用户「继续生成」续跑
+        // 从干净现场起，不是坏现场叠修）；重跑轮没跑过（回滚不成 break——现场已是
+        // 首轮回滚失败态）不再二次回调
+        if (reran) {
+            rollback.rollback();
+        }
+        // 待决 ❌ 补发（确定终态）：末次核验未过的部件从「检查中」落定——先于
+        // 轨道层 run-failed 到达（同终态窗口）
+        if (failedCheckPending) {
+            emitSelfCheck(failedCheckProjection, failedCheckCommand,
+                    AgentEventTypes.PART_CHECK_STATE_FAILED);
+        }
         // 终态留档（#323 失败留账）：超限转终态、没有成功收尾卡时，耗时账与观察面
         // 仍随终态日志留档（平台观测面）——累计墙钟＋逐尝试墙钟与桶＋已落盘文件
         // 清单，失败看得见成本；SSE 封闭集与 run-failed 载荷不变
-        log.error("[{}] 项目 {} 重试超限（{} 次），转终态失败——本场留账：累计 {}、"
+        log.error("[{}] 项目 {} 重试超限（{} 次尝试{}），转终态失败——本场留账：累计 {}、"
                         + "逐尝试 {}、已落盘文件变更 {}。用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
-                what, projectId, maxAttempts,
+                what, projectId, maxAttempts * (reran ? 2 : 1),
+                reran ? "，含回滚后重跑一轮" : "",
                 humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
                 attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
                 filePayloads(runChanges));

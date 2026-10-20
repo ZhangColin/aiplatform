@@ -11,11 +11,13 @@ import com.aieducenter.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 /**
  * 容器内 git 管道（#91 版本层地基）的规则单点，照 {@link ProjectFiles} 形制：
  * 命令构造归本类纯函数、执行归 exec 通道（{@code EnvironmentBackend.exec}）、
- * 输出解析归本类。收拢五件事——幂等仓库初始化（懒初始化：存量工作区与容器重建
+ * 输出解析归本类。收拢九件事——幂等仓库初始化（懒初始化：存量工作区与容器重建
  * 自愈同覆盖，repo-local 身份配置随卷持久）、收口成版提交（摘要主题 + Run-Id
  * trailer 锚定收尾卡，{@code --allow-empty} 保每轮收口必成版）、版本序列读取
  * （git log 即正本）、单版本元数据读取、回滚到此（#93 复位工作树到目标 commit
- * 并追加新版本——Rollback-From trailer 锚定源版本，历史只追加不改写）。
+ * 并追加新版本——Rollback-From trailer 锚定源版本，历史只追加不改写）、段起点
+ * 捕获与无 HEAD 锚定、失败现场留账、段失败回滚（#353 后四件：段级自愈的
+ * 「留账＋干净回退」——机制面，不进用户面版本序列）。
  *
  * <p>版本序列只收带 {@value #RUN_ID_TRAILER} 或 {@value #ROLLBACK_TRAILER} trailer
  * 的成版 commit：智能体 shell 面技术上可跑 git，野 commit 不进版本序列。git
@@ -140,6 +142,68 @@ public final class WorkspaceVersions {
      */
     public static String forkDiffCommand() {
         return "cd " + WorkspaceLayout.ROOT + " && git diff --full-index HEAD^ HEAD";
+    }
+
+    /**
+     * 段起点捕获（#353 失败回滚本段起点）：回读 HEAD ref。{@code --verify} 让
+     * 「无 HEAD」（全新工作区首段——git 懒初始化、尚无收口成版）以非 0 退出，
+     * 与「有 HEAD」分道（调用方据此走 {@link #anchorStartCommand} 锚定）。stdout
+     * = HEAD hash（exitCode 0 时）。
+     */
+    public static String headRefCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git rev-parse --verify HEAD";
+    }
+
+    /**
+     * 无 HEAD 时的段起点锚（#353）：全量提交把基座现状钉成段起点 commit——
+     * <b>无 trailer</b>（版本序列只收带 Run-Id / Rollback-From 的成版 commit，
+     * 锚 commit 不进版本流、不出用户面版本列表），{@code --allow-empty} 兜空
+     * 工作区边界。此后段失败回滚恒有 ref 可回。stdout = 锚 commit hash。
+     */
+    public static String anchorStartCommand() {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git add -A"
+                + " && git commit -q --allow-empty -m '平台段起点锚（失败回滚基准，非版本）'"
+                + " && git rev-parse HEAD";
+    }
+
+    /**
+     * 失败现场留账（#353 留账口径——回滚不丢证据）：索引全量暂存（{@code add -A}
+     * 让段内新建文件进索引——{@code --cached} diff 才可见新建件）→ 相对段起点的
+     * 全量 diff 落盘 patch。git 排除面（数据/依赖/平台产物/.env/物料/导出物）天然
+     * 不进场；patch 落 {@code .platform/}（平台产物目录，git 排除面内——随后回滚的
+     * {@code clean -fd} 不扫它）。scenePath 为平台拼装的锚定形（段号 + 时间戳，无
+     * 用户可控片段）。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     */
+    public static String recordFailureSceneCommand(String ref, String scenePath) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git add -A"
+                + " && git diff --cached '" + ref + "'"
+                + " > '" + WorkspaceLayout.absolute(scenePath) + "'";
+    }
+
+    /**
+     * 段失败回滚（#353）：工作树与索引干净回退到段起点（{@code reset --hard}——
+     * 段内执行体野 commit 一并脱落，前段收口 commit 在起点链上不受影响）＋
+     * {@code clean -fd} 清未跟踪新文件（git 排除面不扫——数据/依赖/平台产物/.env
+     * 不在回滚面：数据库与已装依赖保持现状）。与 #93「回滚到此」的追加式（restore
+     * ＋新 commit）分属两面：本命令是段级自愈的机制面（改写未发布的段内现场），
+     * 不追加 commit、不动用户面版本序列。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     */
+    public static String resetToSegmentStartCommand(String ref) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git reset --hard '" + ref + "'"
+                + " && git clean -fd";
     }
 
     /**

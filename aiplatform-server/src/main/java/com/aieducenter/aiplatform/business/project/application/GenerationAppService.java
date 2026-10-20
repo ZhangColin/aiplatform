@@ -336,9 +336,14 @@ public class GenerationAppService {
      * 续跑现状盘点块（#221 全场景脏续的起手交接，机制与片间交接同构——平台拼事实、
      * 不产自由文本）：续跑断点段首试/重试 prompt 前置——已收口进度（轨道表事实：
      * 阶段 0 + 逐片清单）、中断原因（失败 = 重试耗尽〔携最近错误现场〕/ 中断 =
-     * 未及收口）、脏续纪律（已收口成果不重做、已对的工作保留）。工作区现状的检查
-     * 指引与「中断前摘要」（前片交接）由任务 prompt 与 {@link #segmentContext}
-     * 携带，同片间交接口径。
+     * 未及收口）、续跑纪律（已收口成果不重做）。工作区现状的检查指引与「中断前
+     * 摘要」（前片交接）由任务 prompt 与 {@link #segmentContext} 携带，同片间交接
+     * 口径。
+     *
+     * <p><b>失败段的干净重做口径（#353）</b>：重试耗尽的失败段在终态前已回滚本段
+     * 起点（不变式）——续跑该段时工作区是干净现场：盘点的接手纪律从「保留已对的
+     * 工作脏续」换为「从头重做」（依赖与数据库不在回滚面、保持现状如实告知）；
+     * 中断段（未判死的现场）仍是脏续。</p>
      */
     static String resumeInventoryBlock(int startOrd, List<GenerationSegment> segments,
             String failureScene) {
@@ -357,18 +362,25 @@ public class GenerationAppService {
                     ? STAGE0_TITLE
                     : "切片 " + segment.getOrd() + "/" + totalSlices + "「" + segment.getDescription() + "」");
         }
-        String reason = target != null && target.getStatus() == GenerationSegmentStatus.FAILED
+        boolean failed = target != null && target.getStatus() == GenerationSegmentStatus.FAILED;
+        String reason = failed
                 ? "上一次运行在本段自动重试耗尽后失败"
                         + (failureScene == null ? "" : "（最近错误现场：" + failureScene + "）")
+                        + "；失败现场已回滚到本段起点——代码是干净现场（依赖与数据库不在回滚面、"
+                        + "保持现状），本段从头重做"
                 : "上一次运行在本段中断（未及收口）";
+        String takeover = failed
+                ? "- 接手本段先检查工作区现状（依赖、数据、8081 端口服务是否在跑），"
+                        + "从头完成本段任务。\n\n"
+                : "- 接手本段先检查工作区现状（代码、依赖、数据、8081 端口服务是否在跑），"
+                        + "保留已对的工作，从中断处继续完成本段任务。\n\n";
         return "【续跑现状盘点】本次生成是从中断处接续，不是从头重来：\n"
                 + (progress.length() > 0
                         ? "- 已收口进度：" + progress + "——这些段的成果都在工作区，不要重做。\n"
                         : "- 已收口进度：尚无——前次运行未收口任何段，本次从第一段接续"
                                 + "（已做的工作若有仍在工作区）。\n")
                 + "- 中断原因：" + reason + "。\n"
-                + "- 接手本段先检查工作区现状（代码、依赖、数据、8081 端口服务是否在跑），"
-                + "保留已对的工作，从中断处继续完成本段任务。\n\n";
+                + takeover;
     }
 
     /**
@@ -900,10 +912,16 @@ public class GenerationAppService {
             String prefix = resumeTarget ? resumePrefix : "";
             String handoff = stage0 ? null : previousHandoff;
             String segmentDesc = stage0 ? STAGE0_RETRY_DESC : "实现切片「" + slice + "」";
-            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
-                    resumed && resumeTarget
-                            ? resumeSession(projectId, ord, runId)
-                            : sliceSession(projectId, ord),
+            String sessionId = resumed && resumeTarget
+                    ? resumeSession(projectId, ord, runId)
+                    : sliceSession(projectId, ord);
+            // 段失败回滚（#353）：起跑即捕获回滚基准（git HEAD；无 HEAD 锚定）——
+            // 尝试环耗尽后留账＋干净回退本段起点、新会话重跑一轮（坏现场不叠修）
+            CoderRunAttempts.SegmentRollback rollback =
+                    rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
+                    runId,
+                    sessionId,
                     new CoderRunAttempts.Prompts(
                             designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
                             errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
@@ -912,7 +930,8 @@ public class GenerationAppService {
                             prdVersionNo),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
-                            : RunHeading.slice(slice, ord, slices.size()));
+                            : RunHeading.slice(slice, ord, slices.size()),
+                    rollback);
             if (!result.succeeded()) {
                 failSegment(projectId, ord, runId);
                 if (result.lastError() != null) {
@@ -948,17 +967,22 @@ public class GenerationAppService {
                 String prefix = resumeTarget ? resumePrefix : "";
                 String handoff = previousHandoff;
                 String segmentDesc = "实现切片「" + slice + "」";
-                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
-                        resumed && resumeTarget
-                                ? resumeSession(projectId, ord, runId)
-                                : sliceSession(projectId, ord),
+                String sessionId = resumed && resumeTarget
+                        ? resumeSession(projectId, ord, runId)
+                        : sliceSession(projectId, ord);
+                CoderRunAttempts.SegmentRollback rollback =
+                        rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
+                        runId,
+                        sessionId,
                         new CoderRunAttempts.Prompts(
                                 designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
                                 errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                         (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
                                 runId, sliceClosingSummary(slice), prdVersionNo),
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
-                        RunHeading.slice(slice, ord, slices.size()));
+                        RunHeading.slice(slice, ord, slices.size()),
+                        rollback);
                 if (!result.succeeded()) {
                     failSegment(projectId, ord, runId);
                     if (result.lastError() != null) {
@@ -981,6 +1005,101 @@ public class GenerationAppService {
     /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
     private boolean depsAllClosed(int ord, BuildPlan plan, Set<Integer> closedOrds) {
         return plan.dependsOn(ord - 1).stream().allMatch(closedOrds::contains);
+    }
+
+    /**
+     * 重跑轮会话寻址后缀（#353 回滚重跑）：本段会话 + {@code -rr}（旧会话带失败
+     * 循环历史不续——同 #221 续跑新会话口径；寻址规则归轨道层，预算一轮故恒定后缀）。
+     */
+    static final String RERUN_SESSION_SUFFIX = "-rr";
+
+    /**
+     * 回滚基准捕获（#353 失败回滚的基准，段起跑与 merge 前共用同一操作）：回读
+     * 工作区 git HEAD；无 HEAD（全新工作区首段——git 懒初始化尚无收口成版）即锚
+     * commit 钉基准（无 trailer 不进版本流）。拿不到 ref（环境故障/exec 异常）降级
+     * {@code null}——无回滚基准（不重跑/不清理，同既有口径），如实记日志不静默。
+     */
+    private String captureRollbackBase(Long workspaceId, Long projectId, int ord) {
+        String workspace = Long.toString(workspaceId);
+        try {
+            workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.ensureRepoCommand()));
+            ExecResultResponse head = workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.headRefCommand()));
+            if (head.exitCode() == 0 && !head.stdout().isBlank()) {
+                return head.stdout().trim();
+            }
+            // 无 HEAD：锚 commit 把现状钉成回滚基准（此后回滚恒有 ref 可回）
+            ExecResultResponse anchor = workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.anchorStartCommand()));
+            if (anchor.exitCode() == 0 && !anchor.stdout().isBlank()) {
+                return anchor.stdout().trim();
+            }
+            log.warn("[generate] 项目 {} 段 {} 回滚基准锚定失败（本段不带回滚重跑）：{}",
+                    projectId, ord, anchor.stderr());
+            return null;
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 段 {} 回滚基准捕获失败（本段不带回滚重跑）：{}",
+                    projectId, ord, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 段回滚钩装配（#353 三处调用共用单点）：捕获回滚基准（{@link #captureRollbackBase}）
+     * → 装尝试环耗尽回调（{@link #segmentRollback}）。基准拿不到返回 {@code null}
+     * （无钩——尝试环不重跑、直接终态，同既有口径）。
+     */
+    private CoderRunAttempts.SegmentRollback rollbackHookFor(Long workspaceId, Long projectId,
+            int ord, String sessionId) {
+        String base = captureRollbackBase(workspaceId, projectId, ord);
+        return segmentRollback(workspaceId, projectId, ord, sessionId, base);
+    }
+
+    /**
+     * 段回滚钩装配（#353）：尝试环耗尽后的回调——① 失败现场留账（相对段起点的
+     * 全量 diff 落 {@code .platform/failed-scene-segment-{ord}-{epochMilli}.patch}，
+     * 回滚不丢证据；留账失败不挡回滚——证据面与机制面分道）→ ② 工作区干净回退
+     * 段起点（{@code reset --hard + clean -fd}：段内改动与野 commit 脱落，前段
+     * 收口 commit 不动，数据/依赖等排除面不触）；回滚成功返回重跑轮新会话寻址，
+     * 失败返回 null（坏现场上重跑无意义——不重跑、直接终态）。
+     */
+    private CoderRunAttempts.SegmentRollback segmentRollback(Long workspaceId, Long projectId,
+            int ord, String sessionId, String segmentStart) {
+        if (segmentStart == null) {
+            return null;
+        }
+        String workspace = Long.toString(workspaceId);
+        return () -> {
+            try {
+                String scenePath = WorkspaceLayout.PLATFORM_DIR + "/failed-scene-segment-" + ord
+                        + "-" + System.currentTimeMillis() + ".patch";
+                ExecResultResponse scene = workspaceLifecycleAppService.exec(workspace,
+                        new WorkspaceExecCommand(
+                                WorkspaceVersions.recordFailureSceneCommand(segmentStart, scenePath)));
+                if (scene.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 段 {} 失败现场留账失败（继续回滚——留账不挡回滚）：{}",
+                            projectId, ord, scene.stderr());
+                }
+                ExecResultResponse reset = workspaceLifecycleAppService.exec(workspace,
+                        new WorkspaceExecCommand(
+                                WorkspaceVersions.resetToSegmentStartCommand(segmentStart)));
+                if (reset.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 段 {} 回滚段起点失败（不重跑、转终态）：{}",
+                            projectId, ord, reset.stderr());
+                    return null;
+                }
+                log.info("[generate] 项目 {} 段 {} 重试耗尽——失败现场已留账（{}），工作区已回滚本段起点",
+                        projectId, ord, scenePath);
+                return sessionId + RERUN_SESSION_SUFFIX;
+            }
+            catch (RuntimeException e) {
+                log.warn("[generate] 项目 {} 段 {} 回滚段起点异常（不重跑、转终态）：{}",
+                        projectId, ord, e.toString());
+                return null;
+            }
+        };
     }
 
     /** 重载已收口片集（#351 波间刷新——合并后闭片，后续波据此判定依赖满足）。 */
@@ -1073,6 +1192,9 @@ public class GenerationAppService {
             String sessionId = resumed && resumeTarget
                     ? resumeSession(projectId, ord, runId)
                     : sliceSession(projectId, ord);
+            // fork 内回滚基准 = fork 时主工作区 HEAD（fork 克隆含 .git——回滚等价于
+            // 重新 fork 的干净现场，开销只是 git 操作不起新容器）
+            CoderRunAttempts.SegmentRollback rollback = rollbackHookFor(forkId, projectId, ord, sessionId);
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, forkId, runId,
                     sessionId,
                     new CoderRunAttempts.Prompts(
@@ -1082,7 +1204,8 @@ public class GenerationAppService {
                     (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
                             sliceClosingSummary(slice)),
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
-                    RunHeading.slice(slice, ord, plan.slices().size()));
+                    RunHeading.slice(slice, ord, plan.slices().size()),
+                    rollback);
             if (result.succeeded()) {
                 return ForkSliceOutcome.ok(ord, slice, runId, forkWorkspaceId, result.closingText());
             }
@@ -1104,11 +1227,15 @@ public class GenerationAppService {
      * 按序合并一片 fork 回主工作区（#351）：取 fork 相对基线的 diff → {@code git apply
      * --3way} 三方合并（机器查：冲突返回非 0）→ 主工作区 git 成版。冲突转子智能体裁决
      * （{@link #resolveConflict}）。成功返回 true（含无改动 no-op）；合并/裁决失败返回
-     * false（已落 failSegment + run-failed）。fork 在 finally 释放（不残留短命容器）。
+     * false（已落 failSegment + run-failed），且<b>主工作区回滚 merge 前 HEAD</b>
+     * （#353 残留清理——半应用 patch/冲突标记不留，后续合并与续跑在干净主工作区上
+     * 进行）。fork 在 finally 释放（不残留短命容器）。
      */
     private boolean mergeFork(Project project, ForkSliceOutcome outcome) {
         Long projectId = project.getId();
         Long mainWorkspaceId = project.getWorkspaceId();
+        // merge 前 HEAD 捕获（失败清理基准——恒有 ref：序前段已收口成版/锚定）
+        String mergeBase = captureRollbackBase(mainWorkspaceId, projectId, outcome.ord());
         try {
             ExecResultResponse diff = workspaceLifecycleAppService.exec(outcome.workspaceId(),
                     new WorkspaceExecCommand(WorkspaceVersions.forkDiffCommand()));
@@ -1117,6 +1244,7 @@ public class GenerationAppService {
                 // 闭片成功，否则片产物静默丢失、轨道记为已收口）
                 log.warn("[generate] 项目 {} 片 {} fork diff 取失败（{}），按合并失败处置",
                         projectId, outcome.ord(), diff.stderr());
+                rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
                 failSegment(projectId, outcome.ord(), outcome.runId());
                 eventBridge.emitRunFailed(project, outcome.runId());
                 return false;
@@ -1129,7 +1257,12 @@ public class GenerationAppService {
                 if (applied.exitCode() != 0) {
                     log.warn("[generate] 项目 {} 片 {} 合并冲突（机器查命中），转子智能体裁决",
                             projectId, outcome.ord());
-                    return resolveConflict(project, outcome);
+                    boolean resolved = resolveConflict(project, outcome);
+                    if (!resolved) {
+                        // 裁决失败：主工作区可能留半应用 patch/冲突标记——回滚干净
+                        rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
+                    }
+                    return resolved;
                 }
             }
             versions.commitAtClosing(mainWorkspaceId, projectId, outcome.runId(),
@@ -1137,11 +1270,37 @@ public class GenerationAppService {
             return true;
         } catch (RuntimeException e) {
             log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
+            rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
             failSegment(projectId, outcome.ord(), outcome.runId());
             eventBridge.emitRunFailed(project, outcome.runId());
             return false;
         } finally {
             destroyForkQuietly(outcome.workspaceId());
+        }
+    }
+
+    /**
+     * 主工作区残留清理（#353 合并失败分支共用）：干净回退 merge 前 HEAD（reset
+     * --hard + clean——半应用 patch/冲突标记/裁决 run 的改动一并脱落）。失败只记
+     * 日志不反噬失败处置主链（残留现场的最坏面 = 既有口径）。
+     */
+    private void rollbackMainWorkspaceQuietly(Long workspaceId, Long projectId, int ord,
+            String mergeBase) {
+        if (mergeBase == null) {
+            return;
+        }
+        try {
+            ExecResultResponse reset = workspaceLifecycleAppService.exec(
+                    Long.toString(workspaceId),
+                    new WorkspaceExecCommand(WorkspaceVersions.resetToSegmentStartCommand(mergeBase)));
+            if (reset.exitCode() != 0) {
+                log.warn("[generate] 项目 {} 片 {} 合并失败后的主工作区清理失败（残留现场随续跑处置）：{}",
+                        projectId, ord, reset.stderr());
+            }
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 合并失败后的主工作区清理异常（残留现场随续跑处置）：{}",
+                    projectId, ord, e.toString());
         }
     }
 

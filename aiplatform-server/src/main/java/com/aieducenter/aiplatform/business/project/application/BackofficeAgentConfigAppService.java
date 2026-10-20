@@ -29,8 +29,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
  * 不在配置面）的覆盖态读／全量写／变更留痕读。装配读腿（库值优先、缺省回落）
  * 在 {@link AgentConfigAppService}（运行面），本服务只做后台管理面。
  *
- * <p>写语义＝PUT 全量替换：请求体即覆盖态终态，值面四件（systemPrompt、模型
- * 档位、两工具开关）同写；null/空白＝清空覆盖回落枚举默认。变更留痕
+ * <p>写语义＝PUT 全量替换：请求体即覆盖态终态，值面八件（systemPrompt、模型
+ * 档位、两工具开关、路由策略四件〔#354〕）同写；null/空白＝清空覆盖回落枚举
+ * 默认。变更留痕
  * append-only（操作者＋变更前后全量值快照）：值面有动才落痕——幂等回执（同值
  * 重写）不落痕不写行（留痕链每痕都是真实变更，回滚才可逐痕回溯）；回滚＝把留痕
  * 旧值快照写回，即一次新变更、留新痕（不做版本树）。工具开关已生效装配（#252
@@ -41,9 +42,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
 @Service
 public class BackofficeAgentConfigAppService {
 
-    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开」）。 */
+    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
-            new AgentConfigUpdateCommand(null, null, null, null);
+            new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null);
 
     private final AgentConfigStore configStore;
 
@@ -83,6 +84,9 @@ public class BackofficeAgentConfigAppService {
                 blankToNull(safe.systemPrompt()), blankToNull(safe.modelId()),
                 safe.webSearchEnabled() == null || safe.webSearchEnabled(),
                 safe.fetchUrlEnabled() == null || safe.fetchUrlEnabled(),
+                safe.routingEnabled() == null || safe.routingEnabled(),
+                blankToNull(safe.routingStrongModelId()),
+                safe.routingFileCountThreshold(), safe.routingSliceLengthThreshold(),
                 operator.id(), operator.name(), null);
         AgentOperationalConfig persisted =
                 persistIfChanged(profile, current, next, operator);
@@ -131,6 +135,8 @@ public class BackofficeAgentConfigAppService {
                 current.systemPrompt(), current.modelId(),
                 tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
                 tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
+                current.routingEnabled(), current.routingStrongModelId(),
+                current.routingFileCountThreshold(), current.routingSliceLengthThreshold(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile, current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -165,8 +171,12 @@ public class BackofficeAgentConfigAppService {
         configStore.insertTrace(new AgentConfigTrace(TsidGenerator.newInstance().generate(),
                 profile.key(), current.systemPrompt(), current.modelId(),
                 current.webSearchEnabled(), current.fetchUrlEnabled(),
+                current.routingEnabled(), current.routingStrongModelId(),
+                current.routingFileCountThreshold(), current.routingSliceLengthThreshold(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
-                next.fetchUrlEnabled(), operator.id(), operator.name(), LocalDateTime.now()));
+                next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
+                next.routingFileCountThreshold(), next.routingSliceLengthThreshold(),
+                operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(profile.key());
     }
 
@@ -182,7 +192,11 @@ public class BackofficeAgentConfigAppService {
         return !Objects.equals(current.systemPrompt(), next.systemPrompt())
                 || !Objects.equals(current.modelId(), next.modelId())
                 || current.webSearchEnabled() != next.webSearchEnabled()
-                || current.fetchUrlEnabled() != next.fetchUrlEnabled();
+                || current.fetchUrlEnabled() != next.fetchUrlEnabled()
+                || current.routingEnabled() != next.routingEnabled()
+                || !Objects.equals(current.routingStrongModelId(), next.routingStrongModelId())
+                || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
+                || !Objects.equals(current.routingSliceLengthThreshold(), next.routingSliceLengthThreshold());
     }
 
     /** 配置面智能体寻址（单点）：{@link AgentProfile#byKey} 解析，未知/空键 404。 */

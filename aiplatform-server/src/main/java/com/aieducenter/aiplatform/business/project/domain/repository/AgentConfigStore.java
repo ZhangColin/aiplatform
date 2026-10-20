@@ -22,7 +22,7 @@ public interface AgentConfigStore {
     AgentOperationalConfig find(String agentKey);
 
     /**
-     * 覆盖态整行 upsert（PUT 全量语义）：值面四件＋操作者两列同写，updated_at
+     * 覆盖态整行 upsert（PUT 全量语义）：值面八件＋操作者两列同写，updated_at
      * 刷新；行首次写入即立（清空覆盖不删行——操作者列留最近写者）。
      */
     void save(AgentOperationalConfig config);

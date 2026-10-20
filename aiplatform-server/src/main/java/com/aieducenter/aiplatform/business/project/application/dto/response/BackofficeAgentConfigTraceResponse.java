@@ -9,17 +9,26 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentConfigTrace
 /**
  * 配置变更留痕读面行（#251 历史可查）：一次实际变更的前后全量值快照＋操作者＋
  * 时刻，按时间倒序（最近先）。append-only——留痕不随任何动作删除；回滚＝把旧值
- * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。
+ * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面八件（含路由策略四件，
+ * #354）全量留痕。
  *
  * @param id                  留痕标识（TSID 十进制串）
  * @param oldSystemPrompt     变更前 systemPrompt（null＝此前即缺省回落）
  * @param oldModelId          变更前模型档位（null 同上）
  * @param oldWebSearchEnabled 变更前联网搜索开关
  * @param oldFetchUrlEnabled  变更前网页抓取开关
+ * @param oldRoutingEnabled   变更前模型路由开关
+ * @param oldRoutingStrongModelId 变更前强模型档（null＝回落代码缺省）
+ * @param oldRoutingFileCountThreshold 变更前文件面阈值（null 同上）
+ * @param oldRoutingSliceLengthThreshold 变更前片复杂度阈值（null 同上）
  * @param newSystemPrompt     变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId          变更后模型档位（null 同上）
  * @param newWebSearchEnabled 变更后联网搜索开关
  * @param newFetchUrlEnabled  变更后网页抓取开关
+ * @param newRoutingEnabled   变更后模型路由开关
+ * @param newRoutingStrongModelId 变更后强模型档（null＝本次清空回落代码缺省）
+ * @param newRoutingFileCountThreshold 变更后文件面阈值（null 同上）
+ * @param newRoutingSliceLengthThreshold 变更后片复杂度阈值（null 同上）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -35,6 +44,14 @@ public record BackofficeAgentConfigTraceResponse(
         boolean oldWebSearchEnabled,
         @Schema(description = "变更前网页抓取开关")
         boolean oldFetchUrlEnabled,
+        @Schema(description = "变更前模型路由开关（#354）")
+        boolean oldRoutingEnabled,
+        @Schema(description = "变更前强模型档（null＝此前即回落代码缺省）")
+        String oldRoutingStrongModelId,
+        @Schema(description = "变更前文件面阈值（null 同上）")
+        Integer oldRoutingFileCountThreshold,
+        @Schema(description = "变更前片复杂度阈值（null 同上）")
+        Integer oldRoutingSliceLengthThreshold,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -43,6 +60,14 @@ public record BackofficeAgentConfigTraceResponse(
         boolean newWebSearchEnabled,
         @Schema(description = "变更后网页抓取开关")
         boolean newFetchUrlEnabled,
+        @Schema(description = "变更后模型路由开关（#354）")
+        boolean newRoutingEnabled,
+        @Schema(description = "变更后强模型档（null＝本次清空回落代码缺省）")
+        String newRoutingStrongModelId,
+        @Schema(description = "变更后文件面阈值（null 同上）")
+        Integer newRoutingFileCountThreshold,
+        @Schema(description = "变更后片复杂度阈值（null 同上）")
+        Integer newRoutingSliceLengthThreshold,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -55,8 +80,12 @@ public record BackofficeAgentConfigTraceResponse(
         return new BackofficeAgentConfigTraceResponse(Long.toString(trace.id()),
                 trace.oldSystemPrompt(), trace.oldModelId(),
                 trace.oldWebSearchEnabled(), trace.oldFetchUrlEnabled(),
+                trace.oldRoutingEnabled(), trace.oldRoutingStrongModelId(),
+                trace.oldRoutingFileCountThreshold(), trace.oldRoutingSliceLengthThreshold(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
+                trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
+                trace.newRoutingFileCountThreshold(), trace.newRoutingSliceLengthThreshold(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

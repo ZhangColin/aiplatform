@@ -36,11 +36,16 @@ public class AgentConfigAppService {
 
     /**
      * 生效配置束（一次查库同取——prompt 与档位在命令构建处恒结伴，工具开关
-     * #252 同批）：生效 systemPrompt、生效档位裸名、生效对话轨道模型串（provider
-     * 前缀单源拼装）、增强工具开关生效态。
+     * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
+     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效档位裸名、
+     * 生效对话轨道模型串（provider 前缀单源拼装）、增强工具开关生效态、
+     * 档位覆盖标记（路由协同口径的兜底/钉死判据）与路由策略四件存储态。
      */
     public record EffectiveConfig(String systemPrompt, String modelId, String chatModelString,
-            boolean webSearchEnabled, boolean fetchUrlEnabled) {
+            boolean webSearchEnabled, boolean fetchUrlEnabled,
+            boolean modelIdOverridden, boolean routingEnabled,
+            String routingStrongModelId, Integer routingFileCountThreshold,
+            Integer routingSliceLengthThreshold) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -59,7 +64,10 @@ public class AgentConfigAppService {
         String modelId = config.effectiveModelId(profile.modelId());
         return new EffectiveConfig(config.effectiveSystemPrompt(profile.systemPrompt()),
                 modelId, AgentProfile.chatModelStringOf(modelId),
-                config.webSearchEnabled(), config.fetchUrlEnabled());
+                config.webSearchEnabled(), config.fetchUrlEnabled(),
+                config.modelId() != null, config.routingEnabled(),
+                config.routingStrongModelId(), config.routingFileCountThreshold(),
+                config.routingSliceLengthThreshold());
     }
 
     /**

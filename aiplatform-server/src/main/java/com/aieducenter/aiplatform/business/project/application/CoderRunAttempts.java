@@ -51,7 +51,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>命令全要素同构：执行体配置（{@link AgentProfile#EXECUTOR}——systemPrompt/
  * 模型档位经运营配置读面 {@link AgentConfigAppService} 取生效值，#251 库值优先、
- * 缺省回落枚举默认）、会话寻址由
+ * 缺省回落枚举默认；模型档位另经模型路由判定 {@link ModelRoutingAppService} 选档
+ * ——路由判定优先、人工覆盖兜底（钉死位＝路由关），#354 只对 run 执行体座生效）、
+ * 会话寻址由
  * 轨道层拼装传入（#114 每片/每 run 换会话——重试续本会话，已落盘成果保留，同
  * 工作区不丢数据）、owner 寻址、长 run 超时、计量 dims（agentKind=executor）、
  * 项目工作区、流关联。知识命中前置注入只进首试 prompt（一次下发一次注入，重试
@@ -207,14 +209,17 @@ class CoderRunAttempts {
 
     /**
      * 一次尝试的耗时账（#111 阶段耗时分布）：尝试序号 + 尝试墙钟 + 该尝试跨流段
-     * （converse + 续跑）合并的阶段耗时事实。墙钟口径：成功/判据未过的尝试 =
+     * （converse + 续跑）合并的阶段耗时事实 + 该尝试生效模型档位（#354 路由
+     * 留档——逐尝试哪档可归因，收尾卡 durationBreakdown.attempts[].modelId）。
+     * 墙钟口径：成功/判据未过的尝试 =
      * converse 起跑 → 续跑落定（核验前——核验起计收口尾序桶，判据未过的核验时间
      * 未归因，探活类量级小）；中段崩的尝试 = 起跑到异常点（含全部在途），桶 =
      * 该流段已闭合区间的部分观察（#323 失败留账——AgentTurnFailure 携带；非客户
      * 端失败〔前段失败/判据回调抛错〕无可携事实仍零桶，观察面口径见
      * StageDurationFacts）。
      */
-    private record AttemptDuration(int attempt, long wallMs, StageDurations durations) {
+    private record AttemptDuration(int attempt, long wallMs, StageDurations durations,
+            String modelId) {
     }
 
     private final AgentscopeAgentClient agentClient;
@@ -225,12 +230,14 @@ class CoderRunAttempts {
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
     private final VerificationFacts verificationFacts;
+    private final ModelRoutingAppService modelRouting;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
-            ProjectVersionAppService versions, VerificationFacts verificationFacts) {
+            ProjectVersionAppService versions, VerificationFacts verificationFacts,
+            ModelRoutingAppService modelRouting) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -239,6 +246,7 @@ class CoderRunAttempts {
         this.conversationHistory = conversationHistory;
         this.versions = versions;
         this.verificationFacts = verificationFacts;
+        this.modelRouting = modelRouting;
     }
 
     /**
@@ -288,20 +296,24 @@ class CoderRunAttempts {
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
             String what, boolean injectKnowledge, RunSeat seat, RunHeading heading) {
         return run(project, workspaceId, firstRunId, sessionId, prompts, onSuccess, what,
-                injectKnowledge, seat, heading, null);
+                injectKnowledge, seat, ModelRoutingAppService.SegmentSignals.none(), heading,
+                null);
     }
 
     /**
-     * 全参形（#353 段失败回滚）：{@code rollback} 在场时，首轮尝试环耗尽 → 回调轨道层
-     * 留账＋回滚本段起点 → 以原首试 prompt（干净起点重放——不携错误现场、知识注入
-     * 不重复）换会话重跑一轮；重跑轮所有尝试走重试投影（attemptRunId 全新——计量
-     * 幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。重跑轮
-     * 再耗尽则二次回滚后终态（不变式：终态时工作区 = 段起点，续跑从干净现场起）。
+     * 全参形（#353 段失败回滚；#354 路由信号）：{@code rollback} 在场时，首轮尝试环
+     * 耗尽 → 回调轨道层留账＋回滚本段起点 → 以原首试 prompt（干净起点重放——不携
+     * 错误现场、知识注入不重复）换会话重跑一轮；重跑轮所有尝试走重试投影（attemptRunId
+     * 全新——计量幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。
+     * 重跑轮再耗尽则二次回滚后终态（不变式：终态时工作区 = 段起点，续跑从干净现场起）。
      * {@code null} = 无段级回滚（修正/设计/合并裁决轨——既有口径不变）。
+     * {@code signals} = 模型路由的段级信号（轨道层拼装：切片描述——片复杂度信号；
+     * 修正/设计/合并裁决轨经便捷形传空信号；路由只对 executor 座生效，#354）。
      */
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
-            String what, boolean injectKnowledge, RunSeat seat, RunHeading heading,
+            String what, boolean injectKnowledge, RunSeat seat,
+            ModelRoutingAppService.SegmentSignals signals, RunHeading heading,
             SegmentRollback rollback) {
         Long projectId = project.getId();
         String knowledgePrefix = injectKnowledge
@@ -372,6 +384,20 @@ class CoderRunAttempts {
                         ? firstRunId : EventsAppService.newRunId();
                 AgentConfigAppService.EffectiveConfig agent =
                         agentConfigs.effectiveOf(seat.profile());
+                // 模型路由判定（#354）：只对 run 执行体座生效（Demo 阶段模型档＝run
+                // 执行体的模型档）；路由判定优先、人工覆盖兜底——每次尝试起跑时读档
+                // 定档（失败升档信号随尝试序变化，进行中 run 不定格）
+                ModelRoutingAppService.TierSelection tier = seat.profile() == AgentProfile.EXECUTOR
+                        ? modelRouting.select(agent, Long.toString(workspaceId), attempt, round,
+                                signals)
+                        : null;
+                if (tier != null) {
+                    log.info("[{}] 项目 {} 第 {} 轮第 {}/{} 次尝试模型路由：{}（来源 {}，理由 {}）",
+                            what, projectId, round, attempt, maxAttempts, tier.modelId(),
+                            tier.source(), tier.reasons());
+                }
+                String modelString = tier != null ? tier.chatModelString() : agent.chatModelString();
+                String attemptModelId = tier != null ? tier.modelId() : agent.modelId();
                 AgentCommand command = new AgentCommand(
                         attemptRunId,
                         attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
@@ -380,7 +406,7 @@ class CoderRunAttempts {
                                         Duration.between(runStartedAt, Instant.now()).toMillis(),
                                         runChanges, planSteps.get())),
                         agent.systemPrompt(),
-                        agent.chatModelString(),
+                        modelString,
                         roundSessionId,
                         project.ownerUserId(),
                         new UsageContext(Long.toString(projectId),
@@ -425,10 +451,11 @@ class CoderRunAttempts {
                 attemptChanges.addAll(reply.changes());
                 runChanges.addAll(attemptChanges);
                 // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
-                // 核验/收口段抛错不重记（attemptAccounted 守卫）
+                // 核验/收口段抛错不重记（attemptAccounted 守卫）。逐尝试档位随账
+                // 留档（#354 路由可观测——收尾卡 attempts[].modelId）
                 attemptDurations.add(new AttemptDuration(attempt,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
-                        durations.get()));
+                        durations.get(), attemptModelId));
                 attemptAccounted = true;
                 // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 修正
                 // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
@@ -481,7 +508,7 @@ class CoderRunAttempts {
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what,
                             verificationFacts.consume(Long.toString(workspaceId)),
-                            seat.draftsItem());
+                            seat.draftsItem(), tier);
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
@@ -518,10 +545,11 @@ class CoderRunAttempts {
                 if (!attemptAccounted) {
                     // 中段失败（converse/续跑抛错）：尝试账带墙钟与该流段已闭合区间
                     // 的部分观察（AgentTurnFailure 携带；非客户端失败无可携事实仍
-                    // 零桶——观察面口径见 StageDurationFacts）
+                    // 零桶——观察面口径见 StageDurationFacts）。档位随账留档同成功路
+                    // （#354——失败尝试用了哪档同样可归因）
                     attemptDurations.add(new AttemptDuration(attempt,
                             Duration.between(attemptStartedAt, Instant.now()).toMillis(),
-                            durations.get()));
+                            durations.get(), attemptModelId));
                 }
                 log.warn("[{}] 项目 {} 第 {}/{} 次尝试失败（attemptRunId={}）：{}",
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
@@ -696,11 +724,15 @@ class CoderRunAttempts {
      * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。验证统计
      * （#352）另扩 {@code verification}——事实源＝verify 子智能体的
      * report_verification 登记（{@code verification} 参数；null＝未跑/未登记，
-     * 如实缺省不携带）。
+     * 如实缺省不携带）。模型路由（#354）另扩 {@code modelTier}——收口尝试的路由
+     * 判定（哪段用了哪档、为什么：档位 + 来源 + 升档理由 + 判定依据快照）；
+     * {@code tier} 非空才携带（run 执行体座的编码 run；设计/其余会话缺省不携带，
+     * 平台分析口径、前端不渲染——逐尝试档位另见 durationBreakdown.attempts[].modelId）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
-            VerificationFacts.Facts verification, String draftsItem) {
+            VerificationFacts.Facts verification, String draftsItem,
+            ModelRoutingAppService.TierSelection tier) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -723,6 +755,9 @@ class CoderRunAttempts {
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
         }
+        if (tier != null) {
+            closing.put(CLOSING_MODEL_TIER_FIELD, tier.payload());
+        }
         return closing;
     }
 
@@ -734,6 +769,14 @@ class CoderRunAttempts {
      * ——带规范项目编码 run 的「按稿对齐」叙事与 lint 结果；无规范项目不携带）。
      */
     static final String CLOSING_LINT_FIELD = "designLint";
+
+    /**
+     * 收口扩载的模型路由键（#354：收口尝试的路由判定留档——{@code { modelId,
+     * source, reasons?, signals }}；run 执行体座的编码 run 在场、其余缺省不携带。
+     * 平台分析口径、前端不渲染，随收尾卡落对话史——「哪段用了哪档、为什么」的
+     * 可查留档；逐尝试档位见 {@code durationBreakdown.attempts[].modelId}）。
+     */
+    static final String CLOSING_MODEL_TIER_FIELD = "modelTier";
 
     /** 扫描载荷的「曾自动修一轮」键（修轮用尽即标——纠偏过程如实）。 */
     static final String CLOSING_LINT_RETRIED_FIELD = "retried";
@@ -847,11 +890,13 @@ class CoderRunAttempts {
         return breakdown;
     }
 
-    /** 逐尝试分布条目：尝试序号 + 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）。 */
+    /** 逐尝试分布条目：尝试序号 + 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+
+     *  该尝试生效模型档位（#354 路由留档——逐尝试哪档可归因）。 */
     private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("attempt", attempt.attempt());
         payload.put("durationMs", attempt.wallMs());
+        payload.put("modelId", attempt.modelId());
         payload.put("llmMs", attempt.durations().llmMs());
         payload.put("toolsMs", toolsPayload(attempt.durations()));
         payload.put("verifyMs", verifyMs(attempt.durations()));

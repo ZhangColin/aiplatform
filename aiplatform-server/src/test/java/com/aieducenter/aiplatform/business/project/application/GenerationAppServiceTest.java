@@ -59,6 +59,7 @@ import com.aieducenter.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.aieducenter.aiplatform.business.project.domain.enums.GenerationState;
 import com.aieducenter.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
@@ -171,6 +172,23 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(AgentCommand.class), any()))
                 .thenAnswer(invocation -> new AgentReply(
                         invocation.getArgument(0, AgentCommand.class).runId(), text));
+    }
+
+    /** 首试失败、此后照常收口脚本（静默重试/路由升档用例的失败注入面——#354）。 */
+    private void givenConverseFailsThenSucceeds(String failure) {
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (converseCalls.incrementAndGet() == 1) {
+                throw new IllegalStateException(failure);
+            }
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
     }
 
     private void givenAgentsMdWriteSucceeds() {
@@ -1101,20 +1119,26 @@ class GenerationAppServiceTest {
                 List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
         appService.dispatchGenerationOnTurnClose(projectId, plan);
 
-        // fork 内回滚事实（切片 3 的 fork = 9002）：留账 + reset --hard 段起点
-        verify(workspaceLifecycleAppService).exec(eq("9002"),
+        // fork 内回滚事实：切片 3 的 fork 标识按命令事实取（并行波两片同池竞速，
+        // fork 桩 9001/9002 的分配序不固定——以 -slice-3 命令实际跑在的 fork 为准）：
+        // 留账 + reset --hard 段起点
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(6)).converse(commands.capture(), any());
+        String slice3Fork = commands.getAllValues().stream()
+                .filter(cmd -> cmd.sessionId().endsWith("-slice-3"))
+                .map(AgentCommand::workspaceId)
+                .findFirst().orElseThrow();
+        verify(workspaceLifecycleAppService).exec(eq(slice3Fork),
                 argThat(cmd -> cmd != null
                         && cmd.command().contains(".platform/failed-scene-segment-3-")));
-        verify(workspaceLifecycleAppService).exec(eq("9002"),
+        verify(workspaceLifecycleAppService).exec(eq(slice3Fork),
                 argThat(cmd -> cmd != null
                         && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")));
         // 重跑轮新会话（-rr 后缀）跑在 fork 工作区
-        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(6)).converse(commands.capture(), any());
         assertThat(commands.getAllValues())
                 .anySatisfy(cmd -> {
                     assertThat(cmd.sessionId()).endsWith("-slice-3-rr");
-                    assertThat(cmd.workspaceId()).isEqualTo("9002");
+                    assertThat(cmd.workspaceId()).isEqualTo(slice3Fork);
                 });
         // 重跑救活后照常合并：全片收口、generated_at 落位、零失败终态
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
@@ -2652,6 +2676,205 @@ class GenerationAppServiceTest {
         assertThatThrownBy(() -> appService.startGeneration(projectId))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.GENERATION_DESIGN_ENDPOINT.message());
+    }
+
+    // ---------- 模型路由（#354：路由判定优先、人工覆盖兜底；钉死位＝路由关） ----------
+
+    @Test
+    void given_default_routing_when_first_attempt_fails_then_retry_escalates_to_strong() {
+        // 失败升档（历史失败信号）：阶段 0 首试快档（枚举缺省）→ 重试升强档——
+        // 换档不换会话（重试续本段会话，上下文连续）；下一段（切片）重新起跑
+        // 回落快档（信号按段算，不跨段传染）
+        Long projectId = persistedProject("9850");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseFailsThenSucceeds("起服失败");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-flash", // 阶段 0 首试——无信号、快档
+                "deepseek:deepseek-v4-pro",   // 阶段 0 重试——失败升档
+                "deepseek:deepseek-v4-flash"); // 切片首试——新段重新判定、快档
+        assertThat(commands.getAllValues().get(0).sessionId())
+                .isEqualTo(commands.getAllValues().get(1).sessionId());
+
+        // 收尾卡留档：阶段 0 收口带路由判定（升强档＋理由＋判定依据），切片收口
+        // 带快档判定（无升档不携 reasons）
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> stage0Tier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat(stage0Tier)
+                .containsEntry("modelId", "deepseek-v4-pro")
+                .containsEntry("source", "routed");
+        assertThat((List<String>) stage0Tier.get("reasons")).contains("重试升档（第 2 次尝试）");
+        assertThat((Map<String, Object>) stage0Tier.get("signals"))
+                .containsEntry("attempt", 2)
+                .containsEntry("sliceLength", null); // 阶段 0 无切片描述——片复杂度缺位
+        Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat(sliceTier)
+                .containsEntry("modelId", "deepseek-v4-flash")
+                .doesNotContainKey("reasons");
+        // 留档可查：modelTier 随收尾卡落对话史（JSONB 同载荷）——哪段用了哪档的
+        // 持久留档面（失败段无收尾卡、以结构化日志为面）
+        List<Map<String, Object>> closings = jdbcTemplate.queryForList(
+                "SELECT closing->'modelTier'->>'modelId' AS tier_model_id FROM"
+                        + " prj_conversation_entries WHERE project_id = ? AND kind = ?"
+                        + " ORDER BY id",
+                projectId, ConversationEntryKind.CLOSING.getCode());
+        assertThat(closings).extracting(row -> row.get("tier_model_id")).containsExactly(
+                "deepseek-v4-pro", // 阶段 0 收口——重试升档后的强档
+                "deepseek-v4-flash"); // 切片收口——快档
+    }
+
+    @Test
+    void given_large_file_surface_when_dispatch_then_strong_from_first_attempt() {
+        // 文件面大小信号：工作区已跟踪文件数 ≥ 阈值（代码缺省 60）——首试即升强档
+        Long projectId = persistedProject("9851");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd.command().contains("git ls-files"))))
+                .thenReturn(new ExecResultResponse(" 87\n", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro");
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat((List<String>) sliceTier.get("reasons")).contains("文件面超出阈值（87 ≥ 60）");
+        assertThat((Map<String, Object>) sliceTier.get("signals")).containsEntry("fileCount", 87);
+    }
+
+    @Test
+    void given_fat_slice_description_when_dispatch_then_slice_escalates_but_stage0_stays_fast() {
+        // 片复杂度信号：切片描述字数 ≥ 阈值（代码缺省 20）——该片升强档；阶段 0
+        // 无切片描述（信号缺位）仍快档
+        Long projectId = persistedProject("9852");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录、浏览商品、下单支付并查看历史订单")));
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-flash",
+                "deepseek:deepseek-v4-pro");
+    }
+
+    @Test
+    void given_manual_override_with_routing_on_when_retry_then_escalation_crosses_override() {
+        // 路由判定优先、人工覆盖兜底：覆盖是基础档不是钉死——首试走人工档、
+        // 重试升强档（升档越过覆盖）；下一段回落人工档
+        Long projectId = persistedProject("9853");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, model_id)
+                VALUES ('executor', 'deepseek-v4-ultra')
+                """);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseFailsThenSucceeds("起服失败");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-ultra", // 首试——无信号、人工档兜底
+                "deepseek:deepseek-v4-pro",   // 重试——失败升档（越过人工档）
+                "deepseek:deepseek-v4-ultra"); // 切片首试——新段回落人工档
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> tier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat(tier)
+                .containsEntry("modelId", "deepseek-v4-ultra")
+                .containsEntry("source", "routed")
+                .doesNotContainKey("reasons"); // 兜底判定——只记为什么升
+    }
+
+    @Test
+    void given_routing_off_with_override_when_retry_then_pinned_manual_tier() {
+        // 钉死位＝路由关＋人工档：人工档恒生效——失败重试不升档（既有口径）
+        Long projectId = persistedProject("9854");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, model_id, routing_enabled)
+                VALUES ('executor', 'deepseek-v4-pro', false)
+                """);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseFailsThenSucceeds("起服失败");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro", "deepseek:deepseek-v4-pro");
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> tier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat(tier)
+                .containsEntry("modelId", "deepseek-v4-pro")
+                .containsEntry("source", "pinned")
+                .doesNotContainKey("reasons");
+    }
+
+    @Test
+    void given_routing_off_no_override_when_retry_then_enum_default_kept() {
+        // 路由关＋无覆盖：缺省档恒生效（快档）——失败重试也不升档（既有口径零变化）
+        Long projectId = persistedProject("9855");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, routing_enabled)
+                VALUES ('executor', false)
+                """);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("起服失败"))
+                .thenAnswer(invocation -> new AgentReply(
+                        invocation.getArgument(0, AgentCommand.class).runId(), "完成"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
+                "deepseek:deepseek-v4-flash", "deepseek:deepseek-v4-flash", "deepseek:deepseek-v4-flash");
     }
 
     /** 系统＋设计终点、PRD 已产出的项目（构建门用例的前置形态）。 */

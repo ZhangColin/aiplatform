@@ -153,6 +153,22 @@ closing: {
         message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
     ]                               # message（诊断原文）。无规范项目与设计会话不携带——
   }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
+  modelTier: {                      # 可缺省——模型路由判定（#354：run 执行体座的编码 run
+    modelId: "deepseek-v4-pro",     # 在场——「哪段用了哪档、为什么」的留档，随收尾卡落
+    source: "routed",               # 对话史可查；设计会话/其余缺省不携带。平台分析口径、
+    reasons: [                      # 前端不渲染（同 durationBreakdown）：
+      "重试升档（第 2 次尝试）"     #   modelId = 收口尝试的生效模型档位裸名
+    ],                              #   source ∈ routed（路由判定——含无信号回落人工档
+    signals: {                      #   兜底）/ pinned（钉死位——路由关＋人工档）/
+      attempt: 2, round: 1,         #   default（路由关＋枚举缺省）
+      fileCount: 87,                #   reasons = 升档理由（可缺省——快档判定/钉死不携带，
+      sliceLength: 12,              #   只记为什么升：重试升档/回滚重跑升档/文件面超出阈值/
+      fileCountThreshold: 60,       #   片复杂度超出阈值）
+      sliceLengthThreshold: 20 }    #   signals = 判定依据快照（attempt/round/fileCount/
+  }                                 #   sliceLength＋两阈值；采集失败的信号为 null——
+                                    #   无此信号、降级不升档）
+                                    # 逐尝试档位见 durationBreakdown.attempts[].modelId；
+                                    # 失败段（无收尾卡）的判定留档以结构化日志为面
 
   durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
                                    # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
@@ -167,8 +183,10 @@ closing: {
     verifyMs: 9000,                #   验证子智能体委派窗（首末 source=verify 事件跨距；无验证 = 0）
     closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
     attempts: [                    #   逐尝试分布（静默重试代价可归因）——attempt / durationMs
-      { attempt: 1, durationMs: 61000, llmMs: 52000, toolsMs: {...}, verifyMs: 9000 }
-    ]                              #   （尝试墙钟）+ 该尝试三桶；中段崩的尝试带已闭合区间的
+      { attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash", llmMs: 52000, toolsMs: {...}, verifyMs: 9000 }
+    ]                              #   （尝试墙钟）+ 该尝试三桶；modelId＝该尝试生效模型档位
+                                   #   （#354 路由留档——逐尝试哪档可归因，失败尝试同携）；
+                                   #   中段崩的尝试带已闭合区间的
                                    #   部分观察（#323 失败留账——AgentTurnFailure 携带；前段失败/
                                    #   判据回调抛错无可携事实仍零桶）、墙钟照记
     # 一致性口径：桶计 + 未归因差值（平台管道 / 判据未过的核验）≈ durationMs——

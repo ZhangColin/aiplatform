@@ -328,6 +328,76 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.message").value("Signature required"));
     }
 
+    // ---------- 模型路由策略四件（#354：读面缺省 → 覆盖写＋留痕 → 清空回落） ----------
+
+    @Test
+    void given_no_routing_override_when_get_then_code_defaults_with_unoverridden_marks()
+            throws Exception {
+        // 路由策略读面缺省：开关 true＝开、强档与两阈值回落代码缺省（覆盖标记
+        // false、默认预览同值）——路由开且无钉死即路由判定（缺省快档）
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingEnabled").value(true))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
+                .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(60))
+                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(20))
+                .andExpect(jsonPath("$.data.routingSliceLengthThresholdOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingSliceLengthThreshold").value(20));
+        // 装配读面同步：路由开、三可空件 null（回落缺省归路由判定单点）
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.routingEnabled()).isTrue();
+        assertThat(executor.routingStrongModelId()).isNull();
+        assertThat(executor.routingFileCountThreshold()).isNull();
+        assertThat(executor.routingSliceLengthThreshold()).isNull();
+    }
+
+    @Test
+    void given_routing_strategy_updated_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 策略覆盖写（开关关＋强档换＋阈值换）→ GET 生效值＝库值、覆盖标记 true；
+        // 留痕前后快照含路由四件；清空（null）回落代码缺省
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
+                {"routingEnabled": false, "routingStrongModelId": "deepseek-v4-ultra",
+                 "routingFileCountThreshold": 30, "routingSliceLengthThreshold": 10}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingEnabled").value(false))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-ultra"))
+                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
+                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(10));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.routingEnabled()).isFalse();
+        assertThat(executor.routingStrongModelId()).isEqualTo("deepseek-v4-ultra");
+
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                // 旧态＝缺省（开关开、三可空件 null），新态＝本次覆盖——回滚依据
+                .andExpect(jsonPath("$.data[0].oldRoutingEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldRoutingStrongModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldRoutingSliceLengthThreshold").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("deepseek-v4-ultra"))
+                .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(30))
+                .andExpect(jsonPath("$.data[0].newRoutingSliceLengthThreshold").value(10))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 清空回落：路由策略件全 null＝回代码缺省（开关 null 归一缺省 true＝开）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingEnabled").value(true))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
+                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(20));
+    }
+
     // ---------- 夹具 ----------
 
     /** 签名 GET（无体）。 */

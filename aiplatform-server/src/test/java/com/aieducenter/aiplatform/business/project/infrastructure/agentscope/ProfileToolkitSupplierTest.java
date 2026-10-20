@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.junit.jupiter.api.Test;
 
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
@@ -18,6 +22,7 @@ import com.aieducenter.aiplatform.business.project.application.ImageGenerationAp
 import com.aieducenter.aiplatform.business.project.application.BuildPlanFacts;
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
+import com.aieducenter.aiplatform.business.project.application.VerificationFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentTool;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentToolKind;
@@ -65,12 +70,14 @@ class ProfileToolkitSupplierTest {
     private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
     private final LandedFileFacts landedFiles = new LandedFileFacts();
     private final DesignSpecAppService designSpecs = mock(DesignSpecAppService.class);
+    private final VerificationFacts verificationFacts = new VerificationFacts();
 
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider, skillProposals, imageGeneration, landedFiles, designSpecs);
+                webSearchProvider, skillProposals, imageGeneration, landedFiles, designSpecs,
+                verificationFacts);
     }
 
     @Test
@@ -162,24 +169,25 @@ class ProfileToolkitSupplierTest {
                 .getToolNames()).isEmpty();
     }
 
-    // ---------- #263 自荐三槽位齐开：self-test 子键视图（subagent 槽血统） ----------
+    // ---------- #352 verify 子键视图（subagent 槽血统）：验证登记＋技能自荐 ----------
 
     @Test
-    void given_self_test_key_on_project_dev_when_toolkit_then_propose_skill_only() {
-        // 子智能体自有平台工具面＝技能自荐一件（#263 声明白名单接入的本体——
-        // 子键视图发 subagent 槽实例，执行体资产 finish_edit/update_plan 不泄漏）
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+    void given_verify_key_on_project_dev_when_toolkit_then_report_verification_and_propose_skill() {
+        // 子智能体自有平台工具面＝验证结果登记（#352 收尾卡验证统计的事实源）＋
+        // 技能自荐（#263 声明白名单接入的本体）——子键视图发 subagent 槽实例，
+        // 执行体资产 finish_edit/update_plan 不泄漏
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null).getToolNames())
-                .containsExactly(ProposeSkillTool.NAME);
+                .containsExactlyInAnyOrder(ReportVerificationTool.NAME, ProposeSkillTool.NAME);
     }
 
     @Test
-    void given_self_test_key_on_other_workspaces_when_toolkit_then_empty() {
-        // 子键视图只随项目 dev 面发放（self-test 委派位只在 ProjectDev——与声明面同锚）
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+    void given_verify_key_on_other_workspaces_when_toolkit_then_empty() {
+        // 子键视图只随项目 dev 面发放（verify 委派位只在 ProjectDev——与声明面同锚）
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                         new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), null)
                 .getToolNames()).isEmpty();
-        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+        assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                         new AgentWorkspace.Local(null), null).getToolNames()).isEmpty();
     }
 
@@ -191,14 +199,37 @@ class ProfileToolkitSupplierTest {
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
         assertProposeLineage(AgentProfile.EXECUTOR.key(),
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
-        assertProposeLineage(ProfileSubagentSupplier.SELF_TEST_NAME,
+        assertProposeLineage(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
+    }
+
+    @Test
+    void given_verify_key_when_report_verification_called_then_facts_recorded() {
+        // #352 真缝走通：verify 子键装配 → 工具执行 → VerificationFacts 落账
+        // （收尾卡验证统计的事实源链路基座）
+        var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
+        Map<String, Object> input = Map.of("checks",
+                List.of(Map.of(
+                        "name", "首页可访问", "face", "browser", "ok", true)));
+        var result = Mono.from(toolkit.getTool(ReportVerificationTool.NAME)
+                .callAsync(ToolCallParam.builder()
+                        .toolUseBlock(new ToolUseBlock("tc-1", ReportVerificationTool.NAME,
+                                input, null))
+                        .input(input)
+                        .runtimeContext(RuntimeContext.builder()
+                                .sessionId("s").userId("u").build())
+                        .build()))
+                .block();
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(verificationFacts.consume("42").lastRound())
+                .containsExactly(new VerificationFacts.Check("首页可访问", "browser", true, null));
     }
 
     /** 适配器替身：记录血统调用形状（SkillProposalAdapter 为具体类，子类覆写）。 */
     private static final class RecordingProposeAdapter extends SkillProposalAdapter {
 
-        final java.util.List<String> calls = new java.util.ArrayList<>();
+        final List<String> calls = new ArrayList<>();
 
         RecordingProposeAdapter() {
             super(null, null);
@@ -218,11 +249,11 @@ class ProfileToolkitSupplierTest {
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, imageGeneration,
-                landedFiles, designSpecs);
+                landedFiles, designSpecs, verificationFacts);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;
-        java.util.Map<String, Object> input = java.util.Map.of(
+        Map<String, Object> input = Map.of(
                 "name", name, "description", "缝测血统。", "body", "正文。");
         var result = Mono.from(toolkit.getTool(ProposeSkillTool.NAME)
                 .callAsync(ToolCallParam.builder()
@@ -241,7 +272,7 @@ class ProfileToolkitSupplierTest {
 
     @Test
     void given_main_protocol_when_built_then_soft_guidance_present() {
-        // #263 软指引落位钉死：主智能体协议含自荐指引句（不绑时刻——与 self-test
+        // #263 软指引落位钉死：主智能体协议含自荐指引句（不绑时刻——与 verify
         // 正文钉死测试对称；执行体对应句 #259 已落）
         assertThat(AgentProfile.MAIN.systemPrompt()).contains("软指引非必做");
     }

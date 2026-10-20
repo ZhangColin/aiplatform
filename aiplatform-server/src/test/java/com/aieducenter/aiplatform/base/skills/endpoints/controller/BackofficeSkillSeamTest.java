@@ -668,7 +668,7 @@ class BackofficeSkillSeamTest {
         // subagent 槽视图（缝按三槽同权供读侧/未来一等化接线）：指派后即反映、
         // 不继承执行体面
         signedPutAssignments("subagent", OPERATOR_ID, OPERATOR_NAME, tddId).andExpect(status().isOk());
-        assertThat(assemblyFace(ProfileSubagentSupplier.SELF_TEST_NAME, dev))
+        assertThat(assemblyFace(ProfileSubagentSupplier.VERIFY_NAME, dev))
                 .containsExactly("tdd");
     }
 

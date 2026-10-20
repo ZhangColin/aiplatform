@@ -65,15 +65,27 @@ export type WorkClosing = {
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
   version?: string;
-  /** 自测统计（#96 自测子智能体清单式播报的收尾统计）：可缺省——自测子智能体未跑时不携带。
-   *  只记「自测跑了几项」——逐项 ✅/❌ 明细在过程播报里，收尾卡不带通过/未过伪判。 */
-  selfTest?: { total: number };
+  /** 验证统计（#352 独立验证子智能体的收尾统计）：可缺省——验证子智能体未跑/未登记时
+   *  不携带。total/failed＝末轮总项数与未过数、faces＝末轮三面分布（browser 浏览器点流程 /
+   *  db 查库 / log 看日志）、rounds＝本场验证轮数（修复—复验环如实，1＝一轮过）、
+   *  failedItems＝末轮未过项名（修不了如实标注）；逐项 ✅/❌ 明细与证据在过程播报里，
+   *  收尾卡只带聚合。 */
+  verification?: VerificationClosing;
   /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
    *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
   drafts?: ClosingDraft[];
   /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
    *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
   designLint?: DesignLintClosing;
+};
+
+/** 收尾卡验证统计事实（#352）：末轮三面验证聚合＋复验轮次＋未过项名。 */
+export type VerificationClosing = {
+  total: number;
+  failed: number;
+  faces: Record<string, number>;
+  rounds: number;
+  failedItems: string[];
 };
 
 /** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
@@ -737,7 +749,7 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
       : [],
     durationMs: typeof record.durationMs === "number" ? record.durationMs : 0,
     version: typeof record.version === "string" ? record.version : undefined,
-    selfTest: toSelfTest(record.selfTest),
+    verification: toVerification(record.verification),
     drafts: toClosingDrafts(record.drafts),
     designLint: toDesignLint(record.designLint),
   };
@@ -811,12 +823,29 @@ export function toQuoteRef(raw: unknown): { orderId: string; event: string } | u
   };
 }
 
-/** selfTest 载荷容错收窄（#96）：非对象或 total 为 0（无自测动作）回落 undefined。 */
-function toSelfTest(raw: unknown): { total: number } | undefined {
+/** verification 载荷容错收窄（#352）：非对象或 total 为 0（未登记/空轮）回落
+ *  undefined；faces 非对象回落空表、failedItems 只收字符串项、rounds 缺省回落 1。 */
+function toVerification(raw: unknown): VerificationClosing | undefined {
   const record = asRecord(raw);
   if (!record) return undefined;
   const total = typeof record.total === "number" ? record.total : 0;
-  return total > 0 ? { total } : undefined;
+  if (total <= 0) return undefined;
+  const rawFaces = asRecord(record.faces);
+  const faces: Record<string, number> = {};
+  if (rawFaces) {
+    for (const [face, count] of Object.entries(rawFaces)) {
+      if (typeof count === "number") faces[face] = count;
+    }
+  }
+  return {
+    total,
+    failed: typeof record.failed === "number" ? record.failed : 0,
+    faces,
+    rounds: typeof record.rounds === "number" && record.rounds > 0 ? record.rounds : 1,
+    failedItems: Array.isArray(record.failedItems)
+      ? record.failedItems.filter((item): item is string => typeof item === "string")
+      : [],
+  };
 }
 
 type SetFn = (partial: Partial<ChatState>) => void;

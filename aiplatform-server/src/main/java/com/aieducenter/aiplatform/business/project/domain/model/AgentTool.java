@@ -8,9 +8,10 @@ import com.cartisan.core.domain.BaseEnum;
 
 /**
  * 平台侧智能体工具面正本（#252，ADR-0021 工具面可观测＋窄幅开关）：按职能槽位
- * （{@link AgentProfile} 稳定键）列平台资产工具——名字即模型可见注册名（与
- * {@code ProfileToolkitSupplier} 装配注册同源，一致性由装配面测试钉死：装配注册
- * 集与枚举该槽位集合必须一致，改一头不改另一头测试即红）。
+ * （{@link AgentProfile} 稳定键；#352 起另有 {@code subagent} 槽——子智能体平台
+ * 件经声明 allowlist 挂载、本枚举承载其类别与描述正本）列平台资产工具——名字即
+ * 模型可见注册名（与 {@code ProfileToolkitSupplier} 装配注册同源，一致性由装配面
+ * 测试钉死：装配注册集与枚举该槽位集合必须一致，改一头不改另一头测试即红）。
  *
  * <p><b>骨架 / 增强</b>（ADR-0021：编排权不下放配置）：骨架＝编排链路工具
  * （问答、PRD 落库、计划、收口信号）＋项目事实只读件——结构性锁死不开放关停
@@ -55,7 +56,13 @@ public enum AgentTool implements BaseEnum<AgentTool> {
 
     GENERATE_IMAGE(13, "generate_image", "designer", AgentToolKind.SKELETON,
             "图片生成模型出位图设计稿（写实光影/插画氛围向；档位表落提示词层——文字排版"
-                    + "海报写 HTML，ADR-0026 不做代码级硬路由）");
+                    + "海报写 HTML，ADR-0026 不做代码级硬路由）"),
+
+    // ---------- subagent 槽位（子智能体：run 内委派位，verify 验证子智能体——#352） ----------
+
+    REPORT_VERIFICATION(14, "report_verification", "subagent", AgentToolKind.SKELETON,
+            "验证结果登记（三面逐项结果落平台事实——收尾卡验证统计的事实源；经声明 "
+                    + "allowlist 挂子级面）");
 
     private final Integer code;
     /** 模型可见注册名（与装配注册、REST 按名寻址共用）。 */

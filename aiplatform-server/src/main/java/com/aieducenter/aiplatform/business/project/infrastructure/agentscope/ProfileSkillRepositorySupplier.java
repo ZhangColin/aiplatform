@@ -29,10 +29,10 @@ import io.agentscope.core.skill.repository.AgentSkillRepository;
  * 主消费槽位——编码方法论等）；</li>
  * <li>{@link AgentProfile#DESIGNER 设计执行体}＝designer 槽位库技能（#289 技能
  * 指派进槽位；hasShell=false——scripts 结构性不发放，a-only 同主智能体）；</li>
- * <li>{@code self-test}（子智能体槽当前唯一实例，键见 {@link
- * ProfileSubagentSupplier#SELF_TEST_NAME}）＝subagent 槽位库技能——<b>运行时已
+ * <li>{@code verify}（子智能体槽当前唯一实例，键见 {@link
+ * ProfileSubagentSupplier#VERIFY_NAME}）＝subagent 槽位库技能——<b>运行时已
  * 接线</b>（#260 装配一等化：平台工厂构建子智能体时按本键取视图挂载，指派的
- * 启用技能真实出现在自测子智能体技能清单；动态查库同款语义——指派/启停变更
+ * 启用技能真实出现在验证子智能体技能清单；动态查库同款语义——指派/启停变更
  * 下一轮清单重建即生效）；</li>
  * <li>无配置语境＝空集（无技能挂载即框架不注入 {@code <available_skills>}）。</li>
  * </ul>
@@ -70,7 +70,7 @@ public class ProfileSkillRepositorySupplier implements AgentSkillRepositorySuppl
         if (AgentProfile.DESIGNER.key().equals(agentKey)) {
             return List.of(designerLibrary);
         }
-        if (ProfileSubagentSupplier.SELF_TEST_NAME.equals(agentKey)) {
+        if (ProfileSubagentSupplier.VERIFY_NAME.equals(agentKey)) {
             return List.of(subagentLibrary);
         }
         return List.of();

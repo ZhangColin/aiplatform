@@ -419,10 +419,10 @@ class AgentscopeAgentClientTest {
     void given_scripted_delegation_when_converse_then_events_carry_source_attribution() {
         givenStream(
                 new TextBlockDeltaEvent("reply-1", "b-1", "执行体自述。"),
-                new TextBlockDeltaEvent("reply-1", "b-2", "自测通过。")
-                        .withSource("platform-agent/self-test"),
+                new TextBlockDeltaEvent("reply-1", "b-2", "验证通过。")
+                        .withSource("platform-agent/verify"),
                 new ToolCallEndEvent("reply-1", "tc-1", "execute")
-                        .withSource("platform-agent/self-test"));
+                        .withSource("platform-agent/verify"));
 
         List<AgentEvent> frames = new ArrayList<>();
         client.converse(command(null, null), frames::add);
@@ -431,16 +431,16 @@ class AgentscopeAgentClientTest {
         List<AgentEvent> texts = frames.stream().filter(f -> "text".equals(f.type())).toList();
         assertThat(texts).hasSize(2);
         assertThat(texts.get(0).payload()).doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
-        assertThat(texts.get(1).payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+        assertThat(texts.get(1).payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
         // 部件事件：part-text / part-action 带来源归属（分角色播的依据）
         List<AgentEvent> parts = frames.stream()
                 .filter(f -> f.type().startsWith("part-")).toList();
         assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)))
                 .singleElement().satisfies(f ->
-                        assertThat(f.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test"));
+                        assertThat(f.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify"));
         assertThat(parts.stream().filter(f -> f.type().equals(AgentEventTypes.PART_TEXT)))
                 .anySatisfy(f -> assertThat(f.payload())
-                        .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test"))
+                        .containsEntry(AgentEventTypes.SOURCE_FIELD, "verify"))
                 .anySatisfy(f -> assertThat(f.payload())
                         .doesNotContainKey(AgentEventTypes.SOURCE_FIELD));
     }
@@ -464,9 +464,9 @@ class AgentscopeAgentClientTest {
                 new ToolResultEndEvent("evt-7", ts(2_050), "reply-1", "tc-2", "write_file",
                         ToolResultState.SUCCESS),
                 new ModelCallStartEvent("evt-8", ts(2_100), "sub-1")
-                        .withSource("platform-agent/self-test"),
+                        .withSource("platform-agent/verify"),
                 new ModelCallEndEvent("evt-9", ts(2_400), "sub-1", null)
-                        .withSource("platform-agent/self-test"));
+                        .withSource("platform-agent/verify"));
 
         AgentReply reply = client.converse(command(null, null), event -> {
         });
@@ -477,7 +477,7 @@ class AgentscopeAgentClientTest {
         assertThat(reply.durations().commandMs())
                 .containsExactly(Map.entry("install", 690L));
         assertThat(reply.durations().subagentMs())
-                .containsExactly(Map.entry("self-test", 300L));
+                .containsExactly(Map.entry("verify", 300L));
     }
 
     /** run-start 并入角色键（引擎信息归一）：带角色命令携带、无角色不携带——前端工作消息/对话面的锚定判据。 */

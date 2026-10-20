@@ -11,7 +11,7 @@ import com.cartisan.core.domain.BaseEnum;
  * 是<b>键不是身份</b>：智能体身份仍以 business 侧 {@code AgentProfile} 枚举为
  * 正本（ADR-0006 身份与配置分治），本枚举只固化指派面的稳定键——business
  * 装配缝按配置键对齐到此（main/executor/designer 与 AgentProfile 键同串、
- * subagent 是子智能体槽的键，self-test 是其当前唯一职能实例）。code 是框架约定码
+ * subagent 是子智能体槽的键，verify 是其当前唯一职能实例）。code 是框架约定码
  * （BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串键，code 不经任何面）。
  *
  * <p>新增职能槽位＝新增枚举值＋迁移扩键面（REST 槽位路径段即本键，未知键
@@ -22,7 +22,7 @@ import com.cartisan.core.domain.BaseEnum;
  * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell、
  * 设计执行体（#289，ProjectDesign 工作区面）同样禁 shell——两槽结构性
  * a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
- * executor 容器内 shell、subagent（self-test）白名单含跑测试命令的 shell——
+ * executor 容器内 shell、subagent（verify）白名单含跑验证命令的 shell——
  * 两槽开放。</p>
  */
 public enum SkillSlot implements BaseEnum<SkillSlot> {
@@ -36,8 +36,8 @@ public enum SkillSlot implements BaseEnum<SkillSlot> {
     /** 设计执行体（#289，ADR-0025：设计过程执行侧——写界面稿与出图；禁 shell，a-only）。 */
     DESIGNER(4, "designer", false, "设计执行体——设计过程执行侧：按设计物产出多稿候选（界面稿＋出图），不动系统代码"),
 
-    /** 子智能体槽（当前唯一实例 self-test——白名单含跑测试命令的 shell，开放）。 */
-    SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：只读自测）");
+    /** 子智能体槽（当前唯一实例 verify——白名单含跑验证命令的 shell，开放）。 */
+    SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：三面验证）");
 
     private final Integer code;
     private final String key;

@@ -130,17 +130,63 @@ describe("ClosingCard · 四要素（#88 定格收口）", () => {
   });
 });
 
-describe("ClosingCard · 自测统计（#96 清单式播报的收尾统计）", () => {
-  it("自测统计在场：轮末统计带「自测 N 项」（只记项数，不伪报通过/未过）", () => {
-    const html = renderCard(closing({ selfTest: { total: 3 } }));
+describe("ClosingCard · 验证统计（#352 独立验证子智能体的收尾统计）", () => {
+  it("验证全过：轮末统计带「验证 N 项通过」", () => {
+    const html = renderCard(
+      closing({
+        verification: {
+          total: 5,
+          failed: 0,
+          faces: { browser: 2, db: 2, log: 1 },
+          rounds: 1,
+          failedItems: [],
+        },
+      }),
+    );
 
-    expect(html).toContain("自测 3 项");
+    expect(html).toContain("验证 5 项通过");
+    expect(html).not.toContain("未过");
   });
 
-  it("自测缺省（子智能体未跑）：不出自测统计行", () => {
+  it("验证有未过：如实标「N 项未过」并带未过项名（修不了如实标注）", () => {
+    const html = renderCard(
+      closing({
+        verification: {
+          total: 5,
+          failed: 2,
+          faces: { browser: 3, db: 1, log: 1 },
+          rounds: 1,
+          failedItems: ["留言提交", "登录"],
+        },
+      }),
+    );
+
+    expect(html).toContain("验证 5 项");
+    expect(html).toContain("2 项未过");
+    expect(html).toContain("留言提交、登录");
+  });
+
+  it("修复后复验（rounds>1）：如实带复验轮次", () => {
+    const html = renderCard(
+      closing({
+        verification: {
+          total: 5,
+          failed: 0,
+          faces: { browser: 2, db: 2, log: 1 },
+          rounds: 2,
+          failedItems: [],
+        },
+      }),
+    );
+
+    expect(html).toContain("验证 5 项通过");
+    expect(html).toContain("复验 2 轮");
+  });
+
+  it("验证缺省（子智能体未跑/未登记）：不出验证统计行", () => {
     const html = renderCard(closing());
 
-    expect(html).not.toContain("自测");
+    expect(html).not.toContain("验证");
     expect(html).toContain("检查通过"); // 平台收口判据（8081 探活）恒在
   });
 });

@@ -327,20 +327,20 @@ class AgentscopeEventMapperTest {
         /** #95：子智能体转发进父流的事件带引擎 source 路径——映射为末段名（来源归属值）。 */
         @Test
         void given_subagent_event_with_source_path_when_map_then_source_field_is_last_segment() {
-            AgentEvent frame = mapper.map(new TextBlockDeltaEvent("reply-1", "b-1", "自测通过。")
-                    .withSource("platform-agent/self-test"));
+            AgentEvent frame = mapper.map(new TextBlockDeltaEvent("reply-1", "b-1", "验证通过。")
+                    .withSource("platform-agent/verify"));
 
-            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
         }
 
         /** 工具事件同样带来源（动作卡分角色播的依据）。 */
         @Test
         void given_tool_event_with_source_when_map_then_source_on_tool_frame() {
             AgentEvent frame = mapper.map(new ToolCallStartEvent("reply-1", "tc-1", "execute")
-                    .withSource("platform-agent/self-test"));
+                    .withSource("platform-agent/verify"));
 
             assertThat(frame.type()).isEqualTo("tool");
-            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+            assertThat(frame.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
         }
 
         /** sourceOf 口径：空串归一为 null（不携带）；无斜杠的裸名原样（防御位）。 */
@@ -349,8 +349,8 @@ class AgentscopeEventMapperTest {
             assertThat(AgentscopeEventMapper.sourceOf(
                     new TextBlockDeltaEvent("r", "b", "x").withSource(""))).isNull();
             assertThat(AgentscopeEventMapper.sourceOf(
-                    new TextBlockDeltaEvent("r", "b", "x").withSource("self-test")))
-                    .isEqualTo("self-test");
+                    new TextBlockDeltaEvent("r", "b", "x").withSource("verify")))
+                    .isEqualTo("verify");
         }
     }
 }

@@ -882,23 +882,23 @@ describe("bridge · agent 流 → 工作消息 store（#81 parts 契约前端切
       { ...base, prompt: "改配色", model: "m", agent: "executor" },
       "run1:1",
     ));
-    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "先跑一遍自测。" }, "run1:2"));
+    dispatchAgentEvent(agentQc, agentEvent("part-text", { ...base, text: "先跑一遍验证。" }, "run1:2"));
     dispatchAgentEvent(agentQc, agentEvent(
       "part-signal",
-      { ...base, source: "self-test", signal: "derailed" },
+      { ...base, source: "verify", signal: "derailed" },
       "run1:3",
     ));
     // 断线补发重放同 id：去重
     dispatchAgentEvent(agentQc, agentEvent(
       "part-signal",
-      { ...base, source: "self-test", signal: "derailed" },
+      { ...base, source: "verify", signal: "derailed" },
       "run1:3",
     ));
 
     const work = useWorkMessageStore.getState().works["p1"];
     expect(work?.parts).toEqual([
-      { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍自测。" },
-      { kind: "signal", id: "run1:3", source: "self-test", signal: "derailed" },
+      { kind: "text", id: "run1:2", source: undefined, text: "先跑一遍验证。" },
+      { kind: "signal", id: "run1:3", source: "verify", signal: "derailed" },
     ]);
   });
 });

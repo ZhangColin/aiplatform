@@ -282,8 +282,8 @@ class BackofficeAgentConfigSeamTest {
     @Test
     void given_unknown_agent_key_when_any_endpoint_then_404() throws Exception {
         // 一次性判定不进配置面：classify/naming 是实现细节非智能体身份面；任意未知键同语义
-        //（含 self-test 子智能体——配置面只有三座智能体，#289 designer 座齐）
-        for (String badKey : new String[]{"classify", "naming", "reviewer", "self-test"}) {
+        //（含 verify 子智能体——配置面只有三座智能体，#289 designer 座齐）
+        for (String badKey : new String[]{"classify", "naming", "reviewer", "verify"}) {
             signedGet(badKey)
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value(AGENT_CONFIG_NOT_FOUND_CODE))

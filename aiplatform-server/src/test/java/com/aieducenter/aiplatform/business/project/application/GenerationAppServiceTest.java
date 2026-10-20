@@ -120,6 +120,10 @@ class GenerationAppServiceTest {
     @Autowired
     private BuildPlanFacts buildPlanFacts;
 
+    /** 验证事实登记口（#352 收口卡验证统计脚本：模拟 verify 子智能体轮内工具登记）。 */
+    @Autowired
+    private VerificationFacts verificationFacts;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -1485,48 +1489,41 @@ class GenerationAppServiceTest {
                 .containsEntry("systemChanged", true)
                 .containsEntry("systemNote", "完成切片：用户能注册登录");
         assertThat(sliceClosing).doesNotContainKey("prdNote")
-                .doesNotContainKey(AgentEventTypes.SELF_TEST_FIELD); // 无自测动作 → selfTest 可缺省
+                .doesNotContainKey(AgentEventTypes.VERIFICATION_FIELD); // 验证未登记 → verification 可缺省
         assertThat((List<Map<String, Object>>) sliceClosing.get("files")).hasSize(2);
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void given_scripted_self_test_when_closes_then_closing_carries_self_test_total() {
-        // #96 AC①：自测子智能体（source=self-test）的 command 动作按 toolCallId 去重
-        // 进收尾卡统计（total = 自测跑了几项测试命令）
+    void given_verify_reports_when_closes_then_closing_carries_verification_stats() {
+        // #352 AC③：验证结果进收口呈现——verify 子智能体经 report_verification 登记
+        // （工具→事实的单测在 ReportVerificationToolTest；本缝钉收口装配）：
+        // 阶段 0 末轮带未过项（修不了如实标注：failed+failedItems 进卡）、
+        // 切片轮修复—复验两轮（末轮快照后写胜出＝全过，轮次如实累计＝2）
         Long projectId = persistedProject("9812");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
+        AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
-            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
-                    AgentEventTypes.SOURCE_FIELD, "self-test",
-                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
-                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_STARTED,
-                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
-            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
-                    AgentEventTypes.SOURCE_FIELD, "self-test",
-                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-1",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
-                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
-                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【首页探活】")));
-            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
-                    AgentEventTypes.SOURCE_FIELD, "self-test",
-                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-2",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
-                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_COMPLETED,
-                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【留言落库】")));
-            sink.accept(scripted(AgentEventTypes.PART_ACTION, command.runId(), Map.of(
-                    AgentEventTypes.SOURCE_FIELD, "self-test",
-                    AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD, "st-3",
-                    AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD, "execute",
-                    AgentEventTypes.PART_ACTION_STATE_FIELD, AgentEventTypes.PART_ACTION_STATE_FAILED,
-                    AgentEventTypes.PART_ACTION_LABEL_FIELD, "运行【8081 常驻】")));
+            if (converseCalls.incrementAndGet() == 1) {
+                // 阶段 0：一轮验证，带一个未过项（三面各验——分布进 faces）
+                verificationFacts.record("9812", List.of(
+                        new VerificationFacts.Check("首页可访问", "browser", true, null),
+                        new VerificationFacts.Check("演示数据落库", "db", false, "messages 表 0 行"),
+                        new VerificationFacts.Check("应用日志无报错", "log", true, null)));
+            } else {
+                // 切片轮：修复—复验两轮（首轮未过 → 复验全过——末轮快照后写胜出）
+                verificationFacts.record("9812", List.of(
+                        new VerificationFacts.Check("留言提交", "browser", false, "点了无反应")));
+                verificationFacts.record("9812", List.of(
+                        new VerificationFacts.Check("留言提交", "browser", true, null),
+                        new VerificationFacts.Check("留言数据落库", "db", true, "messages 表 1 行")));
+            }
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "系统已生成");
@@ -1537,19 +1534,40 @@ class GenerationAppServiceTest {
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
+        Map<String, Object> stage0Closing =
+                (Map<String, Object>) payloads.getAllValues().get(0).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> stage0Verification =
+                (Map<String, Object>) stage0Closing.get(AgentEventTypes.VERIFICATION_FIELD);
+        assertThat(stage0Verification)
+                .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 3)
+                .containsEntry(AgentEventTypes.VERIFICATION_FAILED_FIELD, 1)
+                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1);
+        assertThat((Map<String, Object>) stage0Verification.get(AgentEventTypes.VERIFICATION_FACES_FIELD))
+                .containsEntry("browser", 1).containsEntry("db", 1).containsEntry("log", 1);
+        assertThat((List<String>) stage0Verification.get(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD))
+                .containsExactly("演示数据落库");
         Map<String, Object> sliceClosing =
                 (Map<String, Object>) payloads.getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD);
-        // 去重后 3 条自测命令（st-1 的 started/completed 两态只记一条）
-        assertThat((Map<String, Object>) sliceClosing.get(AgentEventTypes.SELF_TEST_FIELD))
-                .containsEntry(AgentEventTypes.SELF_TEST_TOTAL_FIELD, 3);
+        Map<String, Object> sliceVerification =
+                (Map<String, Object>) sliceClosing.get(AgentEventTypes.VERIFICATION_FIELD);
+        assertThat(sliceVerification)
+                .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 2)
+                .containsEntry(AgentEventTypes.VERIFICATION_FAILED_FIELD, 0)
+                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 2);
+        assertThat((Map<String, Object>) sliceVerification.get(AgentEventTypes.VERIFICATION_FACES_FIELD))
+                .containsEntry("browser", 1).containsEntry("db", 1).containsEntry("log", 0);
+        assertThat((List<String>) sliceVerification.get(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD))
+                .isEmpty();
+        // 收口消费即清：事实不残留串到下一轨
+        assertThat(verificationFacts.consume("9812")).isNull();
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void given_scripted_durations_when_closes_then_closing_carries_duration_breakdown() {
         // #111 收口扩载·阶段耗时分布：四桶齐备（llmMs / toolsMs 按工具名分桶·command
-        // 按命令归组嵌套 / selfTestMs 委派窗 / closingMs 收口尾序）+ 逐尝试分布；agent_spawn
-        // 委派调用除名（跨距 ≈ 自测窗，入桶即双计）；SSE 扩载与对话史落库同载荷；
+        // 按命令归组嵌套 / verifyMs 委派窗 / closingMs 收口尾序）+ 逐尝试分布；agent_spawn
+        // 委派调用除名（跨距 ≈ 验证窗，入桶即双计）；SSE 扩载与对话史落库同载荷；
         // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）
         Long projectId = persistedProject("9818");
         givenSessionExecutorRunsInline();
@@ -1563,7 +1581,7 @@ class GenerationAppServiceTest {
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "系统已生成", null, List.of(),
                     new StageDurations(5, Map.of("write_file", 2L, "agent_spawn", 9L),
-                            Map.of("install", 3L), Map.of("self-test", 1L)));
+                            Map.of("install", 3L), Map.of("verify", 1L)));
         });
 
         appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(List.of("用户能注册登录")));
@@ -1578,11 +1596,11 @@ class GenerationAppServiceTest {
                 (Map<String, Object>) closing.get("durationBreakdown");
         assertThat(breakdown).isNotNull()
                 .containsEntry("llmMs", 5L)
-                .containsEntry("selfTestMs", 1L);
+                .containsEntry("verifyMs", 1L);
         Map<String, Object> toolsMs = (Map<String, Object>) breakdown.get("toolsMs");
         assertThat(toolsMs)
                 .containsEntry("write_file", 2L)
-                .doesNotContainKey("agent_spawn"); // 委派调用除名（防与自测窗双计）
+                .doesNotContainKey("agent_spawn"); // 委派调用除名（防与验证窗双计）
         assertThat((Map<String, Object>) toolsMs.get("command"))
                 .containsExactly(Map.entry("install", 3L));
         long closingMs = ((Number) breakdown.get("closingMs")).longValue();
@@ -1592,7 +1610,7 @@ class GenerationAppServiceTest {
                 .satisfies(attempt -> {
                     assertThat(attempt).containsEntry("attempt", 1);
                     assertThat(attempt).containsEntry("llmMs", 5L);
-                    assertThat(attempt).containsEntry("selfTestMs", 1L);
+                    assertThat(attempt).containsEntry("verifyMs", 1L);
                     assertThat((Map<String, Object>) attempt.get("toolsMs"))
                             .containsEntry("write_file", 2L)
                             .doesNotContainKey("agent_spawn");
@@ -1613,7 +1631,7 @@ class GenerationAppServiceTest {
         Map<String, Object> persistedBreakdown =
                 (Map<String, Object>) persisted.get("durationBreakdown");
         assertThat(persistedBreakdown).isNotNull()
-                .containsKey("llmMs").containsKey("toolsMs").containsKey("selfTestMs")
+                .containsKey("llmMs").containsKey("toolsMs").containsKey("verifyMs")
                 .containsKey("closingMs").containsKey("attempts");
         assertThat(((Number) persistedBreakdown.get("llmMs")).longValue()).isEqualTo(5L);
         assertThat((Map<String, Object>) persistedBreakdown.get("toolsMs"))
@@ -1663,7 +1681,7 @@ class GenerationAppServiceTest {
         assertThat(attempts.get(0))
                 .containsEntry("attempt", 1)
                 .containsEntry("llmMs", 0L)
-                .containsEntry("selfTestMs", 0L);
+                .containsEntry("verifyMs", 0L);
         assertThat((Map<String, Object>) attempts.get(0).get("toolsMs")).isEmpty();
         assertThat(((Number) attempts.get(0).get("durationMs")).longValue())
                 .isGreaterThanOrEqualTo(0L);

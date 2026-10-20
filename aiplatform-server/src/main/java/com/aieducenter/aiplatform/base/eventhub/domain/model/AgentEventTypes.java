@@ -39,26 +39,39 @@ public final class AgentEventTypes {
     /**
      * run-finish 的收口扩载键（#88）：值为对象 { summary, prdChanged, prdNote?,
      * systemChanged, systemNote?, files[{path,added,removed}], durationMs,
-     * selfTest?{total}（#96）, version?（#91）, durationBreakdown（#111 阶段耗时
-     * 分布——平台分析口径，前端不渲染） }——对话史落库（#89）与版本锚定
-     * （#91）复用同一载荷。判定与清单以平台可观测事实为准（工具调用/探活），
-     * 不由模型自报。
+     * verification?（#352——见 {@link #VERIFICATION_FIELD}）, version?（#91）,
+     * durationBreakdown（#111 阶段耗时分布——平台分析口径，前端不渲染） }——
+     * 对话史落库（#89）与版本锚定（#91）复用同一载荷。判定与清单以平台可观测
+     * 事实为准（工具调用/探活），不由模型自报。
      */
     public static final String CLOSING_FIELD = "closing";
 
     /**
-     * 收口扩载的自测键（#96 自测子智能体清单式播报的收尾统计）：值为对象
-     * {@code { total }}——自测子智能体（source=self-test）的 command 动作去重计数
-     * （一项 = 一条测试命令）。判定以平台可观测的命令动作事实为准；<b>可缺省</b>
-     * ——自测子智能体未跑（无 self-test 命令动作）时本键不携带。逐项 ✅/❌ 的
-     * 通过/未过明细在过程播报（解说段）里，收尾卡只带「自测几项」的聚合——命令
-     * 工具的成功/失败态不反映测试成败（非零退出码仍是 completed），平台不据此
-     * 伪报通过/未过（不粉饰、不瞎判）。
+     * 收口扩载的验证键（#352 独立验证子智能体的收尾统计）：值为对象
+     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[] }}——
+     * 事实源＝verify 子智能体（source=verify）经 report_verification 工具登记的
+     * 本轮逐项结果（平台从工具调用事实观测，不解析子智能体自由文本）：total/failed
+     * ＝末轮总项数与未过数、faces＝末轮三面分布、rounds＝本场验证轮数（修复—
+     * 复验环的如实呈现，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注
+     * 的落点）。<b>可缺省</b>——验证子智能体未跑/未登记时本键不携带。逐项
+     * ✅/❌ 明细与证据在过程播报（解说段）里，收尾卡只带聚合。
      */
-    public static final String SELF_TEST_FIELD = "selfTest";
+    public static final String VERIFICATION_FIELD = "verification";
 
-    /** selfTest 对象的项数键（自测 command 动作去重计数）。 */
-    public static final String SELF_TEST_TOTAL_FIELD = "total";
+    /** verification 对象的末轮总项数键。 */
+    public static final String VERIFICATION_TOTAL_FIELD = "total";
+
+    /** verification 对象的末轮未过项数键。 */
+    public static final String VERIFICATION_FAILED_FIELD = "failed";
+
+    /** verification 对象的三面分布键（{@code {browser,db,log}}——三面各验了几项）。 */
+    public static final String VERIFICATION_FACES_FIELD = "faces";
+
+    /** verification 对象的验证轮数键（修复—复验环如实：>1＝修后复验过）。 */
+    public static final String VERIFICATION_ROUNDS_FIELD = "rounds";
+
+    /** verification 对象的末轮未过项名清单键（修不了如实标注；全过时为空数组）。 */
+    public static final String VERIFICATION_FAILED_ITEMS_FIELD = "failedItems";
 
     /**
      * 智能体挂起提问（ask_user 触发，唯一挂起源）：payload 带
@@ -111,7 +124,7 @@ public final class AgentEventTypes {
 
     /**
      * 事件来源归属（#95 委派位）：run 执行体自身产出的过程事件不携带（缺省 =
-     * 执行体——用户面仍无角色标签）；子智能体（经 run 执行体委派，如自测）转发进
+     * 执行体——用户面仍无角色标签）；子智能体（经 run 执行体委派，如验证）转发进
      * 父流的事件携带子智能体名（值 = 引擎 source 路径的末段）。source 只用于过程
      * 呈现归属（分角色播），不是用户面角色标签。
      */

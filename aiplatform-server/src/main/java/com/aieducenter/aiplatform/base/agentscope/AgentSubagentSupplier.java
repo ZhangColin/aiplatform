@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * 智能体子智能体 SPI（镜像 {@link AgentSkillRepositorySupplier}——委派位与技能位同为
- * run 内一等挂载点，ADR 0006「单一主智能体+委派式执行」）：子智能体（自测、审查等
+ * run 内一等挂载点，ADR 0006「单一主智能体+委派式执行」）：子智能体（验证等
  * 专项职能）归业务侧，base/agentscope 只供内核不供子智能体。业务侧实现本接口，按
  * <b>配置</b>发放子智能体声明（{@link SubagentDeclaration}——名字/描述/隔离工作区/
  * 角色正文/工具白名单）；配置语境为空或未知时返回空集——无声明挂载即框架不注入

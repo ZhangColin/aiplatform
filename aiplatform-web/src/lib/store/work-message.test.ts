@@ -428,12 +428,12 @@ describe("work-message store · 脱轨信号部件（#240：入 parts 流水供�
   it("signal 携来源归属（#95 委派位：子智能体脱轨分角色推导的依据）", () => {
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
-    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), {
+    notePart("p1", ref({ eventId: "r1:2", source: "verify" }), {
       kind: "signal",
       signal: "derailed",
     });
 
-    expect(work()?.parts[0]).toMatchObject({ kind: "signal", source: "self-test" });
+    expect(work()?.parts[0]).toMatchObject({ kind: "signal", source: "verify" });
   });
 });
 
@@ -575,8 +575,8 @@ describe("work-message store · 定格收口（#117：原地定格留驻，收�
     const { startWork, notePart } = useWorkMessageStore.getState();
     startWork("p1", "r1");
     notePart("p1", ref({ eventId: "r1:1" }), { kind: "text", text: "执行体解说" });
-    notePart("p1", ref({ eventId: "r1:2", source: "self-test" }), { kind: "text", text: "自测逐项通过" });
-    notePart("p1", ref({ eventId: "r1:3", source: "self-test" }), {
+    notePart("p1", ref({ eventId: "r1:2", source: "verify" }), { kind: "text", text: "验证逐项通过" });
+    notePart("p1", ref({ eventId: "r1:3", source: "verify" }), {
       kind: "action",
       toolCallId: "tc-1",
       toolName: "execute",
@@ -589,7 +589,7 @@ describe("work-message store · 定格收口（#117：原地定格留驻，收�
     const subagentText = parts[1] as Extract<WorkPart, { kind: "text" }>;
     const action = parts[2] as Extract<WorkPart, { kind: "action" }>;
     expect(text.source).toBeUndefined();
-    expect(subagentText.source).toBe("self-test");
-    expect(action.source).toBe("self-test");
+    expect(subagentText.source).toBe("verify");
+    expect(action.source).toBe("verify");
   });
 });

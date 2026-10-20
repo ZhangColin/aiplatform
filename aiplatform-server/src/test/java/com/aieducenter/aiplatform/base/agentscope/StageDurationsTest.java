@@ -26,7 +26,7 @@ class StageDurationsTest {
     @Test
     void given_two_segments_when_plus_then_counts_summed_and_buckets_merged() {
         StageDurations first = new StageDurations(100,
-                Map.of("write_file", 40L), Map.of("install", 1_000L), Map.of("self-test", 300L));
+                Map.of("write_file", 40L), Map.of("install", 1_000L), Map.of("verify", 300L));
         StageDurations second = new StageDurations(50,
                 Map.of("write_file", 10L, "read_file", 5L), Map.of("dev", 800L), Map.of());
 
@@ -37,7 +37,7 @@ class StageDurationsTest {
                 Map.entry("write_file", 50L), Map.entry("read_file", 5L));
         assertThat(merged.commandMs()).containsExactly(
                 Map.entry("install", 1_000L), Map.entry("dev", 800L));
-        assertThat(merged.subagentMs()).containsExactly(Map.entry("self-test", 300L));
+        assertThat(merged.subagentMs()).containsExactly(Map.entry("verify", 300L));
     }
 
     @Test

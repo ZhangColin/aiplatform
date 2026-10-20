@@ -356,20 +356,20 @@ class AgentscopeHarnessAgentFactoryTest {
         }
     }
 
-    /** 子智能体测试声明（名与业务 SELF_TEST 同形：inline 正文＋工具 allowlist）。 */
-    private static io.agentscope.harness.agent.subagent.SubagentDeclaration selfTestDeclaration() {
+    /** 子智能体测试声明（名与业务 verify 同形：inline 正文＋工具 allowlist）。 */
+    private static io.agentscope.harness.agent.subagent.SubagentDeclaration verifyDeclaration() {
         return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
-                .name("self-test")
-                .description("运行自测：读取系统代码（只读），运行测试验证系统可用，报告回交执行体。")
-                .inlineAgentsBody("你是自测子智能体，逐项 ✅/❌ 播报，结果回交执行体。")
+                .name("verify")
+                .description("运行验证：读取系统代码（只读），运行测试验证系统可用，报告回交执行体。")
+                .inlineAgentsBody("你是验证子智能体，逐项 ✅/❌ 播报，结果回交执行体。")
                 .tools(List.of("read_file", "write_file", "execute"))
                 .build();
     }
 
-    /** 槽位分视图桩供应商（self-test 键→子视图，其余→执行体视图——两测试共用）。 */
+    /** 槽位分视图桩供应商（verify 键→子视图，其余→执行体视图——两测试共用）。 */
     private static AgentSkillRepositorySupplier routedSkillRepos(
             StubSkillRepository childView, StubSkillRepository executorView) {
-        return (agentKey, workspace) -> "self-test".equals(agentKey)
+        return (agentKey, workspace) -> "verify".equals(agentKey)
                 ? List.of(childView)
                 : List.of(executorView);
     }
@@ -387,10 +387,10 @@ class AgentscopeHarnessAgentFactoryTest {
         parentToolkit.registerAgentTool(AgentToolStub.named("update_plan"));
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
                 parentToolkit, TOOLKITS, new InMemoryAgentStateStore(),
                 routedSkillRepos(childView, executorView), List.of())
-                .apply("self-test");
+                .apply("verify");
 
         try {
             // 技能面＝子键视图（同一实例），executor 视图不在
@@ -400,7 +400,7 @@ class AgentscopeHarnessAgentFactoryTest {
                     .doesNotContain("finish_edit", "update_plan");
             // 计量模型同实例（子智能体轮次归当轮用量）＋会话状态同库
             assertThat(child.getModel()).isSameAs(parentModel);
-            assertThat(child.getName()).isEqualTo("self-test");
+            assertThat(child.getName()).isEqualTo("verify");
         } finally {
             child.close();
         }
@@ -422,13 +422,13 @@ class AgentscopeHarnessAgentFactoryTest {
         Toolkit childView = new Toolkit();
         childView.registerAgentTool(childPropose);
         AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
-                "self-test".equals(agentKey) ? childView : new Toolkit();
+                "verify".equals(agentKey) ? childView : new Toolkit();
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 proposeEnabledDeclaration(), new AgentWorkspace.Local(tempDir), null,
                 mock(Model.class), parentToolkit, routedToolkits,
                 new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("self-test");
+                .apply("verify");
 
         try {
             assertThat(child.getToolkit().getToolNames()).contains("propose_skill");
@@ -450,13 +450,13 @@ class AgentscopeHarnessAgentFactoryTest {
         Toolkit childView = new Toolkit();
         childView.registerAgentTool(AgentToolStub.named("propose_skill"));
         AgentToolkitSupplier routedToolkits = (agentKey, workspace, toolSpec) ->
-                "self-test".equals(agentKey) ? childView : new Toolkit();
+                "verify".equals(agentKey) ? childView : new Toolkit();
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null,
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null,
                 mock(Model.class), new Toolkit(), routedToolkits,
                 new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
-                .apply("self-test");
+                .apply("verify");
 
         try {
             assertThat(child.getToolkit().getToolNames()).doesNotContain("propose_skill");
@@ -476,10 +476,10 @@ class AgentscopeHarnessAgentFactoryTest {
         // （edit_file 结构性出局，「不改交付代码」不再只是协议级约束）；声明内的
         // 件保留（read_file/write_file 不被误滤）
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of())
-                .apply("self-test");
+                .apply("verify");
 
         try {
             // Local 工作区真构建注册文件面六件＋execute＋wait_async_results；声明三件
@@ -498,7 +498,7 @@ class AgentscopeHarnessAgentFactoryTest {
         // 缺省声明（空 allowlist）＝全放行（allowlistedToolkit 同语义单点）：后置
         // 过滤不收窄未声明的子级——内置件照常在面
         SubagentDeclaration noAllowlist = SubagentDeclaration.builder()
-                .name("self-test")
+                .name("verify")
                 .description("probe")
                 .inlineAgentsBody("probe body")
                 .build();
@@ -506,7 +506,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of())
-                .apply("self-test");
+                .apply("verify");
 
         try {
             assertThat(child.getToolkit().getToolNames()).contains("edit_file");
@@ -515,11 +515,11 @@ class AgentscopeHarnessAgentFactoryTest {
         }
     }
 
-    /** 含 propose_skill 的声明（#263 生产面同形：自测六件＋自荐）。 */
+    /** 含 propose_skill 的声明（#263 生产面同形：验证六件＋自荐）。 */
     private static io.agentscope.harness.agent.subagent.SubagentDeclaration
             proposeEnabledDeclaration() {
         return io.agentscope.harness.agent.subagent.SubagentDeclaration.builder()
-                .name("self-test")
+                .name("verify")
                 .description("probe")
                 .inlineAgentsBody("probe body")
                 .tools(List.of("read_file", "write_file", "execute", "propose_skill"))
@@ -535,10 +535,10 @@ class AgentscopeHarnessAgentFactoryTest {
         // subagentFactory 必须把平台中间件亲自挂上子级中间件链
         MiddlewareBase counter = new MiddlewareBase() { };
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                selfTestDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of(counter))
-                .apply("self-test");
+                .apply("verify");
 
         try {
             assertThat(child.getDelegate().getMiddlewares()).contains(counter);
@@ -570,13 +570,13 @@ class AgentscopeHarnessAgentFactoryTest {
     @Test
     void given_child_and_parent_views_when_real_build_then_each_key_gets_own_view() {
         // 全链缝（命令构建 → 工厂 → 子智能体创建）：执行体装配面只含 executor 视图，
-        // 经 subagent 管理器按声明名创建的子智能体只含 self-test 键视图（互不漏入）
+        // 经 subagent 管理器按声明名创建的子智能体只含 verify 键视图（互不漏入）
         assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         StubSkillRepository childView = new StubSkillRepository("review-pack");
         StubSkillRepository executorView = new StubSkillRepository("code-review");
         AgentSubagentSupplier subagents = (agentKey, workspace) -> "executor".equals(agentKey)
-                ? List.of(selfTestDeclaration())
+                ? List.of(verifyDeclaration())
                 : List.of();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, routedSkillRepos(childView, executorView),
@@ -587,7 +587,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "deepseek:deepseek-v4-flash", new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
                 "executor", null);
         HarnessAgent child = (HarnessAgent) executor.getSubagentAgentManager()
-                .createAgent("self-test", io.agentscope.core.agent.RuntimeContext.empty());
+                .createAgent("verify", io.agentscope.core.agent.RuntimeContext.empty());
 
         try {
             assertThat(executor.getSkillRepositories()).containsExactly(executorView);

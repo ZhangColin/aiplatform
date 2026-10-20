@@ -45,8 +45,12 @@ class AgentProfileTest {
                 .contains("迭代受理");
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("finish_edit")
-                .contains("self-test") // #96 自检段委派自测子智能体
+                // #352 收口验证委派 verify 子智能体（自测位升级——独立验证三面）：
+                // 失败项修复后复验、修不了如实标注
+                .contains("verify")
                 .contains("agent_spawn")
+                .contains("复验")
+                .contains("如实")
                 .contains("关键节点才解说") // #225 叙说密度放宽：关键节点（开工/转向/失败/收口）才解说
                 // #296 遵守三件套②（验收③）：设计规范短条目（短条目优于长段——
                 // 条件式「若有 DESIGN.md」兼容无规范项目；缺省正本在此、运营

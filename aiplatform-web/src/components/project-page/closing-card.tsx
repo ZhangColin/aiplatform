@@ -41,6 +41,20 @@ const VISIBLE_FILES = 5;
 /** 稿清单默认可见条数（其余收进「查看全部」——多稿候选可长，卡不无限长）。 */
 const VISIBLE_DRAFTS = 5;
 
+/** 验证三面的用户面标签（#352：browser/db/log → 界面/落库/日志——hover 明细用）。 */
+const VERIFICATION_FACE_LABELS: Record<string, string> = {
+  browser: "界面",
+  db: "落库",
+  log: "日志",
+};
+
+/** 验证三面分布的 hover 明细（「界面 2 · 落库 2 · 日志 1」；未知面按原名如实呈现）。 */
+function verificationFacesTitle(faces: Record<string, number>): string {
+  return Object.entries(faces)
+    .map(([face, count]) => `${VERIFICATION_FACE_LABELS[face] ?? face} ${count}`)
+    .join(" · ");
+}
+
 /** 稿形态 → 图标（html＝界面稿〔可交互轻页面〕/ image＝图像稿〔平面位图〕）。 */
 function DraftIcon({ media }: { media: ClosingDraft["media"] }) {
   return media === "html" ? (
@@ -234,8 +248,9 @@ export function ClosingCard({
   const shown = filesOpen ? files : files.slice(0, VISIBLE_FILES);
   const added = files.reduce((total, file) => total + file.added, 0);
   const removed = files.reduce((total, file) => total + file.removed, 0);
-  // 自测统计（#96）：可缺省——自测子智能体未跑时不携带；只记「自测几项」，逐项 ✅/❌ 明细在过程播报
-  const selfTest = closing.selfTest;
+  // 验证统计（#352）：可缺省——验证子智能体未跑/未登记时不携带；全过带三面分布
+  // hover 明细，有未过如实标项名（修不了如实标注），修复后复验带轮次
+  const verification = closing.verification;
   // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
   const designLint = closing.designLint;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
@@ -348,7 +363,7 @@ export function ClosingCard({
       )}
 
       {/* 轮末统计：设计会话＝时长＋稿数（#290）；编码 run＝自检通过（closing 在场 ⟺
-          收口判据核验通过）+ 自测统计（#96，可缺省）+ 时长 + 文件数 + 变更行数 */}
+          收口判据核验通过）+ 验证统计（#352，可缺省）+ 时长 + 文件数 + 变更行数 */}
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {design && drafts ? (
           <span className="flex items-center gap-1">
@@ -359,9 +374,20 @@ export function ClosingCard({
             <ShieldCheck className="size-3.5" /> 检查通过
           </span>
         )}
-        {selfTest ? (
-          <span className="flex items-center gap-1">
-            <ListChecks className="size-3.5" /> 自测 {selfTest.total} 项
+        {verification ? (
+          <span className="flex items-center gap-1" title={verificationFacesTitle(verification.faces)}>
+            <ListChecks className="size-3.5" />
+            {verification.failed > 0 ? (
+              <>
+                验证 {verification.total} 项 ·{" "}
+                <span className="text-amber-600">
+                  {verification.failed} 项未过：{verification.failedItems.join("、")}
+                </span>
+              </>
+            ) : (
+              <>验证 {verification.total} 项通过</>
+            )}
+            {verification.rounds > 1 ? `（复验 ${verification.rounds} 轮）` : null}
           </span>
         ) : null}
         <span className="flex items-center gap-1">

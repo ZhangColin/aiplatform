@@ -13,6 +13,7 @@ import com.aieducenter.aiplatform.business.project.application.DesignSpecAppServ
 import com.aieducenter.aiplatform.business.project.application.FinishEditFacts;
 import com.aieducenter.aiplatform.business.project.application.ImageGenerationAppService;
 import com.aieducenter.aiplatform.business.project.application.PrdRevisionFacts;
+import com.aieducenter.aiplatform.business.project.application.VerificationFacts;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.port.ExternalContentFetcher;
 import com.aieducenter.aiplatform.business.project.domain.port.WebSearchProvider;
@@ -41,9 +42,10 @@ import io.agentscope.core.tool.Toolkit;
  * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由），随设计面
  * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
  * 委派在工厂结构性关闭）；
- * self-test 子键（#263，子智能体自有平台工具面——平台工厂构建子级时按此键取
- * 视图合并，镜像技能仓库的子键路由先例）= propose_skill（subagent 槽血统实例，
- * 测试清单经验自荐——绑任务回交前，挂载与否归声明 allowlist 治理）；
+ * verify 子键（#352，子智能体自有平台工具面——平台工厂构建子级时按此键取
+ * 视图合并，镜像技能仓库的子键路由先例）= report_verification（验证结果登记
+ * ——收尾卡验证统计的事实源）+ propose_skill（subagent 槽血统实例，验证经验
+ * 自荐——绑任务回交前，挂载与否归声明 allowlist 治理）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。
@@ -73,13 +75,15 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final ImageGenerationAppService imageGeneration;
     private final LandedFileFacts landedFiles;
     private final DesignSpecAppService designSpecs;
+    private final VerificationFacts verificationFacts;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration,
-            LandedFileFacts landedFiles, DesignSpecAppService designSpecs) {
+            LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
+            VerificationFacts verificationFacts) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -92,6 +96,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.imageGeneration = imageGeneration;
         this.landedFiles = landedFiles;
         this.designSpecs = designSpecs;
+        this.verificationFacts = verificationFacts;
     }
 
     @Override
@@ -142,11 +147,13 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             toolkit.registerAgentTool(new GenerateImageTool(design.workspaceId(), imageGeneration,
                     landedFiles, designSpecs));
         }
-        // #263 self-test 子键视图：子智能体自有平台工具面（技能自荐 subagent 槽
-        // 血统实例）——平台工厂构建子智能体时按本键取视图合并进子级工具面
-        // （镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否
-        if (ProfileSubagentSupplier.SELF_TEST_NAME.equals(agentKey)
+        // #352 verify 子键视图：子智能体自有平台工具面（验证结果登记＋技能自荐
+        // subagent 槽血统实例）——平台工厂构建子智能体时按本键取视图合并进子级
+        // 工具面（镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否
+        if (ProfileSubagentSupplier.VERIFY_NAME.equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
+            toolkit.registerAgentTool(new ReportVerificationTool(dev.workspaceId(),
+                    verificationFacts));
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.SUBAGENT, skillProposals));
         }

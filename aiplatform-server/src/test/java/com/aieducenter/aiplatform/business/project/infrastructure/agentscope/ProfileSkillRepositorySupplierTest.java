@@ -80,8 +80,8 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(names(supplier.skillRepositoriesFor(AgentProfile.DESIGNER.key(), dev).get(0)))
                 .containsExactly("visual-qa");
 
-        // 子智能体槽视图（self-test 键）＝subagent 槽库技能；不继承执行体面
-        assertThat(names(supplier.skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME, dev)
+        // 子智能体槽视图（verify 键）＝subagent 槽库技能；不继承执行体面
+        assertThat(names(supplier.skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME, dev)
                 .get(0)))
                 .containsExactly("review-pack");
 
@@ -123,13 +123,13 @@ class ProfileSkillRepositorySupplierTest {
 
     @Test
     void given_subagent_slot_assignment_changes_when_reread_child_view_then_reflects_latest() {
-        // 子智能体技能面＝self-test 键视图（平台工厂按声明名取用）：指派即在面、
+        // 子智能体技能面＝verify 键视图（平台工厂按声明名取用）：指派即在面、
         // 取消指派即退出——同一仓库实例重读（下一轮清单重建即生效，非固化快照）
         skillStore.assign(SkillSlot.SUBAGENT, record(303, "review-pack", "superpowers 包"));
 
         ProfileSkillRepositorySupplier supplier = supplier();
         AgentSkillRepository childView = supplier
-                .skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME,
+                .skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME,
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"))
                 .get(0);
 
@@ -175,9 +175,9 @@ class ProfileSkillRepositorySupplierTest {
         assertThat(executorSkill.getResources())
                 .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");
 
-        // subagent 槽（self-test 白名单含跑测试命令的 shell）：同开
+        // subagent 槽（verify 白名单含跑验证命令的 shell）：同开
         AgentSkill subagentSkill = supplier
-                .skillRepositoriesFor(ProfileSubagentSupplier.SELF_TEST_NAME, dev).get(0)
+                .skillRepositoriesFor(ProfileSubagentSupplier.VERIFY_NAME, dev).get(0)
                 .getSkill("tdd");
         assertThat(subagentSkill.getResources())
                 .containsEntry("scripts/run-tests.sh", "#!/bin/bash\nset -e\n");

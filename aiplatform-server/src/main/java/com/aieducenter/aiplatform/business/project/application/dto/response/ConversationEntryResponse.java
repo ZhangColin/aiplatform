@@ -51,13 +51,15 @@ public record ConversationEntryResponse(
                 + "收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝"
                 + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
                 + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
-                + "selfTest?{total}, version?, durationBreakdown{llmMs,toolsMs,selfTestMs,"
-                + "closingMs,attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为"
-                + "平台分析口径，呈现可忽略）",
+                + "verification?{total,failed,faces,rounds,failedItems}, version?, "
+                + "durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,attempts[]} }（可缺省键＝"
+                + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）",
                 example = "{\"summary\":\"完成切片：用户能登录\",\"prdChanged\":false,"
                         + "\"systemChanged\":true,\"systemNote\":\"起服了登录页\","
                         + "\"files\":[{\"path\":\"/src/App.jsx\",\"added\":40,\"removed\":0}],"
-                        + "\"durationMs\":183420,\"selfTest\":{\"total\":3},"
+                        + "\"durationMs\":183420,\"verification\":{\"total\":5,\"failed\":1,"
+                        + "\"faces\":{\"browser\":2,\"db\":2,\"log\":1},\"rounds\":2,"
+                        + "\"failedItems\":[\"留言提交\"]},"
                         + "\"version\":\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2\"}")
         Map<String, Object> closing,
         @Schema(description = "消息附件数组（kind=1 user 可携带，其余 kind 为 null；#97 圈注起立、"

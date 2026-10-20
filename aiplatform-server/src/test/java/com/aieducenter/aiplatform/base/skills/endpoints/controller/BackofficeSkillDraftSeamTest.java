@@ -241,7 +241,7 @@ class BackofficeSkillDraftSeamTest {
         assertThat(names).doesNotContain("draft-seam-invisible");
         assertThat(assemblyNames(AgentProfile.EXECUTOR.key(), dev))
                 .doesNotContain("draft-seam-invisible");
-        assertThat(assemblyNames(ProfileSubagentSupplier.SELF_TEST_NAME, dev))
+        assertThat(assemblyNames(ProfileSubagentSupplier.VERIFY_NAME, dev))
                 .doesNotContain("draft-seam-invisible");
     }
 

@@ -179,7 +179,7 @@ describe("WorkMessage · 脱轨留痕（#240：机器语法吞段的人话信号
       <WorkMessage
         work={work({
           parts: [
-            { kind: "text", id: "t0", text: "先跑一遍自测。" },
+            { kind: "text", id: "t0", text: "先跑一遍验证。" },
             signal({ id: "run-1:5" }),
           ],
         })}

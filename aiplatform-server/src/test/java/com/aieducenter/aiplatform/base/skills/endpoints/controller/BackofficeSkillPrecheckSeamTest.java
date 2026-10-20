@@ -244,7 +244,7 @@ class BackofficeSkillPrecheckSeamTest {
     @Test
     void given_subagent_slot_when_signed_precheck_then_no_protocol_face_same_mechanism()
             throws Exception {
-        long candidateId = plantSkill(76_100_051L, "self-test-aids", "自测辅助包", "自测辅助正文。");
+        long candidateId = plantSkill(76_100_051L, "verify-aids", "验证辅助包", "验证辅助正文。");
         givenPrecheckReply("{\"overlaps\":[]}");
 
         // subagent 无运营配置正本：无协议面如实标注、机制同一不特判

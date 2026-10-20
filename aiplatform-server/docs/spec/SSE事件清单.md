@@ -82,7 +82,7 @@ data: {"type":"...","payload":{...},"ts":"2026-08-19T02:15:33.123Z"}
 | `part-plan` | `projectId` `runId` `sessionId` `engine` `source`（可缺省） `steps` | 步骤清单部件（[#236](https://github.com/ZhangColin/aiplatform/issues/236)）：run 级步骤清单的**全量快照**——agent 调 `update_plan` 工具自产计划（每 run 开工先调一次、随推进再调），由部件映射表从工具参数增量解析产出（参数落定点 ToolCallEnd 出事件）。`steps` = `[{ id, title, state }]` 全量数组（id 稳定跨调用不变——就地整表更新的锚；title 用户语言一句话；`state` ∈ `pending`（○ 待做）/ `in_progress`（● 当前）/ `completed`（✓ 已收口），**不设 ✗ 态**——失败留痕归 `part-action` 与收尾卡）。**快照式**：执行中再调即新事件整表替换（已收口步骤不可变＝提示词纪律，平台 v1 不强制校验；消费端不合并）；**不走动作行、不留动作痕**（计划变化不产生动作部件、不单独播报）；断线补发以**最后快照**为准（重放按事件序 + 事件 id 去重）；**不落库**（当次会话定格留驻、刷新不回显——过程明细口径维持）；agent 不调用则无事件（界面无清单区域，解说兜底）。契约与来源解耦：不携带计划来源（v1 run 执行体提示词直产，skill 线接入时再议标注） |
 | `part-attachment` | —— | **消息附件部件**（[#97](https://github.com/ZhangColin/aiplatform/issues/97) 圈注落地）：圈注锚随用户发言发送的载荷位——指认是对话输入的增强不是替代，<b>不随 run 过程流发射</b>：随 `POST /api/projects/{id}/messages` 的 `attachments` 进派发（渲染进主智能体 prompt 精确读取），并随用户发言落对话史 JSONB（`prj_conversation_entries.attachments`）、刷新回访经 `GET /api/projects/{id}/conversation` 水合回显圈注 chip（非截图）。schema 见[下节](#消息附件部件锚载荷-schema97) |
 
-> **来源归属（#95 委派位）**：委派子智能体（如自测）转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-text`/`part-signal`/`part-action`/`part-plan`——后者是事件归属非计划来源，见该行注）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source；`part-check` 为平台侧产出，也不带。
+> **来源归属（#95 委派位）**：委派子智能体（如验证）转发进父流的过程事件带 `source` 字段（值 = 子智能体声明名，引擎 source 路径的末段）；run 执行体自身产出的过程事件**不携带** `source`（缺省 = 执行体——用户面仍无角色标签，source 只用于过程呈现归属）。携带范围：引擎透传事件（`text`/`reasoning`/`tool`/`step-*`，payload 顶层）与消息部件事件（`part-text`/`part-signal`/`part-action`/`part-plan`——后者是事件归属非计划来源，见该行注）。生命周期事件（`run-start`/`run-finish` 等）恒为执行体层级，不带 source；`part-check` 为平台侧产出，也不带。
 
 #### 收口扩载 closing schema（#88）
 
@@ -107,13 +107,15 @@ closing: {
                                    # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
                                    # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff
   durationMs: 183420               # 轮末统计·时长（首试起跑到收口；文件数/变更行数由 files 派生）
-  selfTest:   { total: 3 }         # 可缺省——自测统计（#96 自测子智能体清单式播报的收尾统计）：
-                                   # 自测子智能体（source=self-test）的 command 动作去重计数（一项 =
-                                   # 一条测试命令）；无自测命令动作（子智能体未跑）不携带——收尾卡
-                                   # 缺省不出自测统计行。判定以平台可观测的命令动作事实为准；逐项
-                                   # ✅/❌ 的通过/未过明细在过程播报（解说段）里，收尾卡只带「自测
-                                   # 几项」聚合——命令工具的成败态不反映测试成败（非零退出码仍是
-                                   # completed），平台不据此伪报通过/未过（不粉饰、不瞎判）
+  verification: {                  # 可缺省——验证统计（#352 独立验证子智能体的收尾统计）：
+    total: 5,                      # 事实源＝verify 子智能体（source=verify）经
+    failed: 1,                     # report_verification 工具登记的逐项结果（平台从工具调用
+    faces: { browser: 2, db: 2, log: 1 },  # 事实观测，不解析自由文本）：total/failed＝末轮
+    rounds: 2,                     # 总项数与未过数、faces＝末轮三面分布（浏览器点流程/查库/
+    failedItems: ["留言提交"]      # 看日志）、rounds＝本场验证轮数（修复—复验环如实，1＝
+  }                                # 一轮过）、failedItems＝末轮未过项名（修不了如实标注的
+                                   # 落点）。验证子智能体未跑/未登记不携带——收尾卡缺省不出
+                                   # 验证统计行；逐项 ✅/❌ 明细与证据在过程播报（解说段）里
   version:     "a1b2c3d4e5f6..."   # 可缺省——版本锚定（#91）：收口自动成版的 commit hash
                                    # （容器内 git，主题 = 摘要、Run-Id trailer 锚定收尾卡）；
                                    # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响；
@@ -123,7 +125,7 @@ closing: {
                                    # 收口即成版，携带本键（收尾卡版本控件「查看当时」即见
                                    # 定稿稿）
   drafts:      [                   # 可缺省——稿清单（#289 设计会话收尾卡扩载，closing 复用先例
-                                   # 对偶 version/selfTest）：设计会话真收口携带本轮稿清单与
+                                   # 对偶 version/verification）：设计会话真收口携带本轮稿清单与
                                    # 去向（判定以平台可观察的文件变更事实为准——本场落进
                                    # design/ 的稿；#292：平面类代码出图稿〔首行画幅声明〕
                                    # 收口即渲成同名 PNG——渲成的条目以 PNG 为正身
@@ -156,16 +158,16 @@ closing: {
                                    # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
     llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）
     toolsMs: {                     #   工具执行（参数落定→结果落定的纯执行窗，按工具名分桶；
-                                   #   agent_spawn 委派调用除名——跨距 ≈ 自测窗，入桶即双计）
+                                   #   agent_spawn 委派调用除名——跨距 ≈ 验证窗，入桶即双计）
       write_file: 3000,
       command: { install: 61000, dev: 800, test: 2400, other: 500 }
                                    #   command 按命令归组（依赖安装 / dev server / 测试 / 其他，
                                    #   粗分组首版，只携带出现过的组）
     },
-    selfTestMs: 9000,              #   自测子智能体委派窗（首末 source=self-test 事件跨距；无自测 = 0）
+    verifyMs: 9000,                #   验证子智能体委派窗（首末 source=verify 事件跨距；无验证 = 0）
     closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
     attempts: [                    #   逐尝试分布（静默重试代价可归因）——attempt / durationMs
-      { attempt: 1, durationMs: 61000, llmMs: 52000, toolsMs: {...}, selfTestMs: 9000 }
+      { attempt: 1, durationMs: 61000, llmMs: 52000, toolsMs: {...}, verifyMs: 9000 }
     ]                              #   （尝试墙钟）+ 该尝试三桶；中段崩的尝试带已闭合区间的
                                    #   部分观察（#323 失败留账——AgentTurnFailure 携带；前段失败/
                                    #   判据回调抛错无可携事实仍零桶）、墙钟照记
@@ -177,7 +179,7 @@ closing: {
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 自检通过（part-check passed 先行）——前端过程明细（解说段/动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
 - **版本锚定（#91）**：`closing.version`（可缺省）= 收口自动成版的 commit hash——版本正本 = 容器内 git log（无便利表），Run-Id trailer 联接收尾卡与版本；版本详情 API 复用 `closing` 载荷锚定收尾卡。
-- **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 自测 / 收口尾序 + 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
+- **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 验证 / 收口尾序 + 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
 #### 消息附件部件锚载荷 schema（#97；#286 扩 image 形态）

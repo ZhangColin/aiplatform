@@ -271,7 +271,7 @@ final class AgentscopeEventMapper {
 
     /**
      * 引擎 source 路径 → 子智能体名（末段）：执行体事件 source 为空返回 {@code null}
-     * （不携带）；子智能体事件返回其声明名（如 {@code "self-test"}——路径末段，
+     * （不携带）；子智能体事件返回其声明名（如 {@code "verify"}——路径末段，
      * 嵌套委派取直接来源层）。空串归一为 null。
      */
     static String sourceOf(io.agentscope.core.event.AgentEvent event) {

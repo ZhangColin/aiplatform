@@ -151,18 +151,18 @@ class StageDurationFactsTest {
         // 其模型/工具事件不进执行体的 LLM/工具桶（窗内细节即子智能体账）
         StageDurationFacts facts = new StageDurationFacts();
         facts.onEvent(modelStart("r-1", 1_000));
-        facts.onEvent(new TextBlockDeltaEvent("evt-st-1", ts(1_100), "r-sub", "b-1", "自测开始")
-                .withSource("platform-agent/self-test"));
-        facts.onEvent(modelStart("r-sub", 1_200).withSource("platform-agent/self-test"));
-        facts.onEvent(modelEnd("r-sub", 1_500).withSource("platform-agent/self-test"));
+        facts.onEvent(new TextBlockDeltaEvent("evt-st-1", ts(1_100), "r-sub", "b-1", "验证开始")
+                .withSource("platform-agent/verify"));
+        facts.onEvent(modelStart("r-sub", 1_200).withSource("platform-agent/verify"));
+        facts.onEvent(modelEnd("r-sub", 1_500).withSource("platform-agent/verify"));
         facts.onEvent(toolCallEnd("tc-sub", "execute", 1_600)
-                .withSource("platform-agent/self-test"));
+                .withSource("platform-agent/verify"));
         facts.onEvent(toolResultEnd("tc-sub", "execute", ToolResultState.SUCCESS, 1_900)
-                .withSource("platform-agent/self-test"));
+                .withSource("platform-agent/verify"));
         facts.onEvent(modelEnd("r-1", 2_000));
 
         StageDurations durations = facts.snapshot();
-        assertThat(durations.subagentMs()).containsExactly(Map.entry("self-test", 800L));
+        assertThat(durations.subagentMs()).containsExactly(Map.entry("verify", 800L));
         assertThat(durations.llmMs()).isEqualTo(1_000L); // 只含执行体的 r-1
         assertThat(durations.toolsMs()).isEmpty();
         assertThat(durations.commandMs()).isEmpty();

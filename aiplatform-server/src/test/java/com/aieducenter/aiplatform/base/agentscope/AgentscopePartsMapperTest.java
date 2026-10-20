@@ -425,11 +425,11 @@ class AgentscopePartsMapperTest {
         @Test
         void given_dsml_block_between_narration_when_mapped_then_no_part_carries_syntax() {
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
-                    "先跑一遍自测。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
+                    "先跑一遍验证。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
                             + "<｜DSML｜parameter name=\"command\" string=\"true\">docker exec ws-1 pnpm test"
                             + "</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>全部通过。"));
 
-            assertThat(texts(parts)).containsExactly("先跑一遍自测。", "全部通过。");
+            assertThat(texts(parts)).containsExactly("先跑一遍验证。", "全部通过。");
         }
 
         /** 标记头跨增量 split：残头从不入段（含 split 当拍的映射结果），拼全后整段吞。 */
@@ -551,7 +551,7 @@ class AgentscopePartsMapperTest {
         @Test
         void given_dsml_swallow_when_mapped_then_signal_after_human_text_without_syntax() {
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
-                    "先跑一遍自测。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
+                    "先跑一遍验证。<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"execute\">\n"
                             + "<｜DSML｜parameter name=\"command\" string=\"true\">docker exec ws-1 pnpm test"
                             + "</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"));
 
@@ -618,11 +618,11 @@ class AgentscopePartsMapperTest {
         @Test
         void given_subagent_derailment_when_mapped_then_signal_carries_source() {
             List<AgentEvent> parts = mapper.map(new TextBlockDeltaEvent("r", "b-1",
-                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>").withSource("platform-agent/self-test"));
+                    "<｜DSML｜tool_calls></｜DSML｜tool_calls>").withSource("platform-agent/verify"));
 
             assertThat(types(parts)).containsExactly(AgentEventTypes.PART_SIGNAL);
             assertThat(parts.get(0).payload())
-                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
         }
 
         /** 信封契约：信号载荷扁平（无 data 键），只有关联字段 + 信号值。 */
@@ -840,24 +840,24 @@ class AgentscopePartsMapperTest {
         @Test
         void given_subagent_narration_when_mapped_then_part_text_carries_source() {
             List<AgentEvent> parts = mapper.map(
-                    new TextBlockDeltaEvent("r", "b-1", "自测逐项通过。")
-                            .withSource("platform-agent/self-test"));
+                    new TextBlockDeltaEvent("r", "b-1", "验证逐项通过。")
+                            .withSource("platform-agent/verify"));
 
             assertThat(parts).singleElement().satisfies(part -> {
                 assertThat(part.type()).isEqualTo(AgentEventTypes.PART_TEXT);
-                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
             });
         }
 
-        /** 子智能体动作卡带来源（动作卡分角色播——自测清单式播报的呈现依据）。 */
+        /** 子智能体动作卡带来源（动作卡分角色播——验证清单式播报的呈现依据）。 */
         @Test
         void given_subagent_action_when_mapped_then_part_action_carries_source() {
             List<AgentEvent> parts = mapper.map(
-                    new ToolCallStartEvent("r", "tc-1", "execute").withSource("self-test"));
+                    new ToolCallStartEvent("r", "tc-1", "execute").withSource("verify"));
 
             assertThat(parts).singleElement().satisfies(part -> {
                 assertThat(part.type()).isEqualTo(AgentEventTypes.PART_ACTION);
-                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+                assertThat(part.payload()).containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
             });
         }
 
@@ -867,7 +867,7 @@ class AgentscopePartsMapperTest {
             mapper.map(new TextBlockDeltaEvent("r", "b-1", "执行体说半句"));
 
             List<AgentEvent> parts = mapper.map(
-                    new TextBlockDeltaEvent("r", "b-2", "子智能体接上。").withSource("self-test"));
+                    new TextBlockDeltaEvent("r", "b-2", "子智能体接上。").withSource("verify"));
 
             assertThat(parts).hasSize(2);
             assertThat(parts.get(0).payload())
@@ -875,7 +875,7 @@ class AgentscopePartsMapperTest {
                     .doesNotContainKey(AgentEventTypes.SOURCE_FIELD);
             assertThat(parts.get(1).payload())
                     .containsEntry(AgentEventTypes.PART_TEXT_FIELD, "子智能体接上。")
-                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "self-test");
+                    .containsEntry(AgentEventTypes.SOURCE_FIELD, "verify");
         }
     }
 }

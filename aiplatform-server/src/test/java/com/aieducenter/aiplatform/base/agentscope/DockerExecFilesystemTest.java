@@ -351,9 +351,9 @@ class DockerExecFilesystemTest {
         exec.responder = c -> ok("");
 
         fs.uploadFiles(RuntimeContext.empty(),
-                List.of(Map.entry("agents/selfTest/workspace/app.js", new byte[]{2})));
+                List.of(Map.entry("agents/verify/workspace/app.js", new byte[]{2})));
 
-        assertThat(exec.ran("cat > '/workspace/agents/selfTest/workspace/app.js'")).isTrue();
+        assertThat(exec.ran("cat > '/workspace/agents/verify/workspace/app.js'")).isTrue();
         assertThat(exec.ran("/workspace/.platform/agentscope-state/agents")).isFalse();
     }
 

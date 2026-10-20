@@ -24,23 +24,27 @@ import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.Pro
  *   <li>harness 内建编码工具（executor 槽）：{@link HarnessBuiltinTools} 注册自省
  *       （名字跟框架版本走，不手工抄录）；main 槽只读面结构性无（#86 内核文件/shell
  *       已关，不呈现空组）；</li>
- *   <li>子智能体声明工具面（subagent 槽）：{@code ProfileSubagentSupplier#SELF_TEST_TOOLS}
+ *   <li>子智能体声明工具面（subagent 槽）：{@code ProfileSubagentSupplier#VERIFY_TOOLS}
  *       同源引用（#260 装配一等化——工具面按声明 allowlist 呈现，技能面走 subagent
- *       槽位装配视图）；#263 propose_skill 平台资产件经声明接入，类别归 {@link
- *       AgentTool} 正本（描述按子级职能语境）。</li>
+ *       槽位装配视图）；#352 report_verification 与 #263 propose_skill 平台资产件
+ *       经声明接入，类别归 {@link AgentTool} 正本（描述按子级职能语境）。</li>
  * </ul>
  * 开关写口在 {@link BackofficeAgentConfigAppService#toggleTool}（共表共留痕机制）。
  */
 @Service
 public class BackofficeAgentToolAppService {
 
-    /** subagent 槽呈现描述（self-test 声明面——工具面按声明 allowlist 呈现）。 */
+    /** subagent 槽呈现描述（verify 声明面——工具面按声明 allowlist 呈现）。 */
     private static final String SUBAGENT_TOOL_DESCRIPTION =
-            "self-test 子智能体声明工具面（声明 allowlist 收窄，只读交付代码＋跑测试＋报告写隔离根）";
+            "verify 子智能体声明工具面（声明 allowlist 收窄，只读交付代码＋三面验证跑命令＋脚本报告写隔离根）";
 
     /** subagent 槽平台资产件呈现描述（#263 自荐经声明接入——按子级职能语境）。 */
     private static final String SUBAGENT_PROPOSE_SKILL_DESCRIPTION =
-            "技能草稿自荐（自测清单经验沉淀待审——经声明 allowlist 挂子级面，#263 三槽位齐开）";
+            "技能草稿自荐（验证经验沉淀待审——经声明 allowlist 挂子级面，#263 三槽位齐开）";
+
+    /** subagent 槽验证登记件呈现描述（#352 经声明接入——收尾卡验证统计的事实源）。 */
+    private static final String SUBAGENT_REPORT_VERIFICATION_DESCRIPTION =
+            "验证结果登记（三面逐项结果落平台事实——收尾卡验证统计的事实源，经声明 allowlist 挂子级面）";
 
     private final AgentConfigAppService agentConfigs;
 
@@ -95,25 +99,27 @@ public class BackofficeAgentToolAppService {
                 List.copyOf(tools));
     }
 
-    /** subagent 槽：self-test 声明工具面（呈现即声明事实；平台资产件归自身类别正本）。 */
+    /** subagent 槽：verify 声明工具面（呈现即声明事实；平台资产件归自身类别正本）。 */
     private static BackofficeAgentToolSlotResponse subagentSlot() {
-        List<BackofficeAgentToolResponse> tools = ProfileSubagentSupplier.SELF_TEST_TOOLS.stream()
+        List<BackofficeAgentToolResponse> tools = ProfileSubagentSupplier.VERIFY_TOOLS.stream()
                 .map(BackofficeAgentToolAppService::subagentToolOf)
                 .toList();
         return new BackofficeAgentToolSlotResponse("subagent", "子智能体", tools);
     }
 
     /**
-     * subagent 槽单件呈现：平台资产件（#263 自荐经声明 allowlist 接入）类别归
-     * {@link AgentTool} 正本（骨架锁死同口径——开关面同样不可及）、描述按子级职能
-     * 语境；其余按 harness 内建呈现口径。<b>单件假设钉死</b>：subagent 槽当前唯一
-     * 平台资产＝propose_skill——清单再进平台件时须按名分派描述，勿把专属文案
-     * 错挂。
+     * subagent 槽单件呈现：平台资产件（#352 验证登记 / #263 自荐，经声明 allowlist
+     * 接入）类别归 {@link AgentTool} 正本（骨架锁死同口径——开关面同样不可及）、
+     * 描述按子级职能语境按名分派（勿把专属文案错挂）；其余按 harness 内建呈现口径。
      */
     private static BackofficeAgentToolResponse subagentToolOf(String name) {
         if (AgentTool.PROPOSE_SKILL_MAIN.toolName().equals(name)) {
             return BackofficeAgentToolResponse.of(name, AgentToolKind.SKELETON, true,
                     SUBAGENT_PROPOSE_SKILL_DESCRIPTION);
+        }
+        if (AgentTool.REPORT_VERIFICATION.toolName().equals(name)) {
+            return BackofficeAgentToolResponse.of(name, AgentToolKind.SKELETON, true,
+                    SUBAGENT_REPORT_VERIFICATION_DESCRIPTION);
         }
         return BackofficeAgentToolResponse.of(name, AgentToolKind.HARNESS_BUILTIN, true,
                 SUBAGENT_TOOL_DESCRIPTION);

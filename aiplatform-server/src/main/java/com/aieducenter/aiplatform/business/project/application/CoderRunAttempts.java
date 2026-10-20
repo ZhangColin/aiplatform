@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,7 +34,6 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.infrastructure.agentscope.ProfileSubagentSupplier;
 
-import io.agentscope.harness.agent.tool.ShellExecuteTool;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -123,7 +121,7 @@ class CoderRunAttempts {
      * 只拼装不判定。设计轨道另携 {@code drafts} 稿清单（#292：轨道层在收口点拼装
      * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
      * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
-     * <b>自测事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
+     * <b>验证事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
      * 项目的编码 run 在场，非规范项目/设计会话恒 null）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
@@ -202,12 +200,13 @@ class CoderRunAttempts {
     private final GenerationProperties properties;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
+    private final VerificationFacts verificationFacts;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
-            ProjectVersionAppService versions) {
+            ProjectVersionAppService versions, VerificationFacts verificationFacts) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -215,6 +214,7 @@ class CoderRunAttempts {
         this.properties = properties;
         this.conversationHistory = conversationHistory;
         this.versions = versions;
+        this.verificationFacts = verificationFacts;
     }
 
     /**
@@ -269,6 +269,9 @@ class CoderRunAttempts {
         int maxAttempts = properties.getMaxAttempts();
         Instant runStartedAt = Instant.now();
         List<FileChange> runChanges = new ArrayList<>();
+        // 验证事实清残留（#352）：本轨验证统计从零起算——上一轨/生成 run 的遗留
+        // 不进本轨收尾卡（生命周期对偶 FinishEditFacts 的轨道起跑清残留）
+        verificationFacts.clear(Long.toString(workspaceId));
         // 上次尝试的错误现场（#221 原地修）：重试 prompt 的携带物——首试为 null，
         // 每次失败刷新为该次的错误事实
         String previousError = null;
@@ -321,18 +324,11 @@ class CoderRunAttempts {
                 // 不过即该次尝试失败走重试——中场 run-finish 若出用户面，工作消息定格
                 // 了又生长（重试信号外泄）、run-failed 前出现假收口
                 AtomicReference<AgentEvent> pendingFinish = new AtomicReference<>();
-                // 自测观察（#96）：自测子智能体（source=self-test）的 command 动作按
-                // toolCallId 去重计数，收口计入 closing.selfTest.total——判定以平台可
-                // 观测的命令动作事实为准（自测跑了几项命令），不解析子智能体自由文本。
-                // 每次尝试各起一账（重试尝试的自测随尝试失败作废，只成功尝试的自测
-                // 进收尾统计）
-                Set<String> selfTestCommands = new LinkedHashSet<>();
                 Consumer<AgentEvent> sink = event -> {
                     if (AgentEventTypes.RUN_FINISH.equals(event.type())) {
                         pendingFinish.set(event);
                         return;
                     }
-                    observeSelfTest(event, selfTestCommands);
                     observePlanSteps(event, planSteps);
                     projection.accept(event);
                 };
@@ -399,7 +395,9 @@ class CoderRunAttempts {
                         judgment = judgment.withDesignLint(retried);
                     }
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
-                            runStartedAt, what, selfTestCommands, seat.draftsItem());
+                            runStartedAt, what,
+                            verificationFacts.consume(Long.toString(workspaceId)),
+                            seat.draftsItem());
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
@@ -578,7 +576,7 @@ class CoderRunAttempts {
     static final String CLOSING_VERSION_FIELD = "version";
 
     /**
-     * 收口扩载的阶段耗时分布键（#111）：{@code { llmMs, toolsMs, selfTestMs,
+     * 收口扩载的阶段耗时分布键（#111）：{@code { llmMs, toolsMs, verifyMs,
      * closingMs, attempts[] }}——平台分析口径（时长优化归因用），前端不渲染
      * （收尾卡呈现不变，只有「用时」durationMs）。
      */
@@ -586,7 +584,7 @@ class CoderRunAttempts {
 
     /**
      * 委派工具注册名（harness 子智能体发起面）：其执行跨距 ≈ 被委执子智能体的事件
-     * 窗——工具桶除名防双计（自测时长由 selfTestMs 桶承载）。
+     * 窗——工具桶除名防双计（验证时长由 verifyMs 桶承载）。
      */
     private static final String AGENT_SPAWN_TOOL = "agent_spawn";
 
@@ -597,11 +595,14 @@ class CoderRunAttempts {
      * 判定行 = 收口判据回调返回的权威事实；变更清单 = 工具调用观察（同路径跨尝试
      * 行数合并——用户面一场 run 的活动量口径）；时长 = 首试起跑到本收口。设计会话
      * （#289）另扩 {@code drafts} 稿清单（#292 起随判定事实由轨道层拼装——平面稿
-     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。
+     * 渲成 PNG 后以 PNG 为正身；draftsItem 非空＝设计会话开关）。验证统计
+     * （#352）另扩 {@code verification}——事实源＝verify 子智能体的
+     * report_verification 登记（{@code verification} 参数；null＝未跑/未登记，
+     * 如实缺省不携带）。
      */
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
-            Set<String> selfTestCommands, String draftsItem) {
+            VerificationFacts.Facts verification, String draftsItem) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -614,9 +615,9 @@ class CoderRunAttempts {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        Map<String, Object> selfTest = selfTestStatistic(selfTestCommands);
-        if (selfTest != null) {
-            closing.put(AgentEventTypes.SELF_TEST_FIELD, selfTest);
+        Map<String, Object> verificationPayload = verificationPayload(verification);
+        if (verificationPayload != null) {
+            closing.put(AgentEventTypes.VERIFICATION_FIELD, verificationPayload);
         }
         if (draftsItem != null) {
             closing.put(CLOSING_DRAFTS_FIELD, judgment.drafts());
@@ -725,7 +726,7 @@ class CoderRunAttempts {
 
     /**
      * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
-     * = 按工具名分桶·command 按命令归组嵌套 / 自测 = self-test 委派窗 / 收口尾序 =
+     * = 按工具名分桶·command 按命令归组嵌套 / 验证 = verify 委派窗 / 收口尾序 =
      * 探活 + 样式合规扫描（#296）+ 成版）+ 逐尝试分布（静默重试代价可归因——每次
      * 尝试的墙钟与桶各自带）。
      * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验等）
@@ -740,7 +741,7 @@ class CoderRunAttempts {
         Map<String, Object> breakdown = new LinkedHashMap<>();
         breakdown.put("llmMs", total.llmMs());
         breakdown.put("toolsMs", toolsPayload(total));
-        breakdown.put("selfTestMs", selfTestMs(total));
+        breakdown.put("verifyMs", verifyMs(total));
         breakdown.put("closingMs", closingMs);
         breakdown.put("attempts", attempts.stream()
                 .map(CoderRunAttempts::attemptPayload)
@@ -755,13 +756,13 @@ class CoderRunAttempts {
         payload.put("durationMs", attempt.wallMs());
         payload.put("llmMs", attempt.durations().llmMs());
         payload.put("toolsMs", toolsPayload(attempt.durations()));
-        payload.put("selfTestMs", selfTestMs(attempt.durations()));
+        payload.put("verifyMs", verifyMs(attempt.durations()));
         return payload;
     }
 
     /**
      * 工具桶载荷：按工具名分桶（{@link #AGENT_SPAWN_TOOL} 委派调用除名——其跨距 ≈
-     * 子智能体事件窗，入桶即与自测桶双计）；command 工具以命令归组对象嵌套
+     * 子智能体事件窗，入桶即与验证桶双计）；command 工具以命令归组对象嵌套
      * （install / dev / test / other——只携带出现过的组）。
      */
     private static Map<String, Object> toolsPayload(StageDurations durations) {
@@ -777,47 +778,43 @@ class CoderRunAttempts {
         return tools;
     }
 
-    /** 自测桶 = self-test 委派窗（无自测 = 0——四桶齐备，缺省出 0 不缺席）。 */
-    private static long selfTestMs(StageDurations durations) {
+    /** 验证桶 = verify 委派窗（无验证 = 0——四桶齐备，缺省出 0 不缺席）。 */
+    private static long verifyMs(StageDurations durations) {
         return durations.subagentMs()
-                .getOrDefault(ProfileSubagentSupplier.SELF_TEST_NAME, 0L);
+                .getOrDefault(ProfileSubagentSupplier.VERIFY_NAME, 0L);
     }
 
     /**
-     * 自测观察（#96）：自测子智能体（source=self-test）的 command 动作部件按
-     * toolCallId 去重入账（started/running/completed/failed 任一态即记一条——同
-     * toolCallId 跨态只记一次，Set 天然去重）。只在自测子智能体的命令动作上落账：
-     * 执行体自身（source 缺省）的 command 不计、读类工具不进部件（无账可记）。
-     * 只记「自测跑了几项命令」——命令工具的成败态不反映测试成败（非零退出码仍是
-     * completed），平台不据此伪报通过/未过（不粉饰、不瞎判）。
+     * 验证统计（#352 收尾卡轮末统计）：{@code { total, failed, faces{browser,db,log},
+     * rounds, failedItems[] }}——事实源＝verify 子智能体的 report_verification 登记：
+     * 末轮快照的总项数/未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证
+     * 轮数（修复—复验环如实：>1＝修后复验过）。验证子智能体未跑/未登记（null）
+     * 返回 {@code null}（closing 不携带 verification 键，前端缺省不显示验证统计行）。
+     * 逐项 ✅/❌ 明细与证据在过程播报，收尾卡只带聚合。
      */
-    private static void observeSelfTest(AgentEvent event, Set<String> selfTestCommands) {
-        if (!AgentEventTypes.PART_ACTION.equals(event.type())) {
-            return;
-        }
-        if (!ProfileSubagentSupplier.SELF_TEST_NAME
-                .equals(event.payload().get(AgentEventTypes.SOURCE_FIELD))) {
-            return;
-        }
-        if (!ShellExecuteTool.NAME
-                .equals(event.payload().get(AgentEventTypes.PART_ACTION_TOOL_NAME_FIELD))) {
-            return;
-        }
-        selfTestCommands.add(String.valueOf(
-                event.payload().get(AgentEventTypes.PART_ACTION_TOOL_CALL_FIELD)));
-    }
-
-    /**
-     * 自测统计（#96 收尾卡轮末统计）：{@code { total }}——自测子智能体跑了几项
-     * 测试命令。无自测命令动作（自测子智能体未跑）返回 {@code null}（closing 不
-     * 携带 selfTest 键，前端缺省不显示自测统计行）。逐项 ✅/❌ 明细在过程播报，
-     * 收尾卡只带聚合计数。
-     */
-    private static Map<String, Object> selfTestStatistic(Set<String> selfTestCommands) {
-        if (selfTestCommands.isEmpty()) {
+    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts) {
+        if (facts == null || facts.lastRound().isEmpty()) {
             return null;
         }
-        return Map.of(AgentEventTypes.SELF_TEST_TOTAL_FIELD, selfTestCommands.size());
+        List<VerificationFacts.Check> lastRound = facts.lastRound();
+        Map<String, Integer> faceCounts = new LinkedHashMap<>();
+        List<String> failedItems = new ArrayList<>();
+        for (String face : VerificationFacts.FACES) {
+            faceCounts.put(face, 0);
+        }
+        for (VerificationFacts.Check check : lastRound) {
+            faceCounts.merge(check.face(), 1, Integer::sum);
+            if (!check.ok()) {
+                failedItems.add(check.name());
+            }
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(AgentEventTypes.VERIFICATION_TOTAL_FIELD, lastRound.size());
+        payload.put(AgentEventTypes.VERIFICATION_FAILED_FIELD, failedItems.size());
+        payload.put(AgentEventTypes.VERIFICATION_FACES_FIELD, faceCounts);
+        payload.put(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, facts.rounds());
+        payload.put(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD, failedItems);
+        return payload;
     }
 
     /** 被押后的 run-finish 加挂 closing 载荷（载荷拼装归 {@link #closingPayload}）。 */

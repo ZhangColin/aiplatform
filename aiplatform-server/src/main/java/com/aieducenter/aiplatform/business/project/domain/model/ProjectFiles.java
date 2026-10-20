@@ -84,7 +84,7 @@ public final class ProjectFiles {
      * #TRUNCATION_PLACEHOLDERS 「其余代码略」式短语}或独占一行的纯省略号注释即判
      * 残缺（逐字命中、大小写不敏感）。空内容/null 不判残缺——本判据裁的是模型
      * 「写一半留占位」的截断形态（残缺即不收口、重试修全）；缺件由取件退出码在
-     * 调用侧覆盖，空件非本票点名的截断形态（仍由 8081 探活/片内 self-test 兜）。
+     * 调用侧覆盖，空件非本票点名的截断形态（仍由 8081 探活/片内 verify 兜）。
      */
     public static boolean hasTruncationPlaceholder(String content) {
         if (content == null) {

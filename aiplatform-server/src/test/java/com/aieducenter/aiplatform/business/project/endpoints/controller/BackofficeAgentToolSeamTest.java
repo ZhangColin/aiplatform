@@ -37,8 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * （骨架七＋增强两，含 propose_skill 技能自荐 #263 三槽位齐开）、executor 平台
  * 三件（骨架，含 propose_skill 技能自荐 #259）
  * ＋harness 内建编码工具（注册自省，含
- * read_file/execute）、subagent＝self-test 声明七件（含 propose_skill——平台
- * 资产件类别归正本 SKELETON）；增强 enabled 按生效开关、
+ * read_file/execute）、subagent＝verify 声明八件（含 report_verification 验证登记
+ * 与 propose_skill——平台资产件类别归正本 SKELETON）；增强 enabled 按生效开关、
  * 骨架/内建恒 true；</li>
  * <li><b>开关生效装配断言</b>：PUT 关 web_search → 清单 enabled=false ＋ 真装配链
  * （{@link AgentConfigAppService#effectiveOf} 取生效规格 →
@@ -139,11 +139,13 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[2].tools.length()").value(
                         1 + fileBuiltinCount()))
                 .andExpect(jsonPath("$.data[2].tools[?(@.name == 'execute')]").doesNotExist())
-                // subagent：self-test 声明七件（同源引用声明常量——#263 自荐经声明
-                // 接入；平台资产件类别归正本 SKELETON，其余 harness 内建口径）
+                // subagent：verify 声明八件（同源引用声明常量——#352 验证登记与
+                // #263 自荐经声明接入；平台资产件类别归正本 SKELETON，其余 harness 内建口径）
                 .andExpect(jsonPath("$.data[3].tools", hasSize(
-                        ProfileSubagentSupplier.SELF_TEST_TOOLS.size())))
+                        ProfileSubagentSupplier.VERIFY_TOOLS.size())))
                 .andExpect(jsonPath("$.data[3].tools[?(@.name == 'propose_skill')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[3].tools[?(@.name == 'report_verification')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[3].tools[?(@.name == 'execute')].kind")
                         .value("HARNESS_BUILTIN"));

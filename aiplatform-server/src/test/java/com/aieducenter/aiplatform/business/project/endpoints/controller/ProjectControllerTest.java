@@ -395,6 +395,38 @@ class ProjectControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ---------- #359 生成取消：停止端点契约 ----------
+
+    @Test
+    void given_in_flight_run_when_stop_then_stopped_true() throws Exception {
+        when(generationAppService.stopInFlightRun(900L)).thenReturn(true);
+
+        performAsUser(post("/api/projects/900/generation/stop"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.stopped").value(true));
+    }
+
+    @Test
+    void given_no_in_flight_run_when_stop_then_idempotent_stopped_false() throws Exception {
+        // 幂等口径：无在途（连点/与自然收口竞态）200 stopped=false——不 409
+        when(generationAppService.stopInFlightRun(901L)).thenReturn(false);
+
+        performAsUser(post("/api/projects/901/generation/stop"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stopped").value(false));
+    }
+
+    @Test
+    void given_unknown_project_when_stop_then_prj_001_mapped_to_404() throws Exception {
+        when(generationAppService.stopInFlightRun(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(post("/api/projects/404/generation/stop"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001));
+    }
+
     @Test
     void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
         // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一

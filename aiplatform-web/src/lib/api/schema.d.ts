@@ -80,7 +80,7 @@ export interface paths {
         get: operations["config"];
         /**
          * 智能体配置全量写（覆盖态终态＋变更留痕）
-         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位名不做白名单校验（错值致新会话失败经留痕写回可回滚）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingSliceLengthThreshold 缺省＝清空回落代码缺省（强档deepseek-v4-pro、文件面 60、片复杂度 20 字）。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/片复杂度）越阈升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位名不做白名单校验（错值致新会话失败经留痕写回可回滚）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
@@ -303,8 +303,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 确认下单（冻结 PRD 快照与交付物类型入单）
-         * @description 纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，取消再下 = 新单新快照），待报价起步；交付物类型自项目终点类型一并冻结（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档 409 ORD_004；打包环境故障 WSP_002
+         * 下单（过双确认门冻结 PRD 确认版与交付物类型入单）
+         * @description 纯按钮零输入：下单前置门＝存在已确认 PRD 版本＋Demo 确认版本（无确认如实拦截 ORD_018/ORD_019），过门即冻结已确认 PRD 版本全文冗余拷贝＋双版本引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用），待报价起步；交付物类型自项目终点类型一并冻结（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；无已确认 PRD 版本 409 ORD_018；无 Demo 确认版本 409 ORD_019；项目已归档 409 ORD_004；打包环境故障 WSP_002
          */
         post: operations["place"];
         delete?: never;
@@ -442,9 +442,29 @@ export interface paths {
         put?: never;
         /**
          * 对话区发言（入口三分类派发：意见/咨询/兜底）
-         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。divergence（可选，#294 发散度 chip，Integer code）：1=REFINE（微调）/2=EXPLORE（探索）/3=REIMAGINE（大胆）——只随作用域发言生效，改稿 prompt 携档位引导；非法值 400。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
+         * @description content 即用户在对话区输入的这句话。平台先经智能体边界上的轻量分类调用三分类（分类失败/超时兜底按意见处理），再按类派发——意见与咨询同一主智能体单会话（main-{projectId}）连续：意见 → 主智能体意见轮消化（追问/改 PRD，轮收口后平台自动派更新 run）；咨询 → 主智能体答询轮（只读工具集查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，下单意图指引「确认此版本，准备签约」入口）。对用户全程隐式，无需标注类型。守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / 咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。designItem（可选）：设计物作用域（#291 跨件回溯的会话路由——画布点选稿卡后的随话改稿）在场即跳过分类与主智能体轮，发言直达该件设计会话（同会话继续产新代候选；设计轨在途即排队、当前稿代收口后受理；件不存在 404 PRJ_047、件未产出稿 409 PRJ_048）。divergence（可选，#294 发散度 chip，Integer code）：1=REFINE（微调）/2=EXPLORE（探索）/3=REIMAGINE（大胆）——只随作用域发言生效，改稿 prompt 携档位引导；非法值 400。空白 400；已归档 409 PRJ_013（对话区关闭——咨询与兜底同拦）；订单处理中 409 ORD_006（下单即冻结迭代，取消订单即解冻）仅意见类输入触发；挂起问答待答时：意见 409 PRJ_024（指路作答）、咨询转作答复续跑（与作答通道同路——同挂起 run、咨询文本即答复文本；仅平台重启丢锚的边角 409 PRJ_024 指路作答）、兜底照常引导；项目不存在 404 PRJ_001
          */
         post: operations["postMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/generation/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 停止在途生成/更新（#359 生成取消）
+         * @description 用户叫停在途编码 run（生成/迭代更新/设计过程任一在途即停——停止请求置停＋中断执行任务，模型流订阅随之中止不再烧 token）。停止＝中断口径非判死：已收口成果保留、在途段回待跑，不回滚；终态按失败账口径收口——run-failed 载荷带 stopped=true＋一句人话（「已按你的要求停止，已完成的进度都保留」），已耗计量如实落账。停止后项目态转「生成中断」（不显假生成中），「继续生成」从断点脏续（续跑起手带现状盘点，中断原因＝用户停止）；更新轨停止记终态账，「继续更新」照常可达。幂等：无在途返回 stopped=false（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。项目不存在 404 PRJ_001
+         */
+        post: operations["stopGeneration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1669,7 +1689,7 @@ export interface paths {
         };
         /**
          * 项目详情
-         * @description status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。generationState = 生成态四态投影（#222，Integer code：1=从未生成 2=生成中 3=生成中断 4=已生成）——轨道表＋generated_at＋在途标记派生、与 SSE 会话态无关（刷新/回访后档位仍正确）；生成中断/从未生成即「继续生成」出口的档位（POST /{id}/generate 断点续跑或计划重派），已生成 =「确认下单」门槛口径不变
+         * @description status = 派生项目状态（Integer code：1=进行中 3=已归档，归档优先）。generationState = 生成态四态投影（#222，Integer code：1=从未生成 2=生成中 3=生成中断 4=已生成）——轨道表＋generated_at＋在途标记派生、与 SSE 会话态无关（刷新/回访后档位仍正确）；生成中断/从未生成即「继续生成」出口的档位（POST /{id}/generate 断点续跑或计划重派），已生成 = Demo 首版成版锚（v1 随 generated_at 同刻落）
          */
         get: operations["get_1"];
         put?: never;
@@ -1939,7 +1959,7 @@ export interface paths {
         };
         /**
          * 订单详情（用户面）
-         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）+ 下单/取消时点 + 支付/归档时点（#30——已支付为瞬态，paidAt 与 archivedAt 同拍）。订单不存在 404 ORD_001
+         * @description 状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）+ 下单/取消时点 + 支付/归档时点（#338 起已支付＝开工条件满足的真实中间态，paidAt 先落、archivedAt 归档步骤后落）。订单不存在 404 ORD_001
          */
         get: operations["detail_1"];
         put?: never;
@@ -3117,6 +3137,25 @@ export interface components {
             webSearchEnabled?: boolean;
             /** @description 增强工具开关：网页抓取（缺省 true＝开；生效语义同 webSearchEnabled） */
             fetchUrlEnabled?: boolean;
+            /** @description 模型路由开关（#354：缺省 true＝开——路由判定优先；false＝既有人工定档口径。仅 run 执行体消费） */
+            routingEnabled?: boolean;
+            /**
+             * @description 强模型档裸名（#354 路由升档落点；null/缺省/纯空白＝清空回落代码缺省 deepseek-v4-pro。不做白名单校验同 modelId）
+             * @example deepseek-v4-pro
+             */
+            routingStrongModelId?: string;
+            /**
+             * Format: int32
+             * @description 文件面阈值（#354：工作区已跟踪文件数 ≥ 此值升强档；null＝清空回落代码缺省 60）
+             * @example 60
+             */
+            routingFileCountThreshold?: number;
+            /**
+             * Format: int32
+             * @description 片复杂度阈值（#354：切片描述字数 ≥ 此值升强档；null＝清空回落代码缺省 20）
+             * @example 20
+             */
+            routingSliceLengthThreshold?: number;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -3128,7 +3167,7 @@ export interface components {
         };
         BackofficeAgentConfigResponse: {
             /**
-             * @description 智能体稳定键（main=主智能体 / executor=run 执行体）
+             * @description 智能体稳定键（main=主智能体 / executor=run 执行体 / designer=设计执行体）
              * @example main
              */
             agentKey?: string;
@@ -3146,7 +3185,7 @@ export interface components {
             modelId?: string;
             /** @description systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认） */
             systemPromptOverridden?: boolean;
-            /** @description 模型档位是否库覆盖值（true＝覆盖；false＝枚举默认） */
+            /** @description 模型档位是否库覆盖值（true＝覆盖；false＝枚举默认；路由开时为兜底基础档——信号升档可越过；路由关时＝钉死人工档） */
             modelIdOverridden?: boolean;
             /** @description 枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与配置分治的缺省正本） */
             defaultSystemPrompt?: string;
@@ -3159,6 +3198,48 @@ export interface components {
             webSearchEnabled?: boolean;
             /** @description 网页抓取开关生效态（生效语义同 webSearchEnabled；无覆盖行语境＝true 开） */
             fetchUrlEnabled?: boolean;
+            /** @description 模型路由开关生效态（#354：开＝路由判定优先；关＝既有人工定档口径。仅 run 执行体消费，无覆盖行语境＝true 开） */
+            routingEnabled?: boolean;
+            /**
+             * @description 强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——对照 routingStrongModelIdOverridden 知来源）
+             * @example deepseek-v4-pro
+             */
+            routingStrongModelId?: string;
+            /** @description 强模型档是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            routingStrongModelIdOverridden?: boolean;
+            /**
+             * @description 代码缺省强模型档（预览：清空覆盖即落此值）
+             * @example deepseek-v4-pro
+             */
+            defaultRoutingStrongModelId?: string;
+            /**
+             * Format: int32
+             * @description 文件面阈值生效值（#354：工作区已跟踪文件数 ≥ 此值升强档；库覆盖值或代码缺省）
+             * @example 60
+             */
+            routingFileCountThreshold?: number;
+            /** @description 文件面阈值是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            routingFileCountThresholdOverridden?: boolean;
+            /**
+             * Format: int32
+             * @description 代码缺省文件面阈值（预览：清空覆盖即落此值）
+             * @example 60
+             */
+            defaultRoutingFileCountThreshold?: number;
+            /**
+             * Format: int32
+             * @description 片复杂度阈值生效值（#354：切片描述字数 ≥ 此值升强档；库覆盖值或代码缺省）
+             * @example 20
+             */
+            routingSliceLengthThreshold?: number;
+            /** @description 片复杂度阈值是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            routingSliceLengthThresholdOverridden?: boolean;
+            /**
+             * Format: int32
+             * @description 代码缺省片复杂度阈值（预览：清空覆盖即落此值）
+             * @example 20
+             */
+            defaultRoutingSliceLengthThreshold?: number;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -3576,6 +3657,17 @@ export interface components {
         };
         InterviewTurnResponse: {
             runId?: string;
+        };
+        ApiResponseGenerationStopResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["GenerationStopResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        GenerationStopResponse: {
+            stopped?: boolean;
         };
         ApiResponseGenerationStartResponse: {
             /** Format: int32 */
@@ -5114,6 +5206,20 @@ export interface components {
             oldWebSearchEnabled?: boolean;
             /** @description 变更前网页抓取开关 */
             oldFetchUrlEnabled?: boolean;
+            /** @description 变更前模型路由开关（#354） */
+            oldRoutingEnabled?: boolean;
+            /** @description 变更前强模型档（null＝此前即回落代码缺省） */
+            oldRoutingStrongModelId?: string;
+            /**
+             * Format: int32
+             * @description 变更前文件面阈值（null 同上）
+             */
+            oldRoutingFileCountThreshold?: number;
+            /**
+             * Format: int32
+             * @description 变更前片复杂度阈值（null 同上）
+             */
+            oldRoutingSliceLengthThreshold?: number;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型档位（null＝本次清空回落） */
@@ -5122,6 +5228,20 @@ export interface components {
             newWebSearchEnabled?: boolean;
             /** @description 变更后网页抓取开关 */
             newFetchUrlEnabled?: boolean;
+            /** @description 变更后模型路由开关（#354） */
+            newRoutingEnabled?: boolean;
+            /** @description 变更后强模型档（null＝本次清空回落代码缺省） */
+            newRoutingStrongModelId?: string;
+            /**
+             * Format: int32
+             * @description 变更后文件面阈值（null 同上）
+             */
+            newRoutingFileCountThreshold?: number;
+            /**
+             * Format: int32
+             * @description 变更后片复杂度阈值（null 同上）
+             */
+            newRoutingSliceLengthThreshold?: number;
             /**
              * @description 变更操作者 id
              * @example 700200
@@ -5707,6 +5827,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseInterviewTurnResponse"];
+                };
+            };
+        };
+    };
+    stopGeneration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseGenerationStopResponse"];
                 };
             };
         };

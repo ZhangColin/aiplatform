@@ -26,6 +26,8 @@ type ProjectGeneration = {
   coderStatus?: CoderRunStatus;
   /** 失败终态的用户面原因（#355 run-failed 载荷 message；新一轮 run 起跑即清）。 */
   failureReason?: string;
+  /** 用户停止旗标（#359 run-failed 载荷 stopped=true）：失败档文案分岔「已停止」的判定锚；新一轮 run 起跑即清。 */
+  coderStoppedByUser?: boolean;
   /** 预览重挂纪元（编码 run 每次收口 +1，重放去重）。 */
   previewEpoch: number;
   /** 已计过纪元的 run-finish 事件 id（重放去重锚，有界）。 */
@@ -42,9 +44,10 @@ export type GenerationState = {
   /**
    * 编码 run 的 run-failed（轨道终态收口事件）：状态 → error。终态的唯一写入口
    * （#56/#84）——重试全程静默、中间失败不出事件（run 失败为唯一失败终态），
-   * 恢复出口零闪现。reason = 载荷 message（#355 用户面失败原因；缺省保留既有）。
+   * 恢复出口零闪现。reason = 载荷 message（#355 用户面失败原因；缺省保留既有）；
+   * stopped = 载荷 stopped（#359 用户停止收口——失败档文案分岔「已停止」）。
    */
-  noteCoderFailed: (projectId: string, reason?: string) => void;
+  noteCoderFailed: (projectId: string, reason?: string, stopped?: boolean) => void;
 };
 
 /** runId 登记集软上限（agent 流重放缓冲 ~1000 事件）。 */
@@ -93,9 +96,12 @@ export const useGenerationStore = create<GenerationState>((set) => ({
       const registered = generation.coderRunIds.includes(runId)
         ? generation
         : { ...generation, coderRunIds: pushCapped(generation.coderRunIds, runId) };
-      return registered.coderStatus === "running" && registered.failureReason === undefined
+      return registered.coderStatus === "running"
+        && registered.failureReason === undefined
+        && !registered.coderStoppedByUser
         ? registered
-        : { ...registered, coderStatus: "running", failureReason: undefined };
+        : { ...registered, coderStatus: "running", failureReason: undefined,
+            coderStoppedByUser: undefined };
     }),
 
   noteCoderFinish: (projectId, eventId) =>
@@ -117,14 +123,18 @@ export const useGenerationStore = create<GenerationState>((set) => ({
       };
     }),
 
-  noteCoderFailed: (projectId, reason) =>
+  noteCoderFailed: (projectId, reason, stopped) =>
     updateGeneration(set, projectId, (generation) => {
-      // 缺省保留既有原因（重放/无载荷不回退），带原因随新事件更新；终态幂等
+      // 缺省保留既有原因（重放/无载荷不回退），带原因随新事件更新；终态幂等；
+      // 停止旗标同口径（#359：缺省保留既有——重放不带 stopped 不回退）
       const next = reason ?? generation.failureReason;
-      if (generation.coderStatus === "error" && generation.failureReason === next) {
+      const nextStopped = stopped ?? generation.coderStoppedByUser;
+      if (generation.coderStatus === "error" && generation.failureReason === next
+          && generation.coderStoppedByUser === nextStopped) {
         return generation;
       }
-      return { ...generation, coderStatus: "error", failureReason: next };
+      return { ...generation, coderStatus: "error", failureReason: next,
+        coderStoppedByUser: nextStopped };
     }),
 }));
 
@@ -134,6 +144,14 @@ export function failureReasonOf(
   projectId: string,
 ): string | undefined {
   return state.generations[projectId]?.failureReason;
+}
+
+/** 用户停止旗标（#359 run-failed 载荷 stopped；失败档文案分岔「已停止」）。 */
+export function coderStoppedOf(
+  state: Pick<GenerationState, "generations">,
+  projectId: string,
+): boolean | undefined {
+  return state.generations[projectId]?.coderStoppedByUser;
 }
 
 /** 编码 run 判定（bridge 侧用：登记过的 runId 即编码 run）。 */

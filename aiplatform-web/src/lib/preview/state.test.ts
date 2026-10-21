@@ -7,6 +7,7 @@ import type { WorkPart } from "@/lib/store/work-message";
 import {
   UPDATING_NOTICE,
   INTERRUPTED_NOTICE,
+  STOPPED_NOTICE,
   isPreviewNotServing,
   previewTrouble,
   workHintOf,
@@ -149,6 +150,23 @@ describe("systemPanelPhase · 四态投影档位（#222：REST 投影派生，�
     expect(
       systemPanelPhase({ generationState: "generated", coderStatus: "error", parts: [] }),
     ).toEqual({ kind: "failed", text: "更新遇到了问题", recovery: "restart-update" });
+  });
+
+  it("用户停止终态（#359 载荷 stopped）：文案分岔「已停止」——未生成口径「已停止生成」、已生成口径「已停止更新」，恢复入口不变", () => {
+    expect(
+      systemPanelPhase({ generationState: "generating", coderStatus: "error", parts: [], coderStoppedByUser: true }),
+    ).toEqual({ kind: "failed", text: STOPPED_NOTICE, recovery: "resume", reason: undefined });
+    expect(
+      systemPanelPhase({ generationState: "generated", coderStatus: "error", parts: [], coderStoppedByUser: true }),
+    ).toEqual({ kind: "failed", text: "已停止更新", recovery: "restart-update" });
+    expect(STOPPED_NOTICE).toBe("已停止生成，已完成的进度都保留");
+    // 页面档（有应用）同款分岔：细条失败态带停止口径
+    expect(
+      systemPanelPhase({ generationState: "generated", coderStatus: "error", parts: [], coderStoppedByUser: true, url: "http://localhost:42659" }),
+    ).toEqual({
+      kind: "page",
+      notice: { failed: true, text: "已停止更新", recovery: "restart-update", reason: undefined },
+    });
   });
 
   it("失败原因随 phase 透出（#355 run-failed 载荷 message），缺省不出原因行", () => {

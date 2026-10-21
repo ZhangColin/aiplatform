@@ -85,4 +85,20 @@ class AgentEventBridgeTest {
         verify(events).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), payload.capture());
         assertThat(payload.getValue()).doesNotContainKey("message");
     }
+
+    /** 用户停止的终态收口（#359）：run-failed 载荷带 stopped=true＋一句人话——前端失败档分岔「已停止」文案的判定锚。 */
+    @Test
+    void given_user_stop_when_emit_run_stopped_then_payload_carries_stopped_and_message() {
+        EventsAppService events = mock(EventsAppService.class);
+        AgentEventBridge bridge = new AgentEventBridge(events);
+
+        bridge.emitRunStopped(projectStub(42L, 7L, null), "run-3");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(events).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), payload.capture());
+        assertThat(payload.getValue()).containsEntry("runId", "run-3");
+        assertThat(payload.getValue()).containsEntry("stopped", true);
+        assertThat(payload.getValue()).containsEntry("message", "已按你的要求停止，已完成的进度都保留");
+    }
 }

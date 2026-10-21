@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -140,6 +141,10 @@ class GenerationAppServiceTest {
     @MockitoBean
     private KnowledgePort knowledgePort;
 
+    /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
+    @Autowired
+    private CodingRunTrack codingRunTrack;
+
     /** 两命中的检索桩（下发前置注入 happy path）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
@@ -163,7 +168,8 @@ class GenerationAppServiceTest {
     private void givenSessionExecutorRunsInline() {
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(1)).run();
-            return null;
+            // submit 起返回 Future（#359 停止通道）：直通已同步跑完——已完成 future
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
         }).when(sessionExecutor).submit(any(), any());
     }
 
@@ -357,6 +363,94 @@ class GenerationAppServiceTest {
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2, 2, 3, 1);
         verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    // ---------- 生成取消（#359：在途 run 可停止——停止＝中断口径，不重试不回滚） ----------
+
+    @Test
+    void given_stop_requested_mid_slice_when_generate_then_no_retry_stopped_terminal_and_resumable() {
+        // 灵魂用例（#359 AC②③）：切片 1 在途时用户叫停——停止不走重试环（一次尝试即
+        // 收场）、不触发段回滚（中断口径非判死，已收口片保留、在途片回 PENDING）、
+        // run-failed 载荷带 stopped=true（失败账口径如实收口）；「继续生成」照常可续
+        // ——续跑 run 起手带现状盘点（中断原因＝用户停止）
+        Long projectId = persistedProject("9845");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (converseCalls.incrementAndGet() == 2) {
+                // 切片 1 首试在途被中断（Future.cancel 线程中断打断模型流的现场等价物）
+                codingRunTrack.requestStop(projectId);
+                throw new IllegalStateException("java.lang.InterruptedException");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 停止不重试：阶段 0 + 切片 1 首试 = 2 次 converse（重试环被停止旁路）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        String slice1RunId = commands.getAllValues().get(1).runId();
+        // run-failed(stopped=true) 锚被停场次（失败账口径——run 失败仍是唯一失败终态）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                slice1RunId.equals(payload.get(EventsAppService.RUN_FIELD))
+                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
+        // 已收口片保留（阶段 0 CLOSED）、在途片不被判死（PENDING 非 FAILED）、后续片不派
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 1, 1);
+        assertThat(generatedAt(projectId)).isNull();
+        // 四态投影如实：在途标记已释放 → 生成中断（不显假「生成中」）
+        assertThat(queryAppService.detail(projectId).generationState())
+                .isEqualTo(GenerationState.INTERRUPTED);
+        // 「继续生成」从断点续跑：续跑 run 起手带现状盘点（中断原因＝用户停止），
+        // 续跑跑完余轨（切片 1 + 切片 2 两场 converse）
+        appService.startGeneration(projectId);
+        ArgumentCaptor<AgentCommand> resumed = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(resumed.capture(), any());
+        assertThat(resumed.getAllValues().get(2).prompt()).contains("用户停止");
+    }
+
+    @Test
+    void given_stop_requested_mid_wave_when_generate_then_forks_destroyed_no_merge_no_generated() {
+        // #359 并行波停止：波内在途被叫停——fork 全释放（不留孤儿容器）、不合并
+        // （已收口前段不动）、generated_at 不落、run-failed(stopped) 收口
+        Long projectId = persistedProject("9846");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().endsWith("-slice-2")) {
+                codingRunTrack.requestStop(projectId);
+                throw new IllegalStateException("java.lang.InterruptedException");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // run-failed(stopped=true) 收口（锚＝轨道首 run——波内各片 runId 非稳定锚）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
+        // 波内两片不被判死（PENDING）、后续波不派；已收口前段（阶段 0+首片）保留
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 1, 1, 1);
+        assertThat(generatedAt(projectId)).isNull();
+        // fork 全释放：起跑的（中断路径）与已完未合并的（停止清理路径）都不留孤儿
+        // ——两路幂等双保险（重复 destroy 只是日志），按 id 断言至少释放一次
+        verify(workspaceLifecycleAppService, atLeastOnce()).destroy("9001");
+        verify(workspaceLifecycleAppService, atLeastOnce()).destroy("9002");
+        // 停止面已清：续起新轨不带旧停（generationState 中断 → 可继续生成）
+        assertThat(codingRunTrack.stopRequested(projectId)).isFalse();
     }
 
     @Test
@@ -916,10 +1010,16 @@ class GenerationAppServiceTest {
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
 
-        // 模拟中断未落终态（进程在终态落表前死亡的可观察状态）：片行拨回待跑
+        // 模拟中断未落终态（进程在终态落表前死亡的可观察状态）：片行拨回待跑＋
+        // 进程内终态现场清空（重启两半都要模拟——#359 起待跑片＋在场现场在生产
+        // 只属用户停止〔停止收口写入 STOP_SCENE〕，会呈现停止叙事而非通用中断）
         jdbcTemplate.update(
                 "UPDATE prj_generation_segments SET status = 1 WHERE project_id = ? AND ord = 1",
                 projectId);
+        @SuppressWarnings("unchecked")
+        Map<Long, String> scenes = (Map<Long, String>) org.springframework.test.util.ReflectionTestUtils
+                .getField(appService, "terminalFailureScenes");
+        scenes.remove(projectId);
 
         doReturn(new AgentReply("r1", "切片1续跑完成"), new AgentReply("r2", "切片2完成"))
                 .when(agentClient).converse(any(), any());

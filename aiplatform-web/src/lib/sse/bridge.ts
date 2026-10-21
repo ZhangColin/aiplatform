@@ -258,10 +258,11 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
       case "run-failed": {
         // 编码 run 超限终态收口（#56）：轨道真终态（事件到 ⟺ 恢复出口可达）——
         // 「继续生成/继续更新」只认本事件；无 executor 登记的 runId 忽略（事件序
-        // 异常防御位，同其他 coder 事件）
+        // 异常防御位，同其他 coder 事件）。stopped（#359 用户停止收口）随载荷
+        // 透传 store——失败档文案分岔「已停止」
         const { payload } = platform;
         if (isCoderRun(generation, payload.projectId, payload.runId)) {
-          generation.noteCoderFailed(payload.projectId, payload.message);
+          generation.noteCoderFailed(payload.projectId, payload.message, payload.stopped);
           // 四态投影回「生成中断」（#222）：终态落轨道表即失效项目域——「继续
           // 生成」出口由投影派生（刷新后仍在，不依赖本事件）
           void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });

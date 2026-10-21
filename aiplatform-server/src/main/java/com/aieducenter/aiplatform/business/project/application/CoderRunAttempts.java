@@ -74,6 +74,12 @@ import lombok.extern.slf4j.Slf4j;
  * 「终态时工作区 = 段起点」不变式，用户续跑从干净现场起。修正/设计/合并裁决轨
  * 不传钩（各轨既有失败处置口径不变）。</p>
  *
+ * <p><b>用户停止旁路（#359 生成取消）</b>：停止请求在场（CodingRunTrack 停止面）
+ * 时，尝试起跑前查停、失败处置时查停——停止<b>不走重试环、不触发段回滚</b>（用户
+ * 停止＝中断口径非判死，#353 回滚只属自动重试耗尽的失败段），以
+ * {@link RunStoppedException} 直抛轨道层停止收口（run-failed 载荷 stopped=true
+ * 失败账口径；已收口片保留、在途段回待跑，续走断点脏续——ADR-0020）。</p>
+ *
  * <p><b>失败留账与重试携进展现场（#323）</b>：失败尝试的耗时账与观察面不清零
  * 弃置——客户端流失败经 {@link AgentTurnFailure} 携部分观察（已提交文件变更＋
  * 已闭合区间阶段耗时）上浮，本环计入本场累计（收口清单与耗时分布跨尝试含失败
@@ -231,13 +237,14 @@ class CoderRunAttempts {
     private final ProjectVersionAppService versions;
     private final VerificationFacts verificationFacts;
     private final ModelRoutingAppService modelRouting;
+    private final CodingRunTrack codingRunTrack;
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions, VerificationFacts verificationFacts,
-            ModelRoutingAppService modelRouting) {
+            ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack) {
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
@@ -247,6 +254,7 @@ class CoderRunAttempts {
         this.versions = versions;
         this.verificationFacts = verificationFacts;
         this.modelRouting = modelRouting;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -374,6 +382,11 @@ class CoderRunAttempts {
                         what, projectId);
             }
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                // 停止旁路（#359 生成取消）：起跑前查停——停止不走重试环（一次尝试即
+                // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口
+                if (codingRunTrack.stopRequested(projectId)) {
+                    throw new RunStoppedException(firstRunId);
+                }
                 Instant attemptStartedAt = Instant.now();
                 AtomicReference<StageDurations> durations =
                         new AtomicReference<>(StageDurations.zero());
@@ -535,6 +548,29 @@ class CoderRunAttempts {
                 return RunResult.ok(reply.text());
             }
             catch (RuntimeException e) {
+                // 停止旁路（#359）：停止请求在场时的一切失败按停止收场——中断打断的
+                // 模型流（Future.cancel 线程中断经 runTurn 包装成 AgentTurnFailure）
+                // 不进重试环、不触发回滚，直抛轨道层停止收口。收场前照 #323 口径
+                // 留账（失败账口径，AC：停止的 run 留账如实）——中断尝试的部分观察
+                // 面与终态日志不弃置（已耗计量另由 MeteredModel 流收口直报，不重复）
+                if (codingRunTrack.stopRequested(projectId)) {
+                    if (e instanceof AgentTurnFailure failure) {
+                        durations.accumulateAndGet(failure.durations(), StageDurations::plus);
+                        runChanges.addAll(failure.changes());
+                    }
+                    if (!attemptAccounted) {
+                        attemptDurations.add(new AttemptDuration(attempt,
+                                Duration.between(attemptStartedAt, Instant.now()).toMillis(),
+                                durations.get(), attemptModelId));
+                    }
+                    log.info("[{}] 项目 {} 用户停止收场（attemptRunId={}）——本场留账：累计 {}、"
+                                    + "逐尝试 {}、已落盘文件变更 {}",
+                            what, projectId, attemptRunId,
+                            humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
+                            attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
+                            filePayloads(runChanges));
+                    throw new RunStoppedException(firstRunId);
+                }
                 previousError = errorScene(e);
                 if (e instanceof AgentTurnFailure failure) {
                     // 失败留账（#323）：失败流段的部分观察面（已提交文件变更＋已闭合

@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.stereotype.Component;
@@ -52,9 +53,14 @@ public class AgentSessionExecutor implements DisposableBean {
         this.passthrough = executor;
     }
 
-    /** 提交一轮会话任务（新轮或续跑）；同会话严格按提交序执行。 */
-    public void submit(String sessionId, Runnable task) {
-        dispatch(sessionId, () -> {
+    /**
+     * 提交一轮会话任务（新轮或续跑）；同会话严格按提交序执行。返回任务的
+     * {@link Future}——{@code cancel(true)} 中断在途执行线程（#359 生成取消：
+     * 停止请求经此打断阻塞中的模型流订阅；测试直通已同步跑完，返回已完成
+     * future，cancel 是无害 no-op）。
+     */
+    public Future<?> submit(String sessionId, Runnable task) {
+        return dispatch(sessionId, () -> {
             try {
                 task.run();
             }
@@ -65,12 +71,12 @@ public class AgentSessionExecutor implements DisposableBean {
     }
 
     /** 生产：落 sessionId 哈希对应的 stripe（同会话恒同 stripe → 串行）；测试：直通。 */
-    private void dispatch(String sessionId, Runnable wrapped) {
+    private Future<?> dispatch(String sessionId, Runnable wrapped) {
         if (passthrough != null) {
             passthrough.execute(wrapped);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        stripes[stripeIndex(sessionId)].execute(wrapped);
+        return stripes[stripeIndex(sessionId)].submit(wrapped);
     }
 
     /** stripe 路由（package-private 供测试挑不同 stripe 的会话对，勿在实现外复刻）。 */

@@ -469,6 +469,18 @@ describe("bridge · 智能体事件 → generation store（生成面，#22）", 
     expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
   });
 
+  it("用户停止终态（#359）：run-failed 载荷 stopped → 状态 error＋停止旗标（失败档文案分岔「已停止」）", () => {
+    dispatchAgentEvent(agentQc, agentEvent("run-start", { projectId: "p1", runId: "run1", prompt: "开始做系统", agent: "executor" }, "run1:1"));
+
+    dispatchAgentEvent(agentQc, agentEvent("run-failed",
+      { projectId: "p1", runId: "run1", message: "已按你的要求停止，已完成的进度都保留", stopped: true },
+      "run1:9"));
+    const generation = useGenerationStore.getState().generations["p1"];
+    expect(generation?.coderStatus).toBe("error");
+    expect(generation?.coderStoppedByUser).toBe(true);
+    expect(generation?.failureReason).toBe("已按你的要求停止，已完成的进度都保留");
+  });
+
   it("run-failed 无 CODER 登记的 runId → 忽略（事件序异常防御位）", () => {
     dispatchAgentEvent(agentQc, agentEvent("run-failed", { projectId: "p1", runId: "ghost" }, "ghost:1"));
 

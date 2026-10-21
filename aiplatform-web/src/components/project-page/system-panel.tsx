@@ -39,6 +39,7 @@ import { PreviewToolbar } from "./preview-toolbar";
 import { RestartUpdateButton } from "./restart-update";
 import { formatClock } from "./work-message";
 import { ResumeGenerationButton } from "./resume-generation";
+import { StopGenerationButton } from "./stop-generation";
 import { DemoVersionChip } from "./demo-version-chip";
 
 /**
@@ -69,6 +70,7 @@ export function SystemPanel({
   projectId,
   generationState,
   coderStatus,
+  coderStoppedByUser,
   failureReason,
   onGenerated,
   onOpenFiles,
@@ -79,6 +81,8 @@ export function SystemPanel({
   generationState?: GenerationState;
   /** 本会话编码 run 状态（更新轨信号——更新中/更新失败）。 */
   coderStatus?: CoderRunStatus;
+  /** 用户停止旗标（#359 run-failed 载荷 stopped；失败档文案分岔「已停止」）。 */
+  coderStoppedByUser?: boolean;
   /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
   failureReason?: string;
   /** 发起成功回调（切系统模式呈现等待态），归装配层。 */
@@ -155,6 +159,7 @@ export function SystemPanel({
   const phase = systemPanelPhase({
     generationState,
     coderStatus,
+    coderStoppedByUser,
     url,
     error: preview.error,
     parts,
@@ -307,10 +312,12 @@ export function SystemPanel({
         ) : null}
         {variant === "default" ? refreshButton : null}
         {updatingNotice ? (
-          // 更新中轻状态（#124）：收进浏览器条内联——spinner + 文案，不再悬浮叠预览
+          // 更新中轻状态（#124）：收进浏览器条内联——spinner + 文案，不再悬浮叠预览；
+          // 停止入口同排（#359 入口不藏：生成中细条挂「停止」）
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
             <span className="truncate">{updatingNotice.text}</span>
+            <StopGenerationButton projectId={projectId} />
           </span>
         ) : null}
         <form
@@ -398,11 +405,15 @@ export function SystemPanel({
                   status={phase.text}
                   startedAt={workStartedAt}
                   endedAt={workEndedAt}
-                />
+                >
+                  {/* 停止入口（#359 入口不藏）：Demo 等待态与时钟卡同排 */}
+                  <StopGenerationButton projectId={projectId} />
+                </DemoWaitingHint>
               ) : (
                 <PanelHint>
                   <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
                   <p className="max-w-full truncate">{phase.text}</p>
+                  <StopGenerationButton projectId={projectId} />
                 </PanelHint>
               )
             ) : phase.kind === "failed" ? (
@@ -413,6 +424,7 @@ export function SystemPanel({
                   endedAt={workEndedAt}
                   reason={phase.reason}
                   failed
+                  stopped={coderStoppedByUser}
                 >
                   {recoveryAction(phase.recovery)}
                 </DemoWaitingHint>
@@ -472,6 +484,7 @@ function DemoWaitingHint({
   startedAt,
   endedAt,
   failed = false,
+  stopped = false,
   reason,
   children,
 }: {
@@ -479,6 +492,8 @@ function DemoWaitingHint({
   startedAt?: number;
   endedAt?: number;
   failed?: boolean;
+  /** 用户停止终态（#359）：标题分岔「已停止生成」（停止是用户动作，不称失败）。 */
+  stopped?: boolean;
   /** 失败原因行（#355 run-failed 载荷 message——终态失败原因可理解）。 */
   reason?: string;
   children?: ReactNode;
@@ -499,7 +514,7 @@ function DemoWaitingHint({
           <LoaderCircle className="size-5 animate-spin text-electric-indigo" />
         )}
         <p className="font-semibold text-ink-primary">
-          {failed ? "生成未能完成" : "正在为您生成系统"}
+          {stopped ? "已停止生成" : failed ? "生成未能完成" : "正在为您生成系统"}
         </p>
       </div>
       <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-soft/70 bg-white/80 p-4 text-left shadow-xs">

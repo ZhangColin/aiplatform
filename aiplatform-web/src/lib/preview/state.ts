@@ -35,6 +35,9 @@ export const STARTING_NOTICE = "系统启动中";
 /** 生成中断的呈现口径（#222 四态投影的中断档——失败终态/进程重启/中断同档，不判死）。 */
 export const INTERRUPTED_NOTICE = "生成中断了，已完成的进度都保留";
 
+/** 用户停止的呈现口径（#359 生成取消：停止是用户动作，不称「中断/失败」）。 */
+export const STOPPED_NOTICE = "已停止生成，已完成的进度都保留";
+
 /**
  * 后端「预览应用尚未就绪」的数字业务码（WSP_012 → 1012＝域码 WSP=1×1000＋序号，
  * 见 aiplatform-server ErrorCodePrefix）：HTTP 503 只是状态，判定认业务码。
@@ -168,6 +171,8 @@ export function systemPanelPhase(input: {
   generationState?: GenerationState;
   /** 本会话编码 run 状态（更新轨信号——更新中/更新失败；生成档位不依赖它）。 */
   coderStatus?: CoderRunStatus;
+  /** 用户停止旗标（#359 run-failed 载荷 stopped；失败档文案分岔「已停止」）。 */
+  coderStoppedByUser?: boolean;
   /** REST 探活通过才返回——有 URL 即应用可访问。 */
   url?: string;
   /** 预览查询的 error（未就绪 WSP_012 视同待期）。 */
@@ -177,17 +182,19 @@ export function systemPanelPhase(input: {
   /** 失败终态的用户面原因（#355 run-failed 载荷 message；失败档原因行）。 */
   failureReason?: string;
 }): SystemPanelPhase {
-  const { generationState, coderStatus, url, error, parts, failureReason } = input;
+  const { generationState, coderStatus, coderStoppedByUser, url, error, parts, failureReason } = input;
 
   // 有 URL 即上页面（跨会话直接显示系统现状；重试静默期间不退占位——不闪断）
   if (url) {
-    return { kind: "page", notice: noticeOf(generationState, coderStatus, failureReason) };
+    return { kind: "page", notice: noticeOf(generationState, coderStatus, coderStoppedByUser, failureReason) };
   }
 
   // 会话内失败终态先行呈现（#56 run 失败为唯一失败终态；REST 投影随失效重拉收敛
-  // ——run-failed 即 invalidate 项目域）：已生成 → 更新失败口径，否则生成中断口径
+  // ——run-failed 即 invalidate 项目域）：已生成 → 更新失败口径，否则生成中断口径；
+  // 停止旗标（#359）改走「已停止」口径（用户动作，不称中断/失败）
   if (coderStatus === "error") {
-    return { kind: "failed", reason: failureReason, ...failedOutcome(generationState) };
+    return { kind: "failed", reason: failureReason,
+      ...failedOutcome(generationState, coderStoppedByUser) };
   }
 
   if (generationState === "generating" || coderStatus === "running") {
@@ -212,10 +219,11 @@ export function systemPanelPhase(input: {
   return { kind: "idle" };
 }
 
-/** 页面上的轻提示（一套话术面：进行中 / 中断 / 更新失败）。 */
+/** 页面上的轻提示（一套话术面：进行中 / 中断 / 停止 / 更新失败）。 */
 function noticeOf(
   generationState: GenerationState | undefined,
   coderStatus: CoderRunStatus | undefined,
+  coderStoppedByUser: boolean | undefined,
   failureReason?: string,
 ): PanelNotice | undefined {
   // 进行中优先（「继续生成」点击后的乐观起跑——投影仍中断时会话信号先行回进行中）
@@ -223,7 +231,8 @@ function noticeOf(
     return { failed: false, text: UPDATING_NOTICE };
   }
   if (coderStatus === "error") {
-    return { failed: true, reason: failureReason, ...failedOutcome(generationState) };
+    return { failed: true, reason: failureReason,
+      ...failedOutcome(generationState, coderStoppedByUser) };
   }
   if (generationState === "interrupted") {
     // 中断 + 有页面（部分切片已收口、应用在跑）：细条带「继续生成」，页面保留
@@ -239,12 +248,20 @@ function interruptedOutcome(): { text: string; recovery: "resume" } {
 
 /**
  * 失败终态文案与恢复入口（占位与页面轻提示同源）：已生成（投影）→ 更新失败口径
- * 「继续更新」（更新轨恢复出口）；否则生成中断口径「继续生成」。
+ * 「继续更新」（更新轨恢复出口）；否则生成中断口径「继续生成」。停止旗标
+ * （#359 run-failed 载荷 stopped）改走「已停止」口径——停止是用户动作，不称
+ * 「中断/失败」，恢复入口不变（继续生成/继续更新照常可达）。
  */
-function failedOutcome(generationState: GenerationState | undefined): {
+function failedOutcome(generationState: GenerationState | undefined,
+    coderStoppedByUser?: boolean): {
   text: string;
   recovery: RecoveryAction;
 } {
+  if (coderStoppedByUser) {
+    return generationState === "generated"
+      ? { text: "已停止更新", recovery: "restart-update" }
+      : { text: STOPPED_NOTICE, recovery: "resume" };
+  }
   return generationState === "generated"
     ? { text: "更新遇到了问题", recovery: "restart-update" }
     : interruptedOutcome();

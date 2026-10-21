@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { failureReasonOf, useGenerationStore } from "./generation";
+import { coderStoppedOf, failureReasonOf, useGenerationStore } from "./generation";
 
 /**
  * 生成面 store「静默重试 vs 终态」判定（#56 → #82/#84 收紧）：终态只有一个写入口
@@ -66,5 +66,22 @@ describe("generation store · 静默重试与终态判定（#56/#84）", () => {
 
     store.noteCoderFinish("p1", "run1:9");
     expect(useGenerationStore.getState().generations["p1"]?.previewEpoch).toBe(1);
+  });
+
+  it("用户停止旗标（#359 run-failed 载荷 stopped）：随 noteCoderFailed 落、重派起跑即清", () => {
+    givenCoderRunStarted("p1", "run1");
+    const store = useGenerationStore.getState();
+    store.noteCoderFailed("p1", "已按你的要求停止，已完成的进度都保留", true);
+    expect(useGenerationStore.getState().generations["p1"]?.coderStatus).toBe("error");
+    expect(coderStoppedOf(useGenerationStore.getState(), "p1")).toBe(true);
+
+    // 无 stopped 载荷的真失败：旗标不置（缺省不误判「已停止」）
+    givenCoderRunStarted("p2", "run2");
+    useGenerationStore.getState().noteCoderFailed("p2", "应用服务未能启动");
+    expect(coderStoppedOf(useGenerationStore.getState(), "p2")).toBeFalsy();
+
+    // 重派起跑即清（新一轮不是「已停止」态）
+    store.noteCoderRun("p1", "run-restart");
+    expect(coderStoppedOf(useGenerationStore.getState(), "p1")).toBeFalsy();
   });
 });

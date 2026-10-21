@@ -89,6 +89,10 @@ class IterationAppServiceTest {
     @Autowired
     private FinishEditFacts finishFixFacts;
 
+    /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
+    @Autowired
+    private CodingRunTrack codingRunTrack;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -379,6 +383,48 @@ class IterationAppServiceTest {
                         && dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         // 超限转终态后轨道照常收工释放：用户再提意见即重新起轨（兜底口径）
         assertThat(appService.startFixRun(projectId, "再试一场", null).queued()).isFalse();
+    }
+
+    // ---------- 更新停止（#359 生成取消：失败账口径——终态账可达「继续更新」） ----------
+
+    @Test
+    void given_stop_requested_mid_fix_when_run_then_stopped_terminal_account_and_restartable() {
+        // 灵魂用例（#359 AC②③·修正轨）：更新在途被叫停——不重试（一次尝试即收场）、
+        // run-failed(stopped=true) 收口、失败账口径记终态账——「继续更新」出口照常
+        // 可达（restart 不被 PRJ_026 挡回，交接物沿用同任务重派）
+        Long projectId = persistedGeneratedProject("9930");
+        List<Runnable> tracks = givenTrackQueued();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            codingRunTrack.requestStop(projectId);
+            throw new IllegalStateException("java.lang.InterruptedException");
+        });
+
+        IterationAppService.FixDispatch dispatch = appService.startFixRun(projectId,
+                "把按钮改成蓝色", null);
+        tracks.remove(0).run();
+
+        // 停止不重试：恰一次 converse
+        verify(agentClient, times(1)).converse(any(), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                dispatch.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
+        // 终态账在场：「继续更新」恢复出口不被 PRJ_026 挡回（失败账口径）
+        assertThat(appService.restartFixRun(projectId).runId()).isNotBlank();
+        // 重派同任务：交接物沿用（「把按钮改成蓝色」），续跑可完成——重打桩走
+        // doAnswer 形（when() 形会先调一次在桩的停止脚本，误触发停止）
+        doAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().startsWith("coder-")) {
+                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            }
+            return new AgentReply(command.runId(), "已按意见修正");
+        }).when(agentClient).converse(any(), any());
+        tracks.remove(0).run();
+        ArgumentCaptor<AgentCommand> restarted = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(restarted.capture(), any());
+        assertThat(restarted.getAllValues().get(1).prompt()).contains("把按钮改成蓝色");
+        // 停止面已清：新一场照常可起
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
     // ---------- 结束工具收口（#46：finish_edit 事实观测；判定呈现归 #88 收口扩载） ----------

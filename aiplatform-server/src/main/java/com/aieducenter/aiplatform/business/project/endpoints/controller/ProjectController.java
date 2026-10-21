@@ -41,6 +41,7 @@ import com.aieducenter.aiplatform.business.project.application.dto.command.Switc
 import com.aieducenter.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.FixRestartResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStartResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.GenerationStopResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.InterviewTurnResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.PrdVersionResponse;
@@ -226,6 +227,24 @@ public class ProjectController {
     public ApiResponse<GenerationStartResponse> generate(@PathVariable String id) {
         return ApiResponse.ok(new GenerationStartResponse(
                 generationAppService.startGeneration(parseId(id)).runId()));
+    }
+
+    @PostMapping("/{id}/generation/stop")
+    @Operation(summary = "停止在途生成/更新（#359 生成取消）",
+            description = "用户叫停在途编码 run（生成/迭代更新/设计过程任一在途即停——"
+                    + "停止请求置停＋中断执行任务，模型流订阅随之中止不再烧 token）。"
+                    + "停止＝中断口径非判死：已收口成果保留、在途段回待跑，不回滚；"
+                    + "终态按失败账口径收口——run-failed 载荷带 stopped=true＋一句人话"
+                    + "（「已按你的要求停止，已完成的进度都保留」），已耗计量如实落账。"
+                    + "停止后项目态转「生成中断」（不显假生成中），「继续生成」从断点"
+                    + "脏续（续跑起手带现状盘点，中断原因＝用户停止）；更新轨停止记"
+                    + "终态账，「继续更新」照常可达。幂等：无在途返回 stopped=false"
+                    + "（连点/与自然收口的竞态如实回，不 409）。停止是异步收场：请求"
+                    + "返回 ≠ 执行体已完全落定，以 SSE/REST 重查为准。"
+                    + "项目不存在 404 PRJ_001")
+    public ApiResponse<GenerationStopResponse> stopGeneration(@PathVariable String id) {
+        return ApiResponse.ok(new GenerationStopResponse(
+                generationAppService.stopInFlightRun(parseId(id))));
     }
 
     @PostMapping("/{id}/fix-runs/restart")

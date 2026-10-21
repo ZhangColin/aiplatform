@@ -22,7 +22,7 @@ import { ENDPOINT_TYPE } from "@/lib/projects/endpoint";
 import { lockRowOf } from "@/lib/orders/lock";
 import { useAgentEventChannel } from "@/lib/sse/agent-event-channel";
 import { useSseStatus } from "@/lib/sse/provider";
-import { coderStatusOf, failureReasonOf, useGenerationStore } from "@/lib/store/generation";
+import { coderStatusOf, coderStoppedOf, failureReasonOf, useGenerationStore } from "@/lib/store/generation";
 import { useM01Store } from "@/lib/store/m01";
 import { useVersionRecordStore } from "@/lib/store/version-record";
 import { cn } from "@/lib/utils";
@@ -49,6 +49,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
   useAgentEventChannel(projectId);
   const agentStatus = useSseStatus("agent");
   const coderStatus = useGenerationStore((s) => coderStatusOf(s, projectId));
+  const coderStopped = useGenerationStore((s) => coderStoppedOf(s, projectId));
   const failureReason = useGenerationStore((s) => failureReasonOf(s, projectId));
 
   // 移动单区域切换（#350，交接包 13.2）：窄屏（<xl）8:4 双栏退化为「预览/对话」
@@ -169,6 +170,7 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
               projectId={projectId}
               generationState={generationState}
               coderStatus={coderStatus}
+              coderStoppedByUser={coderStopped}
               failureReason={failureReason}
               onGenerated={() => {}}
               onOpenFiles={() => setFilesOpen(true)}

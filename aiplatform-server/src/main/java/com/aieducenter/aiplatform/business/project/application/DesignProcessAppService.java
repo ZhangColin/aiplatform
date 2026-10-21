@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -335,14 +336,20 @@ public class DesignProcessAppService {
                 || item.getStatus() == DesignItemStatus.FAILED);
         if (runnable) {
             String firstRunId = EventsAppService.newRunId();
-            sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+            Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
                 try {
                     runDesignTrack(project, firstRunId);
+                }
+                catch (RunStoppedException e) {
+                    // 停止收口（#359 生成取消·设计轨同机制）：run-failed(stopped)
+                    // 收口（残队不排空——同失败口径，随下次派发合并受理）
+                    eventBridge.emitRunStopped(project, e.runId());
                 }
                 finally {
                     codingRunTrack.end(projectId);
                 }
             });
+            codingRunTrack.registerTask(projectId, trackTask);
             return new DesignRun(firstRunId);
         }
         // 清单现行且全部收口/定稿：意见即改稿（#291 改稿同会话继续）——与残队
@@ -355,14 +362,19 @@ public class DesignProcessAppService {
         }
         enqueueRevision(projectId, target, opinion, null);
         String firstRunId = EventsAppService.newRunId();
-        sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
                 sweepQueuedRevisions(project, null, firstRunId);
+            }
+            catch (RunStoppedException e) {
+                // 停止收口（#359，同轨道位口径）
+                eventBridge.emitRunStopped(project, e.runId());
             }
             finally {
                 codingRunTrack.end(projectId);
             }
         });
+        codingRunTrack.registerTask(projectId, trackTask);
         return new DesignRun(firstRunId);
     }
 
@@ -391,15 +403,20 @@ public class DesignProcessAppService {
             return null;
         }
         String firstRunId = EventsAppService.newRunId();
-        sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
+        Future<?> trackTask = sessionExecutor.submit(SESSION_PREFIX + projectId, () -> {
             try {
                 runRevision(project, item, feedback, divergence, firstRunId);
                 sweepQueuedRevisions(project, null, null);
+            }
+            catch (RunStoppedException e) {
+                // 停止收口（#359，同轨道位口径）
+                eventBridge.emitRunStopped(project, e.runId());
             }
             finally {
                 codingRunTrack.end(projectId);
             }
         });
+        codingRunTrack.registerTask(projectId, trackTask);
         return new DesignRun(firstRunId);
     }
 

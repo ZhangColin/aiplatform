@@ -568,6 +568,27 @@ class DesignProcessAppServiceTest {
     }
 
     @Test
+    void given_stop_requested_mid_design_when_dispatch_then_stopped_terminal_no_next_item() {
+        // #359 设计轨停止（三轨同机制）：在途设计会话被叫停——不重试（一次尝试即
+        // 收场）、run-failed(stopped=true) 收口、件不判死（待跑）、不自动跳下一件
+        Long projectId = persistedDesignProject(ProjectEndpointType.DESIGN, null);
+        givenSessionExecutorRunsInline();
+        givenPrdContent(DESIGN_PRD);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            codingRunTrack.requestStop(projectId);
+            throw new IllegalStateException("java.lang.InterruptedException");
+        });
+
+        appService.dispatchDesignOnTurnClose(projectId, null);
+
+        verify(agentClient, times(1)).converse(any(), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
+                Boolean.TRUE.equals(payload.get(AgentEventTypes.RUN_STOPPED_FIELD))));
+        assertThat(itemRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(1, 1); // 件不判死（待跑）、件 2 未被自动推进
+    }
+
+    @Test
     void given_prd_revised_when_dispatch_again_then_order_follows_new_checklist_closed_kept() {
         // #289 验收②后半：改 PRD 清单序→推进序随改——PRD 演进（锚漂）即清单重产：
         // 推进序随新清单、已收口件按标题精确对照保留（不重做；措辞漂移即对照不上、

@@ -1,7 +1,9 @@
 package com.aieducenter.aiplatform.business.project.application;
 
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -39,6 +41,16 @@ public class SliceParallelExecutor implements DisposableBean {
     /** 并行任务投递面（{@link java.util.concurrent.CompletableFuture#supplyAsync} 的池）。 */
     public ExecutorService pool() {
         return pool;
+    }
+
+    /**
+     * 并行任务提交（#359 生成取消起波任务走本口）：返回池的 {@link Future}——
+     * {@code cancel(true)} 中断执行中的 fork 片线程（打断阻塞中的模型流订阅）。
+     * {@link java.util.concurrent.CompletableFuture#cancel} 不传中断（对已起跑任务
+     * 无效），停止通道必须走本口。
+     */
+    public <T> Future<T> submit(Callable<T> task) {
+        return pool.submit(task);
     }
 
     @Override

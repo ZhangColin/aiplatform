@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
 
@@ -276,14 +278,35 @@ public class IterationAppService {
                 // 正本＝新确认版）。读不出时 fail-closed 归已确认版（PrdDraftBaseline）
                 String baselinePrd = prdDraftBaseline.driftedFrom(projectId)
                         .map(version -> version.getContent()).orElse(null);
-                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, runId,
-                        fixSession(projectId, runId),
-                        new CoderRunAttempts.Prompts(fixRunPrompt(handoff, baselinePrd),
-                                IterationAppService::fixRetryPrompt),
-                        (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                currentHandoff, prdVersionNo),
-                        "fix", true, CoderRunAttempts.RunSeat.executor(),
-                        RunHeading.titled(FIX_TITLE));
+                CoderRunAttempts.RunResult result;
+                try {
+                    result = coderRunAttempts.run(project, runId,
+                            fixSession(projectId, runId),
+                            new CoderRunAttempts.Prompts(fixRunPrompt(handoff, baselinePrd),
+                                    IterationAppService::fixRetryPrompt),
+                            (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
+                                    currentHandoff, prdVersionNo),
+                            "fix", true, CoderRunAttempts.RunSeat.executor(),
+                            RunHeading.titled(FIX_TITLE));
+                }
+                catch (RunStoppedException e) {
+                    // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见
+                    // 合并，意见零丢失）记终态账，「继续更新」恢复出口照常可达；释放
+                    // 与账同临界区（同正常收工口径，不出现「已释放无账」窗口）；
+                    // run-failed(stopped) 与终态账同事实点发射
+                    synchronized (codingRunTrack) {
+                        List<FixHandoff> pending = queuedFixRuns.remove(projectId);
+                        FixHandoff stopped = pending == null || pending.isEmpty()
+                                ? currentHandoff
+                                : FixHandoff.merge(Stream.concat(
+                                        Stream.of(currentHandoff), pending.stream()).toList());
+                        terminallyFailedHandoffs.put(projectId, stopped);
+                        codingRunTrack.end(projectId);
+                        released = true;
+                    }
+                    eventBridge.emitRunStopped(project, e.runId());
+                    return;
+                }
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (codingRunTrack) {
@@ -456,7 +479,10 @@ public class IterationAppService {
     }
 
     private void submitFixTrack(Project project, String firstRunId, FixHandoff firstHandoff) {
-        sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + project.getId(),
+        // 主轨任务登记停止面（#359）：requestStop 的 cancel(true) 经此中断在途执行
+        // 线程——修正轨停止同样是真断流（不只标志位）
+        Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + project.getId(),
                 () -> runFixTrack(project, firstRunId, firstHandoff));
+        codingRunTrack.registerTask(project.getId(), trackTask);
     }
 }

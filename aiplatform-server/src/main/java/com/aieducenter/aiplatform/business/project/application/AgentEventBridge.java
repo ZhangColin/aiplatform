@@ -64,6 +64,31 @@ public class AgentEventBridge {
      * 失败不再零原因，用户可分辨「模型没写好」与「服务侧故障」。</p>
      */
     public void emitRunFailed(Project project, String runId, String lastError) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        String reason = userFacingRunFailure(lastError);
+        if (reason != null) {
+            payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
+        }
+        eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
+    }
+
+    /**
+     * 用户停止的终态收口发射（#359 生成取消）：在途 run 被用户叫停后的轨道层收口
+     * ——事件复用 {@code run-failed}（失败账口径：停止的 run 如实留账计量与终态
+     * 状态），载荷加 {@code stopped=true} 标记（前端失败档文案分岔「已停止」）＋
+     * 定型一句人话（非错误现场映射——停止是用户动作，无失败原因可报）。runId =
+     * 被停场次的用户面标识（首试 runId），恢复出口（继续生成/继续更新）照常只认
+     * 本事件。
+     */
+    public void emitRunStopped(Project project, String runId) {
+        Map<String, Object> payload = runScopedPayload(project, runId);
+        payload.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
+        payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, "已按你的要求停止，已完成的进度都保留");
+        eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
+    }
+
+    /** run 级事件的关联载荷基底（project 双路由键＋runId——emitRunFailed/Stopped 共用）。 */
+    private static Map<String, Object> runScopedPayload(Project project, String runId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
         payload.put(EventsAppService.OWNER_FIELD,
@@ -71,11 +96,7 @@ public class AgentEventBridge {
         payload.put(EventsAppService.OWNER_GUEST_FIELD,
                 EventsAppService.ownerPayload(project.getOwnerGuestId()));
         payload.put(EventsAppService.RUN_FIELD, runId);
-        String reason = userFacingRunFailure(lastError);
-        if (reason != null) {
-            payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
-        }
-        eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
+        return payload;
     }
 
     /**

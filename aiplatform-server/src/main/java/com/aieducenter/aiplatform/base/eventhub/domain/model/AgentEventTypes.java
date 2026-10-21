@@ -91,6 +91,12 @@ public final class AgentEventTypes {
      */
     public static final String RUN_FAILED = "run-failed";
 
+    /**
+     * run-failed 载荷的用户停止标记（#359 生成取消）：true = 本终态由用户主动停止
+     * 收口（非失败——停止即失败账口径，但前端失败档文案分岔「已停止」，不称「中断/失败」）。
+     */
+    public static final String RUN_STOPPED_FIELD = "stopped";
+
     // ---------- payload 关联键（全通道唯一真值） ----------
 
     /** 运行关联字段（事件 id 的 streamId 同值；payload 必带）。 */

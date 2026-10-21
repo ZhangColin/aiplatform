@@ -8,8 +8,11 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -371,6 +374,9 @@ public class GenerationAppService {
                         + (failureScene == null ? "" : "（最近错误现场：" + failureScene + "）")
                         + "；失败现场已回滚到本段起点——代码是干净现场（依赖与数据库不在回滚面、"
                         + "保持现状），本段从头重做"
+                // 带现场的断点段（#359 用户停止——PENDING 非 FAILED）现场即中断原因；
+                // 无现场（进程重启等）回落通用口径
+                : failureScene != null ? failureScene
                 : "上一次运行在本段中断（未及收口）";
         String takeover = failed
                 ? "- 接手本段先检查工作区现状（依赖、数据、8081 端口服务是否在跑），"
@@ -544,6 +550,21 @@ public class GenerationAppService {
     }
 
     /**
+     * 停止在途编码 run（#359 生成取消）：不挑轨道——生成/更新/设计任一在途即置停
+     * ＋中断执行任务（模型流订阅随之取消，不再烧 token）。停止＝中断口径非判死：
+     * 已收口成果保留、在途段回待跑，终态按失败账口径 run-failed(stopped=true) 收口
+     * （修正轨记终态账——「继续更新」可达；生成轨中断现场入续跑盘点）。幂等：无
+     * 在途返回 false（与自然收口的竞态如实回，不 409——连点/迟到点击无害）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在
+     */
+    public boolean stopInFlightRun(Long projectId) {
+        projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+        return codingRunTrack.requestStop(projectId);
+    }
+
+    /**
      * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门）：
      * #332 起系统终点的首个构建 run 唯一触发＝确认此版 PRD
      * （{@link #dispatchFirstDemoOnConfirm}），本入口不再承担系统终点的自动起
@@ -663,14 +684,23 @@ public class GenerationAppService {
         // 本锚（此后新确认不漂移旧版关联）；无确认版项目（设计类起跑/legacy）为 null
         Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
         String firstRunId = EventsAppService.newRunId();
-        sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId, () -> {
-            try {
-                runGenerationTrack(project, firstRunId, resolved, prdVersionNo);
-            }
-            finally {
-                codingRunTrack.end(projectId);
-            }
-        });
+        Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId,
+                () -> {
+                    try {
+                        runGenerationTrack(project, firstRunId, resolved, prdVersionNo);
+                    }
+                    catch (RunStoppedException e) {
+                        // 停止收口（#359 生成取消）：中断口径非判死——已收口片保留、
+                        // 在途段留待跑，不回滚；中断现场入续跑盘点（「中断原因＝用户
+                        // 停止」）；终态按失败账口径 run-failed(stopped=true) 收口
+                        terminalFailureScenes.put(projectId, STOP_SCENE);
+                        eventBridge.emitRunStopped(project, e.runId());
+                    }
+                    finally {
+                        codingRunTrack.end(projectId);
+                    }
+                });
+        codingRunTrack.registerTask(projectId, trackTask);
         return new GenerationRun(firstRunId);
     }
 
@@ -1047,6 +1077,12 @@ public class GenerationAppService {
     static final String RERUN_SESSION_SUFFIX = "-rr";
 
     /**
+     * 用户停止的中断现场（#359 生成取消）：入续跑现状盘点的「中断原因」——续跑 run
+     * 起手即知上次是用户叫停（非故障），从现状继续不重做。
+     */
+    static final String STOP_SCENE = "用户停止——在途 run 已按你的要求停止，已完成的进度都保留";
+
+    /**
      * 回滚基准捕获（#353 失败回滚的基准，段起跑与 merge 前共用同一操作）：回读
      * 工作区 git HEAD；无 HEAD（全新工作区首段——git 懒初始化尚无收口成版）即锚
      * commit 钉基准（无 trailer 不进版本流）。拿不到 ref（环境故障/exec 异常）降级
@@ -1158,23 +1194,44 @@ public class GenerationAppService {
             String previousHandoff, String designContext, Integer prdVersionNo, boolean resumed,
             int startOrd, String resumePrefix, int lastOrd, String firstRunId) {
         Long projectId = project.getId();
-        // 先全部提交再统一等待（真并行）：若在流内逐元素 supplyAsync 后立即 join，会退化为
-        // 逐个 fork 串行跑——下一片要等上一片 join 返回才提交（并发不成立）
-        List<CompletableFuture<ForkSliceOutcome>> futures = runnable.stream()
-                .map(ord -> CompletableFuture.supplyAsync(
+        // 本波 fork 登记簿（#359 停止清理的事实源）：fork 落成即记——停止时全部释放，
+        // 已完未合并的不留孤儿容器
+        ConcurrentLinkedQueue<String> createdForks = new ConcurrentLinkedQueue<>();
+        // 先全部提交再统一等待（真并行）：若在流内逐元素提交后立即取结果，会退化为
+        // 逐个 fork 串行跑——下一片要等上一片返回才提交（并发不成立）。提交走
+        // sliceParallelExecutor.submit（池 Future——#359 停止 cancel(true) 可中断
+        // 执行线程；CompletableFuture.cancel 不传中断，停不了在途流）
+        List<Future<ForkSliceOutcome>> futures = runnable.stream()
+                .map(ord -> sliceParallelExecutor.submit(
                         () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
-                                resumed, startOrd, resumePrefix, firstRunId),
-                        sliceParallelExecutor.pool()))
+                                resumed, startOrd, resumePrefix, firstRunId, createdForks)))
                 .toList();
+        futures.forEach(future -> codingRunTrack.registerTask(projectId, future));
         List<ForkSliceOutcome> outcomes = new ArrayList<>(futures.size());
-        for (int i = 0; i < futures.size(); i++) {
-            int ord = runnable.get(i);
-            try {
-                outcomes.add(futures.get(i).join());
-            } catch (RuntimeException e) {
-                outcomes.add(ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
-                        EventsAppService.newRunId(), null, errorText(e)));
+        try {
+            for (int i = 0; i < futures.size(); i++) {
+                int ord = runnable.get(i);
+                try {
+                    outcomes.add(futures.get(i).get());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    RuntimeException failure = cause instanceof RuntimeException runtime
+                            ? runtime : new IllegalStateException(cause);
+                    outcomes.add(ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
+                            EventsAppService.newRunId(), null, errorText(failure)));
+                } catch (CancellationException e) {
+                    // 波任务被取消（cancel 只来自停止请求——在途片中断后被置完成态）
+                    throwStoppedWave(projectId, firstRunId, createdForks);
+                }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throwStoppedWave(projectId, firstRunId, createdForks);
+        }
+        // 停止收场（#359）：波内被叫停（任一在途片停止旁路 / 波起跑即停）——fork 全
+        // 释放、不合并（已收口前段不动）、探活/预览/落位全跳过，停止信号上抛轨道层
+        if (codingRunTrack.stopRequested(projectId)) {
+            throwStoppedWave(projectId, firstRunId, createdForks);
         }
         for (ForkSliceOutcome outcome : outcomes) {
             if (!outcome.succeeded()) {
@@ -1203,6 +1260,20 @@ public class GenerationAppService {
     }
 
     /**
+     * 并行波的停止收场（#359）：本波已落成的 fork 全释放（中断片的由其自身停止分支
+     * 释放、已完未合并的由此释放——双路径幂等，重复 destroy 只是日志），然后以停止
+     * 信号上抛（锚＝轨道首 run——波内各片 runId 非稳定锚，终态收口只认轨道锚）。
+     */
+    private void throwStoppedWave(Long projectId, String firstRunId,
+            ConcurrentLinkedQueue<String> createdForks) {
+        String fork;
+        while ((fork = createdForks.poll()) != null) {
+            destroyForkQuietly(fork);
+        }
+        throw new RunStoppedException(firstRunId);
+    }
+
+    /**
      * fork 副本跑一片（#351）：fork 主工作区当前 HEAD → 执行体在 fork 上实现本片（收口
      * 判据 = fork 内 8081 探活 + 入口文件完整 + fork 内 git 成版）。成功回交 fork
      * workspaceId（供合并）与收口终文（供交接）；失败/异常回交失败现场，fork 由合并
@@ -1210,7 +1281,7 @@ public class GenerationAppService {
      */
     private ForkSliceOutcome runForkSlice(Project project, BuildPlan plan, int ord,
             String previousHandoff, String designContext, boolean resumed, int startOrd,
-            String resumePrefix, String firstRunId) {
+            String resumePrefix, String firstRunId, ConcurrentLinkedQueue<String> createdForks) {
         Long projectId = project.getId();
         String slice = plan.slices().get(ord - 1);
         String forkWorkspaceId = null;
@@ -1218,6 +1289,7 @@ public class GenerationAppService {
         try {
             forkWorkspaceId = workspaceLifecycleAppService.fork(
                     Long.toString(project.getWorkspaceId()));
+            createdForks.add(forkWorkspaceId);
             Long forkId = Long.parseLong(forkWorkspaceId);
             boolean resumeTarget = ord == startOrd;
             String prefix = resumeTarget ? resumePrefix : "";
@@ -1245,6 +1317,14 @@ public class GenerationAppService {
             }
             return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError());
         } catch (RuntimeException e) {
+            // 停止旁路（#359）：在途片被中断（线程中断打断模型流）——本 fork 自行
+            // 释放（主轨可能在 join 前就被停止信号上抛，到不了波收尾清理），停止
+            // 信号上抛交主轨收口
+            if (codingRunTrack.stopRequested(projectId)) {
+                destroyForkQuietly(forkWorkspaceId);
+                createdForks.remove(forkWorkspaceId);
+                throw new RunStoppedException(runId);
+            }
             // fork 释放统一归调用方（runParallelWave 失败分支 / mergeFork finally），此处不销毁
             return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e));
         }

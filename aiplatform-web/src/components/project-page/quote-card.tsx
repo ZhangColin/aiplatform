@@ -12,8 +12,9 @@ import { formatPrice } from "@/lib/orders/price";
  * 收尾卡同族。卡载事件（quoted=报价已出 / repriced=报价已更新，#204 改价入流）
  * + 订单引用——金额/备注/状态渲染时取订单当前态（useOrder 详情查询，待报价/
  * 已报价态轮询现成），卡不冻结金额：已支付/已取消/已归档转态由同一视镜自然呈现，
- * 不残留可支付假象。卡内即支付闭环（复用 mock 支付 mutation 与确认弹窗）；订单
- * tab 保留完整详情与改价历史的家（「查看订单详情」跳转回调归装配层 openOutputsTo）。
+ * 不残留可支付假象。mock 支付闭环已随 #337 退役（卡内无支付动作，付款走签约页
+ * 凭证核验路径）；订单详情与改价历史以签约付款页为家（「查看订单详情」跳转
+ * 回调＝装配层 onSeeOrder）。
  */
 export function QuoteCard({
   orderId,

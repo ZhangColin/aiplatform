@@ -272,13 +272,16 @@ export type PlatformAgentEvent =
     }
   | {
       /**
-       * 兜底轻引导回复（#47 入口三分类）：非意见非咨询输入的平台侧定型文案——
-       * 零产物路径（不起任何智能体 run，本事件即该次派发的全部）；`prompt` 为
-       * 锚定的用户输入（事件到达重建对话面；回访经对话史水合——#89）；`label` 为呈现标签（「平台」）；
-       * `text` 为引导文案（下单意图引导到「确认下单」）。
+       * 平台侧定型文案直达对话面（带「平台」标签气泡）。两类使用：兜底轻引导
+       * （#47 入口三分类——非意见非咨询输入的零产物路径，本事件即该次派发的
+       * 全部）；在途意见回执（#360——首个构建 run 在途时意见轮收口的排队事实
+       * 告知，runId 锚该意见轮）。`prompt` 为锚定的用户输入（事件到达重建对话
+       * 面；回访经对话史水合——#89）——可缺省（在途回执不携带：用户气泡已由
+       * 意见轮自落，不重复重建）；`label` 为呈现标签（「平台」）；`text` 为
+       * 定型文案。
        */
       type: "guide-reply";
-      payload: AgentPayload & { prompt: string; label: string; text: string };
+      payload: AgentPayload & { prompt?: string; label: string; text: string };
     }
   | {
       /**

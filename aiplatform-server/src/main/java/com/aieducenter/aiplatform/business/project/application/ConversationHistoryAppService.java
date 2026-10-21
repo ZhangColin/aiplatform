@@ -158,6 +158,15 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 平台单条定型文案落库（#360 在途意见回执）：用户发言已由所属对话轮自落——
+     * 只补 guide 行（挂该轮 runId，水合并入该轮块、位置在轮回复后）。事件已发射
+     * 后的补写：失败只记日志（呈现面失败不牵连排队事实）。
+     */
+    public void recordGuideNotice(Long projectId, String runId, String text) {
+        quietly(() -> entries.save(ConversationEntry.guide(projectId, runId, text)));
+    }
+
+    /**
      * 报价卡落库（#203 报价感知，ADR-0017 视镜语义）：平台对用户的钱事发言——载荷
      * 仅事件（{@code quoted}=报价已出 / {@code repriced}=报价已更新）+ 订单引用，不含
      * 金额（金额/备注/状态渲染时取订单当前态）。调用方在报价事实落定后补写——缺卡

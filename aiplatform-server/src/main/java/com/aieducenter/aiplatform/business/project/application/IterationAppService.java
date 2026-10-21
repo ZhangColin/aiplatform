@@ -157,6 +157,18 @@ public class IterationAppService {
     }
 
     /**
+     * 携完整交接物的修正派发（#360 首 Demo 在途意见的排空口）：与
+     * {@link #startFixRun} 同守卫同轨道，差异只在交接物粒度——多轮意见由调用方
+     * 逐轮配对成 {@link FixHandoff}（首 Demo 在途期间收口的各意见轮，生成收口后
+     * 合并为一场更新 run 补派）；在途口径同款（修正 run 在途即排队进
+     * {@link #queuedFixRuns}，那场收口排空时自然合并——竞态零丢失）。
+     */
+    FixDispatch startFixRun(Long projectId, FixHandoff handoff) {
+        Project project = requireFixableProject(projectId);
+        return dispatch(project, handoff);
+    }
+
+    /**
      * 修正 run 超限终态的恢复出口（#48）：重派终态那场的交接物（交接物沿用、
      * 每次新会话，#114），新 runId 随响应回——与新 run 的链路锚（同
      * {@code /generate} 口径），重派事实落日志可追溯。仅终态可达：修正在途（进行

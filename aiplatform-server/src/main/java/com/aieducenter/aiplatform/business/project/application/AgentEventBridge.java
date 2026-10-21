@@ -145,22 +145,27 @@ public class AgentEventBridge {
     }
 
     /**
-     * guide-reply 发射（兜底轻引导，#47 入口三分类）：非意见非咨询输入的平台侧
-     * 定型文案——零产物路径的全部事件（无智能体 run、无事件序）；runId 为派发锚
-     * （随派发响应同值返回），prompt 随事件携带供重放重建对话面，label 为呈现
-     * 标签（「平台」，非智能体角色）。
+     * guide-reply 发射（兜底轻引导，#47 入口三分类）：平台侧定型文案直达对话面
+     * （带标签气泡，非智能体话语）；runId 为派发锚（随派发响应同值返回），
+     * label 为呈现标签（「平台」，非智能体角色）。prompt 随事件携带供重放重建
+     * 对话面——可空（#360 在途意见回执复用本型：用户气泡已由意见轮自落，
+     * 平台只补一条回执，不重复重建用户输入；空即不携带，前端不落用户气泡）。
      */
     public void emitGuideReply(Project project, String runId, String prompt,
             String label, String text) {
-        eventsAppService.publishAgentEvent(AgentEventTypes.GUIDE_REPLY, Map.of(
-                EventsAppService.PROJECT_FIELD, project.getId().toString(),
-                EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
-                EventsAppService.OWNER_GUEST_FIELD,
-                EventsAppService.ownerPayload(project.getOwnerGuestId()),
-                EventsAppService.RUN_FIELD, runId,
-                AgentEventTypes.GUIDE_PROMPT_FIELD, prompt,
-                AgentEventTypes.GUIDE_LABEL_FIELD, label,
-                AgentEventTypes.GUIDE_TEXT_FIELD, text));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put(EventsAppService.PROJECT_FIELD, project.getId().toString());
+        payload.put(EventsAppService.OWNER_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerAccountId()));
+        payload.put(EventsAppService.OWNER_GUEST_FIELD,
+                EventsAppService.ownerPayload(project.getOwnerGuestId()));
+        payload.put(EventsAppService.RUN_FIELD, runId);
+        if (prompt != null) {
+            payload.put(AgentEventTypes.GUIDE_PROMPT_FIELD, prompt);
+        }
+        payload.put(AgentEventTypes.GUIDE_LABEL_FIELD, label);
+        payload.put(AgentEventTypes.GUIDE_TEXT_FIELD, text);
+        eventsAppService.publishAgentEvent(AgentEventTypes.GUIDE_REPLY, payload);
     }
 
     /**

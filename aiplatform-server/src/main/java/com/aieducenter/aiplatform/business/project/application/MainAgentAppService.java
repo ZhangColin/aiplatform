@@ -729,9 +729,13 @@ public class MainAgentAppService {
                         return;
                     }
                     // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
-                    // 计划补产链自然恢复——构建从定稿设计稿长出）
+                    // 计划补产链自然恢复——构建从定稿设计稿长出）；携意见载荷
+                    // （#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
+                    // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
                     GenerationAppService.GenerationRun run =
-                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan);
+                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
+                                    new GenerationAppService.TurnOpinion(
+                                            opinion, prdRevisionSummary, runId));
                     if (run != null) {
                         log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
                                 projectId, run.runId());

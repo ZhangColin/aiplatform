@@ -71,7 +71,7 @@ public class OrderQueryAppService {
 
     /**
      * 项目最近一张订单（任意状态，#30）：归档终态项目页的「完整记录」嵌入面——
-     * 支付归档后订单转终态、activeOrder 归空，项目详情改挂本嵌入供订单卡取单。
+     * 订单转终态（已归档＝后台人工/已取消）后 activeOrder 归空，项目详情改挂本嵌入供订单卡取单。
      */
     public Optional<OrderBriefResponse> latestOrderOf(Long projectId) {
         return orderRepository.findFirstByProjectIdOrderByCreatedAtDescIdDesc(projectId)

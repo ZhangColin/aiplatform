@@ -107,7 +107,8 @@ public class Project extends Auditable implements AggregateRoot<Project, Long> {
 
     /**
      * 首次生成时点：单向置位（{@link #markGenerated} 只在首次落值，后续生成/迭代
-     * 不刷新）——「确认下单」可见性与项目列表「进行中」推导口径的锚点。生成编排
+     * 不刷新）——Demo 首版成版与 Demo 确认门可用性的推导锚、项目列表「进行中」推导
+     * 口径的锚点。生成编排
      * 落位归生成环（#22），本聚合只保证置位语义。
      */
     @Column(name = "generated_at")

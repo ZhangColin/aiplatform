@@ -26,9 +26,9 @@ import com.aieducenter.aiplatform.support.Tsid;
 
 /**
  * 订单 REST 面（#28 交易环①用户面 + #297 设计资产包取件 + #336 合同确认与
- * 预览）：确认下单（纯按钮零输入——读当前 PRD 冻结快照入单）/ 订单详情（含
- * 范围文本三段）/ 取消 / 设计资产包下载 / 确认范围并准备合同（范围快照冻结·
- * 合同创建口）/ 合同预览（订单名下最近合同）。后台机机面（清单/详情/源码包/
+ * 预览）：下单（过双确认门——已确认 PRD 版本＋Demo 确认版本，冻结确认版全文
+ * 冗余拷贝入单）/ 订单详情（含范围文本三段）/ 取消 / 设计资产包下载 /
+ * 确认范围并准备合同（范围快照冻结·合同创建口）/ 合同预览（订单名下最近合同）。后台机机面（清单/详情/源码包/
  * 报价改价/范围录入）归 {@link BackofficeOrderController}（#29，
  * /api/backoffice/*，五头 HMAC）；合同承接面归
  * {@link BackofficeContractController}；付款面（计划查询/凭证上传）归
@@ -39,7 +39,7 @@ import com.aieducenter.aiplatform.support.Tsid;
  */
 @RestController
 @Validated
-@Tag(name = "Orders", description = "订单：确认下单 / 详情 / 取消 / 设计资产包下载 / 确认范围并准备合同 / 合同预览")
+@Tag(name = "Orders", description = "订单：下单 / 详情 / 取消 / 设计资产包下载 / 确认范围并准备合同 / 合同预览")
 public class OrderController {
 
     private final OrderAppService appService;
@@ -72,17 +72,19 @@ public class OrderController {
     }
 
     @PostMapping("/api/projects/{projectId}/orders")
-    @Operation(summary = "确认下单（冻结 PRD 快照与交付物类型入单）",
-            description = "纯按钮零输入：读当前 PRD 全文冻结为订单快照（此后 PRD 修订不影响本单，"
-                    + "取消再下 = 新单新快照），待报价起步；交付物类型自项目终点类型一并冻结"
+    @Operation(summary = "下单（过双确认门冻结 PRD 确认版与交付物类型入单）",
+            description = "纯按钮零输入：下单前置门＝存在已确认 PRD 版本＋Demo 确认版本（无确认"
+                    + "如实拦截 ORD_018/ORD_019），过门即冻结已确认 PRD 版本全文冗余拷贝＋双版本"
+                    + "引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用），待报价起步；"
+                    + "交付物类型自项目终点类型一并冻结"
                     + "（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。"
                     + "设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态"
                     + "＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝"
                     + "下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），"
                     + "取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张"
                     + "未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落"
-                    + "（#29）。项目不存在 404 PRJ_001；PRD 从未产出 409 PRJ_015；项目已归档"
-                    + " 409 ORD_004；打包环境故障 WSP_002")
+                    + "（#29）。项目不存在 404 PRJ_001；无已确认 PRD 版本 409 ORD_018；无 Demo"
+                    + " 确认版本 409 ORD_019；项目已归档 409 ORD_004；打包环境故障 WSP_002")
     public ApiResponse<OrderResponse> place(@PathVariable String projectId) {
         return ApiResponse.ok(appService.place(Tsid.resolve(projectId, ProjectMessage.PROJECT_NOT_FOUND)));
     }
@@ -92,8 +94,8 @@ public class OrderController {
             description = "状态（Integer code：1=待报价 2=已报价 3=已支付 4=已归档 5=已取消）"
                     + "+ 报价面（总价/币种/后台备注/改价历史新→旧，#29）+ 范围文本三段"
                     + "（#336 后台录入工作副本——「核对范围与报价」子步骤的确认面）"
-                    + "+ 下单/取消时点 + 支付/归档时点（#30——已支付为瞬态，paidAt 与 "
-                    + "archivedAt 同拍）。订单不存在 404 ORD_001")
+                    + "+ 下单/取消时点 + 支付/归档时点（#338 起已支付＝开工条件满足的真实"
+                    + "中间态，paidAt 先落、archivedAt 归档步骤后落）。订单不存在 404 ORD_001")
     public ApiResponse<OrderResponse> detail(@PathVariable String id) {
         return ApiResponse.ok(appService.detail(Tsid.resolve(id, OrderMessage.ORDER_NOT_FOUND)));
     }

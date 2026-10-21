@@ -513,7 +513,7 @@ class ProjectControllerTest {
         performAsUser(post("/api/projects/100/generate"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(4018))
-                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD，系统会随后自动生成"));
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo"));
     }
 
     @Test

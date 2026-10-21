@@ -41,7 +41,7 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
 
     /**
      * 项目名下最近一张订单（任意状态；#30 归档终态「完整记录」的嵌入面——
-     * 支付归档后订单转终态，activeOrder 归空、项目页改挂本嵌入取订单卡）。
+     * 订单转终态（已归档＝后台人工/已取消）后 activeOrder 归空、项目页改挂本嵌入取订单卡）。
      * createdAt 同拍按 id 破平（TSID 时间有序）。
      */
     Optional<Order> findFirstByProjectIdOrderByCreatedAtDescIdDesc(Long projectId);

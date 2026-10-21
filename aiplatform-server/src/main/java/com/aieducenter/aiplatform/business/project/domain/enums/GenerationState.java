@@ -26,7 +26,7 @@ public enum GenerationState implements BaseEnum<GenerationState> {
     /** 生成中断（有轨道片行但不在途且未生成：失败终态/重启/中断——「继续生成」从断点续跑）。 */
     INTERRUPTED(3, "生成中断"),
 
-    /** 已生成（generated_at 落位＝最后一片收口＝「确认下单」门槛；恒赢迭代在途）。 */
+    /** 已生成（generated_at 落位＝最后一片收口＝Demo 首版成版锚；恒赢迭代在途）。 */
     GENERATED(4, "已生成");
 
     private final Integer code;

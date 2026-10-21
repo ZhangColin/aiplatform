@@ -253,7 +253,7 @@ class DispatchAppServiceTest {
 
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), argThat(
                 payload -> String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
-                        .contains("确认下单")));
+                        .contains("确认此版本，准备签约")));
         verify(agentClient, times(1)).converse(any(), any());
     }
 
@@ -267,7 +267,7 @@ class DispatchAppServiceTest {
 
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), argThat(
                 payload -> String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
-                        .contains("首次生成完成")));
+                        .contains("Demo 生成完成后")));
     }
 
     @Test

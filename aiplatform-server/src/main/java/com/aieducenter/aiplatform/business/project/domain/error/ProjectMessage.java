@@ -29,8 +29,8 @@ public enum ProjectMessage implements CodeMessage {
     /** 生成重复发起守卫：已生成（调整走对话区意见）或生成在途。 */
     GENERATION_ALREADY_REQUESTED(409, "PRJ_017", "系统已生成或正在生成中，请勿重复发起"),
 
-    /** 生成前置事实守卫：PRD 从未产出（待定项未清不设门，无 PRD 除外；#101 生成无门后兜直连调用）。 */
-    GENERATION_PRD_NOT_PRODUCED(409, "PRJ_018", "PRD 尚未产出，先在对话区把需求聊出 PRD，系统会随后自动生成"),
+    /** 生成前置事实守卫：PRD 从未产出（确认门的前置——无 PRD 无从确认；直连调用兜底）。 */
+    GENERATION_PRD_NOT_PRODUCED(409, "PRJ_018", "PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo"),
 
     /** 更新任务前置事实守卫：系统从未生成（迭代在首次生成完成后才开始）。 */
     FIX_RUN_NOT_GENERATED(409, "PRJ_019", "系统还没做好，等系统生成完成后再提修改意见"),

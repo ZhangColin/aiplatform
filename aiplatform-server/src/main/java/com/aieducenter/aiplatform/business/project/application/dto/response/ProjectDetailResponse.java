@@ -26,10 +26,10 @@ import com.aieducenter.aiplatform.business.project.domain.enums.ProjectType;
  * @param archived            是否已归档（单向终点）
  * @param createdAt           创建时间
  * @param updatedAt           更新时间（审计列）
- * @param prdProducedAt       PRD 产出时点（成果区长出判据；NULL = 闲聊期——对话区占满
- *                            全宽、成果区未长）
+ * @param prdProducedAt       PRD 产出时点（PRD 文档面滑出判据；NULL = 闲聊期——对话占
+ *                            满全宽、右栏未滑出）
  * @param generatedAt         首次生成时点（run 成功收口单向置位；NULL = 未生成过——
- *                            生成自动发起或失败重发、「确认下单」不可见的推导口径）
+ *                            生成经确认门触发或失败重发、「Demo 确认门」不可用的推导口径）
  * @param generationState     生成态四态投影（#222：轨道表＋generated_at＋在途标记
  *                            派生——NEVER_GENERATED / GENERATING / INTERRUPTED /
  *                            GENERATED；与 SSE 会话态无关，刷新/回访后档位仍正确，

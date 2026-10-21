@@ -152,7 +152,7 @@ public class ProjectController {
                     + "自动派更新 run）；咨询 → 主智能体答询轮（只读工具集"
                     + "查证后直接作答，零产物：PRD 与系统都不动、不起更新 run）；"
                     + "兜底（含下单意图）→ 平台定型轻引导（guide-reply 事件直达对话区，零产物，"
-                    + "下单意图指引「确认下单」入口）。对用户全程隐式，无需标注类型。"
+                    + "下单意图指引「确认此版本，准备签约」入口）。对用户全程隐式，无需标注类型。"
                     + "守卫与分类同步完成后返回，runId = 所派运行的标识（意见 = 意见轮 / "
                     + "咨询 = 答询轮 / 兜底 = guide-reply 事件锚，挂 /api/events?runId= ），"
                     + "回复经 SSE 到达（run-start 事件携带智能体配置键 agent=main）。"
@@ -250,7 +250,7 @@ public class ProjectController {
                     + "2=生成中 3=生成中断 4=已生成）——轨道表＋generated_at＋在途标记派生、"
                     + "与 SSE 会话态无关（刷新/回访后档位仍正确）；生成中断/从未生成即"
                     + "「继续生成」出口的档位（POST /{id}/generate 断点续跑或计划重派），"
-                    + "已生成 =「确认下单」门槛口径不变")
+                    + "已生成 = Demo 首版成版锚（v1 随 generated_at 同刻落）")
     public ApiResponse<ProjectDetailResponse> get(@PathVariable String id) {
         return ApiResponse.ok(queryAppService.detail(parseId(id)));
     }

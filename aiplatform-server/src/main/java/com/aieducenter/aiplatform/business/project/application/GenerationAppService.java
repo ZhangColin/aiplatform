@@ -113,8 +113,8 @@ import lombok.extern.slf4j.Slf4j;
  * 失败不出用户面事件；每片超限转终态失败即发 {@code run-failed} 收口事件（#56，
  * run 失败为唯一失败终态），由用户「继续生成」脏续兜底（断点续跑同路，不重头；
  * generated_at 不落位 = 出口口径仍在）。最后一片
- * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——「确认下单」
- * 可见性口径）。</p>
+ * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——Demo 首版
+ * 成版锚）。</p>
  */
 @Service
 @Slf4j
@@ -1443,7 +1443,7 @@ public class GenerationAppService {
      * （收口扩载 verification 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
      * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
-     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移「确认下单」可见性）——且与
+     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移 Demo 首版成版锚）——且与
      * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,

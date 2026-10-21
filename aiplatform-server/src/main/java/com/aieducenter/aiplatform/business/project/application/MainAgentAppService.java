@@ -55,12 +55,13 @@ import lombok.extern.slf4j.Slf4j;
  * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
  * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
- * <p><b>链必达收口（#43，#101 生成无门自动发起）</b>：主智能体无派发权——生成与
- * 更新 run 的派发都不在模型手里，平台在意见轮落定后观测收口（无挂起问答）即按
- * 项目态自动派发：已生成派更新 run（交接物 = 用户意见原文 + 需求侧判定结果——
- * PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、未生成但已产出 PRD 派
- * 首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}）、未
- * 产出 PRD 止于对话（访谈期常态）。判定结果从工具调用事实观测
+ * <p><b>链必达收口（#43；#101 生成无门已由 #332 生成加门推翻）</b>：主智能体无
+ * 派发权——生成与更新 run 的派发都不在模型手里，平台在意见轮落定后观测收口（无
+ * 挂起问答）即按项目态自动派发：已生成派更新 run（交接物 = 用户意见原文 + 需求
+ * 侧判定结果——PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、未生成但
+ * 已存在已确认 PRD 版本才派首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}，
+ * PRD 已产出未确认不派——确认门是首个生成的唯一触发）、未产出 PRD 止于对话
+ * （访谈期常态）。判定结果从工具调用事实观测
  * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD
  * 止于对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
  * {@link GenerationAppService}）。</p>

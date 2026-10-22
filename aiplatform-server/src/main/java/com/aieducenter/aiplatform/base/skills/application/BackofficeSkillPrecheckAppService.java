@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.EdgeModelSupplier;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.base.metering.domain.model.UsageEvent;
@@ -39,9 +40,10 @@ import com.cartisan.core.exception.ApplicationException;
  *
  * <p><b>判定引擎＝classify 先例形态的一次性会话</b>（不抽公共「一次性判定」组件
  * ——三个调用点形状各异，防投机性复杂度）：空 sink（无 SSE 事件）、短超时 15s、
- * 专用会话前缀 {@code skillcheck-}（每次预检独立会话，不承上下文）、专用 flash
- * 档模型配置键（{@code app.skills.precheck-model}，代码保证缺省——不吃
- * agentscope 缺省模型的部署配法）、专用计量标记 agentKind=skillcheck（平台级
+ * 专用会话前缀 {@code skillcheck-}（每次预检独立会话，不承上下文）、模型走边缘
+ * 点档位链（#366 收编：precheck 档位库值优先缺省 flash，经 {@link EdgeModelSupplier}
+ * 反转读 business 配置面＋解析单点——旧 yml 专用键退役；轻调用不烧重档原意承
+ * #51）、专用计量标记 agentKind=skillcheck（平台级
  * 归属桶 subject=skills——预检无项目语境）。系统提示词要求结构化输出，容错解析，
  * 不可解析按失败降级。
  *
@@ -93,16 +95,16 @@ public class BackofficeSkillPrecheckAppService {
     private final SkillStore skillStore;
     private final SlotProtocolSource protocolSource;
     private final AgentscopeAgentClient agentClient;
-    private final SkillsProperties properties;
+    private final EdgeModelSupplier edgeModels;
 
     public BackofficeSkillPrecheckAppService(BackofficeSkillAppService skillAppService,
             SkillStore skillStore, SlotProtocolSource protocolSource,
-            AgentscopeAgentClient agentClient, SkillsProperties properties) {
+            AgentscopeAgentClient agentClient, EdgeModelSupplier edgeModels) {
         this.skillAppService = skillAppService;
         this.skillStore = skillStore;
         this.protocolSource = protocolSource;
         this.agentClient = agentClient;
-        this.properties = properties;
+        this.edgeModels = edgeModels;
     }
 
     /**
@@ -132,20 +134,23 @@ public class BackofficeSkillPrecheckAppService {
     // ---------- 内部 ----------
 
     /**
-     * 一次性判定调用（classify 先例形态）：skillcheck-{runId} 独立会话、专用
-     * flash 配置键、空 sink、短超时、计量 agentKind=skillcheck、不触任何工作区。
+     * 一次性判定调用（classify 先例形态）：skillcheck-{runId} 独立会话、模型走
+     * 边缘点档位链（#366 收编：precheck 档位经 {@link EdgeModelSupplier} 反转读
+     * business 配置面＋解析单点——库值优先缺省 flash，后台改档下一轮预检即生效）、
+     * 空 sink、短超时、计量 agentKind=skillcheck、不触任何工作区。
      * 失败/超时/输出不可解析返回 null（调用方降级「未执行」）。
      */
     private List<PrecheckHint> judge(SkillSlot slot, String protocol,
             List<SkillRecord> assigned, List<SkillRecord> candidates) {
         String runId = EventsAppService.newRunId();
         String sessionId = SESSION_PREFIX + runId;
+        EdgeModelSupplier.EdgeModel model = edgeModels.precheckModel();
         AgentCommand command = new AgentCommand(
                 runId,
                 assemblePrompt(slot, protocol, assigned, candidates),
                 PRECHECK_SYSTEM_PROMPT,
-                properties.getPrecheckModel(), // 专用配置键（缺省 flash 档）
-                null, // 无通道语境：配置缺省串走 SDK 内置 provider（ADR-0031 边缘点收编属 #366）
+                model.modelString(), // 边缘点档位解析产物（缺省 flash 档）
+                model.channel(), // 通道注入：key/baseUrl 入 SDK，不吃环境变量
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(METERING_SUBJECT,

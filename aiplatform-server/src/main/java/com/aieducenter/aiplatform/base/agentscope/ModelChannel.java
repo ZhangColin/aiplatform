@@ -11,8 +11,8 @@ import java.util.HexFormat;
  * 经创建上下文注入 SDK（覆盖依赖库默认地址与环境变量），enableThinking 显式关
  * （方舟 DeepSeek V4 标深度思考，不传参默认开/关未确证，冒烟实测后定终值）。
  *
- * <p>可为 null＝无通道语境（未走档位解析的一次性调用面，如取名/分类/预检的
- * 配置缺省串）——SDK 侧回落内置 provider 的环境变量/默认地址（既有行为）。</p>
+ * <p>可为 null＝无通道语境（测试形——主链全部调用面〔三座与边缘四点，#366 收编〕
+ * 一律经档位解析携通道注入；null 时 SDK 侧回落内置 provider 的环境变量/默认地址）。</p>
  *
  * <p>{@link #fingerprint()} 是<b>生效配置指纹</b>：进智能体实例缓存键
  * （{@code AgentscopeHarnessAgentFactory#obtain}）——同模型串下换 key/换地址

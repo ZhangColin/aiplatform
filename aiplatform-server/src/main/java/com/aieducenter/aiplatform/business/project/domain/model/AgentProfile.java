@@ -22,7 +22,8 @@ import com.cartisan.core.domain.BaseEnum;
  * 仍是智能体身份（有哪些智能体、职能、寻址键）与<b>缺省</b>正本；systemPrompt/
  * 模型档位的运营覆盖态落库（{@code prj_agent_configs}）后台可维护——装配「库值
  * 优先、缺省回落枚举默认」（解析单点 {@code AgentConfigAppService}），变更留痕
- * 可回滚。classify/naming 等一次性判定提示词不属智能体身份面，不进配置面。</p>
+ * 可回滚。边缘调用点（取名/压缩/分类/预检）非智能体身份面，档位经
+ * {@link AgentEdgePoint} 同表收编（#366，值面仅档位）；其提示词仍不属配置面。</p>
  *
  * <p>{@link #key()} 是两处寻址腿的稳定键：工具集装配（ProfileToolkitSupplier 按
  * 配置发放）与 SSE run-start 载荷的 {@code agent} 字段（前端对话面/工作消息的

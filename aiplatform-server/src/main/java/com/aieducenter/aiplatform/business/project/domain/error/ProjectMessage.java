@@ -189,7 +189,10 @@ public enum ProjectMessage implements CodeMessage {
     MODEL_PROVIDER_DISABLED(503, "PRJ_062", "模型供应商通道已停用：{0}（启用该通道后重试）"),
 
     /** 通道 key 空（ADR-0031）：apiKey 落库唯一正本、无环境变量回落——缺失即明确报错，不静默兜底。 */
-    MODEL_PROVIDER_KEY_MISSING(503, "PRJ_063", "模型供应商通道未配置 apiKey：{0}（在通道配置填入后重试）");
+    MODEL_PROVIDER_KEY_MISSING(503, "PRJ_063", "模型供应商通道未配置 apiKey：{0}（在通道配置填入后重试）"),
+
+    /** 边缘调用点不存在（#366）：边缘点档位面只有取名/压缩/分类/预检四点；三座智能体走 PRJ_033 端点。 */
+    EDGE_POINT_NOT_FOUND(404, "PRJ_064", "边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 

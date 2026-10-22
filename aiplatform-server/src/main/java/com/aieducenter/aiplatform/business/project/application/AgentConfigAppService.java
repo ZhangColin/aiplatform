@@ -3,6 +3,7 @@ package com.aieducenter.aiplatform.business.project.application;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfigStore;
@@ -19,7 +20,9 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
  * 下一轮命令构建自然反映（对话轮本身是秒级 LLM 调用，读取代价可忽略）；智能体
  * 实例层不必感知——工厂缓存键已含 sysPrompt 与解析后的模型串＋通道指纹
  * （{@code AgentscopeAgentClient#prepareFor}），新值即新实例，进行中 run 不定格。
- * classify/naming 等一次性判定不走本面（提示词与档位各自独立，不属智能体身份面）。</p>
+ * 边缘调用点（取名/压缩/分类/预检）的<b>模型档位</b>同走本面
+ * （{@link #effectiveEdgeModelId}，#366 同表同机制）；其提示词仍不属配置面
+ * （一次性判定的编排内建）。</p>
  *
  * <p><b>工具面规格（#252）</b>：增强工具开关（web_search/fetch_url）同取生效值，
  * {@link EffectiveConfig#toolSpec()} 编成规格串随命令入底座——进工厂实例缓存键
@@ -69,6 +72,19 @@ public class AgentConfigAppService {
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),
                 config.routingSliceFeatureThreshold());
+    }
+
+    /**
+     * 边缘调用点生效档位键（#366，库值优先、缺省回落 {@link AgentEdgePoint#modelId()}
+     * ——缺省腿单点，三座同机制同表）：值面仅模型档位（边缘行其余覆盖列结构性
+     * 缺省），模型串与通道注入由 {@code ModelTierAppService#resolve} 在调用侧解析。
+     */
+    @Transactional(readOnly = true)
+    public String effectiveEdgeModelId(AgentEdgePoint point) {
+        AgentOperationalConfig override = configStore.find(point.key());
+        AgentOperationalConfig config =
+                override != null ? override : AgentOperationalConfig.defaults(point.key());
+        return config.effectiveModelId(point.modelId());
     }
 
     /**

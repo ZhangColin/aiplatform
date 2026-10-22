@@ -70,9 +70,6 @@ class DispatchAppServiceTest {
     private ConversationHistoryAppService conversationHistory;
 
     @Autowired
-    private DispatchProperties dispatchProperties;
-
-    @Autowired
     private CodingRunTrack codingRunTrack;
 
     @Autowired
@@ -152,13 +149,13 @@ class DispatchAppServiceTest {
         AgentCommand classify = command.getAllValues().get(0);
         AgentCommand inquiry = command.getAllValues().get(1);
 
-        // 分类命令：智能体边界轻量调用——一次性会话、模型档由专用配置键决定（#51，
-        // 缺省 flash，不吃 agentscope 缺省模型的部署配法）、不触项目工作区、
-        // 计量 agentKind=classify、短超时、无流关联（空 sink 无事件）
+        // 分类命令：智能体边界轻量调用——一次性会话、模型档走边缘点档位链（#366：
+        // classification 档位库值优先缺省 flash → 解析单点产模型串＋通道注入——
+        // 后台改档下一轮派发即生效）、不触项目工作区、计量 agentKind=classify、
+        // 短超时、无流关联（空 sink 无事件）
         assertThat(classify.sessionId()).startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
-        assertThat(classify.modelString()).isEqualTo(dispatchProperties.getClassificationModel());
-        assertThat(dispatchProperties.getClassificationModel())
-                .isEqualTo("deepseek:deepseek-v4-flash"); // 缺省即 flash 档（代码保证）
+        assertThat(classify.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(classify.modelChannel()).isNotNull(); // 通道注入（key/baseUrl 入 SDK）
         assertThat(classify.workspaceId()).isNull();
         assertThat(classify.agentKey()).isNull();
         assertThat(classify.timeout()).isEqualTo(java.time.Duration.ofSeconds(15));

@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +25,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.aieducenter.aiplatform.base.eventhub.domain.model.AgentEventTypes;
-import com.aieducenter.aiplatform.base.skills.application.SkillsProperties;
+import com.aieducenter.aiplatform.business.project.application.ModelTierSeed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
@@ -51,8 +52,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <li><b>无重叠</b>：空提示＋executed=true 成功态；</li>
  * <li><b>失败/超时降级</b>：桩抛错/返回不可解析输出 → executed=false「未执行」
  * （与「无重叠」可区分）、hints 恒空，且<b>不拦后续指派</b>（PUT 照常落地）；</li>
- * <li><b>命令断言</b>（ArgumentCaptor 逐字段）：专用会话前缀 skillcheck-、专用
- * flash 档配置键（代码保证缺省）、空 sink（喂事件无事发生）、短超时 15s、专用
+ * <li><b>命令断言</b>（ArgumentCaptor 逐字段）：专用会话前缀 skillcheck-、模型
+ * 走边缘点档位链（#366 收编：precheck 档位库值优先缺省 flash → 解析单点产模型
+ * 串＋通道注入）、空 sink（喂事件无事发生）、短超时 15s、专用
  * 计量标记 agentKind=skillcheck＋平台级归属桶、不触工作区、无配置语境；</li>
  * <li><b>对照材料组装</b>：生效 systemPrompt 库值覆盖优先（造一条 prj_agent_configs
  * 覆盖行验证——提示词含覆盖文本、不含枚举默认正文）＋该槽位已指派启用技能
@@ -89,15 +91,19 @@ class BackofficeSkillPrecheckSeamTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private SkillsProperties properties;
-
     /** 判定引擎桩（classify 测试先例）：按会话前缀脚本化分流。 */
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
     /** 已种植库条目 id（teardown 精确清理）。 */
     private final List<Long> plantedSkillIds = new ArrayList<>();
+
+    @BeforeEach
+    void ensureChannelKeyForRealResolution() {
+        // 真解析链护卫（#366 边缘点收编）：预检模型走 precheck 档位→解析单点真链路
+        // （测试环境无 key 注入——幂等补测试 key，DispatchAppServiceTest 同款）
+        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+    }
 
     @AfterEach
     void tearDown() {
@@ -139,9 +145,8 @@ class BackofficeSkillPrecheckSeamTest {
         // 命令断言（ArgumentCaptor 逐字段，classify 先例形制）
         AgentCommand command = capturedCommand();
         assertThat(command.sessionId()).startsWith("skillcheck-");
-        assertThat(command.modelString())
-                .isEqualTo(properties.getPrecheckModel())
-                .isEqualTo("deepseek:deepseek-v4-flash"); // 缺省即 flash 档（代码保证）
+        assertThat(command.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        assertThat(command.modelChannel()).isNotNull(); // 边缘点档位链（#366 收编）
         assertThat(command.timeout()).isEqualTo(java.time.Duration.ofSeconds(15));
         assertThat(command.usageContext().subject()).isEqualTo("skills");
         assertThat(command.usageContext().dims())

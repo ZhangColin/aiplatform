@@ -3,6 +3,8 @@ package com.aieducenter.aiplatform.business.project.application;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.aieducenter.aiplatform.base.agentscope.ModelChannel;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ModelProvider;
@@ -26,6 +28,7 @@ import com.cartisan.core.exception.ApplicationException;
  * 深度思考、不传参数时默认开/关未确证——装配不留给模型默认；终值冒烟实测开/关
  * 的延迟与质量后定（#369 活体验收）。</p>
  */
+@Slf4j
 @Service
 public class ModelTierAppService {
 
@@ -73,8 +76,13 @@ public class ModelTierAppService {
             throw new ApplicationException(ProjectMessage.MODEL_PROVIDER_KEY_MISSING,
                     provider.providerKey());
         }
-        return new ResolvedModel(tierKey, provider.providerKey(), tier.modelName(),
-                provider.baseUrl(), provider.apiKey(), THINKING_ENABLED);
+        ResolvedModel resolved = new ResolvedModel(tierKey, provider.providerKey(),
+                tier.modelName(), provider.baseUrl(), provider.apiKey(), THINKING_ENABLED);
+        // 装配可证（#366）：档位键 → 实际模型串的单点日志——三座与边缘四点的每次
+        // 命令构建/装配经此留迹，后台改档后的生效链路 grep 可查（key 不入日志）
+        log.info("[model-tier] 档位解析 {} → {}（通道 {}，thinking={}）", tierKey,
+                resolved.modelString(), provider.providerKey(), THINKING_ENABLED);
+        return resolved;
     }
 
     /**

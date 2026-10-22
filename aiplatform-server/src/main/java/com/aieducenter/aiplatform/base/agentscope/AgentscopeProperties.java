@@ -6,10 +6,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * AgentScope 内核配置（前缀 app.agentscope）：模型默认值 / 默认人格 / agent 名 /
- * 工作区根 / 单轮超时。workspace 是本地兜底工作区（命令未带 workspaceId 时用，
- * 如取名轻调用），为空时用 AgentScope 默认（.agentscope/workspace）；带 workspaceId
- * 的调用解析为项目 dev 工作区（容器文件面，不经此配置）。
+ * AgentScope 内核配置（前缀 app.agentscope）：默认人格 / agent 名 / 工作区根 /
+ * 单轮超时。模型选用不在此（ADR-0031/#366 起全链走档位解析：三座与边缘四点的
+ * 模型串＋通道注入由业务侧 {@code ModelTierAppService} 解析随命令/装配透传——
+ * 旧 yml 模型键 default-model/compaction-model 已随边缘点收编退役）。workspace
+ * 是本地兜底工作区（命令未带 workspaceId 时用，如取名轻调用），为空时用
+ * AgentScope 默认（.agentscope/workspace）；带 workspaceId 的调用解析为项目
+ * dev 工作区（容器文件面，不经此配置）。
  */
 @Component
 @ConfigurationProperties(prefix = "app.agentscope")
@@ -17,9 +20,6 @@ public class AgentscopeProperties {
 
     /** agent 名（AgentState 落盘命名空间的一部分，稳定勿动） */
     private String agentName = "platform-agent";
-
-    /** 默认模型串（provider:modelId，白名单见 ModelRef） */
-    private String defaultModel = "deepseek:deepseek-v4-flash";
 
     /** 默认系统提示词（命令未带 systemPrompt 时兜底） */
     private String defaultSystemPrompt = "你是平台智能体。";
@@ -47,15 +47,10 @@ public class AgentscopeProperties {
      * 尤甚。取 400K：按最坏低估比 2.5× 折算 est 400K ≈ 真实 1M，正好在
      * context_length_exceeded 硬上限前触发（streamEvents 路径天然受益，「炸后下轮」
      * 因下一轮先压缩再跑而自愈，#108 / ADR-0012）。null = 回框架动态缺省。
+     * 压缩模型不在此配（#366 起走边缘点档位链：compaction 档位库值优先缺省 flash，
+     * 经 {@code EdgeModelSupplier} 解析注入工厂装配）。
      */
     private Integer compactionTriggerTokens = 400_000;
-
-    /**
-     * 压缩（摘要）专用模型串（provider:modelId，压缩模型档位）。缺省取 flash 便宜档——
-     * 执行体（pro）会话的压缩不再烧 pro；主智能体本就 flash，同档无成本差但显式化
-     * （ADR-0012：框架缺省值转平台显式配置）。null/空 = 回框架缺省（用主模型）。
-     */
-    private String compactionModel = "deepseek:deepseek-v4-flash";
 
     /**
      * 模型流断流自动重试次数上界（含首试；#321）。单条模型流遇可重试错误（HTTP
@@ -92,14 +87,6 @@ public class AgentscopeProperties {
 
     public void setAgentName(String agentName) {
         this.agentName = agentName;
-    }
-
-    public String getDefaultModel() {
-        return defaultModel;
-    }
-
-    public void setDefaultModel(String defaultModel) {
-        this.defaultModel = defaultModel;
     }
 
     public String getDefaultSystemPrompt() {
@@ -140,14 +127,6 @@ public class AgentscopeProperties {
 
     public void setCompactionTriggerTokens(Integer compactionTriggerTokens) {
         this.compactionTriggerTokens = compactionTriggerTokens;
-    }
-
-    public String getCompactionModel() {
-        return compactionModel;
-    }
-
-    public void setCompactionModel(String compactionModel) {
-        this.compactionModel = compactionModel;
     }
 
     public Integer getModelStreamRetryMaxAttempts() {

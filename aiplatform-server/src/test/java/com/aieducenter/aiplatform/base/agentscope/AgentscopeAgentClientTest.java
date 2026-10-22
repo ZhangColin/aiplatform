@@ -90,7 +90,6 @@ class AgentscopeAgentClientTest {
     void setUp() {
         properties = new AgentscopeProperties();
         properties.setAgentName("platform-agent");
-        properties.setDefaultModel("deepseek:deepseek-v4-flash");
         properties.setDefaultSystemPrompt("你是平台智能体。");
         properties.setTimeout(Duration.ofSeconds(30));
         client = new AgentscopeAgentClient(factory, properties, workspaceLifecycleAppService,
@@ -121,7 +120,7 @@ class AgentscopeAgentClientTest {
                 new TextBlockDeltaEvent("r-1", "b-1", "呀"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        var reply = client.converse(command(null, null), frames::add);
+        var reply = client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         // 透传 text 事件照发，解说尾段另成 part-text 部件（收口事件前）
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
@@ -158,7 +157,7 @@ class AgentscopeAgentClientTest {
                 new ToolCallEndEvent("r-1", "tc-1", "execute"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         assertThat(frames.stream().map(AgentEvent::type)).noneMatch(type ->
                 type.startsWith("live-") || type.equals("role-assigned")
@@ -173,7 +172,7 @@ class AgentscopeAgentClientTest {
         givenStream(new ExceedMaxItersEvent("r-1", 10, 10));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         AgentEvent finish = frames.get(frames.size() - 1);
         assertThat(finish.type()).isEqualTo(AgentEventTypes.RUN_FINISH);
@@ -184,7 +183,7 @@ class AgentscopeAgentClientTest {
     void given_converse_when_call_agent_then_runtime_context_carries_session_user_and_run_id() {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "嗯"));
 
-        client.converse(command(null, null), event -> {
+        client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
         });
 
         verify(agent).streamEvents(any(List.class), contextCaptor.capture());
@@ -203,7 +202,7 @@ class AgentscopeAgentClientTest {
                 WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
-        client.converse(new AgentCommand("run-9", "写 PRD", null, null, "s-9", "alice",
+        client.converse(new AgentCommand("run-9", "写 PRD", null, "deepseek:deepseek-v4-flash", "s-9", "alice",
                 null, "42", Map.of()), event -> {
                 });
 
@@ -219,7 +218,7 @@ class AgentscopeAgentClientTest {
                 WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
 
-        client.converse(new AgentCommand("run-1", "咨询", null, null, null, "s-1", "alice",
+        client.converse(new AgentCommand("run-1", "咨询", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null), event -> {
                 });
 
@@ -231,7 +230,7 @@ class AgentscopeAgentClientTest {
     void given_no_workspace_id_when_converse_then_local_workspace_fallback() {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "本地"));
 
-        client.converse(command(null, null), event -> {
+        client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
         });
 
         verify(factory).obtain(any(), any(), any(), any(),
@@ -247,7 +246,7 @@ class AgentscopeAgentClientTest {
                 WorkspaceId.of("42"), "ws-42", "previewnet"));
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "好"));
 
-        client.converse(new AgentCommand("run-1", "梳理需求", null, null, null, "s-1", "alice",
+        client.converse(new AgentCommand("run-1", "梳理需求", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, "42", Map.of(), null, null, null, "main", false, false, null, null), event -> {
                 });
 
@@ -286,7 +285,7 @@ class AgentscopeAgentClientTest {
                     return Flux.just(new TextBlockDeltaEvent("r-1", "b-1", "答"));
                 }));
 
-        client.converse(command(null, null), event -> {
+        client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
         });
 
         assertThat(duringStream.get()).isNull();
@@ -327,7 +326,7 @@ class AgentscopeAgentClientTest {
                 new TextBlockDeltaEvent("reply-1", "b-2", "订单管理完成"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         // 部件序列（步骤分组已退役 #115：ModelCallStart 不产 part-step）：
         // 解说段 → 动作 started（参数在途，通用对象）→ 动作 running（参数落定，
@@ -371,7 +370,7 @@ class AgentscopeAgentClientTest {
                 new ToolResultEndEvent("reply-1", "tc-1", "execute", ToolResultState.ERROR));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         List<AgentEvent> actions = frames.stream()
                 .filter(f -> f.type().equals(AgentEventTypes.PART_ACTION)).toList();
@@ -396,7 +395,7 @@ class AgentscopeAgentClientTest {
                 new ToolResultEndEvent("reply-1", "tc-1", "write_file", ToolResultState.SUCCESS));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         // 引擎透传承存（开放集合），旧直播族不出现
         assertThat(frames.stream().map(AgentEvent::type)).contains(
@@ -425,7 +424,7 @@ class AgentscopeAgentClientTest {
                         .withSource("platform-agent/verify"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(command(null, null), frames::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         // 透传 text：执行体段无 source、子智能体段带 source（末段名）
         List<AgentEvent> texts = frames.stream().filter(f -> "text".equals(f.type())).toList();
@@ -468,7 +467,7 @@ class AgentscopeAgentClientTest {
                 new ModelCallEndEvent("evt-9", ts(2_400), "sub-1", null)
                         .withSource("platform-agent/verify"));
 
-        AgentReply reply = client.converse(command(null, null), event -> {
+        AgentReply reply = client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
         });
 
         assertThat(reply.durations().llmMs()).isEqualTo(300);
@@ -486,7 +485,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(new AgentCommand("run-1", "做系统", null, null, null, "s-1", "alice",
+        client.converse(new AgentCommand("run-1", "做系统", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, null, Map.of(), null, null, null, "CODER", false, false, null, null), frames::add);
 
         assertThat(frames.get(0).type()).isEqualTo(AgentEventTypes.RUN_START);
@@ -495,7 +494,7 @@ class AgentscopeAgentClientTest {
         // 无配置语境（取名等一次性调用）：run-start 不带 agent 键
         givenStream(new TextBlockDeltaEvent("r-2", "b-1", "名"));
         List<AgentEvent> plain = new ArrayList<>();
-        client.converse(command(null, null), plain::add);
+        client.converse(command("deepseek:deepseek-v4-flash", null), plain::add);
         assertThat(plain.get(0).payload()).doesNotContainKey("agent");
     }
 
@@ -505,7 +504,7 @@ class AgentscopeAgentClientTest {
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "写"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        client.converse(new AgentCommand("run-1", "做系统", null, null, null, "s-1", "alice",
+        client.converse(new AgentCommand("run-1", "做系统", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, null, Map.of(), null, null, null, "CODER", false, false,
                 RunHeading.slice("商品浏览", 2, 5), null), frames::add);
 
@@ -521,7 +520,7 @@ class AgentscopeAgentClientTest {
                 .thenReturn(Flux.error(new RuntimeException("boom")));
 
         List<AgentEvent> frames = new ArrayList<>();
-        assertThatThrownBy(() -> client.converse(command(null, null), frames::add))
+        assertThatThrownBy(() -> client.converse(command("deepseek:deepseek-v4-flash", null), frames::add))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("智能体调用失败");
 
@@ -555,7 +554,7 @@ class AgentscopeAgentClientTest {
 
         List<AgentEvent> frames = new ArrayList<>();
         AgentTurnFailure failure = catchThrowableOfType(
-                () -> client.converse(command(null, null), frames::add), AgentTurnFailure.class);
+                () -> client.converse(command("deepseek:deepseek-v4-flash", null), frames::add), AgentTurnFailure.class);
 
         assertThat(failure).isNotNull();
         assertThat(failure.getMessage()).contains("智能体调用失败").contains("mid-stream boom");
@@ -582,7 +581,7 @@ class AgentscopeAgentClientTest {
                 .thenThrow(new IllegalStateException("DeepSeek API key 未配置"));
 
         List<AgentEvent> frames = new ArrayList<>();
-        assertThatThrownBy(() -> client.converse(command(null, null), frames::add))
+        assertThatThrownBy(() -> client.converse(command("deepseek:deepseek-v4-flash", null), frames::add))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("API key");
 
@@ -603,16 +602,18 @@ class AgentscopeAgentClientTest {
                 .thenReturn(Flux.error(new RuntimeException("mid-stream boom")));
 
         assertThatThrownBy(() -> client.converse(
-                        command(null, new UsageContext("prj-1", Map.of())), event -> {
+                        command("deepseek:deepseek-v4-flash", new UsageContext("prj-1", Map.of())), event -> {
                         }))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void given_no_model_string_when_converse_then_configured_default_applied() {
+    void given_command_when_converse_then_model_string_passed_through_and_prompt_defaulted() {
+        // 模型串必填直透（#366 起无配置缺省回落——全部调用面经档位解析携串），
+        // systemPrompt 缺省仍取内核配置默认
         givenStream(new TextBlockDeltaEvent("r-1", "b-1", "默认"));
 
-        client.converse(command(null, null), event -> {
+        client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
         });
 
         verify(factory).obtain(eq("platform-agent"), eq("你是平台智能体。"),
@@ -628,7 +629,7 @@ class AgentscopeAgentClientTest {
                         new ToolUseBlock("tc-q", "ask_user", Map.of("question", "用哪个框架?")))));
 
         List<AgentEvent> frames = new ArrayList<>();
-        var reply = client.converse(command(null, null), frames::add);
+        var reply = client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
 
         // 提问挂起（ask_user，唯一挂起源）= question-raised（问答作答通道）
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
@@ -766,7 +767,7 @@ class AgentscopeAgentClientTest {
 
     /** 带静默判死阈值的生成形命令（timeout 不设总墙钟——活超时接管）。 */
     private AgentCommand commandWithSilence(Duration silence) {
-        return new AgentCommand("run-1", "生成", null, null, null, "s-1", "alice",
+        return new AgentCommand("run-1", "生成", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, null, Map.of(), null, silence, null, null, false, false, null, null);
     }
 
@@ -814,7 +815,7 @@ class AgentscopeAgentClientTest {
                 Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
                 Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
 
-        assertThatThrownBy(() -> client.converse(command(null, null), event -> {
+        assertThatThrownBy(() -> client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
                 })).isInstanceOf(IllegalStateException.class);
     }
 
@@ -822,7 +823,7 @@ class AgentscopeAgentClientTest {
 
     /** 带静默判死阈值与工具窗预算的生成形命令（#355）。 */
     private AgentCommand commandWithSilence(Duration silence, Duration toolSilence) {
-        return new AgentCommand("run-1", "生成", null, null, null, "s-1", "alice",
+        return new AgentCommand("run-1", "生成", null, "deepseek:deepseek-v4-flash", null, "s-1", "alice",
                 null, null, Map.of(), null, silence, toolSilence, null, false, false, null, null);
     }
 

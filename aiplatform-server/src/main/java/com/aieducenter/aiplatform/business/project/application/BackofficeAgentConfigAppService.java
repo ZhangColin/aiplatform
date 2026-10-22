@@ -12,10 +12,13 @@ import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.aieducenter.aiplatform.base.agentscope.HarnessBuiltinTools;
 import com.aieducenter.aiplatform.business.project.application.dto.command.AgentConfigUpdateCommand;
+import com.aieducenter.aiplatform.business.project.application.dto.command.EdgeModelUpdateCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeAgentConfigResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeAgentConfigTraceResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeEdgeModelConfigResponse;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentConfigTrace;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentTool;
@@ -24,10 +27,12 @@ import com.aieducenter.aiplatform.business.project.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfigStore;
 
 /**
- * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：两座智能体（main/
- * executor——{@link AgentProfile#byKey} 单点寻址，classify/naming 等一次性判定
- * 不在配置面）的覆盖态读／全量写／变更留痕读。装配读腿（库值优先、缺省回落）
- * 在 {@link AgentConfigAppService}（运行面），本服务只做后台管理面。
+ * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
+ * executor/designer——{@link AgentProfile#byKey} 单点寻址）的覆盖态读／全量写／
+ * 变更留痕读，＋边缘调用点四件（取名/压缩/分类/预检，#366 同表收编——值面仅
+ * 模型档位，{@link AgentEdgePoint#byKey} 寻址）的档位读／写／留痕读。装配读腿
+ * （库值优先、缺省回落）在 {@link AgentConfigAppService}（运行面），本服务只做
+ * 后台管理面。
  *
  * <p>写语义＝PUT 全量替换：请求体即覆盖态终态，值面八件（systemPrompt、模型
  * 档位、两工具开关、路由策略四件〔#354〕）同写；null/空白＝清空覆盖回落枚举
@@ -36,8 +41,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
  * 重写）不落痕不写行（留痕链每痕都是真实变更，回滚才可逐痕回溯）；回滚＝把留痕
  * 旧值快照写回，即一次新变更、留新痕（不做版本树）。工具开关已生效装配（#252
  * {@link #toggleTool}：关即退出槽位装配面、开即回归——与本配置共表共留痕机制，
- * 增强工具窄幅写口）。事务：覆盖写入与留痕追加同事务原子（见
- * {@link AgentConfigStore}）。</p>
+ * 增强工具窄幅写口）。边缘点写同构（{@link #updateEdgeModel} 窄值面）。事务：
+ * 覆盖写入与留痕追加同事务原子（见 {@link AgentConfigStore}）。</p>
  */
 @Service
 public class BackofficeAgentConfigAppService {
@@ -45,6 +50,10 @@ public class BackofficeAgentConfigAppService {
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null);
+
+    /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
+    private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
+            new EdgeModelUpdateCommand(null);
 
     private final AgentConfigStore configStore;
 
@@ -79,7 +88,7 @@ public class BackofficeAgentConfigAppService {
         AgentProfile profile = requireProfile(agentKey);
         requireOperator(operator);
         AgentConfigUpdateCommand safe = command == null ? EMPTY_COMMAND : command;
-        AgentOperationalConfig current = currentOf(profile);
+        AgentOperationalConfig current = currentOf(profile.key());
         AgentOperationalConfig next = new AgentOperationalConfig(profile.key(),
                 blankToNull(safe.systemPrompt()), blankToNull(safe.modelId()),
                 safe.webSearchEnabled() == null || safe.webSearchEnabled(),
@@ -89,7 +98,7 @@ public class BackofficeAgentConfigAppService {
                 safe.routingFileCountThreshold(), safe.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), null);
         AgentOperationalConfig persisted =
-                persistIfChanged(profile, current, next, operator);
+                persistIfChanged(profile.key(), current, next, operator);
         return BackofficeAgentConfigResponse.of(profile,
                 persisted != null ? persisted : current); // 幂等回执：值面无动零写入
     }
@@ -130,7 +139,7 @@ public class BackofficeAgentConfigAppService {
             throw new ApplicationException(ProjectMessage.AGENT_TOOL_TOGGLE_FORBIDDEN);
         }
         AgentProfile profile = AgentProfile.byKey(tool.slot()).orElseThrow();
-        AgentOperationalConfig current = currentOf(profile);
+        AgentOperationalConfig current = currentOf(profile.key());
         AgentOperationalConfig next = new AgentOperationalConfig(profile.key(),
                 current.systemPrompt(), current.modelId(),
                 tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
@@ -138,12 +147,71 @@ public class BackofficeAgentConfigAppService {
                 current.routingEnabled(), current.routingStrongModelId(),
                 current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), null);
-        persistIfChanged(profile, current, next, operator); // 幂等（开关已是目标态）零写入
+        persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
     }
 
     /** 开关回执（工具＋写定生效态——幂等重写时即现行态）。 */
     public record ToolToggle(AgentTool tool, boolean enabled) {
+    }
+
+    // ---------- 边缘调用点（#366：值面仅模型档位，同表同留痕机制） ----------
+
+    /**
+     * 边缘调用点档位读面（GET）：生效值（库值或代码缺省档位键）＋覆盖标记＋缺省
+     * 预览＋最近写者。无覆盖行＝回落代码缺省（覆盖标记 false、写者 null）。
+     *
+     * @throws ApplicationException PRJ_064 边缘调用点不存在（档位面只有四点）
+     */
+    @Transactional(readOnly = true)
+    public BackofficeEdgeModelConfigResponse edgeConfig(String edgeKey) {
+        AgentEdgePoint point = requireEdgePoint(edgeKey);
+        return BackofficeEdgeModelConfigResponse.of(point, configStore.find(point.key()));
+    }
+
+    /**
+     * 边缘调用点档位写（PUT）：值面仅模型档位（窄命令形——边缘点无 prompt/开关/
+     * 路由语义），写语义与全量写同构（null/纯空白＝清空覆盖回落代码缺省；值面有
+     * 动才落痕，幂等回执零写入）。装配腿 {@code AgentConfigAppService
+     * #effectiveEdgeModelId} 动态查库——改档下一轮命令构建即生效。
+     *
+     * @throws ApplicationException PRJ_064 边缘调用点不存在；PRJ_034 操作者缺
+     */
+    @Transactional
+    public BackofficeEdgeModelConfigResponse updateEdgeModel(String edgeKey,
+            EdgeModelUpdateCommand command, Operator operator) {
+        AgentEdgePoint point = requireEdgePoint(edgeKey);
+        requireOperator(operator);
+        EdgeModelUpdateCommand safe = command == null ? EMPTY_EDGE_COMMAND : command;
+        AgentOperationalConfig current = currentOf(point.key());
+        // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态）
+        AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
+                null, blankToNull(safe.modelId()),
+                true, true, true, null, null, null,
+                operator.id(), operator.name(), null);
+        AgentOperationalConfig persisted =
+                persistIfChanged(point.key(), current, next, operator);
+        return BackofficeEdgeModelConfigResponse.of(point,
+                persisted != null ? persisted : current); // 幂等回执：值面无动零写入
+    }
+
+    /**
+     * 边缘调用点留痕读面（GET traces）：该点全部留痕按时间倒序（快照列与三座同形
+     * ——边缘行档位列之外的快照件恒缺省态）。
+     *
+     * @throws ApplicationException PRJ_064 边缘调用点不存在
+     */
+    @Transactional(readOnly = true)
+    public List<BackofficeAgentConfigTraceResponse> edgeTraces(String edgeKey) {
+        AgentEdgePoint point = requireEdgePoint(edgeKey);
+        return configStore.findTraces(point.key()).stream()
+                .map(BackofficeAgentConfigTraceResponse::of).toList();
+    }
+
+    /** 边缘点寻址（单点）：{@link AgentEdgePoint#byKey} 解析，未知/空键 404。 */
+    private static AgentEdgePoint requireEdgePoint(String edgeKey) {
+        return AgentEdgePoint.byKey(edgeKey)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.EDGE_POINT_NOT_FOUND));
     }
 
     /**
@@ -158,18 +226,18 @@ public class BackofficeAgentConfigAppService {
     }
 
     /**
-     * 值面变更落库＋留痕（全量写与工具开关写的共用写路径，同事务原子）：值面无动
-     * 返回 null（幂等回执零写入）；有动即整行 upsert＋留痕（变更前后全量值快照＋
-     * 操作者）并回读新现行。
+     * 值面变更落库＋留痕（全量写、工具开关写与边缘档位写的共用写路径，同事务原子）：
+     * 值面无动返回 null（幂等回执零写入）；有动即整行 upsert＋留痕（变更前后全量值
+     * 快照＋操作者）并回读新现行。
      */
-    private AgentOperationalConfig persistIfChanged(AgentProfile profile,
+    private AgentOperationalConfig persistIfChanged(String agentKey,
             AgentOperationalConfig current, AgentOperationalConfig next, Operator operator) {
         if (!valueFacetsChanged(current, next)) {
             return null;
         }
         configStore.save(next);
         configStore.insertTrace(new AgentConfigTrace(TsidGenerator.newInstance().generate(),
-                profile.key(), current.systemPrompt(), current.modelId(),
+                agentKey, current.systemPrompt(), current.modelId(),
                 current.webSearchEnabled(), current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
                 current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
@@ -177,13 +245,13 @@ public class BackofficeAgentConfigAppService {
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(), next.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), LocalDateTime.now()));
-        return configStore.find(profile.key());
+        return configStore.find(agentKey);
     }
 
     /** 现行覆盖态（无行＝全回落缺省态：值面缺省、无写者——留痕前态与比对基准）。 */
-    private AgentOperationalConfig currentOf(AgentProfile profile) {
-        AgentOperationalConfig override = configStore.find(profile.key());
-        return override != null ? override : AgentOperationalConfig.defaults(profile.key());
+    private AgentOperationalConfig currentOf(String agentKey) {
+        AgentOperationalConfig override = configStore.find(agentKey);
+        return override != null ? override : AgentOperationalConfig.defaults(agentKey);
     }
 
     /** 值面比对（写者/时刻不入比——值面无动即幂等，操作者列不因空写漂移）。 */

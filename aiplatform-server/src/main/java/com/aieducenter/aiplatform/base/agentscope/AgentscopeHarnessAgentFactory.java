@@ -62,50 +62,59 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                ModelChannel modelChannel, AgentWorkspace workspace, String agentKey,
-                String toolSpec);
+                ModelChannel modelChannel, EdgeModelSupplier.EdgeModel compaction,
+                AgentWorkspace workspace, String agentKey, String toolSpec);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
     private final AgentBuilder builder;
     private final AgentStateStore stateStore;
     private final AgentToolkitSupplier toolkitSupplier;
+    private final EdgeModelSupplier edgeModels;
 
     @Autowired
     public AgentscopeHarnessAgentFactory(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
-            AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel, workspace,
-                agentKey, toolSpec) ->
+            EdgeModelSupplier edgeModels, AgentscopeProperties properties) {
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel,
+                compaction, workspace, agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
                         middlewareSupplier,
-                        name, sysPrompt, modelString, modelChannel, workspace, agentKey, toolSpec,
-                        properties));
+                        name, sysPrompt, modelString, modelChannel, compaction, workspace,
+                        agentKey, toolSpec, properties),
+                edgeModels);
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
-            AgentBuilder builder) {
+            AgentBuilder builder, EdgeModelSupplier edgeModels) {
         this.stateStore = stateStore;
         this.toolkitSupplier = toolkitSupplier;
         this.builder = builder;
+        this.edgeModels = edgeModels;
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
             ModelChannel modelChannel, AgentWorkspace workspace, String agentKey, String toolSpec) {
+        // 压缩档位随装配解析（#366 边缘点收编：compaction 档位库值优先缺省 → 解析
+        // 单点，每次 obtain 动态查——后台改档下一轮命令构建即生效）
+        EdgeModelSupplier.EdgeModel compaction = edgeModels.compactionModel();
         // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
         // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
         // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
         // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配；
         // modelChannel.fingerprint() 是生效配置指纹（ADR-0031）：同模型串下换
-        // key/换地址＝指纹变＝新实例——守「改配置即生效、进行中 run 不定格」
+        // key/换地址＝指纹变＝新实例——守「改配置即生效、进行中 run 不定格」；
+        // 压缩档位同入指纹（#366）：改压缩档即新实例
         String key = name + "|" + modelString + "|"
                 + (modelChannel == null ? "" : modelChannel.fingerprint()) + "|"
                 + sysPrompt + "|" + workspace.identity()
-                + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec);
+                + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec)
+                + "|cx=" + compaction.modelString() + "@"
+                + (compaction.channel() == null ? "" : compaction.channel().fingerprint());
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, modelChannel, workspace,
-                        agentKey, toolSpec));
+                k -> builder.build(name, sysPrompt, modelString, modelChannel, compaction,
+                        workspace, agentKey, toolSpec));
     }
 
     @Override
@@ -125,8 +134,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
             String name, String sysPrompt, String modelString, ModelChannel modelChannel,
-            AgentWorkspace workspace, String agentKey, String toolSpec,
-            AgentscopeProperties properties) {
+            EdgeModelSupplier.EdgeModel compaction, AgentWorkspace workspace, String agentKey,
+            String toolSpec, AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
         // 模型流层平台包装（#109 计量 + #321 断流自动重试）：主模型解析即关内层
         // 缺省重试（见 innerRetryDisabledOptions）、经 streamLayer 包装——重试
@@ -175,9 +184,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
-        // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩模型档，让压缩在
-        // context_length_exceeded 前触发——取值与依据见 AgentscopeProperties。
-        builder.compaction(compactionConfig(properties));
+        // 压缩显式配置（#108 / ADR-0012）：触发阈值 + 压缩档位解析产物（#366 边缘
+        // 点收编——档位键经 EdgeModelSupplier 反转读配置面），让压缩在
+        // context_length_exceeded 前触发；阈值取值依据见 AgentscopeProperties。
+        builder.compaction(compactionConfig(properties, compaction));
         switch (workspace) {
             case AgentWorkspace.Local local -> {
                 if (local.root() != null) {
@@ -440,24 +450,24 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     /**
-     * 压缩配置装配：把配置的触发阈值 + 压缩模型档落到 {@link CompactionConfig}，空值
-     * 回框架缺省（保留量/裁剪亦走框架缺省）——取值与依据见 {@link AgentscopeProperties}
-     * （#108 / ADR-0012）。压缩（摘要）模型同经 {@link #streamLayer} 包装（#109
+     * 压缩配置装配：把配置的触发阈值 + 压缩档位解析产物落到 {@link CompactionConfig}
+     * ——压缩模型来自 {@link EdgeModelSupplier}（#366 边缘点收编：compaction 档位
+     * 库值优先缺省 flash，通道注入同主模型链——换压缩档/换通道不发版），保留量/裁剪
+     * 走框架缺省。压缩（摘要）模型同经 {@link #streamLayer} 包装（#109
      * 计量 + #321 断流重试，内层重试同关）：压缩链的摘要与 flushBeforeCompact
      * 记忆抽取共用该模型实例直调 stream()，包装后用量归入当前轮计量（flash 档与
      * 主模型 pro 档各自归位）、断流同获流层重试。
      */
-    static CompactionConfig compactionConfig(AgentscopeProperties properties) {
+    static CompactionConfig compactionConfig(AgentscopeProperties properties,
+            EdgeModelSupplier.EdgeModel compaction) {
         CompactionConfig.Builder config = CompactionConfig.builder();
         if (properties.getCompactionTriggerTokens() != null) {
             config.triggerTokens(properties.getCompactionTriggerTokens());
         }
-        String compactionModel = properties.getCompactionModel();
-        if (compactionModel != null && !compactionModel.isBlank()) {
-            config.model(streamLayer(
-                    ModelRegistry.resolve(compactionModel, INNER_RETRY_DISABLED), compactionModel,
-                    properties));
-        }
+        config.model(streamLayer(
+                ModelRegistry.resolve(compaction.modelString(),
+                        creationContextOf(compaction.channel())),
+                compaction.modelString(), properties));
         return config.build();
     }
 }

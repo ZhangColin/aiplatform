@@ -14,10 +14,12 @@ import io.agentscope.core.event.ConfirmResult;
  * @param sessionId         会话标识（状态槽位寻址）
  * @param userId            会话用户（状态槽位寻址）
  * @param workspaceId       工作区标识（可空 → 本地兜底工作区）
- * @param modelString       模型串（可空 → 配置默认；档位解析产物＝「前缀:实际模型名」）
- * @param modelChannel      模型通道注入件（可空＝无通道语境，语义同
- *                         {@link AgentCommand#modelChannel()}——续跑与首轮同通道，
- *                          业务侧从运营配置重新解析，不信挂起载荷）
+ * @param modelString       模型串（必填——档位解析产物「前缀:实际模型名」，语义同
+ *                         {@link AgentCommand#modelString()}；业务侧从运营配置重新
+ *                         解析重建，不信挂起载荷）
+ * @param modelChannel      模型通道注入件（主链非空——续跑与首轮同通道，业务侧
+ *                          从运营配置重新解析，不信挂起载荷；null＝测试形，语义同
+ *                         {@link AgentCommand#modelChannel()}）
  * @param systemPrompt      系统提示词（可空 → 配置默认）
  * @param replyId           挂起的引擎侧请求 id（计量幂等键后缀）
  * @param confirmResults    待确认工具的批复清单（与挂起 toolCalls 一一对应）
@@ -48,4 +50,13 @@ public record AgentResume(
         boolean workspaceReadOnly,
         boolean workspaceNoShell,
         String toolSpec) {
+
+    public AgentResume {
+        if (runId == null || runId.isBlank() || sessionId == null || sessionId.isBlank()
+                || modelString == null || modelString.isBlank()) {
+            throw new IllegalArgumentException(
+                    "AgentResume 字段不完整：runId/sessionId/modelString 必填"
+                            + "（modelString＝档位解析产物，与 AgentCommand 同契约）");
+        }
+    }
 }

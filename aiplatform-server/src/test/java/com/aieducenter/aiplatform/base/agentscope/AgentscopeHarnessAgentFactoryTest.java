@@ -58,6 +58,22 @@ class AgentscopeHarnessAgentFactoryTest {
     private static final AgentMiddlewareSupplier NO_MIDDLEWARES =
             (agentKey, workspace) -> List.of();
 
+    /**
+     * 边缘模型固定桩（#366 压缩档位装配腿）：无通道语境的 deepseek 串——SDK 内置
+     * provider 缺省路径，工厂测试不依赖库/通道注册（档位链装配断言归 business 侧）。
+     */
+    private static final EdgeModelSupplier EDGE_MODELS = new EdgeModelSupplier() {
+        @Override
+        public EdgeModel compactionModel() {
+            return new EdgeModel("deepseek:deepseek-v4-flash", null);
+        }
+
+        @Override
+        public EdgeModel precheckModel() {
+            return new EdgeModel("deepseek:deepseek-v4-flash", null);
+        }
+    };
+
     /** 计量缝测试用固定时钟（#321 streamLayer 装配测）。 */
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-10-16T10:00:00Z"), ZoneOffset.UTC);
@@ -69,11 +85,12 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, workspace, agentKey, toolSpec) -> {
+                (name, sysPrompt, modelString, modelChannel, compaction, workspace, agentKey,
+                        toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
-                });
+                }, EDGE_MODELS);
     }
 
     @Test
@@ -256,7 +273,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentStateStore stateStore = new InMemoryAgentStateStore();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
-                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                stateStore, TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES, EDGE_MODELS,
                 new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
@@ -279,7 +296,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
-                new AgentscopeProperties());
+                EDGE_MODELS, new AgentscopeProperties());
 
         HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
@@ -293,7 +310,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
-                new AgentscopeProperties());
+                EDGE_MODELS, new AgentscopeProperties());
 
         HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
@@ -312,7 +329,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 "无 DEEPSEEK_API_KEY，跳过真构建断言");
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
-                new AgentscopeProperties());
+                EDGE_MODELS, new AgentscopeProperties());
 
         HarnessAgent designer = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), "designer", null);
@@ -588,7 +605,8 @@ class AgentscopeHarnessAgentFactoryTest {
         MiddlewareBase counter = new MiddlewareBase() { };
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS,
-                (agentKey, workspace) -> List.of(counter), new AgentscopeProperties());
+                (agentKey, workspace) -> List.of(counter), EDGE_MODELS,
+                new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-mw", "sys",
                 "deepseek:deepseek-v4-flash", null, new AgentWorkspace.Local(null), null, null);
@@ -612,7 +630,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 : List.of();
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS, routedSkillRepos(childView, executorView),
-                subagents, NO_MIDDLEWARES,
+                subagents, NO_MIDDLEWARES, EDGE_MODELS,
                 new AgentscopeProperties());
 
         HarnessAgent executor = factory.obtain("platform-agent", "sys",
@@ -665,17 +683,19 @@ class AgentscopeHarnessAgentFactoryTest {
     }
 
     /**
-     * 压缩显式配置（#108 / ADR-0012）：触发阈值 400K + flash 档（取值与依据见
-     * AgentscopeProperties）。模型解析需 API key（ModelRegistry 建 deepseek 模型读
+     * 压缩显式配置（#108 / ADR-0012；#366 边缘点收编）：触发阈值 400K + 压缩档位
+     * 解析产物（模型来自 {@link EdgeModelSupplier} 注入，非 yml——缺省 flash 档
+     * 由配置面保证）。模型解析需 API key（ModelRegistry 建 deepseek 模型读
      * DEEPSEEK_API_KEY），无 key 跳过。
      */
     @Test
-    void given_default_properties_when_compaction_config_then_explicit_threshold_and_flash_model() {
+    void given_resolved_compaction_model_when_compaction_config_then_explicit_threshold_and_model() {
         assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
                 "无 DEEPSEEK_API_KEY，跳过模型解析断言");
 
         CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
-                new AgentscopeProperties());
+                new AgentscopeProperties(),
+                new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-flash", null));
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
         assertThat(config.getModel()).isNotNull();
@@ -685,15 +705,65 @@ class AgentscopeHarnessAgentFactoryTest {
     }
 
     @Test
-    void given_blank_compaction_model_when_compaction_config_then_no_model_override() {
-        // 压缩模型档为空串 = 回框架缺省（用主模型）；触发阈值照常显式——无 API key 也可断言
-        AgentscopeProperties properties = new AgentscopeProperties();
-        properties.setCompactionModel("");
+    void given_pro_tier_compaction_model_when_compaction_config_then_resolved_string_lands() {
+        // 模型来自解析产物（档位链半边）：EdgeModel 换 pro 串即落 pro——配置面改档
+        // 经供数口直达装配，properties 无模型键可回
+        assumeTrue(System.getenv("DEEPSEEK_API_KEY") != null,
+                "无 DEEPSEEK_API_KEY，跳过模型解析断言");
 
-        CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(properties);
+        CompactionConfig config = AgentscopeHarnessAgentFactory.compactionConfig(
+                new AgentscopeProperties(),
+                new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-pro", null));
 
         assertThat(config.getTriggerTokens()).isEqualTo(400_000);
-        assertThat(config.getModel()).isNull();
+        assertThat(config.getModel().getModelName()).isEqualTo("deepseek-v4-pro");
+    }
+
+    @Test
+    void given_same_main_spec_when_compaction_tier_changes_then_new_instance() {
+        // #366 压缩档位入实例缓存键（生效配置指纹半边）：后台改 compaction 档，
+        // 同主规格下一轮 obtain 即新实例——改配置即生效、进行中 run 不定格
+        List<HarnessAgent> created = new ArrayList<>();
+        ModelChannel compactionChannel =
+                new ModelChannel("https://ark.example/api/v3", "sk-a", false);
+        java.util.concurrent.atomic.AtomicReference<EdgeModelSupplier.EdgeModel> compaction =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                        new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-flash-ga-260731",
+                                compactionChannel));
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS,
+                (name, sysPrompt, modelString, modelChannel, compactionModel, workspace, agentKey,
+                        toolSpec) -> {
+                    HarnessAgent agent = mock(HarnessAgent.class);
+                    created.add(agent);
+                    return agent;
+                },
+                new EdgeModelSupplier() {
+                    @Override
+                    public EdgeModel compactionModel() {
+                        return compaction.get();
+                    }
+
+                    @Override
+                    public EdgeModel precheckModel() {
+                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
+                    }
+                });
+        ModelChannel main = new ModelChannel("https://ark.example/api/v3", "sk-a", false);
+
+        HarnessAgent first = factory.obtain("platform-agent", "sys", "volcengine:main-model",
+                main, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        HarnessAgent sameCompaction = factory.obtain("platform-agent", "sys",
+                "volcengine:main-model", main,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        assertThat(sameCompaction).isSameAs(first); // 同压缩档＝同规格复用
+
+        compaction.set(new EdgeModelSupplier.EdgeModel("volcengine:deepseek-v4-pro-ga-260813",
+                compactionChannel));
+        HarnessAgent tierChanged = factory.obtain("platform-agent", "sys", "volcengine:main-model",
+                main, new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        assertThat(tierChanged).isNotSameAs(first); // 改压缩档＝新实例
+        assertThat(created).hasSize(2);
     }
 
     // ---------- #321/#322 模型流层平台包装（断流重试 + 总时长上限 + 计量边界） ----------

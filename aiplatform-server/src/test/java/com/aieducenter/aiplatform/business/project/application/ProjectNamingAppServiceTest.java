@@ -12,8 +12,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.aieducenter.aiplatform.base.agentscope.AgentCommand;
 import com.aieducenter.aiplatform.base.agentscope.AgentReply;
 import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.aieducenter.aiplatform.base.agentscope.ModelChannel;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -23,7 +25,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -82,6 +87,30 @@ class ProjectNamingAppServiceTest {
         assertThat(command.getValue().usageContext().dims()).isEqualTo(
                 UsageDims.of(43L, UsageDims.AGENT_KIND_NAMING, "naming-43"));
         assertThat(command.getValue().runId()).isNotBlank();
+    }
+
+    @Test
+    void given_effective_tier_when_name_async_then_command_carries_resolved_model_and_channel() {
+        // #366 边缘点收编：取名模型选用走档位解析链（配置读面→解析单点）——命令携
+        // 「前缀:实际模型名」串与通道注入件（key/baseUrl 注入 SDK，不吃环境变量）；
+        // 库值覆盖 pro 与缺省 flash 同链（下一轮命令构建即生效）
+        when(projectRepository.findById(44L)).thenReturn(Optional.of(placeholderProject()));
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("run-n", "商城小程序"));
+
+        serviceWithTier("flash").nameAsync(44L, "做个商城小程序");
+        ArgumentCaptor<AgentCommand> flash = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient).converse(flash.capture(), any());
+        assertThat(flash.getValue().modelString())
+                .isEqualTo("volcengine:deepseek-v4-flash-ga-260731");
+        assertThat(flash.getValue().modelChannel()).isEqualTo(
+                new ModelChannel("https://ark.example/api/v3", "sk-test-ark", false));
+
+        serviceWithTier("pro").nameAsync(44L, "做个商城小程序");
+        ArgumentCaptor<AgentCommand> pro = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(pro.capture(), any());
+        assertThat(pro.getValue().modelString())
+                .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
     }
 
     @Test
@@ -226,8 +255,28 @@ class ProjectNamingAppServiceTest {
 
     /** 直通执行器：nameAsync 提交即同步执行（异步语义在编排测试覆盖）。 */
     private ProjectNamingAppService service() {
-        return new ProjectNamingAppService(agentClient, projectRepository,
-                eventsAppService, Runnable::run);
+        return serviceWithTier("flash");
+    }
+
+    /**
+     * 指定生效档位键的构造（装配链断言用：缺省 flash 与库值覆盖 pro 两形共用——
+     * 覆盖态经 {@code AgentConfigAppService#effectiveEdgeModelId} 解析、模型串与
+     * 通道经 {@code ModelTierAppService#resolve} 解析，#366 边缘点收编链路）。
+     */
+    private ProjectNamingAppService serviceWithTier(String tierKey) {
+        String modelName = "pro".equals(tierKey)
+                ? "deepseek-v4-pro-ga-260813" : "deepseek-v4-flash-ga-260731";
+        // lenient：blank-requirement 形不触发解析链（零调用合法——不因桩未用报错）
+        AgentConfigAppService agentConfigs = mock(AgentConfigAppService.class);
+        lenient().when(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING))
+                .thenReturn(tierKey);
+        ModelTierAppService modelTiers = mock(ModelTierAppService.class);
+        lenient().when(modelTiers.resolve(tierKey)).thenReturn(
+                new ModelTierAppService.ResolvedModel(
+                        tierKey, "volcengine", modelName, "https://ark.example/api/v3",
+                        "sk-test-ark", false));
+        return new ProjectNamingAppService(agentClient, agentConfigs, modelTiers,
+                projectRepository, eventsAppService, Runnable::run);
     }
 
     private Project placeholderProject() {

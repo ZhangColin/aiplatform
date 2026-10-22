@@ -15,6 +15,7 @@ import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.MessageAttachment;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.enums.DesignDivergence;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 
 import lombok.extern.slf4j.Slf4j;
@@ -29,9 +30,9 @@ import lombok.extern.slf4j.Slf4j;
  * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
  *
  * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
- * 一次性会话（{@code classify-{runId}}，模型档由专用配置键
- * {@code app.dispatch.classification-model} 决定（缺省 flash 档，代码保证——
- * 不吃 agentscope 缺省模型的部署配法，#51）、空 sink 无事件、不触项目工作区），
+ * 一次性会话（{@code classify-{runId}}，模型档走边缘点档位链——classification
+ * 档位库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
+ * 烧重档）、空 sink 无事件、不触项目工作区），
  * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
  * 拿不到真锚）。</p>
  *
@@ -92,18 +93,21 @@ public class DispatchAppService {
     private final MainAgentAppService mainAgentAppService;
     private final AgentEventBridge eventBridge;
     private final AgentscopeAgentClient agentClient;
-    private final DispatchProperties properties;
+    private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
     private final ConversationHistoryAppService conversationHistory;
     private final DesignProcessAppService designProcessAppService;
 
     public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
-            AgentscopeAgentClient agentClient, DispatchProperties properties,
+            AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
+            ModelTierAppService modelTiers,
             ConversationHistoryAppService conversationHistory,
             DesignProcessAppService designProcessAppService) {
         this.mainAgentAppService = mainAgentAppService;
         this.eventBridge = eventBridge;
         this.agentClient = agentClient;
-        this.properties = properties;
+        this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
         this.conversationHistory = conversationHistory;
         this.designProcessAppService = designProcessAppService;
     }
@@ -205,21 +209,24 @@ public class DispatchAppService {
     }
 
     /**
-     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档由专用配置键
-     * {@code app.dispatch.classification-model} 决定（缺省 flash，#51——不吃
-     * agentscope 缺省模型的部署配法）、空 sink（无 SSE 事件）、不触项目工作区、
-     * 计量 agentKind=classify。失败 / 超时 / 输出不可解析一律回落意见链（见类
-     * 注释的定向取舍）。
+     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点档位链
+     * （#366 收编：classification 档位库值优先缺省 flash——配置读面
+     * {@link AgentConfigAppService#effectiveEdgeModelId} → 解析单点
+     * {@link ModelTierAppService#resolve} 产模型串＋通道注入，后台改档下一轮派发
+     * 即生效）、空 sink（无 SSE 事件）、不触项目工作区、计量 agentKind=classify。
+     * 失败 / 超时 / 输出不可解析一律回落意见链（见类注释的定向取舍）。
      */
     private Classification classify(Long projectId, String prompt) {
         String runId = EventsAppService.newRunId();
         String sessionId = CLASSIFY_SESSION_PREFIX + runId;
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
+                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.CLASSIFICATION));
         AgentCommand command = new AgentCommand(
                 runId,
                 prompt,
                 CLASSIFY_SYSTEM_PROMPT,
-                properties.getClassificationModel(), // 专用配置键（缺省 flash 档）
-                null, // 无通道语境：配置缺省串走 SDK 内置 provider（边缘点收编属 #366）
+                model.modelString(), // 边缘点档位解析产物（缺省 flash 档）
+                model.channel(), // 通道注入：key/baseUrl 入 SDK，不吃环境变量
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),

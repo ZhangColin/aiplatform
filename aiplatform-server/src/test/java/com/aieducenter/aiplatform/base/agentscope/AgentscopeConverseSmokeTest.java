@@ -79,7 +79,7 @@ class AgentscopeConverseSmokeTest {
         List<AgentEvent> frames = new ArrayList<>();
 
         AgentReply reply = agentClient.converse(
-                new AgentCommand(runId, "用一句话介绍你自己", null, null,
+                new AgentCommand(runId, "用一句话介绍你自己", null, "deepseek:deepseek-v4-flash",
                         "smoke-session", "smoke-user",
                         new UsageContext("smoke-prj", Map.of("scene", "agentscope-smoke")),
                         null, Map.of()),

@@ -15,6 +15,7 @@ import com.aieducenter.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.aieducenter.aiplatform.base.agentscope.UsageContext;
 import com.aieducenter.aiplatform.base.eventhub.application.EventsAppService;
 import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.UsageDims;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -63,6 +64,8 @@ public class ProjectNamingAppService implements DisposableBean {
     private static final String[] CLARIFICATION_MARKERS = {"还需要", "比如", "例如", "请问"};
 
     private final AgentscopeAgentClient agentClient;
+    private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
     private final ProjectRepository projectRepository;
     private final EventsAppService eventsAppService;
     /** 提交通道（生产=虚拟线程池；测试=直通同步）。 */
@@ -72,9 +75,12 @@ public class ProjectNamingAppService implements DisposableBean {
 
     @Autowired
     public ProjectNamingAppService(AgentscopeAgentClient agentClient,
+            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
             ProjectRepository projectRepository,
             EventsAppService eventsAppService) {
         this.agentClient = agentClient;
+        this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
         this.projectRepository = projectRepository;
         this.eventsAppService = eventsAppService;
         this.ownedExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -87,9 +93,12 @@ public class ProjectNamingAppService implements DisposableBean {
 
     /** 测试便利构造（直通道，无生命周期）。 */
     ProjectNamingAppService(AgentscopeAgentClient agentClient,
+            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
             ProjectRepository projectRepository,
             EventsAppService eventsAppService, Executor executor) {
         this.agentClient = agentClient;
+        this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
         this.projectRepository = projectRepository;
         this.eventsAppService = eventsAppService;
         this.executor = executor;
@@ -146,20 +155,35 @@ public class ProjectNamingAppService implements DisposableBean {
         });
     }
 
-    /** 静默轻调用取名：naming-{projectId} 一次性会话、本地工作区、缺省 flash 档模型。 */
+    /**
+     * 静默轻调用取名：naming-{projectId} 一次性会话、本地工作区、模型走边缘点
+     * 档位链（#366：naming 档位库值优先缺省 flash → 解析单点产模型串＋通道注入
+     * ——后台改档下一轮取名即生效）。
+     */
     private String converseForName(Long projectId, String requirement) {
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
+                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING));
         AgentCommand command = new AgentCommand(
                 EventsAppService.newRunId(),
                 requirement,
                 NAMING_SYSTEM_PROMPT,
-                null, // 模型取适配器缺省（对话轨道 flash 档，快且省）
+                model.modelString(),
+                model.channel(),
                 SESSION_PREFIX + projectId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),
                         UsageDims.of(projectId, UsageDims.AGENT_KIND_NAMING,
                                 SESSION_PREFIX + projectId)),
                 null, // 本地兜底工作区：取名不读写项目 dev 工作区
-                Map.of());
+                Map.of(),
+                /* timeout= */ null, // 取内核配置默认（一次性轻调用）
+                /* silenceTimeout= */ null,
+                /* toolSilenceTimeout= */ null,
+                null, // 一次性判定无配置语境：空工具面
+                /* workspaceReadOnly= */ false,
+                /* workspaceNoShell= */ false,
+                /* heading= */ null,
+                /* toolSpec= */ null);
         AgentReply reply = agentClient.converse(command, event -> {
         });
         return sanitize(reply.text());

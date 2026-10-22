@@ -37,22 +37,21 @@ app:
   embedding:
     url: http://127.0.0.1:9091
   # base.agentscope：智能体内核（AgentScope HarnessAgent）默认值。
-  # API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry 自行读取）；
+  # 模型选用不在此（ADR-0031/#366：档位解析链统一承载；本地 profile 曾覆盖的
+  # 取名/压缩 pro 档已入位智能体运营配置 prj_agent_configs 边缘点行——naming/
+  # compaction 两键值 pro，后台可见可改可回滚）；
   # workspace 是本地兜底工作区（命令未带 workspaceId 时用，留空 = AgentScope 默认）——
   # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面）。
   agentscope:
     agent-name: platform-agent
-    default-model: deepseek:deepseek-v4-pro
     default-system-prompt: 你是平台智能体。
     timeout: 2m
     # 单 turn 迭代上限：内核缺省 10 会把编码 turn 掐断成 exceed_max_iters 假完成
     # （依据与取值见 AgentscopeProperties#maxIters 注释——单点事实在此不重述）。
     max-iters: 300
-    # 压缩显式配置（#108 / ADR-0012）：触发阈值 + flash 档，让压缩在
-    # context_length_exceeded 前触发（依据与取值见 AgentscopeProperties
-    # #compactionTriggerTokens / #compactionModel 注释——单点事实在此不重述）。
+    # 压缩触发阈值（#108 / ADR-0012）：让压缩在 context_length_exceeded 前触发
+    # （压缩模型走边缘点档位链，不在此配）。
     compaction-trigger-tokens: 400000
-    compaction-model: deepseek:deepseek-v4-pro
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
   workspace:

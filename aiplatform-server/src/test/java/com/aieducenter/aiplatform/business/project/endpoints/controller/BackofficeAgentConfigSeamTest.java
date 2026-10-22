@@ -12,6 +12,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.aieducenter.aiplatform.backoffice.BackofficeSeamTest;
 import com.aieducenter.aiplatform.backoffice.BackofficeSignatures;
 import com.aieducenter.aiplatform.business.project.application.AgentConfigAppService;
+import com.aieducenter.aiplatform.business.project.application.ModelTierAppService;
+import com.aieducenter.aiplatform.business.project.application.ModelTierSeed;
+import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,6 +64,9 @@ class BackofficeAgentConfigSeamTest {
     private static final String MAIN_PROMPT_V2 = "主智能体覆盖协议 V2：催促收敛优先。";
     private static final String EXECUTOR_PROMPT_V1 = "执行体覆盖协议 V1：开工先列步骤。";
 
+    /** 信封数字业务码：PRJ 域码 4 × 1000＋序号（边缘点面 PRJ_064，#366）。 */
+    private static final int EDGE_POINT_NOT_FOUND_CODE = 4064;
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -70,6 +76,10 @@ class BackofficeAgentConfigSeamTest {
     /** 装配读面（#251 缝 2 真链路断言：两座命令构建的取值单点）。 */
     @Autowired
     private AgentConfigAppService agentConfigs;
+
+    /** 档位解析（ADR-0031 解析单点：边缘点档位键 → 模型串＋通道，#366 缝 2 真链路）。 */
+    @Autowired
+    private ModelTierAppService modelTiers;
 
     @AfterEach
     void tearDown() {
@@ -278,8 +288,9 @@ class BackofficeAgentConfigSeamTest {
 
     @Test
     void given_unknown_agent_key_when_any_endpoint_then_404() throws Exception {
-        // 一次性判定不进配置面：classify/naming 是实现细节非智能体身份面；任意未知键同语义
-        //（含 verify 子智能体——配置面只有三座智能体，#289 designer 座齐）
+        // 三座端点只认三座智能体：边缘调用点（naming 等）走 /edge/{edgeKey} 面档位
+        // 端点（#366），三座端点照 404；任意未知键同语义（含 verify 子智能体——
+        // 配置面只有三座智能体，#289 designer 座齐）
         for (String badKey : new String[]{"classify", "naming", "reviewer", "verify"}) {
             signedGet(badKey)
                     .andExpect(status().isNotFound())
@@ -395,12 +406,130 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));
     }
 
+    // ---------- 边缘四点（#366：仅模型档位入配置面，同表同机制） ----------
+
+    @Test
+    void given_no_edge_override_when_signed_get_edge_then_effective_falls_back_to_default_tier()
+            throws Exception {
+        // 四点读面缺省：生效档＝代码缺省档位键（flash）、覆盖标记 false、默认预览
+        // 同值、写者 null；装配读面同值且经档位解析真链路产通道模型串（V44 种子）
+        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        for (AgentEdgePoint point : AgentEdgePoint.values()) {
+            signedGet("edge/" + point.key())
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.agentKey").value(point.key()))
+                    .andExpect(jsonPath("$.data.agentName").value(point.getName()))
+                    .andExpect(jsonPath("$.data.modelId").value("flash"))
+                    .andExpect(jsonPath("$.data.modelIdOverridden").value(false))
+                    .andExpect(jsonPath("$.data.defaultModelId").value("flash"))
+                    .andExpect(jsonPath("$.data.operatorId").value(nullValue()))
+                    .andExpect(jsonPath("$.data.operatorName").value(nullValue()));
+            // 缝 2（装配读面＋解析单点）：缺省 flash → volcengine 通道模型串
+            assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("flash");
+            assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
+                    .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+        }
+    }
+
+    @Test
+    void given_edge_tier_overridden_when_put_then_library_value_wins_next_resolve()
+            throws Exception {
+        // AC：后台 PUT 边缘键改档即时生效——四键逐一 PUT pro：GET 生效值＝库值＋
+        // 覆盖标记 true，装配读面取库值、经解析单点产 pro 档模型串（下一轮命令
+        // 构建即生效的取值半边）；四点各自独立（动 naming 不动 precheck）
+        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+        for (AgentEdgePoint point : AgentEdgePoint.values()) {
+            signedPutEdge(point.key(), OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.modelId").value("pro"))
+                    .andExpect(jsonPath("$.data.modelIdOverridden").value(true))
+                    .andExpect(jsonPath("$.data.defaultModelId").value("flash"))
+                    .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+            assertThat(agentConfigs.effectiveEdgeModelId(point)).isEqualTo("pro");
+            assertThat(modelTiers.resolve(agentConfigs.effectiveEdgeModelId(point)).modelString())
+                    .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+        }
+
+        // 清空覆盖（PUT 全量语义同款：null/缺省/纯空白＝清空）→ 回落代码缺省 flash
+        signedPutEdge("naming", OPERATOR_ID_2, OPERATOR_NAME_2, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelId").value("flash"))
+                .andExpect(jsonPath("$.data.modelIdOverridden").value(false));
+        assertThat(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.NAMING)).isEqualTo("flash");
+        // 其余三点不受清空牵连（各自独立行）
+        assertThat(agentConfigs.effectiveEdgeModelId(AgentEdgePoint.COMPACTION))
+                .isEqualTo("pro");
+    }
+
+    @Test
+    void given_edge_changes_when_traces_then_snapshots_and_unknown_key_404() throws Exception {
+        // 留痕同机制：改档一痕（old=null 缺省态 → new=pro＋操作者）；同值幂等重写
+        // 不落痕；未知边缘键 404 PRJ_064、缺操作者 400 PRJ_034（同面守卫）
+        signedPutEdge("compaction", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+                .andExpect(status().isOk());
+        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelId\": \"pro\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID)); // 幂等：写者不漂移
+        signedGet("edge/compaction/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newModelId").value("pro"))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID))
+                .andExpect(jsonPath("$.data[0].operatorName").value(OPERATOR_NAME));
+
+        // 回滚＝旧值写回（一次新变更、留新痕）
+        signedPutEdge("compaction", OPERATOR_ID_2, OPERATOR_NAME_2, "{\"modelId\": null}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelId").value("flash"));
+        signedGet("edge/compaction/traces")
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].newModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 负例：未知边缘键三端点同 404 PRJ_064；边缘键不进三座端点（404 PRJ_033）
+        for (String badKey : new String[]{"summarize", "reviewer"}) {
+            signedGet("edge/" + badKey)
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(EDGE_POINT_NOT_FOUND_CODE));
+            signedGet("edge/" + badKey + "/traces")
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(EDGE_POINT_NOT_FOUND_CODE));
+            signedPutEdge(badKey, OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"pro\"}")
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value(EDGE_POINT_NOT_FOUND_CODE));
+        }
+        signedGet("naming")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(AGENT_CONFIG_NOT_FOUND_CODE));
+        // 缺操作者同面守卫（PRJ_034）
+        signedPutEdge("naming", null, null, "{\"modelId\": \"pro\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(AGENT_CONFIG_OPERATOR_REQUIRED_CODE));
+    }
+
     // ---------- 夹具 ----------
 
     /** 签名 GET（无体）。 */
     private ResultActions signedGet(String pathSuffix) throws Exception {
         String path = "/api/backoffice/agent-configs/" + pathSuffix;
         return mockMvc.perform(BackofficeSignatures.signed(get(path), path, null));
+    }
+
+    /** 签名 PUT 边缘点档位（JSON 体＋操作者透传头；operatorId 传 null 即缺头负例形制）。 */
+    private ResultActions signedPutEdge(String edgeKey, String operatorId, String operatorName,
+            String body) throws Exception {
+        String path = "/api/backoffice/agent-configs/edge/" + edgeKey;
+        MockHttpServletRequestBuilder request = BackofficeSignatures.signed(
+                put(path).contentType(MediaType.APPLICATION_JSON).content(body), path, body);
+        if (operatorId != null) {
+            request.header("X-User-Id", operatorId);
+        }
+        if (operatorName != null) {
+            request.header("X-User-Name", operatorName);
+        }
+        return mockMvc.perform(request);
     }
 
     /** 签名 PUT 配置（JSON 体＋操作者透传头；operatorId 传 null 即缺头负例形制）。 */

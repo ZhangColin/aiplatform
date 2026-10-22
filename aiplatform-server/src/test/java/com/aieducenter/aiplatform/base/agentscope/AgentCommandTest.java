@@ -8,13 +8,16 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link AgentCommand} 入参校验：runId/prompt/sessionId 必填，其余可空各取默认；
- * workspaceId/streamCorrelation 透传 + 信封契约校验。
+ * {@link AgentCommand} 入参校验：runId/prompt/sessionId/modelString 必填
+ * （modelString＝档位解析产物——ADR-0031/#366 起全部调用面经档位解析携串，无配置
+ * 缺省回落），其余可空各取默认；workspaceId/streamCorrelation 透传 + 信封契约校验。
  */
 class AgentCommandTest {
 
+    private static final String MODEL = "deepseek:deepseek-v4-flash";
+
     private AgentCommand command(String runId, String prompt, String sessionId) {
-        return new AgentCommand(runId, prompt, null, null, sessionId, null,
+        return new AgentCommand(runId, prompt, null, MODEL, sessionId, null,
                 null, null, null);
     }
 
@@ -22,7 +25,7 @@ class AgentCommandTest {
     void given_blank_run_id_when_construct_then_rejected() {
         assertThatThrownBy(() -> command(" ", "你好", "s-1"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("runId/prompt/sessionId 必填");
+                .hasMessageContaining("runId/prompt/sessionId/modelString 必填");
     }
 
     @Test
@@ -35,6 +38,15 @@ class AgentCommandTest {
     void given_blank_session_id_when_construct_then_rejected() {
         assertThatThrownBy(() -> command("run-1", "你好", null))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void given_blank_model_string_when_construct_then_rejected() {
+        // #366：模型串必填——配置缺省串回落已随边缘点收编退役，漏解析即编程错误
+        assertThatThrownBy(() -> new AgentCommand("run-1", "你好", null, null,
+                "s-1", null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("modelString");
     }
 
     @Test
@@ -59,7 +71,7 @@ class AgentCommandTest {
     @Test
     void given_null_correlation_when_construct_then_normalized_to_empty() {
         AgentCommand command = new AgentCommand(
-                "run-1", "你好", null, null, "s-1", null, null, null, null);
+                "run-1", "你好", null, MODEL, "s-1", null, null, null, null);
 
         assertThat(command.streamCorrelation()).isEmpty();
     }
@@ -67,7 +79,7 @@ class AgentCommandTest {
     @Test
     void given_correlation_with_type_key_when_construct_then_rejected() {
         assertThatThrownBy(() -> new AgentCommand(
-                "run-1", "你好", null, null, "s-1", null, null, null, Map.of("type", "evil")))
+                "run-1", "你好", null, MODEL, "s-1", null, null, null, Map.of("type", "evil")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("streamCorrelation 禁含 type 键（信封契约）");
     }
@@ -86,13 +98,13 @@ class AgentCommandTest {
     void given_convenience_forms_when_construct_then_workspace_read_write_default() {
         // 兼容形（取名 / 无语境一次性调用）缺省读写面：workspaceReadOnly 恒 false（#47 前调用面不变）
         assertThat(command("run-1", "你好", "s-1").workspaceReadOnly()).isFalse();
-        assertThat(new AgentCommand("run-1", "你好", null, null, "s-1", null, null, null,
+        assertThat(new AgentCommand("run-1", "你好", null, MODEL, "s-1", null, null, null,
                 Map.of(), "main").workspaceReadOnly()).isFalse();
     }
 
     @Test
     void given_canonical_form_when_construct_then_workspace_read_only_kept() {
-        AgentCommand command = new AgentCommand("run-1", "咨询", null, null, null, "s-1", null,
+        AgentCommand command = new AgentCommand("run-1", "咨询", null, MODEL, null, "s-1", null,
                 null, "42", Map.of(), null, null, null, "ASSISTANT", true, false, null, null);
 
         assertThat(command.workspaceReadOnly()).isTrue(); // 主智能体对话姿态：写面结构性关闭
@@ -102,7 +114,7 @@ class AgentCommandTest {
     @Test
     void given_heading_when_construct_then_kept() {
         RunHeading heading = RunHeading.slice("商品浏览", 2, 5);
-        AgentCommand command = new AgentCommand("run-1", "做系统", null, null, null, "s-1", null,
+        AgentCommand command = new AgentCommand("run-1", "做系统", null, MODEL, null, "s-1", null,
                 null, null, Map.of(), null, null, null, "executor", false, false, heading, null);
 
         assertThat(command.heading()).isEqualTo(heading);

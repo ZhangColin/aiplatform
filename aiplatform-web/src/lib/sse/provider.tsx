@@ -30,9 +30,10 @@ export function SseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let conn: SseConnection | null = null;
     let cancelled = false;
-    // 会话守卫：未登录不建连。探 /api/me——401 时薄 client 的全局 401 出口已
-    // 接管整页跳，此处保持沉默；其余结果（200；404 = 后端 A2 未上；网络错）
-    // 按已登录建连，交给连接层的失败计数兜底。#17 落地 useMe 后改由其守卫。
+    // 会话守卫：无身份（匿名/凭证过期）不建连。探 /api/projects（账户或访客
+    // 任一在场即 200——访客 era 修正，勿回退探 /me：访客按设计吃 401 会被误判
+    // 死）；401 时探针自身静默；其余结果（200；404；网络错）按在场建连，交给
+    // 连接层的失败计数兜底。
     void probeSessionAlive().then((alive) => {
       if (!alive || cancelled) return;
       conn = new SseConnection({

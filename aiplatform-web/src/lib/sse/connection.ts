@@ -8,7 +8,8 @@ import { useSseStatusStore, type SseChannel } from "@/lib/store/sse-status";
  * 401 盲区探针 / agent 流去重 / StrictMode 双挂载幂等。
  *
  * 浏览器对非 2xx 响应会置 CLOSED 且不再自动重连（原生重连只覆盖断流），
- * 此时探一次 /api/me：401 停手交全局 401 出口；非 401 按原生节奏（~3s）再播种，
+ * 此时探一次会话（{@link probeSessionAlive}，探 /api/projects）：401 停手交
+ * 全局 401 出口；非 401 按原生节奏（~3s）再播种，
  * 防后端重启 / 代理瞬时 5xx 让通道永久失活。
  */
 
@@ -32,7 +33,7 @@ export type SseConnectionOptions = {
 /** 去重 Set 上限：超限整表清空。 */
 const DEDUP_CAP = 1000;
 
-/** 连续失败多少次探一次 /api/me（issue #16：401 盲区）。 */
+/** 连续失败多少次探一次会话探针（issue #16：401 盲区）。 */
 const FAILURE_PROBE_THRESHOLD = 5;
 
 /** 再播种延迟：对齐浏览器原生重连节奏（~3s），非退避。 */
@@ -43,10 +44,16 @@ const RESEED_DELAY_MS = 3_000;
  * 401 → false（本探针只决定 SSE 停手）；其余（200 / 404 / 网络错）→ true，
  * 按会话未知处理、继续原生重连。探针是匿名可逛面上的背景查询——显式
  * {@code silentUnauthorized}，401 不弹 M01（首页匿名访问不因探活被拦）。
+ *
+ * <p><b>探 {@code /api/projects} 而非 {@code /me}（访客 era 修正）</b>：/me 是
+ * 账户端点，访客凭证按设计吃 401——拿它探活会把持有效凭证的访客误判成
+ * 「会话已死」，SSE 通道（通知＋智能体两通道）根本不建连，agent 流/error
+ * 兜底事件全数失明。列表端点过 /api/** 拦截面（账户会话或有效访客凭证
+ * 任一在场即 200、全无才 401），正是本探针要判定的语义。</p>
  */
 export async function probeSessionAlive(): Promise<boolean> {
   try {
-    await api.get("/me", { silentUnauthorized: true });
+    await api.get("/projects", { query: { page: 1, size: 1 }, silentUnauthorized: true });
     return true;
   } catch (error) {
     return !(error instanceof ApiError && error.status === 401);

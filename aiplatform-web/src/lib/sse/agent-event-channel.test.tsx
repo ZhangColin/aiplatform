@@ -44,7 +44,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   FakeEventSource.instances = [];
   useSseStatusStore.getState().setStatus("agent", "offline");
-  // 探针 /api/me 的 fetch 桩：deferred 挂起，测试决定何时放行
+  // 会话探针（/api/projects）的 fetch 桩：deferred 挂起，测试决定何时放行
   probe = deferred<Response>();
   fetchMock = vi.fn().mockReturnValue(probe.promise);
   vi.stubGlobal("fetch", fetchMock);
@@ -104,5 +104,48 @@ describe("useAgentEventChannel：StrictMode 双挂载（issue #60）", () => {
     unmount();
     expect(FakeEventSource.instances[0].closeSpy).toHaveBeenCalledTimes(1);
     expect(useSseStatusStore.getState().statuses.agent).toBe("offline");
+  });
+
+  it("访客照建连：/me 401（账户端点拒访客）但探针 /api/projects 200 → EventSource 建立", async () => {
+    // 回归锚：访客 era 前探针打 /me，持有效访客凭证也被判「会话已死」→
+    // SSE 通道不建连，agent 流与 error 兜底事件全数失明（用户只见死寂）
+    fetchMock.mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      const status = url.includes("/api/me") ? 401 : 200;
+      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status }));
+    });
+
+    function Host() {
+      useAgentEventChannel("p1");
+      return null;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Host />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toBe("/api/events?projectId=p1");
+  });
+
+  it("全无身份：探针 401 → 不建连（停手语义不变）", async () => {
+    fetchMock.mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify({ code: 4001 }), { status: 401 })),
+    );
+
+    function Host() {
+      useAgentEventChannel("p1");
+      return null;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Host />
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    expect(FakeEventSource.instances).toHaveLength(0);
   });
 });

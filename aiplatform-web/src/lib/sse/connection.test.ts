@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSseStatusStore } from "@/lib/store/sse-status";
 
-import { SseConnection } from "./connection";
+import { probeSessionAlive, SseConnection } from "./connection";
 
 /**
  * 原生 EventSource 的最小替身（公开行为 seam：构造次数 / readyState / close 调用）。
@@ -73,10 +73,10 @@ function makeWindowStub() {
   };
 }
 
-/** /api/me 探针的 fetch stub：status 可控，默认 200。 */
+/** 会话探针的 fetch stub：status 可控，默认 200（探 /api/projects，访客 era 起）。 */
 function stubProbe(status: number) {
   const fetchMock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify({ data: { accountId: "u1" } }), { status }),
+    new Response(JSON.stringify({ data: [] }), { status }),
   );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -207,7 +207,7 @@ describe("SseConnection", () => {
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("401 盲区：连续 5 次失败探一次 /api/me；非 401 不动原生重连（不 close、不另建连接）", async () => {
+  it("401 盲区：连续 5 次失败探一次会话探针；非 401 不动原生重连（不 close、不另建连接）", async () => {
     const fetchMock = stubProbe(200);
     const conn = new SseConnection({ channel: "notification", url: "/api/events", onEvent: vi.fn() });
     conn.connect();
@@ -219,8 +219,8 @@ describe("SseConnection", () => {
 
     es.simulateError(FakeEventSource.CONNECTING); // 第 5 次
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    // buildUrl 产出 URL 对象，字符串化后断言目标端点
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/me");
+    // buildUrl 产出 URL 对象，字符串化后断言目标端点（/api/projects：账户或访客任一在场即活）
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/projects");
 
     expect(es.closeSpy).not.toHaveBeenCalled();
     expect(FakeEventSource.instances).toHaveLength(1);
@@ -313,5 +313,22 @@ describe("SseConnection", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("probeSessionAlive：访客 era 探针语义（/api/projects）", () => {
+  it("访客凭证在场：探针 200 → alive（/me 对访客 401 与本探针无关）", async () => {
+    stubProbe(200);
+    await expect(probeSessionAlive()).resolves.toBe(true);
+  });
+
+  it("全无身份（匿名/凭证过期）：探针 401 → not alive（SSE 停手语义不变）", async () => {
+    stubProbe(401);
+    await expect(probeSessionAlive()).resolves.toBe(false);
+  });
+
+  it("网络错/5xx：会话未知 → alive（按原生节奏继续重连）", async () => {
+    stubProbe(503);
+    await expect(probeSessionAlive()).resolves.toBe(true);
   });
 });

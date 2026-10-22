@@ -103,7 +103,7 @@ describe("SseProvider：StrictMode 双挂载（issue #60）", () => {
 });
 
 describe("SseProvider：匿名探活不弹登录（A1 回归）", () => {
-  it("/api/me 401 → 不建连、不发 401 全局出口事件（首页只逛零足迹）", async () => {
+  it("探针 401（全无身份）→ 不建连、不发 401 全局出口事件（首页只逛零足迹）", async () => {
     const { UNAUTHORIZED_EVENT } = await import("@/lib/api/client");
     const listener = vi.fn();
     window.addEventListener(UNAUTHORIZED_EVENT, listener);

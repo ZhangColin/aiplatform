@@ -91,6 +91,9 @@ demo() {
   show "$(call_get "$PROVIDERS_PATH/t-demo-channel/traces")"
   show "$(call_get "$TIERS_PATH/t-demo-tier/traces")"
 
+  step "6b. 清单拉取负例（假上游——502 PRJ_077 明确报错不静默；真拉走 pull-models <通道键>）"
+  show "$(call_json POST "$PROVIDERS_PATH/t-demo-channel/remote-models" '{}')"
+
   step "7. 绑定即时校验负例（写不存在的档位键——400 PRJ_074，零写入）"
   show "$(call_json PUT "/api/backoffice/agent-configs/executor" '{"modelId":"t-no-such-tier"}')"
 
@@ -153,6 +156,10 @@ set_tier() { # <tierKey> <providerKey> <modelName> [displayName] [enabled]
 traces_channel() { show "$(call_get "$PROVIDERS_PATH/$1/traces")"; }
 traces_tier() { show "$(call_get "$TIERS_PATH/$1/traces")"; }
 
+pull_models() { # <providerKey> 手动拉取远端模型清单（对照库内档位；每次全量真拉）
+  show "$(call_json POST "$PROVIDERS_PATH/$1/remote-models" '{}')"
+}
+
 delete_channel() { show "$(call_json DELETE "$PROVIDERS_PATH/$1" '{}')"; }
 delete_tier() { show "$(call_json DELETE "$TIERS_PATH/$1" '{}')"; }
 
@@ -168,6 +175,9 @@ usage() {
   create-tier <tierKey> <providerKey> <modelName> [displayName]
   set-tier <tierKey> <providerKey> <modelName> [displayName] [enabled]
   traces-channel <key> / traces-tier <key> 留痕读面（回滚依据）
+  pull-models <key>                          手动拉取远端模型清单（对照库内档位；
+                                            trackedTierKeys 空＝建议入库，勾选后走
+                                            create-tier，modelName 填条目 modelId）
   delete-channel <key> / delete-tier <key> 删除（被引用即 409）
 环境：BACKOFFICE_API_KEY/SECRET（同 backoffice-quote.sh）、OP_ID/OP_NAME（写留痕）
 USAGE
@@ -186,6 +196,7 @@ case "${1:-}" in
   set-tier) shift; set_tier "$@" ;;
   traces-channel) traces_channel "$2" ;;
   traces-tier) traces_tier "$2" ;;
+  pull-models) pull_models "$2" ;;
   delete-channel) delete_channel "$2" ;;
   delete-tier) delete_tier "$2" ;;
   *) usage ;;

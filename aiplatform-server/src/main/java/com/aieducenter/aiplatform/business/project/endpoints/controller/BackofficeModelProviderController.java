@@ -18,11 +18,13 @@ import com.cartisan.openapi.annotation.RequireSignature;
 import com.cartisan.web.doc.ErrorCodes;
 import com.cartisan.web.response.ApiResponse;
 
+import com.aieducenter.aiplatform.business.project.application.BackofficeModelCatalogAppService;
 import com.aieducenter.aiplatform.business.project.application.BackofficeModelChannelAppService;
 import com.aieducenter.aiplatform.business.project.application.dto.command.ModelProviderCreateCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.command.ModelProviderUpdateCommand;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeModelProviderResponse;
 import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeModelProviderTraceResponse;
+import com.aieducenter.aiplatform.business.project.application.dto.response.BackofficeRemoteModelCatalogResponse;
 import com.aieducenter.aiplatform.business.project.domain.model.Operator;
 
 /**
@@ -41,8 +43,12 @@ public class BackofficeModelProviderController {
 
     private final BackofficeModelChannelAppService appService;
 
-    public BackofficeModelProviderController(BackofficeModelChannelAppService appService) {
+    private final BackofficeModelCatalogAppService catalogAppService;
+
+    public BackofficeModelProviderController(BackofficeModelChannelAppService appService,
+            BackofficeModelCatalogAppService catalogAppService) {
         this.appService = appService;
+        this.catalogAppService = catalogAppService;
     }
 
     @GetMapping
@@ -111,6 +117,24 @@ public class BackofficeModelProviderController {
     public ApiResponse<Void> delete(@PathVariable String providerKey) {
         appService.deleteProvider(providerKey, currentOperator());
         return ApiResponse.ok();
+    }
+
+    @PostMapping("/{providerKey}/remote-models")
+    @Operation(summary = "远端模型清单手动拉取（对照库内档位）",
+            description = "按通道行真拉远端模型清单（OpenAI 兼容 GET {baseUrl}/models，"
+                    + "方舟端点实测同形状）并与库内档位对照：条目 trackedTierKeys 空＝"
+                    + "远端有库里无（建议入库）；staleTiers＝库内指向远端已无（提示"
+                    + "过时）。每次全量真拉无缓存（手动同步——自动定时同步备案未来"
+                    + "增强，ADR-0031）。勾选入库复用档位创建写口（POST /api/backoffice/"
+                    + "model-tiers，modelName 填所选条目 modelId、语义键人工命名）。"
+                    + "条目 status 如实转述（方舟：无 status＝活跃、Shutdown/Retiring＝"
+                    + "下架/退场中）。上游不可用明确报错不静默（502 PRJ_077 带理由）；"
+                    + "通道 key 空 400 PRJ_076；停用通道可拉（巡检语义）。纯读动作"
+                    + "零留痕。需要机机签名（五头 HMAC），无签名 401")
+    @ErrorCodes({"PRJ_065", "PRJ_076", "PRJ_077", "UNAUTHORIZED"})
+    public ApiResponse<BackofficeRemoteModelCatalogResponse> pullRemoteModels(
+            @PathVariable String providerKey) {
+        return ApiResponse.ok(catalogAppService.pull(providerKey));
     }
 
     @GetMapping("/{providerKey}/traces")

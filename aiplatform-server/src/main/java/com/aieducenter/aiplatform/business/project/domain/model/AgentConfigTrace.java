@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
  * @param oldRoutingEnabled             变更前模型路由开关
  * @param oldRoutingStrongModelId       变更前强模型档（null＝回落代码缺省）
  * @param oldRoutingFileCountThreshold  变更前文件面阈值（null 同上）
- * @param oldRoutingSliceLengthThreshold 变更前片复杂度阈值（null 同上）
+ * @param oldRoutingSliceFeatureThreshold 变更前片复杂度阈值（null 同上）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId                    变更后模型档位（null 同上）
  * @param newWebSearchEnabled           变更后联网搜索开关
@@ -26,7 +26,7 @@ import java.time.LocalDateTime;
  * @param newRoutingEnabled             变更后模型路由开关
  * @param newRoutingStrongModelId       变更后强模型档（null＝本次清空回落代码缺省）
  * @param newRoutingFileCountThreshold  变更后文件面阈值（null 同上）
- * @param newRoutingSliceLengthThreshold 变更后片复杂度阈值（null 同上）
+ * @param newRoutingSliceFeatureThreshold 变更后片复杂度阈值（null 同上）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -41,7 +41,7 @@ public record AgentConfigTrace(
         boolean oldRoutingEnabled,
         String oldRoutingStrongModelId,
         Integer oldRoutingFileCountThreshold,
-        Integer oldRoutingSliceLengthThreshold,
+        Integer oldRoutingSliceFeatureThreshold,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -49,7 +49,7 @@ public record AgentConfigTrace(
         boolean newRoutingEnabled,
         String newRoutingStrongModelId,
         Integer newRoutingFileCountThreshold,
-        Integer newRoutingSliceLengthThreshold,
+        Integer newRoutingSliceFeatureThreshold,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

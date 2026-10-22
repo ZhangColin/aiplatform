@@ -1,6 +1,7 @@
 package com.aieducenter.aiplatform.business.project.application;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,8 +31,11 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>信号三件（任一越阈即升强档，否则回落人工档兜底）</b>：①失败升档——
  * 重试（同段第 N 次尝试）与回滚重跑（首轮重试耗尽）是「难活」的直接事实；
  * ②文件面大小——工作区已跟踪文件数（{@link #countTrackedFiles}，代码面越
- * 大、改动一致性越难）；③片复杂度——切片描述字数（主智能体「宁粗勿碎」，
- * 长描述即粗片）。策略配置化：开关/强档/两阈值走智能体运营配置面
+ * 大、改动一致性越难；基座工程面＝镜像内置模板 12 件〔ADR-0013〕，对 60 件
+ * 阈值的影响可忽略——#361 已核）；③片复杂度——切片功能条目数（切片描述的
+ * 枚举段数 {@link #featureCountOf}，一包多功能的粗片才升档；#361 重定——原
+ * 切片描述字数信号实测恒燃，主智能体「宁粗勿碎」下标题字数无一低于旧阈值，
+ * 不是复杂度代理）。策略配置化：开关/强档/两阈值走智能体运营配置面
  * （prj_agent_configs 扩展列，PUT /api/backoffice/agent-configs/executor
  * 可调、不发版），null＝回落本类代码缺省。</p>
  *
@@ -49,8 +53,20 @@ public class ModelRoutingAppService {
     /** 文件面阈值代码缺省：工作区已跟踪文件数 ≥ 此值即升强档（运营配置面可换）。 */
     public static final int DEFAULT_FILE_COUNT_THRESHOLD = 60;
 
-    /** 片复杂度阈值代码缺省：切片描述字数 ≥ 此值即升强档（运营配置面可换）。 */
-    public static final int DEFAULT_SLICE_LENGTH_THRESHOLD = 20;
+    /**
+     * 片复杂度阈值代码缺省：切片功能条目数 ≥ 此值即升强档（运营配置面可换）。
+     * #361 重定（原字数信号恒燃——实测切片标题无一低于 20 字，标题字数不是复杂
+     * 度代理）；4＝一包四件以上的粗片才升档，Demo 阶段激进快模型基调下保守升档
+     * （快档兜不住由失败重试升档信号补）。
+     */
+    public static final int DEFAULT_SLICE_FEATURE_THRESHOLD = 4;
+
+    /**
+     * 功能条目计数的枚举分隔符模式（正则字符类；中英常用枚举形：顿号/逗号/分号/
+     * 斜杠/加号——连词〔并/和/与〕是行文不是枚举，不切）。词法统计非语义解析
+     * （同字数计数的事实面，不违「不解析自由文本」判定契约）。
+     */
+    private static final String ENUM_SEPARATOR_PATTERN = "[、，,;；/／+＋]";
 
     /** 档位来源词表（closing.modelTier.source 与日志共用）：路由判定/钉死/枚举缺省。 */
     public static final String SOURCE_ROUTED = "routed";
@@ -139,19 +155,19 @@ public class ModelRoutingAppService {
             int round, Integer fileCount, String sliceDescription) {
         int fileThreshold = effective.routingFileCountThreshold() != null
                 ? effective.routingFileCountThreshold() : DEFAULT_FILE_COUNT_THRESHOLD;
-        int sliceThreshold = effective.routingSliceLengthThreshold() != null
-                ? effective.routingSliceLengthThreshold() : DEFAULT_SLICE_LENGTH_THRESHOLD;
+        int sliceThreshold = effective.routingSliceFeatureThreshold() != null
+                ? effective.routingSliceFeatureThreshold() : DEFAULT_SLICE_FEATURE_THRESHOLD;
         String strongModelId = effective.routingStrongModelId() != null
                 ? effective.routingStrongModelId() : DEFAULT_STRONG_MODEL_ID;
         Map<String, Object> signalFacts = new LinkedHashMap<>();
         signalFacts.put("attempt", attempt);
         signalFacts.put("round", round);
         signalFacts.put("fileCount", fileCount);
-        Integer sliceLength = sliceDescription == null
-                ? null : sliceDescription.strip().length();
-        signalFacts.put("sliceLength", sliceLength);
+        Integer sliceFeatures = sliceDescription == null
+                ? null : featureCountOf(sliceDescription);
+        signalFacts.put("sliceFeatures", sliceFeatures);
         signalFacts.put("fileCountThreshold", fileThreshold);
-        signalFacts.put("sliceLengthThreshold", sliceThreshold);
+        signalFacts.put("sliceFeatureThreshold", sliceThreshold);
         if (!effective.routingEnabled()) {
             // 钉死位＝路由关：人工档恒生效（覆盖或枚举缺省——既有口径）
             return new TierSelection(effective.modelId(), effective.chatModelString(),
@@ -172,14 +188,29 @@ public class ModelRoutingAppService {
             escalate = true;
             reasons.add("文件面超出阈值（" + fileCount + " ≥ " + fileThreshold + "）");
         }
-        if (sliceLength != null && sliceLength >= sliceThreshold) {
+        if (sliceFeatures != null && sliceFeatures >= sliceThreshold) {
             escalate = true;
-            reasons.add("片复杂度超出阈值（" + sliceLength + " 字 ≥ " + sliceThreshold + "）");
+            reasons.add("片复杂度超出阈值（" + sliceFeatures + " 项 ≥ " + sliceThreshold + "）");
         }
         // 路由判定优先：信号升强档；无信号回落人工档兜底（覆盖即基础档 → 枚举缺省）
         String modelId = escalate ? strongModelId : effective.modelId();
         return new TierSelection(modelId, AgentProfile.chatModelStringOf(modelId),
                 SOURCE_ROUTED, reasons, signalFacts);
+    }
+
+    /**
+     * 切片功能条目数（片复杂度信号的事实源，#361 重定）：切片描述按枚举分隔符
+     * （{@link #ENUM_SEPARATOR_PATTERN}）切分后的非空段数——「用户能注册登录」＝1（普通
+     * 纵切片）、「用户能注册登录、浏览商品、下单支付、查看历史订单」＝4（一包多
+     * 功能的粗片）。null 透传（非切片段信号缺位，判定单点自行处理）。
+     */
+    static Integer featureCountOf(String sliceDescription) {
+        if (sliceDescription == null) {
+            return null;
+        }
+        return (int) Arrays.stream(sliceDescription.strip().split(ENUM_SEPARATOR_PATTERN))
+                .filter(segment -> !segment.isBlank())
+                .count();
     }
 
     /**

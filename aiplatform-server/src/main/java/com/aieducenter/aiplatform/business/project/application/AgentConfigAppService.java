@@ -45,7 +45,7 @@ public class AgentConfigAppService {
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
-            Integer routingSliceLengthThreshold) {
+            Integer routingSliceFeatureThreshold) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -67,7 +67,7 @@ public class AgentConfigAppService {
                 config.webSearchEnabled(), config.fetchUrlEnabled(),
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),
-                config.routingSliceLengthThreshold());
+                config.routingSliceFeatureThreshold());
     }
 
     /**

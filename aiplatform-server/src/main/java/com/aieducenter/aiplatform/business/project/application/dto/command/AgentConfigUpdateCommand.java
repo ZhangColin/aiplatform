@@ -29,8 +29,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          deepseek-v4-pro；不做白名单校验同 modelId）
  * @param routingFileCountThreshold 文件面阈值（工作区已跟踪文件数 ≥ 此值升强档；
  *                          null＝清空回落代码缺省 60）
- * @param routingSliceLengthThreshold 片复杂度阈值（切片描述字数 ≥ 此值升强档；
- *                          null＝清空回落代码缺省 20）
+ * @param routingSliceFeatureThreshold 片复杂度阈值（切片功能条目数——枚举段数
+ *                          ≥ 此值升强档；null＝清空回落代码缺省 4；#361 重定）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -55,7 +55,7 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "文件面阈值（#354：工作区已跟踪文件数 ≥ 此值升强档；"
                 + "null＝清空回落代码缺省 60）", example = "60")
         Integer routingFileCountThreshold,
-        @Schema(description = "片复杂度阈值（#354：切片描述字数 ≥ 此值升强档；"
-                + "null＝清空回落代码缺省 20）", example = "20")
-        Integer routingSliceLengthThreshold) {
+        @Schema(description = "片复杂度阈值（#354/#361：切片功能条目数——描述的枚举段数"
+                + " ≥ 此值升强档；null＝清空回落代码缺省 4）", example = "4")
+        Integer routingSliceFeatureThreshold) {
 }

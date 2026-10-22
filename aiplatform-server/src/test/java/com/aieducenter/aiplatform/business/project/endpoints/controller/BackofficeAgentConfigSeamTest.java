@@ -344,15 +344,15 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
                 .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
                 .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(60))
-                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(20))
-                .andExpect(jsonPath("$.data.routingSliceLengthThresholdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingSliceLengthThreshold").value(20));
+                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4))
+                .andExpect(jsonPath("$.data.routingSliceFeatureThresholdOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingSliceFeatureThreshold").value(4));
         // 装配读面同步：路由开、三可空件 null（回落缺省归路由判定单点）
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isTrue();
         assertThat(executor.routingStrongModelId()).isNull();
         assertThat(executor.routingFileCountThreshold()).isNull();
-        assertThat(executor.routingSliceLengthThreshold()).isNull();
+        assertThat(executor.routingSliceFeatureThreshold()).isNull();
     }
 
     @Test
@@ -362,14 +362,14 @@ class BackofficeAgentConfigSeamTest {
         // 留痕前后快照含路由四件；清空（null）回落代码缺省
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
                 {"routingEnabled": false, "routingStrongModelId": "deepseek-v4-ultra",
-                 "routingFileCountThreshold": 30, "routingSliceLengthThreshold": 10}
+                 "routingFileCountThreshold": 30, "routingSliceFeatureThreshold": 10}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(false))
                 .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-ultra"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(10));
+                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(10));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isFalse();
         assertThat(executor.routingStrongModelId()).isEqualTo("deepseek-v4-ultra");
@@ -381,11 +381,11 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].oldRoutingEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].oldRoutingStrongModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldRoutingSliceLengthThreshold").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldRoutingSliceFeatureThreshold").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
                 .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("deepseek-v4-ultra"))
                 .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data[0].newRoutingSliceLengthThreshold").value(10))
+                .andExpect(jsonPath("$.data[0].newRoutingSliceFeatureThreshold").value(10))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
 
         // 清空回落：路由策略件全 null＝回代码缺省（开关 null 归一缺省 true＝开）
@@ -395,7 +395,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-pro"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
-                .andExpect(jsonPath("$.data.routingSliceLengthThreshold").value(20));
+                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));
     }
 
     // ---------- 夹具 ----------

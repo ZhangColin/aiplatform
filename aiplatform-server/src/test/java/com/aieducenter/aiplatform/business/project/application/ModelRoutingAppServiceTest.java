@@ -104,15 +104,30 @@ class ModelRoutingAppServiceTest {
     }
 
     @Test
-    void given_long_slice_description_when_decide_then_escalates() {
-        int threshold = ModelRoutingAppService.DEFAULT_SLICE_LENGTH_THRESHOLD;
-        String fat = "用户能注册登录、浏览商品、下单支付并查看历史订单";
-        assertThat(fat.strip().length()).isGreaterThanOrEqualTo(threshold);
+    void given_long_title_few_features_when_decide_then_stays_fast() {
+        // #361 回归案：标题字数不是复杂度代理（实测切片标题无一低于 20 字——字数
+        // 信号恒燃、快档在生成轨空转）；长而少枚举的片（30 字、1 个枚举分隔）不升档
+        String thirtyChars = "用户能登录并区分管理员/普通员工两种角色的访问权限";
         ModelRoutingAppService.TierSelection selection =
-                ModelRoutingAppService.decide(routedDefault(), 1, 1, null, fat);
+                ModelRoutingAppService.decide(routedDefault(), 1, 1, null, thirtyChars);
+        assertThat(selection.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(selection.reasons()).isEmpty();
+    }
+
+    @Test
+    void given_enumerated_slice_at_feature_threshold_when_decide_then_escalates() {
+        // 片复杂度信号＝切片功能条目数（枚举分隔计数）：粗片（一包多功能）越阈升档
+        int threshold = ModelRoutingAppService.DEFAULT_SLICE_FEATURE_THRESHOLD;
+        String enumerated = "用户能注册登录、浏览商品、下单支付、查看历史订单";
+        ModelRoutingAppService.TierSelection selection =
+                ModelRoutingAppService.decide(routedDefault(), 1, 1, null, enumerated);
         assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
-        assertThat(selection.reasons()).hasSize(1)
-                .anySatisfy(reason -> assertThat(reason).contains("片复杂度超出阈值"));
+        assertThat(selection.reasons()).containsExactly(
+                "片复杂度超出阈值（" + threshold + " 项 ≥ " + threshold + "）");
+        // 阈值下界不升档（越阈判定的边界语义——3 项枚举是普通纵切片）
+        ModelRoutingAppService.TierSelection below =
+                ModelRoutingAppService.decide(routedDefault(), 1, 1, null, "用户能注册、登录、找回密码");
+        assertThat(below.modelId()).isEqualTo("deepseek-v4-flash");
     }
 
     @Test
@@ -155,11 +170,12 @@ class ModelRoutingAppServiceTest {
                         "deepseek:deepseek-v4-flash", true, true, false, true,
                         "deepseek-v4-ultra", 5, 7);
         ModelRoutingAppService.TierSelection selection =
-                ModelRoutingAppService.decide(custom, 1, 1, 5, "用户能下单支付");
+                ModelRoutingAppService.decide(custom, 1, 1, 5, "用户能注册、登录、找回、浏览、下单、支付、退款");
         assertThat(selection.modelId()).isEqualTo("deepseek-v4-ultra");
         assertThat(selection.reasons()).hasSize(2);
         assertThat(selection.signals()).containsEntry("fileCountThreshold", 5)
-                .containsEntry("sliceLengthThreshold", 7);
+                .containsEntry("sliceFeatureThreshold", 7)
+                .containsEntry("sliceFeatures", 7);
     }
 
     @Test

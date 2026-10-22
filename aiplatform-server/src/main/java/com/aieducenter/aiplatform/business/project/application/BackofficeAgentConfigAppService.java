@@ -86,7 +86,7 @@ public class BackofficeAgentConfigAppService {
                 safe.fetchUrlEnabled() == null || safe.fetchUrlEnabled(),
                 safe.routingEnabled() == null || safe.routingEnabled(),
                 blankToNull(safe.routingStrongModelId()),
-                safe.routingFileCountThreshold(), safe.routingSliceLengthThreshold(),
+                safe.routingFileCountThreshold(), safe.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), null);
         AgentOperationalConfig persisted =
                 persistIfChanged(profile, current, next, operator);
@@ -136,7 +136,7 @@ public class BackofficeAgentConfigAppService {
                 tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
                 tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
-                current.routingFileCountThreshold(), current.routingSliceLengthThreshold(),
+                current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile, current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -172,10 +172,10 @@ public class BackofficeAgentConfigAppService {
                 profile.key(), current.systemPrompt(), current.modelId(),
                 current.webSearchEnabled(), current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
-                current.routingFileCountThreshold(), current.routingSliceLengthThreshold(),
+                current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
-                next.routingFileCountThreshold(), next.routingSliceLengthThreshold(),
+                next.routingFileCountThreshold(), next.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(profile.key());
     }
@@ -196,7 +196,7 @@ public class BackofficeAgentConfigAppService {
                 || current.routingEnabled() != next.routingEnabled()
                 || !Objects.equals(current.routingStrongModelId(), next.routingStrongModelId())
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
-                || !Objects.equals(current.routingSliceLengthThreshold(), next.routingSliceLengthThreshold());
+                || !Objects.equals(current.routingSliceFeatureThreshold(), next.routingSliceFeatureThreshold());
     }
 
     /** 配置面智能体寻址（单点）：{@link AgentProfile#byKey} 解析，未知/空键 404。 */

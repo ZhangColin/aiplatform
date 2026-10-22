@@ -35,9 +35,9 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
  * @param routingFileCountThreshold 文件面阈值生效值（库覆盖值或代码缺省）
  * @param routingFileCountThresholdOverridden true＝文件面阈值为库覆盖值
  * @param defaultRoutingFileCountThreshold 代码缺省文件面阈值（同上预览）
- * @param routingSliceLengthThreshold 片复杂度阈值生效值（库覆盖值或代码缺省）
- * @param routingSliceLengthThresholdOverridden true＝片复杂度阈值为库覆盖值
- * @param defaultRoutingSliceLengthThreshold 代码缺省片复杂度阈值（同上预览）
+ * @param routingSliceFeatureThreshold 片复杂度阈值生效值（库覆盖值或代码缺省）
+ * @param routingSliceFeatureThresholdOverridden true＝片复杂度阈值为库覆盖值
+ * @param defaultRoutingSliceFeatureThreshold 代码缺省片复杂度阈值（同上预览）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -84,13 +84,13 @@ public record BackofficeAgentConfigResponse(
         boolean routingFileCountThresholdOverridden,
         @Schema(description = "代码缺省文件面阈值（预览：清空覆盖即落此值）", example = "60")
         Integer defaultRoutingFileCountThreshold,
-        @Schema(description = "片复杂度阈值生效值（#354：切片描述字数 ≥ 此值升强档；"
-                + "库覆盖值或代码缺省）", example = "20")
-        Integer routingSliceLengthThreshold,
+        @Schema(description = "片复杂度阈值生效值（#354/#361：切片功能条目数——描述的"
+                + "枚举段数 ≥ 此值升强档；库覆盖值或代码缺省）", example = "4")
+        Integer routingSliceFeatureThreshold,
         @Schema(description = "片复杂度阈值是否库覆盖值（true＝覆盖；false＝代码缺省）")
-        boolean routingSliceLengthThresholdOverridden,
-        @Schema(description = "代码缺省片复杂度阈值（预览：清空覆盖即落此值）", example = "20")
-        Integer defaultRoutingSliceLengthThreshold,
+        boolean routingSliceFeatureThresholdOverridden,
+        @Schema(description = "代码缺省片复杂度阈值（预览：清空覆盖即落此值）", example = "4")
+        Integer defaultRoutingSliceFeatureThreshold,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -122,10 +122,10 @@ public record BackofficeAgentConfigResponse(
                         ? config.routingFileCountThreshold() : ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
                 config.routingFileCountThreshold() != null,
                 ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
-                config.routingSliceLengthThreshold() != null
-                        ? config.routingSliceLengthThreshold() : ModelRoutingAppService.DEFAULT_SLICE_LENGTH_THRESHOLD,
-                config.routingSliceLengthThreshold() != null,
-                ModelRoutingAppService.DEFAULT_SLICE_LENGTH_THRESHOLD,
+                config.routingSliceFeatureThreshold() != null
+                        ? config.routingSliceFeatureThreshold() : ModelRoutingAppService.DEFAULT_SLICE_FEATURE_THRESHOLD,
+                config.routingSliceFeatureThreshold() != null,
+                ModelRoutingAppService.DEFAULT_SLICE_FEATURE_THRESHOLD,
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

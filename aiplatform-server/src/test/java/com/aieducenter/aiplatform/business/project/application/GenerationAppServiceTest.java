@@ -2981,7 +2981,7 @@ class GenerationAppServiceTest {
         assertThat((List<String>) stage0Tier.get("reasons")).contains("重试升档（第 2 次尝试）");
         assertThat((Map<String, Object>) stage0Tier.get("signals"))
                 .containsEntry("attempt", 2)
-                .containsEntry("sliceLength", null); // 阶段 0 无切片描述——片复杂度缺位
+                .containsEntry("sliceFeatures", null); // 阶段 0 无切片描述——片复杂度缺位
         Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
                 .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
@@ -3038,15 +3038,16 @@ class GenerationAppServiceTest {
 
     @Test
     void given_fat_slice_description_when_dispatch_then_slice_escalates_but_stage0_stays_fast() {
-        // 片复杂度信号：切片描述字数 ≥ 阈值（代码缺省 20）——该片升强档；阶段 0
-        // 无切片描述（信号缺位）仍快档
+        // 片复杂度信号：切片功能条目数（枚举段数）≥ 阈值（代码缺省 4，#361 重定）
+        // ——该片升强档；阶段 0 无切片描述（信号缺位）仍快档。长而少枚举的标题
+        // 不升档（字数信号恒燃已废——回归见 ModelRoutingAppServiceTest）
         Long projectId = persistedProject("9852");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
 
         appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录、浏览商品、下单支付并查看历史订单")));
+                new BuildPlan(List.of("用户能注册登录、浏览商品、下单支付、查看历史订单")));
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());

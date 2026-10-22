@@ -80,7 +80,7 @@ export interface paths {
         get: operations["config"];
         /**
          * 智能体配置全量写（覆盖态终态＋变更留痕）
-         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingSliceLengthThreshold 缺省＝清空回落代码缺省（强档deepseek-v4-pro、文件面 60、片复杂度 20 字）。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/片复杂度）越阈升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位名不做白名单校验（错值致新会话失败经留痕写回可回滚）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingSliceFeatureThreshold 缺省＝清空回落代码缺省（强档deepseek-v4-pro、文件面 60、片复杂度 4 项功能条目——#361 重定：切片描述的枚举段数，标题字数不是复杂度代理）。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/片复杂度）越阈升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位名不做白名单校验（错值致新会话失败经留痕写回可回滚）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
@@ -3152,10 +3152,10 @@ export interface components {
             routingFileCountThreshold?: number;
             /**
              * Format: int32
-             * @description 片复杂度阈值（#354：切片描述字数 ≥ 此值升强档；null＝清空回落代码缺省 20）
-             * @example 20
+             * @description 片复杂度阈值（#354/#361：切片功能条目数——描述的枚举段数 ≥ 此值升强档；null＝清空回落代码缺省 4）
+             * @example 4
              */
-            routingSliceLengthThreshold?: number;
+            routingSliceFeatureThreshold?: number;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -3228,18 +3228,18 @@ export interface components {
             defaultRoutingFileCountThreshold?: number;
             /**
              * Format: int32
-             * @description 片复杂度阈值生效值（#354：切片描述字数 ≥ 此值升强档；库覆盖值或代码缺省）
-             * @example 20
+             * @description 片复杂度阈值生效值（#354/#361：切片功能条目数——描述的枚举段数 ≥ 此值升强档；库覆盖值或代码缺省）
+             * @example 4
              */
-            routingSliceLengthThreshold?: number;
+            routingSliceFeatureThreshold?: number;
             /** @description 片复杂度阈值是否库覆盖值（true＝覆盖；false＝代码缺省） */
-            routingSliceLengthThresholdOverridden?: boolean;
+            routingSliceFeatureThresholdOverridden?: boolean;
             /**
              * Format: int32
              * @description 代码缺省片复杂度阈值（预览：清空覆盖即落此值）
-             * @example 20
+             * @example 4
              */
-            defaultRoutingSliceLengthThreshold?: number;
+            defaultRoutingSliceFeatureThreshold?: number;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -5219,7 +5219,7 @@ export interface components {
              * Format: int32
              * @description 变更前片复杂度阈值（null 同上）
              */
-            oldRoutingSliceLengthThreshold?: number;
+            oldRoutingSliceFeatureThreshold?: number;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型档位（null＝本次清空回落） */
@@ -5241,7 +5241,7 @@ export interface components {
              * Format: int32
              * @description 变更后片复杂度阈值（null 同上）
              */
-            newRoutingSliceLengthThreshold?: number;
+            newRoutingSliceFeatureThreshold?: number;
             /**
              * @description 变更操作者 id
              * @example 700200

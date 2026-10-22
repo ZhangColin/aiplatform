@@ -34,8 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * false、默认预览同值、开关 true、写者 null；</li>
  * <li><b>覆盖写＋装配断言（缝 2）</b>：PUT 后 GET 生效值＝库值＋覆盖标记 true；
  * 装配读面（{@link AgentConfigAppService}——MainAgentAppService/CoderRunAttempts
- * 命令构建的取值单点）systemPromptOf/chatModelStringOf 返回库值（provider 前缀
- * 单源拼装）；两座智能体各自独立（动 main 不动 executor）；</li>
+ * 命令构建的取值单点）返回库值（systemPrompt 与档位键）；两座智能体各自独立（动 main 不动 executor）；</li>
  * <li><b>清空回落</b>：null/缺省/纯空白＝清空覆盖，GET 与装配读面回枚举默认；</li>
  * <li><b>留痕＋回滚</b>：每次实际变更一痕（前后全量值快照＋操作者＋倒序最近先）、
  * 同值幂等重写不落痕；回滚＝旧值写回（一次新变更、留新痕——不做版本树）；</li>
@@ -107,8 +106,7 @@ class BackofficeAgentConfigSeamTest {
         // 装配读面同步回落（缝 2：命令构建取值单点）
         var mainDefaults = agentConfigs.effectiveOf(AgentProfile.MAIN);
         assertThat(mainDefaults.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
-        assertThat(mainDefaults.chatModelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
-        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).systemPrompt())
+                assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).systemPrompt())
                 .isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
     }
 
@@ -118,11 +116,11 @@ class BackofficeAgentConfigSeamTest {
     void given_override_persisted_when_get_and_assembly_then_library_value_wins()
             throws Exception {
         signedPut("main", OPERATOR_ID, OPERATOR_NAME, """
-                {"systemPrompt": "%s", "modelId": "deepseek-v4-pro"}""".formatted(MAIN_PROMPT_V1))
+                {"systemPrompt": "%s", "modelId": "pro"}""".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.agentKey").value("main"))
                 .andExpect(jsonPath("$.data.systemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data.modelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.modelId").value("pro"))
                 .andExpect(jsonPath("$.data.systemPromptOverridden").value(true))
                 .andExpect(jsonPath("$.data.modelIdOverridden").value(true))
                 // 默认预览仍指枚举缺省（清空回落即落此值）
@@ -139,12 +137,11 @@ class BackofficeAgentConfigSeamTest {
         // 装配断言（缝 2）：库值优先——systemPrompt 取库值、模型串 provider 前缀单源拼装
         var main = agentConfigs.effectiveOf(AgentProfile.MAIN);
         assertThat(main.systemPrompt()).isEqualTo(MAIN_PROMPT_V1);
-        assertThat(main.modelId()).isEqualTo("deepseek-v4-pro");
-        assertThat(main.chatModelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        assertThat(main.modelId()).isEqualTo("pro");
         // 两座独立：main 的覆盖不漂进 executor（仍枚举默认）
         var executorDefaults = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executorDefaults.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(executorDefaults.chatModelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
+        assertThat(executorDefaults.modelId()).isEqualTo(AgentProfile.EXECUTOR.modelId());
     }
 
     // ---------- 清空回落：null/缺省/纯空白＝回落枚举默认 ----------
@@ -154,7 +151,7 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // #341 起 Demo 阶段（executor）缺省＝快模型档，覆盖档取强模型档以示覆盖值≠缺省值
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"deepseek-v4-pro\"}"
+                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}"
                         .formatted(EXECUTOR_PROMPT_V1))
                 .andExpect(status().isOk());
         assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR).systemPrompt())
@@ -169,7 +166,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.modelIdOverridden").value(false));
         var executorBack = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executorBack.systemPrompt()).isEqualTo(AgentProfile.EXECUTOR.systemPrompt());
-        assertThat(executorBack.chatModelString()).isEqualTo(AgentProfile.EXECUTOR.chatModelString());
+        assertThat(executorBack.modelId()).isEqualTo(AgentProfile.EXECUTOR.modelId());
 
         // 纯空白同 null（归一）；显式 null 同语义；行保留（写者留最近动作者）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
@@ -195,7 +192,7 @@ class BackofficeAgentConfigSeamTest {
             throws Exception {
         // 变更一（V1 覆盖）→ 变更二（V2 翻新）→ 幂等（同值重写）→ 变更三（回滚＝V1 写回）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"deepseek-v4-pro\"}".formatted(MAIN_PROMPT_V1))
+                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk());
         signedPut("main", OPERATOR_ID_2, OPERATOR_NAME_2,
                 "{\"systemPrompt\": \"%s\"}".formatted(MAIN_PROMPT_V2))
@@ -207,7 +204,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID_2));
         // 回滚＝把留痕旧值写回（一次新变更、留新痕——不做版本树）
         signedPut("main", OPERATOR_ID, OPERATOR_NAME,
-                "{\"systemPrompt\": \"%s\", \"modelId\": \"deepseek-v4-pro\"}".formatted(MAIN_PROMPT_V1))
+                "{\"systemPrompt\": \"%s\", \"modelId\": \"pro\"}".formatted(MAIN_PROMPT_V1))
                 .andExpect(status().isOk());
 
         signedGet("main/traces")
@@ -218,13 +215,13 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].oldSystemPrompt").value(MAIN_PROMPT_V2))
                 .andExpect(jsonPath("$.data[0].oldModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[0].newModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data[0].newModelId").value("pro"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID))
                 .andExpect(jsonPath("$.data[0].oldWebSearchEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].newWebSearchEnabled").value(true))
                 // 痕二：翻新——old=V1/pro，new=V2/模型清空（PUT 全量：未带即 null）
                 .andExpect(jsonPath("$.data[1].oldSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[1].oldModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data[1].oldModelId").value("pro"))
                 .andExpect(jsonPath("$.data[1].newSystemPrompt").value(MAIN_PROMPT_V2))
                 .andExpect(jsonPath("$.data[1].newModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[1].operatorId").value(OPERATOR_ID_2))
@@ -233,7 +230,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[2].oldSystemPrompt").value(nullValue()))
                 .andExpect(jsonPath("$.data[2].oldModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[2].newSystemPrompt").value(MAIN_PROMPT_V1))
-                .andExpect(jsonPath("$.data[2].newModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data[2].newModelId").value("pro"))
                 .andExpect(jsonPath("$.data[2].operatorId").value(OPERATOR_ID));
 
         // 留痕跨智能体隔离：executor 无痕
@@ -303,7 +300,7 @@ class BackofficeAgentConfigSeamTest {
 
     @Test
     void given_missing_operator_headers_when_signed_put_then_400() throws Exception {
-        signedPut("main", null, null, "{\"modelId\": \"deepseek-v4-pro\"}")
+        signedPut("main", null, null, "{\"modelId\": \"pro\"}")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(AGENT_CONFIG_OPERATOR_REQUIRED_CODE))
                 .andExpect(jsonPath("$.message").value("操作者不能为空"));
@@ -316,7 +313,7 @@ class BackofficeAgentConfigSeamTest {
     void given_no_signature_headers_when_any_endpoint_then_401_signature_required() throws Exception {
         mockMvc.perform(put("/api/backoffice/agent-configs/main")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"modelId\": \"deepseek-v4-pro\"}"))
+                        .content("{\"modelId\": \"pro\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("Signature required"));
@@ -338,9 +335,9 @@ class BackofficeAgentConfigSeamTest {
         signedGet("executor")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.defaultRoutingStrongModelId").value("pro"))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
                 .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
                 .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(60))
@@ -392,7 +389,7 @@ class BackofficeAgentConfigSeamTest {
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
                 .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));

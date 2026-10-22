@@ -145,6 +145,7 @@ public class BackofficeSkillPrecheckAppService {
                 assemblePrompt(slot, protocol, assigned, candidates),
                 PRECHECK_SYSTEM_PROMPT,
                 properties.getPrecheckModel(), // 专用配置键（缺省 flash 档）
+                null, // 无通道语境：配置缺省串走 SDK 内置 provider（ADR-0031 边缘点收编属 #366）
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(METERING_SUBJECT,

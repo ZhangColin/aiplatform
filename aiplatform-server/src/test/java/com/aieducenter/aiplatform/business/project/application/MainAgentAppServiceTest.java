@@ -137,6 +137,9 @@ class MainAgentAppServiceTest {
 
     @BeforeEach
     void defaultAgentReplies() {
+        // 真解析链护卫（ADR-0031）：命令构建经 ModelTierAppService 解析种子档位行
+        // （flash → volcengine 通道），测试环境无 key 注入——幂等补测试 key
+        ModelTierSeed.ensureChannelKey(jdbcTemplate);
         // 轮落定点读 converse/resume 返回维护挂起问答会合锚——默认回复形状兜底
         // （个别用例自带脚本后打桩覆盖之，Mockito 后桩胜出）。同测重打桩时 when()
         // 的 matcher 空参调用会触发旧 answer——null 直接过，不当真调用（同
@@ -232,7 +235,7 @@ class MainAgentAppServiceTest {
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.systemPrompt()).contains("ask_user");
-        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue();
         assertThat(value.workspaceId()).isEqualTo("9700");
@@ -255,7 +258,7 @@ class MainAgentAppServiceTest {
         givenSessionExecutorRunsInline();
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs (agent_key, system_prompt, model_id, web_search_enabled)
-                VALUES ('main', ?, 'deepseek-v4-pro', false)
+                VALUES ('main', ?, 'pro', false)
                 """, "主智能体覆盖协议：每轮先复述目标。");
 
         appService.runOpinionTurn(projectId, "做一个官网");
@@ -263,7 +266,7 @@ class MainAgentAppServiceTest {
         ArgumentCaptor<AgentCommand> overridden = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(overridden.capture(), any());
         assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。");
-        assertThat(overridden.getValue().modelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        assertThat(overridden.getValue().modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
         // 开关库值编入规格串（ws 关、fu 缺省开）
         assertThat(overridden.getValue().toolSpec()).isEqualTo("ws=false,fu=true");
 
@@ -274,7 +277,7 @@ class MainAgentAppServiceTest {
         assertThat(fallback.getAllValues().get(1).systemPrompt())
                 .isEqualTo(AgentProfile.MAIN.systemPrompt());
         assertThat(fallback.getAllValues().get(1).modelString())
-                .isEqualTo(AgentProfile.MAIN.chatModelString());
+                .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(fallback.getAllValues().get(1).toolSpec()).isEqualTo("ws=true,fu=true");
     }
 
@@ -519,7 +522,7 @@ class MainAgentAppServiceTest {
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
         assertThat(value.workspaceId()).isEqualTo("9703");
-        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue(); // 续跑同只读面（#86：不漂移成读写面）
@@ -590,7 +593,7 @@ class MainAgentAppServiceTest {
         assertThat(value.prompt()).isEqualTo("我后台的地址是什么？");
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
         assertThat(value.userId()).isEqualTo(Long.toString(OWNER));
-        assertThat(value.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(value.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(value.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(value.workspaceReadOnly()).isTrue();
         assertThat(value.usageContext().dims()).isEqualTo(

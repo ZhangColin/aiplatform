@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  *
  * <p><b>模型路由策略四列（#354，ADR-0030；片复杂度信号 #361 重定）</b>：run
  * 执行体的模型档位路由策略——路由开关（缺省开＝路由判定优先）、强模型档与两
- * 阈值（null＝回落代码缺省：strongModelId=deepseek-v4-pro、文件面 60、片复杂
+ * 阈值（null＝回落代码缺省：strongModelId=pro、文件面 60、片复杂
  * 度 4 项功能条目）。协同口径：路由判定
  * 优先、人工覆盖兜底——路由开＝信号升强档优先，无信号回落人工档兜底
  * （{@code modelId} 覆盖 → 枚举缺省——覆盖即基础档，快档位可经覆盖配置、不关
@@ -24,8 +24,8 @@ import java.time.LocalDateTime;
  *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
- * @param modelId                    运营覆盖模型档位（null＝回落枚举默认；裸档位名——provider
- *                                   前缀由 {@link AgentProfile#chatModelStringOf} 统一拼）
+ * @param modelId                    运营覆盖模型档位键（null＝回落枚举默认；ADR-0031 语义键
+ *                                   ——模型串与通道注入由 ModelTierAppService 统一解析）
  * @param webSearchEnabled           增强工具开关：联网搜索（关即退出槽位装配面，#252）
  * @param fetchUrlEnabled            增强工具开关：网页抓取（同上）
  * @param routingEnabled             模型路由开关（缺省开＝路由判定优先；关＝既有人工定档口径）

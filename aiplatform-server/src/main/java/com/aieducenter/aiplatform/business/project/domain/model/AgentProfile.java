@@ -37,7 +37,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // 能力边界正本（#216：纪律条款 + 终态能力清单，与工具装配一致）终结无验证
     // 自述；savePrd 的 summary 必传（产出/修订说明——平台从工具调用事实观测，
     // 不新增自报面）
-    MAIN("main", 1, "主智能体", "deepseek-v4-flash",
+    MAIN("main", 1, "主智能体", "flash",
             "你是平台的主智能体，直接与用户对话，全程一个人负责：梳理需求（提问澄清、"
                     + "撰写修订 PRD）、回答项目咨询、受理迭代意见。工作协议：\n"
                     + "【需求梳理（项目初期）】\n"
@@ -155,7 +155,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // 用快模型，质量靠验证兜底」；Demo 与正式生产同轨同协议，档位在既有智能体运营
     // 配置机制上人工定档）。正式生产档为未来独立槽位、与本缺省互不牵连；改档经运营
     // 配置面（ADR-0021）即时生效、不发版。路由判定机制归 #354。
-    EXECUTOR("executor", 2, "run 执行体", "deepseek-v4-flash",
+    EXECUTOR("executor", 2, "run 执行体", "flash",
             "你是平台的 run 执行体，负责把 PRD 变成可操作的系统、把用户意见变为系统更新："
                     + "在沙箱工作区内读写代码、运行命令，产出真实可运行的应用。工作协议：\n"
                     + "1. 需求正本 = 工作区根下的 docs/PRD.md，开工先完整阅读；「功能清单」章节是"
@@ -220,7 +220,7 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
     // 多稿候选——界面类写可交互轻量实现、平面类出图（档位表落提示词层，ADR-0026
     // 不做代码级硬路由）；产物只落 design/（不动系统代码）；无 shell（工具面结构性
     // 收窄，ProjectDesign 工作区面）；解说与术语口径对偶执行体协议
-    DESIGNER("designer", 3, "设计执行体", "deepseek-v4-pro",
+    DESIGNER("designer", 3, "设计执行体", "pro",
             "你是平台的设计执行体，负责把设计物清单变成设计稿：按任务说明携带的设计物"
                     + "逐件产出多稿候选——界面类写可交互的轻量实现、平面类调出图工具"
                     + "——设计稿只落工作区 design/ 目录。工作协议：\n"
@@ -301,26 +301,13 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
         return name;
     }
 
-    /** 该配置的模型档位（对话内核模型条目名；运营覆盖时装配取库值，本值即回落缺省）。 */
+    /**
+     * 该配置的模型档位键（ADR-0031：引用 {@code prj_model_tiers} 的语义键，如
+     * flash/pro——运营覆盖时装配取库值，本值即回落缺省；档位键 → 模型串与通道
+     * 注入的解析单点在 {@code ModelTierAppService}）。
+     */
     public String modelId() {
         return modelId;
-    }
-
-    /**
-     * 对话轨道模型串（AgentScope {@code provider:modelId} 形）：provider 与
-     * {@code ModelRef} 白名单一致（当前仅 deepseek，加白时同步）。
-     */
-    public String chatModelString() {
-        return chatModelStringOf(modelId);
-    }
-
-    /**
-     * 模型档位 → 对话轨道模型串（#251 覆盖档位共用）：枚举默认与运营配置覆盖
-     * 档位同一 provider 前缀单源拼装（覆盖值是裸档位名，provider 不随配置漂移
-     * ——白名单口径同 {@link #chatModelString()}：当前仅 deepseek，加白时同步）。
-     */
-    public static String chatModelStringOf(String modelId) {
-        return "deepseek:" + modelId;
     }
 
     public String systemPrompt() {

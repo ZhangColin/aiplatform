@@ -10,15 +10,16 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
 /**
  * 智能体运营配置装配读面（#251，ADR-0021「库值优先、缺省回落」解析单点）：
  * {@code MainAgentAppService}（主智能体命令/续跑构建）与 {@code CoderRunAttempts}
- * （执行体命令构建）装配 systemPrompt／模型串时一律经本服务取<b>生效值</b>——库
- * 有覆盖值用库值，无覆盖（行不存在或列 null）回落 {@link AgentProfile} 枚举
- * 默认。枚举仍是身份与缺省正本，本服务只是覆盖态的读腿。
+ * （执行体命令构建）装配 systemPrompt／模型档位键时一律经本服务取<b>生效值</b>
+ * ——库有覆盖值用库值，无覆盖（行不存在或列 null）回落 {@link AgentProfile} 枚举
+ * 默认。枚举仍是身份与缺省正本，本服务只是覆盖态的读腿；档位键 → 模型串与通道
+ * 注入的解析在 {@code ModelTierAppService}（ADR-0031 装配链）。
  *
  * <p>动态查库、不缓存：每次 {@code effectiveOf} 一次主键 SELECT，配置变更后
  * 下一轮命令构建自然反映（对话轮本身是秒级 LLM 调用，读取代价可忽略）；智能体
- * 实例层不必感知——工厂缓存键已含 sysPrompt 与模型串（{@code AgentscopeAgentClient#
- * prepareFor}），新值即新实例，进行中 run 不定格。classify/naming 等一次性判定
- * 不走本面（提示词与档位各自独立，不属智能体身份面）。</p>
+ * 实例层不必感知——工厂缓存键已含 sysPrompt 与解析后的模型串＋通道指纹
+ * （{@code AgentscopeAgentClient#prepareFor}），新值即新实例，进行中 run 不定格。
+ * classify/naming 等一次性判定不走本面（提示词与档位各自独立，不属智能体身份面）。</p>
  *
  * <p><b>工具面规格（#252）</b>：增强工具开关（web_search/fetch_url）同取生效值，
  * {@link EffectiveConfig#toolSpec()} 编成规格串随命令入底座——进工厂实例缓存键
@@ -37,11 +38,12 @@ public class AgentConfigAppService {
     /**
      * 生效配置束（一次查库同取——prompt 与档位在命令构建处恒结伴，工具开关
      * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
-     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效档位裸名、
-     * 生效对话轨道模型串（provider 前缀单源拼装）、增强工具开关生效态、
+     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效档位键
+     * （ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService#resolve}
+     * 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关生效态、
      * 档位覆盖标记（路由协同口径的兜底/钉死判据）与路由策略四件存储态。
      */
-    public record EffectiveConfig(String systemPrompt, String modelId, String chatModelString,
+    public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
@@ -61,9 +63,8 @@ public class AgentConfigAppService {
         AgentOperationalConfig override = configStore.find(profile.key());
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(profile.key());
-        String modelId = config.effectiveModelId(profile.modelId());
         return new EffectiveConfig(config.effectiveSystemPrompt(profile.systemPrompt()),
-                modelId, AgentProfile.chatModelStringOf(modelId),
+                config.effectiveModelId(profile.modelId()),
                 config.webSearchEnabled(), config.fetchUrlEnabled(),
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),

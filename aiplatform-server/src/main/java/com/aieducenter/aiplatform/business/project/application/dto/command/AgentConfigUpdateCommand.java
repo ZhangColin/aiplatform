@@ -20,13 +20,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 仅 run 执行体（executor）消费，其余智能体行同列无消费。</p>
  *
  * @param systemPrompt      覆盖 systemPrompt（null＝清空回落枚举默认）
- * @param modelId           覆盖模型档位裸名（null＝清空回落枚举默认；路由开时
- *                          为兜底基础档——信号升档可越过）
+ * @param modelId           覆盖模型档位键（ADR-0031 语义键如 flash/pro；null＝清空
+ *                          回落枚举默认；路由开时为兜底基础档——信号升档可越过）
  * @param webSearchEnabled  联网搜索开关（缺省 true；关即退出装配面）
  * @param fetchUrlEnabled   网页抓取开关（同上；缺省 true）
  * @param routingEnabled    模型路由开关（缺省 true＝开；false＝既有人工定档口径）
- * @param routingStrongModelId 强模型档裸名（null/缺省/纯空白＝清空回落代码缺省
- *                          deepseek-v4-pro；不做白名单校验同 modelId）
+ * @param routingStrongModelId 强模型档键（语义键同 modelId；null/缺省/纯空白＝清空
+ *                          回落代码缺省 pro；不做存在性校验同 modelId——档位表
+ *                          即时校验属 #367 绑定校验）
  * @param routingFileCountThreshold 文件面阈值（工作区已跟踪文件数 ≥ 此值升强档；
  *                          null＝清空回落代码缺省 60）
  * @param routingSliceFeatureThreshold 片复杂度阈值（切片功能条目数——枚举段数
@@ -36,9 +37,9 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
                 + "清空覆盖，装配回落枚举默认——GET 回执的 defaultSystemPrompt 即回落落点）")
         String systemPrompt,
-        @Schema(description = "覆盖模型档位裸名（如 deepseek-v4-pro；null/缺省/纯空白＝"
+        @Schema(description = "覆盖模型档位键（如 pro；null/缺省/纯空白＝"
                 + "清空覆盖回落枚举默认。不做白名单校验——错值致新会话失败经留痕写回可回滚）",
-                example = "deepseek-v4-pro")
+                example = "pro")
         String modelId,
         @Schema(description = "增强工具开关：联网搜索（缺省 true＝开；#252 起生效装配——"
                 + "关即退出槽位装配面、开即回归，窄幅写口 PUT /agent-tools/{toolName}）")
@@ -49,8 +50,8 @@ public record AgentConfigUpdateCommand(
                 + "false＝既有人工定档口径。仅 run 执行体消费）")
         Boolean routingEnabled,
         @Schema(description = "强模型档裸名（#354 路由升档落点；null/缺省/纯空白＝清空"
-                + "回落代码缺省 deepseek-v4-pro。不做白名单校验同 modelId）",
-                example = "deepseek-v4-pro")
+                + "回落代码缺省 pro。不做存在性校验同 modelId（档位表即时校验属 #367）",
+                example = "pro")
         String routingStrongModelId,
         @Schema(description = "文件面阈值（#354：工作区已跟踪文件数 ≥ 此值升强档；"
                 + "null＝清空回落代码缺省 60）", example = "60")

@@ -232,6 +232,7 @@ class CoderRunAttempts {
     private final AgentEventBridge eventBridge;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
     private final GenerationProperties properties;
     private final ConversationHistoryAppService conversationHistory;
     private final ProjectVersionAppService versions;
@@ -241,7 +242,8 @@ class CoderRunAttempts {
 
     CoderRunAttempts(AgentscopeAgentClient agentClient,
             AgentEventBridge eventBridge, ProjectKnowledgeAppService knowledgeAppService,
-            AgentConfigAppService agentConfigs, GenerationProperties properties,
+            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            GenerationProperties properties,
             ConversationHistoryAppService conversationHistory,
             ProjectVersionAppService versions, VerificationFacts verificationFacts,
             ModelRoutingAppService modelRouting, CodingRunTrack codingRunTrack) {
@@ -249,6 +251,7 @@ class CoderRunAttempts {
         this.eventBridge = eventBridge;
         this.knowledgeAppService = knowledgeAppService;
         this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
         this.properties = properties;
         this.conversationHistory = conversationHistory;
         this.versions = versions;
@@ -409,8 +412,10 @@ class CoderRunAttempts {
                             what, projectId, round, attempt, maxAttempts, tier.modelId(),
                             tier.source(), tier.reasons());
                 }
-                String modelString = tier != null ? tier.chatModelString() : agent.chatModelString();
+                // 档位键 → 模型串＋通道注入（ADR-0031 解析单点）：路由选定档或座
+                // 生效档统一在此解析——供应商/凭证/档位配置变更下一次尝试起跑即生效
                 String attemptModelId = tier != null ? tier.modelId() : agent.modelId();
+                ModelTierAppService.ResolvedModel model = modelTiers.resolve(attemptModelId);
                 AgentCommand command = new AgentCommand(
                         attemptRunId,
                         attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
@@ -419,7 +424,8 @@ class CoderRunAttempts {
                                         Duration.between(runStartedAt, Instant.now()).toMillis(),
                                         runChanges, planSteps.get())),
                         agent.systemPrompt(),
-                        modelString,
+                        model.modelString(),
+                        model.channel(),
                         roundSessionId,
                         project.ownerUserId(),
                         new UsageContext(Long.toString(projectId),

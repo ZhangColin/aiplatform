@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 
 import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -88,6 +89,12 @@ class DispatchAppServiceTest {
 
     @MockitoBean
     private AgentSessionExecutor sessionExecutor;
+
+    @BeforeEach
+    void ensureChannelKeyForRealResolution() {
+        // 真解析链护卫（ADR-0031）：测试环境无 key 注入——幂等补测试 key
+        ModelTierSeed.ensureChannelKey(jdbcTemplate);
+    }
 
     @AfterEach
     void tearDown() {
@@ -162,7 +169,7 @@ class DispatchAppServiceTest {
         assertThat(inquiry.sessionId()).isEqualTo("main-" + projectId);
         assertThat(inquiry.prompt()).isEqualTo("我后台的地址是什么？");
         assertThat(inquiry.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
-        assertThat(inquiry.modelString()).isEqualTo(AgentProfile.MAIN.chatModelString());
+        assertThat(inquiry.modelString()).isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
         assertThat(inquiry.agentKey()).isEqualTo(AgentProfile.MAIN.key());
         assertThat(inquiry.workspaceReadOnly()).isTrue();
         assertThat(inquiry.workspaceId()).isEqualTo("9800");

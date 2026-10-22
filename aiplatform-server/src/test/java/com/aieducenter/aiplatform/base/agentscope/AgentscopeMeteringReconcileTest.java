@@ -214,7 +214,7 @@ class AgentscopeMeteringReconcileTest {
 
     /** 真实 HarnessAgent 挂进工厂 stub（模型＝MeteredModel 包装的脚本模型）。 */
     private void mountAgent(HarnessAgent agent) {
-        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
     }
 
     private HarnessAgent.Builder agentBuilder(Model model) {

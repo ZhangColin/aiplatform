@@ -10,7 +10,11 @@ import com.aieducenter.aiplatform.base.eventhub.domain.model.EventEnvelope;
  *
  * <p>{@code runId} 为本轮调用的平台标识（计量幂等键与事件锚定都基于它）；
  * {@code systemPrompt} / {@code modelString} 可空——为空时取配置默认；
- * {@code usageContext} 可空——为空则本轮不上报用量（底座不发明归属）；
+ * {@code modelChannel} 可空——模型通道注入件（ADR-0031：业务侧档位解析的
+ * baseUrl/apiKey/enableThinking，经创建上下文注入 SDK、进实例缓存键指纹）；
+ * 非空时 {@code modelString} 应为经档位解析的「前缀:实际模型名」串；为空＝
+ * 无通道语境（一次性调用面的配置缺省串），SDK 侧回落内置 provider 的环境
+ * 变量/默认地址（既有行为）；{@code usageContext} 可空——为空则本轮不上报用量（底座不发明归属）；
  * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
  * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
  * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
@@ -42,6 +46,7 @@ public record AgentCommand(
         String prompt,
         String systemPrompt,
         String modelString,
+        ModelChannel modelChannel,
         String sessionId,
         String userId,
         UsageContext usageContext,
@@ -57,11 +62,11 @@ public record AgentCommand(
         String toolSpec) {
 
     /** 无逐轮超时的兼容形（取内核配置默认）：无配置语境的一次性本地会话调用面
-     * （取名等）不变——空工具面、无工具面规格。 */
+     * （取名等）不变——空工具面、无通道注入、无工具面规格。 */
     public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation) {
-        this(runId, prompt, systemPrompt, modelString, sessionId, userId,
+        this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, null,
                 false, false, null, null);
     }
@@ -70,7 +75,7 @@ public record AgentCommand(
     public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
             String sessionId, String userId, UsageContext usageContext,
             String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
-        this(runId, prompt, systemPrompt, modelString, sessionId, userId,
+        this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
                 usageContext, workspaceId, streamCorrelation, null, null, null, agentKey,
                 false, false, null, null);
     }

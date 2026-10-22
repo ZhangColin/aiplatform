@@ -69,7 +69,7 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, workspace, agentKey, toolSpec) -> {
+                (name, sysPrompt, modelString, modelChannel, workspace, agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -81,9 +81,9 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
-        HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent second = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
 
         // 同规格恰建一次（技能集不入键——供应商非工厂字段、obtain 无从取技能态；
@@ -97,17 +97,17 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "另一个 sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "另一个 sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-chat",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-chat", null,
                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(java.nio.file.Path.of("/tmp/other-workspace")), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("1", "ws-1-dev"), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null, null);
 
         assertThat(created).hasSize(6);
@@ -118,10 +118,10 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent first = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
         // 同 workspaceId 同容器 = 同规格（复用）；同 id 不同容器名 = 不同规格
-        HarnessAgent same = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent same = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
 
         assertThat(same).isSameAs(first);
@@ -133,9 +133,9 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null, null);
 
         assertThat(created).hasSize(2);
@@ -148,9 +148,9 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent ba = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "main", null);
-        HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent coder = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "CODER", null);
 
         assertThat(coder).isNotSameAs(ba);
@@ -165,16 +165,48 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        HarnessAgent open = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent open = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
-        HarnessAgent closed = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent closed = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=false,fu=true");
-        HarnessAgent openAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent openAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", "ws=true,fu=true");
 
         assertThat(closed).isNotSameAs(open);
         assertThat(openAgain).isSameAs(open);
         assertThat(created).hasSize(2);
+    }
+
+    /**
+     * 通道指纹入缓存键（ADR-0031 生效配置指纹）：同模型串下换 key/换地址＝指纹
+     * 变＝新实例——守「改配置即生效、进行中 run 不定格」（改 apiKey/baseUrl 后
+     * 旧实例不得滞留缓存继续用旧凭证）；同通道（指纹同）自身复用。
+     */
+    @Test
+    void given_same_model_string_when_channel_fingerprint_changes_then_new_instance() {
+        List<HarnessAgent> created = new ArrayList<>();
+        AgentscopeHarnessAgentFactory factory = factoryWith(created);
+        ModelChannel keyA = new ModelChannel("https://ark.example/api/v3", "sk-a", false);
+        ModelChannel keyB = new ModelChannel("https://ark.example/api/v3", "sk-b", false);
+        ModelChannel keyAUrlMoved = new ModelChannel("https://ark2.example/api/v3", "sk-a", false);
+
+        HarnessAgent first = factory.obtain("platform-agent", "sys",
+                "volcengine:deepseek-v4-flash-ga-260731", keyA,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        HarnessAgent sameChannel = factory.obtain("platform-agent", "sys",
+                "volcengine:deepseek-v4-flash-ga-260731", keyA,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        HarnessAgent keyRotated = factory.obtain("platform-agent", "sys",
+                "volcengine:deepseek-v4-flash-ga-260731", keyB,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+        HarnessAgent urlMoved = factory.obtain("platform-agent", "sys",
+                "volcengine:deepseek-v4-flash-ga-260731", keyAUrlMoved,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
+
+        assertThat(sameChannel).isSameAs(first);
+        assertThat(keyRotated).isNotSameAs(first);
+        assertThat(urlMoved).isNotSameAs(first);
+        assertThat(created).hasSize(3);
     }
 
     @Test
@@ -184,11 +216,11 @@ class AgentscopeHarnessAgentFactoryTest {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
 
-        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "X", null);
-        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
-        HarnessAgent readOnlyAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent readOnlyAgain = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "X", null);
 
         assertThat(readOnly).isNotSameAs(dev);
@@ -200,9 +232,9 @@ class AgentscopeHarnessAgentFactoryTest {
     void given_cached_agents_when_destroy_then_all_closed_and_cache_cleared() throws IOException {
         List<HarnessAgent> created = new ArrayList<>();
         AgentscopeHarnessAgentFactory factory = factoryWith(created);
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
-        factory.obtain("platform-agent", "sys2", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys2", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
 
         factory.destroy();
@@ -210,7 +242,7 @@ class AgentscopeHarnessAgentFactoryTest {
         for (HarnessAgent agent : created) {
             verify(agent, times(1)).close();
         }
-        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.Local(null), null, null);
         assertThat(created).hasSize(3);
     }
@@ -228,7 +260,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
-                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null, null);
+                "deepseek:deepseek-v4-flash", null, new AgentWorkspace.Local(null), null, null);
 
         assertThat(agent.getStateStore()).isSameAs(stateStore);
         // 压缩接线守护（#108）：工厂显式配 compactionConfig → 压缩中间件非空（非 disableCompaction）
@@ -249,7 +281,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
-        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent dev = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor", null);
 
         assertThat(dev.getSubagentAgentManager()).isNotNull();
@@ -263,7 +295,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
-        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent readOnly = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main", null);
 
         assertThat(readOnly.getSubagentAgentManager()).isNull();
@@ -282,7 +314,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
                 new AgentscopeProperties());
 
-        HarnessAgent designer = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash",
+        HarnessAgent designer = factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
                 new AgentWorkspace.ProjectDesign("42", "ws-42-dev"), "designer", null);
 
         // 写文件件在（界面稿 HTML 落工作区的执行面）；shell（execute）结构性不在
@@ -559,7 +591,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 (agentKey, workspace) -> List.of(counter), new AgentscopeProperties());
 
         HarnessAgent agent = factory.obtain("platform-agent-mw", "sys",
-                "deepseek:deepseek-v4-flash", new AgentWorkspace.Local(null), null, null);
+                "deepseek:deepseek-v4-flash", null, new AgentWorkspace.Local(null), null, null);
         try {
             assertThat(agent.getDelegate().getMiddlewares()).contains(counter);
         } finally {
@@ -584,7 +616,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentscopeProperties());
 
         HarnessAgent executor = factory.obtain("platform-agent", "sys",
-                "deepseek:deepseek-v4-flash", new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
+                "deepseek:deepseek-v4-flash", null, new AgentWorkspace.ProjectDev("42", "ws-42-dev"),
                 "executor", null);
         HarnessAgent child = (HarnessAgent) executor.getSubagentAgentManager()
                 .createAgent("verify", io.agentscope.core.agent.RuntimeContext.empty());

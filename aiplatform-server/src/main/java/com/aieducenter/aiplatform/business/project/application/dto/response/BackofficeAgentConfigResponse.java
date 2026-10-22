@@ -18,7 +18,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
  * @param agentKey                智能体稳定键（寻址腿）
  * @param agentName               展示名
  * @param systemPrompt            生效 systemPrompt（库覆盖值或枚举默认——装配实取值）
- * @param modelId                 生效模型档位裸名
+ * @param modelId                 生效模型档位键（ADR-0031 语义键）
  * @param systemPromptOverridden  true＝systemPrompt 为库覆盖值（false＝枚举默认）
  * @param modelIdOverridden       true＝模型档位为库覆盖值（false＝枚举默认；路由开
  *                                时为兜底基础档——信号升档可越过；路由关时＝钉死
@@ -51,7 +51,7 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "生效 systemPrompt（库覆盖值或枚举默认——装配实取值，"
                 + "对照 systemPromptOverridden 知来源）")
         String systemPrompt,
-        @Schema(description = "生效模型档位裸名（如 deepseek-v4-flash）", example = "deepseek-v4-flash")
+        @Schema(description = "生效模型档位键（ADR-0031 语义键，如 flash/pro）", example = "flash")
         String modelId,
         @Schema(description = "systemPrompt 是否库覆盖值（true＝覆盖；false＝枚举默认）")
         boolean systemPromptOverridden,
@@ -61,7 +61,7 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "枚举默认 systemPrompt（预览：清空覆盖即落此值——身份与"
                 + "配置分治的缺省正本）")
         String defaultSystemPrompt,
-        @Schema(description = "枚举默认模型档位（清空覆盖即落此值）", example = "deepseek-v4-flash")
+        @Schema(description = "枚举默认模型档位（清空覆盖即落此值）", example = "flash")
         String defaultModelId,
         @Schema(description = "联网搜索开关生效态（#252 起生效装配：关即退出槽位装配面；无覆盖行语境＝true 开）")
         boolean webSearchEnabled,
@@ -71,11 +71,11 @@ public record BackofficeAgentConfigResponse(
                 + "定档口径。仅 run 执行体消费，无覆盖行语境＝true 开）")
         boolean routingEnabled,
         @Schema(description = "强模型档生效值（#354 路由升档落点；库覆盖值或代码缺省——"
-                + "对照 routingStrongModelIdOverridden 知来源）", example = "deepseek-v4-pro")
+                + "对照 routingStrongModelIdOverridden 知来源）", example = "pro")
         String routingStrongModelId,
         @Schema(description = "强模型档是否库覆盖值（true＝覆盖；false＝代码缺省）")
         boolean routingStrongModelIdOverridden,
-        @Schema(description = "代码缺省强模型档（预览：清空覆盖即落此值）", example = "deepseek-v4-pro")
+        @Schema(description = "代码缺省强模型档（预览：清空覆盖即落此值）", example = "pro")
         String defaultRoutingStrongModelId,
         @Schema(description = "文件面阈值生效值（#354：工作区已跟踪文件数 ≥ 此值升强档；"
                 + "库覆盖值或代码缺省）", example = "60")

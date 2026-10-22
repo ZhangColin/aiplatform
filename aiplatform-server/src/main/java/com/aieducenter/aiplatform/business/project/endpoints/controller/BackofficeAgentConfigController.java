@@ -73,7 +73,7 @@ public class BackofficeAgentConfigController {
                     + "人工档恒生效，对账/对比的定档通道）；routingStrongModelId/"
                     + "routingFileCountThreshold/"
                     + "routingSliceFeatureThreshold 缺省＝清空回落代码缺省（强档"
-                    + "deepseek-v4-pro、文件面 60、片复杂度 4 项功能条目——#361 重定："
+                    + "pro、文件面 60、片复杂度 4 项功能条目——#361 重定："
                     + "切片描述的枚举段数，标题字数不是复杂度代理）。协同口径：路由"
                     + "判定优先、人工覆盖兜底——任一信号（重试失败/文件面/片复杂度）"
                     + "越阈升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，"

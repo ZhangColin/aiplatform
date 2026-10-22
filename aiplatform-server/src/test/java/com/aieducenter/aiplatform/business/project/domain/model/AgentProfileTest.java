@@ -75,8 +75,8 @@ class AgentProfileTest {
         // 迭代 = 更新 run）由 run 执行体承载，其缺省档 ＝ 快模型档（spec⑤「Demo 阶段
         // 激进用快模型，质量靠验证兜底」）——Demo 与正式生产同轨同协议，档位在既有
         // 智能体运营配置机制上人工定档（本票＝配置态初档；路由判定机制归 #354）。
-        assertThat(AgentProfile.EXECUTOR.modelId()).isEqualTo("deepseek-v4-flash");
-        assertThat(AgentProfile.EXECUTOR.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
+        // ADR-0031 起缺省值＝档位语义键（flash——解析链在 ModelTierAppService）。
+        assertThat(AgentProfile.EXECUTOR.modelId()).isEqualTo("flash");
     }
 
     @Test
@@ -84,7 +84,7 @@ class AgentProfileTest {
         // #341 首 Demo/迭代任务模型档可独立于正式生产档配置：三座智能体各持自身
         // 缺省档位（运营配置面按 agentKey 各自覆盖——改一座不牵连他座），Demo 阶段
         // 缺省快模型档（本票），设计执行体不在本票范围（设计线独立、档位另配）。
-        assertThat(AgentProfile.DESIGNER.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(AgentProfile.DESIGNER.modelId()).isEqualTo("pro");
         assertThat(AgentProfile.EXECUTOR.modelId())
                 .isNotEqualTo(AgentProfile.DESIGNER.modelId());
     }

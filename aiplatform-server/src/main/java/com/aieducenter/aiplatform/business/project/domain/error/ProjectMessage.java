@@ -177,7 +177,19 @@ public enum ProjectMessage implements CodeMessage {
     PRODUCTION_FIELD_TOO_LONG(400, "PRJ_058", "生产承接字段超长"),
 
     /** 人工动作操作者必填（口径同 ORD_035/ORD_043）：不落无名留痕；创建行系统操作者由工厂内建。 */
-    PRODUCTION_OPERATOR_REQUIRED(400, "PRJ_059", "操作者必填（生产承接动作须携带操作者身份）");
+    PRODUCTION_OPERATOR_REQUIRED(400, "PRJ_059", "操作者必填（生产承接动作须携带操作者身份）"),
+
+    /** 档位缺行（ADR-0031）：引用的档位键在 prj_model_tiers 无行——配置数据不一致，先建档位行或改绑。 */
+    MODEL_TIER_NOT_FOUND(500, "PRJ_060", "模型档位不存在：{0}（先在模型档位配置建行，或改绑既有档位）"),
+
+    /** 档位停用（ADR-0031）：引用的档位行 enabled=false——升档/换模型时临时停用的明确拦截面。 */
+    MODEL_TIER_DISABLED(503, "PRJ_061", "模型档位已停用：{0}（启用该档位或改绑其他档位）"),
+
+    /** 通道停用（ADR-0031）：档位所属供应商通道 enabled=false——不静默换道，运维恢复通道后自动续用。 */
+    MODEL_PROVIDER_DISABLED(503, "PRJ_062", "模型供应商通道已停用：{0}（启用该通道后重试）"),
+
+    /** 通道 key 空（ADR-0031）：apiKey 落库唯一正本、无环境变量回落——缺失即明确报错，不静默兜底。 */
+    MODEL_PROVIDER_KEY_MISSING(503, "PRJ_063", "模型供应商通道未配置 apiKey：{0}（在通道配置填入后重试）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 

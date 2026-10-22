@@ -19,25 +19,27 @@ import com.aieducenter.aiplatform.base.workspace.application.dto.response.ExecRe
  * 模型路由判定单测（#354 判定单点 {@link ModelRoutingAppService#decide} 纯函数
  * 直测——协同口径：路由判定优先、人工覆盖兜底；钉死位＝路由关；信号三件任一
  * 越阈即升强档）＋文件面大小信号采集（exec 失败/不可解析＝无此信号、降级不升档）。
+ * 档位值为语义键（ADR-0031：flash/pro——模型串与通道注入由 ModelTierAppService
+ * 解析，判定层只见键）。
  */
 class ModelRoutingAppServiceTest {
 
     /** 路由开的 execute 座生效配置（无人工档覆盖、缺省策略——兜底＝枚举缺省快档）。 */
     private static AgentConfigAppService.EffectiveConfig routedDefault() {
-        return new AgentConfigAppService.EffectiveConfig("prompt", "deepseek-v4-flash",
-                "deepseek:deepseek-v4-flash", true, true, false, true, null, null, null);
+        return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                true, true, false, true, null, null, null);
     }
 
     /** 路由开＋人工档覆盖（覆盖＝兜底基础档——路由判定仍可升强档）。 */
     private static AgentConfigAppService.EffectiveConfig routedWithOverride() {
-        return new AgentConfigAppService.EffectiveConfig("prompt", "deepseek-v4-flash",
-                "deepseek:deepseek-v4-flash", true, true, true, true, null, null, null);
+        return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                true, true, true, true, null, null, null);
     }
 
     /** 路由关＋人工档覆盖（钉死位——人工档恒生效）。 */
     private static AgentConfigAppService.EffectiveConfig pinned() {
-        return new AgentConfigAppService.EffectiveConfig("prompt", "deepseek-v4-pro",
-                "deepseek:deepseek-v4-pro", true, true, true, false, null, null, null);
+        return new AgentConfigAppService.EffectiveConfig("prompt", "pro",
+                true, true, true, false, null, null, null);
     }
 
     // ---------- 协同口径：路由判定优先、人工覆盖兜底；钉死位＝路由关 ----------
@@ -46,8 +48,7 @@ class ModelRoutingAppServiceTest {
     void given_routing_on_no_signals_when_decide_then_fast_default() {
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, 10, "用户能注册登录");
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-flash");
-        assertThat(selection.chatModelString()).isEqualTo("deepseek:deepseek-v4-flash");
+        assertThat(selection.modelId()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_ROUTED);
         assertThat(selection.reasons()).isEmpty();
     }
@@ -58,7 +59,7 @@ class ModelRoutingAppServiceTest {
         // 配置、不关路由）
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedWithOverride(), 1, 1, 10, null);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(selection.modelId()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_ROUTED);
         assertThat(selection.reasons()).isEmpty();
     }
@@ -68,7 +69,7 @@ class ModelRoutingAppServiceTest {
         // 路由判定优先：信号升强档优先于人工档（覆盖是兜底不是钉死）
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedWithOverride(), 2, 1, null, null);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("重试升档（第 2 次尝试）");
     }
 
@@ -76,7 +77,7 @@ class ModelRoutingAppServiceTest {
     void given_retry_attempt_when_decide_then_escalates_to_strong() {
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 2, 1, null, null);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("重试升档（第 2 次尝试）");
     }
 
@@ -85,7 +86,7 @@ class ModelRoutingAppServiceTest {
         // #353 外环：首轮重试耗尽回滚重跑——首试（attempt 1）也升强档
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 2, null, null);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly("回滚重跑升档（首轮重试耗尽）");
     }
 
@@ -94,13 +95,13 @@ class ModelRoutingAppServiceTest {
         int threshold = ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD;
         ModelRoutingAppService.TierSelection atThreshold =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, threshold, null);
-        assertThat(atThreshold.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(atThreshold.modelId()).isEqualTo("pro");
         assertThat(atThreshold.reasons()).containsExactly(
                 "文件面超出阈值（" + threshold + " ≥ " + threshold + "）");
         // 阈值下界不升档（越阈判定的边界语义）
         ModelRoutingAppService.TierSelection below =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, threshold - 1, null);
-        assertThat(below.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(below.modelId()).isEqualTo("flash");
     }
 
     @Test
@@ -110,7 +111,7 @@ class ModelRoutingAppServiceTest {
         String thirtyChars = "用户能登录并区分管理员/普通员工两种角色的访问权限";
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, null, thirtyChars);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(selection.modelId()).isEqualTo("flash");
         assertThat(selection.reasons()).isEmpty();
     }
 
@@ -121,13 +122,13 @@ class ModelRoutingAppServiceTest {
         String enumerated = "用户能注册登录、浏览商品、下单支付、查看历史订单";
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, null, enumerated);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.reasons()).containsExactly(
                 "片复杂度超出阈值（" + threshold + " 项 ≥ " + threshold + "）");
         // 阈值下界不升档（越阈判定的边界语义——3 项枚举是普通纵切片）
         ModelRoutingAppService.TierSelection below =
                 ModelRoutingAppService.decide(routedDefault(), 1, 1, null, "用户能注册、登录、找回密码");
-        assertThat(below.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(below.modelId()).isEqualTo("flash");
     }
 
     @Test
@@ -136,7 +137,7 @@ class ModelRoutingAppServiceTest {
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 3, 1, threshold, "用户能注册登录"
                         + "、浏览商品、下单支付、管理订单、查看报表与个人中心");
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.reasons()).hasSize(3);
     }
 
@@ -146,8 +147,7 @@ class ModelRoutingAppServiceTest {
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(pinned(), 3, 2, 999, "用户能注册登录、浏览商品"
                         + "、下单支付、管理订单、查看报表与个人中心、后台统计与导出");
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-pro");
-        assertThat(selection.chatModelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        assertThat(selection.modelId()).isEqualTo("pro");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_PINNED);
         assertThat(selection.reasons()).isEmpty();
     }
@@ -155,23 +155,23 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_routing_off_without_override_when_decide_then_enum_default_even_on_failure() {
         AgentConfigAppService.EffectiveConfig disabledDefault =
-                new AgentConfigAppService.EffectiveConfig("prompt", "deepseek-v4-flash",
-                        "deepseek:deepseek-v4-flash", true, true, false, false, null, null, null);
+                new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                        true, true, false, false, null, null, null);
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(disabledDefault, 3, 2, 999, null);
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-flash");
+        assertThat(selection.modelId()).isEqualTo("flash");
         assertThat(selection.source()).isEqualTo(ModelRoutingAppService.SOURCE_DEFAULT);
     }
 
     @Test
     void given_config_custom_strategy_when_decide_then_override_values_win() {
         AgentConfigAppService.EffectiveConfig custom =
-                new AgentConfigAppService.EffectiveConfig("prompt", "deepseek-v4-flash",
-                        "deepseek:deepseek-v4-flash", true, true, false, true,
-                        "deepseek-v4-ultra", 5, 7);
+                new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                        true, true, false, true,
+                        "doubao-flagship", 5, 7);
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(custom, 1, 1, 5, "用户能注册、登录、找回、浏览、下单、支付、退款");
-        assertThat(selection.modelId()).isEqualTo("deepseek-v4-ultra");
+        assertThat(selection.modelId()).isEqualTo("doubao-flagship");
         assertThat(selection.reasons()).hasSize(2);
         assertThat(selection.signals()).containsEntry("fileCountThreshold", 5)
                 .containsEntry("sliceFeatureThreshold", 7)
@@ -183,7 +183,7 @@ class ModelRoutingAppServiceTest {
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(routedDefault(), 2, 1, 87, "用户能注册登录");
         Map<String, Object> payload = selection.payload();
-        assertThat(payload).containsEntry("modelId", "deepseek-v4-pro")
+        assertThat(payload).containsEntry("modelId", "pro")
                 .containsEntry("source", ModelRoutingAppService.SOURCE_ROUTED);
         assertThat(payload).containsKey("reasons").containsKey("signals");
         // 快档判定（无升档）不携带 reasons（缺省不携带——留档只记为什么升）

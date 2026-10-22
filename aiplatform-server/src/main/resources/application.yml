@@ -12,6 +12,13 @@ spring:
     baseline-on-migrate: true
     baseline-version: "0"
     locations: classpath:db/migration
+    # #365 · 模型供应商通道种子 key 注入（ADR-0031：apiKey 落库唯一正本、git 永不
+    # 含 key 字面——部署环境注入种子（V44 一次性 INSERT），本机 dev 直写库，后续换
+    # key 走后台维护面（#367）；变量只在迁移执行时读一次，非运行期回落（缺失即空、
+    # 装配明确报错）。ARK_API_KEY 是图片域名（image-generation），对话线独立成对。
+    placeholders:
+      volcengineApiKey: ${VOLCENGINE_API_KEY:}
+      deepseekApiKey: ${DEEPSEEK_API_KEY:}
   datasource:
     driver-class-name: org.postgresql.Driver
   jpa:
@@ -56,9 +63,13 @@ app:
   embedding:
     url: http://127.0.0.1:9091
   # base.agentscope：智能体内核（AgentScope HarnessAgent）默认值。
-  # API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry 自行读取）；
-  # workspace 是本地兜底工作区（命令未带 workspaceId 时用，留空 = AgentScope 默认）——
-  # 命令带 workspaceId 则解析为项目 dev 工作区（docker exec 文件面）。
+  # 三座智能体的模型走供应商通道（ADR-0031：prj_model_providers/prj_model_tiers
+  # 两层落库、apiKey 库内唯一正本，装配链 ModelTierAppService 解析）；
+  # 本节 default-model 是无通道语境的一次性调用面（取名等边缘点，#366 收编）的
+  # 兜底串——API Key 走 DEEPSEEK_API_KEY 环境变量（AgentScope ModelRegistry
+  # 自行读取）；workspace 是本地兜底工作区（命令未带 workspaceId 时用，
+  # 留空 = AgentScope 默认）——命令带 workspaceId 则解析为项目 dev 工作区
+  # （docker exec 文件面）。
   agentscope:
     agent-name: platform-agent
     default-model: deepseek:deepseek-v4-flash

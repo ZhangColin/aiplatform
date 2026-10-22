@@ -219,6 +219,7 @@ public class DispatchAppService {
                 prompt,
                 CLASSIFY_SYSTEM_PROMPT,
                 properties.getClassificationModel(), // 专用配置键（缺省 flash 档）
+                null, // 无通道语境：配置缺省串走 SDK 内置 provider（边缘点收编属 #366）
                 sessionId,
                 null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
                 new UsageContext(Long.toString(projectId),

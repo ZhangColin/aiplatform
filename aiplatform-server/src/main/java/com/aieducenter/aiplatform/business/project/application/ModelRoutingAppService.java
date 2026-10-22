@@ -47,8 +47,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ModelRoutingAppService {
 
-    /** 强模型档代码缺省（路由升档落点；运营配置面 routingStrongModelId 可换、不发版）。 */
-    public static final String DEFAULT_STRONG_MODEL_ID = "deepseek-v4-pro";
+    /**
+     * 强模型档代码缺省（路由升档落点；运营配置面 routingStrongModelId 可换、
+     * 不发版）。ADR-0031 起值＝档位语义键（prj_model_tiers 行）。
+     */
+    public static final String DEFAULT_STRONG_MODEL_ID = "pro";
 
     /** 文件面阈值代码缺省：工作区已跟踪文件数 ≥ 此值即升强档（运营配置面可换）。 */
     public static final int DEFAULT_FILE_COUNT_THRESHOLD = 60;
@@ -107,10 +110,11 @@ public class ModelRoutingAppService {
     }
 
     /**
-     * 一次路由判定的收场：命令构建消费档位与模型串；收尾卡留档消费
+     * 一次路由判定的收场：命令构建消费档位键（模型串与通道注入由
+     * {@code ModelTierAppService#resolve} 解析——判定层不越层）；收尾卡留档消费
      * {@link #payload()} 面（哪段用了哪档、为什么）。
      */
-    public record TierSelection(String modelId, String chatModelString, String source,
+    public record TierSelection(String modelId, String source,
             List<String> reasons, Map<String, Object> signals) {
 
         /** 收尾卡留档载荷（closing.modelTier）：档位 + 来源 + 升档理由 + 判定依据快照。 */
@@ -170,7 +174,7 @@ public class ModelRoutingAppService {
         signalFacts.put("sliceFeatureThreshold", sliceThreshold);
         if (!effective.routingEnabled()) {
             // 钉死位＝路由关：人工档恒生效（覆盖或枚举缺省——既有口径）
-            return new TierSelection(effective.modelId(), effective.chatModelString(),
+            return new TierSelection(effective.modelId(),
                     effective.modelIdOverridden() ? SOURCE_PINNED : SOURCE_DEFAULT,
                     List.of(), signalFacts);
         }
@@ -194,8 +198,7 @@ public class ModelRoutingAppService {
         }
         // 路由判定优先：信号升强档；无信号回落人工档兜底（覆盖即基础档 → 枚举缺省）
         String modelId = escalate ? strongModelId : effective.modelId();
-        return new TierSelection(modelId, AgentProfile.chatModelStringOf(modelId),
-                SOURCE_ROUTED, reasons, signalFacts);
+        return new TierSelection(modelId, SOURCE_ROUTED, reasons, signalFacts);
     }
 
     /**

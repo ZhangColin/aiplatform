@@ -89,6 +89,7 @@ public class MainAgentAppService {
     private final AgentSessionExecutor sessionExecutor;
     private final ProjectKnowledgeAppService knowledgeAppService;
     private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
     private final OrderQueryAppService orderQueryAppService;
     private final IterationAppService iterationAppService;
     private final GenerationAppService generationAppService;
@@ -125,7 +126,8 @@ public class MainAgentAppService {
             PrdVersionRepository prdVersions,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
-            AgentConfigAppService agentConfigs, OrderQueryAppService orderQueryAppService,
+            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            OrderQueryAppService orderQueryAppService,
             IterationAppService iterationAppService, GenerationAppService generationAppService,
             DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
@@ -138,6 +140,7 @@ public class MainAgentAppService {
         this.sessionExecutor = sessionExecutor;
         this.knowledgeAppService = knowledgeAppService;
         this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
         this.orderQueryAppService = orderQueryAppService;
         this.iterationAppService = iterationAppService;
         this.generationAppService = generationAppService;
@@ -265,13 +268,15 @@ public class MainAgentAppService {
         String sessionId = sessionIdOf(projectId);
         conversationHistory.recordAnswer(projectId, runId, answerText);
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
 
         AgentResume resume = new AgentResume(
                 runId,
                 sessionId,
                 project.ownerUserId(),
                 Long.toString(project.getWorkspaceId()),
-                main.chatModelString(),
+                model.modelString(),
+                model.channel(),
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
                 replyId,
                 pendingToolCalls.stream()
@@ -606,16 +611,19 @@ public class MainAgentAppService {
     /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。systemPrompt/
      * 模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认
      * ——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入 toolSpec 随命令
-     * 透传装配）。 */
+     * 透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService} 解析
+     * （ADR-0031——供应商/凭证配置变更同轮生效）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
         return new AgentCommand(
                 runId,
                 prompt,
                 main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
-                main.chatModelString(),
+                model.modelString(),
+                model.channel(),
                 sessionId,
                 project.ownerUserId(),
                 usageContextOf(projectId, sessionId),

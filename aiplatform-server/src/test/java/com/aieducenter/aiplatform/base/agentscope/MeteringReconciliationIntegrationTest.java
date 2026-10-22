@@ -168,7 +168,7 @@ class MeteringReconciliationIntegrationTest {
     }
 
     private void mountAgent(HarnessAgent agent) {
-        when(factory.obtain(any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(factory.obtain(any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
     }
 
     /** 真实 HarnessAgent（装配对齐平台工厂：MeteredModel 包装 + 平台压缩配置 + 记忆关闭）。 */

@@ -81,6 +81,9 @@ class AccountBindingMigrationReplayTest {
                 .table("aiplatform-server_flyway_schema_history")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
+                // V44 模型通道种子 placeholder（镜像 spring.flyway.placeholders——回放
+                // schema 种子 key 落空即可，identity 域回放不消费档位）
+                .placeholders(java.util.Map.of("volcengineApiKey", "", "deepseekApiKey", ""))
                 .load();
     }
 
@@ -200,6 +203,7 @@ class AccountBindingMigrationReplayTest {
                 .table("aiplatform-server_flyway_schema_history")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
+                .placeholders(java.util.Map.of("volcengineApiKey", "", "deepseekApiKey", ""))
                 .target(String.valueOf(version))
                 .load()
                 .migrate();

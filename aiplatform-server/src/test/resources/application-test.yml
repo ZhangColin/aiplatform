@@ -4,6 +4,14 @@
 spring:
   datasource:
     url: ${TEST_DB_URL:jdbc:postgresql://localhost:5432/aiplatform_test}
+  flyway:
+    placeholders:
+      # #365 · 模型供应商通道种子 key（ADR-0031）：测试环境注入测试 key——走真
+      # 解析链的集成测试（对话/生成/设计命令构建）免逐测试补 key；报错路径
+      # （key 空/停用）由 ModelTierAppServiceTest 用独立 fixture 行钉死，不依赖
+      # 种子态。只在迁移执行时求值（种子一次性 INSERT），非运行期回落。
+      volcengineApiKey: sk-test-ark
+      deepseekApiKey: sk-test-deepseek
 
 # #171 · 闲置休眠器在测试 profile 关闭（#197 内移休眠扫描入口自持开关）：启动对账
 # 与定时轮的休眠扫描静默不扰测试库（休眠扫描验收走直调——WorkspaceHibernationIntegrationTest

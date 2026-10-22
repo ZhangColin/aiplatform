@@ -62,7 +62,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     interface AgentBuilder {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
-                AgentWorkspace workspace, String agentKey, String toolSpec);
+                ModelChannel modelChannel, AgentWorkspace workspace, String agentKey,
+                String toolSpec);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
@@ -75,10 +76,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
             AgentscopeProperties properties) {
-        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, workspace, agentKey, toolSpec) ->
+        this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel, workspace,
+                agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
                         middlewareSupplier,
-                        name, sysPrompt, modelString, workspace, agentKey, toolSpec, properties));
+                        name, sysPrompt, modelString, modelChannel, workspace, agentKey, toolSpec,
+                        properties));
     }
 
     AgentscopeHarnessAgentFactory(AgentStateStore stateStore, AgentToolkitSupplier toolkitSupplier,
@@ -89,15 +92,20 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     }
 
     public HarnessAgent obtain(String name, String sysPrompt, String modelString,
-            AgentWorkspace workspace, String agentKey, String toolSpec) {
+            ModelChannel modelChannel, AgentWorkspace workspace, String agentKey, String toolSpec) {
         // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
         // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
         // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
-        // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配
-        String key = name + "|" + modelString + "|" + sysPrompt + "|" + workspace.identity()
+        // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配；
+        // modelChannel.fingerprint() 是生效配置指纹（ADR-0031）：同模型串下换
+        // key/换地址＝指纹变＝新实例——守「改配置即生效、进行中 run 不定格」
+        String key = name + "|" + modelString + "|"
+                + (modelChannel == null ? "" : modelChannel.fingerprint()) + "|"
+                + sysPrompt + "|" + workspace.identity()
                 + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec);
         return agents.computeIfAbsent(key,
-                k -> builder.build(name, sysPrompt, modelString, workspace, agentKey, toolSpec));
+                k -> builder.build(name, sysPrompt, modelString, modelChannel, workspace,
+                        agentKey, toolSpec));
     }
 
     @Override
@@ -116,16 +124,21 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
     private static HarnessAgent buildAgent(AgentStateStore stateStore,
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
-            String name, String sysPrompt, String modelString, AgentWorkspace workspace,
-            String agentKey, String toolSpec, AgentscopeProperties properties) {
+            String name, String sysPrompt, String modelString, ModelChannel modelChannel,
+            AgentWorkspace workspace, String agentKey, String toolSpec,
+            AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
         // 模型流层平台包装（#109 计量 + #321 断流自动重试）：主模型解析即关内层
         // 缺省重试（见 innerRetryDisabledOptions）、经 streamLayer 包装——重试
         // 内圈（429/5xx 零发射失败流层接续）、计量外圈（主循环每次迭代的
         // stream() 收口报用量，取代只认 ModelCallEndEvent 的旧源）；子智能体
-        // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）
+        // 复用同一实例（计量边界连续，子智能体轮次同归当轮用量）。通道注入件
+        // （ADR-0031）随解析进创建上下文：baseUrl/apiKey/enableThinking 注入
+        // SDK（覆盖依赖库默认地址与环境变量），前缀路由到平台注册工厂
+        // （volcengine）或内置 provider（deepseek 等）
         Model model = streamLayer(
-                ModelRegistry.resolve(modelString, INNER_RETRY_DISABLED), modelString, properties);
+                ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
+                modelString, properties);
         // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
@@ -408,6 +421,23 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             ModelCreationContext.builder()
                     .component(GenerateOptions.class, innerRetryDisabledOptions())
                     .build();
+
+    /**
+     * 生效解析上下文（ADR-0031 通道注入腿）：通道件非空＝档位解析产物——
+     * baseUrl/apiKey/enableThinking 注入创建上下文（平台 volcengine 工厂与内置
+     * provider 都从标准字段读，key 不落环境变量）；空＝无通道语境（一次性调用
+     * 面的配置缺省串），维持仅内层重试关闭的既有上下文。
+     */
+    static ModelCreationContext creationContextOf(ModelChannel modelChannel) {
+        if (modelChannel == null) {
+            return INNER_RETRY_DISABLED;
+        }
+        return INNER_RETRY_DISABLED.toBuilder()
+                .apiKey(modelChannel.apiKey())
+                .baseUrl(modelChannel.baseUrl())
+                .enableThinking(modelChannel.thinkingEnabled())
+                .build();
+    }
 
     /**
      * 压缩配置装配：把配置的触发阈值 + 压缩模型档落到 {@link CompactionConfig}，空值

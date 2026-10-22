@@ -9,7 +9,7 @@ import com.aieducenter.aiplatform.base.agentscope.ModelChannel;
 import com.aieducenter.aiplatform.business.project.domain.error.ProjectMessage;
 import com.aieducenter.aiplatform.business.project.domain.model.ModelProvider;
 import com.aieducenter.aiplatform.business.project.domain.model.ModelTier;
-import com.aieducenter.aiplatform.business.project.domain.repository.ModelTierStore;
+import com.aieducenter.aiplatform.business.project.domain.repository.ModelChannelStore;
 import com.cartisan.core.exception.ApplicationException;
 
 /**
@@ -38,9 +38,9 @@ public class ModelTierAppService {
      */
     static final boolean THINKING_ENABLED = false;
 
-    private final ModelTierStore tierStore;
+    private final ModelChannelStore tierStore;
 
-    public ModelTierAppService(ModelTierStore tierStore) {
+    public ModelTierAppService(ModelChannelStore tierStore) {
         this.tierStore = tierStore;
     }
 

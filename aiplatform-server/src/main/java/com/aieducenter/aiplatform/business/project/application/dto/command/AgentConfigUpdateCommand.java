@@ -8,8 +8,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 纯空白＝清空覆盖（装配回落枚举默认——GET 的 defaultSystemPrompt/defaultModelId
  * 即回落落点）；工具开关两件缺省 true＝开。
  *
- * <p>档位名不做白名单校验（换模型不发版是本面目的——校验面即信任面：签名面
- * 担保调用应用，操作者头明示信任；错值致新会话失败时经留痕写回即可回滚）。
+ * <p>档位键即时校验（#367，ADR-0031）：modelId 与 routingStrongModelId 非空时
+ * 必须在模型档位面（/model-tiers）有行且启用——错值写不进去（PRJ_074/075，
+ * 白名单从档位表来，不再靠留痕回滚兜底）；null＝清空回落缺省不校验。
  * 工具开关已生效装配（#252：关即退出槽位装配面、开即回归——窄幅写口见
  * {@code PUT /agent-tools/{toolName}}）。</p>
  *
@@ -26,8 +27,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param fetchUrlEnabled   网页抓取开关（同上；缺省 true）
  * @param routingEnabled    模型路由开关（缺省 true＝开；false＝既有人工定档口径）
  * @param routingStrongModelId 强模型档键（语义键同 modelId；null/缺省/纯空白＝清空
- *                          回落代码缺省 pro；不做存在性校验同 modelId——档位表
- *                          即时校验属 #367 绑定校验）
+ *                          回落代码缺省 pro；非空时即时校验同 modelId〔#367〕）
  * @param routingFileCountThreshold 文件面阈值（工作区已跟踪文件数 ≥ 此值升强档；
  *                          null＝清空回落代码缺省 60）
  * @param routingSliceFeatureThreshold 片复杂度阈值（切片功能条目数——枚举段数
@@ -38,7 +38,8 @@ public record AgentConfigUpdateCommand(
                 + "清空覆盖，装配回落枚举默认——GET 回执的 defaultSystemPrompt 即回落落点）")
         String systemPrompt,
         @Schema(description = "覆盖模型档位键（如 pro；null/缺省/纯空白＝"
-                + "清空覆盖回落枚举默认。不做白名单校验——错值致新会话失败经留痕写回可回滚）",
+                + "清空覆盖回落枚举默认。即时校验（#367）：须在模型档位面有行"
+                + "且启用（PRJ_074/075））",
                 example = "pro")
         String modelId,
         @Schema(description = "增强工具开关：联网搜索（缺省 true＝开；#252 起生效装配——"
@@ -49,8 +50,8 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "模型路由开关（#354：缺省 true＝开——路由判定优先；"
                 + "false＝既有人工定档口径。仅 run 执行体消费）")
         Boolean routingEnabled,
-        @Schema(description = "强模型档裸名（#354 路由升档落点；null/缺省/纯空白＝清空"
-                + "回落代码缺省 pro。不做存在性校验同 modelId（档位表即时校验属 #367）",
+        @Schema(description = "强模型档语义键（#354 路由升档落点；null/缺省/纯空白＝清空"
+                + "回落代码缺省 pro。即时校验同 modelId（#367）",
                 example = "pro")
         String routingStrongModelId,
         @Schema(description = "文件面阈值（#354：工作区已跟踪文件数 ≥ 此值升强档；"

@@ -23,8 +23,10 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentOperational
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentTool;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentToolKind;
+import com.aieducenter.aiplatform.business.project.domain.model.ModelTier;
 import com.aieducenter.aiplatform.business.project.domain.model.Operator;
 import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfigStore;
+import com.aieducenter.aiplatform.business.project.domain.repository.ModelChannelStore;
 
 /**
  * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
@@ -36,7 +38,8 @@ import com.aieducenter.aiplatform.business.project.domain.repository.AgentConfig
  *
  * <p>写语义＝PUT 全量替换：请求体即覆盖态终态，值面八件（systemPrompt、模型
  * 档位、两工具开关、路由策略四件〔#354〕）同写；null/空白＝清空覆盖回落枚举
- * 默认。变更留痕
+ * 默认。改档（modelId 与路由强档、边缘点档位）即时校验档位键存在且启用
+ * （#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底）。变更留痕
  * append-only（操作者＋变更前后全量值快照）：值面有动才落痕——幂等回执（同值
  * 重写）不落痕不写行（留痕链每痕都是真实变更，回滚才可逐痕回溯）；回滚＝把留痕
  * 旧值快照写回，即一次新变更、留新痕（不做版本树）。工具开关已生效装配（#252
@@ -57,8 +60,12 @@ public class BackofficeAgentConfigAppService {
 
     private final AgentConfigStore configStore;
 
-    public BackofficeAgentConfigAppService(AgentConfigStore configStore) {
+    private final ModelChannelStore channelStore;
+
+    public BackofficeAgentConfigAppService(AgentConfigStore configStore,
+            ModelChannelStore channelStore) {
         this.configStore = configStore;
+        this.channelStore = channelStore;
     }
 
     /**
@@ -97,6 +104,11 @@ public class BackofficeAgentConfigAppService {
                 blankToNull(safe.routingStrongModelId()),
                 safe.routingFileCountThreshold(), safe.routingSliceFeatureThreshold(),
                 operator.id(), operator.name(), null);
+        // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
+        // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
+        // 枚举/代码正本，装配面自会校验）
+        requireBindableTier(next.modelId());
+        requireBindableTier(next.routingStrongModelId());
         AgentOperationalConfig persisted =
                 persistIfChanged(profile.key(), current, next, operator);
         return BackofficeAgentConfigResponse.of(profile,
@@ -189,6 +201,7 @@ public class BackofficeAgentConfigAppService {
                 null, blankToNull(safe.modelId()),
                 true, true, true, null, null, null,
                 operator.id(), operator.name(), null);
+        requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
                 persistIfChanged(point.key(), current, next, operator);
         return BackofficeEdgeModelConfigResponse.of(point,
@@ -271,6 +284,24 @@ public class BackofficeAgentConfigAppService {
     private static AgentProfile requireProfile(String agentKey) {
         return AgentProfile.byKey(agentKey)
                 .orElseThrow(() -> new ApplicationException(ProjectMessage.AGENT_CONFIG_NOT_FOUND));
+    }
+
+    /**
+     * 绑定即时校验（#367，ADR-0031——「错值靠留痕回滚兜底」的退役面）：非空档位键
+     * 必须在档位表有行且启用——白名单从档位表来（替代硬编码集合）。缺行 PRJ_074、
+     * 停用 PRJ_075；null（清空回落缺省）放行。
+     */
+    private void requireBindableTier(String tierKey) {
+        if (tierKey == null) {
+            return;
+        }
+        ModelTier tier = channelStore.findTier(tierKey);
+        if (tier == null) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_BINDING_NOT_FOUND, tierKey);
+        }
+        if (!tier.enabled()) {
+            throw new ApplicationException(ProjectMessage.MODEL_TIER_BINDING_DISABLED, tierKey);
+        }
     }
 
     /** 操作者必留痕（#251 写操作全程）：缺头/缺肢即拦（技能库/知识治理同款）。 */

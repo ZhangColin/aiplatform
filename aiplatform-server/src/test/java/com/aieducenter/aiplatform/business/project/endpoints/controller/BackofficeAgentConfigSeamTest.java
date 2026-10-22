@@ -18,6 +18,7 @@ import com.aieducenter.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.aieducenter.aiplatform.business.project.domain.model.AgentProfile;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -85,6 +86,8 @@ class BackofficeAgentConfigSeamTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM prj_agent_config_traces");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
+        // 绑定校验例的档位夹具（t- 前缀归零——种子档位行不动）
+        jdbcTemplate.update("DELETE FROM prj_model_tiers WHERE tier_key LIKE 't-%'");
     }
 
     // ---------- 读面缺省：无覆盖行＝全回落枚举默认 ----------
@@ -367,20 +370,21 @@ class BackofficeAgentConfigSeamTest {
     void given_routing_strategy_updated_when_get_and_traces_then_effective_and_snapshots()
             throws Exception {
         // 策略覆盖写（开关关＋强档换＋阈值换）→ GET 生效值＝库值、覆盖标记 true；
-        // 留痕前后快照含路由四件；清空（null）回落代码缺省
+        // 留痕前后快照含路由四件；清空（null）回落代码缺省。强档键取种子档位
+        // doubao-flagship（#367 起改档即时校验档位键——裸名已写不进去）
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
-                {"routingEnabled": false, "routingStrongModelId": "deepseek-v4-ultra",
+                {"routingEnabled": false, "routingStrongModelId": "doubao-flagship",
                  "routingFileCountThreshold": 30, "routingSliceFeatureThreshold": 10}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(false))
-                .andExpect(jsonPath("$.data.routingStrongModelId").value("deepseek-v4-ultra"))
+                .andExpect(jsonPath("$.data.routingStrongModelId").value("doubao-flagship"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
                 .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(10));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isFalse();
-        assertThat(executor.routingStrongModelId()).isEqualTo("deepseek-v4-ultra");
+        assertThat(executor.routingStrongModelId()).isEqualTo("doubao-flagship");
 
         signedGet("executor/traces")
                 .andExpect(status().isOk())
@@ -391,7 +395,7 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingSliceFeatureThreshold").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
-                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("deepseek-v4-ultra"))
+                .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("doubao-flagship"))
                 .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(30))
                 .andExpect(jsonPath("$.data[0].newRoutingSliceFeatureThreshold").value(10))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
@@ -404,6 +408,38 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
                 .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
                 .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));
+    }
+
+    // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
+
+    @Test
+    void given_unknown_or_disabled_tier_when_put_then_rejected_with_zero_writes()
+            throws Exception {
+        // 停用档夹具（t- 前缀，teardown 归零——种子档位是他测真链路依赖）
+        jdbcTemplate.update(
+                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                        + "VALUES ('t-off', 'volcengine', 'some-off-model', FALSE)");
+
+        // 三座 modelId/路由强档与边缘点档位：缺行键 400 PRJ_074、停用键 400 PRJ_075
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-nope\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4074))
+                .andExpect(jsonPath("$.message").value(containsString("t-nope")));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"routingStrongModelId\": \"t-nope\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4074));
+        signedPutEdge("naming", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-nope\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4074));
+        signedPut("main", OPERATOR_ID, OPERATOR_NAME, "{\"modelId\": \"t-off\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4075))
+                .andExpect(jsonPath("$.message").value(containsString("t-off")));
+
+        // fail-fast：负例零写入（不落行不落痕）——错值不再进留痕链
+        assertThat(configRowCount()).isZero();
+        assertThat(traceRowCount()).isZero();
     }
 
     // ---------- 边缘四点（#366：仅模型档位入配置面，同表同机制） ----------

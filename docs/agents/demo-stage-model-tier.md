@@ -24,7 +24,9 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 
 档位经智能体运营配置机制切换，**不发版**——改档下一次命令构建即生效（每次命令构建动态查库取生效值，无缓存）。模型档位值为**语义键**（ADR-0031：`flash`/`pro`/`doubao-flagship` 这类运营短名，指向实际模型名与供应商通道——模型版本升级改档位行指向即可，逐处绑定不动）：
 
-1. **改档**：`PUT /api/backoffice/agent-configs/executor`（机机五头 HMAC 签名；`X-User-Id`/`X-User-Name` 必带——写操作留痕）。请求体全量语义：`{"modelId": "pro"}` 换强模型档，`{"modelId": "flash"}` 回快模型档，`{"modelId": null}`（或纯空白/缺省）清空覆盖、回落枚举缺省（快模型档）。档位名不做白名单校验——错值致新会话失败，经留痕写回可回滚。
+1. **改档**：`PUT /api/backoffice/agent-configs/executor`（机机五头 HMAC 签名；`X-User-Id`/`X-User-Name` 必带——写操作留痕）。请求体全量语义：`{"modelId": "pro"}` 换强模型档，`{"modelId": "flash"}` 回快模型档，`{"modelId": null}`（或纯空白/缺省）清空覆盖、回落枚举缺省（快模型档）。档位键即时校验（#367）：非空须在模型档位面（`/api/backoffice/model-tiers`）有行且启用——错值 400 当场拒（PRJ_074 缺行 / PRJ_075 停用），不再靠留痕回滚兜底；null 清空不校验。
+
+**模型版本升级（方舟名带日期后缀、季度级更新）**：改档位行指向即全部引用自动跟上——`PUT /api/backoffice/model-tiers/{tierKey}` 改 `modelName`（同面可换通道、改显示名、停启用）；建新档走 POST、删行有绑定守卫（被引用 409）。**换 key/换通道**（不发版不重启）：`/api/backoffice/model-providers` 面——apiKey 写收全量值、读面与留痕一律掩码（尾 4 位），`PUT` 不携 apiKey＝保持现值、携全量新值＝换 key（改完下一轮命令构建即生效）。curl 执行面：`aiplatform-server/scripts/backoffice-model-channel.sh`（`demo` 全流程演示〔可弃键自动清场〕＋单动词运维操作）。
 2. **查生效值**：`GET /api/backoffice/agent-configs/executor`——生效 `modelId` ＋覆盖标记 `modelIdOverridden` ＋缺省预览 `defaultModelId`。
 3. **回滚**：`GET /api/backoffice/agent-configs/executor/traces` 取某痕旧值快照，把旧值 `PUT` 回写（即一次新变更、留新痕——不做版本树）。
 

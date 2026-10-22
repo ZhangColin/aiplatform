@@ -192,7 +192,42 @@ public enum ProjectMessage implements CodeMessage {
     MODEL_PROVIDER_KEY_MISSING(503, "PRJ_063", "模型供应商通道未配置 apiKey：{0}（在通道配置填入后重试）"),
 
     /** 边缘调用点不存在（#366）：边缘点档位面只有取名/压缩/分类/预检四点；三座智能体走 PRJ_033 端点。 */
-    EDGE_POINT_NOT_FOUND(404, "PRJ_064", "边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）");
+    EDGE_POINT_NOT_FOUND(404, "PRJ_064", "边缘调用点不存在（档位配置面只有 naming/compaction/classification/precheck 四点）"),
+
+    // ========== 模型供应商/档位后台维护面（#367，ADR-0031——读写双面、掩码回显、绑定即时校验） ==========
+
+    /** 通道寻址守卫：维护面无该通道行（404——装配面缺行是 PRJ_060/500，语义不同）。 */
+    MODEL_PROVIDER_NOT_FOUND(404, "PRJ_065", "模型供应商通道不存在"),
+
+    /** 档位寻址守卫：维护面无该档位行（404——装配面缺行是 PRJ_060/500，语义不同）。 */
+    MODEL_TIER_CONFIG_NOT_FOUND(404, "PRJ_066", "模型档位不存在"),
+
+    /** 通道创建冲突：键名即协议路由前缀、主键唯一——已存在即拒（改行走 PUT）。 */
+    MODEL_PROVIDER_EXISTS(409, "PRJ_067", "模型供应商通道已存在（键名唯一——改既有行走 PUT）"),
+
+    /** 档位创建冲突：语义键即引用腿、主键唯一——已存在即拒（改行走 PUT）。 */
+    MODEL_TIER_EXISTS(409, "PRJ_068", "模型档位已存在（语义键唯一——改既有档走 PUT）"),
+
+    /** 通道命令守卫：baseUrl 必填（创建与更新同拦——维护面无部分更新语义）。 */
+    MODEL_PROVIDER_FIELDS_REQUIRED(400, "PRJ_069", "通道配置字段不完整（baseUrl 必填）"),
+
+    /** 档位命令守卫：所属通道与实际模型名必填（显示名可空＝回落语义键）。 */
+    MODEL_TIER_FIELDS_REQUIRED(400, "PRJ_070", "档位配置字段不完整（providerKey/modelName 必填）"),
+
+    /** 档位所属通道守卫：命令引用的通道行不存在（先建通道行再挂档位——FK 裸错的读面化）。 */
+    MODEL_TIER_PROVIDER_UNKNOWN(400, "PRJ_071", "档位所属的模型供应商通道不存在：{0}（先建通道行）"),
+
+    /** 通道删除守卫：仍被档位行引用（删通道先删/改挂其下的档位行——悬空引用不留静默坑）。 */
+    MODEL_PROVIDER_DELETE_REFERENCED(409, "PRJ_072", "该通道仍被模型档位引用，先删改这些档位行再删通道"),
+
+    /** 档位删除守卫：仍被智能体运营配置绑定（先改绑或清空绑定——悬空引用不留静默坑；临时下线用停用不删行）。 */
+    MODEL_TIER_DELETE_REFERENCED(409, "PRJ_073", "该档位仍被智能体运营配置绑定，先改绑或清空绑定再删（临时下线用停用不删行）"),
+
+    /** 绑定即时校验（#367）：改档写的档位键无行——错值写不进去，不再靠留痕回滚兜底。 */
+    MODEL_TIER_BINDING_NOT_FOUND(400, "PRJ_074", "绑定的模型档位不存在：{0}（先在模型档位面建行）"),
+
+    /** 绑定即时校验（#367）：改档写的档位行已停用——停用档不可作新绑定（既有绑定装配时报 PRJ_061）。 */
+    MODEL_TIER_BINDING_DISABLED(400, "PRJ_075", "绑定的模型档位已停用：{0}（启用该档位或改绑其他档位）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 

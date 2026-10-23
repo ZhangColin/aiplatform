@@ -33,7 +33,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 外部仓库惯例真模型冒烟（#214；DEEPSEEK_API_KEY 未设或 docker daemon 不在整类
+ * 外部仓库惯例真模型冒烟（#214；VOLCENGINE_API_KEY 未设或 docker daemon 不在整类
  * 跳过）：PRD 引用外部 GitHub 仓库（cartisan-boot）时，真 run 执行体按执行体协议
  * 第 9 条「起手先 clone 再读」把仓库浅克隆进工作区 external/ 资料目录——只读参考、
  * 不合并进交付系统。仅 SSE 发射边 mock 收口观测。
@@ -116,9 +116,9 @@ class ExternalRepoConventionSmokeTest {
     @BeforeAll
     static void requireEnvironment() {
         Assumptions.assumeTrue(
-                System.getenv("DEEPSEEK_API_KEY") != null
-                        && !System.getenv("DEEPSEEK_API_KEY").isBlank(),
-                "DEEPSEEK_API_KEY 未设置，跳过外部仓库惯例真模型冒烟");
+                System.getenv("VOLCENGINE_API_KEY") != null
+                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
+                "VOLCENGINE_API_KEY 未设置（volcengine 通道种子无 key），跳过外部仓库惯例真模型冒烟");
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
     }
 

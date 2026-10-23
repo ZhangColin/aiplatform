@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -107,20 +108,26 @@ class BackofficeModelChannelSeamTest {
 
     @Test
     void given_seed_rows_when_list_and_get_then_api_key_masked_everywhere() throws Exception {
-        // 清单读面：种子两通道掩码形（sk-test-ark → ****-ark）、写者 null（种子写入）
+        // 清单读面：种子两通道皆掩码形（**** 前缀）、写者 null（种子写入）。volcengine
+        // key 随测试环境（env 注入＝真值〔#369 真模型冒烟〕/未注入＝ModelTierSeed 补
+        // 测试假值）——明文不泄漏断言取库内现值验，掩码形不钉 fixture 字面
+        String volcKey = jdbcTemplate.queryForObject(
+                "SELECT api_key FROM prj_model_providers WHERE provider_key = 'volcengine'",
+                String.class);
         String listBody = signedRequest(get(PROVIDERS_PATH), PROVIDERS_PATH, null, null, null)
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(listBody)
-                .contains("****-ark").contains("****seek")
-                .doesNotContain("sk-test-ark").doesNotContain("sk-test-deepseek");
+                .contains("****")
+                .doesNotContain(volcKey)
+                .doesNotContain("sk-test-deepseek");
 
         signedRequest(get(PROVIDERS_PATH + "/volcengine"),
                         PROVIDERS_PATH + "/volcengine", null, null, null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.providerKey").value("volcengine"))
                 .andExpect(jsonPath("$.data.baseUrl").value("https://ark.cn-beijing.volces.com/api/v3"))
-                .andExpect(jsonPath("$.data.apiKeyMasked").value("****-ark"))
+                .andExpect(jsonPath("$.data.apiKeyMasked").value(startsWith("****")))
                 .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.data.operatorId").value(nullValue()));
 

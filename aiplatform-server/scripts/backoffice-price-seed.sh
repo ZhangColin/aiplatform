@@ -9,8 +9,8 @@
 # 2026-08-16 起分 peak/off-peak 时段价（off-peak = peak 一半，peak 时段
 # 01:00–04:00、06:00–10:00 UTC）；单价表无时段维度，种子取 peak 档（上限口径）：
 # 成本可见性宁高勿低，精确到时段的换算是单价表演化，现在不预设。
-# 现役模型 = demo 配置档位 deepseek-v4-pro / deepseek-v4-flash（business
-# AgentProfile），DeepSeek 无缓存写/推理独立口径 → 每模型三行
+# 现役模型 = volcengine 通道三档位实际模型（#369 切换后，deepseek 官方行降备胎
+# ——历史成本计价仍用其旧行），DeepSeek 系无缓存写/推理独立口径 → 每模型三行
 # （tokenKind：1=input 3=cache_read 2=output）。$x/1M ÷ 1e6 = 每 token 单价。
 #
 # #288 出图按张行（tokenKind 6=image，CNY/张；2026-10-06 核对各家官方定价页）：
@@ -20,6 +20,13 @@
 #   openai/gpt-image-2.5-sunburst 不种：官方按 token 计价（image output $30/1M）、
 #   无按张官方价，硬抄折算数违「实时值为准」纪律——用 OpenAI 档时经管理 API 自行
 #   开行（unpriced 警示会如实暴露）。
+#
+# #369 火山通道行（provider=volcengine＝通道键，模型名与档位行实际模型一致；
+# 2026-10-23 核对 docs.volcengine.com/docs/ark/model-pricing 在线推理常规价，
+# CNY/百万 tokens，无时段分档直取）：切换后主通道三模型 × 3 tokenKind
+# （1=input 3=cache_read 2=output），成本观测跨通道切换不断线。
+#   deepseek-v4-pro-ga-260813 9/0.3/27｜deepseek-v4-flash-ga-260731 3/0.1/9｜
+#   doubao-seed-2-1-pro-260915 6/1.2/30。
 # 生效起点统一 2026-01-01（敞口覆盖平台存量事件；真实改价史经管理 API 原子
 # 改价维护，历史成本不漂移）。
 #
@@ -49,6 +56,15 @@ SEED_ROWS=(
   "zhipu            glm-image                   6  0.10        CNY"
   "volcano          doubao-seedream-5-0-260128  6  0.22        CNY"
   "dashscope        qwen-image-3.0              6  0.18        CNY"
+  "volcengine       deepseek-v4-pro-ga-260813   1  0.000009    CNY"
+  "volcengine       deepseek-v4-pro-ga-260813   3  0.0000003   CNY"
+  "volcengine       deepseek-v4-pro-ga-260813   2  0.000027    CNY"
+  "volcengine       deepseek-v4-flash-ga-260731 1  0.000003    CNY"
+  "volcengine       deepseek-v4-flash-ga-260731 3  0.0000001   CNY"
+  "volcengine       deepseek-v4-flash-ga-260731 2  0.000009    CNY"
+  "volcengine       doubao-seed-2-1-pro-260915  1  0.000006    CNY"
+  "volcengine       doubao-seed-2-1-pro-260915  3  0.0000012   CNY"
+  "volcengine       doubao-seed-2-1-pro-260915  2  0.00003     CNY"
 )
 
 # 既有键集（含已关行）：provider|model|tokenKind 每行一条。清单分页翻到取尽（防

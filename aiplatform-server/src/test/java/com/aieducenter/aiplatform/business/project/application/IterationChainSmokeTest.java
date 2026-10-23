@@ -40,7 +40,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 迭代链必达真模型冒烟（#43；DEEPSEEK_API_KEY 未设或 docker daemon 不在整类
+ * 迭代链必达真模型冒烟（#43；VOLCENGINE_API_KEY 未设或 docker daemon 不在整类
  * 跳过）：「改主色调」场景全链绿——真主智能体（真模型 + 真 dev 容器 + 真会话状态）修订
  * PRD 后，平台在 意见轮收口<b>自动</b>派修正 run（不依赖任何派发工具调用——主智能体
  * 也没有派发工具），真 run 执行体把系统改掉。仅 SSE / 通知发射边（无订阅者的
@@ -111,9 +111,9 @@ class IterationChainSmokeTest {
     @BeforeAll
     static void requireEnvironment() {
         Assumptions.assumeTrue(
-                System.getenv("DEEPSEEK_API_KEY") != null
-                        && !System.getenv("DEEPSEEK_API_KEY").isBlank(),
-                "DEEPSEEK_API_KEY 未设置，跳过链必达真模型冒烟");
+                System.getenv("VOLCENGINE_API_KEY") != null
+                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
+                "VOLCENGINE_API_KEY 未设置（volcengine 通道种子无 key），跳过链必达真模型冒烟");
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
     }
 

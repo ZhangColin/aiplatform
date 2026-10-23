@@ -56,3 +56,5 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
    - **路由关（对照基线）**：`PUT /api/backoffice/agent-configs/executor` 写 `{"routingEnabled": false}`；
    - **钉死强档（质量基线）**：`PUT` 写 `{"routingEnabled": false, "modelId": "pro"}`（钉死位——人工档恒生效）；
 4. 对比结果留档（时长量级、质量差异、项目账 token、路由判定分布）——路由开轮供速度目标推算，钉死强档轮为质量基线，路由关轮为对照基线。
+
+**enableThinking 终值对比（#369 切换验收）**：方舟 DeepSeek V4 系均标深度思考，装配显式关（`ModelTierAppService.THINKING_ENABLED`——终值位单点，缺省 false；非运营开关）。对比法：改该常量临时开→重启 dev 后端→同一任务跑一轮，与关态轮对比首轮延迟/质量/token——终值结论回写常量与 ADR-0031（若开态显著拖慢首 token 则维持显式关，用户故事 12 承诺不破）。成本面联动：跑完经成本观测面核 volcengine 模型行有单价匹配（单价表已开三档位实际模型行，#369 种子）、无 unpriced 警示。

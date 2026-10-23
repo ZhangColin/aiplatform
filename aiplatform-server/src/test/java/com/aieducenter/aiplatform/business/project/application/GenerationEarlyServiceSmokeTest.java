@@ -34,7 +34,7 @@ import com.aieducenter.aiplatform.business.project.domain.aggregate.Project;
 import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepository;
 
 /**
- * 尽早起服真模型冒烟（#44 渐进预览前提；DEEPSEEK_API_KEY 未设或 docker daemon
+ * 尽早起服真模型冒烟（#44 渐进预览前提；VOLCENGINE_API_KEY 未设或 docker daemon
  * 不在整类跳过）：真 run 执行体从 PRD 生成系统的过程中，应用端口（8081）在 run
  * 早期即可访问——而不是临近收口才第一次起服务。仅 SSE 发射边 mock 收口观测。
  *
@@ -121,9 +121,9 @@ class GenerationEarlyServiceSmokeTest {
     @BeforeAll
     static void requireEnvironment() {
         Assumptions.assumeTrue(
-                System.getenv("DEEPSEEK_API_KEY") != null
-                        && !System.getenv("DEEPSEEK_API_KEY").isBlank(),
-                "DEEPSEEK_API_KEY 未设置，跳过尽早起服真模型冒烟");
+                System.getenv("VOLCENGINE_API_KEY") != null
+                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
+                "VOLCENGINE_API_KEY 未设置（volcengine 通道种子无 key），跳过尽早起服真模型冒烟");
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
     }
 

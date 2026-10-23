@@ -15,7 +15,7 @@
 #   WAIT=180 ./scripts/user-journey.sh        # 放宽等智能体回应的时限
 #   CLEANUP=0 ./scripts/user-journey.sh       # 失败时保留项目供事后排查
 #
-# 前提：本服务（8888，带 SSO_*/DEEPSEEK_API_KEY 启动）与 identity 在跑；
+# 前提：本服务（8888，带 SSO_*/VOLCENGINE_API_KEY 启动）与 identity 在跑；
 # 凭据读仓库根 .env.local（gitignored）。
 # ============================================================================
 set -euo pipefail

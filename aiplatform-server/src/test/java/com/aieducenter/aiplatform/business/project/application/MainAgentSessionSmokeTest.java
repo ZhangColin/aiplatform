@@ -35,7 +35,7 @@ import com.aieducenter.aiplatform.business.project.domain.repository.ProjectRepo
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 主智能体访谈循环真模型冒烟（DEEPSEEK_API_KEY 未设或 docker daemon 不在整类跳过）：
+ * 主智能体访谈循环真模型冒烟（VOLCENGINE_API_KEY 未设或 docker daemon 不在整类跳过）：
  * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
  * （无订阅者的广播口）一处 mock 收口观测。
  *
@@ -93,9 +93,9 @@ class MainAgentSessionSmokeTest {
     @BeforeAll
     static void requireEnvironment() {
         Assumptions.assumeTrue(
-                System.getenv("DEEPSEEK_API_KEY") != null
-                        && !System.getenv("DEEPSEEK_API_KEY").isBlank(),
-                "DEEPSEEK_API_KEY 未设置，跳过真模型主智能体访谈冒烟");
+                System.getenv("VOLCENGINE_API_KEY") != null
+                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
+                "VOLCENGINE_API_KEY 未设置（volcengine 通道种子无 key），跳过真模型主智能体访谈冒烟");
         Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
     }
 

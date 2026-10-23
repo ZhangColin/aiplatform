@@ -99,7 +99,9 @@ class ModelTierAppServiceTest {
     @Test
     void given_v44_seed_rows_when_resolve_then_volcengine_primary_shape() {
         // V44 种子链路（volcengine 主用通道 + flash 档）——主链路的真实形状钉死：
-        // 三座缺省档 flash 经真解析产 volcengine 前缀模型串（活体走查前的结构面）
+        // 三座缺省档 flash 经真解析产 volcengine 前缀模型串（活体走查前的结构面）。
+        // key 值随测试环境（env 注入＝真值〔#369 真模型冒烟〕/未注入＝ModelTierSeed
+        // 补测试假值）——断言守「非空不回落＋明文不入指纹」，不钉 fixture 字面
         ModelTierSeed.ensureChannelKey(jdbcTemplate);
 
         ResolvedModel resolved = modelTiers.resolve("flash");
@@ -107,8 +109,8 @@ class ModelTierAppServiceTest {
         assertThat(resolved.modelString())
                 .isEqualTo("volcengine:deepseek-v4-flash-ga-260731");
         assertThat(resolved.baseUrl()).isEqualTo("https://ark.cn-beijing.volces.com/api/v3");
-        assertThat(resolved.apiKey()).isEqualTo(ModelTierSeed.TEST_API_KEY);
-        assertThat(resolved.channel().fingerprint()).doesNotContain("sk-test-ark");
+        assertThat(resolved.apiKey()).isNotBlank();
+        assertThat(resolved.channel().fingerprint()).doesNotContain(resolved.apiKey());
     }
 
     private void seedChannel(String providerKey, String baseUrl, String apiKey, boolean enabled) {

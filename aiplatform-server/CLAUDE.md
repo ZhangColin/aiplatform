@@ -30,15 +30,15 @@ AI 开发平台后端：`base` 底座（workspace/eventhub/knowledge/metering/sk
 
 ### Issue tracker
 
-Issue 通过 GitHub Issues 管理（`gh` CLI）。见 `docs/agents/issue-tracker.md`。
+Issue 跟踪在 GitHub Issues（`ZhangColin/aiplatform`），通过 `gh` CLI 操作。见根级 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-使用默认五角色标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。见 `docs/agents/triage-labels.md`。
+使用默认标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。见根级 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-Single-context 布局：仓库根目录 `CONTEXT.md` + `docs/adr/`（由 `/domain-modeling` 惰性创建）。见 `docs/agents/domain.md`。
+Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威。见根级 `docs/agents/domain.md`。
 
 ### Skill audit guide
 

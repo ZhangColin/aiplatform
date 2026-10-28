@@ -27,13 +27,13 @@
 
 ### Issue tracker
 
-Issue 跟踪在 GitHub Issues（ZhangColin/aiplatform-web），用 `gh` CLI 操作。See `docs/agents/issue-tracker.md`.
+Issue 跟踪在 GitHub Issues（`ZhangColin/aiplatform`），通过 `gh` CLI 操作。见根级 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-使用五个默认 triage 标签（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）。See `docs/agents/triage-labels.md`.
+使用默认标签：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。见根级 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-Single-context 布局：根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威。见根级 `docs/agents/domain.md`。
 

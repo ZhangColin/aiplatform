@@ -1,41 +1,46 @@
-# Windows 开发机落机指南（WSL2 路线）
+# Windows 开发机落机指南（原生 Windows 路线）
 
-> 读者：换机时的自己。路线已定：**WSL2 ＋ Docker Desktop**。开发形态＝「后端直接跑在一台装了 Docker 的 Linux 宿主机上」，WSL2 就是那台 Linux，现有脚本与习惯原样平移；原生 Windows 需移植全部 bash 脚本＋自编译 pgvector，不取。
+> 读者：换机时的自己。路线（2026-10 实际落地）：**原生 Windows 工具链 + Docker Desktop（WSL backend 仅承载 Docker）**。
+> 开发形态＝VSCode + PowerShell 为主，Git Bash 只执行 git 命令；仓库放 C 盘 `C:\Users\zhang\workspace\aiplatform`。
+> 旧稿的 WSL2 路线已废弃（当时顾虑的「自编译 pgvector」因 Docker Desktop 就位而不成立）；本地起停脚本已新写 PowerShell 版，仓内 `.sh` 保留给 Linux 服务器（CentOS/Ubuntu 部署侧）。
 
-## 1. 基础层（全在 WSL 内）
+## 1. 基础层（全装 Windows 侧）
 
-1. `wsl --install -d Ubuntu`（22.04/24.04）；Windows 侧装 Docker Desktop（WSL backend）。
-2. WSL 内装：Temurin JDK 21、Maven、Node 20（nvm）、pnpm@10、python3＋pip（`pip install fastembed`）。
-3. git 与 SSH key 在 WSL 内重新配置（私仓 GitHub 权限）。
-4. **仓库放 WSL 文件系统内**（`~/…`），不要放 `/mnt/c`（跨文件系统 IO 慢一个量级）。
+1. JDK 21（Temurin）、Maven、Node 20+、git（Git Bash 随装）。
+2. pnpm 不必单独装：独立安装的 pnpm 有 `manage-package-manager-versions` 特性，在 `aiplatform-web` 目录内自动切到 `package.json` 钉的 `pnpm@10.28.2`（实测 `pnpm --version` 输出 10.28.2），lockfile 安全。
+3. python：系统 3.15 与 fastembed 不兼容（依赖无 3.15 wheel，`ResolutionImpossible`）。用 **uv** 自管 python：`pip install uv`（其 Scripts 目录已入用户 PATH），embedding 服务经 `uv run --with fastembed --python 3.12` 启动。
+4. Docker Desktop（用户目录安装：`AppData\Local\Programs\DockerDesktop`）。
 
-## 2. 数据库（绕开 Windows 编译 pgvector）
+## 2. 数据库（Docker 起 pgvector，不装本机 PG）
 
-- 用仓里现成备胎镜像：`pgvector/pgvector:pg16`（见 `aiplatform-server/docker-compose.dev.yml`，端口映射改/用 5432）。
-- 建库 `aiplatform` 与 `aiplatform_test`，用户 `postgres`/密码 `truth`（与 application-local.yml 一致 → 零环境变量）。
-- 版本说明：旧机是本机 PG18，Docker 路线为 PG16（与 CI 备案一致）；Flyway 已应用集兼容。
-- 数据迁移（可选）：旧机 `pg_dump` → 新机 `psql` 导入；或空库起步让 Flyway 重建。
+- Windows 无 pgvector 官方预编译包（自编译要 MSVC），本机 PG 不取；Docker 官方镜像开箱即用。
+- 正口径文件：`aiplatform-server/docker-compose.windows.yml`（5432 直映、`postgres`/`truth` 对齐 application-local.yml → 后端零环境变量；`docker/initdb/` 建第二库）。
+- 起法：`docker compose -f docker-compose.windows.yml up -d`（容器名 `aiplatform-pg`，数据在 named volume `pgdata_windows`，容器删了数据仍在）。
+- 两库：`aiplatform`（POSTGRES_DB）+ `aiplatform_test`（initdb 脚本，@IntegrationTest 隔离用）；vector extension 由 Flyway V1 自建，无需手工。
+- 版本口径 pg16（与 CI 一致；旧 mac 机是本机 PG18）。数据迁移（可选）：旧机 `pg_dump` → `docker exec -i aiplatform-pg psql` 导入；或空库起步让 Flyway 重建。
+- `docker-compose.dev.yml`（5434 应急备胎）是 mac 侧口径文件，Windows 上勿用。
 
-## 3. 代码与运行
+## 3. 代码与运行（PowerShell）
 
-1. clone 仓库；`aiplatform-server/.env.local` 从旧机拷（`VOLCENGINE_API_KEY`、`DEEPSEEK_API_KEY`、`BOCHA_API_KEY`、`ARK_API_KEY`、`IMAGE_GEN_PROVIDER` 等）。
-2. `scripts/dev.sh` 一键起后端（8888）＋前端（3333）。
-3. embedding 单独跑：`python3 aiplatform-server/scripts/embedding_server.py`；首次拉模型到 `~/.cache/fastembed`，大陆网络可设 hf-mirror 或直接从旧机拷缓存目录。
-4. 登录不依赖 identity：访客路径＋验证码登录（通道＝后端日志），详见 `docs/deploy/replit-deployment-brief.md` §1.5；dev.sh 对 10002 的探测失败可忽略。
+1. clone 仓库；`aiplatform-server/.env.local` 从旧机拷（SSO 七项 + `VOLCENGINE_API_KEY` + `BOCHA_API_KEY` + `OPENAPI_APP_*` 等，gitignored）。
+2. 前后端一键拉起：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`（后端 8888 + 前端 3333，停旧/健康探测对齐旧 dev.sh 语义；日志在 `%TEMP%\aiplatform-{backend,web}.log`）。后端单独起用 `aiplatform-server/scripts/dev-backend.ps1`。
+3. embedding 单独跑（知识库功能才需要）：`cd aiplatform-server; uv run --with fastembed --python 3.12 python scripts/embedding_server.py`；首次拉模型到 `~/.cache/fastembed`，大陆网络可设 hf-mirror 或直接从旧机拷缓存目录（ONNX 模型跨平台通用）。
+4. 登录不依赖 identity：访客路径＋验证码登录（通道＝后端日志），详见 `docs/deploy/replit-deployment-brief.md` §1.5。
 
 ## 4. 已知坑与新机差异
 
-- **工作区镜像 chromium**：新机是 amd64，arm64 zip 要换包（`dev-image.Dockerfile` 内注释指明位置；与 Replit 外部 host 同一笔资产）。
-- 容器内 clone github 卡 TCP：macOS 旧机已知现象；WSL/Docker Desktop 网络栈不同，若复现沿用既有判定（用 exitCode 与 `.git` 目录判成败，别信 git init 假绿）。
-- macOS bash 3.2 的全角变量坑在 WSL bash5 自然消失。
+- **`.sh` 行尾**：仓库已加 `.gitattributes` 钉 `*.sh eol=lf`（Windows `core.autocrlf=true` 会 checkout 成 CRLF 而炸脚本；服务器部署也依赖 LF）。
+- **工作区镜像 chromium（未决）**：`dev-image.Dockerfile` 取 npmmirror legacy zip `chromium-linux-arm64.zip`（revision 1243 与 playwright 1.63 钉死配对）。**该 revision 在 npmmirror 只有 arm64 包，x64 无源**（官方 CDN legacy 路径亦失效）。amd64 新机首次构建 dev 镜像时需解决：容器内配代理走 `playwright install` 官方注册表，或找到可用 x64 zip 后改 Dockerfile（文件内注释已记录约束：升版＝同步改钉版＋zip 版本）。
+- 容器内 clone github 卡 TCP：macOS 旧机已知现象；Docker Desktop 网络栈不同，若复现沿用既有判定（用 exitCode 与 `.git` 目录判成败，别信 git init 假绿）。
 - 容器 8081 应用重启后要手工拉（restart=unless-stopped 行为同 Linux，见 #168）。
 - 验证编译用 `clean test-compile`（增量「Nothing to compile」假绿）；`mvn test` 直跑（@IntegrationTest 已隔离到 aiplatform_test 库）。
-- Docker 残留清理沿用 `aiplatform-server/scripts/clean-ws-residue.sh`（判定准绳＝`wsp_workspaces` 注册表并集）。
+- Docker 残留清理沿用 `aiplatform-server/scripts/clean-ws-residue.sh`（判定准绳＝`wsp_workspaces` 注册表并集；在 Git Bash/服务器侧执行）。
+- PowerShell 5.1 会把 docker 的 stderr 进度输出显示为 NativeCommandError（`Container xxx Running` 红字），非真错误。
 
 ## 5. 验收
 
-1. `mvn clean test-compile` 全绿。
-2. dev.sh 拉起后：首页匿名建一个项目、真跑一个任务（容器置备＋预览 `*.localhost` 可打开）。
+1. `mvn clean test-compile` 全绿（aiplatform-server 目录）。
+2. dev.ps1 拉起后：首页匿名建一个项目、真跑一个任务（容器置备＋预览 `*.localhost` 可打开）。
 3. 验证码登录走通（后端日志读码）。
 
 ## 6. 参考

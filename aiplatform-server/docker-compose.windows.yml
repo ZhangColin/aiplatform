@@ -1,0 +1,28 @@
+# Windows 开发机正口径（原生 Windows 工具链，Docker Desktop 起 PG）：
+#   - mac 旧机是本机 PG18 单实例；Windows 不装本机 PG——pgvector 无官方预编译包，
+#     自编译需 MSVC 工具链，不取，直接用 pgvector 官方镜像（pg16，与 CI 备案口径一致）。
+#   - 端口/账号对齐 application-local.yml（5432、postgres/truth）→ 后端零环境变量。
+#   - docker-compose.dev.yml（5434 备胎口径）是 mac 侧文件，与此无关，勿混用。
+# 用法：docker compose -f docker-compose.windows.yml up -d
+#   数据在 named volume pgdata_windows，容器删了数据仍在；重置 = down 后删卷。
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aiplatform-pg
+    environment:
+      POSTGRES_DB: aiplatform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: truth
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_windows:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aiplatform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata_windows:

@@ -23,9 +23,10 @@
 ## 3. 代码与运行（PowerShell）
 
 1. clone 仓库；`aiplatform-server/.env.local` 从旧机拷（SSO 七项 + `VOLCENGINE_API_KEY` + `BOCHA_API_KEY` + `OPENAPI_APP_*` 等，gitignored）。
-2. 前后端一键拉起：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`（后端 8888 + 前端 3333，停旧/健康探测对齐旧 dev.sh 语义；日志在 `%TEMP%\aiplatform-{backend,web}.log`）。后端单独起用 `aiplatform-server/scripts/dev-backend.ps1`。
-3. embedding 单独跑（知识库功能才需要）：`cd aiplatform-server; uv run --with fastembed --python 3.12 python scripts/embedding_server.py`；首次拉模型到 `~/.cache/fastembed`，大陆网络可设 hf-mirror 或直接从旧机拷缓存目录（ONNX 模型跨平台通用）。
-4. 登录不依赖 identity：访客路径＋验证码登录（通道＝后端日志），详见 `docs/deploy/replit-deployment-brief.md` §1.5。
+2. **cartisan-boot 基座（编译阻塞）**：parent POM `com.cartisan:cartisan-boot:0.1.0-SNAPSHOT` 不在任何公共仓库（pom 亦无 repositories 段），旧机是本地 install 的。新机必须从旧机拷 `~/.m2/repository/com/cartisan/` 整目录到同路径（顺手拷 `~/.m2/settings.xml` 若存在）；或用 cartisan 源码仓重新 `mvn install`。缺它 `mvn clean test-compile` 直接报 Non-resolvable parent POM。
+3. 前后端一键拉起：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`（后端 8888 + 前端 3333，停旧/健康探测对齐旧 dev.sh 语义；日志在 `%TEMP%\aiplatform-{backend,web}.log`）。后端单独起用 `aiplatform-server/scripts/dev-backend.ps1`。
+4. embedding 单独跑（知识库功能才需要）：`cd aiplatform-server; uv run --with fastembed --python 3.12 python scripts/embedding_server.py`；首次拉模型到 `~/.cache/fastembed`，大陆网络可设 hf-mirror 或直接从旧机拷缓存目录（ONNX 模型跨平台通用）。
+5. 登录不依赖 identity：访客路径＋验证码登录（通道＝后端日志），详见 `docs/deploy/replit-deployment-brief.md` §1.5。
 
 ## 4. 已知坑与新机差异
 

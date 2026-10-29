@@ -46,10 +46,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* 现阶段 theme 未设计 dark：强制 light，避免跟随系统暗色偏好时呈现未设计的暗色布局；
+            设计 dark 后移除 forcedTheme、恢复 defaultTheme="system" + enableSystem */}
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          forcedTheme="light"
           disableTransitionOnChange
         >
           <QueryProvider>

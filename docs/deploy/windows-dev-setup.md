@@ -27,6 +27,7 @@
 3. 前后端一键拉起：`powershell -ExecutionPolicy Bypass -File scripts/dev.ps1`（后端 8888 + 前端 3333，停旧/健康探测对齐旧 dev.sh 语义；日志在 `%TEMP%\aiplatform-{backend,web}.log`）。后端单独起用 `aiplatform-server/scripts/dev-backend.ps1`。
 4. embedding 单独跑（知识库功能才需要）：`cd aiplatform-server; uv run --with fastembed --python 3.12 python scripts/embedding_server.py`；首次拉模型到 `~/.cache/fastembed`，大陆网络可设 hf-mirror 或直接从旧机拷缓存目录（ONNX 模型跨平台通用）。
 5. 登录不依赖 identity：访客路径＋验证码登录（通道＝后端日志），详见 `docs/deploy/replit-deployment-brief.md` §1.5。
+6. 前端 fresh clone 后：`pnpm install` ＋ `pnpm exec next typegen`——`next-env.d.ts` 与 `.next/types`（`PageProps`/`LayoutProps` 全局泛型）均被 gitignore，需 Next CLI 生成；缺了直接 typecheck 会报 `Cannot find name 'PageProps'`。
 
 ## 4. 已知坑与新机差异
 

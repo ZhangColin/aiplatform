@@ -1,0 +1,576 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import com.semgravio.aiplatform.IntegrationTest;
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
+import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+/**
+ * 主智能体访谈循环真模型冒烟（VOLCENGINE_API_KEY 未设或 docker daemon 不在整类跳过）：
+ * 编排全真链（真模型 + 真 dev 容器 + 真 PG 会话状态/问答答复续跑），仅 SSE 发射边
+ * （无订阅者的广播口）一处 mock 收口观测。
+ *
+ * <p>验收口径：一句话开场 → 至少两轮实质提问（QUESTION 载荷带前端问答卡形状，
+ * 经 JSON 往返）→ 答复续跑（answerQuestion 从项目侧事实重建恢复私货）→ 催促收敛
+ * （主智能体停止提问）→ savePrd 产出 PRD（工作区文件 + 状态位 + document-updated，
+ * 修订再执行三更新）→ 同会话上下文延续；计量落 UsageEvent（dims.agentKind=main）。</p>
+ */
+@IntegrationTest
+class MainAgentSessionSmokeTest {
+
+    private static final Duration TURN_DEADLINE = Duration.ofSeconds(150);
+
+    @Autowired
+    private MainAgentAppService appService;
+
+    @Autowired
+    private ProjectQueryAppService queryAppService;
+
+    @Autowired
+    private ProjectKnowledgeAppService knowledgeAppService;
+
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    /** 工作区走真实建链（容器 + wsp_workspaces 行——PRD 读端点按记录寻址）。 */
+    @Autowired
+    private WorkspaceLifecycleAppService workspaceLifecycleAppService;
+
+    /** 事件发射边收口（单端点单流）：智能体事件与通知分口捕获（真实链路无订阅者，
+     *  发射本身是观测缝）。 */
+    @MockitoBean
+    private EventsAppService eventsAppService;
+
+    private final ConcurrentLinkedQueue<Frame> frames = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Notify> notifies = new ConcurrentLinkedQueue<>();
+
+    private String workspaceId;
+    private Long projectId;
+    private String sessionId;
+
+    private record Frame(String type, Map<String, Object> payload) {
+        String runId() {
+            Object runId = payload.get("runId");
+            return runId != null ? runId.toString() : "";
+        }
+    }
+
+    private record Notify(String type, Map<String, Object> payload) {
+    }
+
+    @BeforeAll
+    static void requireEnvironment() {
+        Assumptions.assumeTrue(
+                System.getenv("VOLCENGINE_API_KEY") != null
+                        && !System.getenv("VOLCENGINE_API_KEY").isBlank(),
+                "VOLCENGINE_API_KEY 未设置（volcengine 通道种子无 key），跳过真模型主智能体访谈冒烟");
+        Assumptions.assumeTrue(dockerAvailable(), "本机 docker daemon 不在，跳过真实工作区链路");
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sessionId != null) {
+            jdbcTemplate.update("DELETE FROM met_usage_events WHERE session_id = ?", sessionId);
+            jdbcTemplate.update("DELETE FROM cat_agent_state WHERE session_id = ?", sessionId);
+        }
+        if (projectId != null) {
+            knowledgeAppService.purgeByProject(projectId);
+            jdbcTemplate.update("DELETE FROM prj_projects WHERE id = ?", projectId);
+        }
+        if (workspaceId != null) {
+            try {
+                workspaceLifecycleAppService.destroy(workspaceId);
+            } catch (RuntimeException e) {
+                // 物理清理尽力而为（记录已随 destroy 删；Docker 残留可重试销毁）
+            }
+        }
+    }
+
+    @Test
+    @Timeout(700)
+    void given_one_liner_when_interview_then_question_loop_until_prd_produced() {
+        // 真实 dev 容器 + 工作区记录 + 项目落库（编排面全真——PRD 读端点按
+        // wsp_workspaces 行寻址，照实走 docker exec）
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        doAnswer(invocation -> {
+            notifies.add(new Notify(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishNotification(any(), any());
+        Project project = projectRepository.save(Project.create("冒烟官网", null, null, Long.parseLong(workspaceId), null, null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        // 1) 一句话开场 → 主智能体至少一轮实质提问（QUESTION，前端问答卡形状经 JSON 往返）
+        MainAgentAppService.MainAgentRun first = appService.runOpinionTurn(projectId,
+                "做一个企业官网");
+        Frame question1 = awaitQuestionOf(first.runId());
+        Map<String, Object> body1 = questionBody(question1);
+        assertThat(framesOf(AgentEventTypes.RUN_START)).isNotEmpty();   // 开场事件到达（角色键已并入）
+        Map<String, Object> asked = firstQuestionOf(body1);
+        assertThat(String.valueOf(asked.get("question"))).as("问题载荷：%s", asked).isNotBlank();
+        // 问答卡形状齐备即可——单选/多选由模型按问题性质定，不锁死（曾断 multiple=false
+        // 被模型正当的多选题打爆）
+        assertThat(asked).containsKeys("header", "multiple", "custom", "options");
+
+        // 2) 答复 → 续跑 → 第二轮提问（答复循环 ≥2 轮：续跑在同一 run 上再挂起，
+        // 新挂起新 engineRef；答复刻意只覆盖目标用户——范围/约束仍缺，访谈必续）
+        settle(question1, "目标用户是海外企业客户，主要看公司与产品介绍；其余方面我也不确定，你继续问");
+        Frame question2 = awaitNextQuestionOf(first.runId(), engineRefOf(question1));
+        settle(question2, "要有中英文两个语言版本，范围就官网本体不要商城，风格简洁专业");
+
+        // 3) 催促收敛：第二问答复后续跑要么再挂新问（逐问以催促文本答复再催）、要么
+        // 收口（run-finish）——上限 4 轮必收敛。不设「无在悬问开新轮」回退：续跑
+        // 出结果（新挂起/收口/异常）前开新轮会与内核挂起态相撞（ASKING 未批复即
+        // 报错），而 awaitResumeOutcome 本就阻塞到出结果，回退是死重兼竞态源
+        List<String> seenRefs = new ArrayList<>(
+                List.of(engineRefOf(question1), engineRefOf(question2)));
+        String outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+        for (int i = 0; i < 4 && !"finished".equals(outcome); i++) {
+            Frame pending = questionFrameByRef(outcome);
+            seenRefs.add(outcome);
+            settle(pending, "不要再继续提问了，现在就结束访谈，直接产出 PRD");
+            outcome = awaitResumeOutcome(allRunIds(), seenRefs);
+        }
+        assertThat(outcome).as("催促收敛未在限轮内收口（已捕获事件序：%s）",
+                frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList())
+                .isEqualTo("finished");
+
+        // #34 回归守卫：多轮答复续跑后，会话状态任何 tool_use 的 input 不得含
+        // answer 键——答复经 block metadata（模型不可见；input 持久化且模型可见，
+        // 带 answer 会教模型「ask_user 可自带答案」自答后续提问）
+        assertNoAnswerKeyInToolUseInputs();
+
+        // 4) 判定明确/催促收敛 → savePrd：工作区文件 + 状态位 + document-updated
+        //    （PRD 读端点直读工作区文件——run 执行体同视图）
+        awaitPrdProduced(1);
+        assertThat(prdBitOf(projectId)).isNotNull();
+        PrdResponse prd = queryAppService.prd(projectId);
+        assertThat(prd.content()).as("PRD 正文（真模型产出）").isNotBlank();
+        assertThat(prd.updatedAt()).isNotNull();
+
+        // 4b) 咨询答询（#86 同会话）：问项目情况——同一 main 会话直接作答（零产物），
+        //     随后的修订与回溯仍在同会话连续
+        MainAgentAppService.MainAgentRun inquiry = appService.answerInquiry(project,
+                "现在项目有 PRD 了吗？如有，请用一句话概括它写了什么，不要提问");
+        awaitRunEnd(inquiry.runId());
+        assertThat(textOf(inquiry.runId())).as("咨询应在同会话直接作答").isNotBlank();
+
+        // 5) PRD 修订（savePrd 再次执行）：三更新——文件/状态位/事件
+        LocalDateTime firstBit = prdBitOf(projectId);
+        MainAgentAppService.MainAgentRun revision = appService.runOpinionTurn(projectId,
+                "需求有更新：官网要增加一个博客板块，请修订并重新保存 PRD");
+        awaitRunEnd(revision.runId());
+        awaitPrdProduced(2);
+        assertThat(prdBitOf(projectId)).isAfterOrEqualTo(firstBit);
+        assertThat(queryAppService.prd(projectId).content()).isNotBlank();
+
+        // 6) 同会话上下文延续：访谈答复在上下文中可回溯（自由补充不丢）
+        MainAgentAppService.MainAgentRun recall = appService.runOpinionTurn(projectId,
+                "回顾访谈：我把目标用户答成了什么？只回答「海外企业客户」相关的答案要点，不要再提问");
+        awaitRunEnd(recall.runId());
+        assertThat(textOf(recall.runId())).contains("海外");
+
+        // 7) 计量：主智能体对话用量落 UsageEvent（dims 终态口径：agentKind=main、归属项目）
+        Integer usageRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM met_usage_events WHERE session_id = ?", Integer.class,
+                sessionId);
+        assertThat(usageRows).isPositive();
+        Map<String, Object> usage = jdbcTemplate.queryForMap(
+                "SELECT subject, dims->>'agentKind' AS agent_kind FROM met_usage_events"
+                        + " WHERE session_id = ? LIMIT 1", sessionId);
+        assertThat(String.valueOf(usage.get("subject"))).isEqualTo(projectId.toString());
+        assertThat(String.valueOf(usage.get("agent_kind"))).isEqualTo("main");
+    }
+
+    /**
+     * 抓取闭环冒烟（#213）：对话区贴静态 URL → 主智能体调用 fetch_url 抓取 →
+     * 回复引用其内容。真跑 LLM（example.com——RFC 2606 稳定静态页，标题
+     * 「Example Domain」）；断言两层——会话状态确有 fetch_url 调用（非模型空口
+     * 自述）+ 回复引用内容（「example domain」不在 URL 里，串台 URL 回声过不了）。
+     */
+    @Test
+    @Timeout(240)
+    void given_pasted_url_when_inquiry_then_reply_cites_fetched_content() {
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("抓取冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "读取 https://example.com 的内容，然后用一句话告诉我这个页面的标题是什么，不要再提问");
+
+        awaitRunEnd(run.runId());
+        assertThat(toolWasInvoked("fetch_url")).as("主智能体应实际调用 fetch_url 抓取").isTrue();
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体回复应引用抓取内容（标题 Example Domain）")
+                .containsIgnoringCase("example domain");
+        // #216 话术与实际能力一致：有 fetch_url 工具就该自己读，而非让用户手动提供内容
+        assertThat(reply).as("有 fetch_url 工具就不该让用户手动提供内容（回复：%s）", reply)
+                .doesNotContain("请手动");
+    }
+
+    /**
+     * 能力边界正本冒烟（#216）：问一个主智能体确实没有对应工具的能力（直接部署上线），
+     * 主智能体应如实自述边界（「我没有这个工具」）并给替代路径（系统构建/更新由平台
+     * 自动安排），而不是「平台没有 X 能力」式未经验证的平台断言。真跑 LLM；断言两层
+     * ——回复非空 + 不含「平台没有/不支持/不具备」平台级断言措辞（排掉最坏的自述错误：
+     * 无验证断言）。「部署」平台确有其事（run 执行体自动构建），故「平台不支持部署」即假。
+     */
+    @Test
+    @Timeout(240)
+    void given_unavailable_capability_when_asked_then_describes_boundary_without_platform_assertion() {
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("能力边界冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "你能帮我直接把做好的系统部署上线、配置服务器吗？不要提问");
+
+        awaitRunEnd(run.runId());
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体应据实作答").isNotBlank();
+        assertThat(reply).as("不应有「平台没有/不支持」式未验证断言（回复：%s）", reply)
+                .doesNotContain("平台没有")
+                .doesNotContain("平台不支持")
+                .doesNotContain("平台不具备");
+        // 替代路径：如实自述「我没有这个工具」之外，还该指向平台自动安排（构建/更新
+        // 由平台收口后发生）——「平台」即替代路径的承载方
+        assertThat(reply).as("应给出平台承载的替代路径（回复：%s）", reply).contains("平台");
+    }
+
+    /**
+     * 调研闭环冒烟（#215）：「参考 X 类平台」输入 → 主智能体自主判断缺口 → 调用
+     * web_search 搜索（无来源给定的调研——连「去哪找」都自主）→ 回复综合搜得内容。
+     * 真跑 LLM + 真博查（BOCHA_API_KEY 未设则本方法跳过）。搜索结果是活的、非确定性，
+     * 故只断言机制铁证三层——会话状态确有 web_search 调用 + 回复非空 + 回复无失败/
+     * 零结果措辞（搜索失败/零结果时工具如实报错，模型回复必带失败/未果措辞，排掉
+     * 「只点了工具没搜到」的假绿），不锁具体结果文案。搜后 fetch_url 抓取阅读由
+     * fetch_url 冒烟单独钉住；搜→读→再搜的多轮由装配断言（两工具同挂 MAIN）+ 提示词
+     * 协议兜底（每条工具调用即时返回，无轮次死锁结构）。
+     */
+    @Test
+    @Timeout(240)
+    void given_reference_platforms_when_inquiry_then_searches_and_synthesizes() {
+        Assumptions.assumeTrue(
+                System.getenv("BOCHA_API_KEY") != null && !System.getenv("BOCHA_API_KEY").isBlank(),
+                "BOCHA_API_KEY 未设置，跳过真博查调研冒烟");
+
+        WorkspaceResponse workspace = workspaceLifecycleAppService
+                .create(new CreateWorkspaceCommand(EnvKind.DEV));
+        workspaceId = workspace.workspaceId();
+        doAnswer(invocation -> {
+            frames.add(new Frame(invocation.getArgument(0), invocation.getArgument(1)));
+            return null;
+        }).when(eventsAppService).publishAgentEvent(any(), any());
+        Project project = projectRepository.save(Project.create("调研冒烟", null, null, Long.parseLong(workspaceId), null, null));
+        projectId = project.getId();
+        sessionId = MainAgentAppService.SESSION_PREFIX + projectId;
+
+        MainAgentAppService.MainAgentRun run = appService.answerInquiry(project,
+                "我想做一个 AI 建站产品，参考 Lovable、Replit 这类平台的做法，"
+                        + "请告诉我这类平台通常具备哪些核心能力，不要再提问");
+
+        awaitRunEnd(run.runId());
+        assertThat(toolWasInvoked("web_search")).as("主智能体应实际调用 web_search 自主搜索").isTrue();
+        String reply = textOf(run.runId());
+        assertThat(reply).as("主智能体回复应综合搜得内容（非空）").isNotBlank();
+        assertThat(reply).as("搜索不应失败或零结果（回复：%s）", reply)
+                .doesNotContain("搜索失败")
+                .doesNotContain("未搜到结果");
+    }
+
+    // ---------- 内部 ----------
+
+    private Set<String> allRunIds() {
+        Set<String> runs = new HashSet<>();
+        frames.forEach(f -> runs.add(f.runId()));
+        return runs;
+    }
+
+    /** 有界等待 document-updated 触达 ≥ n 次（savePrd 每次执行必发；工具在 run
+     *  收口前执行，收敛轮结束即可等，留界兜底层间延迟）。 */
+    private void awaitPrdProduced(int atLeast) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (documentUpdatedCount() >= atLeast && prdBitOf(projectId) != null) {
+                return;
+            }
+            sleepQuietly();
+        }
+        assertThat(documentUpdatedCount()).as("document-updated 触达（已捕获：%s）",
+                notifies.stream().map(n -> n.type()).toList()).isGreaterThanOrEqualTo(atLeast);
+        assertThat(prdBitOf(projectId)).as("PRD 状态位").isNotNull();
+    }
+
+    private long documentUpdatedCount() {
+        return notifies.stream()
+                .filter(n -> ProjectEventTypes.DOCUMENT_UPDATED.equals(n.type())).count();
+    }
+
+    /** 项目「PRD 已产出」状态位（savePrd 落盘回调写入）。 */
+    private LocalDateTime prdBitOf(Long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
+                LocalDateTime.class, projectId);
+    }
+
+    /** 主智能体会话状态正文（#34 守卫的判读源：tool_use input 不含 answer 键）。 */
+    private String sessionStateJson() {
+        return jdbcTemplate.queryForObject(
+                "SELECT state_data FROM cat_agent_state WHERE session_id = ?",
+                String.class, sessionId);
+    }
+
+    /** #34 守卫判读：遍历会话状态 tool_use 块，input 含 answer 键即违规（答复正道 =
+     *  block metadata，模型不可见）。 */
+    private void assertNoAnswerKeyInToolUseInputs() {
+        List<String> offenders = new ArrayList<>();
+        try {
+            for (var msg : new ObjectMapper().readTree(sessionStateJson()).path("context")) {
+                for (var block : msg.path("content")) {
+                    if ("tool_use".equals(block.path("type").asText())
+                            && block.path("input").has("answer")) {
+                        offenders.add(block.path("id").asText());
+                    }
+                }
+            }
+        }
+        catch (java.io.IOException e) {
+            throw new AssertionError("会话状态解析失败", e);
+        }
+        assertThat(offenders).as("#34：tool_use input 不应含 answer 键（违规件 id）").isEmpty();
+    }
+
+    /** 会话状态里是否出现过该工具的 tool_use（真跑冒烟的铁证——工具确被调用，而非模型空口自述）。 */
+    private boolean toolWasInvoked(String toolName) {
+        try {
+            for (var msg : new ObjectMapper().readTree(sessionStateJson()).path("context")) {
+                for (var block : msg.path("content")) {
+                    if ("tool_use".equals(block.path("type").asText())
+                            && toolName.equals(block.path("name").asText())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            throw new AssertionError("会话状态解析失败", e);
+        }
+        return false;
+    }
+
+    /** 等待该 run 的 QUESTION 挂起事件（问答卡呈现源；#83 拆分后纯 QUESTION——kind 键已退役）。 */
+    private Frame awaitQuestionOf(String runId) {
+        return awaitFrame(runId, AgentEventTypes.QUESTION_RAISED);
+    }
+
+    /** 挂起事件的引擎侧请求 id（答复续跑的锚——一轮一值）。 */
+    private static String engineRefOf(Frame question) {
+        return String.valueOf(question.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD));
+    }
+
+    /** 事件的 engineRef（非挂起事件为空串——事件序诊断用）。 */
+    private static String engineRefOrEmpty(Frame frame) {
+        Object ref = frame.payload().get(AgentEventTypes.WAIT_ENGINE_REF_FIELD);
+        return ref != null ? String.valueOf(ref) : "";
+    }
+
+    /** 等待该 run 的下一个 QUESTION（续跑同 run 再挂起——按排除已见 engineRef 区分）。 */
+    private Frame awaitNextQuestionOf(String runId, String excludeRef) {
+        long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
+        while (System.nanoTime() < deadline) {
+            for (Frame frame : frames) {
+                if (!runId.equals(frame.runId())
+                        || !AgentEventTypes.QUESTION_RAISED.equals(frame.type())) {
+                    continue;
+                }
+                if (!excludeRef.equals(engineRefOf(frame))) {
+                    return frame;
+                }
+            }
+            sleepQuietly();
+        }
+        throw new AssertionError("答复续跑未再挂起提问（run=" + runId + "）——访谈在第二轮前收敛");
+    }
+
+    /** 按 engineRef 取挂起事件（催促循环锚定 awaitResumeOutcome 返回的新挂起）。 */
+    private Frame questionFrameByRef(String engineRef) {
+        return frames.stream()
+                .filter(f -> AgentEventTypes.QUESTION_RAISED.equals(f.type())
+                        && engineRef.equals(engineRefOf(f)))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("engineRef 无对应挂起事件: " + engineRef));
+    }
+
+    /** 等待该 run 收口（run-finish；error 视为失败）。 */
+    private void awaitRunEnd(String runId) {
+        Frame end = awaitFrame(runId, AgentEventTypes.RUN_FINISH, AgentEventTypes.ERROR);
+        assertThat(end.type()).as("run %s 异常收口：%s", runId, end.payload())
+                .isEqualTo(AgentEventTypes.RUN_FINISH);
+    }
+
+    /** 续跑出结果（跨候选 run 锚集）：再挂起（返回新 engineRef，排除已见）或收口
+     *  （"finished"；error 直接失败）。 */
+    private String awaitResumeOutcome(Set<String> runIds, List<String> seenRefs) {
+        long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
+        while (System.nanoTime() < deadline) {
+            for (Frame frame : frames) {
+                if (!runIds.contains(frame.runId())) {
+                    continue;
+                }
+                if (AgentEventTypes.ERROR.equals(frame.type())) {
+                    throw new AssertionError("run 异常收口：" + frame.payload()
+                            + "；已捕获事件序：" + frames.stream()
+                                    .map(f -> f.type() + "@" + engineRefOrEmpty(f))
+                                    .toList());
+                }
+                if (AgentEventTypes.RUN_FINISH.equals(frame.type())) {
+                    return "finished";
+                }
+                if (AgentEventTypes.QUESTION_RAISED.equals(frame.type())) {
+                    String ref = engineRefOf(frame);
+                    if (!seenRefs.contains(ref)) {
+                        return ref;
+                    }
+                }
+            }
+            sleepQuietly();
+        }
+        throw new AssertionError("续跑无结果超时（runs=" + runIds + "）；已捕获事件序："
+                + frames.stream().map(f -> f.type() + "@" + engineRefOrEmpty(f)).toList());
+    }
+
+    private Frame awaitFrame(String runId, String... types) {
+        long deadline = System.nanoTime() + TURN_DEADLINE.toNanos();
+        while (System.nanoTime() < deadline) {
+            for (Frame frame : frames) {
+                if (runId.equals(frame.runId()) && List.of(types).contains(frame.type())) {
+                    return frame;
+                }
+            }
+            sleepQuietly();
+        }
+        throw new AssertionError("等待事件超时（" + List.of(types) + " run=" + runId
+                + "），已捕获：" + frames.stream().map(f -> f.type() + "@" + f.runId()).toList());
+    }
+
+    /** 该 run 文本增量拼接（对话可见面）。 */
+    private String textOf(String runId) {
+        StringBuilder text = new StringBuilder();
+        for (Frame frame : frames) {
+            if (runId.equals(frame.runId()) && "text".equals(frame.type())) {
+                Object data = frame.payload().get("data");
+                if (data instanceof Map<?, ?> map && map.get("delta") != null) {
+                    text.append(map.get("delta"));
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    private List<Frame> framesOf(String type) {
+        return frames.stream().filter(f -> type.equals(f.type())).toList();
+    }
+
+    /** 答复挂起问（问答作答通道的编排入口调用——同 #19 端点的服务端路径）。 */
+    @SuppressWarnings("unchecked")
+    private void settle(Frame question, String answer) {
+        Map<String, Object> body = questionBody(question);
+        List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) body.get("toolCalls");
+        assertThat(toolCalls).as("挂起事件 data 应带待确认工具清单").isNotEmpty();
+        appService.answerQuestion(projectId, question.runId(), engineRefOf(question), toolCalls, answer);
+    }
+
+    /** 挂起事件载荷（question-raised 的 data）：JSON 往返后的前端问答卡/续跑载荷形状。 */
+    private Map<String, Object> questionBody(Frame question) {
+        return parseBody(question.payload().get(AgentEventTypes.WAIT_DATA_FIELD));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseBody(Object raw) {
+        try {
+            if (raw instanceof Map<?, ?> map) {
+                return (Map<String, Object>) map;
+            }
+            return new ObjectMapper().readValue(String.valueOf(raw), Map.class);
+        } catch (java.io.IOException e) {
+            throw new AssertionError("挂起事件 body 解析失败: " + raw, e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> firstQuestionOf(Map<String, Object> body) {
+        Object questions = body.get("questions");
+        assertThat(questions).as("QUESTION body 应带 questions 数组（前端问答卡形状）").isNotNull();
+        return ((List<Map<String, Object>>) questions).get(0);
+    }
+
+    private static void sleepQuietly() {
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("等待被中断", e);
+        }
+    }
+
+    private static boolean dockerAvailable() {
+        try {
+            Process p = new ProcessBuilder("docker", "version", "--format", "{{.Server.Version}}")
+                    .start();
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}

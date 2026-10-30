@@ -1,0 +1,294 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.springframework.stereotype.Service;
+
+import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.AgentReply;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.UsageContext;
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
+import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
+import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 入口派发编排（#47 三分类，#86 并轨后归一主智能体单会话）：对话区发言先过全局
+ * 守卫（存在 / 未归档），再经智能体边界上的轻量分类调用分岔——意见走主智能体
+ * 意见轮（{@link MainAgentAppService#runOpinionTurn}，订单冻结 / 挂起问答守卫在
+ * 此分岔内拦）、咨询走主智能体答询轮（{@link MainAgentAppService#answerInquiry}，
+ * 零产物短路，随时可答）、兜底走平台定型引导（零产物，不起任何智能体 run）。
+ * 意见与咨询同一 {@code main-{projectId}} 会话连续（#86）——分岔只是车道语义
+ * （守卫与交接物有无），不是会话派生。对用户全程隐式（CONTEXT.md「派发」）。
+ *
+ * <p><b>分类是轻量调用而非新模型端口</b>：复用 {@link AgentscopeAgentClient}
+ * 一次性会话（{@code classify-{runId}}，模型档走边缘点档位链——classification
+ * 档位库值优先缺省 flash（#366 收编，旧 yml 专用键退役；原意承 #51：轻调用不
+ * 烧重档）、空 sink 无事件、不触项目工作区），
+ * 同步跑在派发请求路径上（秒级；分类结果决定响应携带的 runId 归属，异步化会
+ * 拿不到真锚）。</p>
+ *
+ * <p><b>失败 / 超时兜底 = 按意见</b>（设计 v1 §3.1 的定向取舍）：误进意见链有
+ * 主智能体把关（追问或改 PRD，代价小）；误判为咨询会丢变更（不可接受）。分类
+ * 调用异常、超时或输出不可解析一律回落意见链。</p>
+ *
+ * <p><b>兜底类零产物</b>：轻量引导回复为平台定型文案（代码承载，非 LLM 产），
+ * 经 {@code guide-reply} 事件直达对话区；下单意图归兜底的引导分岔——指引
+ * Demo 确认门（「确认此版本，准备签约」；未生成时如实说明入口出现时机）。全程不起 run、不动任何
+ * 产物。</p>
+ */
+@Service
+@Slf4j
+public class DispatchAppService {
+
+    /** 分类一次性会话标识派生前缀（每次派发独立会话——分类不承上下文）。 */
+    static final String CLASSIFY_SESSION_PREFIX = "classify-";
+
+    /**
+     * 分类超时（REST 路径上的硬界）：flash 档单标签输出秒级；超时即回落意见链，
+     * 不让派发请求无限等待。
+     */
+    private static final Duration CLASSIFY_TIMEOUT = Duration.ofSeconds(15);
+
+    /**
+     * 分类协议：只输出一个标签，不解释。三分类 + 下单意图分岔（ORDER_INTENT 是
+     * 兜底的引导分岔——同一终止形态，仅文案不同）；拿不准意见/咨询时判意见。
+     */
+    private static final String CLASSIFY_SYSTEM_PROMPT =
+            "你是平台项目对话区的入口分类器，把用户发来的消息分类后只输出分类标签本身。"
+                    + "分类定义：\n"
+                    + "OPINION（意见）：想让平台改点什么——改系统、加功能、调范围、改需求，"
+                    + "或推进需求梳理的答复与补充；拿不准是不是要改时也算 OPINION。\n"
+                    + "INQUIRY（咨询）：想了解现状的提问——问系统怎么用、访问地址、账号、"
+                    + "项目进展、PRD 写了什么等；不要求任何变更。\n"
+                    + "FALLBACK（兜底）：与项目无关的寒暄、感谢、闲聊、模糊输入。\n"
+                    + "ORDER_INTENT（下单意图）：想买/下单/询价/问怎么购买的明确意图。\n"
+                    + "判定规则：只输出一个标签（OPINION、INQUIRY、FALLBACK 或 ORDER_INTENT），"
+                    + "不解释、不换行、不加标点；拿不准 OPINION 还是 INQUIRY 时判 OPINION。";
+
+    /** 兜底轻引导文案（平台侧定型文案，用户面正本）。 */
+    static final String GUIDE_GENERIC_TEXT =
+            "我在这里帮您把系统做出来：想改哪里、想加什么功能，直接告诉我；"
+                    + "想了解项目的情况（比如系统的访问地址、账号），也可以直接问。";
+
+    /** 下单意图引导文案（已生成——Demo 确认门入口在位）。 */
+    static final String GUIDE_ORDER_TEXT_GENERATED =
+            "好的，请到 Demo 体验页点「确认此版本，准备签约」：确认后进入签约付款，平台会为您安排报价。";
+
+    /** 下单意图引导文案（未生成——如实说明入口出现时机，不指不存在的东西）。 */
+    static final String GUIDE_ORDER_TEXT_NOT_GENERATED =
+            "Demo 生成完成后，Demo 体验页会出现「确认此版本，准备签约」按钮，届时点击即可进入签约。";
+
+    /** 引导回复呈现标签（非智能体角色——平台自己说话）。 */
+    static final String GUIDE_LABEL = "平台";
+
+    private final MainAgentAppService mainAgentAppService;
+    private final AgentEventBridge eventBridge;
+    private final AgentscopeAgentClient agentClient;
+    private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
+    private final ConversationHistoryAppService conversationHistory;
+    private final DesignProcessAppService designProcessAppService;
+
+    public DispatchAppService(MainAgentAppService mainAgentAppService, AgentEventBridge eventBridge,
+            AgentscopeAgentClient agentClient, AgentConfigAppService agentConfigs,
+            ModelTierAppService modelTiers,
+            ConversationHistoryAppService conversationHistory,
+            DesignProcessAppService designProcessAppService) {
+        this.mainAgentAppService = mainAgentAppService;
+        this.eventBridge = eventBridge;
+        this.agentClient = agentClient;
+        this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
+        this.conversationHistory = conversationHistory;
+        this.designProcessAppService = designProcessAppService;
+    }
+
+    /**
+     * 派发一条对话区输入（REST 路径同步入口）：全局守卫（存在 / 未归档——归档即
+     * 对话区关闭，咨询与兜底也停）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
+     * 挂起问答（PRJ_024）只拦意见链：意见分岔（主智能体意见轮）自带守卫在分类后
+     * 拦——咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类
+     * 调用，秒级轻调用，接受）。响应携带所派 run 的标识（意见 = 意见轮 / 咨询 =
+     * 答询轮 / 兜底 = 引导事件锚）。
+     *
+     * <p><b>设计物作用域（#291 跨件回溯的会话路由）</b>：{@code designItem} 在场
+     * 即跳过分类与主智能体轮——发言直达该件设计会话改稿（同会话继续；设计轨在途
+     * 即排队、当前稿代收口后受理）。守卫同意见链（归档/订单冻结——设计改稿是
+     * 迭代动作）；挂起问答不拦（主智能体会话的问答与设计会话互不相干）。发言照
+     * 常落对话史（回访可见），排队时响应锚＝发言锚（改稿 run 起跑另带自身锚）。</p>
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区
+     *                              关闭，先于分类——拒绝即零调用零事件）；ORD_006
+     *                              订单处理中 / PRJ_024 挂起问答待答（仅意见类，
+     *                              分类后拦）；PRJ_047 设计物不存在 / PRJ_048 件
+     *                              未产出稿（仅作用域形态）；divergence 非法值
+     *                              400（Jackson 枚举绑定面）
+     */
+    public DispatchRun dispatch(Long projectId, String prompt, List<MessageAttachment> attachments,
+            Integer designItem, DesignDivergence divergence) {
+        Project project = mainAgentAppService.requireDispatchableProject(projectId);
+        if (designItem != null) {
+            return dispatchDesignRevision(project, prompt, attachments, designItem, divergence);
+        }
+        Classification classified = classify(projectId, prompt);
+        return switch (classified.type()) {
+            case OPINION -> new DispatchRun(
+                    mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
+            case INQUIRY -> new DispatchRun(
+                    mainAgentAppService.answerInquiry(project, prompt, attachments).runId());
+            case FALLBACK -> guideReply(project, prompt, classified.orderIntent(), attachments);
+        };
+    }
+
+    /**
+     * 作用域改稿派发（#291；#294 携发散度）：发言落对话史（用户面照见）＋直达
+     * 目标件设计会话。排队时锚＝发言锚（runId 只作响应与事件挂载的链路锚，改稿
+     * run 各带自身锚——项目过滤订阅照常看见直播卡生长）。
+     */
+    private DispatchRun dispatchDesignRevision(Project project, String prompt,
+            List<MessageAttachment> attachments, int designItem, DesignDivergence divergence) {
+        // 守卫先于落库（对齐意见轮口径）：拒绝即零副作用——不落幽灵发言
+        designProcessAppService.requireRevisionableItem(project.getId(), designItem);
+        String runId = EventsAppService.newRunId();
+        conversationHistory.recordUserUtterance(project.getId(), runId, prompt, attachments);
+        DesignProcessAppService.DesignRun run = designProcessAppService.reviseDesignItem(
+                project.getId(), designItem, prompt, divergence);
+        return new DispatchRun(run != null ? run.runId() : runId);
+    }
+
+    /** 无附件的派发（纯文字发言——#97 之前与测试既有口径）。 */
+    public DispatchRun dispatch(Long projectId, String prompt) {
+        return dispatch(projectId, prompt, MessageAttachment.NONE, null, null);
+    }
+
+    /** 一次派发的运行标识（前端挂智能体事件 ?runId= 的锚；兜底路径锚 guide-reply 事件）。 */
+    public record DispatchRun(String runId) {
+    }
+
+    /** 对话区消息三分类（CONTEXT.md「派发」；下单意图是兜底的引导分岔信号）。 */
+    enum MessageClass {
+        OPINION, INQUIRY, FALLBACK
+    }
+
+    /** 分类结果：类型 + 兜底分支的下单意图信号。 */
+    record Classification(MessageClass type, boolean orderIntent) {
+
+        static final Classification OPINION_FALLBACK = new Classification(MessageClass.OPINION, false);
+    }
+
+    // ---------- 内部 ----------
+
+    /**
+     * 兜底轻引导：发 {@code guide-reply} 事件（零产物路径的全部事件）即收口——不起
+     * run、不提交会话、不动任何产物。runId 为派发锚。
+     */
+    private DispatchRun guideReply(Project project, String prompt, boolean orderIntent,
+            List<MessageAttachment> attachments) {
+        String runId = EventsAppService.newRunId();
+        String text = orderIntent
+                ? (project.getGeneratedAt() != null
+                        ? GUIDE_ORDER_TEXT_GENERATED : GUIDE_ORDER_TEXT_NOT_GENERATED)
+                : GUIDE_GENERIC_TEXT;
+        eventBridge.emitGuideReply(project, runId, prompt,
+                GUIDE_LABEL, text);
+        // 对话史落库（#89）：轻引导也是对话面——用户发言 + 定型文案两行（事件已发，
+        // 补写失败只记日志）；消息附件随发言同落
+        conversationHistory.recordGuide(project.getId(), runId, prompt, text, attachments);
+        log.info("[dispatch] 项目 {} 兜底引导（{}）", project.getId(),
+                orderIntent ? "下单意图" : "泛引导");
+        return new DispatchRun(runId);
+    }
+
+    /**
+     * 轻量分类调用（智能体边界上，非新端口）：一次性会话、模型档走边缘点档位链
+     * （#366 收编：classification 档位库值优先缺省 flash——配置读面
+     * {@link AgentConfigAppService#effectiveEdgeModelId} → 解析单点
+     * {@link ModelTierAppService#resolve} 产模型串＋通道注入，后台改档下一轮派发
+     * 即生效）、空 sink（无 SSE 事件）、不触项目工作区、计量 agentKind=classify。
+     * 失败 / 超时 / 输出不可解析一律回落意见链（见类注释的定向取舍）。
+     */
+    private Classification classify(Long projectId, String prompt) {
+        String runId = EventsAppService.newRunId();
+        String sessionId = CLASSIFY_SESSION_PREFIX + runId;
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(
+                agentConfigs.effectiveEdgeModelId(AgentEdgePoint.CLASSIFICATION));
+        AgentCommand command = new AgentCommand(
+                runId,
+                prompt,
+                CLASSIFY_SYSTEM_PROMPT,
+                model.modelString(), // 边缘点档位解析产物（缺省 flash 档）
+                model.channel(), // 通道注入：key/baseUrl 入 SDK，不吃环境变量
+                sessionId,
+                null, // 一次性会话，无 (userId, sessionId) 槽位复用语义
+                new UsageContext(Long.toString(projectId),
+                        UsageDims.of(projectId, UsageDims.AGENT_KIND_CLASSIFY, sessionId)),
+                null, // 本地兜底工作区：分类不读写项目工作区
+                Map.of(),
+                CLASSIFY_TIMEOUT,
+                /* silenceTimeout= */ null,
+                /* toolSilenceTimeout= */ null,
+                null,
+                /* workspaceReadOnly= */ false,
+                /* workspaceNoShell= */ false,
+                /* heading= */ null,
+                /* toolSpec= */ null); // 一次性判定无配置语境：空工具面、无规格
+        try {
+            AgentReply reply = agentClient.converse(command, event -> {
+            });
+            Classification parsed = parse(reply.text());
+            if (parsed != null) {
+                return parsed;
+            }
+            log.warn("[dispatch] 项目 {} 分类输出不可解析（回落意见链）：{}", projectId, reply.text());
+        }
+        catch (RuntimeException e) {
+            log.warn("[dispatch] 项目 {} 分类调用失败（回落意见链）：{}", projectId, e.toString());
+        }
+        return Classification.OPINION_FALLBACK;
+    }
+
+    /**
+     * 分类输出解析（容错；大小写不敏感）：OPINION / INQUIRY / FALLBACK /
+     * ORDER_INTENT（裸 ORDER 亦认）。单标签命中即归类；<b>出现多个不同标签
+     * （模型违规解释）视为歧义，按意见处理</b>——「误判为咨询会丢变更」的定向
+     * 兜底（先出现者获胜会放大该风险）。无可识别标签返回 null（调用方回落
+     * 意见链）。
+     */
+    static Classification parse(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String text = raw.toUpperCase(Locale.ROOT);
+        boolean orderIntent = text.indexOf("ORDER") >= 0;
+        boolean opinion = text.indexOf("OPINION") >= 0;
+        boolean inquiry = text.indexOf("INQUIRY") >= 0;
+        boolean fallback = text.indexOf("FALLBACK") >= 0;
+        int distinct = (orderIntent ? 1 : 0) + (opinion ? 1 : 0)
+                + (inquiry ? 1 : 0) + (fallback ? 1 : 0);
+        if (distinct == 0) {
+            return null;
+        }
+        if (distinct > 1) {
+            return Classification.OPINION_FALLBACK; // 歧义兜底：宁进意见链（有主智能体把关）
+        }
+        if (orderIntent) {
+            return new Classification(MessageClass.FALLBACK, true);
+        }
+        if (opinion) {
+            return new Classification(MessageClass.OPINION, false);
+        }
+        if (inquiry) {
+            return new Classification(MessageClass.INQUIRY, false);
+        }
+        return new Classification(MessageClass.FALLBACK, false);
+    }
+}

@@ -1,0 +1,104 @@
+package com.semgravio.aiplatform.business.project.application.dto.response;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
+import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessionSource;
+
+/**
+ * 对话史条目读面（#89 水合载荷）：kind 为 Integer code + kindName 中文名随行
+ * （#186 平台房规：枚举出口配 *Name，消费端零映射；§3.6.1 边界枚举统一 code
+ * ——{@code ConversationEntryKind} 1=user 2=agent 3=question 4=answer 5=closing
+ * 6=guide 7=quote），question / closing 为事件载荷 JSON 原样；attachments（#97
+ * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
+ * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）；
+ * sessionSource（#298 会话来源标识）= 2=设计会话（设计收尾卡携 drafts 判据），
+ * null＝主会话缺省（含无结构标记的改稿发言——存储不同构降级口径，见
+ * {@link ConversationSessionSource}）。
+ */
+public record ConversationEntryResponse(
+        Long id,
+        Integer kind,
+        String kindName,
+        @Schema(description = "会话来源标识（#298）：2=设计会话（每设计物一个——判据＝收尾卡携 "
+                + "drafts 稿清单：首产/改稿/定稿收尾卡）、null=主会话缺省（作用域改稿发言无"
+                + "结构标记不标注、设计会话完整稿本在智能体会话存储——存储不同构降级口径）。"
+                + "后台对话史按来源分组或标注；用户面前端可忽略",
+                example = "2")
+        Integer sessionSource,
+        String sessionSourceName,
+        String runId,
+        String text,
+        @Schema(description = "问答卡载荷（kind=3 question 携带，其余 kind 为 null）："
+                + "question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, "
+                + "engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的"
+                + "待确认工具最小面）、data.questions=[{header,question,multiple,custom,"
+                + "options[{label}]}]（问答卡投影，custom 恒 true 可自由输入）。"
+                + "answered=false 即挂起待答，据此可重建可作答",
+                example = "{\"runId\":\"r-01\",\"sessionId\":\"s-01\",\"engine\":\"agentscope\","
+                        + "\"summary\":\"目标用户是谁？\",\"engineRef\":\"req-77\","
+                        + "\"data\":{\"toolCalls\":[{\"id\":\"tc-1\",\"name\":\"ask_user\","
+                        + "\"input\":{\"question\":\"目标用户是谁？\",\"header\":\"目标用户\"}}],"
+                        + "\"questions\":[{\"header\":\"目标用户\",\"question\":\"目标用户是谁？\","
+                        + "\"multiple\":false,\"custom\":true,"
+                        + "\"options\":[{\"label\":\"个人开发者\"}]}]}}")
+        Map<String, Object> question,
+        @Schema(description = "收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish "
+                + "收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝"
+                + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
+                + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
+                + "verification?{total,failed,faces,rounds,failedItems}, version?, "
+                + "durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,attempts[]} }（可缺省键＝"
+                + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）",
+                example = "{\"summary\":\"完成切片：用户能登录\",\"prdChanged\":false,"
+                        + "\"systemChanged\":true,\"systemNote\":\"起服了登录页\","
+                        + "\"files\":[{\"path\":\"/src/App.jsx\",\"added\":40,\"removed\":0}],"
+                        + "\"durationMs\":183420,\"verification\":{\"total\":5,\"failed\":1,"
+                        + "\"faces\":{\"browser\":2,\"db\":2,\"log\":1},\"rounds\":2,"
+                        + "\"failedItems\":[\"留言提交\"]},"
+                        + "\"version\":\"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2\"}")
+        Map<String, Object> closing,
+        @Schema(description = "消息附件数组（kind=1 user 可携带，其余 kind 为 null；#97 圈注起立、"
+                + "#286 扩图片物料）：两形态——{attachmentType:\"annotation\", annotation:{kind, "
+                + "anchor:{selector?,text?,region?{x,y,width,height}}, note?}}（结构化定位＋"
+                + "标注类型，kind=select 点选锚定 / circle 拖框圈区域 / comment 历史兼容，"
+                + "据此重建圈注 chip，非截图）与 {attachmentType:\"image\", name, path}"
+                + "（图片物料——path 为工作区路径引用，据此重建物料 chip、取件走 files/raw）",
+                example = "[{\"attachmentType\":\"annotation\",\"annotation\":{\"kind\":\"select\","
+                        + "\"anchor\":{\"selector\":\"#login-btn\",\"text\":\"登录\"}}},"
+                        + "{\"attachmentType\":\"image\",\"name\":\"logo.png\","
+                        + "\"path\":\"materials/3897654321098765432-logo.png\"}]")
+        List<Map<String, Object>> attachments,
+        @Schema(description = "报价卡载荷（kind=7 quote 携带，其余 kind 为 null，#203）："
+                + "仅事件＋订单引用——{ orderId（字符串，防 JS 精度丢失）, event（quoted=报价已出 / "
+                + "repriced=报价已更新）}，不含金额（视镜非快照，ADR-0017——金额/备注/"
+                + "状态渲染时取订单当前态）",
+                example = "{\"orderId\":\"3897654321098765432\",\"event\":\"quoted\"}")
+        Map<String, Object> quote,
+        boolean answered,
+        LocalDateTime at) {
+
+    /** 实体 → 读面（kind 出 Integer code + kindName 中文名；sessionSource 可空
+     *  ——设计会话收尾卡才携带，null＝主会话缺省，判定归读口单点）。 */
+    public static ConversationEntryResponse of(ConversationEntry entry,
+            ConversationSessionSource sessionSource) {
+        return new ConversationEntryResponse(
+                entry.getId(),
+                entry.getKind().getCode(),
+                entry.getKind().getName(),
+                sessionSource == null ? null : sessionSource.getCode(),
+                sessionSource == null ? null : sessionSource.getName(),
+                entry.getRunId(),
+                entry.getText(),
+                entry.getQuestion(),
+                entry.getClosing(),
+                entry.getAttachments(),
+                entry.getQuote(),
+                Boolean.TRUE.equals(entry.getAnswered()),
+                entry.getCreatedAt());
+    }
+}

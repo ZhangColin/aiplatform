@@ -1,0 +1,301 @@
+package com.semgravio.aiplatform.business.project.domain.model;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+
+/**
+ * 容器内 git 管道（#91 版本层地基）的规则单点，照 {@link ProjectFiles} 形制：
+ * 命令构造归本类纯函数、执行归 exec 通道（{@code EnvironmentBackend.exec}）、
+ * 输出解析归本类。收拢九件事——幂等仓库初始化（懒初始化：存量工作区与容器重建
+ * 自愈同覆盖，repo-local 身份配置随卷持久）、收口成版提交（摘要主题 + Run-Id
+ * trailer 锚定收尾卡，{@code --allow-empty} 保每轮收口必成版）、版本序列读取
+ * （git log 即正本）、单版本元数据读取、回滚到此（#93 复位工作树到目标 commit
+ * 并追加新版本——Rollback-From trailer 锚定源版本，历史只追加不改写）、段起点
+ * 捕获与无 HEAD 锚定、失败现场留账、段失败回滚（#353 后四件：段级自愈的
+ * 「留账＋干净回退」——机制面，不进用户面版本序列）。
+ *
+ * <p>版本序列只收带 {@value #RUN_ID_TRAILER} 或 {@value #ROLLBACK_TRAILER} trailer
+ * 的成版 commit：智能体 shell 面技术上可跑 git，野 commit 不进版本序列。git
+ * 跟踪面 = 交付物全集——
+ * .gitignore 由 {@link WorkspaceLayout#NON_DELIVERABLE_DIRS} + {@link WorkspaceLayout#ENV_FILE}
+ * 单一事实派生（数据/平台产物/可重建依赖/机密不入版，与源码包、文件树同口径），
+ * 外加物料目录（输入面不入 git，ADR-0027——文件区/源码包仍含物料，仅版本流不跟）；
+ * {@code .git} 本身由 git 天然排除。</p>
+ *
+ * <p>退出码约定（读命令三守卫）：0 = 正常；3 = 零版本 / 版本不存在（待期口径，
+ * 调用方映射空列表 / 404）；其余非 0 = 真实 git 故障（调用方映射环境故障）。</p>
+ */
+public final class WorkspaceVersions {
+
+    /** 成版 commit 的收尾卡锚定 trailer（版本序列的成员判据）。 */
+    public static final String RUN_ID_TRAILER = "Run-Id: ";
+
+    /** 回滚 commit 的源版本锚定 trailer（#93 回滚到此——版本序列的第二成员判据）。 */
+    public static final String ROLLBACK_TRAILER = "Rollback-From: ";
+
+    /** 「零版本 / 版本不存在」守卫退出码（与真实 git 故障分道）。 */
+    public static final int EXIT_NO_VERSION = 3;
+
+    /** 版本引用的合法形态：hex 短/长 hash（API 用户可控入参的 shell 注入防线）。 */
+    private static final Pattern VALID_REF = Pattern.compile("[0-9a-f]{4,40}");
+
+    /** git log 记录格式：hash / 成版时刻 / 主题 / 正文四字段（%x1f 分隔），记录间 %x1e。 */
+    private static final String LOG_FORMAT = "%H%x1f%at%x1f%s%x1f%b%x1e";
+
+    private static final String FIELD_SEPARATOR = "\u001f";
+    private static final String RECORD_SEPARATOR = "\u001e";
+
+    /** 成版 commit 的 repo-local 身份（容器内提交者，非用户可见面）。 */
+    private static final String COMMITTER_NAME = "aiplatform";
+    private static final String COMMITTER_EMAIL = "aiplatform@workspace.local";
+
+    private WorkspaceVersions() {
+    }
+
+    /**
+     * 幂等仓库初始化：无 .git 才 init（容器重建后卷内仓库原样续用，存量工作区懒
+     * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。排除名单
+     * 写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用脚手架自带
+     * 的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版生效）：
+     * 非交付名单＋机密之外，物料目录与导出物目录不入版本流（ADR-0027 版本化规则
+     * ——刀＝可再生性：上传物料是输入面、exports/ 是可再生衍生〔#294 下载图位图化
+     * 落点，#297 设计资产包同面〕，git 不跟踪；代价如实：「查看当时」对两者不快照、
+     * 回滚不触〔restore 只动 tracked 文件〕，均以工作区卷为唯一正本随封存保全）。
+     */
+    public static String ensureRepoCommand() {
+        String excludeEntries = Stream.concat(
+                        WorkspaceLayout.NON_DELIVERABLE_DIRS.stream(),
+                        Stream.of(WorkspaceLayout.ENV_FILE, WorkspaceLayout.MATERIALS_DIR,
+                                WorkspaceLayout.EXPORTS_DIR))
+                .map(name -> "'" + name + "'")
+                .collect(Collectors.joining(" "));
+        return "cd " + WorkspaceLayout.ROOT
+                + " && if ! test -d .git; then git init -q -b main ."
+                + " && git config user.name '" + COMMITTER_NAME + "'"
+                + " && git config user.email '" + COMMITTER_EMAIL + "'; fi"
+                + " && printf '%s\\n' " + excludeEntries + " > .git/info/exclude";
+    }
+
+    /**
+     * 收口成版提交：全量暂存 → 提交（主题 = 收口摘要，正文 = Run-Id trailer；
+     * {@code --allow-empty}——「本轮系统无需改动」轮也成版，版本 ↔ 收尾卡 1:1
+     * 锚定不缺位）→ 回读 HEAD hash（成版锚点，随收口扩载回传）。stdout = commit
+     * hash（exitCode 0 时）。subject 经单引号转义；runId 为平台生成的 TSID
+     * 数字串（非用户输入）。
+     */
+    public static String commitCommand(String subject, String runId) {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git add -A"
+                + " && " + commitTail(subject, RUN_ID_TRAILER + runId);
+    }
+
+    /**
+     * 版本序列读取：零版本（无 HEAD）exit {@value #EXIT_NO_VERSION} 与真实故障
+     * 分道；否则 git log 全量（原生序 = 新→旧 = 版本序列）。
+     */
+    public static String listCommand() {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && if ! git rev-parse --verify HEAD >/dev/null 2>&1; then exit "
+                + EXIT_NO_VERSION + "; fi"
+                + " && git log --format='" + LOG_FORMAT + "'";
+    }
+
+    /**
+     * 回滚到此（#93）：把工作树与索引复位到目标 commit 的树（{@code git restore
+     * --source --staged --worktree}——只动 tracked 文件：数据 / node_modules /
+     * .env / .platform 等非交付物不在跟踪面，原样保留），再提交为一个<b>新</b>
+     * commit（HEAD 不动，历史只追加不改写——无 rebase/force 类操作），携
+     * Rollback-From trailer 锚定源版本。{@code --allow-empty} 兜「回滚到当前
+     * HEAD」（树同形、空提交）的边界。stdout = 新版本 commit hash。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝——用户
+     *                                  可控入参不进 shell）
+     */
+    public static String rollbackCommand(String ref, String subject) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("版本引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git restore --source='" + ref + "' --staged --worktree ."
+                + " && " + commitTail(subject, ROLLBACK_TRAILER + ref);
+    }
+
+    /**
+     * 工作树脏检（#100 回滚并发守卫）：{@code git status --porcelain} 全量输出，
+     * stdout 逐行 = 工作树/索引相对 HEAD 的改动（含 untracked {@code ??} 行——
+     * restore 不触 untracked，故解析时过滤）。
+     */
+    public static String statusCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git status --porcelain";
+    }
+
+    /**
+     * fork 副本切片改动 diff（#351 合并输入）：fork 收口成版后 HEAD 即切片 commit、
+     * HEAD^ 即克隆基线（fork 只多这一次提交）——输出统一 diff（含完整 blob 哈希，
+     * {@code --full-index} 供 {@code git apply --3way} 三方合并定位基线）。stdout =
+     * patch 文本。
+     */
+    public static String forkDiffCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git diff --full-index HEAD^ HEAD";
+    }
+
+    /**
+     * 段起点捕获（#353 失败回滚本段起点）：回读 HEAD ref。{@code --verify} 让
+     * 「无 HEAD」（全新工作区首段——git 懒初始化、尚无收口成版）以非 0 退出，
+     * 与「有 HEAD」分道（调用方据此走 {@link #anchorStartCommand} 锚定）。stdout
+     * = HEAD hash（exitCode 0 时）。
+     */
+    public static String headRefCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git rev-parse --verify HEAD";
+    }
+
+    /**
+     * 无 HEAD 时的段起点锚（#353）：全量提交把基座现状钉成段起点 commit——
+     * <b>无 trailer</b>（版本序列只收带 Run-Id / Rollback-From 的成版 commit，
+     * 锚 commit 不进版本流、不出用户面版本列表），{@code --allow-empty} 兜空
+     * 工作区边界。此后段失败回滚恒有 ref 可回。stdout = 锚 commit hash。
+     */
+    public static String anchorStartCommand() {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git add -A"
+                + " && git commit -q --allow-empty -m '平台段起点锚（失败回滚基准，非版本）'"
+                + " && git rev-parse HEAD";
+    }
+
+    /**
+     * 失败现场留账（#353 留账口径——回滚不丢证据）：索引全量暂存（{@code add -A}
+     * 让段内新建文件进索引——{@code --cached} diff 才可见新建件）→ 相对段起点的
+     * 全量 diff 落盘 patch。git 排除面（数据/依赖/平台产物/.env/物料/导出物）天然
+     * 不进场；patch 落 {@code .platform/}（平台产物目录，git 排除面内——随后回滚的
+     * {@code clean -fd} 不扫它）。scenePath 为平台拼装的锚定形（段号 + 时间戳，无
+     * 用户可控片段）。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     */
+    public static String recordFailureSceneCommand(String ref, String scenePath) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git add -A"
+                + " && git diff --cached '" + ref + "'"
+                + " > '" + WorkspaceLayout.absolute(scenePath) + "'";
+    }
+
+    /**
+     * 段失败回滚（#353）：工作树与索引干净回退到段起点（{@code reset --hard}——
+     * 段内执行体野 commit 一并脱落，前段收口 commit 在起点链上不受影响）＋
+     * {@code clean -fd} 清未跟踪新文件（git 排除面不扫——数据/依赖/平台产物/.env
+     * 不在回滚面：数据库与已装依赖保持现状）。与 #93「回滚到此」的追加式（restore
+     * ＋新 commit）分属两面：本命令是段级自愈的机制面（改写未发布的段内现场），
+     * 不追加 commit、不动用户面版本序列。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     */
+    public static String resetToSegmentStartCommand(String ref) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git reset --hard '" + ref + "'"
+                + " && git clean -fd";
+    }
+
+    /**
+     * 应用 fork patch 到主工作区（#351 按序合并的机器查/执行）：{@code git apply
+     * --3way -}——patch 经 stdin 灌入（{@code execWithStdin}），三方合并（fork 与主
+     * 共享基线 blob，冲突才退）。exitCode 0 = 干净应用（或三方合并成功）；非 0 =
+     * 冲突（转子智能体裁决）。应用后改动在未暂存工作树，由调用方 {@code commitAtClosing}
+     * 提交成版。
+     */
+    public static String applyPatchCommand() {
+        return "cd " + WorkspaceLayout.ROOT + " && git apply --3way -";
+    }
+
+    /**
+     * 是否存未提交的 tracked 改动（#100）：{@code git restore} 只动 tracked 文件，
+     * 故 untracked（{@code ??} 行）不算会被丢弃的改动；其余任何行（modified /
+     * staged / deleted / added 等）都表示 restore 会静默丢弃的未提交 tracked 改动。
+     */
+    public static boolean hasUncommittedTrackedChanges(String stdout) {
+        for (String line : stdout.split("\n")) {
+            String status = line.trim();
+            if (status.isEmpty() || status.startsWith("??")) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 单版本元数据读取：ref 不存在 exit {@value #EXIT_NO_VERSION}；否则该 commit
+     * 单条 log（格式同 {@link #listCommand()}）。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝——用户
+     *                                  可控入参不进 shell）
+     */
+    public static String showCommand(String ref) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("版本引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && if ! git rev-parse --verify '" + ref + "^{commit}' >/dev/null 2>&1;"
+                + " then exit " + EXIT_NO_VERSION + "; fi"
+                + " && git log -1 --format='" + LOG_FORMAT + "' '" + ref + "'";
+    }
+
+    /**
+     * 解析 git log 输出为版本序列（原生序新→旧保持）。只收带 Run-Id 或
+     * Rollback-From trailer 的成版 commit（野 commit 不是版本）；畸形记录跳过
+     * 不炸整列。
+     */
+    public static List<WorkspaceVersion> parseLog(String stdout) {
+        List<WorkspaceVersion> versions = new ArrayList<>();
+        for (String record : stdout.split(RECORD_SEPARATOR)) {
+            String[] fields = record.trim().split(FIELD_SEPARATOR, -1);
+            if (fields.length != 4) {
+                continue;
+            }
+            String runId = extractTrailer(fields[3], RUN_ID_TRAILER);
+            String rollbackFrom = extractTrailer(fields[3], ROLLBACK_TRAILER);
+            if (runId == null && rollbackFrom == null) {
+                continue;
+            }
+            try {
+                versions.add(new WorkspaceVersion(fields[0],
+                        Long.parseLong(fields[1]), fields[2], runId, rollbackFrom));
+            } catch (NumberFormatException malformed) {
+                // 时刻段不是数字 = 畸形记录，跳过
+            }
+        }
+        return versions;
+    }
+
+    /** 提交尾（成版 / 回滚共用）：提交携 trailer（Run-Id 或 Rollback-From）→ 回读 HEAD hash。 */
+    private static String commitTail(String subject, String trailer) {
+        return "git commit -q --allow-empty -m '" + escapeSingleQuote(subject) + "'"
+                + " -m '" + trailer + "'"
+                + " && git rev-parse HEAD";
+    }
+
+    /** 提交正文（%b）取指定 trailer 值；无该 trailer = null（野 commit / 异类版本）。 */
+    private static String extractTrailer(String body, String trailer) {
+        for (String line : body.split("\n")) {
+            if (line.startsWith(trailer)) {
+                return line.substring(trailer.length()).trim();
+            }
+        }
+        return null;
+    }
+
+    /** 单引号转义（sh：{@code '} → {@code '\''}）。 */
+    private static String escapeSingleQuote(String text) {
+        return text.replace("'", "'\\''");
+    }
+}

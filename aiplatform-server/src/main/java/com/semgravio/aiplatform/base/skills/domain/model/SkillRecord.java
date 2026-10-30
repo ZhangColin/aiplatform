@@ -1,0 +1,57 @@
+package com.semgravio.aiplatform.base.skills.domain.model;
+
+import java.time.LocalDateTime;
+import java.util.Map;
+
+import com.semgravio.aiplatform.base.skills.domain.enums.SkillSource;
+import com.semgravio.aiplatform.base.skills.domain.enums.SkillStatus;
+
+/**
+ * 技能库条目读模型（#247 管理读面）：{@code skl_skills} 一行的呈现——装时/晋升
+ * 时固化的快照，内容面为解析态（frontmatter 全量＋正文）＋ scripts/ 资源面
+ * （#253，ADR-0021 内容面 c），审核面所见即运行时注入面。
+ *
+ * @param id            条目标识（TSID，安装/晋升时生成；管理端点 URL 柄）
+ * @param name          技能名（frontmatter name；与来源包合成唯一键）
+ * @param description   简介（frontmatter description，清单直读冗余）
+ * @param sourcePackage 来源包标识（安装仓库；跨包同名区分键。自产行＝固定虚拟值
+ *                      {@code self}，#262——套既有唯一约束即自产同名唯一）
+ * @param version       版本标识（装时 commit，快照锚。自产行＝{@code self}）
+ * @param source        来源（#262 V23 列化：2=安装 3=自产——库行两值；1=内置
+ *                      无行，BUILTIN 只在读模型合成）
+ * @param status        技能状态（1=启用 2=停用）
+ * @param frontmatter   SKILL.md frontmatter 全量（解析态，含 name/description）
+ * @param content       SKILL.md 正文（frontmatter 剥离后全文）
+ * @param resources     scripts/ 资源面（#253：技能目录相对路径 → 内容，与框架
+ *                      {@code AgentSkill.resources} 同形；无 scripts 即空 map——
+ *                      存量行 V20 回填空面）
+ * @param operatorId    最近管理动作操作者 id（安装＝装者、启停＝最近动作者；
+ *                      未管理过为 null——#248 落痕口径）
+ * @param operatorName  最近管理动作操作者名（直读展示；未管理过为 null）
+ * @param updateAvailable 远端有新版标记（#250 来源包级事实经 join 呈现：远端
+ *                       HEAD ≠ 装时版本即 true；null＝未检查过——含 T4 前存量
+ *                       安装与装配视图外的直读）
+ * @param loadCount     加载次数（#261 使用计数观测面，V22 起随行带出：口径＝
+ *                      load 实际发生——装配缝中间件拦 load 工具调用且 catalog
+ *                      命中才计，目录重建不计；历史事实非状态，更新翻新不重置；
+ *                      新装行恒 0）
+ * @param lastLoadedAt  最近加载时刻（#261；null＝从未被加载过——含存量行 V22
+ *                      回填前与新装行）
+ */
+public record SkillRecord(
+        long id,
+        String name,
+        String description,
+        String sourcePackage,
+        String version,
+        SkillSource source,
+        SkillStatus status,
+        Map<String, Object> frontmatter,
+        String content,
+        Map<String, String> resources,
+        String operatorId,
+        String operatorName,
+        Boolean updateAvailable,
+        long loadCount,
+        LocalDateTime lastLoadedAt) {
+}

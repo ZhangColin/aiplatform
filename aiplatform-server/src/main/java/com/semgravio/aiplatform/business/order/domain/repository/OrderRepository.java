@@ -1,0 +1,55 @@
+package com.semgravio.aiplatform.business.order.domain.repository;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import com.cartisan.data.jpa.repository.BaseRepository;
+
+import com.semgravio.aiplatform.business.order.domain.aggregate.Order;
+import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
+
+/**
+ * 订单仓储。
+ */
+public interface OrderRepository extends BaseRepository<Order, Long> {
+
+    /**
+     * 项目名下的未终结订单（「同项目至多一个未终结订单」的应用预检面）。
+     * 谓词 = {@link OrderStatus#TERMINAL} 取反，与库侧部分唯一索引
+     * （uk_ord_orders_active）同口径：非终态至多一行，本查询即 0/1 行。
+     */
+    default Optional<Order> findActiveByProject(Long projectId) {
+        return findByProjectIdAndStatusNotIn(projectId, OrderStatus.TERMINAL)
+                .stream().findFirst();
+    }
+
+    /** 项目名下不在给定状态清单的订单。 */
+    List<Order> findByProjectIdAndStatusNotIn(Long projectId, List<OrderStatus> statuses);
+
+    /**
+     * 项目名下是否曾出现给定状态的订单（#287 下载支付门判定：「曾有」的事实
+     * 查询，不依赖「最近一张」——判定语义直译，状态机演进不波及）。
+     */
+    boolean existsByProjectIdAndStatusIn(Long projectId, List<OrderStatus> statuses);
+
+    /** 一批项目名下不在给定状态清单的订单（项目列表嵌入未终结订单事实的批量面）。 */
+    List<Order> findByProjectIdInAndStatusNotIn(Collection<Long> projectIds, List<OrderStatus> statuses);
+
+    /**
+     * 项目名下最近一张订单（任意状态；#30 归档终态「完整记录」的嵌入面——
+     * 订单转终态（已归档＝后台人工/已取消）后 activeOrder 归空、项目页改挂本嵌入取订单卡）。
+     * createdAt 同拍按 id 破平（TSID 时间有序）。
+     */
+    Optional<Order> findFirstByProjectIdOrderByCreatedAtDescIdDesc(Long projectId);
+
+    /**
+     * 带价目历史的单笔查询：响应拼装（用户面详情/报价返回值要读价目集合）在
+     * 仓储事务之外，JOIN FETCH 一次取齐，避免懒加载在会话外炸开。
+     */
+    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.priceEntries WHERE o.id = :id")
+    Optional<Order> findWithHistory(@Param("id") Long id);
+}

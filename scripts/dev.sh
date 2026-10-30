@@ -3,7 +3,7 @@
 # 就直接起（停旧段空跑），已在跑则先停再起（换新代码）。附健康探测。
 #
 # 进程锚定只认本仓路径与端口（aiplatform-server/target/classes、aiplatform-web/…next dev），
-# 绝不宽匹配——同机还跑着 aieducenter-identity-web 等其他 next dev，pkill -f "next dev"
+# 绝不宽匹配——同机还跑着 semgravio-identity-web 等其他 next dev，pkill -f "next dev"
 # 会误伤。identity-web 本脚本不管，仅在结尾探测展示（SSO 依赖它，顺手看一眼）。
 #
 # 用法（仓库任意位置）：scripts/dev.sh

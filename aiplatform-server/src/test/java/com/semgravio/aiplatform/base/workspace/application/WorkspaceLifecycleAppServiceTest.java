@@ -1,0 +1,585 @@
+package com.semgravio.aiplatform.base.workspace.application;
+
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+
+import com.semgravio.aiplatform.IntegrationTest;
+import com.semgravio.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
+import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
+import com.semgravio.aiplatform.base.workspace.application.event.PreviewReady;
+import com.semgravio.aiplatform.base.workspace.application.event.WorkspaceCreated;
+import com.semgravio.aiplatform.base.workspace.application.event.WorkspaceDestroyed;
+import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
+import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
+import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.semgravio.aiplatform.base.workspace.domain.enums.MiddlewareKind;
+import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceContentPackage;
+import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.ProvisionedResource;
+import com.semgravio.aiplatform.base.workspace.domain.model.SealPackage;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
+import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.core.exception.DomainException;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 工作区生命周期用例（片1b 验收：mock 环境后端与后台置备器，聚焦编排、落库与事件时序）。
+ * 创建异步化（#61）：创建即返回 PROVISIONING 记录 + WorkspaceCreated（AFTER_COMMIT），
+ * docker 副作用转 {@link WorkspaceProvisionAppService} 后台（本测试 mock 置备器，只验「提交」；
+ * 置备收敛在 WorkspaceProvisionAppServiceTest）。生命周期三事件经
+ * {@code @TransactionalEventListener(AFTER_COMMIT)} 测试监听器捕获；Docker 真实链路见
+ * DockerEnvironmentBackendTest。
+ */
+@IntegrationTest
+@Import(WorkspaceLifecycleAppServiceTest.EventRecorder.class)
+class WorkspaceLifecycleAppServiceTest {
+
+    @Autowired
+    private WorkspaceLifecycleAppService appService;
+
+    @Autowired
+    private WorkspaceRepository workspaceRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    /** 环境后端 mock：create 不再同步调用它（#61），置备收敛在 WorkspaceProvisionAppServiceTest。 */
+    @MockitoBean
+    private EnvironmentBackend environmentBackend;
+
+    /** 后台置备器 mock：编排只验「提交置备」的时机与入参，不验后台收敛。 */
+    @MockitoBean
+    private WorkspaceProvisionAppService provisioner;
+
+    @Autowired
+    private EventRecorder eventRecorder;
+
+    @AfterEach
+    void tearDown() {
+        eventRecorder.clear();
+        // 独立事务清场（断言失败时不留脏行）；资源行有 FK，先子后父
+        jdbcTemplate.update("DELETE FROM wsp_resources");
+        jdbcTemplate.update("DELETE FROM wsp_workspaces");
+    }
+
+    @Test
+    void given_dev_command_when_create_then_provisioning_record_created_event_and_provision_enqueued() {
+        WorkspaceResponse response = appService.create(new CreateWorkspaceCommand(EnvKind.DEV));
+
+        // 创建即返回 PROVISIONING 记录：资源清单空、确定性命名已落位
+        assertThat(response.status()).isEqualTo(ProvisioningStatus.PROVISIONING);
+        assertThat(response.resources()).isEmpty();
+        assertThat(response.containerName()).isEqualTo("ws-" + response.workspaceId());
+        assertThat(response.networkName()).isEqualTo("previewnet");
+        // 库记录真实落定（独立连接可见 = 已提交）：PROVISIONING 态
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT provisioning_status FROM wsp_workspaces WHERE id = ?", Integer.class,
+                Long.parseLong(response.workspaceId())))
+                .isEqualTo(ProvisioningStatus.PROVISIONING.getCode());
+        // 事件 AFTER_COMMIT 送达，workspaceId 即记录 id
+        assertThat(eventRecorder.created()).hasSize(1);
+        assertThat(eventRecorder.created().get(0).workspaceId().value())
+                .isEqualTo(response.workspaceId());
+        assertThat(eventRecorder.created().get(0).kind()).isEqualTo(EnvKind.DEV);
+        assertThat(eventRecorder.workspacesAtCreatedDelivery()).isEqualTo(1);
+
+        // 事务提交后提交后台置备（同 workspaceId）；本线程不同步调用 docker
+        ArgumentCaptor<WorkspaceId> id = ArgumentCaptor.forClass(WorkspaceId.class);
+        verify(provisioner).provision(id.capture(), eq(EnvKind.DEV));
+        assertThat(id.getValue().value()).isEqualTo(response.workspaceId());
+        verify(environmentBackend, never()).createWorkspace(any(), any());
+    }
+
+    @Test
+    void given_default_command_when_create_then_dev_kind_passed_to_provisioner() {
+        appService.create(new CreateWorkspaceCommand(null));
+
+        verify(provisioner).provision(any(WorkspaceId.class), eq(EnvKind.DEV));
+        verify(environmentBackend, never()).createWorkspace(any(), any());
+    }
+
+    @Test
+    void given_seeded_workspace_when_get_then_response_from_record() {
+        workspaceRepository.save(Workspace.register(devProvision("102")));
+
+        WorkspaceResponse response = appService.get("102");
+
+        assertThat(response.containerName()).isEqualTo("ws-100");
+        assertThat(response.networkName()).isEqualTo("previewnet");
+        assertThat(response.status()).isEqualTo(ProvisioningStatus.READY);
+        assertThat(response.resources()).hasSize(2);
+    }
+
+    @Test
+    void given_unknown_or_malformed_id_when_get_then_not_found() {
+        assertThatThrownBy(() -> appService.get("404"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+        assertThatThrownBy(() -> appService.get("not-a-tsid"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+        // 非正数（TSID 恒正）语义上同不存在
+        assertThatThrownBy(() -> appService.get("0"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+        assertThatThrownBy(() -> appService.get("-1"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
+    @Test
+    void given_seeded_workspace_when_exec_then_handle_rebuilt_from_record() {
+        workspaceRepository.save(Workspace.register(devProvision("103")));
+        when(environmentBackend.exec(any(), eq("echo hi")))
+                .thenReturn(new ExecResult("hi", "", 0));
+
+        ExecResultResponse response = appService.exec("103", new WorkspaceExecCommand("echo hi"));
+
+        assertThat(response.stdout()).isEqualTo("hi");
+        assertThat(response.exitCode()).isZero();
+        // 句柄从库记录重建（重启接回的执行面）：不是 create 时的那份内存对象
+        ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
+        verify(environmentBackend).exec(handle.capture(), eq("echo hi"));
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
+        assertThat(handle.getValue().networkName()).isEqualTo("previewnet");
+    }
+
+    @Test
+    void given_unknown_workspace_when_exec_then_not_found() {
+        assertThatThrownBy(() -> appService.exec("404", new WorkspaceExecCommand("ls")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
+    @Test
+    void given_pending_workspace_when_handleOf_then_deterministic_names() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("106"), EnvKind.DEV));
+
+        WorkspaceHandle handle = appService.handleOf("106");
+
+        // 置备中句柄可取：确定性命名（主智能体对话只消费 containerName，无需等待）
+        assertThat(handle.containerName()).isEqualTo("ws-106");
+        assertThat(handle.networkName()).isEqualTo("previewnet");
+    }
+
+    @Test
+    void given_pending_workspace_when_exec_then_implicitly_waits_until_ready() throws Exception {
+        WorkspaceId id = WorkspaceId.of("106");
+        workspaceRepository.save(Workspace.registerPending(id, EnvKind.DEV));
+        when(environmentBackend.exec(any(), eq("echo hi"))).thenReturn(new ExecResult("hi", "", 0));
+
+        // 后台线程延迟完成置备（模拟 provisioner 收敛 READY），主线程在 exec 处隐式等待
+        Thread flipper = new Thread(() -> {
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            Workspace pending = workspaceRepository.findById(106L).orElseThrow();
+            workspaceRepository.save(pending.complete(devProvision("106")));
+        });
+        flipper.start();
+
+        ExecResultResponse response = appService.exec("106", new WorkspaceExecCommand("echo hi"));
+        flipper.join();
+
+        assertThat(response.stdout()).isEqualTo("hi");
+        // exec 在就绪后放行（隐式等待 READY）：句柄从记录重建，容器名 = 记录命名
+        ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
+        verify(environmentBackend).exec(handle.capture(), eq("echo hi"));
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-106");
+    }
+
+    @Test
+    void given_failed_workspace_when_exec_then_provision_failed_not_reaching_backend() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("107"), EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败"));
+
+        assertThatThrownBy(() -> appService.exec("107", new WorkspaceExecCommand("ls")))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("环境置备失败");
+        verify(environmentBackend, never()).exec(any(), any());
+    }
+
+    @Test
+    void given_failed_workspace_when_get_then_provision_error_exposed() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("108"), EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败"));
+
+        WorkspaceResponse response = appService.get("108");
+
+        assertThat(response.status()).isEqualTo(ProvisioningStatus.FAILED);
+        assertThat(response.provisionError()).isEqualTo("WSP_002：环境后端操作失败");
+    }
+
+    @Test
+    void given_failed_workspace_when_retry_then_provisioning_and_reprovisioned() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("109"), EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败"));
+
+        WorkspaceResponse response = appService.retry("109");
+
+        // FAILED → PROVISIONING（失败原因清空）落库，后台重新提交置备
+        assertThat(response.status()).isEqualTo(ProvisioningStatus.PROVISIONING);
+        assertThat(response.provisionError()).isNull();
+        ArgumentCaptor<WorkspaceId> id = ArgumentCaptor.forClass(WorkspaceId.class);
+        verify(provisioner).provision(id.capture(), eq(EnvKind.DEV));
+        assertThat(id.getValue().value()).isEqualTo("109");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT provisioning_status FROM wsp_workspaces WHERE id = 109", Integer.class))
+                .isEqualTo(ProvisioningStatus.PROVISIONING.getCode());
+    }
+
+    @Test
+    void given_ready_workspace_when_retry_then_state_invalid() {
+        workspaceRepository.save(Workspace.register(devProvision("110")));
+
+        assertThatThrownBy(() -> appService.retry("110"))
+                .isInstanceOf(DomainException.class)
+                .hasMessageContaining("置备状态不合法");
+        verify(provisioner, never()).provision(any(), any());
+    }
+
+    @Test
+    void given_seeded_workspace_when_pack_source_then_bytes_from_backend_handle_rebuilt() {
+        workspaceRepository.save(Workspace.register(devProvision("105")));
+        byte[] tarball = {0x1f, (byte) 0x8b, 0x08};
+        when(environmentBackend.packSource(any(WorkspaceHandle.class))).thenReturn(tarball);
+
+        byte[] bytes = appService.packSource("105");
+
+        // 源码包字节透传后端（真容器打包链路在 DockerEnvironmentBackendTest）
+        assertThat(bytes).containsExactly(tarball);
+        ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
+        verify(environmentBackend).packSource(handle.capture());
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
+    }
+
+    @Test
+    void given_unknown_workspace_when_pack_source_then_not_found() {
+        assertThatThrownBy(() -> appService.packSource("404"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
+    @Test
+    void given_seeded_workspace_when_expose_preview_then_url_and_ready_event_after_commit() {
+        workspaceRepository.save(Workspace.register(devProvision("104")));
+        when(environmentBackend.exposePort(any(), eq(8081)))
+                .thenReturn(URI.create("http://104.localhost/"));
+
+        URI url = appService.exposePreview("104");
+
+        assertThat(url).isEqualTo(URI.create("http://104.localhost/"));
+        assertThat(eventRecorder.previewReady()).hasSize(1);
+        assertThat(eventRecorder.previewReady().get(0).url())
+                .isEqualTo(URI.create("http://104.localhost/"));
+        assertThat(eventRecorder.previewReady().get(0).workspaceId().value()).isEqualTo("104");
+    }
+
+    @Test
+    void given_provisioning_workspace_when_expose_preview_then_starting_pending() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("107"), EnvKind.DEV));
+
+        // 置备/唤醒进行中：立即待期（WSP_013 系统启动中），不阻塞请求线程长等
+        assertThatThrownBy(() -> appService.exposePreview("107"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting(e -> ((ApplicationException) e).getCodeMessage())
+                .isEqualTo(WorkspaceMessage.WORKSPACE_STARTING);
+    }
+
+    @Test
+    void given_failed_workspace_when_expose_preview_then_provision_failed() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("108"), EnvKind.DEV)
+                .markFailed("WSP_002：环境后端操作失败"));
+
+        // FAILED 语义保留（awaitReady 时代的 WSP_010 口径不变）
+        assertThatThrownBy(() -> appService.exposePreview("108"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting(e -> ((ApplicationException) e).getCodeMessage())
+                .isEqualTo(WorkspaceMessage.WORKSPACE_PROVISION_FAILED);
+    }
+
+    @Test
+    void given_seeded_workspace_when_preview_url_then_subdomain_from_properties() {
+        // 预览 URL 纯派生（不探活、不发事件）：scheme + 基域名来自配置（默认 http + localhost）
+        workspaceRepository.save(Workspace.register(devProvision("106")));
+
+        URI url = appService.previewUrl("106");
+
+        assertThat(url).isEqualTo(URI.create("http://106.localhost/"));
+    }
+
+    @Test
+    void given_seeded_workspace_when_destroy_then_backend_cascade_then_records_deleted_and_event() {
+        workspaceRepository.save(Workspace.register(devProvision("105")));
+
+        appService.destroy("105");
+
+        ArgumentCaptor<WorkspaceHandle> handle = ArgumentCaptor.forClass(WorkspaceHandle.class);
+        verify(environmentBackend).destroyWorkspace(handle.capture());
+        assertThat(handle.getValue().containerName()).isEqualTo("ws-100");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 105", Integer.class))
+                .isEqualTo(0);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_resources WHERE workspace_id = 105", Integer.class))
+                .isEqualTo(0);
+        assertThat(eventRecorder.destroyed()).hasSize(1);
+        assertThat(eventRecorder.destroyed().get(0).workspaceId().value()).isEqualTo("105");
+        // AFTER_COMMIT：销毁事件送达时记录已删
+        assertThat(eventRecorder.workspacesAtDestroyedDelivery()).isEqualTo(0);
+    }
+
+    @Test
+    void given_pending_workspace_when_destroy_then_cancel_inflight_before_cascade() {
+        workspaceRepository.save(Workspace.registerPending(WorkspaceId.of("111"), EnvKind.DEV));
+
+        appService.destroy("111");
+
+        // 置备中销毁（#64）：先取消在途后台置备（防 docker 侧完成后残留），再级联回收 + 删记录
+        InOrder inOrder = inOrder(provisioner, environmentBackend);
+        inOrder.verify(provisioner).cancel(WorkspaceId.of("111"));
+        inOrder.verify(environmentBackend).destroyWorkspace(any(WorkspaceHandle.class));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 111", Integer.class))
+                .isEqualTo(0);
+    }
+
+    @Test
+    void given_unknown_workspace_when_destroy_then_not_found() {
+        assertThatThrownBy(() -> appService.destroy("404"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining("工作区不存在");
+    }
+
+    // ---------- 测试监听器（A1 §5：三事件捕获，AFTER_COMMIT 语义） ----------
+
+    @TestConfiguration
+    static class EventRecorder {
+
+        private final List<WorkspaceCreated> created = new CopyOnWriteArrayList<>();
+        private final List<WorkspaceDestroyed> destroyed = new CopyOnWriteArrayList<>();
+        private final List<PreviewReady> previewReady = new CopyOnWriteArrayList<>();
+        private volatile int workspacesAtCreatedDelivery = -1;
+        private volatile int workspacesAtDestroyedDelivery = -1;
+
+        private final JdbcTemplate jdbcTemplate;
+
+        EventRecorder(JdbcTemplate jdbcTemplate) {
+            this.jdbcTemplate = jdbcTemplate;
+        }
+
+        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+        public void onCreated(WorkspaceCreated event) {
+            workspacesAtCreatedDelivery = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM wsp_workspaces", Integer.class);
+            created.add(event);
+        }
+
+        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+        public void onDestroyed(WorkspaceDestroyed event) {
+            workspacesAtDestroyedDelivery = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM wsp_workspaces", Integer.class);
+            destroyed.add(event);
+        }
+
+        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+        public void onPreviewReady(PreviewReady event) {
+            previewReady.add(event);
+        }
+
+        List<WorkspaceCreated> created() {
+            return created;
+        }
+
+        List<WorkspaceDestroyed> destroyed() {
+            return destroyed;
+        }
+
+        List<PreviewReady> previewReady() {
+            return previewReady;
+        }
+
+        int workspacesAtCreatedDelivery() {
+            return workspacesAtCreatedDelivery;
+        }
+
+        int workspacesAtDestroyedDelivery() {
+            return workspacesAtDestroyedDelivery;
+        }
+
+        void clear() {
+            created.clear();
+            destroyed.clear();
+            previewReady.clear();
+            workspacesAtCreatedDelivery = -1;
+            workspacesAtDestroyedDelivery = -1;
+        }
+    }
+
+    // ---------- 项目文件包（#174 后台下载：封存直取包 / 未封存即时导出） ----------
+
+    @Test
+    void given_sealed_workspace_when_content_package_then_seal_package_bytes_no_docker()
+            throws Exception {
+        byte[] archive = "整卷封存内容".getBytes();
+        Workspace workspace = seedWorkspace(DesiredState.SEALED, writePackage(archive));
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        // 封存态直取封存包：字节原样、零 docker 探查/打包（卷已删，包是唯一事实）
+        assertThat(result.content()).isEqualTo(archive);
+        assertThat(result.fromSealArchive()).isTrue();
+        verify(environmentBackend, never()).containerState(any());
+        verify(environmentBackend, never()).packSource(any());
+    }
+
+    @Test
+    void given_sealed_workspace_without_package_record_when_content_package_then_wsp_016() {
+        Workspace workspace = seedWorkspace(DesiredState.SEALED, null);
+
+        assertThatThrownBy(() -> appService.contentPackageOf(workspace.workspaceId().value()))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessage(WorkspaceMessage.WORKSPACE_SEAL_PACKAGE_UNAVAILABLE.message());
+        verify(environmentBackend, never()).packSource(any());
+    }
+
+    @Test
+    void given_hibernated_workspace_when_content_package_then_woken_then_source_packed() {
+        // 种入旧触碰时刻（DOWNLOAD 面不拨针的 DB 层断言锚；固定时刻避开精度截断）
+        LocalDateTime oldTouch = LocalDateTime.of(2026, 9, 10, 8, 0);
+        Workspace workspace = seedWorkspace(DesiredState.HIBERNATED, null);
+        workspace.markTouched(oldTouch);
+        workspace.hibernate();
+        workspaceRepository.save(workspace);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.ABSENT);
+        // 唤醒重建的置备内核：补齐 complete 收口（真实置备器的行为形状）
+        doAnswer(invocation -> {
+            WorkspaceId id = invocation.getArgument(0);
+            workspaceRepository.findById(id.id()).ifPresent(fresh ->
+                    workspaceRepository.save(fresh.complete(
+                            WorkspaceProvision.of(fresh.toHandle()))));
+            return null;
+        }).when(provisioner).provisionForWake(any(WorkspaceId.class), eq(EnvKind.DEV));
+        byte[] source = "源码包内容".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        // 容器缺失（休眠）：先同步唤醒重建（不拉应用——打包只要容器不要 8081），后打包
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner).provisionForWake(workspace.workspaceId(), EnvKind.DEV);
+        verify(environmentBackend, never()).startApp(any());
+        // DOWNLOAD 面不拨针（#196，DB 层断言）：「取完包该继续睡」不是活跃信号
+        assertThat(workspaceRepository.findById(workspace.getId()).orElseThrow()
+                .getLastTouchAt()).isEqualTo(oldTouch);
+    }
+
+    @Test
+    void given_probe_unknown_when_content_package_then_packed_without_rebuild() {
+        // #176：探查失败≠容器不在——不触发同步唤醒重建（预清 rm -f 会杀可能健康的
+        // 容器），直接打包：容器在则成，真不在则 packSource 如实失败、重试即恢复
+        Workspace workspace = seedWorkspace(DesiredState.RUNNING, null);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.UNKNOWN);
+        byte[] source = "在线源码".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner, never()).provisionForWake(any(), any());
+    }
+
+    @Test
+    void given_running_workspace_when_content_package_then_packed_without_wake() {
+        Workspace workspace = seedWorkspace(DesiredState.RUNNING, null);
+        when(environmentBackend.containerState(workspace.toHandle())).thenReturn(ContainerState.RUNNING);
+        byte[] source = "在线源码".getBytes();
+        when(environmentBackend.packSource(workspace.toHandle())).thenReturn(source);
+
+        WorkspaceContentPackage result = appService.contentPackageOf(workspace.workspaceId().value());
+
+        assertThat(result.content()).isEqualTo(source);
+        assertThat(result.fromSealArchive()).isFalse();
+        verify(provisioner, never()).provisionForWake(any(), any());
+    }
+
+    // ---------- 项目文件包 fixture ----------
+
+    @TempDir
+    private Path packageDir;
+
+    /** 落一行期望态就位的工作区（READY 起点；SEALED 需带包元数据）。 */
+    private Workspace seedWorkspace(DesiredState desired, SealPackage sealed) {
+        WorkspaceId id = WorkspaceId.generate();
+        Workspace workspace = Workspace.dev(id, WorkspaceNaming.containerName(id),
+                WorkspaceNaming.PREVIEW_NETWORK);
+        if (desired == DesiredState.HIBERNATED) {
+            workspace.hibernate();
+        } else if (desired == DesiredState.SEALED) {
+            workspace.hibernate();
+            workspace.seal(sealed, LocalDateTime.of(2026, 9, 15, 10, 0));
+        }
+        return workspaceRepository.save(workspace);
+    }
+
+    /** 落一个真实封存包文件，返回其元数据（路径指向临时目录）。 */
+    private SealPackage writePackage(byte[] content) throws Exception {
+        Path file = packageDir.resolve("pkg-" + System.nanoTime() + ".tar.gz");
+        Files.write(file, content);
+        return new SealPackage(file.toString(), content.length);
+    }
+
+    // ---------- 供给 fixture（containerName 固定，便于唯一约束冲突构造） ----------
+
+    private WorkspaceProvision devProvision(String workspaceId) {
+        WorkspaceHandle handle = WorkspaceHandle.dev(WorkspaceId.of(workspaceId),
+                "ws-100", "previewnet");
+        // 单容器 all-in-one：中间件资源都在工作区容器内、无宿主端口（连接串容器内回环）
+        return new WorkspaceProvision(handle, List.of(
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, "ws-100", 0,
+                        "postgresql://ws100@localhost:5432/ws100"),
+                new ProvisionedResource(MiddlewareKind.REDIS, "ws-100", 0,
+                        "redis://localhost:6379")));
+    }
+}

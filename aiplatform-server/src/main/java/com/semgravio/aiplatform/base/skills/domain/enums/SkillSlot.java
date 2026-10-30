@@ -1,0 +1,102 @@
+package com.semgravio.aiplatform.base.skills.domain.enums;
+
+import java.util.Locale;
+import java.util.Optional;
+
+import com.cartisan.core.domain.BaseEnum;
+
+/**
+ * 职能槽位（#249 指派模型，ADR-0021；#289 起四槽）：技能指派的全局配置单元——平台智能体
+ * 的职能面（主智能体 / run 执行体 / 设计执行体 / 子智能体），各自独立多选、不分项目。槽位
+ * 是<b>键不是身份</b>：智能体身份仍以 business 侧 {@code AgentProfile} 枚举为
+ * 正本（ADR-0006 身份与配置分治），本枚举只固化指派面的稳定键——business
+ * 装配缝按配置键对齐到此（main/executor/designer 与 AgentProfile 键同串、
+ * subagent 是子智能体槽的键，verify 是其当前唯一职能实例）。code 是框架约定码
+ * （BaseEnum 自动转换面；槽位落库与 REST 寻址均用字符串键，code 不经任何面）。
+ *
+ * <p>新增职能槽位＝新增枚举值＋迁移扩键面（REST 槽位路径段即本键，未知键
+ * 404 SKL_010），并按该槽位运行时有无 shell 拍板 {@link #hasShell()} 位。</p>
+ *
+ * <p>scripts 资源开放面（#253，ADR-0021 内容面 c）：开放面＝<b>有 shell 的
+ * 槽位</b>——{@link #hasShell()} 为真的槽位装配面才附 scripts 资源（框架
+ * {@code AgentSkill.resources} 通路）；主智能体 ProjectReadOnly 禁 shell、
+ * 设计执行体（#289，ProjectDesign 工作区面）同样禁 shell——两槽结构性
+ * a-only（装配出的技能 resources 恒空，load 工具枚举无 scripts 入口）。
+ * executor 容器内 shell、subagent（verify）白名单含跑验证命令的 shell——
+ * 两槽开放。</p>
+ */
+public enum SkillSlot implements BaseEnum<SkillSlot> {
+
+    /** 主智能体（需求侧：访谈梳理＋PRD 撰写——技能面挂内置 PRD 写作；禁 shell）。 */
+    MAIN(1, "main", false, "主智能体——需求侧：访谈梳理、PRD 撰写修订、答询，不读写沙箱代码"),
+
+    /** run 执行体（实现侧：读写工作区、跑命令——安装技能的主消费槽位；有 shell）。 */
+    EXECUTOR(2, "executor", true, "run 执行体——实现侧：沙箱工作区内读写代码、运行命令"),
+
+    /** 设计执行体（#289，ADR-0025：设计过程执行侧——写界面稿与出图；禁 shell，a-only）。 */
+    DESIGNER(4, "designer", false, "设计执行体——设计过程执行侧：按设计物产出多稿候选（界面稿＋出图），不动系统代码"),
+
+    /** 子智能体槽（当前唯一实例 verify——白名单含跑验证命令的 shell，开放）。 */
+    SUBAGENT(3, "subagent", true, "子智能体——run 内委派的专项职能（当前唯一实例：三面验证）");
+
+    private final Integer code;
+    private final String key;
+    private final boolean shell;
+    private final String role;
+
+    SkillSlot(Integer code, String key, boolean shell, String role) {
+        this.code = code;
+        this.key = key;
+        this.shell = shell;
+        this.role = role;
+    }
+
+    /** 框架约定码（BaseEnum 自动转换面；不落库不经 REST——寻址用字符串键）。 */
+    @Override
+    public Integer getCode() {
+        return code;
+    }
+
+    /** 展示名（BaseEnum 约定面；REST 读面回显槽位用字符串键，name 不出面）。 */
+    @Override
+    public String getName() {
+        return key;
+    }
+
+    /** 槽位稳定键（REST 路径段与装配缝寻址共用）。 */
+    public String key() {
+        return key;
+    }
+
+    /**
+     * 该槽位运行时有无 shell（#253 scripts 开放面判定正本）：真＝装配面附
+     * scripts 资源；假＝结构性 a-only（resources 恒空）。
+     */
+    public boolean hasShell() {
+        return shell;
+    }
+
+    /**
+     * 槽位职能一句话（#255 指派预检对照材料语境用）：判定模型对照工作协议与技能
+     * 重叠时需知道该槽位是干什么的——职能是槽位身份的一部分，正本随枚举。
+     */
+    public String role() {
+        return role;
+    }
+
+    /**
+     * 按稳定键解析槽位（大小写不敏感）：空键/未知键返回空，由调用方定 404 语义
+     * （SKL_010）。
+     */
+    public static Optional<SkillSlot> byKey(String key) {
+        if (key == null || key.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(SkillSlot.valueOf(key.trim().toUpperCase(Locale.ROOT)));
+        }
+        catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+}

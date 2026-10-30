@@ -1,0 +1,300 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.cartisan.core.exception.ApplicationException;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import com.semgravio.aiplatform.base.agentscope.AgentReply;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.domain.aggregate.ConversationEntry;
+import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
+import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessionSource;
+import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.repository.ConversationEntryRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 对话史落库（#89 对话史落库④，spec ④）——<b>写口唯一</b>：对话表的全部写入经本
+ * 服务（主智能体单会话收口处为主写口——#86 并轨后单会话，无双会话先落再迁移的
+ * 结构；问答 / 收尾卡 / 轻引导的写入同归本口）。对话面全量落库：用户发言、智能体
+ * 回复、问答卡、问答作答、收尾卡、平台轻引导；<b>过程明细不落</b>（解说段 / 动作卡
+ * 流水——收尾卡已是凝聚物）。
+ *
+ * <p><b>失败口径分两档</b>：提交侧（用户发言 / 问答作答——REST 线程同步写）失败
+ * 上抛——REST 5xx 撤回乐观气泡，「落库 ⟺ 说过」不漂移（刷新不丢已发送的话）；
+ * 收口侧（智能体回复 / 问答卡 / 收尾卡——异步轨道写）失败只记日志不牵连已成轮
+ * （轮已成功，历史缺段不炸对话轨道）。读口 = 项目全量按 id 升序（写入序即对话序）。</p>
+ *
+ * <p>run 不落平台表的口径不变：对话史承载「再进入所见」，编排轨道（迭代排队 /
+ * 在途标记）保持进程内为已知取舍。</p>
+ */
+@Service
+@Slf4j
+public class ConversationHistoryAppService {
+
+    /** 消息附件 → JSONB 数组的序列化器（对话史落库用，静态无状态；NON_NULL——
+     *  附件两形态各携带态字段，未携带的形态字段不入库不回访）。 */
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+
+    /** 报价卡事件类型：首次报价（报价已出）/ 改价（报价已更新，#204 改价入流）。
+     *  常量归写口持有——跨 BC 调用方（订单上下文）引用止于应用层，不下探聚合。 */
+    public static final String QUOTE_EVENT_QUOTED = "quoted";
+
+    /** 改价（报价已更新，#204 改价入流——追加新卡不改旧卡）。 */
+    public static final String QUOTE_EVENT_REPRICED = "repriced";
+
+    private final ConversationEntryRepository entries;
+    private final ProjectRepository projectRepository;
+
+    public ConversationHistoryAppService(ConversationEntryRepository entries,
+            ProjectRepository projectRepository) {
+        this.entries = entries;
+        this.projectRepository = projectRepository;
+    }
+
+    /**
+     * 用户发言落库（意见 / 咨询 / 建项目开场需求——提交守卫全过后、异步轮提交前
+     * 同步写；失败上抛撤回 REST 面）。attachments = 随发言发送的消息附件
+     * （圈注/图片物料两形态，可空/空表——纯文字发言），落库为 JSONB 数组供刷新
+     * 回显重建附件 chip。
+     */
+    public void recordUserUtterance(Long projectId, String runId, String text,
+            List<MessageAttachment> attachments) {
+        entries.save(ConversationEntry.userUtterance(projectId, runId, text,
+                toJsonMaps(attachments)));
+    }
+
+    /** 用户发言落库（无附件——纯文字发言）。 */
+    public void recordUserUtterance(Long projectId, String runId, String text) {
+        recordUserUtterance(projectId, runId, text, null);
+    }
+
+    /** 消息附件 → 原始 JSON 数组（圈注与图片物料两形态；空/全无效形态返回 null
+     *  ——不入库空数组，回访 chip 重建以本数组为准）。 */
+    private static List<Map<String, Object>> toJsonMaps(List<MessageAttachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return null;
+        }
+        List<MessageAttachment> kept = attachments.stream()
+                .filter(a -> a != null && (a.hasAnnotation() || a.hasImage()))
+                .toList();
+        if (kept.isEmpty()) {
+            return null;
+        }
+        return JSON.convertValue(kept, new TypeReference<>() {
+        });
+    }
+
+    /**
+     * 问答作答落库（作答通道受理即写——同步、失败上抛同用户发言口径）；同一事务
+     * 内置位 run 内最近一张待答问答卡的 answered（读模型自洽：未答 ⟺ 待答卡在场）。
+     */
+    @Transactional
+    public void recordAnswer(Long projectId, String runId, String answerText) {
+        entries.findFirstByRunIdAndKindAndAnsweredFalseOrderByIdDesc(runId,
+                        ConversationEntryKind.QUESTION)
+                .ifPresent(question -> {
+                    question.markAnswered();
+                    entries.save(question);
+                });
+        entries.save(ConversationEntry.answer(projectId, runId, answerText));
+    }
+
+    /**
+     * 智能体回复段落库（轮收口或问答挂起时的已出文本段——段序即对话序，问答
+     * 挂起段先落、答复与续跑段随后，交错成完整叙事）。异步轨道写：失败只记日志。
+     */
+    public void recordAgentReply(Long projectId, String runId, String text) {
+        if (text == null || text.isBlank()) {
+            return; // 无话语段（纯工具轮 / 挂起前无解说）不落空行
+        }
+        quietly(() -> entries.save(ConversationEntry.agentReply(projectId, runId, text)));
+    }
+
+    /**
+     * 问答卡落库（question-raised 事件 payload 原样——engineRef / data.toolCalls /
+     * questions 投影全量，刷新 / 回访后问答卡可重建可作答）。
+     */
+    private void recordQuestion(Long projectId, AgentEvent event) {
+        Object runId = event.payload().get(AgentEventTypes.RUN_FIELD);
+        quietly(() -> entries.save(ConversationEntry.question(projectId,
+                runId != null ? runId.toString() : null, event.payload())));
+    }
+
+    /**
+     * 收尾卡落库（编码 run 真收口的 closing 权威事实——#88 SSE 扩载同载荷，版本
+     * 锚定 #91 复用本行）。异步轨道写：失败只记日志（不触发尝试环重试）。
+     */
+    public void recordClosing(Long projectId, String runId, Map<String, Object> closing) {
+        quietly(() -> entries.save(ConversationEntry.closing(projectId, runId, closing)));
+    }
+
+    /**
+     * 平台轻引导落库（兜底分支零产物路径：用户发言 + 定型文案两行——对话完整）。
+     * 事件已发射后的补写：失败只记日志。attachments = 随发言发送的消息附件（可空）。
+     */
+    public void recordGuide(Long projectId, String runId, String prompt, String text,
+            List<MessageAttachment> attachments) {
+        quietly(() -> {
+            entries.save(ConversationEntry.userUtterance(projectId, runId, prompt,
+                    toJsonMaps(attachments)));
+            entries.save(ConversationEntry.guide(projectId, runId, text));
+        });
+    }
+
+    /**
+     * 平台单条定型文案落库（#360 在途意见回执）：用户发言已由所属对话轮自落——
+     * 只补 guide 行（挂该轮 runId，水合并入该轮块、位置在轮回复后）。事件已发射
+     * 后的补写：失败只记日志（呈现面失败不牵连排队事实）。
+     */
+    public void recordGuideNotice(Long projectId, String runId, String text) {
+        quietly(() -> entries.save(ConversationEntry.guide(projectId, runId, text)));
+    }
+
+    /**
+     * 报价卡落库（#203 报价感知，ADR-0017 视镜语义）：平台对用户的钱事发言——载荷
+     * 仅事件（{@code quoted}=报价已出 / {@code repriced}=报价已更新）+ 订单引用，不含
+     * 金额（金额/备注/状态渲染时取订单当前态）。调用方在报价事实落定后补写——缺卡
+     * 不炸报价动作，失败只记日志（同收口侧口径）。
+     */
+    public void recordQuote(Long projectId, Long orderId, String event) {
+        quietly(() -> entries.save(ConversationEntry.quote(projectId, orderId, event)));
+    }
+
+    /**
+     * 已收口成果清单读口（#223 存量恢复的对照源）：项目收尾卡（kind=closing）的
+     * summary → 收口 run 锚（同叙事多次收口——往次重发起服——以后到为准）。收尾卡
+     * 是平台侧收口权威事实（git 收口 commit 经 Run-Id trailer 锚定同一收尾卡，
+     * 旁证同源）——存量在途项目（生成早于轨道表、无持久化计划）补产计划落库时
+     * 对照此清单标已完片、只补缺口。
+     */
+    public Map<String, String> closedGenerationSummaries(Long projectId) {
+        Map<String, String> summaries = new LinkedHashMap<>();
+        for (ConversationEntry entry : entries.findByProjectIdAndKindOrderByIdAsc(projectId,
+                ConversationEntryKind.CLOSING)) {
+            if (entry.getClosing() == null) {
+                continue;
+            }
+            // 载荷键是收口扩载契约的 String summary（#88）；非 String 视同缺失——
+            // 不 String.valueOf 铸假匹配键（对照是逐字精确匹配）
+            if (entry.getClosing().get(CoderRunAttempts.CLOSING_SUMMARY_FIELD) instanceof String summary) {
+                summaries.put(summary, entry.getRunId());
+            }
+        }
+        return summaries;
+    }
+
+    /**
+     * 对话史读口（水合载荷）：项目全量按 id 升序（写入序即对话序）。归档项目照读
+     * （对话区只读终态）。会话来源标识随行（#298 后台对接件——对话史含设计会话）：
+     * 设计会话收尾卡（closing 携 {@code drafts} 稿清单——SSE 收口扩载契约键，仅
+     * 设计轨道拼装）标设计会话来源；其余条目 null＝主会话缺省（作用域改稿发言无
+     * 结构标记、设计会话完整稿本在智能体会话存储——存储不同构，读面推导降级
+     * 口径见 {@link ConversationSessionSource}）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在
+     */
+    public List<ConversationEntryResponse> read(Long projectId) {
+        if (!projectRepository.existsById(projectId)) {
+            throw new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND);
+        }
+        return entries.findByProjectIdOrderByIdAsc(projectId).stream()
+                .map(entry -> ConversationEntryResponse.of(entry, sessionSourceOf(entry)))
+                .toList();
+    }
+
+    /** 会话来源推导单点：设计收尾卡（closing 携 drafts）⇔ 设计会话；其余 null。 */
+    private static ConversationSessionSource sessionSourceOf(ConversationEntry entry) {
+        return entry.getKind() == ConversationEntryKind.CLOSING
+                && entry.getClosing() != null
+                && entry.getClosing().containsKey(CoderRunAttempts.CLOSING_DRAFTS_FIELD)
+                ? ConversationSessionSource.DESIGN
+                : null;
+    }
+
+    /**
+     * 事件桥的对话史旁挂（#89 写口接线）：转发智能体事件至 SSE 桥的同时<b>捕获</b>
+     * question-raised（不即写——问答卡必须落在挂起段文本之后，对话序方正确），
+     * 轮落定点经 {@link TurnRecorder#settle} 按序落库（挂起段文本 → 问答卡）。
+     * 捕获的问答卡是刷新 / 回访后问答卡可重建可作答的唯一来源（重放缓冲降级断线
+     * 补发后不再承担刷新重建）。
+     */
+    public TurnRecorder recorder(Long projectId, Consumer<AgentEvent> sink) {
+        return new TurnRecorder(projectId, sink);
+    }
+
+    /**
+     * 轮级对话史记录器：旁挂一轮对话的事件桥——转发 SSE 事件 + 捕获问答卡载荷，
+     * 轮落定点（converse / resume 返回后）按对话序落段。轮炸（异常上抛）不落——
+     * 失败轮无对话面残留（重提即兜底）。
+     */
+    public final class TurnRecorder implements Consumer<AgentEvent> {
+
+        private final Long projectId;
+        private final Consumer<AgentEvent> sink;
+        private AgentEvent question;
+
+        private TurnRecorder(Long projectId, Consumer<AgentEvent> sink) {
+            this.projectId = projectId;
+            this.sink = sink;
+        }
+
+        /** sink 面：转发 + 捕获问答卡（幂等——一轮多问以后到为准，随各自 settle 落）。 */
+        @Override
+        public void accept(AgentEvent event) {
+            sink.accept(event);
+            if (AgentEventTypes.QUESTION_RAISED.equals(event.type())) {
+                question = event;
+            }
+        }
+
+        /**
+         * 轮落定点落库：正常收口 / 问答挂起——挂起段文本先落、捕获的问答卡随后
+         * （live 呈现序：解说 → 问答卡）。失败 quietly（缺段不牵连已成轮）。
+         */
+        public void settle(String runId, AgentReply reply) {
+            if ((reply.text() == null || reply.text().isBlank()) && question == null) {
+                return;
+            }
+            quietly(() -> {
+                if (reply.text() != null && !reply.text().isBlank()) {
+                    entries.save(ConversationEntry.agentReply(projectId, runId, reply.text()));
+                }
+                if (question != null) {
+                    recordQuestion(projectId, question);
+                    question = null;
+                }
+            });
+        }
+    }
+
+    /** 异步轨道写的护栏：对话史缺段不牵连已成轮（只记日志）。 */
+    private void quietly(Runnable write) {
+        try {
+            write.run();
+        }
+        catch (RuntimeException e) {
+            log.warn("[conversation] 对话史写入失败（缺段不牵连轮）：{}", e.toString());
+        }
+    }
+
+    /** 项目删除级联清理入口（软引用无 FK，删除编排显式调用——同 knw_chunks 先例）。 */
+    public void purgeByProject(Long projectId) {
+        entries.deleteByProjectId(projectId);
+    }
+}

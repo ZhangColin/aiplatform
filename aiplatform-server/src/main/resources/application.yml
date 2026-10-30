@@ -54,7 +54,7 @@ cartisan:
       api-secret: ${OPENAPI_APP_SECRET:}
     # 入站验签的凭据源（app-registry）——prod 走网关域名（路由即鉴权边界）；
     # local 覆盖为本机 app-registry bootstrap 端点（见 application-local.yml）
-    apikey-service-url: https://openapi.aieducenter.com/api/v1/api-keys/by-appId
+    apikey-service-url: https://openapi.semgravio.com/api/v1/api-keys/by-appId
 
 
 # 片3 · base.knowledge：本机 fastembed embedding 服务（512 维），

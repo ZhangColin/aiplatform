@@ -1,0 +1,1337 @@
+package com.semgravio.aiplatform.business.project.endpoints.controller;
+
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.RequestBuilder;
+import org.springframework.format.FormatterRegistry;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import com.cartisan.core.context.RequestContext;
+import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.core.exception.DomainException;
+import com.cartisan.web.config.BaseEnumConverter;
+import com.cartisan.web.exception.GlobalExceptionHandler;
+
+import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
+import com.semgravio.aiplatform.business.project.application.MainAgentAppService;
+import com.semgravio.aiplatform.business.project.application.DispatchAppService;
+import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.semgravio.aiplatform.business.project.application.GenerationAppService;
+import com.semgravio.aiplatform.business.project.application.IterationAppService;
+import com.semgravio.aiplatform.business.project.application.ProjectLifecycleAppService;
+import com.semgravio.aiplatform.business.project.application.ProjectQueryAppService;
+import com.semgravio.aiplatform.business.project.application.ConversationHistoryAppService;
+import com.semgravio.aiplatform.business.project.application.PrdReadiness;
+import com.semgravio.aiplatform.business.project.application.dto.response.PrdReadinessResponse;
+import com.semgravio.aiplatform.business.project.application.DemoVersionAppService;
+import com.semgravio.aiplatform.business.project.application.PrdVersionAppService;
+import com.semgravio.aiplatform.business.project.application.dto.response.ConversationEntryResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.DemoVersionSummaryResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.DesignItemResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.GenerationSegmentResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.PrdResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.PrdVersionSummaryResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectCreatedResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectDetailResponseFixture;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFileContentResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFileDownloadResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFileRawResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectFilesResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectPreviewResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectResponse;
+import com.semgravio.aiplatform.business.project.application.dto.response.ProjectUsageResponse;
+import com.semgravio.aiplatform.business.order.application.dto.response.OrderBriefResponse;
+import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
+import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
+import com.semgravio.aiplatform.business.project.application.dto.response.DesignScopeResponse;
+import com.semgravio.aiplatform.business.project.domain.enums.DesignDivergence;
+import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.DesignScopeType;
+import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
+import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
+import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.ProjectStatusFilter;
+import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
+import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * 项目 REST 面（swagger 契约验收）：ApiResponse 信封、建项目响应携带自动开场运行
+ * runId、类型 Integer code 双向、PRJ_001 → 404、参数校验；归档/用量/源码包/
+ * 列表过滤的契约面。
+ */
+@WebMvcTest(ProjectController.class)
+@Import({ProjectControllerTest.ExceptionAdviceConfig.class,
+        ProjectControllerTest.EnumParamBindingConfig.class,
+        com.cartisan.web.config.JacksonConfiguration.class})
+class ProjectControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private ProjectLifecycleAppService appService;
+
+    @MockitoBean
+    private ProjectQueryAppService queryAppService;
+
+    @MockitoBean
+    private MainAgentAppService mainAgentAppService;
+
+    @MockitoBean
+    private DispatchAppService dispatchAppService;
+
+    @MockitoBean
+    private GenerationAppService generationAppService;
+
+    @MockitoBean
+    private IterationAppService iterationAppService;
+
+    @MockitoBean
+    private ConversationHistoryAppService conversationHistoryAppService;
+
+    @MockitoBean
+    private PrdVersionAppService prdVersionAppService;
+
+    @MockitoBean
+    private DemoVersionAppService demoVersionAppService;
+
+    /** 全 /api/** 拦截——MVC 契约测试不走登录链，夹具直接注 RequestContext。 */
+    private ResultActions performAsUser(RequestBuilder request) throws Exception {
+        return RequestContext.runFor(
+                new RequestContext(null, null, null, null, 1L, "project-test", null, null),
+                () -> mockMvc.perform(request));
+    }
+
+    @Test
+    void given_valid_command_when_create_then_wrapped_with_ba_run() throws Exception {
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("100", ProjectStatus.IN_PROGRESS, false),
+                        "run-1"), null));
+
+        // 一句话创建：请求体只传 requirement（name/type/engine 从契约面消失）
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.project.id").value("100"))
+                .andExpect(jsonPath("$.data.project.type").value(1)) // BaseEnum → Integer code
+                .andExpect(jsonPath("$.data.project.status").value(1)) // IN_PROGRESS → code
+                .andExpect(jsonPath("$.data.project.statusName").value("进行中"))
+                .andExpect(jsonPath("$.data.runId").value("run-1"));
+
+        verify(appService).create(argThat(cmd -> "做一个官网".equals(cmd.requirement())));
+    }
+
+    // ---------- #326 凭证端点契约：惰性建访客的 Set-Cookie 面 ----------
+
+    @Test
+    void given_anonymous_first_message_when_create_then_guest_credential_cookie_issued()
+            throws Exception {
+        // 首条需求消息提交成功才建访客＋发凭证：Set-Cookie 随建项目响应（契约形：
+        // aiplatform_guest=值即凭证；HttpOnly+SameSite=Lax+Path=/；MaxAge 对齐保留期）
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("700", ProjectStatus.IN_PROGRESS, false),
+                        "run-g"),
+                org.springframework.http.ResponseCookie.from(
+                        com.semgravio.aiplatform.business.identity.domain.model.AuthCookies.GUEST_COOKIE_NAME,
+                        "cred-token-x").httpOnly(true).sameSite("Lax")
+                        .path("/").maxAge(java.time.Duration.ofDays(30)).build()));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"免注册先用一句话\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("aiplatform_guest=cred-token-x"),
+                        org.hamcrest.Matchers.containsString("HttpOnly"),
+                        org.hamcrest.Matchers.containsString("SameSite=Lax"),
+                        org.hamcrest.Matchers.containsString("Path=/"),
+                        org.hamcrest.Matchers.containsString("Max-Age=2592000"))));
+    }
+
+    @Test
+    void given_no_lazy_guest_when_create_then_no_set_cookie_header() throws Exception {
+        // 归属既有身份（账户或既有访客，guestCookie null）：不落 Set-Cookie 头
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("701", ProjectStatus.IN_PROGRESS, false),
+                        "run-1"), null));
+
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Set-Cookie"));
+    }
+
+    @Test
+    void given_oversized_requirement_when_create_then_rejected_as_400() throws Exception {
+        // requirement 是创建唯一入参（可空）；长度上限 5000 仍守门
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"" + "长".repeat(5001) + "\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void given_design_endpoint_when_create_then_initial_type_bound() throws Exception {
+        when(appService.create(any())).thenReturn(new ProjectLifecycleAppService.Creation(
+                new ProjectCreatedResponse(detailOf("300", ProjectStatus.IN_PROGRESS, false),
+                        "run-9"), null));
+
+        // #299 mode 进载荷（ADR-0029）：入口选「做设计」携终点初值 Integer code
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"给我的咖啡店设计一个 logo\",\"endpointType\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-9"));
+
+        verify(appService).create(argThat(cmd -> cmd.endpointType() == ProjectEndpointType.DESIGN));
+    }
+
+    @Test
+    void given_unknown_endpoint_code_when_create_then_rejected_as_400() throws Exception {
+        // Integer code 表外值：框架统一信封 400（与 status 过滤参数同口径）
+        performAsUser(post("/api/projects")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"requirement\":\"做一个官网\",\"endpointType\":99}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void given_projects_when_list_then_wrapped_array() throws Exception {
+        when(queryAppService.list(null)).thenReturn(List.of(new ProjectResponse("100", "官网",
+                        ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM, "系统", "900",
+                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null, null,
+                        false, false, false),
+                new ProjectResponse("101", "已下单官网",
+                        ProjectType.WEBSITE, "官网",
+                        ProjectEndpointType.SYSTEM_DESIGN, "系统＋设计", "901",
+                        ProjectStatus.IN_PROGRESS, "进行中", false, null, null,
+                        new OrderBriefResponse("900", OrderStatus.PENDING_QUOTE, "待报价"),
+                        true, true, false)));
+
+        performAsUser(get("/api/projects"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value("100"))
+                .andExpect(jsonPath("$.data[0].status").value(1)) // IN_PROGRESS → code
+                .andExpect(jsonPath("$.data[0].statusName").value("进行中"))
+                .andExpect(jsonPath("$.data[0].endpointType").value(2)) // 终点类型弱标识取数面
+                .andExpect(jsonPath("$.data[0].endpointTypeName").value("系统"))
+                .andExpect(jsonPath("$.data[1].endpointTypeName").value("系统＋设计"))
+                .andExpect(jsonPath("$.data[0].activeOrder").isEmpty()) // 无订单 → null
+                // #28：未终结订单嵌入（四态列表「待报价」的推导输入）
+                .andExpect(jsonPath("$.data[1].activeOrder.id").value("900"))
+                .andExpect(jsonPath("$.data[1].activeOrder.status").value(1))
+                .andExpect(jsonPath("$.data[1].activeOrder.statusName").value("待报价"))
+                .andExpect(jsonPath("$.data[0].prdConfirmed").value(false))
+                .andExpect(jsonPath("$.data[0].demoConfirmed").value(false))
+                .andExpect(jsonPath("$.data[0].needsUserSupplement").value(false))
+                .andExpect(jsonPath("$.data[1].prdConfirmed").value(true))
+                .andExpect(jsonPath("$.data[1].demoConfirmed").value(true))
+                .andExpect(jsonPath("$.data[1].needsUserSupplement").value(false));
+    }
+
+    @Test
+    void given_status_filter_when_list_then_passed_through() throws Exception {
+        when(queryAppService.list(ProjectStatusFilter.ACTIVE)).thenReturn(List.of());
+
+        performAsUser(get("/api/projects").param("status", "1")) // ACTIVE → Integer code
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+        verify(queryAppService).list(ProjectStatusFilter.ACTIVE);
+    }
+
+    @Test
+    void given_unknown_filter_when_list_then_400_with_legal_values() throws Exception {
+        // 非法取值（未知 code / 非数值）在绑定层即 400（框架统一信封：带合法取值表），应用服务不被触达
+        performAsUser(get("/api/projects").param("status", "99"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("status 取值 99 非法，合法取值：1=进行中, 3=已归档"));
+        performAsUser(get("/api/projects").param("status", "active"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("status 取值 active 非法，合法取值：1=进行中, 3=已归档"));
+        verify(queryAppService, never()).list(any());
+    }
+
+    @Test
+    void given_detail_when_get_then_fields_returned() throws Exception {
+        when(queryAppService.detail(100L)).thenReturn(
+                detailOf("100", ProjectStatus.IN_PROGRESS, false));
+
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("100"))
+                .andExpect(jsonPath("$.data.name").value("官网 demo"))
+                .andExpect(jsonPath("$.data.endpointType").value(2))
+                .andExpect(jsonPath("$.data.endpointTypeName").value("系统"))
+                .andExpect(jsonPath("$.data.designScope").doesNotExist())
+                .andExpect(jsonPath("$.data.status").value(1))
+                .andExpect(jsonPath("$.data.archived").value(false));
+    }
+
+    @Test
+    void given_detail_with_design_items_when_get_then_item_list_returned() throws Exception {
+        // #290 设计轨道件清单读模型（对偶 segments 契约）：ord/标题/状态 code + *Name，
+        // null（无现行清单/锚漂）不序列化——前端不渲染计划区
+        when(queryAppService.detail(100L)).thenReturn(ProjectDetailResponseFixture
+                .detailOf("100", "官网 demo")
+                .designItems(List.of(new DesignItemResponse(1, "首页主视觉",
+                        DesignItemStatus.CLOSED, DesignItemStatus.CLOSED.getName(), null)))
+                .build());
+
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.designItems[0].ord").value(1))
+                .andExpect(jsonPath("$.data.designItems[0].title").value("首页主视觉"))
+                .andExpect(jsonPath("$.data.designItems[0].status").value(2))
+                .andExpect(jsonPath("$.data.designItems[0].statusName").value("已收口"));
+    }
+
+    @Test
+    void given_switch_command_when_endpoint_type_then_detail_returned_with_enum_binding() throws Exception {
+        // 终点控件动作端点（#285）：Integer code 双向（BaseEnum 契约），响应与详情同构
+        when(appService.switchEndpoint(eq(100L), argThat(command ->
+                command != null && command.endpointType() == ProjectEndpointType.SYSTEM_DESIGN
+                        && command.scopeType() == DesignScopeType.SELECTED_PAGES)))
+                .thenReturn(ProjectDetailResponseFixture.detailOf("100", "官网 demo")
+                        .workspaceId("900")
+                        .endpointType(ProjectEndpointType.SYSTEM_DESIGN)
+                        .designScope(new DesignScopeResponse(DesignScopeType.SELECTED_PAGES,
+                                "勾选页面", List.of("首页：展示产品与入口")))
+                        .build());
+
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":3,\"scopeType\":2,"
+                                + "\"scopePages\":[\"首页：展示产品与入口\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.endpointType").value(3))
+                .andExpect(jsonPath("$.data.endpointTypeName").value("系统＋设计"))
+                .andExpect(jsonPath("$.data.designScope.type").value(2))
+                .andExpect(jsonPath("$.data.designScope.pages[0]").value("首页：展示产品与入口"));
+    }
+
+    @Test
+    void given_switch_without_endpoint_type_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+        verify(appService, never()).switchEndpoint(any(), any());
+    }
+
+    @Test
+    void given_switch_with_unknown_endpoint_code_then_rejected_with_legal_values() throws Exception {
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(appService, never()).switchEndpoint(any(), any());
+    }
+
+    @Test
+    void given_frozen_project_when_switch_then_ord_006_mapped_to_409() throws Exception {
+        when(appService.switchEndpoint(eq(100L), any()))
+                .thenThrow(new ApplicationException(OrderMessage.ORDER_FROZEN));
+
+        performAsUser(post("/api/projects/100/endpoint-type")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"endpointType\":1,\"scopeType\":1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(5006))
+                .andExpect(jsonPath("$.message").value(OrderMessage.ORDER_FROZEN.message()));
+    }
+
+    @Test
+    void given_unknown_project_when_get_then_prj_001_mapped_to_404() throws Exception {
+        when(queryAppService.detail(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(get("/api/projects/404"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001))
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_non_numeric_id_when_get_then_404() throws Exception {
+        performAsUser(get("/api/projects/abc"))
+                .andExpect(status().isNotFound());
+    }
+
+    // ---------- #359 生成取消：停止端点契约 ----------
+
+    @Test
+    void given_in_flight_run_when_stop_then_stopped_true() throws Exception {
+        when(generationAppService.stopInFlightRun(900L)).thenReturn(true);
+
+        performAsUser(post("/api/projects/900/generation/stop"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.stopped").value(true));
+    }
+
+    @Test
+    void given_no_in_flight_run_when_stop_then_idempotent_stopped_false() throws Exception {
+        // 幂等口径：无在途（连点/与自然收口竞态）200 stopped=false——不 409
+        when(generationAppService.stopInFlightRun(901L)).thenReturn(false);
+
+        performAsUser(post("/api/projects/901/generation/stop"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stopped").value(false));
+    }
+
+    @Test
+    void given_unknown_project_when_stop_then_prj_001_mapped_to_404() throws Exception {
+        when(generationAppService.stopInFlightRun(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(post("/api/projects/404/generation/stop"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001));
+    }
+
+    @Test
+    void given_conversation_when_read_then_entries_wrapped_in_id_order() throws Exception {
+        // 对话史读口（#89 前端水合源）：kind Integer code（§3.6.1 边界枚举统一
+        // code——1=user 3=question 5=closing 7=quote）、question/closing/quote
+        // 载荷原样、id 升序（写入序 = 对话序）；sessionSource 会话来源标识
+        // （#298，null＝主会话缺省）随面携带
+        when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
+                new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
+                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
+                new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
+                        Map.of("engineRef", "reply-1", "data", Map.of()),
+                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null,
+                        Map.of("summary", "首次生成了系统", "prdChanged", false,
+                                "systemChanged", true, "files", List.of(), "durationMs", 183420),
+                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
+                new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
+                        null, null,
+                        Map.of("orderId", "900123", "event", "quoted"),
+                        false, LocalDateTime.of(2026, 9, 6, 9, 0))));
+
+        performAsUser(get("/api/projects/100/conversation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.length()").value(4))
+                .andExpect(jsonPath("$.data[0].kind").value(1))
+                .andExpect(jsonPath("$.data[0].kindName").value("用户发言"))
+                .andExpect(jsonPath("$.data[0].text").value("做一个官网"))
+                .andExpect(jsonPath("$.data[1].kind").value(3))
+                .andExpect(jsonPath("$.data[1].answered").value(false))
+                .andExpect(jsonPath("$.data[1].question.engineRef").value("reply-1"))
+                .andExpect(jsonPath("$.data[2].kind").value(5))
+                .andExpect(jsonPath("$.data[2].closing.summary").value("首次生成了系统"))
+                .andExpect(jsonPath("$.data[2].closing.durationMs").value(183420))
+                // #203 报价卡读面：kind=7、quote 载荷原样（事件 + 订单引用，不含金额）
+                .andExpect(jsonPath("$.data[3].kind").value(7))
+                .andExpect(jsonPath("$.data[3].kindName").value("报价卡"))
+                .andExpect(jsonPath("$.data[3].quote.orderId").value("900123"))
+                .andExpect(jsonPath("$.data[3].quote.event").value("quoted"));
+    }
+
+    @Test
+    void given_unknown_project_when_read_conversation_then_prj_001_mapped_to_404() throws Exception {
+        when(conversationHistoryAppService.read(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(get("/api/projects/404/conversation"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4001))
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_project_when_delete_then_ok_without_data() throws Exception {
+        performAsUser(delete("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        verify(appService).delete(100L);
+    }
+
+    @Test
+    void given_unarchived_when_archive_then_detail_returned() throws Exception {
+        when(appService.archive(100L)).thenReturn(
+                detailOf("100", ProjectStatus.ARCHIVED, true));
+
+        performAsUser(post("/api/projects/100/archive"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(3)) // ARCHIVED → code
+                .andExpect(jsonPath("$.data.statusName").value("已归档"))
+                .andExpect(jsonPath("$.data.archived").value(true));
+    }
+
+    @Test
+    void given_already_archived_when_archive_again_then_prj_013_as_409() throws Exception {
+        // 真实路径是聚合不变量的 DomainException（CartisanException 统一按 CodeMessage 映射 409）
+        when(appService.archive(100L)).thenThrow(
+                new DomainException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
+
+        performAsUser(post("/api/projects/100/archive"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4013))
+                .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
+    }
+
+    @Test
+    void given_project_when_generate_then_run_id_returned() throws Exception {
+        // 「继续生成」纯动作无入参：异步提交即返回首试 runId（过程经 SSE）
+        when(generationAppService.startGeneration(100L)).thenReturn(
+                new GenerationAppService.GenerationRun("run-gen-1"));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-gen-1"));
+        verify(generationAppService).startGeneration(100L);
+    }
+
+    @Test
+    void given_generated_or_in_flight_project_when_generate_then_prj_017_as_409() throws Exception {
+        // 重复发起守卫（已生成或生成在途）——调整入口是指令区意见，不是再生成
+        when(generationAppService.startGeneration(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4017))
+                .andExpect(jsonPath("$.message").value("系统已生成或正在生成中，请勿重复发起"));
+    }
+
+    @Test
+    void given_prd_never_produced_when_generate_then_prj_018_as_409() throws Exception {
+        // 前置事实守卫：PRD 从未产出（前端入口以 PRD 产出为呈现条件，拦直连调用）
+        when(generationAppService.startGeneration(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.GENERATION_PRD_NOT_PRODUCED));
+
+        performAsUser(post("/api/projects/100/generate"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4018))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出，先在对话区把需求聊出 PRD——确认此版后平台开始生成 Demo"));
+    }
+
+    @Test
+    void given_fix_terminal_when_restart_fix_then_run_id_returned() throws Exception {
+        // 「继续更新」（#48 超限终态恢复出口）：纯动作无入参，重派即返回新 run 首试
+        // runId（与新 run 的链路锚，同 /generate 口径）
+        when(iterationAppService.restartFixRun(100L)).thenReturn(
+                new IterationAppService.FixDispatch("run-fix-2", false));
+
+        performAsUser(post("/api/projects/100/fix-runs/restart"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-fix-2"));
+        verify(iterationAppService).restartFixRun(100L);
+    }
+
+    @Test
+    void given_no_terminal_failure_when_restart_fix_then_prj_026_as_409() throws Exception {
+        // 无终态账守卫（未派过/已成功收工/重启丢账）——指路指令区重提意见
+        when(iterationAppService.restartFixRun(100L)).thenThrow(
+                new ApplicationException(ProjectMessage.FIX_RESTART_UNAVAILABLE));
+
+        performAsUser(post("/api/projects/100/fix-runs/restart"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4026))
+                .andExpect(jsonPath("$.message").value("没有可恢复的更新，请在对话区重新提意见"));
+    }
+
+    @Test
+    void given_valid_name_when_rename_then_detail_returned() throws Exception {
+        // 动作端点风格同 archive；响应与详情端点同构（前端 invalidate 后刷新列表/顶栏）
+        when(appService.rename(100L, "品牌官网")).thenReturn(
+                ProjectDetailResponseFixture.detailOf("100", "品牌官网")
+                        .workspaceId("900")
+                        .build());
+
+        performAsUser(post("/api/projects/100/rename")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"品牌官网\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value("品牌官网"));
+        verify(appService).rename(100L, "品牌官网");
+    }
+
+    @Test
+    void given_oversized_name_when_rename_then_rejected_as_400() throws Exception {
+        // 长度上限 100 归命令层守门（与取名净化同限，DB 列长同源）
+        performAsUser(post("/api/projects/100/rename")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + "长".repeat(101) + "\"}"))
+                .andExpect(status().isBadRequest());
+        verify(appService, never()).rename(any(), any());
+    }
+
+    @Test
+    void given_blank_name_when_rename_then_prj_005_as_400() throws Exception {
+        // 空白拒绝在聚合（PRJ_005，与建项目同口径——DomainException 按 CodeMessage 映射 400）
+        when(appService.rename(eq(100L), argThat(" "::equals)))
+                .thenThrow(new DomainException(ProjectMessage.PROJECT_NAME_BLANK));
+
+        performAsUser(post("/api/projects/100/rename")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4005))
+                .andExpect(jsonPath("$.message").value("项目名不能为空白"));
+    }
+
+    @Test
+    void given_unknown_project_when_rename_then_prj_001_mapped_to_404() throws Exception {
+        when(appService.rename(404L, "任意名"))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(post("/api/projects/404/rename")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"任意名\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_usage_when_get_then_aggregations_returned() throws Exception {
+        TokenUsage tokens = new TokenUsage(100, 200, 30, 0, 0);
+        when(queryAppService.usage(100L)).thenReturn(new ProjectUsageResponse("100", tokens,
+                List.of(new ProjectUsageResponse.ModelUsage("deepseek", "deepseek-v4-pro",
+                        tokens)),
+                List.of(new ProjectUsageResponse.AgentKindUsage("executor", "run 执行体",
+                        tokens))));
+
+        performAsUser(get("/api/projects/100/usage"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.total.input").value(100))
+                // 平台成本归运营口径（#167）：用户面响应不再含 cost/unpriced 字段
+                .andExpect(jsonPath("$.data.cost").doesNotExist())
+                .andExpect(jsonPath("$.data.unpriced").doesNotExist())
+                .andExpect(jsonPath("$.data.byModel[0].model").value("deepseek-v4-pro"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKind").value("executor"))
+                .andExpect(jsonPath("$.data.byAgentKind[0].agentKindLabel").value("run 执行体"));
+    }
+
+    @Test
+    void given_workspace_when_source_package_then_binary_file_returned() throws Exception {
+        byte[] bytes = {0x1f, (byte) 0x8b, 0x08, 0x00, 0x74, 0x61, 0x72};
+        // #287 用户面补门：控制器走 downloadableSourcePackage（门判定归应用层，
+        // 本缝只钉头与字节）
+        when(appService.downloadableSourcePackage(100L)).thenReturn(bytes);
+
+        byte[] body = performAsUser(get("/api/projects/100/source-package"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("application/gzip"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(body).containsExactly(bytes); // 真实文件字节（不走 JSON 信封）
+    }
+
+    @Test
+    void given_paid_project_when_file_download_then_binary_file_returned_with_attachment()
+            throws Exception {
+        byte[] bytes = {0x00, 0x01, (byte) 0x89, 'P'};
+        when(queryAppService.fileDownload(eq(100L), eq("exports/poster.png")))
+                .thenReturn(new ProjectFileDownloadResponse(bytes, "image/png"));
+
+        byte[] body = performAsUser(get("/api/projects/100/files/download")
+                        .param("path", "exports/poster.png"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                .andExpect(header().string("Content-Disposition",
+                        "attachment; filename=\"poster.png\""))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        // 带走语义（attachment）＋原始字节（不走 JSON 信封）；门判定归应用层本缝不代偿
+        assertThat(body).containsExactly(bytes);
+    }
+
+    @Test
+    void given_project_when_preview_then_url_returned() throws Exception {
+        when(appService.preview(100L)).thenReturn(new ProjectPreviewResponse(
+                "http://localhost:30080"));
+
+        performAsUser(get("/api/projects/100/preview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.url").value("http://localhost:30080"));
+    }
+
+    @Test
+    void given_prd_in_workspace_when_get_prd_then_content_updated_at_and_readiness_returned() throws Exception {
+        // #331：PRD 读面带收敛度投影（分级缺项＋五维维度态——stub 用真实解析同构，
+        // 不手捏形态：#306 契约钉真实形态教训）
+        String prd = """
+                # 官网 PRD
+
+                ## 验收与待确认
+
+                ### 次要未知
+
+                1. 【验收】首屏文案口径未确认（假设：先出后改）
+                """;
+        when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
+                prd, Instant.ofEpochSecond(1756100000),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
+                /* draftChangeSummary= */ null));
+
+        performAsUser(get("/api/projects/100/prd"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.content").value(prd))
+                // Instant → ISO-8601（Jackson2ObjectMapperBuilder 缺省关时间戳）
+                .andExpect(jsonPath("$.data.updatedAt")
+                        .value(Instant.ofEpochSecond(1756100000).toString()))
+                // 收敛度投影：阻碍级空（门放行态）、次要条目（dimension 呈现词＋文本）、
+                // 五维固定序（验收维 minor=⚡、其余 ready=✓——「n/5」呈现面自数）
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.minor.length()").value(1))
+                .andExpect(jsonPath("$.data.readiness.minor[0].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.minor[0].text")
+                        .value("首屏文案口径未确认（假设：先出后改）"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].dimension").value("目标与角色"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[0].status").value("ready"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].dimension").value("验收"))
+                .andExpect(jsonPath("$.data.readiness.dimensions[4].status").value("minor"));
+    }
+
+    @Test
+    void given_parked_draft_change_when_get_prd_then_change_summary_returned() throws Exception {
+        // #334 改需求回路：范围级新草稿停驻待确认——PRD 读面带差异摘要（对话区
+        // 「PRD 已更新，确认新版后生成下一版 Demo」提示与确认门摘要层的数据面；
+        // 无停驻为 null，不占形）
+        String prd = "# 官网 PRD\n";
+        when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
+                prd, Instant.ofEpochSecond(1756100000),
+                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
+                "功能清单新增管理后台章：管理员可管理商品与订单"));
+
+        performAsUser(get("/api/projects/100/prd"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.draftChangeSummary")
+                        .value("功能清单新增管理后台章：管理员可管理商品与订单"));
+    }
+
+    @Test
+    void given_prd_not_produced_when_get_prd_then_prj_015_as_404() throws Exception {
+        // 「未产出」口径：404 PRJ_015（区别于项目不存在的 PRJ_001）——前端区分「还没产出」
+        when(queryAppService.prd(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+
+        performAsUser(get("/api/projects/100/prd"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4015))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    // ---------- PRD 确认版本（#330「确认即成版」：确认动作＋版本列表/详情） ----------
+
+    @Test
+    void given_draft_prd_when_confirm_then_version_returned() throws Exception {
+        when(prdVersionAppService.confirm(100L)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
+
+        // 确认即成版：回执携带版本号（#332 生成加门的挂点——确认后自动派 Demo run 消费）
+        // ＋收敛度投影（fail-open 空态：无「验收与待确认」章——五维全 ready）
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"))
+                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
+    }
+
+    @Test
+    void given_prd_not_produced_when_confirm_then_prj_015_as_404() throws Exception {
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4015))
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+    }
+
+    @Test
+    void given_blocking_pending_when_confirm_then_prj_053_as_409() throws Exception {
+        // 两级门拦截（#331）：阻碍核心流程缺项在场——确认被拦，前端认数字码 4053
+        //（缺项明细经 PRD 读面 readiness 拉取呈现，信封只载码＋消息）
+        when(prdVersionAppService.confirm(100L))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING));
+
+        performAsUser(post("/api/projects/100/prd/confirm"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4053))
+                .andExpect(jsonPath("$.message").value("PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认"));
+    }
+
+    @Test
+    void given_confirmed_versions_when_list_then_newest_first_without_content() throws Exception {
+        when(prdVersionAppService.versions(100L)).thenReturn(List.of(
+                new PrdVersionSummaryResponse("100", 2,
+                        LocalDateTime.of(2026, 10, 17, 9, 0)),
+                new PrdVersionSummaryResponse("100", 1,
+                        LocalDateTime.of(2026, 10, 16, 12, 0))));
+
+        // 清单轻量形（不含全文——全文走单版详情）；versionNo 是小整数版本号（非 TSID，数值形）
+        performAsUser(get("/api/projects/100/prd/versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].confirmedAt").value("2026-10-17T09:00:00"))
+                .andExpect(jsonPath("$.data[1].versionNo").value(1))
+                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T12:00:00"));
+    }
+
+    @Test
+    void given_version_no_when_detail_then_full_text_returned() throws Exception {
+        when(prdVersionAppService.version(100L, 1)).thenReturn(new PrdVersionResponse("100", 1,
+                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
+                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
+
+        performAsUser(get("/api/projects/100/prd/versions/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(1))
+                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
+                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
+    }
+
+    @Test
+    void given_no_such_version_when_detail_then_prj_052_as_404() throws Exception {
+        when(prdVersionAppService.version(100L, 7))
+                .thenThrow(new ApplicationException(ProjectMessage.PRD_VERSION_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/prd/versions/7"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4052))
+                .andExpect(jsonPath("$.message").value("PRD 版本不存在"));
+    }
+
+    // ---------- Demo 版本（#333「版本化与确认标记」：清单＋确认动作） ----------
+
+    @Test
+    void given_demo_versions_when_list_then_newest_first_with_anchor_and_marker() throws Exception {
+        when(demoVersionAppService.versions(100L)).thenReturn(List.of(
+                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
+                        LocalDateTime.of(2026, 10, 17, 9, 0), null),
+                new DemoVersionSummaryResponse("100", 1, 1, "r-1",
+                        LocalDateTime.of(2026, 10, 16, 12, 0),
+                        LocalDateTime.of(2026, 10, 16, 13, 0))));
+
+        // 清单最新在前；prdVersionNo＝「Demo vN（基于 PRD vM 快照）」关联锚；confirmedAt
+        // 仅确认标记所在版非空（标记投影到行）
+        performAsUser(get("/api/projects/100/demo-versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].versionNo").value(2))
+                .andExpect(jsonPath("$.data[0].prdVersionNo").value(1))
+                .andExpect(jsonPath("$.data[0].runId").value("r-2"))
+                .andExpect(jsonPath("$.data[0].confirmedAt").doesNotExist())
+                .andExpect(jsonPath("$.data[1].versionNo").value(1))
+                .andExpect(jsonPath("$.data[1].confirmedAt").value("2026-10-16T13:00:00"));
+    }
+
+    @Test
+    void given_version_when_confirm_demo_then_summary_with_confirmed_at() throws Exception {
+        when(demoVersionAppService.confirm(100L, 2)).thenReturn(
+                new DemoVersionSummaryResponse("100", 2, 1, "r-2",
+                        LocalDateTime.of(2026, 10, 17, 9, 0),
+                        LocalDateTime.of(2026, 10, 17, 10, 0)));
+
+        // 「确认此版本，准备签约」：既有版本上打标记——回执＝所确认版本清单形
+        performAsUser(post("/api/projects/100/demo-versions/2/confirm"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.versionNo").value(2))
+                .andExpect(jsonPath("$.data.prdVersionNo").value(1))
+                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-17T10:00:00"));
+    }
+
+    @Test
+    void given_no_such_demo_version_when_confirm_then_prj_054_as_404() throws Exception {
+        when(demoVersionAppService.confirm(100L, 7))
+                .thenThrow(new ApplicationException(ProjectMessage.DEMO_VERSION_NOT_FOUND));
+
+        performAsUser(post("/api/projects/100/demo-versions/7/confirm"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(4054))
+                .andExpect(jsonPath("$.message").value("Demo 版本不存在"));
+    }
+
+    // ---------- 文件树 / 文件内容（#27 文件模式只读浏览） ----------
+
+    @Test
+    void given_workspace_files_when_get_files_then_sorted_entries_returned() throws Exception {
+        when(queryAppService.files(100L)).thenReturn(new ProjectFilesResponse("100",
+                List.of(new ProjectFilesResponse.FileEntry("AGENTS.md", 7),
+                        new ProjectFilesResponse.FileEntry("docs/PRD.md", 12))));
+
+        performAsUser(get("/api/projects/100/files"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId").value("100"))
+                .andExpect(jsonPath("$.data.files[0].path").value("AGENTS.md"))
+                .andExpect(jsonPath("$.data.files[0].size").value(7))
+                .andExpect(jsonPath("$.data.files[1].path").value("docs/PRD.md"))
+                .andExpect(jsonPath("$.data.files[1].size").value(12));
+    }
+
+    @Test
+    void given_unknown_project_when_get_files_then_prj_001_as_404() throws Exception {
+        when(queryAppService.files(404L))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(get("/api/projects/404/files"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_text_file_when_get_content_then_path_and_body_returned() throws Exception {
+        when(queryAppService.fileContent(100L, "src/app.ts"))
+                .thenReturn(new ProjectFileContentResponse("src/app.ts", "export const a = 1;\n"));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "src/app.ts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.path").value("src/app.ts"))
+                .andExpect(jsonPath("$.data.content").value("export const a = 1;\n"));
+        verify(queryAppService).fileContent(100L, "src/app.ts");
+    }
+
+    @Test
+    void given_missing_file_when_get_content_then_prj_021_as_404() throws Exception {
+        when(queryAppService.fileContent(100L, "src/gone.ts"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_FOUND));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "src/gone.ts"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("文件不存在"));
+    }
+
+    @Test
+    void given_non_viewable_path_when_get_content_then_prj_020_as_400() throws Exception {
+        // 非交付物/机密/逃逸路径在判定层拒绝：400 PRJ_020（工作区不被触达）
+        when(queryAppService.fileContent(100L, "data/pg/base.sql"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_PATH_INVALID));
+
+        performAsUser(get("/api/projects/100/files/content").param("path", "data/pg/base.sql"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不在可浏览范围"));
+    }
+
+    @Test
+    void given_oversized_or_binary_file_when_get_content_then_prj_022_023_as_400() throws Exception {
+        // 超大小上限（容器侧拦截不读取）与非文本：同 400 口径、错误码可分辨
+        when(queryAppService.fileContent(100L, "big.log"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_TOO_LARGE));
+        performAsUser(get("/api/projects/100/files/content").param("path", "big.log"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("文件太大，暂不支持在线查看"));
+
+        when(queryAppService.fileContent(100L, "logo.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_TEXTUAL));
+        performAsUser(get("/api/projects/100/files/content").param("path", "logo.png"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不是文本文件，暂不支持在线查看"));
+    }
+
+    // ---------- 图片 raw 直出（#283 点看图片 inline 大图） ----------
+
+    @Test
+    void given_image_file_when_raw_then_real_content_type_and_inline_bytes_returned() throws Exception {
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01};
+        when(queryAppService.fileRaw(100L, "materials/ref.png"))
+                .thenReturn(new ProjectFileRawResponse(png, "image/png"));
+
+        byte[] body = performAsUser(get("/api/projects/100/files/raw")
+                        .param("path", "materials/ref.png"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                // inline 呈现语义（源码包是 attachment）＋ SVG 脚本面收口头
+                .andExpect(header().string("Content-Disposition", "inline; filename=\"ref.png\""))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(header().string("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(body).containsExactly(png); // 真实图片字节（不走 JSON 信封，含 NUL 原样）
+    }
+
+    @Test
+    void given_raw_guards_when_raw_then_prj_038_022_021_020_mapped() throws Exception {
+        // 非图片扩展名：raw 只伺服图片——400 PRJ_038（数字码 4038）
+        when(queryAppService.fileRaw(100L, "src/app.ts"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_IMAGE));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "src/app.ts"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4038))
+                .andExpect(jsonPath("$.message").value("该文件暂不支持在线查看"));
+
+        // 超图片查看上限（25 MiB，容器侧拦截）：与文本上限同码族 PRJ_022
+        when(queryAppService.fileRaw(100L, "materials/huge.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_TOO_LARGE));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "materials/huge.png"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("文件太大，暂不支持在线查看"));
+
+        // 文件不存在：PRJ_021（与文本点看同口径）
+        when(queryAppService.fileRaw(100L, "materials/gone.png"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_NOT_FOUND));
+        performAsUser(get("/api/projects/100/files/raw").param("path", "materials/gone.png"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("文件不存在"));
+
+        // 非交付物/机密/逃逸：判定层拒绝 PRJ_020（工作区不被触达）
+        when(queryAppService.fileRaw(100L, ".env"))
+                .thenThrow(new ApplicationException(ProjectMessage.FILE_PATH_INVALID));
+        performAsUser(get("/api/projects/100/files/raw").param("path", ".env"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该文件不在可浏览范围"));
+    }
+
+    // ---------- 指令区发言 / 问答卡作答（#19 需求环①） ----------
+
+    @Test
+    void given_message_when_post_then_run_id_returned() throws Exception {
+        // #47 入口三分类：/messages 走派发入口（runId = 所派运行，分支归应用层测试）
+        when(dispatchAppService.dispatch(100L, "目标用户主要是海外客户", null, null, null))
+                .thenReturn(new DispatchAppService.DispatchRun("run-9"));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"目标用户主要是海外客户\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.runId").value("run-9"));
+    }
+
+    @Test
+    void given_scoped_message_with_divergence_when_post_then_enum_code_bound() throws Exception {
+        // #294 作用域发言携发散度：BaseEnum Integer code 双向（endpointType 先例）——
+        // 3=REIMAGINE 绑定到枚举后透传派发
+        when(dispatchAppService.dispatch(eq(100L), eq("换个方向"), any(), eq(1),
+                eq(DesignDivergence.REIMAGINE)))
+                .thenReturn(new DispatchAppService.DispatchRun("run-11"));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"换个方向\",\"designItem\":1,\"divergence\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-11"));
+        verify(dispatchAppService).dispatch(eq(100L), eq("换个方向"), any(), eq(1),
+                eq(DesignDivergence.REIMAGINE));
+    }
+
+    @Test
+    void given_message_with_two_form_attachments_when_post_then_both_bound_and_dispatched() throws Exception {
+        // #286 附件两形态（圈注 + 图片物料）在 REST 契约层绑定并透传派发——
+        // image 形态载荷＝工作区路径引用、不带字节
+        AtomicReference<List<MessageAttachment>> dispatched =
+                new AtomicReference<>();
+        when(dispatchAppService.dispatch(any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    dispatched.set(invocation.getArgument(2));
+                    return new DispatchAppService.DispatchRun("run-10");
+                });
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"content":"照这张参考图改",
+                                 "attachments":[
+                                   {"attachmentType":"image","name":"logo.png",
+                                    "path":"materials/3897654321098765432-logo.png"},
+                                   {"attachmentType":"annotation","annotation":{
+                                     "kind":"select","anchor":{"selector":"#hero"}}}]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.runId").value("run-10"));
+
+        List<MessageAttachment> attachments = dispatched.get();
+        assertThat(attachments).hasSize(2);
+        assertThat(attachments.get(0).hasImage()).isTrue();
+        assertThat(attachments.get(0).path()).isEqualTo("materials/3897654321098765432-logo.png");
+        assertThat(attachments.get(1).hasAnnotation()).isTrue();
+    }
+
+    @Test
+    void given_blank_or_oversized_message_when_post_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\" \"}"))
+                .andExpect(status().isBadRequest());
+        // #294 发散度非法档位码：BaseEnum Integer code 绑定面 400（零派发调用）
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"改稿\",\"designItem\":1,\"divergence\":9}"))
+                .andExpect(status().isBadRequest());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"" + "长".repeat(5001) + "\"}"))
+                .andExpect(status().isBadRequest());
+        verify(dispatchAppService, never()).dispatch(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void given_archived_project_when_post_message_then_prj_013_as_409() throws Exception {
+        // 归档即指令区关闭（只读终态）
+        when(dispatchAppService.dispatch(100L, "再改改", null, null, null))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"再改改\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4013))
+                .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
+    }
+
+    @Test
+    void given_pending_question_when_post_message_then_prj_024_as_409() throws Exception {
+        // 挂起问答守卫的 REST 契约（#40 / ADR-0005）：问答待答期间 /messages 同步
+        // 409 指路作答——直连调用方不再 200 后异步撞死（本条锁码到状态映射，
+        // 行为由应用层守卫测试驱动）
+        when(dispatchAppService.dispatch(100L, "测试：请继续", null, null, null))
+                .thenThrow(new ApplicationException(ProjectMessage.QUESTION_PENDING));
+
+        performAsUser(post("/api/projects/100/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"测试：请继续\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(4024))
+                .andExpect(jsonPath("$.message").value("当前有问题待答复，请对问答卡作答后再发送新消息"));
+    }
+
+    @Test
+    void given_unknown_project_when_post_message_then_prj_001_as_404() throws Exception {
+        when(dispatchAppService.dispatch(404L, "你好", null, null, null))
+                .thenThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+
+        performAsUser(post("/api/projects/404/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"你好\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_question_answer_when_answer_then_ok_and_facts_passed() throws Exception {
+        // qid（路径）= 挂起事件 engineRef；请求体回传 runId + data.toolCalls 原样 + 答复
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9",
+                                 "toolCalls":[{"id":"tc-1","name":"ask_user",
+                                               "input":{"question":"目标用户是谁？"}}],
+                                 "answer":"海外企业客户"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(mainAgentAppService).answerQuestion(100L, "run-9", "reply-7",
+                List.of(Map.of("id", "tc-1", "name", "ask_user",
+                        "input", Map.of("question", "目标用户是谁？"))),
+                "海外企业客户");
+    }
+
+    @Test
+    void given_blank_answer_when_answer_then_rejected_as_400() throws Exception {
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":" "}
+                                """))
+                .andExpect(status().isBadRequest());
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[],"answer":"有"}
+                                """))
+                .andExpect(status().isBadRequest());
+        verify(mainAgentAppService, never()).answerQuestion(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void given_archived_or_unknown_project_when_answer_then_mapped() throws Exception {
+        doThrow(new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED))
+                .when(mainAgentAppService).answerQuestion(eq(100L), any(), any(), any(), any());
+
+        performAsUser(post("/api/projects/100/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":"企业客户"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("项目已归档（归档是单向终点）"));
+
+        doThrow(new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND))
+                .when(mainAgentAppService).answerQuestion(eq(404L), any(), any(), any(), any());
+        performAsUser(post("/api/projects/404/questions/reply-7/answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"runId":"run-9","toolCalls":[{"id":"tc-1","name":"ask_user"}],
+                                 "answer":"企业客户"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("项目不存在"));
+    }
+
+    @Test
+    void given_prd_produced_when_detail_then_prd_produced_at_returned() throws Exception {
+        // 成果区长出判据透出：闲聊期 null（指令区占满全宽），产出后有时点
+        when(queryAppService.detail(100L)).thenReturn(
+                detailOf("100", ProjectStatus.IN_PROGRESS, false,
+                        LocalDateTime.of(2026, 8, 31, 9, 0), GenerationState.GENERATING));
+
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.prdProducedAt").value("2026-08-31T09:00:00"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.NEVER_GENERATED));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(jsonPath("$.data.prdProducedAt").value((Object) null));
+    }
+
+    @Test
+    void given_generation_states_when_detail_then_projection_returned() throws Exception {
+        // 生成态四态投影透出（#222）：Integer code + *Name 随行——与 SSE 会话态无关，
+        // 前端档位与「继续生成」出口的推导输入
+        when(queryAppService.detail(100L)).thenReturn(
+                detailOf("100", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.INTERRUPTED));
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.generationState").value(3))
+                .andExpect(jsonPath("$.data.generationStateName").value("生成中断"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.GENERATED));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(jsonPath("$.data.generationState").value(4))
+                .andExpect(jsonPath("$.data.generationStateName").value("已生成"));
+    }
+
+    @Test
+    void given_segments_when_detail_then_plan_list_returned() throws Exception {
+        // 生成轨道片清单透出（#225 计划区只读读模型）：ord/描述/状态 code + *Name
+        // 按库序透出；缺计划 = 字段缺席（前端不渲染计划区、不伪造计划）
+        when(queryAppService.detail(100L)).thenReturn(detailOf("100", ProjectStatus.IN_PROGRESS,
+                false, LocalDateTime.of(2026, 9, 20, 9, 0), GenerationState.GENERATING,
+                List.of(
+                        new GenerationSegmentResponse(0, "系统初始化", GenerationSegmentStatus.CLOSED,
+                                GenerationSegmentStatus.CLOSED.getName()),
+                        new GenerationSegmentResponse(1, "用户能注册登录", GenerationSegmentStatus.PENDING,
+                                GenerationSegmentStatus.PENDING.getName()))));
+        performAsUser(get("/api/projects/100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments.length()").value(2))
+                .andExpect(jsonPath("$.data.segments[0].ord").value(0))
+                .andExpect(jsonPath("$.data.segments[0].description").value("系统初始化"))
+                .andExpect(jsonPath("$.data.segments[0].status").value(2))
+                .andExpect(jsonPath("$.data.segments[0].statusName").value("已收口"))
+                .andExpect(jsonPath("$.data.segments[1].status").value(1))
+                .andExpect(jsonPath("$.data.segments[1].statusName").value("待跑"));
+
+        when(queryAppService.detail(101L)).thenReturn(
+                detailOf("101", ProjectStatus.IN_PROGRESS, false, null,
+                        GenerationState.NEVER_GENERATED));
+        performAsUser(get("/api/projects/101"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.segments").value((Object) null));
+    }
+
+    // ---------- 夹具 ----------
+
+    /** 详情夹具（列表字段全量的最小可用形态；prdProducedAt/generatedAt 缺省未产出、生成态缺省从未生成、片清单缺省无）。 */
+    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived) {
+        return detailOf(id, status, archived, null, GenerationState.NEVER_GENERATED);
+    }
+
+    /** 详情夹具（携片清单——#225 计划区透出面）。 */
+    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
+            LocalDateTime prdProducedAt, GenerationState generationState,
+            List<GenerationSegmentResponse> segments) {
+        return ProjectDetailResponseFixture.detailOf(id, "官网 demo")
+                .workspaceId("900")
+                .status(status)
+                .archived(archived)
+                .prdProducedAt(prdProducedAt)
+                .generationState(generationState)
+                .segments(segments)
+                .build();
+    }
+
+    private ProjectDetailResponse detailOf(String id, ProjectStatus status, boolean archived,
+            LocalDateTime prdProducedAt, GenerationState generationState) {
+        return detailOf(id, status, archived, prdProducedAt, generationState, null);
+    }
+
+    /**
+     * MVC 切片不含 cartisan-web autoconfig，手动注册其全局异常处理器
+     * （BaseEnum Jackson 序列化经类级 @Import 引入，对齐生产序列化行为）。
+     */
+    static class ExceptionAdviceConfig {
+
+        @Bean
+        public GlobalExceptionHandler globalExceptionHandler() {
+            return new GlobalExceptionHandler();
+        }
+    }
+
+    /**
+     * query param 的 BaseEnum 按 code 绑定走 CartisanWebAutoConfiguration
+     * 注册的 converter factory（切片不含该 autoconfig，此处对齐注册——
+     * status=1 → ProjectStatusFilter.ACTIVE）。
+     */
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class EnumParamBindingConfig implements WebMvcConfigurer {
+
+        @Override
+        public void addFormatters(FormatterRegistry registry) {
+            registry.addConverterFactory(new BaseEnumConverter());
+        }
+    }
+}

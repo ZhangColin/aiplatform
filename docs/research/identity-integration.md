@@ -2,10 +2,10 @@
 
 > 调研票：[#4](https://github.com/ZhangColin/aiplatform-server/issues/4)（wayfinder:research），产出供 A2 规格票（#6）消费。
 >
-> 信息源（约定：**不读 aieducenter-identity 源码本体**）：
+> 信息源（约定：**不读 semgravio-identity 源码本体**）：
 > - app-registry swagger `http://localhost:8088/v3/api-docs`（已拉取成功）
 > - identity swagger `http://localhost:10001/v3/api-docs`（已拉取成功）
-> - SSO demo 参考实现 `~/workspace/aieducenter-identity/demo/`（demo-backend + demo-web）
+> - SSO demo 参考实现 `~/workspace/semgravio-identity/demo/`（demo-backend + demo-web）
 > - 本仓库 `docs/guide/cartisan-boot-使用手册.md` §1.8 + cartisan-openapi 0.1.0-SNAPSHOT 依赖 jar（本仓库 pom 声明的框架模块，反编译核对签名算法）
 >
 > 调研日期：2026-08-19。两个服务均已启动，swagger 均可访问；无「服务未启动」缺口。
@@ -27,7 +27,7 @@
 
 | 项 | 值 | 说明 |
 |---|---|---|
-| issuer | `https://identity.aieducenter.com` | 生产 issuer；local 实际入口 `http://identity.localhost:10001`（demo 配置实证） |
+| issuer | `https://identity.semgravio.com` | 生产 issuer；local 实际入口 `http://identity.localhost:10001`（demo 配置实证） |
 | authorization_endpoint | `/authorize` | 有 SSO 会话发 code 302；无则 302 登录页 |
 | token_endpoint | `/token` | code 换 access/id/refresh；refresh 轮换 |
 | userinfo_endpoint | `/userinfo` | Bearer access_token 换资料（按 scope） |
@@ -158,7 +158,7 @@ cartisan:
 |---|---|---|
 | `client_id` + `client_secret` | `POST /api/app-registry/apps/{appId}/sso-clients/credentials`（无则创建，有则仅重置 secret；**client_id 终身稳定，secret 一次性明文返回**） | 存我方后端环境变量；轮换 secret 不换 client_id |
 | apiKey=aiplatform 的 `apiSecret` | `POST /api/app-registry/apps/{appId}/api-keys`（一次性明文） | 已注册 apiKey=aiplatform；secret 由持管理权限者发放 |
-| 各环境 identity issuer 地址 | 人工告知（local：`http://identity.localhost:10001`；生产 discovery 标 `https://identity.aieducenter.com`） | discovery 端点可直接探测 |
+| 各环境 identity issuer 地址 | 人工告知（local：`http://identity.localhost:10001`；生产 discovery 标 `https://identity.semgravio.com`） | discovery 端点可直接探测 |
 
 ### 3.3 我方**后端**（aiplatform-server）配置（对照 demo `SsoProperties` 七项 + openapi 两项）
 
@@ -212,7 +212,7 @@ cartisan:
 
 | 文件 | 内容 |
 |---|---|
-| `demo/demo-backend/src/main/java/com/aieducenter/demobff/sso/AuthController.java` | `/auth/login` `/auth/callback` `/auth/logout` 三端点（state/nonce、cookie、错误兜底） |
+| `demo/demo-backend/src/main/java/com/semgravio/demobff/sso/AuthController.java` | `/auth/login` `/auth/callback` `/auth/logout` 三端点（state/nonce、cookie、错误兜底） |
 | `.../sso/OidcClient.java` | authorizeUrl / exchangeCode / logoutUrl / decodeIdToken / randomToken |
 | `.../sso/BffSessionStore.java`、`BffSession.java` | 服务端会话存储（内存版，我方换 Redis） |
 | `.../sso/MeController.java` | `/api/me` 凭 cookie 返用户 |

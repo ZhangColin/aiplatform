@@ -1,0 +1,206 @@
+package com.semgravio.aiplatform.base.eventhub.application;
+
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Predicate;
+
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.cartisan.data.jpa.id.TsidGenerator;
+
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
+import com.semgravio.aiplatform.base.eventhub.infrastructure.sse.SseChannelHub;
+
+/**
+ * SSE 事件通道语义（SSE事件清单·单端点单流，#82 合并）：{@code GET /api/events}
+ * 的订阅与发射入口——一条流承载两族事件，<b>合并通道不合并语义</b>：
+ *
+ * <ul>
+ *   <li><b>智能体事件族</b>（{@link #publishAgentEvent}）：关联字段 {@code runId}
+ *       必带（{@code projectId} 由业务编排桥接注入）；进近期事件缓冲（断线补发族）
+ *       ——断线重连（Last-Event-ID 在场）先收缓冲中锚事件之后命中订阅过滤的事件
+ *       （断线窗口），新连接（刷新）不补发（对话史经 REST 水合，#89——重放缓冲
+ *       只承担断线窗口，不再承担刷新重建）。streamId = runId（id 行
+ *       {@code {runId}:{seq}}）。</li>
+ *   <li><b>平台通知族</b>（{@link #publishNotification}）：关联字段 {@code projectId}
+ *       必带；<b>不进缓冲</b>（{@code broadcastUnbuffered}）——只达实时订阅、新连接
+ *       不补发，「通知只作实时呈现、状态以查询为准」。streamId = projectId。</li>
+ * </ul>
+ *
+ * <p><b>订阅过滤与族投递</b>：{@code ?projectId=} / {@code ?runId=}（与 payload
+ * 关联字段同名，可叠用 AND；缺省 = 通知族全量）。智能体事件族只投递给带过滤
+ * （projectId 或 runId）的订阅——过程细节是项目内事实，无跨项目消费面；未过滤
+ * 订阅（站点级常开连接）只收平台通知族。Last-Event-ID 请求头作新连/重连分野：
+ * 有值（浏览器断线重连自动携带）= 断线补发（缓冲中锚事件之后的窗口），无值
+ * （新连接/刷新）= 不补发（#89 起——对话史水合归 REST，重放缓冲降级为断线补发）。</p>
+ *
+ * <p><b>订阅者归属隔离（ADR-0018，#208；#326 扩访客键）</b>：订阅握手绑定订阅者
+ * 归属（登录账号或访客），每事件以 {@code ownerAccountId}/{@code ownerGuestId}
+ * 双路由键携带归属（owner 双列互斥，恰带其一）；投递谓词统一叠加「事件归属 ==
+ * 订阅者」双键匹配（实时与重放同谓词），未过滤订阅语义 = 我的全部通知，他人
+ * projectId 过滤订阅 = 静默空流。归属由发布侧注入（本层不查库），两个发布口对
+ * 归属键强制校验（双键至少其一非空）、漏传发布期即炸——未来发布点结构性防漏。</p>
+ *
+ * <p>发射制：业务编排层在副作用真实落定后调用（base 区不发 SSE）；事件 type
+ * 名册见 docs/spec/SSE事件清单.md（代码侧引用 {@code XxxEventTypes} 常量类，
+ * 禁止字符串字面量散落）。</p>
+ */
+@Service
+public class EventsAppService {
+
+    /** 事件通道名（单端点单流，内核按名泛化）。 */
+    public static final String CHANNEL = "events";
+
+    /** 通知族关联字段（payload 字段与订阅过滤参数同名，ADR-0001 寻址）。 */
+    public static final String PROJECT_FIELD = "projectId";
+
+    /** 智能体事件族关联字段（正本 = {@link AgentEventTypes#RUN_FIELD}）。 */
+    public static final String RUN_FIELD = AgentEventTypes.RUN_FIELD;
+
+    /**
+     * 归属账号路由键（ADR-0018：#208 通道按订阅者隔离）：payload 字段，与
+     * projectId/runId 同 idiom；发布侧注入、投递谓词按「事件归属 == 订阅者」匹配。
+     * 前端不消费（路由键非内容——隔离修后只见自己的 accountId）。
+     */
+    public static final String OWNER_FIELD = "ownerAccountId";
+
+    /**
+     * 归属访客路由键（#326 访客域，ADR-0018 注记扩 guestId）：访客名下项目的事件
+     * 归属腿——与 {@link #OWNER_FIELD} 并立成对匹配（owner 双列互斥，事件恰带其一
+     * 非空；缺席视空串不匹配任何订阅）。前端不消费（路由键非内容）。
+     */
+    public static final String OWNER_GUEST_FIELD = "ownerGuestId";
+
+    private final SseChannelHub hub;
+
+    public EventsAppService(SseChannelHub hub, AgentEventProperties properties) {
+        this.hub = hub;
+        // 智能体事件族 = 带近期事件缓冲的热流（断线补发族，#89）：构造期注册，先于
+        // 任何订阅/广播（内核 fail-fast 约定）；通知族经 broadcastUnbuffered 逐发射豁免
+        hub.registerReplay(CHANNEL, properties.getReplayDepth());
+    }
+
+    /**
+     * 订阅事件流（单端点单流，两族混载）。订阅握手绑定订阅者归属（ADR-0018：
+     * 账户 {@code ownerAccountId} 或访客 {@code ownerGuestId}，/api/** 拦截面保证
+     * 二者至少其一在场——匿名 401），投递谓词叠加「事件归属 == 订阅者」双键匹配。
+     * 过滤参数可单用可叠用（AND），均为空 = 只收平台通知族（智能体事件族不投递给
+     * 未过滤订阅）；过滤参数维持纯兴趣选择——他人 projectId 的过滤订阅 = 静默空流
+     * （连接不断）。断线补发（#89 重放缓冲降级）：lastEventId 非空（浏览器断线重连
+     * 自动携带）——先收缓冲中锚事件之后命中过滤谓词的智能体事件（断线窗口，锚不在
+     * 缓冲则整段缓冲）再进实时流；空（新连接/刷新）不补发——对话史经 REST 水合，
+     * 重放缓冲只承担断线窗口、不再承担刷新重建。补发谓词与实时谓词同一（含归属与
+     * 族投递规则），通知族不在缓冲、天然不补发。
+     */
+    public SseEmitter subscribe(String ownerAccountId, String ownerGuestId, String projectId,
+            String runId, String lastEventId) {
+        return hub.subscribe(CHANNEL,
+                deliveryPredicate(ownerAccountId, ownerGuestId, projectId, runId), lastEventId);
+    }
+
+    /**
+     * 发射一条平台通知（fire-and-forget）。payload 必带关联字段 projectId 与归属
+     * 路由键（ownerAccountId / ownerGuestId 至少其一非空——owner 双列互斥，事件
+     * 恰带其一）——本层 fail-fast（漏传发布期即炸，未来发布点结构性防漏）；不进
+     * 重放缓冲（新连接不补发，REST 查询兜底）。
+     */
+    public void publishNotification(String type, Map<String, Object> payload) {
+        Object projectId = payload.get(PROJECT_FIELD);
+        if (projectId == null || projectId.toString().isBlank()) {
+            throw new IllegalArgumentException(
+                    "平台通知 payload 必带关联字段 " + PROJECT_FIELD + "（SSE事件清单·信封）");
+        }
+        requireOwner(payload, "平台通知");
+        hub.broadcastUnbuffered(CHANNEL, projectId.toString(), type, payload);
+    }
+
+    /**
+     * 发射一条智能体事件（fire-and-forget）。payload 必带关联字段 runId 与归属路由
+     * 键（ownerAccountId / ownerGuestId 至少其一非空）——本层 fail-fast（漏传发布
+     * 期即炸）；进重放缓冲（新连接按订阅过滤补发，断线重连不补发）。
+     */
+    public void publishAgentEvent(String type, Map<String, Object> payload) {
+        Object runId = payload.get(RUN_FIELD);
+        if (runId == null || runId.toString().isBlank()) {
+            throw new IllegalArgumentException(
+                    "智能体事件 payload 必带关联字段 " + RUN_FIELD + "（SSE事件清单·信封）");
+        }
+        requireOwner(payload, "智能体事件");
+        hub.broadcast(CHANNEL, runId.toString(), type, payload);
+    }
+
+    /**
+     * runId 生成（业务编排层用）：TSID 十进制字符串——编排层与底座同构的唯一生成口
+     * （SSE id / 库列 / 日志共用形）。
+     */
+    public static String newRunId() {
+        return Long.toString(TsidGenerator.newInstance().generate());
+    }
+
+    /**
+     * 归属路由键的载荷值（Long → 十进制字符串，账户键 {@link #OWNER_FIELD} 与访客键
+     * {@link #OWNER_GUEST_FIELD} 共用）：发布点从聚合取归属注入——账户/访客 owner
+     * 双列互斥，两键各注入（未落侧空串）。占位形聚合（测试/无会话上下文）双列皆
+     * 未落时两侧皆空串——被发布口按「漏传」拒发，也永不匹配任何真实订阅者
+     * （deny-by-default）。
+     */
+    public static String ownerPayload(Long ownerAccountId) {
+        return ownerAccountId == null ? "" : ownerAccountId.toString();
+    }
+
+    /**
+     * 投递谓词（实时与重放同源）：归属双键匹配（事件归属 == 订阅者，恒生效）+
+     * 字段过滤 AND + 族投递规则——智能体事件族（payload 携带 runId）只投递给带过滤
+     * 的订阅，未过滤订阅只收通知族。归属匹配不套 {@link #matches} 的空值跳过语义
+     * ——订阅者身份恒非空（匿名 401 拦截），事件归属漏传/空串即不达任何订阅。
+     */
+    private static Predicate<Map<String, Object>> deliveryPredicate(
+            String ownerAccountId, String ownerGuestId, String projectId, String runId) {
+        boolean filtered = notBlank(projectId) || notBlank(runId);
+        return payload -> sameOwner(payload, ownerAccountId, ownerGuestId)
+                && matches(payload, PROJECT_FIELD, projectId)
+                && matches(payload, RUN_FIELD, runId)
+                && (filtered || payload.get(RUN_FIELD) == null);
+    }
+
+    /**
+     * 归属匹配（路由键双键，恒生效）：账户键与访客键皆同值才投递（owner 双列互斥
+     * ——事件恰带其一非空、订阅者恰携其一）；键缺席视空串归一（不匹配非空订阅者
+     * 维度），空/漏即 deny。
+     */
+    private static boolean sameOwner(Map<String, Object> payload, String ownerAccountId,
+            String ownerGuestId) {
+        return Objects.equals(routingKeyOf(payload, OWNER_FIELD), nullToEmpty(ownerAccountId))
+                && Objects.equals(routingKeyOf(payload, OWNER_GUEST_FIELD),
+                        nullToEmpty(ownerGuestId));
+    }
+
+    /** 发布口归属键强制校验（与 projectId/runId 同级）：双键皆漏传/空串发布期即炸。 */
+    private static void requireOwner(Map<String, Object> payload, String family) {
+        if (routingKeyOf(payload, OWNER_FIELD).isBlank()
+                && routingKeyOf(payload, OWNER_GUEST_FIELD).isBlank()) {
+            throw new IllegalArgumentException(family + " payload 必带归属路由键（"
+                    + OWNER_FIELD + " / " + OWNER_GUEST_FIELD + " 至少其一，SSE事件清单·信封）");
+        }
+    }
+
+    /** 路由键载荷归一（缺席/空视空串——双键匹配的归一形）。 */
+    private static String routingKeyOf(Map<String, Object> payload, String field) {
+        Object value = payload.get(field);
+        return value == null ? "" : value.toString();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static boolean matches(Map<String, Object> payload, String field, String expected) {
+        return expected == null || expected.isBlank()
+                || Objects.equals(String.valueOf(payload.get(field)), expected);
+    }
+}

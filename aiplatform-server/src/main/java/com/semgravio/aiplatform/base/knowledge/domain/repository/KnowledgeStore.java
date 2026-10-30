@@ -1,0 +1,75 @@
+package com.semgravio.aiplatform.base.knowledge.domain.repository;
+
+import java.time.Instant;
+import java.util.List;
+
+import com.semgravio.aiplatform.base.knowledge.domain.enums.MaterialStatus;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
+import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialRecord;
+import com.semgravio.aiplatform.base.knowledge.domain.model.MaterialSearchResult;
+import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+
+/**
+ * 知识存取（素材登记表 {@code knw_materials} + 块表 {@code knw_chunks}）：素材
+ * 身份、状态与操作者落登记表（单一事实源），块表只存内容与向量。pgvector 向量
+ * 列超出 JPA 映射面，写读两侧都走原生 SQL（照 {@code UsageEventAggregations}
+ * 先例：接口在 domain/repository，JdbcTemplate 实现在 infrastructure，不挂
+ * Spring Data 仓储）。
+ */
+public interface KnowledgeStore {
+
+    /**
+     * 幂等落库：登记表 upsert（保 id/状态/操作者/首沉淀时间，只刷新展示字段）
+     * ＋ {@code (kind, sourceRef)} 块删后插，同一事务内完成（新旧块原子切换、
+     * 停用状态跨重沉淀存活）。embeddings 与 {@link KnowledgeSpec#chunks()}
+     * 同序同量（调用方保证）。
+     */
+    void replace(KnowledgeSpec spec, List<float[]> embeddings);
+
+    /**
+     * 余弦相似检索（HNSW 索引）：全局跨项目、按相似度升序取 topK（A5 §3 策略）；
+     * 仅启用素材的块参与命中（停用素材整体退出，#153）。
+     */
+    List<KnowledgeHit> findSimilar(float[] queryVector, int topK);
+
+    /**
+     * 素材状态迁移（停用⇄启用，#153 可逆开关）：落状态与最近管理动作操作者。
+     *
+     * @return 素材不存在（未沉淀过）返回 false，由调用方定域内语义
+     */
+    boolean setStatus(String kind, String sourceRef, MaterialStatus status, Operator operator);
+
+    /**
+     * 按项目清理登记行与全部知识块（级联清理入口，A5 §5；照删含已停用素材）。
+     */
+    void deleteByProject(String projectId);
+
+    /**
+     * 登记行按 id 直读（#166 管理端点寻址：素材 id 即 URL 柄）。
+     *
+     * @return 查无返回 null，由调用方定 404 语义
+     */
+    MaterialRecord findMaterial(long id);
+
+    /**
+     * 素材清单检索（#166 管理读面，登记表单表查询）：状态单选（null＝全部）＋
+     * 沉淀时间闭区间（null 侧不限）＋来源项目 id 精确（null/空白＝不过滤），
+     * 排序沉淀时间倒序、id 倒序稳定；SQL 侧分页（offset/limit 由调用方换算）。
+     */
+    MaterialSearchResult searchMaterials(MaterialStatus status, Instant sunkFrom, Instant sunkTo,
+                                         String projectId, int offset, int limit);
+
+    /**
+     * 素材块文本按 seq 升序（#166 详情全文拼装入料）。
+     */
+    List<String> chunksOf(String kind, String sourceRef);
+
+    /**
+     * 治理删除素材（#166）：登记行与全部块同事务移除、不动来源项目（与
+     * {@link #deleteByProject} 项目级联正交）。无行可留、不留痕。
+     *
+     * @return 素材不存在返回 false，由调用方定 404 语义
+     */
+    boolean deleteMaterial(long id);
+}

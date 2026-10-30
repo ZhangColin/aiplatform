@@ -21,7 +21,7 @@
 
 ### 鉴权：不用 cartisan-security，BFF 照 identity demo
 
-- **不引入 cartisan-security（Sa-Token 一并不要）**。认证以 identity 服务为正主：OIDC 授权码 + BFF 形态，照 `aieducenter-identity/demo/demo-backend` 实现——`/auth/login`、`/auth/callback`、`/auth/logout` + `/api/me`；自管内存会话（不透明 cookie，token 三件套只在服务端）；配置 `sso.*` 七项。
+- **不引入 cartisan-security（Sa-Token 一并不要）**。认证以 identity 服务为正主：OIDC 授权码 + BFF 形态，照 `semgravio-identity/demo/demo-backend` 实现——`/auth/login`、`/auth/callback`、`/auth/logout` + `/api/me`；自管内存会话（不透明 cookie，token 三件套只在服务端）；配置 `sso.*` 七项。
 - cartisan-security 的 `SecurityFilter` 原负责把 userId/userName 写入 RequestContext——改为**自写同等小 filter**（BFF 会话 → RequestContext），业务代码读法不变；401/403 映射进自己的全局异常处理。角色/权限切面（Code-Canvas 授权矩阵）归 A2 票。
 - 机机调用走 cartisan-openapi 签名（`X-Api-Key/…/X-Sign`），与用户会话无关，不受影响。
 - identity 服务刚建，swagger 与行为不符处协作调整（例：`/token` swagger 误标 query、实测 form body）。

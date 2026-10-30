@@ -1,0 +1,1837 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import com.cartisan.core.exception.ApplicationException;
+
+import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.RunHeading;
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.workspace.application.ConvergenceFace;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceConvergenceAppService;
+import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
+import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
+import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
+import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
+import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
+import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
+import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
+import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门——「确认此版 PRD
+ * 并生成 Demo」成为首个构建 run 的唯一触发，旧「PRD 出即自动起」口径退役；
+ * #104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
+ * 首次生成由确认动作触发（{@link #dispatchFirstDemoOnConfirm}，确认即成版后自动
+ * 派首个 Demo run），显式端点（POST /generate）与中断「继续生成」兜底走同一编排
+ * （{@link #startGeneration}——重发即断点续跑，#221）。
+ * run 执行体与主智能体
+ * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
+ * 极薄），仅资产与工具不同：会话每片/每 run 换新（#114 会话有界——每片新会话
+ * {@code coder-{projectId}-slice-{n}}，重试续本片会话）、配置 = 平台技术约定
+ * + 实现协议（{@link AgentProfile#EXECUTOR}）、无业务工具（编码工具由 harness
+ * 内核自带）。
+ *
+ * <p><b>生成轨道（#104）</b>：按切片计划（{@link BuildPlan}，主智能体产出的有序
+ * 纵向切片）顺序多 run——阶段 0（先起服白底页）固定前置，此后逐片长出。每片收口
+ * 判据 = 8081 可达（平台侧检查点） + 成版 + run-finish（收口扩载；「端到端可操作」
+ * 由片内 verify 兜）。失败语义：某片超限转终态即发 {@code run-failed} 收口、
+ * 不自动跳下一片；{@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间
+ * 片不落位）。</p>
+ *
+ * <p><b>生成轨道表（#220，ADR-0020）</b>：切片计划与每片收口/失败状态落平台库
+ * （{@code prj_generation_segments}，「run 无表、重启即清」口径的精确例外）
+ * ——进程重启后计划与片进度仍可查，断点 = 表中最深收口片（续跑事实源）。计划
+ * 生命周期跟 PRD 版本走：落库时记 {@code prd_produced_at} 版本锚，PRD 演进即
+ * 锚不一致、旧计划不沿用，重产 = 整组替换。计划缺失不兜假计划（minimalFallback
+ * 已删）——重派主智能体按 PRD 补产（{@link MainAgentAppService#requestBuildPlan}，
+ * 补产轮收口自动再派生成）。</p>
+ *
+ * <p><b>断点续跑（#221，ADR-0020）</b>：「继续生成」从断点接续——跳过已收口片、
+ * 只重跑失败/中断片（断点后首段），起手带现状盘点（工作区现状指引＋切片进度＋
+ * 中断原因＋中断前摘要），交接机制与片间交接同构（平台拼轨道表事实、不产自由
+ * 文本）；全场景同一脏续口径（重试耗尽 run-failed 后重发、进程重启后重发）。
+ * 断点以轨道表为准、git 收口 commit（Run-Id 锚定收尾卡）为旁证；干净重做不设
+ * 默认路径——PRD 演进即计划重产从头来（用户的显式选择）。</p>
+ *
+ * <p><b>存量恢复（#223，ADR-0020「存量在途项目走计划重派路径恢复」）</b>：生成
+ * 早于轨道表的在途项目（表内无片行）发起「继续生成」＝计划重派恢复——补产轮
+ * 携已收口成果清单（收尾卡叙事，要求已完片照录原文），计划落库时对照收尾卡
+ * <b>精确匹配</b>（片收口叙事逐字相等）标已完片（run 锚 = 往次收口 run），续跑只补
+ * 缺口；措辞漂移即对照不上、按待跑重做（降级方向安全：多跑不漏做）。PRD 已演进
+ * 的换锚重产（表内有旧片行）不适用存量对照——整组替换重置、从头来是既定口径。</p>
+ *
+ * <p><b>生成加门（#332）</b>：首个构建 run 的唯一触发＝确认此版 PRD
+ * （{@link #dispatchFirstDemoOnConfirm}）——PRD 产出不再自动起（旧口径退役，
+ * ADR-0008 改写为确认门口径）。确认动作过两级门（#331）成版后自动派；未生成＋
+ * 已确认版本在场，用户重确认即再触发。确认后的小迭代照旧无门（受理即派、沿用
+ * 当前已确认 PRD）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
+ *
+ * <p><b>首 Demo 在途的意见排队补派（#360）</b>：首个构建 run 在途期间（generated_at
+ * 未落位）到达的意见轮，收口派发不再静默跳过——意见（原文＋需求侧修订说明）入队
+ * （{@link #firstDemoTurnOpinions}，修正轨 queuedFixRuns 同构的进程内态）＋对话面
+ * 平台明示（guide-reply 复用型，{@link #IN_FLIGHT_OPINION_NOTICE}）；生成<b>成功
+ * 收口</b>后排空队列，多条意见合并为一场更新 run 补派（{@link IterationAppService}
+ * 的逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。失败/停止收口不排空、
+ * 队列保留：「继续生成」续跑成功收口时再消化（不自锁）；补派起跑撞修正轨在途即
+ * 排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。意见零丢失之外仍留兜底：
+ * 进程内队列重启即清（同修正轨口径），用户重提即恢复。</p>
+ *
+ * <p><b>过程事件恒挂</b>：消息部件（解说段 + 动作卡）随全部智能体
+ * 事件流产出（parts 契约，前端长成工作消息）。</p>
+ *
+ * <p><b>知识命中前置注入</b>（#24 生成环③）：下发前以首试任务 prompt 检索知识库
+ * （query 截 2000 字、topK=5），命中块拼在任务 prompt <b>前</b>（知识是背景非
+ * 指令）；检索失败降级空注入、run 照旧下发。一次切入一次注入（#114 生成链首片）——
+ * 只在阶段 0 注入、切片不重注入（注入口径不膨胀）；单 run 内重试续本片会话（注入
+ * 块已在会话历史），不重检索不重注入。</p>
+ *
+ * <p><b>工作区布局资产就位</b>：下发前把平台约定写入工作区 AGENTS.md
+ * （幂等覆写，内容平台所有）——run 执行体经 harness 工作区上下文自读；
+ * PRD（docs/PRD.md）由主智能体先前写出，同样是智能体自读，平台不搬运。</p>
+ *
+ * <p><b>失败自动静默重试有限次＝原地修（#221）</b>（同工作区不丢数据——重试续
+ * 本片会话，已落盘成果保留；新尝试携带错误现场继续修，不重做已对的工作）：中间
+ * 失败不出用户面事件；每片超限转终态失败即发 {@code run-failed} 收口事件（#56，
+ * run 失败为唯一失败终态），由用户「继续生成」脏续兜底（断点续跑同路，不重头；
+ * generated_at 不落位 = 出口口径仍在）。最后一片
+ * 成功收口才落 {@code generated_at}（首次生成时点，单向置位——Demo 首版
+ * 成版锚）。</p>
+ */
+@Service
+@Slf4j
+public class GenerationAppService {
+
+    /**
+     * 任务级解说约定（#225 叙说密度放宽的拼装单点，任务 prompt 统一携带；执行体
+     * systemPrompt 的协议条同向但更详——两处措辞独立维护）。
+     */
+    static final String NARRATION_CONVENTION =
+            "过程解说只在关键节点（开工、重大转向、失败、收口）用一两句平实中文说明，"
+                    + "不必每组动作都配解说。";
+
+    /**
+     * 阶段 0 prompt（先起服，#104 生成轨道首段；#113 收敛为「模板就位 + 起服 +
+     * curl 确认」）：读 PRD 了解整体目标，工作区已内置基座工程（依赖预装），直接
+     * 在基座上把应用以最小可运行形态跑上 8081（白底骨架页即可），收口即白底页——
+     * 先于任何切片，解决「全程 503」的早可见；免选型、免初始化，总时长下压。
+     */
+    static final String STAGE0_RUN_PROMPT =
+            "系统初始化（先起服）：请完整阅读工作区 docs/PRD.md（需求正本）了解整体目标。"
+                    + "工作区已内置可运行的基座工程（TypeScript / Next.js / pnpm，依赖已预装），"
+                    + "无需选型或初始化——直接在基座上把应用以最小可运行形态跑上 8081 端口"
+                    + "（后台常驻，白底骨架页即可，暂不实现业务功能），收口前用 curl 确认 8081 可访问。"
+                    + NARRATION_CONVENTION;
+
+    /**
+     * 阶段 0 工作消息头部标题（#118）：非切片（先起服的固定水平工序）——只出标题、
+     * 无「（n/N）」进度（切片计划只含纵向切片，阶段 0 不在其列）。
+     */
+    static final String STAGE0_TITLE = "系统初始化";
+
+    /**
+     * 阶段 0 重试续作的本段任务描述（与首试 prompt 同口径的段叙事，重试拼装用）。
+     */
+    static final String STAGE0_RETRY_DESC = "先起服：应用以最小可运行形态跑上 8081";
+
+    /** 阶段 0 收口叙事（收尾卡 summary；#223 存量对照的匹配键）。 */
+    static final String STAGE0_CLOSING_SUMMARY = "起服了系统骨架";
+
+    /** 切片收口叙事前缀（收尾卡 summary；#223 存量对照的匹配键）。 */
+    static final String SLICE_CLOSING_PREFIX = "完成切片：";
+
+    /** 切片收口叙事（收尾卡 summary 的拼装单点——落口与存量对照同键）。 */
+    static String sliceClosingSummary(String slice) {
+        return SLICE_CLOSING_PREFIX + slice;
+    }
+
+    /**
+     * 重试续作 prompt（#104 分段口径；#221 原地修——携带错误现场；#323 重试携
+     * 进展现场）：同工作区不丢数据——已落盘成果保留、不重做已对的工作，针对上次
+     * 错误在现有成果上继续修完 <b>本段</b>任务（阶段 0 / 某片），不越段——切片逐段
+     * 由平台顺序派 run 决定，重试不替执行体跨到下一片（「做一点展示一点」的完整性
+     * 优先）。segmentDesc 即本段任务描述（与首试 prompt 同口径）；retryScene =
+     * 上次失败的重试现场（尝试环拼装——错误事实＋已干多久/干到哪的进展事实）。
+     */
+    static String retryRunPrompt(String segmentDesc, String retryScene) {
+        return "上一次尝试失败。\n" + retryScene + "\n工作区内已完成的成果"
+                + "仍然有效——不要重做已对的工作。请先检查现状（代码、依赖、数据、8081 "
+                + "端口服务是否在跑），针对该错误在现有成果上继续修复、完成本段任务"
+                + "（" + segmentDesc + "），收口前确认 8081 端口服务在跑、curl 可访问。";
+    }
+
+    /**
+     * 切片 prompt（#104 生成轨道逐段长出）：第 {@code index}/{@code total} 片，在
+     * 现有系统上增量实现「用户能 X」这一纵向切片（前端→后端→落库端到端走通、用户
+     * 可操作），系统其余部分保持可用。切片计划由主智能体产出（每片一句用户语言），
+     * 平台只顺序执行、不解析自由文本（ADR 0009）。
+     */
+    static String sliceRunPrompt(int index, int total, String slice) {
+        return "系统增量（切片 " + index + "/" + total + "）：请在现有系统上增量实现"
+                + "这一纵向切片——「" + slice + "」（前端到后端、数据落库端到端走通，"
+                + "用户可操作），保持系统其余部分可用，收口前确认 8081 端口服务在跑、"
+                + "curl 可访问。" + NARRATION_CONVENTION;
+    }
+
+    /**
+     * 首片 prompt（#339 首屏界面先行）：第一片先出可点的界面——主要页面与导航的
+     * 界面骨架一次搭出来（页面成型、可交互、预览立即可点），此片先不接数据与后端
+     * 逻辑、保持系统可运行；此后各片再逐片补数据与逻辑（{@link #sliceRunPrompt}
+     * 纵向切片形）。与主智能体的切片计划约定同向（{@link AgentProfile#MAIN} 第 5 条
+     * ／{@code MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT}）——让用户尽早看到
+     * 系统长出来，而非等全部片完才见东西。
+     */
+    static String firstSliceRunPrompt(int total, String slice) {
+        return "系统增量（切片 1/" + total + "，界面先行）：请在现有系统上先做出可点的界面"
+                + "——「" + slice + "」：把主要页面与导航的界面骨架一次搭出来（页面成型、"
+                + "可交互、预览立即可点），本片先不接数据与后端逻辑、保持系统可运行；"
+                + "收口前确认 8081 端口服务在跑、curl 可访问。" + NARRATION_CONVENTION;
+    }
+
+    /**
+     * 交接摘要产出约定（#114 片间交接）：每片/阶段 0 收口前，执行体自产交接摘要
+     * 作为最后一段话——平台取其收口终文（{@link CoderRunAttempts.RunResult#closingText}）
+     * 落 .platform/ 并注入下一片 prompt。三要素（做了什么/关键文件/下一片须知）由
+     * prompt 约定，平台不解析自由文本（不自造摘要机制，ADR 0012）。
+     */
+    static final String HANDOFF_PRODUCTION =
+            "\n收口前，用你最后一段话输出本片交接摘要（供下一片执行体接手），包含三要素："
+                    + "① 本片做了什么；② 关键文件（新增或修改的关键文件路径）；③ 下一片须知"
+                    + "（下一片执行体需要知道的关键上下文、未完成事项或注意事项）。";
+
+    /** 切片计划轨迹（#114 每片新会话后执行体自见全局）：全量有序清单，本片位置由切片任务自述。 */
+    static String planTrajectory(BuildPlan plan) {
+        StringBuilder trajectory = new StringBuilder("整体切片计划（按实现顺序）：");
+        for (int i = 0; i < plan.slices().size(); i++) {
+            trajectory.append('\n').append(i + 1).append(". ").append(plan.slices().get(i));
+        }
+        return trajectory.toString();
+    }
+
+    /** 前片交接摘要注入块（#114 片间交接）：下一片 prompt 直接携带前片终文。 */
+    static String previousHandoffBlock(String previousHandoff) {
+        return "上一片交接摘要（前片执行体所留，供你接手）：\n" + previousHandoff;
+    }
+
+    /**
+     * 定稿设计稿引用块（#291 稿入起跑上下文——ADR-0024「定稿稿以规范源身份经
+     * 起跑上下文喂系统轨」）：设计类终点全部定稿后的构建，每段 prompt 前置定稿
+     * 稿清单——执行体先读稿再动手，系统的配色、字体、圆角与整体视觉语感与定稿
+     * 稿保持一致（规范级提炼与校验归一致性桥 #295/#296）。空清单＝纯系统项目或
+     * 无定稿件，零注入。
+     */
+    static String finalizedDesignsContext(List<DesignItem> finalized) {
+        if (finalized.isEmpty()) {
+            return "";
+        }
+        StringBuilder block = new StringBuilder("本项目有已定稿的设计稿（设计先行——先读稿再动手：")
+                .append("系统的配色、字体、圆角与整体视觉语感与定稿稿保持一致）：\n");
+        for (DesignItem item : finalized) {
+            block.append("- 设计物「").append(item.getTitle()).append("」定稿稿：")
+                    .append(item.getFinalizedPath()).append('\n');
+        }
+        return block.append('\n').toString();
+    }
+
+    /**
+     * 片级上下文（#114 每片新会话）：首试与重试共用——重试可能落在空会话（首试
+     * converse 在引擎建会话前就失败，#84 静默重试恰覆盖此路径），故重试不能依赖
+     * 「会话历史自持前片摘要」，须自足携带同一份上下文。拼装 = PRD 引用 + 切片
+     * 计划轨迹 + 前片交接摘要 + 交接摘要产出约定。
+     */
+    static String segmentContext(BuildPlan plan, String previousHandoff) {
+        StringBuilder context = new StringBuilder("\n\n")
+                .append("先重读工作区 docs/PRD.md（需求正本）了解整体目标。")
+                .append("\n").append(planTrajectory(plan));
+        if (previousHandoff != null) {
+            context.append("\n\n").append(previousHandoffBlock(previousHandoff));
+        }
+        return context.append(HANDOFF_PRODUCTION).toString();
+    }
+
+    /** 阶段 0 首试 prompt（#114）：起服任务 + 片级上下文。 */
+    static String stage0Prompt(BuildPlan plan) {
+        return STAGE0_RUN_PROMPT + segmentContext(plan, null);
+    }
+
+    /**
+     * 切片首试 prompt（#114）：切片任务 + 片级上下文；#339 首片分岔——index 0 走
+     * {@link #firstSliceRunPrompt 界面先行}，此后各片走 {@link #sliceRunPrompt}
+     * 端到端纵向切片。
+     */
+    static String slicePrompt(BuildPlan plan, int index, String previousHandoff) {
+        String slice = plan.slices().get(index);
+        String task = index == 0
+                ? firstSliceRunPrompt(plan.slices().size(), slice)
+                : sliceRunPrompt(index + 1, plan.slices().size(), slice);
+        return task + segmentContext(plan, previousHandoff);
+    }
+
+    /** 生成轨重试续作 prompt（#114；#221/#323 重试现场）：续作任务 + 片级上下文（与首试同上下文）。 */
+    static String generationRetryPrompt(BuildPlan plan, String segmentDesc, String previousHandoff,
+            String retryScene) {
+        return retryRunPrompt(segmentDesc, retryScene) + segmentContext(plan, previousHandoff);
+    }
+
+    /** 生成轨会话寻址（#114 每片新会话）：段号 0 = 阶段 0，1..N = 切片，重试续本段会话。 */
+    static String sliceSession(Long projectId, int segment) {
+        return CoderRunAttempts.SESSION_PREFIX + projectId + "-slice-" + segment;
+    }
+
+    /**
+     * 续跑段会话寻址（#221 脏续新会话）：断点段（失败/中断片）续跑起新会话——不续
+     * 失败旧会话（重试耗尽的旧会话带着失败循环历史，且引擎会话状态不保证跨进程在），
+     * 现状盘点即起手交接（与片间交接同构）；会话内重试照旧续本会话。runId 后缀同
+     * 修正轨 {@code fix-{runId}} 惯例——每场续跑会话唯一。
+     */
+    static String resumeSession(Long projectId, int segment, String runId) {
+        return sliceSession(projectId, segment) + "-" + runId;
+    }
+
+    /** 交接摘要落盘路径（#114 .platform/ 平台产物目录，不进用户 git 成版）：段号对应切片序。 */
+    static String handoffFile(int segment) {
+        return WorkspaceLayout.PLATFORM_DIR + "/slice-handoff-" + segment + ".md";
+    }
+
+    /**
+     * 前片交接摘要读回（#221 续跑起手）：{@code .platform/slice-handoff-{n}.md} 是
+     * 交接摘要的落盘正本（#114 片间交接写下的透明面）——进程重启后内存终文不在，
+     * 续跑从工作区读回断点前片的交接作「中断前摘要」。读不回（未落盘/文件缺失）
+     * 降级 null：执行体重读 PRD 与计划轨迹自足（同重试落空会话的口径），不阻断续跑。
+     */
+    private String readSliceHandoff(Project project, int segment) {
+        try {
+            ExecResultResponse result = workspaceLifecycleAppService.exec(
+                    Long.toString(project.getWorkspaceId()),
+                    new WorkspaceExecCommand("cat '" + WorkspaceLayout.absolute(handoffFile(segment)) + "'"));
+            if (result.exitCode() == 0 && !result.stdout().isBlank()) {
+                return result.stdout().strip();
+            }
+            log.warn("[generate] 项目 {} 片 {} 交接摘要读回缺失（降级空交接，续跑不断流）：exitCode={}",
+                    project.getId(), segment, result.exitCode());
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 交接摘要读回失败（降级空交接，续跑不断流）：{}",
+                    project.getId(), segment, e.toString());
+        }
+        return null;
+    }
+
+    /**
+     * 续跑现状盘点块（#221 全场景脏续的起手交接，机制与片间交接同构——平台拼事实、
+     * 不产自由文本）：续跑断点段首试/重试 prompt 前置——已收口进度（轨道表事实：
+     * 阶段 0 + 逐片清单）、中断原因（失败 = 重试耗尽〔携最近错误现场〕/ 中断 =
+     * 未及收口）、续跑纪律（已收口成果不重做）。工作区现状的检查指引与「中断前
+     * 摘要」（前片交接）由任务 prompt 与 {@link #segmentContext} 携带，同片间交接
+     * 口径。
+     *
+     * <p><b>失败段的干净重做口径（#353）</b>：重试耗尽的失败段在终态前已回滚本段
+     * 起点（不变式）——续跑该段时工作区是干净现场：盘点的接手纪律从「保留已对的
+     * 工作脏续」换为「从头重做」（依赖与数据库不在回滚面、保持现状如实告知）；
+     * 中断段（未判死的现场）仍是脏续。</p>
+     */
+    static String resumeInventoryBlock(int startOrd, List<GenerationSegment> segments,
+            String failureScene) {
+        int totalSlices = segments.size() - 1;
+        StringBuilder progress = new StringBuilder();
+        GenerationSegment target = null;
+        for (GenerationSegment segment : segments) {
+            if (segment.getOrd() >= startOrd) {
+                target = segment; // 断点段（失败/中断片）——中断原因的叙事源
+                break;
+            }
+            if (progress.length() > 0) {
+                progress.append("、");
+            }
+            progress.append(segment.getOrd() == 0
+                    ? STAGE0_TITLE
+                    : "切片 " + segment.getOrd() + "/" + totalSlices + "「" + segment.getDescription() + "」");
+        }
+        boolean failed = target != null && target.getStatus() == GenerationSegmentStatus.FAILED;
+        String reason = failed
+                ? "上一次运行在本段自动重试耗尽后失败"
+                        + (failureScene == null ? "" : "（最近错误现场：" + failureScene + "）")
+                        + "；失败现场已回滚到本段起点——代码是干净现场（依赖与数据库不在回滚面、"
+                        + "保持现状），本段从头重做"
+                // 带现场的断点段（#359 用户停止——PENDING 非 FAILED）现场即中断原因；
+                // 无现场（进程重启等）回落通用口径
+                : failureScene != null ? failureScene
+                : "上一次运行在本段中断（未及收口）";
+        String takeover = failed
+                ? "- 接手本段先检查工作区现状（依赖、数据、8081 端口服务是否在跑），"
+                        + "从头完成本段任务。\n\n"
+                : "- 接手本段先检查工作区现状（代码、依赖、数据、8081 端口服务是否在跑），"
+                        + "保留已对的工作，从中断处继续完成本段任务。\n\n";
+        return "【续跑现状盘点】本次生成是从中断处接续，不是从头重来：\n"
+                + (progress.length() > 0
+                        ? "- 已收口进度：" + progress + "——这些段的成果都在工作区，不要重做。\n"
+                        : "- 已收口进度：尚无——前次运行未收口任何段，本次从第一段接续"
+                                + "（已做的工作若有仍在工作区）。\n")
+                + "- 中断原因：" + reason + "。\n"
+                + takeover;
+    }
+
+    /**
+     * AGENTS.md 平台约定正文（工作区布局资产，#22 就位）：工作区物理约定的正本
+     * ——harness 工作区上下文自动注入 run 执行体，也是后续迭代 run / 引擎资产的
+     * 演进载体。内容平台所有（无用户可控片段），幂等覆写。
+     */
+    static final String AGENTS_MD_CONTENT = """
+            # 工作区平台约定
+
+            本工作区是平台的单容器沙箱：Node.js 运行时与 PostgreSQL、Redis 同容器，/workspace 是唯一持久卷——容器可随时销毁重建，卷内数据不丢、卷外皆可弃。
+
+            ## 基座技术栈
+
+            工作区开箱即是一个可运行的基座工程（镜像内置、依赖已预装），技术栈固定：TypeScript / Next.js / React 19 / pnpm / shadcn（Tailwind 4）/ PostgreSQL / Redis。在基座上增量长出系统——不换栈、不重选型、不重新搭骨架；基座覆盖不了的依赖才在工作区现场安装（pnpm add），不要引入替代性框架。
+
+            - 应用代码放工作区根目录；docs/ 放文档（docs/PRD.md 是需求正本，只读）。
+            - external/ 是外部仓库资料目录：PRD 引用外部仓库时，把仓库浅克隆进 external/（git clone --depth 1 <仓库地址> external/<仓库名>），只读参考其 README/文档/源码结构、不合并进系统；此目录不进交付源码包、不在文件树显示、不进版本正本（随封存保全，非缓存）。
+            - 数据库连接串读 .env 的 DATABASE_URL（平台生成、唯一注入通道，勿手改）；需要缓存用 .env 的 REDIS_URL。
+            - 应用自用的文件数据必须落 data/ 目录（卷内才持久）。
+            - 应用服务必须监听 0.0.0.0:8081——平台预览从该端口取流量。
+            - 应用服务一开工就跑起来：先把可运行形态（最小骨架或空壳页面即可）跑上 8081 后台常驻，此后增量长出页面与功能、随改随生效——不要写完全部代码才起服务。
+            - 基座依赖已在镜像预装；新增依赖才在工作区现场安装（node_modules 属可重建物，打包交付时排除）。
+            - .platform/ 是平台产物目录，不要写入；本文件（AGENTS.md）由平台维护，不要修改。
+            - 每轮生成或修正收尾前，确认 8081 端口的服务在后台常驻运行——预览呈现的是活的服务。
+            """;
+
+    /**
+     * AGENTS.md 设计规范节（#296 遵守三件套②提示词注入的工作区腿——短条目优于
+     * 长段，Lovable 官方指引；带规范项目才拼入，无规范项目零改变）：DESIGN.md
+     * 指路每轮读＋token 纪律。事实面（token 清单/色板/风格）在 DESIGN.md，本节
+     * 只立规矩——两级各安其位。
+     */
+    static final String AGENTS_MD_DESIGN_SPEC_SECTION = """
+
+            ## 设计规范
+
+            本项目带设计规范正本：工作区根的 DESIGN.md（随设计定稿刷新、平台维护）——每轮开工先读，系统界面的颜色、字体、圆角与组件风格照它对齐（视觉正源＝定稿设计稿）。src/app/globals.css 的 :root 是 token 生效位，其中平台维护的「平台设计规范」@theme 块已收窄默认调色板（bg-red-500 等裸色工具类不可用）：样式一律引用语义 token 或品牌色 token（bg-brand-1 等），禁裸色、禁任意值（p-[13px]）、禁 inline style；需要新颜色时在 :root 定义 token 并在 @theme 暴露，不写死色值。token 清单与细则见 DESIGN.md。""";
+
+    /**
+     * 收口判据核验探针（#35）：converse 无异常不构成成功——run 执行体可能道歉式
+     * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 EXECUTOR systemPrompt
+     * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
+     * 端口有 HTTP 应答（连接拒绝即非 0）；{@code --max-time} 上限（#183）——收口
+     * 线程不被无响应对端挂死。
+     */
+    static final String CLOSING_PROBE = "curl -s --max-time 2 -o /dev/null http://localhost:8081";
+
+    /**
+     * 入口文件完整性探针（#339）：读预览入口文件（{@link ProjectFiles#BASELINE_ENTRY}
+     * 基座首页）内容——收口判据的第二件。取件退出码非 0 = 入口文件缺失（残缺），
+     * 内容含 {@link ProjectFiles#hasTruncationPlaceholder 「其余代码略」式截断占位}
+     * 也判残缺：残缺即不收口、驱动尝试环静默重试修全。命令全常量（路径平台固定，
+     * 无用户可控片段）。
+     */
+    static final String ENTRY_FILE_PROBE =
+            "cat '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ENTRY) + "'";
+
+    private final ProjectRepository projectRepository;
+    private final AgentSessionExecutor sessionExecutor;
+    private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
+    private final CoderRunAttempts coderRunAttempts;
+    private final AgentEventBridge eventBridge;
+    private final EventsAppService eventsAppService;
+    private final CodingRunTrack codingRunTrack;
+    private final GenerationSegmentRepository generationSegments;
+    private final DesignItemRepository designItems;
+    private final TransactionTemplate transactionTemplate;
+    private final MainAgentAppService mainAgentAppService;
+    private final ConversationHistoryAppService conversationHistory;
+    private final DesignSpecAppService designSpecs;
+    private final BuildDispatchPolicy buildDispatchPolicy;
+    private final DemoVersionAppService demoVersionAppService;
+    private final DemoSeedAppService demoSeed;
+    private final ProjectVersionAppService versions;
+    private final SliceParallelExecutor sliceParallelExecutor;
+    private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
+
+    /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
+    private final IterationAppService iterationAppService;
+
+    /**
+     * 计划补产账（#220 计划缺失兜底的防烧护栏，projectId → 已补产过的 PRD 版本锚）：
+     * 同一 PRD 版本只补产一次——补产轮收口仍无计划即止（用户重提意见即兜底；PRD
+     * 演进换锚可再补产）。进程内账，重启即清（重启后至多多补一轮）；计划落库即清账
+     * （补产已兑现）。
+     */
+    private final Map<Long, LocalDateTime> planProductionRequests = new ConcurrentHashMap<>();
+
+    /**
+     * 终态失败现场账（#221 续跑现状盘点的「中断原因」旁证，projectId → 最近一次
+     * 终态失败末次尝试的错误现场）：run-failed 时记下，同进程内「继续生成」的现状
+     * 盘点携带；跨进程丢失即降级为不携现场的失败叙事（轨道表状态才是事实源，本账
+     * 只是旁证）。续跑收口成功即清，再失败即覆写。
+     */
+    private final Map<Long, String> terminalFailureScenes = new ConcurrentHashMap<>();
+
+    /**
+     * 首 Demo 在途期间到达的意见轮（#360，projectId → 按收口序排队）：生成成功
+     * 收口后由 {@link #dispatchFirstDemoTurnOpinions} 排空合并补派一场更新 run；
+     * 失败/停止收口保留（「继续生成」续跑成功时消化）。进程内态与轨道状态同口径
+     * ——重启即清，用户重提即兜底（修正轨 queuedFixRuns 同构）。
+     */
+    private final Map<Long, List<TurnOpinion>> firstDemoTurnOpinions = new ConcurrentHashMap<>();
+
+    /**
+     * 一条在途意见轮的排队载荷（#360）：意见原文＋该轮需求侧判定（savePrd 修订
+     * 说明，null = 未修订）＋意见轮 runId（明示回执的对话面锚）——排空时逐轮
+     * 配对成修正轨交接物（{@link IterationAppService.FixHandoff.Round} 同形）。
+     */
+    record TurnOpinion(String opinion, String prdRevisionSummary, String turnRunId) {
+    }
+
+    /**
+     * @param mainAgentAppService 计划补产口（{@link MainAgentAppService#requestBuildPlan}）。
+     *        {@code @Lazy} 破主智能体编排与本服务的构造环：MainAgentAppService 收口派发
+     *        依赖本服务（既有方向），本服务计划缺失时重派主智能体补产（#220 新增方向）
+     *        ——环只此一处、以懒代理收口，行为仍是进程内直调。
+     */
+    public GenerationAppService(ProjectRepository projectRepository,
+            AgentSessionExecutor sessionExecutor,
+            WorkspaceLifecycleAppService workspaceLifecycleAppService,
+            CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
+            EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
+            GenerationSegmentRepository generationSegments, DesignItemRepository designItems,
+            TransactionTemplate transactionTemplate,
+            @Lazy MainAgentAppService mainAgentAppService,
+            ConversationHistoryAppService conversationHistory,
+            DesignSpecAppService designSpecs,
+            BuildDispatchPolicy buildDispatchPolicy,
+            DemoVersionAppService demoVersionAppService,
+            DemoSeedAppService demoSeed,
+            ProjectVersionAppService versions,
+            SliceParallelExecutor sliceParallelExecutor,
+            WorkspaceConvergenceAppService workspaceConvergenceAppService,
+            IterationAppService iterationAppService) {
+        this.projectRepository = projectRepository;
+        this.sessionExecutor = sessionExecutor;
+        this.workspaceLifecycleAppService = workspaceLifecycleAppService;
+        this.coderRunAttempts = coderRunAttempts;
+        this.eventBridge = eventBridge;
+        this.eventsAppService = eventsAppService;
+        this.codingRunTrack = codingRunTrack;
+        this.generationSegments = generationSegments;
+        this.designItems = designItems;
+        this.transactionTemplate = transactionTemplate;
+        this.mainAgentAppService = mainAgentAppService;
+        this.conversationHistory = conversationHistory;
+        this.designSpecs = designSpecs;
+        this.buildDispatchPolicy = buildDispatchPolicy;
+        this.demoVersionAppService = demoVersionAppService;
+        this.demoSeed = demoSeed;
+        this.versions = versions;
+        this.sliceParallelExecutor = sliceParallelExecutor;
+        this.workspaceConvergenceAppService = workspaceConvergenceAppService;
+        this.iterationAppService = iterationAppService;
+    }
+
+    /**
+     * 触发生成的显式入口（#332 生成加门后为中断「继续生成」出口的载体——POST
+     * /generate 端点与收口自动派发共用同一编排；#221 断点续跑：轨道表已有收口/
+     * 失败片即从断点脏续、已收口片不重做）：守卫 → AGENTS.md 资产就位 → 异步提交
+     * 编码 run（首试 runId 随响应回，过程事件经 SSE；失败重试与超限兜底在异步轨道内）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
+     *                              PRJ_017 已生成或生成在途（重复发起）；
+     *                              PRJ_018 PRD 从未产出（编码 run 的任务就是读
+     *                              PRD 实现，无 PRD 起跑只会空烧重试）
+     */
+    public GenerationRun startGeneration(Long projectId) {
+        Project project = requireGeneratableProject(projectId);
+        GenerationRun run = dispatchGeneration(project, /* rejectInFlight= */ true,
+                /* plan= */ null, /* turnOpinion= */ null);
+        if (run == null) {
+            // 计划缺失且该 PRD 版本已补产过（补产账拦截）：同步 409——重复触发口径
+            // 同在途拒绝（收口自动路径的 null 静默跳过不经过本入口）
+            throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+        }
+        return run;
+    }
+
+    /**
+     * 停止在途编码 run（#359 生成取消）：不挑轨道——生成/更新/设计任一在途即置停
+     * ＋中断执行任务（模型流订阅随之取消，不再烧 token）。停止＝中断口径非判死：
+     * 已收口成果保留、在途段回待跑，终态按失败账口径 run-failed(stopped=true) 收口
+     * （修正轨记终态账——「继续更新」可达；生成轨中断现场入续跑盘点）。幂等：无
+     * 在途返回 false（与自然收口的竞态如实回，不 409——连点/迟到点击无害）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在
+     */
+    public boolean stopInFlightRun(Long projectId) {
+        projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+        return codingRunTrack.requestStop(projectId);
+    }
+
+    /**
+     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门）：
+     * #332 起系统终点的首个构建 run 唯一触发＝确认此版 PRD
+     * （{@link #dispatchFirstDemoOnConfirm}），本入口不再承担系统终点的自动起
+     * （{@link MainAgentAppService} 收口观测对系统终点改判据为「未生成＋存在已
+     * 确认版本」，无确认不派）；本入口仍承担设计类轨迹的首个构建（设计全部定稿
+     * 后经此起构建，设计轨触发律不改）与系统终点已确认后的重触发。守卫沿用
+     * {@link #startGeneration}（存在 / 未归档 / 未生成过 / PRD 已产出——
+     * {@link #requireGeneratableProject} 单点），差异只在在途口径：生成进行中
+     * 意见轮（{@code turnOpinion} 在场）入队＋明示、生成成功收口后合并补派
+     * （#360——不再静默丢）；无意见载荷的调用面（设计定稿构建/平台轮）仍静默
+     * 跳过（不派不报错）；按钮路径在途拒绝 PRJ_017。
+     *
+     * @param plan 切片计划交接物（saveBuildPlan 事实终值；null = 本轮未产出——沿用
+     *             表内现行计划〔PRD 锚一致才有效〕，仍无则计划缺失走补产兜底）
+     * @return 派发的 run 标识；在途（生成进行中）或计划缺失不再派返回 null——调用方
+     *         据此区分「已派」与「未派」，不误报派发事实
+     * @throws ApplicationException 守卫组同 {@link #startGeneration}（收口观测处
+     *                              已判定过未归档 / 未生成 / PRD 已产出，此处守卫
+     *                              兜其余竞态调用面）
+     */
+    public GenerationRun dispatchGenerationOnTurnClose(Long projectId, BuildPlan plan) {
+        return dispatchGenerationOnTurnClose(projectId, plan, /* turnOpinion= */ null);
+    }
+
+    /**
+     * 携意见轮载荷的收口派发（#360 首 Demo 在途的反馈不静默丢）：{@code turnOpinion}
+     * 在场且生成在途时意见入队＋对话面平台明示，返回 null（调用方不误报派发事实，
+     * 排空补派是生成收口后的次生事实）；其余路径同两参形。
+     */
+    public GenerationRun dispatchGenerationOnTurnClose(Long projectId, BuildPlan plan,
+            TurnOpinion turnOpinion) {
+        Project project = requireGeneratableProject(projectId);
+        return dispatchGeneration(project, /* rejectInFlight= */ false, plan, turnOpinion);
+    }
+
+    /**
+     * 确认触发首个 Demo run（#332 生成加门；spec #320 实施序③）：PRD 确认动作过
+     * 两级门成版后，平台经本入口派首个构建 run——「确认此版 PRD 并生成 Demo」
+     * 成为首个构建 run 的<b>唯一触发</b>（推翻 #101「生成无门、PRD 出即起」旧口径，
+     * ADR-0008 改写）。确认即成版（{@link PrdVersionAppService}）已先行落库；本
+     * 入口只负责派发。
+     *
+     * <p>幂等/重发同口径：已生成或生成在途静默跳过返回 null（首个 Demo 已起或在
+     * 跑，确认不重复派）；未生成且（调用方已确认）版本在场即派——run-failed 后
+     * 项目仍「未生成」，用户重确认（或经「继续生成」）即再触发，不自动重试（防空烧）。
+     * 切片计划缺失走既有补产链（{@link #dispatchPlanProduction}，主智能体按 PRD
+     * 补产）——确认前的计划事实随访谈轮收口消费，不跨轮保留。</p>
+     *
+     * @return 派发的 run 标识；已生成 / 在途 / 计划缺失未派返回 null——调用方不
+     *         据此报错（确认回执以版本号为准，派发是次生事实）
+     */
+    public GenerationRun dispatchFirstDemoOnConfirm(Long projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getArchivedAt() != null
+                || project.getGeneratedAt() != null) {
+            return null; // 首个 Demo 已生成 / 归档——确认只负责首个，不重复派
+        }
+        return dispatchGeneration(project, /* rejectInFlight= */ false, /* plan= */ null,
+                /* turnOpinion= */ null);
+    }
+
+    /**
+     * 首次生成派发（显式与收口自动两入口共用）：切片计划解析（#220 计划跟 PRD 版本
+     * 走）→ AGENTS.md 资产就位 → 计划落轨道表 → 异步提交编码 run。在途口径按调用方
+     * 分岔——按钮路径拒绝 PRJ_017、收口自动路径静默跳过（返回 null 即「未派」，调用
+     * 方不关心）。资产就位/计划落库失败如实上抛并释放在途标记（环境故障口径，生成
+     * 不起跑）。计划缺失不派 run（不造假计划）——重派主智能体补产。
+     */
+    private GenerationRun dispatchGeneration(Project project, boolean rejectInFlight,
+            BuildPlan plan, TurnOpinion turnOpinion) {
+        Long projectId = project.getId();
+        // 设计类终点收口（#285 立门、#289 立语义、#291 定稿放行）：设计主线交付
+        // 设计资产包、系统＋设计设计先行——构建只从定稿设计稿长出（ADR-0024）：
+        // 清单全部定稿即门开（定稿触发与计划补产链双路可达，起跑上下文携定稿稿
+        // 引用块）；未定稿完不派（PRD 收口的路由已在上游起设计过程，
+        // MainAgentAppService#dispatchOnTurnClose）。在途口径按调用方分岔（按钮
+        // 拒绝 PRJ_042、收口自动静默跳过——防御位，正常不可达）。
+        if (project.getEndpointType().designInvolved()
+                && !DesignItem.checklistFinalized(
+                        designItems.findByProjectIdOrderByOrdAsc(projectId),
+                        project.getPrdProducedAt())) {
+            if (rejectInFlight) {
+                throw new ApplicationException(ProjectMessage.GENERATION_DESIGN_ENDPOINT);
+            }
+            log.info("[generate] 项目 {} 终点类型为 {} 且设计未全部定稿，系统生成不派（设计线编排）",
+                    projectId, project.getEndpointType().getName());
+            return null;
+        }
+        boolean hasTurnOpinion = turnOpinion != null && turnOpinion.opinion() != null
+                && !turnOpinion.opinion().isBlank();
+        if (hasTurnOpinion) {
+            // #360 首 Demo 在途的反馈不静默丢：入队判定与 begin 同临界区（修正轨排队
+            // 锁序同款——begin 失败 ⟹ end 未发生 ⟹ 排空 remove 未发生，add 不落在
+            // 排空之后，零丢失；remove 同锁见 {@link #dispatchFirstDemoTurnOpinions}）
+            boolean queued = false;
+            synchronized (codingRunTrack) {
+                if (!codingRunTrack.begin(projectId)) {
+                    firstDemoTurnOpinions.computeIfAbsent(projectId, key -> new ArrayList<>())
+                            .add(turnOpinion);
+                    queued = true;
+                }
+            }
+            if (queued) {
+                log.info("[generate] 项目 {} 首 Demo 在途，意见轮收口入队（成功收口后"
+                        + "合并补派，轮锚 {}）", projectId, turnOpinion.turnRunId());
+                notifyTurnOpinionQueued(project, turnOpinion); // 锁外：回执不占轨道锁
+                return null;
+            }
+        }
+        else if (!codingRunTrack.begin(projectId)) {
+            if (rejectInFlight) {
+                throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+            }
+            log.info("[generate] 项目 {} 生成在途，收口自动派发静默跳过（无意见载荷调用面）",
+                    projectId);
+            return null;
+        }
+        // 切片计划解析（#220 计划跟 PRD 版本走）：显式交接物优先（即计划重产——PRD
+        // 演进随修订轮重交）；无交接物沿用表内现行计划（仅当 PRD 版本锚一致——PRD
+        // 未演进）。计划缺失：释放在途占位后走补产兜底（占位不跨补产轮——补产轮
+        // 收口再派时可重新占位，不自锁）
+        BuildPlan resolved = resolvePlan(project, plan);
+        if (resolved == null) {
+            codingRunTrack.end(projectId);
+            return dispatchPlanProduction(project);
+        }
+        try {
+            // 起手资产就位（#296）：设计规范物化＋AGENTS.md 平台约定（物化先于
+            // AGENTS.md——设计规范节内容随物化结果）
+            writeConventionAssets(workspaceLifecycleAppService, designSpecs, project);
+            // 交接物在位 = 计划（重）产——整组替换落表；沿用表内计划的再派（REST 兜底、
+            // PRD 未演进）不重落——片状态是续跑事实，重落即清零
+            if (plan != null) {
+                recordPlan(project, resolved);
+            }
+        } catch (RuntimeException e) {
+            codingRunTrack.end(projectId);
+            throw e;
+        }
+
+        // 额度/收费通用缝（#332）：构建任务派发前「规则说明位＋执行前确认位」两挂点
+        // ——v1 缺省免费不限次（说明位空、确认位不激活＝直接派发，行为无感）。结构在
+        // 位：说明位激活后拼入起跑上下文/呈现面；确认位激活后此处拦下待用户确认。
+        buildDispatchPolicy.ruleNotice(projectId);
+        if (buildDispatchPolicy.requiresPreExecutionConfirmation(projectId)) {
+            log.info("[generate] 项目 {} 构建派发前需执行前确认（规则缝激活），本次不派", projectId);
+            codingRunTrack.end(projectId);
+            return null;
+        }
+
+        // Demo 版本锚捕获（#333）：起跑时已确认 PRD 版本——在途 Demo 照跑完收口绑
+        // 本锚（此后新确认不漂移旧版关联）；无确认版项目（设计类起跑/legacy）为 null
+        Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
+        String firstRunId = EventsAppService.newRunId();
+        Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId,
+                () -> {
+                    boolean trackReturned = false;
+                    try {
+                        runGenerationTrack(project, firstRunId, resolved, prdVersionNo);
+                        trackReturned = true;
+                    }
+                    catch (RunStoppedException e) {
+                        // 停止收口（#359 生成取消）：中断口径非判死——已收口片保留、
+                        // 在途段留待跑，不回滚；中断现场入续跑盘点（「中断原因＝用户
+                        // 停止」）；终态按失败账口径 run-failed(stopped=true) 收口；
+                        // #360 在途意见队列保留（不排空）——「继续生成」续跑成功收口
+                        // 时消化，不自锁
+                        terminalFailureScenes.put(projectId, STOP_SCENE);
+                        eventBridge.emitRunStopped(project, e.runId());
+                    }
+                    finally {
+                        codingRunTrack.end(projectId);
+                    }
+                    if (trackReturned) {
+                        // #360 排空只在轨道正常返回后（停止/异常收场不动队列）；
+                        // 在途标记已释放（排空补派的更新 run 要占同一轨道）——补派
+                        // 是否起跑由排空内按 generated_at 事实判定
+                        dispatchFirstDemoTurnOpinions(projectId);
+                    }
+                });
+        codingRunTrack.registerTask(projectId, trackTask);
+        return new GenerationRun(firstRunId);
+    }
+
+    /**
+     * 在途意见入队后的平台明示（#360）：guide-reply 复用型（prompt 不携带——用户
+     * 气泡已由意见轮自落，平台只补回执一条），同步落对话史（#89 闭史，刷新回访
+     * 不丢；落库内部 quietly 自吞失败）。事件发射失败只记日志不反噬排队事实。
+     */
+    private void notifyTurnOpinionQueued(Project project, TurnOpinion turnOpinion) {
+        conversationHistory.recordGuideNotice(project.getId(), turnOpinion.turnRunId(),
+                IN_FLIGHT_OPINION_NOTICE);
+        try {
+            eventBridge.emitGuideReply(project, turnOpinion.turnRunId(), /* prompt= */ null,
+                    DispatchAppService.GUIDE_LABEL, IN_FLIGHT_OPINION_NOTICE);
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 在途意见回执事件发射失败（不反噬排队）：{}",
+                    project.getId(), e.toString());
+        }
+    }
+
+    /**
+     * 首 Demo 在途意见队列的排空（#360，生成轨道任务尾部调）：合并为一场更新 run
+     * 补派（逐轮配对交接物——同构修正轨排队合并，不逐条烧 run）。只在生成
+     * <b>成功收口</b>后排空——以 {@code generated_at} 落位事实为闸（失败收口轨道
+     * 正常返回的场景同走本方法、闸不过即原队保留，「继续生成」续跑成功时再来消化
+     * ——不自锁、不重复派）。补派撞修正轨在途（用户恰在收口窗口提意见起跑了更新
+     * run）即排进修正轨队列，那场收口排空时自然合并（竞态零丢失）。补派失败不炸
+     * 轨道任务（#51 口径）——记日志，用户重提即兜底。
+     */
+    private void dispatchFirstDemoTurnOpinions(Long projectId) {
+        Project current = projectRepository.findById(projectId).orElse(null);
+        if (current == null || current.getGeneratedAt() == null) {
+            return; // 未成功收口（失败/停止/收口落位失败）——队列保留待续跑成功
+        }
+        List<TurnOpinion> queued;
+        synchronized (codingRunTrack) { // 与入队侧同锁（begin 失败 ⟹ end 未发生的锁序）
+            queued = firstDemoTurnOpinions.remove(projectId);
+        }
+        if (queued == null || queued.isEmpty()) {
+            return;
+        }
+        IterationAppService.FixHandoff handoff = new IterationAppService.FixHandoff(
+                queued.stream().map(opinion -> new IterationAppService.FixHandoff.Round(
+                        opinion.opinion(), opinion.prdRevisionSummary())).toList());
+        try {
+            IterationAppService.FixDispatch dispatch =
+                    iterationAppService.startFixRun(projectId, handoff);
+            log.info("[generate] 项目 {} 首 Demo 收口，排空在途意见 {} 轮合并补派更新 run（{}）",
+                    projectId, queued.size(), dispatch.queued() ? "撞在途转修正轨排队" : "起跑");
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 在途意见排空补派失败（用户重提即兜底）：{}",
+                    projectId, e.toString());
+        }
+    }
+
+    /**
+     * 切片计划解析（#220 计划生命周期跟 PRD 版本走）：表内现行计划还原为
+     * {@link BuildPlan}——片行 prd 锚与项目 {@code prd_produced_at} 一致（PRD 未
+     * 演进）才有效；表空或锚不一致（PRD 已修订，旧计划是过期结构）返回 null
+     * （计划缺失/过期）。锚取自库读回值（与比对值同为库回读形，等值比较稳定）。
+     */
+    private BuildPlan resolvePlan(Project project, BuildPlan handed) {
+        if (handed != null) {
+            return handed;
+        }
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(project.getId());
+        if (!GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt())) {
+            return null;
+        }
+        List<GenerationSegment> sliceRows = segments.stream().skip(1).toList();
+        List<String> descriptions =
+                sliceRows.stream().map(GenerationSegment::getDescription).toList();
+        List<Set<Integer>> dependsOn = new ArrayList<>(sliceRows.size());
+        for (int i = 0; i < sliceRows.size(); i++) {
+            if (sliceRows.get(i).getDependsOn() == null) {
+                // 存量旧片行（V41 前，depends_on 未设）：恢复全串行语义——依赖前一片
+                dependsOn.add(i == 0 ? Set.of() : Set.of(i));
+            } else {
+                dependsOn.add(sliceRows.get(i).dependsOnOrds());
+            }
+        }
+        return new BuildPlan(descriptions, dependsOn);
+    }
+
+    /**
+     * 切片计划落轨道表（#220）：整组替换——清现行片集后按「阶段 0 + 切片计划」插入
+     * 待跑片行，PRD 版本锚取项目当下 {@code prd_produced_at}（此后 PRD 演进即锚
+     * 不一致、计划不沿用）。短事务原子替换（旧片不残留；删后先冲刷再插——JPA 同
+     * 事务冲刷序先插后删，不冲刷会撞 (project_id, ord) 唯一键）；失败如实上抛（无
+     * 轨道事实不空跑生成）。落库成功清补产账（补产已兑现）。
+     *
+     * <p><b>存量首录对照标已完片（#223）</b>：表内无片行 = 往次生成早于轨道表——
+     * 补产计划落库时对照项目收尾卡（已收口成果，git 收口 commit 经 Run-Id trailer
+     * 锚定同一收尾卡）把匹配片直接置已收口（证据级精确匹配：片收口叙事与收尾卡
+     * summary 逐字相等——补产 prompt 要求已完片照录原文，措辞漂移即对照不上、按
+     * 待跑重做，降级方向安全：多跑不漏做）；表内有旧片行（PRD 已演进换锚重产）
+     * 不适用——旧片整组替换重置、从头来是既定口径。</p>
+     */
+    private void recordPlan(Project project, BuildPlan plan) {
+        Long projectId = project.getId();
+        LocalDateTime prdAnchor = project.getPrdProducedAt();
+        Map<String, String> legacyClosed = legacyClosedSummaries(projectId);
+        transactionTemplate.executeWithoutResult(status -> {
+            generationSegments.deleteByProjectId(projectId);
+            generationSegments.flush();
+            GenerationSegment stage0 = GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor);
+            markLegacyClosed(stage0, legacyClosed);
+            generationSegments.save(stage0);
+            for (int index = 0; index < plan.slices().size(); index++) {
+                GenerationSegment segment = GenerationSegment.pending(projectId, index + 1,
+                        plan.slices().get(index), prdAnchor, plan.dependsOn(index));
+                markLegacyClosed(segment, legacyClosed);
+                generationSegments.save(segment);
+            }
+        });
+        if (!legacyClosed.isEmpty()) {
+            log.info("[generate] 项目 {} 存量计划首录：对照收尾卡标已完片后只补缺口", projectId);
+        }
+        planProductionRequests.remove(projectId);
+    }
+
+    /**
+     * 存量已完片对照标已收口（#223）：片收口叙事（阶段 0 固定句 / 完成切片句）与
+     * 收尾卡 summary 逐字相等即置已收口，run 锚 = 往次收口的用户面 run（收尾卡锚）。
+     */
+    private static void markLegacyClosed(GenerationSegment segment, Map<String, String> legacyClosed) {
+        String summary = segment.getOrd() == 0
+                ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(segment.getDescription());
+        String runId = legacyClosed.get(summary);
+        if (runId != null) {
+            segment.close(runId);
+        }
+    }
+
+    /**
+     * 存量已收口成果清单（#223 对照源，补产携载与落库标定的共用读口）：表内无片行
+     * = 往次生成早于轨道表——取项目收尾卡叙事（summary → 收口 run 锚）；表内有片行
+     * （PRD 已演进换锚重产）恒空——重产从头来是既定口径，不适用存量对照。
+     */
+    private Map<String, String> legacyClosedSummaries(Long projectId) {
+        if (!generationSegments.findByProjectIdOrderByOrdAsc(projectId).isEmpty()) {
+            return Map.of();
+        }
+        return conversationHistory.closedGenerationSummaries(projectId);
+    }
+
+    /**
+     * 计划缺失兜底（#220，替位已删的 minimalFallback）：重派主智能体按 PRD 补产
+     * 切片计划——补产轮（main 会话、不记用户发言）收口即经既有链必达自动再派生成。
+     * 同一 PRD 版本只补产一次（{@link #planProductionRequests} 防烧护栏）：已补产过
+     * 即静默不派（返回 null），用户重提意见即兜底；PRD 演进换锚可再补产。
+     *
+     * <p><b>存量对照（#223）</b>：表内无片行 = 往次生成早于轨道表（无持久化计划但
+     * 已有收口成果）——补产 prompt 携已收口成果清单（要求已完片照录原文），补产
+     * 计划落库时 {@link #recordPlan} 据此标已完片、只补缺口；表内有旧片行（PRD 已
+     * 演进换锚）不携——重产从头来是既定口径。</p>
+     */
+    private GenerationRun dispatchPlanProduction(Project project) {
+        Long projectId = project.getId();
+        if (project.getPrdProducedAt().equals(planProductionRequests.get(projectId))) {
+            log.info("[generate] 项目 {} 计划缺失且该 PRD 版本已补产过，不再补产（用户重提意见即兜底）",
+                    projectId);
+            return null;
+        }
+        // 记账先于补产提交（补产轮收口的再派要靠它止住——同步执行器下后置记账会
+        // 递归失控）；补产轮起跑被守卫拒（挂起问答等）则清账——该版本仍可再补
+        planProductionRequests.put(projectId, project.getPrdProducedAt());
+        List<String> legacyClosedOutcomes =
+                List.copyOf(legacyClosedSummaries(projectId).keySet());
+        log.info("[generate] 项目 {} 计划缺失，重派主智能体按 PRD 补产切片计划（存量对照清单 {} 项）",
+                projectId, legacyClosedOutcomes.size());
+        try {
+            return new GenerationRun(
+                    mainAgentAppService.requestBuildPlan(projectId, legacyClosedOutcomes).runId());
+        }
+        catch (RuntimeException e) {
+            planProductionRequests.remove(projectId);
+            throw e;
+        }
+    }
+
+    /**
+     * 生成交接物的切片计划探针（#220 轨道表读回）：表内现行计划（PRD 锚一致才
+     * 有效；无/过期 = null）。测试断言交接物落定的读口，也是「重启后计划仍可查」
+     * 的事实面——计划唯一事实源是表，进程内无副本。
+     */
+    BuildPlan planOf(Long projectId) {
+        return projectRepository.findById(projectId)
+                .map(project -> resolvePlan(project, null)).orElse(null);
+    }
+
+    /**
+     * 断点推导探针（#220 断点 = 表中最深收口片；「继续生成」续跑〔#221〕的消费面）：
+     * -1 = 无收口片。锚门自持——片行 PRD 锚与项目不一致（PRD 已修订、计划待重产）
+     * 时旧收口片不算断点（断点属现行计划，过期计划的进度不是新断点事实）。
+     */
+    int deepestClosedSegmentOf(Long projectId) {
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(projectId);
+        if (segments.isEmpty()) {
+            return -1;
+        }
+        return projectRepository.findById(projectId)
+                .filter(project -> GenerationSegment.planMatchesPrd(segments, project.getPrdProducedAt()))
+                .map(project -> segments.stream()
+                        .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                        .mapToInt(GenerationSegment::getOrd)
+                        .max().orElse(-1))
+                .orElse(-1);
+    }
+
+    /** 一场生成的运行标识 = 用户面 run 身份（前端挂智能体事件 ?runId= 的锚；#84 静默重试——重试不换新锚，全程同值）。 */
+    public record GenerationRun(String runId) {
+    }
+
+    // ---------- 内部 ----------
+
+    /**
+     * 生成轨道（异步轨道内，#104 先起服 + 纵向切片逐段；#221 断点续跑；#223 存量
+     * 对照续跑）：断点以轨道表为准（表中最深收口片；git 收口 commit 为旁证）——
+     * <b>续跑跳过已收口片、只重跑失败/中断片</b>（首个未收口段起），起手带现状盘点
+     * （{@link #resumeInventoryBlock}）从新会话脏续（{@link #resumeSession}），前片
+     * 交接摘要取 {@code .platform/} 落盘件（{@link #readSliceHandoff}——进程重启后
+     * 内存终文不在的事实源）。已收口片逐段跳过（任意分布正确——存量对照标的已完
+     * 片理论上非前缀，#223）。全场景同一口径：重试耗尽 run-failed 后「继续生成」
+     * 与中断续跑同路（不重头）；PRD 演进则计划重产整组替换、从头再来（推倒重来是
+     * 显式选择，走对话区改 PRD）。片全收口（末片收口而 {@code generated_at} 落位
+     * 失败的边角、存量对照标满的空缺口）直接补落位。
+     *
+     * <p>每片收口判据 = 8081 可达（{@link #requireReachable} 核验）+ 成版 +
+     * run-finish（收口扩载，端到端可操作由片内 verify 兜）；最后一片收口才落
+     * {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed} 收口
+     * （锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。每片
+     * 收口/失败状态随片落轨道表（#220）。知识命中前置注入只在阶段 0 的 run（一次
+     * 切入一次注入，#114——续跑断点在阶段 0 时同注入，断点在切片则不注入）。</p>
+     */
+    private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan,
+            Integer prdVersionNo) {
+        Long projectId = project.getId();
+        List<String> slices = plan.slices();
+        List<GenerationSegment> segments =
+                generationSegments.findByProjectIdOrderByOrdAsc(projectId);
+        // 待跑段集与已收口段集（#221 断点续跑；#223 存量对照后已收口段可非前缀分布
+        // ——补产照录已完片在前只是提示词约定，平台不强求，逐段跳过已收口片对任意
+        // 分布正确）；断点段 = 首个未收口段
+        Set<Integer> closedOrds = segments.stream()
+                .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                .map(GenerationSegment::getOrd).collect(Collectors.toUnmodifiableSet());
+        List<Integer> openOrds = segments.stream()
+                .filter(segment -> segment.getStatus() != GenerationSegmentStatus.CLOSED)
+                .map(GenerationSegment::getOrd).toList();
+        boolean resumed = segments.stream()
+                .anyMatch(segment -> segment.getStatus() != GenerationSegmentStatus.PENDING);
+        if (openOrds.isEmpty()) {
+            // 片全收口即生成完成（末片收口而 generated_at 落位失败的补落 + 存量对照
+            // 标满的空缺口边角，#223）
+            terminalFailureScenes.remove(projectId);
+            markGenerated(projectId, firstRunId, prdVersionNo);
+            return;
+        }
+        int startOrd = openOrds.get(0);
+        // 续跑起手交接（#221）：断点段（失败/中断片）prompt 前置现状盘点；前片交接
+        // 摘要取断点前最深收口片的 .platform/ 落盘件（内存终文随进程消失，落盘件是
+        // 续跑事实源）
+        String resumePrefix = "";
+        String previousHandoff = null;
+        if (resumed) {
+            // 续跑保预览活（#355 活体实测）：容器重启/休眠后主工作区 8081 应用进程死，
+            // 而续跑跳过序前段（起服位）——波末统一探活会把整轨判死、用户再点一次
+            // 「继续生成」。续跑起手先确保应用在跑（startApp 幂等：已在服直回；
+            // 同步面 ADMIN——轨道等就绪，探活失败不再误杀整轨）。尽力而为：
+            // 收敛不成（工作区异常态等）回落旧行为，探活仍是收口硬门
+            try {
+                workspaceConvergenceAppService.convergeBlocking(
+                        WorkspaceId.of(Long.toString(project.getWorkspaceId())),
+                        ConvergenceFace.ADMIN, /* startAppOnWake= */ true);
+            }
+            catch (RuntimeException e) {
+                log.warn("[generate] 项目 {} 续跑起手应用确保未成（探活仍为收口硬门）：{}",
+                        projectId, e.toString());
+            }
+            resumePrefix = resumeInventoryBlock(startOrd, segments,
+                    terminalFailureScenes.get(projectId));
+            int handoffSource = closedOrds.stream()
+                    .filter(ord -> ord < startOrd).max(Integer::compare).orElse(-1);
+            if (handoffSource >= 0) {
+                previousHandoff = readSliceHandoff(project, handoffSource);
+            }
+        }
+        // 末段 = 最深待跑段（其后段已收口——存量对照的分布边角，全收口即落位）
+        int lastOrd = openOrds.get(openOrds.size() - 1);
+        // 定稿设计稿引用块（#291 稿入起跑上下文）：设计类终点门开后的构建，每段
+        // prompt（首试与重试）前置定稿稿清单；纯系统项目零注入
+        String designContext = finalizedDesignsContext(
+                designItems.findByProjectIdOrderByOrdAsc(projectId).stream()
+                        .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
+                        .toList());
+
+        // ---- 序前段（#339 首屏先行）：阶段 0 + 首片，串行、跑主工作区（预览先活）----
+        for (int index = startOrd; index <= Math.min(1, slices.size()); index++) {
+            int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
+            if (closedOrds.contains(ord)) {
+                continue; // 已收口片不重做（#221 断点续跑 / #223 存量对照）
+            }
+            boolean stage0 = ord == 0;
+            String slice = stage0 ? null : slices.get(ord - 1);
+            boolean last = ord == lastOrd;
+            boolean resumeTarget = ord == startOrd;
+            String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
+            String prefix = resumeTarget ? resumePrefix : "";
+            String handoff = stage0 ? null : previousHandoff;
+            String segmentDesc = stage0 ? STAGE0_RETRY_DESC : "实现切片「" + slice + "」";
+            String sessionId = resumed && resumeTarget
+                    ? resumeSession(projectId, ord, runId)
+                    : sliceSession(projectId, ord);
+            // 段失败回滚（#353）：起跑即捕获回滚基准（git HEAD；无 HEAD 锚定）——
+            // 尝试环耗尽后留账＋干净回退本段起点、新会话重跑一轮（坏现场不叠修）
+            CoderRunAttempts.SegmentRollback rollback =
+                    rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
+                    runId,
+                    sessionId,
+                    new CoderRunAttempts.Prompts(
+                            designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
+                            errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
+                            runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
+                            prdVersionNo),
+                    CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
+                    stage0 ? ModelRoutingAppService.SegmentSignals.none()
+                            : ModelRoutingAppService.SegmentSignals.slice(slice),
+                    stage0 ? RunHeading.titled(STAGE0_TITLE)
+                            : RunHeading.slice(slice, ord, slices.size()),
+                    rollback);
+            if (!result.succeeded()) {
+                failSegment(projectId, ord, runId);
+                if (result.lastError() != null) {
+                    terminalFailureScenes.put(projectId, result.lastError());
+                }
+                eventBridge.emitRunFailed(project, runId, result.lastError());
+                return;
+            }
+            // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一段
+            previousHandoff = result.closingText();
+            placeSliceHandoff(project, ord, previousHandoff);
+        }
+
+        // ---- 并行段（#351）：切片 2..N 按拓扑波，同波无依赖片各拿 fork 隔离同跑、按序合并 ----
+        closedOrds = reloadClosedOrds(projectId); // 序前段收口后刷新（依赖判定的事实源）
+        List<List<Integer>> waves = SliceSchedule.parallelWaves(plan);
+        for (List<Integer> wave : waves) {
+            Set<Integer> currentClosed = closedOrds; // 波内快照（lambda 捕获需实际最终）
+            List<Integer> runnable = wave.stream()
+                    .filter(ord -> !currentClosed.contains(ord))
+                    .filter(ord -> depsAllClosed(ord, plan, currentClosed))
+                    .toList();
+            if (runnable.isEmpty()) {
+                continue; // 波内片已收口（续跑）或依赖未满足（被失败片阻塞，续跑再补）
+            }
+            if (runnable.size() == 1) {
+                // 单片波：无并行收益，退化主工作区串行（既有口径不变）
+                int ord = runnable.get(0);
+                String slice = slices.get(ord - 1);
+                boolean last = ord == lastOrd;
+                boolean resumeTarget = ord == startOrd;
+                String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
+                String prefix = resumeTarget ? resumePrefix : "";
+                String handoff = previousHandoff;
+                String segmentDesc = "实现切片「" + slice + "」";
+                String sessionId = resumed && resumeTarget
+                        ? resumeSession(projectId, ord, runId)
+                        : sliceSession(projectId, ord);
+                CoderRunAttempts.SegmentRollback rollback =
+                        rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+                CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
+                        runId,
+                        sessionId,
+                        new CoderRunAttempts.Prompts(
+                                designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
+                                errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                        (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
+                                runId, sliceClosingSummary(slice), prdVersionNo),
+                        CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                        ModelRoutingAppService.SegmentSignals.slice(slice),
+                        RunHeading.slice(slice, ord, slices.size()),
+                        rollback);
+                if (!result.succeeded()) {
+                    failSegment(projectId, ord, runId);
+                    if (result.lastError() != null) {
+                        terminalFailureScenes.put(projectId, result.lastError());
+                    }
+                    eventBridge.emitRunFailed(project, runId, result.lastError());
+                    return;
+                }
+                previousHandoff = result.closingText();
+                placeSliceHandoff(project, ord, previousHandoff);
+            } else {
+                runParallelWave(project, plan, runnable, previousHandoff, designContext,
+                        prdVersionNo, resumed, startOrd, resumePrefix, lastOrd, firstRunId);
+            }
+            closedOrds = reloadClosedOrds(projectId);
+        }
+        // 末片收口补落（#355 活体实测）：末片（lastOrd）在并行波内先收口、后续波
+        // 仍有片时，波末统一的全片收口条件不成立——generated_at/Demo 首版无人落位，
+        // 轨道收尾全片已收口仍显示「生成中断」。循环后补查补落（读库回最新值——
+        // 本方法的 project 聚合是起跑时装载的旧投影；closeOnGeneration 幂等：
+        // generated_at 在场直跳；种子幂等只补空表）
+        Project current = projectRepository.findById(projectId).orElse(null);
+        if (current != null && current.getGeneratedAt() == null && allSlicesClosed(projectId)) {
+            demoSeed.seedSandbox(project);
+            markGenerated(projectId, firstRunId, prdVersionNo);
+        }
+        terminalFailureScenes.remove(projectId);
+    }
+
+    /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
+    private boolean depsAllClosed(int ord, BuildPlan plan, Set<Integer> closedOrds) {
+        return plan.dependsOn(ord - 1).stream().allMatch(closedOrds::contains);
+    }
+
+    /**
+     * 重跑轮会话寻址后缀（#353 回滚重跑）：本段会话 + {@code -rr}（旧会话带失败
+     * 循环历史不续——同 #221 续跑新会话口径；寻址规则归轨道层，预算一轮故恒定后缀）。
+     */
+    static final String RERUN_SESSION_SUFFIX = "-rr";
+
+    /**
+     * 用户停止的中断现场（#359 生成取消）：入续跑现状盘点的「中断原因」——续跑 run
+     * 起手即知上次是用户叫停（非故障），从现状继续不重做。
+     */
+    static final String STOP_SCENE = "用户停止——在途 run 已按你的要求停止，已完成的进度都保留";
+
+    /**
+     * 首 Demo 在途时意见轮的平台明示文案（#360）：入队即回执——用户面「说了没反应」
+     * 补上平台事实（意见已记录、生成完成后自动落实），兑现靠排空补派而非空话。
+     */
+    static final String IN_FLIGHT_OPINION_NOTICE =
+            "首次生成进行中，本条意见已记录，生成完成后将自动落实";
+
+    /**
+     * 回滚基准捕获（#353 失败回滚的基准，段起跑与 merge 前共用同一操作）：回读
+     * 工作区 git HEAD；无 HEAD（全新工作区首段——git 懒初始化尚无收口成版）即锚
+     * commit 钉基准（无 trailer 不进版本流）。拿不到 ref（环境故障/exec 异常）降级
+     * {@code null}——无回滚基准（不重跑/不清理，同既有口径），如实记日志不静默。
+     */
+    private String captureRollbackBase(Long workspaceId, Long projectId, int ord) {
+        String workspace = Long.toString(workspaceId);
+        try {
+            workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.ensureRepoCommand()));
+            ExecResultResponse head = workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.headRefCommand()));
+            if (head.exitCode() == 0 && !head.stdout().isBlank()) {
+                return head.stdout().trim();
+            }
+            // 无 HEAD：锚 commit 把现状钉成回滚基准（此后回滚恒有 ref 可回）
+            ExecResultResponse anchor = workspaceLifecycleAppService.exec(workspace,
+                    new WorkspaceExecCommand(WorkspaceVersions.anchorStartCommand()));
+            if (anchor.exitCode() == 0 && !anchor.stdout().isBlank()) {
+                return anchor.stdout().trim();
+            }
+            log.warn("[generate] 项目 {} 段 {} 回滚基准锚定失败（本段不带回滚重跑）：{}",
+                    projectId, ord, anchor.stderr());
+            return null;
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 段 {} 回滚基准捕获失败（本段不带回滚重跑）：{}",
+                    projectId, ord, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 段回滚钩装配（#353 三处调用共用单点）：捕获回滚基准（{@link #captureRollbackBase}）
+     * → 装尝试环耗尽回调（{@link #segmentRollback}）。基准拿不到返回 {@code null}
+     * （无钩——尝试环不重跑、直接终态，同既有口径）。
+     */
+    private CoderRunAttempts.SegmentRollback rollbackHookFor(Long workspaceId, Long projectId,
+            int ord, String sessionId) {
+        String base = captureRollbackBase(workspaceId, projectId, ord);
+        return segmentRollback(workspaceId, projectId, ord, sessionId, base);
+    }
+
+    /**
+     * 段回滚钩装配（#353）：尝试环耗尽后的回调——① 失败现场留账（相对段起点的
+     * 全量 diff 落 {@code .platform/failed-scene-segment-{ord}-{epochMilli}.patch}，
+     * 回滚不丢证据；留账失败不挡回滚——证据面与机制面分道）→ ② 工作区干净回退
+     * 段起点（{@code reset --hard + clean -fd}：段内改动与野 commit 脱落，前段
+     * 收口 commit 不动，数据/依赖等排除面不触）；回滚成功返回重跑轮新会话寻址，
+     * 失败返回 null（坏现场上重跑无意义——不重跑、直接终态）。
+     */
+    private CoderRunAttempts.SegmentRollback segmentRollback(Long workspaceId, Long projectId,
+            int ord, String sessionId, String segmentStart) {
+        if (segmentStart == null) {
+            return null;
+        }
+        String workspace = Long.toString(workspaceId);
+        return () -> {
+            try {
+                String scenePath = WorkspaceLayout.PLATFORM_DIR + "/failed-scene-segment-" + ord
+                        + "-" + System.currentTimeMillis() + ".patch";
+                ExecResultResponse scene = workspaceLifecycleAppService.exec(workspace,
+                        new WorkspaceExecCommand(
+                                WorkspaceVersions.recordFailureSceneCommand(segmentStart, scenePath)));
+                if (scene.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 段 {} 失败现场留账失败（继续回滚——留账不挡回滚）：{}",
+                            projectId, ord, scene.stderr());
+                }
+                ExecResultResponse reset = workspaceLifecycleAppService.exec(workspace,
+                        new WorkspaceExecCommand(
+                                WorkspaceVersions.resetToSegmentStartCommand(segmentStart)));
+                if (reset.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 段 {} 回滚段起点失败（不重跑、转终态）：{}",
+                            projectId, ord, reset.stderr());
+                    return null;
+                }
+                log.info("[generate] 项目 {} 段 {} 重试耗尽——失败现场已留账（{}），工作区已回滚本段起点",
+                        projectId, ord, scenePath);
+                return sessionId + RERUN_SESSION_SUFFIX;
+            }
+            catch (RuntimeException e) {
+                log.warn("[generate] 项目 {} 段 {} 回滚段起点异常（不重跑、转终态）：{}",
+                        projectId, ord, e.toString());
+                return null;
+            }
+        };
+    }
+
+    /** 重载已收口片集（#351 波间刷新——合并后闭片，后续波据此判定依赖满足）。 */
+    private Set<Integer> reloadClosedOrds(Long projectId) {
+        return generationSegments.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                .map(GenerationSegment::getOrd).collect(Collectors.toUnmodifiableSet());
+    }
+
+    /** 全片已收口探针（#351 末波落位门槛——有失败片则 generated_at 不落位）。 */
+    private boolean allSlicesClosed(Long projectId) {
+        return generationSegments.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .allMatch(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED);
+    }
+
+    /**
+     * 一场并行波（#351）：波内各片各拿 fork 副本隔离同跑（独立线程池并行），落定后按
+     * ord 序合并回主工作区（冲突机器查 → 子智能体解）；失败片跳过不拖垮其余片。
+     * 波收口统一探活主工作区 + 推送预览；末波（含 lastOrd）且全片已收口才种数据 +
+     * 落 generated_at（口径不变——有失败片不落位）。
+     */
+    private void runParallelWave(Project project, BuildPlan plan, List<Integer> runnable,
+            String previousHandoff, String designContext, Integer prdVersionNo, boolean resumed,
+            int startOrd, String resumePrefix, int lastOrd, String firstRunId) {
+        Long projectId = project.getId();
+        // 本波 fork 登记簿（#359 停止清理的事实源）：fork 落成即记——停止时全部释放，
+        // 已完未合并的不留孤儿容器
+        ConcurrentLinkedQueue<String> createdForks = new ConcurrentLinkedQueue<>();
+        // 先全部提交再统一等待（真并行）：若在流内逐元素提交后立即取结果，会退化为
+        // 逐个 fork 串行跑——下一片要等上一片返回才提交（并发不成立）。提交走
+        // sliceParallelExecutor.submit（池 Future——#359 停止 cancel(true) 可中断
+        // 执行线程；CompletableFuture.cancel 不传中断，停不了在途流）
+        List<Future<ForkSliceOutcome>> futures = runnable.stream()
+                .map(ord -> sliceParallelExecutor.submit(
+                        () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
+                                resumed, startOrd, resumePrefix, firstRunId, createdForks)))
+                .toList();
+        futures.forEach(future -> codingRunTrack.registerTask(projectId, future));
+        List<ForkSliceOutcome> outcomes = new ArrayList<>(futures.size());
+        try {
+            for (int i = 0; i < futures.size(); i++) {
+                int ord = runnable.get(i);
+                try {
+                    outcomes.add(futures.get(i).get());
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    RuntimeException failure = cause instanceof RuntimeException runtime
+                            ? runtime : new IllegalStateException(cause);
+                    outcomes.add(ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
+                            EventsAppService.newRunId(), null, errorText(failure)));
+                } catch (CancellationException e) {
+                    // 波任务被取消（cancel 只来自停止请求——在途片中断后被置完成态）
+                    throwStoppedWave(projectId, firstRunId, createdForks);
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throwStoppedWave(projectId, firstRunId, createdForks);
+        }
+        // 停止收场（#359）：波内被叫停（任一在途片停止旁路 / 波起跑即停）——fork 全
+        // 释放、不合并（已收口前段不动）、探活/预览/落位全跳过，停止信号上抛轨道层
+        if (codingRunTrack.stopRequested(projectId)) {
+            throwStoppedWave(projectId, firstRunId, createdForks);
+        }
+        for (ForkSliceOutcome outcome : outcomes) {
+            if (!outcome.succeeded()) {
+                failSegment(projectId, outcome.ord(), outcome.runId());
+                if (outcome.error() != null) {
+                    terminalFailureScenes.put(projectId, outcome.error());
+                }
+                eventBridge.emitRunFailed(project, outcome.runId(), outcome.error());
+                destroyForkQuietly(outcome.workspaceId()); // 失败片不留 fork 孤儿
+                continue;
+            }
+            if (mergeFork(project, outcome)) {
+                closeSegment(projectId, outcome.ord(), outcome.runId());
+                placeSliceHandoff(project, outcome.ord(), outcome.closingText());
+            }
+        }
+        requireReachable(project.getWorkspaceId());
+        requireEntryFileComplete(project.getWorkspaceId());
+        emitPreviewReady(project);
+        if (runnable.contains(lastOrd) && allSlicesClosed(projectId)) {
+            demoSeed.seedSandbox(project);
+            String finalRunId = outcomes.stream().filter(o -> o.ord() == lastOrd)
+                    .map(ForkSliceOutcome::runId).findFirst().orElse(firstRunId);
+            markGenerated(projectId, finalRunId, prdVersionNo);
+        }
+    }
+
+    /**
+     * 并行波的停止收场（#359）：本波已落成的 fork 全释放（中断片的由其自身停止分支
+     * 释放、已完未合并的由此释放——双路径幂等，重复 destroy 只是日志），然后以停止
+     * 信号上抛（锚＝轨道首 run——波内各片 runId 非稳定锚，终态收口只认轨道锚）。
+     */
+    private void throwStoppedWave(Long projectId, String firstRunId,
+            ConcurrentLinkedQueue<String> createdForks) {
+        String fork;
+        while ((fork = createdForks.poll()) != null) {
+            destroyForkQuietly(fork);
+        }
+        throw new RunStoppedException(firstRunId);
+    }
+
+    /**
+     * fork 副本跑一片（#351）：fork 主工作区当前 HEAD → 执行体在 fork 上实现本片（收口
+     * 判据 = fork 内 8081 探活 + 入口文件完整 + fork 内 git 成版）。成功回交 fork
+     * workspaceId（供合并）与收口终文（供交接）；失败/异常回交失败现场，fork 由合并
+     * 侧（或此处异常路径）释放。
+     */
+    private ForkSliceOutcome runForkSlice(Project project, BuildPlan plan, int ord,
+            String previousHandoff, String designContext, boolean resumed, int startOrd,
+            String resumePrefix, String firstRunId, ConcurrentLinkedQueue<String> createdForks) {
+        Long projectId = project.getId();
+        String slice = plan.slices().get(ord - 1);
+        String forkWorkspaceId = null;
+        String runId = (resumed && ord == startOrd) ? firstRunId : EventsAppService.newRunId();
+        try {
+            forkWorkspaceId = workspaceLifecycleAppService.fork(
+                    Long.toString(project.getWorkspaceId()));
+            createdForks.add(forkWorkspaceId);
+            Long forkId = Long.parseLong(forkWorkspaceId);
+            boolean resumeTarget = ord == startOrd;
+            String prefix = resumeTarget ? resumePrefix : "";
+            String segmentDesc = "实现切片「" + slice + "」";
+            String sessionId = resumed && resumeTarget
+                    ? resumeSession(projectId, ord, runId)
+                    : sliceSession(projectId, ord);
+            // fork 内回滚基准 = fork 时主工作区 HEAD（fork 克隆含 .git——回滚等价于
+            // 重新 fork 的干净现场，开销只是 git 操作不起新容器）
+            CoderRunAttempts.SegmentRollback rollback = rollbackHookFor(forkId, projectId, ord, sessionId);
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, forkId, runId,
+                    sessionId,
+                    new CoderRunAttempts.Prompts(
+                            designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
+                            errorScene -> designContext + prefix
+                                    + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene)),
+                    (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
+                            sliceClosingSummary(slice)),
+                    CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                    ModelRoutingAppService.SegmentSignals.slice(slice),
+                    RunHeading.slice(slice, ord, plan.slices().size()),
+                    rollback);
+            if (result.succeeded()) {
+                return ForkSliceOutcome.ok(ord, slice, runId, forkWorkspaceId, result.closingText());
+            }
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError());
+        } catch (RuntimeException e) {
+            // 停止旁路（#359）：在途片被中断（线程中断打断模型流）——本 fork 自行
+            // 释放（主轨可能在 join 前就被停止信号上抛，到不了波收尾清理），停止
+            // 信号上抛交主轨收口
+            if (codingRunTrack.stopRequested(projectId)) {
+                destroyForkQuietly(forkWorkspaceId);
+                createdForks.remove(forkWorkspaceId);
+                throw new RunStoppedException(runId);
+            }
+            // fork 释放统一归调用方（runParallelWave 失败分支 / mergeFork finally），此处不销毁
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e));
+        }
+    }
+
+    /** fork 片收口判据（#351）：fork 内 8081 可达 + 入口文件完整——只核验不落表不推预览。 */
+    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary) {
+        requireReachable(forkWorkspaceId);
+        requireEntryFileComplete(forkWorkspaceId);
+        return CoderRunAttempts.ClosingJudgment.generation(summary);
+    }
+
+    /**
+     * 按序合并一片 fork 回主工作区（#351）：取 fork 相对基线的 diff → {@code git apply
+     * --3way} 三方合并（机器查：冲突返回非 0）→ 主工作区 git 成版。冲突转子智能体裁决
+     * （{@link #resolveConflict}）。成功返回 true（含无改动 no-op）；合并/裁决失败返回
+     * false（已落 failSegment + run-failed），且<b>主工作区回滚 merge 前 HEAD</b>
+     * （#353 残留清理——半应用 patch/冲突标记不留，后续合并与续跑在干净主工作区上
+     * 进行）。fork 在 finally 释放（不残留短命容器）。
+     */
+    private boolean mergeFork(Project project, ForkSliceOutcome outcome) {
+        Long projectId = project.getId();
+        Long mainWorkspaceId = project.getWorkspaceId();
+        // merge 前 HEAD 捕获（失败清理基准——恒有 ref：序前段已收口成版/锚定）
+        String mergeBase = captureRollbackBase(mainWorkspaceId, projectId, outcome.ord());
+        try {
+            ExecResultResponse diff = workspaceLifecycleAppService.exec(outcome.workspaceId(),
+                    new WorkspaceExecCommand(WorkspaceVersions.forkDiffCommand()));
+            if (diff.exitCode() != 0) {
+                // fork 成版缺失/取 diff 失败 = 本片产物拿不到——如实判失败（不伪装「无改动」
+                // 闭片成功，否则片产物静默丢失、轨道记为已收口）
+                log.warn("[generate] 项目 {} 片 {} fork diff 取失败（{}），按合并失败处置",
+                        projectId, outcome.ord(), diff.stderr());
+                rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
+                failSegment(projectId, outcome.ord(), outcome.runId());
+                eventBridge.emitRunFailed(project, outcome.runId(), "系统产物合并失败");
+                return false;
+            }
+            if (!diff.stdout().isBlank()) {
+                ExecResultResponse applied = workspaceLifecycleAppService.execWithStdin(
+                        Long.toString(mainWorkspaceId),
+                        new WorkspaceExecCommand(WorkspaceVersions.applyPatchCommand()),
+                        diff.stdout().getBytes(StandardCharsets.UTF_8));
+                if (applied.exitCode() != 0) {
+                    log.warn("[generate] 项目 {} 片 {} 合并冲突（机器查命中），转子智能体裁决",
+                            projectId, outcome.ord());
+                    boolean resolved = resolveConflict(project, outcome);
+                    if (!resolved) {
+                        // 裁决失败：主工作区可能留半应用 patch/冲突标记——回滚干净
+                        rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
+                    }
+                    return resolved;
+                }
+            }
+            versions.commitAtClosing(mainWorkspaceId, projectId, outcome.runId(),
+                    sliceClosingSummary(outcome.slice()));
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
+            rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
+            failSegment(projectId, outcome.ord(), outcome.runId());
+            eventBridge.emitRunFailed(project, outcome.runId(), errorText(e));
+            return false;
+        } finally {
+            destroyForkQuietly(outcome.workspaceId());
+        }
+    }
+
+    /**
+     * 主工作区残留清理（#353 合并失败分支共用）：干净回退 merge 前 HEAD（reset
+     * --hard + clean——半应用 patch/冲突标记/裁决 run 的改动一并脱落）。失败只记
+     * 日志不反噬失败处置主链（残留现场的最坏面 = 既有口径）。
+     */
+    private void rollbackMainWorkspaceQuietly(Long workspaceId, Long projectId, int ord,
+            String mergeBase) {
+        if (mergeBase == null) {
+            return;
+        }
+        try {
+            ExecResultResponse reset = workspaceLifecycleAppService.exec(
+                    Long.toString(workspaceId),
+                    new WorkspaceExecCommand(WorkspaceVersions.resetToSegmentStartCommand(mergeBase)));
+            if (reset.exitCode() != 0) {
+                log.warn("[generate] 项目 {} 片 {} 合并失败后的主工作区清理失败（残留现场随续跑处置）：{}",
+                        projectId, ord, reset.stderr());
+            }
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 合并失败后的主工作区清理异常（残留现场随续跑处置）：{}",
+                    projectId, ord, e.toString());
+        }
+    }
+
+    /**
+     * 合并冲突子智能体裁决（#351 冲突裁决出口）：主工作区处于冲突/半应用态，新派一个
+     * 执行体 run 读两侧改动、按用户目标裁决合并，收口判据 = 主工作区 8081 探活 + 入口
+     * 文件完整。裁决成功即其收口成版落主工作区（默认 {@code run} 目标 = 项目主工作区）。
+     * 失败落 failSegment + run-failed（用户续跑兜底）。
+     */
+    private boolean resolveConflict(Project project, ForkSliceOutcome outcome) {
+        Long projectId = project.getId();
+        String resolveRunId = EventsAppService.newRunId();
+        String sessionId = "coder-" + projectId + "-merge-" + outcome.ord();
+        String prompt = "合并切片「" + outcome.slice() + "」的代码时与主工作区现有代码产生冲突"
+                + "（工作区可能留有冲突标记、.rej 拒绝文件或半应用状态）。请先检查工作区现状，"
+                + "理解两侧改动意图，按用户目标裁决合并——保留两侧功能、消除重复定义、合并重复"
+                + "逻辑；不要重做已完成的其它切片，解决冲突后确认 8081 端口服务在跑、curl 可访问。"
+                + NARRATION_CONVENTION;
+        CoderRunAttempts.RunResult result = coderRunAttempts.run(project, resolveRunId, sessionId,
+                new CoderRunAttempts.Prompts(prompt,
+                        errorScene -> retryRunPrompt("解决合并冲突（切片「" + outcome.slice() + "」）",
+                                errorScene)),
+                (attemptRunId, attemptChanges) -> {
+                    requireReachable(project.getWorkspaceId());
+                    requireEntryFileComplete(project.getWorkspaceId());
+                    return CoderRunAttempts.ClosingJudgment.generation(
+                            "解决合并冲突：完成切片「" + outcome.slice() + "」");
+                },
+                CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
+                RunHeading.titled("解决合并冲突"));
+        if (!result.succeeded()) {
+            failSegment(projectId, outcome.ord(), outcome.runId());
+            if (result.lastError() != null) {
+                terminalFailureScenes.put(projectId, result.lastError());
+            }
+            eventBridge.emitRunFailed(project, outcome.runId(), result.lastError());
+            return false;
+        }
+        return true;
+    }
+
+    /** 释放 fork 副本（#351 短命工作区级联清理；失败只记日志不阻断合并收口）。 */
+    private void destroyForkQuietly(String forkWorkspaceId) {
+        if (forkWorkspaceId == null) {
+            return;
+        }
+        try {
+            workspaceLifecycleAppService.destroy(forkWorkspaceId);
+        } catch (RuntimeException e) {
+            log.warn("[generate] fork {} 释放失败（孤儿由残渣扫描兜底）：{}",
+                    forkWorkspaceId, e.toString());
+        }
+    }
+
+    /** 异常现场归一（fork 片失败回交的错误事实）。 */
+    private static String errorText(RuntimeException e) {
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    }
+
+    /** fork 切片跑的结果（#351）：成败 + fork 寻址 + 收口终文 + 失败现场。 */
+    private record ForkSliceOutcome(int ord, String slice, String runId, String workspaceId,
+            String closingText, String error, boolean succeeded) {
+
+        static ForkSliceOutcome ok(int ord, String slice, String runId, String workspaceId,
+                String closingText) {
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, closingText, null, true);
+        }
+
+        static ForkSliceOutcome failed(int ord, String slice, String runId, String workspaceId,
+                String error) {
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, null, error, false);
+        }
+    }
+
+    /**
+     * 交接摘要落盘（#114 片间交接；#221 兼续跑事实源）：前片收口终文写工作区
+     * .platform/slice-handoff-{n}.md（平台产物目录，不进用户 git 成版，与 #107 同向）。
+     * 正文经 base64 传参防 shell 元字符（执行体终文非平台常量）；失败只记日志不断流
+     * ——片间交接的注入走内存终文（{@link CoderRunAttempts.RunResult#closingText}），
+     * 续跑读回（{@link #readSliceHandoff}）读不回即降级空交接，落盘不承担正确性。
+     */
+    private void placeSliceHandoff(Project project, int segment, String content) {
+        try {
+            String encoded = Base64.getEncoder()
+                    .encodeToString(content.getBytes(StandardCharsets.UTF_8));
+            String command = "printf '%s' '" + encoded + "' | base64 -d > '"
+                    + WorkspaceLayout.absolute(handoffFile(segment)) + "'";
+            ExecResultResponse result = workspaceLifecycleAppService.exec(
+                    Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(command));
+            if (result.exitCode() != 0) {
+                log.warn("[generate] 项目 {} 交接摘要落盘失败（透明面，不断流）：{}",
+                        project.getId(), result.stderr());
+            }
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 交接摘要落盘失败（透明面，不断流）：{}",
+                    project.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达＋入口文件完整
+     * （#339 首屏界面先行）才收口——converse 无异常不构成成功（智能体可能道歉式
+     * 放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
+     * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 verify 兜
+     * （收口扩载 verification 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
+     * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
+     * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
+     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移 Demo 首版成版锚）——且与
+     * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
+     */
+    private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
+            boolean markGenerated, String runId, String summary, Integer prdVersionNo) {
+        requireReachable(project.getWorkspaceId());
+        requireEntryFileComplete(project.getWorkspaceId());
+        if (markGenerated) {
+            // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
+            // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型
+            // 自检）；先于 preview-ready，用户首屏即有内容。失败不阻断收口。
+            demoSeed.seedSandbox(project);
+        }
+        emitPreviewReady(project);
+        closeSegment(project.getId(), ord, runId);
+        if (markGenerated) {
+            markGenerated(project.getId(), runId, prdVersionNo);
+        }
+        // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
+        // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
+        return CoderRunAttempts.ClosingJudgment.generation(summary)
+                .withDesignLint(designSpecs.lintClosingPayload(project));
+    }
+
+    /** 片收口状态落表（#220）：真收口（8081 探活过）即置已收口 + 用户面 run 锚。 */
+    private void closeSegment(Long projectId, int ord, String runId) {
+        recordSegmentStatus(projectId, ord, segment -> segment.close(runId));
+    }
+
+    /** 片失败状态落表（#220）：尝试环超限终态即置失败（用户面 run 锚）。 */
+    private void failSegment(Long projectId, int ord, String runId) {
+        recordSegmentStatus(projectId, ord, segment -> segment.fail(runId));
+    }
+
+    /**
+     * 片状态落位（#220）：轨道表是断点推导与续跑的事实源，但落表失败不反噬 run——
+     * 只记日志（收口事实仍在收尾卡；缺行 = 续跑多跑一片，安全向，同
+     * {@link #markGenerated} 的尽力而为口径）。幂等覆写（重派后再收口/失败即刷新
+     * ——状态是「最近一次尝试的结局」）。
+     */
+    private void recordSegmentStatus(Long projectId, int ord, Consumer<GenerationSegment> transition) {
+        try {
+            generationSegments.findByProjectIdAndOrd(projectId, ord).ifPresent(segment -> {
+                transition.accept(segment);
+                generationSegments.save(segment);
+            });
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} 片 {} 状态落表失败（不反噬 run）：{}", projectId, ord,
+                    e.toString());
+        }
+    }
+
+    /** 8081 可达核验（#35 收口判据探针）：不可达即抛异常（驱动尝试环重试/终态）。 */
+    private void requireReachable(Long workspaceId) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(workspaceId), new WorkspaceExecCommand(CLOSING_PROBE));
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
+        }
+    }
+
+    /**
+     * 入口文件完整性核验（#339 首屏界面先行＋入口一次写全，收口判据第二件）：
+     * 预览入口文件（基座首页）取件失败（缺失）或内容含「其余代码略」式截断占位即
+     * 判残缺——残缺不收口，抛异常驱动尝试环静默重试（重试携错误现场、在同一工作区
+     * 上把入口补全），重试耗尽才转终态失败。8081 探活是「服务在跑」，本判据是
+     * 「首屏写全」——两者皆过才算该段真收口。
+     */
+    private void requireEntryFileComplete(Long workspaceId) {
+        ExecResultResponse result = workspaceLifecycleAppService.exec(
+                Long.toString(workspaceId), new WorkspaceExecCommand(ENTRY_FILE_PROBE));
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("入口文件缺失（" + ProjectFiles.BASELINE_ENTRY
+                    + " 取件失败，退出码 " + result.exitCode() + "）");
+        }
+        if (ProjectFiles.hasTruncationPlaceholder(result.stdout())) {
+            throw new IllegalStateException("入口文件残缺（" + ProjectFiles.BASELINE_ENTRY
+                    + " 含「其余代码略」式截断占位，未一次写全）");
+        }
+    }
+
+    /**
+     * 切片收口推 URL（#105 URL 事件驱动推送）：8081 已在容器内探活通过（执行体已起服），
+     * 此处经 exposePreview 取平台侧可访问的预览 URL 并推 {@code preview-ready}（载荷
+     * projectId + url）——前端 bridge 消费写预览查询缓存，免 3s 轮询拿 URL。整个推送
+     * 是「让 UI 活」的面、不承担正确性：URL 取不到或通知发射失败只记日志不断流——
+     * 收口判据仍只有容器内 8081 探活（#104），URL 推送失败不反噬 run；前端兜底靠
+     * run-finish 失效重拉 REST preview 补 URL。
+     */
+    private void emitPreviewReady(Project project) {
+        try {
+            URI url = workspaceLifecycleAppService.exposePreview(
+                    Long.toString(project.getWorkspaceId()));
+            eventsAppService.publishNotification(ProjectEventTypes.PREVIEW_READY, Map.of(
+                    ProjectEventTypes.PROJECT_ID_FIELD, project.getId().toString(),
+                    ProjectEventTypes.URL_FIELD, url.toString(),
+                    EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),
+                        EventsAppService.OWNER_GUEST_FIELD,
+                        EventsAppService.ownerPayload(project.getOwnerGuestId())));
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} preview-ready 推送失败（UI 面，不断流）：{}",
+                    project.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 首次生成时点落位＋Demo 首版成版（#333 同刻原子——{@link
+     * DemoVersionAppService#closeOnGeneration} 短事务）：失败记日志不炸异步轨道
+     * （run 已成功；片全收口的补落路径下次派发自愈，两落 either-or）。
+     */
+    private void markGenerated(Long projectId, String runId, Integer prdVersionNo) {
+        try {
+            demoVersionAppService.closeOnGeneration(projectId, runId, prdVersionNo);
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} generated_at/Demo 首版落位失败：{}", projectId,
+                    e.toString());
+        }
+    }
+
+    /**
+     * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
+     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无单引号）。带规范项目
+     * 追加设计规范节（#296）。
+     */
+    static String agentsMdWriteCommand(boolean withDesignSpec) {
+        return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
+                + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT
+                + (withDesignSpec ? AGENTS_MD_DESIGN_SPEC_SECTION : "")
+                + "\nPLATFORM_EOF";
+    }
+
+    /**
+     * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区；
+     * #296 起手序单点——<b>物化先于 AGENTS.md</b>，节内容随物化结果）：设计规范
+     * 派发物化（带规范项目四件落位〔:root 刷值／收窄块／DESIGN.md／lint 配置〕、
+     * 无规范项目零动作零写入）→ AGENTS.md 平台约定写入（带规范项目拼设计规范
+     * 节）。退出码非 0 即写入失败（环境故障口径如实上抛，run 不起跑——遵守链
+     * 不静默缺席）。
+     */
+    static void writeConventionAssets(WorkspaceLifecycleAppService workspace,
+            DesignSpecAppService designSpecs, Project project) {
+        boolean withDesignSpec = designSpecs.materializeAtDispatch(project);
+        ExecResultResponse result = workspace.exec(
+                Long.toString(project.getWorkspaceId()),
+                new WorkspaceExecCommand(agentsMdWriteCommand(withDesignSpec)));
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "AGENTS.md 平台约定写入失败: " + result.stderr());
+        }
+    }
+
+    /**
+     * 可生成守卫：存在 / 未归档 / 未生成过（已生成项目的调整走对话区意见，迭代环）/
+     * PRD 已产出（「无门」指待定项不设门；编码 run 的任务就是读 PRD，无 PRD 起跑
+     * 只会空烧重试——守的是动作成立的前置事实，不是流程门）。
+     */
+    private Project requireGeneratableProject(Long projectId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        if (project.getGeneratedAt() != null) {
+            throw new ApplicationException(ProjectMessage.GENERATION_ALREADY_REQUESTED);
+        }
+        if (project.getPrdProducedAt() == null) {
+            throw new ApplicationException(ProjectMessage.GENERATION_PRD_NOT_PRODUCED);
+        }
+        return project;
+    }
+}

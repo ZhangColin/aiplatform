@@ -1,0 +1,891 @@
+package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
+
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import com.cartisan.core.exception.ApplicationException;
+import com.cartisan.core.stereotype.Adapter;
+import com.cartisan.core.stereotype.PortType;
+
+import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
+import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.semgravio.aiplatform.base.workspace.domain.enums.MiddlewareKind;
+import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
+import com.semgravio.aiplatform.base.workspace.domain.model.ProvisionedResource;
+import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 本地 Docker 后端（docker CLI 子进程 / ProcessBuilder，弱化实现起步——上云换
+ * TKE 适配器，端口不动）。
+ *
+ * <p>一个工作区 = 一个单容器沙箱（ADR 0001 all-in-one，镜像 aiplatform/dev：node
+ * 应用运行时 + pg/redis 中间件同容器，预览经共享网络网关子域路由（#128/#141，
+ * 无宿主端口映射）——应用首起归 run 执行体（#44「一开工就跑起来」），死而复起
+ * 归平台 {@link #startApp}（#170，收口 #168；无静态兜底——#45 口径不变）；run
+ * 执行体经平台进程内 AgentScope 以 docker exec 驱动文件面，容器不装智能体 CLI）。
+ * {@code /workspace}
+ * 是唯一持久卷：布局骨架与容器内 pg/redis 由镜像入口脚本 {@code init-workspace.sh}
+ * 对既有卷幂等自愈（PGDATA 落 {@code data/pg}），容器无状态、销毁重建不丢数据。
+ * 连接串写入
+ * {@code /workspace/.env}（agent 从环境读，容器内回环形态）。容器命名消费确定性命名
+ * （{@link WorkspaceNaming}，与记录同源派生），销毁级联因此可从句柄独立完成。
+ * Phase A 仅实现 DEV 供给；TEST/PROD（打包产物形态）随后续切片落位。</p>
+ */
+@Component
+@Adapter(PortType.CLIENT)
+@Slf4j
+public class DockerEnvironmentBackend implements EnvironmentBackend {
+
+    /**
+     * 0.13（#340）：镜像增 /opt/seed 演示种子资产（seed.sql 通用示例集引擎＋
+     * apply.sh 幂等施用入口），init-workspace.sh 增种子施用步、appStartCommand
+     * 拉起前施用（run 收口侧由 DemoSeedAppService exec——首跑的应用表在收口前才
+     * 成形，纯起跑点注不进首跑）。0.12（#296）：基座 devDependencies 增
+     * @shadcn/lint＋oxlint（遵守三件套③——带规范项目收口 token 合规扫描的容器内
+     * 执行件）＋基座骨架页改语义 token（调色板收窄兼容）＋渲染层前移（基座依赖
+     * 演进不触发 chromium 重下载）。0.11（#284）：镜像内置位图出口渲染器
+     * （/opt/render——chromium＋Playwright HTML→PNG 保真渲染、resvg SVG→PNG 零
+     * 浏览器旁路，ADR-0026/0027；压缩体积 +0.4–0.5GB、Playwright 版本强绑定）。
+     * 0.10（#283）：init-workspace.sh 增设计线三目录骨架（materials/design/exports，
+     * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
+     * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
+     */
+    private static final String DEV_IMAGE = "aiplatform/dev:0.13";
+
+    private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
+    /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */
+    private static final Duration PREVIEW_PROBE_TIMEOUT = Duration.ofSeconds(2);
+    /**
+     * 应用拉起探活长窗（#170；#172 调大）：拉起含依赖重装（深度唤醒解包排除
+     * node_modules 后 {@code pnpm install} 是分钟级冷链路），10 分钟上限——健康路径
+     * 首个探活成功即返回，长窗只在最坏情况兜底。
+     */
+    private static final Duration APP_START_TIMEOUT = Duration.ofMinutes(10);
+
+    /** 快照容器（#92）的容器本地落点：副本随容器可写层消失，不进卷。 */
+    private static final String SNAPSHOT_ROOT = "/tmp/snap";
+    /** 快照 pg 数据副本（PGDATA 复制到容器本地，清 pid 后起库——ADR 0007 解路二）。 */
+    private static final String SNAPSHOT_DATA = "/tmp/snapdata";
+    /** 容器内 pg 二进制目录（与 init-workspace.sh 同源——镜像 postgresql-15）。 */
+    private static final String PG_BIN = "/usr/lib/postgresql/15/bin";
+
+    /** 预览基域名（#128）：URL 子域 {@code {id}.{previewBase}} 的基域名，开发 localhost。 */
+    @Value("${app.workspace.preview-base:localhost}")
+    private String previewBase = "localhost";
+
+    /** 预览 URL scheme（#129）：开发 http（关 TLS），生产 https（wildcard 证书）。 */
+    @Value("${app.workspace.preview-scheme:http}")
+    private String previewScheme = "http";
+
+    @Override
+    public WorkspaceProvision createWorkspace(WorkspaceId workspaceId, EnvKind kind) {
+        if (kind != EnvKind.DEV) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_KIND_NOT_SUPPORTED);
+        }
+        String containerName = WorkspaceNaming.containerName(workspaceId);
+        // 幂等预清：移除同名残留容器（卷保留——重建即自愈，卷内数据原样续用）
+        runSilently("docker", "rm", "-f", containerName);
+        try {
+            runSilently("docker", "volume", "create", volumeOf(containerName));
+            ensureDevImage();
+            ensurePreviewNetwork();
+            startDevContainer(workspaceId, containerName);
+            List<ProvisionedResource> resources = settleMiddleware(workspaceId, containerName);
+            return WorkspaceProvision.of(
+                    WorkspaceHandle.dev(workspaceId, containerName, WorkspaceNaming.PREVIEW_NETWORK),
+                    resources.toArray(new ProvisionedResource[0]));
+        } catch (RuntimeException e) {
+            // 置备中途失败：已落定的容器/卷无人回收即泄漏（#57），按命名约定级联回滚
+            log.error("[workspace] {} 置备失败，级联回滚已落定资源", workspaceId.value(), e);
+            cascadeCleanup(workspaceId, containerName);
+            throw e;
+        }
+    }
+
+    @Override
+    public void destroyWorkspace(WorkspaceHandle handle) {
+        cascadeCleanup(handle.workspaceId(), handle.containerName());
+    }
+
+    @Override
+    public WorkspaceProvision forkWorkspace(WorkspaceHandle main, WorkspaceId forkId) {
+        String forkName = WorkspaceNaming.containerName(forkId);
+        String forkVol = volumeOf(forkName);
+        // 幂等预清：fork 容器/卷是短命物，同名残留先清（不留半成品）
+        runSilently("docker", "rm", "-f", forkName);
+        runSilently("docker", "volume", "rm", forkVol);
+        try {
+            run("docker", "volume", "create", forkVol);
+            ensureDevImage();
+            ensurePreviewNetwork();
+            // 入口旁路（--entrypoint sleep）：fork 的 pg/redis 由 forkPopulateCommand 手工
+            // 起（PGDATA 是从 main 拷来的数据副本，不走 init-workspace.sh 的空白库自愈）。
+            // 主卷 :ro 挂 /main-ro 供 git clone + node_modules/PGDATA 拷贝。
+            run("docker", "run", "-d", "--name", forkName,
+                    "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                    "--entrypoint", "sleep",
+                    "-v", forkVol + ":" + WorkspaceLayout.ROOT,
+                    "-v", volumeOf(main.containerName()) + ":/main-ro:ro",
+                    DEV_IMAGE, "infinity");
+            runIn(forkName, forkPopulateCommand());
+            // 库名随数据（PGDATA 从 main 拷来，库名 = main 库名——与快照 #92 同口径）；
+            // .env 指副本库（回环 localhost），应用侧零适配
+            String dbName = WorkspaceNaming.databaseName(main.workspaceId());
+            String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
+            String redisUrl = "redis://localhost:6379";
+            waitForReady(() -> execIn(forkName, "pg_isready -h localhost -U postgres"),
+                    "fork PostgreSQL " + forkName);
+            waitForReady(() -> execIn(forkName, "redis-cli -h localhost ping"),
+                    "fork Redis " + forkName);
+            writeEnvFile(forkName, "DATABASE_URL=" + databaseUrl + "\nREDIS_URL=" + redisUrl + "\n");
+            List<ProvisionedResource> resources = List.of(
+                    new ProvisionedResource(MiddlewareKind.POSTGRESQL, forkName, 0, databaseUrl),
+                    new ProvisionedResource(MiddlewareKind.REDIS, forkName, 0, redisUrl));
+            log.info("[workspace] fork {} 就绪（源 {}，代码 HEAD + 数据副本 + 独立中间件）",
+                    forkName, main.containerName());
+            return WorkspaceProvision.of(
+                    WorkspaceHandle.dev(forkId, forkName, WorkspaceNaming.PREVIEW_NETWORK),
+                    resources.toArray(new ProvisionedResource[0]));
+        } catch (RuntimeException e) {
+            // 派生中途失败：已落定的容器/卷级联回滚，不留孤儿（同 createWorkspace #57 口径）
+            log.error("[workspace] fork {} 派生失败，级联回滚已落定资源", forkId.value(), e);
+            cascadeCleanup(forkId, forkName);
+            throw e;
+        }
+    }
+
+    /**
+     * fork 容器落料（#351）：git clone 主仓库（含 .git——收口成版要提交）+ node_modules
+     * 复用 + PGDATA 数据副本（清陈旧 pid 后起库）+ redis。代码只克隆 git 跟踪面
+     * （node_modules/data 已被 .gitignore 排除，clone 天然不含）。库名随数据：PGDATA
+     * 从 main 拷来，内含 main 库——fork 的 .env 指向它（见 {@link #forkWorkspace}）。
+     *
+     * <p><b>克隆目标不直取工作区根（#355 活体实测修复）</b>：DEV 镜像把
+     * {@code .pnpm-store} 烤进工作区卷（pnpm 提速），新卷首挂时 Docker 会把镜像
+     * 卷内容灌入——工作区根恒非空，{@code git clone} 直取报「not an empty
+     * directory」、fork 派生秒败（实测切片并行波两片全炸、连续两次同败）。改
+     * 克隆到临时目录再整树铺进根（保留镜像种子面，克隆面照旧只含 git 跟踪面）。
+     * 主仓 git 未初始（收口成版前的空工作区）则整树直拷——fork 不依赖主仓已
+     * 有版本（#353 无 HEAD 锚口径同源）。</p>
+     */
+    private String forkPopulateCommand() {
+        String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
+        String nodeModules = WorkspaceLayout.absolute("node_modules");
+        return "if test -d /main-ro/.git; then git clone -q /main-ro /tmp/fork-src"
+                + " && cp -a /tmp/fork-src/. " + WorkspaceLayout.ROOT + "/"
+                + " && rm -rf /tmp/fork-src; else cp -a /main-ro/. " + WorkspaceLayout.ROOT
+                + "/; fi"
+                + " && cd " + WorkspaceLayout.ROOT
+                + " && if test -d /main-ro/node_modules && ! test -e " + nodeModules
+                + "; then cp -a /main-ro/node_modules " + nodeModules + "; fi"
+                + " && mkdir -p " + WorkspaceLayout.absolute(WorkspaceLayout.DATA_DIR)
+                + " && cp -a /main-ro/data/pg " + pgData
+                + " && rm -f " + pgData + "/postmaster.pid"
+                + " && su postgres -c '" + PG_BIN + "/pg_ctl -D " + pgData
+                + " -l " + pgData + "/startup.log -w start'"
+                + " && redis-server --daemonize yes --bind 127.0.0.1 --port 6379"
+                + " --save '' --appendonly no";
+    }
+
+    /**
+     * 级联清理：容器 → 快照容器 → 卷（pg 数据在卷内，随卷走）；尽力而为但不静默
+     * （#179）：真失败 warn 带 stderr——删失败的资源无 DB 行、永远不在 #171 扫描
+     * 面内，零留痕＝孤儿永久不可见（收敛靠 clean-ws-residue.sh 手工，直至触发器响）。
+     */
+    private void cascadeCleanup(WorkspaceId workspaceId, String containerName) {
+        logCleanupFailure("删容器 " + containerName,
+                runCapture("docker", "rm", "-f", containerName));
+        // 快照容器级联（#92）：主容器销毁/重建时在途查看会话随之销毁——同卷 ro 挂载
+        // 必在卷删除前清，否则 docker volume rm 因「卷仍被使用」失败留孤儿
+        removeSnapshotContainers(workspaceId);
+        logCleanupFailure("删卷 " + volumeOf(containerName),
+                runCapture("docker", "volume", "rm", volumeOf(containerName)));
+    }
+
+    /**
+     * 销毁清理单步留痕：非 0 退出按回执区分——「对象已不在」（no such container/
+     * volume 的幂等 no-op；大小写不敏感，同 containerState 判据——Docker Desktop
+     * 29 回小写）静默，其余失败（daemon 不可达等）warn。
+     */
+    private void logCleanupFailure(String what, ExecResult result) {
+        if (result.exitCode() == 0
+                || result.stderr().toLowerCase().contains("no such")) {
+            return;
+        }
+        log.warn("[workspace] 销毁清理{}未成（孤儿风险，手工收敛）：{}",
+                what, result.stderr().trim());
+    }
+
+    /** 按命名前缀扫清快照容器（幂等；无在途会话时 no-op）。 */
+    private void removeSnapshotContainers(WorkspaceId workspaceId) {
+        removeContainersByNameFilter(WorkspaceNaming.snapshotContainerPrefix(workspaceId));
+    }
+
+    /** 按命名子串扫清容器（快照容器清理的单点：级联与启动自愈共用）。 */
+    private void removeContainersByNameFilter(String nameFilter) {
+        ExecResult listed = runCapture("docker", "ps", "-a", "--filter",
+                "name=" + nameFilter, "--format", "{{.Names}}");
+        for (String name : listed.stdout().lines().map(String::trim).filter(n -> !n.isEmpty()).toList()) {
+            runSilently("docker", "rm", "-f", name);
+        }
+    }
+
+    @Override
+    public ExecResult exec(WorkspaceHandle handle, String command) {
+        return runCapture("docker", "exec", handle.containerName(), "sh", "-c", command);
+    }
+
+    @Override
+    public BinaryExecResult execBinary(WorkspaceHandle handle, String command) {
+        // exec 的字节形（#283 图片 raw 直出）：同一 docker exec 通道，stdout 按原始
+        // 字节捕获（packSource/packVolume 已证的 runCaptureBinary 缝——二进制不经
+        // String 往返）
+        ByteExec executed = runCaptureBinary(null,
+                "docker", "exec", handle.containerName(), "sh", "-c", command);
+        return new BinaryExecResult(executed.stdout(), executed.stderr(), executed.exitCode());
+    }
+
+    @Override
+    public ExecResult execWithStdin(WorkspaceHandle handle, String command, byte[] stdin) {
+        // exec 的写面（#286 物料上传）：-i 开 stdin 灌字节落盘（上传字节不经 shell
+        // 参数面、不落平台文件系统），stdout 按文本回执解释（stat 字节）——stdin
+        // 缝是 restoreVolume 已证的 runCaptureBinary
+        ByteExec executed = runCaptureBinary(stdin,
+                "docker", "exec", "-i", handle.containerName(), "sh", "-c", command);
+        return new ExecResult(new String(executed.stdout(), StandardCharsets.UTF_8),
+                executed.stderr(), executed.exitCode());
+    }
+
+    @Override
+    public byte[] packSource(WorkspaceHandle handle) {
+        // 容器内 tar 流式写 stdout（GNU tar，dev 镜像 bookworm 基座自带）：
+        // 相对路径归档（解包得到 ./index.html 而非 /workspace/index.html）；
+        // 排除清单单一事实 = WorkspaceLayout（机密 .env + 非交付目录名单，
+        // 与平台文件树只读端点同源——#27）
+        String excludes = Stream.concat(Stream.of(WorkspaceLayout.ENV_FILE),
+                        WorkspaceLayout.NON_DELIVERABLE_DIRS.stream())
+                .map(name -> "--exclude=./" + name)
+                .collect(Collectors.joining(" "));
+        String command = "tar czf - " + excludes + " -C " + WorkspaceLayout.ROOT + " .";
+        try {
+            Process p = new ProcessBuilder("docker", "exec", handle.containerName(),
+                    "sh", "-c", command).start();
+            // stderr 异步读：tar 输出静默但异常时可能写满管道缓冲，同步顺序读会死锁
+            CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(p.getErrorStream().readAllBytes());
+                } catch (Exception readFailure) {
+                    return String.valueOf(readFailure.getMessage());
+                }
+            });
+            byte[] stdout = p.getInputStream().readAllBytes();
+            int code = p.waitFor();
+            if (code != 0) {
+                throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                        "源码打包失败: " + stderr.join());
+            }
+            return stdout;
+        } catch (ApplicationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "源码打包执行失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public URI exposePort(WorkspaceHandle handle, int containerPort) {
+        // 渐进预览（#45 + #128 网关化）：URL 是 workspaceId 子域（确定、不透明——经
+        // 平台 nginx 网关路由到 ws-{id}:8081），这里只做探活——run 执行体按约定自己
+        // 把应用跑在容器端口（#44 尽早起服），平台不再代起静态兜底服务。探活走容器内
+        // 回环（curl localhost:8081，收口判据不变），通过才返回 URL（调用方以此作
+        // 「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，前端轮询续探），不做长阻塞。
+        URI url = URI.create(WorkspaceNaming.previewUrl(handle.workspaceId(), previewScheme, previewBase));
+        waitForAppServingInContainer(handle.containerName(), containerPort,
+                "工作区应用端口 " + handle.containerName(),
+                PREVIEW_PROBE_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
+        return url;
+    }
+
+    @Override
+    public ContainerState containerState(WorkspaceHandle handle) {
+        // 实态一瞥（#173 观测面）：inspect 非 0 时按 stderr 区分「容器不在」
+        // （no such object，真实 docker 的对象缺失回执）与探查失败（daemon 不可达
+        // 等 → UNKNOWN）——观测面如实分示。判据大小写不敏感：经典 CLI 回
+        // 「Error: No such object」而 Docker Desktop 29 回小写「error: no such
+        // object」，只认大写会把缺失全归 UNKNOWN（#176 联调实测）。只读探查，
+        // 不抛。
+        ExecResult inspected = runCapture("docker", "inspect",
+                "-f", "{{.State.Running}}", handle.containerName());
+        if (inspected.exitCode() == 0) {
+            return "true".equals(inspected.stdout().trim())
+                    ? ContainerState.RUNNING : ContainerState.STOPPED;
+        }
+        return inspected.stderr().toLowerCase().contains("no such object")
+                ? ContainerState.ABSENT : ContainerState.UNKNOWN;
+    }
+
+    @Override
+    public Long volumeSizeBytes(WorkspaceHandle handle) {
+        // 卷用量（#173）：先确认卷在（docker run -v 对缺失卷会自动创建——只读
+        // 探查不能有 resurrect 副作用），再旁路容器 du 全卷（--entrypoint du，
+        // 同 packVolume 的旁路形制，卷静默直读）。du -sb 字节直读；任何失败
+        // （卷不在/du 失败/解析不出）一律 null：观测容缺不抛。
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            return null;
+        }
+        ExecResult sized = runCapture("docker", "run", "--rm",
+                "--entrypoint", "du",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE, "-sb", WorkspaceLayout.ROOT);
+        if (sized.exitCode() != 0) {
+            return null;
+        }
+        try {
+            // du 输出形如「2064384\t/workspace」——首个空白分隔字段即字节总数
+            return Long.parseLong(sized.stdout().trim().split("\\s+")[0]);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    @Override
+    public void hibernate(WorkspaceHandle handle) {
+        // 休眠 = 删容器保卷（#171，ADR-0016 单一语义）：只动容器，卷原样——唤醒走
+        // 既有幂等重建路径（createWorkspace 对同名残留先清后建、卷续用）。删前对
+        // 运行中容器优雅关库（#183：卷内 PGDATA 干净落定，唤醒不再经历 WAL 崩溃
+        // 恢复）；已死/不在容器无多余动作。幂等 + 尽力而为：容器已不在 no-op，
+        // 删失败不抛（意图未落库则下轮扫描重试）
+        if (containerState(handle) == ContainerState.RUNNING) {
+            stopPostgresFast(handle.containerName());
+        }
+        runSilently("docker", "rm", "-f", handle.containerName());
+    }
+
+    /**
+     * 容器内 pg 优雅关停（#183，fast 模式）：断开连接、回滚未竟事务、checkpoint
+     * 落定——秒级完成。redis 无恢复语义不动。pg_ctl 拒 root 运行，经 su postgres；
+     * {@code -t 30} 有界等待（挂死防线——休眠跑在扫描线程上），超时/失败只记日志：
+     * 兜底仍是随后的 {@code rm -f}（SIGKILL，等价旧行为的崩溃恢复）。
+     */
+    private void stopPostgresFast(String containerName) {
+        String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
+        ExecResult stopped = runCapture("docker", "exec", containerName,
+                "su", "postgres", "-c",
+                PG_BIN + "/pg_ctl -D " + pgData + " -m fast -w -t 30 stop");
+        if (stopped.exitCode() != 0) {
+            log.warn("[workspace] {} pg 优雅关停未成（兜底 rm -f，唤醒走崩溃恢复）：{}",
+                    containerName, stopped.stderr().trim());
+        }
+    }
+
+    @Override
+    public byte[] packVolume(WorkspaceHandle handle) {
+        // 卷瘦身快照（#172 封存前半）：临时旁路容器（入口旁路——不起中间件，卷静默
+        // 读取）tar 流式写 stdout。排除清单单一事实 = WorkspaceLayout.REBUILDABLE_CACHE_DIRS
+        // （交付口径的 packSource 更严——机密/数据不进交付包，但数据必须随封存包）。
+        // 注意 exclude 逐项独立 argv：本命令不经 shell（docker run 直达 tar），空格拼接
+        // 的单 argv 会被 tar 当成一个选项值、排除全部失效（packSource 经 sh -c 无此坑）。
+        // tar 以 root 跑：uid/gid 入包，解包端（同为 root）原样恢复属主——PGDATA 的
+        // postgres 属主是解包后 pg 能起的前提。
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            // 卷不在（已删/外部漂移）：无包可记——调用方按空包收敛意图
+            log.warn("[workspace] {} 打包时卷不在（已删/外部漂移），无包可记",
+                    handle.workspaceId().value());
+            return null;
+        }
+        List<String> cmd = new ArrayList<>(List.of("docker", "run", "--rm",
+                "--entrypoint", "tar",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE,
+                "czf", "-"));
+        WorkspaceLayout.REBUILDABLE_CACHE_DIRS.forEach(
+                name -> cmd.add("--exclude=./" + name));
+        cmd.addAll(List.of("-C", WorkspaceLayout.ROOT, "."));
+        ByteExec packed = runCaptureBinary(null, cmd.toArray(new String[0]));
+        if (packed.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "封存打包失败: " + packed.stderr());
+        }
+        return packed.stdout();
+    }
+
+    @Override
+    public void restoreVolume(WorkspaceHandle handle, byte[] archive) {
+        // 封存包回卷（#172 深度唤醒前半）：先删后建（残留/上次失败的半解包干净落位）
+        // → 临时旁路容器从 stdin 解包 + 清 PGDATA 陈旧 pid（封存自 rm -f 的静默卷来，
+        // pid 指向旧容器命名空间的进程号，新容器内同号进程可能占位致 pg 拒起）。
+        // 须先于 createWorkspace：卷就位后入口脚本对既有 PGDATA 幂等自愈。
+        String volume = volumeOf(handle.containerName());
+        runSilently("docker", "volume", "rm", volume);
+        run("docker", "volume", "create", volume);
+        String stalePid = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR) + "/postmaster.pid";
+        String command = "tar xzf - -C " + WorkspaceLayout.ROOT + " && rm -f " + stalePid;
+        ByteExec restored = runCaptureBinary(archive, "docker", "run", "--rm", "-i",
+                "--entrypoint", "sh",
+                "-v", volume + ":" + WorkspaceLayout.ROOT,
+                DEV_IMAGE, "-c", command);
+        if (restored.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "封存包回卷失败: " + restored.stderr());
+        }
+    }
+
+    @Override
+    public boolean deleteVolume(WorkspaceHandle handle) {
+        // 删卷（#172 封存后半，封存包安全落盘后）：卷不在 no-op；删失败（容器占用等）
+        // 返回 false——调用方下轮扫描收敛，不抛
+        String volume = volumeOf(handle.containerName());
+        if (runCapture("docker", "volume", "inspect", volume).exitCode() != 0) {
+            return false;
+        }
+        return runCapture("docker", "volume", "rm", volume).exitCode() == 0;
+    }
+
+    @Override
+    public void startApp(WorkspaceHandle handle) {
+        // 8081 应用拉起（#170 平台职责，收口 #168 缺口）：run 执行体 exec 常驻的应用
+        // 进程不随容器自愈（入口脚本只自愈 pg/redis），容器重建/重启后由本方法拉回。
+        // 幂等：已在服直接返回；无起服入口（stdout 无 started 哨兵）不拉不等待——
+        // 从未生成工作区恢复到未生成态，不空耗探活窗。
+        if (appServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT)) {
+            return;
+        }
+        ExecResult started = runCapture("docker", "exec", handle.containerName(),
+                "sh", "-c", appStartCommand());
+        if (started.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "拉起工作区应用失败: " + started.stderr());
+        }
+        if (!started.stdout().contains(STARTED_SENTINEL)) {
+            log.info("[workspace] {} 无起服入口（server.js/package.json 均无），不拉应用",
+                    handle.containerName());
+            return;
+        }
+        waitForAppServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT,
+                "工作区应用 " + handle.containerName(),
+                APP_START_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
+    }
+
+    /** 起服哨兵（appStartCommand 拉起分支的 stdout 回执；无入口分支不输出）。 */
+    private static final String STARTED_SENTINEL = "started";
+
+    /**
+     * 容器内起服命令（与快照 {@link #snapshotAppStartCommand} 同款判据链的主容器版）：
+     * 先按需重装依赖（#172 深度唤醒：封存包排除 node_modules，解包后缺失则
+     * {@code pnpm install}——基座包管理器与 store-dir 约定见镜像 Dockerfile，锁文件
+     * 随包、装完与判据链同窗等待）；再演示种子施用（#340：幂等补空表，拉起前一刻
+     * 补位——apply.sh 恒退 0 不阻断拉起）；再 server.js → node server.js；
+     * package.json → npm start；无入口静默退出（exit 0、不输出 started 哨兵——
+     * 调用方以此区分「拉了等起服」与「无入口不拉」。注意 shell 优先级：{@code &}
+     * 是命令分隔符会把整段后台化，哨兵必须经 {@code { …& } &&} 前台条件执行，
+     * 否则 exit 0 后哨兵仍输出）。差异：不注入 DATABASE_URL/REDIS_URL（主容器
+     * .env 在位、应用自读，#45 口径平台不代起静态兜底，故无 serve.js 兜底分支）、
+     * 日志落卷内 .app.log。
+     */
+    private String appStartCommand() {
+        return "cd " + WorkspaceLayout.ROOT
+                + " && if test -f package.json && ! test -d node_modules; then pnpm install; fi"
+                + " && sh " + WorkspaceLayout.SEED_APPLY_ENTRY
+                + " && if test -f server.js; then APP='node server.js';"
+                + " elif test -f package.json; then APP='npm start';"
+                + " else exit 0; fi"
+                + " && { nohup sh -c \"$APP\" > .app.log 2>&1 & }"
+                + " && echo started";
+    }
+
+    @Override
+    public SnapshotHandle startSnapshot(WorkspaceHandle mainHandle, String viewId, String ref) {
+        String snapName = WorkspaceNaming.snapshotContainerName(mainHandle.workspaceId(), viewId);
+        String dbName = WorkspaceNaming.databaseName(mainHandle.workspaceId());
+        String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
+        startSnapshotContainer(mainHandle, snapName, viewId);
+        try {
+            // 确定性启动序列（ADR 0007 配方）：复制 PGDATA → 清 pid → 起 pg → 起 redis
+            // → 检出当时代码 → 起应用。全部容器本地落点，卷只读、主容器零扰动。
+            runIn(snapName, snapshotDataCommand());
+            runIn(snapName, snapshotCheckoutCommand(ref, databaseUrl));
+            runIn(snapName, snapshotAppStartCommand(databaseUrl));
+            // #141 网关化：无宿主端口映射，探活走容器内回环（与主预览 exposePort 同款
+            // 收口判据）；长窗 + 环境故障口径不变（快照起服是同步等待，非前端轮询）
+            waitForAppServingInContainer(snapName, EnvironmentBackend.DEV_APP_CONTAINER_PORT,
+                    "快照应用 " + snapName, RESOURCE_READY_TIMEOUT,
+                    WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
+            URI url = URI.create(
+                    WorkspaceNaming.snapshotPreviewUrl(viewId, previewScheme, previewBase));
+            log.info("[snapshot] {} 快照就绪（ref={}，预览 {}）", snapName, ref, url);
+            return new SnapshotHandle(snapName, url);
+        } catch (RuntimeException e) {
+            // 快照起服失败：销毁半启动容器，不留孤儿（副本随容器可写层消失）
+            runSilently("docker", "rm", "-f", snapName);
+            throw e;
+        }
+    }
+
+    @Override
+    public void stopSnapshot(SnapshotHandle snapshot) {
+        runSilently("docker", "rm", "-f", snapshot.containerName());
+    }
+
+    @Override
+    public void sweepSnapshotContainers() {
+        // 启动自愈（#92）：快照容器是临时视图，平台重启后注册表丢账——按命名扫清全部
+        // ws-*-snap-* 孤儿（含跨工作区），不留常驻孤儿
+        removeContainersByNameFilter("-snap-");
+    }
+
+    @Override
+    public int sweepSnapshotContainersExcept(Collection<String> keepContainerNames) {
+        // 运行期孤儿兜底（#171）：孤儿清扫原只在启动期跑，运行期同样有漏网（关窗
+        // 销毁删失败、注册表丢账）——保留集（在用会话）之外按命名扫清
+        ExecResult listed = runCapture("docker", "ps", "-a", "--filter",
+                "name=-snap-", "--format", "{{.Names}}");
+        int removed = 0;
+        for (String name : listed.stdout().lines().map(String::trim)
+                .filter(n -> !n.isEmpty()).toList()) {
+            if (!keepContainerNames.contains(name)) {
+                runSilently("docker", "rm", "-f", name);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    // ---------- dev 环境内部 ----------
+
+    /**
+     * 落定单容器中间件（ADR 0001 all-in-one）：pg/redis 由容器入口脚本在容器内起
+     * （PGDATA 落 {@code data/pg} 进卷、redis 回环纯缓存），本方法只做就绪等待 +
+     * {@code .env} 注入 + 资源清单（入库 wsp_resources）。连接串无凭据——pg 为
+     * trust 认证且只监听容器内回环、无对外端口，客户端只有同容器进程。容器销毁
+     * 重建后同一入口脚本对既有卷幂等自愈，数据不丢。
+     */
+    private List<ProvisionedResource> settleMiddleware(WorkspaceId workspaceId, String containerName) {
+        String dbName = WorkspaceNaming.databaseName(workspaceId);
+        waitForReady(() -> execIn(containerName, "pg_isready -h localhost -U postgres"),
+                "容器内 PostgreSQL " + containerName);
+        waitForReady(() -> execIn(containerName, "redis-cli -h localhost ping"),
+                "容器内 Redis " + containerName);
+
+        String databaseUrl = "postgresql://" + dbName + "@localhost:5432/" + dbName;
+        String redisUrl = "redis://localhost:6379";
+        writeEnvFile(containerName, "DATABASE_URL=" + databaseUrl + "\nREDIS_URL=" + redisUrl + "\n");
+
+        log.info("[workspace] {} 单容器中间件就绪：{}（pg/redis 容器内回环，数据落卷）",
+                workspaceId.value(), containerName);
+        return List.of(
+                new ProvisionedResource(MiddlewareKind.POSTGRESQL, containerName, 0, databaseUrl),
+                new ProvisionedResource(MiddlewareKind.REDIS, containerName, 0, redisUrl));
+    }
+
+    /** 容器内 shell 执行（就绪探针等容器内短命令）。 */
+    private ExecResult execIn(String containerName, String command) {
+        return runCapture("docker", "exec", containerName, "sh", "-c", command);
+    }
+
+    /** 连接串写入 /workspace/.env（布局约定三：唯一注入通道；内容为平台生成的 URL，无用户可控片段）。 */
+    private void writeEnvFile(String containerName, String env) {
+        run("docker", "exec", containerName, "sh", "-c",
+                "printf '%s' '" + env + "' > " + WorkspaceLayout.absolute(WorkspaceLayout.ENV_FILE));
+    }
+
+    private void startDevContainer(WorkspaceId workspaceId, String containerName) {
+        // #128 网关化：不再随机映射宿主端口——进共享预览网络（previewnet），网关按
+        // 容器名 ws-{id} DNS 路由（resolver 127.0.0.11），应用仍监听容器内 8081。
+        // restart unless-stopped：Docker 守护进程重启/容器被杀后自动拉起（卷在、入口
+        // 脚本幂等自愈），用户显式 stop 不拉——否则预览随宿主重启死透且无自愈。
+        run("docker", "run", "-d", "--name", containerName,
+                "--restart", "unless-stopped",
+                "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                "-v", volumeOf(containerName) + ":" + WorkspaceLayout.ROOT,
+                "-w", WorkspaceLayout.ROOT,
+                // 归位修复（ADR 0001）：pg 数据进卷（容器内回环，无对外端口）
+                "-e", "PGDATA=" + WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR),
+                "-e", "WORKSPACE_DB=" + WorkspaceNaming.databaseName(workspaceId),
+                DEV_IMAGE, "sleep", "infinity");
+    }
+
+    /** 共享预览网络（#128）：幂等创建（已存在时 docker 返回非 0，静默忽略）。 */
+    private void ensurePreviewNetwork() {
+        runSilently("docker", "network", "create", WorkspaceNaming.PREVIEW_NETWORK);
+    }
+
+    /** 轮询命令探针直至成功或超时（中间件/服务就绪等待）。 */
+    private void waitForReady(Supplier<ExecResult> probe, String target) {
+        long deadline = System.currentTimeMillis() + RESOURCE_READY_TIMEOUT.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (probe.get().ok()) {
+                return;
+            }
+            sleep();
+        }
+        throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                "等待 " + target + " 就绪超时");
+    }
+
+    private void sleep() {
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "等待资源就绪被中断");
+        }
+    }
+
+    /** 单发容器内探活（#170 startApp 幂等前置）：不轮询不抛，只在服与否。 */
+    private boolean appServingInContainer(String containerName, int port) {
+        return execIn(containerName, appProbeCommand(port)).ok();
+    }
+
+    /**
+     * 容器内探活应用端口（#128 网关化：宿主无端口映射，探活走容器回环 curl——
+     * 收口判据「容器内 8081 探活」不变）。curl 退出码 0 = 收到 HTTP 响应（任何状态码
+     * 都算已监听），短窗未就绪按 {@code onTimeout} 口径抛。
+     */
+    private void waitForAppServingInContainer(String containerName, int port, String target,
+            Duration timeout, WorkspaceMessage onTimeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (execIn(containerName, appProbeCommand(port)).ok()) {
+                return;
+            }
+            sleep();
+        }
+        throw new ApplicationException(onTimeout, "等待 " + target + " 就绪超时");
+    }
+
+    /**
+     * 探活 curl 命令（单发与轮询同款，#183）：{@code --max-time} 上限 = 预览短窗
+     * 时长——无响应挂死防线，单次探活不因 TCP 挂起吃掉探活窗、阻塞唤醒线程
+     * （curl 对已建连不回响应的对端默认等分钟级）。
+     */
+    private static String appProbeCommand(int port) {
+        return "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
+                + " -o /dev/null http://localhost:" + port;
+    }
+
+    /** dev 镜像缺失时从 classpath 资源现场构建（首次含 pnpm install 较重，之后走缓存）。 */
+    private void ensureDevImage() {
+        if (runCapture("docker", "image", "inspect", DEV_IMAGE).exitCode() == 0) {
+            return;
+        }
+        try {
+            Path dir = Files.createTempDirectory("aiplatform-ws-image");
+            copyResource("docker/workspace/dev-image.Dockerfile", dir.resolve("Dockerfile"));
+            copyResource("docker/workspace/init-workspace.sh", dir.resolve("init-workspace.sh"));
+            copyResource("docker/workspace/serve.js", dir.resolve("serve.js"));
+            copyResourceTree("docker/workspace/baseline", dir.resolve("baseline"));
+            copyResourceTree("docker/workspace/render", dir.resolve("render"));
+            copyResourceTree("docker/workspace/seed", dir.resolve("seed"));
+            run("docker", "build", "-t", DEV_IMAGE, dir.toString());
+        } catch (ApplicationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "构建 dev 镜像失败: " + e.getMessage());
+        }
+    }
+
+    private void copyResource(String resource, Path target) throws Exception {
+        try (InputStream in = getClass().getClassLoader().getResourceAsStream(resource)) {
+            if (in == null) {
+                throw new IllegalStateException("找不到资源 " + resource);
+            }
+            Files.copy(in, target);
+        }
+    }
+
+    /**
+     * 递归复制 classpath 目录（基座模板就位到镜像 build context）：开发/测试场景下
+     * classpath 落在 target/classes 文件系统目录（file: 协议），直接 {@code Files.walk}
+     * 递归复制；jar 打包形态（生产）镜像由部署流程预置，现场构建不覆盖该路径。
+     */
+    private void copyResourceTree(String resourceDir, Path targetDir) throws Exception {
+        URL url = getClass().getClassLoader().getResource(resourceDir);
+        if (url == null) {
+            throw new IllegalStateException("找不到资源目录 " + resourceDir);
+        }
+        if (!"file".equals(url.getProtocol())) {
+            throw new IllegalStateException("基座模板须以文件系统 classpath 提供（开发场景）: "
+                    + resourceDir);
+        }
+        Path src = Path.of(url.toURI());
+        try (Stream<Path> walk = Files.walk(src)) {
+            for (Path entry : walk.toList()) {
+                Path relative = src.relativize(entry);
+                Path target = targetDir.resolve(relative.toString());
+                if (Files.isDirectory(entry)) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.copy(entry, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
+    // ---------- 快照容器内部（#92 ADR 0007 解路二） ----------
+
+    /** 起快照容器：同镜像 + 同工作区卷挂 :ro + 入口脚本旁路（--entrypoint sleep）
+     *  + 进 previewnet 挂网络别名 {@code snap-{viewId}}（#141 网关化：网关按
+     *  「snap-{viewId} 子域 → 别名」DNS 路由；容器名保留 ws-{id}- 前缀供级联清理，
+     *  无宿主端口映射——失败即环境故障上抛，无端口冲突重试面）。主容器 pg 在活体
+     *  卷上照跑，快照侧永不直接对共享 PGDATA 起库（E0 教训）。 */
+    private void startSnapshotContainer(WorkspaceHandle mainHandle, String snapName, String viewId) {
+        run("docker", "run", "-d", "--name", snapName,
+                "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                "--network-alias", WorkspaceNaming.snapshotNetworkAlias(viewId),
+                "--entrypoint", "sleep",
+                "-v", volumeOf(mainHandle.containerName()) + ":" + WorkspaceLayout.ROOT + ":ro",
+                "-w", WorkspaceLayout.ROOT,
+                DEV_IMAGE, "infinity");
+    }
+
+    /** 快照容器内 shell 执行（启动序列各步）；退出码非 0 即环境故障，如实上抛。 */
+    private void runIn(String containerName, String command) {
+        ExecResult result = runCapture("docker", "exec", containerName, "sh", "-c", command);
+        if (result.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "快照容器命令失败: " + command + "\n" + result.stderr());
+        }
+    }
+
+    /** 数据副本 + 起库 + redis（原子一步）：PGDATA 复制到容器本地 → 清 pid → 起 pg
+     *  → 起 redis。副本是崩溃一致快照（WAL 恢复起库），只读卷、主库零扰动。 */
+    private String snapshotDataCommand() {
+        String pgData = WorkspaceLayout.absolute(WorkspaceLayout.PG_DATA_DIR);
+        return "rm -rf " + SNAPSHOT_DATA + " " + SNAPSHOT_ROOT
+                + " && cp -a " + pgData + " " + SNAPSHOT_DATA
+                + " && rm -f " + SNAPSHOT_DATA + "/postmaster.pid"
+                + " && su postgres -c '" + PG_BIN + "/pg_ctl -D " + SNAPSHOT_DATA
+                + " -l " + SNAPSHOT_DATA + "/startup.log -w start'"
+                + " && redis-server --daemonize yes --bind 127.0.0.1 --port 6379"
+                + " --save '' --appendonly no";
+    }
+
+    /** 检出当时代码 + 依赖复用 + 连接串：{@code git archive} 读 .git（ro 卷）把该
+     *  commit 树解到容器本地（不碰 .git 索引、不互踩主工作树）；node_modules 复用
+     *  主容器（复制而非 symlink——Next 16 Turbopack 拒「项目根外 symlink」，历史代码
+     *  的依赖不入版、v1 复用当前依赖；与复制 PGDATA 同量级的容器本地副本）；.env 写
+     *  副本本地（DATABASE_URL 指容器内 localhost，应用侧零适配）。 */
+    private String snapshotCheckoutCommand(String ref, String databaseUrl) {
+        String nodeModules = WorkspaceLayout.absolute("node_modules");
+        return "mkdir -p " + SNAPSHOT_ROOT
+                + " && git -C " + WorkspaceLayout.ROOT + " archive '" + ref
+                + "' | tar -x -C " + SNAPSHOT_ROOT
+                + " && if test -d " + nodeModules + " && ! test -e " + SNAPSHOT_ROOT
+                + "/node_modules; then cp -a " + nodeModules + " " + SNAPSHOT_ROOT
+                + "/node_modules; fi"
+                + " && printf 'DATABASE_URL=" + databaseUrl
+                + "\\nREDIS_URL=redis://localhost:6379\\n' > " + SNAPSHOT_ROOT + "/.env";
+    }
+
+    /** 起应用（后台常驻，8081）：server.js → node server.js；package.json → npm start
+     *  （生成应用约定带 start 脚本）；否则静态 serve.js 兜底——仅无可用起服入口的
+     *  历史版本（纯静态/仅文档轮）降级呈现，非主路径（#92「查看当时」不代起主预览
+     *  已退休的静态兜底）。DATABASE_URL/REDIS_URL 注入进程环境（与 .env 同形双保险）。 */
+    private String snapshotAppStartCommand(String databaseUrl) {
+        return "cd " + SNAPSHOT_ROOT
+                + " && if test -f server.js; then APP='node server.js';"
+                + " elif test -f package.json; then APP='npm start';"
+                + " else APP='node /opt/serve.js " + SNAPSHOT_ROOT + " 8081'; fi"
+                + " && DATABASE_URL='" + databaseUrl + "' REDIS_URL='redis://localhost:6379'"
+                + " nohup sh -c \"$APP\" > app.log 2>&1 & echo started";
+    }
+
+    // ---------- 命名约定（销毁级联与幂等重建的根基） ----------
+    // container 名消费 {@link WorkspaceNaming}（与记录同源）；卷名是后端内部子资源
+    // 命名（不入库），仅销毁级联用。
+
+    private String volumeOf(String containerName) {
+        return "vol-" + containerName;
+    }
+
+    // ---------- CLI 工具 ----------
+
+    private void run(String... cmd) {
+        ExecResult r = runCapture(cmd);
+        if (r.exitCode() != 0) {
+            throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
+                    "命令失败: " + String.join(" ", cmd) + "\n" + r.stderr());
+        }
+    }
+
+    private void runSilently(String... cmd) {
+        runCapture(cmd);
+    }
+
+    /** 测试子类覆写点：注入单条命令失败以验收回滚路径（#57 验收口径）。 */
+    protected ExecResult runCapture(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).start();
+            String out = new String(p.getInputStream().readAllBytes());
+            String err = new String(p.getErrorStream().readAllBytes());
+            int code = p.waitFor();
+            return new ExecResult(out, err, code);
+        } catch (Exception e) {
+            return new ExecResult("", String.valueOf(e.getMessage()), 1);
+        }
+    }
+
+    /**
+     * 字节流命令 seam（#172 封存打包/回卷，与 {@link #runCapture} 同一假面面）：
+     * stdin 可喂字节（解包）、stdout 取字节（打包）——gzip 二进制经 String 往返会
+     * 损坏，字节命令不走 {@code runCapture}。stderr 异步读防管道写满死锁（同
+     * {@link #packSource} 的教训）。异常（进程起不来等）按 exit 1 + stderr 记因，
+     * 不抛——与 {@code runCapture} 的容错形态一致。
+     */
+    protected ByteExec runCaptureBinary(byte[] stdin, String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).start();
+            CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(p.getErrorStream().readAllBytes());
+                } catch (Exception readFailure) {
+                    return String.valueOf(readFailure.getMessage());
+                }
+            });
+            if (stdin != null) {
+                p.getOutputStream().write(stdin);
+            }
+            p.getOutputStream().close();
+            byte[] stdout = p.getInputStream().readAllBytes();
+            int code = p.waitFor();
+            return new ByteExec(stdout, stderr.join(), code);
+        } catch (Exception e) {
+            return new ByteExec(new byte[0], String.valueOf(e.getMessage()), 1);
+        }
+    }
+
+    /** 字节流命令结果（{@link #runCaptureBinary} 的返回形；测试假面可编）。 */
+    public record ByteExec(byte[] stdout, String stderr, int exitCode) {
+    }
+}

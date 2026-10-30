@@ -1,0 +1,99 @@
+package com.semgravio.aiplatform.base.agentscope;
+
+import java.time.Duration;
+import java.util.Map;
+
+import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
+
+/**
+ * 一轮智能体调用的全部入参：平台进程内 HarnessAgent 单轮对话。
+ *
+ * <p>{@code runId} 为本轮调用的平台标识（计量幂等键与事件锚定都基于它）；
+ * {@code systemPrompt} 可空——为空时取配置默认；{@code modelString}
+ * <b>必填</b>（ADR-0031/#366 起全部调用面经档位解析携「前缀:实际模型名」串
+ * ——三座与边缘四点统一装配链，配置缺省串回落已随边缘点收编退役）；
+ * {@code modelChannel} 可空——模型通道注入件（业务侧档位解析的
+ * baseUrl/apiKey/enableThinking，经创建上下文注入 SDK、进实例缓存键指纹）；
+ * 主链调用与 {@code modelString} 恒结伴非空；为空＝无通道语境（测试形），
+ * SDK 侧回落内置 provider 的环境变量/默认地址；
+ * {@code usageContext} 可空——为空则本轮不上报用量（底座不发明归属）；
+ * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
+ * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
+ * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
+ * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（对话轮 2 分钟量级）；
+ * {@code silenceTimeout} 可空——<b>活超时判定</b>（#322 生成轨）：事件流静默超过
+ * 此值即判死——还在干活就不掐（持续产出事件/工具动作的段无总时长死限），纯静默
+ * 超限才判死；非空即接管超时语义（{@code timeout} 总墙钟不再施加），为空沿用
+ * {@code timeout} 总墙钟（对话轮/判定轮调用面零变化）；{@code toolSilenceTimeout}
+ * 可空——工具执行窗的活超时预算（#355）：工具执行中引擎无事件（长命令会被静默
+ * 阈值误杀），执行窗给延长预算、任何事件到达即回落 {@code silenceTimeout}；为空
+ * 回落同静默阈值（不放大预算）；{@code agentKey} 可空——
+ * 该轮智能体的配置键（业务侧配置标识，
+ * 底座不解释），按配置发放工具集的寻址腿（见 {@link AgentToolkitSupplier}；
+ * 为空 = 无配置语境，空工具面），并随 run-start 载荷透出（前端登记锚）；
+ * {@code workspaceReadOnly}——项目工作区解析为只读面（#86 主智能体姿态：
+ * 不挂内核文件/shell 工具，写面结构性关闭；缺省 false = 读写面）；
+ * {@code workspaceNoShell}——项目工作区解析为设计面（#289 设计执行体姿态，
+ * ADR-0025 无 shell）：内核文件工具（写文件件）保留、shell 与委派结构性关闭；
+ * 只读标记优先（readOnly=true 恒只读面，本标记不生效）；
+ * {@code heading} 可空——工作消息头部标题（#118：用户语言标题 + 生成轨道切片
+ * 进度），底座不解释，随 run-start 载荷透出（{@code slice} 字段，前端工作消息
+ * 头部呈现源）；{@code toolSpec} 可空——工具面规格串（#252 增强工具开关的
+ * 装配腿：业务侧从运营配置解析编码，底座不解释），进工厂实例缓存键并透传
+ * {@link AgentToolkitSupplier}（规格变＝实例变，开关变更下一轮命令构建即新装配；
+ * 一次性判定等无配置语境不填）。</p>
+ */
+public record AgentCommand(
+        String runId,
+        String prompt,
+        String systemPrompt,
+        String modelString,
+        ModelChannel modelChannel,
+        String sessionId,
+        String userId,
+        UsageContext usageContext,
+        String workspaceId,
+        Map<String, Object> streamCorrelation,
+        Duration timeout,
+        Duration silenceTimeout,
+        Duration toolSilenceTimeout,
+        String agentKey,
+        boolean workspaceReadOnly,
+        boolean workspaceNoShell,
+        RunHeading heading,
+        String toolSpec) {
+
+    /** 无逐轮超时的兼容形（取内核配置默认）：一次性本地会话调用面（取名等）
+     * 不变——空工具面、无工具面规格；模型串由调用侧档位解析携入（#366）。 */
+    public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
+            String sessionId, String userId, UsageContext usageContext,
+            String workspaceId, Map<String, Object> streamCorrelation) {
+        this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
+                usageContext, workspaceId, streamCorrelation, null, null, null, null,
+                false, false, null, null);
+    }
+
+    /** 无逐轮超时、带配置键的对话形（主智能体对话轮调用面：配置键穿透工具装配）。 */
+    public AgentCommand(String runId, String prompt, String systemPrompt, String modelString,
+            String sessionId, String userId, UsageContext usageContext,
+            String workspaceId, Map<String, Object> streamCorrelation, String agentKey) {
+        this(runId, prompt, systemPrompt, modelString, null, sessionId, userId,
+                usageContext, workspaceId, streamCorrelation, null, null, null, agentKey,
+                false, false, null, null);
+    }
+
+    public AgentCommand {
+        if (runId == null || runId.isBlank() || prompt == null || prompt.isBlank()
+                || sessionId == null || sessionId.isBlank()
+                || modelString == null || modelString.isBlank()) {
+            throw new IllegalArgumentException(
+                    "AgentCommand 字段不完整：runId/prompt/sessionId/modelString 必填"
+                            + "（modelString＝档位解析产物，ADR-0031/#366 无配置缺省回落）");
+        }
+        streamCorrelation = streamCorrelation == null ? Map.of() : Map.copyOf(streamCorrelation);
+        if (streamCorrelation.containsKey(EventEnvelope.TYPE_KEY)) {
+            throw new IllegalArgumentException(
+                    "streamCorrelation 禁含 " + EventEnvelope.TYPE_KEY + " 键（信封契约）");
+        }
+    }
+}

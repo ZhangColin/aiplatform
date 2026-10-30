@@ -1,0 +1,227 @@
+package com.semgravio.aiplatform.business.project.infrastructure.agentscope;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.permission.PermissionDecision;
+import io.agentscope.core.tool.ToolBase;
+import io.agentscope.core.tool.ToolCallParam;
+import reactor.core.publisher.Mono;
+
+import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.LandedFileFacts;
+import com.semgravio.aiplatform.business.project.application.DesignSpecAppService;
+import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService;
+import com.semgravio.aiplatform.business.project.application.ImageGenerationAppService.ImageGenerationOutcome;
+
+/**
+ * 出图工具件（#288 出图工具件内核，ADR-0026/0027；发放接线归 #289 设计执行体票
+ * ——工具面＝写文件件＋本件、无 shell）：调图片生成模型出位图稿、平台即时转存
+ * 落盘产物目录 {@code design/}——供应商 URL 只中转不透出（工具结果只回落盘路径
+ * 与字节）。<b>档位表落提示词层</b>（ADR-0026：写实氛围/复杂光影/插画向用本件；
+ * 文字排版为主的海报卡片写 HTML——语义判断归执行体，不做代码级硬路由）。
+ * 技术失败（报错/拦截/超时）内核有限自动重试、不产新候选——工具面只见最终结果。
+ *
+ * <p>参数：{@code prompt}（画面正向描述，必传）；{@code count} 1~5 缺省 1（多稿
+ * 候选数量归执行体协议约定）；{@code size} 可选（画幅，供应商词表原样透传）；
+ * {@code name} 可选（落盘词干提示，平台消毒＋TSID 前缀防撞）；{@code palette}＋
+ * {@code style} 可选（设计参数——色板 hex 数组＋风格短语，#295 随稿物化为设计
+ * 规范草稿 {@code design/{词干}.spec.json}，该稿定稿时转正进项目规范：参数即
+ * 设计意图正身，ADR-0028）。计量（按张事件）与转存归
+ * {@link ImageGenerationAppService} 内核；物化归 {@link DesignSpecAppService}；
+ * run/会话标识经 {@link AgentscopeAgentClient#RUN_ID_CONTEXT_KEY} 上下文腿透传
+ * （#259 先例）。</p>
+ */
+public class GenerateImageTool extends ToolBase {
+
+    /** 注册名（#289 装配面与 AgentTool 枚举登记锚——本票只立内核不发放）。 */
+    public static final String NAME = "generate_image";
+
+    private static final String PROMPT_KEY = "prompt";
+    private static final String COUNT_KEY = "count";
+    private static final String SIZE_KEY = "size";
+    private static final String NAME_KEY = "name";
+    private static final String PALETTE_KEY = "palette";
+    private static final String STYLE_KEY = "style";
+
+    private static final int DEFAULT_COUNT = 1;
+
+    private final String workspaceId;
+    private final ImageGenerationAppService generation;
+    private final LandedFileFacts landedFiles;
+    private final DesignSpecAppService designSpecs;
+
+    public GenerateImageTool(String workspaceId, ImageGenerationAppService generation,
+            LandedFileFacts landedFiles, DesignSpecAppService designSpecs) {
+        super(ToolBase.builder()
+                .name(NAME)
+                .description("图片生成模型出位图设计稿，落盘到工作区 design/ 目录并返回文件路径。"
+                        + "适用档位（重要）：写实照片质感、复杂光影、插画氛围向的画面用本工具；"
+                        + "以文字排版为主的海报/卡片/横幅不要用本工具——写 HTML/CSS（首行 "
+                        + "<!-- print: 宽x高 --> 画幅声明）由平台渲 PNG"
+                        + "（文字像素级可控，图片模型画长文案易错字漏字）。prompt 传完整的画面正向"
+                        + "描述（主体、风格、配色、氛围；画面内文字尽量短）；size 可选（画幅，"
+                        + "如 1024x1024）；count 出几张（1~5，探索多稿时用）；name 可选（文件名"
+                        + "提示，如 logo-方案A）；palette 可选（本场色板的 hex 色值数组，"
+                        + "品牌主色在内，如 [\"#166534\",\"#faf9f6\"]）＋style 可选（一句"
+                        + "风格短语）——两者是设计意图正身，随稿物化为设计规范草稿，"
+                        + "定稿时转正进项目规范（品牌色由此进系统主题），出图时尽量"
+                        + "传。失败会自动重试，仍失败会如实返回原因。")
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                PROMPT_KEY, Map.of(
+                                        "type", "string",
+                                        "description", "画面正向描述：主体、风格、配色、氛围，"
+                                                + "画面内文字尽量缩短为标题短语"),
+                                COUNT_KEY, Map.of(
+                                        "type", "integer",
+                                        "description", "出图张数（1~5，缺省 1；多稿探索时传）"),
+                                SIZE_KEY, Map.of(
+                                        "type", "string",
+                                        "description", "画幅（可选，如 1024x1024；不传用供应商"
+                                                + "缺省）"),
+                                NAME_KEY, Map.of(
+                                        "type", "string",
+                                        "description", "文件名词干提示（可选，如 logo-方案A；"
+                                                + "平台自动加唯一前缀）"),
+                                PALETTE_KEY, Map.of(
+                                        "type", "array",
+                                        "items", Map.of("type", "string"),
+                                        "description", "本场色板（可选，hex 色值数组、品牌"
+                                                + "主色在内，如 [\"#166534\",\"#faf9f6\"]）"
+                                                + "——随稿物化为设计规范草稿，定稿转正"),
+                                STYLE_KEY, Map.of(
+                                        "type", "string",
+                                        "description", "风格短语（可选，如「扁平暖调、"
+                                                + "圆润」）——随稿物化为设计规范草稿，"
+                                                + "定稿转正")),
+                        "required", List.of(PROMPT_KEY)))
+                .readOnly(false)
+                .concurrencySafe(false));
+        this.workspaceId = workspaceId;
+        this.generation = generation;
+        this.landedFiles = landedFiles;
+        this.designSpecs = designSpecs;
+    }
+
+    @Override
+    public Mono<PermissionDecision> checkPermissions(Map<String, Object> toolInput,
+            PermissionContextState context) {
+        // 出稿是设计执行体的预期动作（无确认门概念），工具点不放确认
+        return Mono.just(PermissionDecision.allow("出图落盘是设计过程的预期动作，无需确认"));
+    }
+
+    @Override
+    public Mono<ToolResultBlock> callAsync(ToolCallParam param) {
+        Map<String, Object> input = param.getInput();
+        Object prompt = input != null ? input.get(PROMPT_KEY) : null;
+        if (prompt == null || String.valueOf(prompt).isBlank()) {
+            return Mono.just(ToolResultBlock.error("prompt 不能为空：传完整的画面正向描述"));
+        }
+        Integer count = countOf(input == null ? null : input.get(COUNT_KEY));
+        if (count == null) {
+            return Mono.just(ToolResultBlock.error("count 须是 1~5 的整数（缺省 1）"));
+        }
+        RuntimeContext ctx = param.getRuntimeContext();
+        String runId = ctx == null ? null : ctx.get(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY);
+        String sessionId = ctx == null ? null : ctx.getSessionId();
+        try {
+            ImageGenerationOutcome outcome = generation.generate(
+                    workspaceId, runId, sessionId,
+                    String.valueOf(prompt).strip(), count,
+                    textOf(input, SIZE_KEY), textOf(input, NAME_KEY));
+            // 落盘事实进变更事实流（#292）：转存不经引擎写文件工具，流内观察看不见
+            // ——报进 LandedFileFacts，客户端 reply 装配点取走（设计轨收口判据与
+            // 收尾卡清单由此看见图片模型路的稿）。转存路径是相对形，报锚定形
+            if (runId != null
+                    && outcome instanceof ImageGenerationOutcome.Generated generated) {
+                generated.files().forEach(file -> landedFiles.land(runId, "/" + file.path()));
+            }
+            // 设计参数随稿物化（#295 平面类规范草稿）：参数在场才物化（缺席＝无
+            // 设计意图，不写空壳）；失败 quietly 不反噬出图（伴随产出）
+            if (outcome instanceof ImageGenerationOutcome.Generated generated) {
+                List<String> palette = paletteOf(input);
+                String style = textOf(input, STYLE_KEY);
+                if (!palette.isEmpty() || style != null) {
+                    designSpecs.materializePrintParams(workspaceId,
+                            generated.files().stream()
+                                    .map(ImageGenerationOutcome.LandedImage::path).toList(),
+                            palette, style);
+                }
+            }
+            return Mono.just(switch (outcome) {
+                case ImageGenerationOutcome.Generated generated -> ToolResultBlock.text(
+                        format(generated));
+                case ImageGenerationOutcome.Failed failed -> ToolResultBlock.error(
+                        failed.reason());
+            });
+        }
+        catch (RuntimeException e) {
+            // 平台侧失败（供应商未配置/项目解析/回执畸形）如实回给模型，不炸会话
+            return Mono.just(ToolResultBlock.error("出图失败: " + e.getMessage()));
+        }
+    }
+
+    /** 成功结果 → 纯文本（落盘路径＋字节；部分失败如实附注——URL 永不透出）。 */
+    private static String format(ImageGenerationOutcome.Generated generated) {
+        StringBuilder out = new StringBuilder("已出图并落盘（").append(generated.provider())
+                .append('/').append(generated.model()).append("）：");
+        for (ImageGenerationOutcome.LandedImage file : generated.files()) {
+            out.append("\n").append(file.path()).append("（").append(file.sizeBytes())
+                    .append(" 字节）");
+        }
+        if (!generated.failures().isEmpty()) {
+            out.append("\n部分失败（可对缺稿重出）：").append(String.join("；", generated.failures()));
+        }
+        return out.toString();
+    }
+
+    private static Integer countOf(Object raw) {
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return DEFAULT_COUNT;
+        }
+        try {
+            int count = Integer.parseInt(String.valueOf(raw).strip());
+            return count >= 1 && count <= 5 ? count : null;
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 色板参数宽容收口（对偶 countOf 的字形变体容忍）：数组逐项收字符串、
+     *  单串按中英文逗号/顿号切分；空白项剔除（载荷层再截 8——品牌附加色量级）。 */
+    private static List<String> paletteOf(Map<String, Object> input) {
+        if (input == null) {
+            return List.of();
+        }
+        Object raw = input.get(PALETTE_KEY);
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::strip)
+                    .filter(color -> !color.isEmpty())
+                    .toList();
+        }
+        if (raw == null || String.valueOf(raw).isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(String.valueOf(raw).split("[,，、]"))
+                .map(String::strip)
+                .filter(color -> !color.isEmpty())
+                .toList();
+    }
+
+    private static String textOf(Map<String, Object> input, String key) {
+        if (input == null) {
+            return null;
+        }
+        Object raw = input.get(key);
+        return raw == null || String.valueOf(raw).isBlank() ? null : String.valueOf(raw).strip();
+    }
+}

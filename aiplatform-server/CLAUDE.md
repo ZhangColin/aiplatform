@@ -17,7 +17,7 @@ AI 开发平台后端：`base` 底座（workspace/eventhub/knowledge/metering/sk
 - `cartisan-openapi` — 服务间签名验证、API Key 管理
 - `cartisan-test` — ArchUnit 规则、测试基类
 
-不引入 `cartisan-security`：认证走 identity 服务 OIDC + BFF（照 `aieducenter-identity/demo`），见 [ADR-0001](docs/adr/0001-swagger-contract-and-sse-channels.md)。
+不引入 `cartisan-security`：认证走 identity 服务 OIDC + BFF（照 `semgravio-identity/demo`），见 [ADR-0001](docs/adr/0001-swagger-contract-and-sse-channels.md)。
 
 ## 常用命令
 

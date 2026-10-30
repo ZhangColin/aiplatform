@@ -1,0 +1,881 @@
+package com.semgravio.aiplatform.business.project.application;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
+import org.springframework.stereotype.Service;
+
+import com.cartisan.core.exception.ApplicationException;
+
+import com.semgravio.aiplatform.base.agentscope.AgentCommand;
+import com.semgravio.aiplatform.base.agentscope.AgentReply;
+import com.semgravio.aiplatform.base.agentscope.AgentResume;
+import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.agentscope.AgentSuspension;
+import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.UsageContext;
+import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
+import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
+import com.semgravio.aiplatform.business.project.application.dto.command.MessageAttachment;
+import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
+import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
+import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
+import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
+import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
+import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 主智能体单会话编排（#86 并轨，ADR 0006「单一主智能体+委派式执行」）：主智能体
+ * 是平台进程内对话智能体（AgentScope HarnessAgent，经 {@link AgentscopeAgentClient}
+ * 直调——编排缝极薄，无中间端口层），与用户的全部对话——建项目开场、追问、答询、
+ * 受理意见、PRD 撰写修订、需求侧判定——都续同一会话，连续不换会话。
+ *
+ * <p><b>会话寻址（projectId → 主智能体会话的稳定绑定）</b>：sessionId =
+ * {@code main-{projectId}} 无表派生、userId = 项目 owner（状态槽位
+ * (userId, sessionId) 跨轮一致，谁触发都不劈叉上下文；cat_agent_state 承载，
+ * 平台重启后同标识恢复）。工作区解析为<b>只读面</b>（主智能体永不读写沙箱代码——
+ * 内核文件/shell 工具结构性关闭；PRD 写入走 savePrd 业务工具自带通道）。计量
+ * （dims 终态口径 {@link UsageDims}，agentKind=main）与智能体资产（ask_user /
+ * savePrd + 只读四件，按配置发放）同归本编排。</p>
+ *
+ * <p><b>车道语义（入口三分类归 {@link DispatchAppService}，本服务只收分岔后的
+ * 轮）</b>：咨询零产物短路——{@link #answerInquiry} 同会话直答，不锚意见、不派
+ * 更新 run、不受守卫（订单冻结 / 挂起问答只拦意见链）。挂起问答期间对话区输入
+ * 即作答（CONTEXT.md「挂起问答」）：问答卡已呈现时前端直发作答通道；<b>渲染
+ * 竞态窗口</b>（挂起事件已发、卡片未及呈现）里经派发口到达的咨询经
+ * {@link #suspendedQuestions} 会合锚<b>转作答复续跑</b>——同一挂起 run 与工具面、
+ * 咨询文本即答复文本，与作答通道完全同路（模型按协议消化非答复文本，可答可
+ * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
+ * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
+ *
+ * <p><b>链必达收口（#43；#101 生成无门已由 #332 生成加门推翻）</b>：主智能体无
+ * 派发权——生成与更新 run 的派发都不在模型手里，平台在意见轮落定后观测收口（无
+ * 挂起问答）即按项目态自动派发：已生成派更新 run（交接物 = 用户意见原文 + 需求
+ * 侧判定结果——PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、未生成但
+ * 已存在已确认 PRD 版本才派首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}，
+ * PRD 已产出未确认不派——确认门是首个生成的唯一触发）、未产出 PRD 止于对话
+ * （访谈期常态）。判定结果从工具调用事实观测
+ * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD
+ * 止于对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
+ * {@link GenerationAppService}）。</p>
+ *
+ * <p><b>事件桥与对话史（#89）</b>：过程事件经 {@link EventsAppService}（eventhub
+ * 唯一 SSE 管道）发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射
+ * 失败护栏：单事件发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；
+ * 对话本身的成败以 error 事件 + 异常表达（会话执行器吞掉记日志，REST 快返回）。
+ * 对话史落库的主写口在本编排：用户发言提交侧同步落（守卫全过后——失败上抛撤回
+ * REST 面，「落库 ⟺ 说过」不漂移），智能体回复段与问答卡在轮落定点按对话序落
+ * （{@link ConversationHistoryAppService.TurnRecorder}——挂起段文本先落、问答卡
+ * 随后），收尾卡归编码 run 收口（{@code CoderRunAttempts}）。</p>
+ */
+@Service
+@Slf4j
+public class MainAgentAppService {
+
+    /** 主智能体会话标识派生前缀（projectId → main-{projectId}，稳定绑定勿动）。 */
+    public static final String SESSION_PREFIX = "main-";
+
+    private final ProjectRepository projectRepository;
+    private final PrdVersionRepository prdVersions;
+    private final AgentscopeAgentClient agentClient;
+    private final AgentEventBridge eventBridge;
+    private final AgentSessionExecutor sessionExecutor;
+    private final ProjectKnowledgeAppService knowledgeAppService;
+    private final AgentConfigAppService agentConfigs;
+    private final ModelTierAppService modelTiers;
+    private final OrderQueryAppService orderQueryAppService;
+    private final IterationAppService iterationAppService;
+    private final GenerationAppService generationAppService;
+    private final DesignProcessAppService designProcessAppService;
+    private final PrdRevisionFacts prdRevisions;
+    private final BuildPlanFacts buildPlanFacts;
+    private final ConversationHistoryAppService conversationHistory;
+    private final PrdDraftBaseline prdDraftBaseline;
+    private final PrdVersionAppService prdVersionAppService;
+
+    /**
+     * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
+     * （任务首行 put，随执行器串行——意见轮在途的新意见各自成轮，后写不覆盖在途
+     * 轮的锚，#54），追问挂起期间的答复逐条并入（{@link #appendOpinionReply}）
+     * ——收口派发的任务即锚的终值；收口即消费，轮炸即清（失败不留锚，重提即
+     * 兜底）。进程内态，重启丢锚（续跑收口降级为仅末条答复，实质由 PRD 承载）。
+     */
+    private final Map<String, String> opinionExchanges = new ConcurrentHashMap<>();
+
+    /**
+     * 挂起问答的会合锚（sessionId → 本进程内最近一次 ask_user 挂起事实）：轮落定
+     * 点维护（{@link #opinionTurn} 的 converse 与 {@link #answerQuestion} 的 resume
+     * 返回处——问答挂起即落锚、收口或再挂起即覆盖/清除，随会话执行器串行无并发
+     * 写）。用途：答询轮撞挂起（渲染竞态窗口）转作答复续跑——锚携带挂起 run 与
+     * engineRef（run 无表，重启即丢——丢锚回落 409 指路口径）。
+     */
+    private final Map<String, SuspendedQuestion> suspendedQuestions = new ConcurrentHashMap<>();
+
+    /** 一次 ask_user 挂起的会合事实（转答复续跑的入参重建源）。 */
+    private record SuspendedQuestion(String runId, AgentSuspension suspension) {
+    }
+
+    public MainAgentAppService(ProjectRepository projectRepository,
+            PrdVersionRepository prdVersions,
+            AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
+            AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
+            AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
+            OrderQueryAppService orderQueryAppService,
+            IterationAppService iterationAppService, GenerationAppService generationAppService,
+            DesignProcessAppService designProcessAppService,
+            PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
+            ConversationHistoryAppService conversationHistory,
+            PrdDraftBaseline prdDraftBaseline, PrdVersionAppService prdVersionAppService) {
+        this.projectRepository = projectRepository;
+        this.prdVersions = prdVersions;
+        this.agentClient = agentClient;
+        this.eventBridge = eventBridge;
+        this.sessionExecutor = sessionExecutor;
+        this.knowledgeAppService = knowledgeAppService;
+        this.agentConfigs = agentConfigs;
+        this.modelTiers = modelTiers;
+        this.orderQueryAppService = orderQueryAppService;
+        this.iterationAppService = iterationAppService;
+        this.generationAppService = generationAppService;
+        this.designProcessAppService = designProcessAppService;
+        this.prdRevisions = prdRevisions;
+        this.buildPlanFacts = buildPlanFacts;
+        this.conversationHistory = conversationHistory;
+        this.prdDraftBaseline = prdDraftBaseline;
+        this.prdVersionAppService = prdVersionAppService;
+    }
+
+    /**
+     * 主智能体会话建立轮（建项目自动开场专用）：绑定 {@code main-{projectId}}
+     * 之时做知识命中注入——query = 初始需求原文，命中块落会话缓存并接 system prompt
+     * 尾部（知识是背景非指令）；检索失败降级为空注入，访谈照常开始（#5 决议①）。
+     * 一次切入一次注入：后续轮（{@link #runOpinionTurn} / {@link #answerInquiry}）
+     * 与问答续跑（{@link #answerQuestion}）复用同一注入块，不重检索不重追加。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；守卫组同 {@link #runOpinionTurn}
+     *                              （自动开场仅 PRJ_001 可实际发生）
+     */
+    public MainAgentRun startConversation(Long projectId, String requirement) {
+        knowledgeAppService.establishSessionInjection(projectId, requirement);
+        return opinionTurn(projectId, requirement, MessageAttachment.NONE);
+    }
+
+    /**
+     * 派发入口全局守卫（#51 守卫后移）：对话区开着的最低门槛——项目存在 / 未归档
+     * （归档 = 对话区物理关闭，咨询与兜底也停）。订单冻结（ORD_006）与挂起问答
+     * （PRJ_024）只拦意见链：意见分岔自带同款守卫（{@link #opinionTurn}，防御
+     * 纵深），咨询与兜底随时可答（CONTEXT.md「派发」）。已知代价：被拒意见先烧
+     * 一次 flash 分类调用（秒级轻调用，接受）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）
+     */
+    public Project requireDispatchableProject(Long projectId) {
+        Project project = requireProject(projectId);
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        return project;
+    }
+
+    /**
+     * 跑一轮意见受理（意见链分岔，prompt 即用户侧输入）：会话执行器异步提交即
+     * 返回（runId 随响应回，过程事件经 SSE；失败经 error 事件表达不炸调用方）。
+     * system prompt = 主智能体配置 + 会话注入块（未建立/空注入/重启后 = 裸配置）。
+     * 轮收口（无挂起问答且项目已生成）由平台观测自动派更新 run。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
+     *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）；
+     *                              PRJ_024 挂起问答待答（同步 409 指路作答，#40 / ADR-0005）
+     */
+    public MainAgentRun runOpinionTurn(Long projectId, String prompt,
+            List<MessageAttachment> attachments) {
+        return opinionTurn(projectId, prompt, attachments);
+    }
+
+    /** 无附件的意见轮（纯文字发言——#97 之前与测试既有口径）。 */
+    public MainAgentRun runOpinionTurn(Long projectId, String prompt) {
+        return runOpinionTurn(projectId, prompt, MessageAttachment.NONE);
+    }
+
+    /**
+     * 应答一条咨询（咨询链分岔，零产物短路，#47 语义随 #86 并轨单会话）：同一
+     * {@code main-{projectId}} 会话直答——不锚意见、不派更新 run、不受订单冻结与
+     * 挂起问答守卫（只拦意见链）。异步提交（runId 随响应回，回答经 SSE 到达）。
+     * 项目事实由派发入口守卫后的聚合携带（owner / 工作区寻址不入前端信）。
+     *
+     * <p><b>渲染竞态收敛</b>：挂起问答期间对话区输入即作答——问答卡已呈现时前端
+     * 直发作答通道；卡片未及呈现的窗口里经派发口到达的咨询经 {@link
+     * #suspendedQuestions} 转作答复续跑（同挂起 run 与工具面，咨询文本即答复文本）
+     * ——同一输入无论卡片渲染快慢行为一致，不出错误气泡。丢锚重启边角（挂起仍在
+     * 但 runId 已失）同步 409 PRJ_024 指路作答。</p>
+     */
+    public MainAgentRun answerInquiry(Project project, String question,
+            List<MessageAttachment> attachments) {
+        Long projectId = project.getId();
+        String sessionId = sessionIdOf(projectId);
+        // 圈注随咨询同句发送：渲染进答复续跑/答询 prompt（结构化定位喂主智能体）
+        String annotated = question + AttachmentPrompt.renderSuffix(attachments);
+        SuspendedQuestion pending = suspendedQuestions.get(sessionId);
+        if (pending != null) {
+            MainAgentAppService.log.info("[main] 项目 {} 答询撞挂起问答（渲染竞态窗口），转作答复续跑（runId={}）",
+                    projectId, pending.runId());
+            answerQuestion(projectId, pending.runId(), pending.suspension().engineRef(),
+                    pending.suspension().toolCalls(), annotated);
+            return new MainAgentRun(pending.runId());
+        }
+        if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+            // 丢锚重启边角：挂起仍在但本进程没有挂起事实（runId 已失，无法代答）
+            // ——同步 409 指路作答，好过异步错误气泡
+            throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
+        }
+        String runId = EventsAppService.newRunId();
+        conversationHistory.recordUserUtterance(projectId, runId, question, attachments);
+        AgentCommand command = mainCommand(project, runId, annotated);
+        // 零产物：仅对话（答询协议在主智能体配置内——查证只读工具 + 据实作答）
+        sessionExecutor.submit(sessionId, () -> {
+            ConversationHistoryAppService.TurnRecorder recorder =
+                    conversationHistory.recorder(projectId, eventBridge.sink(project));
+            AgentReply reply = agentClient.converse(command, recorder);
+            recorder.settle(runId, reply);
+        });
+        return new MainAgentRun(runId);
+    }
+
+    /** 无附件的答询轮（纯文字咨询——#97 之前与测试既有口径）。 */
+    public MainAgentRun answerInquiry(Project project, String question) {
+        return answerInquiry(project, question, MessageAttachment.NONE);
+    }
+
+    /**
+     * 问答答复续跑（ask_user 挂起的恢复）：挂起轮的 runId/engineRef 与待确认工具
+     * 清单（question-raised 事件 data.toolCalls 形状，前端问答卡回传）+ 用户答复 →
+     * ConfirmResult 批复续跑（续跑续在同一 run 上收口，事件序含答复后的下一问或
+     * 收口）。恢复私货（配置/owner/工作区/计量）从项目侧事实重建，不信前端。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
+     *                              ORD_006 订单处理中（下单即冻结迭代，取消即解冻）
+     */
+    public void answerQuestion(Long projectId, String runId, String replyId,
+            List<Map<String, Object>> pendingToolCalls, String answerText) {
+        Project project = requireUpdatableProject(projectId);
+        String sessionId = sessionIdOf(projectId);
+        conversationHistory.recordAnswer(projectId, runId, answerText);
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
+
+        AgentResume resume = new AgentResume(
+                runId,
+                sessionId,
+                project.ownerUserId(),
+                Long.toString(project.getWorkspaceId()),
+                model.modelString(),
+                model.channel(),
+                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
+                replyId,
+                pendingToolCalls.stream()
+                        .map(toolCall -> AgentscopeAgentClient.answeredToolCall(toolCall, answerText))
+                        .toList(),
+                answerText,
+                usageContextOf(projectId, sessionId),
+                AgentProfile.MAIN.key(),
+                /* workspaceReadOnly= */ true,
+                /* workspaceNoShell= */ false,
+                main.toolSpec());
+        appendOpinionReply(sessionId, answerText);
+        ConversationHistoryAppService.TurnRecorder recorder =
+                conversationHistory.recorder(projectId, eventBridge.sink(project));
+        sessionExecutor.submit(sessionId, () -> {
+            try {
+                AgentReply reply = agentClient.resume(resume, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
+                // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
+                opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
+                throw e;
+            }
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
+        });
+    }
+
+    /** 一轮主智能体对话的运行标识（前端挂智能体事件 ?runId= 的锚）。 */
+    public record MainAgentRun(String runId) {
+    }
+
+    /**
+     * 切片计划补产轮（#220 计划缺失兜底＝重派主智能体按 PRD 产计划，替位已删的
+     * minimalFallback）：平台发起的主智能体轮——按现行 PRD 补产切片计划并调用
+     * saveBuildPlan。不记用户发言（平台发起非用户话语——对话面只见主智能体的补产
+     * 回复，透明面可见）；轮收口走同一条 {@link #dispatchOnTurnClose}（saveBuildPlan
+     * 事实 → 自动派生成）。补产无果不递归再补——由 {@code GenerationAppService} 的
+     * 补产账止住（同一 PRD 版本只补产一次，用户重提意见即兜底）。
+     *
+     * <p><b>存量恢复（#223）</b>：往次生成早于轨道表的项目（无持久化计划但已有
+     * 收口成果）补产时携已收口成果清单（收尾卡叙事）——已完片按原文一字不改照录
+     * 进计划，平台落库时对照收尾卡精确匹配标已完片、只补缺口续跑。清单空（无存量
+     * 成果，或表内有旧片行的换锚重产——从头来是既定口径）即常规全量补产。</p>
+     *
+     * @param completedOutcomes 已收口成果清单（收尾卡 summary，按先后；空 = 常规补产）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档（对话区关闭）；
+     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     *                              （补产轮可追问——挂起即止，答复后续跑收口同链必达）
+     */
+    public MainAgentRun requestBuildPlan(Long projectId, List<String> completedOutcomes) {
+        Project project = requireUpdatableProject(projectId);
+        String sessionId = sessionIdOf(projectId);
+        requireNoPendingQuestion(project, sessionId);
+        String runId = EventsAppService.newRunId();
+        AgentCommand command = mainCommand(project, runId,
+                buildPlanRequestPrompt(completedOutcomes));
+        sessionExecutor.submit(sessionId, () -> {
+            // 同意见轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的计划事实
+            // 不冒充本轮补产产出）
+            String workspaceId = Long.toString(project.getWorkspaceId());
+            prdRevisions.clear(workspaceId);
+            buildPlanFacts.clear(workspaceId);
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 失败即清锚（同意见轮口径）：不派发，用户重提即兜底；error 事件已由
+                // converse 内发出（异常上抛由会话执行器吞）
+                opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
+                throw e;
+            }
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
+        });
+        return new MainAgentRun(runId);
+    }
+
+    /**
+     * 补产轮 prompt（#220）：平台请求主智能体按现行 PRD 补产切片计划——只补产计划、
+     * 不动 PRD（PRD 修订走用户的意见链，不因补产顺手改需求）。
+     */
+    static final String BUILD_PLAN_REQUEST_PROMPT =
+            "平台请求：本项目还没有切片计划。请阅读工作区 docs/PRD.md（需求正本），"
+                    + "把系统拆成有序的纵向切片——第一片固定为界面先行：先做出可点的界面"
+                    + "（把主要页面与导航的界面骨架一次搭出来、可交互、预览立即可点），此片"
+                    + "先不接数据与后端逻辑；自第二片起每片一句用户语言「用户能 X」，从用户"
+                    + "操作到后端落库端到端走通。按实现的自然顺序排列，宁粗勿碎。切片之间"
+                    + "若有依赖（某片必须等另一片先做完——共享同一页面、数据结构、登录态等），"
+                    + "在 saveBuildPlan 的 dependsOn 里写明该片依赖的前面哪几片（1-based 片序，"
+                    + "第一片 = 1）；无依赖的独立切片不写依赖（平台会并行生成它们）——并调用 "
+                    + "saveBuildPlan 工具保存切片计划。不要修改 PRD（本请求只补产计划）。"
+                    + "保存成功后，向用户简短说明已按 PRD 拟好实施计划、系统即将开始生成。";
+
+    /**
+     * 补产轮 prompt 拼装（#223 存量变体）：清单空 = 常规补产原文；有存量成果时
+     * 追加对照约定——已完片按原文一字不改照录进计划前部（平台落库按收尾卡叙事
+     * 精确匹配标已完片，措辞漂移即对照不上、按待跑重做——降级方向安全）。
+     */
+    static String buildPlanRequestPrompt(List<String> completedOutcomes) {
+        if (completedOutcomes.isEmpty()) {
+            return BUILD_PLAN_REQUEST_PROMPT;
+        }
+        StringBuilder prompt = new StringBuilder(BUILD_PLAN_REQUEST_PROMPT)
+                .append("\n\n补充事实：本项目工作区已有往次生成收口的成果（平台收尾卡")
+                .append("记录，按先后顺序）：\n");
+        for (String outcome : completedOutcomes) {
+            prompt.append("- ").append(outcome).append('\n');
+        }
+        return prompt
+                .append("拟计划时请对照这份清单：已完成的切片（上述「")
+                .append(GenerationAppService.SLICE_CLOSING_PREFIX)
+                .append("」各项）")
+                .append("在新计划中按原文一字不改照录、排在计划前部并保持上述先后顺序；")
+                .append("PRD 中尚未完成的其余部分作为待做切片排在后面——")
+                .append("平台会跳过已完成的切片、只生成待做部分。")
+                .toString();
+    }
+
+    /**
+     * 终点切换前置守卫（#285）：切换重产轮与意见轮同会话同引擎约束——挂起问答
+     * 在即同步 409 指路作答。归位在切换编排落库<b>之前</b>调用（拒绝即零副作用
+     * ——终点属性不动）；{@link #requestEndpointShift} 提交前同守卫兜竞态。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
+     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     */
+    public void requireEndpointShiftable(Long projectId) {
+        Project project = requireUpdatableProject(projectId);
+        requireNoPendingQuestion(project, sessionIdOf(projectId));
+    }
+
+    /**
+     * 终点切换重产轮（#285，设置 tab 终点控件的后置轮）：平台发起的主智能体轮
+     * ——不记用户发言（同补产轮口径：对话面只见主智能体的说明，透明面可见），
+     * prompt 由 {@link #endpointShiftPrompt} 按切换事实拼装（PRD 已产出＝重产指令
+     * ——清单章随终点类型走形/设计硬约束入关键约束；访谈期＝转向通告）。轮收口
+     * 走同一条 {@link #dispatchOnTurnClose}（生成轨道对设计类终点收口，设计过程
+     * 编排归后续票；回到系统形可经补产链自动起生成）。守卫同意见轮（归档/订单
+     * 冻结在切换编排前置判定，挂起问答在此同步 409 指路作答）。
+     *
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_013 项目已归档；
+     *                              ORD_006 订单处理中；PRJ_024 挂起问答待答
+     */
+    public MainAgentRun requestEndpointShift(Long projectId, String prompt) {
+        Project project = requireUpdatableProject(projectId);
+        String sessionId = sessionIdOf(projectId);
+        requireNoPendingQuestion(project, sessionId);
+        String runId = EventsAppService.newRunId();
+        AgentCommand command = mainCommand(project, runId, prompt);
+        sessionExecutor.submit(sessionId, () -> {
+            // 同补产轮口径：本轮需求侧事实从零起算（清残留——上一轮滞留的修订/
+            // 计划事实不冒充本轮产出）
+            String workspaceId = Long.toString(project.getWorkspaceId());
+            prdRevisions.clear(workspaceId);
+            buildPlanFacts.clear(workspaceId);
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 失败即清锚（同意见轮口径）：切换已落库（属性是事实）、重产轮失败
+                // 经 error 事件如实呈现——后续任意 PRD 修订按技能形态规则自然收敛
+                opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
+                throw e;
+            }
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ true);
+        });
+        return new MainAgentRun(runId);
+    }
+
+    /**
+     * 切换重产轮 prompt（#285）：按「前终点 → 新终点 × PRD 已否产出」拼装——PRD
+     * 在即重产（清单章走形随终点：设计＝设计物清单、系统/系统＋设计＝功能清单
+     * 〔后者设计硬约束入关键约束〕；回到系统形带切片计划同首产序）；访谈期即
+     * 转向通告（后续梳理按新终点收口，PRD 产出时形态自对齐）。
+     */
+    static String endpointShiftPrompt(ProjectEndpointType previous, ProjectEndpointType target,
+            DesignScope scope, boolean prdProduced) {
+        String targetName = target.getName();
+        if (!prdProduced) {
+            return "平台通知：项目终点类型已定为「" + targetName + "」。请向用户简短说明这一变化（"
+                    + steerSentenceOf(target) + "），随后继续需求梳理；产出 PRD 时清单章按该终点类型走形"
+                    + chapterHintOf(target) + "。";
+        }
+        StringBuilder prompt = new StringBuilder("平台请求：项目终点类型已");
+        if (previous != target) {
+            prompt.append("由「").append(previous.getName()).append("」");
+        }
+        prompt.append("切换为「").append(targetName).append("」（")
+                .append(shiftSentenceOf(previous, target)).append("）。");
+        if (target == ProjectEndpointType.DESIGN) {
+            prompt.append("请把工作区 docs/PRD.md 修订为设计形态：清单章重写为「设计物清单」")
+                    .append("（编号列出各设计物，每件附用途、尺寸、风格要点与验收要点");
+            if (scope != null) {
+                prompt.append("；设计范围从原功能清单的").append(scope.describe()).append("锚定");
+            }
+            prompt.append("），其余章节按「交付设计而非实现系统」的语境相应梳理（系统实现细节退场）。");
+        }
+        else if (previous == ProjectEndpointType.DESIGN) {
+            prompt.append("请把工作区 docs/PRD.md 修订为系统形态：清单章重写为「功能清单」")
+                    .append("（编号列出系统的页面与功能点，每点附验收要点——原设计物清单的设计内容")
+                    .append("转为对应的页面与功能梳理）");
+            if (target == ProjectEndpointType.SYSTEM_DESIGN) {
+                prompt.append("，「关键约束」章写入设计硬约束（系统构建遵循本项目的")
+                        .append("设计方向与已定稿设计）");
+            }
+            prompt.append("。");
+        }
+        else if (target == ProjectEndpointType.SYSTEM_DESIGN) {
+            prompt.append("PRD 保持系统形：功能清单章不动（不另立设计物清单），请把设计硬约束补入")
+                    .append("「关键约束」章——写明设计范围为功能清单的")
+                    .append(scope != null ? scope.describe() : "全部页面")
+                    .append("、设计经平台设计过程产出、系统构建遵循定稿设计。");
+        }
+        else {
+            prompt.append("请把工作区 docs/PRD.md 的「关键约束」章中的设计硬约束移除（功能清单等其余章节不动）。");
+        }
+        prompt.append("先 load_skill_through_path 加载 prd-writing 技能（清单章按项目终点类型走形），")
+                .append("再调用 savePrd 保存修订后的完整 PRD 全文（summary 必传：说明终点切换与本次修订内容）。");
+        if (previous == ProjectEndpointType.DESIGN && target == ProjectEndpointType.SYSTEM) {
+            prompt.append("保存成功后调用 saveBuildPlan 产出切片计划（同首次产出 PRD 后的口径），")
+                    .append("系统随后自动开始生成。");
+        }
+        prompt.append("保存成功后向用户简短说明本次变化。");
+        return prompt.toString();
+    }
+
+    /** 访谈期转向通告句（按新终点的推进语义）。 */
+    private static String steerSentenceOf(ProjectEndpointType target) {
+        return switch (target) {
+            case DESIGN -> "本次定制交付的是设计资产包，平台不生成系统";
+            case SYSTEM_DESIGN -> "先做设计、设计定稿后系统从设计稿长出";
+            case SYSTEM -> "本次定制交付的是可操作系统";
+        };
+    }
+
+    /** 访谈期 prompt 的清单章形态提示。 */
+    private static String chapterHintOf(ProjectEndpointType target) {
+        return switch (target) {
+            case DESIGN -> "（设计物清单——编号列出各设计物及用途、尺寸、风格要点与验收要点）";
+            case SYSTEM_DESIGN -> "（功能清单，设计硬约束写入关键约束章）";
+            case SYSTEM -> "（功能清单）";
+        };
+    }
+
+    /** 重产指令的切换语义句（PRD 已产出形）。 */
+    private static String shiftSentenceOf(ProjectEndpointType previous, ProjectEndpointType target) {
+        if (previous == ProjectEndpointType.DESIGN && target == ProjectEndpointType.SYSTEM_DESIGN) {
+            return "转系统开发";
+        }
+        return steerSentenceOf(target);
+    }
+
+    // ---------- 内部 ----------
+
+    private MainAgentRun opinionTurn(Long projectId, String prompt,
+            List<MessageAttachment> attachments) {
+        Project project = requireUpdatableProject(projectId);
+        String sessionId = sessionIdOf(projectId);
+        requireNoPendingQuestion(project, sessionId);
+
+        String runId = EventsAppService.newRunId();
+        // 圈注随意见同句发送：渲染进主智能体 prompt 与交接物（意见原文）——结构化
+        // 定位随链下到更新 run，执行体知道改哪里
+        String annotated = prompt + AttachmentPrompt.renderSuffix(attachments);
+        // 对话史落库（#89）：提交守卫全过后同步落用户发言（失败上抛撤回 REST 面——
+        // 「落库 ⟺ 说过」不漂移）；智能体回复段在轮落定点写（见 recordTurnReply）。
+        // attachments 原始 JSON 落库供刷新回显重建圈注 chip
+        conversationHistory.recordUserUtterance(projectId, runId, prompt, attachments);
+        // 受理动作卡（#87）：迭代期意见轮（受理轮）开场即发受理事件——意见已接住、
+        // 主智能体正在受理（追问或改 PRD 的过程呈现位，衔接轮收口自动派的更新 run
+        // 工作消息）。守卫全过才发（拒绝即零事件）；访谈期意见轮是纯追问轮、咨询
+        // 轮走 {@link #answerInquiry}，场景矩阵均无卡
+        if (project.isGenerated()) {
+            eventBridge.emitAcceptanceStarted(project, runId);
+        }
+        AgentCommand command = mainCommand(project, runId, annotated);
+        sessionExecutor.submit(sessionId, () -> {
+            // 排队成轮（#54）：锚随任务落（同会话 FIFO——后发意见的 put 排在本轮
+            // 收口之后，不覆盖在途轮的锚）：意见轮在途连发的意见各自成轮、各自
+            // 收口派发，撞在途更新 run 走排队合并
+            opinionExchanges.put(sessionId, annotated);
+            // 本轮需求侧判定从零起算（随会话执行器串行——上一轮收口消费在前，
+            // 不会被本轮起跑插队 wipe）：炸轮滞留/访谈期的 savePrd 事实残留不进
+            // 本轮交接物（意见锚无此滞留——失败即清，见下）
+            prdRevisions.clear(Long.toString(project.getWorkspaceId()));
+            buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
+                // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
+                opinionExchanges.remove(sessionId);
+                suspendedQuestions.remove(sessionId);
+                throw e;
+            }
+            dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
+        });
+        return new MainAgentRun(runId);
+    }
+
+    /**
+     * 轮落定点的挂起问答会合锚维护：问答挂起（软终点，ask_user 唯一挂起源）即落锚
+     * （渲染竞态窗口里答询轮转作答复续跑的入参源）；正常收口即清锚（无可答之问）。
+     */
+    private void settleSuspendedQuestion(String sessionId, String runId, AgentReply reply) {
+        if (reply.suspension() != null) {
+            suspendedQuestions.put(sessionId, new SuspendedQuestion(runId, reply.suspension()));
+        }
+        else {
+            suspendedQuestions.remove(sessionId);
+        }
+    }
+
+    /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。systemPrompt/
+     * 模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认
+     * ——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入 toolSpec 随命令
+     * 透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService} 解析
+     * （ADR-0031——供应商/凭证配置变更同轮生效）。 */
+    private AgentCommand mainCommand(Project project, String runId, String prompt) {
+        Long projectId = project.getId();
+        String sessionId = sessionIdOf(projectId);
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
+        return new AgentCommand(
+                runId,
+                prompt,
+                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
+                model.modelString(),
+                model.channel(),
+                sessionId,
+                project.ownerUserId(),
+                usageContextOf(projectId, sessionId),
+                Long.toString(project.getWorkspaceId()),
+                correlationOf(projectId),
+                null,
+                /* silenceTimeout= */ null,
+                /* toolSilenceTimeout= */ null, // 对话轮总墙钟语义，无工具窗预算
+                AgentProfile.MAIN.key(),
+                /* workspaceReadOnly= */ true,
+                /* workspaceNoShell= */ false,
+                /* heading= */ null,
+                main.toolSpec());
+    }
+
+    /** 会话标识派生（projectId → main-{projectId} 稳定绑定）。 */
+    private static String sessionIdOf(Long projectId) {
+        return SESSION_PREFIX + projectId;
+    }
+
+    /**
+     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门→#334 改需求
+     * 回路）：轮落定（对话轮收口或问答续跑收口）后观测链的走向——会话有挂起问答
+     * = 本轮未收口（答复后续跑再判，意见锚保留）；收口前归档 = 竞态守卫，静默
+     * 不派。落定即按项目态自动派发：<b>已生成派更新 run</b>（交接物 = {@link
+     * #opinionExchanges} 中的意见原文及追问答复 + {@link #prdRevisions} 中的
+     * PRD 修订事实——本轮 savePrd 调用的 summary 终值，无调用事实即 null
+     * 「未修订」），范围级变更（修订事实＋草稿≠已确认版）例外——#334 停派停驻
+     * 待确认（确认过门才派下一版 Demo）；<b>未生成但已产出 PRD</b>——系统终点
+     * 改判据（#332 生成加门）：存在已确认 PRD 版本才派首个构建 run（「确认此版
+     * PRD 并生成 Demo」是唯一触发——用户意见轮「重提即再触发」同此判据），未确认
+     * 静默待确认；本轮范围级新草稿在场同待确认（#334）。设计类终点保持原触发律
+     * （未定稿起设计过程、全部定稿起构建，入口已收起）。意见锚与修订事实同
+     * 「收口即消费」清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD
+     * 止于对话（访谈期常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具
+     * 都不影响派发——链的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚
+     * （收口即消费语义保持）、不自动重试——用户重提即兜底。
+     *
+     * <p><b>平台轮与生成加门（#332）</b>：{@code platformRound} 区分平台发起的需求侧
+     * 轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
+     * 与用户对话轮。生成加门（未生成＋存在已确认版本才起首个构建）只拦<b>用户对话轮</b>
+     * 的直接自动起（旧「PRD 出即起」退役点）；平台轮是确认/继续生成「确认后派」「补产
+     * 再派」的达成机制（补产轮收口即链必达再派生成），不经该门——否则确认/存量恢复
+     * 的补产链被自己的门拦死。判据单一：用户轮＝存在已确认版本（确认动作的次生事实），
+     * 平台轮＝直接放行。</p>
+     */
+    private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
+            boolean platformRound) {
+        try {
+            Project project = projectRepository.findById(projectId).orElse(null);
+            if (project == null
+                    || agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+                return;
+            }
+            String workspaceId = Long.toString(project.getWorkspaceId());
+            if (project.getArchivedAt() != null) {
+                clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
+                return;
+            }
+            if (project.getGeneratedAt() == null) {
+                // 未生成：PRD 已产出即平台自动派首次产出轨（轨内无门——终点类型定轨：
+                // 系统终点派生成 #101、设计类终点起设计过程 #289 同律）；未产出
+                // PRD 静默止于对话（访谈期常态：生成前意见链终点）。切片计划（saveBuildPlan
+                // 事实）是生成交接物——先取再清（不像意见/修订事实止于对话；设计轨
+                // 清单源＝PRD 清单章直读，无交接物）；无计划交接物时由
+                // GenerationAppService 按轨道表解析现行计划，仍缺失则重派
+                // 本服务补产（#220，不兜假计划）
+                BuildPlan plan = buildPlanFacts.consume(workspaceId);
+                // 意见锚取出（#291）：设计类终点的设计派发消费意见原文（在途排队/
+                // 改稿受理）；生成路径不需要（生成读工作区 PRD 正本）——其余锚照
+                // 「收口即消费」清掉
+                String opinion = opinionExchanges.remove(sessionId);
+                String prdRevisionSummary = prdRevisions.consume(workspaceId);
+                if (project.getPrdProducedAt() != null) {
+                    if (project.getEndpointType().designInvolved()
+                            && !designProcessAppService.designFinalized(project)) {
+                        // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
+                        // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
+                        // ADR-0025）；意见原文随派发（#291：在途即排队、清单全收口
+                        // 即改稿——改稿同会话继续）
+                        DesignProcessAppService.DesignRun run =
+                                designProcessAppService.dispatchDesignOnTurnClose(projectId,
+                                        opinion);
+                        if (run != null) {
+                            log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
+                                    projectId, run.runId());
+                        }
+                        return;
+                    }
+                    // 生成加门（#332）：系统终点的首个构建 run 唯一触发＝确认此版
+                    // PRD——用户对话轮 PRD 出不再自动起（旧「生成无门、PRD 出即起」
+                    // 口径退役，ADR-0008 改写）。无已确认版本即静默待确认（不派、不
+                    // 报错），不落轨道片行（未确认不呈现「生成中断」态）；切片计划
+                    // 事实随本轮消费清掉——确认派发时计划缺失走既有补产链。平台轮
+                    // （补产/终点切换）是确认与继续生成的达成机制，不经此门直接放行
+                    // （否则确认后的补产链被自己的门拦死）。设计类终点（含全部定稿）
+                    // 保持原触发律（设计轨分岔代码保留、入口已收起）。
+                    if (!platformRound && !project.getEndpointType().designInvolved()
+                            && !prdVersions.existsByProjectId(projectId)) {
+                        log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
+                                + "（生成加门：待确认此版 PRD）", projectId);
+                        return;
+                    }
+                    // 改需求回路（#334）：已确认版本在场但本轮出范围级新草稿（savePrd
+                    // 修订事实＋草稿≠已确认版——大改小改分流，判定从工具调用事实观测）
+                    // → 新草稿不自动触发 Demo：停驻待确认（意见＋差异摘要），用户过
+                    // 确认门（新版本号）后才派。平台轮不经此门（#332 豁免同口径）。
+                    if (!platformRound && !project.getEndpointType().designInvolved()
+                            && prdRevisionSummary != null
+                            && parkScopeDraftOrAwait(projectId, opinion, prdRevisionSummary)) {
+                        return;
+                    }
+                    // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
+                    // 计划补产链自然恢复——构建从定稿设计稿长出）；携意见载荷
+                    // （#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
+                    // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
+                    GenerationAppService.GenerationRun run =
+                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
+                                    new GenerationAppService.TurnOpinion(
+                                            opinion, prdRevisionSummary, runId));
+                    if (run != null) {
+                        log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
+                                projectId, run.runId());
+                    }
+                }
+                return;
+            }
+            if (project.getEndpointType().designInvolved()
+                    && !designProcessAppService.designFinalized(project)) {
+                // 已生成＋设计类终点＋设计未定稿完（#291 系统中途切换的设计轨承接）：
+                // 意见进设计轨（在途排队/改稿/续跑）——系统迭代让位（设计先行；
+                // 全部定稿后回更新 lane，按稿对齐经定稿触发）
+                String designOpinion = opinionExchanges.remove(sessionId);
+                DesignProcessAppService.DesignRun run =
+                        designProcessAppService.dispatchDesignOnTurnClose(projectId, designOpinion);
+                if (run != null) {
+                    log.info("[main-close] 项目 {} 意见轮收口，平台起设计过程（{}，系统中途切换承接）",
+                            projectId, run.runId());
+                }
+                return;
+            }
+            String task = opinionExchanges.remove(sessionId);
+            if (task == null || task.isBlank()) {
+                return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
+            }
+            String prdRevisionSummary = prdRevisions.consume(workspaceId);
+            // 改需求回路（#334 大改小改分流，判定归主智能体提示词、执行归平台）：
+            // 本轮有 savePrd 修订事实且草稿≠已确认版（{@link PrdDraftBaseline} 漂移
+            // 判定）＝范围级变更——不派更新 run：意见与差异摘要停驻待确认，用户过
+            // 确认门（新版本号）后才由确认动作派下一版 Demo。同文重存（草稿==已确认
+            // 版——派发失败后重提等）不属新草稿，照旧受理即迭代（修订说明进交接物）。
+            if (parkScopeDraftOrAwait(projectId, task, prdRevisionSummary)) {
+                return;
+            }
+            // 小反馈照旧受理即迭代（无修订事实，或草稿==已确认版的同文重存）：
+            // 迭代基准＝当前已确认版本的判定归迭代轨起跑（runFixTrack 逐场取基准）
+            IterationAppService.FixDispatch dispatch =
+                    iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
+            log.info("[main-close] 项目 {} 意见轮收口，平台自动派更新 run（{}，{}）",
+                    projectId, dispatch.queued() ? "排队下一轮" : "起跑",
+                    prdRevisionSummary != null ? "PRD 已修订" : "本轮无修订");
+        }
+        catch (RuntimeException e) {
+            // 派发失败（#51 → #82 失败家族归位；#101 起同 catch 接生成与更新两路）：
+            // 意见锚已消费（不恢复）、不自动重试，用户重提即兜底——失败信号归 error
+            // 事件（dispatch-failed 阶段族已退役），对话面如实呈现不静默
+            try {
+                // 派发失败路径（非热）：归属重查一次携聚合——正常路径在 try 内已携
+                projectRepository.findById(projectId).ifPresentOrElse(
+                        project -> eventBridge.emitError(project, runId, "意见派发失败，请重新发送"),
+                        () -> log.warn("[main-close] 项目 {} 派发失败且事件锚项目缺档，error 事件免发", projectId));
+            }
+            catch (RuntimeException emitFailure) {
+                log.warn("[main-close] 项目 {} 派发失败事件发射失败：{}", projectId,
+                        emitFailure.toString());
+            }
+            log.warn("[main-close] 项目 {} 收口自动派发失败（用户重提即兜底）：{}",
+                    projectId, e.toString());
+        }
+    }
+
+    /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /
+     * 未生成派生成前的三条静默路径共用（生成读的是工作区 PRD 正本，不进交接物）。 */
+    private void clearTurnAnchors(String sessionId, String workspaceId) {
+        opinionExchanges.remove(sessionId);
+        prdRevisions.clear(workspaceId);
+        buildPlanFacts.clear(workspaceId);
+    }
+
+    /**
+     * 改需求回路停派判定与停驻（#334，未生成/已生成两分支共用单点）：本轮 savePrd
+     * 修订事实在场且工作区草稿偏离最新已确认版（{@link PrdDraftBaseline} 全文
+     * 比对）＝范围级新草稿——停驻意见与差异摘要待确认并返回 true（调用方停派：
+     * 新草稿不自动触发 Demo，确认过门〔新版本号〕才派下一版）。意见锚缺失
+     * （进程内理论不可达的防御边角——锚随任务落先于收口）时停派不停驻，只记
+     * 日志待确认（不派不错派）。无修订事实或草稿==已确认版（同文重存——派发
+     * 失败后重提等）返回 false：照旧受理即迭代。
+     */
+    private boolean parkScopeDraftOrAwait(Long projectId, String opinion,
+            String prdRevisionSummary) {
+        if (prdRevisionSummary == null
+                || prdDraftBaseline.driftedFrom(projectId).isEmpty()) {
+            return false;
+        }
+        boolean parked = opinion != null && !opinion.isBlank();
+        if (parked) {
+            prdVersionAppService.parkDraftChange(projectId, opinion, prdRevisionSummary);
+        }
+        log.info("[main-close] 项目 {} 范围级意见收口：PRD 新草稿待确认，停派待确认门（#334——确认过门才派下一版 Demo）{}",
+                projectId, parked ? "" : "；意见锚缺失仅停派（防御边角）");
+        return true;
+    }
+
+    /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；
+     * 无锚（重启丢锚的续跑）时以答复自立。 */
+    private void appendOpinionReply(String sessionId, String reply) {
+        opinionExchanges.compute(sessionId, (key, opinion) -> opinion == null
+                ? reply : opinion + "；用户对追问的答复：" + reply);
+    }
+
+    private static Map<String, Object> correlationOf(Long projectId) {
+        return Map.of(EventsAppService.PROJECT_FIELD, projectId.toString());
+    }
+
+    private static UsageContext usageContextOf(Long projectId, String sessionId) {
+        return new UsageContext(Long.toString(projectId),
+                UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), sessionId));
+    }
+
+    private Project requireProject(Long projectId) {
+        return projectRepository.findById(projectId)
+                .orElseThrow(() -> new ApplicationException(ProjectMessage.PROJECT_NOT_FOUND));
+    }
+
+    /** 意见轮守卫：归档即对话区关闭（只读终态）；未终结订单在即冻结迭代
+     * （下单后的意见不再受理，取消订单即解冻回迭代态）——新发言与作答一并拒绝。 */
+    private Project requireUpdatableProject(Long projectId) {
+        Project project = requireProject(projectId);
+        if (project.getArchivedAt() != null) {
+            throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
+        }
+        orderQueryAppService.requireNoActiveOrder(projectId);
+        return project;
+    }
+
+    /** 挂起问答守卫（#40 / ADR-0005）：会话存在挂起问答（ASKING 态工具块）时
+     * 新输入不盲提交——引擎必拒且 REST 已返 200 只见异步 error 事件；同步 409
+     * 指路作答。作答（resume）在途、ASKING 尚未清库的偶发拦截为已接受竞态边角。
+     * 守卫先于命令提交，拒绝即零事件。 */
+    private void requireNoPendingQuestion(Project project, String sessionId) {
+        if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+            throw new ApplicationException(ProjectMessage.QUESTION_PENDING);
+        }
+    }
+}

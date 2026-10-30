@@ -87,7 +87,7 @@ fi
 
 # ---- 4. 旧版沙箱镜像：只留 DockerEnvironmentBackend.DEV_IMAGE 当前版 ----
 # 版本号单点在 Java 常量；解析失败（文件挪了/常量改名）就跳过镜像清理。
-backend_java="$SERVER_DIR/src/main/java/com/aieducenter/aiplatform/base/workspace/infrastructure/docker/DockerEnvironmentBackend.java"
+backend_java="$SERVER_DIR/src/main/java/com/semgravio/aiplatform/base/workspace/infrastructure/docker/DockerEnvironmentBackend.java"
 current_image=$(grep -oE '"aiplatform/dev:[0-9.]+"' "$backend_java" 2>/dev/null | head -1 | tr -d '"')
 if [ -n "$current_image" ]; then
   for img in $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^aiplatform/dev:' || true); do

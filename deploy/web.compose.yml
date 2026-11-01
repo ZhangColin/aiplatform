@@ -1,0 +1,36 @@
+# 前端部署 compose（原 aiplatform-web/docker-compose.prod.yml 不动）：去掉宿主端口
+# 映射——唯一对外口是网关 8080（deploy/nginx.demo.conf 主站块经 webnet 代理到本容器）。
+# BACKEND_URL 经 build args 构建期烤入（见 deploy/web.Dockerfile 注释）。
+# 用法：docker compose -f deploy/web.compose.yml up -d --build
+# name 必须显式（与 server.compose.yml 同目录，防项目名撞车互相删容器，见那边注释）
+name: aiplatform-web
+
+services:
+  app:
+    image: aiplatform-web:ecs
+    build:
+      context: ../aiplatform-web
+      dockerfile: ../deploy/web.Dockerfile
+      args:
+        BACKEND_URL: http://aiplatform-server:8888
+    container_name: aiplatform-web
+    restart: unless-stopped
+    env_file:
+      - ../aiplatform-web/.env.production
+    networks:
+      - webnet
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  webnet:
+    external: true

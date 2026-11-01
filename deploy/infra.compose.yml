@@ -1,0 +1,42 @@
+# 基础设施三件（ECS 部署）：PG（必须 pgvector——Flyway V1 第一步 CREATE EXTENSION，
+# 缺了整个 schema 建不出来）/ redis（prod 配置 REDIS_HOST 无默认值，缺了起不来）/
+# embedding（模型离线预置）。全部 webnet 内网、无宿主端口（调试走 docker exec）。
+# POSTGRES_PASSWORD 由本目录 .env 供给（与 aiplatform-server/.env.production 同值）。
+# 用法：docker compose -f deploy/infra.compose.yml up -d --build
+# name 必须显式（同目录多 compose 防项目名撞车，见 server.compose.yml 注释）
+name: aiplatform-infra
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aiplatform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aiplatform
+      POSTGRES_USER: aiplatform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - webnet
+  redis:
+    image: redis:7-alpine
+    container_name: aiplatform-redis
+    restart: unless-stopped
+    networks:
+      - webnet
+  embedding:
+    build:
+      context: ../aiplatform-server/scripts
+      dockerfile: ../../deploy/embedding.Dockerfile
+    container_name: aiplatform-embedding
+    restart: unless-stopped
+    networks:
+      - webnet
+
+networks:
+  webnet:
+    external: true
+
+volumes:
+  pgdata:

@@ -1,0 +1,42 @@
+# 后端部署 compose（原 aiplatform-server/docker-compose.prod.yml 不动）：在其基础上补
+# docker.sock 挂载＋seal-archives 独立卷（生产部署.md §1 注记的待补项）。
+# 用法（服务器仓库根）：docker compose -f deploy/server.compose.yml up -d --build
+# name 必须显式：三个 compose 同目录会共用默认项目名 deploy，而服务同名 app 时
+# 后起的 up 会把先起项目的 app 容器当作同名旧服务停删（实测踩坑）。
+name: aiplatform-server
+
+services:
+  app:
+    image: aiplatform-server:ecs
+    build:
+      context: ../aiplatform-server
+      dockerfile: ../deploy/server.Dockerfile
+    container_name: aiplatform-server
+    restart: unless-stopped
+    env_file:
+      - ../aiplatform-server/.env.production
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - seal-archives:/app/seal-archives
+    networks:
+      - webnet
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  webnet:
+    external: true
+
+volumes:
+  seal-archives:

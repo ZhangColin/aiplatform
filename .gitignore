@@ -3,6 +3,8 @@ node_modules/
 .next/
 target/
 *.tsbuildinfo
+# 部署包（deploy/build-bundle.sh 产物）
+dist/
 # IDE / 系统杂物
 .idea/
 .vscode/

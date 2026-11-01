@@ -33,6 +33,7 @@ import {
 import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { useWorkMessageStore } from "@/lib/store/work-message";
 
+import { ChatMarkdown } from "./chat-markdown";
 import { ClosingCard } from "./closing-card";
 import { QuestionCard } from "./question-card";
 import { QuoteCard } from "./quote-card";
@@ -538,7 +539,10 @@ function MessageRow({ message, children, projectId, round, onSeeOrder }: { messa
           <span className="pl-1 text-xs text-muted-foreground">{message.label}</span>
         ) : null}
         <Bubble variant="muted" align="start">
-          <BubbleContent className="whitespace-pre-wrap rounded-2xl rounded-tl-sm border-electric-indigo/15 shadow-xs">{message.text}</BubbleContent>
+          {/* markdown 渲染（pre-wrap 退场：分段交 <p>，块间距走 space-y） */}
+          <BubbleContent className="space-y-1.5 rounded-2xl rounded-tl-sm border-electric-indigo/15 shadow-xs">
+            <ChatMarkdown>{message.text}</ChatMarkdown>
+          </BubbleContent>
         </Bubble>
       </div>
     </div>

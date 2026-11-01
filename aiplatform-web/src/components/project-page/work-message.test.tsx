@@ -249,6 +249,21 @@ describe("WorkMessage · 生长中的工作消息（#81：部件结构与状态�
     expect(html).not.toContain("步"); // 无步骤分组头（#115）
   });
 
+  it("解说段 markdown 渲染：加粗/列表不出星号源码记号（AI 解说是 markdown 文本，与对话气泡同口径）", () => {
+    const html = renderToStaticMarkup(
+      <WorkMessage
+        work={work({
+          parts: [{ kind: "text", id: "t0", text: "正在做**登录页**：\n\n- 表单\n- 校验" }],
+        })}
+      />,
+    );
+
+    expect(html).not.toContain("**");
+    expect(html).toContain("<strong>登录页</strong>");
+    expect(html).toContain("<li>表单</li>");
+    expect(html).toContain("<li>校验</li>");
+  });
+
   it("动作行两态：进行中转圈、失败「没做成」——完成无痕不产生静态条目（#230）；均无时长数字（#115）", () => {
     const running = renderToStaticMarkup(
       <WorkMessage work={work({ parts: [action({ id: "a1", toolCallId: "t1", state: "started" })] })} />,

@@ -15,6 +15,7 @@ import {
 
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ChatMarkdown } from "./chat-markdown";
 import type { GenerationSegmentFact } from "@/lib/projects/detail";
 import type {
   WorkPart,
@@ -383,10 +384,14 @@ function WorkBodyRows({ body, frozen, seat }: { body: WorkBody; frozen: boolean;
   );
 }
 
-/** 部件呈现：解说 = 正文段；自检 = 一句话播报行；动作 = 失败红行（成功无痕 #230；进行中动作归活性行 #235，不进正文）。 */
+/** 部件呈现：解说 = 正文段（markdown，与对话气泡同口径）；自检 = 一句话播报行；动作 = 失败红行（成功无痕 #230；进行中动作归活性行 #235，不进正文）。 */
 function WorkPartRow({ part, frozen, seat }: { part: WorkPart; frozen: boolean; seat: WorkSeat }) {
   if (part.kind === "text") {
-    return <p className="py-1 text-sm leading-relaxed">{part.text}</p>;
+    return (
+      <div className="space-y-1 py-1 text-sm leading-relaxed">
+        <ChatMarkdown>{part.text}</ChatMarkdown>
+      </div>
+    );
   }
   if (part.kind === "check") {
     return <CheckRow part={part} frozen={frozen} seat={seat} />;

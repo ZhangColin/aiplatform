@@ -136,6 +136,24 @@ describe("CommandArea · 对话区（#19 需求环① + #47 三分类，#86 单�
     expect(html).toContain("访谈中");
   });
 
+  it("智能体话语 markdown 渲染：加粗/列表/代码不出星号等源码记号（AI 回复是 markdown 文本）", () => {
+    seedChat([
+      {
+        kind: "agent",
+        id: "b1",
+        text: "明白了——**面向企业的 AI 应用搭建平台**。\n\n- 要点一\n- 要点二\n\n行内代码 `pnpm dev`。",
+      },
+    ]);
+
+    const html = renderToStaticMarkup(<CommandArea projectId="p1" />);
+
+    // 症状：markdown 记号被当纯文本显示（星号裸奔）
+    expect(html).not.toContain("**");
+    expect(html).toContain("<strong>面向企业的 AI 应用搭建平台</strong>");
+    expect(html).toContain("<li>要点一</li>");
+    expect(html).toMatch(/<code[^>]*>pnpm dev<\/code>/);
+  });
+
   it("待答问题：问答卡在流内、输入条提示「回答上面的问题」（Enter 即答复锚点）", () => {
     seedChat([
       { kind: "user", id: "u1", text: "做个官网" },

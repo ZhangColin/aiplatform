@@ -9,8 +9,11 @@ if (-not (Test-Path .env.local)) {
     exit 1
 }
 
-# 逐行解析裸 KEY=VALUE：忽略空行/注释，剥掉成对引号，注入进程环境变量
-Get-Content .env.local | ForEach-Object {
+# 逐行解析裸 KEY=VALUE：忽略空行/注释，剥掉成对引号，注入进程环境变量。
+# 必须 -Encoding UTF8：文件是 UTF-8 无 BOM，Windows PowerShell 5.1 缺省会按系统
+# GBK 码页误读——注释行尾全角标点（。）的字节对会吞掉换行，把下一个 KEY 行并进
+# 注释整行丢弃（实证：13 个 KEY 行静默丢 5 个，含 SSO_CLIENT_ID／RESEND_API_KEY）。
+Get-Content -Encoding UTF8 .env.local | ForEach-Object {
     $line = $_.Trim()
     if (-not $line -or $line.StartsWith('#')) { return }
     $eq = $line.IndexOf('=')

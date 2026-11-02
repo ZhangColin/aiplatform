@@ -13,6 +13,7 @@ import com.semgravio.aiplatform.business.identity.domain.enums.AccountBindingPro
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -55,6 +56,14 @@ class ResendVerificationCodeSenderTest {
                          "subject":"Semgravio 登录验证码",
                          "text":"您的验证码：482913\\n\\n5 分钟内有效。\\n\\n若非本人操作，请忽略此邮件。"}
                         """))
+                // HTML 模板（multipart alternative 的 html 面）：>…< 定界确保断言落在
+                // html 字段内（纯文本 text 字段不含尖括号）——品牌头、验证码、有效期、
+                // 忽略提示四要素齐全
+                .andExpect(content().string(containsString("Semgravio</div>")))
+                .andExpect(content().string(containsString("您的登录验证码")))
+                .andExpect(content().string(containsString(">482913<")))
+                .andExpect(content().string(containsString(">5 分钟内有效。<")))
+                .andExpect(content().string(containsString(">若非本人操作，请忽略此邮件。<")))
                 .andRespond(withSuccess("{\"id\":\"email-1\"}", MediaType.APPLICATION_JSON));
 
         sender.send(AccountBindingProvider.EMAIL, "user@example.com", "482913");
@@ -65,7 +74,7 @@ class ResendVerificationCodeSenderTest {
     @Test
     void given_ttl_configured_120s_when_send_then_body_renders_2_minutes_not_hardcoded() {
         // 「N 分钟内有效」从验证码 TTL 配置渲染（AC：不写死）——TTL 120s ≠ 300s 缺省，
-        // 分钟数必须跟着变，钉死文案与配置不漂移
+        // 分钟数必须跟着变，钉死文案与配置不漂移（text 与 html 两面都跟）
         RestClient.Builder restClientBuilder = RestClient.builder();
         MockRestServiceServer ttlServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         ResendVerificationCodeSender ttlSender = new ResendVerificationCodeSender(
@@ -76,6 +85,7 @@ class ResendVerificationCodeSenderTest {
                 .andExpect(content().json("""
                         {"text":"您的验证码：000001\\n\\n2 分钟内有效。\\n\\n若非本人操作，请忽略此邮件。"}
                         """))
+                .andExpect(content().string(containsString(">2 分钟内有效。<")))
                 .andRespond(withSuccess("{\"id\":\"email-2\"}", MediaType.APPLICATION_JSON));
 
         ttlSender.send(AccountBindingProvider.EMAIL, "another@example.com", "000001");

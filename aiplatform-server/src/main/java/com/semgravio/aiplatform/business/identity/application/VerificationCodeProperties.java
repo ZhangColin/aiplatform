@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component;
  * 全参数化（上线参数，不进代码）；通道机制双开（email/phone）、上线先邮箱——
  * 两个通道开关位在配置，翻开关即开放手机通道，机制零改动。
  *
- * <p>发送服务商＝上线参数（spec-320 Out of scope 定死）：本配置不含服务商凭据，
- * 接真通道时在发送适配器（LoggingVerificationCodeSender）内加配置/换实现，
- * 端口（VerificationCodeSender）与本配置的频控面不动。</p>
+ * <p>发送服务商＝上线参数（spec-320 Out of scope 定死）：本配置不含服务商凭据——
+ * Resend 真发信的 key 与发件地址落 {@code infrastructure/code/ResendProperties}
+ * （#376），端口（VerificationCodeSender）与本配置的频控面不动。</p>
  */
 @Component
 @ConfigurationProperties(prefix = "app.verification-code")

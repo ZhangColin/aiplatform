@@ -2,6 +2,7 @@ package com.semgravio.aiplatform.business.project.application;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -66,6 +67,16 @@ import lombok.extern.slf4j.Slf4j;
  * 止于对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
  * {@link GenerationAppService}）。</p>
  *
+ * <p><b>访谈轮收口硬契约与悬空接管（ADR-0032，#373）</b>：需求梳理期（未出 PRD）
+ * 意见轮与问答作答复跑轮的合法收口只有两形——再问一问（挂起问答）或产出 PRD
+ * （含修订）；轮落定观测点校验，无问无 PRD 即<b>悬空</b>（savePrd 失败只存在于
+ * 智能体叙述、或轮被判死中断，皆命中）——平台补一条如实状态消息（{@link
+ * #danglingInterviews} 标记＋guide-reply 同族平台自述面，文案按可观测失败分形：
+ * 判死「本轮被中断」／savePrd 失败「刚才写 PRD 一步失败了」／泛形，恒带「继续」
+ * 指路），其后输入经 {@link DispatchAppService} 绕过入口三分类直达意见轮（主智能
+ * 体把关），至下一次合法收口解除；恢复轮再悬空则标记保持、再补一条。咨询轮豁免
+ * （答询零产物是常态）、迭代期（PRD 已出）不适用（有派发链与 run 留痕兜底）。</p>
+ *
  * <p><b>事件桥与对话史（#89）</b>：过程事件经 {@link EventsAppService}（eventhub
  * 唯一 SSE 管道）发射，关联字段（projectId）逐事件注入——底座不解释、透传。发射
  * 失败护栏：单事件发射异常只记日志不断流（SSE 是「让 UI 活」的面，不承担正确性）；
@@ -122,6 +133,27 @@ public class MainAgentAppService {
     /** 一次 ask_user 挂起的会合事实（转答复续跑的入参重建源）。 */
     private record SuspendedQuestion(String runId, AgentSuspension suspension) {
     }
+
+    /**
+     * 访谈悬空标记（ADR-0032，#373）：需求梳理期（未出 PRD）用户轮悬空收口（无挂起
+     * 问答且无 PRD 产出——合法收口只有两形）即置；合法收口（挂起问答或 PRD 产出）
+     * 即清。标记在场时入口派发（{@link DispatchAppService}）绕过三分类直达意见轮。
+     * 进程内态，重启丢标（同意见锚取舍——重启后悬空输入回分类口径，泛形兜底文案
+     * 仍在）；key = 会话（projectId 派生，项目间天然隔离）。
+     */
+    private final Set<String> danglingInterviews = ConcurrentHashMap.newKeySet();
+
+    /** 悬空补救文案（ADR-0032）：判死/失败收口形——点名「本轮被中断」。 */
+    static final String DANGLING_REMEDY_INTERRUPTED =
+            "本轮被中断了，需求梳理还没有完成。你可以说「继续」，我们接着梳理。";
+
+    /** 悬空补救文案（ADR-0032）：savePrd 关键步失败形——点名写 PRD 失败。 */
+    static final String DANGLING_REMEDY_PRD_FAILED =
+            "刚才写 PRD 一步失败了，梳理成果还没有保存。你可以说「继续」，我们接着来。";
+
+    /** 悬空补救文案（ADR-0032）：无可观测失败泛形。 */
+    static final String DANGLING_REMEDY_GENERIC =
+            "上一轮没有正常完成，需求梳理还没有到位。你可以说「继续」，我们接着梳理。";
 
     public MainAgentAppService(ProjectRepository projectRepository,
             PrdVersionRepository prdVersions,
@@ -185,6 +217,16 @@ public class MainAgentAppService {
             throw new ApplicationException(ProjectMessage.PROJECT_ALREADY_ARCHIVED);
         }
         return project;
+    }
+
+    /**
+     * 悬空标记读口（入口派发接管判定，ADR-0032，#373）：在即对话区输入绕过入口
+     * 三分类直达意见轮——悬空期短确认（「OK」「可以」）不再被无状态分类吃进兜底、
+     * 回与项目状态无关的定型文案（「装忙复读」的症状面）；宁进意见链有主智能体
+     * 把关。标记合法收口即清（生命周期见 {@link #danglingInterviews}）。
+     */
+    public boolean interviewDangling(Long projectId) {
+        return danglingInterviews.contains(sessionIdOf(projectId));
     }
 
     /**
@@ -308,6 +350,7 @@ public class MainAgentAppService {
                 // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
                 opinionExchanges.remove(sessionId);
                 suspendedQuestions.remove(sessionId);
+                remedyFailedInterviewTurn(projectId, runId); // 判死/失败收口同悬空契约（ADR-0032）
                 throw e;
             }
             dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
@@ -594,6 +637,7 @@ public class MainAgentAppService {
                 // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
                 opinionExchanges.remove(sessionId);
                 suspendedQuestions.remove(sessionId);
+                remedyFailedInterviewTurn(projectId, runId); // 判死/失败收口同悬空契约（ADR-0032）
                 throw e;
             }
             dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
@@ -677,18 +721,31 @@ public class MainAgentAppService {
      * 再派」的达成机制（补产轮收口即链必达再派生成），不经该门——否则确认/存量恢复
      * 的补产链被自己的门拦死。判据单一：用户轮＝存在已确认版本（确认动作的次生事实），
      * 平台轮＝直接放行。</p>
+     *
+     * <p><b>访谈轮收口硬契约（ADR-0032，#373）</b>：本观测点同位校验不变量——需求
+     * 梳理期（未出 PRD）用户轮的合法收口只有「再问一问」（挂起问答）或「产出 PRD」
+     * 两形；无问无 PRD 即悬空（置 {@link #danglingInterviews}＋平台补救，文案按
+     * savePrd 失败事实分形）。两合法形与迭代期、归档路径随观测清除标记（接管解除
+     * 单点归一）；平台轮不入契约。轮失败（判死等异常上抛）不经本观测——悬空补救
+     * 在轮任务的 catch 侧（{@link #remedyFailedInterviewTurn}）。</p>
      */
     private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
             boolean platformRound) {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
-            if (project == null
-                    || agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+            if (project == null) {
+                return;
+            }
+            if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
+                // 合法收口形一（ADR-0032）：挂起问答在场＝本轮未收口——悬空标记随
+                // 解除（访谈重获推进抓手，入口恢复分类）
+                danglingInterviews.remove(sessionId);
                 return;
             }
             String workspaceId = Long.toString(project.getWorkspaceId());
             if (project.getArchivedAt() != null) {
                 clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
+                danglingInterviews.remove(sessionId); // 归档即对话区关闭：标记随清（终态）
                 return;
             }
             if (project.getGeneratedAt() == null) {
@@ -705,60 +762,77 @@ public class MainAgentAppService {
                 // 「收口即消费」清掉
                 String opinion = opinionExchanges.remove(sessionId);
                 String prdRevisionSummary = prdRevisions.consume(workspaceId);
-                if (project.getPrdProducedAt() != null) {
-                    if (project.getEndpointType().designInvolved()
-                            && !designProcessAppService.designFinalized(project)) {
-                        // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
-                        // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
-                        // ADR-0025）；意见原文随派发（#291：在途即排队、清单全收口
-                        // 即改稿——改稿同会话继续）
-                        DesignProcessAppService.DesignRun run =
-                                designProcessAppService.dispatchDesignOnTurnClose(projectId,
-                                        opinion);
-                        if (run != null) {
-                            log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
-                                    projectId, run.runId());
-                        }
-                        return;
+                if (project.getPrdProducedAt() == null) {
+                    // 访谈轮收口硬契约（ADR-0032，#373）：合法收口只有「再问一问」
+                    // （上方挂起检查已排除）或「产出 PRD」（本判定已排除）两形——
+                    // 此处即悬空。用户轮置标记＋平台补救；平台轮（补产/切换通告）不
+                    // 入契约（补产必在 PRD 后；通告轮的悬空不扩大接管面）。补救文案
+                    // 按 savePrd 失败事实分形（点名/泛形），恢复轮再悬空标记保持、
+                    // 再补一条
+                    boolean prdSaveFailed = prdRevisions.consumeFailure(workspaceId);
+                    if (!platformRound) {
+                        markDanglingInterview(project, runId, prdSaveFailed
+                                ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
                     }
-                    // 生成加门（#332）：系统终点的首个构建 run 唯一触发＝确认此版
-                    // PRD——用户对话轮 PRD 出不再自动起（旧「生成无门、PRD 出即起」
-                    // 口径退役，ADR-0008 改写）。无已确认版本即静默待确认（不派、不
-                    // 报错），不落轨道片行（未确认不呈现「生成中断」态）；切片计划
-                    // 事实随本轮消费清掉——确认派发时计划缺失走既有补产链。平台轮
-                    // （补产/终点切换）是确认与继续生成的达成机制，不经此门直接放行
-                    // （否则确认后的补产链被自己的门拦死）。设计类终点（含全部定稿）
-                    // 保持原触发律（设计轨分岔代码保留、入口已收起）。
-                    if (!platformRound && !project.getEndpointType().designInvolved()
-                            && !prdVersions.existsByProjectId(projectId)) {
-                        log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
-                                + "（生成加门：待确认此版 PRD）", projectId);
-                        return;
-                    }
-                    // 改需求回路（#334）：已确认版本在场但本轮出范围级新草稿（savePrd
-                    // 修订事实＋草稿≠已确认版——大改小改分流，判定从工具调用事实观测）
-                    // → 新草稿不自动触发 Demo：停驻待确认（意见＋差异摘要），用户过
-                    // 确认门（新版本号）后才派。平台轮不经此门（#332 豁免同口径）。
-                    if (!platformRound && !project.getEndpointType().designInvolved()
-                            && prdRevisionSummary != null
-                            && parkScopeDraftOrAwait(projectId, opinion, prdRevisionSummary)) {
-                        return;
-                    }
-                    // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
-                    // 计划补产链自然恢复——构建从定稿设计稿长出）；携意见载荷
-                    // （#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
-                    // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
-                    GenerationAppService.GenerationRun run =
-                            generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
-                                    new GenerationAppService.TurnOpinion(
-                                            opinion, prdRevisionSummary, runId));
+                    return;
+                }
+                // 合法收口形二（ADR-0032）：PRD 产出（含修订）——悬空标记随解除
+                danglingInterviews.remove(sessionId);
+                if (project.getEndpointType().designInvolved()
+                        && !designProcessAppService.designFinalized(project)) {
+                    // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
+                    // 设计过程（轨内无门，设计先行——设计主线与系统＋设计同律，
+                    // ADR-0025）；意见原文随派发（#291：在途即排队、清单全收口
+                    // 即改稿——改稿同会话继续）
+                    DesignProcessAppService.DesignRun run =
+                            designProcessAppService.dispatchDesignOnTurnClose(projectId,
+                                    opinion);
                     if (run != null) {
-                        log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
+                        log.info("[main-close] 项目 {} 意见轮收口，平台自动起设计过程（{}）",
                                 projectId, run.runId());
                     }
+                    return;
+                }
+                // 生成加门（#332）：系统终点的首个构建 run 唯一触发＝确认此版
+                // PRD——用户对话轮 PRD 出不再自动起（旧「生成无门、PRD 出即起」
+                // 口径退役，ADR-0008 改写）。无已确认版本即静默待确认（不派、不
+                // 报错），不落轨道片行（未确认不呈现「生成中断」态）；切片计划
+                // 事实随本轮消费清掉——确认派发时计划缺失走既有补产链。平台轮
+                // （补产/终点切换）是确认与继续生成的达成机制，不经此门直接放行
+                // （否则确认后的补产链被自己的门拦死）。设计类终点（含全部定稿）
+                // 保持原触发律（设计轨分岔代码保留、入口已收起）。
+                if (!platformRound && !project.getEndpointType().designInvolved()
+                        && !prdVersions.existsByProjectId(projectId)) {
+                    log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
+                            + "（生成加门：待确认此版 PRD）", projectId);
+                    return;
+                }
+                // 改需求回路（#334）：已确认版本在场但本轮出范围级新草稿（savePrd
+                // 修订事实＋草稿≠已确认版——大改小改分流，判定从工具调用事实观测）
+                // → 新草稿不自动触发 Demo：停驻待确认（意见＋差异摘要），用户过
+                // 确认门（新版本号）后才派。平台轮不经此门（#332 豁免同口径）。
+                if (!platformRound && !project.getEndpointType().designInvolved()
+                        && prdRevisionSummary != null
+                        && parkScopeDraftOrAwait(projectId, opinion, prdRevisionSummary)) {
+                    return;
+                }
+                // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
+                // 计划补产链自然恢复——构建从定稿设计稿长出）；携意见载荷
+                // （#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
+                // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
+                GenerationAppService.GenerationRun run =
+                        generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
+                                new GenerationAppService.TurnOpinion(
+                                        opinion, prdRevisionSummary, runId));
+                if (run != null) {
+                    log.info("[main-close] 项目 {} 意见轮收口，平台自动派首次生成 run（{}）",
+                            projectId, run.runId());
                 }
                 return;
             }
+            // 已生成（迭代期）：收口不变量不适用（ADR-0032——受理即派、有派发链与
+            // run 留痕兜底），悬空标记随清（迭代期无访谈悬空态）
+            danglingInterviews.remove(sessionId);
             if (project.getEndpointType().designInvolved()
                     && !designProcessAppService.designFinalized(project)) {
                 // 已生成＋设计类终点＋设计未定稿完（#291 系统中途切换的设计轨承接）：
@@ -819,6 +893,54 @@ public class MainAgentAppService {
         opinionExchanges.remove(sessionId);
         prdRevisions.clear(workspaceId);
         buildPlanFacts.clear(workspaceId);
+    }
+
+    /**
+     * 访谈期悬空收口的平台补救（ADR-0032，#373）：置悬空标记（其后输入绕过入口
+     * 分类直达意见轮）＋补一条如实状态消息——复用平台自述面（guide-reply 同族，
+     * SSE 事件封闭集零新增；prompt 不携带——无新用户话语，不重复重建用户气泡），
+     * 对话史 guide 行挂本轮 runId（#360 在途意见回执同口径）。发射失败只记日志：
+     * 标记已置（接管仍生效），呈现面失败不牵连收口轨道。
+     */
+    private void markDanglingInterview(Project project, String runId, String remedyText) {
+        danglingInterviews.add(sessionIdOf(project.getId()));
+        try {
+            eventBridge.emitGuideReply(project, runId, null,
+                    DispatchAppService.GUIDE_LABEL, remedyText);
+            conversationHistory.recordGuideNotice(project.getId(), runId, remedyText);
+        }
+        catch (RuntimeException e) {
+            log.warn("[main-close] 项目 {} 悬空补救发射失败（标记已置，不牵连收口轨道）：{}",
+                    project.getId(), e.toString());
+        }
+        log.info("[main-close] 项目 {} 访谈期悬空收口（ADR-0032）：置悬空标记＋平台补救「{}」",
+                project.getId(), remedyText);
+    }
+
+    /**
+     * 失败收口的悬空补救（ADR-0032，#373）：访谈期（未出 PRD）用户轮判死/失败即
+     * 悬空——同为无问无 PRD 收口（#371 判死同被不变量命中），置标记＋点名形补救
+     * （「本轮被中断」）。迭代期（PRD 已出）不适用、归档即对话区关闭同理；挂起
+     * 问答在场即访谈有合法抓手（引擎 ASKING 态指路作答）不置。项目事实重查一次
+     * （提交时快照后 PRD 可能已出——失败轮自身不产 PRD，但守卫口径取观测时点）；
+     * 补救发射失败只记日志——不遮原始轮失败（error 事件已由 converse/resume 内
+     * 发出，异常仍上抛）。
+     */
+    private void remedyFailedInterviewTurn(Long projectId, String runId) {
+        try {
+            Project project = projectRepository.findById(projectId).orElse(null);
+            if (project == null || project.getArchivedAt() != null
+                    || project.getPrdProducedAt() != null
+                    || agentClient.hasAskingToolCall(project.ownerUserId(),
+                            sessionIdOf(projectId))) {
+                return;
+            }
+            markDanglingInterview(project, runId, DANGLING_REMEDY_INTERRUPTED);
+        }
+        catch (RuntimeException e) {
+            log.warn("[main-close] 项目 {} 失败收口悬空补救发射失败（不遮原始轮失败）：{}",
+                    projectId, e.toString());
+        }
     }
 
     /**

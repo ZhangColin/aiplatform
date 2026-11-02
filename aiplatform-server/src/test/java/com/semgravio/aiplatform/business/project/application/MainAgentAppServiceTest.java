@@ -1497,6 +1497,197 @@ class MainAgentAppServiceTest {
         });
     }
 
+    // ---------- 访谈轮收口硬契约与悬空接管（ADR-0032，#373） ----------
+
+    @Test
+    void given_interview_turn_closes_with_question_when_observe_then_no_remedy_and_no_dangling() {
+        // 合法收口形一（硬契约）：访谈期意见轮以挂起问答收口（再问一问）——零补救
+        // 消息、零悬空标记（接管不触发）
+        Long projectId = persistedProject("9750");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                    "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false) // 提交守卫：放行
+                .thenReturn(true); // 收口观测：挂起问答在场（合法形——不悬空）
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
+    @Test
+    void given_interview_turn_closes_with_prd_when_observe_then_no_remedy_and_no_dangling() {
+        // 合法收口形二（硬契约）：访谈期意见轮以 PRD 产出收口（含修订）——零补救、
+        // 零悬空标记
+        Long projectId = persistedPrdProject("9751");
+        givenSessionExecutorRunsInline();
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
+    @Test
+    void given_interview_turn_dangles_with_narration_when_closes_then_generic_remedy_persisted_and_marker() {
+        // 悬空形一（叙述型，#373 本地实录形态）：访谈期意见轮收口无挂起问答、无 PRD
+        // ——智能体叙述「已完成」也改变不了平台事实。平台补一条如实状态（泛形＋「继续」
+        // 指路）、落对话史、置悬空标记
+        Long projectId = persistedProject("9752");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            return new AgentReply(command.runId(), "需求梳理已完成，PRD 内容已在本地拟定完整");
+        });
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "梳理好了吗");
+
+        // 补救消息（平台自述面 guide-reply 同族，SSE 事件封闭集零新增）：锚本轮
+        // runId、无 prompt 键（无新用户话语——不重复重建用户气泡）、泛形＋「继续」
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> projectId.toString().equals(payload.get(EventsAppService.PROJECT_FIELD))
+                        && run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && !payload.containsKey(AgentEventTypes.GUIDE_PROMPT_FIELD)
+                        && DispatchAppService.GUIDE_LABEL.equals(payload.get(AgentEventTypes.GUIDE_LABEL_FIELD))
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                                .contains("上一轮没有正常完成")
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD)).contains("继续")));
+        // 落对话史（guide 行挂本轮 runId——刷新回访补救不丢）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ? AND kind = 6",
+                Integer.class, projectId)).isEqualTo(1);
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_interview_turn_killed_when_converse_fails_then_interrupted_remedy_and_marker() {
+        // 悬空形二（判死收口，#371 同被不变量命中）：访谈期对话轮判死/失败收口——
+        // 同为无问无 PRD 收口，平台补救点名「本轮被中断」并置标记
+        Long projectId = persistedProject("9753");
+        givenSessionExecutorSwallowsFailures();
+        when(agentClient.converse(any(), any()))
+                .thenThrow(new IllegalStateException("活超时判死：静默超阈值"));
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "继续梳理");
+
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                                .contains("本轮被中断")
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD)).contains("继续")));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_conversation_entries WHERE project_id = ? AND kind = 6",
+                Integer.class, projectId)).isEqualTo(1);
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_interview_turn_save_prd_failed_when_closes_then_prd_failed_remedy_and_marker() {
+        // 悬空形三（savePrd 工具失败）：轮内 savePrd 落盘失败（失败事实）＋收口无问
+        // 无 PRD——补救点名「刚才写 PRD 一步失败了」
+        Long projectId = persistedProject("9754");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                prdRevisions.recordFailure(command.workspaceId());
+                return new AgentReply(command.runId(), "PRD 内容已拟定，工作区容器不存在保存失败");
+            }
+            return new AgentReply(command.runId(), "好的");
+        });
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "收敛吧");
+
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                                .contains("写 PRD 一步失败了")
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD)).contains("继续")));
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_dangling_then_recovery_turn_dangles_again_then_marker_kept_and_second_remedy() {
+        // 恢复轮再悬空：标记保持（继续接管）＋再补一条如实状态（每轮悬空收口各补一条）
+        Long projectId = persistedProject("9755");
+        givenSessionExecutorRunsInline();
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+        appService.runOpinionTurn(projectId, "继续");
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), payloads.capture());
+        assertThat(payloads.getAllValues()).allSatisfy(payload ->
+                assertThat(String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD)))
+                        .contains("继续"));
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_dangling_then_next_turn_raises_question_when_settles_then_marker_cleared() {
+        // 标记生命周期＝合法收口即清：悬空后的恢复轮再问一问（挂起问答）——标记清除，
+        // 入口恢复三分类（解除接管）
+        Long projectId = persistedProject("9756");
+        givenSessionExecutorRunsInline();
+        AtomicBoolean asked = new AtomicBoolean(false);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (!asked.getAndSet(true)) {
+                return new AgentReply(command.runId(), "好的"); // 首轮：悬空收口
+            }
+            return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                    "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false) // 首轮提交守卫：放行
+                .thenReturn(false) // 首轮收口观测：无问无 PRD → 悬空（置标记）
+                .thenReturn(false) // 恢复轮提交守卫：放行
+                .thenReturn(true); // 恢复轮收口观测：挂起问答（合法形——清标记）
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+
+        appService.runOpinionTurn(projectId, "继续");
+
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
+    @Test
+    void given_inquiry_during_interview_when_answered_then_no_remdy_and_no_dangling() {
+        // 咨询轮豁免（答询零产物是常态）：访谈期答询不触发不变量——零补救零标记
+        Long projectId = persistedProject("9757");
+        givenSessionExecutorRunsInline();
+
+        appService.answerInquiry(projectRepository.findById(projectId).orElseThrow(),
+                "项目现在什么状态？");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
+    @Test
+    void given_iteration_turn_closes_without_question_when_observe_then_no_remedy() {
+        // 迭代期豁免（PRD 已出）：意见轮无问收口是受理常态（受理即派），不变量不适用
+        Long projectId = persistedGeneratedProject("9758");
+        givenSessionExecutorRunsInline();
+        givenConverseMainRepliesAndExecutorFinishes("好的，会处理的");
+
+        appService.runOpinionTurn(projectId, "按钮改成蓝色");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+    }
+
     // ---------- 测试数据 ----------
 
     /** 单轮交接物（一次派发 = 一轮：一条意见 + 该轮判定）。 */

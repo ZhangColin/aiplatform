@@ -35,6 +35,7 @@ import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
 import com.semgravio.aiplatform.base.agentscope.AgentSessionExecutor;
+import com.semgravio.aiplatform.base.agentscope.AgentSuspension;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
@@ -491,6 +492,83 @@ class DispatchAppServiceTest {
                     ord <= closedOrd ? 2 : 1, anchor);
         }
         return projectId;
+    }
+
+    // ---------- 悬空接管（ADR-0032，#373）：标记期输入绕过入口三分类 ----------
+
+    @Test
+    void given_dangling_marker_when_dispatch_short_confirm_then_straight_to_opinion_without_classification() {
+        // 灵魂用例（#373）：访谈悬空标记期内「OK」直达意见轮——零分类调用（无第二个
+        // classify- 会话）、零兜底引导事件（不再回与项目状态无关的定型文案——「装忙
+        // 复读」症状消除），起意见轮 run（主智能体把关）
+        Long projectId = persistedProject("9820");
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "好的"); // 首轮分类意见 → 意见轮悬空收口置标记
+
+        appService.dispatch(projectId, "做一个官网");
+
+        DispatchAppService.DispatchRun ok = appService.dispatch(projectId, "OK");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(command.capture(), any());
+        // 会话序：分类 → 意见轮 → 悬空接管的意见轮（「OK」零分类直达）
+        assertThat(command.getAllValues().get(0).sessionId())
+                .startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
+        assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("main-" + projectId);
+        AgentCommand takeover = command.getAllValues().get(2);
+        assertThat(takeover.sessionId()).isEqualTo("main-" + projectId);
+        assertThat(takeover.prompt()).isEqualTo("OK");
+        assertThat(takeover.runId()).isEqualTo(ok.runId());
+        // 零兜底引导：全程不出定型文案事件（悬空补救是另一族文案，见 MainAgentAppServiceTest）
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> DispatchAppService.GUIDE_GENERIC_TEXT.equals(
+                        payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))));
+    }
+
+    @Test
+    void given_dangling_marker_cleared_when_legal_close_then_classification_resumes() {
+        // 标记清除即恢复分类：悬空后的恢复轮以挂起问答合法收口 → 标记清除 → 后续
+        // 输入回入口三分类（FALLBACK 引导照常——接管不是常态）
+        Long projectId = persistedProject("9821");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command == null) {
+                return null; // 重打桩空参
+            }
+            if (command.sessionId().startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX)) {
+                return new AgentReply(command.runId(),
+                        "你好呀".equals(command.prompt()) ? "FALLBACK" : "OPINION");
+            }
+            if (command.prompt().contains("官网")) { // 首个意见轮：悬空叙述收口
+                return new AgentReply(command.runId(), "好的");
+            }
+            // 恢复轮：再问一问（挂起问答——合法收口清标记）
+            return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                    "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(false)  // 意见轮收口观测：悬空（置标记）
+                .thenReturn(false)  // 恢复轮提交守卫：放行
+                .thenReturn(true);  // 恢复轮收口观测：挂起问答（清标记）
+
+        appService.dispatch(projectId, "做一个官网"); // 分类 OPINION → 意见轮悬空收口
+        appService.dispatch(projectId, "继续");        // 接管直达意见轮 → 挂起问答收口（清标记）
+        appService.dispatch(projectId, "你好呀");      // 恢复分类 → FALLBACK 引导
+
+        // 会话序：分类 → 意见轮 → 接管意见轮（零分类）→ 分类（恢复）＝恰 4 次
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(command.capture(), any());
+        List<String> sessions = command.getAllValues().stream()
+                .map(AgentCommand::sessionId).toList();
+        assertThat(sessions.stream()
+                .filter(id -> id.startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX)))
+                .hasSize(2); // 悬空窗口内的「继续」不分类，标记清除后「你好呀」回分类
+        // 兜底引导恢复（定型文案照常——接管解除）
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> DispatchAppService.GUIDE_GENERIC_TEXT.equals(
+                        payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))));
     }
 
     // ---------- 分类输出解析（容错口径） ----------

@@ -106,12 +106,17 @@ public class SavePrdTool extends ToolBase {
                 DockerExecFilesystem.overwriteWriteCommand(containerFile),
                 String.valueOf(content).getBytes(StandardCharsets.UTF_8));
         if (!out.ok()) {
+            // 失败事实登记（ADR-0032）：PRD 未成——轮收口若悬空（无问无 PRD），平台
+            // 据此点名「刚才写 PRD 一步失败了」而非泛形
+            prdRevisions.recordFailure(workspaceId);
             return Mono.just(ToolResultBlock.error("PRD 写入工作区失败: " + out.stderr()));
         }
         try {
             artifactAdapter.onWritten(workspaceId);
         }
         catch (RuntimeException e) {
+            // 同上：状态位未置即 PRD 未成，失败事实同面登记
+            prdRevisions.recordFailure(workspaceId);
             return Mono.just(ToolResultBlock.error("PRD 已写入但业务登记失败，可重试保存: "
                     + e.getMessage()));
         }

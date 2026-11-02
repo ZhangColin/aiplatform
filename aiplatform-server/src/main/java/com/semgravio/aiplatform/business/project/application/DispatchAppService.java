@@ -40,6 +40,12 @@ import lombok.extern.slf4j.Slf4j;
  * 主智能体把关（追问或改 PRD，代价小）；误判为咨询会丢变更（不可接受）。分类
  * 调用异常、超时或输出不可解析一律回落意见链。</p>
  *
+ * <p><b>悬空接管（ADR-0032，#373）——「有时不分类」的解释落点</b>：分类器是一次性
+ * 会话、无项目上下文，访谈悬空态（轮异常收口后无问无 PRD）里的短确认（「OK」「可以」）
+ * 会被 FALLBACK 定义吃掉、回定型文案——用户感知「装忙复读」。悬空标记在场时
+ * （{@link MainAgentAppService#interviewDangling}——平台事实级判定，非模型自报）
+ * 输入绕过分类直达意见轮，标记合法收口即清、恢复分类。</p>
+ *
  * <p><b>兜底类零产物</b>：轻量引导回复为平台定型文案（代码承载，非 LLM 产），
  * 经 {@code guide-reply} 事件直达对话区；下单意图归兜底的引导分岔——指引
  * Demo 确认门（「确认此版本，准备签约」；未生成时如实说明入口出现时机）。全程不起 run、不动任何
@@ -114,7 +120,8 @@ public class DispatchAppService {
 
     /**
      * 派发一条对话区输入（REST 路径同步入口）：全局守卫（存在 / 未归档——归档即
-     * 对话区关闭，咨询与兜底也停）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
+     * 对话区关闭，咨询与兜底也停）→ 悬空接管判定（ADR-0032：标记在场即跳过分类
+     * 直达意见轮）→ 轻量分类 → 按类分岔。订单冻结（ORD_006）与
      * 挂起问答（PRJ_024）只拦意见链：意见分岔（主智能体意见轮）自带守卫在分类后
      * 拦——咨询与兜底随时可答（CONTEXT.md「派发」；被拒意见先烧一次 flash 分类
      * 调用，秒级轻调用，接受）。响应携带所派 run 的标识（意见 = 意见轮 / 咨询 =
@@ -138,6 +145,17 @@ public class DispatchAppService {
         Project project = mainAgentAppService.requireDispatchableProject(projectId);
         if (designItem != null) {
             return dispatchDesignRevision(project, prompt, attachments, designItem, divergence);
+        }
+        // 悬空接管（ADR-0032，#373）：访谈悬空标记在场即绕过入口三分类直达意见轮
+        // ——悬空期短确认（「OK」「可以」）不再被无状态分类吃进兜底、回与项目状态
+        // 无关的定型文案（「装忙复读」症状面）；宁进意见链有主智能体把关（既有定向
+        // 取舍的延伸）。守卫照拦：归档已在上拦、订单冻结与挂起问答由意见轮自带守卫
+        // 拦（挂起在场即 409 指路作答——与答询转作答复不冲突，标记在合法收口即清）
+        if (mainAgentAppService.interviewDangling(projectId)) {
+            log.info("[dispatch] 项目 {} 访谈悬空接管：跳过入口分类，直达意见轮（ADR-0032）",
+                    projectId);
+            return new DispatchRun(
+                    mainAgentAppService.runOpinionTurn(projectId, prompt, attachments).runId());
         }
         Classification classified = classify(projectId, prompt);
         return switch (classified.type()) {

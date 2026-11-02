@@ -180,6 +180,9 @@ class SavePrdToolTest {
         assertThat(resultText(result)).contains("写入工作区失败");
         assertThat(port.callbacks).isEmpty();
         assertThat(prdRevisions.consume("42")).isNull();
+        // 失败事实登记（ADR-0032 悬空补救的分形依据）：轮收口无问无 PRD 时据此刻画
+        // 「刚才写 PRD 一步失败了」点名形文案
+        assertThat(prdRevisions.consumeFailure("42")).isTrue();
     }
 
     @Test
@@ -191,6 +194,24 @@ class SavePrdToolTest {
         // 文件已写但业务登记失败：回错误让模型可重试（写幂等覆盖，重试只前进）
         assertThat(result.getState()).isEqualTo(ToolResultState.ERROR);
         assertThat(resultText(result)).contains("登记失败");
+        // 业务登记失败同属失败事实（PRD 未成——状态位未置即悬空分形依据）
+        assertThat(prdRevisions.consumeFailure("42")).isTrue();
+    }
+
+    @Test
+    void given_failure_then_resave_when_called_then_failure_superseded_by_success() {
+        // 同轮失败后重试成功：失败事实随成功覆盖（summary 终值在——悬空判定看 PRD
+        // 产出事实，补救不再点名已翻篇的失败）
+        exec.next = new DockerExecFilesystem.ExecOutput(125, new byte[0],
+                "docker: No such container");
+        call("# PRD", "初版产出");
+        exec.next = new DockerExecFilesystem.ExecOutput(0, new byte[0], "");
+
+        ToolResultBlock result = call("# PRD", "重试成功的产出");
+
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(prdRevisions.consume("42")).isEqualTo("重试成功的产出");
+        assertThat(prdRevisions.consumeFailure("42")).isFalse();
     }
 
     // ---------- 内部 ----------

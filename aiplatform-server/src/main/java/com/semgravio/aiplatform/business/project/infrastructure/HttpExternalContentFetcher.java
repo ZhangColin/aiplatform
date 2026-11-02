@@ -3,16 +3,21 @@ package com.semgravio.aiplatform.business.project.infrastructure;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,6 +50,12 @@ import com.semgravio.aiplatform.business.project.domain.port.FetchResult;
  * JavaScript，附如实降级标志（{@link FetchResult.Content#initialHtmlOnly}，Kimi
  * 同款限制与话术口径）。非 200/坏响应如实报错不炸（{@link FetchResult.Rejected}
  * 带理由）。
+ *
+ * <p>#372 · 超时与出站代理：请求超时可配（{@code app.external-content.request-timeout-seconds}，
+ * 缺省 {@value #DEFAULT_REQUEST_TIMEOUT_SECONDS}s——跨境慢源如 GitHub 实测 200 但
+ * 15s+，钉死 15s 必挂；连接超时维持 5s）；出站代理走 {@link #resolveProxy}（配置项
+ * 优先、环境变量回落）。代理是运维显式配置的可信出站设施：代理侧的出网治理归代理，
+ * 本地 SSRF 判定对经代理请求是「前置建议性拦截」——不因代理移除，也不因代理加严。
  */
 @Component
 @Adapter(PortType.CLIENT)
@@ -62,6 +73,9 @@ public class HttpExternalContentFetcher implements ExternalContentFetcher {
     static final String TRUNCATED_NOTE =
             "（响应超过大小上限，内容已截断，以下为前段。）";
 
+    /** #372 · 请求超时缺省（秒）：跨境慢源余量取上界（Agent Brief 30–45s 区间）。 */
+    static final long DEFAULT_REQUEST_TIMEOUT_SECONDS = 45;
+
     /** 重定向上限（逐跳复检 SSRF，防跳内网/无限环）。 */
     private static final int MAX_REDIRECTS = 5;
 
@@ -78,22 +92,93 @@ public class HttpExternalContentFetcher implements ExternalContentFetcher {
 
     private final int maxBytes;
     private final Predicate<InetAddress> blockedAddress;
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+    private final Duration requestTimeout;
+    private final HttpClient http;
 
     @Autowired
     public HttpExternalContentFetcher(
-            @Value("${app.external-content.max-bytes:1048576}") int maxBytes) {
-        this(maxBytes, HttpExternalContentFetcher::isBlockedAddress);
+            @Value("${app.external-content.max-bytes:1048576}") int maxBytes,
+            @Value("${app.external-content.request-timeout-seconds:"
+                    + DEFAULT_REQUEST_TIMEOUT_SECONDS + "}") long requestTimeoutSeconds,
+            @Value("${app.external-content.proxy:}") String proxy) {
+        this(maxBytes, Duration.ofSeconds(requestTimeoutSeconds),
+                resolveProxy(proxy, System::getenv), HttpExternalContentFetcher::isBlockedAddress);
     }
 
-    /** 执行缝注入构造（单测替身地址判定——假服务跑在 127.0.0.1 随机端口，环回
-     *  恰好是生产判定拦截的目标，故允许注入放行判定以测抓取路径本身）。 */
-    HttpExternalContentFetcher(int maxBytes, Predicate<InetAddress> blockedAddress) {
+    /** 执行缝注入构造（单测替身地址判定与超时/代理解析——假服务跑在 127.0.0.1
+     *  随机端口，环回恰好是生产判定拦截的目标，故允许注入放行判定以测抓取路径
+     *  本身；代理传 null 即直连，与 #213 行为一致）。 */
+    HttpExternalContentFetcher(int maxBytes, Duration requestTimeout,
+            ProxySelector proxy, Predicate<InetAddress> blockedAddress) {
         this.maxBytes = maxBytes;
+        this.requestTimeout = requestTimeout;
         this.blockedAddress = blockedAddress;
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .followRedirects(HttpClient.Redirect.NEVER);
+        if (proxy != null) {
+            builder.proxy(proxy);
+        }
+        this.http = builder.build();
+    }
+
+    /**
+     * #372 · 出站代理解析（返回 null = 直连，与 #213 行为一致）：
+     * <ul>
+     *   <li>配置项 {@code app.external-content.proxy} 优先（host:port 形，宽容接受
+     *       {@code http(s)://} 前缀）；解析失败<b>启动即抛</b>——运维显式配置错不得
+     *       静默直连。</li>
+     *   <li>未配置时回落标准环境变量，取首个非空（HTTPS_PROXY → https_proxy →
+     *       HTTP_PROXY → http_proxy；单一代理口径不分请求 scheme——本地代理客户端
+     *       通常为 http/https 混合端口，抓取主场景 https 在前）；环境变量解析失败
+     *       <b>宽容忽略</b>回落直连——环境可能残留脏值（#372 现场实锤），不炸应用。</li>
+     * </ul>
+     */
+    static ProxySelector resolveProxy(String configured, Function<String, String> env) {
+        if (configured != null && !configured.isBlank()) {
+            return ProxySelector.of(parseProxyAddress(configured));
+        }
+        for (String name : new String[] {"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"}) {
+            String value = env.apply(name);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            try {
+                return ProxySelector.of(parseProxyAddress(value));
+            } catch (IllegalArgumentException ignored) {
+                // 环境残留脏值：忽略回落直连（见 javadoc 口径）
+            }
+        }
+        return null;
+    }
+
+    /** host:port（宽容剥 {@code http(s)://} 前缀与 IPv6 方括号）→ 代理地址；缺端口/
+     *  端口非数字/越界抛 IllegalArgumentException（配置项场景启动即炸，环境变量场景
+     *  由调用方宽容捕获）。 */
+    private static InetSocketAddress parseProxyAddress(String value) {
+        String s = value.strip();
+        int schemeEnd = s.indexOf("://");
+        if (schemeEnd >= 0) {
+            s = s.substring(schemeEnd + 3);
+        }
+        int colon = s.lastIndexOf(':');
+        if (colon <= 0 || colon == s.length() - 1) {
+            throw new IllegalArgumentException("代理地址须为 host:port 形：" + value);
+        }
+        String host = s.substring(0, colon);
+        if (host.startsWith("[") && host.endsWith("]")) {
+            host = host.substring(1, host.length() - 1);
+        }
+        int port;
+        try {
+            port = Integer.parseInt(s.substring(colon + 1));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("代理地址须为 host:port 形：" + value);
+        }
+        if (port <= 0 || port > 65535) {
+            throw new IllegalArgumentException("代理端口越界（1–65535）：" + value);
+        }
+        return new InetSocketAddress(host, port);
     }
 
     /** 安全底线②判定：环回/内网（RFC1918 站点本地）/链路本地（含云元数据）/
@@ -120,13 +205,23 @@ public class HttpExternalContentFetcher implements ExternalContentFetcher {
                 return rejected;
             }
             HttpRequest request = HttpRequest.newBuilder(target)
-                    .timeout(Duration.ofSeconds(15))
+                    .timeout(requestTimeout)
                     .header("User-Agent", "aiplatform-external-fetcher/1.0")
                     .GET()
                     .build();
             HttpResponse<InputStream> response;
             try {
                 response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            } catch (HttpConnectTimeoutException e) {
+                // 连接超时（SYN 被丢，非拒连）：源连接过慢或不可达——归「过慢」语义
+                // 但与「响应过慢」分开（连接超时钉死 5s，未连上谈不上响应）
+                return new FetchResult.Rejected(
+                        "抓取失败（源连接过慢或不可达，连接超时 5s）：" + e.getMessage());
+            } catch (HttpTimeoutException e) {
+                // #372：文案带「源响应过慢」语义（与连接异常区分）——提示模型该源
+                // 本身慢、重试同参大概率仍超时，减少盲目重试空转
+                return new FetchResult.Rejected("抓取失败（源响应过慢，请求超时 "
+                        + requestTimeout.toSeconds() + "s）：" + e.getMessage());
             } catch (IOException e) {
                 return new FetchResult.Rejected("抓取失败（连接异常）：" + e.getMessage());
             } catch (InterruptedException e) {

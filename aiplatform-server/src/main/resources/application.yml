@@ -131,8 +131,14 @@ app:
     cleanup-interval: 1h
   # #213 · business.project 外部资料抓取：响应大小上限（字节，超此截断——缺省
   # 1 MiB）。纯 HTTP 只读 GET，四条安全底线见 HttpExternalContentFetcher。
+  # #372 · 请求超时（秒——跨境慢源如 GitHub 实测 200 但 15s+，钉死 15s 必挂，
+  # 放宽缺省 45；连接超时维持 5s）与出站代理（host:port；空＝直连，未配置时回落
+  # HTTPS_PROXY/HTTP_PROXY 环境变量——本地开发走代理客户端出网、生产法兰克福
+  # 直连）。SSRF 判定不因代理移除也不加严（前置建议性拦截，代理侧治理归代理）。
   external-content:
     max-bytes: 1048576
+    request-timeout-seconds: 45
+    proxy: ""
   # #215 · business.project 调研闭环搜索供数器：base-url + key——换供数方 = 加适配器
   # + 换配置，主链路零改动；key 只落环境变量 BOCHA_API_KEY（.env.local，gitignored），
   # 不进 git。缺省空 key 时搜索如实报错（按供应商类型选适配器的开关留待第二家接入）。

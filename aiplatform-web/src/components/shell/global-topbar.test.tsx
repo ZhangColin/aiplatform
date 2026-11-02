@@ -16,7 +16,8 @@ vi.mock("@/hooks/use-me", () => ({
  * 全局顶栏渲染契约（#343，spec #320 ⑥ / #318 全局壳重建·顶栏）：照原型
  * 全量——五行导航（与侧栏重复亦保留，原型如此设计）＋保存状态胶囊（真实
  * 三态，缺省已保存）＋「我的项目」＋「保存项目」＋头像（访客态＝「登录」
- * 文字入口）。话术逐字照原型。
+ * 入口、#377 切 M01 验证码弹窗）。话术逐字照原型；开弹窗交互归
+ * global-topbar.interaction.test。
  */
 
 /** 门全关（今日真实投影）：仅需求分析可达。 */
@@ -69,10 +70,11 @@ describe("GlobalTopbar（项目空间新壳·顶栏）", () => {
     expect(html).not.toContain("能做这些");
   });
 
-  it("访客态＝「登录」文字入口（me 无数据），不出头像菜单", () => {
+  it("访客态＝「登录」入口（me 无数据），不出头像菜单；不指向 OIDC（#377 开 M01 弹窗）", () => {
     meSeed.me = undefined;
     const html = renderToStaticMarkup(<GlobalTopbar projectId="p1" nav={nav} onOpenNav={() => {}} />);
     expect(html).toContain("登录");
     expect(html).not.toContain('aria-label="个人菜单"');
+    expect(html).not.toContain("/auth/login"); // 登录入口切 M01 弹窗，OIDC 收而不删
   });
 });

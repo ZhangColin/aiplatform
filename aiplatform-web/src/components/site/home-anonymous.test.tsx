@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { M01Dialog } from "@/components/auth/m01-dialog";
@@ -102,6 +102,18 @@ describe("首页匿名首访（A1）", () => {
     expect(useM01Store.getState().open).toBe(false);
     expect(screen.queryByText("登录保存项目")).toBeNull();
     expect(screen.getAllByText("登录").length).toBeGreaterThan(0);
+  });
+
+  it("点「登录」入口开 M01 验证码弹窗（#377 顶栏切弹窗——首页同源件，不跳 OIDC）", async () => {
+    renderHome(false, new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(useM01Store.getState().open).toBe(true);
+    expect(useM01Store.getState().trigger).toBe("topbar-login");
+    expect(useM01Store.getState().resume).toBeNull(); // 无续跑语义
   });
 });
 

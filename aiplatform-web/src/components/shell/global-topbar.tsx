@@ -8,7 +8,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useMe } from "@/hooks/use-me";
-import { buildLoginRedirectUrl } from "@/lib/auth/login-redirect";
 import {
   activeStageOf,
   type StageNavItem,
@@ -21,8 +20,8 @@ import { cn } from "@/lib/utils";
 /**
  * 全局顶栏（#343，spec #320 ⑥ 全局壳重建，照原型全量）：五行导航（首页＋
  * 四阶段——与侧栏重复亦保留，原型如此设计）＋保存状态胶囊（真实三态）＋
- * 「我的项目」＋「保存项目」（触发 M01）＋头像（访客态＝「登录」文字入口；
- * 个人菜单自旧侧栏迁入）。可达性判定输入与侧栏同源（壳装配层单点推导）。
+ * 「我的项目」＋「保存项目」（触发 M01）＋头像（访客态＝「登录」入口、开 M01
+ * 验证码弹窗（#377）；个人菜单自旧侧栏迁入）。可达性判定输入与侧栏同源（壳装配层单点推导）。
  * 「版本记录」（#344，交接包 §5.2 要求、原型未画→补建）＝版本记录抽屉的
  * 顶栏挂点——与 Demo 版本 chip 同一抽屉（store 开合契约）。
  */
@@ -176,13 +175,15 @@ export function SaveProjectButton() {
 }
 
 /**
- * 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」文字入口。导出＝首页顶栏
- *（#345）同源复用。{@code meEnabled=false}＝首页匿名可逛面（无凭证 cookie）：
- * 不发 /me、直接呈现「登录」入口，不落探明前占位。
+ * 头像位：已登录＝个人菜单（旧侧栏迁入）；访客＝「登录」入口——开 M01 验证码
+ * 弹窗（#377，无续跑回调），不再 302 跳 OIDC 登录页（端点代码收而不删、SSO
+ * 迁移时再启用）。导出＝首页顶栏（#345）同源复用。{@code meEnabled=false}＝
+ * 首页匿名可逛面（无凭证 cookie）：不发 /me、直接呈现「登录」入口，不落探明
+ * 前占位。
  */
 export function TopbarAvatar({ meEnabled = true }: { meEnabled?: boolean }) {
   const { data: me, isPending } = useMe(meEnabled);
-  const pathname = usePathname();
+  const openM01 = useM01Store((s) => s.openM01);
 
   if (meEnabled && isPending) {
     // 会话探明前占位（不出「登录」闪烁——登录墙下静候既有会话）
@@ -195,12 +196,13 @@ export function TopbarAvatar({ meEnabled = true }: { meEnabled?: boolean }) {
   }
   if (!me) {
     return (
-      <Link
-        href={buildLoginRedirectUrl(pathname, "")}
+      <button
+        type="button"
+        onClick={() => openM01("topbar-login")}
         className="rounded-lg px-2.5 py-1.5 text-label-md font-medium text-electric-indigo transition-colors hover:bg-surface-violet-tint"
       >
         登录
-      </Link>
+      </button>
     );
   }
   return (

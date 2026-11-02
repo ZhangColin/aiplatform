@@ -25,10 +25,12 @@ import { useM01Store, type M01Trigger } from "@/lib/store/m01";
  * 访客项目（后端 #328）。开合与来路归 {@link useM01Store}；本组件是唯一宿主，
  * 挂全局 layout 一份（顶栏「保存项目」、签约门、401 出口三处触发共用）。
  *
- * <p>三处触发：①「保存项目」开 save-project 文案；②签约门（下单入口接到
+ * <p>四处触发：①「保存项目」开 save-project 文案；②签约门（下单入口接到
  * ORD_017/5017）开 stage-gate 文案并携 resume 续跑回调，验码成功即回调续跑本单
- * （「绑定后放行」）；③401 全局出口（{@link UNAUTHORIZED_EVENT}）开登录——
- * 无续跑语义（请求保持 error 态，登录后前端按域失效自愈）。</p>
+ * （「绑定后放行」）；③顶栏「登录」入口（#377）开 topbar-login 文案、无续跑
+ * 回调（验码通过即关、顶栏转已登录态）；④401 全局出口（{@link
+ * UNAUTHORIZED_EVENT}）开登录——无续跑语义（请求保持 error 态，登录后前端按域
+ * 失效自愈）。</p>
  *
  * <p>表单态随时开重挂（{@link M01Form} 仅在开门时挂载）自然归零，不用 effect
  * 复位。码验证错误（ApiError 6005–6008）就地出后端中文 message，不 toast。</p>
@@ -187,7 +189,7 @@ function M01Form({ trigger }: { trigger: M01Trigger }) {
   );
 }
 
-/** 来路文案（save-project 缺省；stage-gate 签约门）。 */
+/** 来路文案（save-project 缺省；stage-gate 签约门；topbar-login 顶栏登录）。 */
 const COPY = {
   "save-project": {
     title: "登录保存项目",
@@ -197,5 +199,10 @@ const COPY = {
     title: "登录后进入签约付款",
     description:
       "进入签约付款流程需要先登录绑定账号——你已保存的项目会一并归入账号，跨设备可继续；签约联系人与签约主体可在账户内维护。",
+  },
+  "topbar-login": {
+    title: "登录",
+    description:
+      "输入邮箱收取验证码即可登录——验证码登录即注册、无需密码；本浏览器未绑定的项目会自动归入账号，换设备也能继续。",
   },
 } as const;

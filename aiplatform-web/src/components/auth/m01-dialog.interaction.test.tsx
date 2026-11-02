@@ -52,6 +52,14 @@ describe("M01Dialog · 触发文案", () => {
 
     expect(screen.getByText("登录保存项目")).toBeTruthy();
   });
+
+  it("顶栏登录来路（#377）：出「登录」文案", () => {
+    useM01Store.setState({ open: true, trigger: "topbar-login" });
+    renderDialog();
+
+    expect(screen.getByText("登录")).toBeTruthy();
+    expect(screen.getByText(/验证码登录即注册、无需密码/)).toBeTruthy();
+  });
 });
 
 describe("M01Dialog · 发码→验码两步", () => {
@@ -77,6 +85,27 @@ describe("M01Dialog · 发码→验码两步", () => {
     await waitFor(() => expect(resume).toHaveBeenCalledTimes(1)); // 绑定后放行：续跑本单
     expect(useM01Store.getState().open).toBe(false);
     expect(invalidate).toHaveBeenCalled(); // 会话与项目域失效自愈
+  });
+
+  it("顶栏登录来路（#377）：验码成功即关窗、无续跑回调", async () => {
+    auth.sendCode.mockResolvedValue({ expiresInSeconds: 300 });
+    auth.verifyCode.mockResolvedValue({ accountId: "1", displayName: "张三" });
+    useM01Store.setState({ open: true, trigger: "topbar-login" });
+    const { invalidate } = renderDialog();
+
+    fireEvent.change(screen.getByLabelText("邮箱 / 手机号"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
+    await screen.findByText(/验证码已发送至/);
+
+    fireEvent.change(screen.getByLabelText("验证码"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并继续" }));
+
+    await waitFor(() => expect(auth.verifyCode).toHaveBeenCalledWith("user@example.com", "123456"));
+    expect(useM01Store.getState().open).toBe(false); // 验证通过即关（顶栏转已登录态）
+    expect(useM01Store.getState().resume).toBeNull(); // 无续跑语义（区别于签约门）
+    expect(invalidate).toHaveBeenCalled(); // me 失效自愈 → 顶栏头像转登录态
   });
 });
 

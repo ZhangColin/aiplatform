@@ -10,9 +10,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.RequireUserConfirmEvent;
@@ -67,6 +70,8 @@ import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleApp
  */
 @Component
 public class AgentscopeAgentClient {
+
+    private static final Logger logger = LoggerFactory.getLogger(AgentscopeAgentClient.class);
 
     /** 智能体栈单栈自述名（智能体事件的引擎值正本——计量不记引擎）。 */
     public static final String ENGINE = "agentscope";
@@ -333,7 +338,9 @@ public class AgentscopeAgentClient {
      * 超阈值才判死（还在干活就不掐，活跃 run 无总时长死限——生成轨长任务口径，
      * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast——判定轮/
      * 取名/预检等无工具轻调用现状）。判死失败走既有 error 事件表达（SSE 封闭集
-     * 零新增），错误现场带中文口径（外层尝试环 #221 原地修据此续作）。</p>
+     * 零新增），错误现场带中文口径（外层尝试环 #221 原地修据此续作）。判死同时
+     * 显式中断内核执行＋计量面关账（#374 判死止损：取消对内核阻塞段无立即效力，
+     * 僵尸调用只烧 token——见 catch 块注）。</p>
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
@@ -345,12 +352,15 @@ public class AgentscopeAgentClient {
         // 模型边界计量（#109 / #324 对账级修复）：本轮用量由 MeteredModel 在每次
         // stream() 收口直报，此处把计量上下文写入订阅链（contextWrite 订阅态传播）
         // ——主循环每次迭代/压缩/记忆抽取/委派子智能体的模型直调共用同一模型实例、
-        // 据此归入本轮；无 usageContext 不写（不上报，底座不发明归属）
+        // 据此归入本轮；无 usageContext 不写（不上报，底座不发明归属）。scope 提到
+        // 方法级（判死路径 markClosed 观察判死后收口，#374）
+        MeteringScope scope = usageContext != null
+                ? new MeteringScope(runId, prepared.ctx().getSessionId(), usageContext, clock,
+                        usageEventSink, usageIdempotencyKey)
+                : null;
         Flux<io.agentscope.core.event.AgentEvent> events =
                 prepared.agent().streamEvents(messages, prepared.ctx());
-        if (usageContext != null) {
-            MeteringScope scope = new MeteringScope(runId, prepared.ctx().getSessionId(),
-                    usageContext, clock, usageEventSink, usageIdempotencyKey);
+        if (scope != null) {
             events = events.contextWrite(ctx -> ctx.put(MeteringScope.CONTEXT_KEY, scope));
         }
         try {
@@ -400,6 +410,19 @@ public class AgentscopeAgentClient {
                     prepared.fileChanges().changes(), prepared.durations().snapshot());
         }
         catch (Exception e) {
+            // 判死止损（#374）：blockLast 超时/异常的 Reactor cancel 虽沿订阅链传导
+            // （内核 buildAgentStream 的 sink.onCancel 会 dispose 生命周期），但对
+            // 阻塞段无立即效力——SSE 读循环阻塞在 readLine 等下一行、非流式调用
+            // defer 内同步跑到自然完成，僵尸调用只烧 token 产出全弃（实录
+            // main-375467515827203658：判死后 51s 仍见模型调用收口）。显式调内核
+            // 中断口置协作标志：模型流下一 chunk 边界终止（断连即停止生成/计费）、
+            // 迭代间不再续跑；标志由内核每轮订阅开始自 reset，不毒害下一轮。
+            // 先关计量面再中断——中断触发的收口（在途调用取消结算）即「判死后
+            // 仍在产出」的证据，WARN 显式化供对账
+            if (scope != null) {
+                scope.markClosed();
+            }
+            interruptKernel(prepared, runId);
             drainParts(prepared.parts(), sink);
             sink.accept(AgentscopeEventMapper.error(runId, e.getMessage()));
             // 失败留账（#323）：失败流段的部分观察面不清零——已提交的文件变更与
@@ -407,6 +430,39 @@ public class AgentscopeAgentClient {
             // 崩断时在途的未闭合区间仍不计——StageDurationFacts 口径不变）
             return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
                     prepared.durations().snapshot());
+        }
+    }
+
+    /**
+     * 判死止损（#374）：对内核执行流发显式中断——{@code ReActAgent#interrupt(userId,
+     * sessionId)} 置 {@code InterruptControl} 协作标志（内核模型流逐 chunk 检查
+     * {@code checkInterrupted}、迭代间同查——下一 chunk 边界终止在途流式调用且不再
+     * 发起下一迭代）。只置标志不打断在途阻塞段（已发起的非流式调用照跑完——如实
+     * 计量不追缴）；调用失败不遮原始判死异常（吞掉记 WARN）。中断寻址同轮的
+     * (userId, sessionId)——与 runTurn 同步路径执行，下一轮尚未起跑（内核订阅开始
+     * 即 reset 标志），无误杀窗口。
+     */
+    private void interruptKernel(PreparedTurn prepared, String runId) {
+        ReActAgent kernel;
+        try {
+            kernel = prepared.agent().getDelegate();
+        }
+        catch (RuntimeException e) {
+            logger.warn("runId={} 判死：内核委托不可达（{}），跳过显式中断（仅订阅取消兜底）",
+                    runId, e.getMessage());
+            return;
+        }
+        if (kernel == null) {
+            logger.warn("runId={} 判死：内核委托缺失，跳过显式中断（仅订阅取消兜底）", runId);
+            return;
+        }
+        try {
+            kernel.interrupt(prepared.ctx().getUserId(), prepared.ctx().getSessionId());
+            logger.warn("runId={} 判死：已显式中断内核执行（sessionId={}）——止损僵尸模型调用",
+                    runId, prepared.ctx().getSessionId());
+        }
+        catch (RuntimeException e) {
+            logger.warn("runId={} 判死：内核中断调用失败（{}）", runId, e.getMessage());
         }
     }
 

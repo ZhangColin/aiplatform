@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -32,6 +33,7 @@ import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatUsage;
+import io.agentscope.core.ReActAgent;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.harness.agent.HarnessAgent;
 import java.time.Clock;
@@ -69,6 +71,10 @@ class AgentscopeAgentClientTest {
 
     @Mock
     private HarnessAgent agent;
+
+    /** 内核委托假面（#374 判死止损：判死路径对内核的显式中断口调用在此观察）。 */
+    @Mock
+    private ReActAgent kernel;
 
     @Mock
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
@@ -842,6 +848,59 @@ class AgentscopeAgentClientTest {
 
         assertThatThrownBy(() -> client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
                 })).isInstanceOf(IllegalStateException.class);
+    }
+
+    // ---------- #374 判死止损（掐死后显式中断内核执行） ----------
+
+    @Test
+    @Timeout(30)
+    void given_wall_clock_kill_when_converse_then_kernel_execution_interrupted() {
+        // #374 判死止损：总墙钟掐死后显式中断内核——blockLast 超时的 Reactor cancel
+        // 对内核阻塞段（SSE readLine 等下一行、非流式调用）无立即效力，僵尸调用
+        // 继续烧 token（实录 main-375467515827203658：判死后 51s 仍见模型调用收口）；
+        // interrupt(userId, sessionId) 置内核协作标志——模型流下一 chunk 边界终止、
+        // 迭代间不再续跑（内核每轮订阅开始自 reset，标志不毒害下一轮）
+        properties.setTimeout(Duration.ofMillis(300));
+        givenSpacedEvents(Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80),
+                Duration.ofMillis(80), Duration.ofMillis(80), Duration.ofMillis(80));
+        when(agent.getDelegate()).thenReturn(kernel);
+
+        List<AgentEvent> frames = new ArrayList<>();
+        assertThatThrownBy(() -> client.converse(command("deepseek:deepseek-v4-flash", null),
+                frames::add)).isInstanceOf(IllegalStateException.class);
+
+        verify(kernel).interrupt("alice", "s-1");
+        // 判死表达零回归：error 事件照发（SSE 封闭集零新增）
+        assertThat(frames.stream().map(AgentEvent::type)).contains(AgentEventTypes.ERROR);
+    }
+
+    @Test
+    @Timeout(30)
+    void given_silence_kill_when_converse_then_kernel_execution_interrupted() {
+        // 活超时判死同口径（#374 与 #371/#322 判死语义同一）：静默判死也是「不再消费
+        // 流」——内核中断同一显式动作，不因判死语义分叉
+        givenSpacedEvents(Duration.ofMillis(20), Duration.ofMillis(600));
+        when(agent.getDelegate()).thenReturn(kernel);
+
+        assertThatThrownBy(() -> client.converse(commandWithSilence(Duration.ofMillis(300)),
+                event -> {
+                })).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("活超时");
+
+        verify(kernel).interrupt("alice", "s-1");
+    }
+
+    @Test
+    void given_normal_completion_when_converse_then_kernel_interrupt_port_untouched() {
+        // 对照钉子：正常收口（run-finish）不触碰内核中断口——interrupt 是判死路径的
+        // 止损动作，不进正常生命周期
+        givenStream(new TextBlockDeltaEvent("r-1", "b-1", "答"));
+
+        client.converse(command("deepseek:deepseek-v4-flash", null), event -> {
+        });
+
+        verify(agent, never()).getDelegate();
     }
 
     // ---------- #355 工具执行窗预算（长命令不被静默阈值误杀） ----------

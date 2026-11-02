@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.agentscope.core.model.ChatUsage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.util.context.ContextView;
 
 import com.semgravio.aiplatform.base.metering.domain.model.TokenUsage;
@@ -31,6 +33,8 @@ import com.semgravio.aiplatform.base.metering.domain.port.UsageEventSink;
  */
 final class MeteringScope {
 
+    private static final Logger logger = LoggerFactory.getLogger(MeteringScope.class);
+
     /** 订阅链键：当前轮计量上下文（runTurn 订阅点写入、模型边界订阅态读取）。 */
     static final Class<MeteringScope> CONTEXT_KEY = MeteringScope.class;
 
@@ -41,6 +45,8 @@ final class MeteringScope {
     private final UsageEventSink sink;
     private final String idempotencyPrefix;
     private final AtomicLong seq = new AtomicLong();
+    private volatile boolean killed;
+    private final AtomicLong killedReports = new AtomicLong();
 
     MeteringScope(String runId, String sessionId, UsageContext usageContext,
             Clock clock, UsageEventSink sink, String idempotencyPrefix) {
@@ -58,14 +64,29 @@ final class MeteringScope {
     }
 
     /**
+     * 判死标记（#374 可观测兜底）：runTurn 判死（超时/异常）路径调用。此后收口的
+     * 模型调用即僵尸调用证据（取消盲区：SSE 阻塞读等下一行、非流式调用自然完成）
+     * ——计量照报（如实计量不回收），另 WARN 显式化（runId + 判死后序次）供对账。
+     */
+    void markClosed() {
+        killed = true;
+    }
+
+    /**
      * 一次模型 {@code stream()} 收口报恰一条 UsageEvent（幂等键 = 前缀 + 本轮自增
      * 序号；零用量/无 usage 跳过——不发明零事件）。provider/model 取模型边界的
-     * 自身档位（压缩 flash 与主循环 pro 各自归位，不并桶）。
+     * 自身档位（压缩 flash 与主循环 pro 各自归位，不并桶）。判死后（#374）收口
+     * 照报＋WARN（僵尸调用只烧 token 产出全弃，事实必须可见）。
      */
     void report(ModelRef modelRef, ChatUsage usage) {
         TokenUsage tokens = AgentscopeUsageMapper.toTokenUsage(usage);
         if (tokens.total() <= 0) {
             return;
+        }
+        if (killed) {
+            logger.warn("runId={} 判死后仍收到模型调用收口（第 {} 次）——僵尸调用证据"
+                    + "（计量如实上报不回收，对账时与判死时间线拼合定位），本次 tokens={}",
+                    runId, killedReports.incrementAndGet(), tokens.total());
         }
         sink.report(new UsageEvent(
                 idempotencyPrefix + "-" + seq.incrementAndGet(),

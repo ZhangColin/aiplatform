@@ -20,11 +20,13 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.EventEnvelope;
  * {@code workspaceId} 可空——为空落配置的本地工作区，带值则解析为项目工作区
  * （智能体读写项目文件的基础）；{@code streamCorrelation} 可空——流关联字段
  * （如 projectId，底座不解释，逐事件注入智能体事件 payload）；{@code timeout}
- * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（对话轮 2 分钟量级）；
- * {@code silenceTimeout} 可空——<b>活超时判定</b>（#322 生成轨）：事件流静默超过
- * 此值即判死——还在干活就不掐（持续产出事件/工具动作的段无总时长死限），纯静默
- * 超限才判死；非空即接管超时语义（{@code timeout} 总墙钟不再施加），为空沿用
- * {@code timeout} 总墙钟（对话轮/判定轮调用面零变化）；{@code toolSilenceTimeout}
+ * 可空——本轮对话超时（一次性总墙钟），为空取内核配置默认（判定轮/取名/预检等
+ * 无工具轻调用 2 分钟量级）；
+ * {@code silenceTimeout} 可空——<b>活超时判定</b>（#322 生成轨，#371 起对话轨
+ * 同口径）：事件流静默超过此值即判死——还在干活就不掐（持续产出事件/工具动作的
+ * 段无总时长死限），纯静默超限才判死；非空即接管超时语义（{@code timeout} 总墙钟
+ * 不再施加），为空沿用 {@code timeout} 总墙钟（判定轮等轻调用现状）；
+ * {@code toolSilenceTimeout}
  * 可空——工具执行窗的活超时预算（#355）：工具执行中引擎无事件（长命令会被静默
  * 阈值误杀），执行窗给延长预算、任何事件到达即回落 {@code silenceTimeout}；为空
  * 回落同静默阈值（不放大预算）；{@code agentKey} 可空——

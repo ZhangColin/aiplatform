@@ -165,7 +165,8 @@ public class AgentscopeAgentClient {
      * （run 已开场），可再挂起（question-raised 再发）或正常收口（run-finish）。
      * 计量幂等键带 replyId 短后缀（挂起轮已报过 agent-usage-{runId}；短形见
      * {@link #shortReplyKey}）。挂起轮软终点以返回值 {@link AgentReply#suspension()}
-     * 表达。
+     * 表达。超时与 converse 同口径（#371）：请求携 {@link AgentResume#silenceTimeout()}
+     * 即活超时语义接管（续跑与首轮同阈值），为空沿用内核配置总墙钟。
      */
     public AgentReply resume(AgentResume resume, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
@@ -189,7 +190,8 @@ public class AgentscopeAgentClient {
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
-                resume.usageContext(), null, null, null, sink);
+                resume.usageContext(), /* timeout= */ null, resume.silenceTimeout(),
+                resume.toolSilenceTimeout(), sink);
         // 平台工具落盘事实同口（#292）：挂起续跑轮的落盘照进变更事实流；失败分支
         // 同携部分观察上浮（#323 失败留账，converse 同口径）
         List<FileChange> changes = new ArrayList<>(result.changes());
@@ -329,9 +331,9 @@ public class AgentscopeAgentClient {
      * <p><b>超时两语义（#322）</b>：{@code silenceTimeout} 非空＝活超时判定——
      * {@code Flux.timeout} 的信号间隔语义按事件逐个重置，纯静默（无事件/工具动作）
      * 超阈值才判死（还在干活就不掐，活跃 run 无总时长死限——生成轨长任务口径，
-     * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast，对话轮/
-     * 判定轮现状零变化）。判死失败走既有 error 事件表达（SSE 封闭集零新增），
-     * 错误现场带中文口径（外层尝试环 #221 原地修据此续作）。</p>
+     * 替换原一次性总墙钟）；为空＝{@code timeout} 一次性总墙钟（blockLast——判定轮/
+     * 取名/预检等无工具轻调用现状）。判死失败走既有 error 事件表达（SSE 封闭集
+     * 零新增），错误现场带中文口径（外层尝试环 #221 原地修据此续作）。</p>
      */
     private TurnResult runTurn(PreparedTurn prepared, List<Msg> messages, String runId,
             String usageIdempotencyKey, UsageContext usageContext, Duration timeout,

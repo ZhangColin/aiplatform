@@ -32,7 +32,8 @@
 ## 4. 已知坑与新机差异
 
 - **`.sh` 行尾**：仓库已加 `.gitattributes` 钉 `*.sh eol=lf`（Windows `core.autocrlf=true` 会 checkout 成 CRLF 而炸脚本；服务器部署也依赖 LF）。
-- **工作区镜像 chromium（未决）**：`dev-image.Dockerfile` 取 npmmirror legacy zip `chromium-linux-arm64.zip`（revision 1243 与 playwright 1.63 钉死配对）。**该 revision 在 npmmirror 只有 arm64 包，x64 无源**（官方 CDN legacy 路径亦失效）。amd64 新机首次构建 dev 镜像时需解决：容器内配代理走 `playwright install` 官方注册表，或找到可用 x64 zip 后改 Dockerfile（文件内注释已记录约束：升版＝同步改钉版＋zip 版本）。
+- **工作区镜像 chromium（已解，2026-11-02）**：钉版自 `playwright 1.63.0 ↔ chromium 1243` 回退到 **`1.57.0 ↔ 1200`**（`render/package.json` 与 `dev-image.Dockerfile` 两处钉版同步改）——1243 在 npmmirror 只有 arm64 包（x64 404），官方 CDN 本机直连零字节、走代理 400；**1200 为全量双架构**，amd64/arm64 都走 npmmirror、全链国内源可构建。chromium zip 按构建架构选文件名（BuildKit `TARGETARCH` 自动注入）。若日后升版：先查 `https://registry.npmmirror.com/-/binary/playwright/builds/chromium/<rev>/` 确认目标架构 zip 在库，再同步改两处钉版。
+- **工作区镜像基础底座**：`FROM node:22-bookworm` 的 metadata 解析要过 `auth.docker.io`（本机直连超时）——首次构建前先 `docker pull docker.m.daocloud.io/library/node:22-bookworm && docker tag docker.m.daocloud.io/library/node:22-bookworm node:22-bookworm`，BuildKit 命中本地后不再外联。镜像在位后 `ensureDevImage` 直接跳过构建（只在缺失时现场建）。
 - 容器内 clone github 卡 TCP：macOS 旧机已知现象；Docker Desktop 网络栈不同，若复现沿用既有判定（用 exitCode 与 `.git` 目录判成败，别信 git init 假绿）。
 - 容器 8081 应用重启后要手工拉（restart=unless-stopped 行为同 Linux，见 #168）。
 - 验证编译用 `clean test-compile`（增量「Nothing to compile」假绿）；`mvn test` 直跑（@IntegrationTest 已隔离到 aiplatform_test 库）。

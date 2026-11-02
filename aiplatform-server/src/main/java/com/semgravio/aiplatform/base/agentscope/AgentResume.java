@@ -1,5 +1,6 @@
 package com.semgravio.aiplatform.base.agentscope;
 
+import java.time.Duration;
 import java.util.List;
 
 import io.agentscope.core.event.ConfirmResult;
@@ -33,6 +34,14 @@ import io.agentscope.core.event.ConfirmResult;
  *                         designer 会话若有挂起续跑，不漂移成带 shell 的读写面）
  * @param toolSpec          工具面规格串（#252，可空——语义同 {@link AgentCommand#toolSpec()}）：
  *                         续跑与首轮同规格（业务侧从同一运营配置解析重建，不信挂起载荷）
+ * @param silenceTimeout   活超时判死阈值（可空，语义同 {@link AgentCommand#silenceTimeout()}
+ *                         ——#371 续跑与 converse 同口径）：非空即活超时语义接管续跑流
+ *                         （纯静默超限才判死，还在干活就不掐——主智能体问答续跑同样
+ *                         带增强工具，慢工具轮不被一次性总墙钟掐死），业务侧从与首轮
+ *                         命令同一配置重建；为空沿用内核配置总墙钟（旧口径）
+ * @param toolSilenceTimeout 工具执行窗的活超时预算（可空，语义同
+ *                         {@link AgentCommand#toolSilenceTimeout()}——#355）：为空回落
+ *                         同静默阈值（不放大预算）
  */
 public record AgentResume(
         String runId,
@@ -49,7 +58,9 @@ public record AgentResume(
         String agentKey,
         boolean workspaceReadOnly,
         boolean workspaceNoShell,
-        String toolSpec) {
+        String toolSpec,
+        Duration silenceTimeout,
+        Duration toolSilenceTimeout) {
 
     public AgentResume {
         if (runId == null || runId.isBlank() || sessionId == null || sessionId.isBlank()

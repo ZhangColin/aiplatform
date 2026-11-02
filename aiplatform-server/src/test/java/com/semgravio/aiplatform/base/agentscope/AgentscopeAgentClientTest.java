@@ -650,7 +650,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, false, null), frames::add);
+                "approved", null, null, false, false, null, null, null), frames::add);
 
         // 恢复消息带 ConfirmResult metadata（AgentScope 挂起恢复口）；续跑流正常收口
         verify(agent).streamEvents(messages.capture(), any(RuntimeContext.class));
@@ -677,7 +677,7 @@ class AgentscopeAgentClientTest {
                 "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, "reply-9",
                 List.of(new ConfirmResult(true,
                         new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
-                "approved", null, null, false, false, null), frames::add))
+                "approved", null, null, false, false, null, null, null), frames::add))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(frames.stream().map(AgentEvent::type))
@@ -687,6 +687,31 @@ class AgentscopeAgentClientTest {
                 .containsEntry("message",
                         "Failed to create model for id: deepseek:deepseek-v4-flash: "
                                 + "Environment variable DEEPSEEK_API_KEY is required to auto-create model");
+    }
+
+    @Test
+    @Timeout(30)
+    void given_resume_silence_beyond_threshold_when_resume_then_killed_as_activity_timeout() {
+        // #371 续跑与 converse 同口径：resume 请求携静默判死阈值即活超时语义接管
+        // ——事件后 600ms 死寂超阈值 300ms 判死（旧口径落内核 2m 总墙钟，慢工具
+        // 轮被一次性掐死且判死前无事件可见），失败表达走既有 error 事件
+        givenSpacedEvents(Duration.ofMillis(20), Duration.ofMillis(600));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        assertThatThrownBy(() -> client.resume(resumeWithSilence(Duration.ofMillis(300)),
+                frames::add))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("活超时");
+        assertThat(frames.stream().map(AgentEvent::type)).contains(AgentEventTypes.ERROR);
+    }
+
+    /** 带静默判死阈值的续跑请求（#371：续跑与 converse 同口径）。 */
+    private AgentResume resumeWithSilence(Duration silence) {
+        return new AgentResume(
+                "run-1", "s-1", "alice", null, "deepseek:deepseek-v4-flash", null, null, "reply-9",
+                List.of(new ConfirmResult(true,
+                        new ToolUseBlock("tc-1", "write_file", Map.of("path", "x")))),
+                "approved", null, null, false, false, null, silence, null);
     }
 
     @Test

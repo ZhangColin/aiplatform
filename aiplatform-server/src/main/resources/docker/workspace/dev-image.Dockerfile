@@ -7,9 +7,15 @@ FROM node:22-bookworm
 # 版本差异对生成应用透明）。编码智能体 = AgentScope 进程内单栈（平台侧运行），
 # 容器只承载应用运行时与中间件，不装智能体 CLI。git 显式安装（版本层 #91：
 # 收口自动成版走容器内 git；基座 buildpack-deps 隐式自带，显式声明防漂移）。
-RUN apt-get update \
+# 第一层 apt 也走 tuna（对齐 deploy 变体「换源前置到第一层」：本机直连
+# deb.debian.org 实测每包分钟级、大件小时级；sed 换源、层末还原——不留镜像
+# 配置残留，同下方渲染层口径）
+RUN cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig \
+    && sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         postgresql-15 postgresql-client-15 redis-server git \
+    && mv /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm（基座工程包管理器，#113）：依赖在镜像构建期装好，工作区初始化 = 模板就位，
@@ -31,20 +37,32 @@ RUN npm install -g pnpm@10
 # 零浏览器旁路（render-svg.mjs，不触 chromium）。构建期网络三处走国内镜像
 # （本机对默认 CDN/debian 源卡滞是既知事实，实测 54KB/s vs 镜像 8.6MB/s；
 # 研究文档 2026-10-03 备案解法）：npm registry、浏览器 zip 走 npmmirror，apt 走
-# tuna（sed 换源、层末还原——不留镜像配置残留）。chromium zip 是 arm64 命名的
-# 本机单机形态（dev 镜像只在本机构建不外推；amd64 主机构建须换对应 zip）。
+# tuna（sed 换源、层末还原——不留镜像配置残留）。chromium zip 按构建架构取
+# 文件名（BuildKit 自动注入 TARGETARCH），双架构同走 npmmirror revision 1200
+# （2026-11 换 Windows/amd64 机后自 1243 回退并与 render/package.json 的
+# playwright 1.57.0 两处钉版同步改：npmmirror 在 1243 只镜像了 arm64——amd64
+# 404、官方 CDN 本机直连零字节/代理 400，1200 为全量双架构，本机全链国内源
+# 可构建；API 面经查全为稳定接口，回退安全）。**注意两架构 zip 解压布局不同**：
+# arm64 出 chrome-linux/、amd64 出 chrome-linux64/——解压后归一化 mv 成
+# chrome-linux（下游 ENV RENDER_CHROMIUM 与渲染脚本只见统一布局）。
 # 层序：渲染层在基座模板层之前（#296 起）——基座依赖演进（如 @shadcn/lint＋
 # oxlint）只重跑基座 pnpm install，不再触发 chromium 重下载。
 COPY render/ /opt/render/
-RUN cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig \
+ARG TARGETARCH
+RUN CHROMIUM_ZIP=https://cdn.npmmirror.com/binaries/playwright/builds/chromium/1200/chromium-linux.zip; \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+      CHROMIUM_ZIP=https://cdn.npmmirror.com/binaries/playwright/builds/chromium/1200/chromium-linux-arm64.zip; \
+    fi; \
+    cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig \
     && sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends unzip \
     && cd /opt/render && npm install --registry=https://registry.npmmirror.com \
-    && curl -sL https://cdn.npmmirror.com/binaries/playwright/builds/chromium/1243/chromium-linux-arm64.zip -o /tmp/chromium.zip \
+    && curl -sL "$CHROMIUM_ZIP" -o /tmp/chromium.zip \
     && mkdir -p /opt/chrome \
     && unzip -q /tmp/chromium.zip -d /opt/chrome \
     && rm /tmp/chromium.zip \
+    && if [ -d /opt/chrome/chrome-linux64 ] && [ ! -d /opt/chrome/chrome-linux ]; then mv /opt/chrome/chrome-linux64 /opt/chrome/chrome-linux; fi \
     && test -x /opt/chrome/chrome-linux/chrome \
     && npx playwright install-deps chromium \
     && apt-get install -y --no-install-recommends fonts-noto-cjk \

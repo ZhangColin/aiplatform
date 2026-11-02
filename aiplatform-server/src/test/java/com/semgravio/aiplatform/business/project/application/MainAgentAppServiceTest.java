@@ -111,6 +111,9 @@ class MainAgentAppServiceTest {
     @Autowired
     private CodingRunTrack codingRunTrack;
 
+    @Autowired
+    private MainAgentProperties mainAgentProperties;
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -245,6 +248,10 @@ class MainAgentAppServiceTest {
                 UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
         // 后续轮不重注知识：systemPrompt 即配置原文
         assertThat(value.systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
+        // #371 对话轮活超时：命令携可配静默判死阈值（还在干活就不掐——慢工具轮
+        // 不被 2 分钟总墙钟一次性掐死），替换原三 null 总墙钟口径
+        assertThat(value.silenceTimeout()).isEqualTo(mainAgentProperties.getSilenceTimeout());
+        assertThat(value.toolSilenceTimeout()).isEqualTo(mainAgentProperties.getToolSilenceTimeout());
     }
 
     @Test
@@ -537,6 +544,9 @@ class MainAgentAppServiceTest {
                 .containsEntry(AgentscopeAgentClient.ANSWER_METADATA_KEY, "海外企业客户");
         assertThat(value.usageContext().dims()).isEqualTo(
                 UsageDims.of(projectId, UsageDims.kindOf(AgentProfile.MAIN), "main-" + projectId));
+        // #371 续跑与 converse 同口径：续跑请求携与首轮同源的静默判死阈值
+        assertThat(value.silenceTimeout()).isEqualTo(mainAgentProperties.getSilenceTimeout());
+        assertThat(value.toolSilenceTimeout()).isEqualTo(mainAgentProperties.getToolSilenceTimeout());
     }
 
     @Test

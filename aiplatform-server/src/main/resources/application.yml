@@ -117,6 +117,16 @@ app:
     # 工具执行窗的活超时预算（#355）：长命令（依赖安装/测试）执行中引擎无事件，
     # 给延长预算防静默阈值误杀；任何事件到达即回落 silence-timeout
     tool-silence-timeout: 30m
+  # #371 · business.project 主智能体对话编排：对话轮活超时判死阈值——#322 生成轨
+  # 口径接入对话轨（带增强工具〔fetch_url/web_search〕的慢轮不再被
+  # app.agentscope.timeout 一次性总墙钟掐死，还在干活就不掐、纯静默超限才判死；
+  # 问答作答复跑同阈值）。判定轮/取名/预检等无工具轻调用仍走总墙钟缺省。
+  main-agent:
+    silence-timeout: 2m
+    # 工具执行窗预算（#355 同机制）：对话工具是网络 I/O 型（fetch_url 请求超时另配
+    # app.external-content.request-timeout-seconds，缺省 45s），轻于生成轨构建命令
+    # （30m）；任何事件到达即回落 silence-timeout
+    tool-silence-timeout: 5m
   # #326 · business.identity 访客域：保留期缺省走配置（自最近活跃起算，逾此凭证
   # 不认、数据不删）与续期写节流窗口（距最近活跃达此值才写——读多写少，有效性
   # 窗口实际落在 [retention, retention + threshold]）。

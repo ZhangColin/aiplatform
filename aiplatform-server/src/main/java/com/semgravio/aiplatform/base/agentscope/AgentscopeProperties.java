@@ -27,7 +27,11 @@ public class AgentscopeProperties {
     /** 工作区根路径（可空 → AgentScope 默认） */
     private Path workspace;
 
-    /** 单轮对话超时 */
+    /**
+     * 单轮对话超时（一次性总墙钟）：未携活超时阈值的调用面的兜底——判定轮/取名/
+     * 预检等无工具轻调用（对话轮与生成轨已接活超时，见 app.main-agent /
+     * app.generation 的 silence-timeout，#371/#322）。
+     */
     private Duration timeout = Duration.ofMinutes(2);
 
     /**

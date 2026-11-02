@@ -99,6 +99,7 @@ public class MainAgentAppService {
     private final ConversationHistoryAppService conversationHistory;
     private final PrdDraftBaseline prdDraftBaseline;
     private final PrdVersionAppService prdVersionAppService;
+    private final MainAgentProperties mainAgentProperties;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -132,7 +133,8 @@ public class MainAgentAppService {
             DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ConversationHistoryAppService conversationHistory,
-            PrdDraftBaseline prdDraftBaseline, PrdVersionAppService prdVersionAppService) {
+            PrdDraftBaseline prdDraftBaseline, PrdVersionAppService prdVersionAppService,
+            MainAgentProperties mainAgentProperties) {
         this.projectRepository = projectRepository;
         this.prdVersions = prdVersions;
         this.agentClient = agentClient;
@@ -150,6 +152,7 @@ public class MainAgentAppService {
         this.conversationHistory = conversationHistory;
         this.prdDraftBaseline = prdDraftBaseline;
         this.prdVersionAppService = prdVersionAppService;
+        this.mainAgentProperties = mainAgentProperties;
     }
 
     /**
@@ -287,7 +290,10 @@ public class MainAgentAppService {
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,
-                main.toolSpec());
+                main.toolSpec(),
+                // #371 续跑与 converse 同口径：与首轮命令同源阈值（活超时接管续跑流）
+                mainAgentProperties.getSilenceTimeout(),
+                mainAgentProperties.getToolSilenceTimeout());
         appendOpinionReply(sessionId, answerText);
         ConversationHistoryAppService.TurnRecorder recorder =
                 conversationHistory.recorder(projectId, eventBridge.sink(project));
@@ -612,7 +618,9 @@ public class MainAgentAppService {
      * 模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认
      * ——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入 toolSpec 随命令
      * 透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService} 解析
-     * （ADR-0031——供应商/凭证配置变更同轮生效）。 */
+     * （ADR-0031——供应商/凭证配置变更同轮生效）；对话轮活超时阈值取
+     * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
+     */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
@@ -629,9 +637,9 @@ public class MainAgentAppService {
                 usageContextOf(projectId, sessionId),
                 Long.toString(project.getWorkspaceId()),
                 correlationOf(projectId),
-                null,
-                /* silenceTimeout= */ null,
-                /* toolSilenceTimeout= */ null, // 对话轮总墙钟语义，无工具窗预算
+                /* timeout= */ null, // #371 活超时替换一次性总墙钟（同生成轨 #322）
+                mainAgentProperties.getSilenceTimeout(),
+                mainAgentProperties.getToolSilenceTimeout(), // #355 工具执行窗延长预算
                 AgentProfile.MAIN.key(),
                 /* workspaceReadOnly= */ true,
                 /* workspaceNoShell= */ false,

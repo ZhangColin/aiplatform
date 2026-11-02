@@ -1661,7 +1661,38 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_inquiry_during_interview_when_answered_then_no_remdy_and_no_dangling() {
+    void given_dangling_then_prd_produced_before_kill_when_turn_fails_then_marker_cleared() {
+        // 判死路径的标记生命周期闭合（评审追加）：悬空标记在场时，恢复轮内 savePrd
+        // 已成功（PRD 已产出）后才判死——PRD 产出即合法收口事实，标记随清不滞留
+        //（期间输入不再被接管），且不补第二条补救
+        Long projectId = persistedProject("9759");
+        givenSessionExecutorSwallowsFailures();
+        AtomicBoolean killed = new AtomicBoolean(false);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (killed.getAndSet(true)) {
+                // 恢复轮：savePrd 已成功（状态位已置）后判死
+                Project project = projectRepository.findById(projectId).orElseThrow();
+                project.markPrdProduced();
+                projectRepository.save(project);
+                throw new IllegalStateException("活超时判死：静默超阈值");
+            }
+            return new AgentReply(command.runId(), "好的"); // 首轮：悬空收口置标记
+        });
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+
+        appService.runOpinionTurn(projectId, "继续");
+
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+        // 补救恰一条（首轮悬空）——PRD 已出的判死不补第二条
+        verify(eventsAppService, times(1)).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+    }
+
+    @Test
+    void given_inquiry_during_interview_when_answered_then_no_remedy_and_no_dangling() {
         // 咨询轮豁免（答询零产物是常态）：访谈期答询不触发不变量——零补救零标记
         Long projectId = persistedProject("9757");
         givenSessionExecutorRunsInline();

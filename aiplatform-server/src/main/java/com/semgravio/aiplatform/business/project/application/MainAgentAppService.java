@@ -348,9 +348,7 @@ public class MainAgentAppService {
             catch (RuntimeException e) {
                 // 续跑失败同轮失败口径（#83 起 resume 失败上抛）：清锚不派发——error
                 // 事件已由 resume 内发出，用户重提即兜底（不自动重试）
-                opinionExchanges.remove(sessionId);
-                suspendedQuestions.remove(sessionId);
-                remedyFailedInterviewTurn(projectId, runId); // 判死/失败收口同悬空契约（ADR-0032）
+                failUserTurn(projectId, sessionId, runId);
                 throw e;
             }
             dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
@@ -635,9 +633,7 @@ public class MainAgentAppService {
             catch (RuntimeException e) {
                 // 失败即清锚（#54，对齐「收口即消费」）：炸轮不留锚——重提即兜底，
                 // 不自动重试；error 事件已由 converse 内发出（异常上抛由会话执行器吞）
-                opinionExchanges.remove(sessionId);
-                suspendedQuestions.remove(sessionId);
-                remedyFailedInterviewTurn(projectId, runId); // 判死/失败收口同悬空契约（ADR-0032）
+                failUserTurn(projectId, sessionId, runId);
                 throw e;
             }
             dispatchOnTurnClose(projectId, sessionId, runId, /* platformRound= */ false);
@@ -896,6 +892,18 @@ public class MainAgentAppService {
     }
 
     /**
+     * 用户轮失败收口（意见轮与问答续跑共用，ADR-0032）：清两会话锚（失败不留锚
+     * ——重提即兜底，#54/#83 既有口径）＋悬空观测（判死同契约，见 {@link
+     * #remedyFailedInterviewTurn}）。平台轮（补产/切换通告）不入悬空契约，catch
+     * 不走本口。
+     */
+    private void failUserTurn(Long projectId, String sessionId, String runId) {
+        opinionExchanges.remove(sessionId);
+        suspendedQuestions.remove(sessionId);
+        remedyFailedInterviewTurn(projectId, runId);
+    }
+
+    /**
      * 访谈期悬空收口的平台补救（ADR-0032，#373）：置悬空标记（其后输入绕过入口
      * 分类直达意见轮）＋补一条如实状态消息——复用平台自述面（guide-reply 同族，
      * SSE 事件封闭集零新增；prompt 不携带——无新用户话语，不重复重建用户气泡），
@@ -918,21 +926,25 @@ public class MainAgentAppService {
     }
 
     /**
-     * 失败收口的悬空补救（ADR-0032，#373）：访谈期（未出 PRD）用户轮判死/失败即
+     * 失败收口的悬空观测（ADR-0032，#373）：访谈期（未出 PRD）用户轮判死/失败即
      * 悬空——同为无问无 PRD 收口（#371 判死同被不变量命中），置标记＋点名形补救
-     * （「本轮被中断」）。迭代期（PRD 已出）不适用、归档即对话区关闭同理；挂起
-     * 问答在场即访谈有合法抓手（引擎 ASKING 态指路作答）不置。项目事实重查一次
-     * （提交时快照后 PRD 可能已出——失败轮自身不产 PRD，但守卫口径取观测时点）；
-     * 补救发射失败只记日志——不遮原始轮失败（error 事件已由 converse/resume 内
-     * 发出，异常仍上抛）。
+     * （「本轮被中断」）。合法收口形（挂起问答在场——引擎 ASKING 态有推进抓手；
+     * PRD 已产出——判死前 savePrd 已成功的复合边角）与归档终态同观测清除标记
+     * （生命周期与 {@link #dispatchOnTurnClose} 同口径闭合，不留滞留标记）。项目
+     * 事实重查一次（提交时快照后 PRD 可能已出——失败轮自身不产 PRD，但守卫口径
+     * 取观测时点）；补救发射失败只记日志——不遮原始轮失败（error 事件已由
+     * converse/resume 内发出，异常仍上抛）。
      */
     private void remedyFailedInterviewTurn(Long projectId, String runId) {
         try {
             Project project = projectRepository.findById(projectId).orElse(null);
-            if (project == null || project.getArchivedAt() != null
-                    || project.getPrdProducedAt() != null
+            if (project == null) {
+                return;
+            }
+            if (project.getArchivedAt() != null || project.getPrdProducedAt() != null
                     || agentClient.hasAskingToolCall(project.ownerUserId(),
                             sessionIdOf(projectId))) {
+                danglingInterviews.remove(sessionIdOf(projectId));
                 return;
             }
             markDanglingInterview(project, runId, DANGLING_REMEDY_INTERRUPTED);

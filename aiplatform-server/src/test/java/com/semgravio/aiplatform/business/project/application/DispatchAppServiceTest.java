@@ -571,6 +571,27 @@ class DispatchAppServiceTest {
                         payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))));
     }
 
+    @Test
+    void given_dangling_marker_when_order_frozen_then_takeover_still_guards_ord_006() {
+        // 标记期守卫照拦（ADR-0032 验收补齐）：悬空接管直达意见轮——订单冻结守卫
+        // 随意见轮自带面照拦（接管不绕守卫），拒绝即零提交
+        Long projectId = persistedProject("9822");
+        givenSessionExecutorRunsInline();
+        givenClassification("OPINION", "好的");
+
+        appService.dispatch(projectId, "做一个官网"); // 意见轮悬空收口置标记
+        jdbcTemplate.update(
+                "INSERT INTO ord_orders (id, project_id, status, prd_snapshot, created_at, updated_at) "
+                        + "VALUES (?, ?, 1, '# PRD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                9915L, projectId);
+
+        assertThatThrownBy(() -> appService.dispatch(projectId, "OK"))
+                .isInstanceOf(ApplicationException.class)
+                .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
+        // 仅首个意见轮提交过一次；被拒接管零新提交
+        verify(sessionExecutor, times(1)).submit(any(), any());
+    }
+
     // ---------- 分类输出解析（容错口径） ----------
 
     @Test

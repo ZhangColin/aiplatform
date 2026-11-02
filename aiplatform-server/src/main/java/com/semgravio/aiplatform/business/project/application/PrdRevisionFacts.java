@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Component;
@@ -24,7 +25,7 @@ import org.springframework.stereotype.Component;
 public class PrdRevisionFacts {
 
     private final Map<String, String> summaries = new ConcurrentHashMap<>();
-    private final Map<String, Boolean> failures = new ConcurrentHashMap<>();
+    private final Set<String> failures = ConcurrentHashMap.newKeySet();
 
     /** 工具执行侧登记（savePrd 成功调用即事实；一轮多次调用后写胜出——成功即
      *  覆盖同轮早先的失败事实，PRD 终究成了）。 */
@@ -35,7 +36,7 @@ public class PrdRevisionFacts {
 
     /** 工具执行侧失败登记（落盘/业务登记失败即事实——悬空补救点名形依据）。 */
     public void recordFailure(String workspaceId) {
-        failures.put(workspaceId, Boolean.TRUE);
+        failures.add(workspaceId);
     }
 
     /** 收口消费（取走即清）：null = 本轮无 savePrd 调用事实（PRD 未修订）。 */
@@ -45,7 +46,7 @@ public class PrdRevisionFacts {
 
     /** 收口消费失败事实（取走即清）：false = 本轮无 savePrd 失败事实。 */
     public boolean consumeFailure(String workspaceId) {
-        return failures.remove(workspaceId) != null;
+        return failures.remove(workspaceId);
     }
 
     /** 意见轮起跑清残留：本轮判定从零起算。 */

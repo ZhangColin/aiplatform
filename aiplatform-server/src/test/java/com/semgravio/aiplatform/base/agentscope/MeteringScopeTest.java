@@ -77,7 +77,7 @@ class MeteringScopeTest {
                     assertThat(event.getFormattedMessage())
                             .contains("run-1")
                             .contains("判死")
-                            .contains("1");
+                            .contains("第 1 次");
                 });
     }
 
@@ -91,8 +91,8 @@ class MeteringScopeTest {
         scope.report(ModelRef.parse("deepseek:deepseek-v4-flash"), new ChatUsage(2, 2, 0, 0));
 
         assertThat(appender.list).hasSize(2);
-        assertThat(appender.list.get(0).getFormattedMessage()).contains("1");
-        assertThat(appender.list.get(1).getFormattedMessage()).contains("2");
+        assertThat(appender.list.get(0).getFormattedMessage()).contains("第 1 次");
+        assertThat(appender.list.get(1).getFormattedMessage()).contains("第 2 次");
     }
 
     @Test

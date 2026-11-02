@@ -24,7 +24,7 @@ import com.semgravio.aiplatform.base.metering.domain.port.UsageEventSink;
  *
  * <p>usage 取「末个非空 usage 胜出」（同框架 {@code ReasoningContext.processChunk}
  * 的覆盖式累积口径——最终 chunk 携全量 usage，中间 chunk 或空或子集，逐 chunk 累加
- * 会重复计费）；{@code doFinally} 收口确保失败轮已耗 token 如实计量（对齐 run 收口
+ * 会重复计量）；{@code doFinally} 收口确保失败轮已耗 token 如实计量（对齐 run 收口
  * 口径）。计量上下文在<b>订阅态</b>从 Reactor 订阅链读取（{@link MeteringScope} 的
  * 传递机制——装配线程≠订阅/信号线程，装配态读取对后续迭代/压缩/委派链静默漏计，
  * #324）。无活跃轮（不在订阅树上的直调）不报——不发明归属。</p>

@@ -13,6 +13,7 @@ import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
+import io.agentscope.harness.agent.middleware.HarnessSkillMiddleware;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -218,7 +219,51 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         }
         HarnessAgent agent = builder.build();
         realignBuiltinWebTools(toolkit, agent);
+        // #363：项目容器姿态抑制框架宿主物化面（见 suppressHostSkillStaging——
+        // 容器根 /workspace 对纯 NIO 物化是宿主路径，写了必错处）
+        if (containerFs != null) {
+            suppressHostSkillStaging(agent);
+        }
         return agent;
+    }
+
+    /**
+     * 技能物化面宿主抑制（#363）：框架 {@code HarnessSkillMiddleware} 每轮
+     * {@code onSystemPrompt} 经 {@code MarketplaceStager} 把技能（含空 resources 的
+     * a-only 技能——createDirectories 无条件先行）物化到 {@code workspaceRoot/
+     * .skills-cache/}。物化面是<b>纯宿主 NIO</b>（不走 abstractFilesystem），
+     * 而项目容器姿态交给它的 workspace 根是<b>容器路径</b> {@code /workspace}
+     * （{@link #projectSandbox}）——写必错处：宿主不可写即每轮 WARN（#363 现场：
+     * {@code Failed to stage skill ... Read-only file system}），可写则静默落
+     * 垃圾（本机实测 {@code C:\workspace\.skills-cache\...}，容器内并不存在）。
+     *
+     * <p>抑制＝构建后把中间件的 {@code stager} 字段置 null——框架官方语义位
+     * （build 时无 workspace 或无技能仓库即构造 null stager）：{@code stager==null}
+     * → {@code stage} 跳过（空结果 map）、filesRoot 提示缺省。技能清单与 load 工具
+     * 内容发放不受影响（经仓库实例内存态），脚本仍可 load 后自写工作区；filesRoot
+     * 提示本就指向容器内不存在的落点（物化在宿主），缺省反而免谎。镜像
+     * {@link #realignBuiltinWebTools} 先例的构建后置校正（2.0.1 无公开开关）；反射
+     * 失败仅告警——框架结构变更时物化面恢复旧行为（可观测回退，不炸装配）。</p>
+     *
+     * <p>Local 姿态不抑制：本地根即真实宿主目录，物化落点正确。子智能体同款
+     * （{@link #subagentFactory} 容器面分支——其隔离根同样是容器路径）。</p>
+     */
+    private static void suppressHostSkillStaging(HarnessAgent agent) {
+        for (MiddlewareBase middleware : agent.getDelegate().getMiddlewares()) {
+            if (!(middleware instanceof HarnessSkillMiddleware skillMiddleware)) {
+                continue;
+            }
+            try {
+                java.lang.reflect.Field stager =
+                        HarnessSkillMiddleware.class.getDeclaredField("stager");
+                stager.setAccessible(true);
+                stager.set(skillMiddleware, null);
+            }
+            catch (ReflectiveOperationException e) {
+                log.warn("技能物化面抑制未生效（框架 HarnessSkillMiddleware.stager 反射失败，"
+                        + "物化将按框架缺省行为落宿主路径）: {}", e.getMessage());
+            }
+        }
     }
 
     /**
@@ -334,6 +379,11 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             // build() 之后才是完整事实面；技能装载件 load_skill_through_path 由中间
             // 件每轮运行时挂载，不在此处、不受影响）
             stripUndeclared(child.getToolkit(), declaration.getTools());
+            // #363：容器面同款抑制——子级隔离根同样是容器路径（物化面纯宿主 NIO，
+            // 见 suppressHostSkillStaging）；Local 姿态不抑制
+            if (isolatedRoot != null) {
+                suppressHostSkillStaging(child);
+            }
             return child;
         };
     }

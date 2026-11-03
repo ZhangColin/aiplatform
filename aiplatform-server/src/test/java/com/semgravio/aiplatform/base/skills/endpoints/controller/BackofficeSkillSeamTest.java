@@ -1,6 +1,8 @@
 package com.semgravio.aiplatform.base.skills.endpoints.controller;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +28,9 @@ import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.skills.application.BackofficeSkillAppService;
 import com.semgravio.aiplatform.base.skills.domain.repository.SkillStore;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jayway.jsonpath.JsonPath;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -151,6 +156,9 @@ class BackofficeSkillSeamTest {
     private static final String OPERATOR_NAME = "运营·技能管理员";
     private static final String OPERATOR_ID_2 = "700201";
     private static final String OPERATOR_NAME_2 = "运营·小刘";
+
+    /** 安装请求体构造（#378：路径等任意字段经 Jackson 转义，Windows 反斜杠不再拼出非法 JSON）。 */
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 主 fixture 仓库：engineering 类目两技能＋deprecated 类目一技能（排除面）。 */
     private static Path fixtureRepo;
@@ -878,7 +886,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.skills[0].id").value(reviewId));
 
         // 版本留痕可查：from→to＋操作者二号（append-only 历史面）
-        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+        signedGetUpdateTraces(repo)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(1)))
                 .andExpect(jsonPath("$.data[0].sourcePackage").value(repo.toString()))
@@ -897,7 +905,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.fromVersion").value(newSha))
                 .andExpect(jsonPath("$.data.toVersion").value(newSha))
                 .andExpect(jsonPath("$.data.skills", hasSize(3)));
-        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+        signedGetUpdateTraces(repo)
                 .andExpect(jsonPath("$.data", hasSize(1)));
     }
 
@@ -935,7 +943,7 @@ class BackofficeSkillSeamTest {
                 .andExpect(jsonPath("$.data.skills[0].name").value("replacement"));
         assertThatNoRows("tdd");
         // 留痕不因移除而缺（显式动作必留痕）
-        signedGet("/api/backoffice/skills/update-traces?sourcePackage=" + repo)
+        signedGetUpdateTraces(repo)
                 .andExpect(jsonPath("$.data", hasSize(1)));
     }
 
@@ -1134,6 +1142,9 @@ class BackofficeSkillSeamTest {
     private static Path buildRepo(String name, DirectoryPopulator populator) throws Exception {
         Path repo = Files.createTempDirectory(name + "-");
         git(repo, "-c", "init.defaultBranch=main", "init", "-q");
+        // #378：字节忠实检出——fixture 声明禁行尾转换，clone 检出面不受宿主 git
+        // autocrlf（Windows 全局 true）LF→CRLF 影响，scripts 内容断言跨平台恒真
+        writeScript(repo, ".gitattributes", "* -text\n");
         populator.populate(repo);
         git(repo, "add", "-A");
         commitAll(repo, "fixture");
@@ -1228,8 +1239,7 @@ class BackofficeSkillSeamTest {
     /** 同上，一次装包回多名（同源仓库一测试只装一次——SKL_003 同源去重）。 */
     private Map<String, String> installFixtureAndReturnIds(String... skillNames)
             throws Exception {
-        String body = """
-                {"repoUrl": "%s", "excludeDirs": ["deprecated"]}""".formatted(fixtureRepo);
+        String body = installBody(fixtureRepo.toString(), "deprecated");
         String response = mockMvc.perform(signedInstallBuilder(body, OPERATOR_ID, OPERATOR_NAME))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -1258,16 +1268,19 @@ class BackofficeSkillSeamTest {
     /** 签名安装 POST：JSON 体＋操作者透传头（null 即缺头负例形制）。 */
     private ResultActions signedInstall(String repoUrl, String operatorId,
             String operatorName, String... excludeDirs) throws Exception {
-        StringBuilder excludes = new StringBuilder();
+        return mockMvc.perform(signedInstallBuilder(
+                installBody(repoUrl, excludeDirs), operatorId, operatorName));
+    }
+
+    /** 安装请求体（#378：经 Jackson 构造——任意平台路径/字符串实参恒合法 JSON）。 */
+    private static String installBody(String repoUrl, String... excludeDirs) {
+        ObjectNode body = JSON.createObjectNode();
+        body.put("repoUrl", repoUrl);
+        ArrayNode excludes = body.putArray("excludeDirs");
         for (String exclude : excludeDirs) {
-            if (!excludes.isEmpty()) {
-                excludes.append(", ");
-            }
-            excludes.append('"').append(exclude).append('"');
+            excludes.add(exclude);
         }
-        String body = """
-                {"repoUrl": "%s", "excludeDirs": [%s]}""".formatted(repoUrl, excludes);
-        return mockMvc.perform(signedInstallBuilder(body, operatorId, operatorName));
+        return body.toString();
     }
 
     private MockHttpServletRequestBuilder signedInstallBuilder(String body, String operatorId,
@@ -1310,6 +1323,19 @@ class BackofficeSkillSeamTest {
         return mockMvc.perform(request);
     }
 
+    /**
+     * 留痕读面签名 GET（#378）：sourcePackage 值经 URL 编码，且走 {@code get(URI)}
+     * 形——模板形 {@code get(String)} 会二次编码（实测 {@code %→%25}），与客户端
+     * 签名串错位 → 401；URI 形 getQueryString() 逐字节透传，与验签 Filter 按原始
+     * query 串签名恒一致，控制器 @RequestParam 解码回原值与库中来源包等值匹配。
+     */
+    private ResultActions signedGetUpdateTraces(Path repo) throws Exception {
+        String pathWithQuery = "/api/backoffice/skills/update-traces?sourcePackage="
+                + URLEncoder.encode(repo.toString(), StandardCharsets.UTF_8);
+        return mockMvc.perform(BackofficeSignatures.signed(
+                get(URI.create(pathWithQuery)), pathWithQuery, null));
+    }
+
     /** 签名 PUT 指派（JSON 体＝skillIds 全量清单＋操作者透传头；null 即缺头负例形制）。 */
     private ResultActions signedPutAssignments(String slot, String operatorId,
             String operatorName, String... skillIds) throws Exception {
@@ -1338,7 +1364,8 @@ class BackofficeSkillSeamTest {
     private ResultActions signedPostUpdate(String sourcePackage, String operatorId,
             String operatorName) throws Exception {
         String path = "/api/backoffice/skills/update";
-        String body = "{\"sourcePackage\": \"%s\"}".formatted(sourcePackage);
+        // #378：经 Jackson 构造——sourcePackage 为平台路径，手拼会拼出非法 JSON 转义
+        String body = JSON.createObjectNode().put("sourcePackage", sourcePackage).toString();
         MockHttpServletRequestBuilder request = BackofficeSignatures.signed(
                 post(path).contentType(MediaType.APPLICATION_JSON).content(body), path, body);
         if (operatorId != null) {
@@ -1355,8 +1382,13 @@ class BackofficeSkillSeamTest {
         String response = signedGet("/api/backoffice/skills")
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        List<Boolean> marks = JsonPath.read(response,
-                "$.data[?(@.sourcePackage == '" + repo + "')].updateAvailable");
+        // #378：sourcePackage 为平台路径，Java 侧等值过滤——JsonPath 字面量拼
+        // Windows 反斜杠路径会被吞转义致匹配落空
+        List<Map<String, Object>> rows = JsonPath.read(response, "$.data[*]");
+        List<Boolean> marks = rows.stream()
+                .filter(row -> repo.toString().equals(row.get("sourcePackage")))
+                .map(row -> (Boolean) row.get("updateAvailable"))
+                .toList();
         assertThat(marks)
                 .as("来源包 %s 的清单行有新版标记", repo)
                 .isNotEmpty()

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
@@ -187,8 +188,12 @@ class PrdVersionAppServiceTest {
         Map<String, Object> row = jdbcTemplate.queryForMap(
                 "SELECT prd_produced_at FROM prj_prd_versions WHERE project_id = ? AND version_no = 2",
                 projectId);
-        assertThat((java.sql.Timestamp) row.get("prd_produced_at"))
-                .isEqualTo(java.sql.Timestamp.valueOf(project.getPrdProducedAt()));
+        // #378：按存储精度对账（容差 1µs）——PG TIMESTAMP 微秒、写入侧对纳秒
+        // 四舍五入、读取截断对齐会稳定差 0/1µs（实测 776325 vs 776326）；
+        // Timestamp.equals 亚毫秒不等而 AssertJ 渲染只到毫秒（看似相同）
+        assertThat(((java.sql.Timestamp) row.get("prd_produced_at")).toLocalDateTime())
+                .isCloseTo(project.getPrdProducedAt(),
+                        org.assertj.core.api.Assertions.within(1, ChronoUnit.MICROS));
         // 清单倒序（最新在前）、轻量形不带全文
         assertThat(appService.versions(projectId))
                 .extracting(PrdVersionSummaryResponse::versionNo)

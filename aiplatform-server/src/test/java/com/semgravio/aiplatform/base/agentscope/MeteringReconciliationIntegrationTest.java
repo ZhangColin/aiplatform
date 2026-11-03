@@ -86,7 +86,8 @@ class MeteringReconciliationIntegrationTest {
      * 条数与用量逐条核、按 subject 归集不串项目、幂等键形态钉锚。
      */
     @Test
-    void given_scripted_multi_run_session_when_reconcile_then_all_streams_in_project_ledger() {
+    void given_scripted_multi_run_session_when_reconcile_then_all_streams_in_project_ledger()
+            throws InterruptedException {
         // run-1（prj-1，同会话第 1 轮）：ReAct 两流——工具迭代 + 收口
         mountAgent(scriptedAgent(new ScriptedModel(List.of(
                 List.of(toolCall("echo_note", "t-1", new ChatUsage(100, 40, 0, 0.1))),
@@ -107,6 +108,13 @@ class MeteringReconciliationIntegrationTest {
                 List.of(text("另一个项目的活", new ChatUsage(30, 10, 0, 0.01)))))));
         agentClient.converse(command("recon-3", "prj-2", "s-recon-other"), event -> {
         });
+
+        // 落库到位等待（#378）：计量写入在模型流 doFinally——与 converse 返回间有
+        // 毫秒级异步窗口（#369 冒烟实测 ~10ms）。冷 JVM（单类跑）收尾慢、窗口必
+        // 先合；热 JVM（全量套件）converse 秒回，同步断言赢得比落库早 → 台账空
+        // （全量挂/单跑过的真因）。轮询等三 run 确定性行到位（成功轮恰量、失败轮
+        // ≥1——重试行数不钉死）再全量对账；超时即落空，后续断言以真实形态报红
+        awaitUsageEventsSettled();
 
         // 对账（逐 run 条数与用量和——成功轮两流合计；失败轮至少已耗流入账，
         // 内核对失败流段的重试次数不钉死（重试流同机制自然入账，逐条值核））
@@ -142,6 +150,22 @@ class MeteringReconciliationIntegrationTest {
         assertThat(jdbcTemplate.queryForList(
                 "SELECT dims ->> 'agentKind' FROM met_usage_events WHERE subject = 'prj-1'",
                 String.class)).containsOnly("coder");
+    }
+
+    /** 轮询等三 run 计量行落库到位（#378）：doFinally 异步窗口——见用例内注释。 */
+    private void awaitUsageEventsSettled() throws InterruptedException {
+        for (int i = 0; i < 100; i++) {
+            if (countOfRun("recon-1") >= 2 && countOfRun("recon-2") >= 1
+                    && countOfRun("recon-3") >= 1) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+    }
+
+    private int countOfRun(String runId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM met_usage_events WHERE run_id = ?", Integer.class, runId);
     }
 
     /** 项目账视图：(run 数, input 合计, output 合计) 逐 run 分组。 */

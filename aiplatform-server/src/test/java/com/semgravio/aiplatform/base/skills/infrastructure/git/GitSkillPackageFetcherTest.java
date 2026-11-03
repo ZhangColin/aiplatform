@@ -2,6 +2,7 @@ package com.semgravio.aiplatform.base.skills.infrastructure.git;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -9,6 +10,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -84,7 +86,7 @@ class GitSkillPackageFetcherTest {
         // 符号链接指向仓库外宿主文件：不跟（逃出克隆目录的读取通道结构性关闭）
         Path hostage = workDir.resolve("host-secret.txt");
         Files.writeString(hostage, "宿主机密不应入库");
-        Files.createSymbolicLink(repo.resolve("engineering/tdd/scripts/escape.sh"), hostage);
+        createSymbolicLinkOrSkip(repo.resolve("engineering/tdd/scripts/escape.sh"), hostage);
         commitAll(repo);
 
         SkillPackageSnapshot snapshot = fetcher.fetch(repo.toString(), List.of());
@@ -131,7 +133,31 @@ class GitSkillPackageFetcherTest {
     private Path newRepo(String name) throws Exception {
         Path repo = Files.createTempDirectory(name + "-");
         git(repo, "-c", "init.defaultBranch=main", "init", "-q");
+        // #378：字节忠实检出——fixture 声明禁行尾转换，clone 检出面不受宿主 git
+        // autocrlf（Windows 全局 true）LF→CRLF 影响，scripts 内容断言跨平台恒真
+        write(repo, ".gitattributes", "* -text\n");
         return repo;
+    }
+
+    /**
+     * 建符号链接（#378）：仅 Windows 捕获 {@link FileSystemException} 按假定条件
+     * 跳过（无特权非开发者模式常态；原因随跳过消息可见）；POSIX 不捕获——fixture
+     * 真损坏照常报红，不静默。跳过即「symlink 不跟＝防链接逃出克隆目录读宿主文件」
+     * 的防护断言（锚点见 GitSkillPackageFetcher 扫描注释）在本平台缺席、在可建
+     * symlink 的平台（POSIX/CI）照常钉死。
+     */
+    private static void createSymbolicLinkOrSkip(Path link, Path target) throws IOException {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            Files.createSymbolicLink(link, target);
+            return;
+        }
+        try {
+            Files.createSymbolicLink(link, target);
+        }
+        catch (FileSystemException e) {
+            Assumptions.abort("符号链接不可建（Windows 特权限制，防护断言在可建平台钉死）: "
+                    + e.getMessage());
+        }
     }
 
     private static void writeSkill(Path repo, String dir, String name, String description)

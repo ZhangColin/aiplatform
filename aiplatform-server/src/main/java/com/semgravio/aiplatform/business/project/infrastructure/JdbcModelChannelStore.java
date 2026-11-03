@@ -27,7 +27,7 @@ public class JdbcModelChannelStore implements ModelChannelStore {
 
     private static final String FIND_TIER_SQL = """
             SELECT tier_key, provider_key, model_name, display_name, enabled,
-                   operator_id, operator_name, updated_at
+                   thinking_enabled, operator_id, operator_name, updated_at
             FROM prj_model_tiers WHERE tier_key = ?
             """;
 
@@ -45,7 +45,7 @@ public class JdbcModelChannelStore implements ModelChannelStore {
 
     private static final String FIND_ALL_TIERS_SQL = """
             SELECT tier_key, provider_key, model_name, display_name, enabled,
-                   operator_id, operator_name, updated_at
+                   thinking_enabled, operator_id, operator_name, updated_at
             FROM prj_model_tiers ORDER BY tier_key
             """;
 
@@ -66,13 +66,14 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     private static final String SAVE_TIER_SQL = """
             INSERT INTO prj_model_tiers
                 (tier_key, provider_key, model_name, display_name, enabled,
-                 operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 thinking_enabled, operator_id, operator_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (tier_key) DO UPDATE SET
                 provider_key = EXCLUDED.provider_key,
                 model_name = EXCLUDED.model_name,
                 display_name = EXCLUDED.display_name,
                 enabled = EXCLUDED.enabled,
+                thinking_enabled = EXCLUDED.thinking_enabled,
                 operator_id = EXCLUDED.operator_id,
                 operator_name = EXCLUDED.operator_name,
                 updated_at = CURRENT_TIMESTAMP
@@ -111,15 +112,17 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     private static final String INSERT_TIER_TRACE_SQL = """
             INSERT INTO prj_model_tier_traces
                 (id, tier_key, old_provider_key, old_model_name, old_display_name,
-                 old_enabled, new_provider_key, new_model_name, new_display_name,
-                 new_enabled, operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 old_enabled, old_thinking_enabled, new_provider_key, new_model_name,
+                 new_display_name, new_enabled, new_thinking_enabled, operator_id,
+                 operator_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private static final String FIND_TIER_TRACES_SQL = """
             SELECT id, tier_key, old_provider_key, old_model_name, old_display_name,
-                   old_enabled, new_provider_key, new_model_name, new_display_name,
-                   new_enabled, operator_id, operator_name, created_at
+                   old_enabled, old_thinking_enabled, new_provider_key, new_model_name,
+                   new_display_name, new_enabled, new_thinking_enabled, operator_id,
+                   operator_name, created_at
             FROM prj_model_tier_traces WHERE tier_key = ?
             ORDER BY created_at DESC, id DESC
             """;
@@ -163,7 +166,7 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     public void saveTier(ModelTier tier) {
         jdbcTemplate.update(SAVE_TIER_SQL, tier.tierKey(), tier.providerKey(),
                 tier.modelName(), tier.displayName(), tier.enabled(),
-                tier.operatorId(), tier.operatorName());
+                tier.thinkingEnabled(), tier.operatorId(), tier.operatorName());
     }
 
     @Override
@@ -207,8 +210,9 @@ public class JdbcModelChannelStore implements ModelChannelStore {
     public void insertTierTrace(ModelTierTrace trace) {
         jdbcTemplate.update(INSERT_TIER_TRACE_SQL, trace.id(), trace.tierKey(),
                 trace.oldProviderKey(), trace.oldModelName(), trace.oldDisplayName(),
-                trace.oldEnabled(), trace.newProviderKey(), trace.newModelName(),
-                trace.newDisplayName(), trace.newEnabled(),
+                trace.oldEnabled(), trace.oldThinkingEnabled(),
+                trace.newProviderKey(), trace.newModelName(),
+                trace.newDisplayName(), trace.newEnabled(), trace.newThinkingEnabled(),
                 trace.operatorId(), trace.operatorName());
     }
 
@@ -221,6 +225,7 @@ public class JdbcModelChannelStore implements ModelChannelStore {
         Timestamp updatedAt = rs.getTimestamp("updated_at");
         return new ModelTier(rs.getString("tier_key"), rs.getString("provider_key"),
                 rs.getString("model_name"), rs.getString("display_name"), rs.getBoolean("enabled"),
+                rs.getBoolean("thinking_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
@@ -252,8 +257,10 @@ public class JdbcModelChannelStore implements ModelChannelStore {
         return new ModelTierTrace(rs.getLong("id"), rs.getString("tier_key"),
                 rs.getString("old_provider_key"), rs.getString("old_model_name"),
                 rs.getString("old_display_name"), nullableBoolean(rs, "old_enabled"),
+                nullableBoolean(rs, "old_thinking_enabled"),
                 rs.getString("new_provider_key"), rs.getString("new_model_name"),
                 rs.getString("new_display_name"), nullableBoolean(rs, "new_enabled"),
+                nullableBoolean(rs, "new_thinking_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }

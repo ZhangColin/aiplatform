@@ -28,9 +28,10 @@ import com.semgravio.aiplatform.business.project.domain.model.Operator;
 /**
  * 后台模型档位维护 REST 面（#367，spec #364-T3，ADR-0031；机机签名——五头 HMAC
  * 强制闸，同 agent-configs 面）：档位 CRUD＋变更留痕。语义键/实际模型名/所属
- * 通道/显示名/启用态；被智能体运营配置与路由强档引用的即语义键——改档写口
- * （agent-configs 面）对本面 enabled=true 行集即时校验放行。错误码
- * PRJ_066/068/070/071/073。操作者透传头写操作必留痕。
+ * 通道/显示名/启用态/深度思考开关（#370：跟档位/模型走，缺省 false＝显式关）；
+ * 被智能体运营配置与路由强档引用的即语义键——改档写口（agent-configs 面）
+ * 对本面 enabled=true 行集即时校验放行。错误码 PRJ_066/068/070/071/073。
+ * 操作者透传头写操作必留痕。
  */
 @RestController
 @RequestMapping("/api/backoffice/model-tiers")
@@ -80,11 +81,14 @@ public class BackofficeModelTierController {
     }
 
     @PutMapping("/{tierKey}")
-    @Operation(summary = "档位更新（换通道/升模型版本/改显示名/停启用；留痕）",
+    @Operation(summary = "档位更新（换通道/升模型版本/改显示名/停启用/开关注度思考；留痕）",
             description = "PUT 全量语义：providerKey/modelName/displayName 终态替换"
-                    + "（displayName 可空＝清显示名）；enabled 缺省＝保持现值"
-                    + "（停用档换模型名/换通道不被意外复启，显式 true/false 才翻转）。"
-                    + "停用＝既有绑定装配报错 PRJ_061、新绑定被即时校验拒绝 PRJ_075"
+                    + "（displayName 可空＝清显示名）；enabled/thinkingEnabled 缺省＝"
+                    + "保持现值（停用档换模型名/换通道不被意外复启、开思考的档换模型名"
+                    + "不被意外关，显式 true/false 才翻转）。thinkingEnabled＝深度思考"
+                    + "开关（#370：跟档位/模型走，改完下一轮命令构建即生效——通道指纹"
+                    + "含 thinking 腿，新值＝新模型实例，进行中 run 不定格）。停用＝"
+                    + "既有绑定装配报错 PRJ_061、新绑定被即时校验拒绝 PRJ_075"
                     + "（临时下线用停用不删行）。改指向下一轮命令构建即生效（装配"
                     + "动态查库）。值面无动＝幂等回执不落痕；回滚＝留痕旧值快照写回"
                     + "（即一次新变更、留新痕）。X-User-Id/X-User-Name 必留痕（缺头"

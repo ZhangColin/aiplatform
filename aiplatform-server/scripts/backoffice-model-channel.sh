@@ -78,6 +78,10 @@ demo() {
   show "$(call_json PUT "$TIERS_PATH/t-demo-tier" \
     '{"providerKey":"t-demo-channel","modelName":"demo-model-2602","displayName":"演示档 v2"}')"
 
+  step "3b. 开深度思考（#370：开关跟档位走、缺省保持现值；改完下一轮命令构建即生效）"
+  show "$(call_json PUT "$TIERS_PATH/t-demo-tier" \
+    '{"providerKey":"t-demo-channel","modelName":"demo-model-2602","thinkingEnabled":true}')"
+
   step "4. 读回掩码（通道 GET——key 只出尾 4 位）"
   show "$(call_get "$PROVIDERS_PATH/t-demo-channel")"
   mask_note

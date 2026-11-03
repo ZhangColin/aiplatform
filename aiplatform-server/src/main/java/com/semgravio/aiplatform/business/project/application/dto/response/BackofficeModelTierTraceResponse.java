@@ -11,18 +11,20 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelTierTrace;
  * 倒序最近先；append-only、回滚＝旧值写回即一次新变更。创建痕 old 全 null、
  * 删除痕 new 全 null。
  *
- * @param id             留痕标识（TSID 十进制串）
- * @param oldProviderKey 变更前所属通道（创建痕＝null）
- * @param oldModelName   变更前实际模型名（创建痕＝null）
- * @param oldDisplayName 变更前显示名（null＝此前无显示名）
- * @param oldEnabled     变更前启用态（创建痕＝null）
- * @param newProviderKey 变更后所属通道（删除痕＝null）
- * @param newModelName   变更后实际模型名（删除痕＝null）
- * @param newDisplayName 变更后显示名（null＝本次清空回落语义键）
- * @param newEnabled     变更后启用态（删除痕＝null）
- * @param operatorId     变更操作者 id
- * @param operatorName   变更操作者名（直读展示）
- * @param operatedAt     变更动作时刻
+ * @param id                 留痕标识（TSID 十进制串）
+ * @param oldProviderKey     变更前所属通道（创建痕＝null）
+ * @param oldModelName       变更前实际模型名（创建痕＝null）
+ * @param oldDisplayName     变更前显示名（null＝此前无显示名）
+ * @param oldEnabled         变更前启用态（创建痕＝null）
+ * @param oldThinkingEnabled 变更前深度思考开关（#370；创建痕＝null）
+ * @param newProviderKey     变更后所属通道（删除痕＝null）
+ * @param newModelName       变更后实际模型名（删除痕＝null）
+ * @param newDisplayName     变更后显示名（null＝本次清空回落语义键）
+ * @param newEnabled         变更后启用态（删除痕＝null）
+ * @param newThinkingEnabled 变更后深度思考开关（#370；删除痕＝null）
+ * @param operatorId         变更操作者 id
+ * @param operatorName       变更操作者名（直读展示）
+ * @param operatedAt         变更动作时刻
  */
 public record BackofficeModelTierTraceResponse(
         @Schema(description = "留痕标识（TSID 十进制串）")
@@ -35,6 +37,8 @@ public record BackofficeModelTierTraceResponse(
         String oldDisplayName,
         @Schema(description = "变更前启用态（null＝创建痕）")
         Boolean oldEnabled,
+        @Schema(description = "变更前深度思考开关（null＝创建痕）")
+        Boolean oldThinkingEnabled,
         @Schema(description = "变更后所属通道键（null＝删除痕）", example = "volcengine")
         String newProviderKey,
         @Schema(description = "变更后实际模型名（null＝删除痕）")
@@ -43,6 +47,8 @@ public record BackofficeModelTierTraceResponse(
         String newDisplayName,
         @Schema(description = "变更后启用态（null＝删除痕）")
         Boolean newEnabled,
+        @Schema(description = "变更后深度思考开关（null＝删除痕）")
+        Boolean newThinkingEnabled,
         @Schema(description = "变更操作者 id", example = "700210")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·智能体管理员")
@@ -54,9 +60,9 @@ public record BackofficeModelTierTraceResponse(
     public static BackofficeModelTierTraceResponse of(ModelTierTrace trace) {
         return new BackofficeModelTierTraceResponse(Long.toString(trace.id()),
                 trace.oldProviderKey(), trace.oldModelName(), trace.oldDisplayName(),
-                trace.oldEnabled(),
+                trace.oldEnabled(), trace.oldThinkingEnabled(),
                 trace.newProviderKey(), trace.newModelName(), trace.newDisplayName(),
-                trace.newEnabled(),
+                trace.newEnabled(), trace.newThinkingEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

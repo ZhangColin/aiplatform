@@ -415,6 +415,71 @@ class BackofficeModelChannelSeamTest {
                 .andExpect(jsonPath("$.data.enabled").value(false));
     }
 
+    // ---------- thinking 开关（#370 AC）：缺省关、维护面可开/关、留痕、改完即生效 ----------
+
+    @Test
+    void given_tier_thinking_toggle_when_crud_then_default_off_trace_snapshot_and_next_resolve_effective()
+            throws Exception {
+        createProvider("t-thinkc", "https://think.example/api/v3", "sk-think-aaaa");
+
+        // 缺省＝显式关（#369 结论随行：不配置不默认拖慢首 token）；显式开随建行落库
+        createTier("t-plain", "t-thinkc", "plain-model");
+        signedRequest(post(TIERS_PATH), TIERS_PATH, """
+                {"tierKey": "t-deep", "providerKey": "t-thinkc", "modelName": "deep-model",
+                 "thinkingEnabled": true}""",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.thinkingEnabled").value(true));
+        signedRequest(get(TIERS_PATH + "/t-plain"), TIERS_PATH + "/t-plain", null, null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.thinkingEnabled").value(false));
+
+        // 开关翻转＝值面变更：落痕（前后快照含 thinking 腿）＋回显新值
+        signedRequest(put(TIERS_PATH + "/t-plain"), TIERS_PATH + "/t-plain",
+                "{\"providerKey\": \"t-thinkc\", \"modelName\": \"plain-model\", \"thinkingEnabled\": true}",
+                OPERATOR_ID_2, OPERATOR_NAME_2)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.thinkingEnabled").value(true))
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID_2));
+        signedRequest(get(TIERS_PATH + "/t-plain/traces"), TIERS_PATH + "/t-plain/traces",
+                null, null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2))) // 创建＋翻转
+                .andExpect(jsonPath("$.data[0].oldThinkingEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newThinkingEnabled").value(true))
+                .andExpect(jsonPath("$.data[1].oldThinkingEnabled").value(nullValue()))
+                .andExpect(jsonPath("$.data[1].newThinkingEnabled").value(false));
+
+        // 缺省＝保持现值（终态字段不因缺省翻转——同 enabled 口径）：换模型名不带
+        // thinking 不意外关；值面无动＝幂等不落痕
+        signedRequest(put(TIERS_PATH + "/t-deep"), TIERS_PATH + "/t-deep",
+                "{\"providerKey\": \"t-thinkc\", \"modelName\": \"deep-model-v2\"}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.modelName").value("deep-model-v2"))
+                .andExpect(jsonPath("$.data.thinkingEnabled").value(true));
+        signedRequest(put(TIERS_PATH + "/t-deep"), TIERS_PATH + "/t-deep",
+                "{\"providerKey\": \"t-thinkc\", \"modelName\": \"deep-model-v2\", \"thinkingEnabled\": true}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+        // 创建＋换模型名两痕；thinking 缺省保持（第一动）与幂等重写（第二动）零新痕
+        assertThat(tierTraceCount("t-deep")).isEqualTo(2);
+
+        // 改完即生效（AC）：下一轮命令构建解析携新开关、通道指纹变（＝新模型
+        // 实例，进行中 run 不定格——配置指纹机制复用）
+        ModelTierAppService.ResolvedModel before = modelTiers.resolve("t-plain");
+        assertThat(before.thinkingEnabled()).isTrue();
+        String beforeFingerprint = before.channel().fingerprint();
+        signedRequest(put(TIERS_PATH + "/t-plain"), TIERS_PATH + "/t-plain",
+                "{\"providerKey\": \"t-thinkc\", \"modelName\": \"plain-model\", \"thinkingEnabled\": false}",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.thinkingEnabled").value(false));
+        ModelTierAppService.ResolvedModel after = modelTiers.resolve("t-plain");
+        assertThat(after.thinkingEnabled()).isFalse();
+        assertThat(after.channel().fingerprint()).isNotEqualTo(beforeFingerprint);
+    }
+
     // ---------- 绑定即时校验（AC）：三座/路由强档/边缘点改档写错值即拒 ----------
 
     @Test
@@ -600,5 +665,11 @@ class BackofficeModelChannelSeamTest {
         return jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM prj_agent_config_traces WHERE agent_key = ?",
                 Integer.class, agentKey);
+    }
+
+    private Integer tierTraceCount(String tierKey) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM prj_model_tier_traces WHERE tier_key = ?",
+                Integer.class, tierKey);
     }
 }

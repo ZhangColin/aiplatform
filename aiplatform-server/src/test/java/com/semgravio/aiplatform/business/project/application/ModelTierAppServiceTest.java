@@ -42,19 +42,36 @@ class ModelTierAppServiceTest {
     @Test
     void given_tier_row_and_enabled_channel_when_resolve_then_model_string_and_context() {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
-        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true);
+        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
         ResolvedModel resolved = modelTiers.resolve("t-flash");
 
         assertThat(resolved.modelString()).isEqualTo("t-ark:deepseek-v4-flash-ga-260731");
         assertThat(resolved.baseUrl()).isEqualTo(BASE_URL);
         assertThat(resolved.apiKey()).isEqualTo("sk-ark-test");
-        // 深度思考显式关（ADR-0031：方舟 DeepSeek V4 标深度思考，不传参默认开/关未确证
-        // ——装配显式关，终值冒烟实测后定）
+        // 深度思考不配置＝显式关（#370：缺省 false 与 #369 活体结论一致——不配置
+        // ＝显式关，「深度思考不默认拖慢首 token」承诺不破）
         assertThat(resolved.thinkingEnabled()).isFalse();
         // 命令构建消费面：base 层通道注入件（baseUrl/key/thinking）
         assertThat(resolved.channel())
                 .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", false));
+    }
+
+    @Test
+    void given_tier_row_thinking_enabled_when_resolve_then_context_carries_tier_value() {
+        // #370：thinking 终值位从编译常量改档位行——跟档位/模型走（换模型行为
+        // 自动跟随、doubao 与 DeepSeek 可不同设），装配单点读行值
+        seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
+        seedTier("t-think", "t-ark", "deepseek-v4-pro-ga-260813", true, true);
+
+        ResolvedModel resolved = modelTiers.resolve("t-think");
+
+        assertThat(resolved.thinkingEnabled()).isTrue();
+        assertThat(resolved.channel())
+                .isEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", true));
+        // 开关腿进通道指纹：改开关＝新指纹＝新实例（改配置即生效、进行中 run 不定格）
+        assertThat(resolved.channel().fingerprint())
+                .isNotEqualTo(new ModelChannel(BASE_URL, "sk-ark-test", false).fingerprint());
     }
 
     @Test
@@ -69,7 +86,7 @@ class ModelTierAppServiceTest {
     @Test
     void given_disabled_tier_when_resolve_then_explicit_error() {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", true);
-        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", false);
+        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", false, null);
 
         assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
@@ -79,7 +96,7 @@ class ModelTierAppServiceTest {
     @Test
     void given_disabled_provider_when_resolve_then_explicit_error_no_silent_rechannel() {
         seedChannel("t-ark", BASE_URL, "sk-ark-test", false);
-        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true);
+        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
         assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
@@ -89,7 +106,7 @@ class ModelTierAppServiceTest {
     @Test
     void given_blank_provider_api_key_when_resolve_then_explicit_error_no_env_fallback() {
         seedChannel("t-ark", BASE_URL, null, true);
-        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true);
+        seedTier("t-flash", "t-ark", "deepseek-v4-flash-ga-260731", true, null);
 
         assertThatThrownBy(() -> modelTiers.resolve("t-flash"))
                 .isInstanceOf(ApplicationException.class)
@@ -120,10 +137,19 @@ class ModelTierAppServiceTest {
                 providerKey, baseUrl, apiKey, enabled);
     }
 
-    private void seedTier(String tierKey, String providerKey, String modelName, boolean enabled) {
+    /** 建档位夹具（thinkingEnabled null＝不写列——走库缺省，缺省腿断言语境）。 */
+    private void seedTier(String tierKey, String providerKey, String modelName, boolean enabled,
+            Boolean thinkingEnabled) {
+        if (thinkingEnabled == null) {
+            jdbcTemplate.update(
+                    "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
+                            + "VALUES (?, ?, ?, ?)",
+                    tierKey, providerKey, modelName, enabled);
+            return;
+        }
         jdbcTemplate.update(
-                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled) "
-                        + "VALUES (?, ?, ?, ?)",
-                tierKey, providerKey, modelName, enabled);
+                "INSERT INTO prj_model_tiers (tier_key, provider_key, model_name, enabled, "
+                        + "thinking_enabled) VALUES (?, ?, ?, ?, ?)",
+                tierKey, providerKey, modelName, enabled, thinkingEnabled);
     }
 }

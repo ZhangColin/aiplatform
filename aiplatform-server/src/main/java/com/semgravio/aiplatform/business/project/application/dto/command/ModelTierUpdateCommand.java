@@ -9,10 +9,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 复启，显式 true/false 才翻转；与 agent-configs 开关口径之别同通道面 javadoc）。
  * 换通道、升模型版本、停启用皆此一处改指向。
  *
- * @param providerKey 所属通道键（必填，必须已存在）
- * @param modelName   实际模型名（必填）
- * @param displayName 运营显示名（null/空白＝清空回落语义键）
- * @param enabled     缺省＝保持现值；显式 true/false 才翻转
+ * @param providerKey     所属通道键（必填，必须已存在）
+ * @param modelName       实际模型名（必填）
+ * @param displayName     运营显示名（null/空白＝清空回落语义键）
+ * @param enabled         缺省＝保持现值；显式 true/false 才翻转
+ * @param thinkingEnabled 深度思考开关（#370；缺省＝保持现值，显式 true/false 才翻转）
  */
 public record ModelTierUpdateCommand(
         @Schema(description = "所属通道键（终态全量替换，必填且须已存在）",
@@ -25,5 +26,8 @@ public record ModelTierUpdateCommand(
         String displayName,
         @Schema(description = "启用态（缺省＝保持现值，显式 true/false 才翻转；停用＝既有"
                 + "绑定装配报错 PRJ_061、新绑定被即时校验拒绝 PRJ_075）")
-        Boolean enabled) {
+        Boolean enabled,
+        @Schema(description = "深度思考开关（缺省＝保持现值，显式 true/false 才翻转；改完下一轮"
+                + "命令构建即生效——通道指纹含 thinking 腿，新值＝新模型实例，进行中 run 不定格）")
+        Boolean thinkingEnabled) {
 }

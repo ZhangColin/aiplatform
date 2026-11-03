@@ -24,19 +24,16 @@ import com.cartisan.core.exception.ApplicationException;
  * 可查）。动态查库、不缓存（对话轮本身是秒级 LLM 调用，两次主键 SELECT 的
  * 代价可忽略——同 {@code AgentConfigAppService} 口径）。</p>
  *
- * <p>enableThinking 显式关（{@link #THINKING_ENABLED}）：方舟 DeepSeek V4 系均标
- * 深度思考、不传参数时默认开/关未确证——装配不留给模型默认；终值冒烟实测开/关
- * 的延迟与质量后定（#369 活体验收）。</p>
+ * <p>enableThinking 档位行运营配置（#370）：深度思考是模型行为属性，跟档位/
+ * 模型走——换模型行为自动跟随、doubao 与 DeepSeek 系可不同设；缺省 false＝
+ * 显式关（#369 活体验收结论「维持 false」——不配置不默认拖慢首 token）。开关
+ * 改档位维护面（不发版不重启），本服务每轮命令构建读行值；通道指纹含 thinking
+ * 腿，改开关＝新指纹＝新实例（进行中 run 不定格）。volcengine 平台工厂与 SDK
+ * 内置 provider 都从创建上下文读该值——装配不留给模型默认。</p>
  */
 @Slf4j
 @Service
 public class ModelTierAppService {
-
-    /**
-     * 深度思考开关终值位（当前 false＝显式关）：变更走此处单点——volcengine
-     * 平台工厂与 SDK 内置 deepseek provider 都从创建上下文读该值。
-     */
-    static final boolean THINKING_ENABLED = false;
 
     private final ModelChannelStore tierStore;
 
@@ -77,11 +74,11 @@ public class ModelTierAppService {
                     provider.providerKey());
         }
         ResolvedModel resolved = new ResolvedModel(tierKey, provider.providerKey(),
-                tier.modelName(), provider.baseUrl(), provider.apiKey(), THINKING_ENABLED);
+                tier.modelName(), provider.baseUrl(), provider.apiKey(), tier.thinkingEnabled());
         // 装配可证（#366）：档位键 → 实际模型串的单点日志——三座与边缘四点的每次
         // 命令构建/装配经此留迹，后台改档后的生效链路 grep 可查（key 不入日志）
         log.info("[model-tier] 档位解析 {} → {}（通道 {}，thinking={}）", tierKey,
-                resolved.modelString(), provider.providerKey(), THINKING_ENABLED);
+                resolved.modelString(), provider.providerKey(), resolved.thinkingEnabled());
         return resolved;
     }
 

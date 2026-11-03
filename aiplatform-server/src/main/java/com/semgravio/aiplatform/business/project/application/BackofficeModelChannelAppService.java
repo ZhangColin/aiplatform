@@ -32,7 +32,8 @@ import lombok.extern.slf4j.Slf4j;
  * 后台模型供应商/档位维护用例（#367，ADR-0031 两表的写面——读腿在
  * {@link ModelTierAppService} 装配解析）：通道 CRUD（apiKey 写收全量值、<b>读面
  * 一律掩码</b>——回执与留痕快照都只出尾 4 位，全链零明文 key 回显）＋档位 CRUD
- * （语义键/实际模型名/所属通道/显示名/启用态），全部变更 append-only 留痕
+ * （语义键/实际模型名/所属通道/显示名/启用态/深度思考开关〔#370——模型行为
+ * 属性跟档位走，缺省 false＝显式关〕），全部变更 append-only 留痕
  * （操作者＋前后全量值快照）、同值幂等重写不落痕、回滚＝旧值写回即一次新变更
  * ——机制同 {@code BackofficeAgentConfigAppService}（ADR-0021）；差异＝行有
  * 创建/删除生命周期（创建痕 old 全 null、删除痕 new 全 null）。
@@ -66,10 +67,10 @@ public class BackofficeModelChannelAppService {
             new ModelProviderUpdateCommand(null, null, null);
 
     private static final ModelTierCreateCommand EMPTY_TIER_CREATE =
-            new ModelTierCreateCommand(null, null, null, null, null);
+            new ModelTierCreateCommand(null, null, null, null, null, null);
 
     private static final ModelTierUpdateCommand EMPTY_TIER_UPDATE =
-            new ModelTierUpdateCommand(null, null, null, null);
+            new ModelTierUpdateCommand(null, null, null, null, null);
 
     private final ModelChannelStore channelStore;
 
@@ -227,6 +228,8 @@ public class BackofficeModelChannelAppService {
         ModelTier created = new ModelTier(tierKey, providerKey, modelName,
                 blankToNull(safe.displayName()),
                 safe.enabled() == null || safe.enabled(),
+                // thinking 缺省＝显式关（#370：不配置不默认拖慢首 token）
+                safe.thinkingEnabled() != null && safe.thinkingEnabled(),
                 operator.id(), operator.name(), null);
         persistTier(null, created, operator);
         return BackofficeModelTierResponse.of(requireTier(tierKey));
@@ -252,10 +255,13 @@ public class BackofficeModelChannelAppService {
             throw new ApplicationException(ProjectMessage.MODEL_TIER_FIELDS_REQUIRED);
         }
         requireProviderExists(providerKey);
-        // enabled 缺省＝保持现值（同通道面：停用档换模型名/换通道不被意外复启）
+        // enabled/thinking 缺省＝保持现值（同通道面：停用档换模型名/换通道不被
+        // 意外复启；开思考的档换模型名不被意外关——终态字段不因缺省翻转）
         ModelTier next = new ModelTier(current.tierKey(), providerKey, modelName,
                 blankToNull(safe.displayName()),
                 safe.enabled() == null ? current.enabled() : safe.enabled(),
+                safe.thinkingEnabled() == null ? current.thinkingEnabled()
+                        : safe.thinkingEnabled(),
                 operator.id(), operator.name(), null);
         persistTier(current, next, operator);
         return BackofficeModelTierResponse.of(channelStore.findTier(tierKey));
@@ -317,8 +323,8 @@ public class BackofficeModelChannelAppService {
         }
         channelStore.saveTier(next);
         channelStore.insertTierTrace(tierTrace(next.tierKey(), current, next, operator));
-        log.info("[model-channel] 档位变更 {}（{}:{}，enabled {}）", next.tierKey(),
-                next.providerKey(), next.modelName(), next.enabled());
+        log.info("[model-channel] 档位变更 {}（{}:{}，enabled {}，thinking {}）", next.tierKey(),
+                next.providerKey(), next.modelName(), next.enabled(), next.thinkingEnabled());
     }
 
     /** 通道留痕构造单点（old/new 任一 null＝创建/删除痕：该侧快照腿全 null）。 */
@@ -342,10 +348,12 @@ public class BackofficeModelChannelAppService {
                 oldTier == null ? null : oldTier.modelName(),
                 oldTier == null ? null : oldTier.displayName(),
                 oldTier == null ? null : oldTier.enabled(),
+                oldTier == null ? null : oldTier.thinkingEnabled(),
                 newTier == null ? null : newTier.providerKey(),
                 newTier == null ? null : newTier.modelName(),
                 newTier == null ? null : newTier.displayName(),
                 newTier == null ? null : newTier.enabled(),
+                newTier == null ? null : newTier.thinkingEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now());
     }
 
@@ -361,7 +369,8 @@ public class BackofficeModelChannelAppService {
         return Objects.equals(current.providerKey(), next.providerKey())
                 && Objects.equals(current.modelName(), next.modelName())
                 && Objects.equals(current.displayName(), next.displayName())
-                && current.enabled() == next.enabled();
+                && current.enabled() == next.enabled()
+                && current.thinkingEnabled() == next.thinkingEnabled();
     }
 
     /**

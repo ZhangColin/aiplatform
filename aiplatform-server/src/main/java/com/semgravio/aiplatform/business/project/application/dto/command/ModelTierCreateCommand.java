@@ -7,11 +7,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 必须已有行，PRJ_071）。语义键即引用腿：智能体运营配置与路由强档绑定的就是它
  * ——建行后即可被绑定（即时校验放行）。
  *
- * @param tierKey     语义键（运营短名，如 flash/pro/doubao-flagship）
- * @param providerKey 所属通道键（必须已存在——先建通道行再挂档位）
- * @param modelName   实际模型名（如 deepseek-v4-flash-ga-260731）
- * @param displayName 运营显示名（可空＝回落语义键）
- * @param enabled     启用态（缺省 true）
+ * @param tierKey         语义键（运营短名，如 flash/pro/doubao-flagship）
+ * @param providerKey     所属通道键（必须已存在——先建通道行再挂档位）
+ * @param modelName       实际模型名（如 deepseek-v4-flash-ga-260731）
+ * @param displayName     运营显示名（可空＝回落语义键）
+ * @param enabled         启用态（缺省 true）
+ * @param thinkingEnabled 深度思考开关（#370；缺省 false＝显式关）
  */
 public record ModelTierCreateCommand(
         @Schema(description = "档位语义键（引用腿——三座/边缘点/路由强档绑定的值）",
@@ -27,5 +28,8 @@ public record ModelTierCreateCommand(
                 example = "豆包旗舰")
         String displayName,
         @Schema(description = "启用态（缺省 true；停用＝既有绑定装配报错、新绑定被即时校验拒绝）")
-        Boolean enabled) {
+        Boolean enabled,
+        @Schema(description = "深度思考开关（#370：跟档位/模型走；缺省 false＝显式关——不配置"
+                + "不默认拖慢首 token，开态影响首轮延迟/质量/token，细测对比后按档开启）")
+        Boolean thinkingEnabled) {
 }

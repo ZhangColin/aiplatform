@@ -26,7 +26,7 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 
 1. **改档**：`PUT /api/backoffice/agent-configs/executor`（机机五头 HMAC 签名；`X-User-Id`/`X-User-Name` 必带——写操作留痕）。请求体全量语义：`{"modelId": "pro"}` 换强模型档，`{"modelId": "flash"}` 回快模型档，`{"modelId": null}`（或纯空白/缺省）清空覆盖、回落枚举缺省（快模型档）。档位键即时校验（#367）：非空须在模型档位面（`/api/backoffice/model-tiers`）有行且启用——错值 400 当场拒（PRJ_074 缺行 / PRJ_075 停用），不再靠留痕回滚兜底；null 清空不校验。
 
-**模型版本升级（方舟名带日期后缀、季度级更新）**：改档位行指向即全部引用自动跟上——`PUT /api/backoffice/model-tiers/{tierKey}` 改 `modelName`（同面可换通道、改显示名、停启用）；建新档走 POST、删行有绑定守卫（被引用 409）。**换 key/换通道**（不发版不重启）：`/api/backoffice/model-providers` 面——apiKey 写收全量值、读面与留痕一律掩码（尾 4 位），`PUT` 不携 apiKey＝保持现值、携全量新值＝换 key（改完下一轮命令构建即生效）。curl 执行面：`aiplatform-server/scripts/backoffice-model-channel.sh`（`demo` 全流程演示〔可弃键自动清场〕＋单动词运维操作）。
+**模型版本升级（方舟名带日期后缀、季度级更新）**：改档位行指向即全部引用自动跟上——`PUT /api/backoffice/model-tiers/{tierKey}` 改 `modelName`（同面可换通道、改显示名、停启用、开/关深度思考〔`thinkingEnabled`，缺省保持现值；缺省关＝显式关——不配置不默认拖慢首 token，#370〕）；建新档走 POST、删行有绑定守卫（被引用 409）。**换 key/换通道**（不发版不重启）：`/api/backoffice/model-providers` 面——apiKey 写收全量值、读面与留痕一律掩码（尾 4 位），`PUT` 不携 apiKey＝保持现值、携全量新值＝换 key（改完下一轮命令构建即生效）。curl 执行面：`aiplatform-server/scripts/backoffice-model-channel.sh`（`demo` 全流程演示〔可弃键自动清场〕＋单动词运维操作）。
 2. **查生效值**：`GET /api/backoffice/agent-configs/executor`——生效 `modelId` ＋覆盖标记 `modelIdOverridden` ＋缺省预览 `defaultModelId`。
 3. **回滚**：`GET /api/backoffice/agent-configs/executor/traces` 取某痕旧值快照，把旧值 `PUT` 回写（即一次新变更、留新痕——不做版本树）。
 
@@ -57,4 +57,4 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
    - **钉死强档（质量基线）**：`PUT` 写 `{"routingEnabled": false, "modelId": "pro"}`（钉死位——人工档恒生效）；
 4. 对比结果留档（时长量级、质量差异、项目账 token、路由判定分布）——路由开轮供速度目标推算，钉死强档轮为质量基线，路由关轮为对照基线。
 
-**enableThinking 终值对比（#369 切换验收）**：方舟 DeepSeek V4 系均标深度思考，装配显式关（`ModelTierAppService.THINKING_ENABLED`——终值位单点，缺省 false；非运营开关）。对比法：改该常量临时开→重启 dev 后端→同一任务跑一轮，与关态轮对比首轮延迟/质量/token——终值结论回写常量与 ADR-0031（若开态显著拖慢首 token 则维持显式关，用户故事 12 承诺不破）。成本面联动：跑完经成本观测面核 volcengine 模型行有单价匹配（单价表已开三档位实际模型行，#369 种子）、无 unpriced 警示。
+**enableThinking 开关对比（#369 留下、#370 开关后台化后可做）**：方舟 DeepSeek V4 系均标深度思考，装配显式表态不留给模型默认；开关跟档位走（`prj_model_tiers.thinking_enabled`，缺省 false＝显式关——#369 活体结论「维持 false」）。对比法：档位维护面 `PUT /api/backoffice/model-tiers/{tierKey}` 带 `"thinkingEnabled": true` 开→同一任务跑一轮，与关态轮对比首轮延迟/质量/token——改完下一轮命令构建即生效（通道指纹含 thinking 腿，进行中 run 不定格），不发版不重启；结论按档回写（若开态显著拖慢首 token 则维持关，用户故事 12 承诺不破），留痕可回滚。成本面联动：跑完经成本观测面核 volcengine 模型行有单价匹配（单价表已开三档位实际模型行，#369 种子）、无 unpriced 警示。

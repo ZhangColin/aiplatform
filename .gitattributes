@@ -1,3 +1,9 @@
 # bash 脚本必须保持 LF：本地跑（Git Bash）与部署到 Linux 服务器（CentOS/Ubuntu）都吃 LF，
 # Windows 侧 core.autocrlf=true 会把它们 checkout 成 CRLF 而炸掉，这里强制钉住。
 *.sh text eol=lf
+
+# infra 单元被容器/脚本消费的文本钉 LF（*.sh 已由全局规则覆盖；certs/ 未来放证书
+# 二进制，不做目录级 text 归一——只钉已知文本文件）
+deploy/infra/*.yml text eol=lf
+deploy/infra/nginx/*.conf text eol=lf
+deploy/infra/env.example text eol=lf

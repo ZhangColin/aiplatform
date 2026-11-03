@@ -1,0 +1,96 @@
+# semgravio-infra：nginx＋pgsql＋redis 三件套——自包含一键部署单元（整目录可拷走单独用）。
+# 起栈/重跑一律走 ./deploy.sh（幂等：bootstrap docker/compose→建网→建卷→.env→起栈→健康检查）。
+# 容器/DNS 名 semgravio-{pg,redis,nginx} 归本单元独有（dev 栈/应用栈不得占用——撞名先 rename 让位）。
+# 镜像 pin 精确版本（与 semgravio-eu-1 现网一致：PG 16.15＋pgvector 0.8.7 / redis 7.4.12 /
+# nginx 1.30.6）；升级＝显式改本文件，重跑永远无害。
+# 接入契约（建库建号、conf.d/certs 安装）见 README.md；服务配置必须经门禁脚本安装（#385）。
+name: semgravio-infra
+
+services:
+  semgravio-pg:
+    image: pgvector/pgvector:0.8.7-pg16
+    container_name: semgravio-pg
+    restart: unless-stopped
+    environment:
+      # 超管名/密码延用现值（eu-1 数据卷的超管即 aiplatform；.env 是服务器上唯一凭据正本）
+      POSTGRES_USER: ${POSTGRES_USER:-aiplatform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env}
+      # 有意不设 POSTGRES_DB：服务库不是 infra 职责（接入方经建号 helper 自建；既有库原样延用）
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # 只绑宿主回环：本地 dbx 类客户端经 SSH 隧道直连（docs/deploy/prod-db-access.md），
+      # 安全组不放行。容器间互连走 webnet 内 DNS 名 semgravio-pg。
+      - "127.0.0.1:5432:5432"
+    networks:
+      - webnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  semgravio-redis:
+    image: redis:7.4.12-alpine
+    container_name: semgravio-redis
+    restart: unless-stopped
+    # 持久化全关（--save "" --appendonly no）＝纯缓存语义：重启/重建即空。
+    # 镜像自带 VOLUME /data 声明会产生匿名卷（docker 行为、compose 不声明），不写入任何数据、
+    # compose down 一并回收——「无持久卷、仅缓存用途」以本行为为准（README 注记）。
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?missing in .env}", "--save", "", "--appendonly", "no"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?missing in .env}
+    ports:
+      # 只绑宿主回环：与 PG 同款排查姿势（SSH 隧道＋GUI 客户端）；须带密码
+      - "127.0.0.1:6379:6379"
+    networks:
+      - webnet
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    # 有意不在 compose 声明任何持久卷：仅缓存用途，需要持久 kv 的服务不要依赖它（README 注记）
+
+  semgravio-nginx:
+    image: nginx:1.30.6-alpine
+    container_name: semgravio-nginx
+    restart: unless-stopped
+    volumes:
+      # 主体归 infra 管；接入服务只写自己名下的 conf.d/<service>.conf 与 certs/<service>/，
+      # 且必须经门禁脚本安装（nginx -t 通过才 reload；目录挂载＝热更不用重建容器）
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    ports:
+      # 唯一对外口（安全组控暴露面）；listen 443 ssl 由有证书的服务在自己的 conf 里声明
+      - "80:80"
+      - "443:443"
+    networks:
+      # webnet＝共享接入网（infra＋所有接入服务）；previewnet＝平台沙箱网。
+      # 双挂使跨网路由只在本容器发生——沙箱（不可信负载）经 nginx 出网、触达不了 pg/redis。
+      - webnet
+      - previewnet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+networks:
+  # external＋固定名：跨 compose 项目共享（deploy.sh 幂等创建；别的项目不得据为己有）
+  webnet:
+    name: webnet
+    external: true
+  previewnet:
+    name: previewnet
+    external: true
+
+volumes:
+  # external＋固定名：数据卷与 compose 项目生命周期解耦——down 不删数据、换项目名不动数据
+  pgdata:
+    name: semgravio_pgdata
+    external: true

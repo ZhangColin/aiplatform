@@ -507,6 +507,17 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 计量 + #321 断流重试，内层重试同关）：压缩链的摘要与 flushBeforeCompact
      * 记忆抽取共用该模型实例直调 stream()，包装后用量归入当前轮计量（flash 档与
      * 主模型 pro 档各自归位）、断流同获流层重试。
+     *
+     * <p><b>压缩前 offload 关停（#379）</b>：框架缺省 offloadBeforeCompact=true——
+     * 压缩时把被逐消息 offload 进会话树，而 {@code SessionTree.flush()} 是<b>纯宿主
+     * NIO</b> 写 {@code <workspace根>/<用户>/agents/<智能体名>/sessions/} 两份
+     * jsonl（不走 abstractFilesystem，#107 重映射罩不住）。项目容器姿态交给框架的根是容器路径
+     * {@code /workspace}——Windows 宿主落 {@code C:\workspace}（issue 现场）、部署
+     * 环境落后端容器可写层；会话正本在 PG（cat_agent_state），宿主 jsonl 是无读者
+     * 孤儿副本——全形态一致关停（Local 同样无人读，不做姿态分叉），压缩触发/摘要/
+     * flushBeforeCompact 记忆抽取行为不变（被逐消息直接丢弃，不落盘）。勿用
+     * {@code Builder.disableSessionPersistence()} 替代：2.0.1 该开关主构建路径零消费
+     * （惰性，罩不住本链）。</p>
      */
     static CompactionConfig compactionConfig(AgentscopeProperties properties,
             EdgeModelSupplier.EdgeModel compaction) {
@@ -514,6 +525,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         if (properties.getCompactionTriggerTokens() != null) {
             config.triggerTokens(properties.getCompactionTriggerTokens());
         }
+        // #379 宿主泄漏正源（见方法 javadoc）——框架缺省开，必须显式关
+        config.offloadBeforeCompact(false);
         config.model(streamLayer(
                 ModelRegistry.resolve(compaction.modelString(),
                         creationContextOf(compaction.channel())),

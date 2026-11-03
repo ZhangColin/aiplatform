@@ -113,7 +113,7 @@ class AgentscopeMeteringReconcileTest {
                 event -> {
                 });
 
-        List<UsageEvent> events = reportedEvents();
+        List<UsageEvent> events = reportedEvents(2);
         assertThat(events).hasSize(2);
         assertThat(events.get(0).eventId()).isEqualTo("agent-usage-run-1-1");
         assertThat(events.get(0).tokens().input()).isEqualTo(100);
@@ -143,7 +143,7 @@ class AgentscopeMeteringReconcileTest {
 
         // 两流的已耗 token 都已入账（幂等键逐流唯一——多流并发收口时序不定，
         // 序号按收口顺序分配，对账只核全量条数与用量，不钉序号与流序的配对）
-        List<UsageEvent> events = reportedEvents();
+        List<UsageEvent> events = reportedEvents(2);
         assertThat(events).hasSize(2);
         assertThat(events).extracting(UsageEvent::eventId)
                 .containsExactlyInAnyOrder("agent-usage-run-2-1", "agent-usage-run-2-2");
@@ -182,7 +182,7 @@ class AgentscopeMeteringReconcileTest {
                 event -> {
                 });
 
-        List<UsageEvent> events = reportedEvents();
+        List<UsageEvent> events = reportedEvents(3);
         assertThat(events).hasSize(3);
         assertThat(events).extracting(UsageEvent::model)
                 .containsExactly("deepseek-chat", "deepseek-v4-flash", "deepseek-chat");
@@ -195,8 +195,27 @@ class AgentscopeMeteringReconcileTest {
         assertThat(events).allMatch(e -> "prj-1".equals(e.subject()));
     }
 
-    /** 事件逐条捕获（对账面——次数断言在各测试自身，此处只收全量清单）。 */
-    private List<UsageEvent> reportedEvents() {
+    /**
+     * 事件逐条捕获（对账面——次数断言在各测试自身，此处先落 sink 等待再收全量清单）。
+     * 落 sink 等待（#380）：MeteredModel 的 doFinally 收口腿跑在模型信号线程，与
+     * converse 线程的收口/失败上抛无 happens-before——末流收口可晚于 converse 返回
+     * 毫秒级（多类连跑热 JVM 下 converse 秒回即红；单跑冷 JVM 窗口常先合，同族
+     * #378 集成版落库等待）。轮询等 sink 记满期望条数再收（captor 在 verify 时才
+     * 填充，此处直查 mock 调用计数——同 MeteredModelTest#awaitReported 口径）；
+     * 超时即落空，后续断言以真实形态报红。
+     */
+    private List<UsageEvent> reportedEvents(int expectedCount) {
+        long deadline = System.currentTimeMillis() + 2000;
+        while (org.mockito.Mockito.mockingDetails(sink).getInvocations().size() < expectedCount
+                && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(5);
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
         verify(sink, atLeast(0)).report(usageCaptor.capture());
         return new ArrayList<>(usageCaptor.getAllValues());
     }

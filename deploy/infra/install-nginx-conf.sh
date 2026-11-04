@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # semgravio-infra nginx 配置门禁——接入方安装/更新自己名下 conf.d/<service>.conf 的唯一合法通道。
 # 共享 nginx 是最危险的共享故障点：本门禁使任一服务的坏配置无法殃及他人（#385 AC）。
-# 用法：./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录]
+# 用法：./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录] [资产目录]
 # 行为：
-#   ① 资产边界：只写 nginx/conf.d/<service>.conf（+ 可选参数给定时 nginx/certs/<service>/），
-#      绝不触碰其它服务的文件；
+#   ① 资产边界：只写 nginx/conf.d/<service>.conf（+ 可选参数给定时 nginx/certs/<service>/、
+#      nginx/conf.d/<service>.assets/），绝不触碰其它服务的文件；
 #   ② 撞车即拒：server_name 与既有其它服务配置冲突（通配按单层标签口径）、
 #      或声明 default_server（归 infra 兜底 server）——写文件前拒绝，不留任何痕迹；
-#   ③ 语法门禁：写入后 nginx -t 通过才 reload；不过自动回滚刚写的文件（旧文件/证书还原
-#      或删除），nginx 未 reload、存活不受影响。写入前基线 -t 已不过（他方坏配置）时拒绝进场。
+#   ③ 语法门禁：写入后 nginx -t 通过才 reload；不过自动回滚刚写的文件（旧文件/证书/资产
+#      还原或删除），nginx 未 reload、存活不受影响。写入前基线 -t 已不过（他方坏配置）时拒绝进场。
+# 资产目录（第四参，#386）：服务自持的静态资产（如平台预览的标注脚本/提示页/代理注入块），
+# 整体拷入 conf.d/<service>.assets/——conf.d 挂载下天然可见，conf 里引用
+# /etc/nginx/conf.d/<service>.assets/... 随 conf 一并过 nginx -t（语法/结构校验）。
+# 注意：alias 目标存在性不在 nginx -t 范围——资产漏装是运行时 404（死子域回提示页是
+# error_page 路径的间接验法），部署后须经资产 URL 实访一次确认（同生产部署.md 口径）。
 # 并发口径：门禁无跨进程锁——同一共享 nginx 的安装操作由各服务部署流程自行串行化
 # （reload 与 -t 之间的竞态只在此前提下闭合）。
 # 服务名口径：^[a-z][a-z0-9_-]{0,30}$——合法文件名、免引号、无路径穿越面。
@@ -21,14 +26,16 @@ die() { printf '✗ %s\n' "$*" >&2; exit 1; }
 ok()  { printf '✓ %s\n' "$*" >&2; }
 
 # ---- 参数与文件校验 ----------------------------------------------------------
-[ $# -ge 2 ] && [ $# -le 3 ] || die "用法：./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录]"
+[ $# -ge 2 ] && [ $# -le 4 ] || die "用法：./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录] [资产目录]"
 svc=$1
 conf=$2
 certs_src=${3:-}
+assets_src=${4:-}
 [[ "$svc" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] \
   || die "服务名须匹配 ^[a-z][a-z0-9_-]{0,30}$（直接作 conf 文件名）：$svc"
 [ -f "$conf" ] || die "conf 文件不存在：$conf"
 [ -z "$certs_src" ] || [ -d "$certs_src" ] || die "证书目录不存在：$certs_src"
+[ -z "$assets_src" ] || [ -d "$assets_src" ] || die "资产目录不存在：$assets_src"
 
 # ---- nginx 前置 --------------------------------------------------------------
 [ "$(docker inspect -f '{{.State.Running}}' semgravio-nginx 2>/dev/null || true)" = true ] \
@@ -44,9 +51,11 @@ $baseline"
 # 名下资产清单（本脚本唯一会写的目标，路径由 svc 正则兜住、无穿越面）：
 #   nginx/conf.d/<svc>.conf        （必装）
 #   nginx/certs/<svc>/             （可选第三参数给定时装证书）
-# 其余任何文件不碰；其它服务的同名空间（conf/certs）由 svc 身份天然隔开。
+#   nginx/conf.d/<svc>.assets/     （可选第四参数给定时装服务自持静态资产）
+# 其余任何文件不碰；其它服务的同名空间（conf/certs/assets）由 svc 身份天然隔开。
 conf_target=$PWD/nginx/conf.d/$svc.conf
 certs_target=$PWD/nginx/certs/$svc
+assets_target=$PWD/nginx/conf.d/$svc.assets
 
 # ---- ② 撞车即拒（写文件前） --------------------------------------------------
 strip_comments() { sed -e 's/#.*//' "$1"; }   # 去注释：撞车/抢占检测统一口径（防注释里的假名）
@@ -103,13 +112,19 @@ done
 ok "server_name 撞车预检通过：${new_names[*]}"
 
 # ---- ③ 语法门禁：写入 → nginx -t → reload，不过即回滚 -------------------------
-rollback_marker=$(mktemp -d)   # 备份底座：conf 旧文件 + certs 旧目录，失败时逐项还原
+rollback_marker=$(mktemp -d)   # 备份底座：conf 旧文件 + certs 旧目录 + assets 旧目录，失败时逐项还原
 had_prev=0
 [ -f "$conf_target" ] && { cp "$conf_target" "$rollback_marker/prev.conf"; had_prev=1; }
 had_certs=0
 if [ -d "$certs_target" ]; then cp -a "$certs_target" "$rollback_marker/prev-certs"; had_certs=1; fi
+had_assets=0
+if [ -d "$assets_target" ]; then cp -a "$assets_target" "$rollback_marker/prev-assets"; had_assets=1; fi
 
-# 先装证书（conf 里 listen 443 ssl 引用它，-t 一并校验），再装 conf
+# 先装资产与证书（conf 里的 alias/listen 引用它们，-t 一并校验），再装 conf
+if [ -n "$assets_src" ]; then
+  mkdir -p "$assets_target"
+  cp -a "$assets_src"/. "$assets_target"/
+fi
 if [ -n "$certs_src" ]; then
   mkdir -p "$certs_target"
   cp -a "$certs_src"/. "$certs_target"/
@@ -119,15 +134,16 @@ cp -- "$conf" "$conf_target"
 if t_out=$(docker exec semgravio-nginx nginx -t 2>&1); then
   docker exec semgravio-nginx nginx -s reload
   rm -rf "$rollback_marker"
-  ok "nginx -t 通过，已 reload：conf.d/$svc.conf 生效${certs_src:+，证书已装入 certs/$svc/}"
+  ok "nginx -t 通过，已 reload：conf.d/$svc.conf 生效${certs_src:+，证书已装入 certs/$svc/}${assets_src:+，资产已装入 conf.d/$svc.assets/}"
 else
-  # 回滚顺序与写入相反：先撤 conf 再撤 certs；旧的在则还原、无则删除（不留半安装态）
+  # 回滚顺序与写入相反：先撤 conf 再撤 certs/assets；旧的在则还原、无则删除（不留半安装态）
   if [ "$had_prev" = 1 ]; then cp "$rollback_marker/prev.conf" "$conf_target"; else rm -f "$conf_target"; fi
   if [ "$had_certs" = 1 ]; then rm -rf "$certs_target"; cp -a "$rollback_marker/prev-certs" "$certs_target"; else rm -rf "$certs_target"; fi
+  if [ "$had_assets" = 1 ]; then rm -rf "$assets_target"; cp -a "$rollback_marker/prev-assets" "$assets_target"; else rm -rf "$assets_target"; fi
   rm -rf "$rollback_marker"
   # 回滚后基线应恢复全绿（写入前已验过基线）；仍不过说明并发进了别的坏文件
   docker exec semgravio-nginx nginx -t >/dev/null 2>&1 \
     || printf '⚠ 回滚后 nginx -t 仍不过——疑似并发写入了其它坏配置，请立即排查 conf.d/\n' >&2
-  die "nginx 语法校验失败，已自动回滚 conf.d/$svc.conf${certs_src:+ 与 certs/$svc/}（未 reload，nginx 仍跑旧配置、存活不受影响）。原始错误：
+  die "nginx 语法校验失败，已自动回滚 conf.d/$svc.conf${certs_src:+ 与 certs/$svc/}${assets_src:+ 与 conf.d/$svc.assets/}（未 reload，nginx 仍跑旧配置、存活不受影响）。原始错误：
 $t_out"
 fi

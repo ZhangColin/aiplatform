@@ -54,8 +54,9 @@ nginx＋pgsql＋redis 三件套，**自包含、整目录可拷走单独用**（
 - **建库建号**：用 infra 的幂等建号 helper `ensure-db-user.sh`（随本目录走，用法与权限
   边界见下文「建库建号」节）——每服务独立 database ＋低权限角色，只对自己的库有权限；
   超管凭据不出 infra。
-- **nginx 配置**：恰好两个资产——`nginx/conf.d/<service>.conf` 单文件＋
-  `nginx/certs/<service>/` 证书目录。**安装/更新唯一合法通道是门禁脚本
+- **nginx 配置**：恰好三类名下资产——`nginx/conf.d/<service>.conf` 单文件、
+  `nginx/conf.d/<service>.assets/` 服务自持静态资产目录（标注脚本/提示页等，
+  #386 起）、`nginx/certs/<service>/` 证书目录。**安装/更新唯一合法通道是门禁脚本
   `install-nginx-conf.sh`**（用法与裁决语义见下文「nginx 配置安装」节）——共享
   nginx 是最危险的共享故障点，别让一个服务的坏配置弄挂所有人。
 - 证书：infra 只定目录约定；申请/续期人工 certbot。
@@ -91,28 +92,32 @@ DB_PASSWORD=$(openssl rand -hex 16) ./ensure-db-user.sh <服务名>
 门禁脚本，**不要手工放文件**：
 
 ```bash
-./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录]
+./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录] [资产目录]
 ```
 
-- **资产边界**：门禁只写你名下的 `nginx/conf.d/<service>.conf` 与（第三参数给定时）
-  `nginx/certs/<service>/`，绝不触碰其它服务的文件。服务名 `^[a-z][a-z0-9_-]{0,30}$`
+- **资产边界**：门禁只写你名下的 `nginx/conf.d/<service>.conf`、（第三参数给定时）
+  `nginx/certs/<service>/` 与（第四参数给定时）`nginx/conf.d/<service>.assets/`，
+  绝不触碰其它服务的文件。服务名 `^[a-z][a-z0-9_-]{0,30}$`
   （比建号 helper 多允 `-`，nginx 惯例名；同名服务还要建库时库名按 helper 口径另行取名）。
   证书源目录整体拷入名下目录（conf 里 `listen 443 ssl` 的证书路径写
-  `/etc/nginx/certs/<service>/...`，随 conf 一并过 `nginx -t` 校验）。
+  `/etc/nginx/certs/<service>/...`，随 conf 一并过 `nginx -t` 校验）。资产源目录同样
+  整体拷入 `conf.d/<service>.assets/`（conf.d 挂载下天然可见，conf 里引用
+  `/etc/nginx/conf.d/<service>.assets/...`）——平台接入的代理/注入块与标注脚本、
+  提示页即走此通道（#386，装配见平台仓 deploy/nginx/assemble-assets.sh）。
 - **server_name 撞车即拒**：你的 server_name 与既有**其它**服务配置冲突（通配 `*.` 按
   单层标签口径比对：单侧通配只挡恰好多一层子域的精确名，双侧通配仅后缀相同才算撞）、
   或抢占 `default_server`（IP 直访/未匹配域名兜底归 infra `nginx.conf`）——**写文件
   之前拒绝**，错误信息指明冲突名与占主文件，不留任何痕迹。更新自己名下的文件不受自己
   旧 server_name 限制。契约按单行写 server_name；多行折行写法撞车检测可能漏检（属契约
   外用法）。
-- **语法门禁＋自动回滚**：写入后 `nginx -t` 通过才 `reload`；不过自动回滚刚写的文件与
-  证书目录（有旧则还原、无则删除，不留半安装态），nginx 未 reload、存活不受影响，其它
-  服务的路由照常。若写入前基线 `nginx -t` 已不过（他方坏配置先修，与本脚本无关），拒绝
-  进场。
+- **语法门禁＋自动回滚**：写入后 `nginx -t` 通过才 `reload`；不过自动回滚刚写的文件、
+  证书目录与资产目录（有旧则还原、无则删除，不留半安装态），nginx 未 reload、存活不受
+  影响，其它服务的路由照常。若写入前基线 `nginx -t` 已不过（他方坏配置先修，与本脚本
+  无关），拒绝进场。
 - **并发口径**：门禁无跨进程锁——同一共享 nginx 的安装操作（含人工改 conf.d）由各
   服务部署流程自行串行化，`-t` 与 `reload` 之间的竞态只在串行前提下闭合。
-- selftest 有合法生效路由通 / 坏配置回滚且殃及面为零 / 撞车被拒 / 通配口径四组活断言
-  （phase 5）。
+- selftest 有合法生效路由通 / 坏配置回滚且殃及面为零 / 撞车被拒 / 通配口径 /
+  资产目录装入可服务、坏更新连资产回滚还原旧态 五组活断言（phase 5）。
 
 ## eu-1 迁移注记（接管式，SOP 详见 docs/deploy）
 

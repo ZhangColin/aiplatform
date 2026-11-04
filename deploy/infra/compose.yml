@@ -59,8 +59,9 @@ services:
     container_name: semgravio-nginx
     restart: unless-stopped
     volumes:
-      # 主体归 infra 管；接入服务只写自己名下的 conf.d/<service>.conf 与 certs/<service>/，
-      # 且必须经门禁脚本安装（nginx -t 通过才 reload；目录挂载＝热更不用重建容器）
+      # 主体归 infra 管；接入服务只写自己名下的 conf.d/<service>.conf、
+      # conf.d/<service>.assets/ 与 certs/<service>/，且必须经门禁脚本安装
+      # （nginx -t 通过才 reload；目录挂载＝热更不用重建容器）
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/nginx/certs:ro

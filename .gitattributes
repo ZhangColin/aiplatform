@@ -7,3 +7,6 @@
 deploy/infra/*.yml text eol=lf
 deploy/infra/nginx/*.conf text eol=lf
 deploy/infra/env.example text eol=lf
+
+# 平台接入共享 nginx 的 conf 源同钉 LF（服务器/容器内 nginx 消费）
+deploy/nginx/*.conf text eol=lf

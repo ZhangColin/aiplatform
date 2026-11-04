@@ -1,5 +1,12 @@
 # 预览网关：平台级 nginx 反向代理（子域路由 + 圈注注入），替换随机端口暴露
 
+> **演进注记（#386，不改正文决议）**：部署形态的「网关」从独立 nginx 容器演进为
+> 共享基础设施 nginx（`deploy/infra`）里的平台 conf.d 配置——路由/注入/代理块语义
+> 与本 ADR 完全一致（块文件仍单源），只是承载体与安装通道变了（门禁
+> `install-nginx-conf.sh`，conf.d 目录挂载热更）：生产模板 `nginx.prod.conf.template`
+> 随之退役（TLS 切换口径见 `deploy/部署文档.md` §12）；dev 本地预览网关（`*.localhost`）
+> 不变。手工 `docker run` 网关容器在部署面不再有。
+
 系统预览从「Docker 随机宿主端口（`localhost:随机端口`）直接暴露」改为「平台级 nginx 网关按子域路由 + 注入圈注脚本」。每个工作区一个稳定子域 `{workspaceId}.preview.{domain}`（开发 `{workspaceId}.localhost`），网关按 Host 子域路由到对应容器 `ws-{id}:8081`，并在 HTML 响应注入平台标注脚本（annotation.js）。一套配置吃开发与生产两个 profile（只差 base 域名与 TLS）。
 
 ## 定位

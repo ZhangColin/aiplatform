@@ -10,8 +10,9 @@
 #      无平台专属服务
 #   ⑤ 建号 helper（#384）：同一服务两遍执行幂等（角色/库清单不变、输出一致、凭据可用）；
 #      新用户对自身库可读写、对他服务库连接被拒；helper 输出不泄漏超管凭据
-#   ⑥ nginx 门禁（#385）：合法 conf 安装后 reload 生效、路由通；语法坏 conf 被回滚且
-#      nginx 仍活、既有其它服务配置不受影响；server_name 撞车被拒（写文件前）
+#   ⑥ nginx 门禁（#385/#386）：合法 conf 安装后 reload 生效、路由通；语法坏 conf 被回滚且
+#      nginx 仍活、既有其它服务配置不受影响；server_name 撞车被拒（写文件前）；
+#      资产目录装入 conf.d/<svc>.assets/ 可服务、坏更新连资产一并回滚还原旧态
 # 用法：deploy/infra/selftest.sh（要求 docker 可用、80/443/5432/6379 空闲、semgravio-{pg,redis,nginx}
 # 三个容器名无占位——本地 dev 栈占端口时先停 aiplatform-pg / semgravio-dev-redis /
 # aiplatform-gateway；名字被占的容器先 docker rename 让位）。
@@ -83,7 +84,7 @@ umask 077
 # 加载到上游不存在（dummy 后端未起）的排练配置直接起不来（主锁 conf.d 是起栈即加载）；
 # certs 下的排练目录一并清
 rm -f nginx/conf.d/selftest-*.conf
-rm -rf nginx/certs/selftest-web
+rm -rf nginx/certs/selftest-web nginx/conf.d/selftest-*.assets
 
 bash ./deploy.sh
 
@@ -290,9 +291,9 @@ phase "5/6 nginx 门禁（合法生效 / 坏配置回滚 / 撞车即拒，#385 A
 # 不断言脚本内部结构。留痕（conf 文件/后端容器）在清场 phase 一并回收。
 gate_tmp=$(mktemp -d)
 img=$img_nginx   # phase 3 已取被测容器同款镜像（pin 一致性已由 phase 1 兜住）
-http_probe() {   # $1=Host 头；经宿主回环打 nginx，输出应答体
+http_probe() {   # $1=Host 头 [$2=路径，缺省 /]；经宿主回环打 nginx，输出应答体
   docker run --rm --network host "$img" \
-    wget -q -O - --header="Host: $1" http://127.0.0.1/ 2>/dev/null || true
+    wget -q -O - --header="Host: $1" "http://127.0.0.1${2:-/}" 2>/dev/null || true
 }
 
 # 自己的 dummy 后端：webnet 内 DNS 名 selftest-web，恒定应答体
@@ -415,11 +416,47 @@ if bash ./install-nginx-conf.sh selftest-web "$gate_tmp/nope.conf" 2>/dev/null; 
 fi
 ok "资产边界：穿越服务名/缺失文件均被拒（全程只写自己名下 conf.d/<service>.conf）"
 
+# 场景五（资产目录，#386）：第四参整体装入 conf.d/<svc>.assets/——可被路由服务、
+# 坏 conf 连同资产一起回滚、更新自己时旧资产还原（rollback 语义与 conf/证书一致）
+mkdir -p "$gate_tmp/assets"
+echo asset-ok >"$gate_tmp/assets/asset.txt"
+cat >"$gate_tmp/with-assets.conf" <<'EOF'
+server {
+    listen 80;
+    server_name selftest-assets.test;
+    location = /asset.txt { alias /etc/nginx/conf.d/selftest-assets.assets/asset.txt; }
+    location / { return 200 "with-assets\n"; }
+}
+EOF
+bash ./install-nginx-conf.sh selftest-assets "$gate_tmp/with-assets.conf" "" "$gate_tmp/assets" >/dev/null \
+  || die "带资产目录的合法 conf 被门禁误拒"
+[ -f nginx/conf.d/selftest-assets.assets/asset.txt ] || die "资产未落入名下 conf.d/selftest-assets.assets/"
+body=$(http_probe selftest-assets.test /asset.txt)
+[ "$body" = "asset-ok" ] || die "名下资产经共享 nginx 服务不通（应答：$body）"
+ok "资产目录：装入 conf.d/<svc>.assets/ 且经共享 nginx 可服务"
+
+# 坏更新（同服务更新自己不受撞车限制，但语法不过必须连资产一起回滚、旧态还原）
+echo asset-v2 >"$gate_tmp/assets/asset.txt"
+cat >"$gate_tmp/bad-update.conf" <<'EOF'
+server {
+    listen 80;
+    server_name selftest-assets.test;
+    location / { proxy_pass http://selftest-web:80;
+EOF
+if bash ./install-nginx-conf.sh selftest-assets "$gate_tmp/bad-update.conf" "" "$gate_tmp/assets" 2>/dev/null; then
+  die "语法坏更新竟被放行"
+fi
+body=$(http_probe selftest-assets.test /asset.txt)
+[ "$body" = "asset-ok" ] || die "坏更新回滚后旧资产未还原（应答：$body）"
+body=$(http_probe selftest-assets.test)
+[ "$body" = "with-assets" ] || die "坏更新回滚后旧 conf 未还原（应答：$body）"
+ok "坏更新回滚：conf 与资产一并还原旧态"
+
 # ---------------------------------------------------------------- 6. 清场
 phase "6/6 清场（成功收尾）"
-# 排练安装的自己名下文件/证书目录，直接撤（不经门禁——本就是自清理）
+# 排练安装的自己名下文件/证书/资产目录，直接撤（不经门禁——本就是自清理）
 rm -f nginx/conf.d/selftest-*.conf
-rm -rf nginx/certs/selftest-web
+rm -rf nginx/certs/selftest-web nginx/conf.d/selftest-*.assets
 docker exec semgravio-nginx nginx -s reload >/dev/null 2>&1 || true
 docker rm -f selftest-web >/dev/null
 rm -rf "$gate_tmp"

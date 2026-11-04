@@ -100,14 +100,16 @@ class PreviewGatewaySmokeTest {
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
             // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活
+            // 资产（标注脚本/提示页）挂载路径＝块文件 alias 的统一路径（#386：按共享
+            // nginx 挂载形态 /etc/nginx/conf.d/aiplatform.assets/，dev 网关挂同路径）
             ExecResult started = docker("run", "-d", "--name", gatewayContainer,
                     "--network", WorkspaceNaming.PREVIEW_NETWORK,
                     "-p", gatewayPort + ":80",
                     "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
                     "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
                     "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
-                    "-v", dir.resolve("unavailable.html") + ":/etc/nginx/unavailable.html:ro",
-                    "-v", dir.resolve("annotation.js") + ":/etc/nginx/annotation.js:ro",
+                    "-v", dir.resolve("unavailable.html") + ":/etc/nginx/conf.d/aiplatform.assets/unavailable.html:ro",
+                    "-v", dir.resolve("annotation.js") + ":/etc/nginx/conf.d/aiplatform.assets/annotation.js:ro",
                     GATEWAY_IMAGE);
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
 

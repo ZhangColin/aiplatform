@@ -1,5 +1,6 @@
 # 前端部署 compose（原 aiplatform-web/docker-compose.prod.yml 不动）：去掉宿主端口
-# 映射——唯一对外口是网关 8080（deploy/nginx.demo.conf 主站块经 webnet 代理到本容器）。
+# 映射——唯一对外口是共享 nginx（#386：平台 conf.d 配置的主站块经 webnet 代理到本容器；
+# 预览网关已退役，不再有 8080 兜底口）。
 # BACKEND_URL 经 build args 构建期烤入（见 deploy/web.Dockerfile 注释）。
 # 用法：docker compose -f deploy/web.compose.yml up -d --build
 # name 必须显式（与 server.compose.yml 同目录，防项目名撞车互相删容器，见那边注释）

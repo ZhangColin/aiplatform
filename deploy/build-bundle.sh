@@ -3,8 +3,10 @@
 # 在开发机仓库根执行：deploy/build-bundle.sh；末行打印包路径（deploy/release.sh 依赖该约定）。
 # 产物结构（scp 到服务器任意目录解包，deploy/部署文档.md 的命令均以此为根）：
 #   deploy/                    部署文档＋全部 Dockerfile/compose/nginx 配置＋env 模板
+#   deploy/nginx/assets/      平台接入共享 nginx 的资产目录（assemble-assets.sh 装配：
+#                             标注脚本/提示页/代理/注入块——发布时经门禁第四参装入）
 #   aiplatform-server/target/  后端 jar（开发机构建——cartisan-boot 父 POM 只在开发机 ~/.m2）
-#   aiplatform-server/scripts/ embedding_server.py（infra compose 的构建上下文）
+#   aiplatform-server/scripts/ embedding_server.py（embedding 镜像的构建上下文）
 #   aiplatform-web/            前端源码（docker build 上下文，已剔 node_modules 等）
 #   workspace/                 工作区镜像构建上下文（baseline/render/seed/入口脚本）
 #   gateway/                   网关配置与资产（proxy/inject/unavailable/annotation.js）
@@ -35,7 +37,7 @@ OUT="dist/aiplatform-deploy-${STAMP}"
 echo "== 1/4 后端 jar =="
 (cd aiplatform-server && mvn clean package -DskipTests -q)
 
-echo "== 2/4 组装目录（git archive，LF 正本） =="
+echo "== 2/4 组装目录（git archive，LF 正本）＋ nginx 接入资产 =="
 rm -rf "${OUT}"    # 同分钟内重跑兜底
 mkdir -p "${OUT}/aiplatform-server/target" "${OUT}/aiplatform-server/scripts" \
          "${OUT}/aiplatform-web" "${OUT}/workspace" "${OUT}/gateway" "${OUT}/deploy"
@@ -48,6 +50,9 @@ ga HEAD:aiplatform-web                                                      | ta
 ga HEAD:aiplatform-server/src/main/resources/docker/workspace              | tar -x -C "${OUT}/workspace"
 ga HEAD:aiplatform-server/src/main/resources/docker/gateway                | tar -x -C "${OUT}/gateway"
 ga HEAD:deploy                                                              | tar -x -C "${OUT}/deploy"
+
+echo "-- 装配 nginx 接入资产（deploy/nginx/assets/，发布经门禁装入 conf.d/aiplatform.assets/）"
+bash "${OUT}/deploy/nginx/assemble-assets.sh" "${OUT}/deploy/nginx/assets" "$OUT"
 
 echo "== 3/4 记录 revision =="
 git rev-parse HEAD > "${OUT}/REVISION"

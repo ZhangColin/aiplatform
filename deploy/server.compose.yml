@@ -1,5 +1,7 @@
 # 后端部署 compose（原 aiplatform-server/docker-compose.prod.yml 不动）：在其基础上补
 # docker.sock 挂载＋seal-archives 独立卷（生产部署.md §1 注记的待补项）。
+# embedding 自 #386 起归本部署物（原 infra.compose.yml 退役）：与后端同栈编排，
+# 构建上下文＝aiplatform-server/scripts/（deploy/embedding.Dockerfile，模型离线预置）。
 # 用法（服务器仓库根）：docker compose -f deploy/server.compose.yml up -d --build
 # name 必须显式：三个 compose 同目录会共用默认项目名 deploy，而服务同名 app 时
 # 后起的 up 会把先起项目的 app 容器当作同名旧服务停删（实测踩坑）。
@@ -33,6 +35,15 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  embedding:
+    build:
+      context: ../aiplatform-server/scripts
+      dockerfile: ../../deploy/embedding.Dockerfile
+    container_name: aiplatform-embedding
+    restart: unless-stopped
+    networks:
+      - webnet
 
 networks:
   webnet:

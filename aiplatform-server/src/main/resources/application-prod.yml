@@ -15,9 +15,10 @@ spring:
 spring.jpa.show-sql: false
 logging.level.root: INFO
 
-# 预览网关（#129 生产化）：预览 URL 换 https + 生产基域名 {id}.preview.{domain}——
-# 同一份 nginx 网关配置（nginx.prod.conf.template，TLS 终止 + wildcard 证书），见
-# docs/guide/生产部署.md。PREVIEW_BASE 部署时供给（无默认，缺省启动即 fail-fast）。
+# 预览路由（#129 生产化，#386 起归共享 nginx）：预览 URL 换 https + 生产基域名
+# {id}.preview.{domain}——平台 conf.d 配置（deploy/nginx/aiplatform.conf，TLS 终止 +
+# wildcard 证书口径见 docs/guide/生产部署.md §6）。PREVIEW_BASE 部署时供给（无默认，
+# 缺省启动即 fail-fast）。
 app:
   embedding:
     url: ${EMBEDDING_URL}

@@ -25,6 +25,13 @@ type RequestOptions = {
    * 不该弹 M01。
    */
   silentUnauthorized?: boolean;
+  /**
+   * 裸路径直发（不拼 /api 前缀）：/auth 族端点后端注册为裸前缀、有意落在
+   * /api/** 拦截面外（登录端点未登录可调），契约路径（schema paths）即裸前缀，
+   * Next rewrite 第二条 /auth/:path* 原样转发。拼上 /api 反成契约外路径——
+   * 拦截面按访客凭证放行后无路由可匹配，404（#381）。
+   */
+  rawPath?: boolean;
 };
 
 /**
@@ -50,8 +57,8 @@ function emitUnauthorized(path: string) {
   );
 }
 
-function buildUrl(path: string, query: RequestOptions["query"]) {
-  const url = new URL(`/api${path}`, window.location.origin);
+function buildUrl(path: string, query: RequestOptions["query"], rawPath?: boolean) {
+  const url = new URL(`${rawPath ? "" : "/api"}${path}`, window.location.origin);
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === undefined) continue;
     for (const v of Array.isArray(value) ? value : [value]) {
@@ -79,7 +86,7 @@ const inFlightGets =
 
 async function request<T>(path: string, options: RequestOptions & { method: string; body?: unknown }): Promise<T> {
   const { method, query } = options;
-  const url = buildUrl(path, query);
+  const url = buildUrl(path, query, options.rawPath);
 
   if (method === "GET" && inFlightGets) {
     // 静默开关进键：silent 探针与非静默查询是同 URL 的不同语义（401 时是否发

@@ -8,6 +8,9 @@
 > 服务器事实：AWS 法兰克福 `ubuntu@3.70.172.160`，密钥 `~/ssh/semgravio-eu-1.pem`
 > （开发机 Git Bash）；平台部署目录 `~/aiplatform`（`REMOTE_DIR`）；infra 单元目录
 > `~/semgravio-infra`（`INFRA_DIR`，发布脚本默认即此）。
+> 文中 `aiplatform-postgres` / `aiplatform-infra_pgdata` 等旧名均为 eu-1 现网既有
+> docker 资源的事实指称（迁移对象本身），非部署物残留——「无旧项目名残留」约束的是
+> `deploy/infra` 部署物（selftest phase 1 有活断言，docs/ 不在其列）。
 
 ## 0. 迁移前后形态对照
 
@@ -39,12 +42,21 @@
 - [ ] **窗口前快照（回退资产）**：`ssh … 'tar -czf ~/aiplatform-deploy-backup-pre-infra.tar.gz -C ~ aiplatform'`——
       旧 `deploy/infra.compose.yml`、旧 `.env` 全在里面；release.sh 解包只覆盖不删文件，
       旧 compose 窗口后仍在盘上，但快照是干净正本。
+- [ ] **infra 目录上服务器**：开发机仓库根
+      `scp -i ~/ssh/semgravio-eu-1.pem -r deploy/infra ubuntu@3.70.172.160:semgravio-infra`——
+      ④ 要跑的 deploy.sh 以这份为源（release.sh 只解包到 `~/aiplatform`，不填此目录；
+      重复 scp 覆盖同名文件不影响运行中的旧栈）。
+- [ ] **回退留底**（⑥ 之后失败才用得上，窗口前顺手做）：
+      ① 平台镜像备份 tag——`ssh … 'docker tag aiplatform-server:ecs aiplatform-server:ecs-pre-infra && docker tag aiplatform-web:ecs aiplatform-web:ecs-pre-infra'`（⑥ 重建会覆盖原 tag，回退旧代码时 tag 打回）；
+      ② 旧网关启动参数——`ssh … 'docker inspect aiplatform-gateway > ~/gateway-backup.json'`（手工容器，重建命令以它为准）；
+      ③ 上面的 tar 快照（⑥ 会覆盖 `~/aiplatform/deploy/`）。
 - [ ] **通知停机窗口**。窗口时长 ≈ 数据拷贝（视库大小，先 `du` 估）＋ infra 起栈（分钟级）
       ＋ release.sh 重建（server/web 构建，dev 工作区镜像不受影响、不重建）。
 
 ## 2. 停机窗口步骤序
 
-> 每步末尾有「校验点」，不过即跳 §4 回退。全程在服务器上操作（ssh 上去）。
+> 每步末尾有「校验点」，不过即跳 §4 回退。①–⑤ 在服务器上操作（ssh 上去）；
+> ⑥ 回开发机仓库根执行。
 
 **① 停平台**——流量归零，PG 进入静止：
 
@@ -88,9 +100,7 @@ docker run --rm \
 **③ 手写 infra 凭据正本**——`~/semgravio-infra/.env` 只许手写现值，不许用自动生成的：
 
 ```bash
-mkdir -p ~/semgravio-infra   # 随新部署包来的 infra 目录；若 release.sh 尚未跑过，
-                             # 从部署包/仓库 deploy/infra 整目录拷入（INFRA_DIR 默认即此）
-cd ~/semgravio-infra
+cd ~/semgravio-infra   # §1 已 scp 上服务器（deploy.sh/compose.yml/nginx/ 全量在此）
 grep POSTGRES_PASSWORD ~/aiplatform/deploy/.env   # 取旧现值（超管密码，延用）
 umask 077
 cat > .env <<'EOF'
@@ -126,6 +136,11 @@ sed -i \
 grep -E 'DATASOURCE_URL|REDIS_' aiplatform-server/.env.production   # 校验点：三个新值在场
 ```
 
+> 注：平台库账号 `aiplatform` 即该 PG 实例超管——历史形态，凭据延用是 #381 的明确决策
+> （dbx 客户端零感知的前提）。接入契约的「分片凭据」面向后续接入服务；平台自身降权
+> （经 `ensure-db-user.sh` 建低权账号、改 `SPRING_DATASOURCE_USERNAME/PASSWORD`）不在
+> 本批范围，另票。
+
 **⑥ 平台按新契约重起**——一条 release.sh 收掉剩余全部（等价手动流程见部署文档 §6/§7）：
 
 ```bash
@@ -153,10 +168,17 @@ deploy/release.sh
 
 ## 4. 回退路径
 
-任一校验点不过，按此回退；**数据零风险**——新 infra 全程只用新卷，旧卷只读未动。
+任一校验点不过，按此回退。**代价声明**：旧卷全程只读未动，平台存量数据零损失；
+放弃的仅是窗口内新卷上的新增写入（⑥ 后失败才可能存在——后端启动触发的 Flyway
+增量、冒烟产生的访客数据），重试窗口重新产生或从 §1 的 pg_dump 恢复。
 
 ```bash
-# ① 停新栈（external 卷 down 不删；新栈数据与旧栈互不可见，无交叉污染）
+# 前置判断：失败发生在 ⑥ 之前还是之后
+#  · ⑥ 之前：~/aiplatform 的 deploy/ 还是旧形态，直接从 ① 开始
+#  · ⑥ 之后（release.sh 已解包覆盖 deploy/、已删旧网关）：先用 §1 tar 快照恢复旧部署目录
+tar -xzf ~/aiplatform-deploy-backup-pre-infra.tar.gz -C ~
+
+# ① 停新栈（external 卷 down 不删；新旧两栈数据互不可见，无交叉污染）
 cd ~/semgravio-infra && docker compose down
 cd ~/aiplatform
 docker compose -f deploy/server.compose.yml down
@@ -167,24 +189,32 @@ sed -i \
   -e 's|semgravio-pg|aiplatform-postgres|' \
   -e 's|semgravio-redis|aiplatform-redis|' \
   aiplatform-server/.env.production
+# 回退旧代码（仅当 ⑥ 已重建镜像）：docker tag aiplatform-server:ecs-pre-infra aiplatform-server:ecs
+# （web 同法）——之后的 compose up 不带 --build，沿用打回的旧镜像
 
-# ③ 旧 redis 补密码：新后端镜像（#383）对 REDIS_HOST 强制要密码；旧 redis 是纯缓存、
-#    重启即空，加 requirepass 无数据代价——这也正好预演了新形态
-docker rm -f aiplatform-redis
+# ③ 旧基础设施只起 PG/redis 两个服务：embedding 已由新 server compose 管辖且容器
+#    在跑，旧 infra compose 不再 up 它（避免同名互抢）；redis 起来后单独换带密码实例
+docker compose -f deploy/infra.compose.yml up -d postgres redis
+docker rm -f aiplatform-redis   # 换 requirepass 实例：纯缓存、重启即空，无数据代价
 docker run -d --name aiplatform-redis --restart unless-stopped \
-  --network webnet redis:7-alpine redis-server --requirepass <REDIS_PASSWORD> --save "" --appendonly no
+  --network webnet redis:7-alpine \
+  redis-server --requirepass <REDIS_PASSWORD> --save "" --appendonly no
+# ⚠ 此后手工 redis 实例与旧 infra compose 的 redis 服务同名——回退期勿再对该 compose
+#   整项目 up/down（会按无密码声明重建它）；旧形态随重试窗口成功即整体淘汰
 
-# ④ 旧栈起回（compose 文件仍在盘上；窗口前 tar 快照是干净正本）
-docker compose -f deploy/infra.compose.yml up -d
-docker compose -f deploy/server.compose.yml up -d
-docker compose -f deploy/web.compose.yml up -d
+# ④ 预览网关：⑥ 之前失败则容器还在（docker start aiplatform-gateway 若曾被 stop）；
+#    ⑥ 之后失败已被 release.sh 移除——按 §1 留底的 ~/gateway-backup.json 手工重建
+#    （旧形态网关＝compose 之外的手工 docker run，bind-mount inode 坑随它回来，回退期忍之）
 
-# ⑤ 旧形态冒烟：server.sh smoke（容器名自适应，新旧名都认）＋浏览器抽查
+# ⑤ 旧形态冒烟（裸 curl 三项，不经 server.sh smoke——它的口径是共享 nginx 新形态）：
+curl -s -o /dev/null -w "%{http_code}\n" -H "Host: <域名>" http://localhost/            # 主站 200（旧网关 default_server 应答）
+curl -s -o /dev/null -w "%{http_code}\n" -H "Host: <域名>" http://localhost/api/projects # 401
+curl -s -i -H "Host: 9876543210.preview.<域名>" http://localhost/ | grep -E 'HTTP/|系统暂不可用'
 ```
 
-回退后原状恢复（域名/端口/安全组从未动过）。排障定性：新栈 conf/网络问题查
+回退后对外形态原样（域名/端口/安全组从未动过）。排障定性：新栈 conf/网络问题查
 `docker logs semgravio-nginx`＋`docker compose ps`；数据疑问直接对旧卷再跑一遍
-§2② 的文件级比对。修复后择新窗口重跑 §2，§1 前置减半（备份与快照已在）。
+§2② 的文件级比对。修复后择新窗口重跑 §2，§1 前置减半（备份/快照/留底已在）。
 
 ## 5. 窗口后收尾
 

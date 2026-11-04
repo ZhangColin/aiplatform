@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.base.workspace.domain.port;
 
 import java.net.URI;
+import java.time.LocalDateTime;
 import java.util.Collection;
 
 import com.cartisan.core.stereotype.Port;
@@ -190,4 +191,23 @@ public interface EnvironmentBackend {
      * 之外按命名扫清。返回清扫数。
      */
     int sweepSnapshotContainersExcept(Collection<String> keepContainerNames);
+
+    /**
+     * 清扫无主工作区容器（#179 触发器，运行期孤儿兜底）：「记录照删、物理尽力而为」
+     * 的销毁（{@link #destroyWorkspace} 撞 daemon 抖动窗）会把容器留在 Docker 侧
+     * 而库中无记录——休眠扫描只遍历注册表，孤儿永久不可见、永不休眠。按命名扫清
+     * 在跑的 {@code ws-<id>} 主容器（保留集 = 注册表全量编号；快照容器
+     * {@code ws-*-snap-*} 归 {@link #sweepSnapshotContainersExcept}，不在本面）。
+     * 只动启动时刻早于宽限线的容器——新建资源可能尚在「容器已建、记录未落」窗口
+     * （fork 先建容器后落记录），误杀窗口内容器＝杀在途 run。
+     *
+     * <p>卷刻意不在本清扫范围：无主卷可能仍承载用户数据，处置归人工/脚本口径
+     * （clean-ws-residue.sh）。
+     *
+     * @param keepWorkspaceIds 注册表全量工作区编号（保留集，含非 DEV 行）
+     * @param startedBefore    宽限线：启动时刻早于本线的无主容器才删（调用方时钟）
+     * @return 清扫数
+     */
+    int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
+            LocalDateTime startedBefore);
 }

@@ -2,7 +2,9 @@ package com.semgravio.aiplatform.base.workspace.application;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -58,6 +60,13 @@ public class WorkspaceHibernationAppService {
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceProperties properties;
 
+    /**
+     * 孤儿容器清扫宽限（#179 触发器）：新建资源可能尚在「容器已建、记录未落」窗口
+     * （fork 先建容器后落记录），早于「本轮时刻减本宽限」启动的无主容器才删——
+     * 与 clean-ws-residue.sh 的 GRACE_MINUTES 同口径（10 分钟）。
+     */
+    private static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
+
     public WorkspaceHibernationAppService(EnvironmentBackend environmentBackend,
             WorkspaceRepository workspaceRepository,
             WorkspaceConvergenceAppService convergence,
@@ -74,7 +83,9 @@ public class WorkspaceHibernationAppService {
 
     /**
      * 单轮扫描（定时器与启动对账直调；测试直调不等真实定时）：遍历全部工作区逐个
-     * 收敛，返回动作数（观测/日志用）。单条异常不炸整轮（尽力而为，下轮再试）。
+     * 收敛，返回动作数（观测/日志用）；每轮末尾顺带无主容器清扫（#179 触发器——
+     * 销毁「记录照删、物理尽力而为」撞 daemon 抖动窗的泄漏，休眠面只看注册表，
+     * 无主容器永久不可见）。单条异常不炸整轮（尽力而为，下轮再试）。
      * 总开关（{@link WorkspaceProperties#isHibernationEnabled()}）由本入口自持
      * （#197）：关闭即静默返回——业务侧调度器不再跨域读此开关，只把消费方事实
      * 随扫描递入。
@@ -86,7 +97,9 @@ public class WorkspaceHibernationAppService {
         Duration threshold = properties.getIdleThreshold();
         Duration sealThreshold = properties.getSealThreshold();
         int acted = 0;
+        Set<Long> registeredIds = new HashSet<>();
         for (Workspace workspace : workspaceRepository.findAll()) {
+            registeredIds.add(workspace.getId());
             if (workspace.getKind() != EnvKind.DEV
                     || workspace.getStatus() == ProvisioningStatus.PROVISIONING) {
                 continue;   // 非 DEV 不入休眠面（TEST/PROD 占位）；在途置备/唤醒不扰
@@ -101,7 +114,25 @@ public class WorkspaceHibernationAppService {
                         workspace.workspaceId().value(), e);
             }
         }
+        sweepOrphanContainers(registeredIds, now);
         return acted;
+    }
+
+    /**
+     * 孤儿容器清扫（#179 触发器）：保留集 = 本轮注册表全量编号（含非 DEV 行——保留
+     * 集只看「容器有没有主」，与休眠判定无关）；宽限线 = 本轮时刻减 {@link
+     * #ORPHAN_SWEEP_GRACE}。尽力而为：单轮失败记日志，下轮再收。
+     */
+    private void sweepOrphanContainers(Set<Long> registeredIds, LocalDateTime now) {
+        try {
+            int swept = environmentBackend.sweepOrphanWorkspaceContainers(
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
+            if (swept > 0) {
+                log.info("[workspace] 孤儿容器清扫：{} 个在跑容器库无记录已删（卷保留）", swept);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[workspace] 孤儿容器清扫未成（下轮再试）", e);
+        }
     }
 
     /** 单工作区收敛（分支次序见类注释）；返回是否发生动作。 */

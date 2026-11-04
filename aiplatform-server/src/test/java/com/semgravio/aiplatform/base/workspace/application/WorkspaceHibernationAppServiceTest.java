@@ -30,6 +30,7 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
@@ -233,6 +234,41 @@ class WorkspaceHibernationAppServiceTest {
         // 删容器失败不让意图翻（翻了下轮不再重试删）：保持 RUNNING，下轮收敛
         assertThat(acted).isZero();
         verify(workspaceRepository, never()).save(any(Workspace.class));
+    }
+
+    // ---------- 无主容器清扫（#179 触发器） ----------
+
+    @Test
+    void given_scan_round_when_finished_then_sweeps_orphan_containers_with_registered_keep_set() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusMinutes(10));
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.RUNNING);
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // 保留集 = 注册表全量编号；宽限线 = 本轮时刻减 10 分钟（fork「先建容器、
+        // 后落记录」窗口保护，与 clean-ws-residue.sh GRACE_MINUTES 同口径）
+        verify(environmentBackend).sweepOrphanWorkspaceContainers(
+                argThat(ids -> ids.size() == 1 && ids.contains(42L)),
+                eq(NOW.minusMinutes(10)));
+    }
+
+    @Test
+    void given_orphan_sweep_failure_when_scan_then_round_survives_for_next_round() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusMinutes(10));
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.RUNNING);
+        doThrow(new RuntimeException("daemon down"))
+                .when(environmentBackend).sweepOrphanWorkspaceContainers(any(), any());
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 清扫尽力而为：单轮失败不炸整轮，休眠收口照常计数
+        assertThat(acted).isZero();
     }
 
     // ---------- 封存（#172） ----------

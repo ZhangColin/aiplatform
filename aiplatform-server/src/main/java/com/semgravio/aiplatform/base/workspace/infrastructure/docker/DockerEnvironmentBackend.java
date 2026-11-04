@@ -8,11 +8,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -94,6 +101,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     private static final String SNAPSHOT_DATA = "/tmp/snapdata";
     /** 容器内 pg 二进制目录（与 init-workspace.sh 同源——镜像 postgresql-15）。 */
     private static final String PG_BIN = "/usr/lib/postgresql/15/bin";
+
+    /**
+     * 主工作区容器命名形（^ws-<id>$，与 {@link WorkspaceNaming#containerName} 同源）：
+     * 孤儿清扫只认全名主容器——快照容器（ws-*-snap-*）带后缀不在本面；fork 也是
+     * 全名，但 fork 行在库即在保留集。
+     */
+    private static final Pattern MAIN_CONTAINER_NAME = Pattern.compile("^ws-(\\d+)$");
 
     /** 预览基域名（#128）：URL 子域 {@code {id}.{previewBase}} 的基域名，开发 localhost。 */
     @Value("${app.workspace.preview-base:localhost}")
@@ -577,6 +591,75 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             }
         }
         return removed;
+    }
+
+    @Override
+    public int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
+            LocalDateTime startedBefore) {
+        // #179 触发器：销毁「记录照删、物理尽力而为」撞 daemon 抖动窗时，容器留在
+        // Docker 侧而库中无记录——休眠扫描只遍历注册表，孤儿永久不可见（clean-ws-
+        // residue.sh 注释的同源口径）。只扫在跑容器（docker ps 默认面）；宽限线外
+        // 才动手（fork「先建容器、后落记录」窗口保护）；卷不删（无主卷可能仍承载
+        // 用户数据，人工/脚本处置）
+        ExecResult listed = runCapture("docker", "ps", "--format", "{{.Names}}");
+        Set<Long> keep = new HashSet<>(keepWorkspaceIds);
+        List<String> candidates = listed.stdout().lines().map(String::trim)
+                .flatMap(name -> {
+                    Matcher matcher = MAIN_CONTAINER_NAME.matcher(name);
+                    return matcher.matches()
+                            && !keep.contains(Long.parseLong(matcher.group(1)))
+                                    ? Stream.of(name)
+                                    : Stream.empty();
+                })
+                .toList();
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+        // 批量取启动时刻判宽限（单次 inspect；候选在 ps 与 inspect 之间消失时 docker
+        // 把该对象的错误点名列 stderr、stdout 照旧只含拿到的——defensive 解析即可）
+        String[] inspect = Stream.concat(Stream.of(
+                "docker", "inspect", "--format", "{{.Name}}|{{.State.StartedAt}}"),
+                candidates.stream()).toArray(String[]::new);
+        ExecResult inspected = runCapture(inspect);
+        int removed = 0;
+        for (String line : inspected.stdout().lines().map(String::trim)
+                .filter(l -> !l.isEmpty()).toList()) {
+            int sep = line.indexOf('|');
+            if (sep <= 1) {
+                continue;   // 无 Name 前缀斜杠的畸形行不碰（宁可漏删）
+            }
+            Instant started = parseDockerTimestamp(line.substring(sep + 1));
+            String name = line.substring(1, sep);
+            if (started != null && started.atZone(ZoneId.systemDefault()).toLocalDateTime()
+                    .isBefore(startedBefore)) {
+                runSilently("docker", "rm", "-f", name);
+                removed++;
+                log.info("[workspace] 无主容器已清（库无记录，卷保留）：{}", name);
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * 解析 docker inspect 的 RFC3339Nano 时刻（{@code 2026-11-03T14:33:31.5Z}；
+     * fraction 段为零时 Go 省略点号，故可有可无）。解析不出返回 null——无从判
+     * 宽限时本轮放过（宁可漏删，不误杀可能尚在「容器已建、记录未落」窗的新建资源）。
+     */
+    private static Instant parseDockerTimestamp(String raw) {
+        try {
+            String s = raw.trim();
+            int dot = s.indexOf('.');
+            if (dot >= 0) {
+                int zone = s.indexOf('Z', dot);
+                if (zone < 0) {
+                    zone = s.indexOf('+', dot);
+                }
+                s = s.substring(0, dot) + (zone >= 0 ? s.substring(zone) : "");
+            }
+            return Instant.parse(s);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     // ---------- dev 环境内部 ----------

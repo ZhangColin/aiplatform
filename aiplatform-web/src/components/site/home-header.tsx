@@ -5,7 +5,6 @@ import Link from "next/link";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { OsMark } from "@/components/brand/os-mark";
 import {
-  SaveProjectButton,
   SaveStatusPill,
   TopbarAvatar,
 } from "@/components/shell/global-topbar";
@@ -18,7 +17,8 @@ import { recentProjects } from "@/lib/projects/list";
  * 首页顶栏（#345，spec #320 ⑥「首页无侧栏、顶栏照首页形」）：品牌位（圆底 logo
  * ＋「语义引力」＋ OS 徽标＋「Semantic Gravity · Delivery OS」副行，照原型首页
  * 顶栏，与侧栏品牌头 DELIVERY PIPELINE 形分属两处）＋五行导航（首页＋四阶段）＋
- * 保存状态胶囊/「我的项目」/「保存项目」/头像（访客＝「登录」文字入口，与项目
+ * 保存状态胶囊/「我的项目」/头像（访客＝「登录」文字入口——「保存项目」入口
+ * 已并入「登录」；与项目
  * 空间顶栏 #343 同源件复用）。首页无项目上下文：阶段导航指向最近项目的阶段页
  * （有则指过去，无则回首页）。
  *
@@ -83,7 +83,6 @@ export function HomeHeader({ credentialPresent }: { credentialPresent: boolean }
         >
           我的项目
         </Link>
-        <SaveProjectButton />
         <TopbarAvatar meEnabled={credentialPresent} />
       </div>
     </header>

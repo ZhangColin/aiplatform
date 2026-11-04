@@ -8,8 +8,9 @@ import { useM01Store } from "@/lib/store/m01";
 import { GlobalTopbar } from "./global-topbar";
 
 // 顶栏访客态登录入口的交互契约（#377）：点「登录」开 M01 验证码弹窗（来路
-// topbar-login、无续跑回调——与保存项目/签约门的续跑语义区分），全程不离开
-// 平台（渲染面不出 OIDC 302 目标）；已登录态照旧出账号菜单、无登录入口。
+// topbar-login、无续跑回调——区别于签约门的续跑语义；原「保存项目」入口已
+// 并入此处），全程不离开平台（渲染面不出 OIDC 302 目标）；已登录态照旧出账号
+// 菜单、无登录入口。
 
 const meSeed = vi.hoisted(() => ({ me: undefined as object | undefined }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1" }));

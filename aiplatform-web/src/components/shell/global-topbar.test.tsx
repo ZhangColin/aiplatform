@@ -15,9 +15,9 @@ vi.mock("@/hooks/use-me", () => ({
 /**
  * 全局顶栏渲染契约（#343，spec #320 ⑥ / #318 全局壳重建·顶栏）：照原型
  * 全量——五行导航（与侧栏重复亦保留，原型如此设计）＋保存状态胶囊（真实
- * 三态，缺省已保存）＋「我的项目」＋「保存项目」＋头像（访客态＝「登录」
- * 入口、#377 切 M01 验证码弹窗）。话术逐字照原型；开弹窗交互归
- * global-topbar.interaction.test。
+ * 三态，缺省已保存）＋「我的项目」＋头像（访客态＝「登录」入口、#377 切 M01
+ * 验证码弹窗；原「保存项目」按钮已删——与「登录」同开 M01 成同义入口）。
+ * 话术逐字照原型；开弹窗交互归 global-topbar.interaction.test。
  */
 
 /** 门全关（今日真实投影）：仅需求分析可达。 */
@@ -56,14 +56,15 @@ describe("GlobalTopbar（项目空间新壳·顶栏）", () => {
     expect(html).toContain("浏览器已自动保存 · 绑定可跨设备");
   });
 
-  it("「我的项目」→ /projects；「保存项目」在场（触发 M01 归 interaction 断言）", () => {
+  it("「我的项目」→ /projects；「保存项目」不在场（已并入「登录」——#377 后同义入口合一）", () => {
     const html = renderTopbar();
     expect(html).toContain("我的项目");
     expect(html).toContain('href="/projects"');
-    expect(html).toContain("保存项目");
+    expect(html).not.toContain("保存项目");
   });
 
   it("已登录＝头像（个人菜单迁入顶栏）；不残留旧侧栏词", () => {
+    meSeed.me = { displayName: "测试用户" };
     const html = renderTopbar();
     expect(html).toContain('aria-label="个人菜单"');
     expect(html).not.toContain("新建项目");

@@ -10,9 +10,10 @@ import { useVersionRecordStore } from "@/lib/store/version-record";
 import { ProjectSpaceShell } from "./project-space-shell";
 
 // 壳装配的交互面（#343）：灰置点击说明原因、保存胶囊三态（store 真实转移）、
-// 「保存项目」→M01 触发挂点、五行导航与侧栏的阶段重复面；#344 增「版本记录」
-// 抽屉挂载＋顶栏挂点。项目详情桩＝门全关（今日真实投影：PRD/Demo 确认机制
-// 未落地）；登录态桩＝已登录。
+// 五行导航与侧栏的阶段重复面；#344 增「版本记录」抽屉挂载＋顶栏挂点。项目
+// 详情桩＝门全关（今日真实投影：PRD/Demo 确认机制未落地）；登录态桩＝已登录
+// （顶栏访客「登录」入口交互归 global-topbar.interaction；原「保存项目」入口
+// 已并入「登录」）。
 
 const seed = vi.hoisted(() => ({
   detail: {} as ProjectDetail,
@@ -99,7 +100,6 @@ describe("ProjectSpaceShell · 保存状态胶囊三态（store 真实转移）"
     mountShell();
     expect(screen.getByText("浏览器已自动保存 · 绑定可跨设备")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "保存项目" })); // 顺带：触发 M01
     // 保存中（#326 接线方在保存动作处转移——此处直接以写面驱动，胶囊读态即换）
     useSaveStateStore.getState().markSaving();
     expect(await screen.findByText("保存中…")).toBeTruthy();
@@ -109,16 +109,6 @@ describe("ProjectSpaceShell · 保存状态胶囊三态（store 真实转移）"
     // 回落已保存
     useSaveStateStore.getState().markSaved();
     expect(await screen.findByText("浏览器已自动保存 · 绑定可跨设备")).toBeTruthy();
-  });
-});
-
-describe("ProjectSpaceShell · 「保存项目」触发 M01（挂点）", () => {
-  it("点击即开 M01、trigger 记来路 save-project", () => {
-    mountShell();
-    expect(useM01Store.getState().open).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "保存项目" }));
-    expect(useM01Store.getState().open).toBe(true);
-    expect(useM01Store.getState().trigger).toBe("save-project");
   });
 });
 

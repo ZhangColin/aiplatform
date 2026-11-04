@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Menu, Save } from "lucide-react";
+import { History, Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -20,8 +20,10 @@ import { cn } from "@/lib/utils";
 /**
  * 全局顶栏（#343，spec #320 ⑥ 全局壳重建，照原型全量）：五行导航（首页＋
  * 四阶段——与侧栏重复亦保留，原型如此设计）＋保存状态胶囊（真实三态）＋
- * 「我的项目」＋「保存项目」（触发 M01）＋头像（访客态＝「登录」入口、开 M01
- * 验证码弹窗（#377）；个人菜单自旧侧栏迁入）。可达性判定输入与侧栏同源（壳装配层单点推导）。
+ * 「我的项目」＋头像（访客态＝「登录」入口、开 M01 验证码弹窗（#377）；个人
+ * 菜单自旧侧栏迁入）。可达性判定输入与侧栏同源（壳装配层单点推导）。「保存
+ * 项目」按钮已删——#377 登录切 M01 后两入口同开一弹窗成同义入口，合一为
+ * 「登录」（保存卖点由胶囊「绑定可跨设备」与弹窗文案承载）。
  * 「版本记录」（#344，交接包 §5.2 要求、原型未画→补建）＝版本记录抽屉的
  * 顶栏挂点——与 Demo 版本 chip 同一抽屉（store 开合契约）。
  */
@@ -104,7 +106,6 @@ export function GlobalTopbar({
           我的项目
         </Link>
         <VersionRecordButton />
-        <SaveProjectButton />
         <TopbarAvatar />
       </div>
     </header>
@@ -153,23 +154,6 @@ export function VersionRecordButton() {
     >
       <History className="size-4 text-ink-faint" aria-hidden="true" />
       版本记录
-    </Button>
-  );
-}
-
-/** 「保存项目」（照原型）——M01 登录与项目绑定弹窗的触发挂点（#327/#328 消费）。 */
-export function SaveProjectButton() {
-  const openM01 = useM01Store((s) => s.openM01);
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="h-8 gap-1.5 rounded-lg text-label-md font-medium"
-      onClick={() => openM01("save-project")}
-    >
-      <Save className="size-4 text-ink-faint" aria-hidden="true" />
-      保存项目
     </Button>
   );
 }

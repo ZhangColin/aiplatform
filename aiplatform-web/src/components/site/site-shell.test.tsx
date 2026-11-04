@@ -68,9 +68,9 @@ describe("SiteShell · 项目空间分流（#343：/projects/[id] 及阶段子�
   it("/projects/[id]：阶段侧栏＋全局顶栏在场，旧侧栏件不在", () => {
     pathSeed.path = "/projects/p1";
     const html = renderToStaticMarkup(<SiteShell>x</SiteShell>);
-    // 新壳两件
+    // 新壳两件（顶栏以「版本记录」锚——原「保存项目」按钮已删、并入「登录」入口）
     expect(html).toContain("交付生命周期阶段");
-    expect(html).toContain("保存项目");
+    expect(html).toContain("版本记录");
     expect(html).toContain("调度引擎状态");
     // 旧壳四件去向（能做这些删/历史项目迁/新建项目＝品牌头回首页）
     expect(html).not.toContain("能做这些");

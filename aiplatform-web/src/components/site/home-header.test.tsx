@@ -6,8 +6,8 @@ import { HomeHeader } from "./home-header";
 /**
  * 首页顶栏渲染契约（#345，spec #320 ⑥ 全局壳·首页无侧栏、顶栏照首页形）：品牌
  * 位（圆底 logo +「语义引力」+ OS 徽标 +「Semantic Gravity · Delivery OS」副行）
- * + 五行导航（首页＋四阶段）＋保存状态胶囊/「我的项目」/「保存项目」/头像
- * （访客＝「登录」）。首页无项目上下文：阶段导航指向最近项目的阶段页（无则回首页）。
+ * + 五行导航（首页＋四阶段）＋保存状态胶囊/「我的项目」/头像（访客＝「登录」
+ * ——原「保存项目」入口已并入）。首页无项目上下文：阶段导航指向最近项目的阶段页（无则回首页）。
  */
 
 const seed = vi.hoisted(() => ({
@@ -46,12 +46,12 @@ describe("HomeHeader（首页顶栏·照首页形）", () => {
     expect(html).toContain('aria-current="page"');
   });
 
-  it("右侧状态与动作照原型：保存胶囊 + 我的项目 + 保存项目 + 访客登录入口", () => {
+  it("右侧状态与动作照原型：保存胶囊 + 我的项目 + 访客登录入口（「保存项目」已并入「登录」）", () => {
     const html = renderToStaticMarkup(<HomeHeader credentialPresent />);
     expect(html).toContain("浏览器已自动保存 · 绑定可跨设备");
     expect(html).toContain("我的项目");
     expect(html).toContain('href="/projects"');
-    expect(html).toContain("保存项目");
+    expect(html).not.toContain("保存项目");
     expect(html).toContain("登录");
   });
 

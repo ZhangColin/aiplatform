@@ -26,9 +26,9 @@ cartisan:
     self:
       api-key: ${OPENAPI_APP_ID:}
       api-secret: ${OPENAPI_APP_SECRET:}
-    # 入站验签的凭据源（app-registry）——prod 走网关域名（路由即鉴权边界）；
-    # local 覆盖为本机 app-registry bootstrap 端点（见 application-local.yml）
-    apikey-service-url: http://localhost:8088/api/app-registry/api-keys/{apiKey}
+    # 入站验签的凭据源在 application.yml 以 APP_REGISTRY_BASE_URL 注入（缺省即本机
+    # bootstrap 端点），此处无需覆盖
+
 
 
 # 片3 · base.knowledge：本机 fastembed embedding 服务（512 维），

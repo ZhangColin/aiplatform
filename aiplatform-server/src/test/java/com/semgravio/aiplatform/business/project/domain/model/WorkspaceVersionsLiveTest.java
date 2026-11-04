@@ -7,6 +7,7 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -23,6 +24,7 @@ import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvir
  * （带 Run-Id trailer）；容器销毁重建 → 版本历史不丢（.git 落卷内）；.git 不进
  * 源码包（非交付名单单一事实）。daemon 不在则跳过（CI 无 docker 时不红）。
  */
+@Tag("live")
 class WorkspaceVersionsLiveTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 360;

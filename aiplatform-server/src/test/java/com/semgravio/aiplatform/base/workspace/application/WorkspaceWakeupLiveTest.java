@@ -5,6 +5,7 @@ import java.time.Duration;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 未生成路径（无起服入口）唤醒后不拉应用、预览保持未生成口径。daemon 不在本机时跳过。
  */
 @IntegrationTest
+@Tag("live")
 class WorkspaceWakeupLiveTest {
 
     /** 等待唤醒收敛的上界：重建（容器+中间件 ~20s）+ 应用拉起探活（60s 窗）。 */

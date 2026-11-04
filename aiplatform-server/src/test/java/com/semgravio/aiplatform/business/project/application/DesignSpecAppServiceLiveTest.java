@@ -9,6 +9,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * key；「执行体真按协议写 :root／修违规」的活体走查归用户（绿测≠能跑）。
  */
 @IntegrationTest
+@Tag("live")
 class DesignSpecAppServiceLiveTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 600;

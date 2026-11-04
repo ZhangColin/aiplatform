@@ -8,6 +8,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * daemon 不在本机时跳过。
  */
 @IntegrationTest
+@Tag("live")
 class WorkspaceSealLiveTest {
 
     /** 深度唤醒收敛上界：解包 + 重建 + pnpm install（冷链路全量下载）+ dev 起服。 */

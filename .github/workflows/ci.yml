@@ -1,0 +1,52 @@
+# CI 门禁（#389 retro）：fast lane 全量测试——live 车道已由 surefire
+# excludedGroups 默认排除（-P live 才纳入，见 aiplatform-server/pom.xml），
+# 本工作流只跑常绿面。库/凭据与 local+test profile 同名同密（postgres/truth/
+# aiplatform_test），测试代码零改动直连 service 容器；redis 服务无密码，
+# 用环境变量清掉 local profile 的 truth（环境变量优先级高于 profile yml）。
+# 依赖本机服务面的用例（embedding 9091/agentscope 等）在 CI 缺席时经
+# assumeTrue 自跳（各测试类既有口径），缺席不红。
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: truth
+          POSTGRES_DB: aiplatform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SPRING_DATA_REDIS_PASSWORD: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Run tests
+        working-directory: aiplatform-server
+        run: mvn -B -ntp test

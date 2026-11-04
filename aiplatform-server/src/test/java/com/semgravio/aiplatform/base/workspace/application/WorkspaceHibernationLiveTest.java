@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 不在本机时跳过。
  */
 @IntegrationTest
+@Tag("live")
 class WorkspaceHibernationLiveTest {
 
     /** 等待唤醒收敛的上界（重建容器 + 中间件就绪）。 */

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.enums.MiddlewareKind;
@@ -36,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * .env 注入 → exec → exposePort → 销毁级联；容器销毁重建数据不丢（ADR 0001）。
  * daemon 不在则跳过（CI 无 docker 时不红）。
  */
+@Tag("live")
 class DockerEnvironmentBackendTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 360;

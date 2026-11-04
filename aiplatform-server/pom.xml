@@ -174,6 +174,10 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>--enable-preview --add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+                    <!-- live 车道默认排除（#389 retro）：依赖本机 docker daemon/真容器/
+                         渲染二进制的活体用例（*LiveTest＋docker 包 daemon 依赖类）本机与
+                         CI 皆非常绿，混在默认门禁里＝每轮全量都要法证分离环境红。-P live 纳入 -->
+                    <excludedGroups>live</excludedGroups>
                 </configuration>
             </plugin>
             <plugin>
@@ -216,4 +220,24 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- live 车道（#389 retro）：mvn test -P live 才纳入活体用例（默认
+             excludedGroups 排除，见 surefire 配置）。本机 daemon 在时的环境性
+             红（SVG 解析/容器探针/网关）属常态，此车道不作门禁只作手验。 -->
+        <profile>
+            <id>live</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <excludedGroups combine.self="override"/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

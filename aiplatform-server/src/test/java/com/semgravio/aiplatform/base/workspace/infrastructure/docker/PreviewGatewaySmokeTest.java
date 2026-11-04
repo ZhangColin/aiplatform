@@ -10,6 +10,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
@@ -42,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 5xx 原样透传不被提示页替换（不开响应拦截）。自恢复脚本的浏览器轮询→重载
  * 行为不在自动化射程，走 #184 亲手联调。
  */
+@Tag("live")
 class PreviewGatewaySmokeTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 360;

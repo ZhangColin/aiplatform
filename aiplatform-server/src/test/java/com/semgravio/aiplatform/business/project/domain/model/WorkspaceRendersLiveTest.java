@@ -10,6 +10,7 @@ import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 1。daemon 不在则跳过（CI 无 docker 时不红）；「与浏览器呈现保真」的人眼活体
  * 走查归用户（绿测≠能跑）。
  */
+@Tag("live")
 class WorkspaceRendersLiveTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 600;

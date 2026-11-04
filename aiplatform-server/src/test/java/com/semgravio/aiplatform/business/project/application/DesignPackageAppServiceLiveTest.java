@@ -7,6 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 「用户确认下单后拿到包」的活体走查归用户（绿测≠能跑）。
  */
 @IntegrationTest
+@Tag("live")
 class DesignPackageAppServiceLiveTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 600;

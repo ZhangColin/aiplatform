@@ -22,7 +22,8 @@ AI 开发平台后端：`base` 底座（workspace/eventhub/knowledge/metering/sk
 ## 常用命令
 
 - 编译：`mvn compile`
-- 单元测试：`mvn test`
+- 单元测试：`mvn test`（fast lane ~4 分钟常绿门禁——live 车道已默认排除，全量结果可信；CI 同口径见 `.github/workflows/ci.yml`）
+- 活体用例：`mvn test -P live`（依赖本机 docker daemon/渲染二进制的 `@Tag("live")` 类；本机环境性红属常态，不作门禁只作手验）
 - 打包：`mvn package -DskipTests`
 - 变异测试：`mvn org.pitest:pitest-maven:mutationCoverage`
 

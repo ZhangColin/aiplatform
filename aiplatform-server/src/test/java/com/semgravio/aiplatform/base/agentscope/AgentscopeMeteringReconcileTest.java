@@ -115,12 +115,13 @@ class AgentscopeMeteringReconcileTest {
 
         List<UsageEvent> events = reportedEvents(2);
         assertThat(events).hasSize(2);
-        assertThat(events.get(0).eventId()).isEqualTo("agent-usage-run-1-1");
-        assertThat(events.get(0).tokens().input()).isEqualTo(100);
-        assertThat(events.get(0).tokens().output()).isEqualTo(40);
-        assertThat(events.get(1).eventId()).isEqualTo("agent-usage-run-1-2");
-        assertThat(events.get(1).tokens().input()).isEqualTo(60);
-        assertThat(events.get(1).tokens().output()).isEqualTo(30);
+        // 序号按收口顺序分配、不钉与流序的配对（run-2 例既定口径——收口腿在
+        // 模型信号线程上异步 hop，慢机热 JVM 下可倒序落地，#380 同源；对账核
+        // 全量条数、逐流用量与幂等键集合，配对不属契约面）
+        assertThat(events).extracting(UsageEvent::eventId)
+                .containsExactlyInAnyOrder("agent-usage-run-1-1", "agent-usage-run-1-2");
+        assertThat(events).extracting(e -> e.tokens().input() + "/" + e.tokens().output())
+                .containsExactlyInAnyOrder("100/40", "60/30");
         assertThat(events).allMatch(e -> "prj-1".equals(e.subject()));
         assertThat(events).allMatch(e -> "run-1".equals(e.runId()));
     }

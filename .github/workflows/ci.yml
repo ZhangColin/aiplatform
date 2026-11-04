@@ -42,11 +42,20 @@ jobs:
       SPRING_DATA_REDIS_PASSWORD: ""
     steps:
       - uses: actions/checkout@v4
+      # 框架 parent（com.cartisan:cartisan-boot:0.1.0-SNAPSHOT）从不发布远程仓库，
+      # 本机走源码 local-install——CI 同口径：同账号公开仓 checkout 后装进 .m2。
+      # 跟 main：两仓同步演进，框架漂移由本门禁如实暴露
+      - uses: actions/checkout@v4
+        with:
+          repository: ZhangColin/cartisan-boot
+          path: cartisan-boot
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
           cache: maven
+      - name: Install cartisan-boot
+        run: mvn -B -ntp -f cartisan-boot/pom.xml install -DskipTests
       - name: Run tests
         working-directory: aiplatform-server
         run: mvn -B -ntp test

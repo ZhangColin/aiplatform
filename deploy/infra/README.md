@@ -34,7 +34,7 @@ nginx＋pgsql＋redis 三件套，**自包含、整目录可拷走单独用**（
 
 | 组件 | 形态 |
 |---|---|
-| **pgsql**（`semgravio-pg`） | pgvector/pgvector **0.8.7**-pg16（pin 精确版本，与 eu-1 现网一致）；超管 `aiplatform` 延用现值；数据卷 **external 固定名 `semgravio_pgdata`**（`down` 不删、与项目名解耦）；绑宿主**回环 5432**（SSH 隧道直连本地 dbx 客户端，用法见 `docs/deploy/prod-db-access.md`，安全组不放行）。**不预建服务库**——各服务接入时经建号 helper 自建（#384），既有库原样延用。 |
+| **pgsql**（`semgravio-pg`） | pgvector/pgvector **0.8.7**-pg16（pin 精确版本，与 eu-1 现网一致）；超管 `aiplatform` 延用现值；数据卷 **external 固定名 `semgravio_pgdata`**（`down` 不删、与项目名解耦）；绑宿主**回环 5432**（SSH 隧道直连本地 dbx 客户端，用法见 `docs/deploy/prod-db-access.md`，安全组不放行）。**不预建服务库**——各服务接入时经 `ensure-db-user.sh` 自建（见「建库建号」节），既有库原样延用。 |
 | **redis**（`semgravio-redis`） | redis **7.4.12**-alpine；`requirepass` 启用（行为变化，后端配置项见 #383）；绑宿主**回环 6379**；**仅缓存用途：持久化全关（`--save ""` `--appendonly no`），重启/重建即空，需要持久 kv 的服务不要依赖它**。compose 不声明任何持久卷（镜像自带 `VOLUME /data` 声明产生的匿名卷是 docker 行为，不写入任何数据、`docker compose down` 一并回收）。 |
 | **nginx**（`semgravio-nginx`） | nginx **1.30.6**-alpine；绑宿主 **80/443**（唯一对外口）；双挂 `webnet`＋`previewnet`——跨网路由只在此容器发生（沙箱不可信负载经 nginx 出网、触达不了 pg/redis）。`nginx/nginx.conf` 主体归 infra；服务配置走 `conf.d/`＋`certs/`（见契约）。 |
 
@@ -51,13 +51,65 @@ nginx＋pgsql＋redis 三件套，**自包含、整目录可拷走单独用**（
 
 - **入网**：你的服务 compose 里挂 external 网络 `webnet`（容器名即 DNS，直连
   `semgravio-pg:5432` / `semgravio-redis:6379`，不经宿主端口）。
-- **建库建号**：用 infra 的幂等建号 helper（#384，随本目录走）——每服务独立 database
-  ＋低权限角色，只对自己的库有权限；超管凭据不出 infra。
+- **建库建号**：用 infra 的幂等建号 helper `ensure-db-user.sh`（随本目录走，用法与权限
+  边界见下文「建库建号」节）——每服务独立 database ＋低权限角色，只对自己的库有权限；
+  超管凭据不出 infra。
 - **nginx 配置**：恰好两个资产——`nginx/conf.d/<service>.conf` 单文件＋
-  `nginx/certs/<service>/` 证书目录。**必须经门禁脚本安装**（#385：`nginx -t` 通过才
-  reload、失败自动回滚你的文件、`server_name` 冲突即拒）——共享 nginx 是最危险的共享
-  故障点，别让一个服务的坏配置弄挂所有人。
+  `nginx/certs/<service>/` 证书目录。**安装/更新唯一合法通道是门禁脚本
+  `install-nginx-conf.sh`**（用法与裁决语义见下文「nginx 配置安装」节）——共享
+  nginx 是最危险的共享故障点，别让一个服务的坏配置弄挂所有人。
 - 证书：infra 只定目录约定；申请/续期人工 certbot。
+
+### 建库建号：`ensure-db-user.sh`（幂等＋低权限）
+
+接入方一条命令为自己的服务拿到专属 database ＋ 低权限用户：
+
+```bash
+DB_PASSWORD=$(openssl rand -hex 16) ./ensure-db-user.sh <服务名>
+```
+
+- **服务名口径**：`^[a-z][a-z0-9_]{0,30}$`，直接作库名/角色名用（合法 PG 标识符、免引号）。
+  库名＝角色名＝服务名。
+- **幂等（ensure 语义）**：重复执行结果一致——已存在即对齐（角色属性/密码、库属主、
+  权限全部重放），无报错、无重复创建。要跨次结果一致，每次显式携带同一个
+  `DB_PASSWORD`；换新值即是对齐改密（接入方自行发起）。
+- **权限边界**：角色 `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`；库属主＝服务用户，
+  全权支配自己库内的对象；本库 `CONNECT` 对 `PUBLIC` 收回——服务只对**自己名下的库**
+  可连可用，连接其它服务的库直接被拒（`permission denied for database`）。
+  selftest 有两遍幂等＋越库被拒的活断言（phase 4）。
+- **凭据分片口径**：脚本内部以超管执行（`.env` 正本，不经接入方），**stdout 只有**
+  服务自身分片：`DB_HOST=semgravio-pg`（webnet 内 DNS，不经宿主端口）/
+  `DB_PORT=5432`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`。PG 超管凭据不出 infra；
+  redis 密码分片由 infra 运维按 `.env` 正本另行下发（见「凭据模型」）。
+
+### nginx 配置安装：`install-nginx-conf.sh`（门禁——唯一合法通道）
+
+安装或更新你名下的 `conf.d/<service>.conf`（以及可选地装入你名下的证书目录），一律走
+门禁脚本，**不要手工放文件**：
+
+```bash
+./install-nginx-conf.sh <服务名> <conf 文件路径> [证书目录]
+```
+
+- **资产边界**：门禁只写你名下的 `nginx/conf.d/<service>.conf` 与（第三参数给定时）
+  `nginx/certs/<service>/`，绝不触碰其它服务的文件。服务名 `^[a-z][a-z0-9_-]{0,30}$`
+  （比建号 helper 多允 `-`，nginx 惯例名；同名服务还要建库时库名按 helper 口径另行取名）。
+  证书源目录整体拷入名下目录（conf 里 `listen 443 ssl` 的证书路径写
+  `/etc/nginx/certs/<service>/...`，随 conf 一并过 `nginx -t` 校验）。
+- **server_name 撞车即拒**：你的 server_name 与既有**其它**服务配置冲突（通配 `*.` 按
+  单层标签口径比对：单侧通配只挡恰好多一层子域的精确名，双侧通配仅后缀相同才算撞）、
+  或抢占 `default_server`（IP 直访/未匹配域名兜底归 infra `nginx.conf`）——**写文件
+  之前拒绝**，错误信息指明冲突名与占主文件，不留任何痕迹。更新自己名下的文件不受自己
+  旧 server_name 限制。契约按单行写 server_name；多行折行写法撞车检测可能漏检（属契约
+  外用法）。
+- **语法门禁＋自动回滚**：写入后 `nginx -t` 通过才 `reload`；不过自动回滚刚写的文件与
+  证书目录（有旧则还原、无则删除，不留半安装态），nginx 未 reload、存活不受影响，其它
+  服务的路由照常。若写入前基线 `nginx -t` 已不过（他方坏配置先修，与本脚本无关），拒绝
+  进场。
+- **并发口径**：门禁无跨进程锁——同一共享 nginx 的安装操作（含人工改 conf.d）由各
+  服务部署流程自行串行化，`-t` 与 `reload` 之间的竞态只在串行前提下闭合。
+- selftest 有合法生效路由通 / 坏配置回滚且殃及面为零 / 撞车被拒 / 通配口径四组活断言
+  （phase 5）。
 
 ## eu-1 迁移注记（接管式，SOP 详见 docs/deploy）
 

@@ -12,7 +12,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.cartisan.core.exception.ApplicationException;
 
+import com.cartisan.web.request.Pagination;
+import com.cartisan.web.response.PageResponse;
+
 import com.semgravio.aiplatform.IntegrationTest;
+import com.semgravio.aiplatform.business.order.application.dto.response.BackofficeContractSummaryResponse;
 import com.semgravio.aiplatform.business.order.application.dto.response.ContractResponse;
 import com.semgravio.aiplatform.business.order.domain.aggregate.Contract;
 import com.semgravio.aiplatform.business.order.domain.aggregate.Order;
@@ -270,6 +274,25 @@ class ContractAppServiceTest {
         assertThatThrownBy(() -> appService.latestByOrder(order.getId()))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_CONTRACT_NOT_FOUND.message());
+    }
+
+    // ---------- 后台清单读：可空检索维归一（#389 回归——构造期 NPE） ----------
+
+    @Test
+    void given_active_contract_when_list_without_contractNo_then_page_all_not_npe() {
+        confirmedOrder();
+
+        // 无 contractNo（admin 合同页首屏默认形态）与空白串（空输入）都归一为
+        // null＝该维不参与过滤——返回全量而非构造期 NPE 500。此前所有调用面
+        // /测试必传 contractNo 或 mock 掉服务，构造器从未被 null 打过（#389）
+        PageResponse<BackofficeContractSummaryResponse> noFilter =
+                appService.contracts(null, null, null, null, null, new Pagination(1, 20, null));
+        assertThat(noFilter.total()).isEqualTo(1L);
+        assertThat(noFilter.items().get(0).contractNo()).startsWith("SG-");
+
+        PageResponse<BackofficeContractSummaryResponse> blankFilter =
+                appService.contracts(null, null, null, null, "  ", new Pagination(1, 20, null));
+        assertThat(blankFilter.total()).isEqualTo(1L);
     }
 
     // ---------- 夹具（真链路：直接落库驱动到目标态，聚合经公共入口） ----------

@@ -32,6 +32,8 @@ public record BackofficeContractQuery(
         // 空状态清单构造期即归一为 null（空选＝全量）——注解机制不跳过空集合，
         // 归一内聚在此，调用方无从做错
         status = status == null || status.isEmpty() ? null : status;
-        contractNo = contractNo != null && contractNo.isBlank() ? null : contractNo.trim();
+        // null 或空白均归一为 null（该维不参与过滤）——同上行 status 范式；
+        // 反向条件在 null 时落 trim() 必 NPE（#389）
+        contractNo = contractNo == null || contractNo.isBlank() ? null : contractNo.trim();
     }
 }

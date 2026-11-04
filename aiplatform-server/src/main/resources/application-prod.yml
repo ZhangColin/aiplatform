@@ -7,6 +7,10 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
+      # #383：deploy/infra 的 redis 起栈即 requirepass（eu-1 现网迁移前无密码，迁移窗口
+      # 随 infra 起栈生效）——密码无默认值，缺失与 REDIS_HOST 同口径 fail-fast
+      #（启动解析即炸，不静默回落无密码连接）
+      password: ${REDIS_PASSWORD}
 
 spring.jpa.show-sql: false
 logging.level.root: INFO

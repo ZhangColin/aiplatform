@@ -1,6 +1,8 @@
 package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,6 +24,17 @@ class DockerEnvironmentBackendOrphanSweepTest {
     /** 宽限线：本地时区墙上时刻（对照 inspect 回执的 UTC 时刻按系统时区换算）。 */
     private static final LocalDateTime STARTED_BEFORE = LocalDateTime.of(2026, 11, 3, 12, 0);
 
+    /** ws-1（判删）：宽限线前 4 小时；ws-2（判留）：线后 30 分钟。 */
+    private static final String WS_1_STARTED = startedAt(STARTED_BEFORE.minusHours(4));
+    private static final String WS_2_STARTED = startedAt(STARTED_BEFORE.plusMinutes(30));
+
+    /** 夹具时刻按系统时区从宽限线相对推导成 UTC 回执串——本机（UTC+8）与 CI
+     * runner（UTC）下「线前删/线后留」语义一致（硬编码 UTC 时刻只在 UTC+8 成立）。 */
+    private static String startedAt(LocalDateTime localWallClock) {
+        return DateTimeFormatter.ISO_INSTANT.format(
+                localWallClock.atZone(ZoneId.systemDefault()).toInstant());
+    }
+
     /** 假面：回执按命令全串可编（默认全成功），命令全记录。 */
     private static class ScriptedBackend extends DockerEnvironmentBackend {
         final List<String> commands = new ArrayList<>();
@@ -39,10 +52,8 @@ class DockerEnvironmentBackendOrphanSweepTest {
                         "ws-1\nws-2\nws-42\nws-9-snap-1\nother-app\n", "", 0);
             }
             if (command.startsWith("docker inspect")) {
-                // ws-1 启动于 UTC 00:00（本地 08:00——宽限线 12:00 之前，删）；
-                // ws-2 启动于 UTC 04:30（本地 12:30——宽限线之后，留）
                 return new ExecResult(
-                        "/ws-1|2026-11-03T00:00:00Z\n/ws-2|2026-11-03T04:30:00.123Z\n", "", 0);
+                        "/ws-1|" + WS_1_STARTED + "\n/ws-2|" + WS_2_STARTED + "\n", "", 0);
             }
             return new ExecResult("", "", 0);
         }
@@ -110,8 +121,8 @@ class DockerEnvironmentBackendOrphanSweepTest {
             ExecResult script(String command) {
                 if (command.startsWith("docker inspect")) {
                     // ws-1 在 ps 与 inspect 之间消失：docker 把缺失点名列 stderr、
-                    // stdout 照旧只含拿到的——幸存候选照常收敛
-                    return new ExecResult("/ws-2|2026-11-03T00:00:00Z\n",
+                    // stdout 照旧只含拿到的——幸存候选（ws-2，线前）照常收敛
+                    return new ExecResult("/ws-2|" + WS_1_STARTED + "\n",
                             "Error: No such container: ws-1", 1);
                 }
                 return super.script(command);

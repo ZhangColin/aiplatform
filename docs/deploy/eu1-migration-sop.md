@@ -65,7 +65,9 @@ ssh -i ~/ssh/semgravio-eu-1.pem ubuntu@3.70.172.160
 cd ~/aiplatform
 docker compose -f deploy/server.compose.yml down
 docker compose -f deploy/web.compose.yml down
-docker stop aiplatform-embedding aiplatform-gateway 2>/dev/null || true
+# embedding 必须 rm 不能只 stop：新 server compose（#386 归位）要接管同名容器，
+# 旧容器占名会让 ⑥ compose up 撞名失败（2026-11-04 实操踩过）
+docker rm -f aiplatform-embedding aiplatform-gateway 2>/dev/null || true
 docker ps   # 校验点：只剩 aiplatform-postgres / aiplatform-redis 在跑
 ```
 
@@ -225,3 +227,14 @@ curl -s -i -H "Host: 9876543210.preview.<域名>" http://localhost/ | grep -E 'H
 - [ ] `docker images | grep pgvector`：旧浮动 tag `pgvector/pgvector:pg16` 镜像可清理
       （新栈 pin 0.8.7-pg16）。
 - [ ] 开发机/运维笔记归档：窗口实际时长、拷贝字节数、任何与本文档的漂移（漂移回写本文档）。
+
+## 6. 执行记录（2026-11-04，首次按本 SOP 切换）
+
+- **窗口**：①–⑤ 约 10 分钟（PG 数据仅 69MB，文件级拷贝秒级）＋ ⑥ release.sh
+  约 8 分钟（镜像层缓存命中大半）；数据拷贝 1478 文件 / 72,573,649 字节，源目逐字节一致。
+- **基线→新栈比对全中**：4 库 / wsp_workspaces 11 行 / Flyway max('9'，字符串序) 全同。
+- **漂移回写**：① 的 embedding 由 stop 改 rm -f（见 ① 注记）；其余步骤与本文档一致。
+- **上线 revision**：e047ea6（含 build-bundle 资产装配路径修复——该缺陷致 #382 改版后
+  打包必败，已修）。
+- **遗留观察项**：旧 redis（aiplatform-redis，无密码）观察期内仍在跑（webnet 内部可达、
+  无宿主端口映射，平台已不连接它）；与旧 PG 卷一并观察期满回收。

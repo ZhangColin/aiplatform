@@ -277,6 +277,12 @@ grep -q 'permission denied for database' <<<"$deny" \
   || die "svc_a 竟能连 $svc_b 的库（输出：$deny）"
 ok "低权限边界：svc_a 连 $svc_b 的库被拒（permission denied for database）"
 
+# 维护库同样不可达：低权限角色可连接面＝自己名下的库（代码评审收紧项）
+mpg=$(pg_as "$svc_a" "$pw_a" postgres 'SELECT 1' || true)
+grep -q 'permission denied for database' <<<"$mpg" \
+  || die "svc_a 竟能连 postgres 维护库（输出：$mpg）"
+ok "低权限边界：svc_a 连 postgres 维护库同样被拒"
+
 # ---------------------------------------------------------------- 5. nginx 门禁
 phase "5/6 nginx 门禁（合法生效 / 坏配置回滚 / 撞车即拒，#385 AC）"
 # 接入方视角走门禁全链路：dummy 后端挂 webnet，conf 一律经 install-nginx-conf.sh 安装。

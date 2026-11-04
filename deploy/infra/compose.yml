@@ -15,7 +15,7 @@ services:
       # 超管名/密码延用现值（eu-1 数据卷的超管即 aiplatform；.env 是服务器上唯一凭据正本）
       POSTGRES_USER: ${POSTGRES_USER:-aiplatform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env}
-      # 有意不设 POSTGRES_DB：服务库不是 infra 职责（接入方经建号 helper 自建；既有库原样延用）
+      # 有意不设 POSTGRES_DB：服务库不是 infra 职责（接入方经 ensure-db-user.sh 自建；既有库原样延用）
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:

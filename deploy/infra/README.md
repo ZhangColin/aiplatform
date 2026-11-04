@@ -76,7 +76,10 @@ DB_PASSWORD=$(openssl rand -hex 16) ./ensure-db-user.sh <服务名>
 - **权限边界**：角色 `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`；库属主＝服务用户，
   全权支配自己库内的对象；本库 `CONNECT` 对 `PUBLIC` 收回——服务只对**自己名下的库**
   可连可用，连接其它服务的库直接被拒（`permission denied for database`）。
-  selftest 有两遍幂等＋越库被拒的活断言（phase 4）。
+  维护库（`postgres`/`template1`）的 `CONNECT` 也从 `PUBLIC` 收回——新角色的
+  可连接面只有自己的库（超管/属主不受 ACL 影响，运维面不变）。既有非托管库的
+  表级权限本就不在 `PUBLIC`，即使连得上也读不到数据。selftest 有两遍幂等＋
+  越库/维护库被拒的活断言（phase 4）。
 - **凭据分片口径**：脚本内部以超管执行（`.env` 正本，不经接入方），**stdout 只有**
   服务自身分片：`DB_HOST=semgravio-pg`（webnet 内 DNS，不经宿主端口）/
   `DB_PORT=5432`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`。PG 超管凭据不出 infra；

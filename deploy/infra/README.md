@@ -19,8 +19,9 @@ nginx＋pgsql＋redis 三件套，**自包含、整目录可拷走单独用**（
 4. `.env` 缺失时生成随机凭据正本（**仅全新机器**；接管既有服务器必须先手写现值，见下）；
 5. `docker compose up -d` ＋ 等三容器 healthy。
 
-本地排练 / eu-1 迁移前排演：`./selftest.sh`（本地 Docker 从零跑通：起栈健康＋幂等重跑
-＋回环连通＋形态断言；要求 80/443/5432/6379 空闲）。
+本地排练 / eu-1 迁移前排演：`./selftest.sh`（本地 Docker 从零跑通整份契约：起栈健康
+＋幂等重跑＋回环连通＋形态断言＋建号 helper 幂等/低权限边界＋nginx 门禁裁决五场景；
+要求 80/443/5432/6379 空闲）。
 
 ## 凭据模型
 
@@ -119,7 +120,7 @@ DB_PASSWORD=$(openssl rand -hex 16) ./ensure-db-user.sh <服务名>
 - selftest 有合法生效路由通 / 坏配置回滚且殃及面为零 / 撞车被拒 / 通配口径 /
   资产目录装入可服务、坏更新连资产回滚还原旧态 五组活断言（phase 5）。
 
-## eu-1 迁移注记（接管式，SOP 详见 docs/deploy）
+## eu-1 迁移注记（接管式，SOP 详见 docs/deploy/eu1-migration-sop.md）
 
 容器名由旧 `aiplatform-postgres` / `aiplatform-redis` 更名为 `semgravio-pg` /
 `semgravio-redis`——平台侧 `.env.production` 的 `SPRING_DATASOURCE_URL` 与

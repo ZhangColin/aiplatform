@@ -52,7 +52,9 @@ ga HEAD:aiplatform-server/src/main/resources/docker/gateway                | tar
 ga HEAD:deploy                                                              | tar -x -C "${OUT}/deploy"
 
 echo "-- 装配 nginx 接入资产（deploy/nginx/assets/，发布经门禁装入 conf.d/aiplatform.assets/）"
-bash "${OUT}/deploy/nginx/assemble-assets.sh" "${OUT}/deploy/nginx/assets" "$OUT"
+# 三个路径必须绝对：assemble-assets.sh 内部 cd 到自己的 dirname，相对路径会被解析到
+# 包内 deploy/nginx/ 下（踩过：workspace/annotation.js 找不到，装配必败）
+bash "$PWD/${OUT}/deploy/nginx/assemble-assets.sh" "$PWD/${OUT}/deploy/nginx/assets" "$PWD/${OUT}"
 
 echo "== 3/4 记录 revision =="
 git rev-parse HEAD > "${OUT}/REVISION"

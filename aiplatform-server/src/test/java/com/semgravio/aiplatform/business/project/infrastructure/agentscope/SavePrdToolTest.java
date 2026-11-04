@@ -80,6 +80,9 @@ class SavePrdToolTest {
         // content + summary 双必传（#52：修订事实从 summary 参数观测）
         assertThat(String.valueOf(tool.getParameters().get("required")))
                 .contains("content").contains("summary");
+        // summary 载体规格＝markdown 变更说明（界面层按 markdown 渲染呈现——描述
+        // 面钉死，防模型漂移出源码记号）
+        assertThat(tool.getDescription()).contains("markdown 变更说明");
         assertThat(tool.isReadOnly()).isFalse(); // 写工作区产物
     }
 

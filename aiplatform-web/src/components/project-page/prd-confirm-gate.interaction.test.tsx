@@ -65,16 +65,18 @@ describe("PrdConfirmGate · 两段式摘要层（#332 生成加门）", () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it("差异摘要在场（#334 改需求回路）：摘要层带「本版更新内容」节——确认前看到这版改了什么；层内确认段如实说「下一版」", () => {
+  it("差异摘要在场（#334 改需求回路）：摘要层带「本版更新内容」节——按 markdown 渲染（载体规格＝savePrd summary 的 markdown 变更说明）；层内确认段如实说「下一版」", () => {
     renderGate(
       { blocking: [], minor: [], dimensions: [] },
-      "功能清单新增「管理后台」：管理员可管理商品与订单",
+      "**功能清单**新增「管理后台」\n\n- 管理员可管理商品与订单",
     );
 
     fireEvent.click(screen.getByRole("button", { name: /确认此版 PRD 并生成 Demo/ }));
 
     expect(screen.getByText("本版更新内容")).toBeTruthy();
-    expect(screen.getByText("功能清单新增「管理后台」：管理员可管理商品与订单")).toBeTruthy();
+    // 不按纯文本呈现：加粗与列表按 GFM 出结构（ChatMarkdown 对话面单点）
+    expect(screen.getByText("功能清单").tagName).toBe("STRONG");
+    expect(screen.getByText("管理员可管理商品与订单").closest("li")).toBeTruthy();
 
     // 确认段措辞分野（#334）：停驻草稿确认＝出新版本、按新版生成下一版（非「首个」）
     fireEvent.click(screen.getByRole("button", { name: "继续" }));

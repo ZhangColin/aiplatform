@@ -3,6 +3,7 @@
 import { ArrowRight, Check } from "lucide-react";
 import { useState } from "react";
 
+import { ChatMarkdown } from "@/components/project-page/chat-markdown";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -78,7 +79,9 @@ export function PrdConfirmGate({
         <ArrowRight className="size-4.5 transition-transform group-hover:translate-x-0.5" />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        {/* 差异摘要可能是长 markdown（增删章节列表）——放宽至 2xl 并限高滚动，
+            「继续」按钮不被顶出视口；两段共用此尺寸 */}
+        <DialogContent className="sm:max-w-2xl">
           {stage === "summary" ? (
             <>
               <DialogHeader>
@@ -96,12 +99,15 @@ export function PrdConfirmGate({
                 </section>
                 {changeSummary ? (
                   // 本版更新内容（#334 改需求回路）：范围级新草稿的差异摘要——确认
-                  // 前看到这版改了什么（改稿时产出的 markdown 变更说明，原样呈现）
+                  // 前看到这版改了什么。差异摘要＝savePrd summary 的 markdown 变更
+                  // 说明（载体规格见 CONTEXT.md），按对话面 markdown 单点渲染
+                  // （ChatMarkdown——AI 面向用户的产出文本不留纯文本呈现面），
+                  // 长摘要限高滚动
                   <section className="space-y-1">
                     <h3 className="font-medium">本版更新内容</h3>
-                    <p className="whitespace-pre-wrap text-muted-foreground">
-                      {changeSummary}
-                    </p>
+                    <div className="max-h-[50vh] overflow-y-auto rounded-lg border bg-muted/30 p-3 text-muted-foreground">
+                      <ChatMarkdown>{changeSummary}</ChatMarkdown>
+                    </div>
                   </section>
                 ) : null}
                 {minor.length > 0 ? (

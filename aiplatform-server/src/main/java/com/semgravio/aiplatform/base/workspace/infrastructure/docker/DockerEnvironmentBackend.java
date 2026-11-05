@@ -532,7 +532,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 + " && if test -f server.js; then APP='node server.js';"
                 + " elif test -f package.json; then APP='npm start';"
                 + " else exit 0; fi"
-                + " && { nohup sh -c \"$APP\" > .app.log 2>&1 & }"
+                // nohup 直接吃 $APP（有意不加引号：按词切分成命令＋参数）——不得写
+                // sh -c "$APP"：内嵌双引号在 Windows JVM→docker.exe 的 argv 编码链
+                // 上会被剥掉（Java 对 CreateProcess 不转义内嵌引号），容器侧变成
+                // `sh -c node server.js`（server.js 沦为 $0）、node 以 REPL 形态吃
+                // EOF 静默退出 0——起服「成功」而应用从未监听。Linux execve 原样
+                // 传参无此坑，生产一直正常；本机 Windows live 车道稳定踩中
+                + " && { nohup $APP > .app.log 2>&1 & }"
                 + " && echo started";
     }
 
@@ -547,7 +553,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             // → 检出当时代码 → 起应用。全部容器本地落点，卷只读、主容器零扰动。
             runIn(snapName, snapshotDataCommand());
             runIn(snapName, snapshotCheckoutCommand(ref, databaseUrl));
-            runIn(snapName, snapshotAppStartCommand(databaseUrl));
+            runDetached(snapName, snapshotAppStartCommand(databaseUrl));
             // #141 网关化：无宿主端口映射，探活走容器内回环（与主预览 exposePort 同款
             // 收口判据）；长窗 + 环境故障口径不变（快照起服是同步等待，非前端轮询）
             waitForAppServingInContainer(snapName, EnvironmentBackend.DEV_APP_CONTAINER_PORT,
@@ -861,6 +867,21 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         }
     }
 
+    /**
+     * 快照容器内 detached 执行（{@code docker exec -d}）：拉起常驻进程（起应用）
+     * 的规范形态——进程生命周期归容器，不挂在本 exec 会话上（旧「会话内
+     * {@code nohup … & echo started}」依赖孤儿进程语义存活，恒真哨兵也让退出码
+     * 门禁形同虚设）。取舍：detached 无退出码可门禁（CLI 恒 0），失败面由调用方
+     * 的探活超时收口，且 app.log 必然落盘供验尸（旧写法起服即崩时可能连日志位
+     * 都没建）。
+     * 主容器 {@link #appStartCommand} 仍保留会话内旧式是功能例外而非口径分裂：
+     * 其 started 哨兵要 stdout 回执区分「无起服入口」分支（#170 幂等拉起），
+     * detached 拿不到 stdout；若未来主容器改道，哨兵须换成文件形回执。
+     */
+    private void runDetached(String containerName, String command) {
+        run("docker", "exec", "-d", containerName, "sh", "-c", command);
+    }
+
     /** 数据副本 + 起库 + redis（原子一步）：PGDATA 复制到容器本地 → 清 pid → 起 pg
      *  → 起 redis。副本是崩溃一致快照（WAL 恢复起库），只读卷、主库零扰动。 */
     private String snapshotDataCommand() {
@@ -891,17 +912,22 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 + "\\nREDIS_URL=redis://localhost:6379\\n' > " + SNAPSHOT_ROOT + "/.env";
     }
 
-    /** 起应用（后台常驻，8081）：server.js → node server.js；package.json → npm start
+    /** 起应用（常驻，8081）：server.js → node server.js；package.json → npm start
      *  （生成应用约定带 start 脚本）；否则静态 serve.js 兜底——仅无可用起服入口的
      *  历史版本（纯静态/仅文档轮）降级呈现，非主路径（#92「查看当时」不代起主预览
-     *  已退休的静态兜底）。DATABASE_URL/REDIS_URL 注入进程环境（与 .env 同形双保险）。 */
+     *  已退休的静态兜底）。DATABASE_URL/REDIS_URL 注入进程环境（与 .env 同形双保险）。
+     *  命令整体由 {@link #runDetached} 以 detached exec 拉起、前台运行到应用退出。
+     *  nohup 直接吃 $APP（不加引号）的原因见 {@link #appStartCommand} 同款注记——
+     *  Windows JVM→docker.exe 的 argv 编码会剥内嵌双引号，`sh -c "$APP"` 在本机
+     *  live 车道沦为 `sh -c node`（REPL 吃 EOF 静默退出、应用从未监听，快照探活
+     *  30s 超时 5/5）；Linux 生产 execve 原样传参无此坑。 */
     private String snapshotAppStartCommand(String databaseUrl) {
         return "cd " + SNAPSHOT_ROOT
                 + " && if test -f server.js; then APP='node server.js';"
                 + " elif test -f package.json; then APP='npm start';"
                 + " else APP='node /opt/serve.js " + SNAPSHOT_ROOT + " 8081'; fi"
                 + " && DATABASE_URL='" + databaseUrl + "' REDIS_URL='redis://localhost:6379'"
-                + " nohup sh -c \"$APP\" > app.log 2>&1 & echo started";
+                + " nohup $APP > app.log 2>&1";
     }
 
     // ---------- 命名约定（销毁级联与幂等重建的根基） ----------

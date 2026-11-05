@@ -11,6 +11,8 @@
 #   workspace/                 工作区镜像构建上下文（baseline/render/seed/入口脚本）
 #   gateway/                   网关配置与资产（proxy/inject/unavailable/annotation.js）
 #   REVISION                   打包时的 git revision
+#   DEV_IMAGE                  后端引用的 dev 镜像 tag（DockerEnvironmentBackend 常量单源提取，
+#                              release.sh 服务器侧据此预建，#402）
 #
 # 源码树用 `git archive` 导出（旧版 rsync 拷工作区，仅 Mac 可跑），三个理由：
 #   ① Windows Git Bash 无 rsync，git 两平台都在；
@@ -56,8 +58,28 @@ echo "-- 装配 nginx 接入资产（deploy/nginx/assets/，发布经门禁装�
 # 包内 deploy/nginx/ 下（踩过：workspace/annotation.js 找不到，装配必败）
 bash "$PWD/${OUT}/deploy/nginx/assemble-assets.sh" "$PWD/${OUT}/deploy/nginx/assets" "$PWD/${OUT}"
 
-echo "== 3/4 记录 revision =="
+echo "== 3/4 记录 revision ＋ dev 镜像 tag =="
 git rev-parse HEAD > "${OUT}/REVISION"
+# DEV_IMAGE：后端置备工作区引用的 dev 镜像 tag（DockerEnvironmentBackend 常量，唯一正本），
+# 从 HEAD 提取写包根——release.sh 服务器侧据此预建（#402：忘预建则新工作区置备/唤醒重建
+# 静默失败）。提取不到唯一值即打包失败：常量改名/多值属发布链断裂，须显式修。
+DEV_SRC=aiplatform-server/src/main/java/com/semgravio/aiplatform/base/workspace/infrastructure/docker/DockerEnvironmentBackend.java
+# 引号锚定提取（防 0.14-rc1 形被截成数字前缀、绕过多值守卫）；正本＝HEAD，与「打包内容＝
+# 已提交内容」口径自洽
+DEV_IMAGE=$(git show "HEAD:$DEV_SRC" | grep -oE '"aiplatform/dev:[0-9]+(\.[0-9]+)*"' | tr -d '"' | sort -u)
+if [ -z "$DEV_IMAGE" ] || [ "$(printf '%s\n' "$DEV_IMAGE" | wc -l)" -ne 1 ]; then
+  echo "错误：$DEV_SRC 未提取到唯一 aiplatform/dev:<tag>（得到：${DEV_IMAGE:-空}）" >&2
+  exit 1
+fi
+# 带脏打包守卫：jar 按工作区构建、tag 按 HEAD 提取——常量改了没提交则两者漂移，恰好复现
+# 本票要消灭的「静默缺镜像」，拒绝带脏出货
+if [ "${ALLOW_DIRTY:-0}" = "1" ]; then
+  DEV_WT=$(grep -oE '"aiplatform/dev:[0-9]+(\.[0-9]+)*"' "$DEV_SRC" | tr -d '"' | sort -u)
+  [ "$DEV_WT" = "$DEV_IMAGE" ] \
+    || { echo "错误：ALLOW_DIRTY 下 $DEV_SRC 的镜像 tag 工作区（$DEV_WT）与 HEAD（$DEV_IMAGE）不一致——先提交再打包" >&2; exit 1; }
+fi
+printf '%s\n' "$DEV_IMAGE" > "${OUT}/DEV_IMAGE"
+echo "DEV_IMAGE=$DEV_IMAGE"
 
 echo "== 4/4 打包 =="
 tar -C dist -czf "${OUT}.tar.gz" "aiplatform-deploy-${STAMP}"

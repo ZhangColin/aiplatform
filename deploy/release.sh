@@ -99,6 +99,38 @@ else
   echo "   不在场（已是共享 nginx 形态）"
 fi
 
+echo "-- dev 镜像前置（后端置备工作区引用的 tag＝包根 DEV_IMAGE 单源；缺失则现场构建，#402）"
+DEV_IMAGE=$(cat DEV_IMAGE 2>/dev/null || true)
+[ -n "$DEV_IMAGE" ] || { echo "   ✗ 包内缺 DEV_IMAGE 元数据（旧版包？重跑 build-bundle.sh，或按部署文档 §5 手工预建）"; exit 1; }
+if docker image inspect "$DEV_IMAGE" >/dev/null 2>&1; then
+  echo "   ✓ $DEV_IMAGE 在场"
+else
+  echo "   构建 $DEV_IMAGE（deploy/dev-image.deploy.Dockerfile × workspace/；基座层变更时 pnpm install 层重跑，首次较久）"
+  docker build -f deploy/dev-image.deploy.Dockerfile -t "$DEV_IMAGE" workspace/
+fi
+
+echo "-- preview-gateway 网关别名前置（#397 收口探针经它走网关；顺序硬要求＝别名先于后端，#402）"
+GW_ALIAS=preview-gateway
+ALIAS_ERR=$(mktemp)
+# ① 声明正本收敛：包内 deploy/infra/compose.yml 已声明该别名，同步进 infra 单元——防任何
+#    后续 compose 重建静默丢别名（热补只补运行态）；.env 不在包内不会被碰
+if ! cmp -s deploy/infra/compose.yml "$INFRA_PATH/compose.yml"; then
+  cp -f deploy/infra/compose.yml "$INFRA_PATH/compose.yml"
+  echo "   infra compose.yml 已收敛到包内正本（别名声明在位）"
+fi
+# ② 运行态：在场零动作；缺失热补（零停机，Docker 29.x 实测口径）；热补失败＝旧 daemon 形，
+#    fail-fast 给路二——不带病上后端（探针会全量待期）。别名判定按整 token 精确比对
+#    （grep -w 视「-」为非词符，会误吃 preview-gateway-x 形）
+if docker inspect semgravio-nginx --format '{{range $k, $v := .NetworkSettings.Networks}}{{if eq $k "previewnet"}}{{range $v.Aliases}}{{.}} {{end}}{{end}}{{end}}' | tr ' ' '\n' | grep -qx "$GW_ALIAS"; then
+  echo "   ✓ 运行态别名在场"
+elif docker network connect --alias "$GW_ALIAS" previewnet semgravio-nginx 2>"$ALIAS_ERR"; then
+  echo "   别名已热补（零停机）"
+else
+  echo "   ✗ 别名热补失败：$(cat "$ALIAS_ERR")"
+  echo "     路二：cd $INFRA_PATH && ./deploy.sh（compose.yml 已收敛；幂等起栈，nginx 有 ~秒级重建窗口），完成后重跑发布"
+  exit 1
+fi
+
 echo "-- 重建重启（server＋embedding 同栈 → web；build 有层缓存，无改动的秒过）"
 docker compose -f deploy/server.compose.yml up -d --build
 docker compose -f deploy/web.compose.yml up -d --build

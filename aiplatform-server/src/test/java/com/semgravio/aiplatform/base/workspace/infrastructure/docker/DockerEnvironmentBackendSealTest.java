@@ -40,7 +40,8 @@ class DockerEnvironmentBackendSealTest {
 
         @Override
         protected ExecResult runCapture(String... cmd) {
-            commands.add(String.join(" ", cmd));
+            String joined = String.join(" ", cmd);
+            commands.add(joined);
             if ("inspect".equals(cmd[1]) && "-f".equals(cmd[2])) {
                 // 缺失回执照真实 docker 文案（No such object——#176 假面与真口径一致）
                 return containerRunning ? new ExecResult("true\n", "", 0)
@@ -50,8 +51,15 @@ class DockerEnvironmentBackendSealTest {
                 return volumePresent ? new ExecResult("[{}]\n", "", 0)
                         : new ExecResult("", "no such volume", 1);
             }
-            if (cmd.length > 5 && cmd[5].startsWith("curl")) {
+            if (cmd.length > 5 && cmd[5].startsWith("curl") && joined.contains("http://localhost:8081")) {
+                // #397 幂等守卫：回环单发探「进程在不在服」（退出码口径）
                 return appServing ? new ExecResult("", "", 0)
+                        : new ExecResult("", "connection refused", 7);
+            }
+            if (cmd.length > 5 && cmd[5].startsWith("curl")) {
+                // #397 起服判据经网关：绿＝回执末行状态码 200（空 body＝无 /_next
+                // 引用，无 chunk 复测）；红＝连不上网关（别名缺席/容器不在）
+                return appServing ? new ExecResult("200", "", 0)
                         : new ExecResult("", "connection refused", 7);
             }
             if (cmd.length > 5 && cmd[5].startsWith("cd /workspace")) {

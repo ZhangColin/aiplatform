@@ -37,7 +37,7 @@ nginx＋pgsql＋redis 三件套，**自包含、整目录可拷走单独用**（
 |---|---|
 | **pgsql**（`semgravio-pg`） | pgvector/pgvector **0.8.7**-pg16（pin 精确版本，与 eu-1 现网一致）；超管 `aiplatform` 延用现值；数据卷 **external 固定名 `semgravio_pgdata`**（`down` 不删、与项目名解耦）；绑宿主**回环 5432**（SSH 隧道直连本地 dbx 客户端，用法见 `docs/deploy/prod-db-access.md`，安全组不放行）。**不预建服务库**——各服务接入时经 `ensure-db-user.sh` 自建（见「建库建号」节），既有库原样延用。 |
 | **redis**（`semgravio-redis`） | redis **7.4.12**-alpine；`requirepass` 启用（行为变化，后端配置项见 #383）；绑宿主**回环 6379**；**仅缓存用途：持久化全关（`--save ""` `--appendonly no`），重启/重建即空，需要持久 kv 的服务不要依赖它**。compose 不声明任何持久卷（镜像自带 `VOLUME /data` 声明产生的匿名卷是 docker 行为，不写入任何数据、`docker compose down` 一并回收）。 |
-| **nginx**（`semgravio-nginx`） | nginx **1.30.6**-alpine；绑宿主 **80/443**（唯一对外口）；双挂 `webnet`＋`previewnet`——跨网路由只在此容器发生（沙箱不可信负载经 nginx 出网、触达不了 pg/redis）。`nginx/nginx.conf` 主体归 infra；服务配置走 `conf.d/`＋`certs/`（见契约）。 |
+| **nginx**（`semgravio-nginx`） | nginx **1.30.6**-alpine；绑宿主 **80/443**（唯一对外口）；双挂 `webnet`＋`previewnet`——跨网路由只在此容器发生（沙箱不可信负载经 nginx 出网、触达不了 pg/redis）；previewnet 侧挂别名 `preview-gateway`（#397 网络别名契约：平台收口探针从沙箱内经该别名打到网关，dev 网关同名——别名是容器创建期属性，改 compose 后 `up -d` 重建生效）。`nginx/nginx.conf` 主体归 infra；服务配置走 `conf.d/`＋`certs/`（见契约）。 |
 
 镜像一律 pin 精确版本：升级＝显式改 `compose.yml`（重跑永远无害的根基）。
 

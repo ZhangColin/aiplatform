@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
@@ -12,16 +13,20 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 
+import com.cartisan.core.exception.ApplicationException;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
+import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
+import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 预览网关真实容器 smoke（#128）：起一个工作区容器（应用 8081 起服）+ nginx 网关
@@ -46,6 +51,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 请求剥 Origin（stub 上游回显 X-Echo-Origin 断言上游收不到）、非 /_next 路径
  * Origin 原样透传（透传不误伤）、上游的 X-Frame-Options 经网关剥除（iframe 嵌入
  * 展示收口）。写法可换、语义不可退——断言只看外部可观测的请求/响应头到达与否。
+ * #397 收口探针走网关（防线 3）：网关挂 preview-gateway 别名，真 exposePort 探针
+ * 端到端两态——绿（别名 DNS＋Host 路由＋浏览器头＋chunk 复测全链路）与红（模拟
+ * 网关收口不了的未知闸门：应用对 gated chunk 无条件 403 → WSP_012 如实待期）。
  */
 @Tag("live")
 class PreviewGatewaySmokeTest {
@@ -81,8 +89,12 @@ class PreviewGatewaySmokeTest {
         // upgrade 处理回裸 101：供网关 WebSocket 透传断言（升级头到达上游才有 101）。
         // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）。
         // 收到的 Origin 回显为 X-Echo-Origin 响应头、/__xfo 回 X-Frame-Options: DENY：
-        // 供 #394 环境性阻断收口三断言——「上游收到了什么请求头」经响应头可观测
-        execIn(handle, "printf '<html><head><title>probe</title></head><body>hello gateway</body></html>'"
+        // 供 #394 环境性阻断收口三断言——「上游收到了什么请求头」经响应头可观测。
+        // HTML 引用 /_next/static chunk、/__gated/* 无条件 403：供 #397 收口探针断言
+        //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）
+        execIn(handle, "printf '<html><head><title>probe</title>"
+                + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
+                + "<body>hello gateway</body></html>'"
                 + " > /workspace/index.html");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
                 + "const http=require('http');const fs=require('fs');\n"
@@ -91,6 +103,8 @@ class PreviewGatewaySmokeTest {
                 + "res.end('app-level failure');return;}\n"
                 + "if(req.url==='/__xfo'){res.writeHead(200,{'Content-Type':'text/plain',"
                 + "'X-Frame-Options':'DENY'});res.end('xfo probe');return;}\n"
+                + "if(req.url.startsWith('/_next/static/gated')){res.writeHead(403,"
+                + "{'Content-Type':'text/plain'});res.end('gated');return;}\n"
                 + "if(req.headers.origin)res.setHeader('X-Echo-Origin',req.headers.origin);\n"
                 + "res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
                 + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
@@ -112,9 +126,13 @@ class PreviewGatewaySmokeTest {
             docker("rm", "-f", gatewayContainer);
             // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活
             // 资产（标注脚本/提示页）挂载路径＝块文件 alias 的统一路径（#386：按共享
-            // nginx 挂载形态 /etc/nginx/conf.d/aiplatform.assets/，dev 网关挂同路径）
+            // nginx 挂载形态 /etc/nginx/conf.d/aiplatform.assets/，dev 网关挂同路径）；
+            // #397 挂 preview-gateway 别名——收口探针从工作区容器内经它打到应用。
+            // 资产清单与 ThrowawayPreviewGateway 同款（网关资产增删两处同改）——此处
+            // 不复用 fixture 因要宿主端口映射（host 侧 curl 断言）与启动回执断言
             ExecResult started = docker("run", "-d", "--name", gatewayContainer,
                     "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                    "--network-alias", WorkspaceNaming.PREVIEW_GATEWAY_ALIAS,
                     "-p", gatewayPort + ":80",
                     "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
                     "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
@@ -176,6 +194,28 @@ class PreviewGatewaySmokeTest {
             assertThat(xfo.stdout().toLowerCase())
                     .as("上游的 X-Frame-Options 应被网关剥除（iframe 可嵌入）")
                     .doesNotContain("x-frame-options");
+
+            // #397 收口探针走网关＋浏览器真实头（真探针×真网关端到端）：exposePort 的
+            // 探针从工作区容器内经 preview-gateway 别名＋Host 头选路由打到应用——绿
+            // 只可能来自「别名 DNS 解析＋子域路由＋浏览器头不被 403＋HTML 引用的
+            // /_next/static chunk 复测通过」全链路成立（HTML 引用 chunk.js，应用 200）
+            URI probed = backend.exposePort(handle, EnvironmentBackend.DEV_APP_CONTAINER_PORT);
+            assertThat(probed.toString()).isEqualTo("http://" + id + ".localhost/");
+
+            // #397 防未知新闸门：模拟网关收口不了的闸门（应用对 /_next/static/gated*
+            // 无条件 403——形态上等同未来框架新默认闸门），HTML 改引 gated chunk 后
+            // 收口判据应如实红（WSP_012 待期）——「探针 200、真浏览器 403」不再可能
+            execIn(handle, "printf '<html><head><title>probe</title>"
+                    + "<script src=\"/_next/static/gated.js\"></script></head>"
+                    + "<body>hello gateway</body></html>' > /workspace/index.html");
+            assertThatThrownBy(() -> backend.exposePort(handle, EnvironmentBackend.DEV_APP_CONTAINER_PORT))
+                    .isInstanceOf(ApplicationException.class)
+                    .extracting("codeMessage")
+                    .isEqualTo(WorkspaceMessage.PREVIEW_NOT_SERVING);
+            // 复原（后续快照/恢复弧断言继续用正常引用面）
+            execIn(handle, "printf '<html><head><title>probe</title>"
+                    + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
+                    + "<body>hello gateway</body></html>' > /workspace/index.html");
 
             // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
             // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域

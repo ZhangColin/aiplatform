@@ -88,6 +88,13 @@ public interface EnvironmentBackend {
      * 归 run 执行体（#44「一开工就跑起来」），死而复起归 {@link #startApp}（#170 平台
      * 职责）；探活通过才返回 URL（调用方以此作「应用可访问」判据），短窗未就绪抛
      * WSP_012（待期，非故障）。
+     *
+     * <p>探针口径（#397，ADR-0034 防线 3）：经网关路径＋浏览器真实头形态（带预览域
+     * Origin/Referer/Sec-Fetch 打 {@code /} 断言 2xx/3xx；HTML 引用 {@code /_next/static}
+     * 时对一个 chunk 复测）——观察点与用户浏览器一致，「探针 200、真浏览器 403」的
+     * 盲区由此补上；网关不可达＝如实待期，不误报绿。实现不再以容器内回环裸 curl
+     * 作判据（#397 勘误：回环直连带 Origin 打 {@code /_next} 在网关收口后仍 403——
+     * 闸门按请求头不按来源地址）。</p>
      */
     URI exposePort(WorkspaceHandle handle, int containerPort);
 
@@ -148,7 +155,9 @@ public interface EnvironmentBackend {
      * exec 常驻的应用进程容器重启后无人拉，#168 遗留缺口由唤醒编排统一收口）。
      * 幂等：已在服直接返回；起服入口与快照同款判据（server.js → node server.js、
      * package.json → npm start），无入口则不拉（恢复到未生成态）。阻塞直至起服或
-     * 长窗超时（抛 WSP_012），调用方在自愈异步任务内执行。
+     * 长窗超时（抛 WSP_012），调用方在自愈异步任务内执行。起服等待用与
+     * {@link #exposePort} 同款收口探针（#397 经网关＋浏览器真实头——起服即以
+     * 浏览器形态验收）。
      */
     void startApp(WorkspaceHandle handle);
 
@@ -165,8 +174,9 @@ public interface EnvironmentBackend {
      * {@code :ro}、入口脚本旁路；平台经 exec 确定性驱动——复制 PGDATA 到容器本地
      * → 清 pid → 起 pg → 起 redis → 检出 {@code ref} 当时代码到容器本地 → 起应用
      * （DATABASE_URL 指容器内 localhost）。数据只落副本、卷只读，主容器零扰动。
-     * #141 网关化：进 previewnet（别名 {@code snap-{viewId}}、无宿主端口映射），
-     * 探活走容器内回环，起服后返回句柄（含网关子域预览 URL）。
+     * #141 网关化：进 previewnet（别名 {@code snap-{viewId}}、无宿主端口映射）；
+     * #397 起，起服等待用与主预览 {@link #exposePort} 同款收口判据（经网关＋浏览器
+     * 真实头），起服后返回句柄（含网关子域预览 URL）。
      *
      * @param ref 成版 commit hash（hex，调用方已校验存在性；本层只做命令引用）
      */

@@ -20,6 +20,7 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
+import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ThrowawayPreviewGateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,10 +37,15 @@ class WorkspaceWakeupLiveTest {
     /** 等待唤醒收敛的上界：重建（容器+中间件 ~20s）+ 应用拉起探活（60s 窗）。 */
     private static final Duration WAKE_DEADLINE = Duration.ofSeconds(120);
 
-    /** 卷内起服入口替身（startApp 判据链 server.js → node server.js）。 */
+    /**
+     * 卷内起服入口替身（startApp 判据链 server.js → node server.js）。heredoc 单引号
+     * 定界（双引号形态在 Windows JVM→docker.exe argv 链被剥、server.js 落空——
+     * #399 同款坑，冒烟测试 GW_EOF 同款写法）。
+     */
     private static final String WRITE_SERVER_JS =
-            "printf '%s' \"require('http').createServer((q,s)=>{s.end('ok')}).listen(8081)\""
-                    + " > /workspace/server.js";
+            "cat > /workspace/server.js <<'WS_EOF'\n"
+                    + "require('http').createServer((q,s)=>{s.end('ok')}).listen(8081)\n"
+                    + "WS_EOF";
 
     @Autowired
     private WorkspaceLifecycleAppService lifecycle;
@@ -58,8 +64,14 @@ class WorkspaceWakeupLiveTest {
 
     private WorkspaceId workspaceId;
 
+    /** #397 探针走网关：一次性网关（别名 preview-gateway）作探活链路底座。 */
+    private ThrowawayPreviewGateway gateway;
+
     @AfterEach
     void cleanup() {
+        if (gateway != null) {
+            gateway.close();
+        }
         if (workspaceId != null) {
             workspaceRepository.findById(workspaceId.id()).ifPresent(workspace -> {
                 try {
@@ -75,6 +87,7 @@ class WorkspaceWakeupLiveTest {
     @Test
     void given_container_killed_when_touch_generated_workspace_then_rebuilt_app_started_preview_ok() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("wakeup-generated");
         Workspace workspace = provisionReadyWorkspace();
 
         // 已生成项目形态：卷内放起服入口（卷在，删容器后仍存——唤醒后可拉起），
@@ -101,6 +114,7 @@ class WorkspaceWakeupLiveTest {
     @Test
     void given_container_killed_when_touch_never_generated_workspace_then_rebuilt_without_app() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("wakeup-never-generated");
         Workspace workspace = provisionReadyWorkspace();
 
         // 从未生成形态：卷内无起服入口；唤醒不拉应用（startAppOnWake=false 路径）

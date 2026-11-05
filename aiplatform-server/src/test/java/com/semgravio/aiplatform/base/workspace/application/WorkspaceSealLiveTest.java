@@ -25,6 +25,7 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 import com.semgravio.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.archive.LocalDiskSealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
+import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ThrowawayPreviewGateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -68,6 +69,9 @@ class WorkspaceSealLiveTest {
 
     private WorkspaceId workspaceId;
 
+    /** #397 探针走网关：一次性网关作深度唤醒起服等待的探活链路底座。 */
+    private ThrowawayPreviewGateway gateway;
+
     private Path archivePath() {
         Workspace workspace = workspaceRepository.findById(workspaceId.id()).orElse(null);
         return workspace != null && workspace.getArchivePath() != null
@@ -76,6 +80,9 @@ class WorkspaceSealLiveTest {
 
     @AfterEach
     void cleanup() {
+        if (gateway != null) {
+            gateway.close();
+        }
         if (workspaceId != null) {
             workspaceRepository.findById(workspaceId.id()).ifPresent(workspace -> {
                 try {
@@ -101,6 +108,7 @@ class WorkspaceSealLiveTest {
     @Timeout(900)
     void given_hibernated_over_threshold_when_scan_then_sealed_then_deep_wake_data_and_app_intact() throws Exception {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("seal-deep-wake");
         Workspace workspace = provisionReadyWorkspace();
         String containerName = workspace.getContainerName();
         String dbName = "ws" + workspaceId.value();

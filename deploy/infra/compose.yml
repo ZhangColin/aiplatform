@@ -72,8 +72,13 @@ services:
     networks:
       # webnet＝共享接入网（infra＋所有接入服务）；previewnet＝平台沙箱网。
       # 双挂使跨网路由只在本容器发生——沙箱（不可信负载）经 nginx 出网、触达不了 pg/redis。
+      # previewnet 挂别名 preview-gateway（#397 网络别名契约，与 dev 网关同名）：后端
+      # 收口探针从工作区容器内经 http://preview-gateway/ 打本网关——别名是容器创建期
+      # 属性，改 compose 后须 up -d 重建本容器才生效（见部署文档 #397 注记）
       - webnet
-      - previewnet
+      - previewnet:
+          aliases:
+            - preview-gateway
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
       interval: 5s

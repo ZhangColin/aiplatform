@@ -48,11 +48,17 @@ class DockerEnvironmentBackendTest {
 
     private WorkspaceProvision provision;
 
+    /** #397 探针走网关：绿态用例起一次性网关（别名 preview-gateway）作链路底座。 */
+    private ThrowawayPreviewGateway gateway;
+
     @AfterEach
     void tearDown() {
         // 断言失败也不留容器：按命名约定兜底级联清理
         if (provision != null) {
             backend.destroyWorkspace(provision.handle());
+        }
+        if (gateway != null) {
+            gateway.close();
         }
     }
 
@@ -269,7 +275,9 @@ class DockerEnvironmentBackendTest {
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
 
         // #45：平台不代起静态兜底服务——应用未起服是待期（503 WSP_012，前端轮询
-        // 续探），不是 500 故障；用户不会经此看到工作区文件列表的中间态
+        // 续探），不是 500 故障；用户不会经此看到工作区文件列表的中间态。
+        // #397：本用例不起网关——「网关不可达（别名缺席）」与「应用未起服」同为
+        // 如实待期（探针不误报绿）；有网关时上游不在回 5xx，同判据
         assertThatThrownBy(() -> backend.exposePort(provision.handle(),
                         EnvironmentBackend.DEV_APP_CONTAINER_PORT))
                 .isInstanceOf(ApplicationException.class)
@@ -281,8 +289,12 @@ class DockerEnvironmentBackendTest {
     @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_app_serving_when_expose_port_then_preview_url_responds_on_mapped_port() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("expose-plain");
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
-        // 模拟 run 执行体已按约定在 8081 起服（#44 尽早起服）：容器内自起监听进程
+        // 模拟 run 执行体已按约定在 8081 起服（#44 尽早起服）：容器内自起监听进程。
+        // #397 判据断言 / 回 2xx/3xx——摆上真实首页（无首页的 404 对浏览器同为不可访问）
+        assertThat(backend.exec(provision.handle(), "printf '%s' '<html>demo</html>'"
+                + " > /workspace/index.html").exitCode()).isZero();
         assertThat(backend.exec(provision.handle(),
                         "nohup node /opt/serve.js /workspace "
                                 + EnvironmentBackend.DEV_APP_CONTAINER_PORT
@@ -304,10 +316,11 @@ class DockerEnvironmentBackendTest {
     @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_app_rejects_http2_upgrade_when_expose_port_then_probe_still_succeeds_on_http11() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("expose-h2c");
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
         // 复现真实应用（next dev）行为：见到 Upgrade: h2c 直接断连、不回 HTTP/1.1
-        // 响应——若探活走 HTTP/2 会误判未就绪。探活走容器内 curl（HTTP/1.1、不发
-        // upgrade 头）后应通过。
+        // 响应——若探活走 HTTP/2 会误判未就绪。探针的 curl 走 HTTP/1.1、不发
+        // upgrade 头（#397 经网关同款），应通过。
         assertThat(execIn(provision.handle(), "cat > /workspace/server.js <<'PROBE_EOF'\n"
                 + "const http=require('http');\n"
                 + "http.createServer((req,res)=>{\n"
@@ -408,6 +421,7 @@ class DockerEnvironmentBackendTest {
     @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_committed_versions_when_start_snapshot_then_serves_that_version_with_current_data() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("snapshot-serve");
         WorkspaceId workspaceId = WorkspaceId.generate();
         provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
         String db = "ws" + workspaceId.value();
@@ -474,6 +488,7 @@ class DockerEnvironmentBackendTest {
     @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_active_snapshot_when_workspace_destroyed_then_snapshot_cascade_removed() {
         requireDockerDaemon();
+        gateway = ThrowawayPreviewGateway.start("snapshot-cascade");
         WorkspaceId workspaceId = WorkspaceId.generate();
         provision = backend.createWorkspace(workspaceId, EnvKind.DEV);
         execIn(provision.handle(), "printf '<html>v1</html>' > /workspace/index.html");

@@ -11,6 +11,7 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
+import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,7 +28,7 @@ class DockerEnvironmentBackendAppStartTest {
     private static final WorkspaceId ID = WorkspaceId.of("42");
     private static final WorkspaceHandle HANDLE = WorkspaceHandle.dev(ID, "ws-42", "previewnet");
 
-    /** 假面：按命令形状回放（curl 探活 / exec 拉起），余者记录。 */
+    /** 假面：按命令形状回放（网关探针 / exec 拉起），余者记录。 */
     private static final class ScriptedBackend extends DockerEnvironmentBackend {
 
         /** 探活结果序列（true=在服）；耗尽后取末值。 */
@@ -43,9 +44,17 @@ class DockerEnvironmentBackendAppStartTest {
         protected ExecResult runCapture(String... cmd) {
             commands.add(String.join(" ", cmd));
             String joined = String.join(" ", cmd);
-            if (joined.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081")) {
+            // #397 幂等守卫：回环单发探「进程在不在服」（curl 退出码，任何响应=在服）
+            if (joined.contains("curl") && joined.contains("http://localhost:8081")) {
                 boolean ok = serving.isEmpty() || serving.remove(0);
                 return new ExecResult("", "", ok ? 0 : 1);
+            }
+            // #397 起服判据：经网关浏览器形态——回执末行状态码（200=绿，无 /_next
+            // 引用即无 chunk 复测）
+            if (joined.contains("curl") && joined.contains("http://"
+                    + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/")) {
+                boolean ok = serving.isEmpty() || serving.remove(0);
+                return new ExecResult(ok ? "200" : "", "", ok ? 0 : 1);
             }
             if (joined.contains("nohup")) {
                 return new ExecResult(startStdout, "", startExitCode);
@@ -53,10 +62,18 @@ class DockerEnvironmentBackendAppStartTest {
             return new ExecResult("", "", 0);
         }
 
-        /** 探活（curl）调用次数——无入口分支只应有前置单发 1 次，无等待轮询。 */
-        long probeCount() {
+        /** 回环守卫探活调用次数。 */
+        long loopbackProbeCount() {
             return commands.stream()
-                    .filter(c -> c.contains("curl -s --max-time 2 -o /dev/null http://localhost:8081"))
+                    .filter(c -> c.contains("curl") && c.contains("http://localhost:8081"))
+                    .count();
+        }
+
+        /** 经网关判据探活调用次数。 */
+        long gatewayProbeCount() {
+            return commands.stream()
+                    .filter(c -> c.contains("curl") && c.contains("http://"
+                            + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/"))
                     .count();
         }
     }
@@ -64,12 +81,15 @@ class DockerEnvironmentBackendAppStartTest {
     @Test
     void given_app_serving_when_start_app_then_no_start_command_issued() {
         ScriptedBackend backend = new ScriptedBackend();
-        backend.serving.add(true);
+        backend.serving.add(true);   // 回环守卫：进程在服
+        // 网关判据随后的首探即绿（serving 耗尽取末值=true）
 
         backend.startApp(HANDLE);
 
-        // 幂等：探活在服即返回，不发 nohup 拉起
+        // 幂等：守卫在服即不重跑起服命令（重复 nohup 只产 EADDRINUSE 死实例），
+        // 起服完成仍经网关判据验收（#397 与收口同款）
         assertThat(backend.commands).noneMatch(c -> c.contains("nohup"));
+        assertThat(backend.gatewayProbeCount()).isPositive();
     }
 
     @Test
@@ -108,9 +128,10 @@ class DockerEnvironmentBackendAppStartTest {
 
         backend.startApp(HANDLE);
 
-        // 无起服入口不拉不等待：静默返回（不视为环境故障），探活只有前置单发 1 次、
-        // 不进 60s 长窗（唤醒未生成工作区即刻收口，不空耗）
-        assertThat(backend.probeCount()).isEqualTo(1);
+        // 无起服入口不拉不等待：静默返回（不视为环境故障），守卫单发回环 1 次、
+        // 网关判据零探（不进长窗——唤醒未生成工作区即刻收口，不空耗）
+        assertThat(backend.loopbackProbeCount()).isEqualTo(1);
+        assertThat(backend.gatewayProbeCount()).isZero();
     }
 
     @Test

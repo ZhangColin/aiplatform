@@ -18,6 +18,15 @@ public final class WorkspaceNaming {
     /** 平台预览网关共享网络（#128）：网关与全部工作区容器同网，按容器名 DNS 路由。 */
     public static final String PREVIEW_NETWORK = "previewnet";
 
+    /**
+     * 预览网关在 previewnet 的稳定寻址别名（#397 网络别名契约）：dev 网关
+     * （aiplatform-gateway）与生产共享 nginx（semgravio-nginx）都在本网络挂同一
+     * 别名——收口探针从工作区容器内经 {@code http://<本别名>/}＋Host 头（选
+     * {@code {id}.{previewBase}} 路由）打到网关，观察点与用户浏览器一致。别名
+     * 缺席＝网关不可达，收口判据如实为红（WSP_012 待期），不误报绿。
+     */
+    public static final String PREVIEW_GATEWAY_ALIAS = "preview-gateway";
+
     private WorkspaceNaming() {
     }
 

@@ -109,6 +109,15 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      */
     private static final Pattern MAIN_CONTAINER_NAME = Pattern.compile("^ws-(\\d+)$");
 
+    /**
+     * HTML 引用的 Next 静态资产路径（#397 chunk 复测取材）：Next 以
+     * {@code src="/_next/static/chunks/…"} 形态引用，路径字符集仅字母数字与
+     * {@code ._-/}——字符集收窄免引号转义（探针命令不得出现双引号，见
+     * {@link #browserHeaders}）。
+     */
+    private static final Pattern NEXT_STATIC_CHUNK_REF =
+            Pattern.compile("/_next/static/[A-Za-z0-9._/-]+");
+
     /** 预览基域名（#128）：URL 子域 {@code {id}.{previewBase}} 的基域名，开发 localhost。 */
     @Value("${app.workspace.preview-base:localhost}")
     private String previewBase = "localhost";
@@ -337,12 +346,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     public URI exposePort(WorkspaceHandle handle, int containerPort) {
         // 渐进预览（#45 + #128 网关化）：URL 是 workspaceId 子域（确定、不透明——经
         // 平台 nginx 网关路由到 ws-{id}:8081），这里只做探活——run 执行体按约定自己
-        // 把应用跑在容器端口（#44 尽早起服），平台不再代起静态兜底服务。探活走容器内
-        // 回环（curl localhost:8081，收口判据不变），通过才返回 URL（调用方以此作
+        // 把应用跑在容器端口（#44 尽早起服），平台不再代起静态兜底服务。收口探针走
+        // 网关路径＋浏览器真实头（#397，ADR-0034 防线 3——观察点与用户浏览器一致，
+        // 「探针 200、真浏览器 403」的盲区由此补上），通过才返回 URL（调用方以此作
         // 「应用可访问」判据）；短窗未就绪抛 WSP_012（待期，前端轮询续探），不做长阻塞。
         URI url = URI.create(WorkspaceNaming.previewUrl(handle.workspaceId(), previewScheme, previewBase));
-        waitForAppServingInContainer(handle.containerName(), containerPort,
-                "工作区应用端口 " + handle.containerName(),
+        waitForAppServingViaGateway(handle.containerName(), url,
+                "工作区应用 " + handle.containerName() + "（经网关）",
                 PREVIEW_PROBE_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
         return url;
     }
@@ -488,9 +498,19 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     public void startApp(WorkspaceHandle handle) {
         // 8081 应用拉起（#170 平台职责，收口 #168 缺口）：run 执行体 exec 常驻的应用
         // 进程不随容器自愈（入口脚本只自愈 pg/redis），容器重建/重启后由本方法拉回。
-        // 幂等：已在服直接返回；无起服入口（stdout 无 started 哨兵）不拉不等待——
-        // 从未生成工作区恢复到未生成态，不空耗探活窗。
-        if (appServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT)) {
+        // 起服等待与收口判据同款探针（#397 经网关＋浏览器真实头——起服即以浏览器
+        // 形态验收）；幂等守卫例外见 appListeningInContainer。无起服入口（stdout 无
+        // started 哨兵）不拉不等待——从未生成工作区恢复到未生成态，不空耗探活窗。
+        URI previewUrl = URI.create(WorkspaceNaming.previewUrl(
+                handle.workspaceId(), previewScheme, previewBase));
+        if (appListeningInContainer(handle.containerName())) {
+            // 幂等守卫（非收口判据——判据仍是下方经网关的浏览器形态）：进程在服即
+            // 不重跑起服命令——重复 nohup 只会产同端口 EADDRINUSE 的死实例并截断
+            // 覆写 .app.log。网关侧暂红（别名缺席/配置漂移）时应用常活着，重拉只有
+            // 副作用；随后的网关等待如实红（WSP_012）不误报绿
+            waitForAppServingViaGateway(handle.containerName(), previewUrl,
+                    "工作区应用 " + handle.containerName() + "（经网关）",
+                    APP_START_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
             return;
         }
         ExecResult started = runCapture("docker", "exec", handle.containerName(),
@@ -504,8 +524,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                     handle.containerName());
             return;
         }
-        waitForAppServingInContainer(handle.containerName(), DEV_APP_CONTAINER_PORT,
-                "工作区应用 " + handle.containerName(),
+        waitForAppServingViaGateway(handle.containerName(), previewUrl,
+                "工作区应用 " + handle.containerName() + "（经网关）",
                 APP_START_TIMEOUT, WorkspaceMessage.PREVIEW_NOT_SERVING);
     }
 
@@ -554,13 +574,14 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
             runIn(snapName, snapshotDataCommand());
             runIn(snapName, snapshotCheckoutCommand(ref, databaseUrl));
             runDetached(snapName, snapshotAppStartCommand(databaseUrl));
-            // #141 网关化：无宿主端口映射，探活走容器内回环（与主预览 exposePort 同款
-            // 收口判据）；长窗 + 环境故障口径不变（快照起服是同步等待，非前端轮询）
-            waitForAppServingInContainer(snapName, EnvironmentBackend.DEV_APP_CONTAINER_PORT,
-                    "快照应用 " + snapName, RESOURCE_READY_TIMEOUT,
-                    WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
             URI url = URI.create(
                     WorkspaceNaming.snapshotPreviewUrl(viewId, previewScheme, previewBase));
+            // #141 网关化：无宿主端口映射；#397 起与主预览 exposePort 同款收口判据
+            // （经网关＋浏览器真实头——快照同样经网关子域供浏览器逛）；长窗 + 环境
+            // 故障口径不变（快照起服是同步等待，非前端轮询）
+            waitForAppServingViaGateway(snapName, url,
+                    "快照应用 " + snapName + "（经网关）", RESOURCE_READY_TIMEOUT,
+                    WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED);
             log.info("[snapshot] {} 快照就绪（ref={}，预览 {}）", snapName, ref, url);
             return new SnapshotHandle(snapName, url);
         } catch (RuntimeException e) {
@@ -750,21 +771,34 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         }
     }
 
-    /** 单发容器内探活（#170 startApp 幂等前置）：不轮询不抛，只在服与否。 */
-    private boolean appServingInContainer(String containerName, int port) {
-        return execIn(containerName, appProbeCommand(port)).ok();
+    /**
+     * 单发容器内回环探活（#397 起仅作 startApp 的<b>幂等守卫</b>——只答「应用进程
+     * 在不在服、要不要重跑起服命令」，不参与收口判据；判据是
+     * {@link #waitForAppServingViaGateway} 的浏览器形态）：curl 退出码 0 = 收到
+     * HTTP 响应（任何状态码都算进程在服）。回环裸 curl 作<b>收口判据</b>已被 #397
+     * 勘误否决（网关收口后回环直连带 Origin 打 {@code /_next} 仍 403）——本方法
+     * 不得挪作判据用。
+     */
+    private boolean appListeningInContainer(String containerName) {
+        return execIn(containerName, "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
+                + " -o /dev/null http://localhost:" + DEV_APP_CONTAINER_PORT).ok();
     }
 
     /**
-     * 容器内探活应用端口（#128 网关化：宿主无端口映射，探活走容器回环 curl——
-     * 收口判据「容器内 8081 探活」不变）。curl 退出码 0 = 收到 HTTP 响应（任何状态码
-     * 都算已监听），短窗未就绪按 {@code onTimeout} 口径抛。
+     * 收口探针经网关路径（#397，ADR-0034 防线 3）：从工作区容器内以浏览器真实头
+     * 形态经预览网关（previewnet 别名 {@link WorkspaceNaming#PREVIEW_GATEWAY_ALIAS}，
+     * Host 头选 {@code {id}.{previewBase}} 路由——curl 7.88 的 --resolve 地址段不收
+     * 主机名，实测不可用，Host 头是同效形态；生产 TLS 落地（conf 换 443＋80 跳转）
+     * 时探针须改 --resolve 形态带 SNI，见 ADR-0034 勘误注）打应用。网关不可达（别名
+     * 缺席/容器不在）＝探针红，收口判据如实为红不误报绿。轮询形状沿用既有就绪等待
+     * （500ms 节奏、超时按 {@code onTimeout} 口径抛——不新增机制、不新增轮询次数）；
+     * 单发探针 {@code --max-time} 上限 = 预览短窗时长（#183 无响应挂死防线）。
      */
-    private void waitForAppServingInContainer(String containerName, int port, String target,
+    private void waitForAppServingViaGateway(String containerName, URI previewUrl, String target,
             Duration timeout, WorkspaceMessage onTimeout) {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
-            if (execIn(containerName, appProbeCommand(port)).ok()) {
+            if (gatewayProbePass(containerName, previewUrl)) {
                 return;
             }
             sleep();
@@ -773,13 +807,76 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     /**
-     * 探活 curl 命令（单发与轮询同款，#183）：{@code --max-time} 上限 = 预览短窗
-     * 时长——无响应挂死防线，单次探活不因 TCP 挂起吃掉探活窗、阻塞唤醒线程
-     * （curl 对已建连不回响应的对端默认等分钟级）。
+     * 单轮网关探针：{@code /} 以浏览器导航头形态（document/navigate）探起，2xx/3xx
+     * 过、其余（含 403 闸门/5xx 上游不在）红；HTML 引用 {@code /_next/static} 时对
+     * 首个 chunk 以 crossorigin/module 加载形态（script/cors——恰是 Next dev 跨源
+     * 闸门拦的请求形态）复测，无引用跳过（非 Next 应用零误伤）。
      */
-    private static String appProbeCommand(int port) {
+    private boolean gatewayProbePass(String containerName, URI previewUrl) {
+        String host = previewUrl.getHost();
+        String origin = previewUrl.getScheme() + "://" + host;
+        ExecResult root = execIn(containerName, rootProbeCommand(host, origin));
+        if (!browserStatusOk(root)) {
+            return false;
+        }
+        String chunk = firstNextStaticChunkRef(root.stdout());
+        return chunk == null
+                || browserStatusOk(execIn(containerName, assetProbeCommand(host, origin, chunk)));
+    }
+
+    /**
+     * 探针应答判据（curl {@code -w %{http_code}} 回执）：退出码 0 且末行状态码为
+     * 2xx/3xx（#397：断言非 403，2xx/3xx 均可）。退出码非 0（连接拒绝/域名解析
+     * 失败＝网关不可达）或回执不可解析一律红——不误报绿。
+     */
+    private static boolean browserStatusOk(ExecResult probe) {
+        if (probe.exitCode() != 0) {
+            return false;
+        }
+        String out = probe.stdout();
+        String status = out.substring(out.lastIndexOf('\n') + 1).trim();
+        return status.length() == 3 && (status.charAt(0) == '2' || status.charAt(0) == '3');
+    }
+
+    /** HTML 引用的首个 {@code /_next/static} chunk 路径；无引用返回 null（跳过复测）。 */
+    private static String firstNextStaticChunkRef(String html) {
+        Matcher matcher = NEXT_STATIC_CHUNK_REF.matcher(html);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    /**
+     * 根探针命令：body＋末行状态码一并落 stdout（{@code -w '\n%{http_code}'}）——
+     * chunk 复测的取材（HTML 引用面）就在本轮应答里，不另发请求。
+     */
+    private static String rootProbeCommand(String host, String origin) {
         return "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
-                + " -o /dev/null http://localhost:" + port;
+                + " -w '\\n%{http_code}'"
+                + browserHeaders("document", "navigate", host, origin)
+                + " http://" + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/";
+    }
+
+    /** chunk 复测命令：只取状态码（{@code -o /dev/null}），路径来自根应答的引用面。 */
+    private static String assetProbeCommand(String host, String origin, String path) {
+        return "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
+                + " -o /dev/null -w '%{http_code}'"
+                + browserHeaders("script", "cors", host, origin)
+                + " 'http://" + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + path + "'";
+    }
+
+    /**
+     * 浏览器真实头（#396/#397 同一形态）：Host 选网关路由、Origin/Referer=本工作区
+     * 预览 URL、Sec-Fetch 三件套按资源类型（document=navigate / script=cors）、
+     * UA 带平台标记（网关/应用日志可辨识探针流量）。一律单引号——Windows JVM→
+     * docker.exe 的 argv 编码链会剥内嵌双引号（#399），探针命令不得出现双引号。
+     */
+    private static String browserHeaders(String dest, String mode, String host, String origin) {
+        return " -H 'Host: " + host + "'"
+                + " -H 'Origin: " + origin + "'"
+                + " -H 'Referer: " + origin + "/'"
+                + " -H 'Sec-Fetch-Dest: " + dest + "'"
+                + " -H 'Sec-Fetch-Mode: " + mode + "'"
+                + " -H 'Sec-Fetch-Site: same-origin'"
+                + " -H 'User-Agent: Mozilla/5.0 (aiplatform preview-probe #397)'";
     }
 
     /** dev 镜像缺失时从 classpath 资源现场构建（首次含 pnpm install 较重，之后走缓存）。 */

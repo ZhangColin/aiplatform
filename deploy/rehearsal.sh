@@ -7,7 +7,7 @@
 #   STUB=1（快路径）：web 用假后端替身（previewnet/webnet 路由断言全量照跑），
 #     不构建 server/web/embedding——日常改 conf/块文件后回归用。
 #
-# 断言清单（全部外部行为，对应 issue #386 验收）：
+# 断言清单（全部外部行为，对应 issue #386/#396 验收）：
 #   ① 主站 semgravio.com → web（200）
 #   ② 主预览 {id}.preview.semgravio.com → ws-{id}：HTML 注入标注脚本恰一次（注入类目标）
 #   ③ 快照 snap-{vid}.preview.semgravio.com → snap-{vid}：纯代理不注入（纯代理类目标）
@@ -15,6 +15,8 @@
 #   ⑤ 死子域 → 平台风格自恢复提示页（5xx＋文案＋no-store＋recovery 脚本、不注入圈注）
 #   ⑥ redis requirepass：平台凭据分片 PONG、无密码 NOAUTH（全栈模式下后端 env 同值真实连接）
 #   ⑦（全栈）后端健康、embedding 归位可服务、/api 经主站反代 401
+#   ⑧ 浏览器头组合探针（#396）：Host＋Origin(预览域)＋Referer＋Sec-Fetch 打 /_next 资产
+#      非 403；沙箱回显 X-Echo-Origin——/_next 上游无 Origin（网关剥）、非 /_next 原样透传
 #
 # ⚠ 共享资源协调：本排练占用宿主 80/443/5432/6379 与容器名 semgravio-{pg,redis,nginx}/
 # aiplatform-{server,web,embedding}——与 deploy/infra/selftest.sh 及同仓并行会话的 docker
@@ -194,11 +196,18 @@ mk_sandbox() { # $1=容器名（＝previewnet DNS 名） $2=网络别名(可空)
   local name=$1 alias=$2 marker=$3 d=$sandbox_tmp/$1
   mkdir -p "$d"
   printf '<html><head><title>%s</title></head><body>%s</body></html>' "$name" "$marker" >"$d/index.html"
+  # #396 /_next 探针资产：浏览器头组合打 /_next/ 时有真实文件可 200（缺文件只能验到
+  # 404「非 403」的弱断言，探不到 200 形态）
+  printf 'console.log("%s-next-chunk");\n' "$name" >"$d/chunk.js"
   cat >"$d/serve.conf" <<EOF
 server {
     listen 8081;
     root /srv;
     index index.html;
+    # #396 回显探针：收到的 Origin 回显为响应头（always＝任意状态码都带；变量为空时
+    # nginx 整头不下发）——「网关把什么转发给了上游」经响应可观测（同 #394 冒烟 stub
+    # 上游的 X-Echo-Origin 手法，排练以沙箱容器 nginx 承载）
+    add_header X-Echo-Origin \$http_origin always;
 }
 EOF
   docker rm -f "$name" >/dev/null 2>&1 || true
@@ -207,6 +216,7 @@ EOF
   docker run -d --name "$name" "${netargs[@]}" \
     -v "$(win_mount "$d/serve.conf" /etc/nginx/conf.d/serve.conf)" \
     -v "$(win_mount "$d/index.html" /srv/index.html)" \
+    -v "$(win_mount "$d/chunk.js" /srv/_next/static/chunk.js)" \
     "$probe_img" >/dev/null
 }
 # 主预览按容器名 DNS（ws-{id}）：名字必须恰为 ws-4242；id 取非常规值避免撞真工作区
@@ -214,10 +224,10 @@ mk_sandbox ws-4242 "" "rehearsal-ws-4242"
 # 快照按网络别名（snap-{vid}）：容器名随意、别名必须恰为 snap-777
 mk_sandbox rehearsal-snap-777 snap-777 "rehearsal-snap-777"
 sleep 1
-ok "ws-4242（主预览，容器名 DNS）＋ rehearsal-snap-777/snap-777（快照，网络别名）已起"
+ok "ws-4242（主预览，容器名 DNS）＋ rehearsal-snap-777/snap-777（快照，网络别名）已起（含 /_next 探针资产＋Origin 回显）"
 
 # ---------------------------------------------------------------- 6. 行为断言
-phase "6/7 行为断言（主站/注入/纯代理/资产/提示页/redis）"
+phase "6/7 行为断言（主站/注入/纯代理/资产/提示页/redis＋浏览器头探针）"
 H() { curl -s -H "Host: $1" "http://127.0.0.1$2"; }
 Hi() { curl -s -i -H "Host: $1" "http://127.0.0.1$2"; }
 
@@ -266,6 +276,44 @@ grep -qi "cache-control: no-store" <<<"$raw" || die "提示页缺 no-store"
 grep -q 'data-aiplatform="recovery"' <<<"$raw" || die "提示页缺自恢复脚本标记"
 ! grep -q 'data-aiplatform="annotation"' <<<"$raw" || die "提示页不应注入圈注"
 ok "⑤ 死子域 → 5xx＋平台风格自恢复提示页（no-store/不注入）"
+
+# ⑧ #396 浏览器头组合探针：真实浏览器头形态（Host＋Origin=预览域＋Referer＋Sec-Fetch
+# 三件套）打 /_next 资产——网关剥 Origin 若退化，即回到「Next 15.2+ dev 跨源闸门对带
+# 非白名单 Origin 的 /_next/ 一律 403」（页面卡加载、HMR 握手断）形态；「上游收到了
+# 什么」经沙箱回显头 X-Echo-Origin 可观测：/_next/ 无回显（网关剥）、非 /_next/ 有
+# 回显（原样透传——Server Actions CSRF/AI 自写 Origin 校验零扰动的守门断言）。
+# 探针重试收口（⑦ 先例：高负载下单发 curl 可能瞬时空应答假红——重试而非单发定生死）
+browser_probe() { # $1=Host $2=path $3=Sec-Fetch-Dest $4=Sec-Fetch-Mode → 头+体应答（重试至非空）
+  local host=$1 path=$2 dest=$3 mode=$4 resp="" i=0
+  while [ "$i" -lt 10 ] && [ -z "$resp" ]; do
+    resp=$(curl -s -i \
+      -H "Host: $host" \
+      -H "Origin: http://$host" \
+      -H "Referer: http://$host/" \
+      -H "Sec-Fetch-Dest: $dest" \
+      -H "Sec-Fetch-Mode: $mode" \
+      -H "Sec-Fetch-Site: same-origin" \
+      -H "User-Agent: Mozilla/5.0 (rehearsal #396 browser-shape probe)" \
+      "http://127.0.0.1$path") || true
+    i=$((i+1)); [ -z "$resp" ] && sleep 1
+  done
+  [ -n "$resp" ] || die "浏览器头探针空应答（$host$path，重试 10 次——现场保留排查）"
+  printf '%s' "$resp"
+}
+PREVIEW_HOST=4242.preview.semgravio.com
+# /_next 资产（crossorigin/module 加载 chunk 的真实头形态：Dest=script／Mode=cors）
+next_resp=$(browser_probe "$PREVIEW_HOST" /_next/static/chunk.js script cors)
+next_code=$(head -1 <<<"$next_resp" | awk '{print $2}')
+[ "$next_code" = 200 ] \
+  || die "带预览域 Origin 打 /_next 资产应 200 非 403（实际 $next_code——403＝网关剥 Origin 退化；其它状态查路由）"
+grep -q "ws-4242-next-chunk" <<<"$next_resp" || die "/_next 资产应答体非沙箱内容（路由劈叉？）"
+! grep -qi '^x-echo-origin:' <<<"$next_resp" \
+  || die "/_next/ 请求上游应收不到 Origin（回显头不应出现——网关剥 Origin 退化）"
+# 非 /_next 页面路由（浏览器导航真实头形态：Dest=document／Mode=navigate）：Origin 原样透传
+page_resp=$(browser_probe "$PREVIEW_HOST" / document navigate)
+grep -qi "^x-echo-origin: http://$PREVIEW_HOST" <<<"$page_resp" \
+  || die "非 /_next 请求上游应收到 Origin（原样透传——透传不误伤是硬约束）"
+ok "⑧ 浏览器头组合：/_next 非 403 且上游无 Origin（网关剥）、非 /_next Origin 原样透传"
 
 # ⑥ redis requirepass：分片凭据 PONG、无密码 NOAUTH（平台视角，webnet 内 DNS）
 redis_img=$(docker inspect -f '{{.Config.Image}}' semgravio-redis)
@@ -328,5 +376,5 @@ if [ "$INFRA_OWNED" = 1 ]; then
   ok "已拆自建 infra 栈（含排练卷与 .env；网络 webnet/previewnet 保留——幂等资源）"
 fi
 
-printf '\n排练全部通过 ✅（主站＋注入＋纯代理＋资产单源＋提示页＋redis requirepass%s）\n' \
+printf '\n排练全部通过 ✅（主站＋注入＋纯代理＋资产单源＋提示页＋redis requirepass＋浏览器头剥Origin%s）\n' \
   "$([ "$STUB" != 1 ] && echo '＋全栈后端/embedding' || echo '')"

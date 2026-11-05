@@ -76,10 +76,12 @@ services:
       # 收口探针从工作区容器内经 http://preview-gateway/ 打本网关——别名是 Docker 网络
       # 元数据非 nginx 配置（本声明是正本，防重建静默丢）；既有容器可热补零停机：
       # docker network connect --alias preview-gateway previewnet semgravio-nginx（见部署文档 #397 注记）
-      - webnet
-      - previewnet:
-          aliases:
-            - preview-gateway
+      # ⚠ 全映射形态书写（webnet: {} 而非 - webnet 列表混形）：列表混形在 Ubuntu 打包的
+      # compose 2.40 上校验必败（networks.1 must be a string）——semgravio-eu-1 实踩（#402）
+      webnet: {}
+      previewnet:
+        aliases:
+          - preview-gateway
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
       interval: 5s

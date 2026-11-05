@@ -52,6 +52,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>设计对接件（#298）：订单清单/详情 deliverableType（BaseEnum 房规＋取件
  *       端点指路）、对话条目 sessionSource（2=设计会话判据与 null=主会话缺省
  *       降级口径自描述）。</li>
+ *   <li>盖帽标志读面（#390）：项目详情 needsUserSupplement——type=boolean＋
+ *       置位/清零盖帽语义自描述（本读面恒有值，null 只属消费方兼容口径）。</li>
  * </ul>
  */
 @IntegrationTest
@@ -157,6 +159,23 @@ class SpringDocBackofficeContractTest {
                     .as("%s.ownerExternalId 应渲染 type=string", surface[1])
                     .isEqualTo("string");
         }
+    }
+
+    @Test
+    void given_project_detail_schema_when_read_group_then_needs_user_supplement_self_described()
+            throws Exception {
+        // #390 盖帽标志读面（可写不可读补肢）：type=boolean 钉死＋盖帽语义自描述
+        //（admin BFF 镜像之源；本读面恒有值 true/false——null 只属消费方对旧版
+        // 读面的兼容口径，不得漂移成三态语义）
+        JsonNode flag = property(fetchGroup("project"), "BackofficeProjectDetailResponse",
+                "needsUserSupplement");
+        assertThat(flag.path("type").asText(null))
+                .as("needsUserSupplement 应渲染 type=boolean")
+                .isEqualTo("boolean");
+        assertThat(flag.path("description").asText(""))
+                .as("needsUserSupplement 应自描述盖帽语义（置位/清零口径）")
+                .contains("置位")
+                .contains("清零");
     }
 
     @Test

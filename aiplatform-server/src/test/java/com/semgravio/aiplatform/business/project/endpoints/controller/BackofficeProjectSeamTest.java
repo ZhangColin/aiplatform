@@ -52,7 +52,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * （有未终结单 / 只有历史单 / 无单，照用户面 activeOrder/latestOrder 先例）、已删
  * 项目不可见（真删无墓碑：清单不含＋详情 404）、分页上界截断与越界、签名负例与
  * 过滤参数绑定负例（框架信封）。#243 起清单/详情行补 ownerExternalId（账号档案
- * 读口的寻址键）——与 ownerDisplayName 同源同批、同容缺语义。</p>
+ * 读口的寻址键）——与 ownerDisplayName 同源同批、同容缺语义。#390 详情补
+ * needsUserSupplement 盖帽标志直读（可写可读——置位/未置位如实 true/false）。</p>
  */
 @BackofficeSeamTest
 class BackofficeProjectSeamTest {
@@ -290,6 +291,26 @@ class BackofficeProjectSeamTest {
                 .andExpect(jsonPath("$.data.latestOrder").value(nullValue()));
     }
 
+    // ---------- 盖帽标志读面（#390 可写可读） ----------
+
+    @Test
+    void given_flagged_and_fresh_projects_when_signed_detail_then_needs_user_supplement_matches()
+            throws Exception {
+        Project flagged = flaggedProject("置位需补充的项目");
+        Project fresh = newProject("从未置位的项目", null);
+
+        // 置位后详情读面如实回 true——admin BFF 镜像之源（此前可写不可读、运营盲写）
+        signedGet("/api/backoffice/projects/" + flagged.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.needsUserSupplement").value(true));
+
+        // 未置位回 false（聚合列 NOT NULL 有实值——不冒充 null；null 语义只属
+        // BFF 对旧版读面的兼容口径，本读面发版后恒 true/false）
+        signedGet("/api/backoffice/projects/" + fresh.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.needsUserSupplement").value(false));
+    }
+
     // ---------- 已删项目不可见（真删无墓碑） ----------
 
     @Test
@@ -391,6 +412,14 @@ class BackofficeProjectSeamTest {
         Project project = newProject(name, ownerAccountId);
         Project loaded = projectRepository.findById(project.getId()).orElseThrow();
         loaded.archive();
+        return projectRepository.save(loaded);
+    }
+
+    /** 已置「需用户补充」项目（真聚合 flagNeedsUserSupplement() 路径落 needs_user_supplement）。 */
+    private Project flaggedProject(String name) {
+        Project project = newProject(name, null);
+        Project loaded = projectRepository.findById(project.getId()).orElseThrow();
+        loaded.flagNeedsUserSupplement(true);
         return projectRepository.save(loaded);
     }
 

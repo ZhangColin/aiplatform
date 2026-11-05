@@ -40,6 +40,10 @@ import com.semgravio.aiplatform.business.project.domain.enums.ProjectType;
  * @param costSummary      成本汇总指针（项目全量口径：总成本按币种＋unpriced 有无
  *                        标记；明细下钻走成本域端点——「成本读面归成本域、只留
  *                        指针」的形态落地）
+ * @param needsUserSupplement 「需用户补充」项目级盖帽标志（#338 聚合列直读）：生产
+ *                        承接期间需用户补资料/确认事项时后台置位、处理完清零——
+ *                        本读面恒有值（true/false），null 语义只属消费方对旧版
+ *                        读面的兼容口径
  */
 public record BackofficeProjectDetailResponse(
         String id,
@@ -58,7 +62,10 @@ public record BackofficeProjectDetailResponse(
         LocalDateTime generatedAt,
         OrderBriefResponse activeOrder,
         OrderBriefResponse latestOrder,
-        CostSummary costSummary
+        CostSummary costSummary,
+        @Schema(description = "「需用户补充」项目级盖帽标志（#338）：生产承接期间需用户补资料/确认事项时后台置位、"
+                + "处理完清零——六态推导以此盖帽；本读面恒有值 true/false，null 只属消费方对旧版读面的兼容口径")
+        Boolean needsUserSupplement
 ) {
 
     /** 聚合 + 归属账号摘要 + 订单引用 + 成本汇总指针 → 详情（缺档/无主整体 null 呈现）。 */
@@ -85,7 +92,8 @@ public record BackofficeProjectDetailResponse(
                 project.getGeneratedAt(),
                 activeOrder,
                 latestOrder,
-                costSummary);
+                costSummary,
+                project.isNeedsUserSupplement());
     }
 
     /**

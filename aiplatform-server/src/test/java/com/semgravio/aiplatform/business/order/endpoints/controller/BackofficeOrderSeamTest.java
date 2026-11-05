@@ -87,6 +87,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 打包面 mock 收口——seam 不触 docker）→ 清单/详情带 deliverableType；
  * design-package 端点对偶 source-package——<b>待报价单照取</b>（后台不受用户
  * 支付门约束，灵魂断言）、系统单 ORD_016 如实、冻结件缺失 PRJ_051 不顶替。</p>
+ *
+ * <p>#391 双版本引用详情列在本类钉死：真 place 冻结 stub 的双确认版本（可分辨
+ * 值证直读）→ 详情带 prdVersionNo/demoVersionNo；遗留单（库列 NULL）如实 null
+ * ——新单与遗留单呈现有别。</p>
  */
 @BackofficeSeamTest
 class BackofficeOrderSeamTest {
@@ -762,6 +766,43 @@ class BackofficeOrderSeamTest {
                 .andExpect(jsonPath("$.data.ownerDisplayName").value(nullValue()));
     }
 
+    // ---------- #391：双版本引用详情列（真 place 冻结直读＋遗留单 null） ----------
+
+    @Test
+    void given_placed_order_with_distinct_refs_when_signed_detail_then_frozen_version_refs_visible()
+            throws Exception {
+        // 真 place 冻结双版本引用（stub 供给可分辨值 PRD v4＋Demo v7——非缺省 v1，
+        // 冻结直读可溯源）→ 详情带两列：与 prdSnapshot 同批冻结的交易事实，admin
+        // BFF 镜像之源（AiplatformOrderResponse 同形 Integer）
+        OrderResponse order = placeOrderWithVersionRefs(910901L, 4, 7);
+        stubProjectName();
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id()),
+                        "/api/backoffice/orders/" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.prdVersionNo").value(4))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(7));
+    }
+
+    @Test
+    void given_legacy_order_when_signed_detail_then_version_refs_null() throws Exception {
+        // 遗留单（确认制之前下的单）：库列 NULL 如实呈现 null——新单（有冻结）与
+        // 遗留单（无引用）呈现有别，是本票灵魂（admin 抽屉两行不再恒「—」）
+        OrderResponse order = placeOrder();
+        stubProjectName();
+        jdbcTemplate.update(
+                "UPDATE ord_orders SET prd_version_no = NULL, demo_version_no = NULL WHERE id = ?",
+                Long.parseLong(order.id()));
+
+        mockMvc.perform(BackofficeSignatures.signed(
+                        get("/api/backoffice/orders/" + order.id()),
+                        "/api/backoffice/orders/" + order.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.prdVersionNo").value(nullValue()))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(nullValue()));
+    }
+
     // ---------- #158：重试归档写口（支付链造卡单 → 签名重试 → 全链一链断言） ----------
 
     @Test
@@ -932,6 +973,22 @@ class BackofficeOrderSeamTest {
                 new RequestContext(null, null, null, null, /* userId */ accountId,
                         null, null, null),
                 () -> appService.place(projectId));
+    }
+
+    /** 指定双确认版本的下单夹具（#391——覆写缺省 v1/v1 桩，冻结值可溯源）。 */
+    private OrderResponse placeOrderWithVersionRefs(long projectId, int prdVersionNo,
+                                                    int demoVersionNo) {
+        stubProject(projectId);
+        when(projectQueryAppService.confirmedVersionRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.ConfirmedVersionRefs(prdVersionNo, PRD, demoVersionNo));
+        try {
+            return RequestContext.runFor(
+                    new RequestContext(null, null, null, null, /* userId */ DEFAULT_ACCOUNT_ID,
+                            null, null, null),
+                    () -> appService.place(projectId));
+        } catch (Exception e) {
+            throw new RuntimeException("下单夹具绑定缺省账号失败", e);
+        }
     }
 
     /** 项目读面桩（detail/prd 跨 BC 软引用收口——下单冻结快照所需）。 */

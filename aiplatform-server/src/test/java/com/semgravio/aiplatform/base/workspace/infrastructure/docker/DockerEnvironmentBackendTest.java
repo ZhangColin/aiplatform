@@ -4,6 +4,8 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -163,6 +165,25 @@ class DockerEnvironmentBackendTest {
         ExecResult served = curl(provision.handle().containerName());
         assertThat(served.exitCode()).as("8081 应可访问").isZero();
         assertThat(served.stdout()).as("骨架页应含基座首页文案").contains("系统");
+
+        // #395 基座模板 allowedDevOrigins：不经网关直连应用口（容器内回环），带
+        // 预览域 Origin 直打 /_next chunk（浏览器 crossorigin/module 加载的真实
+        // 头形态）——行为与经网关一致（ADR-0034 语义自文档口径）。负面对照先证
+        // 闸门在动（Next 15.2+ dev 跨源闸门对非白名单 Origin 一律 403），再证
+        // 预览域条目放行——空转断言（闸门根本没起）在此露馅。
+        // chunk 路径在 Java 侧从 HTML 提取：容器内命令带内嵌双引号会被
+        // Windows JVM→docker.exe 剥掉（#399），sh 分词即毁
+        String container = provision.handle().containerName();
+        Matcher chunk = Pattern.compile("/_next/static/[^\"\\s>]+\\.js")
+                .matcher(served.stdout());
+        assertThat(chunk.find()).as("基座首页应引用 /_next 静态 chunk").isTrue();
+        String id = provision.handle().workspaceId().value();
+        assertThat(statusWithOrigin(container, chunk.group(), "https://evil.example.com"))
+                .as("非白名单 Origin 打 /_next 应被 dev 闸门 403（闸门在动的对照）")
+                .isEqualTo("403");
+        assertThat(statusWithOrigin(container, chunk.group(), "https://" + id + ".preview.semgravio.com"))
+                .as("预览域 Origin 直打 /_next chunk 应 200 放行（#395 allowedDevOrigins）")
+                .isEqualTo("200");
     }
 
     @Test
@@ -502,6 +523,13 @@ class DockerEnvironmentBackendTest {
     /** 容器内 8081 应用正文（快照/主容器通吃）。 */
     private static ExecResult curl(String containerName) {
         return docker("exec", containerName, "sh", "-c", "curl -s http://localhost:8081");
+    }
+
+    /** 容器内 8081 直连（不经网关）带 Origin 的单发状态码探针（#395）。 */
+    private static String statusWithOrigin(String containerName, String path, String origin) {
+        return docker("exec", containerName, "sh", "-c",
+                "curl -s -o /dev/null -w '%{http_code}' -H 'Origin: " + origin
+                        + "' http://localhost:8081" + path).stdout().trim();
     }
 
     /** 轮询容器内 8081 直至有 HTTP 响应（next dev 首次编译慢，最长约 2 分钟）。 */

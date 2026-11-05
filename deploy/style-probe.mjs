@@ -5,7 +5,7 @@
 // next dev 对非 localhost Host 的静态 chunk 请求回 403，见部署文档 §9 坑点 10）：
 //   # 目标与 cookie 按需改 targets；guest cookie 用 POST /api/projects 现造
 //   docker run --rm -v /tmp:/work --add-host host.docker.internal:host-gateway \
-//     aiplatform/dev:0.13 sh -c '
+//     aiplatform/dev:0.14 sh -c '
 //       apt-get update -qq >/dev/null && apt-get install -y -qq socat >/dev/null
 //       socat TCP-LISTEN:9333,fork,reuseaddr TCP:host.docker.internal:3333 &
 //       sleep 1; cp /work/style-probe.mjs /opt/render/ && cd /opt/render && node style-probe.mjs'

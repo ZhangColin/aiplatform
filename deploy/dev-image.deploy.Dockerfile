@@ -7,7 +7,7 @@
 # ② 基座模板 pnpm install 也显式走 npmmirror（服务器构建）。
 # 其余层（基座/种子/入口/静态服务）与原 Dockerfile 一致。
 # 构建上下文＝aiplatform-server/src/main/resources/docker/workspace/：
-#   docker build -f deploy/dev-image.deploy.Dockerfile -t aiplatform/dev:0.13 \
+#   docker build -f deploy/dev-image.deploy.Dockerfile -t aiplatform/dev:0.14 \
 #     aiplatform-server/src/main/resources/docker/workspace/
 FROM node:22-bookworm
 

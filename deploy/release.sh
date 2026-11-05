@@ -82,6 +82,16 @@ tar -xzf "$HOME/$BUNDLE_FN" --strip-components=1
 rm "$HOME/$BUNDLE_FN"
 echo "   REVISION: $(cat REVISION)"
 
+echo "-- env 模板对照（模板必配、现网 .env.production 未配的变量；模板值多为占位符不自动写，按需补后 up -d 重建生效——restart 不重读 env_file）"
+env_missing=$(comm -23 \
+  <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' deploy/env.server.example | sort -u) \
+  <(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' aiplatform-server/.env.production 2>/dev/null | sort -u) || true)
+if [ -n "$env_missing" ]; then
+  echo "$env_missing" | sed 's/=$//' | sed 's/^/   ⚠ 缺 /'
+else
+  echo "   ✓ 无缺失"
+fi
+
 echo "-- 退役旧预览网关容器（手工 docker run 特例，#386 起部署面不再有它；幂等）"
 if docker inspect aiplatform-gateway >/dev/null 2>&1; then
   docker rm -f aiplatform-gateway >/dev/null && echo "   已移除 aiplatform-gateway"

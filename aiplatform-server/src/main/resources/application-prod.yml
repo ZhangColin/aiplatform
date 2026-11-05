@@ -29,3 +29,10 @@ app:
 # 生产 https：cookie 必须 Secure（A2 §2 表 8-②）；issuer/redirect-uri 随环境注册
 sso:
   cookie-secure: true
+
+# 机机验签凭据源（app-registry）：prod 缺省＝webnet 容器名直发（eu-1 定稿口径，容器
+# 部署免配置；application.yml 缺省 localhost:8088 是本机开发口径，容器内必错）。
+# 仅 app-registry 不在同一 docker 网/裸机形态才需 env 覆盖。
+cartisan:
+  openapi:
+    apikey-service-url: ${APP_REGISTRY_BASE_URL:http://semgravio-app-registry:8088}/api/app-registry/api-keys/{apiKey}

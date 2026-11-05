@@ -54,6 +54,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * #397 收口探针走网关（防线 3）：网关挂 preview-gateway 别名，真 exposePort 探针
  * 端到端两态——绿（别名 DNS＋Host 路由＋浏览器头＋chunk 复测全链路）与红（模拟
  * 网关收口不了的未知闸门：应用对 gated chunk 无条件 403 → WSP_012 如实待期）。
+ * #403 两收口：①Next dev 闸门护 /_next* 与 /__nextjs* 两族（实测 __nextjs_font、
+ * __nextjs_original-stack-frame* 带 Origin 全 403），网关剥 Origin 扩到 __nextjs 族；
+ * ②客户端侧 gzip——上游恒收 identity（Accept-Encoding 剥除是 sub_filter 注入依赖
+ * 不动），nginx 注入后压缩发客户端（1MB 级 dev 资产 5.75× 实测，跨境单流下未压缩
+ * 传输是预览体感慢的主因）。断言仍只看外部可观测的请求/响应头到达与否。
  */
 @Tag("live")
 class PreviewGatewaySmokeTest {
@@ -90,6 +95,9 @@ class PreviewGatewaySmokeTest {
         // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）。
         // 收到的 Origin 回显为 X-Echo-Origin 响应头、/__xfo 回 X-Frame-Options: DENY：
         // 供 #394 环境性阻断收口三断言——「上游收到了什么请求头」经响应头可观测。
+        // /__gzip-probe 回 2KB text/plain、收到的 Accept-Encoding 回显为
+        // X-Echo-Accept-Encoding：供 #403 gzip 收口断言（≥gzip_min_length 才进压缩；
+        // 「上游收到了什么」同样经回显头可观测）。
         // HTML 引用 /_next/static chunk、/__gated/* 无条件 403：供 #397 收口探针断言
         //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）
         execIn(handle, "printf '<html><head><title>probe</title>"
@@ -105,6 +113,10 @@ class PreviewGatewaySmokeTest {
                 + "'X-Frame-Options':'DENY'});res.end('xfo probe');return;}\n"
                 + "if(req.url.startsWith('/_next/static/gated')){res.writeHead(403,"
                 + "{'Content-Type':'text/plain'});res.end('gated');return;}\n"
+                + "if(req.url==='/__gzip-probe'){res.writeHead(200,{'Content-Type':'text/plain'});"
+                + "res.end('g'.repeat(2048));return;}\n"
+                + "if(req.headers['accept-encoding'])"
+                + "res.setHeader('X-Echo-Accept-Encoding',req.headers['accept-encoding']);\n"
                 + "if(req.headers.origin)res.setHeader('X-Echo-Origin',req.headers.origin);\n"
                 + "res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
                 + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
@@ -194,6 +206,34 @@ class PreviewGatewaySmokeTest {
             assertThat(xfo.stdout().toLowerCase())
                     .as("上游的 X-Frame-Options 应被网关剥除（iframe 可嵌入）")
                     .doesNotContain("x-frame-options");
+
+            // #403 ① __nextjs 族 Origin 剥除：Next 16.3.1 dev 闸门护 /_next* 与 /__nextjs*
+            // 两族（实测 __nextjs_font、__nextjs_original-stack-frame* 带 Origin 全 403），
+            // #394 只收了 /_next/——字体按 CSS Fonts 规范 CORS 模式加载必带 Origin（同源
+            // 也带），正好踩闸门。断言形态同 /_next/：上游收不到 Origin（无回显头）且 200
+            ExecResult nextjsFont = curlFullWithOrigin(gatewayPort, id + ".localhost",
+                    "/__nextjs_font/geist-latin.woff2");
+            assertThat(nextjsFont.exitCode()).as("带 Origin 打 /__nextjs_font 应经网关完成").isZero();
+            assertThat(statusCodeOf(nextjsFont.stdout()))
+                    .as("带 Origin 打 /__nextjs_font 应经网关 200").isEqualTo(200);
+            assertThat(nextjsFont.stdout().toLowerCase())
+                    .as("/__nextjs* 请求上游应收不到 Origin（网关剥头，无回显）")
+                    .doesNotContain("x-echo-origin");
+
+            // #403 ② 网关客户端侧 gzip：上游恒收 identity（Accept-Encoding 剥除是注入块
+            // sub_filter 的依赖，不能动）——nginx 在注入处理后压缩发往客户端。断言双侧：
+            // 上游收不到 Accept-Encoding（回显头不出现＝sub_filter 依赖保持）、客户端响应
+            // 含 Content-Encoding: gzip（1MB 级 dev 资产 gzip 5.75×，跨境单流下未压缩
+            // 传输是预览体感慢的主因）
+            ExecResult gzipProbe = curlFullGzip(gatewayPort, id + ".localhost", "/__gzip-probe");
+            assertThat(gzipProbe.exitCode()).as("gzip 探针应经网关完成").isZero();
+            assertThat(statusCodeOf(gzipProbe.stdout())).as("gzip 探针应 200").isEqualTo(200);
+            assertThat(gzipProbe.stdout().toLowerCase())
+                    .as("客户端响应应含 Content-Encoding: gzip（网关客户端侧压缩）")
+                    .contains("content-encoding: gzip");
+            assertThat(gzipProbe.stdout().toLowerCase())
+                    .as("上游应收不到 Accept-Encoding（identity 恒定＝sub_filter 依赖保持）")
+                    .doesNotContain("x-echo-accept-encoding");
 
             // #397 收口探针走网关＋浏览器真实头（真探针×真网关端到端）：exposePort 的
             // 探针从工作区容器内经 preview-gateway 别名＋Host 头选路由打到应用——绿
@@ -387,6 +427,17 @@ class PreviewGatewaySmokeTest {
         return run("curl", "-s", "-i",
                 "-H", "Host: " + host,
                 "-H", "Origin: http://" + host,
+                "http://127.0.0.1:" + port + path);
+    }
+
+    /**
+     * 同 {@link #curlFull}，再带 {@code Accept-Encoding: gzip}（#403）：客户端声明可解压
+     * ——网关客户端侧 gzip 的真实浏览器头形态（响应体为压缩字节，断言只读头与状态行）。
+     */
+    private static ExecResult curlFullGzip(int port, String host, String path) {
+        return run("curl", "-s", "-i",
+                "-H", "Host: " + host,
+                "-H", "Accept-Encoding: gzip",
                 "http://127.0.0.1:" + port + path);
     }
 

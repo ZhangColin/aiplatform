@@ -316,6 +316,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 .map(name -> "--exclude=./" + name)
                 .collect(Collectors.joining(" "));
         String command = "tar czf - " + excludes + " -C " + WorkspaceLayout.ROOT + " .";
+        guardWindowsArgvQuotes("docker", "exec", handle.containerName(), "sh", "-c", command);
         try {
             Process p = new ProcessBuilder("docker", "exec", handle.containerName(),
                     "sh", "-c", command).start();
@@ -846,7 +847,9 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
      * 根探针命令：body＋末行状态码一并落 stdout（{@code -w '\n%{http_code}'}）——
-     * chunk 复测的取材（HTML 引用面）就在本轮应答里，不另发请求。
+     * chunk 复测的取材（HTML 引用面）就在本轮应答里，不另发请求。构造本体只在
+     * 本文（单源）；测试假面按形状匹配消费 {@code ProbeShape}（#401——改探针
+     * 形态时假面不再各改字符串）。
      */
     private static String rootProbeCommand(String host, String origin) {
         return "curl -s --max-time " + PREVIEW_PROBE_TIMEOUT.toSeconds()
@@ -867,7 +870,8 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * 浏览器真实头（#396/#397 同一形态）：Host 选网关路由、Origin/Referer=本工作区
      * 预览 URL、Sec-Fetch 三件套按资源类型（document=navigate / script=cors）、
      * UA 带平台标记（网关/应用日志可辨识探针流量）。一律单引号——Windows JVM→
-     * docker.exe 的 argv 编码链会剥内嵌双引号（#399），探针命令不得出现双引号。
+     * docker.exe 的 argv 编码链会剥内嵌双引号（#399，#401 起该缝已 fail-fast
+     * 防呆），探针命令不得出现双引号。
      */
     private static String browserHeaders(String dest, String mode, String host, String origin) {
         return " -H 'Host: " + host + "'"
@@ -1050,6 +1054,37 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     }
 
     /**
+     * 宿主是否 Windows（#401 防呆判定缝，测试子类可覆写注入形态）：os.name 判定。
+     * ①族 argv 双引号问题是 <b>Windows 平台性确定</b>——任何 Windows JVM→
+     * docker.exe 链的确定行为（换机不消失），非单机怪癖；Linux {@code execve}
+     * 传 argv 数组逐字节原样、生产免疫。守卫因此必须本判定条件化：Linux 上
+     * {@code sh -c} 内双引号是合法常用写法，不得一刀切禁。
+     */
+    protected boolean isWindowsHost() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    /**
+     * Windows 下拒内嵌双引号（#401，#399 家族止血；非 Windows 平台 no-op）：
+     * Java {@code ProcessBuilder} 走 CreateProcess 平面命令行、对参数内嵌
+     * {@code "} 不转义，docker.exe（Go/MSVCRT 规则）重切 argv 时把引号吃掉——
+     * {@code sh -c} 命令静默变形（#399 起服沦 REPL 假成功；#397 WRITE_SERVER_JS
+     * 同坑长期静默）。把「静默怪象」变「当场报错」（WSP_018）；重写纪律＝命令
+     * 一律单引号形态（容器侧 POSIX sh）。本类所有 spawn 缝共用（runCapture／
+     * runCaptureBinary／packSource 的内联 ProcessBuilder）。
+     */
+    private void guardWindowsArgvQuotes(String... cmd) {
+        if (!isWindowsHost()) {
+            return;
+        }
+        for (String arg : cmd) {
+            if (arg.contains("\"")) {
+                throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_COMMAND_EMBEDDED_QUOTE, arg);
+            }
+        }
+    }
+
+    /**
      * 测试子类覆写点：注入单条命令失败以验收回滚路径（#57 验收口径）。
      * stderr 异步排水（#400）：串行「先读尽 stdout 再读 stderr」在子进程 stderr
      * 超管道缓冲（~64KB）时死锁——子进程写 stderr 阻塞不退出、stdout 永无 EOF，
@@ -1057,6 +1092,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * 对齐 {@link #runCaptureBinary} 既有做法）。
      */
     protected ExecResult runCapture(String... cmd) {
+        guardWindowsArgvQuotes(cmd);   // #401 防呆：Windows 下 fail-fast，不静默变形
         try {
             Process p = new ProcessBuilder(cmd).start();
             CompletableFuture<String> stderrDrain = CompletableFuture.supplyAsync(() -> {
@@ -1080,9 +1116,11 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * stdin 可喂字节（解包）、stdout 取字节（打包）——gzip 二进制经 String 往返会
      * 损坏，字节命令不走 {@code runCapture}。stderr 异步读防管道写满死锁（同
      * {@link #packSource} 的教训）。异常（进程起不来等）按 exit 1 + stderr 记因，
-     * 不抛——与 {@code runCapture} 的容错形态一致。
+     * 不抛——与 {@code runCapture} 的容错形态一致；例外是 #401 防呆（Windows 下
+     * 内嵌双引号 fail-fast，同 {@link #guardWindowsArgvQuotes}）。
      */
     protected ByteExec runCaptureBinary(byte[] stdin, String... cmd) {
+        guardWindowsArgvQuotes(cmd);   // #401 防呆：同 runCapture（本缝同喂 sh -c 命令）
         try {
             Process p = new ProcessBuilder(cmd).start();
             CompletableFuture<String> stderr = CompletableFuture.supplyAsync(() -> {

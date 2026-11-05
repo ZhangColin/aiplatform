@@ -19,3 +19,7 @@ Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威（子项目旧词�
 ### Demo 阶段模型档
 
 Demo 阶段（首 Demo ＋ 迭代，run 执行体承载）模型档的初档与改档 SOP（运营配置面改档即生效、不发版、进行中 run 不定格）。见 `docs/agents/demo-stage-model-tier.md`。
+
+### Live 车道防腐
+
+触碰 workspace/docker/探针缝的票，收尾前必须本地跑相关 live 类并在票内评论留结果；①族 Windows argv 双引号平台性口径（防呆 os.name 条件化、命令一律单引号）。见 `docs/agents/live-test-lane.md`。

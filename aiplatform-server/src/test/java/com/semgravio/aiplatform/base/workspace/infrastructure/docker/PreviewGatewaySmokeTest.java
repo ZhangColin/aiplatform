@@ -1,6 +1,5 @@
 package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +19,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
-import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
@@ -64,7 +62,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PreviewGatewaySmokeTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 360;
-    private static final String GATEWAY_IMAGE = "nginx:stable-alpine";
 
     private final DockerEnvironmentBackend backend = new DockerEnvironmentBackend();
     private final SecureRandom random = new SecureRandom();
@@ -99,11 +96,14 @@ class PreviewGatewaySmokeTest {
         // X-Echo-Accept-Encoding：供 #403 gzip 收口断言（≥gzip_min_length 才进压缩；
         // 「上游收到了什么」同样经回显头可观测）。
         // HTML 引用 /_next/static chunk、/__gated/* 无条件 403：供 #397 收口探针断言
-        //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）
-        execIn(handle, "printf '<html><head><title>probe</title>"
-                + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
-                + "<body>hello gateway</body></html>'"
-                + " > /workspace/index.html");
+        //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）。
+        // HTML 落盘走 heredoc＋单引号属性（#401 argv 防呆纪律：命令不得内嵌双引号，
+        // Windows JVM→docker.exe 链会剥——#399 家族；同 GW_EOF 同款写法）
+        execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                + "<html><head><title>probe</title>"
+                + "<script src='/_next/static/chunks/app.js'></script></head>"
+                + "<body>hello gateway</body></html>\n"
+                + "GW_EOF");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
                 + "const http=require('http');const fs=require('fs');\n"
                 + "const server=http.createServer((req,res)=>{"
@@ -129,29 +129,17 @@ class PreviewGatewaySmokeTest {
         int gatewayPort = 20000 + random.nextInt(20000);
         Path dir = Files.createTempDirectory("aiplatform-gateway");
         try {
-            copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
-            copyResource("docker/gateway/gateway-proxy.conf", dir.resolve("gateway-proxy.conf"));
-            copyResource("docker/gateway/gateway-inject.conf", dir.resolve("gateway-inject.conf"));
-            copyResource("docker/gateway/unavailable.html", dir.resolve("unavailable.html"));
-            copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
-            // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活
-            // 资产（标注脚本/提示页）挂载路径＝块文件 alias 的统一路径（#386：按共享
-            // nginx 挂载形态 /etc/nginx/conf.d/aiplatform.assets/，dev 网关挂同路径）；
-            // #397 挂 preview-gateway 别名——收口探针从工作区容器内经它打到应用。
-            // 资产清单与 ThrowawayPreviewGateway 同款（网关资产增删两处同改）——此处
-            // 不复用 fixture 因要宿主端口映射（host 侧 curl 断言）与启动回执断言
-            ExecResult started = docker("run", "-d", "--name", gatewayContainer,
-                    "--network", WorkspaceNaming.PREVIEW_NETWORK,
-                    "--network-alias", WorkspaceNaming.PREVIEW_GATEWAY_ALIAS,
-                    "-p", gatewayPort + ":80",
-                    "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
-                    "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
-                    "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
-                    "-v", dir.resolve("unavailable.html") + ":/etc/nginx/conf.d/aiplatform.assets/unavailable.html:ro",
-                    "-v", dir.resolve("annotation.js") + ":/etc/nginx/conf.d/aiplatform.assets/annotation.js:ro",
-                    GATEWAY_IMAGE);
+            // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活。
+            // 资产清单/挂载形态（#386：块文件 alias 统一路径 /etc/nginx/conf.d/
+            // aiplatform.assets/）/别名/镜像单源＝ThrowawayPreviewGateway（#401：网关
+            // 资产增删只改一处，终结两处同改），此处仅以 hostPort 参数多要宿主端口
+            // 映射（host 侧 curl 断言）；#397 挂 preview-gateway 别名——收口探针从
+            // 工作区容器内经它打到应用
+            ExecResult started = docker(ThrowawayPreviewGateway
+                    .dockerRunArgs(gatewayContainer, ThrowawayPreviewGateway.copyAssets(dir), gatewayPort)
+                    .toArray(new String[0]));
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
 
             // 路由：{id}.localhost → ws-{id}:8081；HTML 含网关注入的标注脚本引用，
@@ -245,17 +233,22 @@ class PreviewGatewaySmokeTest {
             // #397 防未知新闸门：模拟网关收口不了的闸门（应用对 /_next/static/gated*
             // 无条件 403——形态上等同未来框架新默认闸门），HTML 改引 gated chunk 后
             // 收口判据应如实红（WSP_012 待期）——「探针 200、真浏览器 403」不再可能
-            execIn(handle, "printf '<html><head><title>probe</title>"
-                    + "<script src=\"/_next/static/gated.js\"></script></head>"
-                    + "<body>hello gateway</body></html>' > /workspace/index.html");
+            //（heredoc＋单引号属性：#401 argv 防呆纪律，同前 index.html 落盘写法）
+            execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                    + "<html><head><title>probe</title>"
+                    + "<script src='/_next/static/gated.js'></script></head>"
+                    + "<body>hello gateway</body></html>\n"
+                    + "GW_EOF");
             assertThatThrownBy(() -> backend.exposePort(handle, EnvironmentBackend.DEV_APP_CONTAINER_PORT))
                     .isInstanceOf(ApplicationException.class)
                     .extracting("codeMessage")
                     .isEqualTo(WorkspaceMessage.PREVIEW_NOT_SERVING);
             // 复原（后续快照/恢复弧断言继续用正常引用面）
-            execIn(handle, "printf '<html><head><title>probe</title>"
-                    + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
-                    + "<body>hello gateway</body></html>' > /workspace/index.html");
+            execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                    + "<html><head><title>probe</title>"
+                    + "<script src='/_next/static/chunks/app.js'></script></head>"
+                    + "<body>hello gateway</body></html>\n"
+                    + "GW_EOF");
 
             // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
             // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域
@@ -482,16 +475,6 @@ class PreviewGatewaySmokeTest {
             return new ExecResult(out, err, code);
         } catch (Exception e) {
             return new ExecResult("", String.valueOf(e.getMessage()), 1);
-        }
-    }
-
-    private static void copyResource(String resource, Path target) throws Exception {
-        try (InputStream in = PreviewGatewaySmokeTest.class.getClassLoader()
-                .getResourceAsStream(resource)) {
-            if (in == null) {
-                throw new IllegalStateException("找不到资源 " + resource);
-            }
-            Files.copy(in, target);
         }
     }
 

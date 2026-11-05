@@ -82,6 +82,7 @@ public final class DesignPrints {
      * 解析层容忍）。
      */
     public static String headFirstLineCommand(String relativePath) {
-        return ContainerCommands.existenceGuard(relativePath) + " head -n 1 \"$p\"";
+        return ContainerCommands.existenceGuard(relativePath)
+                + " head -n 1 " + ContainerCommands.quoted(relativePath);
     }
 }

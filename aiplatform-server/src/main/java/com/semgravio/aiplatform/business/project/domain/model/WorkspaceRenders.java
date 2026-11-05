@@ -45,7 +45,8 @@ public final class WorkspaceRenders {
                     "画幅须在 1~" + MAX_VIEWPORT_SIDE + " 像素内: " + width + "x" + height);
         }
         return guardAndRun(sourcePath, targetPath,
-                "node " + RENDER_HOME + "/render-html.mjs \"$p\" \"$o\" " + width + " " + height);
+                "node " + RENDER_HOME + "/render-html.mjs " + ContainerCommands.quoted(sourcePath)
+                        + " " + ContainerCommands.quoted(targetPath) + " " + width + " " + height);
     }
 
     /**
@@ -56,7 +57,8 @@ public final class WorkspaceRenders {
     public static String svgToPngCommand(String sourcePath, String targetPath) {
         requireViewable(sourcePath, targetPath);
         return guardAndRun(sourcePath, targetPath,
-                "node " + RENDER_HOME + "/render-svg.mjs \"$p\" \"$o\"");
+                "node " + RENDER_HOME + "/render-svg.mjs " + ContainerCommands.quoted(sourcePath)
+                        + " " + ContainerCommands.quoted(targetPath));
     }
 
     /** 出入路径同守卫（渲染面＝交付文件面，源与产物都不是非交付目录的客人）。 */
@@ -70,12 +72,12 @@ public final class WorkspaceRenders {
     /**
      * 守卫 + 渲染 + 字节回执（两路命令的公共骨架）：存在守卫占退出码 1（源不在），
      * 渲染与 stat 回执任一失败归一为 4（渲染失败——不与「源不在」混淆），成功时
-     * stdout 首行＝PNG 字节数。
+     * stdout 首行＝PNG 字节数。出入路径 Java 侧单引号内联（#401 纪律，无 shell
+     * 变量中间层）。
      */
     private static String guardAndRun(String sourcePath, String targetPath, String renderer) {
         return ContainerCommands.existenceGuard(sourcePath)
-                + " o=" + ContainerCommands.quoted(targetPath) + ";"
                 + " " + renderer
-                + " && stat -c %s \"$o\" || exit 4";
+                + " && stat -c %s " + ContainerCommands.quoted(targetPath) + " || exit 4";
     }
 }

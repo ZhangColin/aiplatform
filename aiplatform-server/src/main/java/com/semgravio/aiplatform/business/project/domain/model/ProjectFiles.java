@@ -165,9 +165,9 @@ public final class ProjectFiles {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
         return ContainerCommands.existenceGuard(path)
-                + " s=$(stat -c %s \"$p\");"
-                + " if [ \"$s\" -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
-                + " printf '%s\\n' \"$s\"; cat \"$p\"";
+                + " s=$(stat -c %s " + ContainerCommands.quoted(path) + ");"
+                + " if [ $s -gt " + MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                + " printf '%s\\n' $s; cat " + ContainerCommands.quoted(path);
     }
 
     /**
@@ -223,9 +223,9 @@ public final class ProjectFiles {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
         return ContainerCommands.existenceGuard(path)
-                + " s=$(stat -c %s \"$p\");"
-                + " if [ \"$s\" -gt " + MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
-                + " cat \"$p\"";
+                + " s=$(stat -c %s " + ContainerCommands.quoted(path) + ");"
+                + " if [ $s -gt " + MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                + " cat " + ContainerCommands.quoted(path);
     }
 
     /**
@@ -261,7 +261,7 @@ public final class ProjectFiles {
         if (!isViewable(path)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + path);
         }
-        return ContainerCommands.existenceGuard(path) + " cat \"$p\"";
+        return ContainerCommands.existenceGuard(path) + " cat " + ContainerCommands.quoted(path);
     }
 
     /**

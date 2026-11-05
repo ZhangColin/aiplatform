@@ -535,16 +535,16 @@ class DockerEnvironmentBackendTest {
         return docker("exec", handle.containerName(), "sh", "-c", command);
     }
 
-    /** 容器内 8081 应用正文（快照/主容器通吃）。 */
+    /** 容器内 8081 应用正文（快照/主容器通吃；URL 令牌单源 {@link ProbeShape}）。 */
     private static ExecResult curl(String containerName) {
-        return docker("exec", containerName, "sh", "-c", "curl -s http://localhost:8081");
+        return docker("exec", containerName, "sh", "-c", "curl -s " + ProbeShape.LOOPBACK_APP_URL);
     }
 
     /** 容器内 8081 直连（不经网关）带 Origin 的单发状态码探针（#395）。 */
     private static String statusWithOrigin(String containerName, String path, String origin) {
         return docker("exec", containerName, "sh", "-c",
                 "curl -s -o /dev/null -w '%{http_code}' -H 'Origin: " + origin
-                        + "' http://localhost:8081" + path).stdout().trim();
+                        + "' " + ProbeShape.LOOPBACK_APP_URL + path).stdout().trim();
     }
 
     /** 轮询容器内 8081 直至有 HTTP 响应（next dev 首次编译慢，最长约 2 分钟）。 */

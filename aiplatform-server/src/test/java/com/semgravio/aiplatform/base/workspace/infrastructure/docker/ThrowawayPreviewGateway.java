@@ -3,7 +3,9 @@ package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
@@ -12,13 +14,36 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
  * 活体测试用一次性预览网关（#397 收口探针走网关）：dev 网关配置原样起一个
  * previewnet 容器、挂 {@code preview-gateway} 网络别名——工作区容器内的收口探针
  * （exposePort/startApp/startSnapshot）经它打到应用，与用户浏览器同观察点。
- * 冒烟级（注入/剥 Origin 等网关行为本身）见 {@code PreviewGatewaySmokeTest}
- * （其网关自起段与本类同款资产清单——网关资产增删两处同改，#386 挂载口径），
- * 本 fixture 只供「需要探针绿」的活体用例作链路底座。无宿主端口映射（探针在
- * 容器间走，不经宿主）；同机已有真 dev 网关（同名别名）时 Docker DNS 轮询两者，
- * 配置同源、路由同效，无断言干扰。
+ *
+ * <p><b>网关资产清单与起容参数的单源（#401，终结 #397 code-review 标记的
+ * Duplicated Code）</b>：classpath 资产清单（{@link #ASSETS}）、挂载形态、
+ * 别名/镜像全在本文；宿主端口映射按用例可选（本 fixture 探针在容器间走、
+ * 不经宿主＝无映射；宿主侧 curl 断言的 {@code PreviewGatewaySmokeTest} 传端口
+ * 消费同源 {@link #dockerRunArgs}）——网关资产增删只改一处。</p>
+ *
+ * <p>冒烟级（注入/剥 Origin 等网关行为本身）见 {@code PreviewGatewaySmokeTest}。
+ * 无宿主端口映射；同机已有真 dev 网关（同名别名）时 Docker DNS 轮询两者，
+ * 配置同源、路由同效，无断言干扰。</p>
  */
 public final class ThrowawayPreviewGateway implements AutoCloseable {
+
+    /** 网关镜像（冒烟测试同款消费，单源）。 */
+    public static final String GATEWAY_IMAGE = "nginx:stable-alpine";
+
+    /**
+     * 网关资产清单（classpath 资源 → 容器挂载点）：挂载路径与块文件 alias 统一
+     * 路径同构（#386：/etc/nginx/conf.d/aiplatform.assets/）。增删资产只改这里。
+     */
+    private record GatewayAsset(String resource, String containerPath) {}
+
+    private static final List<GatewayAsset> ASSETS = List.of(
+            new GatewayAsset("docker/gateway/nginx.conf", "/etc/nginx/nginx.conf"),
+            new GatewayAsset("docker/gateway/gateway-proxy.conf", "/etc/nginx/gateway-proxy.conf"),
+            new GatewayAsset("docker/gateway/gateway-inject.conf", "/etc/nginx/gateway-inject.conf"),
+            new GatewayAsset("docker/gateway/unavailable.html",
+                    "/etc/nginx/conf.d/aiplatform.assets/unavailable.html"),
+            new GatewayAsset("docker/workspace/annotation.js",
+                    "/etc/nginx/conf.d/aiplatform.assets/annotation.js"));
 
     private final String containerName;
     private final Path assetDir;
@@ -35,25 +60,10 @@ public final class ThrowawayPreviewGateway implements AutoCloseable {
     public static ThrowawayPreviewGateway start(String suffix) {
         String containerName = "aiplatform-gw-test-" + suffix;
         try {
-            Path dir = Files.createTempDirectory("aiplatform-gateway-test");
-            copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
-            copyResource("docker/gateway/gateway-proxy.conf", dir.resolve("gateway-proxy.conf"));
-            copyResource("docker/gateway/gateway-inject.conf", dir.resolve("gateway-inject.conf"));
-            copyResource("docker/gateway/unavailable.html", dir.resolve("unavailable.html"));
-            copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
+            Path dir = copyAssets(Files.createTempDirectory("aiplatform-gateway-test"));
             docker("rm", "-f", containerName);
-            // 挂载路径与块文件 alias 统一路径同构（#386：/etc/nginx/conf.d/aiplatform.assets/）
-            ExecResult started = docker("run", "-d", "--name", containerName,
-                    "--network", WorkspaceNaming.PREVIEW_NETWORK,
-                    "--network-alias", WorkspaceNaming.PREVIEW_GATEWAY_ALIAS,
-                    "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
-                    "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
-                    "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
-                    "-v", dir.resolve("unavailable.html")
-                            + ":/etc/nginx/conf.d/aiplatform.assets/unavailable.html:ro",
-                    "-v", dir.resolve("annotation.js")
-                            + ":/etc/nginx/conf.d/aiplatform.assets/annotation.js:ro",
-                    "nginx:stable-alpine");
+            ExecResult started = docker(dockerRunArgs(containerName, dir)
+                    .toArray(new String[0]));
             if (started.exitCode() != 0) {
                 throw new IllegalStateException("一次性网关未起：" + started.stderr());
             }
@@ -63,6 +73,43 @@ public final class ThrowawayPreviewGateway implements AutoCloseable {
         } catch (Exception e) {
             throw new IllegalStateException("一次性网关准备失败: " + e.getMessage(), e);
         }
+    }
+
+    /** 资产清单整份复制到目标目录（文件名取资源路径末段）。 */
+    public static Path copyAssets(Path targetDir) throws Exception {
+        for (GatewayAsset asset : ASSETS) {
+            copyResource(asset.resource(), targetDir.resolve(fileName(asset.resource())));
+        }
+        return targetDir;
+    }
+
+    /**
+     * 网关 {@code docker run} 参数（不含 {@code docker} 前缀，无宿主端口映射——
+     * 本 fixture 的探针在容器间走、不经宿主）：进 previewnet、挂
+     * {@code preview-gateway} 别名、资产清单逐项 :ro 挂载。
+     */
+    public static List<String> dockerRunArgs(String containerName, Path assetDir) {
+        List<String> args = new ArrayList<>(List.of("run", "-d",
+                "--name", containerName,
+                "--network", WorkspaceNaming.PREVIEW_NETWORK,
+                "--network-alias", WorkspaceNaming.PREVIEW_GATEWAY_ALIAS));
+        for (GatewayAsset asset : ASSETS) {
+            args.addAll(List.of("-v",
+                    assetDir.resolve(fileName(asset.resource())) + ":" + asset.containerPath() + ":ro"));
+        }
+        args.add(GATEWAY_IMAGE);
+        return args;
+    }
+
+    /** 同 {@link #dockerRunArgs(String, Path)}，再加宿主端口映射（宿主侧 curl 断言用）。 */
+    public static List<String> dockerRunArgs(String containerName, Path assetDir, int hostPort) {
+        List<String> args = new ArrayList<>(dockerRunArgs(containerName, assetDir));
+        args.addAll(args.size() - 1, List.of("-p", hostPort + ":80"));   // 镜像名前插入
+        return args;
+    }
+
+    private static String fileName(String resource) {
+        return resource.substring(resource.lastIndexOf('/') + 1);
     }
 
     @Override

@@ -68,8 +68,9 @@ class ProjectMaterialsTest {
         // 命令正本逐字钉死（容器契约）：路径单引号转义、父目录幂等落位、stdin 灌
         // 字节、stat 字节回执
         assertThat(ProjectMaterials.uploadCommand("materials/123-logo.png"))
-                .isEqualTo("p='/workspace/materials/123-logo.png';"
-                        + " d=${p%/*}; mkdir -p \"$d\" && cat > \"$p\" && stat -c %s \"$p\"");
+                .isEqualTo("mkdir -p '/workspace/materials'"
+                        + " && cat > '/workspace/materials/123-logo.png'"
+                        + " && stat -c %s '/workspace/materials/123-logo.png'");
     }
 
     @Test
@@ -87,6 +88,7 @@ class ProjectMaterialsTest {
     void given_path_with_quote_when_upload_command_then_single_quote_escaped() {
         // 净化已剔引号，此处是命令构造层的独立防线（转义不依赖上游卫生）
         assertThat(ProjectMaterials.uploadCommand("materials/1-it's.png"))
-                .startsWith("p='/workspace/materials/1-it'\\''s.png';");
+                .startsWith("mkdir -p '/workspace/materials' && cat > "
+                        + "'/workspace/materials/1-it'\\''s.png'");
     }
 }

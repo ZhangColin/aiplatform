@@ -25,6 +25,7 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 import com.semgravio.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.archive.LocalDiskSealPackageStore;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
+import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ProbeShape;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ThrowawayPreviewGateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,13 +114,15 @@ class WorkspaceSealLiveTest {
         String containerName = workspace.getContainerName();
         String dbName = "ws" + workspaceId.value();
 
-        // 卷内种数据：文件探针 + 数据库行（两类用户数据的完整性代表）
+        // 卷内种数据：文件探针 + 数据库行（两类用户数据的完整性代表）。SQL 经
+        // psql -c 一律单引号包裹＋字符串字面量走 PG 美元引号（#401 argv 防呆纪律：
+        // 命令不得内嵌双引号，Windows JVM→docker.exe 链会剥——#399 家族）
         assertThat(backend.exec(workspace.toHandle(),
                 "printf " + FILE_MARKER + " > /workspace/.seal-probe").exitCode()).isZero();
         assertThat(backend.exec(workspace.toHandle(),
                 "psql -h localhost -U " + dbName + " -d " + dbName
-                        + " -c \"create table seal_probe(v text);"
-                        + " insert into seal_probe values ('" + FILE_MARKER + "')\"")
+                        + " -c 'create table seal_probe(v text);"
+                        + " insert into seal_probe values ($q$" + FILE_MARKER + "$q$)'")
                 .exitCode()).as("种入数据库探针行").isZero();
 
         // 休眠态（容器删、卷留）+ 休眠满期（last-touch 逾闲置阈值＋封存阈值）
@@ -162,10 +165,10 @@ class WorkspaceSealLiveTest {
                 .isEqualTo(FILE_MARKER);
         assertThat(backend.exec(woken.toHandle(),
                 "psql -h localhost -U " + dbName + " -d " + dbName
-                        + " -tAc \"select v from seal_probe\"").stdout().trim())
+                        + " -tAc 'select v from seal_probe'").stdout().trim())
                 .as("数据库数据随深度唤醒完整恢复").isEqualTo(FILE_MARKER);
         assertThat(backend.exec(woken.toHandle(),
-                "curl -s -o /dev/null http://localhost:8081").ok())
+                "curl -s -o /dev/null " + ProbeShape.LOOPBACK_APP_URL).ok())
                 .as("应用起服（预览可用判据）").isTrue();
     }
 
@@ -209,7 +212,7 @@ class WorkspaceSealLiveTest {
         while (System.currentTimeMillis() < deadline) {
             if (dockerExitCode("docker", "inspect", containerName) == 0
                     && backend.exec(WorkspaceHandle.dev(workspaceId, containerName,
-                            "previewnet"), "curl -s -o /dev/null http://localhost:8081").ok()) {
+                            "previewnet"), "curl -s -o /dev/null " + ProbeShape.LOOPBACK_APP_URL).ok()) {
                 return true;
             }
             sleep();
@@ -231,9 +234,18 @@ class WorkspaceSealLiveTest {
         return out;
     }
 
+    /**
+     * 退出码探子（容器/卷在否）。输出一律 DISCARD 直落 NUL：Windows 匿名管道仅
+     * ~4KB，不读输出的子进程在 stdout 超容量时写阻塞、永不退出（docker inspect
+     * JSON ~7.4KB 实证挂死 awaitDeepWoken——#400 家族的测试侧漏网，#401 活体
+     * 排查撞上；Linux 管道 64KB 从不触发）。无管道即无死锁。
+     */
     private int dockerExitCode(String... cmd) {
         try {
-            return new ProcessBuilder(cmd).start().waitFor();
+            return new ProcessBuilder(cmd)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start().waitFor();
         } catch (Exception e) {
             return -1;
         }

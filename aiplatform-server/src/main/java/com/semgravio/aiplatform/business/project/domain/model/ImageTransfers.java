@@ -86,7 +86,8 @@ public final class ImageTransfers {
         }
         return partGuardAndRun(relativePath,
                 "curl -fsSL --max-time " + DOWNLOAD_TIMEOUT_SECONDS
-                        + " -o \"$q\" " + ContainerCommands.quotedLiteral(url));
+                        + " -o " + ContainerCommands.quotedPart(relativePath)
+                        + " " + ContainerCommands.quotedLiteral(url));
     }
 
     /**
@@ -98,15 +99,21 @@ public final class ImageTransfers {
         if (!ProjectFiles.isViewable(relativePath)) {
             throw new IllegalArgumentException("非可浏览路径，命令构造拒绝: " + relativePath);
         }
-        return partGuardAndRun(relativePath, "cat > \"$q\"");
+        return partGuardAndRun(relativePath,
+                "cat > " + ContainerCommands.quotedPart(relativePath));
     }
 
-    /** 两形公共骨架：p＝正式落点、q＝{@code .part} 暂存；载荷写入 q → 非空守卫 →
-     *  原子改名 → stat 字节回执；任一失败清理 q 后退出 1（不留半张稿）。 */
+    /** 两形公共骨架：载荷写 {@code .part} 暂存 → 非空守卫 → 原子改名到正式落点 →
+     *  stat 字节回执；任一失败清理暂存后退出 1（不留半张稿）。落点/暂存路径均
+     *  Java 侧单引号内联（#401 纪律：命令不内嵌双引号，无 shell 变量中间层）。 */
     private static String partGuardAndRun(String relativePath, String payloadWrite) {
-        return "p=" + ContainerCommands.quoted(relativePath)
-                + "; q=\"$p.part\"; d=${p%/*}; mkdir -p \"$d\""
-                + " && { " + payloadWrite + " && test -s \"$q\" && mv \"$q\" \"$p\""
-                + " && stat -c %s \"$p\" || { rm -f -- \"$q\"; exit 1; }; }";
+        return "mkdir -p " + ContainerCommands.quotedParent(relativePath)
+                + " && { " + payloadWrite
+                + " && test -s " + ContainerCommands.quotedPart(relativePath)
+                + " && mv " + ContainerCommands.quotedPart(relativePath)
+                + " " + ContainerCommands.quoted(relativePath)
+                + " && stat -c %s " + ContainerCommands.quoted(relativePath)
+                + " || { rm -f -- " + ContainerCommands.quotedPart(relativePath)
+                + "; exit 1; }; }";
     }
 }

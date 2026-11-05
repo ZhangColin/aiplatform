@@ -133,17 +133,17 @@ class ProjectFilesTest {
         // 三段守卫各占退出码：1 = 不是文件/不存在、2 = 超大小上限（cat 前拦截，
         // 巨文件不进内存与 stdout）；0 = 首行字节大小 + 余文正文（PRD 读同构）
         assertThat(ProjectFiles.contentCommand("src/app/page.tsx")).isEqualTo(
-                "p='/workspace/src/app/page.tsx'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " s=$(stat -c %s \"$p\");"
-                        + " if [ \"$s\" -gt " + ProjectFiles.MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
-                        + " printf '%s\\n' \"$s\"; cat \"$p\"");
+                "if ! test -f '/workspace/src/app/page.tsx'; then exit 1; fi;"
+                        + " s=$(stat -c %s '/workspace/src/app/page.tsx');"
+                        + " if [ $s -gt " + ProjectFiles.MAX_CONTENT_BYTES + " ]; then exit 2; fi;"
+                        + " printf '%s\\n' $s; cat '/workspace/src/app/page.tsx'");
     }
 
     @Test
     void given_quote_in_filename_when_content_command_then_shell_escaped() {
         // 用户可控路径进单引号串：' 转义为 '\''，防注入（isViewable 已拒畸形，此处兜底）
         assertThat(ProjectFiles.contentCommand("docs/it's.md"))
-                .contains("p='/workspace/docs/it'\\''s.md';");
+                .contains("'/workspace/docs/it'\\''s.md'");
     }
 
     @Test
@@ -182,21 +182,21 @@ class ProjectFilesTest {
         // 文件原始字节（无「大小首行 + 正文」的文本形——二进制不经文本通道）。
         // #293 起图片点看与设计稿 HTML 伺服共用（命令体与内容无关，判定归调用侧）
         assertThat(ProjectFiles.rawInlineCommand("materials/ref.png")).isEqualTo(
-                "p='/workspace/materials/ref.png'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " s=$(stat -c %s \"$p\");"
-                        + " if [ \"$s\" -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
-                        + " cat \"$p\"");
+                "if ! test -f '/workspace/materials/ref.png'; then exit 1; fi;"
+                        + " s=$(stat -c %s '/workspace/materials/ref.png');"
+                        + " if [ $s -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                        + " cat '/workspace/materials/ref.png'");
         assertThat(ProjectFiles.rawInlineCommand("design/home-1.html")).isEqualTo(
-                "p='/workspace/design/home-1.html'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " s=$(stat -c %s \"$p\");"
-                        + " if [ \"$s\" -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
-                        + " cat \"$p\"");
+                "if ! test -f '/workspace/design/home-1.html'; then exit 1; fi;"
+                        + " s=$(stat -c %s '/workspace/design/home-1.html');"
+                        + " if [ $s -gt " + ProjectFiles.MAX_RAW_IMAGE_BYTES + " ]; then exit 2; fi;"
+                        + " cat '/workspace/design/home-1.html'");
     }
 
     @Test
     void given_quote_in_filename_when_raw_inline_command_then_shell_escaped() {
         assertThat(ProjectFiles.rawInlineCommand("materials/it's.png"))
-                .contains("p='/workspace/materials/it'\\''s.png';");
+                .contains("'/workspace/materials/it'\\''s.png'");
     }
 
     @Test
@@ -257,14 +257,14 @@ class ProjectFilesTest {
         // 下载＝带走，无点看式大小上限（与源码包整卷 tar 同一 exec 通道同口径，
         // 巨文件护面不在命令层）；唯一退出码语义：1 = 不存在（cat 前拦截）
         assertThat(ProjectFiles.downloadCommand("materials/ref.png"))
-                .isEqualTo("p='/workspace/materials/ref.png'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " cat \"$p\"");
+                .isEqualTo("if ! test -f '/workspace/materials/ref.png'; then exit 1; fi;"
+                        + " cat '/workspace/materials/ref.png'");
     }
 
     @Test
     void given_quote_in_filename_when_download_command_then_shell_escaped() {
         assertThat(ProjectFiles.downloadCommand("exports/it's.zip"))
-                .contains("p='/workspace/exports/it'\\''s.zip';");
+                .contains("'/workspace/exports/it'\\''s.zip'");
     }
 
     @Test

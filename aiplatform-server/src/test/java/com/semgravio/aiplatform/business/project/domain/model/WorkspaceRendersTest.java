@@ -20,10 +20,10 @@ class WorkspaceRendersTest {
         // 即 PNG 字节数）；渲染/回执任一失败归一 4——不与「源不在」的 1 混淆
         assertThat(WorkspaceRenders.htmlToPngCommand(
                 "design/poster.html", "design/poster.png", 800, 600)).isEqualTo(
-                "p='/workspace/design/poster.html'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " o='/workspace/design/poster.png';"
-                        + " node /opt/render/render-html.mjs \"$p\" \"$o\" 800 600"
-                        + " && stat -c %s \"$o\" || exit 4");
+                "if ! test -f '/workspace/design/poster.html'; then exit 1; fi;"
+                        + " node /opt/render/render-html.mjs '/workspace/design/poster.html'"
+                        + " '/workspace/design/poster.png' 800 600"
+                        + " && stat -c %s '/workspace/design/poster.png' || exit 4");
     }
 
     @Test
@@ -32,10 +32,10 @@ class WorkspaceRendersTest {
         // （原生尺寸渲染，多分辨率衍生是备案项不预埋）
         assertThat(WorkspaceRenders.svgToPngCommand(
                 "design/logo.svg", "exports/logo.png")).isEqualTo(
-                "p='/workspace/design/logo.svg'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " o='/workspace/exports/logo.png';"
-                        + " node /opt/render/render-svg.mjs \"$p\" \"$o\""
-                        + " && stat -c %s \"$o\" || exit 4");
+                "if ! test -f '/workspace/design/logo.svg'; then exit 1; fi;"
+                        + " node /opt/render/render-svg.mjs '/workspace/design/logo.svg'"
+                        + " '/workspace/exports/logo.png'"
+                        + " && stat -c %s '/workspace/exports/logo.png' || exit 4");
     }
 
     // ---------- 路径守卫（用户可控入参不进 shell 的同一道防线） ----------
@@ -46,10 +46,10 @@ class WorkspaceRendersTest {
         // 已拒畸形，此处兜底）
         assertThat(WorkspaceRenders.htmlToPngCommand(
                 "design/it's.html", "design/it's.png", 100, 100))
-                .contains("p='/workspace/design/it'\\''s.html';");
+                .contains("'/workspace/design/it'\\''s.html'");
         assertThat(WorkspaceRenders.svgToPngCommand(
                 "design/it's.svg", "design/it's.png"))
-                .contains("o='/workspace/design/it'\\''s.png';");
+                .contains("'/workspace/design/it'\\''s.png'");
     }
 
     @Test

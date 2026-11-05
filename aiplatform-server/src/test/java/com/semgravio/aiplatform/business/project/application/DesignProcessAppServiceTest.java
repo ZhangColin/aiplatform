@@ -1128,7 +1128,7 @@ class DesignProcessAppServiceTest {
                     if (command.contains("git commit")) {
                         return new ExecResultResponse("abc123def456\n", "", 0);
                     }
-                    if (command.contains("design/logo-1.html") && command.contains("cat \"$p\"")) {
+                    if (command.contains("design/logo-1.html") && command.contains("cat ")) {
                         return new ExecResultResponse(
                                 draft.getBytes(StandardCharsets.UTF_8).length
                                         + "\n" + draft, "", 0);

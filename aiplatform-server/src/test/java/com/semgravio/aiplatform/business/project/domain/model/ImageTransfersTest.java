@@ -54,22 +54,25 @@ class ImageTransfersTest {
     void given_url_form_when_download_command_then_curl_transfer_with_receipt() {
         assertThat(ImageTransfers.downloadCommand("design/123-hero.png",
                 "https://cdn.example.com/img/abc.png?Expires=1760000000"))
-                .isEqualTo("p='/workspace/design/123-hero.png'; q=\"$p.part\"; d=${p%/*};"
-                        + " mkdir -p \"$d\""
-                        + " && { curl -fsSL --max-time 30 -o \"$q\""
+                .isEqualTo("mkdir -p '/workspace/design'"
+                        + " && { curl -fsSL --max-time 30 -o '/workspace/design/123-hero.png.part'"
                         + " 'https://cdn.example.com/img/abc.png?Expires=1760000000'"
-                        + " && test -s \"$q\" && mv \"$q\" \"$p\" && stat -c %s \"$p\""
-                        + " || { rm -f -- \"$q\"; exit 1; }; }");
+                        + " && test -s '/workspace/design/123-hero.png.part'"
+                        + " && mv '/workspace/design/123-hero.png.part' '/workspace/design/123-hero.png'"
+                        + " && stat -c %s '/workspace/design/123-hero.png'"
+                        + " || { rm -f -- '/workspace/design/123-hero.png.part'; exit 1; }; }");
     }
 
     @Test
     void given_base64_form_when_write_command_then_stdin_part_then_atomic_rename() {
         // base64 形＝stdin 灌 .part 后原子改名（同 .part 语义：失败不留半张稿）
         assertThat(ImageTransfers.writeCommand("design/9-b.jpg"))
-                .isEqualTo("p='/workspace/design/9-b.jpg'; q=\"$p.part\"; d=${p%/*};"
-                        + " mkdir -p \"$d\""
-                        + " && { cat > \"$q\" && test -s \"$q\" && mv \"$q\" \"$p\""
-                        + " && stat -c %s \"$p\" || { rm -f -- \"$q\"; exit 1; }; }");
+                .isEqualTo("mkdir -p '/workspace/design'"
+                        + " && { cat > '/workspace/design/9-b.jpg.part'"
+                        + " && test -s '/workspace/design/9-b.jpg.part'"
+                        + " && mv '/workspace/design/9-b.jpg.part' '/workspace/design/9-b.jpg'"
+                        + " && stat -c %s '/workspace/design/9-b.jpg'"
+                        + " || { rm -f -- '/workspace/design/9-b.jpg.part'; exit 1; }; }");
     }
 
     @Test

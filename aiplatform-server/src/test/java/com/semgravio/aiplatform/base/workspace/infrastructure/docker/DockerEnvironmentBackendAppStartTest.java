@@ -11,7 +11,6 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
-import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -21,7 +20,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 序列与判据——不依赖真实 daemon（真链路 createWorkspace 幂等重建在
  * {@code DockerEnvironmentBackendTest}；容器实态四值映射与唤醒判定归
  * {@code DockerEnvironmentBackendObservationTest}，#176 起判定共用同一探查）。
- * 假面 = 覆写 {@code runCapture} 按命令形状回放既定结果。
+ * 假面 = 覆写 {@code runCapture} 按命令形状回放既定结果——形状谓词单源
+ * {@link ProbeShape}（#401），探针形态演化不再各改字符串。
  */
 class DockerEnvironmentBackendAppStartTest {
 
@@ -42,17 +42,16 @@ class DockerEnvironmentBackendAppStartTest {
 
         @Override
         protected ExecResult runCapture(String... cmd) {
-            commands.add(String.join(" ", cmd));
             String joined = String.join(" ", cmd);
+            commands.add(joined);
             // #397 幂等守卫：回环单发探「进程在不在服」（curl 退出码，任何响应=在服）
-            if (joined.contains("curl") && joined.contains("http://localhost:8081")) {
+            if (ProbeShape.isLoopbackGuard(joined)) {
                 boolean ok = serving.isEmpty() || serving.remove(0);
                 return new ExecResult("", "", ok ? 0 : 1);
             }
             // #397 起服判据：经网关浏览器形态——回执末行状态码（200=绿，无 /_next
             // 引用即无 chunk 复测）
-            if (joined.contains("curl") && joined.contains("http://"
-                    + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/")) {
+            if (ProbeShape.isRootProbe(joined)) {
                 boolean ok = serving.isEmpty() || serving.remove(0);
                 return new ExecResult(ok ? "200" : "", "", ok ? 0 : 1);
             }
@@ -64,17 +63,12 @@ class DockerEnvironmentBackendAppStartTest {
 
         /** 回环守卫探活调用次数。 */
         long loopbackProbeCount() {
-            return commands.stream()
-                    .filter(c -> c.contains("curl") && c.contains("http://localhost:8081"))
-                    .count();
+            return commands.stream().filter(ProbeShape::isLoopbackGuard).count();
         }
 
         /** 经网关判据探活调用次数。 */
         long gatewayProbeCount() {
-            return commands.stream()
-                    .filter(c -> c.contains("curl") && c.contains("http://"
-                            + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/"))
-                    .count();
+            return commands.stream().filter(ProbeShape::isRootProbe).count();
         }
     }
 

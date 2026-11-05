@@ -42,6 +42,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 上游起服恢复后同一子域经网关 200（恢复条件在网关缝可观测）；应用自身回的
  * 5xx 原样透传不被提示页替换（不开响应拦截）。自恢复脚本的浏览器轮询→重载
  * 行为不在自动化射程，走 #184 亲手联调。
+ * #394 环境性阻断收口（ADR-0034：网关是预览流量的信任边界）：加验 /_next/ 前缀
+ * 请求剥 Origin（stub 上游回显 X-Echo-Origin 断言上游收不到）、非 /_next 路径
+ * Origin 原样透传（透传不误伤）、上游的 X-Frame-Options 经网关剥除（iframe 嵌入
+ * 展示收口）。写法可换、语义不可退——断言只看外部可观测的请求/响应头到达与否。
  */
 @Tag("live")
 class PreviewGatewaySmokeTest {
@@ -75,7 +79,9 @@ class PreviewGatewaySmokeTest {
 
         // 摆一个不含任何注入的静态页 + 极简 node 服务（8081 起服）——响应里的注入只能来自网关。
         // upgrade 处理回裸 101：供网关 WebSocket 透传断言（升级头到达上游才有 101）。
-        // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）
+        // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）。
+        // 收到的 Origin 回显为 X-Echo-Origin 响应头、/__xfo 回 X-Frame-Options: DENY：
+        // 供 #394 环境性阻断收口三断言——「上游收到了什么请求头」经响应头可观测
         execIn(handle, "printf '<html><head><title>probe</title></head><body>hello gateway</body></html>'"
                 + " > /workspace/index.html");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
@@ -83,6 +89,9 @@ class PreviewGatewaySmokeTest {
                 + "const server=http.createServer((req,res)=>{"
                 + "if(req.url==='/__app-boom'){res.writeHead(503,{'Content-Type':'text/plain'});"
                 + "res.end('app-level failure');return;}\n"
+                + "if(req.url==='/__xfo'){res.writeHead(200,{'Content-Type':'text/plain',"
+                + "'X-Frame-Options':'DENY'});res.end('xfo probe');return;}\n"
+                + "if(req.headers.origin)res.setHeader('X-Echo-Origin',req.headers.origin);\n"
                 + "res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
                 + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
                 + "server.on('upgrade',(req,socket)=>{socket.write('HTTP/1.1 101 Switching Protocols\\r\\n"
@@ -136,6 +145,37 @@ class PreviewGatewaySmokeTest {
             ExecResult ws = curlWsUpgrade(gatewayPort, id + ".localhost", "/_next/hmr");
             assertThat(ws.stdout()).as("网关应透传 WebSocket 升级头（101，exit=%s）", ws.exitCode())
                     .contains("101");
+
+            // #394 环境性阻断收口（ADR-0034）：stub 上游把收到的 Origin 回显为 X-Echo-Origin
+            // 响应头——「上游收到了什么」经网关响应可观测。带预览域 Origin 打 /_next/ 资产
+            // （浏览器 crossorigin/module 加载 chunk 的真实形态）：Next 15.2+ dev 服务器跨源
+            // 闸门对带非白名单 Origin 的 /_next/ 一律 403（页面卡加载、HMR 握手断），网关剥
+            // Origin 即根除——上游应收不到 Origin（无回显头），且经网关仍 200
+            ExecResult nextAsset = curlFullWithOrigin(gatewayPort, id + ".localhost",
+                    "/_next/static/chunk.js");
+            assertThat(nextAsset.exitCode()).as("带 Origin 打 /_next/ 应经网关完成").isZero();
+            assertThat(statusCodeOf(nextAsset.stdout())).as("带 Origin 打 /_next/ 应经网关 200")
+                    .isEqualTo(200);
+            assertThat(nextAsset.stdout().toLowerCase())
+                    .as("/_next/ 请求上游应收不到 Origin（网关剥头，无回显）")
+                    .doesNotContain("x-echo-origin");
+
+            // #394 非 /_next 路径 Origin 原样透传（透传不误伤是硬约束）：页面路由 POST /
+            // Server Actions 的 CSRF 校验、AI 自写的 Origin 校验不受扰
+            ExecResult pageRoute = curlFullWithOrigin(gatewayPort, id + ".localhost", "/some/page");
+            assertThat(statusCodeOf(pageRoute.stdout())).isEqualTo(200);
+            assertThat(pageRoute.stdout().toLowerCase())
+                    .as("非 /_next 请求上游应收到 Origin（原样透传）")
+                    .contains("x-echo-origin: http://" + id + ".localhost");
+
+            // #394 响应侧收口：上游发 X-Frame-Options（Node 安全中间件默认值属环境性阻断，
+            // 与平台 iframe 展示方式冲突）→ 经网关的响应无此头；CSP 整头不剥（已知开口，
+            // ADR-0034）不在本断言射程
+            ExecResult xfo = curlFull(gatewayPort, id + ".localhost", "/__xfo");
+            assertThat(statusCodeOf(xfo.stdout())).as("XFO 探针应 200").isEqualTo(200);
+            assertThat(xfo.stdout().toLowerCase())
+                    .as("上游的 X-Frame-Options 应被网关剥除（iframe 可嵌入）")
+                    .doesNotContain("x-frame-options");
 
             // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
             // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域
@@ -297,6 +337,17 @@ class PreviewGatewaySmokeTest {
     /** 同 {@link #curlHost}，但带 {@code -i}：状态行/响应头/正文一并落 stdout（错误页断言要读头与状态码）。 */
     private static ExecResult curlFull(int port, String host, String path) {
         return run("curl", "-s", "-i", "-H", "Host: " + host, "http://127.0.0.1:" + port + path);
+    }
+
+    /**
+     * 同 {@link #curlFull}，再带浏览器真实头形态的 Origin（#394）：预览页面的同源
+     * Origin＝{@code http://{host}}——crossorigin/module 加载 chunk 时浏览器实际发的头。
+     */
+    private static ExecResult curlFullWithOrigin(int port, String host, String path) {
+        return run("curl", "-s", "-i",
+                "-H", "Host: " + host,
+                "-H", "Origin: http://" + host,
+                "http://127.0.0.1:" + port + path);
     }
 
     /** 以 WebSocket 升级头探网关（只断状态行，101 后连接悬住由 --max-time 收口，退出码 28 属预期）。 */

@@ -952,12 +952,25 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
         runCapture(cmd);
     }
 
-    /** 测试子类覆写点：注入单条命令失败以验收回滚路径（#57 验收口径）。 */
+    /**
+     * 测试子类覆写点：注入单条命令失败以验收回滚路径（#57 验收口径）。
+     * stderr 异步排水（#400）：串行「先读尽 stdout 再读 stderr」在子进程 stderr
+     * 超管道缓冲（~64KB）时死锁——子进程写 stderr 阻塞不退出、stdout 永无 EOF，
+     * 双方互等（实测 ensureDevImage 现场 docker build 触发，进度全走 stderr；
+     * 对齐 {@link #runCaptureBinary} 既有做法）。
+     */
     protected ExecResult runCapture(String... cmd) {
         try {
             Process p = new ProcessBuilder(cmd).start();
+            CompletableFuture<String> stderrDrain = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new String(p.getErrorStream().readAllBytes());
+                } catch (Exception readFailure) {
+                    return String.valueOf(readFailure.getMessage());
+                }
+            });
             String out = new String(p.getInputStream().readAllBytes());
-            String err = new String(p.getErrorStream().readAllBytes());
+            String err = stderrDrain.join();
             int code = p.waitFor();
             return new ExecResult(out, err, code);
         } catch (Exception e) {

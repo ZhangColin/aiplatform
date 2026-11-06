@@ -76,13 +76,20 @@ ENV RENDER_CHROMIUM=/opt/chrome/chrome-linux/chrome
 # 在基座上增量生长、跳过选型与初始化。devDependencies 含 @shadcn/lint＋oxlint
 # （#296 遵守三件套③——带规范项目收口 token 合规扫描的容器内执行件；无规范项目
 # 只是装而不用，行为零改变）。
+# #421 厚模板补三层：基座健壮件首批四件套（src/lib/robust 数据访问层＋fetch 封装＋
+# 会话存储件、src/components/robust 三态 UX 件＋页面级错误边界——机制/呈现分离：
+# 行为契约在件、长相吃项目设计 token、文案可覆盖）＋测试跑道（vitest 配置＋自测
+# 骨架，模板内零 setup 可跑）＋栈规则集（工作区 AGENTS.md 由平台在派发时按健壮件
+# 在场拼入，见 GenerationAppService）。构建期 pnpm test 跑四件套行为契约测试——
+# 模板自己吃狗粮，红＝镜像构建失败（随镜像构建验证，spec #416 测试决议）；故
+# 基座模板内容变更一律随 DEV_IMAGE tag 换版（单源），存量项目不回补。
 # store-dir 钉在 /workspace/.pnpm-store：/workspace 是独立卷（独立文件系统），
 # pnpm 在卷上会自动改用项目内 store；若构建期走默认全局 store（/root/.local），
 # 复制就位后 node_modules 的 storeDir 记录与运行时不一致，执行体 pnpm add（长尾
 # 依赖 / shadcn add）会报 UNEXPECTED_STORE。预先对齐 storeDir，就位后 pnpm add
 # 只增量下载新依赖、不复装全部。
 COPY baseline/ /opt/baseline/
-RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store
+RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store && pnpm test
 
 # 演示种子数据（#340）：通用示例集引擎 seed.sql（只补空表、按列形合成）＋幂等
 # 施用入口 apply.sh。三处调用——init-workspace.sh（容器自愈，初始化脚本扩位）、

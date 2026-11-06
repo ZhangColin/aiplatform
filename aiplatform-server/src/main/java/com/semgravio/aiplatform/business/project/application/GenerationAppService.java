@@ -441,6 +441,26 @@ public class GenerationAppService {
             本项目带设计规范正本：工作区根的 DESIGN.md（随设计定稿刷新、平台维护）——每轮开工先读，系统界面的颜色、字体、圆角与组件风格照它对齐（视觉正源＝定稿设计稿）。src/app/globals.css 的 :root 是 token 生效位，其中平台维护的「平台设计规范」@theme 块已收窄默认调色板（bg-red-500 等裸色工具类不可用）：样式一律引用语义 token 或品牌色 token（bg-brand-1 等），禁裸色、禁任意值（p-[13px]）、禁 inline style；需要新颜色时在 :root 定义 token 并在 @theme 暴露，不写死色值。token 清单与细则见 DESIGN.md。""";
 
     /**
+     * AGENTS.md 本栈写法规则节（#421 栈规则集）：基座健壮件的件用法示例与「用
+     * 预置件、不裸写」规则——平台维护、随基座 tag 换版（节内容描述的件与
+     * {@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS} 判据锚同批就位）。只在
+     * 新基座工作区拼入（件在场）；存量项目不回补、节不拼入。正文纪律与平台约定
+     * 正文同：无用户可控片段、无内嵌双引号（Windows argv fail-fast 面），单引号
+     * 经 heredoc 单引号定界为字面量、安全。
+     */
+    static final String AGENTS_MD_STACK_RULES_SECTION = """
+
+            ## 本栈写法规则（栈规则集）
+
+            基座预置横切健壮件——行为契约内置、长相吃项目设计 token、文案可覆盖。这些能力直接用预置件，不自己手写；登录页面/流程/角色模型是功能域，自己写。
+
+            - 数据访问（pg/redis）一律走 src/lib/robust/data-access：query（超时＋瞬时错误重试）、cacheGet / cacheSet（redis 恒降级——读挂了返回 null、写挂了返回 false，不抛不挂死）。不 new Pool、createClient 裸用客户端。示例：const rows = await query('SELECT * FROM orders WHERE user_id = $1', [userId])。
+            - 外部 HTTP 一律走 src/lib/robust/http 的 httpFetch / httpJson：默认超时＋错误归一为 HttpError（kind: timeout / network / http / parse，按 kind 分流），GET 缺省重试一次、副作用方法不重试。不用裸 fetch。
+            - 页面加载/空/错三态用 src/components/robust/AsyncSection（status: loading / empty / error / ready，onRetry 挂重试），页面外层包 src/components/robust/ErrorBoundary（渲染崩溃兜底、resetKey 换路由自动复位）。文案默认可覆盖（loadingText / emptyText / errorTitle / retryText 等 props），样式只引用语义 token 类。
+            - 会话与密码用 src/lib/robust/session：createSession（route handler / server action 语境）、getSession（redis 挂了降级 null——受保护页照常判未登录）、destroySession、hashPassword / verifyPassword（scrypt）。不手写 cookie 会话、不裸存密码。
+            - 测试：测试跑道已预置（vitest），测试文件与源码同目录放 *.test.ts(x)，pnpm test 直跑——给业务功能补行为契约测试（成功路径与失败/降级路径都测）。""";
+
+    /**
      * 收口判据核验探针（#35）：converse 无异常不构成成功——run 执行体可能道歉式
      * 放弃或被 maxIters 掐断而照常返回。8081 可达才算收口（与 EXECUTOR systemPrompt
      * 的收口判据对齐）。{@code -s} 静默、{@code -o /dev/null} 弃正文，exitCode 0 =
@@ -1923,30 +1943,43 @@ public class GenerationAppService {
 
     /**
      * AGENTS.md 平台约定写入命令（幂等覆写，生成与更新 run 起手共用）：heredoc
-     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无单引号）。带规范项目
-     * 追加设计规范节（#296）。
+     * 单引号定界不做展开，正文为平台常量（无用户可控片段、无内嵌双引号——
+     * Windows argv fail-fast 面；单引号在定界 heredoc 体内为字面量）。带规范项目
+     * 追加设计规范节（#296）；新基座工作区追加本栈写法规则节（#421 栈规则集）。
      */
-    static String agentsMdWriteCommand(boolean withDesignSpec) {
+    static String agentsMdWriteCommand(boolean withDesignSpec, boolean withStackRules) {
         return "cat > '" + WorkspaceLayout.absolute(WorkspaceLayout.AGENTS_MD)
                 + "' <<'PLATFORM_EOF'\n" + AGENTS_MD_CONTENT
+                + (withStackRules ? AGENTS_MD_STACK_RULES_SECTION : "")
                 + (withDesignSpec ? AGENTS_MD_DESIGN_SPEC_SECTION : "")
                 + "\nPLATFORM_EOF";
+    }
+
+    /**
+     * 基座健壮件在场探针（#421）：{@link ProjectFiles#BASELINE_ROBUST_DATA_ACCESS}
+     * 在场＝新基座工作区（四件套随镜像就位），栈规则集拼入；不在场＝存量工作区
+     * （不回补，节不拼入）。命令全常量、单引号形态（①族纪律）。
+     */
+    static String robustKitProbeCommand() {
+        return "test -f '" + WorkspaceLayout.absolute(ProjectFiles.BASELINE_ROBUST_DATA_ACCESS) + "'";
     }
 
     /**
      * 工作区布局资产就位（生成与更新 run 起手共用，#214 幂等覆写刷新既有工作区；
      * #296 起手序单点——<b>物化先于 AGENTS.md</b>，节内容随物化结果）：设计规范
      * 派发物化（带规范项目四件落位〔:root 刷值／收窄块／DESIGN.md／lint 配置〕、
-     * 无规范项目零动作零写入）→ AGENTS.md 平台约定写入（带规范项目拼设计规范
-     * 节）。退出码非 0 即写入失败（环境故障口径如实上抛，run 不起跑——遵守链
-     * 不静默缺席）。
+     * 无规范项目零动作零写入）→ AGENTS.md 平台约定写入（带规范项目拼设计规范节；
+     * 新基座工作区拼栈规则集节——健壮件在场探针判据，#421）。退出码非 0 即写入
+     * 失败（环境故障口径如实上抛，run 不起跑——遵守链不静默缺席）。
      */
     static void writeConventionAssets(WorkspaceLifecycleAppService workspace,
             DesignSpecAppService designSpecs, Project project) {
         boolean withDesignSpec = designSpecs.materializeAtDispatch(project);
-        ExecResultResponse result = workspace.exec(
-                Long.toString(project.getWorkspaceId()),
-                new WorkspaceExecCommand(agentsMdWriteCommand(withDesignSpec)));
+        String workspaceId = Long.toString(project.getWorkspaceId());
+        boolean withStackRules = workspace.exec(workspaceId,
+                new WorkspaceExecCommand(robustKitProbeCommand())).exitCode() == 0;
+        ExecResultResponse result = workspace.exec(workspaceId,
+                new WorkspaceExecCommand(agentsMdWriteCommand(withDesignSpec, withStackRules)));
         if (result.exitCode() != 0) {
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,
                     "AGENTS.md 平台约定写入失败: " + result.stderr());

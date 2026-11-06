@@ -59,6 +59,13 @@ public final class ProjectFiles {
     public static final String BASELINE_ENTRY = "src/app/page.tsx";
 
     /**
+     * 基座健壮件·数据访问层（#421 首批四件套的取件锚，工作区根相对形）：栈规则集
+     * AGENTS.md 节的就位判据——四件套随基座模板同批就位，此文件在场＝新基座
+     * （栈规则集拼入）；不在场＝存量工作区（不回补，节不拼入）。
+     */
+    public static final String BASELINE_ROBUST_DATA_ACCESS = "src/lib/robust/data-access.ts";
+
+    /**
      * 入口文件截断占位短语（#339 受限宽容名单）：执行体「其余代码略」式残缺产出的
      * <b>字面形</b>——只收强信号短语（含「其余/代码/以下/此处」等截断语境词，
      * 不误伤「略」的常用义如「策略/略高于」）。逐字命中即判残缺。

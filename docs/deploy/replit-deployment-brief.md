@@ -20,9 +20,9 @@
 ### 1.2 工作区沙箱（硬需求核心）
 
 - 实现：`DockerEnvironmentBackend`，**docker CLI 子进程**（非 docker-java 库）。设计上是可替换接口（代码注释预留「上云换 TKE 适配器」）。
-- 每个工作区＝一个常驻容器：`docker run -d --name ws-{id} --restart unless-stopped --network previewnet -v vol-ws-{id}:/workspace aiplatform/dev:0.14 sleep infinity`。无宿主端口映射。
+- 每个工作区＝一个常驻容器：`docker run -d --name ws-{id} --restart unless-stopped --network previewnet -v vol-ws-{id}:/workspace aiplatform/dev:0.15 sleep infinity`。无宿主端口映射。
 - 容器内 all-in-one：用户生成应用（node，**8081**）＋PG15（`/workspace/data/pg`，回环 trust）＋redis（回环）＋git。智能体不进容器，平台 JVM 经 `docker exec` 驱动文件面。
-- 镜像 `aiplatform/dev:0.14`：node:22-bookworm ＋ postgresql-15 ＋ redis ＋ pnpm@10 ＋ Playwright/Chromium 渲染器（**当前 zip 为 arm64 专用，amd64 主机需换包**，见 Dockerfile 内注释）＋ Next.js 基座模板。镜像由后端从 classpath 资源现场 `docker build`（ensureDevImage），**jar 运行形态会抛异常，须由部署流程预置镜像**（此缺口在自有服务器同样存在，属我们侧待办）。
+- 镜像 `aiplatform/dev:0.15`：node:22-bookworm ＋ postgresql-15 ＋ redis ＋ pnpm@10 ＋ Playwright/Chromium 渲染器（**当前 zip 为 arm64 专用，amd64 主机需换包**，见 Dockerfile 内注释）＋ Next.js 基座模板。镜像由后端从 classpath 资源现场 `docker build`（ensureDevImage），**jar 运行形态会抛异常，须由部署流程预置镜像**（此缺口在自有服务器同样存在，属我们侧待办）。
 - 生命周期：闲置 60min 删容器保卷 → 深度唤醒（解包＋pnpm install，10min 探活窗）→ 30 天封存（`seal-archives/`，生产应挂独立卷）。
 - 出网 allow-all：容器内 pnpm install、`git clone` github；模型 API 出网在**平台进程**（ark.cn-beijing.volces.com、api.deepseek.com、api.bocha.cn 等中国大陆端点为主）。
 

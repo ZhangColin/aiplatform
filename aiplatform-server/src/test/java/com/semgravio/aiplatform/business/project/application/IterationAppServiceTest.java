@@ -118,9 +118,11 @@ class IterationAppServiceTest {
     @BeforeEach
     void stubWorkspace() {
         // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
-        // 命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        // 命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
+        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
         when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
+                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
                 .thenReturn(new ExecResultResponse("", "", 0));
     }
 

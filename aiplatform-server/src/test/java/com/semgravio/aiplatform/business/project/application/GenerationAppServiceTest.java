@@ -2857,6 +2857,59 @@ class GenerationAppServiceTest {
                 .anySatisfy(command -> assertThat(command).contains(".oxlintrc.json"));
     }
 
+    /** 健壮件缺席桩（后注册优先）：探针命令（test -f 基座健壮件）退非 0——存量工作区形。 */
+    private void givenRobustKitAbsent() {
+        when(workspaceLifecycleAppService.exec(anyString(),
+                argThat(command -> command != null
+                        && command.command().equals(GenerationAppService.robustKitProbeCommand()))))
+                .thenReturn(new ExecResultResponse("", "not found", 1));
+    }
+
+    @Test
+    void given_robust_kit_present_when_dispatch_then_agents_md_carries_stack_rules_section() {
+        // #421 验收①（栈规则集腿）：新基座工作区（探针在场）派发——AGENTS.md 拼入
+        // 本栈写法规则节（件用法示例＋用预置件规则），且写入命令不携内嵌双引号
+        // （Windows argv fail-fast 面，①族纪律——节内容改坏即红）
+        Long projectId = persistedProject("9830");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds(); // exec 全退 0 ⇒ 探针在场 ⇒ 节拼入
+        givenConverseSucceeds("已生成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(2)).exec(eq("9830"), execs.capture());
+        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .anySatisfy(command -> assertThat(command).contains("test -f"))
+                .anySatisfy(command -> assertThat(command)
+                        .contains("AGENTS.md")
+                        .contains("本栈写法规则")
+                        .contains("src/lib/robust/data-access")
+                        .contains("不自己手写"))
+                .allSatisfy(command -> assertThat(command).doesNotContain("\""));
+    }
+
+    @Test
+    void given_legacy_workspace_when_dispatch_then_stack_rules_section_not_backfilled() {
+        // #421 存量不回补：健壮件不在场（探针退 1）——AGENTS.md 不拼栈规则集节
+        // （存量工作区没有件，节内容指路不存在文件即误导；不回补口径结构性落地）
+        Long projectId = persistedProject("9831");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenRobustKitAbsent();
+        givenConverseSucceeds("已生成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<WorkspaceExecCommand> execs =
+                ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeast(1)).exec(eq("9831"), execs.capture());
+        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .anySatisfy(command -> assertThat(command).contains("AGENTS.md"))
+                .noneSatisfy(command -> assertThat(command).contains("本栈写法规则"));
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void given_lint_violations_when_close_then_fix_round_then_listed_with_retried() {

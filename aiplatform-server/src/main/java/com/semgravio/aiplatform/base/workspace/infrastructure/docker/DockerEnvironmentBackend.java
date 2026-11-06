@@ -70,6 +70,11 @@ import lombok.extern.slf4j.Slf4j;
 public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
+     * 0.15（#421）：基座模板补厚三层——健壮件四件套（src/lib/robust 数据访问层＋
+     * fetch 封装＋会话存储件、src/components/robust 三态 UX 件＋页面级错误边界）＋
+     * 测试跑道（vitest 配置＋自测骨架，构建期 pnpm test 狗粮门）＋旧裸客户端出口
+     * src/lib/db.ts 吸收删除（ADR-0035；栈规则集 AGENTS.md 节由平台派发时按健壮件
+     * 在场探针拼入——存量项目不回补）。0.14（#395）：allowedDevOrigins 预览域条目。
      * 0.13（#340）：镜像增 /opt/seed 演示种子资产（seed.sql 通用示例集引擎＋
      * apply.sh 幂等施用入口），init-workspace.sh 增种子施用步、appStartCommand
      * 拉起前施用（run 收口侧由 DemoSeedAppService exec——首跑的应用表在收口前才
@@ -83,7 +88,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
      * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.14";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.15";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

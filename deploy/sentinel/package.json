@@ -1,0 +1,12 @@
+{
+  "name": "aiplatform-preview-sentinel",
+  "private": true,
+  "type": "module",
+  "description": "预览哨兵（#422）：发布尾部一次性外部真浏览器冒烟（release.sh 之外可独立跑）",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}

@@ -752,10 +752,13 @@ class CoderRunAttempts {
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
     /**
-     * 委派工具注册名（harness 子智能体发起面）：其执行跨距 ≈ 被委执子智能体的事件
-     * 窗——工具桶除名防双计（验证时长由 verifyMs 桶承载）。
+     * 委派族工具注册名（harness 委派发起/等待面）：其执行跨距与被委执子智能体的
+     * 源账（verifyMs 口径——该源模型调用＋工具执行）墙钟重叠——工具桶除名防双计
+     * （#417 补全；agent_spawn＝内核旧名、历史卡仍见，agent_send＝现名，
+     * wait_async_results＝等待屏障——生产实测 3231s＋797s 全漏在工具桶）。
      */
-    private static final String AGENT_SPAWN_TOOL = "agent_spawn";
+    private static final Set<String> DELEGATION_TOOLS =
+            Set.of("agent_spawn", "agent_send", "wait_async_results");
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
@@ -909,12 +912,14 @@ class CoderRunAttempts {
     }
 
     /**
-     * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
-     * = 按工具名分桶·command 按命令归组嵌套 / 验证 = verify 委派窗 / 收口尾序 =
+     * 阶段耗时分布装配（#111；#417 口径修真）：四桶齐备（LLM 等待 = 跨尝试模型调用
+     * 累计 / 工具执行 = 按工具名分桶·command 按命令归组嵌套·委派族除名 / 验证 =
+     * verify 源账（其模型调用＋工具执行累计——并行父流时间不入账）/ 收口尾序 =
      * 探活 + 样式合规扫描（#296）+ 成版）+ 逐尝试分布（静默重试代价可归因——每次
      * 尝试的墙钟与桶各自带）。
-     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验等）
-     * = durationMs；closingMs 含成版而 durationMs 窗口不含（小正
+     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验、
+     * 委派等待屏障等）− 真并行重叠（父流与子智能体源事件墙钟重叠段——并行收益
+     * 双方各自入账）= durationMs；closingMs 含成版而 durationMs 窗口不含（小正
      * 偏差）——量级不符即埋点有洞（缝测守卫）。
      */
     private static Map<String, Object> durationBreakdown(List<AttemptDuration> attempts,
@@ -947,14 +952,15 @@ class CoderRunAttempts {
     }
 
     /**
-     * 工具桶载荷：按工具名分桶（{@link #AGENT_SPAWN_TOOL} 委派调用除名——其跨距 ≈
-     * 子智能体事件窗，入桶即与验证桶双计）；command 工具以命令归组对象嵌套
-     * （install / dev / test / other——只携带出现过的组）。
+     * 工具桶载荷：按工具名分桶（{@link #DELEGATION_TOOLS} 委派族除名——其跨距与
+     * 验证源账墙钟重叠，入桶即双计）；command 工具以命令归组对象嵌套
+     * （install / build / dev / test / db / http / script / other——#417 七族，
+     * 只携带出现过的组）。
      */
     private static Map<String, Object> toolsPayload(StageDurations durations) {
         Map<String, Object> tools = new LinkedHashMap<>();
         durations.toolsMs().forEach((toolName, ms) -> {
-            if (!AGENT_SPAWN_TOOL.equals(toolName)) {
+            if (!DELEGATION_TOOLS.contains(toolName)) {
                 tools.put(toolName, ms);
             }
         });
@@ -964,7 +970,8 @@ class CoderRunAttempts {
         return tools;
     }
 
-    /** 验证桶 = verify 委派窗（无验证 = 0——四桶齐备，缺省出 0 不缺席）。 */
+    /** 验证桶 = verify 源账（该源模型调用＋工具执行累计——并行父流时间不入账；
+     * 无验证 = 0——四桶齐备，缺省出 0 不缺席）。 */
     private static long verifyMs(StageDurations durations) {
         return durations.subagentMs()
                 .getOrDefault(ProfileSubagentSupplier.VERIFY_NAME, 0L);

@@ -29,20 +29,33 @@ import io.agentscope.core.event.ToolResultEndEvent;
  * 承载）；② 工具执行窗 = callEnd（参数落定）→ resultEnd（结果落定，含失败态——
  * 失败的执行照样耗时），参数在途的模型生成时间归 LLM 桶；③ 命令工具（内核
  * shell）不进 toolsMs 平铺——命令文本（参数增量累积解析）按命令归组进
- * commandMs；④ 带 source 的委派事件（子智能体转发进父流）不进执行体桶，只记
- * 委派窗（首末 source 事件跨距——窗内细节即子智能体账，归属哪个桶的判定归收口
- * 装配侧）。</p>
+ * commandMs；④ 带 source 的委派事件（子智能体转发进父流）不进执行体桶，按源
+ * 归集该源自身的模型调用与工具执行配对累计（#417 弃「首末单窗跨距」口径——
+ * 单窗把窗内并行父流的 LLM 时间圈进验证桶，重叠双计；源内区间之间的空档归
+ * 未归因差值）。</p>
  */
 final class StageDurationFacts {
 
     /** 命令归组·依赖安装（closing durationBreakdown 的 command 桶键，SSE事件清单同载）。 */
     static final String GROUP_INSTALL = "install";
 
+    /** 命令归组·构建（#417——build/tsc 等构建族，先于 dev 判定防「vite build」误入 dev）。 */
+    static final String GROUP_BUILD = "build";
+
     /** 命令归组·dev server（起服/常驻类命令）。 */
     static final String GROUP_DEV = "dev";
 
     /** 命令归组·测试。 */
     static final String GROUP_TEST = "test";
+
+    /** 命令归组·数据库客户端（psql 等直连操作）。 */
+    static final String GROUP_DB = "db";
+
+    /** 命令归组·HTTP 探测（curl/wget）。 */
+    static final String GROUP_HTTP = "http";
+
+    /** 命令归组·一次性脚本运行（node/npx 兜族——未被前族命中的 runner 形态）。 */
+    static final String GROUP_SCRIPT = "script";
 
     /** 命令归组·其他（兜底）。 */
     static final String GROUP_OTHER = "other";
@@ -53,14 +66,19 @@ final class StageDurationFacts {
     private static final String COMMAND_TOOL = "execute";
 
     /**
-     * 归组形态（宁粗勿细的首版——依赖安装 / dev server / 测试三族的常见形态命中，
-     * 其余兜底 other）：复合命令按段（&&/;/| 与换行切分）左到右、段内
-     * install > dev > test 首个命中定组。
+     * 归组形态（#417 扩族——生产实测 command.other 吞掉全部命令耗时后的修真：
+     * install / build / dev / test / db / http / script 七族常见形态命中，其余
+     * 兜底 other）：复合命令按段（&&/;/| 与换行切分）左到右、段内
+     * install > build > dev > test > db > http > script 首个命中定组。
      */
     private static final Pattern INSTALL = Pattern.compile(
             "\\b(npm|pnpm|yarn|bun)\\s+(install|i|ci|add)\\b"
                     + "|\\b(apt|apt-get)\\s+install\\b"
                     + "|\\bpip3?\\s+install\\b");
+    private static final Pattern BUILD = Pattern.compile(
+            "\\b(npm|pnpm|yarn|bun)\\s+(run\\s+)?build\\b"
+                    + "|\\b(next|vite|nest|nuxt)\\s+build\\b"
+                    + "|\\btsc\\b");
     private static final Pattern DEV = Pattern.compile(
             "\\b(npm|pnpm|yarn|bun)\\s+(run\\s+)?(dev|start|serve)\\b"
                     + "|\\b(vite|nodemon)\\b"
@@ -69,6 +87,12 @@ final class StageDurationFacts {
             "\\b(npm|pnpm|yarn|bun)\\s+(run\\s+)?(test|check)\\b"
                     + "|\\b(vitest|jest|pytest)\\b"
                     + "|\\bplaywright\\s+test\\b");
+    private static final Pattern DB = Pattern.compile(
+            "\\bpsql\\b|\\bpg_dump\\b|\\bpg_restore\\b|\\bredis-cli\\b");
+    private static final Pattern HTTP = Pattern.compile(
+            "\\bcurl\\b|\\bwget\\b");
+    private static final Pattern SCRIPT = Pattern.compile(
+            "\\bnode\\b|\\bnpx\\b");
 
     /** 复合命令的段切分（&&/;/| 与换行）。 */
     private static final Pattern SEGMENTS = Pattern.compile("[;&|\\n]+");
@@ -76,8 +100,12 @@ final class StageDurationFacts {
     private long llmMs;
     private final Map<String, Long> toolsMs = new LinkedHashMap<>();
     private final Map<String, Long> commandMs = new LinkedHashMap<>();
-    /** 委派窗（source → [首事件 ms, 末事件 ms]）；快照时折算跨距。 */
-    private final Map<String, long[]> subagentWindows = new HashMap<>();
+    /** 委派源账（source → 该源模型调用＋工具执行配对累计；首见序插入、无闭合区间为 0）。 */
+    private final Map<String, Long> subagentAccounts = new LinkedHashMap<>();
+    /** 源内模型调用挂账（source → replyId → 起点 ms）。 */
+    private final Map<String, Map<String, Long>> subagentModelStarts = new HashMap<>();
+    /** 源内工具执行挂账（source → toolCallId → 执行起点）。 */
+    private final Map<String, Map<String, Long>> subagentToolStarts = new HashMap<>();
 
     /** 模型调用挂账（replyId → 起点 ms）。 */
     private final Map<String, Long> modelStarts = new HashMap<>();
@@ -91,8 +119,8 @@ final class StageDurationFacts {
     }
 
     /**
-     * 全事件单入口（掐表点 = 事件产生时刻）：委派事件记委派窗后不并账（窗内细节
-     * 即子智能体账），执行体事件进模型/工具配对。
+     * 全事件单入口（掐表点 = 事件产生时刻）：委派事件按源归集该源自身的配对区间
+     * （不进执行体桶——窗内细节即子智能体账），执行体事件进模型/工具配对。
      */
     void onEvent(AgentEvent event) {
         Long at = epochMilli(event);
@@ -101,8 +129,7 @@ final class StageDurationFacts {
         }
         String source = AgentscopeEventMapper.sourceOf(event);
         if (source != null) {
-            long[] window = subagentWindows.computeIfAbsent(source, key -> new long[]{at, at});
-            window[1] = at;
+            onSourcedEvent(source, event, at);
             return;
         }
         if (event instanceof ModelCallStartEvent start) {
@@ -143,9 +170,43 @@ final class StageDurationFacts {
 
     /** 本流段的阶段耗时不定形快照（未闭合区间丢弃——只计完整观察）。 */
     StageDurations snapshot() {
-        Map<String, Long> windows = new LinkedHashMap<>();
-        subagentWindows.forEach((source, window) -> windows.put(source, window[1] - window[0]));
-        return new StageDurations(llmMs, toolsMs, commandMs, windows);
+        return new StageDurations(llmMs, toolsMs, commandMs, subagentAccounts);
+    }
+
+    /**
+     * 委派源事件归集（#417 源账口径）：该源的模型调用与工具执行各自配对、闭合时
+     * 累计进源账——与执行体配对同律（只计闭合区间），并行父流的事件不在此账。
+     * 其余源事件（文本增量、参数增量等）只登记源首见、不产生账。
+     */
+    private void onSourcedEvent(String source, AgentEvent event, long at) {
+        subagentAccounts.putIfAbsent(source, 0L);
+        if (event instanceof ModelCallStartEvent start) {
+            subagentModelStarts.computeIfAbsent(source, key -> new HashMap<>())
+                    .put(nvl(start.getReplyId()), at);
+        }
+        else if (event instanceof ModelCallEndEvent end) {
+            Long started = removeStart(subagentModelStarts, source, nvl(end.getReplyId()));
+            if (started != null) {
+                subagentAccounts.merge(source, at - started, Long::sum);
+            }
+        }
+        else if (event instanceof ToolCallEndEvent end) {
+            subagentToolStarts.computeIfAbsent(source, key -> new HashMap<>())
+                    .put(nvl(end.getToolCallId()), at);
+        }
+        else if (event instanceof ToolResultEndEvent end) {
+            Long started = removeStart(subagentToolStarts, source, nvl(end.getToolCallId()));
+            if (started != null) {
+                subagentAccounts.merge(source, at - started, Long::sum);
+            }
+        }
+    }
+
+    /** 源内挂账取走（无该源或该键 → null——未配对即不计）。 */
+    private static Long removeStart(Map<String, Map<String, Long>> starts, String source,
+            String key) {
+        Map<String, Long> pending = starts.get(source);
+        return pending != null ? pending.remove(key) : null;
     }
 
     /** 命令工具累积参数 → 归组（command 字段解析不出 → 其他——不可观测即兜底）。 */
@@ -163,8 +224,9 @@ final class StageDurationFacts {
     }
 
     /**
-     * 命令文本归组（粗分组首版）：复合命令按段左到右、段内 install > dev > test
-     * 首个命中定组（「cd x && npm install」归 install）；全不命中兜底 other。
+     * 命令文本归组（#417 七族）：复合命令按段左到右、段内 install > build > dev
+     * > test > db > http > script 首个命中定组（「cd x && npm install」归 install、
+     * 「vite build」归 build）；全不命中兜底 other。
      */
     static String classify(String command) {
         if (command == null || command.isBlank()) {
@@ -178,11 +240,23 @@ final class StageDurationFacts {
             if (INSTALL.matcher(trimmed).find()) {
                 return GROUP_INSTALL;
             }
+            if (BUILD.matcher(trimmed).find()) {
+                return GROUP_BUILD;
+            }
             if (DEV.matcher(trimmed).find()) {
                 return GROUP_DEV;
             }
             if (TEST.matcher(trimmed).find()) {
                 return GROUP_TEST;
+            }
+            if (DB.matcher(trimmed).find()) {
+                return GROUP_DB;
+            }
+            if (HTTP.matcher(trimmed).find()) {
+                return GROUP_HTTP;
+            }
+            if (SCRIPT.matcher(trimmed).find()) {
+                return GROUP_SCRIPT;
             }
         }
         return GROUP_OTHER;

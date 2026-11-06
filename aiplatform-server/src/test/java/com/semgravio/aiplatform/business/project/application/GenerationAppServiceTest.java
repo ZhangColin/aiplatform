@@ -2009,8 +2009,9 @@ class GenerationAppServiceTest {
     @SuppressWarnings("unchecked")
     void given_scripted_durations_when_closes_then_closing_carries_duration_breakdown() {
         // #111 收口扩载·阶段耗时分布：四桶齐备（llmMs / toolsMs 按工具名分桶·command
-        // 按命令归组嵌套 / verifyMs 委派窗 / closingMs 收口尾序）+ 逐尝试分布；agent_spawn
-        // 委派调用除名（跨距 ≈ 验证窗，入桶即双计）；SSE 扩载与对话史落库同载荷；
+        // 按命令归组嵌套 / verifyMs 源账 / closingMs 收口尾序）+ 逐尝试分布；委派族
+        // 工具（agent_spawn 旧名＋agent_send/wait_async_results——#417 补全）除名
+        // （跨距与验证源账重叠，入桶即双计）；SSE 扩载与对话史落库同载荷；
         // 桶计与 durationMs 一致性守卫（允许小误差，量级不符即埋点有洞）
         Long projectId = persistedProject("9818");
         givenSessionExecutorRunsInline();
@@ -2023,7 +2024,8 @@ class GenerationAppServiceTest {
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             return new AgentReply(command.runId(), "系统已生成", null, List.of(),
-                    new StageDurations(5, Map.of("write_file", 2L, "agent_spawn", 9L),
+                    new StageDurations(5, Map.of("write_file", 2L, "agent_spawn", 9L,
+                            "agent_send", 40L, "wait_async_results", 11L),
                             Map.of("install", 3L), Map.of("verify", 1L)));
         });
 
@@ -2043,7 +2045,9 @@ class GenerationAppServiceTest {
         Map<String, Object> toolsMs = (Map<String, Object>) breakdown.get("toolsMs");
         assertThat(toolsMs)
                 .containsEntry("write_file", 2L)
-                .doesNotContainKey("agent_spawn"); // 委派调用除名（防与验证窗双计）
+                .doesNotContainKey("agent_spawn") // 委派族除名（防与验证源账双计）
+                .doesNotContainKey("agent_send")
+                .doesNotContainKey("wait_async_results");
         assertThat((Map<String, Object>) toolsMs.get("command"))
                 .containsExactly(Map.entry("install", 3L));
         long closingMs = ((Number) breakdown.get("closingMs")).longValue();
@@ -2056,7 +2060,9 @@ class GenerationAppServiceTest {
                     assertThat(attempt).containsEntry("verifyMs", 1L);
                     assertThat((Map<String, Object>) attempt.get("toolsMs"))
                             .containsEntry("write_file", 2L)
-                            .doesNotContainKey("agent_spawn");
+                            .doesNotContainKey("agent_spawn")
+                            .doesNotContainKey("agent_send")
+                            .doesNotContainKey("wait_async_results");
                     assertThat(((Number) attempt.get("durationMs")).longValue())
                             .isGreaterThanOrEqualTo(0L);
                 });
@@ -2079,7 +2085,9 @@ class GenerationAppServiceTest {
         assertThat(((Number) persistedBreakdown.get("llmMs")).longValue()).isEqualTo(5L);
         assertThat((Map<String, Object>) persistedBreakdown.get("toolsMs"))
                 .containsKey("command")
-                .doesNotContainKey("agent_spawn");
+                .doesNotContainKey("agent_spawn")
+                .doesNotContainKey("agent_send")
+                .doesNotContainKey("wait_async_results");
     }
 
     @Test

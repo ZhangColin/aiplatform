@@ -171,16 +171,24 @@ closing: {
                                     # 失败段（无收尾卡）的判定留档以结构化日志为面
 
   durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
-                                   # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径）：
+                                   # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径；
+                                   # #417 计量口径修真——verify 源账去重叠双计、委派族除名、
+                                   # command 归组扩七族，桶计可信）：
     llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）
     toolsMs: {                     #   工具执行（参数落定→结果落定的纯执行窗，按工具名分桶；
-                                   #   agent_spawn 委派调用除名——跨距 ≈ 验证窗，入桶即双计）
+                                   #   委派族（agent_spawn 旧名/agent_send/wait_async_results）
+                                   #   除名——跨距与验证源账墙钟重叠，入桶即双计）
       write_file: 3000,
-      command: { install: 61000, dev: 800, test: 2400, other: 500 }
-                                   #   command 按命令归组（依赖安装 / dev server / 测试 / 其他，
-                                   #   粗分组首版，只携带出现过的组）
+      command: { install: 61000, build: 4500, dev: 800, test: 2400,
+                 db: 300, http: 700, script: 1200, other: 500 }
+                                   #   command 按命令归组（依赖安装 / 构建（build/tsc 等）/
+                                   #   dev server / 测试 / 数据库客户端（psql 等）/ HTTP 探测
+                                   #   （curl 等）/ 脚本运行（node/npx 一次性）兜底其他——
+                                   #   #417 七族，other 不再吞掉全部命令耗时；只携带出现过的组）
     },
-    verifyMs: 9000,                #   验证子智能体委派窗（首末 source=verify 事件跨距；无验证 = 0）
+    verifyMs: 9000,                #   验证子智能体源账（verify 源模型调用＋其工具执行
+                                   #   配对累计——#417 弃「首末单窗跨距」口径，并行父流
+                                   #   的时间不入账；无验证 = 0）
     closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
     attempts: [                    #   逐尝试分布（静默重试代价可归因）——attempt / durationMs
       { attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash", llmMs: 52000, toolsMs: {...}, verifyMs: 9000 }
@@ -189,8 +197,10 @@ closing: {
                                    #   中段崩的尝试带已闭合区间的
                                    #   部分观察（#323 失败留账——AgentTurnFailure 携带；前段失败/
                                    #   判据回调抛错无可携事实仍零桶）、墙钟照记
-    # 一致性口径：桶计 + 未归因差值（平台管道 / 判据未过的核验）≈ durationMs——
-    # 量级不符即埋点有洞（缝测守卫）；closingMs 含成版而 durationMs 窗口不含（小正偏差）
+    # 一致性口径：桶计 + 未归因差值（平台管道 / 判据未过的核验 / 委派等待屏障等）
+    # − 真并行重叠（父流与子智能体源事件的墙钟重叠段——并行收益双方各自入账）
+    # ≈ durationMs——量级不符即埋点有洞（缝测守卫，合成事件流用例在
+    # StageDurationFactsTest 闭合）；closingMs 含成版而 durationMs 窗口不含（小正偏差）
   }
 }
 ```

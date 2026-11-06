@@ -8,7 +8,7 @@ import java.util.List;
  * {@link #changes()} 为本流段成功的文件变更事实（#88 收口扩载的观察面——
  * write_file / edit_file 工具调用事实，收口侧拼装变更清单与统计）；
  * {@link #durations()} 为本流段的阶段耗时事实（#111 收口扩载 durationBreakdown
- * 的观察面——模型调用/工具执行/命令归组/委派窗，收口侧跨段合并汇总）。
+ * 的观察面——模型调用/工具执行/命令归组/委派源账，收口侧跨段合并汇总）。
  */
 public record AgentReply(String runId, String text, AgentSuspension suspension,
         List<FileChange> changes, StageDurations durations) {

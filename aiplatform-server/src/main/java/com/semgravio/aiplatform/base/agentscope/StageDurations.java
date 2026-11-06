@@ -7,10 +7,11 @@ import java.util.Map;
 /**
  * 一段流（converse/resume）的阶段耗时事实快照（#111 收口扩载 durationBreakdown
  * 的观察面）：LLM 等待（执行体模型调用起止累计）/ 工具执行（按工具名分桶——
- * command 工具不入此桶）/ 命令归组（command 工具的 install/dev/test/other）/
- * 委派窗（source → 首末事件跨距）。不可变——run 尝试环跨段（converse + 续跑）
- * 以 {@link #plus} 合并、跨尝试在收口装配侧汇总进 closing。观察口径与已知洞见
- * {@link StageDurationFacts}。
+ * command 工具不入此桶）/ 命令归组（command 工具的 install/build/dev/test/db/
+ * http/script/other——#417 七族）/ 委派源账（source → 该源模型调用＋工具执行
+ * 配对累计——#417 弃首末单窗跨距，并行父流时间不入账）。不可变——run 尝试环
+ * 跨段（converse + 续跑）以 {@link #plus} 合并、跨尝试在收口装配侧汇总进
+ * closing。观察口径与已知洞见 {@link StageDurationFacts}。
  */
 public record StageDurations(long llmMs, Map<String, Long> toolsMs,
         Map<String, Long> commandMs, Map<String, Long> subagentMs) {
@@ -28,7 +29,7 @@ public record StageDurations(long llmMs, Map<String, Long> toolsMs,
         return new StageDurations(0, Map.of(), Map.of(), Map.of());
     }
 
-    /** 跨段合并：计数相加、分桶按键求和（同 source 委派窗跨段续接同理求和）。 */
+    /** 跨段合并：计数相加、分桶按键求和（同 source 委派源账跨段续接同理求和）。 */
     public StageDurations plus(StageDurations other) {
         return new StageDurations(llmMs + other.llmMs,
                 merged(toolsMs, other.toolsMs),

@@ -1,5 +1,12 @@
 package com.semgravio.aiplatform.business.project.domain.enums;
 
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import com.cartisan.core.domain.BaseEnum;
 import com.cartisan.data.jpa.converter.BaseEnumConverter;
 import jakarta.persistence.Converter;
@@ -64,7 +71,7 @@ public enum SliceSizeLabel implements BaseEnum<SliceSizeLabel> {
      * null 透传（未设——落库 NULL 列）；空集序列化为空串（与 null＝未设分道：
      * 空串＝显式空映射）。
      */
-    public static String tokensOf(java.util.Set<SliceSizeLabel> labels) {
+    public static String tokensOf(Set<SliceSizeLabel> labels) {
         return labels == null ? null : String.join(",", namesOf(labels));
     }
 
@@ -72,11 +79,11 @@ public enum SliceSizeLabel implements BaseEnum<SliceSizeLabel> {
      * 标签集 → 定序 token 列表（判定快照与配置读面的呈现形，序同 {@link #tokensOf}）。
      * 调用方保证非 null（读面与判定都以缺省映射兜底后才进）。
      */
-    public static java.util.List<String> namesOf(java.util.Set<SliceSizeLabel> labels) {
-        return java.util.Arrays.stream(values())
+    public static List<String> namesOf(Set<SliceSizeLabel> labels) {
+        return Arrays.stream(values())
                 .filter(labels::contains)
                 .map(SliceSizeLabel::getName)
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
     }
 
     /**
@@ -84,15 +91,14 @@ public enum SliceSizeLabel implements BaseEnum<SliceSizeLabel> {
      * （null 透传，与空集分道）；空串/纯空白＝空集；未知 token 静默丢弃（读腿宽容
      * ——写腿已闭集校验，直改库的坏值不炸装配面，降级少一个标签）。
      */
-    public static java.util.Set<SliceSizeLabel> labelsOf(String tokens) {
+    public static Set<SliceSizeLabel> labelsOf(String tokens) {
         if (tokens == null) {
             return null;
         }
-        return java.util.Arrays.stream(tokens.split(","))
+        return Arrays.stream(tokens.split(","))
                 .map(SliceSizeLabel::fromToken)
-                .filter(java.util.Objects::nonNull)
-                .collect(java.util.stream.Collectors.toCollection(
-                        () -> java.util.EnumSet.noneOf(SliceSizeLabel.class)));
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(SliceSizeLabel.class)));
     }
 
     /**

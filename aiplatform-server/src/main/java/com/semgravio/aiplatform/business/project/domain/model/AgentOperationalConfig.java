@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.domain.model;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 
@@ -60,7 +61,7 @@ public record AgentOperationalConfig(
         boolean routingEnabled,
         String routingStrongModelId,
         Integer routingFileCountThreshold,
-        java.util.Set<SliceSizeLabel> routingEscalatingSizeLabels,
+        Set<SliceSizeLabel> routingEscalatingSizeLabels,
         String verifyModelId,
         Integer verifyRoundBudget,
         String operatorId,

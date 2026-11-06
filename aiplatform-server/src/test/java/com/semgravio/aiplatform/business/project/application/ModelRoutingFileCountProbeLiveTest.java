@@ -83,27 +83,27 @@ class ModelRoutingFileCountProbeLiveTest {
 
         // 非 git 工作区（尚未起跑、git 惰性初始化未发生）：探针降级 null＝无此信号
         // （不升档、不断流——既有口径；真实 run 起跑由产出证明闸先 ensureRepo）
-        assertThat(modelRouting.countTrackedFiles(workspaceId))
+        assertThat(modelRouting.countApplicationFiles(workspaceId))
                 .as("非 git 工作区降级无信号").isNull();
 
         // 惰性初始化后的空仓库（阶段 0 起跑面）：tracked 0 − 基数为负，钳 0
         exec("cd /workspace && git init -q -b main ."
                 + " && git config user.name probe && git config user.email probe@local");
-        assertThat(modelRouting.countTrackedFiles(workspaceId))
+        assertThat(modelRouting.countApplicationFiles(workspaceId))
                 .as("空仓库（tracked 0 − 基数）钳 0").isZero();
 
         // 基座钉进跟踪面（模拟收口成版）：tracked＝基座＋杂项（.env 等被 .gitignore
         // 挡在外）→ 应用文件面应＝tracked − 基数（基座整额扣除，不为基座误燃信号）
         exec("cd /workspace && git add -A && git commit -qm probe-baseline");
         int tracked = Integer.parseInt(exec("cd /workspace && git ls-files | wc -l").strip());
-        Integer afterBaseline = modelRouting.countTrackedFiles(workspaceId);
+        Integer afterBaseline = modelRouting.countApplicationFiles(workspaceId);
         assertThat(afterBaseline).as("基座整额扣除：应用文件面＝tracked − 基数")
                 .isEqualTo(Math.max(0, tracked - baselineCount));
 
         // 长出一个应用文件再成版：应用文件面 +1（对基线对照的差分面）
         exec("cd /workspace && printf 'export const x = 1;\\n' > src/app/probe-route.ts"
                 + " && git add -A && git commit -qm probe-app-file");
-        assertThat(modelRouting.countTrackedFiles(workspaceId))
+        assertThat(modelRouting.countApplicationFiles(workspaceId))
                 .as("应用文件增量如实入计")
                 .isEqualTo(afterBaseline + 1);
     }

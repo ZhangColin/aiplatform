@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -46,11 +47,11 @@ class ModelRoutingAppServiceTest {
                 true, true, true, false, null, null, null, null, 3);
     }
 
-    /** 路由开＋自定义映射（升档规模标签集＝中＋大）与文件面阈值覆盖。 */
+    /** 路由开＋自定义映射（升档规模标签集＝中＋大）、文件面阈值与强档覆盖。 */
     private static AgentConfigAppService.EffectiveConfig routedWithMapping(
-            Set<SliceSizeLabel> escalating, Integer fileThreshold) {
+            Set<SliceSizeLabel> escalating, Integer fileThreshold, String strongModelId) {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, null, fileThreshold, escalating, null, 3);
+                true, true, false, true, strongModelId, fileThreshold, escalating, null, 3);
     }
 
     // ---------- 协同口径：路由判定优先、人工覆盖兜底；钉死位＝路由关 ----------
@@ -154,7 +155,7 @@ class ModelRoutingAppServiceTest {
     void given_mapping_override_when_decide_then_configured_labels_escalate() {
         // 映射经路由策略配置面可调（不发版）：运营改映射为「中＋大」→ 中片也升档
         AgentConfigAppService.EffectiveConfig mediumAndLarge =
-                routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), null);
+                routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), null, null);
         assertThat(ModelRoutingAppService.decide(mediumAndLarge, 1, 1, null,
                 SliceSizeLabel.MEDIUM).modelId()).isEqualTo("pro");
         assertThat(ModelRoutingAppService.decide(mediumAndLarge, 1, 1, null,
@@ -164,7 +165,7 @@ class ModelRoutingAppServiceTest {
                 SliceSizeLabel.SMALL).modelId()).isEqualTo("flash");
         // 映射收窄为仅「大」→ 中片回落（缺省映射可经配置收回）
         AgentConfigAppService.EffectiveConfig largeOnly =
-                routedWithMapping(Set.of(SliceSizeLabel.LARGE), null);
+                routedWithMapping(Set.of(SliceSizeLabel.LARGE), null, null);
         assertThat(ModelRoutingAppService.decide(largeOnly, 1, 1, null,
                 SliceSizeLabel.MEDIUM).modelId()).isEqualTo("flash");
     }
@@ -174,7 +175,7 @@ class ModelRoutingAppServiceTest {
         // 空映射＝规模标签信号整体关停（合法运营选择——重试/文件面信号不受影响，
         // 对偶旧阈值「0＝恒升强档」的关停端）
         AgentConfigAppService.EffectiveConfig emptyMapping =
-                routedWithMapping(Set.of(), null);
+                routedWithMapping(Set.of(), null, null);
         assertThat(ModelRoutingAppService.decide(emptyMapping, 1, 1, null,
                 SliceSizeLabel.LARGE).modelId()).isEqualTo("flash");
         // 文件面信号独立在场仍升档（OR 组合——信号互不掩护）
@@ -222,15 +223,16 @@ class ModelRoutingAppServiceTest {
     @Test
     void given_config_custom_strategy_when_decide_then_override_values_win() {
         AgentConfigAppService.EffectiveConfig custom =
-                routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), 5);
+                routedWithMapping(Set.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE), 5,
+                        "doubao-flagship");
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(custom, 1, 1, 5, SliceSizeLabel.MEDIUM);
-        assertThat(selection.modelId()).isEqualTo("pro");
+        assertThat(selection.modelId()).isEqualTo("doubao-flagship");
         assertThat(selection.reasons()).hasSize(2);
         assertThat(selection.signals())
                 .containsEntry("fileCountThreshold", 5)
                 .containsEntry("sizeLabel", "中")
-                .containsEntry("escalatingSizeLabels", java.util.List.of("中", "大"));
+                .containsEntry("escalatingSizeLabels", List.of("中", "大"));
     }
 
     @Test
@@ -243,7 +245,7 @@ class ModelRoutingAppServiceTest {
         assertThat(payload).containsKey("reasons").containsKey("signals");
         assertThat((Map<String, Object>) payload.get("signals"))
                 .containsEntry("sizeLabel", "大")
-                .containsEntry("escalatingSizeLabels", java.util.List.of("大"));
+                .containsEntry("escalatingSizeLabels", List.of("大"));
         // 快档判定（无升档）不携带 reasons（缺省不携带——留档只记为什么升）
         assertThat(ModelRoutingAppService.decide(routedDefault(), 1, 1, null, null)
                 .payload()).doesNotContainKey("reasons");
@@ -257,7 +259,7 @@ class ModelRoutingAppServiceTest {
         when(workspaces.exec(anyString(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse(" 65\n", "", 0));
         ModelRoutingAppService service = new ModelRoutingAppService(workspaces);
-        assertThat(service.countTrackedFiles("1")).isEqualTo(65);
+        assertThat(service.countApplicationFiles("1")).isEqualTo(65);
     }
 
     @Test
@@ -267,7 +269,7 @@ class ModelRoutingAppServiceTest {
         when(workspaces.exec(anyString(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("-22\n", "", 0));
         ModelRoutingAppService service = new ModelRoutingAppService(workspaces);
-        assertThat(service.countTrackedFiles("1")).isZero();
+        assertThat(service.countApplicationFiles("1")).isZero();
     }
 
     @Test
@@ -276,7 +278,7 @@ class ModelRoutingAppServiceTest {
         when(workspaces.exec(anyString(), any(WorkspaceExecCommand.class)))
                 .thenReturn(new ExecResultResponse("", "not a repo", 128));
         ModelRoutingAppService service = new ModelRoutingAppService(workspaces);
-        assertThat(service.countTrackedFiles("1")).isNull();
+        assertThat(service.countApplicationFiles("1")).isNull();
     }
 
     @Test
@@ -286,8 +288,8 @@ class ModelRoutingAppServiceTest {
                 .thenReturn(new ExecResultResponse("garbage", "", 0))
                 .thenThrow(new IllegalStateException("workspace down"));
         ModelRoutingAppService service = new ModelRoutingAppService(workspaces);
-        assertThat(service.countTrackedFiles("1")).isNull();
-        assertThat(service.countTrackedFiles("1")).isNull();
+        assertThat(service.countApplicationFiles("1")).isNull();
+        assertThat(service.countApplicationFiles("1")).isNull();
     }
 
     @Test

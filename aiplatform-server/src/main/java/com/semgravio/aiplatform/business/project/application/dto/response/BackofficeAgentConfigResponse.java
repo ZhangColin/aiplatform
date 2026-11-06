@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -95,11 +96,11 @@ public record BackofficeAgentConfigResponse(
         Integer defaultRoutingFileCountThreshold,
         @Schema(description = "升档规模标签映射生效值（#426：集内标签的片升强档，缺省"
                 + "[\"大\"]；空数组＝信号整体关停）", example = "[\"大\"]")
-        java.util.List<String> routingEscalatingSizeLabels,
+        List<String> routingEscalatingSizeLabels,
         @Schema(description = "映射是否库覆盖值（true＝覆盖；false＝代码缺省）")
         boolean routingEscalatingSizeLabelsOverridden,
         @Schema(description = "代码缺省升档映射（预览：清空覆盖即落此值）", example = "[\"大\"]")
-        java.util.List<String> defaultRoutingEscalatingSizeLabels,
+        List<String> defaultRoutingEscalatingSizeLabels,
         @Schema(description = "verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体"
                 + "生效档——含路由升档，缺省同档不降）", example = "pro")
         String verifyModelId,

@@ -1,7 +1,9 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -309,11 +311,11 @@ public class BackofficeAgentConfigAppService {
      * 归一：去空白、剔重复、EnumSet 定形（序列化序由 {@link SliceSizeLabel#tokensOf}
      * 定序单点管）。
      */
-    private static java.util.Set<SliceSizeLabel> requireValidSizeLabels(java.util.List<String> tokens) {
+    private static Set<SliceSizeLabel> requireValidSizeLabels(List<String> tokens) {
         if (tokens == null) {
             return null;
         }
-        java.util.Set<SliceSizeLabel> labels = java.util.EnumSet.noneOf(SliceSizeLabel.class);
+        Set<SliceSizeLabel> labels = EnumSet.noneOf(SliceSizeLabel.class);
         for (String token : tokens) {
             SliceSizeLabel label = SliceSizeLabel.fromToken(token);
             if (label == null) {

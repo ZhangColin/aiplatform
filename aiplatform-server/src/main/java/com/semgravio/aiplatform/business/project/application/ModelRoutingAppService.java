@@ -32,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>信号三件（任一越阈即升强档，否则回落人工档兜底；#426 修订后）</b>：
  * ①失败升档——重试（同段第 N 次尝试）与回滚重跑（首轮重试耗尽）是「难活」的
  * 直接事实；②文件面大小——<b>应用文件面</b>＝工作区已跟踪文件数扣基座文件基数
- * （{@link #countTrackedFiles} 探针内扣除——基座基数随镜像内置模板
+ * （{@link #countApplicationFiles} 探针内扣除——基座基数随镜像内置模板
  * {@code /opt/baseline} 计数单源、基座换版自动跟随，不再以常数手工同步）；③规模
  * 标签——主智能体产计划时自报的片实现面积（{@link SliceSizeLabel} 小/中/大封闭
  * 集，#423 结构化产出）按映射升档，缺省映射＝「大」升强档、小/中回落人工档
@@ -154,7 +154,7 @@ public class ModelRoutingAppService {
         if (!effective.routingEnabled()) {
             return decide(effective, attempt, round, null, sizeLabel);
         }
-        return decide(effective, attempt, round, countTrackedFiles(workspaceId), sizeLabel);
+        return decide(effective, attempt, round, countApplicationFiles(workspaceId), sizeLabel);
     }
 
     /**
@@ -212,7 +212,7 @@ public class ModelRoutingAppService {
      * 基数〕钳 0＝尚无应用文件）。exec 失败/输出不可解析返回 null＝无此信号
      * （判定降级不升档，采集面不断流）。
      */
-    Integer countTrackedFiles(String workspaceId) {
+    Integer countApplicationFiles(String workspaceId) {
         try {
             ExecResultResponse result = workspaces.exec(workspaceId,
                     new WorkspaceExecCommand(FILE_COUNT_PROBE));

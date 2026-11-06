@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -695,6 +697,136 @@ class GenerationAppServiceTest {
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(payload ->
                 run.runId().equals(payload.get(EventsAppService.RUN_FIELD))));
         assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_attempts_exhausted_when_generate_then_failure_face_persisted_same_payload_as_sse() {
+        // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/档位/失败
+        // 原因/本场累计）随 run-failed SSE 扩载与对话史落库同载荷（同收尾卡「SSE 扩载
+        // 与落库同载荷」先例）——失败作废可归因（#313「33% 失败作废」从此可测），
+        // 速度观测不再只看成功者；平台分析口径、前端不渲染（同 durationBreakdown）
+        Long projectId = persistedProject("9860");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId,
+                SINGLE_SLICE_PLAN);
+
+        // SSE 扩载：run-failed 载荷携 failure 面——逐尝试条数 = 烧满重试次数（每条带
+        // 轮次/档位/墙钟/桶）、error = 末次错误现场原文、durationMs = 本场累计墙钟
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), payloads.capture());
+        assertThat(payloads.getValue().get(EventsAppService.RUN_FIELD)).isEqualTo(run.runId());
+        Map<String, Object> face = (Map<String, Object>) payloads.getValue()
+                .get(AgentEventTypes.FAILURE_FIELD);
+        assertThat(face).isNotNull();
+        assertThat(face).containsEntry("error", "起服失败");
+        assertThat(((Number) face.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) face.get("attempts");
+        assertThat(attempts).hasSize(properties.getMaxAttempts());
+        assertThat(attempts).extracting(attempt -> ((Number) attempt.get("round")).intValue())
+                .containsOnly(1);
+        assertThat(attempts).extracting(attempt -> ((Number) attempt.get("attempt")).intValue())
+                .containsExactly(IntStream
+                        .rangeClosed(1, properties.getMaxAttempts()).boxed().toArray(Integer[]::new));
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(String.valueOf(attempt.get("modelId"))).isNotBlank(); // 逐尝试档位可归因
+            assertThat(((Number) attempt.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
+        });
+        // 落库同载荷：对话史读回失败留账行（kind=8，锚失败 runId）——失败面与 SSE
+        // 载荷同构（JSONB 回读数值窄化，按值归一比对）
+        Map<String, Object> persisted = conversationHistory.read(projectId).stream()
+                .filter(entry -> entry.failure() != null)
+                .reduce((first, second) -> second).orElseThrow().failure();
+        assertThat(normalized(persisted)).isEqualTo(normalized(face));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_stop_requested_mid_slice_when_generate_then_stopped_failure_face_ledgered() {
+        // #418 停止口径（AC④行为不变·仅增落库面）：run-failed(stopped=true) 照常收口
+        // （不重试不回滚、已收口片保留），失败面携 stopped=true＋中断尝试的逐尝试账
+        // ——停止是用户动作无失败原因（不携 error）；同载荷落库
+        Long projectId = persistedProject("9861");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            if (converseCalls.incrementAndGet() == 2) {
+                codingRunTrack.requestStop(projectId);
+                throw new IllegalStateException("java.lang.InterruptedException");
+            }
+            return new AgentReply(invocation.getArgument(0, AgentCommand.class).runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                payloads.capture());
+        Map<String, Object> face = (Map<String, Object>) payloads.getValue()
+                .get(AgentEventTypes.FAILURE_FIELD);
+        assertThat(payloads.getValue())
+                .containsEntry(AgentEventTypes.RUN_STOPPED_FIELD, true); // 停止口径不变
+        assertThat(face)
+                .containsEntry(AgentEventTypes.RUN_STOPPED_FIELD, true)
+                .doesNotContainKey("error"); // 停止无失败原因可报
+        assertThat(((Number) face.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
+        // 中断尝试留账：切片 1 首试被打断——恰一条逐尝试（部分观察，零桶如实）
+        assertThat((List<Map<String, Object>>) face.get("attempts")).singleElement()
+                .satisfies(attempt -> {
+                    assertThat(attempt).containsEntry("round", 1).containsEntry("attempt", 1);
+                    assertThat(((Number) attempt.get("durationMs")).longValue())
+                            .isGreaterThanOrEqualTo(0L);
+                });
+        // 同载荷落库（停止口径的失败留账行）
+        Map<String, Object> persisted = conversationHistory.read(projectId).stream()
+                .filter(entry -> entry.failure() != null)
+                .reduce((first, second) -> second).orElseThrow().failure();
+        assertThat(normalized(persisted)).isEqualTo(normalized(face));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_rerun_round_also_fails_when_generate_then_failure_face_carries_both_rounds() {
+        // #418 回滚重跑失败（AC④行为不变·仅增落库面）：两轮皆败转终态——失败面跨轮
+        // 累计（回滚重跑轮不清账，#323 口径）：首轮 3 试＋重跑轮 3 试逐条带轮次与
+        // 档位（重跑轮升档可归因），库中读回完整失败面
+        Long projectId = persistedProject("9862");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        when(agentClient.converse(any(), any()))
+                .thenReturn(new AgentReply("s0", "阶段0交接"))
+                .thenThrow(new IllegalStateException("切片失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        Map<String, Object> face = conversationHistory.read(projectId).stream()
+                .filter(entry -> entry.failure() != null)
+                .reduce((first, second) -> second).orElseThrow().failure();
+        assertThat(face).containsEntry("error", "切片失败");
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) face.get("attempts");
+        assertThat(attempts).hasSize(2 * properties.getMaxAttempts());
+        // 分轮归因：首轮 N 条 round=1、重跑轮 N 条 round=2；轮内尝试序号各 1..N
+        //（期望序列独立构造——maxAttempts 事实来自测试配置，非被测值回算）
+        List<Integer> expectedRounds = new ArrayList<>();
+        List<Integer> expectedAttempts = new ArrayList<>();
+        for (int round = 1; round <= 2; round++) {
+            for (int attempt = 1; attempt <= properties.getMaxAttempts(); attempt++) {
+                expectedRounds.add(round);
+                expectedAttempts.add(attempt);
+            }
+        }
+        assertThat(attempts).extracting(attempt -> ((Number) attempt.get("round")).intValue())
+                .containsExactlyElementsOf(expectedRounds);
+        assertThat(attempts).extracting(attempt -> ((Number) attempt.get("attempt")).intValue())
+                .containsExactlyElementsOf(expectedAttempts);
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(String.valueOf(attempt.get("modelId"))).isNotBlank();
+            assertThat(((Number) attempt.get("durationMs")).longValue()).isGreaterThanOrEqualTo(0L);
+        });
     }
 
     @Test
@@ -2875,6 +3007,25 @@ class GenerationAppServiceTest {
         Project project = Project.create("生成项目", null, null, Long.parseLong(workspaceId), OWNER, null);
         project.markPrdProduced();
         return projectRepository.save(project).getId();
+    }
+
+    /**
+     * JSONB 回读数值窄化归一（#418 同载荷比对的归一面）：Number 按值折 long、
+     * 容器递归——SSE 载荷（内存形 Long/Integer）与对话史回读形按值等价可比。
+     */
+    private static Object normalized(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> normalized = new LinkedHashMap<>();
+            map.forEach((key, val) -> normalized.put(key, normalized(val)));
+            return normalized;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(GenerationAppServiceTest::normalized).toList();
+        }
+        return value;
     }
 
     /** 已确认 PRD 版本在场（#332 生成加门：{@link

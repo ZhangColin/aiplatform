@@ -24,8 +24,12 @@ public class AgentEventBridge {
 
     private final EventsAppService eventsAppService;
 
-    public AgentEventBridge(EventsAppService eventsAppService) {
+    private final ConversationHistoryAppService conversationHistory;
+
+    public AgentEventBridge(EventsAppService eventsAppService,
+            ConversationHistoryAppService conversationHistory) {
         this.eventsAppService = eventsAppService;
+        this.conversationHistory = conversationHistory;
     }
 
     /**
@@ -57,18 +61,25 @@ public class AgentEventBridge {
      * 中间尝试的内部标识不出用户面）。前端恢复出口只认本事件，run 失败为唯一
      * 失败终态（重试全程静默，中间失败不出事件）。
      *
-     * <p><b>失败原因随事件（#355 机制检查）</b>：{@code lastError}（末次尝试的
-     * 错误现场，原样留档于终态日志/失败留账）经
+     * <p><b>失败原因随事件（#355 机制检查）</b>：失败面的 {@code error}（末次
+     * 尝试的错误现场，原样留档于终态日志/失败留账）经
      * {@link #userFacingRunFailure(String)} 映射为一句用户面原因随
      * {@code message} 键携带（映射不中则截断原文首行；空则缺省不带）——终态
      * 失败不再零原因，用户可分辨「模型没写好」与「服务侧故障」。</p>
+     *
+     * <p><b>失败面同载荷落库（#418 失败片落库面）</b>：{@code failure}（逐尝试
+     * 墙钟/档位/失败原因/本场累计——尝试环装配；轨道级失败携最小面）随事件
+     * {@code failure} 键扩载，并以<b>同一 map</b> 落对话史失败留账行（同收尾卡
+     * 「SSE 扩载与落库同载荷」先例）——先落库后发事件（收尾卡同序：重拉不撞
+     * 未落库空窗）；落库 quietly（观测面缺行不牵连终态收口）。
      */
-    public void emitRunFailed(Project project, String runId, String lastError) {
+    public void emitRunFailed(Project project, String runId, Map<String, Object> failure) {
         Map<String, Object> payload = runScopedPayload(project, runId);
-        String reason = userFacingRunFailure(lastError);
+        String reason = userFacingRunFailure(CoderRunAttempts.errorOf(failure));
         if (reason != null) {
             payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, reason);
         }
+        attachFailure(project, runId, failure, payload);
         eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
     }
 
@@ -78,13 +89,28 @@ public class AgentEventBridge {
      * 状态），载荷加 {@code stopped=true} 标记（前端失败档文案分岔「已停止」）＋
      * 定型一句人话（非错误现场映射——停止是用户动作，无失败原因可报）。runId =
      * 被停场次的用户面标识（首试 runId），恢复出口（继续生成/继续更新）照常只认
-     * 本事件。
+     * 本事件。停止的失败面（#418）同载荷落库与扩载（同 {@link #emitRunFailed}）。
      */
-    public void emitRunStopped(Project project, String runId) {
+    public void emitRunStopped(Project project, String runId, Map<String, Object> failure) {
         Map<String, Object> payload = runScopedPayload(project, runId);
         payload.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
         payload.put(AgentEventTypes.ERROR_MESSAGE_FIELD, "已按你的要求停止，已完成的进度都保留");
+        attachFailure(project, runId, failure, payload);
         eventsAppService.publishAgentEvent(AgentEventTypes.RUN_FAILED, payload);
+    }
+
+    /**
+     * 失败面的落库＋挂载（#418，emitRunFailed/Stopped 共用）：同一 map 先落对话史
+     * 失败留账行（quietly）后挂 run-failed 载荷 {@code failure} 键——同载荷单点；
+     * 面缺席（防御位）不落空壳行、不挂空键，终态事件照发。
+     */
+    private void attachFailure(Project project, String runId, Map<String, Object> failure,
+            Map<String, Object> payload) {
+        if (failure == null) {
+            return;
+        }
+        conversationHistory.recordRunFailure(project.getId(), runId, failure);
+        payload.put(AgentEventTypes.FAILURE_FIELD, failure);
     }
 
     /** run 级事件的关联载荷基底（project 双路由键＋runId——emitRunFailed/Stopped 共用）。 */

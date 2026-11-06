@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
@@ -57,13 +58,19 @@ class AgentEventBridgeTest {
         return project;
     }
 
+    /** 桥（#418 起挂对话史落库腿——mock 之，单测只盯载荷面）。 */
+    private static AgentEventBridge bridge(EventsAppService events) {
+        return new AgentEventBridge(events, Mockito.mock(ConversationHistoryAppService.class));
+    }
+
     /** run-failed 载荷随事件携 message（映射命中），失败原因不缺席。 */
     @Test
     void given_mapped_error_when_emit_run_failed_then_payload_carries_message() {
         EventsAppService events = mock(EventsAppService.class);
-        AgentEventBridge bridge = new AgentEventBridge(events);
+        AgentEventBridge bridge = bridge(events);
 
-        bridge.emitRunFailed(projectStub(42L, 7L, null), "run-1", "8081 不可达（curl 退出码 7）");
+        bridge.emitRunFailed(projectStub(42L, 7L, null), "run-1",
+                CoderRunAttempts.trackFailureFace("8081 不可达（curl 退出码 7）"));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
@@ -76,9 +83,10 @@ class AgentEventBridgeTest {
     @Test
     void given_blank_error_when_emit_run_failed_then_message_absent() {
         EventsAppService events = mock(EventsAppService.class);
-        AgentEventBridge bridge = new AgentEventBridge(events);
+        AgentEventBridge bridge = bridge(events);
 
-        bridge.emitRunFailed(projectStub(42L, null, 9L), "run-2", null);
+        bridge.emitRunFailed(projectStub(42L, null, 9L), "run-2",
+                CoderRunAttempts.trackFailureFace(null));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
@@ -90,9 +98,10 @@ class AgentEventBridgeTest {
     @Test
     void given_user_stop_when_emit_run_stopped_then_payload_carries_stopped_and_message() {
         EventsAppService events = mock(EventsAppService.class);
-        AgentEventBridge bridge = new AgentEventBridge(events);
+        AgentEventBridge bridge = bridge(events);
 
-        bridge.emitRunStopped(projectStub(42L, 7L, null), "run-3");
+        bridge.emitRunStopped(projectStub(42L, 7L, null), "run-3",
+                CoderRunAttempts.stoppedTrackFace());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);

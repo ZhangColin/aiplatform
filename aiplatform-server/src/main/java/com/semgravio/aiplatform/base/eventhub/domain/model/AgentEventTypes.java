@@ -47,6 +47,17 @@ public final class AgentEventTypes {
     public static final String CLOSING_FIELD = "closing";
 
     /**
+     * run-failed 扩载的失败面键（#418 失败片落库面）：值为对象
+     * {@code { stopped?, error?, durationMs, attempts[] }}——逐尝试墙钟/档位/失败
+     * 原因/本场累计的平台观测事实（#323 失败留账的落库面，跨轮累计——回滚重跑轮
+     * 不清账）。<b>对话史落库（失败留账行）与本载荷同 map</b>（同收尾卡「SSE 扩载
+     * 与落库同载荷」先例）；平台分析口径、前端不渲染（同 durationBreakdown）。
+     * 无尝试环数据的轨道级失败（fork 合并失败等）只携 {@code error}；停止口径
+     * 携 {@code stopped: true}（停止是用户动作，无失败原因可报）。
+     */
+    public static final String FAILURE_FIELD = "failure";
+
+    /**
      * 收口扩载的验证键（#352 独立验证子智能体的收尾统计）：值为对象
      * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[] }}——
      * 事实源＝verify 子智能体（source=verify）经 report_verification 工具登记的

@@ -765,7 +765,7 @@ public class GenerationAppService {
                         // #360 在途意见队列保留（不排空）——「继续生成」续跑成功收口
                         // 时消化，不自锁
                         terminalFailureScenes.put(projectId, STOP_SCENE);
-                        eventBridge.emitRunStopped(project, e.runId());
+                        eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     }
                     finally {
                         codingRunTrack.end(projectId);
@@ -1120,7 +1120,7 @@ public class GenerationAppService {
                 if (result.lastError() != null) {
                     terminalFailureScenes.put(projectId, result.lastError());
                 }
-                eventBridge.emitRunFailed(project, runId, result.lastError());
+                eventBridge.emitRunFailed(project, runId, result.failure());
                 return;
             }
             // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一段
@@ -1172,7 +1172,7 @@ public class GenerationAppService {
                     if (result.lastError() != null) {
                         terminalFailureScenes.put(projectId, result.lastError());
                     }
-                    eventBridge.emitRunFailed(project, runId, result.lastError());
+                    eventBridge.emitRunFailed(project, runId, result.failure());
                     return;
                 }
                 previousHandoff = result.closingText();
@@ -1355,8 +1355,10 @@ public class GenerationAppService {
                     Throwable cause = e.getCause() != null ? e.getCause() : e;
                     RuntimeException failure = cause instanceof RuntimeException runtime
                             ? runtime : new IllegalStateException(cause);
+                    String error = errorText(failure);
                     outcomes.add(ForkSliceOutcome.failed(ord, plan.slices().get(ord - 1),
-                            EventsAppService.newRunId(), null, errorText(failure)));
+                            EventsAppService.newRunId(), null, error,
+                            CoderRunAttempts.trackFailureFace(error)));
                 } catch (CancellationException e) {
                     // 波任务被取消（cancel 只来自停止请求——在途片中断后被置完成态）
                     throwStoppedWave(projectId, firstRunId, createdForks);
@@ -1377,7 +1379,7 @@ public class GenerationAppService {
                 if (outcome.error() != null) {
                     terminalFailureScenes.put(projectId, outcome.error());
                 }
-                eventBridge.emitRunFailed(project, outcome.runId(), outcome.error());
+                eventBridge.emitRunFailed(project, outcome.runId(), outcome.failure());
                 destroyForkQuietly(outcome.workspaceId()); // 失败片不留 fork 孤儿
                 continue;
             }
@@ -1408,7 +1410,7 @@ public class GenerationAppService {
         while ((fork = createdForks.poll()) != null) {
             destroyForkQuietly(fork);
         }
-        throw new RunStoppedException(firstRunId);
+        throw new RunStoppedException(firstRunId, CoderRunAttempts.stoppedTrackFace());
     }
 
     /**
@@ -1453,18 +1455,22 @@ public class GenerationAppService {
             if (result.succeeded()) {
                 return ForkSliceOutcome.ok(ord, slice, runId, forkWorkspaceId, result.closingText());
             }
-            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError());
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, result.lastError(),
+                    result.failure());
         } catch (RuntimeException e) {
             // 停止旁路（#359）：在途片被中断（线程中断打断模型流）——本 fork 自行
             // 释放（主轨可能在 join 前就被停止信号上抛，到不了波收尾清理），停止
-            // 信号上抛交主轨收口
+            // 信号上抛交主轨收口；环内停止面原样保留（#418——有逐尝试账不弃），
+            // 环外中断携最小停止面
             if (codingRunTrack.stopRequested(projectId)) {
                 destroyForkQuietly(forkWorkspaceId);
                 createdForks.remove(forkWorkspaceId);
-                throw new RunStoppedException(runId);
+                throw new RunStoppedException(runId, e instanceof RunStoppedException stopped
+                        ? stopped.failure() : CoderRunAttempts.stoppedTrackFace());
             }
             // fork 释放统一归调用方（runParallelWave 失败分支 / mergeFork finally），此处不销毁
-            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e));
+            return ForkSliceOutcome.failed(ord, slice, runId, forkWorkspaceId, errorText(e),
+                    CoderRunAttempts.trackFailureFace(errorText(e)));
         }
     }
 
@@ -1498,7 +1504,8 @@ public class GenerationAppService {
                         projectId, outcome.ord(), diff.stderr());
                 rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
                 failSegment(projectId, outcome.ord(), outcome.runId());
-                eventBridge.emitRunFailed(project, outcome.runId(), "系统产物合并失败");
+                eventBridge.emitRunFailed(project, outcome.runId(),
+                        CoderRunAttempts.trackFailureFace("系统产物合并失败"));
                 return false;
             }
             if (!diff.stdout().isBlank()) {
@@ -1524,7 +1531,8 @@ public class GenerationAppService {
             log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
             rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
             failSegment(projectId, outcome.ord(), outcome.runId());
-            eventBridge.emitRunFailed(project, outcome.runId(), errorText(e));
+            eventBridge.emitRunFailed(project, outcome.runId(),
+                    CoderRunAttempts.trackFailureFace(errorText(e)));
             return false;
         } finally {
             destroyForkQuietly(outcome.workspaceId());
@@ -1588,7 +1596,7 @@ public class GenerationAppService {
             if (result.lastError() != null) {
                 terminalFailureScenes.put(projectId, result.lastError());
             }
-            eventBridge.emitRunFailed(project, outcome.runId(), result.lastError());
+            eventBridge.emitRunFailed(project, outcome.runId(), result.failure());
             return false;
         }
         return true;
@@ -1612,18 +1620,21 @@ public class GenerationAppService {
         return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
     }
 
-    /** fork 切片跑的结果（#351）：成败 + fork 寻址 + 收口终文 + 失败现场。 */
+    /** fork 切片跑的结果（#351）：成败 + fork 寻址 + 收口终文 + 失败现场 + 失败面
+     * （#418 落库面——尝试环装配随失败回交，波收尾随 run-failed 同载荷落库）。 */
     private record ForkSliceOutcome(int ord, String slice, String runId, String workspaceId,
-            String closingText, String error, boolean succeeded) {
+            String closingText, String error, Map<String, Object> failure, boolean succeeded) {
 
         static ForkSliceOutcome ok(int ord, String slice, String runId, String workspaceId,
                 String closingText) {
-            return new ForkSliceOutcome(ord, slice, runId, workspaceId, closingText, null, true);
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, closingText, null, null,
+                    true);
         }
 
         static ForkSliceOutcome failed(int ord, String slice, String runId, String workspaceId,
-                String error) {
-            return new ForkSliceOutcome(ord, slice, runId, workspaceId, null, error, false);
+                String error, Map<String, Object> failure) {
+            return new ForkSliceOutcome(ord, slice, runId, workspaceId, null, error, failure,
+                    false);
         }
     }
 

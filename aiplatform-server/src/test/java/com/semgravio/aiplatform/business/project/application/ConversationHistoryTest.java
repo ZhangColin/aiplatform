@@ -301,12 +301,19 @@ class ConversationHistoryTest {
                     new AgentSuspension("reply-2", List.of(Map.of(
                             "id", "tc-9", "name", "ask_user"))));
         });
+        // 挂起观察（#418 补桩——缺省恒 false 会让派发层误判轮已收口、起注定挂起
+        // 失败的修正 run，失败留账落库后该接缝在对话史现形）：起手守卫无挂起（false）
+        // → 轮收口观测见挂起（true）——轮如实挂起待答、不派修正 run（同灵魂用例
+        // 脚本序次）
+        when(agentClient.hasAskingToolCall(anyString(), anyString()))
+                .thenReturn(false)
+                .thenReturn(true);
 
         mainAgentAppService.runOpinionTurn(projectId, "做一个分销系统");
 
         List<ConversationEntryResponse> history = conversationHistory.read(projectId);
         assertThat(history).extracting(ConversationEntryResponse::kind)
-                .containsExactly(1, 2, 3); // user/agent/question
+                .containsExactly(1, 2, 3); // user/agent/question——挂起轮不派修正 run
         ConversationEntryResponse card = history.get(2);
         assertThat(card.answered()).isFalse(); // 未答 = 挂起待答（水合后问答卡可作答）
         Map<?, ?> data = (Map<?, ?>) card.question().get(AgentEventTypes.WAIT_DATA_FIELD);

@@ -30,7 +30,11 @@ public enum ConversationEntryKind implements BaseEnum<ConversationEntryKind> {
 
     /** 报价卡（#203 报价感知：平台对用户的钱事发言——载荷仅事件 + 订单引用，
      *  金额与状态渲染时取订单当前态，视镜非快照，ADR-0017）。 */
-    QUOTE(7, "报价卡");
+    QUOTE(7, "报价卡"),
+
+    /** 失败留账（#418 失败片落库面：run 失败终态的逐尝试墙钟/档位/失败原因落库
+     *  ——SSE run-failed 扩载同载荷；平台观测口径，用户面零呈现）。 */
+    RUN_FAILURE(8, "失败留账");
 
     private final Integer code;
     private final String name;

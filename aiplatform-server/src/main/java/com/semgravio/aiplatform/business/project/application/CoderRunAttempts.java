@@ -200,21 +200,25 @@ class CoderRunAttempts {
      * 时的执行体终文（{@code closingText}，成功收口才非 null——生成轨把它当交接
      * 摘要用，#114 片间交接：前片执行体自产的「做了什么/关键文件/下一片须知」即其
      * 收口终文；修正轨不用）+ 末次尝试的错误现场（{@code lastError}，终态失败才
-     * 非 null——生成轨续跑现状盘点的「中断原因」旁证，#221）。
+     * 非 null——生成轨续跑现状盘点的「中断原因」旁证，#221）+ 失败面
+     * （{@code failure}，终态失败/停止才非 null——#418 失败片落库面：逐尝试墙钟/
+     * 档位/失败原因/本场累计，轨道层经事件桥与 run-failed SSE 扩载同载荷落库）。
      */
-    record RunResult(boolean succeeded, String closingText, String lastError) {
+    record RunResult(boolean succeeded, String closingText, String lastError,
+            Map<String, Object> failure) {
 
         static RunResult ok(String closingText) {
-            return new RunResult(true, closingText, null);
+            return new RunResult(true, closingText, null, null);
         }
 
-        static RunResult failed(String lastError) {
-            return new RunResult(false, null, lastError);
+        static RunResult failed(String lastError, Map<String, Object> failure) {
+            return new RunResult(false, null, lastError, failure);
         }
     }
 
     /**
-     * 一次尝试的耗时账（#111 阶段耗时分布）：尝试序号 + 尝试墙钟 + 该尝试跨流段
+     * 一次尝试的耗时账（#111 阶段耗时分布）：轮次（#353 段级外环——首轮/回滚重跑
+     * 轮，逐尝试归因分轮可读）+ 尝试序号（轮内）+ 尝试墙钟 + 该尝试跨流段
      * （converse + 续跑）合并的阶段耗时事实 + 该尝试生效模型档位（#354 路由
      * 留档——逐尝试哪档可归因，收尾卡 durationBreakdown.attempts[].modelId）。
      * 墙钟口径：成功/判据未过的尝试 =
@@ -224,8 +228,8 @@ class CoderRunAttempts {
      * 端失败〔前段失败/判据回调抛错〕无可携事实仍零桶，观察面口径见
      * StageDurationFacts）。
      */
-    private record AttemptDuration(int attempt, long wallMs, StageDurations durations,
-            String modelId) {
+    private record AttemptDuration(int round, int attempt, long wallMs,
+            StageDurations durations, String modelId) {
     }
 
     private final AgentscopeAgentClient agentClient;
@@ -386,9 +390,11 @@ class CoderRunAttempts {
             }
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 // 停止旁路（#359 生成取消）：起跑前查停——停止不走重试环（一次尝试即
-                // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口
+                // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口；停止
+                // 失败面（#418）随异常携出（此前尝试的账在场——跨尝试累计）
                 if (codingRunTrack.stopRequested(projectId)) {
-                    throw new RunStoppedException(firstRunId);
+                    throw new RunStoppedException(firstRunId,
+                            failureFace(true, null, attemptDurations, runStartedAt));
                 }
                 Instant attemptStartedAt = Instant.now();
                 AtomicReference<StageDurations> durations =
@@ -473,7 +479,7 @@ class CoderRunAttempts {
                 // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
                 // 核验/收口段抛错不重记（attemptAccounted 守卫）。逐尝试档位随账
                 // 留档（#354 路由可观测——收尾卡 attempts[].modelId）
-                attemptDurations.add(new AttemptDuration(attempt,
+                attemptDurations.add(new AttemptDuration(round, attempt,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                         durations.get(), attemptModelId));
                 attemptAccounted = true;
@@ -565,7 +571,7 @@ class CoderRunAttempts {
                         runChanges.addAll(failure.changes());
                     }
                     if (!attemptAccounted) {
-                        attemptDurations.add(new AttemptDuration(attempt,
+                        attemptDurations.add(new AttemptDuration(round, attempt,
                                 Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                                 durations.get(), attemptModelId));
                     }
@@ -575,7 +581,11 @@ class CoderRunAttempts {
                             humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
                             attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
                             filePayloads(runChanges));
-                    throw new RunStoppedException(firstRunId);
+                    // 停止的失败面（#418 落库面）：stopped 口径＋逐尝试账＋本场累计——
+                    // 停止是用户动作，无失败原因可报（不携 error）；中断尝试的部分观察
+                    // 已计入逐尝试账（上方 #323 留账）
+                    throw new RunStoppedException(firstRunId,
+                            failureFace(true, null, attemptDurations, runStartedAt));
                 }
                 previousError = errorScene(e);
                 if (e instanceof AgentTurnFailure failure) {
@@ -590,7 +600,7 @@ class CoderRunAttempts {
                     // 的部分观察（AgentTurnFailure 携带；非客户端失败无可携事实仍
                     // 零桶——观察面口径见 StageDurationFacts）。档位随账留档同成功路
                     // （#354——失败尝试用了哪档同样可归因）
-                    attemptDurations.add(new AttemptDuration(attempt,
+                    attemptDurations.add(new AttemptDuration(round, attempt,
                             Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                             durations.get(), attemptModelId));
                 }
@@ -613,7 +623,8 @@ class CoderRunAttempts {
         }
         // 终态留档（#323 失败留账）：超限转终态、没有成功收尾卡时，耗时账与观察面
         // 仍随终态日志留档（平台观测面）——累计墙钟＋逐尝试墙钟与桶＋已落盘文件
-        // 清单，失败看得见成本；SSE 封闭集与 run-failed 载荷不变
+        // 清单，失败看得见成本。失败面（#418 落库面）随 RunResult 回传轨道层——
+        // 经事件桥与 run-failed SSE 扩载同载荷落库（失败不再只看日志）
         log.error("[{}] 项目 {} 重试超限（{} 次尝试{}），转终态失败——本场留账：累计 {}、"
                         + "逐尝试 {}、已落盘文件变更 {}。用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
                 what, projectId, maxAttempts * (reran ? 2 : 1),
@@ -621,7 +632,8 @@ class CoderRunAttempts {
                 humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
                 attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
                 filePayloads(runChanges));
-        return RunResult.failed(previousError);
+        return RunResult.failed(previousError,
+                failureFace(false, previousError, attemptDurations, runStartedAt));
     }
 
     /**
@@ -938,10 +950,12 @@ class CoderRunAttempts {
         return breakdown;
     }
 
-    /** 逐尝试分布条目：尝试序号 + 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+
-     *  该尝试生效模型档位（#354 路由留档——逐尝试哪档可归因）。 */
+    /** 逐尝试分布条目：轮次（首轮/回滚重跑轮——#353 分轮归因）+ 尝试序号（轮内）+
+     * 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+ 该尝试生效模型档位
+     * （#354 路由留档——逐尝试哪档可归因）。 */
     private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("round", attempt.round());
         payload.put("attempt", attempt.attempt());
         payload.put("durationMs", attempt.wallMs());
         payload.put("modelId", attempt.modelId());
@@ -949,6 +963,64 @@ class CoderRunAttempts {
         payload.put("toolsMs", toolsPayload(attempt.durations()));
         payload.put("verifyMs", verifyMs(attempt.durations()));
         return payload;
+    }
+
+    /**
+     * 失败面装配（#418 失败片落库面）：{@code { stopped?, error?, durationMs,
+     * attempts[] }}——逐尝试墙钟/档位（跨轮累计，回滚重跑轮不清账——#323 失败
+     * 留账口径）＋失败原因（末次尝试错误现场原文，停止口径不携——停止是用户动作
+     * 无失败原因可报）＋本场累计墙钟（首试起跑到终态收口）。经 {@link RunResult}
+     * /{@link RunStoppedException} 回传轨道层，事件桥以同一 map 落库与扩载
+     * run-failed（同收尾卡「SSE 扩载与落库同载荷」先例）——平台分析口径、前端
+     * 不渲染（同 durationBreakdown）。schema 正本＝SSE事件清单·失败面节。
+     */
+    private static Map<String, Object> failureFace(boolean stopped, String error,
+            List<AttemptDuration> attempts, Instant runStartedAt) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        if (stopped) {
+            failure.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
+        }
+        if (error != null) {
+            failure.put(FAILURE_ERROR_FIELD, error);
+        }
+        failure.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
+        failure.put("attempts", attempts.stream()
+                .map(CoderRunAttempts::attemptPayload)
+                .toList());
+        return failure;
+    }
+
+    /**
+     * 轨道级失败的失败面（#418）：无尝试环数据的失败（fork 合并失败/波级异常等
+     * ——失败发生在 run 收口之后的轨道段，无逐尝试账可归）只携失败原因。轨道层
+     * 调用（同包），事件桥同载荷落库与扩载。
+     */
+    static Map<String, Object> trackFailureFace(String error) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        if (error != null) {
+            failure.put(FAILURE_ERROR_FIELD, error);
+        }
+        return failure;
+    }
+
+    /** 轨道级停止的最小失败面（#418）：波级停止无逐尝试账在场——只携 stopped 口径
+     * （停止是用户动作，无失败原因可报）。 */
+    static Map<String, Object> stoppedTrackFace() {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
+        return failure;
+    }
+
+    /** 失败面的失败原因键（末次尝试错误现场原文——平台分析口径，不经用户面映射）。 */
+    static final String FAILURE_ERROR_FIELD = "error";
+
+    /**
+     * 失败面的失败原因读口（#418）：事件桥取末次错误现场做用户面 message 映射
+     * （#355）用——map 形状知识留在装配侧，消费端不逐键解构。
+     */
+    static String errorOf(Map<String, Object> failure) {
+        return failure != null && failure.get(FAILURE_ERROR_FIELD) instanceof String error
+                ? error : null;
     }
 
     /**

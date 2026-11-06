@@ -57,7 +57,18 @@ class AgentProfileTest {
                 // 配置面可覆盖＝调整不发版）
                 .contains("DESIGN.md")
                 .contains("token 优先")
-                .contains("禁裸色");
+                .contains("禁裸色")
+                // #425 执行体工作协议「用基座件、禁裸客户端」条目＋件用法指路
+                //（细则正本住工作区 AGENTS.md 本栈写法规则节——栈规则集随基座
+                // tag 换版；lint 两档口径：强制档收口被拒、预置档如实标注）
+                .contains("禁裸客户端")
+                .contains("src/lib/robust/data-access")
+                .contains("src/lib/robust/http")
+                .contains("src/lib/robust/session")
+                .contains("不用裸 fetch")
+                .contains("本栈写法规则节")
+                .contains("强制档")
+                .contains("预置档");
         // #295 写稿协议（验收①）：token 集中 :root 条款（界面类确定性直提的协议
         // 保证面）＋平面类出图参数（palette/style 随稿物化）——缺省正本在此，
         // 运营配置面可覆盖（ADR-0021）

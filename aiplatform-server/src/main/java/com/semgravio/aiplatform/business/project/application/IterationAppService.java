@@ -109,6 +109,7 @@ public class IterationAppService {
     private final DemoSeedAppService demoSeed;
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
+    private final RobustKitLintAppService robustKitLint;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -129,7 +130,8 @@ public class IterationAppService {
             PrdDraftBaseline prdDraftBaseline,
             DemoSeedAppService demoSeed,
             ProofOfOutputGate proofGate,
-            VerificationPresenceGate verificationPresence) {
+            VerificationPresenceGate verificationPresence,
+            RobustKitLintAppService robustKitLint) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -143,6 +145,7 @@ public class IterationAppService {
         this.demoSeed = demoSeed;
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
+        this.robustKitLint = robustKitLint;
     }
 
     /**
@@ -435,7 +438,10 @@ public class IterationAppService {
                 .withProofOfOutput(proofAnnotation)
                 // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
                 // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
-                .withDesignLint(designSpecs.lintClosingPayload(project));
+                .withDesignLint(designSpecs.lintClosingPayload(project))
+                // 基座 lint 两档扫描事实（#425——更新轨同盖：强制档违规修不完＝收口
+                // 被拒（尝试环判定），预置档如实标注不拦收口；存量工作区 null 不携带）
+                .withRobustKitLint(robustKitLint.lintClosingPayload(project.getWorkspaceId()));
     }
 
     /**

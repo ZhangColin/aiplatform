@@ -417,6 +417,69 @@ describe("ClosingCard · 按稿对齐（#296 设计规范扫描）", () => {
   });
 });
 
+describe("ClosingCard · 基座件使用（#425 基座 lint 两档）", () => {
+  it("通过：基座件合规一行；曾自动修一轮则注明（纠偏过程如实）", () => {
+    const html = renderCard(closing({
+      robustKitLint: { status: "passed" },
+    }));
+    expect(html).toContain("基座件使用：");
+    expect(html).toContain("基座件合规");
+    expect(html).not.toContain("曾自动修正一轮");
+
+    const retried = renderCard(closing({
+      robustKitLint: { status: "passed", retried: true },
+    }));
+    expect(retried).toContain("基座件合规（曾自动修正一轮）");
+  });
+
+  it("预置档余项：总数行（曾修一轮注明仍余）＋清单（文件:行＋规则中文名，hover 带件用法指引）——不拦收口如实标注", () => {
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        retried: true,
+        preset: {
+          total: 2,
+          violations: [
+            { file: "src/app/login/actions.ts", line: 8, rule: "handwritten-session", message: "会话存储自写——走 src/lib/robust/session" },
+          ],
+        },
+      },
+    }));
+    expect(html).toContain("余 2 处预置件违规");
+    expect(html).toContain("（已自动修正一轮，仍余）");
+    expect(html).toContain("src/app/login/actions.ts:8");
+    expect(html).toContain("会话自写"); // 规则中文名（不露工程码）
+    expect(html).toContain('title="会话存储自写——走 src/lib/robust/session"');
+  });
+
+  it("预置档超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      file: `src/app/login${i}.ts`, line: i + 1, rule: "handwritten-session", message: "自写",
+    }));
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        preset: { total: 7, violations: many },
+      },
+    }));
+    expect(html).toContain("余 7 处预置件违规");
+    expect(html).toContain("查看全部 7 处");
+  });
+
+  it("扫描未执行：如实呈现，不假装达标", () => {
+    const html = renderCard(closing({
+      robustKitLint: { status: "unavailable" },
+    }));
+    expect(html).toContain("基座件扫描未执行");
+    expect(html).not.toContain("基座件合规（");
+  });
+
+  it("存量工作区：不携带不出基座件使用行（基座行为零改变的呈现面）", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("基座件使用");
+  });
+});
+
 describe("ClosingCard · 产出证明判别标注（#420 空转片防呆）", () => {
   it("豁免收口：如实呈现豁免依据（验证确认「能力已存在」）", () => {
     const html = renderCard(closing({

@@ -78,6 +78,10 @@ export type WorkClosing = {
   /** 设计规范扫描（#296 遵守三件套③）：可缺省——带规范项目编码 run 携带（收尾卡
    *  「按稿对齐」行的呈现源）；无规范项目与设计会话不携带。 */
   designLint?: DesignLintClosing;
+  /** 基座 lint 两档扫描（#425）：可缺省——新基座工作区编码 run 携带（收尾卡「基座件
+   *  使用」行的呈现源：预置档余项如实标注、不拦收口）；存量工作区与设计会话不携带。
+   *  强制档违规修不完＝收口被拒，载荷不会以带强制档违规形态出现在收尾卡。 */
+  robustKitLint?: RobustKitLintClosing;
   /** 产出证明判别标注（#420 空转片防呆）：可缺省——豁免收口（验证确认「能力已
    *  存在」）与空转拒绝史（曾拒绝后补做收口）的如实呈现源；正常干活收口不携带。 */
   proofOfOutput?: ProofOfOutputClosing;
@@ -111,6 +115,22 @@ export type DesignLintClosing = {
   retried?: boolean;
   total?: number;
   violations?: { file: string; line: number; rule: string; message: string }[];
+};
+
+/** 收尾卡基座 lint 分档事实（#425）：各档 total＋违规清单——收尾卡只会见预置档余项
+ *  （强制档修不完＝收口被拒，结构性不达收尾卡）。 */
+export type RobustLintTier = {
+  total: number;
+  violations: { file: string; line: number; rule: string; message: string }[];
+};
+
+/** 收尾卡基座 lint 两档扫描事实（#425）：status 三态＋预置档余项（强制档分节仅防御
+ *  性容错——正常流转不携带）。 */
+export type RobustKitLintClosing = {
+  status: "passed" | "violations" | "unavailable";
+  retried?: boolean;
+  preset?: RobustLintTier;
+  mandatory?: RobustLintTier;
 };
 
 /** 对话史条目（#89 水合载荷——GET /projects/{id}/conversation 读面消费口径）。 */
@@ -769,6 +789,7 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     verification: toVerification(record.verification),
     drafts: toClosingDrafts(record.drafts),
     designLint: toDesignLint(record.designLint),
+    robustKitLint: toRobustKitLint(record.robustKitLint),
     proofOfOutput: toProofOfOutput(record.proofOfOutput),
   };
 }
@@ -823,6 +844,44 @@ function toDesignLint(raw: unknown): DesignLintClosing | undefined {
             : [];
         })
       : undefined,
+  };
+}
+
+/**
+ * robustKitLint 载荷容错收窄（#425）：非对象或缺有效 status 回落 undefined（不出
+ * 坏行——收尾卡「基座件使用」行随在场呈现）；分档条目同 designLint 收窄（缺 file
+ * 剔除）。status＝violations 而两档皆空照收（如实——防御性，正常流转不会出现）。
+ */
+function toRobustKitLint(raw: unknown): RobustKitLintClosing | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  if (record.status !== "passed" && record.status !== "violations"
+      && record.status !== "unavailable") {
+    return undefined;
+  }
+  const toTier = (tier: unknown): RobustLintTier | undefined => {
+    const entry = asRecord(tier);
+    if (!entry) return undefined;
+    const violations = Array.isArray(entry.violations)
+      ? entry.violations.flatMap((violation) => {
+          const item = asRecord(violation);
+          return item && typeof item.file === "string"
+            ? [{
+                file: item.file,
+                line: typeof item.line === "number" ? item.line : 0,
+                rule: typeof item.rule === "string" ? item.rule : "",
+                message: typeof item.message === "string" ? item.message : "",
+              }]
+            : [];
+        })
+      : [];
+    return { total: typeof entry.total === "number" ? entry.total : violations.length, violations };
+  };
+  return {
+    status: record.status,
+    retried: record.retried === true,
+    preset: toTier(record.preset),
+    mandatory: toTier(record.mandatory),
   };
 }
 

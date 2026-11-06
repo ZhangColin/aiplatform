@@ -504,6 +504,7 @@ public class GenerationAppService {
     private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
+    private final RobustKitLintAppService robustKitLint;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -566,6 +567,7 @@ public class GenerationAppService {
             WorkspaceConvergenceAppService workspaceConvergenceAppService,
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
+            RobustKitLintAppService robustKitLint,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -589,6 +591,7 @@ public class GenerationAppService {
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
+        this.robustKitLint = robustKitLint;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1607,9 +1610,10 @@ public class GenerationAppService {
     }
 
     /**
-     * fork 片收口判据（#351 + #420 + #424）：fork 内 8081 可达 + 入口文件完整 + 产出
-     * 证明（fork 基线即段起点——fork 差异口径）+ 验证在场（fork 工作区内 verify 登记
-     * ——按工作区键各跑各的）——只核验不落表不推预览。
+     * fork 片收口判据（#351 + #420 + #424 + #425）：fork 内 8081 可达 + 入口文件完整 +
+     * 产出证明（fork 基线即段起点——fork 差异口径）+ 验证在场（fork 工作区内 verify 登记
+     * ——按工作区键各跑各的）+ 基座 lint 两档扫描（#425 在 fork 工作区判——裸客户端
+     * 违规在产出地拦截，不带进主工作区合并）——只核验不落表不推预览。
      */
     private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary,
             ProofOfOutputGate.Checking proof) {
@@ -1618,7 +1622,8 @@ public class GenerationAppService {
         Map<String, Object> proofAnnotation = proof.proof();
         verificationPresence.requirePresence(Long.toString(forkWorkspaceId));
         return CoderRunAttempts.ClosingJudgment.generation(summary)
-                .withProofOfOutput(proofAnnotation);
+                .withProofOfOutput(proofAnnotation)
+                .withRobustKitLint(robustKitLint.lintClosingPayload(forkWorkspaceId));
     }
 
     /**
@@ -1751,10 +1756,12 @@ public class GenerationAppService {
     }
 
     /**
-     * 合并冲突子智能体裁决（#351 冲突裁决出口；#424 验证在场同盖）：主工作区处于
+     * 合并冲突子智能体裁决（#351 冲突裁决出口；#424 验证在场同盖；#425 基座 lint
+     * 同盖）：主工作区处于
      * 冲突/半应用态，新派一个执行体 run 读两侧改动、按用户目标裁决合并，收口判据 =
      * 主工作区 8081 探活 + 入口文件完整 + 验证在场（裁决后的主工作区系统也要过片
-     * 轻验——常开无豁免；裁决天然有产出，产出证明闸不适用 #420 口径）。裁决成功
+     * 轻验——常开无豁免；裁决天然有产出，产出证明闸不适用 #420 口径）+ 基座 lint
+     * 两档扫描（裁决合并产物不得引入裸客户端）。裁决成功
      * 即其收口成版落主工作区（默认 {@code run} 目标 = 项目主工作区）。失败落
      * failSegment + run-failed（用户续跑兜底）。
      */
@@ -1779,7 +1786,9 @@ public class GenerationAppService {
                     verificationPresence.requirePresence(
                             Long.toString(project.getWorkspaceId()));
                     return CoderRunAttempts.ClosingJudgment.generation(
-                            "解决合并冲突：完成切片「" + outcome.slice() + "」");
+                            "解决合并冲突：完成切片「" + outcome.slice() + "」")
+                            .withRobustKitLint(robustKitLint.lintClosingPayload(
+                                    project.getWorkspaceId()));
                 },
                 CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                 RunHeading.titled("解决合并冲突"));
@@ -1865,7 +1874,9 @@ public class GenerationAppService {
      * 异常不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 verify 兜
      * （收口扩载 verification 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
-     * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
+     * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）；
+     * 新基座工作区另附基座 lint 两档扫描事实（#425——强制档＝裸客户端直用，修轮用尽
+     * 仍余＝收口结构性拒绝〔判定归尝试环〕；预置档＝会话件自写，如实标注不拦收口）。
      * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
      * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移 Demo 首版成版锚）——且与
      * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
@@ -1894,7 +1905,9 @@ public class GenerationAppService {
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
         return CoderRunAttempts.ClosingJudgment.generation(summary)
                 .withProofOfOutput(proofAnnotation)
-                .withDesignLint(designSpecs.lintClosingPayload(project));
+                .withDesignLint(designSpecs.lintClosingPayload(project))
+                .withRobustKitLint(robustKitLint.lintClosingPayload(
+                        project.getWorkspaceId()));
     }
 
     /** 片收口状态落表（#220）：真收口（8081 探活过）即置已收口 + 用户面 run 锚。 */

@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   ListChecks,
   Monitor,
+  PackageCheck,
   Palette,
   PenLine,
   RotateCcw,
@@ -34,6 +35,7 @@ import type {
   ClosingDraft,
   DesignLintClosing,
   ProofOfOutputClosing,
+  RobustKitLintClosing,
   WorkClosing,
 } from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
@@ -204,6 +206,82 @@ function DesignLintArea({ lint }: { lint: DesignLintClosing }) {
   );
 }
 
+/** 基座 lint 规则中文名（用户面不露工程码；件用法指引原文经行 hover 可见）。 */
+const ROBUST_LINT_RULE_LABELS: Record<string, string> = {
+  "bare-db-client": "裸数据库客户端",
+  "bare-fetch": "裸 fetch",
+  "handwritten-session": "会话自写",
+};
+
+/**
+ * 基座件使用区（#425 基座 lint 两档的感知面）：新基座工作区编码 run 的基座 lint
+ * 事实——基座件合规（曾自动修一轮则注明，纠偏过程如实）/预置档余项清单（会话
+ * 存储自写——如实标注、不拦收口，文件:行＋规则中文名，hover 带件用法指引）/
+ * 扫描未执行（如实，不假装达标）。强制档违规修不完＝收口被拒，正常流转不出
+ * 现在本卡（分档渲染防御性兼容）。
+ */
+function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
+  const [open, setOpen] = useState(false);
+  const tier = lint.preset ?? lint.mandatory;
+  const violations = tier?.violations ?? [];
+  const shown = open ? violations : violations.slice(0, VISIBLE_LINT);
+  const violating = lint.status === "violations";
+  // 分档标签随在场分节（预置＝正常流转；强制＝防御分支，标签如实不冒名）
+  const tierLabel = lint.preset ? "预置件违规" : "强制档违规";
+  return (
+    <div className="mt-2.5 rounded-lg border bg-background px-2.5 py-2">
+      <div className="flex items-center gap-2 text-[13px]">
+        <PackageCheck className={cn("size-3.5 shrink-0", violating ? "text-amber-600" : "text-muted-foreground")} />
+        <span>
+          基座件使用：
+          {lint.status === "passed" ? (
+            lint.retried ? "基座件合规（曾自动修正一轮）" : "基座件合规"
+          ) : lint.status === "unavailable" ? (
+            "基座件扫描未执行"
+          ) : (
+            <>
+              <span className="font-medium text-amber-600">
+                余 {tier?.total ?? violations.length} 处{tierLabel}
+              </span>
+              {lint.retried ? "（已自动修正一轮，仍余）" : null}
+            </>
+          )}
+        </span>
+      </div>
+      {violating && violations.length > 0 ? (
+        <>
+          <div className="mt-1 font-mono text-xs">
+            {shown.map((violation) => (
+              <div
+                key={`${violation.file}:${violation.line}:${violation.rule}`}
+                className="flex items-center justify-between gap-2 py-0.5"
+                title={violation.message}
+              >
+                <span className="min-w-0 truncate text-foreground/80">
+                  {violation.file}:{violation.line || ""}
+                </span>
+                <span className="shrink-0 text-muted-foreground">
+                  {ROBUST_LINT_RULE_LABELS[violation.rule] ?? violation.rule}
+                </span>
+              </div>
+            ))}
+          </div>
+          {violations.length > VISIBLE_LINT ? (
+            <button
+              type="button"
+              className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setOpen(!open)}
+            >
+              <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+              {open ? "收起" : `查看全部 ${violations.length} 处`}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * 产出证明判别标注（#420 空转片防呆的感知面）：豁免依据（验证确认「能力已存在」
  * 的合法收口——活已被前片干完的薄片）与空转拒绝史（曾 N 次被拒、补做后收口）
@@ -278,6 +356,8 @@ export function ClosingCard({
   const verification = closing.verification;
   // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
   const designLint = closing.designLint;
+  // 基座 lint 两档（#425）：可缺省——新基座工作区编码 run 携带（「基座件使用」行）
+  const robustKitLint = closing.robustKitLint;
   // 产出证明判别标注（#420）：可缺省——豁免收口/空转拒绝史才携带（正常干活不出）
   const proof = closing.proofOfOutput;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
@@ -386,6 +466,10 @@ export function ClosingCard({
           {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
               叙事行＋违规清单；设计会话不携带不出 */}
           {designLint ? <DesignLintArea lint={designLint} /> : null}
+
+          {/* 基座件使用（#425）：新基座工作区的基座 lint 两档事实——预置档余项
+              如实标注（不拦收口）；存量工作区不携带不出 */}
+          {robustKitLint ? <RobustLintArea lint={robustKitLint} /> : null}
 
           {/* 产出证明判别标注（#420）：豁免依据/空转拒绝史的如实呈现；正常干活
               收口不携带不出 */}

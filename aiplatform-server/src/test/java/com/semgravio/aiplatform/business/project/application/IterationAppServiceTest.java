@@ -715,6 +715,50 @@ class IterationAppServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
+        // #425 更新轨同盖：基座 lint 预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
+        // 不拦收口（对比强制档＝收口被拒）；修轮喂回现场进同 run（两试）
+        Long projectId = persistedGeneratedProject("9961");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseClosing(true, "加了登录会话", List.of(
+                new FileChange("/src/app/login/actions.ts", 8, 1)));
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+        // 强制档净、预置档恒余（手写 cookie 会话）——grep 前置判据防误截 AGENTS.md
+        // 写入命令（其正文含件路径字样）
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("createClient"))))
+                .thenReturn(new ExecResultResponse("", "", 1));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("pbkdf2"))))
+                .thenReturn(new ExecResultResponse(
+                        "./src/app/login/actions.ts:8:const jar = await cookies();\n", "", 0));
+
+        appService.startFixRun(projectId, "加登录", null);
+        tracks.remove(0).run();
+
+        // 预置档修一轮仍余＝不拦收口：两试（修轮喂回→仍余收口）、无失败终态；
+        // 收尾卡 robustKitLint 如实标注（violations＋retried＋预置档余项、无强制档）
+        verify(agentClient, times(2)).converse(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
+        assertThat(robustLint)
+                .containsEntry("status", "violations")
+                .containsEntry("retried", true)
+                .doesNotContainKey("mandatory");
+        assertThat((Map<String, Object>) robustLint.get("preset"))
+                .containsEntry("total", 1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
         // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/
         // 变更清单/统计）且判定行为服务端权威值（PRD 改没改 = 交接物修订说明、

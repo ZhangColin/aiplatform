@@ -146,14 +146,15 @@ class CoderRunAttempts {
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote, List<Map<String, Object>> drafts,
-            Map<String, Object> designLint, Map<String, Object> proofOfOutput) {
+            Map<String, Object> designLint, Map<String, Object> robustKitLint,
+            Map<String, Object> proofOfOutput) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null, null);
+            return new ClosingJudgment(false, null, true, note, null, null, null, null);
         }
 
         /**
@@ -164,7 +165,7 @@ class CoderRunAttempts {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null, null);
+                    drafts == null ? List.of() : drafts, null, null, null);
         }
 
         /**
@@ -174,19 +175,25 @@ class CoderRunAttempts {
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
-                    null, null, null);
+                    null, null, null, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    lint, proofOfOutput);
+                    lint, robustKitLint, proofOfOutput);
+        }
+
+        /** 附基座 lint 两档扫描事实（#425 收口回调拼装：存量工作区传 null＝不携带）。 */
+        ClosingJudgment withRobustKitLint(Map<String, Object> lint) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, lint, proofOfOutput);
         }
 
         /** 附产出证明判别标注（#420 收口回调拼装：非豁免且无拒绝史传 null＝不携带）。 */
         ClosingJudgment withProofOfOutput(Map<String, Object> proofOfOutput) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    designLint, proofOfOutput);
+                    designLint, robustKitLint, proofOfOutput);
         }
     }
 
@@ -518,29 +525,58 @@ class CoderRunAttempts {
                     }
                     throw e;
                 }
-                // lint 违规有限自动重试一轮（#296 遵守三件套③，软约束不当硬门）：
-                // 判据已过（8081/finish_edit）、样式扫描有违规且修轮未用、尝试还有
-                // 余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试——
-                // 静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）；
-                // 一轮用尽仍违规＝如实随收尾卡列违规项收口（不静默不假装达标，
-                // 也不 run 失败）
+                // lint 违规有限自动重试一轮（#296 遵守三件套③；#425 同轮扩盖基座
+                // lint 两档）：判据已过（8081/finish_edit）、样式/基座扫描有违规且
+                // 修轮未用、尝试还有余量 → 违规清单喂回执行体原地修一轮（对偶 #221
+                // 错误现场续试——静默重试信号不外泄，part-check 停「检查中」、PASSED
+                // 不抢先播报）；一轮用尽：样式（#296 软约束）与基座预置档（#425 不
+                // 拦收口）＝如实随收尾卡列违规项收口（不静默不假装达标，也不 run
+                // 失败）；基座<b>强制档</b>仍余（#425 收口拒绝回路）＝结构性拒绝
+                // ——拒绝回执抛出走该次尝试失败（重试现场携带违规清单），耗尽走
+                // #353 段级回滚重跑（升档兜底，不建新通道）
                 Map<String, Object> lint = judgment.designLint();
-                if (lint != null && !lintViolations(lint).isEmpty()
+                Map<String, Object> robustLint = judgment.robustKitLint();
+                boolean styleViolating = lint != null && !lintViolations(lint).isEmpty();
+                boolean robustViolating = RobustKitLintAppService.hasViolations(robustLint);
+                if ((styleViolating || robustViolating)
                         && !lintFixRoundUsed && attempt < maxAttempts) {
                     lintFixRoundUsed = true;
-                    previousError = lintRetryScene(lint);
-                    log.info("[{}] 项目 {} 样式合规扫描未过，自动修一轮（attemptRunId={}，违规 {} 处）",
-                            what, projectId, attemptRunId, lint.get("total"));
+                    previousError = combinedLintRetryScene(lint, robustLint);
+                    log.info("[{}] 项目 {} lint 扫描未过（样式 {}／基座强制 {}+预置 {} 处），自动修一轮"
+                            + "（attemptRunId={}）",
+                            what, projectId,
+                            styleViolating ? lint.get("total") : 0,
+                            RobustKitLintAppService.tierViolationsOf(robustLint,
+                                    RobustKitLintAppService.TIER_MANDATORY).size(),
+                            RobustKitLintAppService.tierViolationsOf(robustLint,
+                                    RobustKitLintAppService.TIER_PRESET).size(),
+                            attemptRunId);
                     continue;
+                }
+                if (RobustKitLintAppService.mandatoryViolationsRemain(robustLint)) {
+                    // 强制档拒绝回执（#425）：末次尝试记待决 ❌（同核验未过口径——
+                    // 确定终态时外环补发，降级不悬挂）
+                    if (attempt == maxAttempts) {
+                        failedCheckPending = true;
+                        failedCheckProjection = projection;
+                        failedCheckCommand = command;
+                    }
+                    throw new IllegalStateException(
+                            RobustKitLintAppService.rejectionReceipt(robustLint));
                 }
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
-                    // lint 修轮事实（#296）：曾自动修一轮即标记 retried——收尾卡如实
-                    // 叙事「曾发现违规、修一轮后通过/仍余 N 处」，不抹掉纠偏过程
+                    // lint 修轮事实（#296/#425）：曾自动修一轮即标记 retried——收尾卡
+                    // 如实叙事「曾发现违规、修一轮后通过/仍余 N 处」，不抹掉纠偏过程
                     if (judgment.designLint() != null && lintFixRoundUsed) {
                         Map<String, Object> retried = new LinkedHashMap<>(judgment.designLint());
                         retried.put(CLOSING_LINT_RETRIED_FIELD, true);
                         judgment = judgment.withDesignLint(retried);
+                    }
+                    if (judgment.robustKitLint() != null && lintFixRoundUsed) {
+                        Map<String, Object> retried = new LinkedHashMap<>(judgment.robustKitLint());
+                        retried.put(CLOSING_LINT_RETRIED_FIELD, true);
+                        judgment = judgment.withRobustKitLint(retried);
                     }
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what,
@@ -826,6 +862,9 @@ class CoderRunAttempts {
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
         }
+        if (judgment.robustKitLint() != null) {
+            closing.put(CLOSING_ROBUST_LINT_FIELD, judgment.robustKitLint());
+        }
         if (judgment.proofOfOutput() != null) {
             closing.put(CLOSING_PROOF_FIELD, judgment.proofOfOutput());
         }
@@ -843,6 +882,14 @@ class CoderRunAttempts {
      * ——带规范项目编码 run 的「按稿对齐」叙事与 lint 结果；无规范项目不携带）。
      */
     static final String CLOSING_LINT_FIELD = "designLint";
+
+    /**
+     * 收口扩载的基座 lint 键（#425：{@code { status, retried?, mandatory?, preset? }}
+     * ——各档 { total, violations[] }，条目 file/line/rule/message；强制档违规
+     * 修不完＝收口被拒（载荷不会以「带强制档违规」形态出现在收尾卡——只剩预置档
+     * 余项如实标注）；存量工作区不携带）。
+     */
+    static final String CLOSING_ROBUST_LINT_FIELD = "robustKitLint";
 
     /**
      * 收口扩载的模型路由键（#354：收口尝试的路由判定留档——{@code { modelId,
@@ -900,6 +947,24 @@ class CoderRunAttempts {
                     .append(violation.get("rule")).append("：").append(violation.get("message"));
         }
         return scene.toString();
+    }
+
+    /**
+     * 修轮现场拼装单点（#425 两源合流）：设计规范 lint 与基座 lint 各自现场在场
+     * 即拼、以空行分隔（两扫描独立、清单各自完整——执行体一次修轮看全两份）。
+     */
+    private static String combinedLintRetryScene(Map<String, Object> designLint,
+            Map<String, Object> robustLint) {
+        String scene = "";
+        if (designLint != null && !lintViolations(designLint).isEmpty()) {
+            scene = lintRetryScene(designLint);
+        }
+        if (RobustKitLintAppService.hasViolations(robustLint)) {
+            scene = scene.isEmpty()
+                    ? RobustKitLintAppService.fixRoundScene(robustLint)
+                    : scene + "\n\n" + RobustKitLintAppService.fixRoundScene(robustLint);
+        }
+        return scene;
     }
 
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本

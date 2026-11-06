@@ -3141,6 +3141,199 @@ class GenerationAppServiceTest {
                 .containsExactlyInAnyOrder("src/failed.tsx", "src/lib.js");
     }
 
+    // ---------- 基座 lint 两档（#425：强制档拦裸写/预置档拦自写不拦不用） ----------
+
+    /** 基座 lint 脚本位（key＝工作区）：强制档/预置档 grep 的 stdout（缺省空＝零命中）。 */
+    private final Map<String, String> robustLintMandatory = new ConcurrentHashMap<>();
+    private final Map<String, String> robustLintPreset = new ConcurrentHashMap<>();
+
+    /**
+     * 基座 lint 桩（#425）：两档 grep 按命令分流读脚本位（空 stdout＝退出码 1 零命中）
+     * ——须在 {@link #givenWorkspaceGitReadyWithProofScript} 之后打（窄桩后注册优先；
+     * 探针与既有命令走既有宽桩 exit 0＝健壮件在场）。
+     */
+    private void givenRobustKitPresentWithLintScript() {
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("createClient"))))
+                .thenAnswer(invocation -> {
+                    String stdout = robustLintMandatory.getOrDefault(
+                            (String) invocation.getArgument(0), "");
+                    return new ExecResultResponse(stdout, "", stdout.isEmpty() ? 1 : 0);
+                });
+        when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
+                cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("pbkdf2"))))
+                .thenAnswer(invocation -> {
+                    String stdout = robustLintPreset.getOrDefault(
+                            (String) invocation.getArgument(0), "");
+                    return new ExecResultResponse(stdout, "", stdout.isEmpty() ? 1 : 0);
+                });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_bare_client_slice_when_close_then_lint_fix_round_refed_back_then_closes() {
+        // #425 AC①：强制档判据命中裸 pg/redis 客户端与裸 fetch——违规清单喂回执行体
+        // 同 run 修一轮（对偶设计规范 lint 修轮先例）；修净即正常收口，修轮事实
+        //（retried）随收尾卡如实呈现
+        Long projectId = persistedProject("9844");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        givenRobustKitPresentWithLintScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1：首试扫描命中（修轮喂回）、修轮后修净；阶段 0 干净作对照
+            if (command.sessionId().endsWith("-slice-1")) {
+                boolean bareOnFirstAttempt = !command.prompt().contains("错误现场");
+                robustLintMandatory.put("9844", bareOnFirstAttempt
+                        ? "./src/lib/orders.ts:12:const pool = new Pool({ connectionString });\n"
+                                + "./src/app/orders/page.tsx:40:const r = await fetch('/api/orders');\n"
+                        : "");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 一次收口 + 切片 1 两试（违规喂回修一轮 → 修净收口）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        AgentCommand sliceRetry = commands.getAllValues().get(2);
+        // 违规清单进同 run 现场：重试 prompt 携带基座 lint 修轮指引与 file:line 定位
+        assertThat(sliceRetry.prompt())
+                .contains("基座 lint 扫描未过")
+                .contains("src/lib/orders.ts:12")
+                .contains("src/app/orders/page.tsx:40")
+                .contains("强制档");
+        // 修净后正常收口：片全收口＋generated_at 落位；修轮事实随收尾卡（retried 如实）
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) sliceClosing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
+        assertThat(robustLint)
+                .containsEntry("status", "passed")
+                .containsEntry("retried", true);
+    }
+
+    @Test
+    void given_bare_client_never_fixed_when_generate_then_rejected_rollback_rerun_then_terminal_failed() {
+        // #425 AC②前半：强制档修轮用尽仍余＝收口结构性拒绝（拒绝回执喂回同 run），
+        // 耗尽走 #353 段级自愈回滚重跑（不建新通道），重跑轮同形再耗尽→转终态
+        // run-failed、片 FAILED、后片不派——快档典型「绕不过预置件」形态被闸在片级
+        Long projectId = persistedProject("9845");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        givenRobustKitPresentWithLintScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1 恒违规（修轮喂回后仍裸写——重跑轮同形）；阶段 0 干净
+            if (command.sessionId().endsWith("-slice-1")
+                    || command.sessionId().contains("-slice-1-")) {
+                robustLintMandatory.put("9845",
+                        "./src/lib/orders.ts:12:const pool = new Pool({});\n");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 阶段 0 (1) + 切片 1 首轮（修轮 1 + 拒绝 2）+ 重跑轮同形 3 试 = 7 次 converse
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1 + 2 * properties.getMaxAttempts()))
+                .converse(commands.capture(), any());
+        // 现场次序如实：第 2 试携修轮清单（基座 lint 扫描未过）、第 3 试起携拒绝回执
+        //（强制档未过＝收口被拒——不是软收口）
+        assertThat(commands.getAllValues().get(2).prompt()).contains("基座 lint 扫描未过");
+        assertThat(commands.getAllValues().get(3).prompt()).contains("基座 lint 强制档未过");
+        // 段级自愈兜底：留账＋回滚各两次（重跑前＋终态前——#353 不变式）
+        verify(workspaceLifecycleAppService, times(2)).exec(eq("9845"),
+                argThat((WorkspaceExecCommand cmd) -> cmd != null
+                        && cmd.command().contains("git reset --hard")));
+        // 终态：run-failed、片 FAILED、后片不派、generated_at 不落
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 3, 1);
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_preset_session_residual_when_close_then_annotated_not_blocked() {
+        // #425 AC②后半＋AC③：预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
+        // 不拦收口（对比强制档＝拒绝回路）；未用会话件（阶段 0 零命中）不判违规
+        Long projectId = persistedProject("9846");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        givenRobustKitPresentWithLintScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1 全程（修轮前后）都余预置档违规；阶段 0 干净作对照（不拦不用）
+            if (command.sessionId().endsWith("-slice-1")) {
+                robustLintPreset.put("9846",
+                        "./src/app/login/actions.ts:8:const jar = await cookies();\n");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 预置档不拦收口：片全收口＋generated_at 落位（阶段 0 一次 + 切片两试）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(2).prompt())
+                .contains("基座 lint 扫描未过")
+                .contains("预置档");
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        // 收尾卡如实标注：robustKitLint 带预置档余项与修轮事实、无强制档分节；
+        // 阶段 0（未用会话件）passed 无标注
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) sliceClosing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
+        assertThat(robustLint)
+                .containsEntry("status", "violations")
+                .containsEntry("retried", true)
+                .doesNotContainKey("mandatory");
+        assertThat((Map<String, Object>) robustLint.get("preset"))
+                .containsEntry("total", 1);
+        Map<String, Object> stage0Closing = (Map<String, Object>) payloads.getAllValues()
+                .get(0).get(AgentEventTypes.CLOSING_FIELD);
+        assertThat((Map<String, Object>) stage0Closing
+                .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD))
+                .containsEntry("status", "passed");
+    }
+
     // ---------- 遵守三件套（#296）：派发物化接线＋收口扫描与自动修一轮 ----------
 
     /** oxlint 违规诊断输出（真实 --format json 形状）。 */

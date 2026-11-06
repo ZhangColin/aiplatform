@@ -1182,7 +1182,7 @@ public class GenerationAppService {
                             prdVersionNo, proof),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? ModelRoutingAppService.SegmentSignals.none()
-                            : ModelRoutingAppService.SegmentSignals.slice(slice),
+                            : ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                     stage0 ? RunHeading.titled(STAGE0_TITLE)
                             : RunHeading.slice(slice, ord, slices.size()),
                     rollback);
@@ -1240,7 +1240,7 @@ public class GenerationAppService {
                         (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
                                 runId, sliceClosingSummary(slice), prdVersionNo, proof),
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
-                        ModelRoutingAppService.SegmentSignals.slice(slice),
+                        ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                         RunHeading.slice(slice, ord, slices.size()),
                         rollback);
                 if (!result.succeeded()) {
@@ -1584,7 +1584,7 @@ public class GenerationAppService {
                     (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
                             sliceClosingSummary(slice), proof),
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
-                    ModelRoutingAppService.SegmentSignals.slice(slice),
+                    ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                     RunHeading.slice(slice, ord, plan.slices().size()),
                     rollback);
             if (result.succeeded()) {

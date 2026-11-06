@@ -1,8 +1,11 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.Set;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -59,7 +62,7 @@ public class AgentConfigAppService {
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
-            Integer routingSliceFeatureThreshold,
+            Set<SliceSizeLabel> routingEscalatingSizeLabels,
             String verifyModelId, int verifyRoundBudget) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
@@ -81,7 +84,7 @@ public class AgentConfigAppService {
                 config.webSearchEnabled(), config.fetchUrlEnabled(),
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),
-                config.routingSliceFeatureThreshold(),
+                config.routingEscalatingSizeLabels(),
                 config.verifyModelId(),
                 config.verifyRoundBudget() != null
                         ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET);

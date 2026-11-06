@@ -189,16 +189,17 @@ closing: {
     modelId: "deepseek-v4-pro",     # 在场——「哪段用了哪档、为什么」的留档，随收尾卡落
     source: "routed",               # 对话史可查；设计会话/其余缺省不携带。平台分析口径、
     reasons: [                      # 前端不渲染（同 durationBreakdown）：
-      "重试升档（第 2 次尝试）"     #   modelId = 收口尝试的生效模型档位裸名
+      "规模标签升档（大）"          #   modelId = 收口尝试的生效模型档位裸名
     ],                              #   source ∈ routed（路由判定——含无信号回落人工档
     signals: {                      #   兜底）/ pinned（钉死位——路由关＋人工档）/
-      attempt: 2, round: 1,         #   default（路由关＋枚举缺省）
-      fileCount: 87,                #   reasons = 升档理由（可缺省——快档判定/钉死不携带，
-      sliceLength: 12,              #   只记为什么升：重试升档/回滚重跑升档/文件面超出阈值/
-      fileCountThreshold: 60,       #   片复杂度超出阈值）
-      sliceLengthThreshold: 20 }    #   signals = 判定依据快照（attempt/round/fileCount/
-  }                                 #   sliceLength＋两阈值；采集失败的信号为 null——
-                                    #   无此信号、降级不升档）
+      attempt: 1, round: 1,         #   default（路由关＋枚举缺省）
+      fileCount: 18,                #   reasons = 升档理由（可缺省——快档判定/钉死不携带，
+      sizeLabel: "大",              #   只记为什么升：重试升档/回滚重跑升档/文件面超出阈值/
+      fileCountThreshold: 30,       #   规模标签升档——#426 起枚举密度信号退役）
+      escalatingSizeLabels: ["大"]  #   signals = 判定依据快照（attempt/round/fileCount＝
+  }                                 #   应用文件面〔已跟踪数扣基座基数，#426〕/sizeLabel＝
+                                    #   片规模标签＋escalatingSizeLabels＝生效映射；采集
+                                    #   失败/未设标签的信号为 null——无此信号、降级不升档）
                                     # 逐尝试档位见 durationBreakdown.attempts[].modelId；
                                     # 失败段（无收尾卡）的判定留档＝run-failed 失败面
                                     # （#418——随事件扩载并同载荷落库，见下节）＋结构化日志

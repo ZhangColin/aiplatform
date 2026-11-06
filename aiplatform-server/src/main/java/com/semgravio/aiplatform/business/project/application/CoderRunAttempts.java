@@ -340,8 +340,9 @@ class CoderRunAttempts {
      * 全新——计量幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。
      * 重跑轮再耗尽则二次回滚后终态（不变式：终态时工作区 = 段起点，续跑从干净现场起）。
      * {@code null} = 无段级回滚（修正/设计/合并裁决轨——既有口径不变）。
-     * {@code signals} = 模型路由的段级信号（轨道层拼装：切片描述——片复杂度信号；
-     * 修正/设计/合并裁决轨经便捷形传空信号；路由只对 executor 座生效，#354）。
+     * {@code signals} = 模型路由的段级信号（轨道层拼装：片规模标签——计划自报的
+     * 实现面积，#426 起替换枚举密度信号；修正/设计/合并裁决轨经便捷形传空信号；
+     * 路由只对 executor 座生效，#354）。
      */
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,

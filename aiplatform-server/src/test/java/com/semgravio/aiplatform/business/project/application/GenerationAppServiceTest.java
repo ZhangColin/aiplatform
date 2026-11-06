@@ -4170,7 +4170,7 @@ class GenerationAppServiceTest {
         assertThat((List<String>) stage0Tier.get("reasons")).contains("重试升档（第 2 次尝试）");
         assertThat((Map<String, Object>) stage0Tier.get("signals"))
                 .containsEntry("attempt", 2)
-                .containsEntry("sliceFeatures", null); // 阶段 0 无切片描述——片复杂度缺位
+                .containsEntry("sizeLabel", null); // 阶段 0 无片标签——规模标签信号缺位
         Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
                 .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
@@ -4191,7 +4191,8 @@ class GenerationAppServiceTest {
 
     @Test
     void given_large_file_surface_when_dispatch_then_strong_from_first_attempt() {
-        // 文件面大小信号：工作区已跟踪文件数 ≥ 阈值（代码缺省 60）——首试即升强档
+        // 文件面大小信号：应用文件面（探针输出已扣基座基数）≥ 阈值（代码缺省 30，
+        // #426 排除基座基数后重校）——首试即升强档
         Long projectId = persistedProject("9851");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -4222,28 +4223,49 @@ class GenerationAppServiceTest {
         Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
                 .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
                 .get("modelTier");
-        assertThat((List<String>) sliceTier.get("reasons")).contains("文件面超出阈值（87 ≥ 60）");
+        assertThat((List<String>) sliceTier.get("reasons")).contains("文件面超出阈值（87 ≥ 30）");
         assertThat((Map<String, Object>) sliceTier.get("signals")).containsEntry("fileCount", 87);
     }
 
     @Test
-    void given_fat_slice_description_when_dispatch_then_slice_escalates_but_stage0_stays_fast() {
-        // 片复杂度信号：切片功能条目数（枚举段数）≥ 阈值（代码缺省 4，#361 重定）
-        // ——该片升强档；阶段 0 无切片描述（信号缺位）仍快档。长而少枚举的标题
-        // 不升档（字数信号恒燃已废——回归见 ModelRoutingAppServiceTest）
+    void given_large_labeled_slice_when_dispatch_then_slice_escalates_but_stage0_stays_fast() {
+        // 规模标签信号（#426）：计划自报「大」标签的片（描述短、功能重的锚案形态
+        // ——枚举密度信号量不出来）升强档；阶段 0 无标签（信号缺位）仍快档。
+        // 未设标签的存量计划不升档（回归见 ModelRoutingAppServiceTest）
         Long projectId = persistedProject("9852");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("完成");
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
 
-        appService.dispatchGenerationOnTurnClose(projectId,
-                new BuildPlan(List.of("用户能注册登录、浏览商品、下单支付、查看历史订单")));
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(
+                List.of("用户能进行拼写题与听力题的测试"), null, null,
+                List.of(SliceSizeLabel.LARGE)));
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(commands.capture(), any());
         assertThat(commands.getAllValues()).extracting(AgentCommand::modelString).containsExactly(
                 "volcengine:deepseek-v4-flash-ga-260731",
                 "volcengine:deepseek-v4-pro-ga-260813");
+        // 留档快照：升档理由带规模标签判定快照（标签＋生效映射）
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceTier = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
+                .get("modelTier");
+        assertThat((List<String>) sliceTier.get("reasons")).containsExactly("规模标签升档（大）");
+        assertThat((Map<String, Object>) sliceTier.get("signals"))
+                .containsEntry("sizeLabel", "大")
+                .containsEntry("escalatingSizeLabels", List.of("大"));
     }
 
     @Test

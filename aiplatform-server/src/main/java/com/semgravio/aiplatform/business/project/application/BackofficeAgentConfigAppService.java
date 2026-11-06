@@ -16,6 +16,7 @@ import com.semgravio.aiplatform.business.project.application.dto.command.EdgeMod
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeAgentConfigResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeAgentConfigTraceResponse;
 import com.semgravio.aiplatform.business.project.application.dto.response.BackofficeEdgeModelConfigResponse;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
@@ -103,7 +104,7 @@ public class BackofficeAgentConfigAppService {
                 safe.fetchUrlEnabled() == null || safe.fetchUrlEnabled(),
                 safe.routingEnabled() == null || safe.routingEnabled(),
                 blankToNull(safe.routingStrongModelId()),
-                safe.routingFileCountThreshold(), safe.routingSliceFeatureThreshold(),
+                safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
                 blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
@@ -160,7 +161,7 @@ public class BackofficeAgentConfigAppService {
                 tool == AgentTool.WEB_SEARCH ? enabled : current.webSearchEnabled(),
                 tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
-                current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
+                current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
@@ -257,11 +258,13 @@ public class BackofficeAgentConfigAppService {
                 agentKey, current.systemPrompt(), current.modelId(),
                 current.webSearchEnabled(), current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
-                current.routingFileCountThreshold(), current.routingSliceFeatureThreshold(),
+                current.routingFileCountThreshold(),
+                SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
-                next.routingFileCountThreshold(), next.routingSliceFeatureThreshold(),
+                next.routingFileCountThreshold(),
+                SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
                 next.verifyModelId(), next.verifyRoundBudget(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
@@ -283,7 +286,7 @@ public class BackofficeAgentConfigAppService {
                 || current.routingEnabled() != next.routingEnabled()
                 || !Objects.equals(current.routingStrongModelId(), next.routingStrongModelId())
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
-                || !Objects.equals(current.routingSliceFeatureThreshold(), next.routingSliceFeatureThreshold())
+                || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
                 || !Objects.equals(current.verifyModelId(), next.verifyModelId())
                 || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget());
     }
@@ -297,6 +300,28 @@ public class BackofficeAgentConfigAppService {
             throw new ApplicationException(ProjectMessage.VERIFY_ROUND_BUDGET_INVALID, budget);
         }
         return budget;
+    }
+
+    /**
+     * 升档规模标签映射校验（#426）：null＝清空回落代码缺省（「大」）不校验；非空
+     * token 须在小/中/大封闭集内——非法 token PRJ_079（错值写不进去，同档位键
+     * 即时校验口径）。空列表合法（空映射＝规模标签信号整体关停的运营选择）。
+     * 归一：去空白、剔重复、EnumSet 定形（序列化序由 {@link SliceSizeLabel#tokensOf}
+     * 定序单点管）。
+     */
+    private static java.util.Set<SliceSizeLabel> requireValidSizeLabels(java.util.List<String> tokens) {
+        if (tokens == null) {
+            return null;
+        }
+        java.util.Set<SliceSizeLabel> labels = java.util.EnumSet.noneOf(SliceSizeLabel.class);
+        for (String token : tokens) {
+            SliceSizeLabel label = SliceSizeLabel.fromToken(token);
+            if (label == null) {
+                throw new ApplicationException(ProjectMessage.ROUTING_SIZE_LABEL_INVALID, token);
+            }
+            labels.add(label);
+        }
+        return labels;
     }
 
     /** 配置面智能体寻址（单点）：{@link AgentProfile#byKey} 解析，未知/空键 404。 */

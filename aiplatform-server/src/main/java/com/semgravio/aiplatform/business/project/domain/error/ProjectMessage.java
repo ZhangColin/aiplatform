@@ -238,7 +238,10 @@ public enum ProjectMessage implements CodeMessage {
     MODEL_CATALOG_PULL_KEY_MISSING(400, "PRJ_076", "该通道未配置 apiKey，无法拉取模型清单：{0}（先在通道配置填 key 后重试）"),
 
     /** 上游拉取失败（#368）：非 200/坏响应/连接异常——理由如实转述（502＝上游不可用），明确报错不静默。 */
-    MODEL_CATALOG_PULL_FAILED(502, "PRJ_077", "模型清单拉取失败：{0}（上游不可用或响应异常——检查通道 baseUrl/key 与供应商可用性后重拉）");
+    MODEL_CATALOG_PULL_FAILED(502, "PRJ_077", "模型清单拉取失败：{0}（上游不可用或响应异常——检查通道 baseUrl/key 与供应商可用性后重拉）"),
+
+    /** 升档规模标签映射越出封闭集（#426 路由信号修复）：token 须在小/中/大封闭集内——错值写不进去。 */
+    ROUTING_SIZE_LABEL_INVALID(400, "PRJ_079", "升档规模标签须为小/中/大封闭集内的值：{0}（null/缺省＝清空回落代码缺省「大」；空列表＝空映射）");
 
     // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
 

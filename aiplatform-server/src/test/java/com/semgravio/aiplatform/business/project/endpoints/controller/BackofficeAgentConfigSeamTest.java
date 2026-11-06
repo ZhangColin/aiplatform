@@ -14,6 +14,7 @@ import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierSeed;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
@@ -339,52 +340,63 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.message").value("Signature required"));
     }
 
-    // ---------- 模型路由策略四件（#354：读面缺省 → 覆盖写＋留痕 → 清空回落） ----------
+    // ---------- 模型路由策略四件（#354；#426 信号面修订：阈值重校＋标签映射） ----------
 
     @Test
     void given_no_routing_override_when_get_then_code_defaults_with_unoverridden_marks()
             throws Exception {
-        // 路由策略读面缺省：开关 true＝开、强档与两阈值回落代码缺省（覆盖标记
-        // false、默认预览同值）——路由开且无钉死即路由判定（缺省快档）
+        // 路由策略读面缺省：开关 true＝开、强档/文件面阈值/升档标签映射回落代码缺省
+        // （覆盖标记 false、默认预览同值）——路由开且无钉死即路由判定（缺省快档）；
+        // 文件面阈值缺省 30（应用文件面——#426 排除基座基数后重校）、映射缺省 [大]
         signedGet("executor")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
                 .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
                 .andExpect(jsonPath("$.data.defaultRoutingStrongModelId").value("pro"))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
                 .andExpect(jsonPath("$.data.routingFileCountThresholdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(60))
-                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4))
-                .andExpect(jsonPath("$.data.routingSliceFeatureThresholdOverridden").value(false))
-                .andExpect(jsonPath("$.data.defaultRoutingSliceFeatureThreshold").value(4));
+                .andExpect(jsonPath("$.data.defaultRoutingFileCountThreshold").value(30))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("大"))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultRoutingEscalatingSizeLabels").isArray())
+                .andExpect(jsonPath("$.data.defaultRoutingEscalatingSizeLabels[0]").value("大"));
         // 装配读面同步：路由开、三可空件 null（回落缺省归路由判定单点）
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isTrue();
         assertThat(executor.routingStrongModelId()).isNull();
         assertThat(executor.routingFileCountThreshold()).isNull();
-        assertThat(executor.routingSliceFeatureThreshold()).isNull();
+        assertThat(executor.routingEscalatingSizeLabels()).isNull();
     }
 
     @Test
     void given_routing_strategy_updated_when_get_and_traces_then_effective_and_snapshots()
             throws Exception {
-        // 策略覆盖写（开关关＋强档换＋阈值换）→ GET 生效值＝库值、覆盖标记 true；
-        // 留痕前后快照含路由四件；清空（null）回落代码缺省。强档键取种子档位
-        // doubao-flagship（#367 起改档即时校验档位键——裸名已写不进去）
+        // 策略覆盖写（开关关＋强档换＋阈值换＋映射换）→ GET 生效值＝库值、覆盖标记
+        // true；留痕前后快照含路由四件（映射留存储形逗号接 token）；清空（null）
+        // 回落代码缺省。强档键取种子档位 doubao-flagship（#367 起改档即时校验
+        // 档位键——裸名已写不进去）
         signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
                 {"routingEnabled": false, "routingStrongModelId": "doubao-flagship",
-                 "routingFileCountThreshold": 30, "routingSliceFeatureThreshold": 10}
+                 "routingFileCountThreshold": 50,
+                 "routingEscalatingSizeLabels": ["中", "大"]}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.routingEnabled").value(false))
                 .andExpect(jsonPath("$.data.routingStrongModelId").value("doubao-flagship"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(true))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(10));
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(50))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels").isArray())
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels.length()").value(2))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("中"))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[1]").value("大"))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
         var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
         assertThat(executor.routingEnabled()).isFalse();
         assertThat(executor.routingStrongModelId()).isEqualTo("doubao-flagship");
+        assertThat(executor.routingEscalatingSizeLabels())
+                .containsExactlyInAnyOrder(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE);
 
         signedGet("executor/traces")
                 .andExpect(status().isOk())
@@ -393,11 +405,11 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data[0].oldRoutingEnabled").value(true))
                 .andExpect(jsonPath("$.data[0].oldRoutingStrongModelId").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].oldRoutingFileCountThreshold").value(nullValue()))
-                .andExpect(jsonPath("$.data[0].oldRoutingSliceFeatureThreshold").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldRoutingEscalatingSizeLabels").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].newRoutingEnabled").value(false))
                 .andExpect(jsonPath("$.data[0].newRoutingStrongModelId").value("doubao-flagship"))
-                .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(30))
-                .andExpect(jsonPath("$.data[0].newRoutingSliceFeatureThreshold").value(10))
+                .andExpect(jsonPath("$.data[0].newRoutingFileCountThreshold").value(50))
+                .andExpect(jsonPath("$.data[0].newRoutingEscalatingSizeLabels").value("中,大"))
                 .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
 
         // 清空回落：路由策略件全 null＝回代码缺省（开关 null 归一缺省 true＝开）
@@ -406,8 +418,31 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingEnabled").value(true))
                 .andExpect(jsonPath("$.data.routingStrongModelId").value("pro"))
                 .andExpect(jsonPath("$.data.routingStrongModelIdOverridden").value(false))
-                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(60))
-                .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));
+                .andExpect(jsonPath("$.data.routingFileCountThreshold").value(30))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels[0]").value("大"))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(false));
+    }
+
+    @Test
+    void given_routing_size_label_mapping_invalid_token_when_put_then_400_no_write()
+            throws Exception {
+        // 封闭集校验（#426）：升档标签映射的 token 须在小/中/大封闭集内——非法
+        // token 错值写不进去（对偶档位键即时校验口径），行与留痕零写入
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"routingEscalatingSizeLabels\": [\"大\", \"巨\"]}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4079));
+        assertThat(configRowCount()).isZero();
+        assertThat(traceRowCount()).isZero();
+
+        // 空映射合法（规模标签信号整体关停的运营选择）——覆盖标记 true、生效 []
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"routingEscalatingSizeLabels\": []}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabels.length()").value(0))
+                .andExpect(jsonPath("$.data.routingEscalatingSizeLabelsOverridden").value(true));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)
+                .routingEscalatingSizeLabels()).isEmpty();
     }
 
     // ---------- 验证面两件（#424 片轻验：verify 档位＋单场轮次预算） ----------

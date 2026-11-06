@@ -33,6 +33,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +48,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.cartisan.core.exception.ApplicationException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
@@ -379,6 +385,136 @@ class GenerationAppServiceTest {
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2, 2, 3, 1);
         verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+    }
+
+    // ---------- 并行波可观测档案（#419：fork 文件集落档＋宽度遥测——结构化日志留档） ----------
+
+    /** fork diff 桩（改/增两件——合并档案文件集的断言面）。 */
+    private static final String FORK_DIFF_STUB =
+            "diff --git a/src/app/page.tsx b/src/app/page.tsx\n"
+                    + "index 1111111..2222222 100644\n"
+                    + "--- a/src/app/page.tsx\n+++ b/src/app/page.tsx\n"
+                    + "@@ -1 +1 @@\n-old\n+new\n"
+                    + "diff --git a/src/lib/auth.ts b/src/lib/auth.ts\n"
+                    + "new file mode 100644\n"
+                    + "--- /dev/null\n+++ b/src/lib/auth.ts\n"
+                    + "@@ -0,0 +1 @@\n+export const x = 1;\n";
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_parallel_waves_when_generate_then_telemetry_archives_complete() throws Exception {
+        // 灵魂用例（#419 AC④）：并行波跑后档案字段齐全——①波档案：宽度对照（依赖图
+        // 理论宽度 vs 调度实际并发）＋波边界时序（起止墙钟/跨距）＋逐片时距＋波内
+        // 收口/失败面；②合并档案：合并文件集（并行安全证据）＋冲突与结局；③单片波
+        // 同档（serial 退化）；④检索键齐（projectId/轨道锚/波号——按 run／波检索回放）
+        Long projectId = persistedProject("9842");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        // fork diff 出合成文件集（fork 工作区上的 forkDiffCommand 定向桩，其余 exec
+        // 走既有空成功桩）
+        when(workspaceLifecycleAppService.exec(anyString(), argThat(command ->
+                        command.command().contains("git diff --full-index"))))
+                .thenReturn(new ExecResultResponse(FORK_DIFF_STUB, "", 0));
+
+        Logger telemetryLogger =
+                (Logger) LoggerFactory.getLogger(ParallelWaveTelemetry.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        telemetryLogger.addAppender(appender);
+        try {
+            // 首片(1) → 切片 2、3 无互依赖（波 1 并行 fork）；切片 4 依赖 2、3（波 2
+            // 单片串行）——两种波形态各留一档
+            BuildPlan plan = new BuildPlan(
+                    List.of("首片", "登录", "商品浏览", "下单"),
+                    List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+            appService.dispatchGenerationOnTurnClose(projectId, plan);
+        }
+        finally {
+            telemetryLogger.detachAppender(appender);
+        }
+
+        ObjectMapper json = new ObjectMapper();
+        List<Map<String, Object>> waves = archivedPayloads(appender, "[parallel-wave] ", json);
+        List<Map<String, Object>> merges = archivedPayloads(appender, "[parallel-merge] ", json);
+        assertThat(waves).hasSize(2);
+        assertThat(merges).hasSize(2);
+
+        // 波 1（并行 fork）：理论宽度 2、实际并发 1..2（池调度时序非确定——宽度
+        // 对照的事实是两值都在场且实际不超过理论）、逐片时距与收口面齐全
+        Map<String, Object> parallelWave = waves.get(0);
+        assertThat(parallelWave)
+                .containsEntry("wave", 1)
+                .containsEntry("mode", "parallel")
+                .containsEntry("ords", List.of(2, 3))
+                .containsEntry("theoreticalWidth", 2)
+                .containsEntry("closed", List.of(2, 3))
+                .containsEntry("failed", List.of());
+        assertThat(((Number) parallelWave.get("projectId")).longValue()).isEqualTo(projectId);
+        assertThat((int) parallelWave.get("actualConcurrency")).isBetween(1, 2);
+        assertThat(((Number) parallelWave.get("startedAtMs")).longValue())
+                .isLessThanOrEqualTo(((Number) parallelWave.get("endedAtMs")).longValue());
+        assertThat(((Number) parallelWave.get("durationMs")).longValue()).isNotNegative();
+        List<Map<String, Object>> parallelSlices =
+                (List<Map<String, Object>>) parallelWave.get("slices");
+        assertThat(parallelSlices).hasSize(2);
+        assertThat(parallelSlices).allSatisfy(slice -> {
+            assertThat(slice).containsOnlyKeys("ord", "runId", "startedAtMs", "endedAtMs",
+                    "durationMs", "succeeded");
+            assertThat(slice.get("succeeded")).isEqualTo(true);
+            assertThat(((Number) slice.get("startedAtMs")).longValue())
+                    .isLessThanOrEqualTo(((Number) slice.get("endedAtMs")).longValue());
+        });
+        assertThat(parallelSlices).extracting(slice -> slice.get("ord"))
+                .containsExactlyInAnyOrder(2, 3);
+
+        // 波 2（单片串行退化）：理论宽度 1、实际并发 1、同构字段
+        Map<String, Object> serialWave = waves.get(1);
+        assertThat(serialWave)
+                .containsEntry("wave", 2)
+                .containsEntry("mode", "serial")
+                .containsEntry("ords", List.of(4))
+                .containsEntry("theoreticalWidth", 1)
+                .containsEntry("actualConcurrency", 1)
+                .containsEntry("closed", List.of(4))
+                .containsEntry("failed", List.of());
+        assertThat((List<Map<String, Object>>) serialWave.get("slices")).hasSize(1);
+        // 检索回放键：同轨两波共用轨道锚（run 检索面）
+        assertThat(serialWave.get("trackRunId"))
+                .isEqualTo(parallelWave.get("trackRunId"))
+                .isNotNull();
+
+        // 合并档案（波 1 两片）：文件集＝合成 diff 的 b 侧全集、无冲突、合并成立
+        assertThat(merges).allSatisfy(merge -> {
+            assertThat(merge)
+                    .containsEntry("wave", 1)
+                    .containsEntry("files", List.of("src/app/page.tsx", "src/lib/auth.ts"))
+                    .containsEntry("conflicted", false)
+                    .containsEntry("merged", true);
+            assertThat(((Number) merge.get("projectId")).longValue()).isEqualTo(projectId);
+            assertThat(merge.get("runId")).isNotNull();
+            assertThat(merge.get("slice")).isIn("登录", "商品浏览");
+            assertThat(merge.get("trackRunId")).isEqualTo(parallelWave.get("trackRunId"));
+        });
+        assertThat(merges).extracting(merge -> merge.get("ord"))
+                .containsExactlyInAnyOrder(2, 3);
+    }
+
+    /** 留档捕获辅件：按标签过滤捕获事件并解析 JSON 正文（回放口径）。 */
+    private static List<Map<String, Object>> archivedPayloads(
+            ListAppender<ILoggingEvent> appender, String tag, ObjectMapper json) throws Exception {
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (ILoggingEvent event : appender.list) {
+            if (!event.getFormattedMessage().startsWith(tag)) {
+                continue;
+            }
+            payloads.add(json.readValue(event.getFormattedMessage().substring(tag.length()),
+                    Map.class));
+        }
+        return payloads;
     }
 
     // ---------- 生成取消（#359：在途 run 可停止——停止＝中断口径，不重试不回滚） ----------

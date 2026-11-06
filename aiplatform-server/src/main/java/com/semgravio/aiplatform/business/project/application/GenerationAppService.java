@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
@@ -1131,7 +1132,9 @@ public class GenerationAppService {
         // ---- 并行段（#351）：切片 2..N 按拓扑波，同波无依赖片各拿 fork 隔离同跑、按序合并 ----
         closedOrds = reloadClosedOrds(projectId); // 序前段收口后刷新（依赖判定的事实源）
         List<List<Integer>> waves = SliceSchedule.parallelWaves(plan);
-        for (List<Integer> wave : waves) {
+        // 波号＝调度层序（1-based，#419 档案检索键）——空波（续跑跳过）占号不留档
+        for (int waveNo = 1; waveNo <= waves.size(); waveNo++) {
+            List<Integer> wave = waves.get(waveNo - 1);
             Set<Integer> currentClosed = closedOrds; // 波内快照（lambda 捕获需实际最终）
             List<Integer> runnable = wave.stream()
                     .filter(ord -> !currentClosed.contains(ord))
@@ -1142,6 +1145,7 @@ public class GenerationAppService {
             }
             if (runnable.size() == 1) {
                 // 单片波：无并行收益，退化主工作区串行（既有口径不变）
+                long waveStartedAt = System.currentTimeMillis();
                 int ord = runnable.get(0);
                 String slice = slices.get(ord - 1);
                 boolean last = ord == lastOrd;
@@ -1173,13 +1177,18 @@ public class GenerationAppService {
                         terminalFailureScenes.put(projectId, result.lastError());
                     }
                     eventBridge.emitRunFailed(project, runId, result.failure());
+                    waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
+                            waveStartedAt, ord, runId, false);
                     return;
                 }
                 previousHandoff = result.closingText();
                 placeSliceHandoff(project, ord, previousHandoff);
+                waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
+                        waveStartedAt, ord, runId, true);
             } else {
-                runParallelWave(project, plan, runnable, previousHandoff, designContext,
-                        prdVersionNo, resumed, startOrd, resumePrefix, lastOrd, firstRunId);
+                runParallelWave(project, plan, runnable, wave.size(), waveNo, previousHandoff,
+                        designContext, prdVersionNo, resumed, startOrd, resumePrefix, lastOrd,
+                        firstRunId);
             }
             closedOrds = reloadClosedOrds(projectId);
         }
@@ -1326,23 +1335,45 @@ public class GenerationAppService {
      * 一场并行波（#351）：波内各片各拿 fork 副本隔离同跑（独立线程池并行），落定后按
      * ord 序合并回主工作区（冲突机器查 → 子智能体解）；失败片跳过不拖垮其余片。
      * 波收口统一探活主工作区 + 推送预览；末波（含 lastOrd）且全片已收口才种数据 +
-     * 落 generated_at（口径不变——有失败片不落位）。
+     * 落 generated_at（口径不变——有失败片不落位）。波跑完留宽度遥测档案
+     * （#419——纯观测面，行为零变化）。
+     *
+     * @param theoreticalWidth 依赖图理论宽度（调度层波宽——本波全部片数，非本场
+     *                         runnable 数：续跑时已收口片不在 runnable 但波的理论
+     *                         宽度不变，宽度对照才不失真）
      */
     private void runParallelWave(Project project, BuildPlan plan, List<Integer> runnable,
-            String previousHandoff, String designContext, Integer prdVersionNo, boolean resumed,
-            int startOrd, String resumePrefix, int lastOrd, String firstRunId) {
+            int theoreticalWidth, int waveNo, String previousHandoff, String designContext,
+            Integer prdVersionNo, boolean resumed, int startOrd, String resumePrefix,
+            int lastOrd, String firstRunId) {
         Long projectId = project.getId();
+        long waveStartedAt = System.currentTimeMillis();
         // 本波 fork 登记簿（#359 停止清理的事实源）：fork 落成即记——停止时全部释放，
         // 已完未合并的不留孤儿容器
         ConcurrentLinkedQueue<String> createdForks = new ConcurrentLinkedQueue<>();
+        // 逐片执行时距采样（#419 宽度遥测）：fork 片在池上的实际执行窗，池线程写、
+        // 主轨波收尾读（停止收场不装配——波没跑完，时距无意义）
+        List<ParallelWaveTelemetry.SliceSpan> spans = new CopyOnWriteArrayList<>();
         // 先全部提交再统一等待（真并行）：若在流内逐元素提交后立即取结果，会退化为
         // 逐个 fork 串行跑——下一片要等上一片返回才提交（并发不成立）。提交走
         // sliceParallelExecutor.submit（池 Future——#359 停止 cancel(true) 可中断
         // 执行线程；CompletableFuture.cancel 不传中断，停不了在途流）
         List<Future<ForkSliceOutcome>> futures = runnable.stream()
-                .map(ord -> sliceParallelExecutor.submit(
-                        () -> runForkSlice(project, plan, ord, previousHandoff, designContext,
-                                resumed, startOrd, resumePrefix, firstRunId, createdForks)))
+                .map(ord -> sliceParallelExecutor.submit(() -> {
+                    long startedAt = System.currentTimeMillis();
+                    ForkSliceOutcome outcome = null;
+                    try {
+                        outcome = runForkSlice(project, plan, ord, previousHandoff, designContext,
+                                resumed, startOrd, resumePrefix, firstRunId, createdForks);
+                        return outcome;
+                    }
+                    finally {
+                        spans.add(new ParallelWaveTelemetry.SliceSpan(ord,
+                                outcome != null ? outcome.runId() : null, startedAt,
+                                System.currentTimeMillis(),
+                                outcome != null && outcome.succeeded()));
+                    }
+                }))
                 .toList();
         futures.forEach(future -> codingRunTrack.registerTask(projectId, future));
         List<ForkSliceOutcome> outcomes = new ArrayList<>(futures.size());
@@ -1373,6 +1404,9 @@ public class GenerationAppService {
         if (codingRunTrack.stopRequested(projectId)) {
             throwStoppedWave(projectId, firstRunId, createdForks);
         }
+        // 波内收口/失败面（#419 档案事实）：fork 失败与合并失败同归失败面
+        List<Integer> closedInWave = new ArrayList<>();
+        List<Integer> failedInWave = new ArrayList<>();
         for (ForkSliceOutcome outcome : outcomes) {
             if (!outcome.succeeded()) {
                 failSegment(projectId, outcome.ord(), outcome.runId());
@@ -1381,11 +1415,16 @@ public class GenerationAppService {
                 }
                 eventBridge.emitRunFailed(project, outcome.runId(), outcome.failure());
                 destroyForkQuietly(outcome.workspaceId()); // 失败片不留 fork 孤儿
+                failedInWave.add(outcome.ord());
                 continue;
             }
-            if (mergeFork(project, outcome)) {
+            if (mergeFork(project, outcome, waveNo, firstRunId)) {
                 closeSegment(projectId, outcome.ord(), outcome.runId());
                 placeSliceHandoff(project, outcome.ord(), outcome.closingText());
+                closedInWave.add(outcome.ord());
+            }
+            else {
+                failedInWave.add(outcome.ord());
             }
         }
         requireReachable(project.getWorkspaceId());
@@ -1397,6 +1436,27 @@ public class GenerationAppService {
                     .map(ForkSliceOutcome::runId).findFirst().orElse(firstRunId);
             markGenerated(projectId, finalRunId, prdVersionNo);
         }
+        ParallelWaveTelemetry.waveArchive(new ParallelWaveTelemetry.WaveFacts(projectId,
+                firstRunId, waveNo, ParallelWaveTelemetry.MODE_PARALLEL, runnable,
+                theoreticalWidth, waveStartedAt, System.currentTimeMillis(), List.copyOf(spans),
+                List.copyOf(closedInWave), List.copyOf(failedInWave)));
+    }
+
+    /**
+     * 单片波的宽度遥测档案（#419）：主工作区串行退化（#351 既有口径不变）——实际
+     * 并发恒 1，理论宽度仍记依赖图波宽（续跑把并行波退化成单片 runnable 时如实显
+     * 「宽 N 实际 1」——灰度门槛要看的信号），波边界时序与并行波同构。
+     */
+    private static void waveArchiveSerial(Long projectId, String trackRunId, int waveNo,
+            List<Integer> runnable, int theoreticalWidth, long waveStartedAt, int ord,
+            String runId, boolean succeeded) {
+        long waveEndedAt = System.currentTimeMillis();
+        ParallelWaveTelemetry.waveArchive(new ParallelWaveTelemetry.WaveFacts(projectId,
+                trackRunId, waveNo, ParallelWaveTelemetry.MODE_SERIAL, runnable,
+                theoreticalWidth, waveStartedAt, waveEndedAt,
+                List.of(new ParallelWaveTelemetry.SliceSpan(ord, runId, waveStartedAt,
+                        waveEndedAt, succeeded)),
+                succeeded ? List.of(ord) : List.of(), succeeded ? List.of() : List.of(ord)));
     }
 
     /**
@@ -1487,13 +1547,35 @@ public class GenerationAppService {
      * （{@link #resolveConflict}）。成功返回 true（含无改动 no-op）；合并/裁决失败返回
      * false（已落 failSegment + run-failed），且<b>主工作区回滚 merge 前 HEAD</b>
      * （#353 残留清理——半应用 patch/冲突标记不留，后续合并与续跑在干净主工作区上
-     * 进行）。fork 在 finally 释放（不残留短命容器）。
+     * 进行）。fork 在 finally 释放（不残留短命容器）。合并终局留合并档案（#419
+     * ——文件集/冲突口径/成版锚，纯观测面）。
      */
-    private boolean mergeFork(Project project, ForkSliceOutcome outcome) {
+    private boolean mergeFork(Project project, ForkSliceOutcome outcome, int wave,
+            String trackRunId) {
+        MergeOutcome merge = mergeIntoMainWorkspace(project, outcome);
+        ParallelWaveTelemetry.mergeArchive(new ParallelWaveTelemetry.MergeFacts(
+                project.getId(), trackRunId, wave, outcome.ord(), outcome.slice(),
+                outcome.runId(), merge.files(), merge.conflicted(), merge.merged(),
+                merge.commit()));
+        return merge.merged();
+    }
+
+    /**
+     * 合并终局（#419 合并档案的事实面）：结局（裁决成功也真）＋冲突口径（机器查命中
+     * 即真——裁决结局归 merged）＋合并文件集（diff b 侧路径；取 diff 失败为空集）
+     * ＋成版锚（直合并＝成版回执；裁决成功＝HEAD 回捕；未合并/回捕失败＝null）。
+     */
+    private record MergeOutcome(boolean merged, boolean conflicted, List<String> files,
+            String commit) {
+    }
+
+    /** {@link #mergeFork} 的合并体（#351 既有行为原样——只把返回值换成终局事实）。 */
+    private MergeOutcome mergeIntoMainWorkspace(Project project, ForkSliceOutcome outcome) {
         Long projectId = project.getId();
         Long mainWorkspaceId = project.getWorkspaceId();
         // merge 前 HEAD 捕获（失败清理基准——恒有 ref：序前段已收口成版/锚定）
         String mergeBase = captureRollbackBase(mainWorkspaceId, projectId, outcome.ord());
+        List<String> mergedFiles = List.of();
         try {
             ExecResultResponse diff = workspaceLifecycleAppService.exec(outcome.workspaceId(),
                     new WorkspaceExecCommand(WorkspaceVersions.forkDiffCommand()));
@@ -1506,8 +1588,9 @@ public class GenerationAppService {
                 failSegment(projectId, outcome.ord(), outcome.runId());
                 eventBridge.emitRunFailed(project, outcome.runId(),
                         CoderRunAttempts.trackFailureFace("系统产物合并失败"));
-                return false;
+                return new MergeOutcome(false, false, mergedFiles, null);
             }
+            mergedFiles = ParallelWaveTelemetry.mergedFilesOf(diff.stdout());
             if (!diff.stdout().isBlank()) {
                 ExecResultResponse applied = workspaceLifecycleAppService.execWithStdin(
                         Long.toString(mainWorkspaceId),
@@ -1521,19 +1604,23 @@ public class GenerationAppService {
                         // 裁决失败：主工作区可能留半应用 patch/冲突标记——回滚干净
                         rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
                     }
-                    return resolved;
+                    // 裁决成功的合并成版锚（#419 档案面）：裁决 run 的收口成版即合并
+                    // 成版——HEAD 回捕只读，失败降级 null（档案缺锚不挡合并结局）
+                    String resolvedCommit = resolved
+                            ? headRefQuietly(mainWorkspaceId) : null;
+                    return new MergeOutcome(resolved, true, mergedFiles, resolvedCommit);
                 }
             }
-            versions.commitAtClosing(mainWorkspaceId, projectId, outcome.runId(),
-                    sliceClosingSummary(outcome.slice()));
-            return true;
+            String commit = versions.commitAtClosing(mainWorkspaceId, projectId,
+                    outcome.runId(), sliceClosingSummary(outcome.slice()));
+            return new MergeOutcome(true, false, mergedFiles, commit);
         } catch (RuntimeException e) {
             log.warn("[generate] 项目 {} 片 {} 合并失败：{}", projectId, outcome.ord(), e.toString());
             rollbackMainWorkspaceQuietly(mainWorkspaceId, projectId, outcome.ord(), mergeBase);
             failSegment(projectId, outcome.ord(), outcome.runId());
             eventBridge.emitRunFailed(project, outcome.runId(),
                     CoderRunAttempts.trackFailureFace(errorText(e)));
-            return false;
+            return new MergeOutcome(false, false, mergedFiles, null);
         } finally {
             destroyForkQuietly(outcome.workspaceId());
         }
@@ -1561,6 +1648,25 @@ public class GenerationAppService {
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} 片 {} 合并失败后的主工作区清理异常（残留现场随续跑处置）：{}",
                     projectId, ord, e.toString());
+        }
+    }
+
+    /**
+     * 主工作区 HEAD 只读回捕（#419 合并档案的成版锚——冲突裁决路径专用）：裁决
+     * run 的收口成版即合并成版，HEAD 即锚。失败降级 null（档案缺锚不断流）。
+     */
+    private String headRefQuietly(Long workspaceId) {
+        try {
+            ExecResultResponse head = workspaceLifecycleAppService.exec(
+                    Long.toString(workspaceId),
+                    new WorkspaceExecCommand(WorkspaceVersions.headRefCommand()));
+            return head.exitCode() == 0 && !head.stdout().isBlank()
+                    ? head.stdout().trim() : null;
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 工作区 {} 合并成版锚回捕失败（档案缺锚，不断流）：{}",
+                    workspaceId, e.toString());
+            return null;
         }
     }
 

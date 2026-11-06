@@ -22,6 +22,11 @@ import java.time.LocalDateTime;
  * <p>行不存在与「行存在但覆盖列全 null」语义等价（全回落）；行经 upsert 持续
  * 存在（清空覆盖不删行——操作者列留最近写者，运营可见「谁最后动过」）。</p>
  *
+ * <p><b>验证面两列（#424 片轻验）</b>：run 执行体行的 verify 子智能体档位覆盖与
+ * 单场验证轮次预算——档位 null＝随执行体生效档（含路由升档，缺省同执行体档不降
+ * ＝#406 裁决）；预算 null＝回落代码缺省（首轮＋两轮复验）。主智能体/设计执行体
+ * 行同列恒无消费（不委派 verify）。</p>
+ *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
  * @param modelId                    运营覆盖模型档位键（null＝回落枚举默认；ADR-0031 语义键
@@ -32,6 +37,10 @@ import java.time.LocalDateTime;
  * @param routingStrongModelId       强模型档（路由升档落点；null＝回落代码缺省）
  * @param routingFileCountThreshold  文件面阈值：工作区已跟踪文件数 ≥ 此值升强档（null＝回落代码缺省）
  * @param routingSliceFeatureThreshold 片复杂度阈值：切片功能条目数（枚举段数）≥ 此值升强档（null＝回落代码缺省；#361 重定——原字数信号恒燃废）
+ * @param verifyModelId              verify 子智能体模型档位键（#424：null＝随执行体生效档；
+ *                                   非空即时校验同 modelId〔#367〕）
+ * @param verifyRoundBudget          单场验证轮次预算（#424 防无限复验：report_verification
+ *                                   登记达预算仍有未过项即停修复—复验；null＝回落代码缺省 3）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -47,6 +56,8 @@ public record AgentOperationalConfig(
         String routingStrongModelId,
         Integer routingFileCountThreshold,
         Integer routingSliceFeatureThreshold,
+        String verifyModelId,
+        Integer verifyRoundBudget,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -57,7 +68,7 @@ public record AgentOperationalConfig(
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, null, null, null);
+                null, null, null, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

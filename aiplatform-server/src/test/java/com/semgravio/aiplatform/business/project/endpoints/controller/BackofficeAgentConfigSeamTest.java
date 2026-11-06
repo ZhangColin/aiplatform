@@ -410,6 +410,80 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.routingSliceFeatureThreshold").value(4));
     }
 
+    // ---------- 验证面两件（#424 片轻验：verify 档位＋单场轮次预算） ----------
+
+    @Test
+    void given_no_verify_override_when_get_then_code_defaults_with_unoverridden_marks()
+            throws Exception {
+        // 验证面读面缺省：verifyModelId null＝随执行体生效档（覆盖标记 false）、
+        // 轮次预算回落代码缺省 3（覆盖标记 false、默认预览同值）；装配读面同步
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifyModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.verifyRoundBudget").value(3))
+                .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultVerifyRoundBudget").value(3));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.verifyModelId()).isNull();
+        assertThat(executor.verifyRoundBudget()).isEqualTo(3);
+    }
+
+    @Test
+    void given_verify_face_updated_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 覆盖写（verify 档钉 doubao-flagship＋预算 5）→ GET 生效值＝库值、覆盖
+        // 标记 true；留痕前后快照含验证面两件；清空（null）回落缺省（档随执行体、
+        // 预算 3）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
+                {"verifyModelId": "doubao-flagship", "verifyRoundBudget": 5}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifyModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(true))
+                .andExpect(jsonPath("$.data.verifyRoundBudget").value(5))
+                .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(true));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.verifyModelId()).isEqualTo("doubao-flagship");
+        assertThat(executor.verifyRoundBudget()).isEqualTo(5);
+
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldVerifyModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldVerifyRoundBudget").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newVerifyModelId").value("doubao-flagship"))
+                .andExpect(jsonPath("$.data[0].newVerifyRoundBudget").value(5))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 清空回落：验证面两件 null＝随执行体档＋预算 3
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifyModelId").value(nullValue()))
+                .andExpect(jsonPath("$.data.verifyModelIdOverridden").value(false))
+                .andExpect(jsonPath("$.data.verifyRoundBudget").value(3))
+                .andExpect(jsonPath("$.data.verifyRoundBudgetOverridden").value(false));
+    }
+
+    @Test
+    void given_invalid_verify_face_when_put_then_rejected_with_zero_writes()
+            throws Exception {
+        // verifyModelId 即时校验同 modelId（#367）：缺行键 400 PRJ_074；
+        // verifyRoundBudget 区间校验（1-20）：越界 400 PRJ_078——fail-fast 零写入
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyModelId\": \"t-nope\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4074));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyRoundBudget\": 0}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4078));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"verifyRoundBudget\": 21}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4078));
+
+        assertThat(configRowCount()).isZero();
+        assertThat(traceRowCount()).isZero();
+    }
+
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test

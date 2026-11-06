@@ -65,11 +65,12 @@ export type WorkClosing = {
   durationMs: number;
   /** 成版 commit hash（#91 收口自动成版回填；成版失败缺省）——「查看当时/回滚到此」的寻址锚。 */
   version?: string;
-  /** 验证统计（#352 独立验证子智能体的收尾统计）：可缺省——验证子智能体未跑/未登记时
-   *  不携带。total/failed＝末轮总项数与未过数、faces＝末轮三面分布（browser 浏览器点流程 /
-   *  db 查库 / log 看日志）、rounds＝本场验证轮数（修复—复验环如实，1＝一轮过）、
-   *  failedItems＝末轮未过项名（修不了如实标注）；逐项 ✅/❌ 明细与证据在过程播报里，
-   *  收尾卡只带聚合。 */
+  /** 验证统计（#352 独立验证子智能体的收尾统计；#424 片轻验常开后收口必在场）：
+   *  total/failed＝末轮总项数与未过数、faces＝末轮三面分布（browser 浏览器主径〔含
+   *  刷新验真落库〕/ db 按需下钻 / log 失败定位）、rounds＝本场验证轮数（修复—复验
+   *  环如实，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注）、
+   *  budgetExhausted＝轮次预算用尽仍未过（达预算停止修复—复验的如实标注）；逐项
+   *  ✅/❌ 明细与证据在过程播报里，收尾卡只带聚合。 */
   verification?: VerificationClosing;
   /** 稿清单（#289 设计会话收尾卡扩载）：可缺省——编码 run 不携带；设计会话带本轮
    *  稿清单与去向（收尾卡稿清单区的呈现源，判定行/文件清单让位——设计稿不是系统）。 */
@@ -92,13 +93,16 @@ export type ProofOfOutputClosing = {
   exemptionBasis?: string;
 };
 
-/** 收尾卡验证统计事实（#352）：末轮三面验证聚合＋复验轮次＋未过项名。 */
+/** 收尾卡验证统计事实（#352；#424 增轮次预算用尽标注）：末轮三面验证聚合＋复验轮次
+ *  ＋未过项名＋预算用尽标注。 */
 export type VerificationClosing = {
   total: number;
   failed: number;
   faces: Record<string, number>;
   rounds: number;
   failedItems: string[];
+  /** 轮次预算用尽仍未过（#424：达预算停止修复—复验、未过项如实呈现的标注）。 */
+  budgetExhausted?: boolean;
 };
 
 /** 收尾卡设计规范扫描事实（#296）：status 三态＋违规清单（file/line/rule/message）。 */
@@ -858,8 +862,9 @@ export function toQuoteRef(raw: unknown): { orderId: string; event: string } | u
   };
 }
 
-/** verification 载荷容错收窄（#352）：非对象或 total 为 0（未登记/空轮）回落
- *  undefined；faces 非对象回落空表、failedItems 只收字符串项、rounds 缺省回落 1。 */
+/** verification 载荷容错收窄（#352；#424 增 budgetExhausted）：非对象或 total 为 0
+ *  （未登记/空轮）回落 undefined；faces 非对象回落空表、failedItems 只收字符串项、
+ *  rounds 缺省回落 1、budgetExhausted 只认显式 true。 */
 function toVerification(raw: unknown): VerificationClosing | undefined {
   const record = asRecord(raw);
   if (!record) return undefined;
@@ -880,6 +885,7 @@ function toVerification(raw: unknown): VerificationClosing | undefined {
     failedItems: Array.isArray(record.failedItems)
       ? record.failedItems.filter((item): item is string => typeof item === "string")
       : [],
+    ...(record.budgetExhausted === true ? { budgetExhausted: true } : {}),
   };
 }
 

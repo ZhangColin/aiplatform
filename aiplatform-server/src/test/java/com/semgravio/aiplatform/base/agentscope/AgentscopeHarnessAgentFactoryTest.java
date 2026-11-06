@@ -73,6 +73,11 @@ class AgentscopeHarnessAgentFactoryTest {
         public EdgeModel precheckModel() {
             return new EdgeModel("deepseek:deepseek-v4-flash", null);
         }
+
+        @Override
+        public EdgeModel subagentModel() {
+            return null; // 随父级（#424 缺省同执行体档）
+        }
     };
 
     /**
@@ -108,6 +113,11 @@ class AgentscopeHarnessAgentFactoryTest {
             public EdgeModelSupplier.EdgeModel precheckModel() {
                 return flash;
             }
+
+            @Override
+            public EdgeModelSupplier.EdgeModel subagentModel() {
+                return null; // 随父级（#424 缺省同执行体档）
+            }
         };
     }
 
@@ -122,8 +132,8 @@ class AgentscopeHarnessAgentFactoryTest {
     private AgentscopeHarnessAgentFactory factoryWith(List<HarnessAgent> created,
                                                       AgentStateStore stateStore) {
         return new AgentscopeHarnessAgentFactory(stateStore, TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, compaction, workspace, agentKey,
-                        toolSpec) -> {
+                (name, sysPrompt, modelString, modelChannel, compaction, subagent, workspace,
+                        agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -165,6 +175,60 @@ class AgentscopeHarnessAgentFactoryTest {
                 new AgentWorkspace.ProjectDev("2", "ws-2-dev"), null, null);
 
         assertThat(created).hasSize(6);
+    }
+
+    @Test
+    void given_subagent_tier_override_when_obtain_then_passed_through_and_keyed_per_tier() {
+        // #424 片轻验：verify 子智能体档位覆盖经 EdgeModelSupplier 供数——非空即
+        // 透传 builder（子智能体独立档），null＝随父级（执行体生效档，缺省同档
+        // 不降）；档位入实例缓存键（改档＝新实例——后台改档下一轮命令构建即生效，
+        // 进行中 run 不定格）
+        List<EdgeModelSupplier.EdgeModel> passed = new ArrayList<>();
+        List<HarnessAgent> created = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<EdgeModelSupplier.EdgeModel> subagentTier =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS,
+                (name, sysPrompt, modelString, modelChannel, compaction, subagent, workspace,
+                        agentKey, toolSpec) -> {
+                    passed.add(subagent);
+                    HarnessAgent agent = mock(HarnessAgent.class);
+                    created.add(agent);
+                    return agent;
+                },
+                new EdgeModelSupplier() {
+                    @Override
+                    public EdgeModel compactionModel() {
+                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
+                    }
+
+                    @Override
+                    public EdgeModel precheckModel() {
+                        return new EdgeModel("deepseek:deepseek-v4-flash", null);
+                    }
+
+                    @Override
+                    public EdgeModel subagentModel() {
+                        return subagentTier.get();
+                    }
+                });
+
+        // 缺省：null＝随父级（执行体生效档——#406 裁决缺省同档不降）
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
+                new AgentWorkspace.Local(null), null, null);
+        assertThat(passed).containsExactly((EdgeModelSupplier.EdgeModel) null);
+
+        // 覆盖档：透传 builder＋同父级规格下新实例（verify 档变＝新实例）
+        subagentTier.set(new EdgeModelSupplier.EdgeModel("deepseek:deepseek-v4-pro", null));
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
+                new AgentWorkspace.Local(null), null, null);
+        assertThat(passed.get(1).modelString()).isEqualTo("deepseek:deepseek-v4-pro");
+        assertThat(created).hasSize(2);
+
+        // 同档重取＝复用（档位入键的稳定性：同值不重建）
+        factory.obtain("platform-agent", "sys", "deepseek:deepseek-v4-flash", null,
+                new AgentWorkspace.Local(null), null, null);
+        assertThat(created).hasSize(2);
     }
 
     @Test
@@ -473,7 +537,7 @@ class AgentscopeHarnessAgentFactoryTest {
         parentToolkit.registerAgentTool(AgentToolStub.named("update_plan"));
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel,
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, parentModel, parentModel,
                 parentToolkit, TOOLKITS, new InMemoryAgentStateStore(),
                 routedSkillRepos(childView, executorView), List.of())
                 .apply("verify");
@@ -512,7 +576,7 @@ class AgentscopeHarnessAgentFactoryTest {
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 proposeEnabledDeclaration(), new AgentWorkspace.Local(tempDir), null,
-                mock(Model.class), parentToolkit, routedToolkits,
+                mock(Model.class), mock(Model.class) , parentToolkit, routedToolkits,
                 new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
                 .apply("verify");
 
@@ -540,7 +604,7 @@ class AgentscopeHarnessAgentFactoryTest {
 
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
                 verifyDeclaration(), new AgentWorkspace.Local(tempDir), null,
-                mock(Model.class), new Toolkit(), routedToolkits,
+                mock(Model.class), mock(Model.class) , new Toolkit(), routedToolkits,
                 new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
                 .apply("verify");
 
@@ -562,7 +626,7 @@ class AgentscopeHarnessAgentFactoryTest {
         // （edit_file 结构性出局，「不改交付代码」不再只是协议级约束）；声明内的
         // 件保留（read_file/write_file 不被误滤）
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of())
                 .apply("verify");
@@ -589,7 +653,7 @@ class AgentscopeHarnessAgentFactoryTest {
                 .inlineAgentsBody("probe body")
                 .build();
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                noAllowlist, new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of())
                 .apply("verify");
@@ -621,7 +685,7 @@ class AgentscopeHarnessAgentFactoryTest {
         // subagentFactory 必须把平台中间件亲自挂上子级中间件链
         MiddlewareBase counter = new MiddlewareBase() { };
         HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
-                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class),
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null, mock(Model.class), mock(Model.class),
                 new Toolkit(), TOOLKITS, new InMemoryAgentStateStore(),
                 (agentKey, workspace) -> List.of(), List.of(counter))
                 .apply("verify");
@@ -769,8 +833,8 @@ class AgentscopeHarnessAgentFactoryTest {
                                 compactionChannel));
         AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
                 new InMemoryAgentStateStore(), TOOLKITS,
-                (name, sysPrompt, modelString, modelChannel, compactionModel, workspace, agentKey,
-                        toolSpec) -> {
+                (name, sysPrompt, modelString, modelChannel, compactionModel, subagent,
+                        workspace, agentKey, toolSpec) -> {
                     HarnessAgent agent = mock(HarnessAgent.class);
                     created.add(agent);
                     return agent;
@@ -784,6 +848,11 @@ class AgentscopeHarnessAgentFactoryTest {
                     @Override
                     public EdgeModel precheckModel() {
                         return new EdgeModel("deepseek:deepseek-v4-flash", null);
+                    }
+
+                    @Override
+                    public EdgeModel subagentModel() {
+                        return null; // 随父级（#424 缺省同执行体档）
                     }
                 });
         ModelChannel main = new ModelChannel("https://ark.example/api/v3", "sk-a", false);

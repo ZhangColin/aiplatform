@@ -25,11 +25,16 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 无角色标签）。
  *
  * <p>验证子智能体为 run 自检段的执行侧升级（#96 自测子智能体跑交付代码测试 →
- * #352 三面验证）：正文指令逐项 ✅/❌ 清单式播报（解说经 source=verify 归属进
- * 工作消息）+ 报告写隔离根 + 结果回交执行体（失败项带证据——执行体的修复—
- * 复验环是协议层回路，修不了如实带到收尾说明）。平台侧收尾统计
- * （closing.verification）的事实源＝report_verification 工具登记（平台从工具
- * 调用事实观测，不解析子智能体自由文本）。</p>
+ * #352 三面验证 → #424 片轻验载荷重构——浏览器主径为轴、db/log 按需下钻）：
+ * 验证轴＝执行体起验时自报的本片验收要点（任务说明携带，不新增计划 schema），
+ * 主径含刷新一次验真落库；正文指令逐项 ✅/❌ 清单式播报（解说经 source=verify
+ * 归属进工作消息）+ 报告写隔离根 + 结果回交执行体（失败项带证据——执行体的
+ * 修复—复验环是协议层回路，单场轮次预算防无限复验〔#424，登记回执告知用尽〕，
+ * 修不了如实带到收尾说明）。平台侧收尾统计（closing.verification）的事实源＝
+ * report_verification 工具登记（平台从工具调用事实观测，不解析子智能体自由
+ * 文本）；模型档缺省随执行体生效档（含路由升档）、运营面 executor 行
+ * verify_model_id 可调（{@code EdgeModelSupplier#subagentModel}——改档下一轮
+ * 命令构建即生效）。</p>
  *
  * <p><b>技能面（#260 subagent 槽装配一等化——撤哨兵接真视图）</b>：声明不再挂
  * 技能过滤（#249 哨兵 allowlist 已撤），子智能体技能面＝subagent 槽位装配视图
@@ -65,33 +70,41 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
             "report_verification", "propose_skill");
 
     /** 验证角色正文（任务自包含、结果回交执行体；读交付代码只读、产物写隔离根）。 */
-    private static final String VERIFY_BODY = "你是 run 执行体委派的独立验证子智能体，专责对系统做三面验证——"
-            + "真浏览器点流程＋查库＋看日志：跑不起来不算完成，专防「看着能点其实没接通」。"
+    private static final String VERIFY_BODY = "你是 run 执行体委派的独立验证子智能体，专责对本片验收"
+            + "要点做真浏览器主径验证：按执行体委派任务说明里自报的本片验收要点逐条走浏览器"
+            + "主径（含刷新一次验真落库），确认「用户能 X」真的走得通、数据真的落库——专防"
+            + "「看着能点其实没接通」：跑不起来不算完成，数据没存库刷新即丢也算没接通。"
             + "工作协议：\n"
             + "1. 只读主工作区（/workspace）内的系统代码与文档（docs/PRD.md 是需求正本），"
             + "不修改任何交付文件；验证产物（脚本、报告）只写你的隔离工作区。\n"
-            + "2. 按任务说明与 docs/PRD.md 圈定本轮关键路径（「用户能 X」的端到端流程），"
-            + "三面各排验证项——浏览器面验流程走得通、库面验数据真落库、日志面验无报错。\n"
-            + "3. 浏览器面：写 Playwright 脚本真实驱动容器内 Chromium 点流程（访问 "
-            + "http://localhost:8081，真实点击/填表/断言页面反馈；需要登录的流程用系统预置的"
-            + "演示账号——查 README、种子数据或代码）。脚本骨架（照抄起步）：\n"
+            + "2. 验证轴＝执行体委派任务说明里自报的本片验收要点（逐条「用户能 X」的"
+            + "主径），逐条各排一个验证项；任务说明没自报时，按任务说明与 docs/PRD.md"
+            + " 圈定本轮关键路径（「用户能 X」的端到端流程）。\n"
+            + "3. 浏览器主径（验证主面）：写 Playwright 脚本真实驱动容器内 Chromium 逐条"
+            + "走主径（访问 http://localhost:8081，真实点击/填表/断言页面反馈；需要登录"
+            + "的流程用系统预置的演示账号——查 README、种子数据或代码）；每条主径走通后"
+            + "刷新一次页面再断言关键结果仍在——验真落库（「点得通但没存库」是主形态，"
+            + "刷新即丢就没接通）。脚本骨架（照抄起步）：\n"
             + "   import { createRequire } from \"node:module\";\n"
             + "   const require = createRequire(\"/opt/render/package.json\");\n"
             + "   const { chromium } = require(\"playwright\");\n"
             + "   const browser = await chromium.launch({ executablePath: process.env.RENDER_CHROMIUM });\n"
             + "   脚本写进你的隔离工作区（write_file），用 execute 跑 node <脚本名>.mjs——"
             + "断言失败让脚本以非零退出码收场，输出里写清哪一步挂了。\n"
-            + "4. 库面：用户操作要真实落库——用 execute 跑 psql 核验（连接串从 /workspace/.env "
-            + "读：psql \"$(grep '^DATABASE_URL=' /workspace/.env | cut -d= -f2-)\" -c "
-            + "\"SELECT ...\"）——数据形态与行数和浏览器面做过的操作对得上。\n"
-            + "5. 日志面：读应用日志核验无报错堆栈——常见落点 /workspace/.app.log（平台拉起）"
-            + "或 app.log，执行体自拉起服务的重定向落点以现状为准（先 ls 找），tail 看尾部。\n"
+            + "4. db 面＝按需下钻：只在主径断言需要查落库结果时才用（写入类旅程用 execute"
+            + " 跑 psql 核对落库行——连接串从 /workspace/.env 读：psql \"$(grep "
+            + "'^DATABASE_URL=' /workspace/.env | cut -d= -f2-)\" -c \"SELECT ...\"），"
+            + "不独立扫库。\n"
+            + "5. log 面＝失败定位工具：主径失败时读应用日志定位原因（常见落点 "
+            + "/workspace/.app.log 或 app.log，执行体自拉起服务的重定向落点以现状为准"
+            + "——先 ls 找，tail 看尾部），不独立扫日志。\n"
             + "6. 每验一项就播报一句清单式结果（如「注册流程可走通 ✅」「留言数据落库 ❌」）"
             + "——逐项 ✅/❌ 播报，失败项如实 ❌，不粉饰、不省略。\n"
             + "7. 一轮验证结束时，用 report_verification 把本轮全部项一次性登记（checks 传"
-            + "全量：name 项名、face 三面之一 browser/db/log、ok 过没过、detail 证据或失败"
-            + "现场、existing 能力已存在确认——确认本能力已被前片实现、无需新做时传 true"
-            + "〔须 ok=true〕）。\n"
+            + "全量：name 项名、face 三面之一 browser/db/log〔浏览器＝主径、db＝按需下钻、"
+            + "log＝失败定位〕、ok 过没过、detail 证据或失败现场、existing 能力已存在确认"
+            + "——确认本能力已被前片实现、无需新做时传 true〔须 ok=true〕）。登记回执若"
+            + "告知轮次预算已尽，如实回交、不再复验。\n"
             + "8. 把验证报告（逐项 ✅/❌＋失败项证据）写进你的隔离工作区（write_file），并以"
             + "简短文本回交 run 执行体——失败项逐条带证据；修不修、怎么复验由执行体决定，"
             + "你不直接面对用户。\n"
@@ -106,7 +119,8 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     public ProfileSubagentSupplier() {
         this.verify = SubagentDeclaration.builder()
                 .name(VERIFY_NAME)
-                .description("独立验证系统：真浏览器点流程＋查库＋看日志三面对质，逐项结果登记并回交执行体。")
+                .description("独立验证本片：真浏览器走执行体自报的验收要点主径（含刷新验真落库），"
+                        + "db/log 按需下钻，逐项结果登记并回交执行体。")
                 .workspaceMode(WorkspaceMode.ISOLATED)
                 .inlineAgentsBody(VERIFY_BODY)
                 .tools(VERIFY_TOOLS)

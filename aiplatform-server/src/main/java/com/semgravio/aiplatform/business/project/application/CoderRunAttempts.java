@@ -545,7 +545,8 @@ class CoderRunAttempts {
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what,
                             verificationFacts.consume(Long.toString(workspaceId)),
-                            seat.draftsItem(), tier);
+                            seat.draftsItem(), tier,
+                            agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget());
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
@@ -801,7 +802,7 @@ class CoderRunAttempts {
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
             VerificationFacts.Facts verification, String draftsItem,
-            ModelRoutingAppService.TierSelection tier) {
+            ModelRoutingAppService.TierSelection tier, int verifyRoundBudget) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -814,7 +815,8 @@ class CoderRunAttempts {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        Map<String, Object> verificationPayload = verificationPayload(verification);
+        Map<String, Object> verificationPayload = verificationPayload(verification,
+                verifyRoundBudget);
         if (verificationPayload != null) {
             closing.put(AgentEventTypes.VERIFICATION_FIELD, verificationPayload);
         }
@@ -1073,14 +1075,17 @@ class CoderRunAttempts {
     }
 
     /**
-     * 验证统计（#352 收尾卡轮末统计）：{@code { total, failed, faces{browser,db,log},
-     * rounds, failedItems[] }}——事实源＝verify 子智能体的 report_verification 登记：
-     * 末轮快照的总项数/未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证
-     * 轮数（修复—复验环如实：>1＝修后复验过）。验证子智能体未跑/未登记（null）
-     * 返回 {@code null}（closing 不携带 verification 键，前端缺省不显示验证统计行）。
-     * 逐项 ✅/❌ 明细与证据在过程播报，收尾卡只带聚合。
+     * 验证统计（#352 收尾卡轮末统计；#424 片轻验载荷口径）：
+     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[], budgetExhausted? }}
+     * ——事实源＝verify 子智能体的 report_verification 登记：末轮快照的总项数/
+     * 未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证轮数（修复—
+     * 复验环如实：>1＝修后复验过）＋轮次预算用尽标注（达预算仍有未过＝停止
+     * 修复—复验的超预算如实呈现）。验证子智能体未跑/未登记（null）返回
+     * {@code null}（closing 不携带 verification 键——#424 常开硬门下收口路径
+     * 结构性不达，防御性保留）。逐项 ✅/❌ 明细与证据在过程播报，收尾卡只带聚合。
      */
-    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts) {
+    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts,
+            int roundBudget) {
         if (facts == null || facts.lastRound().isEmpty()) {
             return null;
         }
@@ -1102,6 +1107,9 @@ class CoderRunAttempts {
         payload.put(AgentEventTypes.VERIFICATION_FACES_FIELD, faceCounts);
         payload.put(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, facts.rounds());
         payload.put(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD, failedItems);
+        if (facts.budgetExhausted(roundBudget)) {
+            payload.put(AgentEventTypes.VERIFICATION_BUDGET_EXHAUSTED_FIELD, true);
+        }
         return payload;
     }
 

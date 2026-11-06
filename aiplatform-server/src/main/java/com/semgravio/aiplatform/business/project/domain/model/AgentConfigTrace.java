@@ -19,6 +19,8 @@ import java.time.LocalDateTime;
  * @param oldRoutingStrongModelId       变更前强模型档（null＝回落代码缺省）
  * @param oldRoutingFileCountThreshold  变更前文件面阈值（null 同上）
  * @param oldRoutingSliceFeatureThreshold 变更前片复杂度阈值（null 同上）
+ * @param oldVerifyModelId              变更前 verify 档位（#424；null＝随执行体生效档）
+ * @param oldVerifyRoundBudget          变更前单场验证轮次预算（#424；null＝代码缺省）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId                    变更后模型档位（null 同上）
  * @param newWebSearchEnabled           变更后联网搜索开关
@@ -27,6 +29,8 @@ import java.time.LocalDateTime;
  * @param newRoutingStrongModelId       变更后强模型档（null＝本次清空回落代码缺省）
  * @param newRoutingFileCountThreshold  变更后文件面阈值（null 同上）
  * @param newRoutingSliceFeatureThreshold 变更后片复杂度阈值（null 同上）
+ * @param newVerifyModelId              变更后 verify 档位（null＝清空随执行体档）
+ * @param newVerifyRoundBudget          变更后单场验证轮次预算（null＝清空回落代码缺省）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -42,6 +46,8 @@ public record AgentConfigTrace(
         String oldRoutingStrongModelId,
         Integer oldRoutingFileCountThreshold,
         Integer oldRoutingSliceFeatureThreshold,
+        String oldVerifyModelId,
+        Integer oldVerifyRoundBudget,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -50,6 +56,8 @@ public record AgentConfigTrace(
         String newRoutingStrongModelId,
         Integer newRoutingFileCountThreshold,
         Integer newRoutingSliceFeatureThreshold,
+        String newVerifyModelId,
+        Integer newVerifyRoundBudget,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

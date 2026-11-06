@@ -20,6 +20,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 优先，无信号回落人工档（modelId 覆盖 → 枚举缺省——覆盖即基础档）。
  * 仅 run 执行体（executor）消费，其余智能体行同列无消费。</p>
  *
+ * <p><b>验证面两件（#424 片轻验）</b>：verify 验证子智能体档位与单场验证轮次
+ * 预算——档位 null＝随执行体生效档（含路由升档，缺省同档不降＝#406 裁决「验证
+ * 判错代价高于省的秒数」）；预算 null＝清空回落代码缺省 3（首轮＋两轮复验）。</p>
+ *
  * @param systemPrompt      覆盖 systemPrompt（null＝清空回落枚举默认）
  * @param modelId           覆盖模型档位键（ADR-0031 语义键如 flash/pro；null＝清空
  *                          回落枚举默认；路由开时为兜底基础档——信号升档可越过）
@@ -32,6 +36,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          null＝清空回落代码缺省 60）
  * @param routingSliceFeatureThreshold 片复杂度阈值（切片功能条目数——枚举段数
  *                          ≥ 此值升强档；null＝清空回落代码缺省 4；#361 重定）
+ * @param verifyModelId     verify 子智能体档位键（#424；null/缺省/纯空白＝清空随
+ *                          执行体生效档；非空时即时校验同 modelId〔#367〕）
+ * @param verifyRoundBudget 单场验证轮次预算（#424 防无限复验：report_verification
+ *                          登记达预算仍有未过项即停修复—复验；null＝清空回落代码
+ *                          缺省 3；1-20 整数，越界 PRJ_078）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -59,5 +68,15 @@ public record AgentConfigUpdateCommand(
         Integer routingFileCountThreshold,
         @Schema(description = "片复杂度阈值（#354/#361：切片功能条目数——描述的枚举段数"
                 + " ≥ 此值升强档；null＝清空回落代码缺省 4）", example = "4")
-        Integer routingSliceFeatureThreshold) {
+        Integer routingSliceFeatureThreshold,
+        @Schema(description = "verify 验证子智能体档位键（#424 片轻验：null/缺省/纯空白＝"
+                + "清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelId"
+                + "（#367：须在模型档位面有行且启用）",
+                example = "pro")
+        String verifyModelId,
+        @Schema(description = "单场验证轮次预算（#424 防无限复验：登记达预算仍有未过项即停"
+                + "修复—复验、未过项如实带入收口；null＝清空回落代码缺省 3；1-20 整数，"
+                + "越界 PRJ_078）",
+                example = "3")
+        Integer verifyRoundBudget) {
 }

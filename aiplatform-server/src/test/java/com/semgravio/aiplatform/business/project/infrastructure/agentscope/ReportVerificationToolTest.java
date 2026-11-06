@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -23,15 +24,32 @@ import reactor.core.publisher.Mono;
 class ReportVerificationToolTest {
 
     private final VerificationFacts facts = new VerificationFacts();
-    private final ReportVerificationTool tool = new ReportVerificationTool("42", facts);
+    private final ReportVerificationTool tool =
+            new ReportVerificationTool("42", facts, () -> 3);
 
     private ToolResultState call(Map<String, Object> input) {
-        return Mono.from(tool.callAsync(ToolCallParam.builder()
+        return call(tool, input).getState();
+    }
+
+    private io.agentscope.core.message.ToolResultBlock call(ReportVerificationTool target,
+            Map<String, Object> input) {
+        return Mono.from(target.callAsync(ToolCallParam.builder()
                         .toolUseBlock(new ToolUseBlock("tc-1", ReportVerificationTool.NAME,
                                 input, null))
                         .input(input)
                         .build()))
-                .block().getState();
+                .block();
+    }
+
+    /** 回执全文（output 文本块拼接——预算指引等回执文案断言面）。 */
+    private static String textOf(io.agentscope.core.message.ToolResultBlock block) {
+        StringBuilder text = new StringBuilder();
+        block.getOutput().forEach(part -> {
+            if (part instanceof io.agentscope.core.message.TextBlock textBlock) {
+                text.append(textBlock.getText());
+            }
+        });
+        return text.toString();
     }
 
     @Test
@@ -128,5 +146,50 @@ class ReportVerificationToolTest {
                 Map.of("name", "项", "face", "browser", "ok", false, "existing", true)))))
                 .isEqualTo(ToolResultState.ERROR);
         assertThat(facts.consume("42")).isNull();
+    }
+
+    // ---------- 单场轮次预算（#424 验证 fail 修复复验回路防无限复验） ----------
+
+    @Test
+    void given_rounds_reaching_budget_with_fails_when_call_then_stop_instruction_and_facts_kept() {
+        // 预算 2、两轮仍有未过项：第 2 轮登记回执带「预算已尽停止复验」指引（未过项
+        // 如实带入收口，不粉饰）；事实照常登记（平台观测面不因预算截断——轮次如实）
+        VerificationFacts budgeted = new VerificationFacts();
+        ReportVerificationTool capped = new ReportVerificationTool("42", budgeted, () -> 2);
+        call(capped, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", false, "detail", "点了无反应"))));
+        assertThat(textOf(call(capped, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", false, "detail", "点了无反应"))))))
+                .contains("预算")
+                .contains("停止");
+        assertThat(budgeted.consume("42").rounds()).isEqualTo(2);
+    }
+
+    @Test
+    void given_rounds_reaching_budget_all_passing_when_call_then_no_stop_instruction() {
+        // 全过即验完：即使轮数达预算也不带停止指引（循环自然终点，不打扰回交）
+        VerificationFacts budgeted = new VerificationFacts();
+        ReportVerificationTool capped = new ReportVerificationTool("42", budgeted, () -> 1);
+        assertThat(textOf(call(capped, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", true))))))
+                .doesNotContain("停止");
+    }
+
+    @Test
+    void given_budget_lowered_midway_when_call_then_new_budget_effective() {
+        // 运营面改预算下一轮登记即生效（动态读不缓存——进行中 run 不定格）
+        AtomicInteger budget = new AtomicInteger(3);
+        VerificationFacts budgeted = new VerificationFacts();
+        ReportVerificationTool dynamic = new ReportVerificationTool("42", budgeted, budget::get);
+        call(dynamic, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", false, "detail", "点了无反应"))));
+        assertThat(textOf(call(dynamic, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", false, "detail", "点了无反应"))))))
+                .doesNotContain("停止"); // 预算 3：第 2 轮未达
+        budget.set(2);
+        assertThat(textOf(call(dynamic, Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", false, "detail", "点了无反应"))))))
+                .contains("停止"); // 预算改 2：已达（第 3 轮 ≥ 2）
+        assertThat(budgeted.consume("42").rounds()).isEqualTo(3);
     }
 }

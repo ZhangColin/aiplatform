@@ -32,9 +32,16 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 
 **边缘调用点同面改档（#366）**：项目取名（`naming`）、上下文压缩（`compaction`）、入口分类（`classification`）、技能预检（`precheck`）四件一次性轻调用的模型档位收编同一配置面——端点 `/api/backoffice/agent-configs/edge/{edgeKey}`（GET/PUT/traces 同制，值面仅模型档位：`{"modelId": "pro"}`；缺省一律 `flash`）。改档下一轮调用即生效（装配动态查库）。
 
+**verify 验证子智能体档位与轮次预算（#424 片轻验常开）**：verify 子智能体（片轻验的执行侧）的档位与单场轮次预算收编在 **executor 行**（同一 PUT 通道）——
+
+1. **缺省＝随执行体档**：`verifyModelId` 缺省 null＝随执行体**生效档**（含路由升档——重片升强档时 verify 同档跟随，不降；#406 裁决「验证判错代价高于省的秒数」）。
+2. **改档**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifyModelId": "pro"}`（即时校验同 `modelId`：PRJ_074/075）；null 清空回落随执行体档。改完下一轮命令构建即生效（子智能体档位进智能体实例缓存键指纹）。
+3. **轮次预算**：`{"verifyRoundBudget": 5}`（1-20 整数，越界 PRJ_078；null＝回落代码缺省 3＝首轮验证＋至多两轮修复复验）。预算＝单场防无限复验的护栏：verify 经 report_verification 登记达预算仍有未过项时，登记回执告知「停止修复—复验」，收尾卡验证统计带 `budgetExhausted` 如实标注。动态逐次读——改完下一轮登记即生效。
+4. **查/回滚**：GET 同面（`verifyModelId`/`verifyModelIdOverridden`/`verifyRoundBudget`/`defaultVerifyRoundBudget`）；traces 前后快照含验证面两件。
+
 ## 四、进行中 run 不定格
 
-配置读取时机＝**起跑时读档**：模型档位在每次命令构建（下发 run/对话轮）时取一次生效值，随命令交给智能体工厂；工厂缓存键含模型串，新值即新实例。因此**改档不影响在途 run**——在跑的那一段沿用起跑时读到的档位跑完，改档只影响**下一轮**命令构建。修订中的工作协议（systemPrompt）同理。
+配置读取时机＝**起跑时读档**：模型档位在每次命令构建（下发 run/对话轮）时取一次生效值，随命令交给智能体工厂；工厂缓存键含模型串，新值即新实例。因此**改档不影响在途 run**——在跑的那一段沿用起跑时读到的档位跑完，改档只影响**下一轮**命令构建。修订中的工作协议（systemPrompt）同理。verify 档位同律（随命令构建解析）；轮次预算更细——逐次登记时动态读，改预算对在跑的场也即刻生效（预算是防烧护栏，越早生效越好）。
 
 ## 五、边界与模型路由协同（#354）
 

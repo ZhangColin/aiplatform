@@ -108,6 +108,7 @@ public class IterationAppService {
     private final PrdDraftBaseline prdDraftBaseline;
     private final DemoSeedAppService demoSeed;
     private final ProofOfOutputGate proofGate;
+    private final VerificationPresenceGate verificationPresence;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -127,7 +128,8 @@ public class IterationAppService {
             DemoVersionAppService demoVersionAppService,
             PrdDraftBaseline prdDraftBaseline,
             DemoSeedAppService demoSeed,
-            ProofOfOutputGate proofGate) {
+            ProofOfOutputGate proofGate,
+            VerificationPresenceGate verificationPresence) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -140,6 +142,7 @@ public class IterationAppService {
         this.prdDraftBaseline = prdDraftBaseline;
         this.demoSeed = demoSeed;
         this.proofGate = proofGate;
+        this.verificationPresence = verificationPresence;
     }
 
     /**
@@ -374,13 +377,14 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46 + #88 判定行 + #420 产出证明）：以 finish_edit 工具事实为准
-     * ——无事实 = run 未正常收口，抛出即该次尝试失败（走共用尝试环的静默重试/终态
-     * ，与生成 8081 核验同口径）；产出证明闸（#420 更新轨同盖）先于 finish_edit
-     * 事实消费——零 diff＋无「能力已存在」确认＝结构性拒绝（拒绝回执喂回执行体
-     * 同 run 补做；拒绝不消费 finish_edit 事实，重试轮事实连续），changed=false
-     * 的合法收口须有豁免依据（验证确认能力已存在）或本场实有改动。事实在即返回
-     * 收口判定的权威事实——系统改没改 = finish_edit 的
+     * 修正收口（#46 + #88 判定行 + #420 产出证明 + #424 验证在场）：以 finish_edit
+     * 工具事实为准——无事实 = run 未正常收口，抛出即该次尝试失败（走共用尝试环的
+     * 静默重试/终态，与生成 8081 核验同口径）；产出证明闸（#420 更新轨同盖）与验证
+     * 在场（#424 片轻验常开——更新轨/fix run 同盖）先于 finish_edit 事实消费——
+     * 零 diff＋无「能力已存在」确认＝结构性拒绝、无验证登记不准收口（拒绝回执喂回
+     * 执行体同 run 补做；拒绝不消费 finish_edit 事实，重试轮事实连续），changed=false
+     * 的合法收口须有豁免依据（验证确认能力已存在——其本身即验证登记，在场自洽）或
+     * 本场实有改动。事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
      * changed + 说明，PRD 改没改 = 本场交接物各轮的修订说明（null = 未修订轮；
      * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
      * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
@@ -394,6 +398,7 @@ public class IterationAppService {
     private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
             FixHandoff handoff, Integer prdVersionNo, ProofOfOutputGate.Checking proof) {
         Map<String, Object> proofAnnotation = proof.proof();
+        verificationPresence.requirePresence(Long.toString(project.getWorkspaceId()));
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环

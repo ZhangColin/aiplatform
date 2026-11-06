@@ -56,6 +56,17 @@ public class VerificationFacts {
         Facts(List<Check> lastRound, int rounds) {
             this(lastRound, rounds, List.of());
         }
+
+        /**
+         * 轮次预算用尽判定（#424 单点谓词）：末轮仍有未过项且轮次达预算——登记
+         * 回执的停止修复—复验指引（report_verification）与收尾卡 budgetExhausted
+         * 标注（收口载荷）共此一源；两消费点各携<b>当时</b>的运营配置预算值（动态
+         * 读不缓存——中间改配置两读点各自如实，不做跨点一致性）。
+         */
+        public boolean budgetExhausted(int roundBudget) {
+            return lastRound().stream().anyMatch(check -> !check.ok())
+                    && rounds() >= roundBudget;
+        }
     }
 
     private final Map<String, Facts> facts = new ConcurrentHashMap<>();
@@ -91,6 +102,23 @@ public class VerificationFacts {
     /** 收口消费（取走即清）：null = 本轨验证子智能体未登记（未跑/未报——如实缺省）。 */
     public Facts consume(String workspaceId) {
         return facts.remove(workspaceId);
+    }
+
+    /**
+     * 在场窥读（#424 片轻验常开硬门判据）：本 run 是否有验证登记——无登记＝零验证
+     * （s5/s8 形态），收口硬门据此拒。不消费（与 {@link #consume} 两读不互斥）。
+     */
+    public boolean hasRegistration(String workspaceId) {
+        return facts.containsKey(workspaceId);
+    }
+
+    /**
+     * 全量窥读（#424 登记回执的预算用尽判定取数，消费 {@link Facts#budgetExhausted}
+     * 单点谓词）：不消费（收口统计仍由 {@link #consume} 取走，两读不互斥）；无登记
+     * null 如实。
+     */
+    public Facts peek(String workspaceId) {
+        return facts.get(workspaceId);
     }
 
     /** run 起跑清残留：本轨验证统计从零起算。 */

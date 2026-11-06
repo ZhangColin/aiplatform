@@ -6,6 +6,7 @@ import com.semgravio.aiplatform.base.agentscope.EdgeModelSupplier;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 /**
  * 边缘调用点模型供数适配器（#366）：边缘点档位键 → 生效值（库值优先缺省回落，
@@ -34,6 +35,18 @@ public class ConfigEdgeModelSupplier implements EdgeModelSupplier {
     @Override
     public EdgeModel precheckModel() {
         return resolve(AgentEdgePoint.PRECHECK);
+    }
+
+    @Override
+    public EdgeModel subagentModel() {
+        // #424 片轻验：verify 子智能体档位覆盖在 executor 行（verify_model_id 列）
+        // ——null＝随执行体生效档（含路由升档，缺省同档不降），非空才独立解析
+        String tierKey = agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyModelId();
+        if (tierKey == null) {
+            return null;
+        }
+        ModelTierAppService.ResolvedModel model = modelTiers.resolve(tierKey);
+        return new EdgeModel(model.modelString(), model.channel());
     }
 
     private EdgeModel resolve(AgentEdgePoint point) {

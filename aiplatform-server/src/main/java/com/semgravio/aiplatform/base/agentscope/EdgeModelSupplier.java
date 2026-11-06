@@ -27,6 +27,14 @@ public interface EdgeModelSupplier {
     EdgeModel precheckModel();
 
     /**
+     * 委派子智能体模型（#424 片轻验：执行体委派位子智能体〔verify〕的档位覆盖
+     * ——装配经 {@code AgentscopeHarnessAgentFactory} 进子智能体构建与智能体实例
+     * 缓存键指纹）。<b>null＝随父级（执行体生效档，含路由升档）</b>——缺省同档
+     * 不降（#406 裁决「验证判错代价高于省的秒数」），非空即独立档。
+     */
+    EdgeModel subagentModel();
+
+    /**
      * 解析产物（档位解析的底座消费形）：模型串（前缀:实际模型名——前缀即协议
      * 路由）＋通道注入件（baseUrl/apiKey/thinking，进创建上下文；可空＝无通道
      * 语境，SDK 回落内置 provider 缺省——测试形）。

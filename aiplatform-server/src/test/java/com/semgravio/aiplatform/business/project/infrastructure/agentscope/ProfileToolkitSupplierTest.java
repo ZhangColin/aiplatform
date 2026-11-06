@@ -72,12 +72,17 @@ class ProfileToolkitSupplierTest {
     private final DesignSpecAppService designSpecs = mock(DesignSpecAppService.class);
     private final VerificationFacts verificationFacts = new VerificationFacts();
 
+    /** 装配读面桩（#424 轮次预算动态供数——仅 verify 工具调用时读，装配不触）。 */
+    private final com.semgravio.aiplatform.business.project.application.AgentConfigAppService
+            agentConfigs = org.mockito.Mockito.mock(
+                    com.semgravio.aiplatform.business.project.application.AgentConfigAppService.class);
+
     private ProfileToolkitSupplier supplier() {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
                 webSearchProvider, skillProposals, imageGeneration, landedFiles, designSpecs,
-                verificationFacts);
+                verificationFacts, agentConfigs);
     }
 
     @Test
@@ -206,7 +211,11 @@ class ProfileToolkitSupplierTest {
     @Test
     void given_verify_key_when_report_verification_called_then_facts_recorded() {
         // #352 真缝走通：verify 子键装配 → 工具执行 → VerificationFacts 落账
-        // （收尾卡验证统计的事实源链路基座）
+        // （收尾卡验证统计的事实源链路基座）；#424 登记时读运营面预算（动态供数
+        // 桩缺省 3——未过项为零不打扰回执）
+        when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
+                new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                        true, true, false, true, null, null, null, null, 3));
         var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         Map<String, Object> input = Map.of("checks",
@@ -249,7 +258,7 @@ class ProfileToolkitSupplierTest {
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
                 externalContentFetcher, webSearchProvider, recorder, imageGeneration,
-                landedFiles, designSpecs, verificationFacts);
+                landedFiles, designSpecs, verificationFacts, agentConfigs);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;
@@ -369,7 +378,7 @@ class ProfileToolkitSupplierTest {
             for (boolean fu : new boolean[]{true, false}) {
                 String spec = new AgentConfigAppService.EffectiveConfig(
                         "prompt", "model", ws, fu,
-                        false, true, null, null, null).toolSpec();
+                        false, true, null, null, null, null, 3).toolSpec();
                 assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
                 assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
             }

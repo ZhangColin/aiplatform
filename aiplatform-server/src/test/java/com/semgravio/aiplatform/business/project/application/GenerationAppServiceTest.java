@@ -201,8 +201,44 @@ class GenerationAppServiceTest {
     /** 智能体边界正常收口脚本：converse 返回正常收口的 AgentReply（无挂起面）。 */
     private void givenConverseSucceeds(String text) {
         when(agentClient.converse(any(AgentCommand.class), any()))
-                .thenAnswer(invocation -> new AgentReply(
-                        invocation.getArgument(0, AgentCommand.class).runId(), text));
+                .thenAnswer(invocation -> {
+                    AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+                    verifyRan(command);
+                    return new AgentReply(command.runId(), text);
+                });
+    }
+
+    /**
+     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：收口须
+     * 验证在场——converse 桩内调用即「verify 已跑并登记」；按工作区登记一次
+     * （run 起跑清残留后逐 run 重登，多尝试不虚增复验轮次）。零验证场景的测试
+     * 不调用本位（如 {@code given_zero_verification_slice_...}）。
+     */
+    private void verifyRan(AgentCommand command) {
+        if (!verificationFacts.hasRegistration(command.workspaceId())) {
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("首页主径可走通（刷新仍在）", "browser", true, null)));
+        }
+    }
+
+    /**
+     * 链式收口脚本（thenThrow/thenReturn 链的带验证登记形，#424 常开硬门后收口须
+     * 在场）：第 n 次调用按序取 outcomes（{@link AgentReply}＝成功回复〔先登记
+     * verify〕、{@link RuntimeException}＝该次失败）；超出链长重复末位（Mockito
+     * 链语义同形）。
+     */
+    private void givenConverseChain(Object... outcomes) {
+        AtomicInteger calls = new AtomicInteger();
+        // do 家族（首桩与重打桩通吃）：when(...) 家族重打桩时会先参调旧链桩抛错
+        doAnswer(invocation -> {
+            Object outcome = outcomes[Math.min(calls.getAndIncrement(), outcomes.length - 1)];
+            if (outcome instanceof RuntimeException failure) {
+                throw failure;
+            }
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            return (AgentReply) outcome;
+        }).when(agentClient).converse(any(), any());
     }
 
     /** 首试失败、此后照常收口脚本（静默重试/路由升档用例的失败注入面——#354）。 */
@@ -210,6 +246,7 @@ class GenerationAppServiceTest {
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (converseCalls.incrementAndGet() == 1) {
                 throw new IllegalStateException(failure);
             }
@@ -387,6 +424,7 @@ class GenerationAppServiceTest {
         // 切片 3 的 fork 片反复失败（重试耗尽转终态），其余片照常收口
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().endsWith("-slice-3")) {
                 throw new IllegalStateException("切片3失败");
             }
@@ -549,6 +587,7 @@ class GenerationAppServiceTest {
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (converseCalls.incrementAndGet() == 2) {
                 // 切片 1 首试在途被中断（Future.cancel 线程中断打断模型流的现场等价物）
                 codingRunTrack.requestStop(projectId);
@@ -595,6 +634,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().endsWith("-slice-2")) {
                 codingRunTrack.requestStop(projectId);
                 throw new IllegalStateException("java.lang.InterruptedException");
@@ -673,11 +713,12 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9830");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("run-s0", "阶段0交接"))
-                .thenThrow(new IllegalStateException("切片1中断"))
-                .thenReturn(new AgentReply("run-s1", "切片1交接"))
-                .thenReturn(new AgentReply("run-s2", "切片2交接"));
+        // #424 常开硬门：链式脚本走带验证登记形（成功回复轮先登记 verify）
+        givenConverseChain(
+                new AgentReply("run-s0", "阶段0交接"),
+                new IllegalStateException("切片1中断"),
+                new AgentReply("run-s1", "切片1交接"),
+                new AgentReply("run-s2", "切片2交接"));
 
         BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
         appService.dispatchGenerationOnTurnClose(projectId, plan);
@@ -821,6 +862,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -912,7 +954,9 @@ class GenerationAppServiceTest {
                 codingRunTrack.requestStop(projectId);
                 throw new IllegalStateException("java.lang.InterruptedException");
             }
-            return new AgentReply(invocation.getArgument(0, AgentCommand.class).runId(), "完成");
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
+            return new AgentReply(command.runId(), "完成");
         });
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
@@ -951,9 +995,8 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9862");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("s0", "阶段0交接"))
-                .thenThrow(new IllegalStateException("切片失败"));
+        givenConverseChain(new AgentReply("s0", "阶段0交接"),
+                new IllegalStateException("切片失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
@@ -1044,11 +1087,10 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9803");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("stage0", "阶段 0 完成"))
-                .thenThrow(new IllegalStateException("切片失败"))
-                .thenThrow(new IllegalStateException("切片失败"))
-                .thenThrow(new IllegalStateException("切片失败"));
+        givenConverseChain(new AgentReply("stage0", "阶段 0 完成"),
+                new IllegalStateException("切片失败"),
+                new IllegalStateException("切片失败"),
+                new IllegalStateException("切片失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
@@ -1237,6 +1279,7 @@ class GenerationAppServiceTest {
         BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 // 补产轮内主智能体调 saveBuildPlan（工具事实登记）
                 buildPlanFacts.record(command.workspaceId(), produced);
@@ -1303,12 +1346,11 @@ class GenerationAppServiceTest {
                 cmd.command().startsWith("cat '") && cmd.command().contains("slice-handoff-1.md"))))
                 .thenReturn(new ExecResultResponse("切片1交接：注册登录已端到端走通", "", 0));
         // 发起：阶段 0 + 切片 1 成功收口，切片 2 三次尝试耗尽转终态失败
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("s0", "阶段0交接"))
-                .thenReturn(new AgentReply("s1", "切片1交接"))
-                .thenThrow(new IllegalStateException("切片2起服失败"))
-                .thenThrow(new IllegalStateException("切片2起服失败"))
-                .thenThrow(new IllegalStateException("切片2起服失败"));
+        givenConverseChain(new AgentReply("s0", "阶段0交接"),
+                new AgentReply("s1", "切片1交接"),
+                new IllegalStateException("切片2起服失败"),
+                new IllegalStateException("切片2起服失败"),
+                new IllegalStateException("切片2起服失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录", "用户能下单支付", "用户能查询订单")));
@@ -1319,9 +1361,9 @@ class GenerationAppServiceTest {
                 .containsExactly(2, 2, 3, 1);
         assertThat(generatedAt(projectId)).isNull();
 
-        // 续跑（REST 路径无交接物：重打桩用 doReturn 家——when(...) 求值先参调旧 throw 桩）
-        doReturn(new AgentReply("r2", "切片2续跑完成"), new AgentReply("r3", "切片3完成"))
-                .when(agentClient).converse(any(), any());
+        // 续跑（REST 路径无交接物：重打桩走 do 家族——不参调旧 throw 桩）
+        givenConverseChain(new AgentReply("r2", "切片2续跑完成"),
+                new AgentReply("r3", "切片3完成"));
         GenerationAppService.GenerationRun resume = appService.startGeneration(projectId);
 
         // 只重跑失败片与后续片：发起 5 次 + 续跑 2 次（切片 2、切片 3）——阶段 0 /
@@ -1376,11 +1418,10 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9851");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds(); // cat 读回走缺省桩（stdout 空）→ 降级空交接
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("s0", "阶段0交接"))
-                .thenThrow(new IllegalStateException("切片1失败"))
-                .thenThrow(new IllegalStateException("切片1失败"))
-                .thenThrow(new IllegalStateException("切片1失败"));
+        givenConverseChain(new AgentReply("s0", "阶段0交接"),
+                new IllegalStateException("切片1失败"),
+                new IllegalStateException("切片1失败"),
+                new IllegalStateException("切片1失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
@@ -1396,8 +1437,8 @@ class GenerationAppServiceTest {
                 .getField(appService, "terminalFailureScenes");
         scenes.remove(projectId);
 
-        doReturn(new AgentReply("r1", "切片1续跑完成"), new AgentReply("r2", "切片2完成"))
-                .when(agentClient).converse(any(), any());
+        givenConverseChain(new AgentReply("r1", "切片1续跑完成"),
+                new AgentReply("r2", "切片2完成"));
         appService.startGeneration(projectId);
 
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
@@ -1453,12 +1494,11 @@ class GenerationAppServiceTest {
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
         BuildPlan plan = new BuildPlan(List.of("用户能注册登录"));
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("s0", "阶段0交接"))
-                .thenThrow(new IllegalStateException("越修越乱"))
-                .thenThrow(new IllegalStateException("越修越乱"))
-                .thenThrow(new IllegalStateException("越修越乱"))
-                .thenReturn(new AgentReply("s1r", "切片1重跑完成"));
+        givenConverseChain(new AgentReply("s0", "阶段0交接"),
+                new IllegalStateException("越修越乱"),
+                new IllegalStateException("越修越乱"),
+                new IllegalStateException("越修越乱"),
+                new AgentReply("s1r", "切片1重跑完成"));
 
         appService.dispatchGenerationOnTurnClose(projectId, plan);
 
@@ -1503,9 +1543,8 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9871");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("s0", "阶段0交接"))
-                .thenThrow(new IllegalStateException("切片失败"));
+        givenConverseChain(new AgentReply("s0", "阶段0交接"),
+                new IllegalStateException("切片失败"));
 
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
@@ -1542,6 +1581,7 @@ class GenerationAppServiceTest {
         AtomicInteger calls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -1588,6 +1628,7 @@ class GenerationAppServiceTest {
         // 切片 3 首轮连败（会话 -slice-3），重跑轮（-slice-3-rr）成功
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().endsWith("-slice-3")) {
                 throw new IllegalStateException("切片3失败");
             }
@@ -1656,6 +1697,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "conflict", 1));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().contains("-merge-")) {
                 throw new IllegalStateException("裁决失败");
             }
@@ -1676,6 +1718,72 @@ class GenerationAppServiceTest {
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2, 3, 3, 1);
         assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_zero_verification_adjudication_when_close_then_rejected_then_verified_merges() {
+        // #424 裁决轨同盖（常开无豁免）：合并冲突裁决 run 改主工作区后零验证收口
+        // 同样被拒——拒绝回执喂回裁决 run，补验（裁决后系统两侧功能走得通）后照常
+        // 合并闭片（裁决天然有产出，产出证明闸不适用；验证在场按主工作区键判）
+        Long projectId = persistedProject("9876");
+        givenSessionExecutorRunsInline();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            String command = cmd.command();
+            if (command.contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (command.contains("git diff --full-index")) {
+                return new ExecResultResponse("fake-patch-bytes", "", 0);
+            }
+            if (command.contains("git diff --name-only")) {
+                return new ExecResultResponse("src/app/page.tsx\n", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
+        // 两 fork 片合并均冲突（机器查命中）→ 各起裁决 run；裁决 run 首试零验证、
+        // 拒绝回执喂回后补验（主工作区键登记）
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "conflict", 1));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            if (command.sessionId().contains("-merge-")) {
+                if (command.prompt().contains("错误现场")
+                        && !verificationFacts.hasRegistration(command.workspaceId())) {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("合并后两侧功能主径可走通（刷新仍在）",
+                                    "browser", true, null)));
+                }
+                return new AgentReply(command.runId(), "裁决完成");
+            }
+            verifyRan(command);
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 两裁决 run 各两试（零验证被拒 → 补验收口）；拒绝回执进裁决 run 现场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        List<AgentCommand> merges = new ArrayList<>();
+        verify(agentClient, atLeast(8)).converse(commands.capture(), any());
+        commands.getAllValues().forEach(cmd -> {
+            if (cmd.sessionId().contains("-merge-")) {
+                merges.add(cmd);
+            }
+        });
+        assertThat(merges).hasSize(4);
+        assertThat(merges.get(1).prompt()).contains("错误现场").contains("验证在场未过");
+        assertThat(merges.get(3).prompt()).contains("错误现场").contains("验证在场未过");
+        // 补验后裁决照常合并：全片收口、generated_at 落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
     }
 
     @Test
@@ -1749,6 +1857,7 @@ class GenerationAppServiceTest {
         BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付", "用户能管理商品"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), produced);
                 return new AgentReply(command.runId(), "已对照已有成果拟好实施计划");
@@ -1803,6 +1912,7 @@ class GenerationAppServiceTest {
         BuildPlan produced = new BuildPlan(List.of("用户能够注册并登录系统", "用户能下单支付"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), produced);
                 return new AgentReply(command.runId(), "已拟好计划");
@@ -1867,6 +1977,7 @@ class GenerationAppServiceTest {
         BuildPlan produced = new BuildPlan(List.of("用户能注册登录"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), produced);
                 return new AgentReply(command.runId(), "对照已有成果，系统已全部完成");
@@ -1919,8 +2030,7 @@ class GenerationAppServiceTest {
 
         // 「继续生成」（REST 出口）→ 再次生成中；收口 → 已生成（generated_at 落位
         // 恒赢——此后迭代/修正在途不再改变生成态）
-        doReturn(new AgentReply("r0", "阶段0完成"), new AgentReply("r1", "切片1完成"))
-                .when(agentClient).converse(any(), any());
+        givenConverseChain(new AgentReply("r0", "阶段0完成"), new AgentReply("r1", "切片1完成"));
         appService.startGeneration(projectId);
         assertThat(queryAppService.detail(projectId).generationState())
                 .isEqualTo(GenerationState.GENERATING);
@@ -2096,10 +2206,9 @@ class GenerationAppServiceTest {
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenKnowledgeHits(); // 首试带前置注入，重试不重注入（注入块已在会话历史）
-        when(agentClient.converse(any(), any()))
-                .thenThrow(new IllegalStateException("首次尝试中断"))
-                .thenReturn(new AgentReply("run-2", "系统已生成"))
-                .thenReturn(new AgentReply("run-3", "系统已生成"));
+        givenConverseChain(new IllegalStateException("首次尝试中断"),
+                new AgentReply("run-2", "系统已生成"),
+                new AgentReply("run-3", "系统已生成"));
 
         GenerationAppService.GenerationRun run = appService.dispatchGenerationOnTurnClose(projectId,
                 SINGLE_SLICE_PLAN);
@@ -2141,8 +2250,7 @@ class GenerationAppServiceTest {
         when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
                 cmd.command().contains("curl"))))
                 .thenReturn(new ExecResultResponse("", "Connection refused", 7));
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("run-fake", "很抱歉，目前系统尚未真正实现出来"));
+        givenConverseChain(new AgentReply("run-fake", "很抱歉，目前系统尚未真正实现出来"));
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
@@ -2298,6 +2406,7 @@ class GenerationAppServiceTest {
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -2348,6 +2457,7 @@ class GenerationAppServiceTest {
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             // 切片 1 恒空转（宣告完成但零文件变更——重跑轮同形）：快档典型失败形态
             if (command.sessionId().endsWith("-slice-1")
                     || command.sessionId().contains("-slice-1-")) {
@@ -2391,6 +2501,7 @@ class GenerationAppServiceTest {
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().contains("-slice-1")) {
                 idleProof("9840").set(true);
             }
@@ -2426,6 +2537,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             // fork 9001 上的切片 2：首试空转、拒绝回执喂回后补做；fork 9002 照常
             if ("9001".equals(command.workspaceId())) {
                 idleProof("9001").set(!command.prompt().contains("错误现场"));
@@ -2462,6 +2574,7 @@ class GenerationAppServiceTest {
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -2502,6 +2615,158 @@ class GenerationAppServiceTest {
         assertThat(stage0Closing).doesNotContainKey(CoderRunAttempts.CLOSING_PROOF_FIELD);
     }
 
+    // ---------- 验证在场硬门（#424 片轻验常开：本 run 无验证登记不准收口） ----------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_zero_verification_slice_when_close_then_rejected_refed_back_then_verified_closes() {
+        // #424 AC①：本 run 无验证登记（verify 未跑/未报——锚案 s5/s8 零验证形态）的
+        // 收口被结构性拒绝——拒绝回执进同 run 现场（重试 prompt 携带「验证在场未过」
+        // 与起验指引：自报本片验收要点委派 verify），执行体补跑验证（登记）后正常
+        // 收口；验证统计随收尾卡如实呈现（常开硬门下「该片零验证」结构性不可能）
+        Long projectId = persistedProject("9843");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1：首试宣告完成但不跑验证（零登记——阶段 0 照常登记作对照）、
+            // 拒绝回执喂回后补跑验证（verify 登记进事实面）
+            boolean slice1ZeroVerification = command.sessionId().endsWith("-slice-1")
+                    && !command.prompt().contains("错误现场");
+            if (!slice1ZeroVerification) {
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("留言提交主径可走通", "browser", true, null)));
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 一次收口（验证在场）+ 切片 1 两试（零验证被拒 → 补验后收口）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        AgentCommand sliceRetry = commands.getAllValues().get(2);
+        // 拒绝回执进同 run 现场：重试 prompt 携带验证在场拒绝与起验指引
+        assertThat(sliceRetry.prompt())
+                .contains("错误现场")
+                .contains("验证在场未过")
+                .contains("验收要点")
+                .contains("report_verification");
+        // 补验后正常收口：片全收口 + 验证统计随收尾卡（登记在场即统计在场）
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> verification = (Map<String, Object>) sliceClosing
+                .get(AgentEventTypes.VERIFICATION_FIELD);
+        assertThat(verification)
+                .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 1)
+                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1);
+    }
+
+    @Test
+    void given_zero_verification_fork_slice_when_close_then_rejected_in_fork_then_verified_merges() {
+        // #424 fork 片同盖：fork 内零验证收口同样被拒（事实按 fork 工作区键隔离——
+        // 另一 fork 不串扰），拒绝回执喂回 fork run 补验后照常合并闭片
+        Long projectId = persistedProject("9844");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            // fork 9001 上的切片 2：首试零验证（不登记）、拒绝回执喂回后补验登记；
+            // fork 9002 照常（对照组：并行波内互不串扰）
+            if ("9001".equals(command.workspaceId())) {
+                if (command.prompt().contains("错误现场")
+                        && !verificationFacts.hasRegistration("9001")) {
+                    verificationFacts.record("9001", List.of(
+                            new VerificationFacts.Check("下单主径可走通（刷新仍在）", "browser", true, null)));
+                }
+                return new AgentReply(command.runId(), "完成");
+            }
+            verifyRan(command);
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 切片 2 两试（fork 内零验证被拒 → 补验收口）、其余各一次；拒绝回执进 fork run 现场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(6)).converse(commands.capture(), any());
+        List<AgentCommand> slice2 = commands.getAllValues().stream()
+                .filter(cmd -> "9001".equals(cmd.workspaceId())).toList();
+        assertThat(slice2).hasSize(2);
+        assertThat(slice2.get(1).prompt())
+                .contains("错误现场")
+                .contains("验证在场未过");
+        // 补验后照常合并：全片收口、generated_at 落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_round_budget_exhausted_with_fails_when_closes_then_verified_and_annotated() {
+        // #424 AC③：单场轮次预算生效——运营面配预算 1、一轮验证仍有未过项：收口
+        // 带验证统计（在场硬门过——fail 不拦收口也不静默）＋budgetExhausted 如实
+        // 标注（达预算停止修复—复验、未过项带入收尾卡呈现）
+        Long projectId = persistedProject("9845");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     verify_round_budget)
+                VALUES ('executor', TRUE, TRUE, TRUE, 1)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    verify_round_budget = EXCLUDED.verify_round_budget
+                """);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 每轮登记一项未过（预算 1 已尽仍修不了——如实收口）
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("留言提交主径", "browser", false, "点了无反应")));
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 未过不拦收口（fail 走修复—复验回路＋如实呈现，不静默、不 run 失败）
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> verification = (Map<String, Object>) ((Map<String, Object>) payloads
+                .getAllValues().get(1).get(AgentEventTypes.CLOSING_FIELD))
+                .get(AgentEventTypes.VERIFICATION_FIELD);
+        assertThat(verification)
+                .containsEntry(AgentEventTypes.VERIFICATION_FAILED_FIELD, 1)
+                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1)
+                .containsEntry(AgentEventTypes.VERIFICATION_BUDGET_EXHAUSTED_FIELD, true);
+    }
+
     @Test
     void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
         // #339 协议面（经运营配置面可调）：主智能体切片计划约定与补产提示词同向
@@ -2514,7 +2779,11 @@ class GenerationAppServiceTest {
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("入口文件")
                 .contains(ProjectFiles.BASELINE_ENTRY)
-                .contains("其余代码略");
+                .contains("其余代码略")
+                // #424 片轻验常开：起验自报验收要点＋验证在场硬门＋修复—复验轮次预算
+                .contains("自报本片验收要点")
+                .contains("无 report_verification 登记不准收口")
+                .contains("轮次预算");
     }
 
     @Test
@@ -2528,6 +2797,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -2551,8 +2821,12 @@ class GenerationAppServiceTest {
                 .containsEntry("prdChanged", false)
                 .containsEntry("systemChanged", true)
                 .containsEntry("systemNote", "完成切片：用户能注册登录");
-        assertThat(sliceClosing).doesNotContainKey("prdNote")
-                .doesNotContainKey(AgentEventTypes.VERIFICATION_FIELD); // 验证未登记 → verification 可缺省
+        assertThat(sliceClosing).doesNotContainKey("prdNote");
+        // #424 片轻验常开后收口必带验证在场（verifyRan 脚本位登记）——统计呈现随
+        // 新载荷口径一致（旧「验证未登记可缺省」形在收口路径结构性出局）
+        assertThat((Map<String, Object>) sliceClosing.get(AgentEventTypes.VERIFICATION_FIELD))
+                .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 1)
+                .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1);
         assertThat((List<Map<String, Object>>) sliceClosing.get("files")).hasSize(2);
         assertThat((Long) sliceClosing.get("durationMs")).isGreaterThanOrEqualTo(0L);
     }
@@ -2638,6 +2912,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -2723,6 +2998,7 @@ class GenerationAppServiceTest {
                 .thenThrow(new IllegalStateException("首次尝试中断"))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                             Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -2731,6 +3007,7 @@ class GenerationAppServiceTest {
                 })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                             Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -2782,6 +3059,7 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                             Map.of("prompt", command.prompt())));
@@ -2803,6 +3081,7 @@ class GenerationAppServiceTest {
                 })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                             Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -2812,6 +3091,7 @@ class GenerationAppServiceTest {
                 })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                             Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -3017,6 +3297,7 @@ class GenerationAppServiceTest {
         List<String> prompts = new ArrayList<>();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             prompts.add(command.prompt());
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
@@ -3069,6 +3350,7 @@ class GenerationAppServiceTest {
                         : new ExecResultResponse("{}", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -3105,6 +3387,7 @@ class GenerationAppServiceTest {
                 .thenThrow(new IllegalStateException("再次中断"))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    verifyRan(command);
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                             Map.of(AgentEventTypes.FINISH_FIELD, "end")));
@@ -3151,8 +3434,7 @@ class GenerationAppServiceTest {
         verify(agentClient, never()).converse(any(), any());
 
         // 排队任务收尾（守卫释放，不污染同上下文的后续测试）
-        when(agentClient.converse(any(), any()))
-                .thenReturn(new AgentReply("run-x", "系统已生成"));
+        givenConverseChain(new AgentReply("run-x", "系统已生成"));
         queued.forEach(Runnable::run);
     }
 
@@ -3204,9 +3486,7 @@ class GenerationAppServiceTest {
 
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        givenConverseSucceeds("已生成");
-        doReturn(new AgentReply("run-y", "系统已生成"))
-                .when(agentClient).converse(any(), any());
+        givenConverseChain(new AgentReply("run-y", "系统已生成"));
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
         // 重发 = 阶段 0 + 切片各一次 converse
         verify(agentClient, times(2)).converse(any(), any());
@@ -3225,6 +3505,7 @@ class GenerationAppServiceTest {
         BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), produced);
                 return new AgentReply(command.runId(), "已按 PRD 拟好实施计划");
@@ -3271,6 +3552,7 @@ class GenerationAppServiceTest {
             if (command == null) {
                 return null; // matcher 空参调用（重打桩触发旧 answer）直接过
             }
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
                 return new AgentReply(command.runId(), "计划已定");
@@ -3286,6 +3568,7 @@ class GenerationAppServiceTest {
         // answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "完成") : null;
         });
         GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnConfirm(projectId);
@@ -3307,6 +3590,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
                 return new AgentReply(command.runId(), "计划已定");
@@ -3339,6 +3623,7 @@ class GenerationAppServiceTest {
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
                 buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
                 return new AgentReply(command.runId(), "计划已定");
@@ -3407,6 +3692,7 @@ class GenerationAppServiceTest {
         CountDownLatch fixDone = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().endsWith("-slice-1")) {
                 // 切片 1（末段）在途挂住——制造首 Demo 生成在途窗口
                 generating.countDown();
@@ -3481,6 +3767,7 @@ class GenerationAppServiceTest {
         AtomicBoolean released = new AtomicBoolean(false);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
             if (command.sessionId().endsWith("-slice-1") && !released.get()) {
                 // 首 Demo 切片 1 在途挂住，等停止请求落位（Future.cancel 线程中断的
                 // 现场等价物——停止检查点在中断侧，此处以中断形态异常收场）
@@ -3622,6 +3909,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse("", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "已构建", null, List.of())
                     : null;
         });
@@ -3719,6 +4007,7 @@ class GenerationAppServiceTest {
                 .thenReturn(new ExecResultResponse(" 87\n", "", 0));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));

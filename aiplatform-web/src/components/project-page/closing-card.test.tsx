@@ -183,6 +183,25 @@ describe("ClosingCard · 验证统计（#352 独立验证子智能体的收尾�
     expect(html).toContain("复验 2 轮");
   });
 
+  it("轮次预算用尽仍未过（#424）：如实带「轮次预算已尽」标注", () => {
+    const html = renderCard(
+      closing({
+        verification: {
+          total: 3,
+          failed: 1,
+          faces: { browser: 3, db: 0, log: 0 },
+          rounds: 3,
+          failedItems: ["留言提交"],
+          budgetExhausted: true,
+        },
+      }),
+    );
+
+    expect(html).toContain("1 项未过");
+    expect(html).toContain("复验 3 轮");
+    expect(html).toContain("轮次预算已尽"); // 达预算停止修复—复验的如实呈现
+  });
+
   it("验证缺省（子智能体未跑/未登记）：不出验证统计行", () => {
     const html = renderCard(closing());
 

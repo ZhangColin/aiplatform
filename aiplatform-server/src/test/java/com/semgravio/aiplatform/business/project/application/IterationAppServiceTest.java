@@ -152,9 +152,22 @@ class IterationAppServiceTest {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), changed, text);
+                verifyRan(command);
             }
             return new AgentReply(command.runId(), "修正完成");
         });
+    }
+
+    /**
+     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：更新轨
+     * 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。零验证
+     * 场景的测试不调用本位。
+     */
+    private void verifyRan(AgentCommand command) {
+        if (!verificationFacts.hasRegistration(command.workspaceId())) {
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
+        }
     }
 
     /**
@@ -232,6 +245,9 @@ class IterationAppServiceTest {
         CountDownLatch releaseRun = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
             runInFlight.countDown();
             releaseRun.await();
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
@@ -315,6 +331,9 @@ class IterationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
                             "prompt", command.prompt(), "role", "CODER")));
@@ -324,6 +343,9 @@ class IterationAppServiceTest {
                 })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
                             "prompt", command.prompt(), "role", "CODER")));
@@ -423,6 +445,9 @@ class IterationAppServiceTest {
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
             if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
+            if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             }
             return new AgentReply(command.runId(), "已按意见修正");
@@ -492,12 +517,21 @@ class IterationAppServiceTest {
         Long projectId = persistedGeneratedProject("9910");
         List<Runnable> tracks = givenTrackQueued();
         // 首试正常返回但不调 finish_edit（脚本化「模型忘了收口」）→ 判未正常收口、
-        // 按既有重试口径续试；重试轮调了 → 正常收口
+        // 按既有重试口径续试；重试轮调了 → 正常收口（首试隔离 finish_edit 缺失：验证
+        // 已在场——#424 常开硬门不先于 finish_edit 事实拒）
         when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> new AgentReply(
-                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"))
+                .thenAnswer(invocation -> {
+                    AgentCommand first = invocation.getArgument(0);
+                    if (first.sessionId().startsWith("coder-")) {
+                        verifyRan(first);
+                    }
+                    return new AgentReply(first.runId(), "做完了");
+                })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "重试轮补上收口");
                     return new AgentReply(command.runId(), "修正完成");
                 });
@@ -515,6 +549,39 @@ class IterationAppServiceTest {
         // 异常的重试同一口径——run 失败为唯一失败终态）
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+    }
+
+    @Test
+    void given_zero_verification_fix_run_when_close_then_rejected_refed_back_then_verified_closes() {
+        // #424 更新轨同盖（片轻验常开）：修正 run 零验证收口被结构性拒绝——拒绝回执
+        // 喂回同 run（先于 finish_edit 事实消费，事实连续不丢），补验后正常收口
+        Long projectId = persistedGeneratedProject("9931");
+        List<Runnable> tracks = givenTrackQueued();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            // 首试零验证（finish_edit 已调但不验）、拒绝回执喂回后补验登记
+            if (command.prompt().contains("错误现场")
+                    && !verificationFacts.hasRegistration(command.workspaceId())) {
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.startFixRun(projectId, "修一下分页", null);
+        tracks.remove(0).run();
+
+        // 两试（零验证被拒 → 补验收口）：拒绝回执进同 run 现场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("错误现场")
+                .contains("验证在场未过")
+                .contains("验收要点");
+        // 补验后正常收口：无失败终态、轨道收工（下一场可再起跑）
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
@@ -583,6 +650,9 @@ class IterationAppServiceTest {
             List<FileChange> changes) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -767,6 +837,9 @@ class IterationAppServiceTest {
         AtomicInteger converseCalls = new AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -1000,6 +1073,9 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure, persistentFailure, persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "恢复轮完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });
@@ -1099,6 +1175,9 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure, persistentFailure, persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "合并续派场完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });

@@ -27,19 +27,19 @@ class ModelRoutingAppServiceTest {
     /** 路由开的 execute 座生效配置（无人工档覆盖、缺省策略——兜底＝枚举缺省快档）。 */
     private static AgentConfigAppService.EffectiveConfig routedDefault() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, false, true, null, null, null);
+                true, true, false, true, null, null, null, null, 3);
     }
 
     /** 路由开＋人工档覆盖（覆盖＝兜底基础档——路由判定仍可升强档）。 */
     private static AgentConfigAppService.EffectiveConfig routedWithOverride() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                true, true, true, true, null, null, null);
+                true, true, true, true, null, null, null, null, 3);
     }
 
     /** 路由关＋人工档覆盖（钉死位——人工档恒生效）。 */
     private static AgentConfigAppService.EffectiveConfig pinned() {
         return new AgentConfigAppService.EffectiveConfig("prompt", "pro",
-                true, true, true, false, null, null, null);
+                true, true, true, false, null, null, null, null, 3);
     }
 
     // ---------- 协同口径：路由判定优先、人工覆盖兜底；钉死位＝路由关 ----------
@@ -156,7 +156,7 @@ class ModelRoutingAppServiceTest {
     void given_routing_off_without_override_when_decide_then_enum_default_even_on_failure() {
         AgentConfigAppService.EffectiveConfig disabledDefault =
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, false, null, null, null);
+                        true, true, false, false, null, null, null, null, 3);
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(disabledDefault, 3, 2, 999, null);
         assertThat(selection.modelId()).isEqualTo("flash");
@@ -168,7 +168,7 @@ class ModelRoutingAppServiceTest {
         AgentConfigAppService.EffectiveConfig custom =
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true,
-                        "doubao-flagship", 5, 7);
+                        "doubao-flagship", 5, 7, null, 3);
         ModelRoutingAppService.TierSelection selection =
                 ModelRoutingAppService.decide(custom, 1, 1, 5, "用户能注册、登录、找回、浏览、下单、支付、退款");
         assertThat(selection.modelId()).isEqualTo("doubao-flagship");

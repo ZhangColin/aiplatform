@@ -503,6 +503,7 @@ public class GenerationAppService {
     private final SliceParallelExecutor sliceParallelExecutor;
     private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
     private final ProofOfOutputGate proofGate;
+    private final VerificationPresenceGate verificationPresence;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -564,6 +565,7 @@ public class GenerationAppService {
             SliceParallelExecutor sliceParallelExecutor,
             WorkspaceConvergenceAppService workspaceConvergenceAppService,
             ProofOfOutputGate proofGate,
+            VerificationPresenceGate verificationPresence,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -586,6 +588,7 @@ public class GenerationAppService {
         this.sliceParallelExecutor = sliceParallelExecutor;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
         this.proofGate = proofGate;
+        this.verificationPresence = verificationPresence;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1604,15 +1607,18 @@ public class GenerationAppService {
     }
 
     /**
-     * fork 片收口判据（#351 + #420）：fork 内 8081 可达 + 入口文件完整 + 产出证明
-     * （fork 基线即段起点——fork 差异口径）——只核验不落表不推预览。
+     * fork 片收口判据（#351 + #420 + #424）：fork 内 8081 可达 + 入口文件完整 + 产出
+     * 证明（fork 基线即段起点——fork 差异口径）+ 验证在场（fork 工作区内 verify 登记
+     * ——按工作区键各跑各的）——只核验不落表不推预览。
      */
     private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary,
             ProofOfOutputGate.Checking proof) {
         requireReachable(forkWorkspaceId);
         requireEntryFileComplete(forkWorkspaceId);
+        Map<String, Object> proofAnnotation = proof.proof();
+        verificationPresence.requirePresence(Long.toString(forkWorkspaceId));
         return CoderRunAttempts.ClosingJudgment.generation(summary)
-                .withProofOfOutput(proof.proof());
+                .withProofOfOutput(proofAnnotation);
     }
 
     /**
@@ -1745,10 +1751,12 @@ public class GenerationAppService {
     }
 
     /**
-     * 合并冲突子智能体裁决（#351 冲突裁决出口）：主工作区处于冲突/半应用态，新派一个
-     * 执行体 run 读两侧改动、按用户目标裁决合并，收口判据 = 主工作区 8081 探活 + 入口
-     * 文件完整。裁决成功即其收口成版落主工作区（默认 {@code run} 目标 = 项目主工作区）。
-     * 失败落 failSegment + run-failed（用户续跑兜底）。
+     * 合并冲突子智能体裁决（#351 冲突裁决出口；#424 验证在场同盖）：主工作区处于
+     * 冲突/半应用态，新派一个执行体 run 读两侧改动、按用户目标裁决合并，收口判据 =
+     * 主工作区 8081 探活 + 入口文件完整 + 验证在场（裁决后的主工作区系统也要过片
+     * 轻验——常开无豁免；裁决天然有产出，产出证明闸不适用 #420 口径）。裁决成功
+     * 即其收口成版落主工作区（默认 {@code run} 目标 = 项目主工作区）。失败落
+     * failSegment + run-failed（用户续跑兜底）。
      */
     private boolean resolveConflict(Project project, ForkSliceOutcome outcome) {
         Long projectId = project.getId();
@@ -1757,7 +1765,9 @@ public class GenerationAppService {
         String prompt = "合并切片「" + outcome.slice() + "」的代码时与主工作区现有代码产生冲突"
                 + "（工作区可能留有冲突标记、.rej 拒绝文件或半应用状态）。请先检查工作区现状，"
                 + "理解两侧改动意图，按用户目标裁决合并——保留两侧功能、消除重复定义、合并重复"
-                + "逻辑；不要重做已完成的其它切片，解决冲突后确认 8081 端口服务在跑、curl 可访问。"
+                + "逻辑；不要重做已完成的其它切片，解决冲突后确认 8081 端口服务在跑、curl 可访问，"
+                + "并把裁决后的合并结果委派 verify 子智能体验证（自报验收要点＝两侧功能在合并后"
+                + "都走得通）后收口。"
                 + NARRATION_CONVENTION;
         CoderRunAttempts.RunResult result = coderRunAttempts.run(project, resolveRunId, sessionId,
                 new CoderRunAttempts.Prompts(prompt,
@@ -1766,6 +1776,8 @@ public class GenerationAppService {
                 (attemptRunId, attemptChanges) -> {
                     requireReachable(project.getWorkspaceId());
                     requireEntryFileComplete(project.getWorkspaceId());
+                    verificationPresence.requirePresence(
+                            Long.toString(project.getWorkspaceId()));
                     return CoderRunAttempts.ClosingJudgment.generation(
                             "解决合并冲突：完成切片「" + outcome.slice() + "」");
                 },
@@ -1845,11 +1857,12 @@ public class GenerationAppService {
     }
 
     /**
-     * 单段收口判据（#104 生成轨道的平台侧检查点，#35/#339/#420）：8081 可达＋入口
-     * 文件完整＋产出证明（零 diff＋无「能力已存在」验证确认＝结构性拒绝——拒绝
-     * 回执经重试现场喂回执行体同 run 补做，判据核验次序＝探活 → 入口 → 产出证明
-     * → 副作用）才收口——converse 无异常不构成成功（智能体可能道歉式放弃 / 被
-     * maxIters 掐断）。核验不过抛异常，被共用件
+     * 单段收口判据（#104 生成轨道的平台侧检查点，#35/#339/#420/#424）：8081 可达＋
+     * 入口文件完整＋产出证明（零 diff＋无「能力已存在」验证确认＝结构性拒绝——拒绝
+     * 回执经重试现场喂回执行体同 run 补做，判据核验次序＝探活 → 入口 → 产出证明 →
+     * 验证在场 → 副作用）＋验证在场（#424 片轻验常开：本 run 无 report_verification
+     * 登记不准收口——verify 未跑/未报即拒，拒绝回执同形喂回）才收口——converse 无
+     * 异常不构成成功（智能体可能道歉式放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 verify 兜
      * （收口扩载 verification 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
@@ -1862,8 +1875,10 @@ public class GenerationAppService {
             ProofOfOutputGate.Checking proof) {
         requireReachable(project.getWorkspaceId());
         requireEntryFileComplete(project.getWorkspaceId());
-        // 产出证明（#420）在副作用（种子/预览/片落表）之前——拒绝不落任何收口面
+        // 产出证明（#420）与验证在场（#424 片轻验常开）在副作用（种子/预览/片落表）
+        // 之前——拒绝不落任何收口面
         Map<String, Object> proofAnnotation = proof.proof();
+        verificationPresence.requirePresence(Long.toString(project.getWorkspaceId()));
         if (markGenerated) {
             // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
             // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型

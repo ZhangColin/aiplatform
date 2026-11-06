@@ -419,6 +419,7 @@ export function ClosingCard({
               <>验证 {verification.total} 项通过</>
             )}
             {verification.rounds > 1 ? `（复验 ${verification.rounds} 轮）` : null}
+            {verification.budgetExhausted ? "（轮次预算已尽）" : null}
           </span>
         ) : null}
         <span className="flex items-center gap-1">

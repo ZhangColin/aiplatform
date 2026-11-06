@@ -115,6 +115,21 @@ class DesignProcessAppServiceTest {
     @Autowired
     private FinishEditFacts finishFixFacts;
 
+    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
+    @Autowired
+    private VerificationFacts verificationFacts;
+
+    /**
+     * 模拟 verify 子智能体轮内登记（#424 常开硬门缺省脚本位）：定稿触发的修正/
+     * 生成 run 收口须验证在场——coder 会话登记一次。
+     */
+    private void verifyRan(AgentCommand command) {
+        if (!verificationFacts.hasRegistration(command.workspaceId())) {
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("对齐点主径可走通（刷新仍在）", "browser", true, null)));
+        }
+    }
+
     @Autowired
     private BuildPlanFacts buildPlanFacts;
 
@@ -207,6 +222,7 @@ class DesignProcessAppServiceTest {
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), true, "已按定稿稿对齐");
+                verifyRan(command); // #424 常开硬门：修正/生成 run 收口须验证在场
                 return new AgentReply(command.runId(), "已对齐", null, List.of());
             }
             if (command.sessionId().startsWith("main-")

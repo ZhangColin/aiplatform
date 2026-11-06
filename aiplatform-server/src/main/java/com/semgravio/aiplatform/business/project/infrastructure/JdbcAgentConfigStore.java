@@ -25,17 +25,19 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
     private static final String FIND_SQL = """
             SELECT agent_key, system_prompt, model_id, web_search_enabled, fetch_url_enabled,
                    routing_enabled, routing_strong_model_id, routing_file_count_threshold,
-                   routing_slice_feature_threshold, operator_id, operator_name, updated_at
+                   routing_slice_feature_threshold, verify_model_id, verify_round_budget,
+                   operator_id, operator_name, updated_at
             FROM prj_agent_configs WHERE agent_key = ?
             """;
 
-    /** 整行 upsert：值面八件＋操作者两列；冲突分支全量重写（覆盖态无部分更新语义）。 */
+    /** 整行 upsert：值面全量＋操作者两列；冲突分支全量重写（覆盖态无部分更新语义）。 */
     private static final String SAVE_SQL = """
             INSERT INTO prj_agent_configs
                 (agent_key, system_prompt, model_id, web_search_enabled, fetch_url_enabled,
                  routing_enabled, routing_strong_model_id, routing_file_count_threshold,
-                 routing_slice_feature_threshold, operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 routing_slice_feature_threshold, verify_model_id, verify_round_budget,
+                 operator_id, operator_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (agent_key) DO UPDATE SET
                 system_prompt = EXCLUDED.system_prompt,
                 model_id = EXCLUDED.model_id,
@@ -45,6 +47,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 routing_strong_model_id = EXCLUDED.routing_strong_model_id,
                 routing_file_count_threshold = EXCLUDED.routing_file_count_threshold,
                 routing_slice_feature_threshold = EXCLUDED.routing_slice_feature_threshold,
+                verify_model_id = EXCLUDED.verify_model_id,
+                verify_round_budget = EXCLUDED.verify_round_budget,
                 operator_id = EXCLUDED.operator_id,
                 operator_name = EXCLUDED.operator_name,
                 updated_at = CURRENT_TIMESTAMP
@@ -55,11 +59,13 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 (id, agent_key, old_system_prompt, old_model_id, old_web_search_enabled,
                  old_fetch_url_enabled, old_routing_enabled, old_routing_strong_model_id,
                  old_routing_file_count_threshold, old_routing_slice_feature_threshold,
+                 old_verify_model_id, old_verify_round_budget,
                  new_system_prompt, new_model_id, new_web_search_enabled,
                  new_fetch_url_enabled, new_routing_enabled, new_routing_strong_model_id,
                  new_routing_file_count_threshold, new_routing_slice_feature_threshold,
+                 new_verify_model_id, new_verify_round_budget,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     /** 倒序最近先（id 陪排——同秒多痕不乱序）。 */
@@ -67,10 +73,12 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
             SELECT id, agent_key, old_system_prompt, old_model_id, old_web_search_enabled,
                    old_fetch_url_enabled, old_routing_enabled, old_routing_strong_model_id,
                    old_routing_file_count_threshold, old_routing_slice_feature_threshold,
+                   old_verify_model_id, old_verify_round_budget,
                    new_system_prompt, new_model_id,
                    new_web_search_enabled, new_fetch_url_enabled, new_routing_enabled,
                    new_routing_strong_model_id, new_routing_file_count_threshold,
-                   new_routing_slice_feature_threshold, operator_id, operator_name,
+                   new_routing_slice_feature_threshold, new_verify_model_id,
+                   new_verify_round_budget, operator_id, operator_name,
                    created_at
             FROM prj_agent_config_traces WHERE agent_key = ?
             ORDER BY created_at DESC, id DESC
@@ -95,6 +103,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 config.modelId(), config.webSearchEnabled(), config.fetchUrlEnabled(),
                 config.routingEnabled(), config.routingStrongModelId(),
                 config.routingFileCountThreshold(), config.routingSliceFeatureThreshold(),
+                config.verifyModelId(), config.verifyRoundBudget(),
                 config.operatorId(), config.operatorName());
     }
 
@@ -104,10 +113,12 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.oldSystemPrompt(), trace.oldModelId(), trace.oldWebSearchEnabled(),
                 trace.oldFetchUrlEnabled(), trace.oldRoutingEnabled(),
                 trace.oldRoutingStrongModelId(), trace.oldRoutingFileCountThreshold(),
-                trace.oldRoutingSliceFeatureThreshold(), trace.newSystemPrompt(), trace.newModelId(),
+                trace.oldRoutingSliceFeatureThreshold(), trace.oldVerifyModelId(),
+                trace.oldVerifyRoundBudget(), trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingSliceFeatureThreshold(),
+                trace.newVerifyModelId(), trace.newVerifyRoundBudget(),
                 trace.operatorId(), trace.operatorName());
     }
 
@@ -124,6 +135,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getBoolean("routing_enabled"), rs.getString("routing_strong_model_id"),
                 integerOrNull(rs, "routing_file_count_threshold"),
                 integerOrNull(rs, "routing_slice_feature_threshold"),
+                rs.getString("verify_model_id"), integerOrNull(rs, "verify_round_budget"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
@@ -136,11 +148,13 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getBoolean("old_routing_enabled"), rs.getString("old_routing_strong_model_id"),
                 integerOrNull(rs, "old_routing_file_count_threshold"),
                 integerOrNull(rs, "old_routing_slice_feature_threshold"),
+                rs.getString("old_verify_model_id"), integerOrNull(rs, "old_verify_round_budget"),
                 rs.getString("new_system_prompt"), rs.getString("new_model_id"),
                 rs.getBoolean("new_web_search_enabled"), rs.getBoolean("new_fetch_url_enabled"),
                 rs.getBoolean("new_routing_enabled"), rs.getString("new_routing_strong_model_id"),
                 integerOrNull(rs, "new_routing_file_count_threshold"),
                 integerOrNull(rs, "new_routing_slice_feature_threshold"),
+                rs.getString("new_verify_model_id"), integerOrNull(rs, "new_verify_round_budget"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }

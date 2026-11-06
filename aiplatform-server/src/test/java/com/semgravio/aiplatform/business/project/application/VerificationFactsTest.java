@@ -83,6 +83,33 @@ class VerificationFactsTest {
         assertThat(facts.consume("2").lastRound().get(0).name()).isEqualTo("乙项");
     }
 
+    // ---------- 在场窥读口（#424 片轻验常开硬门＋单场轮次预算） ----------
+
+    @Test
+    void given_no_registration_when_presence_peek_then_false_and_null_snapshot() {
+        // #424 验证在场硬门判据：无登记（verify 未跑/未报）＝零验证——窥读不消费
+        // （收口统计仍由 consume 取走，两读不互斥）
+        assertThat(facts.hasRegistration("42")).isFalse();
+        assertThat(facts.peek("42")).isNull();
+    }
+
+    @Test
+    void given_registration_when_presence_peek_then_true_rounds_counted_not_consumed() {
+        // 修复—复验环逐轮登记：在场＝true、轮次累计（预算判据源）——窥读后收口
+        // 消费照常取走全量事实
+        facts.record("42", List.of(
+                new VerificationFacts.Check("留言提交", "browser", false, "点了无反应")));
+        facts.record("42", List.of(
+                new VerificationFacts.Check("留言提交", "browser", true, null)));
+
+        assertThat(facts.hasRegistration("42")).isTrue();
+        assertThat(facts.peek("42").rounds()).isEqualTo(2);
+
+        VerificationFacts.Facts consumed = facts.consume("42");
+        assertThat(consumed.rounds()).isEqualTo(2);
+        assertThat(facts.hasRegistration("42")).isFalse();
+    }
+
     // ---------- 「能力已存在」确认读口（#420 空转片豁免判据） ----------
 
     @Test

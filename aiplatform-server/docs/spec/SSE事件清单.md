@@ -107,15 +107,19 @@ closing: {
                                    # edit 的 replace_all 多命中按一次计、命令行改造的文件不进清单
                                    # （真 diff 归版本层 #91 容器 git）——已知取舍，非精确 diff
   durationMs: 183420               # 轮末统计·时长（首试起跑到收口；文件数/变更行数由 files 派生）
-  verification: {                  # 可缺省——验证统计（#352 独立验证子智能体的收尾统计）：
-    total: 5,                      # 事实源＝verify 子智能体（source=verify）经
-    failed: 1,                     # report_verification 工具登记的逐项结果（平台从工具调用
-    faces: { browser: 2, db: 2, log: 1 },  # 事实观测，不解析自由文本）：total/failed＝末轮
-    rounds: 2,                     # 总项数与未过数、faces＝末轮三面分布（浏览器点流程/查库/
-    failedItems: ["留言提交"]      # 看日志）、rounds＝本场验证轮数（修复—复验环如实，1＝
-  }                                # 一轮过）、failedItems＝末轮未过项名（修不了如实标注的
-                                   # 落点）。验证子智能体未跑/未登记不携带——收尾卡缺省不出
-                                   # 验证统计行；逐项 ✅/❌ 明细与证据在过程播报（解说段）里
+  verification: {                  # 验证统计（#352 独立验证子智能体；#424 片轻验常开后编码
+    total: 5,                      # run 收口必在场——无验证登记不准收口；设计会话不涉及）：
+    failed: 1,                     # 事实源＝verify 子智能体（source=verify）经
+    faces: { browser: 2, db: 2, log: 1 },  # report_verification 工具登记的逐项结果（平台从
+    rounds: 2,                     # 工具调用事实观测，不解析自由文本）：total/failed＝末轮
+    failedItems: ["留言提交"],     # 总项数与未过数、faces＝末轮三面分布（browser＝浏览器
+    budgetExhausted: true          # 主径〔验证主轴，含刷新一次验真落库〕/db＝按需下钻/
+  }                                # log＝失败定位——#424 载荷口径，面键不变）、rounds＝本场
+                                   # 验证轮数（修复—复验环如实，1＝一轮过）、failedItems＝
+                                   # 末轮未过项名（修不了如实标注的落点）、budgetExhausted＝
+                                   # 轮次预算用尽仍未过（可缺省——达预算停止修复—复验的
+                                   # 如实标注，预算运营面可调、缺省 3）。逐项 ✅/❌ 明细与
+                                   # 证据在过程播报（解说段）里
   version:     "a1b2c3d4e5f6..."   # 可缺省——版本锚定（#91）：收口自动成版的 commit hash
                                    # （容器内 git，主题 = 摘要、Run-Id trailer 锚定收尾卡）；
                                    # 成版失败（git 不可用等）本轮缺 version 键——run 收口不受影响；

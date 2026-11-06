@@ -36,15 +36,18 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceLayout;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
+import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationPlanJourney;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.DesignItemStatus;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.ProjectFiles;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
 import com.semgravio.aiplatform.business.project.domain.repository.DesignItemRepository;
+import com.semgravio.aiplatform.business.project.domain.repository.GenerationPlanJourneyRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.GenerationSegmentRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
@@ -487,6 +490,7 @@ public class GenerationAppService {
     private final EventsAppService eventsAppService;
     private final CodingRunTrack codingRunTrack;
     private final GenerationSegmentRepository generationSegments;
+    private final GenerationPlanJourneyRepository generationPlanJourneys;
     private final DesignItemRepository designItems;
     private final TransactionTemplate transactionTemplate;
     private final MainAgentAppService mainAgentAppService;
@@ -546,7 +550,9 @@ public class GenerationAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             CoderRunAttempts coderRunAttempts, AgentEventBridge eventBridge,
             EventsAppService eventsAppService, CodingRunTrack codingRunTrack,
-            GenerationSegmentRepository generationSegments, DesignItemRepository designItems,
+            GenerationSegmentRepository generationSegments,
+            GenerationPlanJourneyRepository generationPlanJourneys,
+            DesignItemRepository designItems,
             TransactionTemplate transactionTemplate,
             @Lazy MainAgentAppService mainAgentAppService,
             ConversationHistoryAppService conversationHistory,
@@ -567,6 +573,7 @@ public class GenerationAppService {
         this.eventsAppService = eventsAppService;
         this.codingRunTrack = codingRunTrack;
         this.generationSegments = generationSegments;
+        this.generationPlanJourneys = generationPlanJourneys;
         this.designItems = designItems;
         this.transactionTemplate = transactionTemplate;
         this.mainAgentAppService = mainAgentAppService;
@@ -864,6 +871,11 @@ public class GenerationAppService {
      * {@link BuildPlan}——片行 prd 锚与项目 {@code prd_produced_at} 一致（PRD 未
      * 演进）才有效；表空或锚不一致（PRD 已修订，旧计划是过期结构）返回 null
      * （计划缺失/过期）。锚取自库读回值（与比对值同为库回读形，等值比较稳定）。
+     *
+     * <p><b>结构化扩展读回（#423）</b>：片行 {@code size_label} 逐片还原（全未设
+     * ＝V49 前旧片行的空集口径，存量不回补；部分未设按构造不可达、防御归空）；核心
+     * 旅程自计划旅程表还原（锚门同片行口径——{@link GenerationPlanJourney#planMatchesPrd}，
+     * 同事务写、理论不可达的防御边角，不一致按未设处理）。</p>
      */
     private BuildPlan resolvePlan(Project project, BuildPlan handed) {
         if (handed != null) {
@@ -878,6 +890,7 @@ public class GenerationAppService {
         List<String> descriptions =
                 sliceRows.stream().map(GenerationSegment::getDescription).toList();
         List<Set<Integer>> dependsOn = new ArrayList<>(sliceRows.size());
+        List<SliceSizeLabel> sizes = new ArrayList<>(sliceRows.size());
         for (int i = 0; i < sliceRows.size(); i++) {
             if (sliceRows.get(i).getDependsOn() == null) {
                 // 存量旧片行（V41 前，depends_on 未设）：恢复全串行语义——依赖前一片
@@ -885,8 +898,21 @@ public class GenerationAppService {
             } else {
                 dependsOn.add(sliceRows.get(i).dependsOnOrds());
             }
+            sizes.add(sliceRows.get(i).getSizeLabel());
         }
-        return new BuildPlan(descriptions, dependsOn);
+        if (sizes.contains(null)) {
+            sizes = List.of(); // 全未设（存量）＝空集；部分未设不可达、防御归空
+        }
+        List<GenerationPlanJourney> journeyRows =
+                generationPlanJourneys.findByProjectIdOrderByOrdAsc(project.getId());
+        List<BuildPlan.CoreJourney> journeys =
+                GenerationPlanJourney.planMatchesPrd(journeyRows, project.getPrdProducedAt())
+                        ? journeyRows.stream()
+                                .map(journey -> new BuildPlan.CoreJourney(journey.getRole(),
+                                        journey.getEntry(), journey.getKeyActions()))
+                                .toList()
+                        : List.of();
+        return new BuildPlan(descriptions, dependsOn, journeys, sizes);
     }
 
     /**
@@ -895,6 +921,11 @@ public class GenerationAppService {
      * 不一致、计划不沿用）。短事务原子替换（旧片不残留；删后先冲刷再插——JPA 同
      * 事务冲刷序先插后删，不冲刷会撞 (project_id, ord) 唯一键）；失败如实上抛（无
      * 轨道事实不空跑生成）。落库成功清补产账（补产已兑现）。
+     *
+     * <p><b>结构化扩展同批落库（#423）</b>：每片规模标签随片行落 {@code size_label}
+     * （封闭集 token；计划未设＝NULL）；核心旅程清单逐条落计划旅程表（同锚同事务）
+     * ——旅程行同「整组替换」语义，旧旅程不残留。两件与计划同生命周期（PRD 演进
+     * 即随重产整组换新）。
      *
      * <p><b>存量首录对照标已完片（#223）</b>：表内无片行 = 往次生成早于轨道表——
      * 补产计划落库时对照项目收尾卡（已收口成果，git 收口 commit 经 Run-Id trailer
@@ -910,14 +941,22 @@ public class GenerationAppService {
         transactionTemplate.executeWithoutResult(status -> {
             generationSegments.deleteByProjectId(projectId);
             generationSegments.flush();
+            generationPlanJourneys.deleteByProjectId(projectId);
+            generationPlanJourneys.flush();
             GenerationSegment stage0 = GenerationSegment.pending(projectId, 0, STAGE0_TITLE, prdAnchor);
             markLegacyClosed(stage0, legacyClosed);
             generationSegments.save(stage0);
             for (int index = 0; index < plan.slices().size(); index++) {
                 GenerationSegment segment = GenerationSegment.pending(projectId, index + 1,
-                        plan.slices().get(index), prdAnchor, plan.dependsOn(index));
+                        plan.slices().get(index), prdAnchor, plan.dependsOn(index),
+                        plan.sliceSize(index));
                 markLegacyClosed(segment, legacyClosed);
                 generationSegments.save(segment);
+            }
+            for (int index = 0; index < plan.coreJourneys().size(); index++) {
+                BuildPlan.CoreJourney journey = plan.coreJourneys().get(index);
+                generationPlanJourneys.save(GenerationPlanJourney.of(projectId, index + 1,
+                        journey.role(), journey.entry(), journey.keyActions(), prdAnchor));
             }
         });
         if (!legacyClosed.isEmpty()) {

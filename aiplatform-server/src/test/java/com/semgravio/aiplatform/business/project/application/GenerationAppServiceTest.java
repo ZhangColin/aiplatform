@@ -74,6 +74,7 @@ import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegm
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
 import com.semgravio.aiplatform.business.project.domain.enums.ConversationEntryKind;
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationState;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.enums.ProjectEndpointType;
 import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -181,6 +182,7 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_design_items");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
         jdbcTemplate.update("DELETE FROM prj_agent_configs");
@@ -248,6 +250,21 @@ class GenerationAppServiceTest {
                 "SELECT ord, description, status, run_id FROM prj_generation_segments"
                         + " WHERE project_id = ? ORDER BY ord",
                 projectId);
+    }
+
+    /** 计划旅程行读口（#423 断言面：role / entry / key_actions / prd_produced_at）。 */
+    private List<Map<String, Object>> journeyRows(Long projectId) {
+        return jdbcTemplate.queryForList(
+                "SELECT role, entry, key_actions, prd_produced_at"
+                        + " FROM prj_generation_plan_journeys WHERE project_id = ? ORDER BY ord",
+                projectId);
+    }
+
+    /** 项目 PRD 版本锚读口（锚一致性断言的独立事实源）。 */
+    private java.sql.Timestamp projectPrdAnchor(Long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId);
     }
 
     // ---------- 生成轨道（#104：阶段 0 先起服 + 纵向切片逐段） ----------
@@ -1084,6 +1101,81 @@ class GenerationAppServiceTest {
                 .isEqualTo(jdbcTemplate.queryForObject(
                         "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
                         java.sql.Timestamp.class, projectId));
+    }
+
+    @Test
+    void given_plan_with_journeys_and_sizes_when_recorded_then_both_persisted_with_prd_anchor() {
+        // #423 AC② 两件落库随 PRD 版本走：核心旅程行落计划旅程表（锚 = 项目
+        // prd_produced_at）、每片规模标签落片行 size_label（阶段 0 恒无标签）；
+        // planOf 读回全量四件（表即事实源——进程重启不丢）
+        Long projectId = persistedProject("9843");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        BuildPlan plan = new BuildPlan(
+                List.of("用户能注册登录", "用户能下单支付"),
+                BuildPlan.sequentialDependencies(List.of("用户能注册登录", "用户能下单支付")),
+                List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
+                List.of(SliceSizeLabel.SMALL, SliceSizeLabel.LARGE));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 片行规模标签：逐片落 code（1=小 2=中 3=大），阶段 0 无标签
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT size_label FROM prj_generation_segments WHERE project_id = ? ORDER BY ord",
+                projectId))
+                .extracting(row -> row.get("size_label"))
+                .containsExactly(null, 1, 3);
+        // 旅程行：三要素逐条落、锚 = 项目 PRD 版本锚（同片行锚）
+        List<Map<String, Object>> journeys = journeyRows(projectId);
+        assertThat(journeys).hasSize(1);
+        assertThat(journeys.get(0)).containsEntry("role", "买家")
+                .containsEntry("entry", "首页")
+                .containsEntry("key_actions", "注册登录→浏览商品→下单支付");
+        assertThat((java.sql.Timestamp) journeys.get(0).get("prd_produced_at"))
+                .isEqualTo(projectPrdAnchor(projectId));
+        // 读回（轨道表还原 BuildPlan 全量四件）
+        assertThat(appService.planOf(projectId)).isEqualTo(plan);
+    }
+
+    @Test
+    void given_prd_revised_when_replan_then_journeys_and_sizes_replaced_no_residue() {
+        // #423 AC② 演进重产：PRD 演进（锚换新）后重产计划——旅程行整组替换（旧旅程
+        // 无残留）、片行标签随片行整组替换重落（旧标签无残留）、锚 = 修订后 PRD 版本
+        Long projectId = persistedProject("9844");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenThrow(new IllegalStateException("起服失败"));
+
+        appService.dispatchGenerationOnTurnClose(projectId, new BuildPlan(
+                List.of("旧切片一", "旧切片二"),
+                BuildPlan.sequentialDependencies(List.of("旧切片一", "旧切片二")),
+                List.of(new BuildPlan.CoreJourney("旧角色", "旧首页", "旧动作串")),
+                List.of(SliceSizeLabel.SMALL, SliceSizeLabel.SMALL)));
+        revisePrd(projectId);
+
+        BuildPlan replan = new BuildPlan(
+                List.of("新切片一", "新切片二", "新切片三"),
+                BuildPlan.sequentialDependencies(List.of("新切片一", "新切片二", "新切片三")),
+                List.of(new BuildPlan.CoreJourney("新角色", "新首页", "新动作串"),
+                        new BuildPlan.CoreJourney("新角色二", "新后台", "新动作串二")),
+                List.of(SliceSizeLabel.MEDIUM, SliceSizeLabel.LARGE, SliceSizeLabel.LARGE));
+        appService.dispatchGenerationOnTurnClose(projectId, replan);
+
+        // 旅程行整组替换：只含新计划旅程（旧旅程无残留）、锚 = 修订后 PRD 版本锚
+        List<Map<String, Object>> journeys = journeyRows(projectId);
+        assertThat(journeys).extracting(journey -> journey.get("role"))
+                .containsExactly("新角色", "新角色二");
+        assertThat((java.sql.Timestamp) journeys.get(0).get("prd_produced_at"))
+                .isEqualTo(projectPrdAnchor(projectId));
+        // 片行标签随整组替换重落（旧标签无残留；阶段 0 恒无标签；code 口径）
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT size_label FROM prj_generation_segments WHERE project_id = ? ORDER BY ord",
+                projectId))
+                .extracting(row -> row.get("size_label"))
+                .containsExactly(null, 2, 3, 3);
+        // 读回 = 新计划全量（旧两件不沿用）
+        assertThat(appService.planOf(projectId)).isEqualTo(replan);
     }
 
     @Test

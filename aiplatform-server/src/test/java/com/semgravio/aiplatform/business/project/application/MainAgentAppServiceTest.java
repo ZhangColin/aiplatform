@@ -1077,6 +1077,19 @@ class MainAgentAppServiceTest {
     }
 
     @Test
+    void given_build_plan_request_prompt_when_inspect_then_structured_extension_required() {
+        // #423 AC③ 计划补产兜底同要两件：补产指令面与主智能体工作协议（第 5 条
+        // saveBuildPlan 契约）对 coreJourneys／sliceSizes 一并要求——工具契约是
+        // 硬门（缺件即拒），prompt 是模型知道要产出的指令面
+        assertThat(MainAgentAppService.BUILD_PLAN_REQUEST_PROMPT)
+                .contains("coreJourneys")
+                .contains("sliceSizes");
+        assertThat(AgentProfile.MAIN.systemPrompt())
+                .contains("coreJourneys")
+                .contains("sliceSizes");
+    }
+
+    @Test
     void given_generation_in_flight_when_opinion_turn_closes_then_dispatch_skipped() {
         // 场景矩阵（#101 在途守卫；#332 生成加门后取「已确认版本在场＋在途」形——门
         // 放行才走到在途守卫）：生成进行中，意见轮收口静默跳过（不派不报错）——已产出

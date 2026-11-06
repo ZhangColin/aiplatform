@@ -107,6 +107,7 @@ public class IterationAppService {
     private final DemoVersionAppService demoVersionAppService;
     private final PrdDraftBaseline prdDraftBaseline;
     private final DemoSeedAppService demoSeed;
+    private final ProofOfOutputGate proofGate;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -125,7 +126,8 @@ public class IterationAppService {
             DesignSpecAppService designSpecs,
             DemoVersionAppService demoVersionAppService,
             PrdDraftBaseline prdDraftBaseline,
-            DemoSeedAppService demoSeed) {
+            DemoSeedAppService demoSeed,
+            ProofOfOutputGate proofGate) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -137,6 +139,7 @@ public class IterationAppService {
         this.demoVersionAppService = demoVersionAppService;
         this.prdDraftBaseline = prdDraftBaseline;
         this.demoSeed = demoSeed;
+        this.proofGate = proofGate;
     }
 
     /**
@@ -292,12 +295,16 @@ public class IterationAppService {
                         .map(version -> version.getContent()).orElse(null);
                 CoderRunAttempts.RunResult result;
                 try {
+                    // 产出证明闸（#420 更新轨同盖）：本场判定件——起跑捕获段起点
+                    //（工作区 HEAD），拒绝史跨尝试累计
+                    ProofOfOutputGate.Checking proof =
+                            proofGate.forRun(project.getWorkspaceId());
                     result = coderRunAttempts.run(project, runId,
                             fixSession(projectId, runId),
                             new CoderRunAttempts.Prompts(fixRunPrompt(handoff, baselinePrd),
                                     IterationAppService::fixRetryPrompt),
                             (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                    currentHandoff, prdVersionNo),
+                                    currentHandoff, prdVersionNo, proof),
                             "fix", true, CoderRunAttempts.RunSeat.executor(),
                             RunHeading.titled(FIX_TITLE));
                 }
@@ -367,9 +374,13 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46 + #88 判定行）：以 finish_edit 工具事实为准——无事实 = run 未
-     * 正常收口，抛出即该次尝试失败（走共用尝试环的静默重试/终态，与生成 8081 核验
-     * 同口径）；事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
+     * 修正收口（#46 + #88 判定行 + #420 产出证明）：以 finish_edit 工具事实为准
+     * ——无事实 = run 未正常收口，抛出即该次尝试失败（走共用尝试环的静默重试/终态
+     * ，与生成 8081 核验同口径）；产出证明闸（#420 更新轨同盖）先于 finish_edit
+     * 事实消费——零 diff＋无「能力已存在」确认＝结构性拒绝（拒绝回执喂回执行体
+     * 同 run 补做；拒绝不消费 finish_edit 事实，重试轮事实连续），changed=false
+     * 的合法收口须有豁免依据（验证确认能力已存在）或本场实有改动。事实在即返回
+     * 收口判定的权威事实——系统改没改 = finish_edit 的
      * changed + 说明，PRD 改没改 = 本场交接物各轮的修订说明（null = 未修订轮；
      * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
      * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
@@ -381,7 +392,8 @@ public class IterationAppService {
      * 收口补位，markGenerated 同口径）。</p>
      */
     private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
-            FixHandoff handoff, Integer prdVersionNo) {
+            FixHandoff handoff, Integer prdVersionNo, ProofOfOutputGate.Checking proof) {
+        Map<String, Object> proofAnnotation = proof.proof();
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
@@ -414,6 +426,8 @@ public class IterationAppService {
                 prdNotes.isEmpty() ? null : String.join("；", prdNotes),
                 fact.changed(),
                 fact.text())
+                // 产出证明判别标注（#420：空转拒绝史／豁免依据——正常干活收口 null 不携带）
+                .withProofOfOutput(proofAnnotation)
                 // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
                 // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
                 .withDesignLint(designSpecs.lintClosingPayload(project));

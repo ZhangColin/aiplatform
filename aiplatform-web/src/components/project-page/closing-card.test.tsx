@@ -397,3 +397,44 @@ describe("ClosingCard · 按稿对齐（#296 设计规范扫描）", () => {
     expect(html).not.toContain("按稿对齐");
   });
 });
+
+describe("ClosingCard · 产出证明判别标注（#420 空转片防呆）", () => {
+  it("豁免收口：如实呈现豁免依据（验证确认「能力已存在」）", () => {
+    const html = renderCard(closing({
+      systemChanged: false,
+      systemNote: "该能力系统已具备",
+      files: [],
+      proofOfOutput: {
+        exempted: true,
+        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
+      },
+    }));
+    expect(html).toContain("能力已存在");
+    expect(html).toContain("预约列表倒序");
+  });
+
+  it("空转拒绝史：曾 N 次被拒、补做后收口——纠偏过程如实", () => {
+    const html = renderCard(closing({
+      proofOfOutput: { idleRejections: 2 },
+    }));
+    expect(html).toContain("2 次空转拒绝");
+  });
+
+  it("拒绝史与豁免依据并存：两行事实都出（先被拒、后补验证确认豁免）", () => {
+    const html = renderCard(closing({
+      proofOfOutput: {
+        idleRejections: 1,
+        exempted: true,
+        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
+      },
+    }));
+    expect(html).toContain("1 次空转拒绝");
+    expect(html).toContain("预约列表倒序");
+  });
+
+  it("正常干活收口（无标注）：不出产出证明行——真·薄片不误伤的呈现面", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("空转拒绝");
+    expect(html).not.toContain("能力已存在");
+  });
+});

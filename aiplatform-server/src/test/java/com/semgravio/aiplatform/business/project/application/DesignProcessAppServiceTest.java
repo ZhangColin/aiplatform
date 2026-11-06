@@ -187,6 +187,10 @@ class DesignProcessAppServiceTest {
                     if (command.contains("git commit")) {
                         return new ExecResultResponse("abc123def456\n", "", 0);
                     }
+                    if (command.contains("git diff --name-only")) {
+                        // #420 产出证明探针：脚本化的构建/更新 run 干了活（有产出）
+                        return new ExecResultResponse("src/app/page.tsx\n", "", 0);
+                    }
                     return new ExecResultResponse("", "", 0);
                 });
     }

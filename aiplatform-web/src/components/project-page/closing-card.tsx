@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BadgeCheck,
   Check,
   ChevronDown,
   Clock3,
@@ -29,7 +30,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
-import type { ClosingDraft, DesignLintClosing, WorkClosing } from "@/lib/store/chat";
+import type {
+  ClosingDraft,
+  DesignLintClosing,
+  ProofOfOutputClosing,
+  WorkClosing,
+} from "@/lib/store/chat";
 import { rawFileUrl } from "@/lib/projects/files";
 import { cn } from "@/lib/utils";
 
@@ -199,6 +205,25 @@ function DesignLintArea({ lint }: { lint: DesignLintClosing }) {
 }
 
 /**
+ * 产出证明判别标注（#420 空转片防呆的感知面）：豁免依据（验证确认「能力已存在」
+ * 的合法收口——活已被前片干完的薄片）与空转拒绝史（曾 N 次被拒、补做后收口）
+ * 如实呈现——事后审计每片「干没干活、依据是什么」；正常干活收口（diff＞0 且无
+ * 拒绝史）不携带不出。
+ */
+function ProofArea({ proof }: { proof: ProofOfOutputClosing }) {
+  return (
+    <div className="mt-1.5 flex items-start gap-2 text-[13px] text-muted-foreground">
+      <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />
+      <span>
+        {proof.exempted ? <>豁免收口——{proof.exemptionBasis ?? "验证确认「能力已存在」"}</> : null}
+        {proof.exempted && proof.idleRejections ? "；" : null}
+        {proof.idleRejections ? <>曾 {proof.idleRejections} 次空转拒绝，补做后收口</> : null}
+      </span>
+    </div>
+  );
+}
+
+/**
  * 定稿后续触发行（#291 定稿收尾卡）：drafts 携 triggers（仅定稿收尾卡——显式
  * 动作收口后的分岔事实：已按稿对齐/已开始构建/下单开放）即出「已触发」一行；
  * 候选产出轮（首产/改稿）不携带、零呈现。定稿稿行在卡内即「锁定那张」的叙事
@@ -253,6 +278,8 @@ export function ClosingCard({
   const verification = closing.verification;
   // 设计规范扫描（#296）：可缺省——带规范项目编码 run 携带（「按稿对齐」行）
   const designLint = closing.designLint;
+  // 产出证明判别标注（#420）：可缺省——豁免收口/空转拒绝史才携带（正常干活不出）
+  const proof = closing.proofOfOutput;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
   // 版本控件让位）——空数组（畸形载荷，后端收口判据＝有新稿、正常路径非空）也走
   // 设计形态如实出「本轮 0 稿」，不闪编码 run 语料
@@ -359,6 +386,10 @@ export function ClosingCard({
           {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
               叙事行＋违规清单；设计会话不携带不出 */}
           {designLint ? <DesignLintArea lint={designLint} /> : null}
+
+          {/* 产出证明判别标注（#420）：豁免依据/空转拒绝史的如实呈现；正常干活
+              收口不携带不出 */}
+          {proof ? <ProofArea proof={proof} /> : null}
         </>
       )}
 

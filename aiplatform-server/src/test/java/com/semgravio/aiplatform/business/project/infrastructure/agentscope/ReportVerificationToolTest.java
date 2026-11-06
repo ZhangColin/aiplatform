@@ -101,4 +101,32 @@ class ReportVerificationToolTest {
                 .isEqualTo(ToolResultState.ERROR);
         assertThat(facts.consume("42")).isNull();
     }
+
+    // ---------- 「能力已存在」确认形态（#420 空转片豁免路径） ----------
+
+    @Test
+    void given_confirmation_when_call_then_recorded_existing_and_queryable() {
+        // #420：verify 确认能力已存在（活已被前片干完）——existing=true（须 ok=true）
+        // 登记为平台事实，收口闸的豁免读口可查；未带 existing 的项照旧 false
+        ToolResultState state = call(Map.of("checks", List.of(
+                Map.of("name", "留言提交", "face", "browser", "ok", true, "existing", true),
+                Map.of("name", "首页可访问", "face", "browser", "ok", true))));
+
+        assertThat(state).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(facts.capabilityExistsConfirmation("42")).isEqualTo("留言提交");
+        VerificationFacts.Facts consumed = facts.consume("42");
+        assertThat(consumed.lastRound()).containsExactly(
+                new VerificationFacts.Check("留言提交", "browser", true, null, true),
+                new VerificationFacts.Check("首页可访问", "browser", true, null));
+    }
+
+    @Test
+    void given_existing_true_but_failed_when_call_then_error_and_nothing_recorded() {
+        // 确认即通过：existing=true 须 ok=true——「已存在但未过」是矛盾态，报错引导
+        // 改正、整轮不登记（不静默把矛盾态入账）
+        assertThat(call(Map.of("checks", List.of(
+                Map.of("name", "项", "face", "browser", "ok", false, "existing", true)))))
+                .isEqualTo(ToolResultState.ERROR);
+        assertThat(facts.consume("42")).isNull();
+    }
 }

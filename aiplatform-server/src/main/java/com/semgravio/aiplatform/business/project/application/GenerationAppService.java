@@ -478,6 +478,7 @@ public class GenerationAppService {
     private final ProjectVersionAppService versions;
     private final SliceParallelExecutor sliceParallelExecutor;
     private final WorkspaceConvergenceAppService workspaceConvergenceAppService;
+    private final ProofOfOutputGate proofGate;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -536,6 +537,7 @@ public class GenerationAppService {
             ProjectVersionAppService versions,
             SliceParallelExecutor sliceParallelExecutor,
             WorkspaceConvergenceAppService workspaceConvergenceAppService,
+            ProofOfOutputGate proofGate,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -556,6 +558,7 @@ public class GenerationAppService {
         this.versions = versions;
         this.sliceParallelExecutor = sliceParallelExecutor;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
+        this.proofGate = proofGate;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1101,6 +1104,8 @@ public class GenerationAppService {
             // 尝试环耗尽后留账＋干净回退本段起点、新会话重跑一轮（坏现场不叠修）
             CoderRunAttempts.SegmentRollback rollback =
                     rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+            // 产出证明闸（#420）：本场判定件（段起点锚起跑捕获，跨尝试累计拒绝史）
+            ProofOfOutputGate.Checking proof = proofGate.forRun(project.getWorkspaceId());
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
                     runId,
                     sessionId,
@@ -1109,7 +1114,7 @@ public class GenerationAppService {
                             errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                     (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
                             runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
-                            prdVersionNo),
+                            prdVersionNo, proof),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? ModelRoutingAppService.SegmentSignals.none()
                             : ModelRoutingAppService.SegmentSignals.slice(slice),
@@ -1159,6 +1164,8 @@ public class GenerationAppService {
                         : sliceSession(projectId, ord);
                 CoderRunAttempts.SegmentRollback rollback =
                         rollbackHookFor(project.getWorkspaceId(), projectId, ord, sessionId);
+                // 产出证明闸（#420）：单片波退化串行同盖（同序前段口径）
+                ProofOfOutputGate.Checking proof = proofGate.forRun(project.getWorkspaceId());
                 CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
                         runId,
                         sessionId,
@@ -1166,7 +1173,7 @@ public class GenerationAppService {
                                 designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
                                 errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
                         (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
-                                runId, sliceClosingSummary(slice), prdVersionNo),
+                                runId, sliceClosingSummary(slice), prdVersionNo, proof),
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                         ModelRoutingAppService.SegmentSignals.slice(slice),
                         RunHeading.slice(slice, ord, slices.size()),
@@ -1500,6 +1507,9 @@ public class GenerationAppService {
             // fork 内回滚基准 = fork 时主工作区 HEAD（fork 克隆含 .git——回滚等价于
             // 重新 fork 的干净现场，开销只是 git 操作不起新容器）
             CoderRunAttempts.SegmentRollback rollback = rollbackHookFor(forkId, projectId, ord, sessionId);
+            // 产出证明闸（#420）：fork 片在 fork 工作区内判（fork 基线即段起点——
+            // fork 差异口径）
+            ProofOfOutputGate.Checking proof = proofGate.forRun(forkId);
             CoderRunAttempts.RunResult result = coderRunAttempts.run(project, forkId, runId,
                     sessionId,
                     new CoderRunAttempts.Prompts(
@@ -1507,7 +1517,7 @@ public class GenerationAppService {
                             errorScene -> designContext + prefix
                                     + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene)),
                     (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
-                            sliceClosingSummary(slice)),
+                            sliceClosingSummary(slice), proof),
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                     ModelRoutingAppService.SegmentSignals.slice(slice),
                     RunHeading.slice(slice, ord, plan.slices().size()),
@@ -1534,11 +1544,16 @@ public class GenerationAppService {
         }
     }
 
-    /** fork 片收口判据（#351）：fork 内 8081 可达 + 入口文件完整——只核验不落表不推预览。 */
-    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary) {
+    /**
+     * fork 片收口判据（#351 + #420）：fork 内 8081 可达 + 入口文件完整 + 产出证明
+     * （fork 基线即段起点——fork 差异口径）——只核验不落表不推预览。
+     */
+    private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary,
+            ProofOfOutputGate.Checking proof) {
         requireReachable(forkWorkspaceId);
         requireEntryFileComplete(forkWorkspaceId);
-        return CoderRunAttempts.ClosingJudgment.generation(summary);
+        return CoderRunAttempts.ClosingJudgment.generation(summary)
+                .withProofOfOutput(proof.proof());
     }
 
     /**
@@ -1771,9 +1786,11 @@ public class GenerationAppService {
     }
 
     /**
-     * 单段收口判据（#104 生成轨道的平台侧检查点）：8081 可达＋入口文件完整
-     * （#339 首屏界面先行）才收口——converse 无异常不构成成功（智能体可能道歉式
-     * 放弃 / 被 maxIters 掐断）。核验不过抛异常，被共用件
+     * 单段收口判据（#104 生成轨道的平台侧检查点，#35/#339/#420）：8081 可达＋入口
+     * 文件完整＋产出证明（零 diff＋无「能力已存在」验证确认＝结构性拒绝——拒绝
+     * 回执经重试现场喂回执行体同 run 补做，判据核验次序＝探活 → 入口 → 产出证明
+     * → 副作用）才收口——converse 无异常不构成成功（智能体可能道歉式放弃 / 被
+     * maxIters 掐断）。核验不过抛异常，被共用件
      * 尝试环当作该次尝试失败（走重试/终态路径）；「端到端可操作」由片内 verify 兜
      * （收口扩载 verification 统计），平台侧不新增探针。带规范项目另附样式合规扫描事实
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）。
@@ -1782,9 +1799,12 @@ public class GenerationAppService {
      * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
-            boolean markGenerated, String runId, String summary, Integer prdVersionNo) {
+            boolean markGenerated, String runId, String summary, Integer prdVersionNo,
+            ProofOfOutputGate.Checking proof) {
         requireReachable(project.getWorkspaceId());
         requireEntryFileComplete(project.getWorkspaceId());
+        // 产出证明（#420）在副作用（种子/预览/片落表）之前——拒绝不落任何收口面
+        Map<String, Object> proofAnnotation = proof.proof();
         if (markGenerated) {
             // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
             // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型
@@ -1799,6 +1819,7 @@ public class GenerationAppService {
         // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
         return CoderRunAttempts.ClosingJudgment.generation(summary)
+                .withProofOfOutput(proofAnnotation)
                 .withDesignLint(designSpecs.lintClosingPayload(project));
     }
 

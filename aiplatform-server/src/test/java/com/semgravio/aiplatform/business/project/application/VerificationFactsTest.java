@@ -82,4 +82,52 @@ class VerificationFactsTest {
         assertThat(facts.consume("1").lastRound().get(0).name()).isEqualTo("甲项");
         assertThat(facts.consume("2").lastRound().get(0).name()).isEqualTo("乙项");
     }
+
+    // ---------- 「能力已存在」确认读口（#420 空转片豁免判据） ----------
+
+    @Test
+    void given_confirmation_in_last_round_when_query_then_names_and_facts_kept() {
+        // #420 豁免判据：末轮快照含 existing=true 且 ok=true 的确认项——「能力已存在」
+        // 的确认依据（项名连缀）；existing=true 但未过（ok=false）不是确认；读口不
+        // 消费（收口统计仍由 consume 取走，两读不互斥）
+        facts.record("42", List.of(
+                new VerificationFacts.Check("留言提交", "browser", true, null, true),
+                new VerificationFacts.Check("首页可访问", "browser", true, null),
+                new VerificationFacts.Check("矛盾项", "db", false, "表 0 行", true)));
+
+        assertThat(facts.capabilityExistsConfirmation("42")).isEqualTo("留言提交");
+
+        VerificationFacts.Facts consumed = facts.consume("42");
+        assertThat(consumed.lastRound()).hasSize(3);
+        assertThat(consumed.lastRound().get(0).existing()).isTrue();
+        assertThat(consumed.lastRound().get(1).existing()).isFalse();
+    }
+
+    @Test
+    void given_no_confirmation_when_query_then_null() {
+        // 无登记 / 末轮全无 existing 确认——读口如实 null（不虚构豁免依据）
+        assertThat(facts.capabilityExistsConfirmation("42")).isNull();
+        facts.record("42", List.of(
+                new VerificationFacts.Check("首页可访问", "browser", true, null),
+                new VerificationFacts.Check("未过项", "db", false, "表 0 行")));
+        assertThat(facts.capabilityExistsConfirmation("42")).isNull();
+    }
+
+    @Test
+    void given_confirmation_then_reverify_round_when_query_then_confirmation_survives() {
+        // #420 留档语义（#405 裁决「确认＝report_verification 正向结果留档」）：确认
+        // 跨轮累计（对偶 rounds 口径）——确认轮之后的复验轮（修复—复验环全量上报、
+        // 未再带 existing 标记）不覆写掉既有确认，零 diff 合法薄片的豁免依据不丢
+        facts.record("42", List.of(
+                new VerificationFacts.Check("留言提交", "browser", true, null, true)));
+        facts.record("42", List.of(
+                new VerificationFacts.Check("首页可访问", "browser", true, null),
+                new VerificationFacts.Check("留言数据落库", "db", true, "1 行")));
+
+        assertThat(facts.capabilityExistsConfirmation("42")).isEqualTo("留言提交");
+        // 收口统计仍取末轮快照（两读不互斥——确认留档不进统计面）
+        VerificationFacts.Facts consumed = facts.consume("42");
+        assertThat(consumed.rounds()).isEqualTo(2);
+        assertThat(consumed.lastRound()).noneMatch(VerificationFacts.Check::existing);
+    }
 }

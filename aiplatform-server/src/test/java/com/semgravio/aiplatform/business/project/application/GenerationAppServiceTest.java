@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -1329,15 +1330,20 @@ class GenerationAppServiceTest {
 
     /**
      * 段起点捕获可得的 git 桩（#353 生产形态）：rev-parse / 锚 commit 回假 hash
-     * （段起跑恒能捕获段起点），其余 exec 全通。缺省桩（{@link #givenAgentsMdWriteSucceeds}
-     * 的空 stdout）走「捕获不到段起点」的降级路径（不重跑、直接终态）——既有失败
-     * 测试即该路径的断言面。
+     * （段起跑恒能捕获段起点），其余 exec 全通；产出证明探针（#420 --name-only）
+     * 缺省回有产出（正常干活——空转场景由 {@link #givenWorkspaceGitReadyWithProofScript}
+     * 的脚本位改写）。缺省桩（{@link #givenAgentsMdWriteSucceeds} 的空 stdout）走
+     * 「捕获不到段起点」的降级路径（不重跑、闸跳过、直接终态）——既有失败测试即
+     * 该路径的断言面。
      */
     private void givenWorkspaceGitReady() {
         when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
             WorkspaceExecCommand cmd = invocation.getArgument(1);
             if (cmd.command().contains("git rev-parse")) {
                 return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (cmd.command().contains("git diff --name-only")) {
+                return new ExecResultResponse("src/app/page.tsx\n", "", 0);
             }
             return new ExecResultResponse("", "", 0);
         });
@@ -1545,6 +1551,9 @@ class GenerationAppServiceTest {
             }
             if (command.contains("git diff --full-index")) {
                 return new ExecResultResponse("fake-patch-bytes", "", 0);
+            }
+            if (command.contains("git diff --name-only")) {
+                return new ExecResultResponse("src/app/page.tsx\n", "", 0); // #420 有产出
             }
             return new ExecResultResponse("", "", 0);
         });
@@ -2148,6 +2157,257 @@ class GenerationAppServiceTest {
 
         verify(agentClient, times(properties.getMaxAttempts())).converse(any(), any());
         assertThat(generatedAt(projectId)).isNull();
+    }
+
+    // ---------- 产出证明闸（#420 空转片防呆：零 diff＋无「能力已存在」确认＝结构性拒绝） ----------
+
+    /**
+     * 产出证明探针脚本位（#420）：key＝工作区（并行波下 fork 副本各跑各的闸——
+     * 按工作区隔离不串扰）、true＝零 diff 空转、缺省 false＝有产出。
+     */
+    private final Map<String, AtomicBoolean> idleProofs = new ConcurrentHashMap<>();
+
+    private AtomicBoolean idleProof(String workspace) {
+        return idleProofs.computeIfAbsent(workspace, key -> new AtomicBoolean(false));
+    }
+
+    /**
+     * 产出证明闸桩（#420）：git 就绪（段起点可捕获）＋diff 探针读脚本位
+     * {@link #idleProofs}（探针命令带 --name-only，与留账的 --cached diff 区分）。
+     */
+    private void givenWorkspaceGitReadyWithProofScript() {
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            if (cmd == null) {
+                return new ExecResultResponse("", "", 0);
+            }
+            if (cmd.command().contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (cmd.command().contains("git diff --name-only")) {
+                boolean idle = idleProof((String) invocation.getArgument(0)).get();
+                return new ExecResultResponse(
+                        idle ? "" : "src/app/page.tsx\n", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+        when(workspaceLifecycleAppService.exposePreview(anyString()))
+                .thenReturn(URI.create("http://localhost:30080"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_idle_slice_when_close_then_rejected_refed_back_then_work_done_closes() {
+        // #420 AC①：切片零 diff＋无「能力已存在」确认的收口被结构性拒绝——拒绝回执
+        // 进同 run 现场（重试 prompt 携带「产出证明未过」与补做指引），执行体补做
+        // （动了文件）后正常收口；空转拒绝史随收尾卡判别标注如实呈现
+        Long projectId = persistedProject("9837");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1：首试空转（宣告完成但零文件变更）、拒绝回执喂回后补做干活
+            // ——脚本位随场改写（首试 prompt 无错误现场＝空转轮）
+            if (command.sessionId().endsWith("-slice-1")) {
+                idleProof("9837").set(!command.prompt().contains("错误现场"));
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 一次收口 + 切片 1 两试（空转被拒 → 补做收口）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        AgentCommand sliceRetry = commands.getAllValues().get(2);
+        // 拒绝回执进同 run 现场：重试 prompt 携带产出证明拒绝与两出路指引
+        assertThat(sliceRetry.prompt())
+                .contains("错误现场")
+                .contains("产出证明未过")
+                .contains("能力已存在");
+        // 补做后正常收口：片全收口 + 拒绝史标注随收尾卡（idleRejections=1）
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> sliceClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> proof = (Map<String, Object>) sliceClosing
+                .get(CoderRunAttempts.CLOSING_PROOF_FIELD);
+        assertThat(proof).containsEntry(ProofOfOutputGate.IDLE_REJECTIONS_FIELD, 1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_idle_slice_never_proving_when_generate_then_rollback_rerun_then_terminal_failed() {
+        // #420 AC②：空转拒绝耗尽（原地补做三连拒——拒绝回执喂回仍零 diff）→ 段级
+        // 自愈回滚重跑（复用 #353 既有机制：留账＋回滚段起点＋新会话重跑一轮，不建
+        // 新通道），重跑轮仍空转→转终态 run-failed；逐尝试档位经既有路由「重试／
+        // 回滚重跑升档」信号自动升档（attempt+1／round+1——flash→pro，路由面零改动）
+        Long projectId = persistedProject("9839");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            // 切片 1 恒空转（宣告完成但零文件变更——重跑轮同形）：快档典型失败形态
+            if (command.sessionId().endsWith("-slice-1")
+                    || command.sessionId().contains("-slice-1-")) {
+                idleProof("9839").set(true);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 阶段 0 (1) + 切片 1 首轮 3 拒 + 重跑轮 3 拒 = 7 次 converse；切片 2 不派
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1 + 2 * properties.getMaxAttempts()))
+                .converse(commands.capture(), any());
+        // 重跑轮新会话（既有回滚重跑机制——不建新通道）；首试 prompt 原样重放
+        AgentCommand rerun = commands.getAllValues().get(4);
+        assertThat(rerun.sessionId())
+                .isEqualTo(GenerationAppService.sliceSession(projectId, 1) + "-rr");
+        assertThat(rerun.prompt()).isEqualTo(commands.getAllValues().get(1).prompt());
+        // 留账＋回滚各两次（重跑前＋终态前——#353 不变式：终态时工作区＝段起点）
+        verify(workspaceLifecycleAppService, times(2)).exec(eq("9839"),
+                argThat(cmd -> cmd != null
+                        && cmd.command().contains("git reset --hard '" + FAKE_SEGMENT_START + "'")));
+        // 终态：run-failed 锚切片 1 首试 runId、片落 FAILED、后片不派
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                argThat(payload -> payload.get(EventsAppService.RUN_FIELD) != null
+                        && payload.containsKey(AgentEventTypes.FAILURE_FIELD)));
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 3, 1);
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_idle_rejections_then_escalated_model_tiers_recorded_in_failure_face() {
+        // #420 AC② 升档留档：空转拒绝驱动尝试环重试——逐尝试档位经既有路由信号
+        // 自动升档（attempt≥2 重试升档、round 2 回滚重跑升档：flash→pro），失败面
+        // attempts[].modelId 可归因（#418 落库面承载——平台分析口径）
+        Long projectId = persistedProject("9840");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().contains("-slice-1")) {
+                idleProof("9840").set(true);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                payloads.capture());
+        Map<String, Object> failure = (Map<String, Object>) payloads.getValue()
+                .get(AgentEventTypes.FAILURE_FIELD);
+        assertThat(failure.get("error")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.STRING)
+                .contains("产出证明未过");
+        List<Map<String, Object>> attempts = (List<Map<String, Object>>) failure.get("attempts");
+        assertThat(attempts).hasSize(2 * properties.getMaxAttempts());
+        assertThat(attempts.stream().map(attempt -> attempt.get("modelId")))
+                .containsExactly("flash", "pro", "pro", "pro", "pro", "pro");
+    }
+
+    @Test
+    void given_idle_fork_slice_when_close_then_gate_fires_in_fork_and_merge_saves_it() {
+        // #420 fork 片同盖（fork 差异口径）：fork 内空转收口同样被结构性拒绝——拒绝
+        // 回执喂回 fork run 同 run 补做；补做后照常合并闭片。脚本位按工作区隔离
+        // （并行波内另一 fork 片不受串扰）
+        Long projectId = persistedProject("9842");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            // fork 9001 上的切片 2：首试空转、拒绝回执喂回后补做；fork 9002 照常
+            if ("9001".equals(command.workspaceId())) {
+                idleProof("9001").set(!command.prompt().contains("错误现场"));
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(
+                List.of("首片", "登录", "商品浏览", "下单"),
+                List.of(Set.of(), Set.of(1), Set.of(1), Set.of(2, 3)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 切片 2 两试（fork 内被拒→补做）、其余各一次；拒绝回执进 fork run 现场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(6)).converse(commands.capture(), any());
+        List<AgentCommand> slice2 = commands.getAllValues().stream()
+                .filter(cmd -> "9001".equals(cmd.workspaceId())).toList();
+        assertThat(slice2).hasSize(2);
+        assertThat(slice2.get(1).prompt()).contains("产出证明未过");
+        // 补做后照常合并：全片收口、generated_at 落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_capability_exists_confirmation_when_idle_slice_then_exempt_close_with_basis() {
+        // #420 AC③＋AC⑥：验证确认「能力已存在」（existing 确认形态）＝活已被前片
+        // 干完的薄片，走豁免路径正常收口——豁免依据落收尾卡判别标注；真·薄片
+        // （diff＞0 干活）不携带标注（阶段 0 即此形——正常收口无 proofOfOutput）
+        Long projectId = persistedProject("9838");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReadyWithProofScript();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 切片 1 零 diff，但 verify 子智能体已确认本片能力已存在（豁免路径；
+            // 事实键＝工作区 id，对偶 verify 统计测试的登记口径）
+            if (command.sessionId().endsWith("-slice-1")) {
+                idleProof("9838").set(true);
+                verificationFacts.record("9838", List.of(
+                        new VerificationFacts.Check("留言提交", "browser", true, null, true)));
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 豁免正常收口：片全收口、generated_at 落位、零拒绝轮（一次收口）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> exemptClosing = (Map<String, Object>) payloads.getAllValues()
+                .get(1).get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> proof = (Map<String, Object>) exemptClosing
+                .get(CoderRunAttempts.CLOSING_PROOF_FIELD);
+        assertThat(proof)
+                .containsEntry(ProofOfOutputGate.EXEMPTED_FIELD, true)
+                .containsEntry(ProofOfOutputGate.EXEMPTION_BASIS_FIELD,
+                        "验证确认「能力已存在」：留言提交");
+        // 真·薄片（阶段 0 diff＞0 正常干活）不误伤：不携带判别标注
+        Map<String, Object> stage0Closing = (Map<String, Object>) payloads.getAllValues()
+                .get(0).get(AgentEventTypes.CLOSING_FIELD);
+        assertThat(stage0Closing).doesNotContainKey(CoderRunAttempts.CLOSING_PROOF_FIELD);
     }
 
     @Test

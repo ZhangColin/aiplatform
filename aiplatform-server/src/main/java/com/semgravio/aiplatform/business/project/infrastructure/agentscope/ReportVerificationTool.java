@@ -38,6 +38,7 @@ public class ReportVerificationTool extends ToolBase {
     private static final String FACE_KEY = "face";
     private static final String OK_KEY = "ok";
     private static final String DETAIL_KEY = "detail";
+    private static final String EXISTING_KEY = "existing";
 
     private final String workspaceId;
     private final VerificationFacts verificationFacts;
@@ -48,7 +49,9 @@ public class ReportVerificationTool extends ToolBase {
                 .description("验证结果登记（一轮验证结束时调用一次，checks 传本轮全量）：每项"
                         + " name=验证项名（用户语言，如「留言提交」）、face=三面之一（" + FACE_ENUM_TEXT
                         + "＝浏览器点流程／查库／看日志）、ok=过没过、"
-                        + "detail=证据或失败现场（通过项可省）。未过项如实 ok=false，不粉饰。")
+                        + "detail=证据或失败现场（通过项可省）、existing=能力已存在确认"
+                        + "（#420：确认本能力已被前片实现、无需新做——此时 ok 必须 true）。"
+                        + "未过项如实 ok=false，不粉饰。")
                 .inputSchema(Map.of(
                         "type", "object",
                         "properties", Map.of(CHECKS_KEY, Map.of(
@@ -64,7 +67,11 @@ public class ReportVerificationTool extends ToolBase {
                                                 OK_KEY, Map.of("type", "boolean",
                                                         "description", "过没过"),
                                                 DETAIL_KEY, Map.of("type", "string",
-                                                        "description", "证据或失败现场（可省）")),
+                                                        "description", "证据或失败现场（可省）"),
+                                                EXISTING_KEY, Map.of("type", "boolean",
+                                                        "description", "能力已存在确认（可省，缺省"
+                                                                + " false）：确认本能力已被前片"
+                                                                + "实现、无需新做——须 ok=true")),
                                         "required", List.of(NAME_KEY, FACE_KEY, OK_KEY)))),
                         "required", List.of(CHECKS_KEY)))
                 .readOnly(true)
@@ -108,10 +115,18 @@ public class ReportVerificationTool extends ToolBase {
                 return Mono.just(ToolResultBlock.error(
                         "checks[" + i + "].ok 必须是布尔值：过传 true、未过传 false"));
             }
+            Object existing = item.get(EXISTING_KEY);
+            boolean existingFlag = Boolean.TRUE.equals(existing);
+            if (existingFlag && !okFlag) {
+                return Mono.just(ToolResultBlock.error(
+                        "checks[" + i + "]：existing=true（能力已存在确认）须 ok=true——"
+                                + "「已存在但未过」是矛盾态，未过就如实 ok=false 且不带 existing"));
+            }
             Object detail = item.get(DETAIL_KEY);
             parsed.add(new VerificationFacts.Check(String.valueOf(name), faceText, okFlag,
                     detail == null || String.valueOf(detail).isBlank()
-                            ? null : String.valueOf(detail)));
+                            ? null : String.valueOf(detail),
+                    existingFlag));
         }
         verificationFacts.record(workspaceId, parsed);
         long failed = parsed.stream().filter(check -> !check.ok()).count();

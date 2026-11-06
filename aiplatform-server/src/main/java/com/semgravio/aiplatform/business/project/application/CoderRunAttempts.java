@@ -139,18 +139,21 @@ class CoderRunAttempts {
      * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
      * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
      * <b>验证事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
-     * 项目的编码 run 在场，非规范项目/设计会话恒 null）。
+     * 项目的编码 run 在场，非规范项目/设计会话恒 null）；编码轨道另携
+     * {@code proofOfOutput} 产出证明判别标注（#420：空转拒绝史／豁免依据——
+     * 判定在 {@link ProofOfOutputGate}（收口判据回调抛出即结构性拒绝，本环走既有
+     * 重试/回滚重跑通道），标注随收尾卡如实呈现；非豁免收口且无拒绝史恒 null）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote, List<Map<String, Object>> drafts,
-            Map<String, Object> designLint) {
+            Map<String, Object> designLint, Map<String, Object> proofOfOutput) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null);
+            return new ClosingJudgment(false, null, true, note, null, null, null);
         }
 
         /**
@@ -161,7 +164,7 @@ class CoderRunAttempts {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null);
+                    drafts == null ? List.of() : drafts, null, null);
         }
 
         /**
@@ -170,12 +173,20 @@ class CoderRunAttempts {
          */
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null, null);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
+                    null, null, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts, lint);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    lint, proofOfOutput);
+        }
+
+        /** 附产出证明判别标注（#420 收口回调拼装：非豁免且无拒绝史传 null＝不携带）。 */
+        ClosingJudgment withProofOfOutput(Map<String, Object> proofOfOutput) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, proofOfOutput);
         }
     }
 
@@ -813,6 +824,9 @@ class CoderRunAttempts {
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
         }
+        if (judgment.proofOfOutput() != null) {
+            closing.put(CLOSING_PROOF_FIELD, judgment.proofOfOutput());
+        }
         if (tier != null) {
             closing.put(CLOSING_MODEL_TIER_FIELD, tier.payload());
         }
@@ -835,6 +849,15 @@ class CoderRunAttempts {
      * 可查留档；逐尝试档位见 {@code durationBreakdown.attempts[].modelId}）。
      */
     static final String CLOSING_MODEL_TIER_FIELD = "modelTier";
+
+    /**
+     * 收口扩载的产出证明判别标注键（#420 空转片防呆）：{@code { idleRejections?,
+     * exempted?, exemptionBasis? }}——空转拒绝史（本场被拒后补做收口）与豁免
+     * 依据（验证确认「能力已存在」的合法收口）；正常干活收口（diff＞0 且无拒绝
+     * 史）不携带。判定在 {@link ProofOfOutputGate}（零 diff＋无确认＝结构性拒绝
+     * ——拒绝回执经重试现场喂回执行体同 run 补做）。
+     */
+    static final String CLOSING_PROOF_FIELD = "proofOfOutput";
 
     /** 扫描载荷的「曾自动修一轮」键（修轮用尽即标——纠偏过程如实）。 */
     static final String CLOSING_LINT_RETRIED_FIELD = "retried";

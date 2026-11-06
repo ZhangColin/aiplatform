@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -88,6 +90,10 @@ class IterationAppServiceTest {
 
     @Autowired
     private FinishEditFacts finishFixFacts;
+
+    /** 验证事实登记口（#420 豁免路径脚本：模拟 verify 子智能体轮内 existing 确认登记）。 */
+    @Autowired
+    private VerificationFacts verificationFacts;
 
     /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
     @Autowired
@@ -719,6 +725,107 @@ class IterationAppServiceTest {
                 .containsEntry("systemNote", "页面上没有写死配送范围，都以文档为准");
         assertThat(closing).doesNotContainKey("prdNote");
         assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+    }
+
+    // ---------- 产出证明闸（#420 空转片防呆：更新轨同盖——迭代/fix run 不重新引入空转收口） ----------
+
+    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
+    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
+
+    /** 产出证明探针脚本位（true＝零 diff 空转；缺省 false＝有产出）。 */
+    private final AtomicBoolean idleProof = new AtomicBoolean(false);
+
+    /** 产出证明闸桩（#420）：git 就绪＋diff 探针读脚本位（--name-only 与留账 diff 区分）。 */
+    private void givenWorkspaceGitReadyWithProofScript() {
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            if (cmd == null) {
+                return new ExecResultResponse("", "", 0);
+            }
+            if (cmd.command().contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (cmd.command().contains("git diff --name-only")) {
+                return new ExecResultResponse(
+                        idleProof.get() ? "" : "src/app/page.tsx\n", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_idle_fix_run_when_close_then_rejected_then_confirmed_exempt_closes() {
+        // #420 AC⑤＋AC①（更新轨同盖）：changed=false＋零 diff＋无确认的收口被结构性
+        // 拒绝——拒绝回执进同 run 现场；补验证（确认「能力已存在」）后走豁免路径
+        // 正常收口，拒绝史＋豁免依据均随收尾卡判别标注
+        Long projectId = persistedGeneratedProject("9940");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspaceGitReadyWithProofScript();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 执行体宣告无需改动（changed=false）；首试零 diff 未验证被拒，重试轮
+            // verify 确认该能力已存在（用户要的活系统里已有）
+            finishFixFacts.record(command.workspaceId(), false, "该能力系统已具备");
+            if (converseCalls.incrementAndGet() == 1) {
+                idleProof.set(true);
+            } else {
+                verificationFacts.record("9940", List.of(
+                        new VerificationFacts.Check("预约列表倒序", "browser", true, null, true)));
+            }
+            return new AgentReply(command.runId(), "修正完成", null, List.of());
+        });
+
+        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
+        tracks.remove(0).run();
+
+        // 两试：空转被拒（回执进重试现场）→ 补验证确认后豁免收口
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("产出证明未过")
+                .contains("能力已存在");
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> proof =
+                (Map<String, Object>) closing.get(CoderRunAttempts.CLOSING_PROOF_FIELD);
+        assertThat(proof)
+                .containsEntry(ProofOfOutputGate.IDLE_REJECTIONS_FIELD, 1)
+                .containsEntry(ProofOfOutputGate.EXEMPTED_FIELD, true)
+                .containsEntry(ProofOfOutputGate.EXEMPTION_BASIS_FIELD,
+                        "验证确认「能力已存在」：预约列表倒序");
+        assertThat(closing).containsEntry("systemChanged", false);
+    }
+
+    @Test
+    void given_idle_fix_run_never_proving_when_fix_then_terminal_run_failed() {
+        // #420 空转拒绝耗尽（更新轨既有失败处置——无段级回滚钩，终态 run-failed 走
+        // 恢复出口，不建新通道）：失败面错误现场携拒绝回执（可归因「为何没修成」）
+        Long projectId = persistedGeneratedProject("9941");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspaceGitReadyWithProofScript();
+        idleProof.set(true);
+        givenConverseFinishing(false, "该能力系统已具备");
+
+        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
+        tracks.remove(0).run();
+
+        verify(agentClient, times(3)).converse(any(), any());
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                payloads.capture());
+        Map<String, Object> failure =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.FAILURE_FIELD);
+        assertThat(String.valueOf(failure.get("error"))).contains("产出证明未过");
     }
 
     // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------

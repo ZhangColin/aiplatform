@@ -153,6 +153,17 @@ closing: {
         message: "..." }            # no-inline-styles 内联样式——@shadcn/lint 规则名）/
     ]                               # message（诊断原文）。无规范项目与设计会话不携带——
   }                                 # 调色板不收窄、不扫描（基座行为零改变，一等断言）
+  proofOfOutput: {                  # 可缺省——产出证明判别标注（#420 空转片防呆）：收口
+    idleRejections: 1,              # 判据增补「产出证明」（本段起点以来工作区 diff＞0、
+    exempted: true,                 # 或验证确认「能力已存在」〔report_verification 的
+    exemptionBasis: "验证确认「能力已存在」：留言提交"  # existing 确认形态〕二者必居一，
+  }                                 # 平台侧判定不经模型自报；零 diff＋无确认＝结构性拒绝
+                                    # （拒绝回执经重试现场喂回执行体同 run 补做，耗尽走
+                                    # 段级自愈回滚重跑——见 #353/#405）。豁免收口（活已被
+                                    # 前片干完的薄片）携 exempted＋exemptionBasis；曾拒绝
+                                    # 后补做收口携 idleRejections（两者可并存）；正常干活
+                                    # 收口（diff＞0 且无拒绝史）不携带——收尾卡「产出证明」
+                                    # 标注行的呈现源（前端如实呈现）
   modelTier: {                      # 可缺省——模型路由判定（#354：run 执行体座的编码 run
     modelId: "deepseek-v4-pro",     # 在场——「哪段用了哪档、为什么」的留档，随收尾卡落
     source: "routed",               # 对话史可查；设计会话/其余缺省不携带。平台分析口径、

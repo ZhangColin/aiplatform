@@ -21,8 +21,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 收口探针走网关＋浏览器真实头（#397，ADR-0034 防线 3）：「应用可访问」判据
  * （exposePort）与起服等待（startApp）的探针形态与红绿判据——Docker CLI 假面
  * seam（同 {@code DockerEnvironmentBackendAppStartTest} 形制）：覆写
- * {@code runCapture} 按命令形状回放探针应答，免 daemon。真实网关端到端（真
- * nginx×真探针）见 {@code PreviewGatewaySmokeTest}。
+ * {@code runCapture} 按命令形状回放探针应答，免 daemon。形状谓词单源
+ * {@link ProbeShape}（#401——三个假面不再各改字符串）；本测试另以字面量钉
+ * 浏览器头的具体形态（单点钉形状，非复制）。真实网关端到端（真 nginx×真探针）
+ * 见 {@code PreviewGatewaySmokeTest}。
  *
  * <p>判据口径（#397 勘误后）：探针<b>必须经网关路径</b>（previewnet 网络别名
  * {@code preview-gateway}＋Host 头选路由），带浏览器真实头（Origin=本工作区预览
@@ -51,21 +53,21 @@ class DockerEnvironmentBackendGatewayProbeTest {
         protected ExecResult runCapture(String... cmd) {
             String joined = String.join(" ", cmd);
             commands.add(joined);
-            if (isRootProbe(joined)) {
+            if (ProbeShape.isRootProbe(joined)) {
                 return nextOf(rootResponses);
             }
-            if (isChunkProbe(joined)) {
+            if (ProbeShape.isChunkProbe(joined)) {
                 return nextOf(chunkResponses);
             }
             return new ExecResult("", "", 0);
         }
 
         List<String> rootProbes() {
-            return commands.stream().filter(DockerEnvironmentBackendGatewayProbeTest::isRootProbe).toList();
+            return commands.stream().filter(ProbeShape::isRootProbe).toList();
         }
 
         List<String> chunkProbes() {
-            return commands.stream().filter(DockerEnvironmentBackendGatewayProbeTest::isChunkProbe).toList();
+            return commands.stream().filter(ProbeShape::isChunkProbe).toList();
         }
 
         private static ExecResult nextOf(List<ExecResult> responses) {
@@ -74,19 +76,6 @@ class DockerEnvironmentBackendGatewayProbeTest {
             }
             return responses.isEmpty() ? new ExecResult("", "", 1) : responses.get(0);
         }
-    }
-
-    /** 根探针：打网关地址的 {@code /}（无 /_next 路径段）。 */
-    private static boolean isRootProbe(String command) {
-        return command.contains("curl") && command.contains("http://"
-                + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/")
-                && !command.contains("/_next/");
-    }
-
-    /** chunk 复测探针：打网关地址的 /_next/ 路径。 */
-    private static boolean isChunkProbe(String command) {
-        return command.contains("curl") && command.contains("http://"
-                + WorkspaceNaming.PREVIEW_GATEWAY_ALIAS + "/_next/");
     }
 
     private static ExecResult rootResponse(String body, String status) {

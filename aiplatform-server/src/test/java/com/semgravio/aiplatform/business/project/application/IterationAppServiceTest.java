@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -89,6 +91,10 @@ class IterationAppServiceTest {
     @Autowired
     private FinishEditFacts finishFixFacts;
 
+    /** 验证事实登记口（#420 豁免路径脚本：模拟 verify 子智能体轮内 existing 确认登记）。 */
+    @Autowired
+    private VerificationFacts verificationFacts;
+
     /** 停止面（#359 生成取消）——停止请求的注入口（测试经公开 requestStop 触发）。 */
     @Autowired
     private CodingRunTrack codingRunTrack;
@@ -112,9 +118,11 @@ class IterationAppServiceTest {
     @BeforeEach
     void stubWorkspace() {
         // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
-        // 命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        // 命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
+        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
         when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
+                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
                 .thenReturn(new ExecResultResponse("", "", 0));
     }
 
@@ -123,6 +131,7 @@ class IterationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
+        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -144,9 +153,22 @@ class IterationAppServiceTest {
             AgentCommand command = invocation.getArgument(0);
             if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), changed, text);
+                verifyRan(command);
             }
             return new AgentReply(command.runId(), "修正完成");
         });
+    }
+
+    /**
+     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：更新轨
+     * 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。零验证
+     * 场景的测试不调用本位。
+     */
+    private void verifyRan(AgentCommand command) {
+        if (!verificationFacts.hasRegistration(command.workspaceId())) {
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
+        }
     }
 
     /**
@@ -224,6 +246,9 @@ class IterationAppServiceTest {
         CountDownLatch releaseRun = new CountDownLatch(1);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
             runInFlight.countDown();
             releaseRun.await();
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
@@ -307,6 +332,9 @@ class IterationAppServiceTest {
         when(agentClient.converse(any(), any()))
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
                             "prompt", command.prompt(), "role", "CODER")));
@@ -316,6 +344,9 @@ class IterationAppServiceTest {
                 })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     Consumer<AgentEvent> sink = invocation.getArgument(1);
                     sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(), Map.of(
                             "prompt", command.prompt(), "role", "CODER")));
@@ -415,6 +446,9 @@ class IterationAppServiceTest {
         doAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0, AgentCommand.class);
             if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
+            if (command.sessionId().startsWith("coder-")) {
                 finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
             }
             return new AgentReply(command.runId(), "已按意见修正");
@@ -484,12 +518,21 @@ class IterationAppServiceTest {
         Long projectId = persistedGeneratedProject("9910");
         List<Runnable> tracks = givenTrackQueued();
         // 首试正常返回但不调 finish_edit（脚本化「模型忘了收口」）→ 判未正常收口、
-        // 按既有重试口径续试；重试轮调了 → 正常收口
+        // 按既有重试口径续试；重试轮调了 → 正常收口（首试隔离 finish_edit 缺失：验证
+        // 已在场——#424 常开硬门不先于 finish_edit 事实拒）
         when(agentClient.converse(any(), any()))
-                .thenAnswer(invocation -> new AgentReply(
-                        ((AgentCommand) invocation.getArgument(0)).runId(), "做完了"))
+                .thenAnswer(invocation -> {
+                    AgentCommand first = invocation.getArgument(0);
+                    if (first.sessionId().startsWith("coder-")) {
+                        verifyRan(first);
+                    }
+                    return new AgentReply(first.runId(), "做完了");
+                })
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "重试轮补上收口");
                     return new AgentReply(command.runId(), "修正完成");
                 });
@@ -507,6 +550,39 @@ class IterationAppServiceTest {
         // 异常的重试同一口径——run 失败为唯一失败终态）
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
+        assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
+    }
+
+    @Test
+    void given_zero_verification_fix_run_when_close_then_rejected_refed_back_then_verified_closes() {
+        // #424 更新轨同盖（片轻验常开）：修正 run 零验证收口被结构性拒绝——拒绝回执
+        // 喂回同 run（先于 finish_edit 事实消费，事实连续不丢），补验后正常收口
+        Long projectId = persistedGeneratedProject("9931");
+        List<Runnable> tracks = givenTrackQueued();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            // 首试零验证（finish_edit 已调但不验）、拒绝回执喂回后补验登记
+            if (command.prompt().contains("错误现场")
+                    && !verificationFacts.hasRegistration(command.workspaceId())) {
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.startFixRun(projectId, "修一下分页", null);
+        tracks.remove(0).run();
+
+        // 两试（零验证被拒 → 补验收口）：拒绝回执进同 run 现场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("错误现场")
+                .contains("验证在场未过")
+                .contains("验收要点");
+        // 补验后正常收口：无失败终态、轨道收工（下一场可再起跑）
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         assertThat(appService.startFixRun(projectId, "下一场", null).queued()).isFalse();
     }
 
@@ -575,6 +651,9 @@ class IterationAppServiceTest {
             List<FileChange> changes) {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
             Consumer<AgentEvent> sink = invocation.getArgument(1);
             sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
                     Map.of("prompt", command.prompt())));
@@ -633,6 +712,50 @@ class IterationAppServiceTest {
                 (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
         Map<String, Object> lint = (Map<String, Object>) closing.get("designLint");
         assertThat(lint).containsEntry("status", "passed");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
+        // #425 更新轨同盖：基座 lint 预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
+        // 不拦收口（对比强制档＝收口被拒）；修轮喂回现场进同 run（两试）
+        Long projectId = persistedGeneratedProject("9961");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseClosing(true, "加了登录会话", List.of(
+                new FileChange("/src/app/login/actions.ts", 8, 1)));
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+        // 强制档净、预置档恒余（手写 cookie 会话）——grep 前置判据防误截 AGENTS.md
+        // 写入命令（其正文含件路径字样）
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("createClient"))))
+                .thenReturn(new ExecResultResponse("", "", 1));
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("grep -rnE")
+                        && cmd.command().contains("pbkdf2"))))
+                .thenReturn(new ExecResultResponse(
+                        "./src/app/login/actions.ts:8:const jar = await cookies();\n", "", 0));
+
+        appService.startFixRun(projectId, "加登录", null);
+        tracks.remove(0).run();
+
+        // 预置档修一轮仍余＝不拦收口：两试（修轮喂回→仍余收口）、无失败终态；
+        // 收尾卡 robustKitLint 如实标注（violations＋retried＋预置档余项、无强制档）
+        verify(agentClient, times(2)).converse(any(), any());
+        verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
+        assertThat(robustLint)
+                .containsEntry("status", "violations")
+                .containsEntry("retried", true)
+                .doesNotContainKey("mandatory");
+        assertThat((Map<String, Object>) robustLint.get("preset"))
+                .containsEntry("total", 1);
     }
 
     @Test
@@ -719,6 +842,110 @@ class IterationAppServiceTest {
                 .containsEntry("systemNote", "页面上没有写死配送范围，都以文档为准");
         assertThat(closing).doesNotContainKey("prdNote");
         assertThat((List<Map<String, Object>>) closing.get("files")).isEmpty();
+    }
+
+    // ---------- 产出证明闸（#420 空转片防呆：更新轨同盖——迭代/fix run 不重新引入空转收口） ----------
+
+    /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
+    private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
+
+    /** 产出证明探针脚本位（true＝零 diff 空转；缺省 false＝有产出）。 */
+    private final AtomicBoolean idleProof = new AtomicBoolean(false);
+
+    /** 产出证明闸桩（#420）：git 就绪＋diff 探针读脚本位（--name-only 与留账 diff 区分）。 */
+    private void givenWorkspaceGitReadyWithProofScript() {
+        when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
+            WorkspaceExecCommand cmd = invocation.getArgument(1);
+            if (cmd == null) {
+                return new ExecResultResponse("", "", 0);
+            }
+            if (cmd.command().contains("git rev-parse")) {
+                return new ExecResultResponse(FAKE_SEGMENT_START + "\n", "", 0);
+            }
+            if (cmd.command().contains("git diff --name-only")) {
+                return new ExecResultResponse(
+                        idleProof.get() ? "" : "src/app/page.tsx\n", "", 0);
+            }
+            return new ExecResultResponse("", "", 0);
+        });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_idle_fix_run_when_close_then_rejected_then_confirmed_exempt_closes() {
+        // #420 AC⑤＋AC①（更新轨同盖）：changed=false＋零 diff＋无确认的收口被结构性
+        // 拒绝——拒绝回执进同 run 现场；补验证（确认「能力已存在」）后走豁免路径
+        // 正常收口，拒绝史＋豁免依据均随收尾卡判别标注
+        Long projectId = persistedGeneratedProject("9940");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspaceGitReadyWithProofScript();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            // 执行体宣告无需改动（changed=false）；首试零 diff 未验证被拒，重试轮
+            // verify 确认该能力已存在（用户要的活系统里已有）
+            finishFixFacts.record(command.workspaceId(), false, "该能力系统已具备");
+            if (converseCalls.incrementAndGet() == 1) {
+                idleProof.set(true);
+            } else {
+                verificationFacts.record("9940", List.of(
+                        new VerificationFacts.Check("预约列表倒序", "browser", true, null, true)));
+            }
+            return new AgentReply(command.runId(), "修正完成", null, List.of());
+        });
+
+        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
+        tracks.remove(0).run();
+
+        // 两试：空转被拒（回执进重试现场）→ 补验证确认后豁免收口
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("产出证明未过")
+                .contains("能力已存在");
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> closing =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.CLOSING_FIELD);
+        Map<String, Object> proof =
+                (Map<String, Object>) closing.get(CoderRunAttempts.CLOSING_PROOF_FIELD);
+        assertThat(proof)
+                .containsEntry(ProofOfOutputGate.IDLE_REJECTIONS_FIELD, 1)
+                .containsEntry(ProofOfOutputGate.EXEMPTED_FIELD, true)
+                .containsEntry(ProofOfOutputGate.EXEMPTION_BASIS_FIELD,
+                        "验证确认「能力已存在」：预约列表倒序");
+        assertThat(closing).containsEntry("systemChanged", false);
+    }
+
+    @Test
+    void given_idle_fix_run_never_proving_when_fix_then_terminal_run_failed() {
+        // #420 空转拒绝耗尽（更新轨既有失败处置——无段级回滚钩，终态 run-failed 走
+        // 恢复出口，不建新通道）：失败面错误现场携拒绝回执（可归因「为何没修成」）
+        Long projectId = persistedGeneratedProject("9941");
+        List<Runnable> tracks = givenTrackQueued();
+        givenWorkspaceGitReadyWithProofScript();
+        idleProof.set(true);
+        givenConverseFinishing(false, "该能力系统已具备");
+
+        appService.startFixRun(projectId, "预约列表按时间倒序排", null);
+        tracks.remove(0).run();
+
+        verify(agentClient, times(3)).converse(any(), any());
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                payloads.capture());
+        Map<String, Object> failure =
+                (Map<String, Object>) payloads.getValue().get(AgentEventTypes.FAILURE_FIELD);
+        assertThat(String.valueOf(failure.get("error"))).contains("产出证明未过");
     }
 
     // ---------- 交接物三要素（#52：需求侧判定结果入修正 run prompt） ----------
@@ -891,6 +1118,9 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure, persistentFailure, persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "恢复轮完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });
@@ -990,6 +1220,9 @@ class IterationAppServiceTest {
                 .thenThrow(persistentFailure, persistentFailure, persistentFailure)
                 .thenAnswer(invocation -> {
                     AgentCommand command = invocation.getArgument(0);
+                    if (command.sessionId().startsWith("coder-")) {
+                        verifyRan(command);
+                    }
                     finishFixFacts.record(command.workspaceId(), true, "合并续派场完成修正");
                     return new AgentReply(command.runId(), "修正完成");
                 });
@@ -1168,5 +1401,90 @@ class IterationAppServiceTest {
         assertThat(command.getAllValues().get(0).prompt())
                 .contains("需求正本 = 工作区")
                 .doesNotContain("本轮需求基准");
+    }
+
+    // ---------- 更新轨收口后复走整轨终验（#427：防修 A 坏 B） ----------
+
+    /** 现行旅程清单就位（PRD 锚对齐——复走终验的载荷轴；journey 表 + 项目锚）。 */
+    private void givenCurrentJourneys(Long projectId, String role, String entry, String keyActions) {
+        jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?",
+                projectId);
+        java.sql.Timestamp anchor = jdbcTemplate.queryForObject(
+                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId);
+        jdbcTemplate.update("""
+                INSERT INTO prj_generation_plan_journeys
+                    (id, project_id, ord, role, entry, key_actions, prd_produced_at)
+                VALUES (?, ?, 1, ?, ?, ?, ?)
+                """, System.nanoTime(), projectId, role, entry, keyActions, anchor);
+    }
+
+    @Test
+    void given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified() {
+        // #427 AC④（更新轨腿）：更新 run 收口后复走整轨终验——修 A 坏 B 被拦：更新
+        // run 修好了意见项但走坏了核心旅程 → 复走终验抓到（fail）→ 自动起终验修复
+        // run（载荷＝失败项清单）→ 复走过验，轨道才收工
+        Long projectId = persistedGeneratedProject("9970");
+        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
+        List<Runnable> tracks = givenTrackQueued();
+        // 终验/修复 run 的收口探针（8081 探活＋入口完整）——探针命令全通
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        AtomicBoolean fixDone = new AtomicBoolean();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                // 更新后首走终验：旅程被更新修坏（修 A 坏 B）；修复后复走：全过
+                if (!fixDone.get()) {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", false, "更新后支付按钮失灵")));
+                }
+                else {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", true, null)));
+                }
+            }
+            else if (command.sessionId().contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX)) {
+                finishFixFacts.record(command.workspaceId(), true, "修复了更新修坏的支付");
+                verifyRan(command);
+                fixDone.set(true);
+            }
+            else {
+                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        // 更新 run + 终验(fail) + 终验修复 + 复走终验(pass) = 4 场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        assertThat(all.get(0).sessionId()).contains("-fix-");            // 更新 run
+        assertThat(all.get(1).sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        assertThat(all.get(2).sessionId())
+                .contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX);
+        assertThat(all.get(2).prompt())
+                .contains("「下单支付」").contains("更新后支付按钮失灵");
+        assertThat(all.get(3).sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+    }
+
+    @Test
+    void given_no_journeys_when_update_run_closes_then_no_reverification() {
+        // #427 存量口径（更新轨腿）：无核心旅程轴（旧计划不回补）——更新 run 收口后
+        // 不复走终验，既有更新轨行为不变
+        Long projectId = persistedGeneratedProject("9971");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        verify(agentClient, times(1)).converse(any(), any()); // 只更新 run，无终验 run
     }
 }

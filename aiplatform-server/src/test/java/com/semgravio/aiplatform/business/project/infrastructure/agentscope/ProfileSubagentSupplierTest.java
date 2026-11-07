@@ -51,6 +51,24 @@ class ProfileSubagentSupplierTest {
     }
 
     @Test
+    void given_verify_body_when_built_then_main_path_axis_protocol() {
+        // #424 载荷重构钉死：验证轴＝执行体自报的本片验收要点、浏览器主径为轴
+        //（含刷新一次验真落库）、db 按需下钻、log 降为失败定位工具——浏览器＋
+        // 查库＋看日志三面全跑的旧口径退役（「三面各排验证项」字样不再在位）
+        SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
+
+        assertThat(declaration.getInlineAgentsBody())
+                .contains("自报的本片验收要点")
+                .contains("浏览器主径")
+                .contains("刷新一次")
+                .contains("验真落库")
+                .contains("按需下钻")
+                .contains("失败定位工具")
+                .doesNotContain("三面各排验证项");
+    }
+
+    @Test
     void given_verify_body_when_built_then_instructs_checklist_broadcast_and_report_back() {
         // 清单式播报（逐项 ✅/❌ 经 source=verify 解说进工作消息，失败项如实 ❌
         // 不粉饰）+ 报告写隔离根 + 结果回交执行体（失败项带证据）

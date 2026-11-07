@@ -72,15 +72,16 @@ public class BackofficeAgentConfigController {
                     + "默认——调整工作协议、换模型不发版）；webSearchEnabled/"
                     + "fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即"
                     + "退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/"
-                    + "{toolName}）。模型路由策略四件（#354，仅 run 执行体消费）："
-                    + "routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——"
-                    + "人工档恒生效，对账/对比的定档通道）；routingStrongModelId/"
-                    + "routingFileCountThreshold/"
-                    + "routingSliceFeatureThreshold 缺省＝清空回落代码缺省（强档"
-                    + "pro、文件面 60、片复杂度 4 项功能条目——#361 重定："
-                    + "切片描述的枚举段数，标题字数不是复杂度代理）。协同口径：路由"
-                    + "判定优先、人工覆盖兜底——任一信号（重试失败/文件面/片复杂度）"
-                    + "越阈升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，"
+                    + "{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run"
+                    + " 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；"
+                    + "false＝钉死位——人工档恒生效，对账/对比的定档通道）；"
+                    + "routingStrongModelId/routingFileCountThreshold/"
+                    + "routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、"
+                    + "文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、"
+                    + "升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；"
+                    + "token 越出小/中/大封闭集 400 PRJ_079）。协同口径：路由"
+                    + "判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射"
+                    + "命中）升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，"
                     + "覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，"
                     + "变更后下一轮命令构建自然"
                     + "取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——"
@@ -92,9 +93,10 @@ public class BackofficeAgentConfigController {
                     + "（/model-tiers）有行且启用——缺行 400 PRJ_074、停用 400 "
                     + "PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落"
                     + "缺省不校验）。X-User-Id/X-User-Name 透传头"
-                    + "必留痕（缺头 400 PRJ_034）。寻址同 GET（未知键 404 PRJ_033）。"
+                    + "必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大"
+                    + "封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。"
                     + "回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"PRJ_033", "PRJ_034"})
+    @ErrorCodes({"PRJ_033", "PRJ_034", "PRJ_079"})
     public ApiResponse<BackofficeAgentConfigResponse> update(@PathVariable String agentKey,
             @RequestBody AgentConfigUpdateCommand command) {
         return ApiResponse.ok(appService.update(agentKey, command, currentOperator()));

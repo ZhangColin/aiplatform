@@ -11,7 +11,9 @@
 #   SERVER_HOST=3.70.172.160   SERVER_USER=ubuntu   SSH_KEY=$HOME/ssh/semgravio-eu-1.pem
 #   REMOTE_DIR=aiplatform（相对服务器 $HOME；绝对路径以 / 开头也可）
 #   INFRA_DIR=semgravio-infra（相对服务器 $HOME；共享 infra 单元目录，门禁脚本所在）
-# 常用开关：SKIP_BUILD=1 复用 dist/ 里最新的包只发布；SKIP_BACKUP=1 跳过部署前 pg_dump。
+# 常用开关：SKIP_BUILD=1 复用 dist/ 里最新的包只发布；SKIP_BACKUP=1 跳过部署前 pg_dump；
+#   SKIP_SENTINEL=1 应急跳过尾部预览哨兵（真浏览器冒烟，#422——跳过＝发布链路未验）。
+#   哨兵细节（一次性沙箱/退出码口径/单跑复验）见 deploy/preview-sentinel.sh 头注释。
 # 服务器侧日常运维（看日志/重启/备份/冒烟）用 deploy/server.sh。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,11 +25,11 @@ REMOTE_DIR="${REMOTE_DIR:-aiplatform}"
 INFRA_DIR="${INFRA_DIR:-semgravio-infra}"
 REMOTE="${SERVER_USER}@${SERVER_HOST}"
 
-echo "== 0/4 前置检查 =="
+echo "== 0/5 前置检查 =="
 [ -f "$SSH_KEY" ] || { echo "错误：找不到密钥 $SSH_KEY（可用 SSH_KEY=... 覆盖）"; exit 1; }
 ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$REMOTE" true
 
-echo "== 1/4 打包 =="
+echo "== 1/5 打包 =="
 if [ "${SKIP_BUILD:-0}" = "1" ]; then
   BUNDLE=$(ls -t dist/aiplatform-deploy-*.tar.gz 2>/dev/null | head -1 || true)
   [ -n "$BUNDLE" ] || { echo "错误：dist/ 没有现成包；去掉 SKIP_BUILD 全新打包，或先跑 deploy/build-bundle.sh"; exit 1; }
@@ -38,10 +40,10 @@ else
 fi
 BASENAME=$(basename "$BUNDLE")
 
-echo "== 2/4 上传（$(du -h "$BUNDLE" | cut -f1) → $REMOTE） =="
+echo "== 2/5 上传（$(du -h "$BUNDLE" | cut -f1) → $REMOTE） =="
 scp -i "$SSH_KEY" "$BUNDLE" "$REMOTE:"
 
-echo "== 3/4 服务器：infra 前置检查 → 备份 → 解包 → 重建重启 → conf 门禁安装 → 冒烟 =="
+echo "== 3/5 服务器：infra 前置检查 → 备份 → 解包 → 重建重启 → conf 门禁安装 → 冒烟 =="
 ssh -i "$SSH_KEY" -o BatchMode=yes "$REMOTE" \
   "BUNDLE_FN=$BASENAME REMOTE_DIR=$REMOTE_DIR INFRA_DIR=$INFRA_DIR SKIP_BACKUP=${SKIP_BACKUP:-0} bash -s" <<'REMOTE'
 set -euo pipefail
@@ -161,4 +163,11 @@ docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'aiplatform|semgrav
 echo "   注：aiplatform-web 显示 unhealthy 是既知误报（容器内 wget 被拒、外部实通），见部署文档 §9"
 REMOTE
 
-echo "== 4/4 完成：$BASENAME 已上线 =="
+echo "== 4/5 预览哨兵：外部真浏览器冒烟（#422，从发布机外部位点）=="
+if [ "${SKIP_SENTINEL:-0}" = "1" ]; then
+  echo "⚠ SKIP_SENTINEL=1——主站/预览页与关键子资源未验（应急跳过；事后补跑 deploy/preview-sentinel.sh）"
+else
+  deploy/preview-sentinel.sh
+fi
+
+echo "== 5/5 完成：$BASENAME 已上线 =="

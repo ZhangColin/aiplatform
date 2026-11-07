@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
+
 /**
  * 构建计划（生成编排交接物，ADR 0009）：主智能体产出 PRD 后顺带产出的有序纵向
  * 切片清单——每片一句用户语言「用户能 X」。平台只执行、不解析 PRD 自由文本
@@ -21,12 +23,25 @@ import java.util.Set;
  * 前面哪几片（{@code dependsOn}，1-based 片序，1 = 首片），平台据此算并行波
  * （{@link SliceSchedule}）。旧平面清单构造保留（全串行 = 每片依赖前一片），
  * 既有调用与测试零改动——依赖是结构化交接物的自然延伸（不解析自由文本）。</p>
+ *
+ * <p><b>结构化输出扩展（#423）</b>：计划同批携带两件结构化产出——①核心旅程清单
+ * {@code coreJourneys}（几条「角色＋入口＋关键动作串」，整轨终验的载荷契约，
+ * #406）；②每片规模标签 {@code sliceSizes}（小/中/大封闭集，模型路由信号，
+ * #414）。两件随计划同生命周期落库（PRD 演进即重产、进程重启不丢），计划补产
+ * 兜底同要两件。空清单＝未设（本扩展前的存量计划与旧构造——消费面按「无信号」
+ * 处理，存量不回补）。</p>
  */
-public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn) {
+public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn,
+        List<CoreJourney> coreJourneys, List<SliceSizeLabel> sliceSizes) {
 
     /** 旧平面清单构造（全串行 = 每片依赖前一片）：既有调用/测试零改动的兼容入口。 */
     public BuildPlan(List<String> slices) {
         this(slices, sequentialDependencies(slices));
+    }
+
+    /** 依赖形构造（#351；两件结构化扩展未设——存量口径）。 */
+    public BuildPlan(List<String> slices, List<Set<Integer>> dependsOn) {
+        this(slices, dependsOn, null, null);
     }
 
     public BuildPlan {
@@ -51,11 +66,21 @@ public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn) {
         }
         slices = copied;
         dependsOn = resolved;
+        coreJourneys = coreJourneys == null ? List.of() : List.copyOf(coreJourneys);
+        sliceSizes = sliceSizes == null ? List.of() : List.copyOf(sliceSizes);
+        if (!sliceSizes.isEmpty() && sliceSizes.size() != copied.size()) {
+            throw new IllegalArgumentException("规模标签数须与切片数一致（或整体未设）");
+        }
     }
 
     /** 第 {@code index}（0-based）片依赖的片序集（1-based；空 = 无依赖可并行）。 */
     public Set<Integer> dependsOn(int index) {
         return dependsOn.get(index);
+    }
+
+    /** 第 {@code index}（0-based）片的规模标签（null = 未设——存量计划无信号）。 */
+    public SliceSizeLabel sliceSize(int index) {
+        return sliceSizes.isEmpty() ? null : sliceSizes.get(index);
     }
 
     /** 全串行依赖（旧平面清单口径）：每片依赖前一片（首片无依赖、恒先行）。 */
@@ -66,5 +91,12 @@ public record BuildPlan(List<String> slices, List<Set<Integer>> dependsOn) {
             deps.add(i == 0 ? Set.of() : Set.of(i));
         }
         return deps;
+    }
+
+    /**
+     * 一条核心旅程（#423，#406 整轨终验的载荷轴）：角色（谁在用）＋入口（从哪
+     * 进来）＋关键动作串（一路做什么）——主智能体结构化自报，平台不解析自由文本。
+     */
+    public record CoreJourney(String role, String entry, String keyActions) {
     }
 }

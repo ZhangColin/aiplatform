@@ -9,8 +9,8 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
 /**
  * 配置变更留痕读面行（#251 历史可查）：一次实际变更的前后全量值快照＋操作者＋
  * 时刻，按时间倒序（最近先）。append-only——留痕不随任何动作删除；回滚＝把旧值
- * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面八件（含路由策略四件，
- * #354）全量留痕。
+ * 快照 PUT 回去（即一次新变更、留新痕，不做版本树）。值面全量（含路由策略四件
+ * #354、验证面两件 #424）留痕。
  *
  * @param id                  留痕标识（TSID 十进制串）
  * @param oldSystemPrompt     变更前 systemPrompt（null＝此前即缺省回落）
@@ -20,7 +20,11 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param oldRoutingEnabled   变更前模型路由开关
  * @param oldRoutingStrongModelId 变更前强模型档（null＝回落代码缺省）
  * @param oldRoutingFileCountThreshold 变更前文件面阈值（null 同上）
- * @param oldRoutingSliceFeatureThreshold 变更前片复杂度阈值（null 同上）
+ * @param oldRoutingEscalatingSizeLabels 变更前升档规模标签映射（存储形逗号接 token，
+ *                                       如「中,大」；null 同上；空串＝空映射，#426）
+ * @param oldVerifyModelId    变更前 verify 档位（#424；null＝此前即随执行体档）
+ * @param oldVerifyRoundBudget 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
+ * @param oldFinalVerifyFixBudget 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
  * @param newSystemPrompt     变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId          变更后模型档位（null 同上）
  * @param newWebSearchEnabled 变更后联网搜索开关
@@ -28,7 +32,11 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newRoutingEnabled   变更后模型路由开关
  * @param newRoutingStrongModelId 变更后强模型档（null＝本次清空回落代码缺省）
  * @param newRoutingFileCountThreshold 变更后文件面阈值（null 同上）
- * @param newRoutingSliceFeatureThreshold 变更后片复杂度阈值（null 同上）
+ * @param newRoutingEscalatingSizeLabels 变更后升档规模标签映射（存储形逗号接 token；
+ *                                       null 同上；空串＝空映射）
+ * @param newVerifyModelId    变更后 verify 档位（null＝本次清空随执行体档）
+ * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
+ * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -50,8 +58,15 @@ public record BackofficeAgentConfigTraceResponse(
         String oldRoutingStrongModelId,
         @Schema(description = "变更前文件面阈值（null 同上）")
         Integer oldRoutingFileCountThreshold,
-        @Schema(description = "变更前片复杂度阈值（null 同上）")
-        Integer oldRoutingSliceFeatureThreshold,
+        @Schema(description = "变更前升档规模标签映射（#426 存储形逗号接 token，如「中,大」；"
+                + "null＝此前即回落代码缺省；空串＝空映射）")
+        String oldRoutingEscalatingSizeLabels,
+        @Schema(description = "变更前 verify 档位（#424；null＝此前即随执行体生效档）")
+        String oldVerifyModelId,
+        @Schema(description = "变更前单场验证轮次预算（#424；null＝此前即代码缺省）")
+        Integer oldVerifyRoundBudget,
+        @Schema(description = "变更前整轨终验修复预算（#427；null＝此前即代码缺省）")
+        Integer oldFinalVerifyFixBudget,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -66,8 +81,15 @@ public record BackofficeAgentConfigTraceResponse(
         String newRoutingStrongModelId,
         @Schema(description = "变更后文件面阈值（null 同上）")
         Integer newRoutingFileCountThreshold,
-        @Schema(description = "变更后片复杂度阈值（null 同上）")
-        Integer newRoutingSliceFeatureThreshold,
+        @Schema(description = "变更后升档规模标签映射（#426 存储形逗号接 token；null＝本次"
+                + "清空回落代码缺省；空串＝空映射）")
+        String newRoutingEscalatingSizeLabels,
+        @Schema(description = "变更后 verify 档位（#424；null＝本次清空随执行体生效档）")
+        String newVerifyModelId,
+        @Schema(description = "变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）")
+        Integer newVerifyRoundBudget,
+        @Schema(description = "变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）")
+        Integer newFinalVerifyFixBudget,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -81,11 +103,15 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldSystemPrompt(), trace.oldModelId(),
                 trace.oldWebSearchEnabled(), trace.oldFetchUrlEnabled(),
                 trace.oldRoutingEnabled(), trace.oldRoutingStrongModelId(),
-                trace.oldRoutingFileCountThreshold(), trace.oldRoutingSliceFeatureThreshold(),
+                trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
+                trace.oldVerifyModelId(), trace.oldVerifyRoundBudget(),
+                trace.oldFinalVerifyFixBudget(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
-                trace.newRoutingFileCountThreshold(), trace.newRoutingSliceFeatureThreshold(),
+                trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
+                trace.newVerifyModelId(), trace.newVerifyRoundBudget(),
+                trace.newFinalVerifyFixBudget(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

@@ -44,3 +44,7 @@ Single-context：根级 `CONTEXT.md` + `docs/adr/` 为权威。见根级 `docs/a
 ### Skill audit guide
 
 技能安装/更新/指派/自产晋升的审核正本（skills 域后台审核口径：双向边界判断＋安装清单＋重叠处置＋自产草稿审核四要素）。见根级 `docs/agents/skill-audit-guide.md`。
+
+### Live 车道防腐
+
+触碰 workspace/docker/探针缝的票，收尾前必须本地跑相关 live 类并在票内评论留结果；①族 Windows argv 双引号平台性口径（防呆 os.name 条件化、命令一律单引号）。见根级 `docs/agents/live-test-lane.md`。

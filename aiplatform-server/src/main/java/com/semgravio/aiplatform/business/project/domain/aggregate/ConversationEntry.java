@@ -79,6 +79,12 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     @Column(name = "quote", columnDefinition = "jsonb", updatable = false)
     private Map<String, Object> quote;
 
+    /** kind=run_failure（#418 失败片落库面）：run 失败终态的失败面原样（SSE
+     * run-failed 扩载同载荷——{ stopped?, error?, durationMs, attempts[] }）。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "failure", columnDefinition = "jsonb", updatable = false)
+    private Map<String, Object> failure;
+
     /** kind=question 的已答位（作答即置位——全表唯一 UPDATE 面）。 */
     @Column(name = "answered")
     private Boolean answered;
@@ -88,7 +94,8 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
 
     private ConversationEntry(Long projectId, String runId, ConversationEntryKind kind,
             String text, Map<String, Object> question, Map<String, Object> closing,
-            List<Map<String, Object>> attachments, Map<String, Object> quote) {
+            List<Map<String, Object>> attachments, Map<String, Object> quote,
+            Map<String, Object> failure) {
         this.projectId = projectId;
         this.runId = runId;
         this.kind = kind;
@@ -97,6 +104,7 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
         this.closing = closing;
         this.attachments = attachments;
         this.quote = quote;
+        this.failure = failure;
         this.answered = kind == ConversationEntryKind.QUESTION ? Boolean.FALSE : null;
     }
 
@@ -104,7 +112,7 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     public static ConversationEntry userUtterance(Long projectId, String runId, String text,
             List<Map<String, Object>> attachments) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.USER, text, null, null,
-                attachments, null);
+                attachments, null, null);
     }
 
     /** 用户发言条目（无附件——纯文字发言）。 */
@@ -115,40 +123,48 @@ public class ConversationEntry extends Auditable implements AggregateRoot<Conver
     /** 智能体回复条目（轮收口 / 问答挂起时按段落库——段序即对话序）。 */
     public static ConversationEntry agentReply(Long projectId, String runId, String text) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.AGENT, text, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** 问答卡条目（question-raised 事件 payload 原样——刷新后可重建可作答）。 */
     public static ConversationEntry question(Long projectId, String runId,
             Map<String, Object> payload) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.QUESTION, null,
-                payload, null, null, null);
+                payload, null, null, null, null);
     }
 
     /** 问答作答条目。 */
     public static ConversationEntry answer(Long projectId, String runId, String text) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.ANSWER, text, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** 收尾卡条目（#88 closing 载荷原样）。 */
     public static ConversationEntry closing(Long projectId, String runId,
             Map<String, Object> closing) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.CLOSING, null, null,
-                closing, null, null);
+                closing, null, null, null);
     }
 
     /** 平台轻引导条目（兜底分支定型文案）。 */
     public static ConversationEntry guide(Long projectId, String runId, String text) {
         return new ConversationEntry(projectId, runId, ConversationEntryKind.GUIDE, text, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** 报价卡条目（#203）：不属任何对话轮（runId 恒空）——报价是平台对用户的独立
      * 发言，非某轮的产物。载荷 = 订单引用（字符串，防 JS 精度丢失）+ 事件类型。 */
     public static ConversationEntry quote(Long projectId, Long orderId, String event) {
         return new ConversationEntry(projectId, null, ConversationEntryKind.QUOTE, null, null,
-                null, null, Map.of("orderId", orderId.toString(), "event", event));
+                null, null, Map.of("orderId", orderId.toString(), "event", event), null);
+    }
+
+    /** 失败留账条目（#418 失败片落库面）：run 失败终态的失败面原样——SSE
+     * run-failed 扩载同载荷，锚失败 run 的用户面 runId。 */
+    public static ConversationEntry runFailure(Long projectId, String runId,
+            Map<String, Object> failure) {
+        return new ConversationEntry(projectId, runId, ConversationEntryKind.RUN_FAILURE, null,
+                null, null, null, null, failure);
     }
 
     /** 问答卡作答置位（幂等——已答不再置）。 */

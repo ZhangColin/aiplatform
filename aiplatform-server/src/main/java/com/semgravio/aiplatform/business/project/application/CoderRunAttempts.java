@@ -139,18 +139,22 @@ class CoderRunAttempts {
      * ——平面稿渲成 PNG 后以 PNG 为正身的事实面，非设计会话恒 null）；编码轨道
      * 另携 {@code designLint} 设计规范扫描事实（#296：token 合规是机器可判的
      * <b>验证事实</b>不是判定分类——判定出口零改，仅随收尾卡如实呈现；带规范
-     * 项目的编码 run 在场，非规范项目/设计会话恒 null）。
+     * 项目的编码 run 在场，非规范项目/设计会话恒 null）；编码轨道另携
+     * {@code proofOfOutput} 产出证明判别标注（#420：空转拒绝史／豁免依据——
+     * 判定在 {@link ProofOfOutputGate}（收口判据回调抛出即结构性拒绝，本环走既有
+     * 重试/回滚重跑通道），标注随收尾卡如实呈现；非豁免收口且无拒绝史恒 null）。
      */
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote, List<Map<String, Object>> drafts,
-            Map<String, Object> designLint) {
+            Map<String, Object> designLint, Map<String, Object> robustKitLint,
+            Map<String, Object> proofOfOutput, Map<String, Object> knownDefects) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null);
+            return new ClosingJudgment(false, null, true, note, null, null, null, null, null);
         }
 
         /**
@@ -161,7 +165,7 @@ class CoderRunAttempts {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null);
+                    drafts == null ? List.of() : drafts, null, null, null, null);
         }
 
         /**
@@ -170,12 +174,35 @@ class CoderRunAttempts {
          */
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, null, null);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
+                    null, null, null, null, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
-            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts, lint);
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    lint, robustKitLint, proofOfOutput, knownDefects);
+        }
+
+        /** 附基座 lint 两档扫描事实（#425 收口回调拼装：存量工作区传 null＝不携带）。 */
+        ClosingJudgment withRobustKitLint(Map<String, Object> lint) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, lint, proofOfOutput, knownDefects);
+        }
+
+        /** 附产出证明判别标注（#420 收口回调拼装：非豁免且无拒绝史传 null＝不携带）。 */
+        ClosingJudgment withProofOfOutput(Map<String, Object> proofOfOutput) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, robustKitLint, proofOfOutput, knownDefects);
+        }
+
+        /**
+         * 附已知缺陷清单（#427 整轨终验修复预算耗尽：终验末轮收口拼装——版本照成
+         * ＋缺陷清单如实进收尾卡；通过/预算内有修复路径不携带）。
+         */
+        ClosingJudgment withKnownDefects(Map<String, Object> knownDefects) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, robustKitLint, proofOfOutput, knownDefects);
         }
     }
 
@@ -200,21 +227,25 @@ class CoderRunAttempts {
      * 时的执行体终文（{@code closingText}，成功收口才非 null——生成轨把它当交接
      * 摘要用，#114 片间交接：前片执行体自产的「做了什么/关键文件/下一片须知」即其
      * 收口终文；修正轨不用）+ 末次尝试的错误现场（{@code lastError}，终态失败才
-     * 非 null——生成轨续跑现状盘点的「中断原因」旁证，#221）。
+     * 非 null——生成轨续跑现状盘点的「中断原因」旁证，#221）+ 失败面
+     * （{@code failure}，终态失败/停止才非 null——#418 失败片落库面：逐尝试墙钟/
+     * 档位/失败原因/本场累计，轨道层经事件桥与 run-failed SSE 扩载同载荷落库）。
      */
-    record RunResult(boolean succeeded, String closingText, String lastError) {
+    record RunResult(boolean succeeded, String closingText, String lastError,
+            Map<String, Object> failure) {
 
         static RunResult ok(String closingText) {
-            return new RunResult(true, closingText, null);
+            return new RunResult(true, closingText, null, null);
         }
 
-        static RunResult failed(String lastError) {
-            return new RunResult(false, null, lastError);
+        static RunResult failed(String lastError, Map<String, Object> failure) {
+            return new RunResult(false, null, lastError, failure);
         }
     }
 
     /**
-     * 一次尝试的耗时账（#111 阶段耗时分布）：尝试序号 + 尝试墙钟 + 该尝试跨流段
+     * 一次尝试的耗时账（#111 阶段耗时分布）：轮次（#353 段级外环——首轮/回滚重跑
+     * 轮，逐尝试归因分轮可读）+ 尝试序号（轮内）+ 尝试墙钟 + 该尝试跨流段
      * （converse + 续跑）合并的阶段耗时事实 + 该尝试生效模型档位（#354 路由
      * 留档——逐尝试哪档可归因，收尾卡 durationBreakdown.attempts[].modelId）。
      * 墙钟口径：成功/判据未过的尝试 =
@@ -224,8 +255,8 @@ class CoderRunAttempts {
      * 端失败〔前段失败/判据回调抛错〕无可携事实仍零桶，观察面口径见
      * StageDurationFacts）。
      */
-    private record AttemptDuration(int attempt, long wallMs, StageDurations durations,
-            String modelId) {
+    private record AttemptDuration(int round, int attempt, long wallMs,
+            StageDurations durations, String modelId) {
     }
 
     private final AgentscopeAgentClient agentClient;
@@ -318,8 +349,9 @@ class CoderRunAttempts {
      * 全新——计量幂等键不撞首轮；run-start 滤掉、事件归锚首试 runId，用户面零感知）。
      * 重跑轮再耗尽则二次回滚后终态（不变式：终态时工作区 = 段起点，续跑从干净现场起）。
      * {@code null} = 无段级回滚（修正/设计/合并裁决轨——既有口径不变）。
-     * {@code signals} = 模型路由的段级信号（轨道层拼装：切片描述——片复杂度信号；
-     * 修正/设计/合并裁决轨经便捷形传空信号；路由只对 executor 座生效，#354）。
+     * {@code signals} = 模型路由的段级信号（轨道层拼装：片规模标签——计划自报的
+     * 实现面积，#426 起替换枚举密度信号；修正/设计/合并裁决轨经便捷形传空信号；
+     * 路由只对 executor 座生效，#354）。
      */
     RunResult run(Project project, Long workspaceId, String firstRunId, String sessionId,
             Prompts prompts, BiFunction<String, List<FileChange>, ClosingJudgment> onSuccess,
@@ -386,9 +418,11 @@ class CoderRunAttempts {
             }
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 // 停止旁路（#359 生成取消）：起跑前查停——停止不走重试环（一次尝试即
-                // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口
+                // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口；停止
+                // 失败面（#418）随异常携出（此前尝试的账在场——跨尝试累计）
                 if (codingRunTrack.stopRequested(projectId)) {
-                    throw new RunStoppedException(firstRunId);
+                    throw new RunStoppedException(firstRunId,
+                            failureFace(true, null, attemptDurations, runStartedAt));
                 }
                 Instant attemptStartedAt = Instant.now();
                 AtomicReference<StageDurations> durations =
@@ -473,7 +507,7 @@ class CoderRunAttempts {
                 // 尝试墙钟止于核验前（收口判据核验起计收口尾序桶）；本尝试账先记，
                 // 核验/收口段抛错不重记（attemptAccounted 守卫）。逐尝试档位随账
                 // 留档（#354 路由可观测——收尾卡 attempts[].modelId）
-                attemptDurations.add(new AttemptDuration(attempt,
+                attemptDurations.add(new AttemptDuration(round, attempt,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                         durations.get(), attemptModelId));
                 attemptAccounted = true;
@@ -501,34 +535,64 @@ class CoderRunAttempts {
                     }
                     throw e;
                 }
-                // lint 违规有限自动重试一轮（#296 遵守三件套③，软约束不当硬门）：
-                // 判据已过（8081/finish_edit）、样式扫描有违规且修轮未用、尝试还有
-                // 余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试——
-                // 静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）；
-                // 一轮用尽仍违规＝如实随收尾卡列违规项收口（不静默不假装达标，
-                // 也不 run 失败）
+                // lint 违规有限自动重试一轮（#296 遵守三件套③；#425 同轮扩盖基座
+                // lint 两档）：判据已过（8081/finish_edit）、样式/基座扫描有违规且
+                // 修轮未用、尝试还有余量 → 违规清单喂回执行体原地修一轮（对偶 #221
+                // 错误现场续试——静默重试信号不外泄，part-check 停「检查中」、PASSED
+                // 不抢先播报）；一轮用尽：样式（#296 软约束）与基座预置档（#425 不
+                // 拦收口）＝如实随收尾卡列违规项收口（不静默不假装达标，也不 run
+                // 失败）；基座<b>强制档</b>仍余（#425 收口拒绝回路）＝结构性拒绝
+                // ——拒绝回执抛出走该次尝试失败（重试现场携带违规清单），耗尽走
+                // #353 段级回滚重跑（升档兜底，不建新通道）
                 Map<String, Object> lint = judgment.designLint();
-                if (lint != null && !lintViolations(lint).isEmpty()
+                Map<String, Object> robustLint = judgment.robustKitLint();
+                boolean styleViolating = lint != null && !lintViolations(lint).isEmpty();
+                boolean robustViolating = RobustKitLintAppService.hasViolations(robustLint);
+                if ((styleViolating || robustViolating)
                         && !lintFixRoundUsed && attempt < maxAttempts) {
                     lintFixRoundUsed = true;
-                    previousError = lintRetryScene(lint);
-                    log.info("[{}] 项目 {} 样式合规扫描未过，自动修一轮（attemptRunId={}，违规 {} 处）",
-                            what, projectId, attemptRunId, lint.get("total"));
+                    previousError = combinedLintRetryScene(lint, robustLint);
+                    log.info("[{}] 项目 {} lint 扫描未过（样式 {}／基座强制 {}+预置 {} 处），自动修一轮"
+                            + "（attemptRunId={}）",
+                            what, projectId,
+                            styleViolating ? lint.get("total") : 0,
+                            RobustKitLintAppService.tierViolationsOf(robustLint,
+                                    RobustKitLintAppService.TIER_MANDATORY).size(),
+                            RobustKitLintAppService.tierViolationsOf(robustLint,
+                                    RobustKitLintAppService.TIER_PRESET).size(),
+                            attemptRunId);
                     continue;
+                }
+                if (RobustKitLintAppService.mandatoryViolationsRemain(robustLint)) {
+                    // 强制档拒绝回执（#425）：末次尝试记待决 ❌（同核验未过口径——
+                    // 确定终态时外环补发，降级不悬挂）
+                    if (attempt == maxAttempts) {
+                        failedCheckPending = true;
+                        failedCheckProjection = projection;
+                        failedCheckCommand = command;
+                    }
+                    throw new IllegalStateException(
+                            RobustKitLintAppService.rejectionReceipt(robustLint));
                 }
                 emitSelfCheck(projection, command, AgentEventTypes.PART_CHECK_STATE_PASSED);
                 if (pendingFinish.get() != null) {
-                    // lint 修轮事实（#296）：曾自动修一轮即标记 retried——收尾卡如实
-                    // 叙事「曾发现违规、修一轮后通过/仍余 N 处」，不抹掉纠偏过程
+                    // lint 修轮事实（#296/#425）：曾自动修一轮即标记 retried——收尾卡
+                    // 如实叙事「曾发现违规、修一轮后通过/仍余 N 处」，不抹掉纠偏过程
                     if (judgment.designLint() != null && lintFixRoundUsed) {
                         Map<String, Object> retried = new LinkedHashMap<>(judgment.designLint());
                         retried.put(CLOSING_LINT_RETRIED_FIELD, true);
                         judgment = judgment.withDesignLint(retried);
                     }
+                    if (judgment.robustKitLint() != null && lintFixRoundUsed) {
+                        Map<String, Object> retried = new LinkedHashMap<>(judgment.robustKitLint());
+                        retried.put(CLOSING_LINT_RETRIED_FIELD, true);
+                        judgment = judgment.withRobustKitLint(retried);
+                    }
                     Map<String, Object> closing = closingPayload(judgment, runChanges,
                             runStartedAt, what,
                             verificationFacts.consume(Long.toString(workspaceId)),
-                            seat.draftsItem(), tier);
+                            seat.draftsItem(), tier,
+                            agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget());
                     // 版本锚定（#91）：收口自动成版——git commit 的 Run-Id trailer
                     // 锚定收尾卡，commit hash 回填 closing 的 version 键（SSE 扩载与
                     // 对话史落库同载荷，版本详情复用）。成版失败 quietly 只记日志
@@ -565,7 +629,7 @@ class CoderRunAttempts {
                         runChanges.addAll(failure.changes());
                     }
                     if (!attemptAccounted) {
-                        attemptDurations.add(new AttemptDuration(attempt,
+                        attemptDurations.add(new AttemptDuration(round, attempt,
                                 Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                                 durations.get(), attemptModelId));
                     }
@@ -575,7 +639,11 @@ class CoderRunAttempts {
                             humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
                             attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
                             filePayloads(runChanges));
-                    throw new RunStoppedException(firstRunId);
+                    // 停止的失败面（#418 落库面）：stopped 口径＋逐尝试账＋本场累计——
+                    // 停止是用户动作，无失败原因可报（不携 error）；中断尝试的部分观察
+                    // 已计入逐尝试账（上方 #323 留账）
+                    throw new RunStoppedException(firstRunId,
+                            failureFace(true, null, attemptDurations, runStartedAt));
                 }
                 previousError = errorScene(e);
                 if (e instanceof AgentTurnFailure failure) {
@@ -590,7 +658,7 @@ class CoderRunAttempts {
                     // 的部分观察（AgentTurnFailure 携带；非客户端失败无可携事实仍
                     // 零桶——观察面口径见 StageDurationFacts）。档位随账留档同成功路
                     // （#354——失败尝试用了哪档同样可归因）
-                    attemptDurations.add(new AttemptDuration(attempt,
+                    attemptDurations.add(new AttemptDuration(round, attempt,
                             Duration.between(attemptStartedAt, Instant.now()).toMillis(),
                             durations.get(), attemptModelId));
                 }
@@ -613,7 +681,8 @@ class CoderRunAttempts {
         }
         // 终态留档（#323 失败留账）：超限转终态、没有成功收尾卡时，耗时账与观察面
         // 仍随终态日志留档（平台观测面）——累计墙钟＋逐尝试墙钟与桶＋已落盘文件
-        // 清单，失败看得见成本；SSE 封闭集与 run-failed 载荷不变
+        // 清单，失败看得见成本。失败面（#418 落库面）随 RunResult 回传轨道层——
+        // 经事件桥与 run-failed SSE 扩载同载荷落库（失败不再只看日志）
         log.error("[{}] 项目 {} 重试超限（{} 次尝试{}），转终态失败——本场留账：累计 {}、"
                         + "逐尝试 {}、已落盘文件变更 {}。用户侧兜底（生成「继续生成」续跑/修正恢复出口/设计重提意见续跑）",
                 what, projectId, maxAttempts * (reran ? 2 : 1),
@@ -621,7 +690,8 @@ class CoderRunAttempts {
                 humanDuration(Duration.between(runStartedAt, Instant.now()).toMillis()),
                 attemptDurations.stream().map(CoderRunAttempts::attemptPayload).toList(),
                 filePayloads(runChanges));
-        return RunResult.failed(previousError);
+        return RunResult.failed(previousError,
+                failureFace(false, previousError, attemptDurations, runStartedAt));
     }
 
     /**
@@ -735,6 +805,9 @@ class CoderRunAttempts {
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
 
+    /** 终验 run 日志标签（#427 整轨终验的 what 参数值）：summary 口径分岔同生成形（note 即摘要）。 */
+    static final String VERIFY_LABEL = "verify";
+
     /** 设计轨日志标签（#289 设计过程轨道）：收口摘要口径分岔用。 */
     static final String DESIGN_LABEL = "design";
 
@@ -752,10 +825,13 @@ class CoderRunAttempts {
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
     /**
-     * 委派工具注册名（harness 子智能体发起面）：其执行跨距 ≈ 被委执子智能体的事件
-     * 窗——工具桶除名防双计（验证时长由 verifyMs 桶承载）。
+     * 委派族工具注册名（harness 委派发起/等待面）：其执行跨距与被委执子智能体的
+     * 源账（verifyMs 口径——该源模型调用＋工具执行）墙钟重叠——工具桶除名防双计
+     * （#417 补全；agent_spawn＝内核旧名、历史卡仍见，agent_send＝现名，
+     * wait_async_results＝等待屏障——生产实测 3231s＋797s 全漏在工具桶）。
      */
-    private static final String AGENT_SPAWN_TOOL = "agent_spawn";
+    private static final Set<String> DELEGATION_TOOLS =
+            Set.of("agent_spawn", "agent_send", "wait_async_results");
 
     /**
      * 收口扩载拼装（#88）：被押后的 run-finish 载荷加 {@code closing} 对象——
@@ -775,7 +851,7 @@ class CoderRunAttempts {
     private static Map<String, Object> closingPayload(ClosingJudgment judgment,
             List<FileChange> changes, Instant runStartedAt, String what,
             VerificationFacts.Facts verification, String draftsItem,
-            ModelRoutingAppService.TierSelection tier) {
+            ModelRoutingAppService.TierSelection tier, int verifyRoundBudget) {
         Map<String, Object> closing = new LinkedHashMap<>();
         closing.put(CLOSING_SUMMARY_FIELD, closingSummary(judgment, what));
         closing.put("prdChanged", judgment.prdChanged());
@@ -788,7 +864,8 @@ class CoderRunAttempts {
         }
         closing.put("files", filePayloads(changes));
         closing.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
-        Map<String, Object> verificationPayload = verificationPayload(verification);
+        Map<String, Object> verificationPayload = verificationPayload(verification,
+                verifyRoundBudget);
         if (verificationPayload != null) {
             closing.put(AgentEventTypes.VERIFICATION_FIELD, verificationPayload);
         }
@@ -797,6 +874,15 @@ class CoderRunAttempts {
         }
         if (judgment.designLint() != null) {
             closing.put(CLOSING_LINT_FIELD, judgment.designLint());
+        }
+        if (judgment.robustKitLint() != null) {
+            closing.put(CLOSING_ROBUST_LINT_FIELD, judgment.robustKitLint());
+        }
+        if (judgment.proofOfOutput() != null) {
+            closing.put(CLOSING_PROOF_FIELD, judgment.proofOfOutput());
+        }
+        if (judgment.knownDefects() != null) {
+            closing.put(CLOSING_KNOWN_DEFECTS_FIELD, judgment.knownDefects());
         }
         if (tier != null) {
             closing.put(CLOSING_MODEL_TIER_FIELD, tier.payload());
@@ -814,12 +900,36 @@ class CoderRunAttempts {
     static final String CLOSING_LINT_FIELD = "designLint";
 
     /**
+     * 收口扩载的基座 lint 键（#425：{@code { status, retried?, mandatory?, preset? }}
+     * ——各档 { total, violations[] }，条目 file/line/rule/message；强制档违规
+     * 修不完＝收口被拒（载荷不会以「带强制档违规」形态出现在收尾卡——只剩预置档
+     * 余项如实标注）；存量工作区不携带）。
+     */
+    static final String CLOSING_ROBUST_LINT_FIELD = "robustKitLint";
+
+    /**
      * 收口扩载的模型路由键（#354：收口尝试的路由判定留档——{@code { modelId,
      * source, reasons?, signals }}；run 执行体座的编码 run 在场、其余缺省不携带。
      * 平台分析口径、前端不渲染，随收尾卡落对话史——「哪段用了哪档、为什么」的
      * 可查留档；逐尝试档位见 {@code durationBreakdown.attempts[].modelId}）。
      */
     static final String CLOSING_MODEL_TIER_FIELD = "modelTier";
+
+    /**
+     * 收口扩载的产出证明判别标注键（#420 空转片防呆）：{@code { idleRejections?,
+     * exempted?, exemptionBasis? }}——空转拒绝史（本场被拒后补做收口）与豁免
+     * 依据（验证确认「能力已存在」的合法收口）；正常干活收口（diff＞0 且无拒绝
+     * 史）不携带。判定在 {@link ProofOfOutputGate}（零 diff＋无确认＝结构性拒绝
+     * ——拒绝回执经重试现场喂回执行体同 run 补做）。
+     */
+    static final String CLOSING_PROOF_FIELD = "proofOfOutput";
+
+    /**
+     * 收口扩载的已知缺陷清单键（#427 整轨终验）：{@code { defects: [{ name, detail? }] }}
+     * ——修复预算耗尽时版本照成、末轮终验 run 收尾卡如实携带（完成叙事与收尾卡同
+     * 源——前端如实呈现，不粉饰「完成」）；通过与预算内修复路径不携带。
+     */
+    static final String CLOSING_KNOWN_DEFECTS_FIELD = "knownDefects";
 
     /** 扫描载荷的「曾自动修一轮」键（修轮用尽即标——纠偏过程如实）。 */
     static final String CLOSING_LINT_RETRIED_FIELD = "retried";
@@ -860,6 +970,24 @@ class CoderRunAttempts {
                     .append(violation.get("rule")).append("：").append(violation.get("message"));
         }
         return scene.toString();
+    }
+
+    /**
+     * 修轮现场拼装单点（#425 两源合流）：设计规范 lint 与基座 lint 各自现场在场
+     * 即拼、以空行分隔（两扫描独立、清单各自完整——执行体一次修轮看全两份）。
+     */
+    private static String combinedLintRetryScene(Map<String, Object> designLint,
+            Map<String, Object> robustLint) {
+        String scene = "";
+        if (designLint != null && !lintViolations(designLint).isEmpty()) {
+            scene = lintRetryScene(designLint);
+        }
+        if (RobustKitLintAppService.hasViolations(robustLint)) {
+            scene = scene.isEmpty()
+                    ? RobustKitLintAppService.fixRoundScene(robustLint)
+                    : scene + "\n\n" + RobustKitLintAppService.fixRoundScene(robustLint);
+        }
+        return scene;
     }
 
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本
@@ -909,12 +1037,14 @@ class CoderRunAttempts {
     }
 
     /**
-     * 阶段耗时分布装配（#111）：四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行
-     * = 按工具名分桶·command 按命令归组嵌套 / 验证 = verify 委派窗 / 收口尾序 =
+     * 阶段耗时分布装配（#111；#417 口径修真）：四桶齐备（LLM 等待 = 跨尝试模型调用
+     * 累计 / 工具执行 = 按工具名分桶·command 按命令归组嵌套·委派族除名 / 验证 =
+     * verify 源账（其模型调用＋工具执行累计——并行父流时间不入账）/ 收口尾序 =
      * 探活 + 样式合规扫描（#296）+ 成版）+ 逐尝试分布（静默重试代价可归因——每次
      * 尝试的墙钟与桶各自带）。
-     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验等）
-     * = durationMs；closingMs 含成版而 durationMs 窗口不含（小正
+     * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验、
+     * 委派等待屏障等）− 真并行重叠（父流与子智能体源事件墙钟重叠段——并行收益
+     * 双方各自入账）= durationMs；closingMs 含成版而 durationMs 窗口不含（小正
      * 偏差）——量级不符即埋点有洞（缝测守卫）。
      */
     private static Map<String, Object> durationBreakdown(List<AttemptDuration> attempts,
@@ -933,10 +1063,12 @@ class CoderRunAttempts {
         return breakdown;
     }
 
-    /** 逐尝试分布条目：尝试序号 + 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+
-     *  该尝试生效模型档位（#354 路由留档——逐尝试哪档可归因）。 */
+    /** 逐尝试分布条目：轮次（首轮/回滚重跑轮——#353 分轮归因）+ 尝试序号（轮内）+
+     * 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+ 该尝试生效模型档位
+     * （#354 路由留档——逐尝试哪档可归因）。 */
     private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("round", attempt.round());
         payload.put("attempt", attempt.attempt());
         payload.put("durationMs", attempt.wallMs());
         payload.put("modelId", attempt.modelId());
@@ -947,14 +1079,73 @@ class CoderRunAttempts {
     }
 
     /**
-     * 工具桶载荷：按工具名分桶（{@link #AGENT_SPAWN_TOOL} 委派调用除名——其跨距 ≈
-     * 子智能体事件窗，入桶即与验证桶双计）；command 工具以命令归组对象嵌套
-     * （install / dev / test / other——只携带出现过的组）。
+     * 失败面装配（#418 失败片落库面）：{@code { stopped?, error?, durationMs,
+     * attempts[] }}——逐尝试墙钟/档位（跨轮累计，回滚重跑轮不清账——#323 失败
+     * 留账口径）＋失败原因（末次尝试错误现场原文，停止口径不携——停止是用户动作
+     * 无失败原因可报）＋本场累计墙钟（首试起跑到终态收口）。经 {@link RunResult}
+     * /{@link RunStoppedException} 回传轨道层，事件桥以同一 map 落库与扩载
+     * run-failed（同收尾卡「SSE 扩载与落库同载荷」先例）——平台分析口径、前端
+     * 不渲染（同 durationBreakdown）。schema 正本＝SSE事件清单·失败面节。
+     */
+    private static Map<String, Object> failureFace(boolean stopped, String error,
+            List<AttemptDuration> attempts, Instant runStartedAt) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        if (stopped) {
+            failure.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
+        }
+        if (error != null) {
+            failure.put(FAILURE_ERROR_FIELD, error);
+        }
+        failure.put("durationMs", Duration.between(runStartedAt, Instant.now()).toMillis());
+        failure.put("attempts", attempts.stream()
+                .map(CoderRunAttempts::attemptPayload)
+                .toList());
+        return failure;
+    }
+
+    /**
+     * 轨道级失败的失败面（#418）：无尝试环数据的失败（fork 合并失败/波级异常等
+     * ——失败发生在 run 收口之后的轨道段，无逐尝试账可归）只携失败原因。轨道层
+     * 调用（同包），事件桥同载荷落库与扩载。
+     */
+    static Map<String, Object> trackFailureFace(String error) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        if (error != null) {
+            failure.put(FAILURE_ERROR_FIELD, error);
+        }
+        return failure;
+    }
+
+    /** 轨道级停止的最小失败面（#418）：波级停止无逐尝试账在场——只携 stopped 口径
+     * （停止是用户动作，无失败原因可报）。 */
+    static Map<String, Object> stoppedTrackFace() {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
+        return failure;
+    }
+
+    /** 失败面的失败原因键（末次尝试错误现场原文——平台分析口径，不经用户面映射）。 */
+    static final String FAILURE_ERROR_FIELD = "error";
+
+    /**
+     * 失败面的失败原因读口（#418）：事件桥取末次错误现场做用户面 message 映射
+     * （#355）用——map 形状知识留在装配侧，消费端不逐键解构。
+     */
+    static String errorOf(Map<String, Object> failure) {
+        return failure != null && failure.get(FAILURE_ERROR_FIELD) instanceof String error
+                ? error : null;
+    }
+
+    /**
+     * 工具桶载荷：按工具名分桶（{@link #DELEGATION_TOOLS} 委派族除名——其跨距与
+     * 验证源账墙钟重叠，入桶即双计）；command 工具以命令归组对象嵌套
+     * （install / build / dev / test / db / http / script / other——#417 七族，
+     * 只携带出现过的组）。
      */
     private static Map<String, Object> toolsPayload(StageDurations durations) {
         Map<String, Object> tools = new LinkedHashMap<>();
         durations.toolsMs().forEach((toolName, ms) -> {
-            if (!AGENT_SPAWN_TOOL.equals(toolName)) {
+            if (!DELEGATION_TOOLS.contains(toolName)) {
                 tools.put(toolName, ms);
             }
         });
@@ -964,21 +1155,25 @@ class CoderRunAttempts {
         return tools;
     }
 
-    /** 验证桶 = verify 委派窗（无验证 = 0——四桶齐备，缺省出 0 不缺席）。 */
+    /** 验证桶 = verify 源账（该源模型调用＋工具执行累计——并行父流时间不入账；
+     * 无验证 = 0——四桶齐备，缺省出 0 不缺席）。 */
     private static long verifyMs(StageDurations durations) {
         return durations.subagentMs()
                 .getOrDefault(ProfileSubagentSupplier.VERIFY_NAME, 0L);
     }
 
     /**
-     * 验证统计（#352 收尾卡轮末统计）：{@code { total, failed, faces{browser,db,log},
-     * rounds, failedItems[] }}——事实源＝verify 子智能体的 report_verification 登记：
-     * 末轮快照的总项数/未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证
-     * 轮数（修复—复验环如实：>1＝修后复验过）。验证子智能体未跑/未登记（null）
-     * 返回 {@code null}（closing 不携带 verification 键，前端缺省不显示验证统计行）。
-     * 逐项 ✅/❌ 明细与证据在过程播报，收尾卡只带聚合。
+     * 验证统计（#352 收尾卡轮末统计；#424 片轻验载荷口径）：
+     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[], budgetExhausted? }}
+     * ——事实源＝verify 子智能体的 report_verification 登记：末轮快照的总项数/
+     * 未过数/三面分布/未过项名（修不了如实标注的落点）＋本场验证轮数（修复—
+     * 复验环如实：>1＝修后复验过）＋轮次预算用尽标注（达预算仍有未过＝停止
+     * 修复—复验的超预算如实呈现）。验证子智能体未跑/未登记（null）返回
+     * {@code null}（closing 不携带 verification 键——#424 常开硬门下收口路径
+     * 结构性不达，防御性保留）。逐项 ✅/❌ 明细与证据在过程播报，收尾卡只带聚合。
      */
-    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts) {
+    private static Map<String, Object> verificationPayload(VerificationFacts.Facts facts,
+            int roundBudget) {
         if (facts == null || facts.lastRound().isEmpty()) {
             return null;
         }
@@ -1000,6 +1195,9 @@ class CoderRunAttempts {
         payload.put(AgentEventTypes.VERIFICATION_FACES_FIELD, faceCounts);
         payload.put(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, facts.rounds());
         payload.put(AgentEventTypes.VERIFICATION_FAILED_ITEMS_FIELD, failedItems);
+        if (facts.budgetExhausted(roundBudget)) {
+            payload.put(AgentEventTypes.VERIFICATION_BUDGET_EXHAUSTED_FIELD, true);
+        }
         return payload;
     }
 
@@ -1011,12 +1209,14 @@ class CoderRunAttempts {
     }
 
     /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成/
-     * 设计轨道按段叙事。 */
+     * 设计轨道按段叙事、终验 run 按验证判定叙事（#427）。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
-        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)) {
+        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)
+                || VERIFY_LABEL.equals(what)) {
             // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片）；
-            // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）——note
-            // 恒非空（轨道层 ClosingJudgment.generation 同形拼装）
+            // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）；终验 run
+            // （#427）：summary = 验证判定叙事（通过／未过已安排修复／预算尽按现状
+            // 交付）——note 恒非空（轨道层 ClosingJudgment.generation 同形拼装）
             return judgment.systemNote();
         }
         if (judgment.prdChanged() && judgment.systemChanged()) {

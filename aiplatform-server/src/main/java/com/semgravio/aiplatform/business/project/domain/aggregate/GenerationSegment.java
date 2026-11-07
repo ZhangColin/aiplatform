@@ -19,6 +19,7 @@ import com.cartisan.data.jpa.domain.Auditable;
 import com.cartisan.data.jpa.id.TsidGenerator;
 
 import com.semgravio.aiplatform.business.project.domain.enums.GenerationSegmentStatus;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 
 /**
  * 生成轨道片行（{@code prj_generation_segments}，#220 生成轨道表）：项目当前
@@ -70,6 +71,13 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
     @Column(name = "depends_on", updatable = false)
     private String dependsOn;
 
+    /** 每片规模标签（#423 路由信号）：{@link SliceSizeLabel} 小/中/大封闭集
+     *  （库存 Integer code）；NULL = 未设（V49 前旧片行与阶段 0 片行——消费面按
+     *  「无信号」处理，存量不回补）。片行不可变（updatable=false，同 description），
+     *  标签是计划整组替换的单位。 */
+    @Column(name = "size_label", updatable = false)
+    private SliceSizeLabel sizeLabel;
+
     protected GenerationSegment() {
     }
 
@@ -91,8 +99,15 @@ public class GenerationSegment extends Auditable implements AggregateRoot<Genera
     /** 待跑片行（#351 携带依赖声明——1-based 片序；空 = 无依赖可并行）。 */
     public static GenerationSegment pending(Long projectId, int ord, String description,
             LocalDateTime prdProducedAt, Set<Integer> dependsOn) {
+        return pending(projectId, ord, description, prdProducedAt, dependsOn, null);
+    }
+
+    /** 待跑片行（#423 携带规模标签；null = 未设）。 */
+    public static GenerationSegment pending(Long projectId, int ord, String description,
+            LocalDateTime prdProducedAt, Set<Integer> dependsOn, SliceSizeLabel sizeLabel) {
         GenerationSegment segment = new GenerationSegment(projectId, ord, description, prdProducedAt);
         segment.dependsOn = serializeDeps(dependsOn);
+        segment.sizeLabel = sizeLabel;
         return segment;
     }
 

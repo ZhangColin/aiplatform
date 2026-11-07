@@ -13,9 +13,10 @@ import com.semgravio.aiplatform.business.project.domain.enums.ConversationSessio
  * 对话史条目读面（#89 水合载荷）：kind 为 Integer code + kindName 中文名随行
  * （#186 平台房规：枚举出口配 *Name，消费端零映射；§3.6.1 边界枚举统一 code
  * ——{@code ConversationEntryKind} 1=user 2=agent 3=question 4=answer 5=closing
- * 6=guide 7=quote），question / closing 为事件载荷 JSON 原样；attachments（#97
+ * 6=guide 7=quote 8=run_failure），question / closing 为事件载荷 JSON 原样；attachments（#97
  * 圈注 B 档、#286 扩图片物料）= 用户发言随带的消息附件 JSON 数组（回显重建附件 chip 用）；
  * quote（#203 报价卡）= 事件 + 订单引用（不含金额——视镜语义，ADR-0017）；
+ * failure（#418 失败留账）= run 失败终态失败面（与 run-failed SSE 扩载同载荷）；
  * sessionSource（#298 会话来源标识）= 2=设计会话（设计收尾卡携 drafts 判据），
  * null＝主会话缺省（含无结构标记的改稿发言——存储不同构降级口径，见
  * {@link ConversationSessionSource}）。
@@ -79,6 +80,16 @@ public record ConversationEntryResponse(
                 + "状态渲染时取订单当前态）",
                 example = "{\"orderId\":\"3897654321098765432\",\"event\":\"quoted\"}")
         Map<String, Object> quote,
+        @Schema(description = "失败面载荷（kind=8 run_failure 失败留账携带，其余 kind 为 null，"
+                + "#418 失败片落库面）：与 run-failed SSE 扩载同载荷——{ stopped?, error?, "
+                + "durationMs, attempts[{round,attempt,durationMs,modelId,llmMs,toolsMs,"
+                + "verifyMs}] }（可缺省键＝该场无该事实；attempts 跨轮累计——回滚重跑轮"
+                + "不清账）。平台分析口径，前端不渲染（同 durationBreakdown）",
+                example = "{\"error\":\"模型响应超时\",\"durationMs\":183420,"
+                        + "\"attempts\":[{\"round\":1,\"attempt\":1,\"durationMs\":61200,"
+                        + "\"modelId\":\"deepseek-v4-flash\",\"llmMs\":58000,\"toolsMs\":2000,"
+                        + "\"verifyMs\":0}]}")
+        Map<String, Object> failure,
         boolean answered,
         LocalDateTime at) {
 
@@ -98,6 +109,7 @@ public record ConversationEntryResponse(
                 entry.getClosing(),
                 entry.getAttachments(),
                 entry.getQuote(),
+                entry.getFailure(),
                 Boolean.TRUE.equals(entry.getAnswered()),
                 entry.getCreatedAt());
     }

@@ -1,10 +1,13 @@
 package com.semgravio.aiplatform.business.project.application.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelRoutingAppService;
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
@@ -35,9 +38,19 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param routingFileCountThreshold 文件面阈值生效值（库覆盖值或代码缺省）
  * @param routingFileCountThresholdOverridden true＝文件面阈值为库覆盖值
  * @param defaultRoutingFileCountThreshold 代码缺省文件面阈值（同上预览）
- * @param routingSliceFeatureThreshold 片复杂度阈值生效值（库覆盖值或代码缺省）
- * @param routingSliceFeatureThresholdOverridden true＝片复杂度阈值为库覆盖值
- * @param defaultRoutingSliceFeatureThreshold 代码缺省片复杂度阈值（同上预览）
+ * @param routingEscalatingSizeLabels 升档规模标签映射生效值（#426：集内标签的片
+ *                                升强档；库覆盖值或代码缺省〔大〕）
+ * @param routingEscalatingSizeLabelsOverridden true＝映射为库覆盖值（false＝代码缺省）
+ * @param defaultRoutingEscalatingSizeLabels 代码缺省映射（预览：清空覆盖即落此值）
+ * @param verifyModelId           verify 子智能体档位覆盖值（#424；null＝随执行体生效档
+ *                                ——含路由升档，缺省同档不降）
+ * @param verifyModelIdOverridden true＝verify 档位为库覆盖值（false＝随执行体档）
+ * @param verifyRoundBudget       单场验证轮次预算生效值（#424；库覆盖值或代码缺省）
+ * @param verifyRoundBudgetOverridden true＝轮次预算为库覆盖值（false＝代码缺省）
+ * @param defaultVerifyRoundBudget 代码缺省轮次预算（预览：清空覆盖即落此值）
+ * @param finalVerifyFixBudget    整轨终验修复预算生效值（#427；库覆盖值或代码缺省）
+ * @param finalVerifyFixBudgetOverridden true＝终验修复预算为库覆盖值（false＝代码缺省）
+ * @param defaultFinalVerifyFixBudget 代码缺省终验修复预算（预览：清空覆盖即落此值）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -77,20 +90,39 @@ public record BackofficeAgentConfigResponse(
         boolean routingStrongModelIdOverridden,
         @Schema(description = "代码缺省强模型档（预览：清空覆盖即落此值）", example = "pro")
         String defaultRoutingStrongModelId,
-        @Schema(description = "文件面阈值生效值（#354：工作区已跟踪文件数 ≥ 此值升强档；"
-                + "库覆盖值或代码缺省）", example = "60")
+        @Schema(description = "文件面阈值生效值（#354/#426：应用文件面——已跟踪文件数扣"
+                + "基座基数 ≥ 此值升强档；库覆盖值或代码缺省）", example = "30")
         Integer routingFileCountThreshold,
         @Schema(description = "文件面阈值是否库覆盖值（true＝覆盖；false＝代码缺省）")
         boolean routingFileCountThresholdOverridden,
-        @Schema(description = "代码缺省文件面阈值（预览：清空覆盖即落此值）", example = "60")
+        @Schema(description = "代码缺省文件面阈值（预览：清空覆盖即落此值）", example = "30")
         Integer defaultRoutingFileCountThreshold,
-        @Schema(description = "片复杂度阈值生效值（#354/#361：切片功能条目数——描述的"
-                + "枚举段数 ≥ 此值升强档；库覆盖值或代码缺省）", example = "4")
-        Integer routingSliceFeatureThreshold,
-        @Schema(description = "片复杂度阈值是否库覆盖值（true＝覆盖；false＝代码缺省）")
-        boolean routingSliceFeatureThresholdOverridden,
-        @Schema(description = "代码缺省片复杂度阈值（预览：清空覆盖即落此值）", example = "4")
-        Integer defaultRoutingSliceFeatureThreshold,
+        @Schema(description = "升档规模标签映射生效值（#426：集内标签的片升强档，缺省"
+                + "[\"大\"]；空数组＝信号整体关停）", example = "[\"大\"]")
+        List<String> routingEscalatingSizeLabels,
+        @Schema(description = "映射是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean routingEscalatingSizeLabelsOverridden,
+        @Schema(description = "代码缺省升档映射（预览：清空覆盖即落此值）", example = "[\"大\"]")
+        List<String> defaultRoutingEscalatingSizeLabels,
+        @Schema(description = "verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体"
+                + "生效档——含路由升档，缺省同档不降）", example = "pro")
+        String verifyModelId,
+        @Schema(description = "verify 档位是否库覆盖值（true＝覆盖钉死；false＝随执行体档）")
+        boolean verifyModelIdOverridden,
+        @Schema(description = "单场验证轮次预算生效值（#424 防无限复验：登记达预算仍有"
+                + "未过项即停修复—复验；库覆盖值或代码缺省）", example = "3")
+        Integer verifyRoundBudget,
+        @Schema(description = "轮次预算是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean verifyRoundBudgetOverridden,
+        @Schema(description = "代码缺省轮次预算（预览：清空覆盖即落此值）", example = "3")
+        Integer defaultVerifyRoundBudget,
+        @Schema(description = "整轨终验修复预算生效值（#427：终验 fail 自动起 fix run 修→复走，"
+                + "耗尽版本照成＋已知缺陷如实呈现；库覆盖值或代码缺省）", example = "2")
+        Integer finalVerifyFixBudget,
+        @Schema(description = "终验修复预算是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean finalVerifyFixBudgetOverridden,
+        @Schema(description = "代码缺省终验修复预算（预览：清空覆盖即落此值）", example = "2")
+        Integer defaultFinalVerifyFixBudget,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -98,7 +130,7 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "最近写入时刻（null＝从未配置）")
         LocalDateTime updatedAt) {
 
-    /** 生效面合成单源：枚举缺省正本＋覆盖行（null 先归一缺省态）＋写者＋路由策略缺省。 */
+    /** 生效面合成单源：枚举缺省正本＋覆盖行（null 先归一缺省态）＋写者＋路由策略缺省＋验证面缺省。 */
     public static BackofficeAgentConfigResponse of(AgentProfile profile, AgentOperationalConfig override) {
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(profile.key());
@@ -122,10 +154,21 @@ public record BackofficeAgentConfigResponse(
                         ? config.routingFileCountThreshold() : ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
                 config.routingFileCountThreshold() != null,
                 ModelRoutingAppService.DEFAULT_FILE_COUNT_THRESHOLD,
-                config.routingSliceFeatureThreshold() != null
-                        ? config.routingSliceFeatureThreshold() : ModelRoutingAppService.DEFAULT_SLICE_FEATURE_THRESHOLD,
-                config.routingSliceFeatureThreshold() != null,
-                ModelRoutingAppService.DEFAULT_SLICE_FEATURE_THRESHOLD,
+                config.routingEscalatingSizeLabels() != null
+                        ? SliceSizeLabel.namesOf(config.routingEscalatingSizeLabels())
+                        : SliceSizeLabel.namesOf(ModelRoutingAppService.DEFAULT_ESCALATING_SIZE_LABELS),
+                config.routingEscalatingSizeLabels() != null,
+                SliceSizeLabel.namesOf(ModelRoutingAppService.DEFAULT_ESCALATING_SIZE_LABELS),
+                config.verifyModelId(),
+                config.verifyModelId() != null,
+                config.verifyRoundBudget() != null
+                        ? config.verifyRoundBudget() : AgentConfigAppService.DEFAULT_VERIFY_ROUND_BUDGET,
+                config.verifyRoundBudget() != null,
+                AgentConfigAppService.DEFAULT_VERIFY_ROUND_BUDGET,
+                config.finalVerifyFixBudget() != null
+                        ? config.finalVerifyFixBudget() : AgentConfigAppService.DEFAULT_FINAL_VERIFY_FIX_BUDGET,
+                config.finalVerifyFixBudget() != null,
+                AgentConfigAppService.DEFAULT_FINAL_VERIFY_FIX_BUDGET,
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

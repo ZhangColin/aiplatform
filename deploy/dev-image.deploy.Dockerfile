@@ -7,7 +7,7 @@
 # ② 基座模板 pnpm install 也显式走 npmmirror（服务器构建）。
 # 其余层（基座/种子/入口/静态服务）与原 Dockerfile 一致。
 # 构建上下文＝aiplatform-server/src/main/resources/docker/workspace/：
-#   docker build -f deploy/dev-image.deploy.Dockerfile -t aiplatform/dev:0.14 \
+#   docker build -f deploy/dev-image.deploy.Dockerfile -t aiplatform/dev:0.15 \
 #     aiplatform-server/src/main/resources/docker/workspace/
 FROM node:22-bookworm
 
@@ -36,8 +36,9 @@ ENV RENDER_CHROMIUM=/usr/bin/chromium
 
 # 基座工程模板（#113 / ADR-0013）：构建期装好依赖，工作区初始化＝模板就位。
 # store-dir 钉 /workspace/.pnpm-store（卷上独立文件系统，防 UNEXPECTED_STORE）。
+# #421 起构建期 pnpm test 跑基座健壮件行为契约测试（随镜像构建验证，与 dev 变体同口径）。
 COPY baseline/ /opt/baseline/
-RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store --registry=https://registry.npmmirror.com
+RUN cd /opt/baseline && pnpm install --store-dir /workspace/.pnpm-store --registry=https://registry.npmmirror.com && pnpm test
 
 # 演示种子数据（#340）
 COPY seed/ /opt/seed/

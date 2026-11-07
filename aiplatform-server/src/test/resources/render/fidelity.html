@@ -1,12 +1,14 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang='zh-CN'>
 <head>
-<meta charset="utf-8">
+<meta charset='utf-8'>
 <title>位图出口保真用例</title>
 <style>
   /* 渲染保真用例（#284 容器活体留存）：几何（矩形＋圆形）/ 配色（钉死 hex）/
      文字（中文排版）。断言在 WorkspaceRendersLiveTest 逐像素核对——改动本文件
-     须同步改动采样坐标。字体栈照设计稿惯例（容器内解析到 Noto Sans CJK）。 */
+     须同步改动采样坐标。字体栈照设计稿惯例（容器内解析到 Noto Sans CJK）。
+     属性一律单引号：fixture 经 heredoc 进 argv 通道，双引号会被 Windows
+     JVM→docker.exe 链剥掉（#401；HTML 单引号属性同合法，渲染零差异）。 */
   html, body { margin: 0; padding: 0; }
   body {
     width: 800px; height: 600px; background: #ffffff;
@@ -30,8 +32,8 @@
 </style>
 </head>
 <body>
-  <div class="red-block"></div>
-  <div class="blue-circle"></div>
-  <div class="title">设计稿位图出口保真</div>
+  <div class='red-block'></div>
+  <div class='blue-circle'></div>
+  <div class='title'>设计稿位图出口保真</div>
 </body>
 </html>

@@ -1,6 +1,5 @@
 package com.semgravio.aiplatform.base.workspace.infrastructure.docker;
 
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +19,6 @@ import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
-import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
@@ -54,12 +52,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * #397 收口探针走网关（防线 3）：网关挂 preview-gateway 别名，真 exposePort 探针
  * 端到端两态——绿（别名 DNS＋Host 路由＋浏览器头＋chunk 复测全链路）与红（模拟
  * 网关收口不了的未知闸门：应用对 gated chunk 无条件 403 → WSP_012 如实待期）。
+ * #403 两收口：①Next dev 闸门护 /_next* 与 /__nextjs* 两族（实测 __nextjs_font、
+ * __nextjs_original-stack-frame* 带 Origin 全 403），网关剥 Origin 扩到 __nextjs 族；
+ * ②客户端侧 gzip——上游恒收 identity（Accept-Encoding 剥除是 sub_filter 注入依赖
+ * 不动），nginx 注入后压缩发客户端（1MB 级 dev 资产 5.75× 实测，跨境单流下未压缩
+ * 传输是预览体感慢的主因）。断言仍只看外部可观测的请求/响应头到达与否。
  */
 @Tag("live")
 class PreviewGatewaySmokeTest {
 
     private static final int PROBE_TIMEOUT_SECONDS = 360;
-    private static final String GATEWAY_IMAGE = "nginx:stable-alpine";
 
     private final DockerEnvironmentBackend backend = new DockerEnvironmentBackend();
     private final SecureRandom random = new SecureRandom();
@@ -90,12 +92,18 @@ class PreviewGatewaySmokeTest {
         // /__app-boom 回应用自身 503：供「应用错误不被提示页替换」断言（#180 不开响应拦截）。
         // 收到的 Origin 回显为 X-Echo-Origin 响应头、/__xfo 回 X-Frame-Options: DENY：
         // 供 #394 环境性阻断收口三断言——「上游收到了什么请求头」经响应头可观测。
+        // /__gzip-probe 回 2KB text/plain、收到的 Accept-Encoding 回显为
+        // X-Echo-Accept-Encoding：供 #403 gzip 收口断言（≥gzip_min_length 才进压缩；
+        // 「上游收到了什么」同样经回显头可观测）。
         // HTML 引用 /_next/static chunk、/__gated/* 无条件 403：供 #397 收口探针断言
-        //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）
-        execIn(handle, "printf '<html><head><title>probe</title>"
-                + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
-                + "<body>hello gateway</body></html>'"
-                + " > /workspace/index.html");
+        //（chunk 复测绿；模拟网关收口不了的未知新闸门——探针应如实红）。
+        // HTML 落盘走 heredoc＋单引号属性（#401 argv 防呆纪律：命令不得内嵌双引号，
+        // Windows JVM→docker.exe 链会剥——#399 家族；同 GW_EOF 同款写法）
+        execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                + "<html><head><title>probe</title>"
+                + "<script src='/_next/static/chunks/app.js'></script></head>"
+                + "<body>hello gateway</body></html>\n"
+                + "GW_EOF");
         execIn(handle, "cat > /workspace/server.js <<'GW_EOF'\n"
                 + "const http=require('http');const fs=require('fs');\n"
                 + "const server=http.createServer((req,res)=>{"
@@ -105,6 +113,10 @@ class PreviewGatewaySmokeTest {
                 + "'X-Frame-Options':'DENY'});res.end('xfo probe');return;}\n"
                 + "if(req.url.startsWith('/_next/static/gated')){res.writeHead(403,"
                 + "{'Content-Type':'text/plain'});res.end('gated');return;}\n"
+                + "if(req.url==='/__gzip-probe'){res.writeHead(200,{'Content-Type':'text/plain'});"
+                + "res.end('g'.repeat(2048));return;}\n"
+                + "if(req.headers['accept-encoding'])"
+                + "res.setHeader('X-Echo-Accept-Encoding',req.headers['accept-encoding']);\n"
                 + "if(req.headers.origin)res.setHeader('X-Echo-Origin',req.headers.origin);\n"
                 + "res.writeHead(200,{'Content-Type':'text/html;charset=utf-8'});"
                 + "res.end(fs.readFileSync('/workspace/index.html'));});\n"
@@ -117,29 +129,17 @@ class PreviewGatewaySmokeTest {
         int gatewayPort = 20000 + random.nextInt(20000);
         Path dir = Files.createTempDirectory("aiplatform-gateway");
         try {
-            copyResource("docker/gateway/nginx.conf", dir.resolve("nginx.conf"));
-            copyResource("docker/gateway/gateway-proxy.conf", dir.resolve("gateway-proxy.conf"));
-            copyResource("docker/gateway/gateway-inject.conf", dir.resolve("gateway-inject.conf"));
-            copyResource("docker/gateway/unavailable.html", dir.resolve("unavailable.html"));
-            copyResource("docker/workspace/annotation.js", dir.resolve("annotation.js"));
             gatewayContainer = "aiplatform-gw-" + id;
             docker("rm", "-f", gatewayContainer);
-            // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活
-            // 资产（标注脚本/提示页）挂载路径＝块文件 alias 的统一路径（#386：按共享
-            // nginx 挂载形态 /etc/nginx/conf.d/aiplatform.assets/，dev 网关挂同路径）；
-            // #397 挂 preview-gateway 别名——收口探针从工作区容器内经它打到应用。
-            // 资产清单与 ThrowawayPreviewGateway 同款（网关资产增删两处同改）——此处
-            // 不复用 fixture 因要宿主端口映射（host 侧 curl 断言）与启动回执断言
-            ExecResult started = docker("run", "-d", "--name", gatewayContainer,
-                    "--network", WorkspaceNaming.PREVIEW_NETWORK,
-                    "--network-alias", WorkspaceNaming.PREVIEW_GATEWAY_ALIAS,
-                    "-p", gatewayPort + ":80",
-                    "-v", dir.resolve("nginx.conf") + ":/etc/nginx/nginx.conf:ro",
-                    "-v", dir.resolve("gateway-proxy.conf") + ":/etc/nginx/gateway-proxy.conf:ro",
-                    "-v", dir.resolve("gateway-inject.conf") + ":/etc/nginx/gateway-inject.conf:ro",
-                    "-v", dir.resolve("unavailable.html") + ":/etc/nginx/conf.d/aiplatform.assets/unavailable.html:ro",
-                    "-v", dir.resolve("annotation.js") + ":/etc/nginx/conf.d/aiplatform.assets/annotation.js:ro",
-                    GATEWAY_IMAGE);
+            // 网关与工作区同 previewnet 网（按容器名/别名 DNS 解析），宿主端口映射供测试探活。
+            // 资产清单/挂载形态（#386：块文件 alias 统一路径 /etc/nginx/conf.d/
+            // aiplatform.assets/）/别名/镜像单源＝ThrowawayPreviewGateway（#401：网关
+            // 资产增删只改一处，终结两处同改），此处仅以 hostPort 参数多要宿主端口
+            // 映射（host 侧 curl 断言）；#397 挂 preview-gateway 别名——收口探针从
+            // 工作区容器内经它打到应用
+            ExecResult started = docker(ThrowawayPreviewGateway
+                    .dockerRunArgs(gatewayContainer, ThrowawayPreviewGateway.copyAssets(dir), gatewayPort)
+                    .toArray(new String[0]));
             assertThat(started.exitCode()).as("网关应可启动：%s", started.stderr()).isZero();
 
             // 路由：{id}.localhost → ws-{id}:8081；HTML 含网关注入的标注脚本引用，
@@ -195,6 +195,34 @@ class PreviewGatewaySmokeTest {
                     .as("上游的 X-Frame-Options 应被网关剥除（iframe 可嵌入）")
                     .doesNotContain("x-frame-options");
 
+            // #403 ① __nextjs 族 Origin 剥除：Next 16.3.1 dev 闸门护 /_next* 与 /__nextjs*
+            // 两族（实测 __nextjs_font、__nextjs_original-stack-frame* 带 Origin 全 403），
+            // #394 只收了 /_next/——字体按 CSS Fonts 规范 CORS 模式加载必带 Origin（同源
+            // 也带），正好踩闸门。断言形态同 /_next/：上游收不到 Origin（无回显头）且 200
+            ExecResult nextjsFont = curlFullWithOrigin(gatewayPort, id + ".localhost",
+                    "/__nextjs_font/geist-latin.woff2");
+            assertThat(nextjsFont.exitCode()).as("带 Origin 打 /__nextjs_font 应经网关完成").isZero();
+            assertThat(statusCodeOf(nextjsFont.stdout()))
+                    .as("带 Origin 打 /__nextjs_font 应经网关 200").isEqualTo(200);
+            assertThat(nextjsFont.stdout().toLowerCase())
+                    .as("/__nextjs* 请求上游应收不到 Origin（网关剥头，无回显）")
+                    .doesNotContain("x-echo-origin");
+
+            // #403 ② 网关客户端侧 gzip：上游恒收 identity（Accept-Encoding 剥除是注入块
+            // sub_filter 的依赖，不能动）——nginx 在注入处理后压缩发往客户端。断言双侧：
+            // 上游收不到 Accept-Encoding（回显头不出现＝sub_filter 依赖保持）、客户端响应
+            // 含 Content-Encoding: gzip（1MB 级 dev 资产 gzip 5.75×，跨境单流下未压缩
+            // 传输是预览体感慢的主因）
+            ExecResult gzipProbe = curlFullGzip(gatewayPort, id + ".localhost", "/__gzip-probe");
+            assertThat(gzipProbe.exitCode()).as("gzip 探针应经网关完成").isZero();
+            assertThat(statusCodeOf(gzipProbe.stdout())).as("gzip 探针应 200").isEqualTo(200);
+            assertThat(gzipProbe.stdout().toLowerCase())
+                    .as("客户端响应应含 Content-Encoding: gzip（网关客户端侧压缩）")
+                    .contains("content-encoding: gzip");
+            assertThat(gzipProbe.stdout().toLowerCase())
+                    .as("上游应收不到 Accept-Encoding（identity 恒定＝sub_filter 依赖保持）")
+                    .doesNotContain("x-echo-accept-encoding");
+
             // #397 收口探针走网关＋浏览器真实头（真探针×真网关端到端）：exposePort 的
             // 探针从工作区容器内经 preview-gateway 别名＋Host 头选路由打到应用——绿
             // 只可能来自「别名 DNS 解析＋子域路由＋浏览器头不被 403＋HTML 引用的
@@ -205,17 +233,22 @@ class PreviewGatewaySmokeTest {
             // #397 防未知新闸门：模拟网关收口不了的闸门（应用对 /_next/static/gated*
             // 无条件 403——形态上等同未来框架新默认闸门），HTML 改引 gated chunk 后
             // 收口判据应如实红（WSP_012 待期）——「探针 200、真浏览器 403」不再可能
-            execIn(handle, "printf '<html><head><title>probe</title>"
-                    + "<script src=\"/_next/static/gated.js\"></script></head>"
-                    + "<body>hello gateway</body></html>' > /workspace/index.html");
+            //（heredoc＋单引号属性：#401 argv 防呆纪律，同前 index.html 落盘写法）
+            execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                    + "<html><head><title>probe</title>"
+                    + "<script src='/_next/static/gated.js'></script></head>"
+                    + "<body>hello gateway</body></html>\n"
+                    + "GW_EOF");
             assertThatThrownBy(() -> backend.exposePort(handle, EnvironmentBackend.DEV_APP_CONTAINER_PORT))
                     .isInstanceOf(ApplicationException.class)
                     .extracting("codeMessage")
                     .isEqualTo(WorkspaceMessage.PREVIEW_NOT_SERVING);
             // 复原（后续快照/恢复弧断言继续用正常引用面）
-            execIn(handle, "printf '<html><head><title>probe</title>"
-                    + "<script src=\"/_next/static/chunks/app.js\"></script></head>"
-                    + "<body>hello gateway</body></html>' > /workspace/index.html");
+            execIn(handle, "cat > /workspace/index.html <<'GW_EOF'\n"
+                    + "<html><head><title>probe</title>"
+                    + "<script src='/_next/static/chunks/app.js'></script></head>"
+                    + "<body>hello gateway</body></html>\n"
+                    + "GW_EOF");
 
             // #180 A 片：死子域（无对应容器，DNS 解析失败）→ 网关回自恢复提示页而非
             // 裸 502——状态码仍 5xx、文案命中、no-store、自恢复脚本随页下发；快照子域
@@ -390,6 +423,17 @@ class PreviewGatewaySmokeTest {
                 "http://127.0.0.1:" + port + path);
     }
 
+    /**
+     * 同 {@link #curlFull}，再带 {@code Accept-Encoding: gzip}（#403）：客户端声明可解压
+     * ——网关客户端侧 gzip 的真实浏览器头形态（响应体为压缩字节，断言只读头与状态行）。
+     */
+    private static ExecResult curlFullGzip(int port, String host, String path) {
+        return run("curl", "-s", "-i",
+                "-H", "Host: " + host,
+                "-H", "Accept-Encoding: gzip",
+                "http://127.0.0.1:" + port + path);
+    }
+
     /** 以 WebSocket 升级头探网关（只断状态行，101 后连接悬住由 --max-time 收口，退出码 28 属预期）。 */
     private static ExecResult curlWsUpgrade(int port, String host, String path) {
         return run("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3",
@@ -431,16 +475,6 @@ class PreviewGatewaySmokeTest {
             return new ExecResult(out, err, code);
         } catch (Exception e) {
             return new ExecResult("", String.valueOf(e.getMessage()), 1);
-        }
-    }
-
-    private static void copyResource(String resource, Path target) throws Exception {
-        try (InputStream in = PreviewGatewaySmokeTest.class.getClassLoader()
-                .getResourceAsStream(resource)) {
-            if (in == null) {
-                throw new IllegalStateException("找不到资源 " + resource);
-            }
-            Files.copy(in, target);
         }
     }
 

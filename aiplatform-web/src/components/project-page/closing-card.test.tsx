@@ -183,6 +183,25 @@ describe("ClosingCard · 验证统计（#352 独立验证子智能体的收尾�
     expect(html).toContain("复验 2 轮");
   });
 
+  it("轮次预算用尽仍未过（#424）：如实带「轮次预算已尽」标注", () => {
+    const html = renderCard(
+      closing({
+        verification: {
+          total: 3,
+          failed: 1,
+          faces: { browser: 3, db: 0, log: 0 },
+          rounds: 3,
+          failedItems: ["留言提交"],
+          budgetExhausted: true,
+        },
+      }),
+    );
+
+    expect(html).toContain("1 项未过");
+    expect(html).toContain("复验 3 轮");
+    expect(html).toContain("轮次预算已尽"); // 达预算停止修复—复验的如实呈现
+  });
+
   it("验证缺省（子智能体未跑/未登记）：不出验证统计行", () => {
     const html = renderCard(closing());
 
@@ -395,5 +414,133 @@ describe("ClosingCard · 按稿对齐（#296 设计规范扫描）", () => {
   it("无规范项目：不携带不出按稿对齐行（基座行为零改变的呈现面）", () => {
     const html = renderCard(closing());
     expect(html).not.toContain("按稿对齐");
+  });
+});
+
+describe("ClosingCard · 基座件使用（#425 基座 lint 两档）", () => {
+  it("通过：基座件合规一行；曾自动修一轮则注明（纠偏过程如实）", () => {
+    const html = renderCard(closing({
+      robustKitLint: { status: "passed" },
+    }));
+    expect(html).toContain("基座件使用：");
+    expect(html).toContain("基座件合规");
+    expect(html).not.toContain("曾自动修正一轮");
+
+    const retried = renderCard(closing({
+      robustKitLint: { status: "passed", retried: true },
+    }));
+    expect(retried).toContain("基座件合规（曾自动修正一轮）");
+  });
+
+  it("预置档余项：总数行（曾修一轮注明仍余）＋清单（文件:行＋规则中文名，hover 带件用法指引）——不拦收口如实标注", () => {
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        retried: true,
+        preset: {
+          total: 2,
+          violations: [
+            { file: "src/app/login/actions.ts", line: 8, rule: "handwritten-session", message: "会话存储自写——走 src/lib/robust/session" },
+          ],
+        },
+      },
+    }));
+    expect(html).toContain("余 2 处预置件违规");
+    expect(html).toContain("（已自动修正一轮，仍余）");
+    expect(html).toContain("src/app/login/actions.ts:8");
+    expect(html).toContain("会话自写"); // 规则中文名（不露工程码）
+    expect(html).toContain('title="会话存储自写——走 src/lib/robust/session"');
+  });
+
+  it("预置档超可见上限：出「查看全部 N 处」收口（卡不无限长）", () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      file: `src/app/login${i}.ts`, line: i + 1, rule: "handwritten-session", message: "自写",
+    }));
+    const html = renderCard(closing({
+      robustKitLint: {
+        status: "violations",
+        preset: { total: 7, violations: many },
+      },
+    }));
+    expect(html).toContain("余 7 处预置件违规");
+    expect(html).toContain("查看全部 7 处");
+  });
+
+  it("扫描未执行：如实呈现，不假装达标", () => {
+    const html = renderCard(closing({
+      robustKitLint: { status: "unavailable" },
+    }));
+    expect(html).toContain("基座件扫描未执行");
+    expect(html).not.toContain("基座件合规（");
+  });
+
+  it("存量工作区：不携带不出基座件使用行（基座行为零改变的呈现面）", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("基座件使用");
+  });
+});
+
+describe("ClosingCard · 产出证明判别标注（#420 空转片防呆）", () => {
+  it("豁免收口：如实呈现豁免依据（验证确认「能力已存在」）", () => {
+    const html = renderCard(closing({
+      systemChanged: false,
+      systemNote: "该能力系统已具备",
+      files: [],
+      proofOfOutput: {
+        exempted: true,
+        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
+      },
+    }));
+    expect(html).toContain("能力已存在");
+    expect(html).toContain("预约列表倒序");
+  });
+
+  it("空转拒绝史：曾 N 次被拒、补做后收口——纠偏过程如实", () => {
+    const html = renderCard(closing({
+      proofOfOutput: { idleRejections: 2 },
+    }));
+    expect(html).toContain("2 次空转拒绝");
+  });
+
+  it("拒绝史与豁免依据并存：两行事实都出（先被拒、后补验证确认豁免）", () => {
+    const html = renderCard(closing({
+      proofOfOutput: {
+        idleRejections: 1,
+        exempted: true,
+        exemptionBasis: "验证确认「能力已存在」：预约列表倒序",
+      },
+    }));
+    expect(html).toContain("1 次空转拒绝");
+    expect(html).toContain("预约列表倒序");
+  });
+
+  it("正常干活收口（无标注）：不出产出证明行——真·薄片不误伤的呈现面", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("空转拒绝");
+    expect(html).not.toContain("能力已存在");
+  });
+});
+
+describe("ClosingCard · 已知缺陷清单（#427 整轨终验：预算耗尽版本照成、如实呈现）", () => {
+  it("缺陷清单在场：如实出已知缺陷区（总数定性＋逐项名，hover 带证据）", () => {
+    const html = renderCard(closing({
+      summary: "系统整体验证：1 项未过、修复预算已尽——系统按现状交付，已知缺陷如下如实呈现",
+      knownDefects: {
+        defects: [
+          { name: "下单支付", detail: "点击支付无响应" },
+          { name: "留言提交", detail: "提交后刷新数据丢失" },
+        ],
+      },
+    }));
+    expect(html).toContain("已知缺陷");
+    expect(html).toContain("2 项");
+    expect(html).toContain("下单支付");
+    expect(html).toContain("留言提交");
+    expect(html).toContain("点击支付无响应"); // title hover 证据也在静态标记里
+  });
+
+  it("缺省（终验通过/预算内有修复）：不出已知缺陷区——不粉饰也不虚警", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("已知缺陷");
   });
 });

@@ -145,6 +145,16 @@ public class ConversationHistoryAppService {
     }
 
     /**
+     * 失败留账落库（#418 失败片落库面）：run 失败终态的失败面——逐尝试墙钟/档位/
+     * 失败原因/本场累计，与 run-failed SSE 扩载同载荷（同收尾卡先例；调用点在
+     * 事件桥 emitRunFailed/Stopped——先落库后发事件）。异步轨道写：失败只记日志
+     * （观测面缺行不牵连终态收口）。
+     */
+    public void recordRunFailure(Long projectId, String runId, Map<String, Object> failure) {
+        quietly(() -> entries.save(ConversationEntry.runFailure(projectId, runId, failure)));
+    }
+
+    /**
      * 平台轻引导落库（兜底分支零产物路径：用户发言 + 定型文案两行——对话完整）。
      * 事件已发射后的补写：失败只记日志。attachments = 随发言发送的消息附件（可空）。
      */

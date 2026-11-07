@@ -72,15 +72,15 @@ class DesignPrintsTest {
     @Test
     void given_source_when_head_command_then_guard_then_head() {
         assertThat(DesignPrints.headFirstLineCommand("design/poster-1.html")).isEqualTo(
-                "p='/workspace/design/poster-1.html'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " head -n 1 \"$p\"");
+                "if ! test -f '/workspace/design/poster-1.html'; then exit 1; fi;"
+                        + " head -n 1 '/workspace/design/poster-1.html'");
     }
 
     @Test
     void given_quote_in_path_when_head_command_then_escaped_literal() {
         assertThat(DesignPrints.headFirstLineCommand("design/it's.html")).isEqualTo(
-                "p='/workspace/design/it'\\''s.html'; if ! test -f \"$p\"; then exit 1; fi;"
-                        + " head -n 1 \"$p\"");
+                "if ! test -f '/workspace/design/it'\\''s.html'; then exit 1; fi;"
+                        + " head -n 1 '/workspace/design/it'\\''s.html'");
     }
 
 }

@@ -20,8 +20,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 封存物理面（#172，ADR-0016 删卷换包）与深度唤醒冷启依赖重装：Docker CLI 假面
  * seam 直测——覆写 {@code runCapture}/{@code runCaptureBinary} 捕获命令（含 tar
  * 字节流命令）、免 daemon。只验命令形状：打包排除清单、解包回卷的清 pid、删卷
- * 幂等、startApp 的 {@code pnpm install} 前置。真 daemon 的数据保全验收见
- * {@code WorkspaceSealLiveTest}。
+ * 幂等、startApp 的 {@code pnpm install} 前置。探针形状谓词单源 {@link ProbeShape}
+ * （#401）。真 daemon 的数据保全验收见 {@code WorkspaceSealLiveTest}。
  */
 class DockerEnvironmentBackendSealTest {
 
@@ -51,12 +51,12 @@ class DockerEnvironmentBackendSealTest {
                 return volumePresent ? new ExecResult("[{}]\n", "", 0)
                         : new ExecResult("", "no such volume", 1);
             }
-            if (cmd.length > 5 && cmd[5].startsWith("curl") && joined.contains("http://localhost:8081")) {
+            if (ProbeShape.isLoopbackGuard(joined)) {
                 // #397 幂等守卫：回环单发探「进程在不在服」（退出码口径）
                 return appServing ? new ExecResult("", "", 0)
                         : new ExecResult("", "connection refused", 7);
             }
-            if (cmd.length > 5 && cmd[5].startsWith("curl")) {
+            if (ProbeShape.isGatewayProbe(joined)) {
                 // #397 起服判据经网关：绿＝回执末行状态码 200（空 body＝无 /_next
                 // 引用，无 chunk 复测）；红＝连不上网关（别名缺席/容器不在）
                 return appServing ? new ExecResult("200", "", 0)
@@ -88,7 +88,7 @@ class DockerEnvironmentBackendSealTest {
         assertThat(packed).isEqualTo("packed".getBytes());
         assertThat(backend.commands).contains("docker volume inspect vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.14"
+                "docker run --rm --entrypoint tar -v vol-ws-42:/workspace aiplatform/dev:0.15"
                         + " czf - --exclude=./node_modules --exclude=./.pnpm-store"
                         + " --exclude=./.next -C /workspace .");
         // 数据库随包：排除清单只有三大可重建缓存（无 --exclude data/.env 等）
@@ -159,7 +159,7 @@ class DockerEnvironmentBackendSealTest {
                 "docker volume rm vol-ws-42",
                 "docker volume create vol-ws-42");
         assertThat(backend.binaryCommands).containsExactly(
-                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.14"
+                "docker run --rm -i --entrypoint sh -v vol-ws-42:/workspace aiplatform/dev:0.15"
                         + " -c tar xzf - -C /workspace && rm -f /workspace/data/pg/postmaster.pid");
     }
 

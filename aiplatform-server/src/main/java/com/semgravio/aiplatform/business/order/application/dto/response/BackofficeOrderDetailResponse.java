@@ -14,7 +14,8 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
  * 后台订单详情（#29 交易环②，/api/backoffice/orders/{id}）：报价依据的全量
  * 事实——PRD 快照正文（下单冻结）、项目名、下单账号摘要（#243 起 externalId
  * 与昵称同批）、金额与最新备注、价目历史（#155 append-only 全量，新 → 旧）、
- * 全部状态时点。交付物类型随行（#298——设计单报价素材另含设计资产包端点）。
+ * 全部状态时点。交付物类型随行（#298——设计单报价素材另含设计资产包端点），
+ * 双版本引用随行（#391——下单冻结的 PRD/Demo 版本号，admin 侧镜像之源）。
  *
  * @param id                  订单标识（TSID 十进制字符串）
  * @param projectId           所属项目标识
@@ -26,6 +27,8 @@ import com.semgravio.aiplatform.business.order.domain.enums.OrderStatus;
  * @param statusName          状态名
  * @param deliverableType     交付物类型（code，#297 下单冻结）：1=设计 2=系统 3=系统＋设计
  * @param deliverableTypeName 交付物类型名
+ * @param prdVersionNo        下单冻结的已确认 PRD 版本号（#335/#391；遗留单 NULL）
+ * @param demoVersionNo       下单冻结的已确认 Demo 版本号（#335/#391；遗留单 NULL）
  * @param amount              当前总价（分；待报价 NULL）
  * @param currency            币种（v1 恒 CNY；待报价 NULL）
  * @param note                当前后台备注（最新价目行；待报价 NULL）
@@ -63,6 +66,12 @@ public record BackofficeOrderDetailResponse(
                 example = "3")
         OrderDeliverableType deliverableType,
         String deliverableTypeName,
+        @Schema(description = "下单冻结的已确认 PRD 版本号（随单冻结，此后不随项目变更；"
+                + "null＝确认制之前的遗留单，如实缺省不虚构引用）", example = "3")
+        Integer prdVersionNo,
+        @Schema(description = "下单冻结的已确认 Demo 版本号（下单时项目确认指针的定格值，"
+                + "随单冻结；null＝遗留单）", example = "2")
+        Integer demoVersionNo,
         Long amount,
         String currency,
         String note,
@@ -96,6 +105,8 @@ public record BackofficeOrderDetailResponse(
                 order.getStatus().getName(),
                 order.getDeliverableType(),
                 order.getDeliverableType().getName(),
+                order.getPrdVersionNo(),
+                order.getDemoVersionNo(),
                 order.getAmount(),
                 order.getCurrency(),
                 order.currentQuoteNote(),

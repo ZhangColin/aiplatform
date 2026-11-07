@@ -435,23 +435,31 @@ class ProjectControllerTest {
         // （#298，null＝主会话缺省）随面携带
         when(conversationHistoryAppService.read(100L)).thenReturn(List.of(
                 new ConversationEntryResponse(1L, 1, "用户发言", null, null, "run-1", "做一个官网",
-                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 0)),
+                        null, null, null, null, null, false,
+                        LocalDateTime.of(2026, 9, 5, 10, 0)),
                 new ConversationEntryResponse(2L, 3, "问答卡", null, null, "run-1", null,
                         Map.of("engineRef", "reply-1", "data", Map.of()),
-                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
+                        null, null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 1)),
                 new ConversationEntryResponse(3L, 5, "收尾卡", null, null, "run-2", null, null,
                         Map.of("summary", "首次生成了系统", "prdChanged", false,
                                 "systemChanged", true, "files", List.of(), "durationMs", 183420),
-                        null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
+                        null, null, null, false, LocalDateTime.of(2026, 9, 5, 10, 9)),
                 new ConversationEntryResponse(4L, 7, "报价卡", null, null, null, null, null,
                         null, null,
                         Map.of("orderId", "900123", "event", "quoted"),
-                        false, LocalDateTime.of(2026, 9, 6, 9, 0))));
+                        null, false, LocalDateTime.of(2026, 9, 6, 9, 0)),
+                new ConversationEntryResponse(5L, 8, "失败留账", null, null, "run-3", null, null,
+                        null, null, null,
+                        Map.of("error", "模型响应超时", "durationMs", 61200, "attempts",
+                                List.of(Map.of("round", 1, "attempt", 1, "durationMs", 61200,
+                                        "modelId", "deepseek-v4-flash", "llmMs", 58000,
+                                        "toolsMs", Map.of(), "verifyMs", 0))),
+                        false, LocalDateTime.of(2026, 9, 7, 11, 0))));
 
         performAsUser(get("/api/projects/100/conversation"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.length()").value(4))
+                .andExpect(jsonPath("$.data.length()").value(5))
                 .andExpect(jsonPath("$.data[0].kind").value(1))
                 .andExpect(jsonPath("$.data[0].kindName").value("用户发言"))
                 .andExpect(jsonPath("$.data[0].text").value("做一个官网"))
@@ -465,7 +473,14 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data[3].kind").value(7))
                 .andExpect(jsonPath("$.data[3].kindName").value("报价卡"))
                 .andExpect(jsonPath("$.data[3].quote.orderId").value("900123"))
-                .andExpect(jsonPath("$.data[3].quote.event").value("quoted"));
+                .andExpect(jsonPath("$.data[3].quote.event").value("quoted"))
+                // #418 失败留账读面：kind=8、failure 载荷原样（失败面与 run-failed
+                // SSE 扩载同载荷——逐尝试墙钟/档位/失败原因）
+                .andExpect(jsonPath("$.data[4].kind").value(8))
+                .andExpect(jsonPath("$.data[4].kindName").value("失败留账"))
+                .andExpect(jsonPath("$.data[4].failure.error").value("模型响应超时"))
+                .andExpect(jsonPath("$.data[4].failure.attempts[0].modelId")
+                        .value("deepseek-v4-flash"));
     }
 
     @Test

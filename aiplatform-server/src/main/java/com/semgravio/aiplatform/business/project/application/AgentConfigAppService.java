@@ -1,8 +1,11 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.Set;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -32,6 +35,21 @@ import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigSt
 @Service
 public class AgentConfigAppService {
 
+    /**
+     * 单场验证轮次预算代码缺省（#424 片轻验）：3＝首轮验证＋至多两轮修复复验
+     * （修复预算与 #406 终验缺省两轮同量级）；库覆盖（executor 行
+     * verify_round_budget，1-20）优先于此值。
+     */
+    public static final int DEFAULT_VERIFY_ROUND_BUDGET = 3;
+
+    /**
+     * 整轨终验修复预算代码缺省（#427，#406 裁决「缺省两轮」）：终验 fail 自动起
+     * fix run 修→复走终验的轮数上限，耗尽版本照成＋已知缺陷如实呈现；库覆盖
+     * （executor 行 final_verify_fix_budget，0-10——0＝不起修复 run 的运营选择）
+     * 优先于此值。
+     */
+    public static final int DEFAULT_FINAL_VERIFY_FIX_BUDGET = 2;
+
     private final AgentConfigStore configStore;
 
     public AgentConfigAppService(AgentConfigStore configStore) {
@@ -41,16 +59,19 @@ public class AgentConfigAppService {
     /**
      * 生效配置束（一次查库同取——prompt 与档位在命令构建处恒结伴，工具开关
      * #252 同批；模型路由策略 #354 同批——路由判定消费，阈值/强档的代码缺省
-     * 回落归 {@code ModelRoutingAppService}）：生效 systemPrompt、生效档位键
-     * （ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService#resolve}
-     * 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关生效态、
-     * 档位覆盖标记（路由协同口径的兜底/钉死判据）与路由策略四件存储态。
+     * 回落归 {@code ModelRoutingAppService}；验证面两件 #424 同批——verify 档位
+     * 覆盖（null＝随执行体生效档）与轮次预算生效值）：生效 systemPrompt、生效
+     * 档位键（ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService
+     * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
+     * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
+     * verify 档位覆盖与轮次预算生效值。
      */
     public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
-            Integer routingSliceFeatureThreshold) {
+            Set<SliceSizeLabel> routingEscalatingSizeLabels,
+            String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -71,7 +92,12 @@ public class AgentConfigAppService {
                 config.webSearchEnabled(), config.fetchUrlEnabled(),
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),
-                config.routingSliceFeatureThreshold());
+                config.routingEscalatingSizeLabels(),
+                config.verifyModelId(),
+                config.verifyRoundBudget() != null
+                        ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,
+                config.finalVerifyFixBudget() != null
+                        ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET);
     }
 
     /**

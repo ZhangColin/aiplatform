@@ -159,6 +159,9 @@ class BackofficeOrderControllerTest {
                 .andExpect(jsonPath("$.data.status").value(2))
                 .andExpect(jsonPath("$.data.deliverableType").value(3))
                 .andExpect(jsonPath("$.data.deliverableTypeName").value("系统＋设计"))
+                // #391 双版本引用列加：随单冻结值直读（遗留单 null 如实——归 seam 测试钉）
+                .andExpect(jsonPath("$.data.prdVersionNo").value(3))
+                .andExpect(jsonPath("$.data.demoVersionNo").value(2))
                 .andExpect(jsonPath("$.data.amount").value("128000"))
                 .andExpect(jsonPath("$.data.note").value("首版报价"))
                 // #155 价目历史：新 → 旧，新条目带操作者、存量条目操作者为空
@@ -371,7 +374,7 @@ class BackofficeOrderControllerTest {
     private static BackofficeOrderDetailResponse backofficeDetail() {
         return new BackofficeOrderDetailResponse("900", "100", "宠物店官网", "sub-user-1", "文野",
                 OrderStatus.QUOTED, "已报价",
-                OrderDeliverableType.SYSTEM_DESIGN, "系统＋设计", 128000L, "CNY", "首版报价",
+                OrderDeliverableType.SYSTEM_DESIGN, "系统＋设计", 3, 2, 128000L, "CNY", "首版报价",
                 "交付清单：管理后台", "验收方式：按 PRD v3 验收", "工期口径：4 周",
                 List.of(
                         new BackofficePriceEntryResponse("902", 99000L, "CNY", "调整：去掉导入功能",

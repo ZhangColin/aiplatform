@@ -188,6 +188,26 @@ public final class WorkspaceVersions {
     }
 
     /**
+     * 段起点以来的变更文件名清单（#420 产出证明闸探针）：{@code git diff
+     * --name-only <段起点>}（tracked 面——含段内野 commit 的增量与工作树未提交
+     * 改动）＋ {@code git ls-files --others --exclude-standard}（untracked 面——
+     * 新建文件；排除面经 {@code .git/info/exclude} 天然不进，.platform/ 平台
+     * 产物/数据/依赖不虚构成产出）。两段 {@code &&} 串联，stdout 合计为空＝零
+     * diff——空转判据的唯一确定性信号（#405 裁决）。只读探针：不动索引（区别于
+     * {@link #recordFailureSceneCommand} 的 add -A 暂存——收口尾序不落暂存副作用）。
+     *
+     * @throws IllegalArgumentException ref 非 hex hash 形态（命令构造拒绝）
+     */
+    public static String diffSinceStartCommand(String ref) {
+        if (ref == null || !VALID_REF.matcher(ref).matches()) {
+            throw new IllegalArgumentException("段起点引用必须是 commit hash（hex）: " + ref);
+        }
+        return "cd " + WorkspaceLayout.ROOT
+                + " && git diff --name-only '" + ref + "'"
+                + " && git ls-files --others --exclude-standard";
+    }
+
+    /**
      * 段失败回滚（#353）：工作树与索引干净回退到段起点（{@code reset --hard}——
      * 段内执行体野 commit 一并脱落，前段收口 commit 在起点链上不受影响）＋
      * {@code clean -fd} 清未跟踪新文件（git 排除面不扫——数据/依赖/平台产物/.env

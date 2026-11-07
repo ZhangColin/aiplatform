@@ -343,7 +343,7 @@ public class DesignProcessAppService {
                 catch (RunStoppedException e) {
                     // 停止收口（#359 生成取消·设计轨同机制）：run-failed(stopped)
                     // 收口（残队不排空——同失败口径，随下次派发合并受理）
-                    eventBridge.emitRunStopped(project, e.runId());
+                    eventBridge.emitRunStopped(project, e.runId(), e.failure());
                 }
                 finally {
                     codingRunTrack.end(projectId);
@@ -368,7 +368,7 @@ public class DesignProcessAppService {
             }
             catch (RunStoppedException e) {
                 // 停止收口（#359，同轨道位口径）
-                eventBridge.emitRunStopped(project, e.runId());
+                eventBridge.emitRunStopped(project, e.runId(), e.failure());
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -410,7 +410,7 @@ public class DesignProcessAppService {
             }
             catch (RunStoppedException e) {
                 // 停止收口（#359，同轨道位口径）
-                eventBridge.emitRunStopped(project, e.runId());
+                eventBridge.emitRunStopped(project, e.runId(), e.failure());
             }
             finally {
                 codingRunTrack.end(projectId);
@@ -471,7 +471,7 @@ public class DesignProcessAppService {
                     RunHeading.slice(itemTitle, item.getOrd(), total));
             if (!result.succeeded()) {
                 failDesignItem(projectId, item.getOrd(), runId);
-                eventBridge.emitRunFailed(project, runId, result.lastError());
+                eventBridge.emitRunFailed(project, runId, result.failure());
                 return; // 残队不排空（#291）：随下次派发合并受理
             }
             sweepQueuedRevisions(project, item.getOrd(), null);
@@ -608,7 +608,7 @@ public class DesignProcessAppService {
         if (!result.succeeded()) {
             log.warn("[design] 项目 {} 件 {} 改稿超限转终态（runId={}）——件状态保持，用户重提即兜底",
                     projectId, item.getOrd(), runId);
-            eventBridge.emitRunFailed(project, runId, result.lastError());
+            eventBridge.emitRunFailed(project, runId, result.failure());
         }
         return result;
     }

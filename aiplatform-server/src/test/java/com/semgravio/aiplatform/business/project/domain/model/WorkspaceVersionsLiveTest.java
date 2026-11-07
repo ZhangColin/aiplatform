@@ -256,6 +256,54 @@ class WorkspaceVersionsLiveTest {
         assertThat(versions.get(0).commitHash()).isEqualTo(stage0);
     }
 
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_segment_run_states_when_diff_since_start_then_idle_vs_output_detected() {
+        // #420 产出证明闸探针（容器活体）：段起点以来零变更（tracked 无改＋无未跟踪
+        // 新交付物）＝空转信号；改 tracked／新建未跟踪交付物／段内野 commit 增量都
+        // 算产出；git 排除面（.platform/ 平台产物、data/ 数据）不虚构成产出；段级
+        // 回滚后回到零 diff（重跑轮增量从零起算）
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+        exec("echo '<html>stage0</html>' > /workspace/index.html");
+        String base = commit("起服了系统骨架", "111");
+
+        // ① 空转态：段起点后零 tracked 改动＋零未跟踪交付物——探针零输出
+        ExecResult idle = exec(WorkspaceVersions.diffSinceStartCommand(base));
+        assertThat(idle.exitCode()).as("探针应成功：%s", idle.stderr()).isZero();
+        assertThat(idle.stdout().trim()).as("零 diff＝空转判据的唯一确定性信号").isEmpty();
+
+        // ② 平台产物/数据面不虚构产出：排除面内的写入（.platform/ 交接件、data/
+        //    库数据）后探针仍空——平台自身写入不冒充执行体产出
+        exec("mkdir -p /workspace/.platform /workspace/data");
+        exec("echo 'handoff' > /workspace/.platform/slice-handoff-1.md");
+        exec("echo 'pg-data' > /workspace/data/keep.txt");
+        ExecResult stillIdle = exec(WorkspaceVersions.diffSinceStartCommand(base));
+        assertThat(stillIdle.exitCode()).isZero();
+        assertThat(stillIdle.stdout().trim()).as("排除面写入不算产出").isEmpty();
+
+        // ③ 有产出两形：改 tracked＋新建未跟踪交付物——都进探针输出
+        exec("echo '<html>v2</html>' > /workspace/index.html");
+        exec("mkdir -p /workspace/src && echo 'new' > /workspace/src/new.tsx");
+        ExecResult worked = exec(WorkspaceVersions.diffSinceStartCommand(base));
+        assertThat(worked.exitCode()).isZero();
+        assertThat(worked.stdout()).contains("index.html").contains("src/new.tsx");
+
+        // ④ 段内野 commit 的增量仍在账上（tracked diff 相对段起点，含 committed 变更
+        //    ——工作树净也非空转）
+        exec("cd /workspace && git add -A && git commit -q -m '执行体野 commit'");
+        ExecResult afterWildCommit = exec(WorkspaceVersions.diffSinceStartCommand(base));
+        assertThat(afterWildCommit.exitCode()).isZero();
+        assertThat(afterWildCommit.stdout()).contains("index.html").contains("src/new.tsx");
+
+        // ⑤ 段级回滚后回零 diff（重跑轮语义：回滚即净，增量从零起算）
+        ExecResult reset = exec(WorkspaceVersions.resetToSegmentStartCommand(base));
+        assertThat(reset.exitCode()).as("回滚应成功：%s", reset.stderr()).isZero();
+        ExecResult afterRollback = exec(WorkspaceVersions.diffSinceStartCommand(base));
+        assertThat(afterRollback.exitCode()).isZero();
+        assertThat(afterRollback.stdout().trim()).as("回滚后增量从零起算").isEmpty();
+    }
+
     // ---------- 工具 ----------
 
     /** 幂等 init + 成版提交（两道命令串联，回读 HEAD hash）。 */

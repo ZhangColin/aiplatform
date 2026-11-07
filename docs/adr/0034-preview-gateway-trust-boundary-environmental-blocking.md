@@ -22,6 +22,8 @@
 
 - 单源落预览网关共享代理块（`gateway-proxy.conf`，#141 拆分口径）：dev 预览网关与生产共享 nginx conf.d（`deploy/nginx/aiplatform.conf`）同吃一份。具体写法须避开 nginx `proxy_set_header` 继承陷阱（location 级一旦声明即不继承外层）——新 location 复制指令组或公共头提升＋map 变量按 URI 派生皆可，写法可换、语义以冒烟断言为准（#394）：`/_next/` 请求上游收不到 Origin；非 `/_next` 请求上游收到 Origin（透传不误伤）；上游发 X-Frame-Options 时经网关的响应无此头。
 - `/_next/` 剥 Origin 顺带修复 HMR 握手；其余路径 Origin 原样透传——Server Actions 的 CSRF 校验、AI 自写的 Origin 校验不受扰（应用语义零扰动是硬约束）。
+- **覆盖面增补（#403）**：Next dev 闸门护 `/_next*` 与 `/__nextjs*` **两族**（实测 `__nextjs_font*`、`__nextjs_original-stack-frame*` 带 Origin 全 403；字体按 CSS Fonts 规范 CORS 模式加载必带 Origin、同源也带）——Origin 剥离扩到 `__nextjs` 族，判据与机制不变（同属环境性阻断，网关兜）。
+- **传输收口（#403）**：预览代理块对上游恒剥 `Accept-Encoding`（sub_filter 注入依赖，#141 起）曾使全链路 identity——Next dev 资产 MB 级（1.06MB chunk→gzip 185KB，5.75×）且 `no-cache` 每次导航回源重验证/重传，跨境单流带宽下未压缩传输成为预览「能用了但热切换也慢」的主因。收口＝网关**客户端侧** gzip（nginx 在 sub_filter 注入后压缩发客户端；上游仍恒收 identity，注入依赖不动）；上游缓存策略不动（dev 要新鲜度，迭代语义优先）。
 - 预览与快照响应剥 X-Frame-Options；CSP 整头透传（见 Considered Options）。
 
 ## 三层防线
@@ -37,5 +39,6 @@
 - 用户不改系统里任何文件，平台更新后存量预览自动恢复可用（生产活体验收对事发 workspace 376467559789526725 带 Origin 打涉事 chunk 红→绿留档，#398；验收记录不进 CI）。
 - 收口判据升级（#397）的部署耦合：后端与网关别名（`preview-gateway`）须同窗落地——别名缺席期间收口探针如实待期（预览全红是提醒不是故障）；别名是 Docker 网络元数据非 nginx 配置（门禁/reload 碰不到），既有 nginx 容器可 `docker network connect --alias` 热补零停机（Docker 29.x 实测），compose 声明为正本防重建漂移——顺序见部署文档 §3。
 - 语义保证面：非 `/_next` 路径头透传不误伤、应用自身 5xx 不换脸（#180 口径）不变；XFO 剥离只发生在预览/快照代理路径。
+- #403 两收口的回归面：网关冒烟扩断言（`__nextjs` 族无 Origin 回显＋上游无 Accept-Encoding 回显且客户端含 `Content-Encoding: gzip`）、排练 ⑧ 同步；生产活体验收＝字体带 Origin 200＋大 chunk gzip 下载耗时对比留档（同 #398 口径，不进 CI）。
 - 未来 Next 升级可能引入新的 dev 默认闸门——防线是三层结构，不承诺对具体版本免疫。
 - 同类问题再来时按判据归责（CONTEXT.md 术语「环境性阻断／应用固有行为」），不再从头争论。

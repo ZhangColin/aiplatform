@@ -54,6 +54,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       降级口径自描述）。</li>
  *   <li>盖帽标志读面（#390）：项目详情 needsUserSupplement——type=boolean＋
  *       置位/清零盖帽语义自描述（本读面恒有值，null 只属消费方兼容口径）。</li>
+ *   <li>双版本引用详情列（#391）：订单详情 prdVersionNo/demoVersionNo——
+ *       type=integer（与 OrderResponse 同形）＋随单冻结/null＝遗留单自描述。</li>
  * </ul>
  */
 @IntegrationTest
@@ -195,6 +197,24 @@ class SpringDocBackofficeContractTest {
             assertThat(property(fetchGroup("order"), schema, "deliverableTypeName").isMissingNode())
                     .as("%s.deliverableTypeName 中文名随行（#186 枚举出口配 *Name）", schema)
                     .isFalse();
+        }
+    }
+
+    @Test
+    void given_order_detail_schema_when_read_group_then_frozen_version_refs_coded_and_self_described()
+            throws Exception {
+        // #391 双版本引用详情列（读面增量）：type=integer（与用户面 OrderResponse
+        // 同形——admin BFF 已按此契约先行镜像）＋随单冻结/null＝遗留单语义自描述
+        JsonNode order = fetchGroup("order");
+        for (String field : List.of("prdVersionNo", "demoVersionNo")) {
+            JsonNode version = property(order, "BackofficeOrderDetailResponse", field);
+            assertThat(version.path("type").asText(null))
+                    .as("BackofficeOrderDetailResponse.%s 应渲染 type=integer", field)
+                    .isEqualTo("integer");
+            assertThat(version.path("description").asText(""))
+                    .as("BackofficeOrderDetailResponse.%s 应自描述随单冻结与遗留单口径", field)
+                    .contains("冻结")
+                    .contains("遗留单");
         }
     }
 

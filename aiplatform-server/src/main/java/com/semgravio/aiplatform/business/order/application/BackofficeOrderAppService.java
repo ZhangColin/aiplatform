@@ -112,9 +112,9 @@ public class BackofficeOrderAppService {
 
     /**
      * 后台订单详情：报价依据全量——PRD 快照正文、项目名、下单账号摘要
-     * （externalId＋昵称）、金额与最新备注、状态时点组。项目名/账号摘要软引用
-     * 容缺（null 呈现）——订单及其快照是交易记录，不因关联档缺失而 404
-     * （同清单口径）。
+     * （externalId＋昵称）、金额与最新备注、状态时点组、双版本引用（#391 随单
+     * 冻结，admin BFF 镜像之源）。项目名/账号摘要软引用容缺（null 呈现）——
+     * 订单及其快照是交易记录，不因关联档缺失而 404（同清单口径）。
      *
      * @throws ApplicationException ORD_001 订单不存在
      */

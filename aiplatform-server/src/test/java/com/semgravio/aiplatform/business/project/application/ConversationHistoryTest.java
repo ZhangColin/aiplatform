@@ -75,6 +75,21 @@ class ConversationHistoryTest {
     @Autowired
     private FinishEditFacts finishFixFacts;
 
+    /** 验证事实登记口（#424 片轻验常开硬门脚本位：模拟 verify 子智能体轮内登记）。 */
+    @Autowired
+    private VerificationFacts verificationFacts;
+
+    /**
+     * 模拟 verify 子智能体轮内登记（#424 常开硬门缺省脚本位）：收口自动派的修正
+     * run 收口须验证在场——coder 会话登记一次。
+     */
+    private void verifyRan(AgentCommand command) {
+        if (!verificationFacts.hasRegistration(command.workspaceId())) {
+            verificationFacts.record(command.workspaceId(), List.of(
+                    new VerificationFacts.Check("修正点主径可走通（刷新仍在）", "browser", true, null)));
+        }
+    }
+
     @MockitoBean
     private AgentscopeAgentClient agentClient;
 
@@ -108,9 +123,11 @@ class ConversationHistoryTest {
                 new AgentReply("r", "好的"));
         when(agentClient.hasAskingToolCall(anyString(), anyString())).thenReturn(false);
         // AGENTS.md 资产就位（#214 修正 run 起手幂等覆写）默认成功：只桩资产写入
-        // 命令（含 AGENTS.md），git 成版 exec 仍走缺省 null（静默降级口径不变）。
+        // 命令（含 AGENTS.md）与健壮件在场探针（#421 test -f——默认在场＝新基座
+        // 工作区语义，栈规则集节拼入），git 成版 exec 仍走缺省 null（静默降级口径不变）。
         when(workspaceLifecycleAppService.exec(any(),
-                argThat(cmd -> cmd != null && cmd.command().contains("AGENTS.md"))))
+                argThat(cmd -> cmd != null && (cmd.command().contains("AGENTS.md")
+                        || cmd.command().equals(GenerationAppService.robustKitProbeCommand())))))
                 .thenReturn(new ExecResultResponse("", "", 0));
     }
 
@@ -163,6 +180,7 @@ class ConversationHistoryTest {
                     AgentEventTypes.RUN_FIELD, command.runId(),
                     AgentEventTypes.FINISH_FIELD, "end")));
             finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            verifyRan(command);
             return new AgentReply(command.runId(), "修正完成", null, List.of(
                     new FileChange("/src/App.jsx", 40, 0)));
         });
@@ -301,12 +319,19 @@ class ConversationHistoryTest {
                     new AgentSuspension("reply-2", List.of(Map.of(
                             "id", "tc-9", "name", "ask_user"))));
         });
+        // 挂起观察（#418 补桩——缺省恒 false 会让派发层误判轮已收口、起注定挂起
+        // 失败的修正 run，失败留账落库后该接缝在对话史现形）：起手守卫无挂起（false）
+        // → 轮收口观测见挂起（true）——轮如实挂起待答、不派修正 run（同灵魂用例
+        // 脚本序次）
+        when(agentClient.hasAskingToolCall(anyString(), anyString()))
+                .thenReturn(false)
+                .thenReturn(true);
 
         mainAgentAppService.runOpinionTurn(projectId, "做一个分销系统");
 
         List<ConversationEntryResponse> history = conversationHistory.read(projectId);
         assertThat(history).extracting(ConversationEntryResponse::kind)
-                .containsExactly(1, 2, 3); // user/agent/question
+                .containsExactly(1, 2, 3); // user/agent/question——挂起轮不派修正 run
         ConversationEntryResponse card = history.get(2);
         assertThat(card.answered()).isFalse(); // 未答 = 挂起待答（水合后问答卡可作答）
         Map<?, ?> data = (Map<?, ?>) card.question().get(AgentEventTypes.WAIT_DATA_FIELD);
@@ -364,6 +389,7 @@ class ConversationHistoryTest {
                 return new AgentReply(command.runId(), "好的");
             }
             finishFixFacts.record(command.workspaceId(), true, "已修正");
+            verifyRan(command);
             Consumer<AgentEvent> coderSink = invocation.getArgument(1);
             coderSink.accept(new AgentEvent(AgentEventTypes.RUN_FINISH, Map.of(
                     AgentEventTypes.RUN_FIELD, command.runId(),

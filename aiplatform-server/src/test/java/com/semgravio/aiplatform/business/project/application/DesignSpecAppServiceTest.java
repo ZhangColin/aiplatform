@@ -141,7 +141,7 @@ class DesignSpecAppServiceTest {
         assertThat(commands.getAllValues()).extracting(WorkspaceExecCommand::command)
                 .allSatisfy(command -> assertThat(command)
                         .contains(".spec.json")
-                        .contains("cat > \"$p\""))
+                        .contains("cat > '/workspace/design/"))
                 .anySatisfy(command -> assertThat(command)
                         .contains("384926573-logo-a.spec.json"))
                 .anySatisfy(command -> assertThat(command)

@@ -76,6 +76,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final LandedFileFacts landedFiles;
     private final DesignSpecAppService designSpecs;
     private final VerificationFacts verificationFacts;
+    private final AgentConfigAppService agentConfigs;
 
     public ProfileToolkitSupplier(PrdArtifactAdapter prdArtifacts, FinishEditFacts finishFacts,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
@@ -83,7 +84,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
             SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration,
             LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
-            VerificationFacts verificationFacts) {
+            VerificationFacts verificationFacts, AgentConfigAppService agentConfigs) {
         this.prdArtifacts = prdArtifacts;
         this.finishFacts = finishFacts;
         this.prdRevisions = prdRevisions;
@@ -97,6 +98,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.landedFiles = landedFiles;
         this.designSpecs = designSpecs;
         this.verificationFacts = verificationFacts;
+        this.agentConfigs = agentConfigs;
     }
 
     @Override
@@ -149,11 +151,14 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         }
         // #352 verify 子键视图：子智能体自有平台工具面（验证结果登记＋技能自荐
         // subagent 槽血统实例）——平台工厂构建子智能体时按本键取视图合并进子级
-        // 工具面（镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否
+        // 工具面（镜像技能仓库的子键路由先例），声明 allowlist 治理挂载与否。
+        // 轮次预算经供应 lambda 动态读（#424：运营面改预算下一轮登记即生效——
+        // 工具实例随智能体构建长存，不缓存配置值）
         if (ProfileSubagentSupplier.VERIFY_NAME.equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
             toolkit.registerAgentTool(new ReportVerificationTool(dev.workspaceId(),
-                    verificationFacts));
+                    verificationFacts,
+                    () -> agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget()));
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.SUBAGENT, skillProposals));
         }

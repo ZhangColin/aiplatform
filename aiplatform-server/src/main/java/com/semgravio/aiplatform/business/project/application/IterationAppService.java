@@ -107,6 +107,10 @@ public class IterationAppService {
     private final DemoVersionAppService demoVersionAppService;
     private final PrdDraftBaseline prdDraftBaseline;
     private final DemoSeedAppService demoSeed;
+    private final ProofOfOutputGate proofGate;
+    private final VerificationPresenceGate verificationPresence;
+    private final RobustKitLintAppService robustKitLint;
+    private final TrackFinalVerificationAppService finalVerification;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -125,7 +129,11 @@ public class IterationAppService {
             DesignSpecAppService designSpecs,
             DemoVersionAppService demoVersionAppService,
             PrdDraftBaseline prdDraftBaseline,
-            DemoSeedAppService demoSeed) {
+            DemoSeedAppService demoSeed,
+            ProofOfOutputGate proofGate,
+            VerificationPresenceGate verificationPresence,
+            RobustKitLintAppService robustKitLint,
+            TrackFinalVerificationAppService finalVerification) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -137,6 +145,10 @@ public class IterationAppService {
         this.demoVersionAppService = demoVersionAppService;
         this.prdDraftBaseline = prdDraftBaseline;
         this.demoSeed = demoSeed;
+        this.proofGate = proofGate;
+        this.verificationPresence = verificationPresence;
+        this.robustKitLint = robustKitLint;
+        this.finalVerification = finalVerification;
     }
 
     /**
@@ -292,14 +304,25 @@ public class IterationAppService {
                         .map(version -> version.getContent()).orElse(null);
                 CoderRunAttempts.RunResult result;
                 try {
+                    // 产出证明闸（#420 更新轨同盖）：本场判定件——起跑捕获段起点
+                    //（工作区 HEAD），拒绝史跨尝试累计
+                    ProofOfOutputGate.Checking proof =
+                            proofGate.forRun(project.getWorkspaceId());
                     result = coderRunAttempts.run(project, runId,
                             fixSession(projectId, runId),
                             new CoderRunAttempts.Prompts(fixRunPrompt(handoff, baselinePrd),
                                     IterationAppService::fixRetryPrompt),
                             (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
-                                    currentHandoff, prdVersionNo),
+                                    currentHandoff, prdVersionNo, proof),
                             "fix", true, CoderRunAttempts.RunSeat.executor(),
                             RunHeading.titled(FIX_TITLE));
+                    if (result.succeeded()) {
+                        // #427 更新轨收口后复走整轨终验（防修 A 坏 B）：以现行计划的
+                        // 核心旅程清单为轴复验——fail 自动起终验修复 run 修→复走，
+                        // 预算耗尽已知缺陷随末轮终验收尾卡如实呈现；无旅程轴（存量
+                        // 计划/锚漂）跳过。仍在 try 内：复走途中用户停止走下方停止账
+                        finalVerification.verifyAfterUpdateRun(project);
+                    }
                 }
                 catch (RunStoppedException e) {
                     // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见
@@ -316,7 +339,7 @@ public class IterationAppService {
                         codingRunTrack.end(projectId);
                         released = true;
                     }
-                    eventBridge.emitRunStopped(project, e.runId());
+                    eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     return;
                 }
                 List<FixHandoff> queued;
@@ -345,7 +368,7 @@ public class IterationAppService {
                         // 可达（点击不被 PRJ_025/026 挡回）；排队合并续派的中途超限
                         // 不发（轨道仍在途，「重新修改」零闪现）。锚 = 该场 run 的
                         // 用户面标识（首试 runId，#84 重试不换新锚）
-                        eventBridge.emitRunFailed(project, runId, result.lastError());
+                        eventBridge.emitRunFailed(project, runId, result.failure());
                     }
                     return;
                 }
@@ -367,9 +390,14 @@ public class IterationAppService {
     }
 
     /**
-     * 修正收口（#46 + #88 判定行）：以 finish_edit 工具事实为准——无事实 = run 未
-     * 正常收口，抛出即该次尝试失败（走共用尝试环的静默重试/终态，与生成 8081 核验
-     * 同口径）；事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
+     * 修正收口（#46 + #88 判定行 + #420 产出证明 + #424 验证在场）：以 finish_edit
+     * 工具事实为准——无事实 = run 未正常收口，抛出即该次尝试失败（走共用尝试环的
+     * 静默重试/终态，与生成 8081 核验同口径）；产出证明闸（#420 更新轨同盖）与验证
+     * 在场（#424 片轻验常开——更新轨/fix run 同盖）先于 finish_edit 事实消费——
+     * 零 diff＋无「能力已存在」确认＝结构性拒绝、无验证登记不准收口（拒绝回执喂回
+     * 执行体同 run 补做；拒绝不消费 finish_edit 事实，重试轮事实连续），changed=false
+     * 的合法收口须有豁免依据（验证确认能力已存在——其本身即验证登记，在场自洽）或
+     * 本场实有改动。事实在即返回收口判定的权威事实——系统改没改 = finish_edit 的
      * changed + 说明，PRD 改没改 = 本场交接物各轮的修订说明（null = 未修订轮；
      * 排队合并的多轮说明以「；」连缀——判定结果以平台可观测的工具调用事实为准，
      * 不由模型自报）。changed=false（判定无需改动）的呈现归收口扩载权威化
@@ -381,7 +409,9 @@ public class IterationAppService {
      * 收口补位，markGenerated 同口径）。</p>
      */
     private CoderRunAttempts.ClosingJudgment closeFixRun(Project project, String attemptRunId,
-            FixHandoff handoff, Integer prdVersionNo) {
+            FixHandoff handoff, Integer prdVersionNo, ProofOfOutputGate.Checking proof) {
+        Map<String, Object> proofAnnotation = proof.proof();
+        verificationPresence.requirePresence(Long.toString(project.getWorkspaceId()));
         FinishEditFacts.Fact fact = finishFacts.consume(Long.toString(project.getWorkspaceId()));
         if (fact == null) {
             // 未正常收口不是静默漏过：run-finish 已发（引擎自认成功），抛出驱动尝试环
@@ -414,9 +444,14 @@ public class IterationAppService {
                 prdNotes.isEmpty() ? null : String.join("；", prdNotes),
                 fact.changed(),
                 fact.text())
+                // 产出证明判别标注（#420：空转拒绝史／豁免依据——正常干活收口 null 不携带）
+                .withProofOfOutput(proofAnnotation)
                 // 带规范项目的样式合规扫描事实（#296——更新 run 按稿对齐同律：软约束
                 // 不抛，违规重试一轮归尝试环，仍违规随收尾卡如实；无规范 null 不携带）
-                .withDesignLint(designSpecs.lintClosingPayload(project));
+                .withDesignLint(designSpecs.lintClosingPayload(project))
+                // 基座 lint 两档扫描事实（#425——更新轨同盖：强制档违规修不完＝收口
+                // 被拒（尝试环判定），预置档如实标注不拦收口；存量工作区 null 不携带）
+                .withRobustKitLint(robustKitLint.lintClosingPayload(project.getWorkspaceId()));
     }
 
     /**

@@ -40,7 +40,14 @@ public enum WorkspaceMessage implements CodeMessage {
     WORKSPACE_SEAL_PACKAGE_UNAVAILABLE(404, "WSP_016", "封存包不存在或不可读"),
 
     /** #174 后台动作面：触碰自愈/扫描封存等收敛任务在途，独占互斥让路（不排队）。 */
-    WORKSPACE_ACTION_BUSY(409, "WSP_017", "沙箱有进行中的收敛任务，请稍后再试");
+    WORKSPACE_ACTION_BUSY(409, "WSP_017", "沙箱有进行中的收敛任务，请稍后再试"),
+
+    /** #401 argv 防呆（开发者面，非用户可自愈）：Windows 下命令参数内嵌双引号必被
+     * JVM→docker.exe 的 argv 编码链剥掉而静默变形（#399 家族）——fail-fast 当场报错，
+     * 命令一律单引号形态重写（Linux 生产 execve 免疫，防呆 os.name 条件化）。 */
+    ENVIRONMENT_COMMAND_EMBEDDED_QUOTE(500, "WSP_018",
+            "命令参数含内嵌双引号，Windows 下必被 JVM 到 docker.exe 的 argv 编码链剥掉而静默变形"
+                    + "（#399 家族），命令一律单引号形态重写。参数: {0}");
 
     private final int httpStatus;
     private final String code;

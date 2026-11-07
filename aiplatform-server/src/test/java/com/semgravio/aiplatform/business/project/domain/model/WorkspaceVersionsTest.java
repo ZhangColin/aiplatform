@@ -284,6 +284,29 @@ class WorkspaceVersionsTest {
     }
 
     @Test
+    void given_ref_when_diff_since_segment_start_then_name_only_plus_untracked_without_staging() {
+        String command = WorkspaceVersions.diffSinceStartCommand("a1b2c3d");
+
+        // 产出证明闸探针（#420 空转片防呆）：段起点以来的变更文件名清单——tracked
+        //（diff 含段内野 commit 的增量）＋ untracked（ls-files --others；排除面经
+        // .git/info/exclude 天然不进——.platform/ 平台产物/数据/依赖不虚构成产出）；
+        // 不动索引（add -A 留账先例在此不取——收口尾序不落暂存副作用）；stdout 空
+        // ＝零 diff（空转判据的唯一确定性信号）
+        assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
+        assertThat(command).contains("git diff --name-only 'a1b2c3d'");
+        assertThat(command).contains("git ls-files --others --exclude-standard");
+        assertThat(command).doesNotContain("git add");
+    }
+
+    @Test
+    void given_non_hex_ref_when_diff_since_segment_start_then_rejected_before_shell() {
+        assertThatThrownBy(() -> WorkspaceVersions.diffSinceStartCommand("main; rm -rf /"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> WorkspaceVersions.diffSinceStartCommand("$(id)"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void given_ref_when_reset_to_segment_start_then_hard_reset_and_clean_untracked() {
         String command = WorkspaceVersions.resetToSegmentStartCommand("a1b2c3d");
 

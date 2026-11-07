@@ -174,9 +174,9 @@ class DesignSpecsTest {
         String command = DesignSpecs.sidecarWriteCommand("design/384926573-logo.spec.json");
         assertThat(command)
                 .contains("'/workspace/design/384926573-logo.spec.json'")
-                .contains("mkdir -p")
-                .contains("cat > \"$p\"")
-                .contains("stat -c %s \"$p\"");
+                .contains("mkdir -p '/workspace/design'")
+                .contains("cat > '/workspace/design/384926573-logo.spec.json'")
+                .contains("stat -c %s '/workspace/design/384926573-logo.spec.json'");
     }
 
     // ---------- 遵守面（#296 消费侧：:root 刷值 / 收窄块 / 品牌色 / 规则文件） ----------

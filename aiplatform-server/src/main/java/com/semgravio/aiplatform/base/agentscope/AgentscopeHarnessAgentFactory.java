@@ -64,7 +64,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
 
         HarnessAgent build(String name, String sysPrompt, String modelString,
                 ModelChannel modelChannel, EdgeModelSupplier.EdgeModel compaction,
-                AgentWorkspace workspace, String agentKey, String toolSpec);
+                EdgeModelSupplier.EdgeModel subagent, AgentWorkspace workspace, String agentKey,
+                String toolSpec);
     }
 
     private final ConcurrentHashMap<String, HarnessAgent> agents = new ConcurrentHashMap<>();
@@ -79,10 +80,10 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
             EdgeModelSupplier edgeModels, AgentscopeProperties properties) {
         this(stateStore, toolkitSupplier, (name, sysPrompt, modelString, modelChannel,
-                compaction, workspace, agentKey, toolSpec) ->
+                compaction, subagent, workspace, agentKey, toolSpec) ->
                 buildAgent(stateStore, toolkitSupplier, skillRepositorySupplier, subagentSupplier,
                         middlewareSupplier,
-                        name, sysPrompt, modelString, modelChannel, compaction, workspace,
+                        name, sysPrompt, modelString, modelChannel, compaction, subagent, workspace,
                         agentKey, toolSpec, properties),
                 edgeModels);
     }
@@ -100,22 +101,27 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // 压缩档位随装配解析（#366 边缘点收编：compaction 档位库值优先缺省 → 解析
         // 单点，每次 obtain 动态查——后台改档下一轮命令构建即生效）
         EdgeModelSupplier.EdgeModel compaction = edgeModels.compactionModel();
+        // 委派子智能体档位随装配解析（#424 片轻验）：null＝随父级（执行体生效档
+        // ——含路由升档），非空即独立档；同入实例缓存键指纹（改档即新实例）
+        EdgeModelSupplier.EdgeModel subagent = edgeModels.subagentModel();
         // sysPrompt/workspace/agentKey/toolSpec 明文入键（不用 hashCode：碰撞会把不同
         // 人格/工作区/工具面的 agent 当同规格静默复用）；toolSpec 是工具面规格
         // （#252 增强工具开关）：工具集构建时固化（Toolkit 静态注册、无技能线的
         // 动态视图缝），规格变＝实例变——开关变更下一轮命令构建即新装配；
         // modelChannel.fingerprint() 是生效配置指纹（ADR-0031）：同模型串下换
         // key/换地址＝指纹变＝新实例——守「改配置即生效、进行中 run 不定格」；
-        // 压缩档位同入指纹（#366）：改压缩档即新实例
+        // 压缩档位同入指纹（#366）：改压缩档即新实例；子智能体档位同律（#424）
         String key = name + "|" + modelString + "|"
                 + (modelChannel == null ? "" : modelChannel.fingerprint()) + "|"
                 + sysPrompt + "|" + workspace.identity()
                 + "|" + agentKey + "|" + (toolSpec == null ? "" : toolSpec)
                 + "|cx=" + compaction.modelString() + "@"
-                + (compaction.channel() == null ? "" : compaction.channel().fingerprint());
+                + (compaction.channel() == null ? "" : compaction.channel().fingerprint())
+                + "|sg=" + (subagent == null ? "" : subagent.modelString() + "@"
+                        + (subagent.channel() == null ? "" : subagent.channel().fingerprint()));
         return agents.computeIfAbsent(key,
                 k -> builder.build(name, sysPrompt, modelString, modelChannel, compaction,
-                        workspace, agentKey, toolSpec));
+                        subagent, workspace, agentKey, toolSpec));
     }
 
     @Override
@@ -135,7 +141,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
             AgentToolkitSupplier toolkitSupplier, AgentSkillRepositorySupplier skillRepositorySupplier,
             AgentSubagentSupplier subagentSupplier, AgentMiddlewareSupplier middlewareSupplier,
             String name, String sysPrompt, String modelString, ModelChannel modelChannel,
-            EdgeModelSupplier.EdgeModel compaction, AgentWorkspace workspace, String agentKey,
+            EdgeModelSupplier.EdgeModel compaction, EdgeModelSupplier.EdgeModel subagent,
+            AgentWorkspace workspace, String agentKey,
             String toolSpec, AgentscopeProperties properties) {
         Toolkit toolkit = toolkitSupplier.toolkitFor(agentKey, workspace, toolSpec);
         // 模型流层平台包装（#109 计量 + #321 断流自动重试）：主模型解析即关内层
@@ -149,6 +156,12 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         Model model = streamLayer(
                 ModelRegistry.resolve(modelString, creationContextOf(modelChannel)),
                 modelString, properties);
+        // 委派子智能体档位（#424 片轻验）：覆盖档独立解析同款流层包装（计量外圈＋
+        // 断流重试同构）；null＝随父级实例（缺省同执行体档——含路由升档，计量
+        // 边界连续的既有口径不变）
+        Model subagentModel = subagent == null ? model : streamLayer(
+                ModelRegistry.resolve(subagent.modelString(), creationContextOf(subagent.channel())),
+                subagent.modelString(), properties);
         // 项目工作区容器文件面（ProjectDev/ProjectReadOnly 共用；子智能体同面，#260）
         DockerExecFilesystem containerFs = switch (workspace) {
             case AgentWorkspace.ProjectDev dev -> new DockerExecFilesystem(dev.containerName());
@@ -180,8 +193,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
         // javadoc）；无声明挂载返回空集即框架不注入 <available_subagents>
         subagentSupplier.subagentsFor(agentKey, workspace)
                 .forEach(decl -> builder.subagentFactory(decl.getName(), subagentFactory(decl,
-                        workspace, containerFs, model, toolkit, toolkitSupplier, stateStore,
-                        skillRepositorySupplier, platformMiddlewares)));
+                        workspace, containerFs, model, subagentModel, toolkit, toolkitSupplier,
+                        stateStore, skillRepositorySupplier, platformMiddlewares)));
         if (properties.getMaxIters() != null) {
             builder.maxIters(properties.getMaxIters());
         }
@@ -338,7 +351,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      */
     static Function<String, Agent> subagentFactory(
             SubagentDeclaration declaration, AgentWorkspace workspace,
-            DockerExecFilesystem containerFs, Model parentModel, Toolkit parentToolkit,
+            DockerExecFilesystem containerFs, Model parentModel, Model subagentModel,
+            Toolkit parentToolkit,
             AgentToolkitSupplier toolkitSupplier, AgentStateStore stateStore,
             AgentSkillRepositorySupplier skillRepositorySupplier,
             List<MiddlewareBase> platformMiddlewares) {
@@ -350,12 +364,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 ? java.nio.file.Path.of(AgentWorkspace.ProjectDev.CONTAINER_ROOT)
                         .resolve("agents").resolve(declaration.getName()).resolve("workspace")
                 : null;
-        // 注册键即声明名（Function 入参恒同名），构建只认声明——单声明单工厂
+        // 注册键即声明名（Function 入参恒同名），构建只认声明——单声明单工厂；
+        // 子智能体模型＝覆盖档（#424：调用侧 buildAgent 已把无覆盖归一为父级实例，
+        // 此处恒非空——parentModel 仅作参数形占位）
         return name -> {
             HarnessAgent.Builder sub = HarnessAgent.builder()
                     .name(declaration.getName())
                     .description(declaration.getDescription())
-                    .model(parentModel)
+                    .model(subagentModel)
                     .toolkit(childToolkit)
                     .defaultSessionId(declaration.getName())
                     .maxIters(declaration.getSteps())

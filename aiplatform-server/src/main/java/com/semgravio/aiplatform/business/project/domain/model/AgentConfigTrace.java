@@ -18,7 +18,11 @@ import java.time.LocalDateTime;
  * @param oldRoutingEnabled             变更前模型路由开关
  * @param oldRoutingStrongModelId       变更前强模型档（null＝回落代码缺省）
  * @param oldRoutingFileCountThreshold  变更前文件面阈值（null 同上）
- * @param oldRoutingSliceFeatureThreshold 变更前片复杂度阈值（null 同上）
+ * @param oldRoutingEscalatingSizeLabels 变更前升档规模标签映射（存储形逗号接 token，
+ *                                       如「中,大」；null 同上；空串＝空映射，#426）
+ * @param oldVerifyModelId              变更前 verify 档位（#424；null＝随执行体生效档）
+ * @param oldVerifyRoundBudget          变更前单场验证轮次预算（#424；null＝代码缺省）
+ * @param oldFinalVerifyFixBudget       变更前整轨终验修复预算（#427；null＝代码缺省）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId                    变更后模型档位（null 同上）
  * @param newWebSearchEnabled           变更后联网搜索开关
@@ -26,7 +30,11 @@ import java.time.LocalDateTime;
  * @param newRoutingEnabled             变更后模型路由开关
  * @param newRoutingStrongModelId       变更后强模型档（null＝本次清空回落代码缺省）
  * @param newRoutingFileCountThreshold  变更后文件面阈值（null 同上）
- * @param newRoutingSliceFeatureThreshold 变更后片复杂度阈值（null 同上）
+ * @param newRoutingEscalatingSizeLabels 变更后升档规模标签映射（存储形逗号接 token；
+ *                                       null 同上；空串＝空映射）
+ * @param newVerifyModelId              变更后 verify 档位（null＝清空随执行体档）
+ * @param newVerifyRoundBudget          变更后单场验证轮次预算（null＝清空回落代码缺省）
+ * @param newFinalVerifyFixBudget       变更后整轨终验修复预算（null＝清空回落代码缺省）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -41,7 +49,10 @@ public record AgentConfigTrace(
         boolean oldRoutingEnabled,
         String oldRoutingStrongModelId,
         Integer oldRoutingFileCountThreshold,
-        Integer oldRoutingSliceFeatureThreshold,
+        String oldRoutingEscalatingSizeLabels,
+        String oldVerifyModelId,
+        Integer oldVerifyRoundBudget,
+        Integer oldFinalVerifyFixBudget,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -49,7 +60,10 @@ public record AgentConfigTrace(
         boolean newRoutingEnabled,
         String newRoutingStrongModelId,
         Integer newRoutingFileCountThreshold,
-        Integer newRoutingSliceFeatureThreshold,
+        String newRoutingEscalatingSizeLabels,
+        String newVerifyModelId,
+        Integer newVerifyRoundBudget,
+        Integer newFinalVerifyFixBudget,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

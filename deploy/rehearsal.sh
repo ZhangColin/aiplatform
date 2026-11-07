@@ -199,6 +199,11 @@ mk_sandbox() { # $1=容器名（＝previewnet DNS 名） $2=网络别名(可空)
   # #396 /_next 探针资产：浏览器头组合打 /_next/ 时有真实文件可 200（缺文件只能验到
   # 404「非 403」的弱断言，探不到 200 形态）
   printf 'console.log("%s-next-chunk");\n' "$name" >"$d/chunk.js"
+  # #403 探针资产：__nextjs_font 真实文件（同「有文件才有 200 形态」理由）＋
+  # big.js ≥gzip_min_length（1024）——客户端侧 gzip 断言需要可压缩的足量文本
+  mkdir -p "$d/fdir"
+  printf 'font-probe' >"$d/fdir/geist-latin.woff2"
+  yes 'x' | head -c 2048 >"$d/big.js"
   cat >"$d/serve.conf" <<EOF
 server {
     listen 8081;
@@ -217,6 +222,8 @@ EOF
     -v "$(win_mount "$d/serve.conf" /etc/nginx/conf.d/serve.conf)" \
     -v "$(win_mount "$d/index.html" /srv/index.html)" \
     -v "$(win_mount "$d/chunk.js" /srv/_next/static/chunk.js)" \
+    -v "$(win_mount "$d/fdir/geist-latin.woff2" /srv/__nextjs_font/geist-latin.woff2)" \
+    -v "$(win_mount "$d/big.js" /srv/_next/static/big.js)" \
     "$probe_img" >/dev/null
 }
 # 主预览按容器名 DNS（ws-{id}）：名字必须恰为 ws-4242；id 取非常规值避免撞真工作区
@@ -315,6 +322,23 @@ grep -qi "^x-echo-origin: http://$PREVIEW_HOST" <<<"$page_resp" \
   || die "非 /_next 请求上游应收到 Origin（原样透传——透传不误伤是硬约束）"
 ok "⑧ 浏览器头组合：/_next 非 403 且上游无 Origin（网关剥）、非 /_next Origin 原样透传"
 
+# #403 ① __nextjs 族剥 Origin（字体真实头形态：Dest=font／Mode=cors——CSS Fonts
+# 规范 CORS 模式加载必带 Origin，同源也带）：Next dev 闸门护 /_next* 与 /__nextjs*
+# 两族，扩族若退化＝回到「字体 403」形态
+font_resp=$(browser_probe "$PREVIEW_HOST" /__nextjs_font/geist-latin.woff2 font cors)
+font_code=$(head -1 <<<"$font_resp" | awk '{print $2}')
+[ "$font_code" = 200 ] \
+  || die "带预览域 Origin 打 __nextjs_font 应 200（实际 $font_code——403＝剥 Origin 未覆盖 __nextjs 族；其它状态查路由）"
+! grep -qi '^x-echo-origin:' <<<"$font_resp" \
+  || die "/__nextjs* 请求上游应收不到 Origin（回显头不应出现——剥 Origin 扩族退化）"
+# #403 ② 客户端侧 gzip：带 Accept-Encoding 打 ≥min_length 文本资产，客户端响应应含
+# Content-Encoding: gzip；「上游恒收 identity（sub_filter 依赖）」由冒烟 stub 回显断言
+gzip_resp=$(curl -s -i -H "Host: $PREVIEW_HOST" -H "Accept-Encoding: gzip" \
+  "http://127.0.0.1/_next/static/big.js")
+grep -qi '^content-encoding: gzip' <<<"$gzip_resp" \
+  || die "客户端响应应含 Content-Encoding: gzip（网关客户端侧压缩退化——跨境未压缩传输是预览体感慢主因）"
+ok "⑧ #403：__nextjs 族剥 Origin、客户端侧 gzip"
+
 # ⑥ redis requirepass：分片凭据 PONG、无密码 NOAUTH（平台视角，webnet 内 DNS）
 redis_img=$(docker inspect -f '{{.Config.Image}}' semgravio-redis)
 pong=$(docker run --rm --network webnet "$redis_img" \
@@ -376,5 +400,5 @@ if [ "$INFRA_OWNED" = 1 ]; then
   ok "已拆自建 infra 栈（含排练卷与 .env；网络 webnet/previewnet 保留——幂等资源）"
 fi
 
-printf '\n排练全部通过 ✅（主站＋注入＋纯代理＋资产单源＋提示页＋redis requirepass＋浏览器头剥Origin%s）\n' \
+printf '\n排练全部通过 ✅（主站＋注入＋纯代理＋资产单源＋提示页＋redis requirepass＋浏览器头剥Origin＋__nextjs 扩族＋gzip%s）\n' \
   "$([ "$STUB" != 1 ] && echo '＋全栈后端/embedding' || echo '')"

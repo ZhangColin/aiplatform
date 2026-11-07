@@ -106,7 +106,8 @@ class WorkspaceRendersLiveTest {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
         writeWorkspaceFile("design/fidelity.svg", fixture("render/fidelity.svg"));
-        assertThat(exec("test -x \"$RENDER_CHROMIUM\" && mv /opt/chrome /opt/chrome.moved"
+        // $RENDER_CHROMIUM 无引号（路径无空白；#401 纪律：命令不内嵌双引号）
+        assertThat(exec("test -x $RENDER_CHROMIUM && mv /opt/chrome /opt/chrome.moved"
                 + " && echo moved").exitCode()).as("chromium 目录应可挪走").isZero();
         try {
             ExecResult rendered = exec(WorkspaceRenders.svgToPngCommand(
@@ -150,7 +151,12 @@ class WorkspaceRendersLiveTest {
         }
     }
 
-    /** 经 heredoc 写工作区文件（引号定界＝字面量，内容不经 shell 解释）。 */
+    /**
+     * 经 heredoc 写工作区文件（引号定界＝字面量，内容不经 shell 解释）。注意
+     * heredoc 只防 shell 解析、防不了 argv 层剥引号：内容（fixture）仍不得含
+     * 双引号——Windows JVM→docker.exe 链在 shell 之前就把它们剥掉（#401 防呆
+     * 已在此缝 fail-fast；fixture 属性一律单引号）。
+     */
     private ExecResult writeWorkspaceFile(String path, String content) {
         return exec("cat > /workspace/" + path + " <<'FIDELITY_EOF'\n"
                 + content + "\nFIDELITY_EOF");

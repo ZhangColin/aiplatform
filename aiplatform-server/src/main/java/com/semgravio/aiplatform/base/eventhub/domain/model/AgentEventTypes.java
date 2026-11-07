@@ -47,14 +47,29 @@ public final class AgentEventTypes {
     public static final String CLOSING_FIELD = "closing";
 
     /**
-     * 收口扩载的验证键（#352 独立验证子智能体的收尾统计）：值为对象
-     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[] }}——
-     * 事实源＝verify 子智能体（source=verify）经 report_verification 工具登记的
+     * run-failed 扩载的失败面键（#418 失败片落库面）：值为对象
+     * {@code { stopped?, error?, durationMs, attempts[] }}——逐尝试墙钟/档位/失败
+     * 原因/本场累计的平台观测事实（#323 失败留账的落库面，跨轮累计——回滚重跑轮
+     * 不清账）。<b>对话史落库（失败留账行）与本载荷同 map</b>（同收尾卡「SSE 扩载
+     * 与落库同载荷」先例）；平台分析口径、前端不渲染（同 durationBreakdown）。
+     * 无尝试环数据的轨道级失败（fork 合并失败等）只携 {@code error}；停止口径
+     * 携 {@code stopped: true}（停止是用户动作，无失败原因可报）。
+     */
+    public static final String FAILURE_FIELD = "failure";
+
+    /**
+     * 收口扩载的验证键（#352 独立验证子智能体的收尾统计；#424 片轻验常开后收口
+     * 必在场）：值为对象
+     * {@code { total, failed, faces{browser,db,log}, rounds, failedItems[], budgetExhausted? }}
+     * ——事实源＝verify 子智能体（source=verify）经 report_verification 工具登记的
      * 本轮逐项结果（平台从工具调用事实观测，不解析子智能体自由文本）：total/failed
-     * ＝末轮总项数与未过数、faces＝末轮三面分布、rounds＝本场验证轮数（修复—
-     * 复验环的如实呈现，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注
-     * 的落点）。<b>可缺省</b>——验证子智能体未跑/未登记时本键不携带。逐项
-     * ✅/❌ 明细与证据在过程播报（解说段）里，收尾卡只带聚合。
+     * ＝末轮总项数与未过数、faces＝末轮三面分布（browser＝主径轴、db/log＝按需
+     * 下钻——#424 载荷口径，面键不变）、rounds＝本场验证轮数（修复—复验环的
+     * 如实呈现，1＝一轮过）、failedItems＝末轮未过项名（修不了如实标注的落点）、
+     * budgetExhausted＝轮次预算用尽仍未过（#424：达预算停止修复—复验、未过项
+     * 如实呈现的标注）。<b>可缺省</b>——验证子智能体未跑/未登记时本键不携带
+     * （#424 起收口硬门在场，缺省＝零验证收口被拒路径）。逐项 ✅/❌ 明细与证据
+     * 在过程播报（解说段）里，收尾卡只带聚合。
      */
     public static final String VERIFICATION_FIELD = "verification";
 
@@ -72,6 +87,9 @@ public final class AgentEventTypes {
 
     /** verification 对象的末轮未过项名清单键（修不了如实标注；全过时为空数组）。 */
     public static final String VERIFICATION_FAILED_ITEMS_FIELD = "failedItems";
+
+    /** verification 对象的轮次预算用尽键（#424：达预算仍有未过＝停止修复—复验的如实标注）。 */
+    public static final String VERIFICATION_BUDGET_EXHAUSTED_FIELD = "budgetExhausted";
 
     /**
      * 智能体挂起提问（ask_user 触发，唯一挂起源）：payload 带

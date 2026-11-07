@@ -453,7 +453,7 @@ class AgentscopeAgentClientTest {
     /**
      * 阶段耗时事实随回复携出（#111 收口扩载 durationBreakdown 的观察面接线）：计时源 =
      * 引擎事件 createdAt（构造注入——确定性断言）——执行体模型调用配对进 llmMs、工具执行
-     * 窗按工具名分桶（command 按命令归组）、委派事件记 source 委派窗。
+     * 窗按工具名分桶（command 按命令归组）、委派事件按源归集该源配对区间（#417 源账）。
      */
     @Test
     void given_scripted_events_when_converse_then_reply_carries_stage_durations() {

@@ -147,14 +147,14 @@ class CoderRunAttempts {
     record ClosingJudgment(boolean prdChanged, String prdNote, boolean systemChanged,
             String systemNote, List<Map<String, Object>> drafts,
             Map<String, Object> designLint, Map<String, Object> robustKitLint,
-            Map<String, Object> proofOfOutput) {
+            Map<String, Object> proofOfOutput, Map<String, Object> knownDefects) {
 
         /**
          * 生成轨道的分段判定（#104）：PRD 未动、系统产出；note = 本段叙事（阶段 0
          * 起服骨架 / 完成切片），进收尾卡 summary（版本成版主题同源）。
          */
         static ClosingJudgment generation(String note) {
-            return new ClosingJudgment(false, null, true, note, null, null, null, null);
+            return new ClosingJudgment(false, null, true, note, null, null, null, null, null);
         }
 
         /**
@@ -165,7 +165,7 @@ class CoderRunAttempts {
          */
         static ClosingJudgment design(String note, List<Map<String, Object>> drafts) {
             return new ClosingJudgment(false, null, false, note,
-                    drafts == null ? List.of() : drafts, null, null, null);
+                    drafts == null ? List.of() : drafts, null, null, null, null);
         }
 
         /**
@@ -175,25 +175,34 @@ class CoderRunAttempts {
         static ClosingJudgment update(boolean prdChanged, String prdNote,
                 boolean systemChanged, String systemNote) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote,
-                    null, null, null, null);
+                    null, null, null, null, null);
         }
 
         /** 附设计规范扫描事实（#296 收口回调拼装：非规范项目传 null＝不携带）。 */
         ClosingJudgment withDesignLint(Map<String, Object> lint) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    lint, robustKitLint, proofOfOutput);
+                    lint, robustKitLint, proofOfOutput, knownDefects);
         }
 
         /** 附基座 lint 两档扫描事实（#425 收口回调拼装：存量工作区传 null＝不携带）。 */
         ClosingJudgment withRobustKitLint(Map<String, Object> lint) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    designLint, lint, proofOfOutput);
+                    designLint, lint, proofOfOutput, knownDefects);
         }
 
         /** 附产出证明判别标注（#420 收口回调拼装：非豁免且无拒绝史传 null＝不携带）。 */
         ClosingJudgment withProofOfOutput(Map<String, Object> proofOfOutput) {
             return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
-                    designLint, robustKitLint, proofOfOutput);
+                    designLint, robustKitLint, proofOfOutput, knownDefects);
+        }
+
+        /**
+         * 附已知缺陷清单（#427 整轨终验修复预算耗尽：终验末轮收口拼装——版本照成
+         * ＋缺陷清单如实进收尾卡；通过/预算内有修复路径不携带）。
+         */
+        ClosingJudgment withKnownDefects(Map<String, Object> knownDefects) {
+            return new ClosingJudgment(prdChanged, prdNote, systemChanged, systemNote, drafts,
+                    designLint, robustKitLint, proofOfOutput, knownDefects);
         }
     }
 
@@ -869,6 +878,9 @@ class CoderRunAttempts {
         if (judgment.proofOfOutput() != null) {
             closing.put(CLOSING_PROOF_FIELD, judgment.proofOfOutput());
         }
+        if (judgment.knownDefects() != null) {
+            closing.put(CLOSING_KNOWN_DEFECTS_FIELD, judgment.knownDefects());
+        }
         if (tier != null) {
             closing.put(CLOSING_MODEL_TIER_FIELD, tier.payload());
         }
@@ -908,6 +920,13 @@ class CoderRunAttempts {
      * ——拒绝回执经重试现场喂回执行体同 run 补做）。
      */
     static final String CLOSING_PROOF_FIELD = "proofOfOutput";
+
+    /**
+     * 收口扩载的已知缺陷清单键（#427 整轨终验）：{@code { defects: [{ name, detail? }] }}
+     * ——修复预算耗尽时版本照成、末轮终验 run 收尾卡如实携带（完成叙事与收尾卡同
+     * 源——前端如实呈现，不粉饰「完成」）；通过与预算内修复路径不携带。
+     */
+    static final String CLOSING_KNOWN_DEFECTS_FIELD = "knownDefects";
 
     /** 扫描载荷的「曾自动修一轮」键（修轮用尽即标——纠偏过程如实）。 */
     static final String CLOSING_LINT_RETRIED_FIELD = "retried";
@@ -1187,12 +1206,14 @@ class CoderRunAttempts {
     }
 
     /** 摘要（判定事实的合并叙事——文档与系统不分侧）：更新轮四类收口各一句、生成/
-     * 设计轨道按段叙事。 */
+     * 设计轨道按段叙事、终验 run 按验证判定叙事（#427）。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
-        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)) {
+        if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)
+                || TrackFinalVerificationAppService.VERIFY_LABEL.equals(what)) {
             // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片）；
-            // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）——note
-            // 恒非空（轨道层 ClosingJudgment.generation 同形拼装）
+            // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）；终验 run
+            // （#427）：summary = 验证判定叙事（通过／未过已安排修复／预算尽按现状
+            // 交付）——note 恒非空（轨道层 ClosingJudgment.generation 同形拼装）
             return judgment.systemNote();
         }
         if (judgment.prdChanged() && judgment.systemChanged()) {

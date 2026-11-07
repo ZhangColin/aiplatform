@@ -85,6 +85,15 @@ export type WorkClosing = {
   /** 产出证明判别标注（#420 空转片防呆）：可缺省——豁免收口（验证确认「能力已
    *  存在」）与空转拒绝史（曾拒绝后补做收口）的如实呈现源；正常干活收口不携带。 */
   proofOfOutput?: ProofOfOutputClosing;
+  /** 已知缺陷清单（#427 整轨终验）：可缺省——修复预算耗尽时末轮终验 run 收尾卡
+   *  携带（版本照成＋缺陷如实呈现，不粉饰「完成」）；通过与预算内有修复路径不携带。 */
+  knownDefects?: KnownDefectsClosing;
+};
+
+/** 收尾卡已知缺陷清单事实（#427）：整轨终验修复预算耗尽时随末轮终验 run 呈现。 */
+export type KnownDefectsClosing = {
+  /** 缺陷清单（项名＋证据/失败现场——verify 登记原样）。 */
+  defects: { name: string; detail?: string }[];
 };
 
 /** 收尾卡产出证明判别标注事实（#420）：豁免依据／空转拒绝史（两者可并存）。 */
@@ -791,7 +800,29 @@ export function toWorkClosing(raw: unknown): WorkClosing | undefined {
     designLint: toDesignLint(record.designLint),
     robustKitLint: toRobustKitLint(record.robustKitLint),
     proofOfOutput: toProofOfOutput(record.proofOfOutput),
+    knownDefects: toKnownDefects(record.knownDefects),
   };
+}
+
+/**
+ * knownDefects 载荷容错收窄（#427）：非对象或缺有效缺陷清单回落 undefined（不出
+ * 坏区——已知缺陷随在场呈现）；条目缺 name 剔除、detail 可缺省。
+ */
+function toKnownDefects(raw: unknown): KnownDefectsClosing | undefined {
+  const record = asRecord(raw);
+  if (!record || !Array.isArray(record.defects)) {
+    return undefined;
+  }
+  const defects = record.defects.flatMap((defect) => {
+    const entry = asRecord(defect);
+    return entry && typeof entry.name === "string"
+      ? [{
+          name: entry.name,
+          detail: typeof entry.detail === "string" ? entry.detail : undefined,
+        }]
+      : [];
+  });
+  return defects.length > 0 ? { defects } : undefined;
 }
 
 /**

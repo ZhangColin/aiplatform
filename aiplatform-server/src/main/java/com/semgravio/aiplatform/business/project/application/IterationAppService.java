@@ -110,6 +110,7 @@ public class IterationAppService {
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
     private final RobustKitLintAppService robustKitLint;
+    private final TrackFinalVerificationAppService finalVerification;
 
     /** run 进行中排队的修正交接物（projectId → 待合并交接物清单）。 */
     private final Map<Long, List<FixHandoff>> queuedFixRuns = new ConcurrentHashMap<>();
@@ -131,7 +132,8 @@ public class IterationAppService {
             DemoSeedAppService demoSeed,
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
-            RobustKitLintAppService robustKitLint) {
+            RobustKitLintAppService robustKitLint,
+            TrackFinalVerificationAppService finalVerification) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
         this.coderRunAttempts = coderRunAttempts;
@@ -146,6 +148,7 @@ public class IterationAppService {
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
         this.robustKitLint = robustKitLint;
+        this.finalVerification = finalVerification;
     }
 
     /**
@@ -313,6 +316,13 @@ public class IterationAppService {
                                     currentHandoff, prdVersionNo, proof),
                             "fix", true, CoderRunAttempts.RunSeat.executor(),
                             RunHeading.titled(FIX_TITLE));
+                    if (result.succeeded()) {
+                        // #427 更新轨收口后复走整轨终验（防修 A 坏 B）：以现行计划的
+                        // 核心旅程清单为轴复验——fail 自动起终验修复 run 修→复走，
+                        // 预算耗尽已知缺陷随末轮终验收尾卡如实呈现；无旅程轴（存量
+                        // 计划/锚漂）跳过。仍在 try 内：复走途中用户停止走下方停止账
+                        finalVerification.verifyAfterUpdateRun(project);
+                    }
                 }
                 catch (RunStoppedException e) {
                     // 停止收口（#359 生成取消）：失败账口径——本场（＋排队残队的意见

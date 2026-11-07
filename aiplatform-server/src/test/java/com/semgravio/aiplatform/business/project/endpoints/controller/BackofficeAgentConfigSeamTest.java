@@ -519,6 +519,52 @@ class BackofficeAgentConfigSeamTest {
         assertThat(traceRowCount()).isZero();
     }
 
+    // ---------- 终验修复预算（#427 整轨终验：final_verify_fix_budget） ----------
+
+    @Test
+    void given_final_verify_fix_budget_overridden_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 覆盖写（预算 0＝不起修复 run 的运营选择）→ GET 生效值＝库值、覆盖标记
+        // true；留痕前后快照含预算列；清空（null）回落缺省 2
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"finalVerifyFixBudget\": 0}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.finalVerifyFixBudget").value(0))
+                .andExpect(jsonPath("$.data.finalVerifyFixBudgetOverridden").value(true))
+                .andExpect(jsonPath("$.data.defaultFinalVerifyFixBudget").value(2));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)
+                .finalVerifyFixBudget()).isZero();
+
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldFinalVerifyFixBudget").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newFinalVerifyFixBudget").value(0));
+
+        // 清空回落：null＝代码缺省 2（无覆盖行缺省读面同值——下方默认面并入本例）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.finalVerifyFixBudget").value(2))
+                .andExpect(jsonPath("$.data.finalVerifyFixBudgetOverridden").value(false));
+        assertThat(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)
+                .finalVerifyFixBudget()).isEqualTo(2);
+    }
+
+    @Test
+    void given_invalid_final_verify_fix_budget_when_put_then_rejected_with_zero_writes()
+            throws Exception {
+        // 区间校验（0-10）：越界 400 PRJ_080——fail-fast 零写入（0 合法＝不起修复 run）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"finalVerifyFixBudget\": -1}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4080));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"finalVerifyFixBudget\": 11}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4080));
+
+        assertThat(configRowCount()).isZero();
+        assertThat(traceRowCount()).isZero();
+    }
+
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test

@@ -42,6 +42,14 @@ public class AgentConfigAppService {
      */
     public static final int DEFAULT_VERIFY_ROUND_BUDGET = 3;
 
+    /**
+     * 整轨终验修复预算代码缺省（#427，#406 裁决「缺省两轮」）：终验 fail 自动起
+     * fix run 修→复走终验的轮数上限，耗尽版本照成＋已知缺陷如实呈现；库覆盖
+     * （executor 行 final_verify_fix_budget，0-10——0＝不起修复 run 的运营选择）
+     * 优先于此值。
+     */
+    public static final int DEFAULT_FINAL_VERIFY_FIX_BUDGET = 2;
+
     private final AgentConfigStore configStore;
 
     public AgentConfigAppService(AgentConfigStore configStore) {
@@ -63,7 +71,7 @@ public class AgentConfigAppService {
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
-            String verifyModelId, int verifyRoundBudget) {
+            String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -87,7 +95,9 @@ public class AgentConfigAppService {
                 config.routingEscalatingSizeLabels(),
                 config.verifyModelId(),
                 config.verifyRoundBudget() != null
-                        ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET);
+                        ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,
+                config.finalVerifyFixBudget() != null
+                        ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET);
     }
 
     /**

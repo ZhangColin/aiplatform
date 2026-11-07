@@ -505,6 +505,7 @@ public class GenerationAppService {
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
     private final RobustKitLintAppService robustKitLint;
+    private final TrackFinalVerificationAppService finalVerification;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -568,6 +569,7 @@ public class GenerationAppService {
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
             RobustKitLintAppService robustKitLint,
+            TrackFinalVerificationAppService finalVerification,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -592,6 +594,7 @@ public class GenerationAppService {
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
         this.robustKitLint = robustKitLint;
+        this.finalVerification = finalVerification;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1105,9 +1108,12 @@ public class GenerationAppService {
                 .anyMatch(segment -> segment.getStatus() != GenerationSegmentStatus.PENDING);
         if (openOrds.isEmpty()) {
             // 片全收口即生成完成（末片收口而 generated_at 落位失败的补落 + 存量对照
-            // 标满的空缺口边角，#223）
+            // 标满的空缺口边角，#223）——#427 起完成前置整轨终验（fail 拦「生成完成」
+            // 叙事→fix 循环→预算耗尽版本照成＋已知缺陷如实呈现）
+            if (!completeGeneration(project, plan, firstRunId, prdVersionNo)) {
+                return; // 终验回路 run 终态失败——run-failed 已发、现场已记，续跑复走
+            }
             terminalFailureScenes.remove(projectId);
-            markGenerated(projectId, firstRunId, prdVersionNo);
             return;
         }
         int startOrd = openOrds.get(0);
@@ -1139,8 +1145,6 @@ public class GenerationAppService {
                 previousHandoff = readSliceHandoff(project, handoffSource);
             }
         }
-        // 末段 = 最深待跑段（其后段已收口——存量对照的分布边角，全收口即落位）
-        int lastOrd = openOrds.get(openOrds.size() - 1);
         // 定稿设计稿引用块（#291 稿入起跑上下文）：设计类终点门开后的构建，每段
         // prompt（首试与重试）前置定稿稿清单；纯系统项目零注入
         String designContext = finalizedDesignsContext(
@@ -1156,7 +1160,6 @@ public class GenerationAppService {
             }
             boolean stage0 = ord == 0;
             String slice = stage0 ? null : slices.get(ord - 1);
-            boolean last = ord == lastOrd;
             boolean resumeTarget = ord == startOrd;
             String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
             String prefix = resumeTarget ? resumePrefix : "";
@@ -1177,9 +1180,9 @@ public class GenerationAppService {
                     new CoderRunAttempts.Prompts(
                             designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
                             errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
-                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
+                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord,
                             runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
-                            prdVersionNo, proof),
+                            proof),
                     CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
                     stage0 ? ModelRoutingAppService.SegmentSignals.none()
                             : ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
@@ -1218,7 +1221,6 @@ public class GenerationAppService {
                 long waveStartedAt = System.currentTimeMillis();
                 int ord = runnable.get(0);
                 String slice = slices.get(ord - 1);
-                boolean last = ord == lastOrd;
                 boolean resumeTarget = ord == startOrd;
                 String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
                 String prefix = resumeTarget ? resumePrefix : "";
@@ -1237,8 +1239,8 @@ public class GenerationAppService {
                         new CoderRunAttempts.Prompts(
                                 designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
                                 errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
-                        (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord, last,
-                                runId, sliceClosingSummary(slice), prdVersionNo, proof),
+                        (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord,
+                                runId, sliceClosingSummary(slice), proof),
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
                         ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
                         RunHeading.slice(slice, ord, slices.size()),
@@ -1259,7 +1261,7 @@ public class GenerationAppService {
                         waveStartedAt, ord, runId, true);
             } else {
                 runParallelWave(project, plan, runnable, wave.size(), waveNo, previousHandoff,
-                        designContext, prdVersionNo, resumed, startOrd, resumePrefix, lastOrd,
+                        designContext, prdVersionNo, resumed, startOrd, resumePrefix,
                         firstRunId);
             }
             closedOrds = reloadClosedOrds(projectId);
@@ -1268,13 +1270,57 @@ public class GenerationAppService {
         // 仍有片时，波末统一的全片收口条件不成立——generated_at/Demo 首版无人落位，
         // 轨道收尾全片已收口仍显示「生成中断」。循环后补查补落（读库回最新值——
         // 本方法的 project 聚合是起跑时装载的旧投影；closeOnGeneration 幂等：
-        // generated_at 在场直跳；种子幂等只补空表）
+        // generated_at 在场直跳；种子幂等只补空表）。#427 起完成经整轨终验
+        // （completeGeneration 单点——终验 fail 拦「生成完成」叙事）
         Project current = projectRepository.findById(projectId).orElse(null);
         if (current != null && current.getGeneratedAt() == null && allSlicesClosed(projectId)) {
-            demoSeed.seedSandbox(project);
-            markGenerated(projectId, firstRunId, prdVersionNo);
+            if (!completeGeneration(project, plan, firstRunId, prdVersionNo)) {
+                return; // 终验回路 run 终态失败——run-failed 已发、现场已记，续跑复走
+            }
         }
         terminalFailureScenes.remove(projectId);
+    }
+
+    /**
+     * 生成轨道完成单点（#427 整轨终验的生成轨调用点）：片全收口后、Demo 成版与
+     * 「生成完成」叙事前——演示种子预置（幂等，#340 口径：Demo 将可见前一刻）→
+     * 整轨终验回路（以执行中计划的核心旅程为轴；fail 自动起终验修复 run→复走，
+     * 修复预算耗尽版本照成＋已知缺陷清单如实进完成叙事与收尾卡——完成叙事锚＝
+     * 末轮终验 run 的收尾卡）→ {@code generated_at}/Demo 首版同刻落位（成版锚＝
+     * 末轮终验 run；无终验轴回落最深收口片 run——既有口径）→ 完成位补推预览
+     * （种子/终验修复后的终态首屏）。
+     *
+     * @return false＝终验回路内 run 终态失败（run-failed 已由回路发射、失败现场已
+     *         入续跑盘点账——generated_at 不落位，用户「继续生成」复走终验）
+     */
+    private boolean completeGeneration(Project project, BuildPlan plan, String trackRunId,
+            Integer prdVersionNo) {
+        Long projectId = project.getId();
+        demoSeed.seedSandbox(project);
+        TrackFinalVerificationAppService.Result result =
+                finalVerification.verifyTrack(project, plan.coreJourneys());
+        if (result.runTerminallyFailed()) {
+            if (result.lastError() != null) {
+                terminalFailureScenes.put(projectId, result.lastError());
+            }
+            log.warn("[generate] 项目 {} 整轨终验回路终态失败，生成不落完成位（续跑复走终验）",
+                    projectId);
+            return false;
+        }
+        String completionRunId = result.verifyRunId() != null
+                ? result.verifyRunId() : deepestClosedRunIdOf(projectId, trackRunId);
+        markGenerated(projectId, completionRunId, prdVersionNo);
+        emitPreviewReady(project);
+        return true;
+    }
+
+    /** 无终验轴时的完成锚回落：最深收口片 run（轨道表事实；无收口片回落轨道首 run）。 */
+    private String deepestClosedRunIdOf(Long projectId, String fallback) {
+        return generationSegments.findByProjectIdOrderByOrdAsc(projectId).stream()
+                .filter(segment -> segment.getStatus() == GenerationSegmentStatus.CLOSED)
+                .reduce((first, second) -> second) // 有序清单末位即最深收口片
+                .map(GenerationSegment::getRunId)
+                .orElse(fallback);
     }
 
     /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
@@ -1406,8 +1452,8 @@ public class GenerationAppService {
     /**
      * 一场并行波（#351）：波内各片各拿 fork 副本隔离同跑（独立线程池并行），落定后按
      * ord 序合并回主工作区（冲突机器查 → 子智能体解）；失败片跳过不拖垮其余片。
-     * 波收口统一探活主工作区 + 推送预览；末波（含 lastOrd）且全片已收口才种数据 +
-     * 落 generated_at（口径不变——有失败片不落位）。波跑完留宽度遥测档案
+     * 波收口统一探活主工作区 + 推送预览（完成落位不在波内——#427 起经轨道尾
+     * completeGeneration 过整轨终验后统一落）。波跑完留宽度遥测档案
      * （#419——纯观测面，行为零变化）。
      *
      * @param theoreticalWidth 依赖图理论宽度（调度层波宽——本波全部片数，非本场
@@ -1417,7 +1463,7 @@ public class GenerationAppService {
     private void runParallelWave(Project project, BuildPlan plan, List<Integer> runnable,
             int theoreticalWidth, int waveNo, String previousHandoff, String designContext,
             Integer prdVersionNo, boolean resumed, int startOrd, String resumePrefix,
-            int lastOrd, String firstRunId) {
+            String firstRunId) {
         Long projectId = project.getId();
         long waveStartedAt = System.currentTimeMillis();
         // 本波 fork 登记簿（#359 停止清理的事实源）：fork 落成即记——停止时全部释放，
@@ -1502,12 +1548,8 @@ public class GenerationAppService {
         requireReachable(project.getWorkspaceId());
         requireEntryFileComplete(project.getWorkspaceId());
         emitPreviewReady(project);
-        if (runnable.contains(lastOrd) && allSlicesClosed(projectId)) {
-            demoSeed.seedSandbox(project);
-            String finalRunId = outcomes.stream().filter(o -> o.ord() == lastOrd)
-                    .map(ForkSliceOutcome::runId).findFirst().orElse(firstRunId);
-            markGenerated(projectId, finalRunId, prdVersionNo);
-        }
+        // 完成落位不在波内（#427 起）：片全收口的完成经整轨终验在轨道尾统一落
+        // （runGenerationTrack 尾部补查——波内过早落位会绕过终验）
         ParallelWaveTelemetry.waveArchive(new ParallelWaveTelemetry.WaveFacts(projectId,
                 firstRunId, waveNo, ParallelWaveTelemetry.MODE_PARALLEL, runnable,
                 theoreticalWidth, waveStartedAt, System.currentTimeMillis(), List.copyOf(spans),
@@ -1877,30 +1919,21 @@ public class GenerationAppService {
      * （#296 三件套③——软约束不抛：违规重试一轮的决策归尝试环，仍违规随收尾卡如实）；
      * 新基座工作区另附基座 lint 两档扫描事实（#425——强制档＝裸客户端直用，修轮用尽
      * 仍余＝收口结构性拒绝〔判定归尝试环〕；预置档＝会话件自写，如实标注不拦收口）。
-     * 收口即片状态落表（#220，ord 段号口径一致）；最后一片收口才落 {@code generated_at}
-     * （口径不变——阶段 0 / 中间片不落位 = 拆片不漂移 Demo 首版成版锚）——且与
-     * Demo 首版成版同刻原子（#333：收口自动成版 v1、锚起跑时 PRD 确认版本）。
+     * 收口即片状态落表（#220，ord 段号口径一致）。片收口不落 {@code generated_at}
+     * （#427 起完成位统一经轨道尾的 {@link #completeGeneration}——片全收口后先过
+     * 整轨终验，终验 fail 拦「生成完成」叙事；Demo 首版成版与 generated_at 同刻
+     * 原子〔#333〕不变，锚＝完成叙事的末轮终验 run）。
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
-            boolean markGenerated, String runId, String summary, Integer prdVersionNo,
-            ProofOfOutputGate.Checking proof) {
+            String runId, String summary, ProofOfOutputGate.Checking proof) {
         requireReachable(project.getWorkspaceId());
         requireEntryFileComplete(project.getWorkspaceId());
-        // 产出证明（#420）与验证在场（#424 片轻验常开）在副作用（种子/预览/片落表）
+        // 产出证明（#420）与验证在场（#424 片轻验常开）在副作用（预览/片落表）
         // 之前——拒绝不落任何收口面
         Map<String, Object> proofAnnotation = proof.proof();
         verificationPresence.requirePresence(Long.toString(project.getWorkspaceId()));
-        if (markGenerated) {
-            // 演示种子预置（#340）：末段收口＝Demo 将可见前一刻——表已由 run 长出、
-            // 8081 已活，确定性补通用示例集进真库（中段不种：不扰动后续片的模型
-            // 自检）；先于 preview-ready，用户首屏即有内容。失败不阻断收口。
-            demoSeed.seedSandbox(project);
-        }
         emitPreviewReady(project);
         closeSegment(project.getId(), ord, runId);
-        if (markGenerated) {
-            markGenerated(project.getId(), runId, prdVersionNo);
-        }
         // 生成轮判定（#88 判定行）：PRD 未动（生成不改 PRD——正本由主智能体先行写出）、
         // 系统产出（8081 探活收口事实）；summary = 本段叙事（阶段 0 / 切片完成）
         return CoderRunAttempts.ClosingJudgment.generation(summary)

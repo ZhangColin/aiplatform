@@ -131,6 +131,7 @@ class IterationAppServiceTest {
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
+        jdbcTemplate.update("DELETE FROM prj_generation_plan_journeys");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -1400,5 +1401,90 @@ class IterationAppServiceTest {
         assertThat(command.getAllValues().get(0).prompt())
                 .contains("需求正本 = 工作区")
                 .doesNotContain("本轮需求基准");
+    }
+
+    // ---------- 更新轨收口后复走整轨终验（#427：防修 A 坏 B） ----------
+
+    /** 现行旅程清单就位（PRD 锚对齐——复走终验的载荷轴；journey 表 + 项目锚）。 */
+    private void givenCurrentJourneys(Long projectId, String role, String entry, String keyActions) {
+        jdbcTemplate.update("UPDATE prj_projects SET prd_produced_at = NOW() WHERE id = ?",
+                projectId);
+        java.sql.Timestamp anchor = jdbcTemplate.queryForObject(
+                "SELECT prd_produced_at FROM prj_projects WHERE id = ?",
+                java.sql.Timestamp.class, projectId);
+        jdbcTemplate.update("""
+                INSERT INTO prj_generation_plan_journeys
+                    (id, project_id, ord, role, entry, key_actions, prd_produced_at)
+                VALUES (?, ?, 1, ?, ?, ?, ?)
+                """, System.nanoTime(), projectId, role, entry, keyActions, anchor);
+    }
+
+    @Test
+    void given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified() {
+        // #427 AC④（更新轨腿）：更新 run 收口后复走整轨终验——修 A 坏 B 被拦：更新
+        // run 修好了意见项但走坏了核心旅程 → 复走终验抓到（fail）→ 自动起终验修复
+        // run（载荷＝失败项清单）→ 复走过验，轨道才收工
+        Long projectId = persistedGeneratedProject("9970");
+        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
+        List<Runnable> tracks = givenTrackQueued();
+        // 终验/修复 run 的收口探针（8081 探活＋入口完整）——探针命令全通
+        when(workspaceLifecycleAppService.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        AtomicBoolean fixDone = new AtomicBoolean();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                // 更新后首走终验：旅程被更新修坏（修 A 坏 B）；修复后复走：全过
+                if (!fixDone.get()) {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", false, "更新后支付按钮失灵")));
+                }
+                else {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", true, null)));
+                }
+            }
+            else if (command.sessionId().contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX)) {
+                finishFixFacts.record(command.workspaceId(), true, "修复了更新修坏的支付");
+                verifyRan(command);
+                fixDone.set(true);
+            }
+            else {
+                finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        // 更新 run + 终验(fail) + 终验修复 + 复走终验(pass) = 4 场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        assertThat(all.get(0).sessionId()).contains("-fix-");            // 更新 run
+        assertThat(all.get(1).sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        assertThat(all.get(2).sessionId())
+                .contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX);
+        assertThat(all.get(2).prompt())
+                .contains("「下单支付」").contains("更新后支付按钮失灵");
+        assertThat(all.get(3).sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+    }
+
+    @Test
+    void given_no_journeys_when_update_run_closes_then_no_reverification() {
+        // #427 存量口径（更新轨腿）：无核心旅程轴（旧计划不回补）——更新 run 收口后
+        // 不复走终验，既有更新轨行为不变
+        Long projectId = persistedGeneratedProject("9971");
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        verify(agentClient, times(1)).converse(any(), any()); // 只更新 run，无终验 run
     }
 }

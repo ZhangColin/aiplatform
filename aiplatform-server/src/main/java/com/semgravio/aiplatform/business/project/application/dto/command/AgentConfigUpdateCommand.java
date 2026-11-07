@@ -46,6 +46,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param verifyRoundBudget 单场验证轮次预算（#424 防无限复验：report_verification
  *                          登记达预算仍有未过项即停修复—复验；null＝清空回落代码
  *                          缺省 3；1-20 整数，越界 PRJ_078）
+ * @param finalVerifyFixBudget 整轨终验修复预算（#427：终验 fail 自动起 fix run 修→
+ *                          复走，耗尽版本照成＋已知缺陷如实呈现；null＝清空回落
+ *                          代码缺省 2；0-10 整数——0＝不起修复 run 的运营选择，
+ *                          越界 PRJ_080）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -85,5 +89,10 @@ public record AgentConfigUpdateCommand(
                 + "修复—复验、未过项如实带入收口；null＝清空回落代码缺省 3；1-20 整数，"
                 + "越界 PRJ_078）",
                 example = "3")
-        Integer verifyRoundBudget) {
+        Integer verifyRoundBudget,
+        @Schema(description = "整轨终验修复预算（#427：终验 fail 自动起 fix run 修→复走终验，"
+                + "耗尽版本照成＋已知缺陷清单如实呈现；null＝清空回落代码缺省 2；0-10 整数"
+                + "——0＝不起修复 run 的运营选择，越界 PRJ_080）",
+                example = "2")
+        Integer finalVerifyFixBudget) {
 }

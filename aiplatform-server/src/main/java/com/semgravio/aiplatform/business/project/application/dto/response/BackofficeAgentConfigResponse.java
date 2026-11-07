@@ -48,6 +48,9 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param verifyRoundBudget       单场验证轮次预算生效值（#424；库覆盖值或代码缺省）
  * @param verifyRoundBudgetOverridden true＝轮次预算为库覆盖值（false＝代码缺省）
  * @param defaultVerifyRoundBudget 代码缺省轮次预算（预览：清空覆盖即落此值）
+ * @param finalVerifyFixBudget    整轨终验修复预算生效值（#427；库覆盖值或代码缺省）
+ * @param finalVerifyFixBudgetOverridden true＝终验修复预算为库覆盖值（false＝代码缺省）
+ * @param defaultFinalVerifyFixBudget 代码缺省终验修复预算（预览：清空覆盖即落此值）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -113,6 +116,13 @@ public record BackofficeAgentConfigResponse(
         boolean verifyRoundBudgetOverridden,
         @Schema(description = "代码缺省轮次预算（预览：清空覆盖即落此值）", example = "3")
         Integer defaultVerifyRoundBudget,
+        @Schema(description = "整轨终验修复预算生效值（#427：终验 fail 自动起 fix run 修→复走，"
+                + "耗尽版本照成＋已知缺陷如实呈现；库覆盖值或代码缺省）", example = "2")
+        Integer finalVerifyFixBudget,
+        @Schema(description = "终验修复预算是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean finalVerifyFixBudgetOverridden,
+        @Schema(description = "代码缺省终验修复预算（预览：清空覆盖即落此值）", example = "2")
+        Integer defaultFinalVerifyFixBudget,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -155,6 +165,10 @@ public record BackofficeAgentConfigResponse(
                         ? config.verifyRoundBudget() : AgentConfigAppService.DEFAULT_VERIFY_ROUND_BUDGET,
                 config.verifyRoundBudget() != null,
                 AgentConfigAppService.DEFAULT_VERIFY_ROUND_BUDGET,
+                config.finalVerifyFixBudget() != null
+                        ? config.finalVerifyFixBudget() : AgentConfigAppService.DEFAULT_FINAL_VERIFY_FIX_BUDGET,
+                config.finalVerifyFixBudget() != null,
+                AgentConfigAppService.DEFAULT_FINAL_VERIFY_FIX_BUDGET,
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

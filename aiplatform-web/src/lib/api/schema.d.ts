@@ -3566,6 +3566,12 @@ export interface components {
              * @example 3
              */
             verifyRoundBudget?: number;
+            /**
+             * Format: int32
+             * @description 整轨终验修复预算（#427：终验 fail 自动起 fix run 修→复走终验，耗尽版本照成＋已知缺陷清单如实呈现；null＝清空回落代码缺省 2；0-10 整数——0＝不起修复 run 的运营选择，越界 PRJ_080）
+             * @example 2
+             */
+            finalVerifyFixBudget?: number;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -3673,6 +3679,20 @@ export interface components {
              * @example 3
              */
             defaultVerifyRoundBudget?: number;
+            /**
+             * Format: int32
+             * @description 整轨终验修复预算生效值（#427：终验 fail 自动起 fix run 修→复走，耗尽版本照成＋已知缺陷如实呈现；库覆盖值或代码缺省）
+             * @example 2
+             */
+            finalVerifyFixBudget?: number;
+            /** @description 终验修复预算是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            finalVerifyFixBudgetOverridden?: boolean;
+            /**
+             * Format: int32
+             * @description 代码缺省终验修复预算（预览：清空覆盖即落此值）
+             * @example 2
+             */
+            defaultFinalVerifyFixBudget?: number;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -5927,6 +5947,8 @@ export interface components {
              * @description 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
              */
             oldVerifyRoundBudget?: number;
+            /** Format: int32 */
+            oldFinalVerifyFixBudget?: number;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型档位（null＝本次清空回落） */
@@ -5953,6 +5975,8 @@ export interface components {
              * @description 变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）
              */
             newVerifyRoundBudget?: number;
+            /** Format: int32 */
+            newFinalVerifyFixBudget?: number;
             /**
              * @description 变更操作者 id
              * @example 700200

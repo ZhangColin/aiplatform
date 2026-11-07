@@ -831,7 +831,8 @@ class GenerationAppServiceTest {
                 new BuildPlan(List.of("用户能注册登录")));
 
         assertThat(generatedAt(projectId)).isNotNull();
-        verify(eventsAppService, times(2)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
+        // 阶段 0 + 切片收口各一次＋完成位补推一次（#427：种子施用后的终态首屏）= 3
+        verify(eventsAppService, times(3)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
                 anyMap());
     }
 
@@ -847,8 +848,8 @@ class GenerationAppServiceTest {
         appService.dispatchGenerationOnTurnClose(projectId,
                 new BuildPlan(List.of("用户能注册登录")));
 
-        // 阶段 0 + 1 片 = 2 次收口，各推一次 preview-ready（projectId + url）
-        verify(eventsAppService, times(2)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
+        // 阶段 0 + 1 片 = 2 次收口各推一次＋完成位补推一次（#427 种子后终态首屏）= 3
+        verify(eventsAppService, times(3)).publishNotification(eq(ProjectEventTypes.PREVIEW_READY),
                 argThat(payload -> projectId.toString().equals(payload.get("projectId"))
                         && "http://localhost:30080".equals(payload.get("url"))));
     }
@@ -2765,6 +2766,243 @@ class GenerationAppServiceTest {
                 .containsEntry(AgentEventTypes.VERIFICATION_FAILED_FIELD, 1)
                 .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1)
                 .containsEntry(AgentEventTypes.VERIFICATION_BUDGET_EXHAUSTED_FIELD, true);
+    }
+
+    // ---------- 整轨终验＋fix 循环＋已知缺陷叙事（#427） ----------
+
+    /** 单旅程计划（#427 整轨终验的载荷轴——旅程清单随计划同批）。 */
+    private static final BuildPlan JOURNEY_PLAN = new BuildPlan(
+            List.of("用户能注册登录", "用户能下单支付"),
+            BuildPlan.sequentialDependencies(List.of("用户能注册登录", "用户能下单支付")),
+            List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付")),
+            List.of(SliceSizeLabel.SMALL, SliceSizeLabel.MEDIUM));
+
+    @Test
+    void given_journeys_when_all_slices_closed_then_final_verification_run_before_generated() {
+        // #427 AC①：全轨末终验——片全收口后、generated_at 落位（「生成完成」叙事）
+        // 前，以核心旅程清单为轴起终验 run（真浏览器跨片旅程由 verify 子智能体承载
+        // ——编排测试证编排事实：终验 run 在场、载荷带旅程清单、过验才落位）
+        Long projectId = persistedProject("9890");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 + 终验 run = 4 场；末场即终验（会话与载荷可辨）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        AgentCommand finalVerify = commands.getAllValues().get(3);
+        assertThat(finalVerify.sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        assertThat(finalVerify.prompt())
+                .contains("核心旅程")
+                .contains("买家")
+                .contains("注册登录→浏览商品→下单支付");
+        assertThat(finalVerify.heading())
+                .isEqualTo(RunHeading.titled(TrackFinalVerificationAppService.FINAL_VERIFY_TITLE));
+        // 终验过 → generated_at 落位（Demo 首版成版锚 = 终验 run——完成叙事锚）
+        assertThat(generatedAt(projectId)).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT run_id FROM prj_demo_versions WHERE project_id = ? AND version_no = 1",
+                String.class, projectId)).isEqualTo(finalVerify.runId());
+    }
+
+    @Test
+    void given_no_journeys_when_track_completes_then_no_final_verification() {
+        // #427 存量口径：计划无核心旅程（V49 前旧计划不回补）＝无终验轴——终验不
+        // 起 run，片全收口照旧直接落位（存量行为不变）
+        Long projectId = persistedProject("9891");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        verify(agentClient, times(2)).converse(any(), any()); // 阶段 0 + 切片，无终验 run
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_final_verification_fail_when_fixed_then_reverified_then_generated() {
+        // #427 AC②：终验 fail 拦「生成完成」叙事→失败项自动起终验修复 run（载荷＝
+        // 失败项清单）→修复收口后复走终验（防修 A 坏 B）→复走过验才落 generated_at
+        Long projectId = persistedProject("9892");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        AtomicBoolean fixDone = new AtomicBoolean();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                // 首场终验：旅程未过（跨片断点形态）；修复后的复走：全过
+                if (!fixDone.get()) {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", false, "点击支付无响应")));
+                }
+                else {
+                    verificationFacts.record(command.workspaceId(), List.of(
+                            new VerificationFacts.Check("下单支付", "browser", true, null)));
+                }
+            }
+            else if (command.sessionId().contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX)) {
+                // 终验修复 run：finish_edit 事实（changed=true）＋片轻验在场
+                finishEditFacts.record(command.workspaceId(), true, "修复了支付提交");
+                verifyRan(command);
+                fixDone.set(true);
+            }
+            else {
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 + 终验(fail) + 修复 + 终验(pass) = 6 场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(6)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        AgentCommand firstVerify = all.get(3);
+        AgentCommand fixRun = all.get(4);
+        AgentCommand reverify = all.get(5);
+        assertThat(fixRun.sessionId())
+                .contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX);
+        // 修复 run 载荷＝失败项清单（项名＋证据）
+        assertThat(fixRun.prompt())
+                .contains("「下单支付」")
+                .contains("点击支付无响应")
+                .contains("finish_edit");
+        // 复走终验在场（另一场终验 run，非首场重试——会话不同）
+        assertThat(reverify.sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)
+                .isNotEqualTo(firstVerify.sessionId());
+        // 复走过验 → generated_at 落位（成版锚 = 复走终验 run）
+        assertThat(generatedAt(projectId)).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT run_id FROM prj_demo_versions WHERE project_id = ? AND version_no = 1",
+                String.class, projectId)).isEqualTo(reverify.runId());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void given_fix_budget_exhausted_when_still_failing_then_version_built_with_known_defects() {
+        // #427 AC③：修复预算（缺省两轮）耗尽——版本照成（generated_at/Demo v1 落位）
+        // ＋已知缺陷清单如实进完成叙事与收尾卡（closing.knownDefects——前端如实呈现）
+        Long projectId = persistedProject("9893");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        AtomicInteger verifyRounds = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                verifyRounds.incrementAndGet();
+                // 每场终验恒未过（修不动——预算耗尽形态）
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("下单支付", "browser", false, "点击支付无响应")));
+            }
+            else if (command.sessionId().contains(TrackFinalVerificationAppService.VFIX_SESSION_INFIX)) {
+                finishEditFacts.record(command.workspaceId(), true, "尝试修复");
+                verifyRan(command);
+            }
+            else {
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 + 终验×3（首验＋两轮修复后复走）+ 修复×2 = 8 场
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(8)).converse(commands.capture(), any());
+        assertThat(verifyRounds.get()).isEqualTo(3);
+        AgentCommand lastVerify = commands.getAllValues().get(7);
+        // 版本照成：generated_at/Demo v1 落位（锚 = 末轮终验 run——完成叙事锚）
+        assertThat(generatedAt(projectId)).isNotNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT run_id FROM prj_demo_versions WHERE project_id = ? AND version_no = 1",
+                String.class, projectId)).isEqualTo(lastVerify.runId());
+        // 已知缺陷清单进末轮终验收尾卡：summary 如实叙事＋knownDefects 清单
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, atLeast(8)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> lastVerifyClosing = payloads.getAllValues().stream()
+                .filter(payload -> lastVerify.runId().equals(payload.get(AgentEventTypes.RUN_FIELD)))
+                .reduce((first, second) -> second).orElseThrow()
+                .entrySet().stream()
+                .filter(entry -> AgentEventTypes.CLOSING_FIELD.equals(entry.getKey()))
+                .map(entry -> (Map<String, Object>) entry.getValue())
+                .findFirst().orElseThrow();
+        assertThat(lastVerifyClosing.get(CoderRunAttempts.CLOSING_SUMMARY_FIELD))
+                .asString().contains("预算已尽").contains("如实呈现");
+        Map<String, Object> knownDefects = (Map<String, Object>) lastVerifyClosing
+                .get(CoderRunAttempts.CLOSING_KNOWN_DEFECTS_FIELD);
+        assertThat(knownDefects).isNotNull();
+        List<Map<String, Object>> defectItems = (List<Map<String, Object>>) knownDefects.get("defects");
+        assertThat(defectItems).hasSize(1);
+        assertThat(defectItems.get(0))
+                .containsEntry("name", "下单支付")
+                .containsEntry("detail", "点击支付无响应");
+        // 对话史落库同载荷（#89 同载荷先例——刷新回访不丢）
+        Map<String, Object> persistedClosing = conversationHistory.read(projectId).stream()
+                .filter(entry -> lastVerify.runId().equals(entry.runId()))
+                .reduce((first, second) -> second).orElseThrow().closing();
+        assertThat(normalized(((Map<String, Object>) persistedClosing
+                .get(CoderRunAttempts.CLOSING_KNOWN_DEFECTS_FIELD))))
+                .isEqualTo(normalized(knownDefects));
+    }
+
+    @Test
+    void given_zero_fix_budget_configured_when_failing_then_straight_to_known_defects() {
+        // #427 AC② 运营面可调腿：终验修复预算配 0（合法运营选择——不起修复 run）：
+        // 终验 fail 直达已知缺陷形态（版本照成＋knownDefects），无修复 run、无复走
+        Long projectId = persistedProject("9894");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     final_verify_fix_budget)
+                VALUES ('executor', TRUE, TRUE, TRUE, 0)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget
+                """);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("下单支付", "browser", false, "点击支付无响应")));
+            }
+            else {
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 + 终验×1（预算 0 即末轮）= 4 场——无修复 run、无复走
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(3).sessionId())
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
+        // 版本照成
+        assertThat(generatedAt(projectId)).isNotNull();
     }
 
     @Test

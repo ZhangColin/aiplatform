@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   BadgeCheck,
   Check,
   ChevronDown,
@@ -34,6 +35,7 @@ import { useRollbackVersion, useVersionViewSession } from "@/hooks/use-version";
 import type {
   ClosingDraft,
   DesignLintClosing,
+  KnownDefectsClosing,
   ProofOfOutputClosing,
   RobustKitLintClosing,
   WorkClosing,
@@ -283,6 +285,52 @@ function RobustLintArea({ lint }: { lint: RobustKitLintClosing }) {
 }
 
 /**
+ * 已知缺陷区（#427 整轨终验的如实呈现面）：修复预算耗尽时版本照成——不粉饰
+ * 「完成」：总数定性一行（已交付＋自动修复预算已用完）＋逐项缺陷名（hover 带
+ * 证据/失败现场），超可见上限收折叠（同 lint 清单收口）。终验通过/预算内有修复
+ * 的收尾卡不携带不出。
+ */
+function KnownDefectsArea({ knownDefects }: { knownDefects: KnownDefectsClosing }) {
+  const [open, setOpen] = useState(false);
+  const defects = knownDefects.defects;
+  const shown = open ? defects : defects.slice(0, VISIBLE_LINT);
+  return (
+    <div className="mt-2.5 rounded-lg border border-amber-600/40 bg-amber-500/[0.06] px-2.5 py-2">
+      <div className="flex items-center gap-2 text-[13px]">
+        <AlertTriangle className="size-3.5 shrink-0 text-amber-600" />
+        <span>
+          系统已交付，但有{" "}
+          <span className="font-medium text-amber-600">{defects.length} 项已知缺陷</span>
+          （自动修复预算已用完，如实告知）
+        </span>
+      </div>
+      <div className="mt-1 text-[13px]">
+        {shown.map((defect) => (
+          <div
+            key={defect.name}
+            className="py-0.5 text-foreground/80"
+            title={defect.detail ?? defect.name}
+          >
+            <span className="mr-1.5 text-amber-600">✗</span>
+            {defect.name}
+          </div>
+        ))}
+      </div>
+      {defects.length > VISIBLE_LINT ? (
+        <button
+          type="button"
+          className="mt-1 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+          {open ? "收起" : `查看全部 ${defects.length} 项`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * 产出证明判别标注（#420 空转片防呆的感知面）：豁免依据（验证确认「能力已存在」
  * 的合法收口——活已被前片干完的薄片）与空转拒绝史（曾 N 次被拒、补做后收口）
  * 如实呈现——事后审计每片「干没干活、依据是什么」；正常干活收口（diff＞0 且无
@@ -360,6 +408,9 @@ export function ClosingCard({
   const robustKitLint = closing.robustKitLint;
   // 产出证明判别标注（#420）：可缺省——豁免收口/空转拒绝史才携带（正常干活不出）
   const proof = closing.proofOfOutput;
+  // 已知缺陷清单（#427）：可缺省——整轨终验修复预算耗尽才携带（版本照成＋如实
+  // 呈现，不粉饰「完成」）；终验通过/预算内有修复路径不出
+  const knownDefects = closing.knownDefects;
   // 稿清单（#289 设计会话扩载）：drafts 键在场即设计收口变体（判定行/文件清单/
   // 版本控件让位）——空数组（畸形载荷，后端收口判据＝有新稿、正常路径非空）也走
   // 设计形态如实出「本轮 0 稿」，不闪编码 run 语料
@@ -462,6 +513,10 @@ export function ClosingCard({
               ) : null}
             </div>
           ) : null}
+
+          {/* 已知缺陷（#427）：整轨终验修复预算耗尽的如实呈现——最重的一行，
+              先于 lint/证明类标注出 */}
+          {knownDefects ? <KnownDefectsArea knownDefects={knownDefects} /> : null}
 
           {/* 按稿对齐（#296）：带规范项目的样式合规扫描事实——编码 run 面上的
               叙事行＋违规清单；设计会话不携带不出 */}

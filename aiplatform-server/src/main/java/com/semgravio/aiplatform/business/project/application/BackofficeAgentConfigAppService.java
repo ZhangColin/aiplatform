@@ -56,7 +56,7 @@ public class BackofficeAgentConfigAppService {
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
-                    null, null);
+                    null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -108,6 +108,7 @@ public class BackofficeAgentConfigAppService {
                 blankToNull(safe.routingStrongModelId()),
                 safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
                 blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
+                requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -165,6 +166,7 @@ public class BackofficeAgentConfigAppService {
                 current.routingEnabled(), current.routingStrongModelId(),
                 current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
                 current.verifyModelId(), current.verifyRoundBudget(),
+                current.finalVerifyFixBudget(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -206,7 +208,7 @@ public class BackofficeAgentConfigAppService {
         // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
-                true, true, true, null, null, null, null, null,
+                true, true, true, null, null, null, null, null, null,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -263,11 +265,12 @@ public class BackofficeAgentConfigAppService {
                 current.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
                 current.verifyModelId(), current.verifyRoundBudget(),
+                current.finalVerifyFixBudget(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
-                next.verifyModelId(), next.verifyRoundBudget(),
+                next.verifyModelId(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -290,7 +293,8 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
                 || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
                 || !Objects.equals(current.verifyModelId(), next.verifyModelId())
-                || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget());
+                || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
+                || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget());
     }
 
     /**
@@ -300,6 +304,18 @@ public class BackofficeAgentConfigAppService {
     private static Integer requireValidRoundBudget(Integer budget) {
         if (budget != null && (budget < 1 || budget > 20)) {
             throw new ApplicationException(ProjectMessage.VERIFY_ROUND_BUDGET_INVALID, budget);
+        }
+        return budget;
+    }
+
+    /**
+     * 整轨终验修复预算校验（#427）：null＝清空回落代码缺省不校验；非空须 0-10
+     * 整数（越界 PRJ_080——错值写不进去，同档位键即时校验口径；0＝不起修复 run
+     * 的合法运营选择）。
+     */
+    private static Integer requireValidFinalVerifyFixBudget(Integer budget) {
+        if (budget != null && (budget < 0 || budget > 10)) {
+            throw new ApplicationException(ProjectMessage.FINAL_VERIFY_FIX_BUDGET_INVALID, budget);
         }
         return budget;
     }

@@ -520,3 +520,27 @@ describe("ClosingCard · 产出证明判别标注（#420 空转片防呆）", ()
     expect(html).not.toContain("能力已存在");
   });
 });
+
+describe("ClosingCard · 已知缺陷清单（#427 整轨终验：预算耗尽版本照成、如实呈现）", () => {
+  it("缺陷清单在场：如实出已知缺陷区（总数定性＋逐项名，hover 带证据）", () => {
+    const html = renderCard(closing({
+      summary: "系统整体验证：1 项未过、修复预算已尽——系统按现状交付，已知缺陷如下如实呈现",
+      knownDefects: {
+        defects: [
+          { name: "下单支付", detail: "点击支付无响应" },
+          { name: "留言提交", detail: "提交后刷新数据丢失" },
+        ],
+      },
+    }));
+    expect(html).toContain("已知缺陷");
+    expect(html).toContain("2 项");
+    expect(html).toContain("下单支付");
+    expect(html).toContain("留言提交");
+    expect(html).toContain("点击支付无响应"); // title hover 证据也在静态标记里
+  });
+
+  it("缺省（终验通过/预算内有修复）：不出已知缺陷区——不粉饰也不虚警", () => {
+    const html = renderCard(closing());
+    expect(html).not.toContain("已知缺陷");
+  });
+});

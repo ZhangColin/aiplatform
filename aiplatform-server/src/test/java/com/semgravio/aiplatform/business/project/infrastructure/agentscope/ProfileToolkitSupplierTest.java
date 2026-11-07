@@ -215,7 +215,7 @@ class ProfileToolkitSupplierTest {
         // 桩缺省 3——未过项为零不打扰回执）
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, true, null, null, null, null, 3));
+                        true, true, false, true, null, null, null, null, 3, 2));
         var toolkit = supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null);
         Map<String, Object> input = Map.of("checks",
@@ -378,7 +378,7 @@ class ProfileToolkitSupplierTest {
             for (boolean fu : new boolean[]{true, false}) {
                 String spec = new AgentConfigAppService.EffectiveConfig(
                         "prompt", "model", ws, fu,
-                        false, true, null, null, null, null, 3).toolSpec();
+                        false, true, null, null, null, null, 3, 2).toolSpec();
                 assertThat(AgentConfigAppService.toolEnabled(spec, "ws")).as(spec).isEqualTo(ws);
                 assertThat(AgentConfigAppService.toolEnabled(spec, "fu")).as(spec).isEqualTo(fu);
             }

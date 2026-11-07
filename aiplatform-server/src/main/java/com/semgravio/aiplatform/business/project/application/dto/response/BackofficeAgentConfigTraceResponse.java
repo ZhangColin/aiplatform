@@ -24,6 +24,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  *                                       如「中,大」；null 同上；空串＝空映射，#426）
  * @param oldVerifyModelId    变更前 verify 档位（#424；null＝此前即随执行体档）
  * @param oldVerifyRoundBudget 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
+ * @param oldFinalVerifyFixBudget 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
  * @param newSystemPrompt     变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId          变更后模型档位（null 同上）
  * @param newWebSearchEnabled 变更后联网搜索开关
@@ -35,6 +36,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  *                                       null 同上；空串＝空映射）
  * @param newVerifyModelId    变更后 verify 档位（null＝本次清空随执行体档）
  * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
+ * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -63,6 +65,7 @@ public record BackofficeAgentConfigTraceResponse(
         String oldVerifyModelId,
         @Schema(description = "变更前单场验证轮次预算（#424；null＝此前即代码缺省）")
         Integer oldVerifyRoundBudget,
+        Integer oldFinalVerifyFixBudget,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -84,6 +87,7 @@ public record BackofficeAgentConfigTraceResponse(
         String newVerifyModelId,
         @Schema(description = "变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）")
         Integer newVerifyRoundBudget,
+        Integer newFinalVerifyFixBudget,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -99,11 +103,13 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldRoutingEnabled(), trace.oldRoutingStrongModelId(),
                 trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
                 trace.oldVerifyModelId(), trace.oldVerifyRoundBudget(),
+                trace.oldFinalVerifyFixBudget(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
                 trace.newVerifyModelId(), trace.newVerifyRoundBudget(),
+                trace.newFinalVerifyFixBudget(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

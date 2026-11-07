@@ -506,6 +506,7 @@ public class GenerationAppService {
     private final VerificationPresenceGate verificationPresence;
     private final RobustKitLintAppService robustKitLint;
     private final TrackFinalVerificationAppService finalVerification;
+    private final ClosingProbes closingProbes;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -570,6 +571,7 @@ public class GenerationAppService {
             VerificationPresenceGate verificationPresence,
             RobustKitLintAppService robustKitLint,
             TrackFinalVerificationAppService finalVerification,
+            ClosingProbes closingProbes,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -595,6 +597,7 @@ public class GenerationAppService {
         this.verificationPresence = verificationPresence;
         this.robustKitLint = robustKitLint;
         this.finalVerification = finalVerification;
+        this.closingProbes = closingProbes;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1082,7 +1085,7 @@ public class GenerationAppService {
      * 显式选择，走对话区改 PRD）。片全收口（末片收口而 {@code generated_at} 落位
      * 失败的边角、存量对照标满的空缺口）直接补落位。
      *
-     * <p>每片收口判据 = 8081 可达（{@link #requireReachable} 核验）+ 成版 +
+     * <p>每片收口判据 = 8081 可达（{@link ClosingProbes#requireReachable} 核验）+ 成版 +
      * run-finish（收口扩载，端到端可操作由片内 verify 兜）；最后一片收口才落
      * {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed} 收口
      * （锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。每片
@@ -1545,8 +1548,8 @@ public class GenerationAppService {
                 failedInWave.add(outcome.ord());
             }
         }
-        requireReachable(project.getWorkspaceId());
-        requireEntryFileComplete(project.getWorkspaceId());
+        closingProbes.requireReachable(project.getWorkspaceId());
+        closingProbes.requireEntryFileComplete(project.getWorkspaceId());
         emitPreviewReady(project);
         // 完成落位不在波内（#427 起）：片全收口的完成经整轨终验在轨道尾统一落
         // （runGenerationTrack 尾部补查——波内过早落位会绕过终验）
@@ -1659,8 +1662,8 @@ public class GenerationAppService {
      */
     private CoderRunAttempts.ClosingJudgment closeForkSlice(Long forkWorkspaceId, String summary,
             ProofOfOutputGate.Checking proof) {
-        requireReachable(forkWorkspaceId);
-        requireEntryFileComplete(forkWorkspaceId);
+        closingProbes.requireReachable(forkWorkspaceId);
+        closingProbes.requireEntryFileComplete(forkWorkspaceId);
         Map<String, Object> proofAnnotation = proof.proof();
         verificationPresence.requirePresence(Long.toString(forkWorkspaceId));
         return CoderRunAttempts.ClosingJudgment.generation(summary)
@@ -1823,8 +1826,8 @@ public class GenerationAppService {
                         errorScene -> retryRunPrompt("解决合并冲突（切片「" + outcome.slice() + "」）",
                                 errorScene)),
                 (attemptRunId, attemptChanges) -> {
-                    requireReachable(project.getWorkspaceId());
-                    requireEntryFileComplete(project.getWorkspaceId());
+                    closingProbes.requireReachable(project.getWorkspaceId());
+                    closingProbes.requireEntryFileComplete(project.getWorkspaceId());
                     verificationPresence.requirePresence(
                             Long.toString(project.getWorkspaceId()));
                     return CoderRunAttempts.ClosingJudgment.generation(
@@ -1926,8 +1929,8 @@ public class GenerationAppService {
      */
     private CoderRunAttempts.ClosingJudgment closeGenerationStage(Project project, int ord,
             String runId, String summary, ProofOfOutputGate.Checking proof) {
-        requireReachable(project.getWorkspaceId());
-        requireEntryFileComplete(project.getWorkspaceId());
+        closingProbes.requireReachable(project.getWorkspaceId());
+        closingProbes.requireEntryFileComplete(project.getWorkspaceId());
         // 产出证明（#420）与验证在场（#424 片轻验常开）在副作用（预览/片落表）
         // 之前——拒绝不落任何收口面
         Map<String, Object> proofAnnotation = proof.proof();
@@ -1969,35 +1972,6 @@ public class GenerationAppService {
         catch (RuntimeException e) {
             log.warn("[generate] 项目 {} 片 {} 状态落表失败（不反噬 run）：{}", projectId, ord,
                     e.toString());
-        }
-    }
-
-    /** 8081 可达核验（#35 收口判据探针）：不可达即抛异常（驱动尝试环重试/终态）。 */
-    private void requireReachable(Long workspaceId) {
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(workspaceId), new WorkspaceExecCommand(CLOSING_PROBE));
-        if (result.exitCode() != 0) {
-            throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
-        }
-    }
-
-    /**
-     * 入口文件完整性核验（#339 首屏界面先行＋入口一次写全，收口判据第二件）：
-     * 预览入口文件（基座首页）取件失败（缺失）或内容含「其余代码略」式截断占位即
-     * 判残缺——残缺不收口，抛异常驱动尝试环静默重试（重试携错误现场、在同一工作区
-     * 上把入口补全），重试耗尽才转终态失败。8081 探活是「服务在跑」，本判据是
-     * 「首屏写全」——两者皆过才算该段真收口。
-     */
-    private void requireEntryFileComplete(Long workspaceId) {
-        ExecResultResponse result = workspaceLifecycleAppService.exec(
-                Long.toString(workspaceId), new WorkspaceExecCommand(ENTRY_FILE_PROBE));
-        if (result.exitCode() != 0) {
-            throw new IllegalStateException("入口文件缺失（" + ProjectFiles.BASELINE_ENTRY
-                    + " 取件失败，退出码 " + result.exitCode() + "）");
-        }
-        if (ProjectFiles.hasTruncationPlaceholder(result.stdout())) {
-            throw new IllegalStateException("入口文件残缺（" + ProjectFiles.BASELINE_ENTRY
-                    + " 含「其余代码略」式截断占位，未一次写全）");
         }
     }
 

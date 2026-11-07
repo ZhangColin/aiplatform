@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.application;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,12 +50,19 @@ public class VerificationFacts {
      * 一场 run 的验证事实：末轮快照（收口时刻状态——修复后复验通过即全过）+
      * 累计轮次（修复—复验环的如实呈现，1 = 一轮过）＋「能力已存在」确认的跨轮
      * 累计（#420 留档语义：确认轮之后的复验轮不覆写掉既有确认——末轮快照后写
-     * 胜出只作用于统计面，豁免依据不随复验丢）。
+     * 胜出只作用于统计面，豁免依据不随复验丢）＋跨轮累计清单（#427 整轨终验判
+     * 定面：逐项名后写胜出的并集——一场验证 run 内多次登记〔如逐旅程分别登记〕
+     * 时不被末轮快照遮蔽，早登记的失败项仍在场；项重验以最新一次为准）。
      */
-    public record Facts(List<Check> lastRound, int rounds, List<String> confirmedExisting) {
+    public record Facts(List<Check> lastRound, int rounds, List<String> confirmedExisting,
+            List<Check> cumulative) {
 
         Facts(List<Check> lastRound, int rounds) {
-            this(lastRound, rounds, List.of());
+            this(lastRound, rounds, List.of(), lastRound);
+        }
+
+        Facts(List<Check> lastRound, int rounds, List<String> confirmedExisting) {
+            this(lastRound, rounds, confirmedExisting, lastRound);
         }
 
         /**
@@ -72,11 +80,25 @@ public class VerificationFacts {
     private final Map<String, Facts> facts = new ConcurrentHashMap<>();
 
     /** 工具执行侧登记（report_verification 调用即事实）：末轮快照后写胜出、轮次
-     *  累加、existing 确认跨轮并集（去重保序）。 */
+     *  累加、existing 确认跨轮并集（去重保序）、累计清单逐项名后写胜出并集。 */
     public void record(String workspaceId, List<Check> checks) {
         facts.merge(workspaceId, new Facts(List.copyOf(checks), 1, confirmedNames(checks)),
                 (previous, next) -> new Facts(next.lastRound(), previous.rounds() + 1,
-                        union(previous.confirmedExisting(), next.confirmedExisting())));
+                        union(previous.confirmedExisting(), next.confirmedExisting()),
+                        mergeByName(previous.cumulative(), next.lastRound())));
+    }
+
+    /** 跨轮累计合并（#427 整轨终验判定面）：同项名后写胜出（重验以最新为准）、
+     *  新项名追加保序——多次登记的并集不被末轮快照遮蔽。 */
+    private static List<Check> mergeByName(List<Check> cumulative, List<Check> latest) {
+        Map<String, Check> merged = new LinkedHashMap<>();
+        for (Check check : cumulative) {
+            merged.putIfAbsent(check.name(), check);
+        }
+        for (Check check : latest) {
+            merged.put(check.name(), check);
+        }
+        return List.copyOf(merged.values());
     }
 
     private static List<String> confirmedNames(List<Check> checks) {

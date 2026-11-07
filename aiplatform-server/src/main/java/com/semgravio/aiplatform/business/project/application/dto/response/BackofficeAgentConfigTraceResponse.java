@@ -65,6 +65,7 @@ public record BackofficeAgentConfigTraceResponse(
         String oldVerifyModelId,
         @Schema(description = "变更前单场验证轮次预算（#424；null＝此前即代码缺省）")
         Integer oldVerifyRoundBudget,
+        @Schema(description = "变更前整轨终验修复预算（#427；null＝此前即代码缺省）")
         Integer oldFinalVerifyFixBudget,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
@@ -87,6 +88,7 @@ public record BackofficeAgentConfigTraceResponse(
         String newVerifyModelId,
         @Schema(description = "变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）")
         Integer newVerifyRoundBudget,
+        @Schema(description = "变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）")
         Integer newFinalVerifyFixBudget,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,

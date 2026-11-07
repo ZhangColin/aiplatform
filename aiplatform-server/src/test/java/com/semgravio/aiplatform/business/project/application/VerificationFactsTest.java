@@ -157,4 +157,31 @@ class VerificationFactsTest {
         assertThat(consumed.rounds()).isEqualTo(2);
         assertThat(consumed.lastRound()).noneMatch(VerificationFacts.Check::existing);
     }
+
+    @Test
+    void given_multiple_registrations_when_peek_then_cumulative_union_by_name() {
+        // #427 整轨终验判定面：一场 run 内多次登记（逐旅程分别登记的 off-协议形态）
+        // ——累计清单逐项名后写胜出并集：早登记的失败项不被末轮遮蔽（「旅程 A 未过＋
+        // 旅程 B 已过」累计仍含 A 的失败），同项重验以最新为准；末轮快照口径不变
+        facts.record("42", List.of(
+                new VerificationFacts.Check("旅程 1·下单支付", "browser", false, "点击无响应")));
+        facts.record("42", List.of(
+                new VerificationFacts.Check("旅程 2·留言反馈", "browser", true, null)));
+
+        VerificationFacts.Facts peeked = facts.peek("42");
+        assertThat(peeked.cumulative()).extracting(
+                check -> check.name() + ":" + check.ok())
+                .containsExactly("旅程 1·下单支付:false", "旅程 2·留言反馈:true");
+        // 末轮快照口径不变（#424 契约）：只看末轮登记
+        assertThat(peeked.lastRound())
+                .extracting(VerificationFacts.Check::name)
+                .containsExactly("旅程 2·留言反馈");
+
+        // 同项重验最新胜出：旅程 1 修后重登记通过——累计面该项翻绿，其余不动
+        facts.record("42", List.of(
+                new VerificationFacts.Check("旅程 1·下单支付", "browser", true, null)));
+        assertThat(facts.peek("42").cumulative()).extracting(
+                check -> check.name() + ":" + check.ok())
+                .containsExactly("旅程 1·下单支付:true", "旅程 2·留言反馈:true");
+    }
 }

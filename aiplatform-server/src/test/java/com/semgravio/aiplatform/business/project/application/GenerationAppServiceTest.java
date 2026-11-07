@@ -3006,6 +3006,105 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void given_multi_journey_separate_registrations_when_one_fails_then_not_masked_by_later_pass() {
+        // code-review #427 回归：多旅程分别登记（off-协议形态——末轮快照后写胜出）
+        // 时早登记的失败不被后登记的通过遮蔽——终验判定读跨轮累计并集，「旅程 A
+        // 未过＋旅程 B 已过」仍 fail（已知缺陷含 A），拦「生成完成」叙事不被击穿
+        Long projectId = persistedProject("9895");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     final_verify_fix_budget)
+                VALUES ('executor', TRUE, TRUE, TRUE, 0)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget
+                """);
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)) {
+                // 逐旅程分两次登记：旅程 1 未过、旅程 2 已过（off-协议——协议要求
+                // 一次性汇总登记；平台判定须结构兼容此形态）
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("旅程 1·下单支付", "browser", false, "点击支付无响应")));
+                verificationFacts.record(command.workspaceId(), List.of(
+                        new VerificationFacts.Check("旅程 2·留言反馈", "browser", true, null)));
+            }
+            else {
+                verifyRan(command);
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan twoJourneyPlan = new BuildPlan(
+                List.of("用户能注册登录", "用户能下单支付", "用户能留言反馈"),
+                BuildPlan.sequentialDependencies(
+                        List.of("用户能注册登录", "用户能下单支付", "用户能留言反馈")),
+                List.of(new BuildPlan.CoreJourney("买家", "首页", "注册登录→浏览商品→下单支付"),
+                        new BuildPlan.CoreJourney("访客", "首页", "留言反馈")),
+                List.of(SliceSizeLabel.SMALL, SliceSizeLabel.MEDIUM, SliceSizeLabel.SMALL));
+        appService.dispatchGenerationOnTurnClose(projectId, twoJourneyPlan);
+
+        // 版本照成（预算 0 耗尽）但已知缺陷含旅程 1 的失败项——不被旅程 2 的通过遮蔽
+        assertThat(generatedAt(projectId)).isNotNull();
+        ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
+        verify(eventsAppService, atLeast(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
+                payloads.capture());
+        Map<String, Object> verifyClosing = payloads.getAllValues().stream()
+                .map(payload -> (Map<String, Object>) payload.get(AgentEventTypes.CLOSING_FIELD))
+                .filter(closing -> closing != null && closing
+                        .get(CoderRunAttempts.CLOSING_KNOWN_DEFECTS_FIELD) != null)
+                .reduce((first, second) -> second).orElseThrow();
+        List<Map<String, Object>> defects = (List<Map<String, Object>>) ((Map<String, Object>)
+                verifyClosing.get(CoderRunAttempts.CLOSING_KNOWN_DEFECTS_FIELD)).get("defects");
+        assertThat(defects).hasSize(1);
+        assertThat(defects.get(0)).containsEntry("name", "旅程 1·下单支付");
+    }
+
+    @Test
+    void given_final_verification_run_terminally_fails_when_generate_then_no_completion_and_resume_reverifies() {
+        // #427 终态路径：终验 run 重试耗尽＝轨道失败（run-failed 已发、generated_at
+        // 不落位——「生成完成」叙事被拦）；用户「继续生成」复走终验（片全收口即重终验）
+        Long projectId = persistedProject("9896");
+        givenSessionExecutorRunsInline();
+        givenWorkspaceGitReady();
+        AtomicBoolean verifyBroken = new AtomicBoolean(true);
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX)
+                    && verifyBroken.get()) {
+                throw new IllegalStateException("验证编排失败");
+            }
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            verifyRan(command);
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 终验耗尽：generated_at 不落位＋run-failed 终态事件（锚终验 run）
+        assertThat(generatedAt(projectId)).isNull();
+        verify(eventsAppService, atLeast(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED),
+                anyMap());
+
+        // 「继续生成」复走：片全收口即重终验，这次通过 → 完成落位
+        verifyBroken.set(false);
+        appService.startGeneration(projectId);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
     void given_protocol_constants_when_inspect_then_ui_first_and_entry_completeness_anchored() {
         // #339 协议面（经运营配置面可调）：主智能体切片计划约定与补产提示词同向
         // 承载首片界面先行；执行体协议承载入口文件写全约定

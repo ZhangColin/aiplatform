@@ -71,8 +71,8 @@ class TrackFinalVerificationAppService {
     /** 终验修复 run 会话寻址中缀（{@code coder-{projectId}-vfix-{runId}}——对偶修正轨 fix 惯例）。 */
     static final String VFIX_SESSION_INFIX = "-vfix-";
 
-    /** 终验 run 日志标签（CoderRunAttempts 的 what 参数——summary 口径分岔用）。 */
-    static final String VERIFY_LABEL = "verify";
+    /** 终验 run 日志标签（正本住 {@link CoderRunAttempts#VERIFY_LABEL}——summary 口径分岔共用）。 */
+    static final String VERIFY_LABEL = CoderRunAttempts.VERIFY_LABEL;
 
     /**
      * 一项已知缺陷（预算耗尽时如实呈现的单元）：name 项名（用户语言）＋detail
@@ -132,6 +132,7 @@ class TrackFinalVerificationAppService {
     private final AgentConfigAppService agentConfigs;
     private final GenerationPlanJourneyRepository generationPlanJourneys;
     private final DemoSeedAppService demoSeed;
+    private final ClosingProbes closingProbes;
 
     TrackFinalVerificationAppService(CoderRunAttempts coderRunAttempts,
             AgentEventBridge eventBridge, WorkspaceLifecycleAppService workspaceLifecycle,
@@ -140,7 +141,8 @@ class TrackFinalVerificationAppService {
             RobustKitLintAppService robustKitLint, DesignSpecAppService designSpecs,
             AgentConfigAppService agentConfigs,
             GenerationPlanJourneyRepository generationPlanJourneys,
-            DemoSeedAppService demoSeed) {
+            DemoSeedAppService demoSeed,
+            ClosingProbes closingProbes) {
         this.coderRunAttempts = coderRunAttempts;
         this.eventBridge = eventBridge;
         this.workspaceLifecycle = workspaceLifecycle;
@@ -153,6 +155,7 @@ class TrackFinalVerificationAppService {
         this.agentConfigs = agentConfigs;
         this.generationPlanJourneys = generationPlanJourneys;
         this.demoSeed = demoSeed;
+        this.closingProbes = closingProbes;
     }
 
     /**
@@ -283,8 +286,8 @@ class TrackFinalVerificationAppService {
             AtomicReference<VerificationFacts.Facts> captured, int journeyCount,
             boolean finalRound) {
         Long workspaceId = project.getWorkspaceId();
-        requireReachable(workspaceId);
-        requireEntryFileComplete(workspaceId);
+        closingProbes.requireReachable(workspaceId);
+        closingProbes.requireEntryFileComplete(workspaceId);
         verificationPresence.requirePresence(Long.toString(workspaceId));
         VerificationFacts.Facts facts = verificationFacts.peek(Long.toString(workspaceId));
         captured.set(facts);
@@ -360,16 +363,20 @@ class TrackFinalVerificationAppService {
                         + "逐条委派 verify 子智能体验证（agent_spawn，agent_id 传 verify）——"
                         + "委派任务说明里逐条自报该旅程的验收要点（哪个角色、从哪个页面进入、"
                         + "按顺序做什么），由它以真浏览器完整走通每条跨片旅程（含刷新一次验真"
-                        + "落库）并用 report_verification 逐项登记结果。\n核心旅程清单：");
+                        + "落库）并登记结果。\n核心旅程清单：");
         for (int index = 0; index < journeys.size(); index++) {
             BuildPlan.CoreJourney journey = journeys.get(index);
             prompt.append('\n').append(index + 1).append(". 角色「").append(journey.role())
                     .append("」从「").append(journey.entry()).append("」进入，依次「")
                     .append(journey.keyActions()).append('」');
         }
-        prompt.append("\n\n本 run 是验证编排 run：不修改任何系统代码——发现问题如实登记即可，"
-                + "修复由平台自动另行安排。本 run 无 report_verification 登记不能收口；"
-                + "全部旅程登记完成后即可收口（无需 finish_edit）。")
+        prompt.append("\n\n登记要求：每条旅程至少一个验证项（项名含旅程可辨，如「旅程 1·下单"
+                        + "支付」）；全部旅程验完后，把全部旅程的逐项结果用 report_verification "
+                        + "一次性汇总登记（checks 传全量——不要逐旅程分多次登记，多次登记平台按"
+                        + "并集判定但收尾统计只看末轮）。")
+                .append("\n\n本 run 是验证编排 run：不修改任何系统代码——发现问题如实登记即可，"
+                        + "修复由平台自动另行安排。本 run 无 report_verification 登记不能收口；"
+                        + "全部旅程登记完成后即可收口（无需 finish_edit）。")
                 .append(GenerationAppService.NARRATION_CONVENTION);
         return prompt.toString();
     }
@@ -415,33 +422,21 @@ class TrackFinalVerificationAppService {
         return Map.of("defects", items);
     }
 
-    /** 末轮快照的未过项（验证事实 → 缺陷清单；无登记/空轮＝无缺陷——防御归过）。 */
+    /**
+     * 终验判定的未过项（验证事实 → 缺陷清单）：读<b>跨轮累计清单</b>（逐项名后写
+     * 胜出并集）而非末轮快照——一场终验 run 内多次登记（逐旅程分别登记）时早登记
+     * 的失败项不被末轮遮蔽（code-review #427：末轮快照后写胜出会把「旅程 A 未过＋
+     * 旅程 B 已过」误判为通过）；项重验以最新一次为准。无登记（在场门已拦）/空
+     * 清单＝无缺陷。
+     */
     private static List<Defect> defectsOf(VerificationFacts.Facts facts) {
         if (facts == null) {
             return List.of();
         }
-        return facts.lastRound().stream()
+        return facts.cumulative().stream()
                 .filter(check -> !check.ok())
                 .map(check -> new Defect(check.name(), check.detail()))
                 .toList();
     }
 
-    /** 8081 可达核验（同 {@code GenerationAppService} 收口探针口径——终验收口判据首件）。 */
-    private void requireReachable(Long workspaceId) {
-        ExecResultResponse result = workspaceLifecycle.exec(Long.toString(workspaceId),
-                new WorkspaceExecCommand(GenerationAppService.CLOSING_PROBE));
-        if (result.exitCode() != 0) {
-            throw new IllegalStateException("8081 不可达（curl 退出码 " + result.exitCode() + "）");
-        }
-    }
-
-    /** 入口文件完整性核验（同 {@code GenerationAppService} 口径——残缺不收口）。 */
-    private void requireEntryFileComplete(Long workspaceId) {
-        ExecResultResponse result = workspaceLifecycle.exec(Long.toString(workspaceId),
-                new WorkspaceExecCommand(GenerationAppService.ENTRY_FILE_PROBE));
-        if (result.exitCode() != 0 || ProjectFiles.hasTruncationPlaceholder(result.stdout())) {
-            throw new IllegalStateException("入口文件缺失或残缺（" + ProjectFiles.BASELINE_ENTRY
-                    + "，退出码 " + result.exitCode() + "）");
-        }
-    }
 }

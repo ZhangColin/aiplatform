@@ -5947,7 +5947,10 @@ export interface components {
              * @description 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
              */
             oldVerifyRoundBudget?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
+             */
             oldFinalVerifyFixBudget?: number;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
@@ -5975,7 +5978,10 @@ export interface components {
              * @description 变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）
              */
             newVerifyRoundBudget?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description 变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）
+             */
             newFinalVerifyFixBudget?: number;
             /**
              * @description 变更操作者 id

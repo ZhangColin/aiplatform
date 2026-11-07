@@ -805,6 +805,9 @@ class CoderRunAttempts {
     /** 生成轨日志标签（run 的 what 参数值）：收口摘要口径分岔用——调用点同包引用。 */
     static final String GENERATE_LABEL = "generate";
 
+    /** 终验 run 日志标签（#427 整轨终验的 what 参数值）：summary 口径分岔同生成形（note 即摘要）。 */
+    static final String VERIFY_LABEL = "verify";
+
     /** 设计轨日志标签（#289 设计过程轨道）：收口摘要口径分岔用。 */
     static final String DESIGN_LABEL = "design";
 
@@ -1209,7 +1212,7 @@ class CoderRunAttempts {
      * 设计轨道按段叙事、终验 run 按验证判定叙事（#427）。 */
     private static String closingSummary(ClosingJudgment judgment, String what) {
         if (GENERATE_LABEL.equals(what) || DESIGN_LABEL.equals(what)
-                || TrackFinalVerificationAppService.VERIFY_LABEL.equals(what)) {
+                || VERIFY_LABEL.equals(what)) {
             // 生成轨道（#104）：summary = 本段叙事（阶段 0 起服骨架 / 完成切片）；
             // 设计轨道（#289）：summary = 本场设计物叙事（完成设计物：X）；终验 run
             // （#427）：summary = 验证判定叙事（通过／未过已安排修复／预算尽按现状

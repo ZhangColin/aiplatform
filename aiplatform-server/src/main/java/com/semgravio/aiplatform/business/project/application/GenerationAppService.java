@@ -70,9 +70,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>生成轨道（#104）</b>：按切片计划（{@link BuildPlan}，主智能体产出的有序
  * 纵向切片）顺序多 run——阶段 0（先起服白底页）固定前置，此后逐片长出。每片收口
  * 判据 = 8081 可达（平台侧检查点） + 成版 + run-finish（收口扩载；「端到端可操作」
- * 由片内 verify 兜）。失败语义：某片超限转终态即发 {@code run-failed} 收口、
- * 不自动跳下一片；{@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间
- * 片不落位）。</p>
+ * 由片内 verify 兜）。失败语义（#429，补全 #351「失败片跳过不拖垮其余片」）：片失败
+ * 终态不拖垮整轨——同轨续派依赖仍全收口的待跑片，全轨无可续派才呈「生成中断」
+ * （阶段 0 失败例外：起服未成，整轨即中断）。详叙见 {@link #runGenerationTrack}。
+ * {@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间片不落位）。</p>
  *
  * <p><b>生成轨道表（#220，ADR-0020）</b>：切片计划与每片收口/失败状态落平台库
  * （{@code prj_generation_segments}，「run 无表、重启即清」口径的精确例外）
@@ -1087,9 +1088,12 @@ public class GenerationAppService {
      *
      * <p>每片收口判据 = 8081 可达（{@link ClosingProbes#requireReachable} 核验）+ 成版 +
      * run-finish（收口扩载，端到端可操作由片内 verify 兜）；最后一片收口才落
-     * {@code generated_at}。失败语义：某片超限转终态即发 {@code run-failed} 收口
-     * （锚该片 runId）、不自动跳下一片——「做一点展示一点」的完整性优先。每片
-     * 收口/失败状态随片落轨道表（#220）。知识命中前置注入只在阶段 0 的 run（一次
+     * {@code generated_at}。失败语义（#429）：某片超限转终态即发 {@code run-failed}
+     * 收口（锚该片 runId）＋片落 FAILED，<b>不整轨返回</b>——后续波里依赖仍全收口的
+     * 片照常续派（失败片跳过不拖垮其余片，单片波/序前段与并行波同口径）；被失败片
+     * 阻塞的片本轨不派，全轨无可续派时整轨呈「生成中断」（失败现场保留入续跑盘点，
+     * 「继续生成」补失败片及其下游）；阶段 0 失败例外——起服未成、收口硬门必败，
+     * 整轨即中断。每片收口/失败状态随片落轨道表（#220）。知识命中前置注入只在阶段 0 的 run（一次
      * 切入一次注入，#114——续跑断点在阶段 0 时同注入，断点在切片则不注入）。</p>
      */
     private void runGenerationTrack(Project project, String firstRunId, BuildPlan plan,
@@ -1198,7 +1202,14 @@ public class GenerationAppService {
                     terminalFailureScenes.put(projectId, result.lastError());
                 }
                 eventBridge.emitRunFailed(project, runId, result.failure());
-                return;
+                if (stage0) {
+                    // 阶段 0 失败＝起服未成（#429 例外）：收口硬门（8081）必败，无一片
+                    // 有续派意义——整轨即呈生成中断（generated_at 不落位）
+                    return;
+                }
+                // #429 片失败不拖垮整轨：首片（界面先行）失败不返回——后续波里依赖
+                // 仍全收口的片照常续派；依赖本片的片被阻塞不派（波内依赖判定的事实源）
+                continue;
             }
             // 前片交接摘要（#114 片间交接）：本片收口终文即交接，落 .platform/ 并注入下一段
             previousHandoff = result.closingText();
@@ -1217,7 +1228,9 @@ public class GenerationAppService {
                     .filter(ord -> depsAllClosed(ord, plan, currentClosed))
                     .toList();
             if (runnable.isEmpty()) {
-                continue; // 波内片已收口（续跑）或依赖未满足（被失败片阻塞，续跑再补）
+                // 波内片已收口（续跑）或依赖未满足（被失败片阻塞本轨不派——#429 失败
+                // 片跳过不拖垮其余片：可续派的片已在前续波照常派，无可续派时轨道尾呈中断）
+                continue;
             }
             if (runnable.size() == 1) {
                 // 单片波：无并行收益，退化主工作区串行（既有口径不变）
@@ -1256,7 +1269,10 @@ public class GenerationAppService {
                     eventBridge.emitRunFailed(project, runId, result.failure());
                     waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
                             waveStartedAt, ord, runId, false);
-                    return;
+                    // #429 片失败不拖垮整轨：不返回——后续波里依赖仍全收口的片照常
+                    // 续派（与并行波同口径）；依赖本片的片被阻塞不派，全轨无可续派
+                    // 时轨道尾呈「生成中断」
+                    continue;
                 }
                 previousHandoff = result.closingText();
                 placeSliceHandoff(project, ord, previousHandoff);
@@ -1276,10 +1292,22 @@ public class GenerationAppService {
         // generated_at 在场直跳；种子幂等只补空表）。#427 起完成经整轨终验
         // （completeGeneration 单点——终验 fail 拦「生成完成」叙事）
         Project current = projectRepository.findById(projectId).orElse(null);
-        if (current != null && current.getGeneratedAt() == null && allSlicesClosed(projectId)) {
-            if (!completeGeneration(project, plan, firstRunId, prdVersionNo)) {
-                return; // 终验回路 run 终态失败——run-failed 已发、现场已记，续跑复走
+        if (current != null && current.getGeneratedAt() == null) {
+            if (allSlicesClosed(projectId)) {
+                if (!completeGeneration(project, plan, firstRunId, prdVersionNo)) {
+                    return; // 终验回路 run 终态失败——run-failed 已发、现场已记，续跑复走
+                }
+                terminalFailureScenes.remove(projectId); // 收口成功即清（续跑盘点账）
             }
+            else {
+                // #429：整轨收口于失败片（剩余待跑片全被依赖链阻塞、无可续派）——
+                // 呈「生成中断」（generated_at 不落位，run-failed 已随各失败片发出）；
+                // 失败现场保留入续跑盘点（terminalFailureScenes 收口成功才清），用户
+                // 「继续生成」补失败片及其下游
+                log.warn("[generate] 项目 {} 整轨无可续派（有片失败终态、其余待跑片被"
+                        + "依赖链阻塞），呈生成中断（续跑补失败片及其下游）", projectId);
+            }
+            return;
         }
         terminalFailureScenes.remove(projectId);
     }

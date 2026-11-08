@@ -1081,10 +1081,11 @@ class GenerationAppServiceTest {
 
     @Test
     void given_slice_fails_when_generate_then_run_failed_and_no_next_slice() {
-        // 灵魂用例（#104 失败不跳片 + #220 AC② 片失败落表、断点=最深收口片）：
-        // 阶段 0 成功、切片 1 失败——run-failed 锚失败片 runId，不自动跳切片 2；
-        // 失败片状态落表（FAILED + run 锚），断点 = 已收口的最深片（= 阶段 0；
-        // 失败片是续跑重做对象，不进断点）
+        // 灵魂用例（#104 失败不跳片 + #220 AC② 片失败落表、断点=最深收口片；#429
+        // 语义刷新）：阶段 0 成功、切片 1 失败——run-failed 锚失败片 runId；切片 2 依赖
+        // 切片 1（串行计划）→ 被失败片阻塞本轨不派，全轨无可续派呈「生成中断」
+        // （generated_at 不落位）；失败片状态落表（FAILED + run 锚），断点 = 已收口的
+        // 最深片（= 阶段 0；失败片是续跑重做对象，不进断点）
         Long projectId = persistedProject("9803");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
@@ -1110,6 +1111,44 @@ class GenerationAppServiceTest {
         assertThat(rows.get(1)).containsEntry("run_id", slice1RunId);
         assertThat(rows.get(2)).containsEntry("run_id", null);
         assertThat(appService.deepestClosedSegmentOf(projectId)).isZero();
+    }
+
+    @Test
+    void given_first_slice_fails_when_generate_then_independent_later_slices_still_dispatch() {
+        // 灵魂用例（#429 生产回归：片失败终态把整轨打成「生成中断」、剩余待跑片无人
+        // 续派）：首片（序前段，界面先行）重试耗尽转终态——不整轨返回，后续波里依赖
+        // 仍全收口的片照常续派（登录无依赖照常跑收口）；依赖链被失败片阻塞的片本轨
+        // 不派；有失败片 → generated_at 不落位（全轨无可续派时呈「生成中断」），
+        // run-failed 只锚失败片
+        Long projectId = persistedProject("9842");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0, AgentCommand.class);
+            verifyRan(command);
+            if (command.sessionId().endsWith("-slice-1")) {
+                throw new IllegalStateException("首片失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        // 首片无依赖 / 登录无依赖（不依赖失败的首片，#429 续派对象）/ 下单依赖登录
+        BuildPlan plan = new BuildPlan(
+                List.of("首片界面", "用户能登录", "用户能下单"),
+                List.of(Set.of(), Set.of(), Set.of(2)));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 阶段 0 + 首片 3 次重试 + 登录 + 下单 = 6 次 converse——首片失败后续派不中断
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(6)).converse(commands.capture(), any());
+        String slice1RunId = commands.getAllValues().get(1).runId();
+        // run-failed 只锚失败片（首片），收口片不发失败终态
+        verify(eventsAppService, times(1)).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), argThat(
+                payload -> slice1RunId.equals(payload.get(EventsAppService.RUN_FIELD))));
+        // 阶段 0 / 登录 / 下单已收口、首片 FAILED；有失败片 → generated_at 不落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 3, 2, 2);
+        assertThat(generatedAt(projectId)).isNull();
     }
 
     @Test

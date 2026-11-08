@@ -386,6 +386,32 @@ class AgentscopeHarnessAgentFactoryTest {
     }
 
     /**
+     * pending tool 恢复接线守护（#431）：生产实测 verify 子智能体会话反复
+     * IllegalStateException: Pending tool calls exist without results——会话（PG 槽位）
+     * 带着上次中断遗留的无结果 tool_use 续跑即炸、整轮尝试被吞。框架
+     * enablePendingToolRecovery＝resume 时对无结果 pending 调用自动补 ERROR 结果
+     * 继续走（WARN 遥测落框架日志），主智能体显式开启。真构建路径（需 API key，
+     * 无 key 跳过——同 {@link #given_state_store_when_built_then_wired_into_agent} 口径）。
+     */
+    @Test
+    void given_any_build_when_built_then_pending_tool_recovery_enabled() {
+        requireVolcengineKey();
+        AgentscopeHarnessAgentFactory factory = new AgentscopeHarnessAgentFactory(
+                new InMemoryAgentStateStore(), TOOLKITS, SKILL_REPOS, SUBAGENTS, NO_MIDDLEWARES,
+                volcEdgeModels(), new AgentscopeProperties());
+
+        HarnessAgent agent = factory.obtain("platform-agent-t", "sys",
+                "volcengine:deepseek-v4-flash-ga-260731", volcChannel(),
+                new AgentWorkspace.Local(null), null, null);
+
+        try {
+            assertThat(agent.getDelegate().isPendingToolRecoveryEnabled()).isTrue();
+        } finally {
+            agent.close();
+        }
+    }
+
+    /**
      * 委派位结构守护（#95）：ProjectDev（run 执行体）开子智能体（工厂不再 disableSubagents，
      * 框架装 subagent 中间件——含通用子智能体），ProjectReadOnly（主智能体对话姿态）关
      * 子智能体（委派是 run 内机制，主智能体永不委派）。真构建路径（需 API key 建模型，
@@ -660,6 +686,30 @@ class AgentscopeHarnessAgentFactoryTest {
 
         try {
             assertThat(child.getToolkit().getToolNames()).contains("edit_file");
+        } finally {
+            child.close();
+        }
+    }
+
+    /**
+     * 子级 pending 恢复接线守护（#431）：故障面正在子智能体——子会话槽位
+     * （defaultSessionId＝声明名）跨委派/跨 run 常驻 PG，上次中断遗留的无结果
+     * tool_use 让后续每次委派的 resume 炸 IllegalStateException。子级构建同款
+     * 开启 enablePendingToolRecovery（主级见
+     * {@link #given_any_build_when_built_then_pending_tool_recovery_enabled}）。
+     * 本地工作区真构建，无需 API key。
+     */
+    @Test
+    void given_child_built_then_pending_tool_recovery_enabled(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws IOException {
+        HarnessAgent child = (HarnessAgent) AgentscopeHarnessAgentFactory.subagentFactory(
+                verifyDeclaration(), new AgentWorkspace.Local(tempDir), null,
+                mock(Model.class), mock(Model.class), new Toolkit(), TOOLKITS,
+                new InMemoryAgentStateStore(), (agentKey, workspace) -> List.of(), List.of())
+                .apply("verify");
+
+        try {
+            assertThat(child.getDelegate().isPendingToolRecoveryEnabled()).isTrue();
         } finally {
             child.close();
         }

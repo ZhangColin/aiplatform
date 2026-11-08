@@ -30,9 +30,12 @@ class WorkspaceVersionsTest {
         // 幂等：已有 .git 不重复 init（容器重建后卷内仓库原样续用）
         assertThat(command).contains("if ! test -d .git; then");
         assertThat(command).contains("git init");
-        // repo-local 身份（git 全局配置不进卷，随卷持久的是 repo-local config）
-        assertThat(command).contains("git config user.name");
-        assertThat(command).contains("git config user.email");
+        // repo-local 身份（git 全局配置不进卷，随卷持久的是 repo-local config）。
+        // #430：身份写入必须在 init-if 之外无条件执行——fork 克隆（#351）与存量
+        // 仓库已有 .git（git clone 不携 repo-local config），身份若藏在 if 内即跳过，
+        // 收口成版必败「Author identity unknown」
+        assertThat(command).contains("fi && git config user.name 'semgravio-builder'");
+        assertThat(command).contains("git config user.email 'builder@semgravio.com'");
         // 工作区根锚定
         assertThat(command).startsWith("cd " + WorkspaceLayout.ROOT);
     }

@@ -179,7 +179,14 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                 // 不注入 <available_skills>；平台技能来源三途（内置 classpath/安装库/
                 // 自产库）均非框架工作区目录 skills/（预留位已删，ADR-0022），关闭
                 // 框架工作区技能自动合成免无谓文件面往返
-                .disableDefaultWorkspaceSkills();
+                .disableDefaultWorkspaceSkills()
+                // pending tool 恢复开（#431）：会话（PG 槽位）带上次中断遗留的无结果
+                // tool_use 续跑时，框架缺省炸 IllegalStateException（Pending tool
+                // calls exist without results——生产 verify 反复实测），整轮尝试被
+                // 吞、靠 run 重试环自愈分钟级。开启＝resume 时对无结果 pending 调用
+                // 自动补 ERROR 结果继续走（模型看见工具失败事实自行续作，WARN 遥测
+                // 落框架日志）——最小修复，不叠旁路恢复层（#412 递减效应引证）
+                .enablePendingToolRecovery(true);
         skillRepositorySupplier.skillRepositoriesFor(agentKey, workspace)
                 .forEach(builder::skillRepository);
         // 平台中间件挂载位（#261 首件＝技能加载计数）：全形态挂观测中间件；
@@ -319,7 +326,8 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
      * 子智能体构建工厂（#260 subagent 槽装配一等化——撤哨兵接真视图）：业务侧声明
      * 携带 WHAT（名/描述/正文/工具 allowlist/步数），平台不变式在此兑现 HOW——计量
      * 模型同实例、状态存储同库、记忆关闭（记忆不进包）、容器文件面同父级、无工作区
-     * 技能；<b>技能面＝按子智能体键取装配视图</b>（{@link
+     * 技能、pending tool 恢复开（#431——子会话槽位常驻，中断遗留的无结果 tool_use
+     * 续跑即炸 IllegalStateException）；<b>技能面＝按子智能体键取装配视图</b>（{@link
      * AgentSkillRepositorySupplier#skillRepositoriesFor}——subagent 槽动态查库视图，
      * 指派/启停变更子智能体下一轮清单重建即生效、进行中 run 不定格，ADR-0021 语义
      * 与主装配同款）。
@@ -379,6 +387,9 @@ public class AgentscopeHarnessAgentFactory implements DisposableBean {
                     // 子智能体不委派（框架 asLeafSubagent 包私有的公开等价面）
                     .disableSubagents()
                     .disableDefaultWorkspaceSkills()
+                    // pending tool 恢复开（#431）：故障面正在子级——子级同款开启
+                    // （根因与机制见 buildAgent 处注释）
+                    .enablePendingToolRecovery(true)
                     .stateStore(stateStore);
             if (isolatedRoot != null) {
                 sub.workspace(isolatedRoot).abstractFilesystem(containerFs);

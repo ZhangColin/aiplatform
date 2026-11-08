@@ -51,21 +51,27 @@ public final class WorkspaceVersions {
     private static final String RECORD_SEPARATOR = "\u001e";
 
     /** 成版 commit 的 repo-local 身份（容器内提交者，非用户可见面）。 */
-    private static final String COMMITTER_NAME = "aiplatform";
-    private static final String COMMITTER_EMAIL = "aiplatform@workspace.local";
+    private static final String COMMITTER_NAME = "semgravio-builder";
+    private static final String COMMITTER_EMAIL = "builder@semgravio.com";
 
     private WorkspaceVersions() {
     }
 
     /**
      * 幂等仓库初始化：无 .git 才 init（容器重建后卷内仓库原样续用，存量工作区懒
-     * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。排除名单
-     * 写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用脚手架自带
-     * 的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版生效）：
-     * 非交付名单＋机密之外，物料目录与导出物目录不入版本流（ADR-0027 版本化规则
-     * ——刀＝可再生性：上传物料是输入面、exports/ 是可再生衍生〔#294 下载图位图化
-     * 落点，#297 设计资产包同面〕，git 不跟踪；代价如实：「查看当时」对两者不快照、
-     * 回滚不触〔restore 只动 tracked 文件〕，均以工作区卷为唯一正本随封存保全）。
+     * 初始化兼容），repo-local 提交身份随卷持久（git 全局配置不进卷）。<b>身份
+     * 写入无条件执行</b>（#430——生产实测「Author identity unknown」致片级收口成版
+     * 必败的根因）：身份原本藏在 init-if 内，而 fork 克隆（#351 {@code git clone}
+     * 不携 repo-local config）与存量仓库的 .git 早已存在，if 内配置被整体跳过；
+     * 移出 if 后每条写路径前置的本命令天然自愈（收口成版 / 段起点锚共用本管道，
+     * fork 副本收口亦同覆盖）。平台统一署名 {@code semgravio-builder}（可审计）。
+     * 排除名单写入 {@code .git/info/exclude}（repo-local 且不在工作树——不与应用
+     * 脚手架自带的 .gitignore 冲突，也随卷持久；每次重写，名单演进即随下次成版
+     * 生效）：非交付名单＋机密之外，物料目录与导出物目录不入版本流（ADR-0027
+     * 版本化规则——刀＝可再生性：上传物料是输入面、exports/ 是可再生衍生〔#294
+     * 下载图位图化落点，#297 设计资产包同面〕，git 不跟踪；代价如实：「查看当时」
+     * 对两者不快照、回滚不触〔restore 只动 tracked 文件〕，均以工作区卷为唯一
+     * 正本随封存保全）。
      */
     public static String ensureRepoCommand() {
         String excludeEntries = Stream.concat(
@@ -75,9 +81,9 @@ public final class WorkspaceVersions {
                 .map(name -> "'" + name + "'")
                 .collect(Collectors.joining(" "));
         return "cd " + WorkspaceLayout.ROOT
-                + " && if ! test -d .git; then git init -q -b main ."
+                + " && if ! test -d .git; then git init -q -b main .; fi"
                 + " && git config user.name '" + COMMITTER_NAME + "'"
-                + " && git config user.email '" + COMMITTER_EMAIL + "'; fi"
+                + " && git config user.email '" + COMMITTER_EMAIL + "'"
                 + " && printf '%s\\n' " + excludeEntries + " > .git/info/exclude";
     }
 

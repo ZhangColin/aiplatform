@@ -172,6 +172,34 @@ class WorkspaceVersionsLiveTest {
 
     @Test
     @Timeout(PROBE_TIMEOUT_SECONDS)
+    void given_preexisting_repo_without_identity_when_ensure_then_commit_succeeds_with_platform_signature() {
+        // #430 生产实测根因：fork 克隆（git clone 不携 repo-local config）与存量
+        // 仓库的 .git 早已存在，旧版身份配置藏在 init-if 内被整体跳过——收口成版
+        // 必败「Author identity unknown」。身份写入移出 init-if 后本管道前置命令
+        // 无条件自愈：预置无身份仓库 → ensure → 提交成功且署平台统一名。
+        requireDockerDaemon();
+        provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);
+
+        // 预置「已有 .git 但无 identity」仓库（存量工作区 / fork 克隆同形）
+        ExecResult init = exec("git init -q -b main .");
+        assertThat(init.exitCode()).as("预置仓库应成功：%s", init.stderr()).isZero();
+        ExecResult noName = exec("git config --get user.name");
+        assertThat(noName.exitCode()).as("预置仓库应无 user.name（复现 #430 现场）").isNotZero();
+
+        // ensure 后身份落 repo-local config（无条件幂等），成版提交成功
+        String hash = commit("首次生成了系统", "111");
+        assertThat(hash).isNotEmpty();
+        assertThat(exec("git config --get user.name").stdout().trim())
+                .as("ensure 后身份应落 repo-local config").isEqualTo("semgravio-builder");
+        assertThat(exec("git config --get user.email").stdout().trim())
+                .as("ensure 后邮箱应落 repo-local config").isEqualTo("builder@semgravio.com");
+        // 成版 commit 的提交者 = 平台统一署名（可审计）
+        assertThat(exec("git -C /workspace log -1 --format='%an <%ae>'").stdout().trim())
+                .as("成版 commit 应署平台统一名").isEqualTo("semgravio-builder <builder@semgravio.com>");
+    }
+
+    @Test
+    @Timeout(PROBE_TIMEOUT_SECONDS)
     void given_dirty_worktree_when_status_then_untracked_ignored_tracked_detected() {
         requireDockerDaemon();
         provision = backend.createWorkspace(WorkspaceId.generate(), EnvKind.DEV);

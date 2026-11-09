@@ -90,6 +90,14 @@ public record BackofficeAgentConfigTraceResponse(
         boolean oldSingleSessionGenerationEnabled,
         @Schema(description = "变更前切片并行机器开关（#436；恒有值——缺省态恒 false＝并行机器关）")
         boolean oldParallelSliceMachineEnabled,
+        @Schema(description = "变更前决策时注入总开关（#437；恒有值——缺省态恒 true＝注入开）")
+        boolean oldDecisionHintsEnabled,
+        @Schema(description = "变更前失败止损阈值（#437；null＝此前即代码缺省）")
+        Integer oldDecisionHintErrorStreak,
+        @Schema(description = "变更前微指令堆叠上限（#437；null＝此前即代码缺省）")
+        Integer oldDecisionHintStackCap,
+        @Schema(description = "变更前禁用集（#437 存储形逗号接键；null＝此前即全启用；空串＝全启用显式形）")
+        String oldDecisionHintDisabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -123,6 +131,14 @@ public record BackofficeAgentConfigTraceResponse(
         boolean newSingleSessionGenerationEnabled,
         @Schema(description = "变更后切片并行机器开关（#436；恒有值）")
         boolean newParallelSliceMachineEnabled,
+        @Schema(description = "变更后决策时注入总开关（#437；恒有值）")
+        boolean newDecisionHintsEnabled,
+        @Schema(description = "变更后失败止损阈值（#437；null＝本次清空回落代码缺省）")
+        Integer newDecisionHintErrorStreak,
+        @Schema(description = "变更后微指令堆叠上限（#437；null＝本次清空回落代码缺省）")
+        Integer newDecisionHintStackCap,
+        @Schema(description = "变更后禁用集（#437 存储形逗号接键；null＝本次清空全启用）")
+        String newDecisionHintDisabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -142,6 +158,8 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
                 trace.oldFinalVerificationGateEnabled(),
                 trace.oldSingleSessionGenerationEnabled(), trace.oldParallelSliceMachineEnabled(),
+                trace.oldDecisionHintsEnabled(), trace.oldDecisionHintErrorStreak(),
+                trace.oldDecisionHintStackCap(), trace.oldDecisionHintDisabled(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
@@ -151,6 +169,8 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),
                 trace.newFinalVerificationGateEnabled(),
                 trace.newSingleSessionGenerationEnabled(), trace.newParallelSliceMachineEnabled(),
+                trace.newDecisionHintsEnabled(), trace.newDecisionHintErrorStreak(),
+                trace.newDecisionHintStackCap(), trace.newDecisionHintDisabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

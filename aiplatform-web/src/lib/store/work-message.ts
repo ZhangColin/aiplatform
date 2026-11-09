@@ -52,6 +52,17 @@ export type WorkCheckState = "checking" | "passed" | "failed";
 export type WorkSignalKind = "derailed";
 
 /**
+ * 决策时微指令种类（正本 part-hint 词表，封闭集 #437）：failure_stop_loss＝同类
+ * 错误连续失败的止损换策 / anti_mock＝拒 mock 占位数据 / context_economy＝大结果
+ * 摘要优先的上下文经济 / parallel_tools＝可并行的工具调用不要排成串。
+ */
+export type WorkHintKind =
+  | "failure_stop_loss"
+  | "anti_mock"
+  | "context_economy"
+  | "parallel_tools";
+
+/**
  * 步骤清单条目（#236 part-plan 快照的投影）：agent 自产计划的步骤——稳定 id
  * （跨快照不变）、用户语言标题、状态 ✓●○ 三态（不设 ✗——失败留痕归动作部件
  * 与收尾卡）。快照整表替换（不进 parts 流水——计划变化不单独播报、不留动作痕）。
@@ -120,6 +131,20 @@ export type WorkPart =
       source?: string;
       /** 信号值（封闭词表，v1 唯一 derailed）。 */
       signal: WorkSignalKind;
+    }
+  | {
+      /**
+       * 决策时微指令部件（#437 part-hint）：执行体每迭代注入一条——每次注入一
+       * 件、不原位更新（堆叠上限 ≤3 服务端管）；呈现＝正文提示行（注入内容对用
+       * 户可见，过程呈现不倒退）。
+       */
+      kind: "hint";
+      /** React key（首见事件 id）。 */
+      id: string;
+      /** 指令种类（封闭词表四键）。 */
+      hintKind: WorkHintKind;
+      /** 微指令全文（服务端模板渲染后直出）。 */
+      text: string;
     };
 
 /**
@@ -149,6 +174,7 @@ export type PartEventRef = {
 export type WorkPartInput =
   | { kind: "text"; text: string }
   | { kind: "signal"; signal: WorkSignalKind }
+  | { kind: "hint"; hintKind: WorkHintKind; text: string }
   | { kind: "check"; state: WorkCheckState }
   | {
       kind: "action";
@@ -322,6 +348,16 @@ function applyPart(work: ProjectWork, ref: PartEventRef, input: WorkPartInput): 
       ];
     }
     return { ...work, parts: capParts(parts) };
+  }
+  if (input.kind === "hint") {
+    // 决策时微指令（#437）：每次注入一件、不原位更新（堆叠上限服务端管）
+    const part: WorkPart = {
+      kind: "hint",
+      id: ref.eventId,
+      hintKind: input.hintKind,
+      text: input.text,
+    };
+    return { ...work, parts: capParts([...work.parts, part]) };
   }
   if (input.kind === "signal") {
     // 脱轨信号（#240）：每次吞段一件、不原位更新（天然低频——刷屏节流是触发器）

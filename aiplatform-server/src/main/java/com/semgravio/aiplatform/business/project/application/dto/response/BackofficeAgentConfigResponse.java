@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelRoutingAppService;
+import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -157,6 +158,27 @@ public record BackofficeAgentConfigResponse(
                 + "fork 隔离工作区/波调度/并行执行/合并全关；true＝宽波 fork 并行旧行为〔#351〕。"
                 + "仅 run 执行体行消费，仅单会话关闭后有消费面）")
         boolean parallelSliceMachineEnabled,
+        @Schema(description = "决策时注入总开关生效态（#437，#432 Step 3；缺省 true＝注入开〔默认〕——"
+                + "执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。"
+                + "仅 run 执行体行消费）")
+        boolean decisionHintsEnabled,
+        @Schema(description = "失败止损阈值生效值（#437；库覆盖值或代码缺省）", example = "3")
+        Integer decisionHintErrorStreak,
+        @Schema(description = "失败止损阈值是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean decisionHintErrorStreakOverridden,
+        @Schema(description = "代码缺省失败止损阈值（预览：清空覆盖即落此值）", example = "3")
+        Integer defaultDecisionHintErrorStreak,
+        @Schema(description = "微指令堆叠上限生效值（#437；库覆盖值或代码缺省）", example = "3")
+        Integer decisionHintStackCap,
+        @Schema(description = "堆叠上限是否库覆盖值（true＝覆盖；false＝代码缺省）")
+        boolean decisionHintStackCapOverridden,
+        @Schema(description = "代码缺省堆叠上限（预览：清空覆盖即落此值）", example = "3")
+        Integer defaultDecisionHintStackCap,
+        @Schema(description = "禁用集生效值（#437；库覆盖值——空数组＝全启用）",
+                example = "[\"parallel_tools\"]")
+        List<String> decisionHintDisabled,
+        @Schema(description = "禁用集是否库覆盖值（true＝覆盖；false＝全启用）")
+        boolean decisionHintDisabledOverridden,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -208,6 +230,22 @@ public record BackofficeAgentConfigResponse(
                 config.finalVerificationGateEnabled(),
                 config.singleSessionGenerationEnabled(),
                 config.parallelSliceMachineEnabled(),
+                config.decisionHintsEnabled(),
+                config.decisionHintErrorStreak() != null
+                        ? config.decisionHintErrorStreak()
+                        : AgentConfigAppService.DEFAULT_DECISION_HINT_ERROR_STREAK,
+                config.decisionHintErrorStreak() != null,
+                AgentConfigAppService.DEFAULT_DECISION_HINT_ERROR_STREAK,
+                config.decisionHintStackCap() != null
+                        ? config.decisionHintStackCap()
+                        : AgentConfigAppService.DEFAULT_DECISION_HINT_STACK_CAP,
+                config.decisionHintStackCap() != null,
+                AgentConfigAppService.DEFAULT_DECISION_HINT_STACK_CAP,
+                config.decisionHintDisabled() != null && !config.decisionHintDisabled().isBlank()
+                        ? DecisionHintKind.decode(config.decisionHintDisabled()).stream()
+                                .map(DecisionHintKind::key).toList()
+                        : List.of(),
+                config.decisionHintDisabled() != null,
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

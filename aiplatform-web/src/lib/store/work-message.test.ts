@@ -437,6 +437,32 @@ describe("work-message store · 脱轨信号部件（#240：入 parts 流水供�
   });
 });
 
+describe("work-message store · 决策时微指令部件（#437 part-hint：每次注入一件入流水，呈现归正文提示行）", () => {
+  it("hint 入流水（每次注入一件、不原位更新）；重放同 id 去重", () => {
+    const { startWork, notePart } = useWorkMessageStore.getState();
+    startWork("p1", "r1");
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "hint", hintKind: "failure_stop_loss",
+      text: "同一错误已连续失败 3 次，请换用别的策略。",
+    });
+    notePart("p1", ref({ eventId: "r1:3" }), {
+      kind: "hint", hintKind: "parallel_tools",
+      text: "本轮可并行的工具调用请一次发出，不要排成串。",
+    });
+
+    expect(work()?.parts).toEqual([
+      { kind: "hint", id: "r1:2", hintKind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
+      { kind: "hint", id: "r1:3", hintKind: "parallel_tools", text: "本轮可并行的工具调用请一次发出，不要排成串。" },
+    ]); // 连续注入各一件（堆叠上限 ≤3 服务端管，store 不判）
+
+    notePart("p1", ref({ eventId: "r1:2" }), {
+      kind: "hint", hintKind: "failure_stop_loss",
+      text: "同一错误已连续失败 3 次，请换用别的策略。",
+    });
+    expect(work()?.parts).toHaveLength(2); // 重放去重
+  });
+});
+
 describe("work-message store · 座席（#290 designer 设计会话：同骨架异语料的呈现分岔锚）", () => {
   it("startWork 座席随 run-start 配置键落锚：designer 座＝设计会话（计划区/活性行分岔的依据）", () => {
     useWorkMessageStore.getState().startWork("p1", "r1", undefined, undefined, "designer");

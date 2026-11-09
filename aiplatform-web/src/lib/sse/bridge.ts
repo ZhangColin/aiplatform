@@ -390,6 +390,17 @@ export function dispatchAgentEvent(queryClient: QueryClient, event: SseEvent): v
         );
         return;
       }
+      case "part-hint": {
+        // 决策时微指令（#437）：每次注入一件入 parts 流水（堆叠上限服务端管）——
+        // 呈现归正文提示行（注入内容对用户可见）；平台侧产出（无 engine 字段）
+        const { payload } = platform;
+        work.notePart(
+          payload.projectId,
+          { runId: payload.runId, sessionId: payload.sessionId, eventId: event.id },
+          { kind: "hint", hintKind: payload.kind, text: payload.text },
+        );
+        return;
+      }
       case "part-plan": {
         // 步骤清单快照（#236）：整表替换落 `plan`（不进 parts 流水——不走动作行、
         // 不留动作痕、不单独播报）；断线补发按事件序重放，最后快照即终态

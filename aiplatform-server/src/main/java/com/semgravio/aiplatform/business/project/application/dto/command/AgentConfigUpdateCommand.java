@@ -69,6 +69,16 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          false/null＝并行机器关〔默认——fork 隔离工作区/波调度/并行
  *                          执行/合并全关，全轨主工作区串行〕；true＝宽波 fork 并行旧
  *                          行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面）
+ * @param decisionHintsEnabled 决策时注入总开关（#437，#432 Step 3；缺省 true/null＝
+ *                          注入开〔默认〕；false＝全停原样透传。仅 run 执行体行消费）
+ * @param decisionHintErrorStreak 失败止损阈值（#437；同类错误连续失败 ≥ 此值注入
+ *                          「换策略」微指令；null＝清空回落代码缺省 3；2-10 整数，
+ *                          越界 PRJ_081）
+ * @param decisionHintStackCap 微指令堆叠上限（#437；单轮最多注入几条不同微指令；null＝
+ *                          清空回落代码缺省 3；1-3 整数，越界 PRJ_082）
+ * @param decisionHintDisabled 禁用集（#437；库条目键数组——封闭集
+ *                          failure_stop_loss/anti_mock/context_economy/parallel_tools，
+ *                          非法 token PRJ_083；空数组/null＝全启用）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -130,5 +140,21 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "切片并行机器开关（#436，#432 Step 2；缺省 false＝并行机器关〔默认〕——"
                 + "fork 隔离工作区/波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波 fork 并行"
                 + "旧行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面）")
-        Boolean parallelSliceMachineEnabled) {
+        Boolean parallelSliceMachineEnabled,
+        @Schema(description = "决策时注入总开关（#437，#432 Step 3；缺省 true＝注入开〔默认〕——"
+                + "执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。"
+                + "仅 run 执行体行消费）")
+        Boolean decisionHintsEnabled,
+        @Schema(description = "失败止损阈值（#437；同类错误连续失败 ≥ 此值注入「换策略」微指令；"
+                + "null＝清空回落代码缺省 3；2-10 整数，越界 PRJ_081）",
+                example = "3")
+        Integer decisionHintErrorStreak,
+        @Schema(description = "微指令堆叠上限（#437；单轮最多注入几条不同微指令〔研究口径 ≤3〕；"
+                + "null＝清空回落代码缺省 3；1-3 整数，越界 PRJ_082）",
+                example = "3")
+        Integer decisionHintStackCap,
+        @Schema(description = "禁用集（#437；库条目键数组——封闭集 failure_stop_loss/anti_mock/"
+                + "context_economy/parallel_tools，非法 token PRJ_083；空数组/null＝全启用）",
+                example = "[\"parallel_tools\"]")
+        List<String> decisionHintDisabled) {
 }

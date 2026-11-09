@@ -1,10 +1,14 @@
 package com.semgravio.aiplatform.business.project.application;
 
+import java.util.HashSet;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintConfig;
+import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
+import com.semgravio.aiplatform.business.project.domain.decisionhint.HintPolicy;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentOperationalConfig;
@@ -49,6 +53,20 @@ public class AgentConfigAppService {
      * 优先于此值。
      */
     public static final int DEFAULT_FINAL_VERIFY_FIX_BUDGET = 2;
+
+    /**
+     * 决策时注入失败止损阈值代码缺省（#437）：同类错误（同工具＋错误首行归一化）
+     * 连续失败 ≥ 此值即注入「换策略」微指令；库覆盖（executor 行
+     * decision_hint_error_streak，2-10）优先于此值。
+     */
+    public static final int DEFAULT_DECISION_HINT_ERROR_STREAK = 3;
+
+    /**
+     * 决策时注入堆叠上限代码缺省（#437）：单轮最多注入几条不同微指令——研究
+     * 口径 ≤3（再堆收益递减转负）；库覆盖（executor 行 decision_hint_stack_cap，
+     * 1-3）优先于此值。
+     */
+    public static final int DEFAULT_DECISION_HINT_STACK_CAP = 3;
 
     private final AgentConfigStore configStore;
 
@@ -124,6 +142,35 @@ public class AgentConfigAppService {
         AgentOperationalConfig config =
                 override != null ? override : AgentOperationalConfig.defaults(point.key());
         return config.effectiveModelId(point.modelId());
+    }
+
+    /**
+     * 决策时注入生效配置（#437 判定读腿——执行体 ReAct 循环中间件每迭代调用）：
+     * 库值优先、缺省回落代码缺省（总开关缺省开＝#437 落地态；阈值/上限缺省 3；
+     * 禁用集 null/空＝全启用——逗号串解码宽容坏 token，非法值在写口已被
+     * PRJ_083 拒掉）。动态查库不缓存：运营面改完下一次判定即生效，不发版、
+     * 进行中 run 不定格；装配不进 agent 实例缓存键（改配置无需重建实例）。
+     */
+    @Transactional(readOnly = true)
+    public DecisionHintConfig decisionHintConfigOf(AgentProfile profile) {
+        AgentOperationalConfig override = configStore.find(profile.key());
+        AgentOperationalConfig config =
+                override != null ? override : AgentOperationalConfig.defaults(profile.key());
+        return new DecisionHintConfig(
+                config.decisionHintsEnabled(),
+                new HintPolicy(
+                        config.decisionHintErrorStreak() != null
+                                ? config.decisionHintErrorStreak()
+                                : DEFAULT_DECISION_HINT_ERROR_STREAK,
+                        config.decisionHintStackCap() != null
+                                ? config.decisionHintStackCap()
+                                : DEFAULT_DECISION_HINT_STACK_CAP,
+                        disabledHintKindsOf(config.decisionHintDisabled())));
+    }
+
+    /** 禁用集逗号串解码（宽容腿）：null/空＝空集；未知 token 跳过（写口 PRJ_083 已拒，读面不炸）。 */
+    private static Set<DecisionHintKind> disabledHintKindsOf(String tokens) {
+        return new HashSet<>(DecisionHintKind.decode(tokens));
     }
 
     /**

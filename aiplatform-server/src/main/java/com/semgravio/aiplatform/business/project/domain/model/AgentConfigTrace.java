@@ -48,6 +48,15 @@ import java.time.LocalDateTime;
  *                                       态恒 false＝并行机器关）
  * @param newSingleSessionGenerationEnabled 变更后单会话连续编码开关（#436；恒有值）
  * @param newParallelSliceMachineEnabled 变更后切片并行机器开关（#436；恒有值）
+ * @param oldDecisionHintsEnabled     变更前决策时注入总开关（#437；恒有值——缺省态恒
+ *                                true＝注入开）
+ * @param oldDecisionHintErrorStreak 变更前失败止损阈值（#437；null＝代码缺省）
+ * @param oldDecisionHintStackCap    变更前微指令堆叠上限（#437；null＝代码缺省）
+ * @param oldDecisionHintDisabled    变更前禁用集（#437；null＝全启用）
+ * @param newDecisionHintsEnabled     变更后决策时注入总开关（#437；恒有值）
+ * @param newDecisionHintErrorStreak 变更后失败止损阈值（#437；null＝清空回落代码缺省）
+ * @param newDecisionHintStackCap    变更后微指令堆叠上限（#437；null＝清空回落代码缺省）
+ * @param newDecisionHintDisabled    变更后禁用集（#437；null＝清空全启用）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -71,6 +80,10 @@ public record AgentConfigTrace(
         boolean oldFinalVerificationGateEnabled,
         boolean oldSingleSessionGenerationEnabled,
         boolean oldParallelSliceMachineEnabled,
+        boolean oldDecisionHintsEnabled,
+        Integer oldDecisionHintErrorStreak,
+        Integer oldDecisionHintStackCap,
+        String oldDecisionHintDisabled,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -87,6 +100,10 @@ public record AgentConfigTrace(
         boolean newFinalVerificationGateEnabled,
         boolean newSingleSessionGenerationEnabled,
         boolean newParallelSliceMachineEnabled,
+        boolean newDecisionHintsEnabled,
+        Integer newDecisionHintErrorStreak,
+        Integer newDecisionHintStackCap,
+        String newDecisionHintDisabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

@@ -2,6 +2,7 @@ package com.semgravio.aiplatform.business.project.application;
 
 import java.time.LocalDateTime;
 import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Objects;
@@ -30,6 +31,7 @@ import com.semgravio.aiplatform.business.project.domain.model.ModelTier;
 import com.semgravio.aiplatform.business.project.domain.model.Operator;
 import com.semgravio.aiplatform.business.project.domain.repository.AgentConfigStore;
 import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelStore;
+import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 
 /**
  * 后台智能体配置用例（#251，ADR-0021 身份与配置分治）：三座智能体（main/
@@ -56,7 +58,7 @@ public class BackofficeAgentConfigAppService {
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开＋收口三闸开〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null, null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -116,6 +118,12 @@ public class BackofficeAgentConfigAppService {
                 // #436 缺省口径：单会话开关 null＝开（翻转缺省 true），并行机器 null＝关
                 safe.singleSessionGenerationEnabled() == null || safe.singleSessionGenerationEnabled(),
                 safe.parallelSliceMachineEnabled() != null && safe.parallelSliceMachineEnabled(),
+                // #437 缺省口径：注入总开关 null＝开（落地态 true），阈值/上限 null＝
+                // 清空回落代码缺省（校验在后），禁用集 null＝清空全启用
+                safe.decisionHintsEnabled() == null || safe.decisionHintsEnabled(),
+                requireValidHintErrorStreak(safe.decisionHintErrorStreak()),
+                requireValidHintStackCap(safe.decisionHintStackCap()),
+                requireValidHintDisabledKinds(safe.decisionHintDisabled()),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -177,6 +185,8 @@ public class BackofficeAgentConfigAppService {
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
+                current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
+                current.decisionHintStackCap(), current.decisionHintDisabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -219,7 +229,7 @@ public class BackofficeAgentConfigAppService {
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
                 true, true, true, null, null, null, null, null, null, true, true, true,
-                true, false,
+                true, false, true, null, null, null,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -280,6 +290,8 @@ public class BackofficeAgentConfigAppService {
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
                 current.finalVerificationGateEnabled(),
                 current.singleSessionGenerationEnabled(), current.parallelSliceMachineEnabled(),
+                current.decisionHintsEnabled(), current.decisionHintErrorStreak(),
+                current.decisionHintStackCap(), current.decisionHintDisabled(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
@@ -288,6 +300,8 @@ public class BackofficeAgentConfigAppService {
                 next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
                 next.finalVerificationGateEnabled(),
                 next.singleSessionGenerationEnabled(), next.parallelSliceMachineEnabled(),
+                next.decisionHintsEnabled(), next.decisionHintErrorStreak(),
+                next.decisionHintStackCap(), next.decisionHintDisabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -316,7 +330,53 @@ public class BackofficeAgentConfigAppService {
                 || current.proofOfOutputGateEnabled() != next.proofOfOutputGateEnabled()
                 || current.finalVerificationGateEnabled() != next.finalVerificationGateEnabled()
                 || current.singleSessionGenerationEnabled() != next.singleSessionGenerationEnabled()
-                || current.parallelSliceMachineEnabled() != next.parallelSliceMachineEnabled();
+                || current.parallelSliceMachineEnabled() != next.parallelSliceMachineEnabled()
+                || current.decisionHintsEnabled() != next.decisionHintsEnabled()
+                || !Objects.equals(current.decisionHintErrorStreak(), next.decisionHintErrorStreak())
+                || !Objects.equals(current.decisionHintStackCap(), next.decisionHintStackCap())
+                || !Objects.equals(current.decisionHintDisabled(), next.decisionHintDisabled());
+    }
+
+    /**
+     * 失败止损阈值校验（#437）：null＝清空回落代码缺省不校验；非空须 2-10
+     * 整数（越界 PRJ_081——错值写不进去，同档位键即时校验口径）。
+     */
+    private static Integer requireValidHintErrorStreak(Integer streak) {
+        if (streak != null && (streak < 2 || streak > 10)) {
+            throw new ApplicationException(ProjectMessage.DECISION_HINT_ERROR_STREAK_INVALID, streak);
+        }
+        return streak;
+    }
+
+    /**
+     * 微指令堆叠上限校验（#437）：null＝清空回落代码缺省不校验；非空须 1-3
+     * 整数（越界 PRJ_082——研究口径：堆叠 >3 收益递减转负，运营面不放宽）。
+     */
+    private static Integer requireValidHintStackCap(Integer cap) {
+        if (cap != null && (cap < 1 || cap > 3)) {
+            throw new ApplicationException(ProjectMessage.DECISION_HINT_STACK_CAP_INVALID, cap);
+        }
+        return cap;
+    }
+
+    /**
+     * 禁用集校验＋归一（#437）：null＝清空全启用；每个 token 须为库条目键封闭集
+     * （非法 PRJ_083——错值写不进去）。归一：去空白、剔重复、逗号拼接存储形
+     * （null 返回＝清空；空集返回空串＝全启用的显式形）。
+     */
+    private static String requireValidHintDisabledKinds(List<String> kinds) {
+        if (kinds == null) {
+            return null;
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String kind : kinds) {
+            DecisionHintKind entry = DecisionHintKind.byKey(kind);
+            if (entry == null) {
+                throw new ApplicationException(ProjectMessage.DECISION_HINT_KIND_INVALID, kind);
+            }
+            normalized.add(entry.key());
+        }
+        return String.join(",", normalized);
     }
 
     /**

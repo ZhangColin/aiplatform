@@ -50,6 +50,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 轨道派发处），轨道起跑时动态查库不缓存。落地依据 #434 T2 排练决策
  * （2-3 段大块形态与槽位续用机制同构，实测压缩/交接/止损全要素成立）。</p>
  *
+ * <p><b>决策时微指令注入四列（#437，#432 Step 3）</b>：注入总开关
+ * （缺省 true＝判定注入生效；false＝全停原样透传）、失败止损阈值
+ * （null＝代码缺省 3）、堆叠上限（null＝代码缺省 3——研究口径 ≤3）与禁用集
+ * （库条目键逗号串；null/空＝全启用；库正文在代码正本）。判定处每迭代动态
+ * 查库不缓存、装配不进 agent 实例缓存键——运营面改完下一次判定即生效，不发版、
+ * 进行中 run 不定格。仅 run 执行体行消费（中间件只挂执行体装配面）。</p>
+ *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
  * @param modelId                    运营覆盖模型档位键（null＝回落枚举默认；ADR-0031 语义键
@@ -83,6 +90,15 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * @param parallelSliceMachineEnabled 切片并行机器开关（#436；缺省 false＝fork 隔离工作区/
  *                                   波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波
  *                                   fork 并行旧行为〔#351〕。仅 run 执行体行消费）
+ * @param decisionHintsEnabled        决策时注入总开关（#437；缺省 true＝判定注入生效；
+ *                                   false＝全停原样透传。仅 run 执行体行消费）
+ * @param decisionHintErrorStreak     失败止损阈值（#437；同类错误连续失败 ≥ 此值注入换
+ *                                   策略微指令；null＝回落代码缺省 3；2-10，越界 PRJ_081）
+ * @param decisionHintStackCap        微指令堆叠上限（#437；单轮最多注入几条不同微指令；
+ *                                   null＝回落代码缺省 3；1-3，越界 PRJ_082）
+ * @param decisionHintDisabled        禁用集（#437；库条目键逗号串——封闭集
+ *                                   failure_stop_loss/anti_mock/context_economy/
+ *                                   parallel_tools，非法 token PRJ_083；null/空＝全启用）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -106,6 +122,10 @@ public record AgentOperationalConfig(
         boolean finalVerificationGateEnabled,
         boolean singleSessionGenerationEnabled,
         boolean parallelSliceMachineEnabled,
+        boolean decisionHintsEnabled,
+        Integer decisionHintErrorStreak,
+        Integer decisionHintStackCap,
+        String decisionHintDisabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -113,12 +133,14 @@ public record AgentOperationalConfig(
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
      * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、单会话开＋并行
-     * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、无写者——装配
+     * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、决策时注入开＋阈值/
+     * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、无写者——装配
      * 解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, null, null, null, false, false, false, true, false, null, null, null);
+                null, null, null, null, false, false, false, true, false, true, null, null, null,
+                null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

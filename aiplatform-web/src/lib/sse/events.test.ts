@@ -213,6 +213,11 @@ describe("智能体事件族收窄", () => {
       type: "part-check",
       payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", state: "checking" },
     },
+    {
+      // 决策时微指令（#437 part-hint）：平台侧产出（无 engine 字段）；kind 封闭词表四键
+      type: "part-hint",
+      payload: { projectId: "p1", runId: "r1", sessionId: "coder-p1", kind: "failure_stop_loss", text: "同一错误已连续失败 3 次，请换用别的策略。" },
+    },
   ] as const)("消息部件事件 $type 按正本收窄为平台事件，不落入透传口", (frame) => {
     // 期望值来自正本「消息部件事件」节（#77 parts 契约；字段值镜像服务端
     // AgentscopeAgentClientTest 的部件序列断言——双侧同源于契约正本）

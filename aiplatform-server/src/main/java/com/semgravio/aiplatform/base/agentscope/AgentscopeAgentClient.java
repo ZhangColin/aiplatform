@@ -37,6 +37,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
+import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.metering.domain.port.UsageEventSink;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 
@@ -89,6 +90,30 @@ public class AgentscopeAgentClient {
      * 在工具构造态）——首个消费面是技能草稿血统（#259 自荐工具的来源 run 腿）。
      */
     public static final String RUN_ID_CONTEXT_KEY = "platformRunId";
+
+    /**
+     * RuntimeContext 属性键：本轮平台事件汇（{@code Consumer<AgentEvent>}——调用方
+     * 经 converse/resume 传入的 sink，run 编排侧即用户面投影，runId 归锚已在其内）。
+     * 逐轮写入上下文属性袋，供引擎内中间件把<b>平台侧部件事件</b>（如 #437 决策时
+     * 微指令的 part-hint 可见事实）直接推给用户面——引擎事件映射表只翻译引擎
+     * 原生事件，平台事实的正道是复用调用方投影（同 emitSelfCheck 的用户面归锚
+     * 语义，但无需平台线程另起通道：中间件在引擎事件链上，经属性袋取汇即发）。
+     */
+    public static final String PLATFORM_EVENT_SINK_CONTEXT_KEY = "platformEventSink";
+
+    /**
+     * 决策时微指令的 part-hint 平台事件装配（#437 载荷单点）：runId/sessionId 归锚
+     * ＋指令种类键＋微指令全文。经 {@link #PLATFORM_EVENT_SINK_CONTEXT_KEY} 取汇的
+     * 调用方（执行体中间件）直推，用户面可见事实（注入内容对用户可见）。
+     */
+    public static AgentEvent decisionHintEvent(String runId, String sessionId, String hintKind,
+            String text) {
+        return new AgentEvent(AgentEventTypes.PART_HINT, Map.of(
+                AgentEventTypes.RUN_FIELD, runId,
+                AgentEventTypes.SESSION_FIELD, sessionId,
+                AgentEventTypes.PART_HINT_KIND_FIELD, hintKind,
+                AgentEventTypes.PART_HINT_TEXT_FIELD, text));
+    }
 
     /**
      * 问答答复的注入通道：挂起批复重写 block 的 metadata 键（#34 口径——答复不进
@@ -176,7 +201,7 @@ public class AgentscopeAgentClient {
     public AgentReply resume(AgentResume resume, Consumer<AgentEvent> sink) {
         PreparedTurn prepared;
         try {
-            prepared = prepareFor(TurnSpec.resumeOf(resume));
+            prepared = prepareFor(TurnSpec.resumeOf(resume), sink);
         }
         catch (RuntimeException e) {
             // 同口径补口（resume 跑在异步轨道，异常被吞只记日志）：前段失败必须先发
@@ -294,7 +319,7 @@ public class AgentscopeAgentClient {
      * 任一失败由 {@link #converse} 补发 error 事件后上抛。
      */
     private PreparedTurn prepareTurn(AgentCommand command, Consumer<AgentEvent> sink) {
-        PreparedTurn prepared = prepareFor(TurnSpec.of(command));
+        PreparedTurn prepared = prepareFor(TurnSpec.of(command), sink);
         sink.accept(AgentscopeEventMapper.runStart(command.runId(), command.prompt(),
                 prepared.modelRef().toModelString(), ENGINE, command.agentKey(),
                 command.heading()));
@@ -308,7 +333,7 @@ public class AgentscopeAgentClient {
      * → 会话上下文与映射表组装（部件映射表恒挂——消息部件是全部智能体事件的呈现
      * 地基）。
      */
-    private PreparedTurn prepareFor(TurnSpec spec) {
+    private PreparedTurn prepareFor(TurnSpec spec, Consumer<AgentEvent> sink) {
         // 模型串必填（ADR-0031/#366：全部调用面经档位解析携串——配置缺省回落已随
         // 边缘点收编退役，null 即编程错误、形状校验单点报错）
         ModelRef modelRef = ModelRef.parse(spec.modelString());
@@ -320,7 +345,7 @@ public class AgentscopeAgentClient {
                 modelRef.toModelString(), spec.modelChannel(), workspace, spec.agentKey(),
                 spec.toolSpec());
         return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId(),
-                spec.runId()),
+                spec.runId(), sink),
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new FileChangeFacts(), new StageDurationFacts());
@@ -496,12 +521,16 @@ public class AgentscopeAgentClient {
                 : new AgentWorkspace.ProjectDev(workspaceId, handle.containerName());
     }
 
-    private RuntimeContext runtimeContext(String sessionId, String userId, String runId) {
+    private RuntimeContext runtimeContext(String sessionId, String userId, String runId,
+            Consumer<AgentEvent> sink) {
         return RuntimeContext.builder()
                 .sessionId(sessionId)
                 .userId(userId)
                 // run 标识入上下文属性袋（#259 工具血统透传腿，见 RUN_ID_CONTEXT_KEY）
                 .put(RUN_ID_CONTEXT_KEY, runId)
+                // 平台事件汇入属性袋（#437 决策时微指令的 part-hint 可见事实通道，
+                // 见 PLATFORM_EVENT_SINK_CONTEXT_KEY）
+                .put(PLATFORM_EVENT_SINK_CONTEXT_KEY, sink)
                 .build();
     }
 

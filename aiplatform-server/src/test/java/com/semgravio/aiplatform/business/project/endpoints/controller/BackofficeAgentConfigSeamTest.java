@@ -14,6 +14,7 @@ import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.business.project.application.AgentConfigAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierAppService;
 import com.semgravio.aiplatform.business.project.application.ModelTierSeed;
+import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
 import com.semgravio.aiplatform.business.project.domain.model.AgentEdgePoint;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
@@ -724,6 +725,132 @@ class BackofficeAgentConfigSeamTest {
         assertThat(executor.verificationPresenceGateEnabled()).isFalse();
         assertThat(executor.proofOfOutputGateEnabled()).isFalse();
         assertThat(executor.finalVerificationGateEnabled()).isFalse();
+    }
+
+    // ---------- 决策时注入四件（#437 开关承载面；缺省＝注入开＋阈值3＋堆叠3＋全启用；仅 executor 行消费） ----------
+
+    @Test
+    void given_no_decision_hint_override_when_get_then_defaults_with_unoverridden_marks()
+            throws Exception {
+        // #437 缺省态（无覆盖行）：注入开＝#432 Step 3 落地态；阈值/堆叠回落代码缺省
+        // 3（覆盖标记 false、默认预览同值）；禁用集空＝全启用；装配读面同步
+        // （decisionHintConfigOf＝中间件每迭代动态查库的取值单点）
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(true))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(3))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultDecisionHintErrorStreak").value(3))
+                .andExpect(jsonPath("$.data.decisionHintStackCap").value(3))
+                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(false))
+                .andExpect(jsonPath("$.data.defaultDecisionHintStackCap").value(3))
+                .andExpect(jsonPath("$.data.decisionHintDisabled").isArray())
+                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
+                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(false));
+        var hintConfig = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
+        assertThat(hintConfig.enabled()).isTrue();
+        assertThat(hintConfig.policy().errorStreakThreshold()).isEqualTo(3);
+        assertThat(hintConfig.policy().stackCap()).isEqualTo(3);
+        assertThat(hintConfig.policy().disabledKinds()).isEmpty();
+    }
+
+    @Test
+    void given_decision_hint_face_updated_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 覆盖写（总开关关＋阈值 5＋堆叠 2＋禁用两件）→ GET 生效值＝库值、覆盖标记
+        // true；留痕前后快照含四件（禁用集留存储形逗号接键）；幂等重写不落痕；
+        // 清空（PUT {}）回落缺省（开关 null 归一 true＝注入开、阈值/堆叠 3、全启用）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
+                {"decisionHintsEnabled": false, "decisionHintErrorStreak": 5,
+                 "decisionHintStackCap": 2, "decisionHintDisabled": ["parallel_tools", "anti_mock"]}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(false))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(5))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(true))
+                .andExpect(jsonPath("$.data.decisionHintStackCap").value(2))
+                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(true))
+                .andExpect(jsonPath("$.data.decisionHintDisabled[0]").value("parallel_tools"))
+                .andExpect(jsonPath("$.data.decisionHintDisabled[1]").value("anti_mock"))
+                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(true));
+        var hintConfig = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
+        assertThat(hintConfig.enabled()).isFalse();
+        assertThat(hintConfig.policy().errorStreakThreshold()).isEqualTo(5);
+        assertThat(hintConfig.policy().stackCap()).isEqualTo(2);
+        assertThat(hintConfig.policy().disabledKinds())
+                .containsExactlyInAnyOrder(DecisionHintKind.PARALLEL_TOOLS, DecisionHintKind.ANTI_MOCK);
+
+        // 幂等重写（PUT 全量语义：四件同值携带——值面无动不落痕，写者不漂移）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
+                {"decisionHintsEnabled": false, "decisionHintErrorStreak": 5,
+                 "decisionHintStackCap": 2, "decisionHintDisabled": ["parallel_tools", "anti_mock"]}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldDecisionHintsEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldDecisionHintErrorStreak").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldDecisionHintStackCap").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].oldDecisionHintDisabled").value(nullValue()))
+                .andExpect(jsonPath("$.data[0].newDecisionHintsEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newDecisionHintErrorStreak").value(5))
+                .andExpect(jsonPath("$.data[0].newDecisionHintStackCap").value(2))
+                // 存储形逗号接键（序随写入数组序——禁用集语义无序，回滚照单写回）
+                .andExpect(jsonPath("$.data[0].newDecisionHintDisabled").value("parallel_tools,anti_mock"))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 清空回落缺省：注入开＋阈值 3＋堆叠 3＋全启用（#437 落地态）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionHintsEnabled").value(true))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreak").value(3))
+                .andExpect(jsonPath("$.data.decisionHintErrorStreakOverridden").value(false))
+                .andExpect(jsonPath("$.data.decisionHintStackCap").value(3))
+                .andExpect(jsonPath("$.data.decisionHintStackCapOverridden").value(false))
+                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
+                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(false));
+        var back = agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR);
+        assertThat(back.enabled()).isTrue();
+        assertThat(back.policy().errorStreakThreshold()).isEqualTo(3);
+        assertThat(back.policy().stackCap()).isEqualTo(3);
+        assertThat(back.policy().disabledKinds()).isEmpty();
+    }
+
+    @Test
+    void given_invalid_decision_hint_face_when_put_then_rejected_with_zero_writes()
+            throws Exception {
+        // 区间校验：失败止损阈值 2-10（PRJ_081）、堆叠上限 1-3（PRJ_082——研究
+        // 口径 >3 收益递减转负，运营面不放宽）；禁用集封闭集校验（PRJ_083——
+        // 四键外键名写不进去）——fail-fast 零写入
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintErrorStreak\": 1}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4081));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintErrorStreak\": 11}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4081));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintStackCap\": 0}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4082));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintStackCap\": 4}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4082));
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"decisionHintDisabled\": [\"parallel_tools\", \"nope\"]}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(4083));
+
+        assertThat(configRowCount()).isZero();
+        assertThat(traceRowCount()).isZero();
+
+        // 空禁用集合法（全启用显式形）——覆盖标记 true、生效 []
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{\"decisionHintDisabled\": []}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionHintDisabled.length()").value(0))
+                .andExpect(jsonPath("$.data.decisionHintDisabledOverridden").value(true));
+        assertThat(agentConfigs.decisionHintConfigOf(AgentProfile.EXECUTOR)
+                .policy().disabledKinds()).isEmpty();
     }
 
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------

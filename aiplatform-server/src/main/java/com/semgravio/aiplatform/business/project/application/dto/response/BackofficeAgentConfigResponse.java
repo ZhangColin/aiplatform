@@ -60,6 +60,13 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关生效态（#433；
  *                                #435 起缺省 false＝闸关——终验不起 run、不拦完成
  *                                叙事。仅 run 执行体行消费）
+ * @param singleSessionGenerationEnabled 单会话连续编码开关生效态（#436；缺省
+ *                                true＝单会话开——阶段 0＋全部切片同会话槽位连续
+ *                                追加；false＝旧「每片新会话」形态。仅 run 执行体
+ *                                行消费）
+ * @param parallelSliceMachineEnabled 切片并行机器开关生效态（#436；缺省 false＝
+ *                                fork/波/并行/合并全关；true＝宽波 fork 并行旧行为。
+ *                                仅 run 执行体行消费）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -142,6 +149,14 @@ public record BackofficeAgentConfigResponse(
         @Schema(description = "整轨终验拦「生成完成」开关生效态（#433；#435 起缺省 false＝闸关——"
                 + "终验不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事〔#427〕。仅 run 执行体行消费）")
         boolean finalVerificationGateEnabled,
+        @Schema(description = "单会话连续编码开关生效态（#436，#432 Step 2；缺省 true＝单会话开〔默认〕——"
+                + "阶段 0＋全部切片在同一执行会话槽位内连续追加；false＝旧「每片新会话」形态。"
+                + "仅 run 执行体行消费）")
+        boolean singleSessionGenerationEnabled,
+        @Schema(description = "切片并行机器开关生效态（#436，#432 Step 2；缺省 false＝并行机器关〔默认〕——"
+                + "fork 隔离工作区/波调度/并行执行/合并全关；true＝宽波 fork 并行旧行为〔#351〕。"
+                + "仅 run 执行体行消费，仅单会话关闭后有消费面）")
+        boolean parallelSliceMachineEnabled,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -191,6 +206,8 @@ public record BackofficeAgentConfigResponse(
                 config.verificationPresenceGateEnabled(),
                 config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
+                config.singleSessionGenerationEnabled(),
+                config.parallelSliceMachineEnabled(),
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

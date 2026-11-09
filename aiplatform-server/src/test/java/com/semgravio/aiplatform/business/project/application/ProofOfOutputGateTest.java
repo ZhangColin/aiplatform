@@ -41,7 +41,7 @@ class ProofOfOutputGateTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, null, 3, 2,
-                        true, enabled, true));
+                        true, enabled, true, true, false));
     }
 
     /** 每例闸开先行（#435 起闸缺省关——闸开行为面由本桩显式承载）。 */

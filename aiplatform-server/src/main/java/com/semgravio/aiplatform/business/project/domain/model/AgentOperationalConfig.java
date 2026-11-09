@@ -41,6 +41,15 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 收口路径），主智能体/设计执行体行同列恒无消费。闸判定处动态查库不缓存——
  * 运营面改完下一次闸判定即生效，不发版、进行中 run 不定格。</p>
  *
+ * <p><b>生成会话形态两开关列（#436，#432 Step 2 切片机器退役）</b>：
+ * 单会话连续编码开关（缺省 true＝阶段 0＋全部切片在同一执行会话槽位内连续
+ * 追加——每段新对话＋交接传递，段级自愈＝同会话返工提示不传段级回滚钩；
+ * false＝旧「每片新会话」形态）与切片并行机器开关（缺省 false＝fork 隔离
+ * 工作区/波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波 fork 并行
+ * 旧行为——仅单会话关闭后有消费面）。仅 run 执行体行消费（判定发生在生成
+ * 轨道派发处），轨道起跑时动态查库不缓存。落地依据 #434 T2 排练决策
+ * （2-3 段大块形态与槽位续用机制同构，实测压缩/交接/止损全要素成立）。</p>
+ *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
  * @param modelId                    运营覆盖模型档位键（null＝回落枚举默认；ADR-0031 语义键
@@ -67,6 +76,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  *                                   以来零 diff 且无确认被拒仅在该闸被运营打开时生效）
  * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝
  *                                   闸关——终验不起 run、不拦完成叙事）
+ * @param singleSessionGenerationEnabled 单会话连续编码开关（#436；缺省 true＝阶段 0＋全部
+ *                                   切片在同一执行会话槽位内连续追加〔每段新对话＋交接
+ *                                   传递，段级自愈＝同会话返工提示〕；false＝旧「每片新
+ *                                   会话」形态。仅 run 执行体行消费）
+ * @param parallelSliceMachineEnabled 切片并行机器开关（#436；缺省 false＝fork 隔离工作区/
+ *                                   波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波
+ *                                   fork 并行旧行为〔#351〕。仅 run 执行体行消费）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -88,18 +104,21 @@ public record AgentOperationalConfig(
         boolean verificationPresenceGateEnabled,
         boolean proofOfOutputGateEnabled,
         boolean finalVerificationGateEnabled,
+        boolean singleSessionGenerationEnabled,
+        boolean parallelSliceMachineEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
 
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
-     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、无写者——装配
+     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、单会话开＋并行
+     * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、无写者——装配
      * 解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, null, null, null, false, false, false, null, null, null);
+                null, null, null, null, false, false, false, true, false, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

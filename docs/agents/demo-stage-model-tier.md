@@ -47,6 +47,14 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 4. **闸开语义**：在场闸开＝本 run 无验证登记不收口；产出证明闸开＝零 diff 且无确认的空转片被拒（记拒绝史、段起点探针跑）；整轨终验开＝轨道完成前以核心旅程为轴终验、fail 拦「生成完成」。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受三开关影响，常开。
 5. **查生效值**：GET 同面（`verificationPresenceGateEnabled`/`proofOfOutputGateEnabled`/`finalVerificationGateEnabled` 生效态）。
 
+**生成会话形态两开关（#436——#432 Step 2 单长会话落地＋切片机器退役）**：Demo 首建的生成会话形态由两开关决定（编排缝动态读档），收编 **executor 行**（同一 PUT 通道）——
+
+1. **缺省＝单会话开＋并行机器关（#436 落地态）**：`singleSessionGenerationEnabled` 缺省 true＝分段任务在同一执行会话槽位（`coder-{projectId}-single`）内连续追加（每段新对话＋交接传递，#434 T2 排练定稿形态）；`parallelSliceMachineEnabled` 缺省 false＝fork 隔离工作区/波调度/并行执行/合并机器整体关。切片计划保留但降级为进度/预览叙事，不再驱动新 session；依赖图产出保留用于进度展示；断点续跑跨进程重启语义保留。
+2. **切回切片机器态**：`PUT /api/backoffice/agent-configs/executor` 带 `{"singleSessionGenerationEnabled": false, "parallelSliceMachineEnabled": true}`——每片新会话（`coder-{projectId}-slice-n`）＋宽波 fork 并行（#351 现行为）；半开（单会话关＋并行关）＝每片新会话但全轨主工作区串行、零 fork。两开关独立可组合；null 归一缺省（单会话 null→true、并行 null→false）。留痕前后快照含两开关（回滚腿完整）。
+3. **单会话形态失败语义**：段级自愈＝同会话返工提示（原地修重试环），重试耗尽转终态失败、**不传段级回滚钩**（工作区不回滚、无重跑轮）；续跑现状盘点按脏续口径（未回滚、保留已对的工作——与中断段同口径）。被失败片阻塞的后续片跳过不派（#429 不变）。
+4. **生效时机＝轨道起跑时读档**：改完不发版即生效，进行中 run 不定格（同模型档语义）。
+5. **查生效值**：GET 同面（`singleSessionGenerationEnabled`/`parallelSliceMachineEnabled` 生效态）；编排行为锚定见 `GenerationAppServiceTest` given_single_session_ 系用例。
+
 ## 四、进行中 run 不定格
 
 配置读取时机＝**起跑时读档**：模型档位在每次命令构建（下发 run/对话轮）时取一次生效值，随命令交给智能体工厂；工厂缓存键含模型串，新值即新实例。因此**改档不影响在途 run**——在跑的那一段沿用起跑时读到的档位跑完，改档只影响**下一轮**命令构建。修订中的工作协议（systemPrompt）同理。verify 档位同律（随命令构建解析）；轮次预算更细——逐次登记时动态读，改预算对在跑的场也即刻生效（预算是防烧护栏，越早生效越好）。

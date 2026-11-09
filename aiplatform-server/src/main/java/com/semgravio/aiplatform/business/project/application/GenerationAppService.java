@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,6 +75,16 @@ import lombok.extern.slf4j.Slf4j;
  * 终态不拖垮整轨——同轨续派依赖仍全收口的待跑片，全轨无可续派才呈「生成中断」
  * （阶段 0 失败例外：起服未成，整轨即中断）。详叙见 {@link #runGenerationTrack}。
  * {@code generated_at} 落最后一片收口（口径不变——阶段 0 / 中间片不落位）。</p>
+ *
+ * <p><b>生成会话形态两开关（#436，#432 Step 2 切片机器退役）</b>：单会话连续编码
+ * 开关（缺省开）＝阶段 0＋全部切片在<b>同一执行会话槽位</b>内逐段串行追加（每段
+ * 新对话＋交接传递，段级自愈＝同会话返工提示〔不传段级回滚钩，失败段脏现场保留〕，
+ * 落地依据 #434 T2 排练实证形态）；关闭＝旧「每片新会话」形态（{@link #sliceSession}）。
+ * 切片并行机器开关（缺省关）＝fork 隔离工作区/波调度/并行执行/合并（#351）整体
+ * 关停、全轨主工作区串行；开启且单会话关闭＝旧并行波行为。切片计划在两形态下
+ * 都保留——单会话形态降级为进度/预览叙事（不再驱动新 session），依赖图产出
+ * 保留在计划表仅进度展示用。两开关走智能体运营配置面（executor 行），轨道起跑
+ * 时读档、不发版可调、进行中 run 不定格。</p>
  *
  * <p><b>生成轨道表（#220，ADR-0020）</b>：切片计划与每片收口/失败状态落平台库
  * （{@code prj_generation_segments}，「run 无表、重启即清」口径的精确例外）
@@ -315,6 +326,17 @@ public class GenerationAppService {
     }
 
     /**
+     * 单会话连续编码的会话寻址（#436，#432 Step 2）：整场生成轨道恒定一个执行
+     * 会话槽位——阶段 0＋全部切片在同槽位内逐段追加（每段新对话＋交接传递，
+     * #434 T2 排练实证形态：槽位复用而非对话累积，失败段的失败历史留在该段
+     * 对话内、不污染后续段的新对话）。首派与断点续跑同址续用（续跑的新段也是
+     * 槽位内新对话，同 #221「不续失败旧会话」口径不冲突）。
+     */
+    static String singleSession(Long projectId) {
+        return CoderRunAttempts.SESSION_PREFIX + projectId + "-single";
+    }
+
+    /**
      * 续跑段会话寻址（#221 脏续新会话）：断点段（失败/中断片）续跑起新会话——不续
      * 失败旧会话（重试耗尽的旧会话带着失败循环历史，且引擎会话状态不保证跨进程在），
      * 现状盘点即起手交接（与片间交接同构）；会话内重试照旧续本会话。runId 后缀同
@@ -365,9 +387,13 @@ public class GenerationAppService {
      * 起点（不变式）——续跑该段时工作区是干净现场：盘点的接手纪律从「保留已对的
      * 工作脏续」换为「从头重做」（依赖与数据库不在回滚面、保持现状如实告知）；
      * 中断段（未判死的现场）仍是脏续。</p>
+     *
+     * <p><b>单会话模式的失败段口径（#436）</b>：单会话连续编码不传段级回滚钩，
+     * 失败段工作区<b>未回滚</b>（脏现场）——{@code failedSegmentRolledBack=false}
+     * 时失败段按脏续盘点（保留已对的工作、检查现状继续修完本段），与中断段同口径。</p>
      */
     static String resumeInventoryBlock(int startOrd, List<GenerationSegment> segments,
-            String failureScene) {
+            String failureScene, boolean failedSegmentRolledBack) {
         int totalSlices = segments.size() - 1;
         StringBuilder progress = new StringBuilder();
         GenerationSegment target = null;
@@ -387,13 +413,15 @@ public class GenerationAppService {
         String reason = failed
                 ? "上一次运行在本段自动重试耗尽后失败"
                         + (failureScene == null ? "" : "（最近错误现场：" + failureScene + "）")
-                        + "；失败现场已回滚到本段起点——代码是干净现场（依赖与数据库不在回滚面、"
-                        + "保持现状），本段从头重做"
+                        + (failedSegmentRolledBack
+                                ? "；失败现场已回滚到本段起点——代码是干净现场（依赖与数据库不在回滚面、"
+                                        + "保持现状），本段从头重做"
+                                : "；本段成果保留在工作区（未回滚）")
                 // 带现场的断点段（#359 用户停止——PENDING 非 FAILED）现场即中断原因；
                 // 无现场（进程重启等）回落通用口径
                 : failureScene != null ? failureScene
                 : "上一次运行在本段中断（未及收口）";
-        String takeover = failed
+        String takeover = failed && failedSegmentRolledBack
                 ? "- 接手本段先检查工作区现状（依赖、数据、8081 端口服务是否在跑），"
                         + "从头完成本段任务。\n\n"
                 : "- 接手本段先检查工作区现状（代码、依赖、数据、8081 端口服务是否在跑），"
@@ -508,6 +536,7 @@ public class GenerationAppService {
     private final RobustKitLintAppService robustKitLint;
     private final TrackFinalVerificationAppService finalVerification;
     private final ClosingProbes closingProbes;
+    private final AgentConfigAppService agentConfigs;
 
     /** 更新 run 派发口（#360 排空补派）：生成成功收口后消化在途意见队列。 */
     private final IterationAppService iterationAppService;
@@ -573,6 +602,7 @@ public class GenerationAppService {
             RobustKitLintAppService robustKitLint,
             TrackFinalVerificationAppService finalVerification,
             ClosingProbes closingProbes,
+            AgentConfigAppService agentConfigs,
             IterationAppService iterationAppService) {
         this.projectRepository = projectRepository;
         this.sessionExecutor = sessionExecutor;
@@ -599,6 +629,7 @@ public class GenerationAppService {
         this.robustKitLint = robustKitLint;
         this.finalVerification = finalVerification;
         this.closingProbes = closingProbes;
+        this.agentConfigs = agentConfigs;
         this.iterationAppService = iterationAppService;
     }
 
@@ -1124,6 +1155,14 @@ public class GenerationAppService {
             return;
         }
         int startOrd = openOrds.get(0);
+        // 生成会话形态两开关（#436，#432 Step 2 切片机器退役）：轨道起跑时读档——
+        // 单会话连续编码（缺省开＝阶段 0＋全部切片同会话槽位逐段追加）与切片并行
+        // 机器（缺省关＝fork/波/并行/合并全关、全轨串行）；动态查库不缓存，运营
+        // 面改完下一次轨道派发即生效，进行中 run 不定格
+        AgentConfigAppService.EffectiveConfig sessionConfig =
+                agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        boolean singleSessionMode = sessionConfig.singleSessionGenerationEnabled();
+        boolean parallelMachine = sessionConfig.parallelSliceMachineEnabled();
         // 续跑起手交接（#221）：断点段（失败/中断片）prompt 前置现状盘点；前片交接
         // 摘要取断点前最深收口片的 .platform/ 落盘件（内存终文随进程消失，落盘件是
         // 续跑事实源）
@@ -1144,8 +1183,10 @@ public class GenerationAppService {
                 log.warn("[generate] 项目 {} 续跑起手应用确保未成（探活仍为收口硬门）：{}",
                         projectId, e.toString());
             }
+            // 失败段是否已回滚本段起点：单会话模式（#436）不传段级回滚钩、失败段
+            // 脏现场保留——盘点按脏续口径（与中断段同）
             resumePrefix = resumeInventoryBlock(startOrd, segments,
-                    terminalFailureScenes.get(projectId));
+                    terminalFailureScenes.get(projectId), !singleSessionMode);
             int handoffSource = closedOrds.stream()
                     .filter(ord -> ord < startOrd).max(Integer::compare).orElse(-1);
             if (handoffSource >= 0) {
@@ -1159,6 +1200,13 @@ public class GenerationAppService {
                         .filter(item -> item.getStatus() == DesignItemStatus.FINALIZED)
                         .toList());
 
+        if (singleSessionMode) {
+            // ---- 单会话连续编码（#436，#432 Step 2）：阶段 0＋全部切片在同一执行
+            // 会话槽位内逐段串行追加（主工作区）；切片计划降级为进度/预览叙事 ----
+            runSingleSessionSegments(project, plan, firstRunId, startOrd, closedOrds,
+                    resumePrefix, previousHandoff, designContext, slices);
+        }
+        else {
         // ---- 序前段（#339 首屏先行）：阶段 0 + 首片，串行、跑主工作区（预览先活）----
         for (int index = startOrd; index <= Math.min(1, slices.size()); index++) {
             int ord = index; // 片段号（轨道表 ord 口径；lambda 捕获需实际最终）
@@ -1232,10 +1280,12 @@ public class GenerationAppService {
                 // 片跳过不拖垮其余片：可续派的片已在前续波照常派，无可续派时轨道尾呈中断）
                 continue;
             }
-            if (runnable.size() == 1) {
-                // 单片波：无并行收益，退化主工作区串行（既有口径不变）
+            if (runnable.size() == 1 || !parallelMachine) {
+                // 串行面：单片波（无并行收益，退化主工作区串行——既有口径不变）或
+                // 并行机器关（#436 开关：fork/波/并行/合并全关）——波内可跑片逐片
+                // 主工作区串行，失败片跳过不拖垮其余片（#429 同口径）
                 long waveStartedAt = System.currentTimeMillis();
-                int ord = runnable.get(0);
+                for (int ord : runnable) {
                 String slice = slices.get(ord - 1);
                 boolean resumeTarget = ord == startOrd;
                 String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
@@ -1278,12 +1328,14 @@ public class GenerationAppService {
                 placeSliceHandoff(project, ord, previousHandoff);
                 waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
                         waveStartedAt, ord, runId, true);
+                }
             } else {
                 runParallelWave(project, plan, runnable, wave.size(), waveNo, previousHandoff,
                         designContext, prdVersionNo, resumed, startOrd, resumePrefix,
                         firstRunId);
             }
             closedOrds = reloadClosedOrds(projectId);
+        }
         }
         // 末片收口补落（#355 活体实测）：末片（lastOrd）在并行波内先收口、后续波
         // 仍有片时，波末统一的全片收口条件不成立——generated_at/Demo 首版无人落位，
@@ -1310,6 +1362,90 @@ public class GenerationAppService {
             return;
         }
         terminalFailureScenes.remove(projectId);
+    }
+
+    /**
+     * 单会话连续编码轨道（#436，#432 Step 2 切片机器退役的落地形态）：阶段 0＋全部
+     * 切片在<b>同一执行会话槽位</b>（{@link #singleSession}）内逐段串行追加、全部跑
+     * 主工作区——每段一场 run（独立收口判据/收尾卡/进度落表/预览节奏，进度叙事与
+     * 预览节奏照常更新），跨段连续性靠交接摘要文本（每段新对话，槽位续用而非对话
+     * 累积——#434 T2 排练实证形态）。与既有逐段串行口径的差异两点：
+     *
+     * <ul>
+     * <li><b>会话寻址恒定</b>：全轨一个槽位（首派与断点续跑同址续用——续跑的新段
+     *     也是槽位内新对话，失败段的失败历史不污染后续段）；</li>
+     * <li><b>段级自愈＝同会话返工提示</b>：不传段级回滚钩（#353 外环不生效）——
+     *     尝试环原地修即返工提示（同会话），耗尽转终态失败、工作区<b>不回滚</b>
+     *     （脏现场保留），续跑按脏续口径从现状继续（{@link #resumeInventoryBlock}
+     *     failedSegmentRolledBack=false 分支）。</li>
+     * </ul>
+     *
+     * 失败语义其余口径不变（#429）：片失败终态发 run-failed＋片落 FAILED 不拖垮
+     * 整轨——后续依赖仍全收口的片照常续派，被失败片阻塞的片跳过不派，全轨无可
+     * 续派时轨道尾呈「生成中断」；阶段 0 失败＝起服未成，整轨即中断。无 fork/
+     * 波/合并机器面（依赖图产出保留在计划表，仅进度展示用）。
+     */
+    private void runSingleSessionSegments(Project project, BuildPlan plan, String firstRunId,
+            int startOrd, Set<Integer> closedOrds, String resumePrefix, String previousHandoff,
+            String designContext, List<String> slices) {
+        Long projectId = project.getId();
+        Set<Integer> closed = new HashSet<>(closedOrds);
+        String handoff = previousHandoff;
+        String sessionId = singleSession(projectId);
+        for (int ord = startOrd; ord <= slices.size(); ord++) {
+            if (closed.contains(ord)) {
+                continue; // 已收口片不重做（#221 断点续跑 / #223 存量对照）
+            }
+            if (ord >= 1 && !depsAllClosed(ord, plan, closed)) {
+                continue; // 被失败片阻塞的片本轨不派（#429——失败片跳过不拖垮其余片）
+            }
+            boolean stage0 = ord == 0;
+            final int segmentOrd = ord; // lambda 捕获需实际最终
+            String slice = stage0 ? null : slices.get(ord - 1);
+            boolean resumeTarget = ord == startOrd;
+            String runId = resumeTarget ? firstRunId : EventsAppService.newRunId();
+            String prefix = resumeTarget ? resumePrefix : "";
+            String segmentDesc = stage0 ? STAGE0_RETRY_DESC : "实现切片「" + slice + "」";
+            String handoffForRun = handoff; // lambda 捕获需实际最终——本段注入的交接快照
+            // 产出证明闸（#420）：同逐段串行口径（闸开时本 run 判段起点以来 diff）
+            ProofOfOutputGate.Checking proof = proofGate.forRun(project.getWorkspaceId());
+            CoderRunAttempts.RunResult result = coderRunAttempts.run(project, project.getWorkspaceId(),
+                    runId,
+                    sessionId,
+                    new CoderRunAttempts.Prompts(
+                            designContext + prefix
+                                    + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, handoffForRun)),
+                            errorScene -> designContext + prefix
+                                    + generationRetryPrompt(plan, segmentDesc, handoffForRun, errorScene)),
+                    (attemptRunId, attemptChanges) -> closeGenerationStage(project, segmentOrd,
+                            runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
+                            proof),
+                    CoderRunAttempts.GENERATE_LABEL, stage0, CoderRunAttempts.RunSeat.executor(),
+                    stage0 ? ModelRoutingAppService.SegmentSignals.none()
+                            : ModelRoutingAppService.SegmentSignals.slice(plan.sliceSize(ord - 1)),
+                    stage0 ? RunHeading.titled(STAGE0_TITLE)
+                            : RunHeading.slice(slice, ord, slices.size()),
+                    /* rollback= */ null); // 单会话：段级自愈＝同会话返工提示，不回滚重跑
+            if (!result.succeeded()) {
+                failSegment(projectId, ord, runId);
+                if (result.lastError() != null) {
+                    terminalFailureScenes.put(projectId, result.lastError());
+                }
+                eventBridge.emitRunFailed(project, runId, result.failure());
+                if (stage0) {
+                    // 阶段 0 失败＝起服未成（#429 例外，与序前段/切片机器态同语义）：
+                    // 收口硬门（8081）必败，无一片有续派意义——整轨即呈生成中断
+                    // （generated_at 不落位），AC3「失败续跑语义不变」
+                    return;
+                }
+                // #429 片失败不拖垮整轨：不返回——后续依赖仍全收口的片照常续派；
+                // 依赖本片的片上方依赖判定跳过不派，全轨无可续派时轨道尾呈「生成中断」
+                continue;
+            }
+            closed.add(ord);
+            handoff = result.closingText();
+            placeSliceHandoff(project, ord, handoff);
+        }
     }
 
     /**

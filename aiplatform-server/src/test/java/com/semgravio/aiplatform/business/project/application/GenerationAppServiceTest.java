@@ -309,6 +309,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_two_slice_plan_when_generate_then_stage0_then_slices_in_order() {
+        givenPerSliceSessions();
         // 灵魂用例（#104 轨道顺序 + #114 每片新会话）：阶段 0（先起服）固定前置，其后
         // 按切片计划顺序逐片派 run——首 run = 阶段 0 起服 prompt、随后逐片切片 prompt；
         // 每片换新会话（slice-0/slice-1/slice-2），前片交接摘要（收口终文）注入下一片
@@ -334,6 +335,176 @@ class GenerationAppServiceTest {
                 GenerationAppService.sliceSession(projectId, 2));
         // 每场 run 各自的首试 runId 互不相同（阶段 0 首 run 身份 + 切片逐片新 runId）
         assertThat(all).extracting(AgentCommand::runId).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void given_single_session_default_when_generate_then_all_segments_share_one_session_and_no_fork() {
+        // #436 AC①③ 缺省态灵魂用例：无配置行＝单会话连续编码缺省开（切片机器退役
+        // 落地态）——阶段 0＋全部切片在同一执行会话槽位（coder-{projectId}-single）
+        // 内连续追加（每段新对话＋交接传递，prompt 与逐段串行口径逐字一致），不切
+        // 新 session、不 fork；进度叙事/预览节奏照常（逐片收口落表、末片收口落位）
+        Long projectId = persistedProject("9810");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        List<AgentCommand> all = commands.getAllValues();
+        assertThat(all).extracting(AgentCommand::prompt).containsExactly(
+                GenerationAppService.stage0Prompt(plan),
+                GenerationAppService.slicePrompt(plan, 0, "完成"),
+                GenerationAppService.slicePrompt(plan, 1, "完成"));
+        // 单会话寻址（#436）：全轨恒定一个槽位——阶段 0 与切片同址、无 slice-{n} 切换
+        assertThat(all).extracting(AgentCommand::sessionId).containsExactly(
+                GenerationAppService.singleSession(projectId),
+                GenerationAppService.singleSession(projectId),
+                GenerationAppService.singleSession(projectId));
+        // 切片并行机器缺省关：不 fork 隔离工作区（无 fork/波/合并机器面）
+        verify(workspaceLifecycleAppService, never()).fork(anyString());
+        // 进度叙事照常：逐片收口落表（ord 0/1/2 全已收口）、generated_at 末片收口落位
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_single_session_default_when_slice_fails_then_no_rollback_and_resume_continues_same_session() {
+        // #436 AC③：单会话形态失败语义——段级自愈＝同会话返工提示（原地修重试环），
+        // 重试耗尽转终态失败、不传段级回滚钩（工作区不回滚、无重跑轮）；被失败片
+        // 阻塞的后续片跳过不派（#429）；「继续生成」断点续跑从同会话槽位继续（新
+        // 对话），现状盘点按脏续口径（未回滚、保留已对的工作）
+        Long projectId = persistedProject("9811");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        int maxAttempts = properties.getMaxAttempts();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            // 第 2 ~ 1+maxAttempts 次＝切片 1 的各次尝试（首试与重试 prompt 措辞
+            // 不同——按调用序甄别，全抛＝重试耗尽转终态失败）
+            int call = converseCalls.incrementAndGet();
+            if (call >= 2 && call <= 1 + maxAttempts) {
+                throw new IllegalStateException("本片起服反复失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        BuildPlan plan = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        // 阶段 0 一次收口 + 切片 1 重试耗尽（无回滚重跑轮——尝试数＝maxAttempts）
+        assertThat(converseCalls.get()).isEqualTo(1 + maxAttempts);
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 3, 1); // 阶段 0 收口 / 切片 1 失败 / 切片 2 被依赖阻塞待跑
+        assertThat(generatedAt(projectId)).isNull();
+        // 单会话：段级回滚钩不传——工作区无任何 git reset（失败现场原样保留）
+        ArgumentCaptor<WorkspaceExecCommand> execs = ArgumentCaptor.forClass(WorkspaceExecCommand.class);
+        verify(workspaceLifecycleAppService, atLeastOnce()).exec(anyString(), execs.capture());
+        assertThat(execs.getAllValues()).extracting(WorkspaceExecCommand::command)
+                .noneMatch(command -> command.contains("reset --hard"));
+
+        // 断点续跑（#221 语义不变）：同会话槽位续作、现状盘点按脏续口径喂入
+        appService.startGeneration(projectId);
+
+        verify(agentClient, times(1 + maxAttempts + 2)).converse(any(), any());
+        ArgumentCaptor<AgentCommand> resumed = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1 + maxAttempts + 2)).converse(resumed.capture(), any());
+        List<AgentCommand> all = resumed.getAllValues();
+        AgentCommand resumeFirst = all.get(1 + maxAttempts);
+        assertThat(resumeFirst.sessionId()).isEqualTo(GenerationAppService.singleSession(projectId));
+        assertThat(resumeFirst.prompt())
+                .contains("【续跑现状盘点】")
+                .contains("未回滚")
+                .contains("保留已对的工作");
+        // 续跑同槽位覆盖全部段：后续会话寻址仍为单会话槽位
+        assertThat(all.subList(1 + maxAttempts, all.size()))
+                .extracting(AgentCommand::sessionId)
+                .containsOnly(GenerationAppService.singleSession(projectId));
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(2, 2, 2);
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_single_session_default_when_stage0_fails_then_track_interrupted_no_slice_dispatched() {
+        // #436 单会话态的 #429 例外语义（AC3 失败续跑语义不变）：阶段 0＝起服未成，
+        // 收口硬门必败、无一片有续派意义——整轨即中断（不续派切片、generated_at
+        // 不落位），与序前段/切片机器态的 return 口径一致
+        Long projectId = persistedProject("9813");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        int maxAttempts = properties.getMaxAttempts();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            // 第 1 ~ maxAttempts 次＝阶段 0 的各次尝试，全抛＝重试耗尽转终态失败
+            if (converseCalls.incrementAndGet() <= maxAttempts) {
+                throw new IllegalStateException("起服反复失败");
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        // 阶段 0 重试耗尽后整轨中断：切片 1/2 不派（无续派意义）、不落完成位
+        assertThat(converseCalls.get()).isEqualTo(maxAttempts);
+        assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                .containsExactly(3, 1, 1); // 阶段 0 失败 / 切片全待跑（不续派）
+        assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_parallel_machine_off_when_per_slice_sessions_then_wide_wave_runs_serially_no_fork() {
+        // #436 AC②：单会话关＋并行机器关＝切片机器半开（每片新会话保留）但 fork/
+        // 波/并行/合并全关——宽波内可跑片逐片主工作区串行、零 fork
+        givenPerSliceSessionsSerialOnly();
+        Long projectId = persistedProject("9812");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        BuildPlan plan = new BuildPlan(
+                List.of("用户能注册登录", "用户能下单支付", "用户能查看订单"),
+                List.of(Set.of(), Set.of(), Set.of()));
+        appService.dispatchGenerationOnTurnClose(projectId, plan);
+
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(4)).converse(commands.capture(), any());
+        // 每片新会话形态保留（slice-{n}），宽波（切片 2/3 同层）串行退化、无 fork
+        assertThat(commands.getAllValues()).extracting(AgentCommand::sessionId).containsExactly(
+                GenerationAppService.sliceSession(projectId, 0),
+                GenerationAppService.sliceSession(projectId, 1),
+                GenerationAppService.sliceSession(projectId, 2),
+                GenerationAppService.sliceSession(projectId, 3));
+        verify(workspaceLifecycleAppService, never()).fork(anyString());
+        assertThat(generatedAt(projectId)).isNotNull();
+    }
+
+    @Test
+    void given_failed_segment_single_session_when_inventory_then_dirty_continue_wording() {
+        // #436 单会话形态续跑盘点口径：失败段未回滚（脏现场）——按脏续盘点（保留
+        // 已对的工作、继续修完本段），与中断段同口径；不再出现「回滚到本段起点」
+        LocalDateTime anchor = LocalDateTime.now();
+        GenerationSegment stage0 = GenerationSegment.pending(1L, 0,
+                GenerationAppService.STAGE0_TITLE, anchor);
+        stage0.fail("run-x");
+
+        String inventory = GenerationAppService.resumeInventoryBlock(0, List.of(stage0), null,
+                /* failedSegmentRolledBack= */ false);
+
+        assertThat(inventory)
+                .contains("自动重试耗尽后失败")
+                .contains("未回滚")
+                .contains("保留已对的工作")
+                .doesNotContain("回滚到本段起点")
+                .doesNotContain("从头完成本段任务");
     }
 
     @Test
@@ -372,6 +543,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_independent_slices_when_generate_then_run_in_parallel_on_forks() {
+        givenPerSliceSessions();
         // #351 切片并行：无依赖独立切片同波，各拿 fork 副本隔离同跑——fork 片的 run 目标
         // = fork 工作区（非项目主工作区）、计量仍归项目账；全片收口才落 generated_at
         Long projectId = persistedProject("9840");
@@ -414,6 +586,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_failed_fork_slice_when_generate_then_other_slices_merged_and_track_incomplete() {
+        givenPerSliceSessions();
         // #351 失败副本处置（重试耗尽→跳过不拖垮整轨）：同波内一片失败、其余片照常合并
         // 收口；有失败片则 generated_at 不落位（续跑只补失败片及其下游）
         Long projectId = persistedProject("9841");
@@ -460,6 +633,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_parallel_waves_when_generate_then_telemetry_archives_complete() throws Exception {
+        givenPerSliceSessions();
         // 灵魂用例（#419 AC④）：并行波跑后档案字段齐全——①波档案：宽度对照（依赖图
         // 理论宽度 vs 调度实际并发）＋波边界时序（起止墙钟/跨距）＋逐片时距＋波内
         // 收口/失败面；②合并档案：合并文件集（并行安全证据）＋冲突与结局；③单片波
@@ -625,6 +799,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_stop_requested_mid_wave_when_generate_then_forks_destroyed_no_merge_no_generated() {
+        givenPerSliceSessions();
         // #359 并行波停止：波内在途被叫停——fork 全释放（不留孤儿容器）、不合并
         // （已收口前段不动）、generated_at 不落、run-failed(stopped) 收口
         Long projectId = persistedProject("9846");
@@ -708,6 +883,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_slice_retries_when_generate_then_retry_same_slice_session_and_handoff_injected() {
+        givenPerSliceSessions();
         // #114 重试续本片会话 + 片间交接：阶段 0 成功、切片 1 首试失败后重试成功、切片 2
         // 成功——重试续切片 1 会话（不换新）；前片收口终文注入下一片（切片 2 的 prompt
         // 带切片 1 的交接、切片 1 的 prompt 带阶段 0 的交接）
@@ -881,6 +1057,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_stage0_fails_when_generate_then_run_failed_and_no_slices() {
+        givenPerSliceSessions();
         // #104 失败语义·阶段 0：阶段 0 起服失败（不可恢复）——烧满重试转终态，不派
         // 任何切片；run-failed 锚阶段 0 首 run 身份；generated_at 不落
         Long projectId = persistedProject("9802");
@@ -900,6 +1077,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_attempts_exhausted_when_generate_then_failure_face_persisted_same_payload_as_sse() {
+        givenPerSliceSessions();
         // #418 灵魂用例（观测地基批）：重试耗尽转终态——失败面（逐尝试墙钟/档位/失败
         // 原因/本场累计）随 run-failed SSE 扩载与对话史落库同载荷（同收尾卡「SSE 扩载
         // 与落库同载荷」先例）——失败作废可归因（#313「33% 失败作废」从此可测），
@@ -991,6 +1169,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_rerun_round_also_fails_when_generate_then_failure_face_carries_both_rounds() {
+        givenPerSliceSessions();
         // #418 回滚重跑失败（AC④行为不变·仅增落库面）：两轮皆败转终态——失败面跨轮
         // 累计（回滚重跑轮不清账，#323 口径）：首轮 3 试＋重跑轮 3 试逐条带轮次与
         // 档位（重跑轮升档可归因），库中读回完整失败面
@@ -1116,6 +1295,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_first_slice_fails_when_generate_then_independent_later_slices_still_dispatch() {
+        givenPerSliceSessions();
         // 灵魂用例（#429 生产回归：片失败终态把整轨打成「生成中断」、剩余待跑片无人
         // 续派）：首片（序前段，界面先行）重试耗尽转终态——不整轨返回，后续波里依赖
         // 仍全收口的片照常续派（登录无依赖照常跑收口）；依赖链被失败片阻塞的片本轨
@@ -1154,6 +1334,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_prd_revised_when_dispatch_with_new_plan_then_table_replaced_no_residue() {
+        givenPerSliceSessions();
         // #220 AC③ 计划生命周期跟 PRD 版本走：PRD 修订（锚换新）后重产计划——表内
         // 整组替换（旧片不残留续用）、状态随新计划重置；轨道按新计划执行（prompt
         // 轨迹含新切片、不含旧切片）
@@ -1263,6 +1444,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_prd_revised_when_dispatch_without_plan_then_stale_plan_not_reused_and_redispatch() {
+        givenPerSliceSessions();
         // #220 AC③+④：PRD 修订后无交接物派发——旧计划锚不一致不沿用（不出现拿旧
         // 计划生成的 run），计划缺失走补产兜底：重派主智能体按 PRD 补产（main 会话
         // 一轮、prompt 请求 saveBuildPlan）；补产轮无果由补产账止住（同 PRD 版本只
@@ -1312,6 +1494,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_no_plan_when_generate_then_redispatch_produces_plan_and_generation_follows() {
+        givenPerSliceSessions();
         // #220 AC④ 补产链闭环：计划缺失重派主智能体——补产轮调 saveBuildPlan（事实
         // 登记）后收口，链必达自动派生成（新计划落表、轨道起跑、generated_at 落位）
         Long projectId = persistedProject("9843");
@@ -1372,6 +1555,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_terminal_failure_when_regenerate_then_resume_from_breakpoint_with_inventory() {
+        givenPerSliceSessions();
         // 灵魂用例（#221 AC①②④⑤ 全链）：发起（阶段 0 + 切片 1 收口）→ 中断（切片 2
         // 重试耗尽 run-failed）→ 续跑（REST 重发无交接物——计划与断点取自轨道表，
         // 无进程内副本可依〔「按表续跑」〕；错误现场走进程内终态账，跨进程丢失即降级
@@ -1452,6 +1636,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_interrupted_pending_segment_when_regenerate_then_resume_with_interrupt_reason() {
+        givenPerSliceSessions();
         // #221 全场景脏续·非错误中断（进程重启/平台中断——片未及落终态，表中待跑；
         // 以终态后拨回待跑模拟重启时的可观察状态）：续跑同路（跳过已收口片、断点片
         // 新会话起手现状盘点），中断原因叙事为「中断」而非「重试耗尽」、不携错误
@@ -1527,6 +1712,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_slice_retries_exhausted_when_generate_then_rollback_and_rerun_round_saves_it() {
+        givenPerSliceSessions();
         // #353 灵魂用例：切片首轮重试耗尽（原地修三连败）→ 失败现场留账落盘（回滚
         // 不丢证据）＋ 工作区 git 回滚本段起点（前段成果不动）＋ 新会话重跑一轮——
         // 重跑成功即照常收口（坏现场不叠修）；重跑首试 prompt 原样重放（干净起点、
@@ -1578,6 +1764,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_rerun_round_also_fails_when_generate_then_terminal_with_workspace_rolled_back_twice() {
+        givenPerSliceSessions();
         // #353 两轮皆败→终态：首轮耗尽回滚重跑、重跑轮再耗尽仍转终态（预算一轮）——
         // 终态前再回滚一次（不变式：终态时工作区 = 段起点，用户续跑从干净现场起）；
         // run-failed 锚失败片首试 runId、片落 FAILED、后片不派、generated_at 不落
@@ -1613,6 +1800,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_rerun_round_when_generate_then_user_facing_run_start_not_republished() {
+        givenPerSliceSessions();
         // #353 重跑轮用户面静默（#84 投影同律延伸）：重跑轮 run-start 滤掉（run 身份
         // 全程 = 首试 runId 不换锚）、重跑轮事件归锚首试 runId——用户面只见工作消息
         // 正常生长，不见「重新开始」
@@ -1657,6 +1845,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_fork_slice_retries_exhausted_when_generate_then_fork_rolled_back_rerun_and_merged() {
+        givenPerSliceSessions();
         // #353 fork 片回滚重跑：并行波内切片首轮重试耗尽 → fork 内留账＋回滚 fork
         // 起点（fork 时主工作区 HEAD）＋ 新会话重跑——成功即照常按序合并回主工作区
         // （并行片同样不在坏现场叠修）；全片收口照常落 generated_at
@@ -1711,6 +1900,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_merge_conflict_resolution_fails_when_generate_then_main_workspace_rolled_back() {
+        givenPerSliceSessions();
         // #353 合并失败的残留清理：fork 片成功但合并冲突（机器查命中）→ 冲突裁决
         // run 失败 → 主工作区回滚 merge 前 HEAD（不留半应用/冲突标记残留——后续
         // 合并与续跑在干净主工作区上进行）；失败片落 FAILED、generated_at 不落
@@ -1763,6 +1953,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_zero_verification_adjudication_when_close_then_rejected_then_verified_merges() {
+        givenPerSliceSessions();
         // #424 裁决轨同盖（闸开无豁免——本用例经 givenClosingGatesOpen 切回）：合并冲突裁决 run 改主工作区后零验证收口
         // 同样被拒——拒绝回执喂回裁决 run，补验（裁决后系统两侧功能走得通）后照常
         // 合并闭片（裁决天然有产出，产出证明闸不适用；验证在场按主工作区键判）
@@ -1830,6 +2021,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_rollback_fails_when_closing_check_never_passes_then_failed_check_still_emitted() {
+        givenPerSliceSessions();
         // #353 降级路径的自检播报（#85 口径不破）：有钩但回滚失败（reset exec 非 0
         // → 不重跑直接终态）——末次核验未过照样出 ❌（部件不悬挂「检查中」），
         // ❌ 先于 run-failed 到达
@@ -1880,6 +2072,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_legacy_project_with_closings_when_resume_then_marked_and_only_gap_runs() {
+        givenPerSliceSessions();
         // 灵魂用例（#223 AC①）：存量在途项目（生成早于轨道表——表内无片行，已收口
         // 成果只在收尾卡）发起「继续生成」：补产轮 prompt 携已收口成果清单（已完片
         // 照录原文的约定）→ 补产计划落库对照标已完片（run 锚 = 往次收口的用户面
@@ -1941,6 +2134,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_legacy_project_when_plan_paraphrases_then_no_match_and_full_redo() {
+        givenPerSliceSessions();
         // #223 降级方向安全：补产未照录原文（切片措辞漂移）——切片对照不上即待跑
         // 重做、不猜语义等价；对得上的照标（阶段 0 固定句不受措辞影响）——多跑不
         // 漏做，部分对照部分跳过
@@ -1981,6 +2175,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_tracked_project_prd_revised_when_replan_then_no_legacy_marking() {
+        givenPerSliceSessions();
         // #223 边界：存量对照只认「表内无片行」的首录——PRD 已演进的换锚重产
         // （表内有旧片行）整组替换重置待跑、从头来是既定口径，即便新计划措辞与
         // 旧收口叙事逐字相同也不标（阶段 0 照样真跑）
@@ -2092,7 +2287,8 @@ class GenerationAppServiceTest {
                 GenerationAppService.STAGE0_TITLE, anchor);
         stage0.fail("run-x");
 
-        String inventory = GenerationAppService.resumeInventoryBlock(0, List.of(stage0), null);
+        String inventory = GenerationAppService.resumeInventoryBlock(0, List.of(stage0), null,
+                /* failedSegmentRolledBack= */ true);
 
         assertThat(inventory)
                 .contains("自动重试耗尽后失败")
@@ -2108,6 +2304,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_project_when_generate_then_stage0_command_bound_to_coder_session() {
+        givenPerSliceSessions();
         // 编码命令全要素（阶段 0 首 run 代表）：coder 会话稳定绑定 + owner 寻址 +
         // EXECUTOR 配置 + 长任务超时 + 计量 dims + 项目工作区 + 流关联
         Long projectId = persistedProject("9805");
@@ -2283,6 +2480,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_converse_ok_but_service_unreachable_when_generate_then_no_generated_at_and_reinitiate_exit() {
+        givenPerSliceSessions();
         // 假完成（#35）：阶段 0 converse 正常结束但 8081 不可达——核验不过不落
         // generated_at，走既有重试/终态失败路径（阶段 0 失败不派切片），「继续生成」出口
         // 仍在；重发（REST 路径无交接物）沿用表内现行计划（#220 PRD 锚一致即有效）
@@ -2343,6 +2541,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_entry_file_truncated_when_generate_then_not_closed_within_attempts() {
+        givenPerSliceSessions();
         // #339 收口判据含入口文件完整性：入口文件残缺（「其余代码略」式）不收口
         // ——8081 探活可达也不算真收口（收口判据两件），尝试环静默重试耗尽转终态
         // 失败、generated_at 不落
@@ -2385,6 +2584,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_entry_file_missing_when_generate_then_not_closed() {
+        givenPerSliceSessions();
         // #339 入口文件取件失败（缺失）＝残缺——不收口（缺件也是首屏打不开），
         // 静默重试耗尽转终态、generated_at 不落
         Long projectId = persistedProject("9836");
@@ -2425,6 +2625,45 @@ class GenerationAppServiceTest {
     }
 
     /**
+     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——旧行为用例显式切回）：
+     * 直写 executor 行 single_session_generation_enabled=FALSE（每片新会话，
+     * {@code coder-{projectId}-slice-n}）＋ parallel_slice_machine_enabled=TRUE
+     * （宽波 fork 并行）。与 {@link #givenClosingGatesOpen} 可叠加（列各写各的）。
+     * 单会话缺省面由 given_single_session_... 系新用例锚定。
+     */
+    private void givenPerSliceSessions() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     single_session_generation_enabled, parallel_slice_machine_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    single_session_generation_enabled
+                        = EXCLUDED.single_session_generation_enabled,
+                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
+                """);
+    }
+
+    /**
+     * 切片机器半开（#436 三态之「每片新会话＋并行机器关」）：直写 executor 行
+     * single_session_generation_enabled=FALSE＋parallel_slice_machine_enabled=FALSE
+     * ——每片新会话保留（coder-{projectId}-slice-n），但 fork/波/并行/合并全关，
+     * 宽波逐片主工作区串行。
+     */
+    private void givenPerSliceSessionsSerialOnly() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     single_session_generation_enabled, parallel_slice_machine_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, FALSE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    single_session_generation_enabled
+                        = EXCLUDED.single_session_generation_enabled,
+                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
+                """);
+    }
+
+    /**
      * 产出证明探针脚本位（#420）：key＝工作区（并行波下 fork 副本各跑各的闸——
      * 按工作区隔离不串扰）、true＝零 diff 空转、缺省 false＝有产出。
      */
@@ -2461,6 +2700,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_idle_slice_when_close_then_rejected_refed_back_then_work_done_closes() {
+        givenPerSliceSessions();
         // #420 AC①：切片零 diff＋无「能力已存在」确认的收口被结构性拒绝——拒绝回执
         // 进同 run 现场（重试 prompt 携带「产出证明未过」与补做指引），执行体补做
         // （动了文件）后正常收口；空转拒绝史随收尾卡判别标注如实呈现
@@ -2512,6 +2752,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_idle_slice_never_proving_when_generate_then_rollback_rerun_then_terminal_failed() {
+        givenPerSliceSessions();
         // #420 AC②：空转拒绝耗尽（原地补做三连拒——拒绝回执喂回仍零 diff）→ 段级
         // 自愈回滚重跑（复用 #353 既有机制：留账＋回滚段起点＋新会话重跑一轮，不建
         // 新通道），重跑轮仍空转→转终态 run-failed；逐尝试档位经既有路由「重试／
@@ -2558,6 +2799,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_idle_rejections_then_escalated_model_tiers_recorded_in_failure_face() {
+        givenPerSliceSessions();
         // #420 AC② 升档留档：空转拒绝驱动尝试环重试——逐尝试档位经既有路由信号
         // 自动升档（attempt≥2 重试升档、round 2 回滚重跑升档：flash→pro），失败面
         // attempts[].modelId 可归因（#418 落库面承载——平台分析口径）
@@ -2592,6 +2834,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_idle_fork_slice_when_close_then_gate_fires_in_fork_and_merge_saves_it() {
+        givenPerSliceSessions();
         // #420 fork 片同盖（fork 差异口径）：fork 内空转收口同样被结构性拒绝——拒绝
         // 回执喂回 fork run 同 run 补做；补做后照常合并闭片。脚本位按工作区隔离
         // （并行波内另一 fork 片不受串扰）
@@ -2633,6 +2876,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_capability_exists_confirmation_when_idle_slice_then_exempt_close_with_basis() {
+        givenPerSliceSessions();
         // #420 AC③＋AC⑥：验证确认「能力已存在」（existing 确认形态）＝活已被前片
         // 干完的薄片，走豁免路径正常收口——豁免依据落收尾卡判别标注；真·薄片
         // （diff＞0 干活）不携带标注（阶段 0 即此形——正常收口无 proofOfOutput）
@@ -2688,6 +2932,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_zero_verification_slice_when_close_then_rejected_refed_back_then_verified_closes() {
+        givenPerSliceSessions();
         // #424 AC①：本 run 无验证登记（verify 未跑/未报——锚案 s5/s8 零验证形态）的
         // 收口被结构性拒绝——拒绝回执进同 run 现场（重试 prompt 携带「验证在场未过」
         // 与起验指引：自报本片验收要点委派 verify），执行体补跑验证（登记）后正常
@@ -2745,6 +2990,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_zero_verification_fork_slice_when_close_then_rejected_in_fork_then_verified_merges() {
+        givenPerSliceSessions();
         // #424 fork 片同盖：fork 内零验证收口同样被拒（事实按 fork 工作区键隔离——
         // 另一 fork 不串扰），拒绝回执喂回 fork run 补验后照常合并闭片
         Long projectId = persistedProject("9844");
@@ -3696,6 +3942,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_bare_client_slice_when_close_then_lint_fix_round_refed_back_then_closes() {
+        givenPerSliceSessions();
         // #425 AC①：强制档判据命中裸 pg/redis 客户端与裸 fetch——违规清单喂回执行体
         // 同 run 修一轮（对偶设计规范 lint 修轮先例）；修净即正常收口，修轮事实
         //（retried）随收尾卡如实呈现
@@ -3752,6 +3999,7 @@ class GenerationAppServiceTest {
 
     @Test
     void given_bare_client_never_fixed_when_generate_then_rejected_rollback_rerun_then_terminal_failed() {
+        givenPerSliceSessions();
         // #425 AC②前半：强制档修轮用尽仍余＝收口结构性拒绝（拒绝回执喂回同 run），
         // 耗尽走 #353 段级自愈回滚重跑（不建新通道），重跑轮同形再耗尽→转终态
         // run-failed、片 FAILED、后片不派——快档典型「绕不过预置件」形态被闸在片级
@@ -3801,6 +4049,7 @@ class GenerationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_when_close_then_annotated_not_blocked() {
+        givenPerSliceSessions();
         // #425 AC②后半＋AC③：预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
         // 不拦收口（对比强制档＝拒绝回路）；未用会话件（阶段 0 零命中）不判违规
         Long projectId = persistedProject("9846");
@@ -4396,6 +4645,7 @@ class GenerationAppServiceTest {
     @Test
     void given_first_demo_in_flight_when_turn_opinions_arrive_then_notified_and_merged_fix_after_close()
             throws InterruptedException {
+        givenPerSliceSessions();
         // 灵魂用例（#360 AC①）：首 Demo 在途时意见轮收口的派发不再静默丢——意见入队
         // + 对话面平台明示（guide-reply 复用，prompt 缺省不再重建用户气泡）；生成
         // 收口成功后排空队列，多条意见合并为一场更新 run 补派（修正轨排队合并同构）
@@ -4471,6 +4721,7 @@ class GenerationAppServiceTest {
     @Test
     void given_stopped_first_demo_when_turn_opinion_queued_then_resume_digests_without_deadlock()
             throws InterruptedException {
+        givenPerSliceSessions();
         // #360 AC②：停止收口不排空（队列保留）、「继续生成」续跑成功收口时消化——
         // 与恢复出口不冲突（不自锁、不重复派）；生成成功后「继续生成」出口按已生成
         // 口径拒绝（PRJ_017），不与补派的更新 run 抢轨道

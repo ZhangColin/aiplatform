@@ -112,6 +112,7 @@ class ProjectEndpointSwitchTest {
     void tearDown() {
         jdbcTemplate.update("DELETE FROM ord_orders");
         jdbcTemplate.update("DELETE FROM prj_generation_segments");
+        jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_conversation_entries");
         jdbcTemplate.update("DELETE FROM prj_projects");
     }
@@ -314,6 +315,7 @@ class ProjectEndpointSwitchTest {
         // #291 转系统开发（验收⑤）：设计主线定稿后转系统开发＝终点切换链——PRD 重写
         // 系统形（切换重产轮）后同序自动起构建（shift 轮产计划 → 收口派生成），
         // 起跑上下文携定稿稿引用块（稿以规范源身份进系统轨）
+        givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
         Long projectId = persistedProject(/* prdProduced= */ true, /* generated= */ false);
         Project design = projectOf(projectId);
         design.switchEndpoint(ProjectEndpointType.DESIGN, null);
@@ -377,6 +379,24 @@ class ProjectEndpointSwitchTest {
 
     private Project projectOf(Long projectId) {
         return projectRepository.findById(projectId).orElseThrow();
+    }
+
+    /**
+     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——锚 slice-0 会话寻址的
+     * 旧行为用例显式切回）：直写 executor 行 single_session_generation_enabled=FALSE
+     * ＋parallel_slice_machine_enabled=TRUE（tearDown 已清 prj_agent_configs）。
+     */
+    private void givenPerSliceSessions() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     single_session_generation_enabled, parallel_slice_machine_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    single_session_generation_enabled
+                        = EXCLUDED.single_session_generation_enabled,
+                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
+                """);
     }
 
     /** 切换重产轮的主智能体 prompt 断言面（main 会话首条 converse 命令的 prompt 腿

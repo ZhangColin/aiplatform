@@ -1244,6 +1244,7 @@ class DesignProcessAppServiceTest {
         // 全部定稿放行），起跑上下文携定稿稿引用块（稿入起跑上下文——执行体先读
         // 稿再动手）；转系统开发同链（PRD 重写系统形后同序，归 MainAgentAppService
         // 终点切换既有链）
+        givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
         Long projectId = persistedDesignProject(ProjectEndpointType.SYSTEM_DESIGN, null);
         givenSessionExecutorRunsInline();
         givenWorkspaceCommands("""
@@ -1449,6 +1450,24 @@ class DesignProcessAppServiceTest {
     }
 
     // ---------- designer 座运营配置（三座齐） ----------
+
+    /**
+     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——锚 slice-0 会话寻址的
+     * 旧行为用例显式切回）：直写 executor 行 single_session_generation_enabled=FALSE
+     * ＋parallel_slice_machine_enabled=TRUE。与既有 designer 行配置用例各写各的键。
+     */
+    private void givenPerSliceSessions() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     single_session_generation_enabled, parallel_slice_machine_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    single_session_generation_enabled
+                        = EXCLUDED.single_session_generation_enabled,
+                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
+                """);
+    }
 
     @Test
     void given_designer_config_override_when_dispatch_then_command_uses_override() {

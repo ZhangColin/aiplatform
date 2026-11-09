@@ -66,7 +66,10 @@ public class AgentConfigAppService {
      * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
      * verify 档位覆盖与轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
      * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
-     * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）。
+     * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
+     * 生成会话形态两开关 #436 同批——单会话连续编码（缺省 true）与切片并行机器
+     * （缺省 false），生成轨道派发处读取（{@code GenerationAppService}），仅 run
+     * 执行体行消费。
      */
     public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
@@ -75,7 +78,8 @@ public class AgentConfigAppService {
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
             String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget,
             boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
-            boolean finalVerificationGateEnabled) {
+            boolean finalVerificationGateEnabled,
+            boolean singleSessionGenerationEnabled, boolean parallelSliceMachineEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -104,7 +108,9 @@ public class AgentConfigAppService {
                         ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET,
                 config.verificationPresenceGateEnabled(),
                 config.proofOfOutputGateEnabled(),
-                config.finalVerificationGateEnabled());
+                config.finalVerificationGateEnabled(),
+                config.singleSessionGenerationEnabled(),
+                config.parallelSliceMachineEnabled());
     }
 
     /**

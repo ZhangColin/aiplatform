@@ -642,6 +642,74 @@ class BackofficeAgentConfigSeamTest {
                 .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(false));
     }
 
+    // ---------- 生成会话形态两开关（#436 开关承载面；缺省＝单会话开＋并行机器关＝切片机器退役落地态；仅 executor 行消费） ----------
+
+    @Test
+    void given_no_session_switch_override_when_get_then_single_session_on_parallel_off_by_default()
+            throws Exception {
+        // #436 缺省态（无覆盖行）：单会话连续编码开＝#432 Step 2 落地态（切片机器
+        // 退役）；并行机器关——两开关各自缺省与编排读面一致
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.singleSessionGenerationEnabled").value(true))
+                .andExpect(jsonPath("$.data.parallelSliceMachineEnabled").value(false));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.singleSessionGenerationEnabled()).isTrue();
+        assertThat(executor.parallelSliceMachineEnabled()).isFalse();
+    }
+
+    @Test
+    void given_session_switches_flipped_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 切回切片机器态（单会话关＋并行机器开）→ GET 生效值＝库值；留痕前后快照
+        // 含两开关（old=缺省态 true/false → new=false/true）；幂等重写不落痕；
+        // 清空（PUT {}）回落缺省（null 归一：单会话缺省 true、并行缺省 false）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
+                {"singleSessionGenerationEnabled": false, "parallelSliceMachineEnabled": true}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.singleSessionGenerationEnabled").value(false))
+                .andExpect(jsonPath("$.data.parallelSliceMachineEnabled").value(true));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.singleSessionGenerationEnabled()).isFalse();
+        assertThat(executor.parallelSliceMachineEnabled()).isTrue();
+
+        // 幂等重写（PUT 全量语义：两开关同值携带——值面无动不落痕）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
+                {"singleSessionGenerationEnabled": false, "parallelSliceMachineEnabled": true}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldSingleSessionGenerationEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldParallelSliceMachineEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newSingleSessionGenerationEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newParallelSliceMachineEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 切回落地态（单会话开＋并行关）＝旧值写回（一次新变更、留新痕）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
+                {"singleSessionGenerationEnabled": true, "parallelSliceMachineEnabled": false}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.singleSessionGenerationEnabled").value(true))
+                .andExpect(jsonPath("$.data.parallelSliceMachineEnabled").value(false));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].oldSingleSessionGenerationEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newSingleSessionGenerationEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 清空回落缺省：单会话开＋并行关（#436 落地态）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.singleSessionGenerationEnabled").value(true))
+                .andExpect(jsonPath("$.data.parallelSliceMachineEnabled").value(false));
+    }
+
     @Test
     void given_closing_gate_toggles_on_main_row_when_put_then_persisted_but_executor_untouched()
             throws Exception {

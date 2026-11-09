@@ -175,6 +175,24 @@ class MainAgentAppServiceTest {
         }).when(sessionExecutor).submit(any(), any());
     }
 
+    /**
+     * 切片机器切回旧行为（#436 缺省＝单会话开＋并行机器关——锚 slice-0 会话寻址的
+     * 旧行为用例显式切回）：直写 executor 行 single_session_generation_enabled=FALSE
+     * ＋parallel_slice_machine_enabled=TRUE（tearDown 已清 prj_agent_configs）。
+     */
+    private void givenPerSliceSessions() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     single_session_generation_enabled, parallel_slice_machine_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    single_session_generation_enabled
+                        = EXCLUDED.single_session_generation_enabled,
+                    parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled
+                """);
+    }
+
     /** 同生产语义吞掉轨道异常（异步轨道失败经 error 事件表达，执行器只记日志）——
      * 炸轮用例的执行器形态。 */
     private void givenSessionExecutorSwallowsFailures() {
@@ -1019,6 +1037,7 @@ class MainAgentAppServiceTest {
         // 生成 Demo」）后意见轮收口——平台自动派首个构建 run（#104 生成轨道首 run =
         // 阶段 0 先起服），切片计划随派发交接（planOf 可取到）。判据＝未生成＋存在
         // 已确认版本（收口观测点单一判据）。
+        givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
         Long projectId = persistedPrdProject("9731");
         markPrdConfirmed(projectId);
         givenSessionExecutorRunsInline();

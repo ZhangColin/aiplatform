@@ -29,6 +29,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    routing_escalating_size_labels, verify_model_id, verify_round_budget,
                    final_verify_fix_budget, verification_presence_gate_enabled,
                    proof_of_output_gate_enabled, final_verification_gate_enabled,
+                   single_session_generation_enabled, parallel_slice_machine_enabled,
                    operator_id, operator_name, updated_at
             FROM prj_agent_configs WHERE agent_key = ?
             """;
@@ -41,8 +42,9 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  routing_escalating_size_labels, verify_model_id, verify_round_budget,
                  final_verify_fix_budget, verification_presence_gate_enabled,
                  proof_of_output_gate_enabled, final_verification_gate_enabled,
+                 single_session_generation_enabled, parallel_slice_machine_enabled,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (agent_key) DO UPDATE SET
                 system_prompt = EXCLUDED.system_prompt,
                 model_id = EXCLUDED.model_id,
@@ -58,6 +60,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 verification_presence_gate_enabled = EXCLUDED.verification_presence_gate_enabled,
                 proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
                 final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled,
+                single_session_generation_enabled = EXCLUDED.single_session_generation_enabled,
+                parallel_slice_machine_enabled = EXCLUDED.parallel_slice_machine_enabled,
                 operator_id = EXCLUDED.operator_id,
                 operator_name = EXCLUDED.operator_name,
                 updated_at = CURRENT_TIMESTAMP
@@ -71,14 +75,16 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                  old_verify_model_id, old_verify_round_budget, old_final_verify_fix_budget,
                  old_verification_presence_gate_enabled, old_proof_of_output_gate_enabled,
                  old_final_verification_gate_enabled,
+                 old_single_session_generation_enabled, old_parallel_slice_machine_enabled,
                  new_system_prompt, new_model_id, new_web_search_enabled,
                  new_fetch_url_enabled, new_routing_enabled, new_routing_strong_model_id,
                  new_routing_file_count_threshold, new_routing_escalating_size_labels,
                  new_verify_model_id, new_verify_round_budget, new_final_verify_fix_budget,
                  new_verification_presence_gate_enabled, new_proof_of_output_gate_enabled,
                  new_final_verification_gate_enabled,
+                 new_single_session_generation_enabled, new_parallel_slice_machine_enabled,
                  operator_id, operator_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     /** 倒序最近先（id 陪排——同秒多痕不乱序）。 */
@@ -89,6 +95,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    old_verify_model_id, old_verify_round_budget, old_final_verify_fix_budget,
                    old_verification_presence_gate_enabled, old_proof_of_output_gate_enabled,
                    old_final_verification_gate_enabled,
+                   old_single_session_generation_enabled, old_parallel_slice_machine_enabled,
                    new_system_prompt, new_model_id,
                    new_web_search_enabled, new_fetch_url_enabled, new_routing_enabled,
                    new_routing_strong_model_id, new_routing_file_count_threshold,
@@ -96,6 +103,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                    new_verify_round_budget, new_final_verify_fix_budget,
                    new_verification_presence_gate_enabled, new_proof_of_output_gate_enabled,
                    new_final_verification_gate_enabled,
+                   new_single_session_generation_enabled, new_parallel_slice_machine_enabled,
                    operator_id, operator_name,
                    created_at
             FROM prj_agent_config_traces WHERE agent_key = ?
@@ -125,6 +133,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 config.verifyModelId(), config.verifyRoundBudget(), config.finalVerifyFixBudget(),
                 config.verificationPresenceGateEnabled(), config.proofOfOutputGateEnabled(),
                 config.finalVerificationGateEnabled(),
+                config.singleSessionGenerationEnabled(), config.parallelSliceMachineEnabled(),
                 config.operatorId(), config.operatorName());
     }
 
@@ -138,6 +147,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.oldVerifyRoundBudget(), trace.oldFinalVerifyFixBudget(),
                 trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
                 trace.oldFinalVerificationGateEnabled(),
+                trace.oldSingleSessionGenerationEnabled(), trace.oldParallelSliceMachineEnabled(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
@@ -146,6 +156,7 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 trace.newFinalVerifyFixBudget(),
                 trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),
                 trace.newFinalVerificationGateEnabled(),
+                trace.newSingleSessionGenerationEnabled(), trace.newParallelSliceMachineEnabled(),
                 trace.operatorId(), trace.operatorName());
     }
 
@@ -167,6 +178,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getBoolean("verification_presence_gate_enabled"),
                 rs.getBoolean("proof_of_output_gate_enabled"),
                 rs.getBoolean("final_verification_gate_enabled"),
+                rs.getBoolean("single_session_generation_enabled"),
+                rs.getBoolean("parallel_slice_machine_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 updatedAt == null ? null : updatedAt.toLocalDateTime());
     }
@@ -184,6 +197,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getBoolean("old_verification_presence_gate_enabled"),
                 rs.getBoolean("old_proof_of_output_gate_enabled"),
                 rs.getBoolean("old_final_verification_gate_enabled"),
+                rs.getBoolean("old_single_session_generation_enabled"),
+                rs.getBoolean("old_parallel_slice_machine_enabled"),
                 rs.getString("new_system_prompt"), rs.getString("new_model_id"),
                 rs.getBoolean("new_web_search_enabled"), rs.getBoolean("new_fetch_url_enabled"),
                 rs.getBoolean("new_routing_enabled"), rs.getString("new_routing_strong_model_id"),
@@ -194,6 +209,8 @@ public class JdbcAgentConfigStore implements AgentConfigStore {
                 rs.getBoolean("new_verification_presence_gate_enabled"),
                 rs.getBoolean("new_proof_of_output_gate_enabled"),
                 rs.getBoolean("new_final_verification_gate_enabled"),
+                rs.getBoolean("new_single_session_generation_enabled"),
+                rs.getBoolean("new_parallel_slice_machine_enabled"),
                 rs.getString("operator_id"), rs.getString("operator_name"),
                 createdAt == null ? null : createdAt.toLocalDateTime());
     }

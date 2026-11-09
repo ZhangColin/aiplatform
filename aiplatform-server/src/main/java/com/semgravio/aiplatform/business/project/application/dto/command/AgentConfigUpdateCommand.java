@@ -61,6 +61,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          false/null＝闸关〔默认——终验不起 run，完成口径回落 #427 前
  *                          形态〕；true＝闸开——轨道完成前以核心旅程为轴终验、fail 拦完成
  *                          叙事〔#427〕。仅 run 执行体行消费）
+ * @param singleSessionGenerationEnabled 单会话连续编码开关（#436，#432 Step 2；缺省
+ *                          true/null＝单会话开〔默认——阶段 0＋全部切片在同一执行会话
+ *                          槽位内连续追加，段级自愈＝同会话返工提示〕；false＝旧「每片
+ *                          新会话」形态。仅 run 执行体行消费）
+ * @param parallelSliceMachineEnabled 切片并行机器开关（#436，#432 Step 2；缺省
+ *                          false/null＝并行机器关〔默认——fork 隔离工作区/波调度/并行
+ *                          执行/合并全关，全轨主工作区串行〕；true＝宽波 fork 并行旧
+ *                          行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -114,5 +122,13 @@ public record AgentConfigUpdateCommand(
         Boolean proofOfOutputGateEnabled,
         @Schema(description = "整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝闸关——终验"
                 + "不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事。仅 run 执行体行消费）")
-        Boolean finalVerificationGateEnabled) {
+        Boolean finalVerificationGateEnabled,
+        @Schema(description = "单会话连续编码开关（#436，#432 Step 2；缺省 true＝单会话开〔默认〕——"
+                + "阶段 0＋全部切片在同一执行会话槽位内连续追加〔每段新对话＋交接传递，段级自愈＝"
+                + "同会话返工提示〕；false＝旧「每片新会话」形态。仅 run 执行体行消费）")
+        Boolean singleSessionGenerationEnabled,
+        @Schema(description = "切片并行机器开关（#436，#432 Step 2；缺省 false＝并行机器关〔默认〕——"
+                + "fork 隔离工作区/波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波 fork 并行"
+                + "旧行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面）")
+        Boolean parallelSliceMachineEnabled) {
 }

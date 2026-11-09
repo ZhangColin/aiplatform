@@ -29,7 +29,7 @@ class VerificationPresenceGateTest {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
                         true, true, false, true, null, null, null, null, 3, 2,
-                        enabled, true, true));
+                        enabled, true, true, true, false));
     }
 
     @Test

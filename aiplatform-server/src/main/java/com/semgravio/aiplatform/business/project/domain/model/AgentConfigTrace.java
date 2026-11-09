@@ -42,6 +42,12 @@ import java.time.LocalDateTime;
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
  * @param newProofOfOutputGateEnabled   变更后空转产出证明闸开关（#433；同上）
  * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
+ * @param oldSingleSessionGenerationEnabled 变更前单会话连续编码开关（#436；恒有值——
+ *                                       缺省态恒 true＝单会话开）
+ * @param oldParallelSliceMachineEnabled 变更前切片并行机器开关（#436；恒有值——缺省
+ *                                       态恒 false＝并行机器关）
+ * @param newSingleSessionGenerationEnabled 变更后单会话连续编码开关（#436；恒有值）
+ * @param newParallelSliceMachineEnabled 变更后切片并行机器开关（#436；恒有值）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -63,6 +69,8 @@ public record AgentConfigTrace(
         boolean oldVerificationPresenceGateEnabled,
         boolean oldProofOfOutputGateEnabled,
         boolean oldFinalVerificationGateEnabled,
+        boolean oldSingleSessionGenerationEnabled,
+        boolean oldParallelSliceMachineEnabled,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -77,6 +85,8 @@ public record AgentConfigTrace(
         boolean newVerificationPresenceGateEnabled,
         boolean newProofOfOutputGateEnabled,
         boolean newFinalVerificationGateEnabled,
+        boolean newSingleSessionGenerationEnabled,
+        boolean newParallelSliceMachineEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

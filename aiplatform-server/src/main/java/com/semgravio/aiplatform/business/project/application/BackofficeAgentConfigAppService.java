@@ -53,10 +53,10 @@ import com.semgravio.aiplatform.business.project.domain.repository.ModelChannelS
 @Service
 public class BackofficeAgentConfigAppService {
 
-    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕」）。 */
+    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开＋收口三闸开〕」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
-                    null, null, null);
+                    null, null, null, null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -109,6 +109,9 @@ public class BackofficeAgentConfigAppService {
                 safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
                 blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
+                safe.verificationPresenceGateEnabled() == null || safe.verificationPresenceGateEnabled(),
+                safe.proofOfOutputGateEnabled() == null || safe.proofOfOutputGateEnabled(),
+                safe.finalVerificationGateEnabled() == null || safe.finalVerificationGateEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归
@@ -167,6 +170,8 @@ public class BackofficeAgentConfigAppService {
                 current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
+                current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
+                current.finalVerificationGateEnabled(),
                 operator.id(), operator.name(), null);
         persistIfChanged(profile.key(), current, next, operator); // 幂等（开关已是目标态）零写入
         return new ToolToggle(tool, enabled);
@@ -208,7 +213,7 @@ public class BackofficeAgentConfigAppService {
         // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
-                true, true, true, null, null, null, null, null, null,
+                true, true, true, null, null, null, null, null, null, true, true, true,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
         AgentOperationalConfig persisted =
@@ -266,11 +271,15 @@ public class BackofficeAgentConfigAppService {
                 SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
+                current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
+                current.finalVerificationGateEnabled(),
                 next.systemPrompt(), next.modelId(), next.webSearchEnabled(),
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
                 next.verifyModelId(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
+                next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
+                next.finalVerificationGateEnabled(),
                 operator.id(), operator.name(), LocalDateTime.now()));
         return configStore.find(agentKey);
     }
@@ -294,7 +303,10 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
                 || !Objects.equals(current.verifyModelId(), next.verifyModelId())
                 || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
-                || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget());
+                || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget())
+                || current.verificationPresenceGateEnabled() != next.verificationPresenceGateEnabled()
+                || current.proofOfOutputGateEnabled() != next.proofOfOutputGateEnabled()
+                || current.finalVerificationGateEnabled() != next.finalVerificationGateEnabled();
     }
 
     /**

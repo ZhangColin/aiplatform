@@ -15,6 +15,7 @@ import org.mockito.Mockito;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 /**
  * 产出证明闸（#420 空转片防呆）判定件：收口判据增补「产出证明」——本段起点以来
@@ -29,10 +30,25 @@ class ProofOfOutputGateTest {
     private final WorkspaceLifecycleAppService workspaceLifecycle =
             Mockito.mock(WorkspaceLifecycleAppService.class);
     private final VerificationFacts verificationFacts = new VerificationFacts();
+    private final AgentConfigAppService agentConfigs = Mockito.mock(AgentConfigAppService.class);
     private final ProofOfOutputGate gate = new ProofOfOutputGate(workspaceLifecycle,
-            verificationFacts);
+            verificationFacts, agentConfigs);
     /** diff 探针脚本位（测试中随时改写：空＝零 diff 空转；有文件＝干了活）。 */
     private final AtomicReference<String> diffStdout = new AtomicReference<>("");
+
+    /** 闸态装配桩：true＝闸开（缺省）、false＝闸关（#433 开关化）。 */
+    private void givenGateEnabled(boolean enabled) {
+        when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
+                new AgentConfigAppService.EffectiveConfig("prompt", "flash",
+                        true, true, false, true, null, null, null, null, 3, 2,
+                        true, enabled, true));
+    }
+
+    /** 缺省闸开（现行为）：既有零行为变化面由闸开缺省承载。 */
+    @org.junit.jupiter.api.BeforeEach
+    void defaultGateOpen() {
+        givenGateEnabled(true);
+    }
 
     /** 段起点捕获可得＋diff 探针读脚本位（一次打桩，测试经 {@link #diffStdout} 改写）。 */
     private void givenSegmentStartCapturedAndDiffScripted() {
@@ -150,5 +166,30 @@ class ProofOfOutputGateTest {
         });
 
         assertThat(gate.forRun(42L).proof()).isNull();
+    }
+
+    // ---------- 闸开关化（#433：缺省闸开＝现行为；闸关＝零 diff 也放行） ----------
+
+    @Test
+    void given_gate_closed_when_zero_diff_then_passes_without_probe() {
+        // 闸关（#432 砍验证税开关态）：段起点以来零 diff 且无确认——空转片也放行，
+        // 不抛拒绝回执（无重跑税）；段起点探针不跑（exec 桩全空也稳过）
+        givenGateEnabled(false);
+        when(workspaceLifecycle.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+
+        assertThat(gate.forRun(42L).proof()).isNull();
+    }
+
+    @Test
+    void given_gate_closed_then_no_idle_rejection_history_accumulates() {
+        // 闸关下多次 proof() 均放行且不累计空转拒绝史（拒绝史只属闸开语义）
+        givenGateEnabled(false);
+        when(workspaceLifecycle.exec(any(), any()))
+                .thenReturn(new ExecResultResponse("", "", 0));
+        ProofOfOutputGate.Checking checking = gate.forRun(42L);
+
+        assertThat(checking.proof()).isNull();
+        assertThat(checking.proof()).isNull();
     }
 }

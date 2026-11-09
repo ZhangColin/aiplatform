@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.WorkspaceVersions;
 
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +36,12 @@ import lombok.extern.slf4j.Slf4j;
  * 降级跳过——环境故障不是空转片，同「无回滚基准不重跑」取舍。fork 片在 fork
  * 工作区内以同一探针判（fork 基线即段起点——fork 差异口径）。探针只读不动
  * 索引；探测不成降级放行（fail-open：坏探针不拦正常收口，如实记日志）。</p>
+ *
+ * <p><b>开关化（#433，#432 Step 1 开关承载面）</b>：本闸接入运营配置面开关
+ * （executor 行 {@code proof_of_output_gate_enabled}，缺省 true＝闸开＝现行为）
+ * ——闸关＝整场 run 的判定件 {@link Checking#proof()} 直返 null（零 diff 放行、
+ * 不累计拒绝史、段起点捕获不跑）；开关在 {@link #forRun} 起跑时读档一次（本
+ * run 闸态恒定），不发版、进行中 run 不定格。</p>
  */
 @Component
 @Slf4j
@@ -51,19 +58,25 @@ class ProofOfOutputGate {
 
     private final WorkspaceLifecycleAppService workspaceLifecycle;
     private final VerificationFacts verificationFacts;
+    private final AgentConfigAppService agentConfigs;
 
     ProofOfOutputGate(WorkspaceLifecycleAppService workspaceLifecycle,
-            VerificationFacts verificationFacts) {
+            VerificationFacts verificationFacts, AgentConfigAppService agentConfigs) {
         this.workspaceLifecycle = workspaceLifecycle;
         this.verificationFacts = verificationFacts;
+        this.agentConfigs = agentConfigs;
     }
 
     /**
-     * 一场 run 的产出证明判定件：起跑先捕获段起点锚，收口判据核验时（探活/入口
-     * 完整之后、成版与片落表之前）调 {@link Checking#proof()}。
+     * 一场 run 的产出证明判定件：起跑先读闸态开关（#433，本 run 恒定），闸开
+     * 再捕获段起点锚；收口判据核验时（探活/入口完整之后、成版与片落表之前）调
+     * {@link Checking#proof()}。
      */
     Checking forRun(Long workspaceId) {
-        return new Checking(workspaceId, captureSegmentStart(workspaceId));
+        boolean gateEnabled = agentConfigs.effectiveOf(AgentProfile.EXECUTOR)
+                .proofOfOutputGateEnabled();
+        return new Checking(workspaceId, gateEnabled,
+                gateEnabled ? captureSegmentStart(workspaceId) : null);
     }
 
     /** 段起点捕获（#353 同操作序）：无 HEAD 锚定；拿不到返回 null（闸降级跳过）。 */
@@ -99,20 +112,26 @@ class ProofOfOutputGate {
     class Checking {
 
         private final Long workspaceId;
+        private final boolean gateEnabled;
         private final String segmentStart;
         private int idleRejections = 0;
 
-        private Checking(Long workspaceId, String segmentStart) {
+        private Checking(Long workspaceId, boolean gateEnabled, String segmentStart) {
             this.workspaceId = workspaceId;
+            this.gateEnabled = gateEnabled;
             this.segmentStart = segmentStart;
         }
 
         /**
-         * 产出证明核验（收口判据增补件）：有 diff 或有确认即过——返回判别标注
+         * 产出证明核验（收口判据增补件）：闸关（#433 运营面开关）直返 null（零
+         * diff 放行、不累计拒绝史）；闸开＝有 diff 或有确认即过——返回判别标注
          * （null＝无事可标：非豁免收口且无拒绝史）；零 diff＋无确认抛拒绝回执
          * （喂回执行体同 run 补做：补实现／补验证）。
          */
         Map<String, Object> proof() {
+            if (!gateEnabled) {
+                return null; // 闸关（#432 砍验证税开关态）——不探测、不拒绝、不标注
+            }
             if (segmentStart == null) {
                 return null; // 段起点捕获不成——闸降级跳过（环境故障不是空转片）
             }

@@ -565,6 +565,98 @@ class BackofficeAgentConfigSeamTest {
         assertThat(traceRowCount()).isZero();
     }
 
+    // ---------- 收口三硬门开关（#433：缺省 true＝闸开＝现行为；仅 executor 行消费） ----------
+
+    @Test
+    void given_no_closing_gate_override_when_get_then_gates_default_open() throws Exception {
+        // 三闸读面缺省：无覆盖行＝全回落缺省（闸开＝现行为——#424 在场闸/#420 产出
+        // 证明闸/#427 整轨终验拦「生成完成」照常生效）；装配读面同步 true
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(true));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.verificationPresenceGateEnabled()).isTrue();
+        assertThat(executor.proofOfOutputGateEnabled()).isTrue();
+        assertThat(executor.finalVerificationGateEnabled()).isTrue();
+    }
+
+    @Test
+    void given_closing_gates_turned_off_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 三闸全关（#432 Step 1 砍验证税的开关承载面——不发版可调，默认闸开）→
+        // GET 生效值＝库值；留痕前后快照含三闸（old=true 缺省态 → new=false）；
+        // 幂等重写不落痕；清空（PUT {}）回落缺省 true
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, """
+                {"verificationPresenceGateEnabled": false, "proofOfOutputGateEnabled": false,
+                 "finalVerificationGateEnabled": false}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(false))
+                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(false))
+                .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(false));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.verificationPresenceGateEnabled()).isFalse();
+        assertThat(executor.proofOfOutputGateEnabled()).isFalse();
+        assertThat(executor.finalVerificationGateEnabled()).isFalse();
+
+        // 幂等重写（PUT 全量语义：三闸同值携带——值面无动不落痕，写者不漂移）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2, """
+                {"verificationPresenceGateEnabled": false, "proofOfOutputGateEnabled": false,
+                 "finalVerificationGateEnabled": false}
+                """)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldVerificationPresenceGateEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldProofOfOutputGateEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldFinalVerificationGateEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newVerificationPresenceGateEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newProofOfOutputGateEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newFinalVerificationGateEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 回闸（切回现行为）＝旧值写回（一次新变更、留新痕——不做版本树）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"verificationPresenceGateEnabled\": true, \"proofOfOutputGateEnabled\": true,"
+                        + " \"finalVerificationGateEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(true));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].oldFinalVerificationGateEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newFinalVerificationGateEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 清空回落：开关缺省 true＝闸开（null 归一缺省，同工具开关口径）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.proofOfOutputGateEnabled").value(true))
+                .andExpect(jsonPath("$.data.finalVerificationGateEnabled").value(true));
+    }
+
+    @Test
+    void given_closing_gate_toggles_on_main_row_when_put_then_persisted_but_executor_untouched()
+            throws Exception {
+        // 三座同面可写（同表全量语义），但闸判定只读 executor 行——main 行写开关
+        // 不影响装配读面的 executor 三闸（两座独立口径同 #251）
+        signedPut("main", OPERATOR_ID, OPERATOR_NAME,
+                "{\"verificationPresenceGateEnabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verificationPresenceGateEnabled").value(false));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.verificationPresenceGateEnabled()).isTrue();
+        assertThat(executor.proofOfOutputGateEnabled()).isTrue();
+        assertThat(executor.finalVerificationGateEnabled()).isTrue();
+    }
+
     // ---------- 绑定即时校验（#367，ADR-0031——错值写不进去，不再靠留痕回滚兜底） ----------
 
     @Test

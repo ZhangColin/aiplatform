@@ -2,6 +2,10 @@ package com.semgravio.aiplatform.business.project.application;
 
 import org.springframework.stereotype.Component;
 
+import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
+
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * 验证在场硬门（#424 片轻验常开，#406 裁决「验证在场升为平台硬要件」）：收口
  * 判据在既有硬门（服务探活＋入口文件完整＋产出证明）上新增「验证在场」维度——
@@ -24,22 +28,38 @@ import org.springframework.stereotype.Component;
  * 环的整个生命周期，跨尝试连续（首试登记后流中断、重试正常收口时统计仍在）。
  * 本门只读不消费：收口统计仍由收口载荷拼装处 {@link VerificationFacts#consume}
  * 取走，两读不互斥。</p>
+ *
+ * <p><b>开关化（#433，#432 Step 1 开关承载面）</b>：本闸接入运营配置面开关
+ * （executor 行 {@code verification_presence_gate_enabled}，缺省 true＝闸开＝
+ * 现行为）——闸关即放行（无登记不拦），判定处动态查库、不发版、进行中 run
+ * 不定格（改完下一次收口判定即生效）。</p>
  */
 @Component
+@Slf4j
 class VerificationPresenceGate {
 
     private final VerificationFacts verificationFacts;
+    private final AgentConfigAppService agentConfigs;
 
-    VerificationPresenceGate(VerificationFacts verificationFacts) {
+    VerificationPresenceGate(VerificationFacts verificationFacts,
+            AgentConfigAppService agentConfigs) {
         this.verificationFacts = verificationFacts;
+        this.agentConfigs = agentConfigs;
     }
 
     /**
      * 验证在场核验（收口判据增补件，装配位与产出证明同位点——探活/入口完整/产出
      * 证明之后、种子/预览/片落表等副作用之前）：本 run 有任一轮验证登记即过；
-     * 无登记抛拒绝回执（喂回执行体同 run 补验）。
+     * 无登记抛拒绝回执（喂回执行体同 run 补验）。闸关（运营配置面 executor 行
+     * {@code verification_presence_gate_enabled}=false，#433 开关化——缺省 true＝
+     * 闸开＝现行为）即放行；判定处动态查库，改完下一次收口判定即生效。
      */
     void requirePresence(String workspaceId) {
+        if (!agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verificationPresenceGateEnabled()) {
+            log.info("[presence] 工作区 {} 验证在场闸关（运营面开关），无登记也放行",
+                    workspaceId);
+            return;
+        }
         if (!verificationFacts.hasRegistration(workspaceId)) {
             throw new IllegalStateException(rejectionReceipt());
         }

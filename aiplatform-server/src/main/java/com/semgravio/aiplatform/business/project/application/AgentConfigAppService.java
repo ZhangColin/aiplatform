@@ -64,14 +64,18 @@ public class AgentConfigAppService {
      * 档位键（ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService
      * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
      * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
-     * verify 档位覆盖与轮次预算生效值。
+     * verify 档位覆盖与轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
+     * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
+     * 缺省 true＝闸开＝现行为。
      */
     public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
-            String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget) {
+            String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget,
+            boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
+            boolean finalVerificationGateEnabled) {
 
         /** 增强工具开关规格串（命令透传底座：进缓存键＋装配判据；编解码单源本类）。 */
         public String toolSpec() {
@@ -97,7 +101,10 @@ public class AgentConfigAppService {
                 config.verifyRoundBudget() != null
                         ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,
                 config.finalVerifyFixBudget() != null
-                        ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET);
+                        ? config.finalVerifyFixBudget() : DEFAULT_FINAL_VERIFY_FIX_BUDGET,
+                config.verificationPresenceGateEnabled(),
+                config.proofOfOutputGateEnabled(),
+                config.finalVerificationGateEnabled());
     }
 
     /**

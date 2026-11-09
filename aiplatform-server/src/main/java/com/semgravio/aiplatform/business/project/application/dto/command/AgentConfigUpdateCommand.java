@@ -50,6 +50,16 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          复走，耗尽版本照成＋已知缺陷如实呈现；null＝清空回落
  *                          代码缺省 2；0-10 整数——0＝不起修复 run 的运营选择，
  *                          越界 PRJ_080）
+ * @param verificationPresenceGateEnabled 验证在场闸开关（#433，#432 Step 1 开关承载
+ *                          面：缺省 true＝闸开——本 run 无 report_verification 登记
+ *                          不准收口〔#424〕；false＝闸跳过。仅 run 执行体行消费）
+ * @param proofOfOutputGateEnabled 空转产出证明闸开关（#433；缺省 true＝闸开——段起点
+ *                          以来零 diff 且无「能力已存在」确认不收口〔#420〕；false＝
+ *                          闸跳过。仅 run 执行体行消费）
+ * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；缺省 true＝
+ *                          闸开——轨道完成前以核心旅程为轴终验、fail 拦完成叙事
+ *                          〔#427〕；false＝终验不起 run，完成口径回落 #427 前形态。
+ *                          仅 run 执行体行消费）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -94,5 +104,14 @@ public record AgentConfigUpdateCommand(
                 + "耗尽版本照成＋已知缺陷清单如实呈现；null＝清空回落代码缺省 2；0-10 整数"
                 + "——0＝不起修复 run 的运营选择，越界 PRJ_080）",
                 example = "2")
-        Integer finalVerifyFixBudget) {
+        Integer finalVerifyFixBudget,
+        @Schema(description = "验证在场闸开关（#433：缺省 true＝闸开——本 run 无验证"
+                + "登记不准收口；false＝闸跳过。仅 run 执行体行消费）")
+        Boolean verificationPresenceGateEnabled,
+        @Schema(description = "空转产出证明闸开关（#433：缺省 true＝闸开——段起点以来"
+                + "零 diff 且无「能力已存在」确认不收口；false＝闸跳过。仅 run 执行体行消费）")
+        Boolean proofOfOutputGateEnabled,
+        @Schema(description = "整轨终验拦「生成完成」开关（#433：缺省 true＝闸开——轨道"
+                + "完成前终验 fail 拦完成叙事；false＝终验不起 run。仅 run 执行体行消费）")
+        Boolean finalVerificationGateEnabled) {
 }

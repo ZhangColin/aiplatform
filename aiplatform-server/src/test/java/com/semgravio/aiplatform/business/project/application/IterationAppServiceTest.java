@@ -128,6 +128,7 @@ class IterationAppServiceTest {
 
     @AfterEach
     void tearDown() {
+        jdbcTemplate.update("DELETE FROM prj_agent_configs");
         jdbcTemplate.update("DELETE FROM prj_design_specs");
         jdbcTemplate.update("DELETE FROM prj_prd_versions");
         jdbcTemplate.update("DELETE FROM prj_demo_versions");
@@ -1486,5 +1487,35 @@ class IterationAppServiceTest {
         tracks.remove(0).run();
 
         verify(agentClient, times(1)).converse(any(), any()); // 只更新 run，无终验 run
+    }
+
+    @Test
+    void given_final_verification_gate_closed_when_update_run_closes_then_no_reverification() {
+        // #433 开关化行为矩阵（更新轨腿·闸关态）： journeys 在场也不复走终验——
+        // 更新 run 收工即轨道收工（闸开＝现行为面由
+        // given_update_breaks_journey_when_track_closes_then_reverified_fixed_and_reverified
+        // 锚定）
+        Long projectId = persistedGeneratedProject("9972");
+        givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
+                """);
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "把预约列表按时间倒序排列", null);
+        tracks.remove(0).run();
+
+        // 只更新 run——无终验 run、无终验修复 run（闸关）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(1)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(0).sessionId())
+                .contains("-fix-")
+                .doesNotContain(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX);
     }
 }

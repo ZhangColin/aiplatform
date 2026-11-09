@@ -36,6 +36,12 @@ import lombok.extern.slf4j.Slf4j;
  * 修复修坏别的旅程）。回路内的终验修复 run 收口后同复走（本回路自带，非两调用点
  * 之列）。</p>
  *
+ * <p><b>开关化（#433，#432 Step 1 开关承载面）</b>：整轨终验拦「生成完成」接入
+ * 运营配置面开关（executor 行 {@code final_verification_gate_enabled}，缺省
+ * true＝闸开＝现行为）——闸关＝{@link #verifyTrack} 入口即返回跳过形（终验不起
+ * run、不拦完成叙事，成版锚回落最深收口片 run 的 #427 前形态）；判定处动态查库，
+ * 不发版、进行中 run 不定格。</p>
+ *
  * <p><b>终验 run 形态</b>：run 执行体作验证编排者——任务＝把核心旅程逐条委派
  * verify 子智能体（agent_spawn）走真浏览器跨片旅程并登记，<b>不改系统代码</b>
  * （发现问题如实登记，修复由平台经终验修复 run 另行安排——验证与修复分离，修
@@ -198,7 +204,8 @@ class TrackFinalVerificationAppService {
     }
 
     /**
-     * 整轨终验回路（两调用点共用）：终验 run → 全过即收；有未过且预算有余 → 终验
+     * 整轨终验回路（两调用点共用）：闸关（运营面开关 #433）即跳过（不拦「生成完成」，
+     * 成版锚回落最深收口片 run）；终验 run → 全过即收；有未过且预算有余 → 终验
      * 修复 run（载荷＝失败项清单）→ 复走终验；预算耗尽 → 版本照成＋已知缺陷清单
      * （末轮终验 run 收尾卡如实呈现）。修复预算动态读运营配置（缺省两轮；0＝不起
      * 修复 run、fail 直达已知缺陷形态——合法运营选择）。
@@ -207,6 +214,15 @@ class TrackFinalVerificationAppService {
      * 的停止收口处置（生成轨停止收口/更新轨停止账）。</p>
      */
     Result verifyTrack(Project project, List<BuildPlan.CoreJourney> journeys) {
+        if (!agentConfigs.effectiveOf(AgentProfile.EXECUTOR).finalVerificationGateEnabled()) {
+            // 闸关（#433 运营面开关，#432 砍验证税开关态——缺省 true＝闸开＝现行为）：
+            // 终验不起 run、不拦「生成完成」，调用点照旧直接完成（无验证声明——
+            // 同无旅程轴的 skipped 形，成版锚回落最深收口片 run 的 #427 前形态）；
+            // 判定处动态查库，改完下一次轨道完成即生效
+            log.info("[verify] 项目 {} 整轨终验闸关（运营面开关），跳过终验（完成口径"
+                    + "回落 #427 前形态）", project.getId());
+            return Result.skipped();
+        }
         if (journeys.isEmpty()) {
             log.info("[verify] 项目 {} 计划无核心旅程（存量不回补），整轨终验跳过", project.getId());
             return Result.skipped();

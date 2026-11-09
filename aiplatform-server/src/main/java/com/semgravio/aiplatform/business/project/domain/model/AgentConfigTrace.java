@@ -23,6 +23,10 @@ import java.time.LocalDateTime;
  * @param oldVerifyModelId              变更前 verify 档位（#424；null＝随执行体生效档）
  * @param oldVerifyRoundBudget          变更前单场验证轮次预算（#424；null＝代码缺省）
  * @param oldFinalVerifyFixBudget       变更前整轨终验修复预算（#427；null＝代码缺省）
+ * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
+ *                                       缺省态恒 true＝闸开）
+ * @param oldProofOfOutputGateEnabled   变更前空转产出证明闸开关（#433；同上）
+ * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）
  * @param newModelId                    变更后模型档位（null 同上）
  * @param newWebSearchEnabled           变更后联网搜索开关
@@ -35,6 +39,9 @@ import java.time.LocalDateTime;
  * @param newVerifyModelId              变更后 verify 档位（null＝清空随执行体档）
  * @param newVerifyRoundBudget          变更后单场验证轮次预算（null＝清空回落代码缺省）
  * @param newFinalVerifyFixBudget       变更后整轨终验修复预算（null＝清空回落代码缺省）
+ * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
+ * @param newProofOfOutputGateEnabled   变更后空转产出证明闸开关（#433；同上）
+ * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -53,6 +60,9 @@ public record AgentConfigTrace(
         String oldVerifyModelId,
         Integer oldVerifyRoundBudget,
         Integer oldFinalVerifyFixBudget,
+        boolean oldVerificationPresenceGateEnabled,
+        boolean oldProofOfOutputGateEnabled,
+        boolean oldFinalVerificationGateEnabled,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -64,6 +74,9 @@ public record AgentConfigTrace(
         String newVerifyModelId,
         Integer newVerifyRoundBudget,
         Integer newFinalVerifyFixBudget,
+        boolean newVerificationPresenceGateEnabled,
+        boolean newProofOfOutputGateEnabled,
+        boolean newFinalVerificationGateEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

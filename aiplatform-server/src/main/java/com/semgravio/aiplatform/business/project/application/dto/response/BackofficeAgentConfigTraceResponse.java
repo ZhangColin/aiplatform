@@ -37,6 +37,13 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newVerifyModelId    变更后 verify 档位（null＝本次清空随执行体档）
  * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
  * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
+ * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
+ *                          缺省态恒 true＝闸开）
+ * @param oldProofOfOutputGateEnabled 变更前空转产出证明闸开关（#433；同上）
+ * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
+ * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
+ * @param newProofOfOutputGateEnabled 变更后空转产出证明闸开关（#433；同上）
+ * @param newFinalVerificationGateEnabled 变更后整轨终验拦「生成完成」开关（#433；同上）
  * @param operatorId          变更操作者 id
  * @param operatorName        变更操作者名（直读展示）
  * @param operatedAt          变更动作时刻（留痕生成时刻）
@@ -67,6 +74,12 @@ public record BackofficeAgentConfigTraceResponse(
         Integer oldVerifyRoundBudget,
         @Schema(description = "变更前整轨终验修复预算（#427；null＝此前即代码缺省）")
         Integer oldFinalVerifyFixBudget,
+        @Schema(description = "变更前验证在场闸开关（#433；恒有值——缺省态恒 true＝闸开）")
+        boolean oldVerificationPresenceGateEnabled,
+        @Schema(description = "变更前空转产出证明闸开关（#433；恒有值）")
+        boolean oldProofOfOutputGateEnabled,
+        @Schema(description = "变更前整轨终验拦「生成完成」开关（#433；恒有值）")
+        boolean oldFinalVerificationGateEnabled,
         @Schema(description = "变更后 systemPrompt（null＝本次清空回落枚举默认）")
         String newSystemPrompt,
         @Schema(description = "变更后模型档位（null＝本次清空回落）")
@@ -90,6 +103,12 @@ public record BackofficeAgentConfigTraceResponse(
         Integer newVerifyRoundBudget,
         @Schema(description = "变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）")
         Integer newFinalVerifyFixBudget,
+        @Schema(description = "变更后验证在场闸开关（#433；恒有值）")
+        boolean newVerificationPresenceGateEnabled,
+        @Schema(description = "变更后空转产出证明闸开关（#433；恒有值）")
+        boolean newProofOfOutputGateEnabled,
+        @Schema(description = "变更后整轨终验拦「生成完成」开关（#433；恒有值）")
+        boolean newFinalVerificationGateEnabled,
         @Schema(description = "变更操作者 id", example = "700200")
         String operatorId,
         @Schema(description = "变更操作者名（直读展示）", example = "运营·技能管理员")
@@ -106,12 +125,16 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
                 trace.oldVerifyModelId(), trace.oldVerifyRoundBudget(),
                 trace.oldFinalVerifyFixBudget(),
+                trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
+                trace.oldFinalVerificationGateEnabled(),
                 trace.newSystemPrompt(), trace.newModelId(),
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
                 trace.newVerifyModelId(), trace.newVerifyRoundBudget(),
                 trace.newFinalVerifyFixBudget(),
+                trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),
+                trace.newFinalVerificationGateEnabled(),
                 trace.operatorId(), trace.operatorName(), trace.createdAt());
     }
 }

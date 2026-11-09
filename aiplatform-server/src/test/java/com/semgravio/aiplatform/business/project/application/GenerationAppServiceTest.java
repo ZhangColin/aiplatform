@@ -2863,6 +2863,83 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_presence_and_proof_gates_closed_when_idle_unverified_slice_then_track_completes_normally() {
+        // #433 开关化行为矩阵（在场闸＋产出证明闸·闸关态，编排缝）：零验证登记＋
+        // 零 diff 的空转未验片——两闸直放行，片照常收口、轨道照常完成：generated_at
+        // 落位、preview-ready 照推（完成叙事不拦）。闸开＝现行为面由
+        // given_zero_verification_slice_.../given_idle_slice_... 拒绝—补做链路锚定
+        Long projectId = persistedProject("9898");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     verification_presence_gate_enabled, proof_of_output_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE, FALSE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    verification_presence_gate_enabled
+                        = EXCLUDED.verification_presence_gate_enabled,
+                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled
+                """);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        // 不登记验证（verifyRan 不调用）——闸开态下该片会被验证在场闸拒
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 + 1 片收口即完成——无拒绝重试（闸关不喂回）、无终验 run
+        verify(agentClient, times(2)).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNotNull();
+        // preview-ready 照推（收口 2 次＋完成位补推 1 次）
+        verify(eventsAppService, times(3)).publishNotification(
+                eq(ProjectEventTypes.PREVIEW_READY), anyMap());
+    }
+
+    @Test
+    void given_final_verification_gate_closed_when_track_completes_then_no_verify_run_and_completed_with_slice_anchor() {
+        // #433 开关化行为矩阵（闸关态）：journeys 在场也不起终验 run——「生成完成」
+        // 不被拦，generated_at 照常落位（成版锚＝最深收口片 run，#427 前形态）、
+        // preview-ready 照推。闸开＝现行为面由 given_journeys_when_all_slices_closed...
+        // 锚定（零行为变化）
+        Long projectId = persistedProject("9897");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, FALSE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
+                """);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenConverseSucceeds("完成");
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 = 3 场——无终验 run（闸关）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).noneMatch(command -> command.sessionId()
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX));
+        // 「生成完成」不拦：落位＋成版锚＝最深收口片 run（非终验 run）
+        assertThat(generatedAt(projectId)).isNotNull();
+        AgentCommand lastSlice = commands.getAllValues().get(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT run_id FROM prj_demo_versions WHERE project_id = ? AND version_no = 1",
+                String.class, projectId)).isEqualTo(lastSlice.runId());
+        // preview-ready 照推（阶段 0＋切片收口 3 次＋完成位补推 1 次）
+        verify(eventsAppService, times(4)).publishNotification(
+                eq(ProjectEventTypes.PREVIEW_READY), anyMap());
+    }
+
+    @Test
     void given_final_verification_fail_when_fixed_then_reverified_then_generated() {
         // #427 AC②：终验 fail 拦「生成完成」叙事→失败项自动起终验修复 run（载荷＝
         // 失败项清单）→修复收口后复走终验（防修 A 坏 B）→复走过验才落 generated_at

@@ -37,9 +37,10 @@ import lombok.extern.slf4j.Slf4j;
  * 工作区内以同一探针判（fork 基线即段起点——fork 差异口径）。探针只读不动
  * 索引；探测不成降级放行（fail-open：坏探针不拦正常收口，如实记日志）。</p>
  *
- * <p><b>开关化（#433，#432 Step 1 开关承载面）</b>：本闸接入运营配置面开关
- * （executor 行 {@code proof_of_output_gate_enabled}，缺省 true＝闸开＝现行为）
- * ——闸关＝整场 run 的判定件 {@link Checking#proof()} 直返 null（零 diff 放行、
+ * <p><b>开关化（#433；#435 翻转缺省）</b>：本闸接入运营配置面开关
+ * （executor 行 {@code proof_of_output_gate_enabled}，#435 起缺省 false＝
+ * 闸关＝#432 Step 1 砍验证税落地态）——闸关＝整场 run 的判定件
+ * {@link Checking#proof()} 直返 null（零 diff 放行、
  * 不累计拒绝史、段起点捕获不跑）；开关在 {@link #forRun} 起跑时读档一次（本
  * run 闸态恒定），不发版、进行中 run 不定格。</p>
  */
@@ -68,9 +69,9 @@ class ProofOfOutputGate {
     }
 
     /**
-     * 一场 run 的产出证明判定件：起跑先读闸态开关（#433，本 run 恒定），闸开
-     * 再捕获段起点锚；收口判据核验时（探活/入口完整之后、成版与片落表之前）调
-     * {@link Checking#proof()}。
+     * 一场 run 的产出证明判定件：起跑先读闸态开关（#433；#435 起缺省 false＝
+     * 闸关＝砍验证税落地态，本 run 恒定），闸开再捕获段起点锚；收口判据核验时
+     * （探活/入口完整之后、成版与片落表之前）调 {@link Checking#proof()}。
      */
     Checking forRun(Long workspaceId) {
         boolean gateEnabled = agentConfigs.effectiveOf(AgentProfile.EXECUTOR)

@@ -29,10 +29,11 @@ import lombok.extern.slf4j.Slf4j;
  * 本门只读不消费：收口统计仍由收口载荷拼装处 {@link VerificationFacts#consume}
  * 取走，两读不互斥。</p>
  *
- * <p><b>开关化（#433，#432 Step 1 开关承载面）</b>：本闸接入运营配置面开关
- * （executor 行 {@code verification_presence_gate_enabled}，缺省 true＝闸开＝
- * 现行为）——闸关即放行（无登记不拦），判定处动态查库、不发版、进行中 run
- * 不定格（改完下一次收口判定即生效）。</p>
+ * <p><b>开关化（#433；#435 翻转缺省）</b>：本闸接入运营配置面开关
+ * （executor 行 {@code verification_presence_gate_enabled}，#435 起缺省
+ * false＝闸关＝#432 Step 1 砍验证税落地态）——闸关即放行（无登记不拦），
+ * 运营可一键切回 true＝闸开＝#424 现行为；判定处动态查库、不发版、进行中
+ * run 不定格（改完下一次收口判定即生效）。</p>
  */
 @Component
 @Slf4j
@@ -51,8 +52,8 @@ class VerificationPresenceGate {
      * 验证在场核验（收口判据增补件，装配位与产出证明同位点——探活/入口完整/产出
      * 证明之后、种子/预览/片落表等副作用之前）：本 run 有任一轮验证登记即过；
      * 无登记抛拒绝回执（喂回执行体同 run 补验）。闸关（运营配置面 executor 行
-     * {@code verification_presence_gate_enabled}=false，#433 开关化——缺省 true＝
-     * 闸开＝现行为）即放行；判定处动态查库，改完下一次收口判定即生效。
+     * {@code verification_presence_gate_enabled}=false，#433 开关化、#435 起为
+     * 缺省态——砍验证税）即放行；判定处动态查库，改完下一次收口判定即生效。
      */
     void requirePresence(String workspaceId) {
         if (!agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verificationPresenceGateEnabled()) {

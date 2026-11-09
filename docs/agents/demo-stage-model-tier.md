@@ -39,12 +39,12 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 3. **轮次预算**：`{"verifyRoundBudget": 5}`（1-20 整数，越界 PRJ_078；null＝回落代码缺省 3＝首轮验证＋至多两轮修复复验）。预算＝单场防无限复验的护栏：verify 经 report_verification 登记达预算仍有未过项时，登记回执告知「停止修复—复验」，收尾卡验证统计带 `budgetExhausted` 如实标注。动态逐次读——改完下一轮登记即生效。
 4. **查/回滚**：GET 同面（`verifyModelId`/`verifyModelIdOverridden`/`verifyRoundBudget`/`defaultVerifyRoundBudget`）；traces 前后快照含验证面两件。
 
-**收口三硬门开关（#433，#432 Step 1 砍验证税的开关承载面）**：验证在场闸（#424）、空转产出证明闸（#420）、整轨终验拦「生成完成」（#427）三件收口硬门各持独立开关，收编 **executor 行**（同一 PUT 通道）——
+**收口三硬门开关（#433 开关承载面；#435 翻转缺省——#432 Step 1 砍验证税落地态）**：验证在场闸（#424）、空转产出证明闸（#420）、整轨终验拦「生成完成」（#427）三件收口硬门各持独立开关，收编 **executor 行**（同一 PUT 通道）——
 
-1. **缺省＝闸开（现行为）**：三开关缺省 true——本票（#433）零行为变化；#432 后续步切关才砍验证税。
-2. **切闸**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verificationPresenceGateEnabled": false, "proofOfOutputGateEnabled": false, "finalVerificationGateEnabled": false}`（三件各自独立，可组合）；null/缺省＝回落 true＝闸开。留痕前后快照含三闸（回滚腿完整）。
+1. **缺省＝闸关（#435 起）**：三开关缺省 false＝#432 Step 1 正式落地——秒级确定性探活（8081 探活＋入口文件完整＋git 成版）是唯一收口要件；#433 的开关机制原样保留（闸代码全留仓）。
+2. **切闸**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verificationPresenceGateEnabled": true, "proofOfOutputGateEnabled": true, "finalVerificationGateEnabled": true}`（三件各自独立，可组合）＝一键切回旧行为（#424/#420/#427 现行为）；false/null＝闸关。留痕前后快照含三闸（回滚腿完整）。
 3. **生效时机＝下一次闸判定**：闸判定处动态查库——在场闸/整轨终验在收口/完成判定时读，产出证明闸在 run 起跑（`forRun`）时读本 run 闸态；改完不发版即生效，进行中 run 不定格（产出证明闸按「起跑时读档」语义——本 run 恒定，对偶模型档）。
-4. **闸关语义**：在场闸关＝无验证登记也放行；产出证明闸关＝零 diff 空转片放行（不拒、不记拒绝史、段起点探针不跑）；整轨终验关＝轨道完成前不起终验 run、不拦「生成完成」——成版锚回落最深收口片 run（#427 前形态）。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受三开关影响，常开。
+4. **闸开语义**：在场闸开＝本 run 无验证登记不收口；产出证明闸开＝零 diff 且无确认的空转片被拒（记拒绝史、段起点探针跑）；整轨终验开＝轨道完成前以核心旅程为轴终验、fail 拦「生成完成」。秒级确定性探活（8081 探活＋入口文件完整＋git 成版）不受三开关影响，常开。
 5. **查生效值**：GET 同面（`verificationPresenceGateEnabled`/`proofOfOutputGateEnabled`/`finalVerificationGateEnabled` 生效态）。
 
 ## 四、进行中 run 不定格

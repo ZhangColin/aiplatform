@@ -66,7 +66,7 @@ public class AgentConfigAppService {
      * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
      * verify 档位覆盖与轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
      * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
-     * 缺省 true＝闸开＝现行为。
+     * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）。
      */
     public record EffectiveConfig(String systemPrompt, String modelId,
             boolean webSearchEnabled, boolean fetchUrlEnabled,

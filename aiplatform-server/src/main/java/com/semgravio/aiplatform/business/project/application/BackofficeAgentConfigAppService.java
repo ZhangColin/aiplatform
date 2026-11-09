@@ -86,7 +86,8 @@ public class BackofficeAgentConfigAppService {
     }
 
     /**
-     * 配置全量写（PUT）：命令归一（覆盖两件空白＝null 清空、开关两件缺省 true）
+     * 配置全量写（PUT）：命令归一（覆盖两件空白＝null 清空、开关缺省＝增强工具/
+     * 路由缺省 true、收口三闸缺省 false〔#435 翻转——null＝闸关〕）
      * → 与现行值面比对：无动即幂等回执（不落痕不写行）→ 有动即整行 upsert＋
      * 留痕（变更前全量快照→变更后全量快照＋操作者）同事务落。回执与 GET 同形。
      *
@@ -109,9 +110,9 @@ public class BackofficeAgentConfigAppService {
                 safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
                 blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
-                safe.verificationPresenceGateEnabled() == null || safe.verificationPresenceGateEnabled(),
-                safe.proofOfOutputGateEnabled() == null || safe.proofOfOutputGateEnabled(),
-                safe.finalVerificationGateEnabled() == null || safe.finalVerificationGateEnabled(),
+                safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
+                safe.proofOfOutputGateEnabled() != null && safe.proofOfOutputGateEnabled(),
+                safe.finalVerificationGateEnabled() != null && safe.finalVerificationGateEnabled(),
                 operator.id(), operator.name(), null);
         // 绑定即时校验（#367，ADR-0031）：改档写的档位键必须存在且启用——错值
         // 写不进去（不再靠留痕回滚兜底）；清空（null＝回落缺省）不校验（缺省归

@@ -36,7 +36,7 @@ class ProofOfOutputGateTest {
     /** diff 探针脚本位（测试中随时改写：空＝零 diff 空转；有文件＝干了活）。 */
     private final AtomicReference<String> diffStdout = new AtomicReference<>("");
 
-    /** 闸态装配桩：true＝闸开（缺省）、false＝闸关（#433 开关化）。 */
+    /** 闸态装配桩：true＝闸开（#435 起为运营切回旧行为）、false＝闸关（#435 缺省态）。 */
     private void givenGateEnabled(boolean enabled) {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
@@ -44,7 +44,7 @@ class ProofOfOutputGateTest {
                         true, enabled, true));
     }
 
-    /** 缺省闸开（现行为）：既有零行为变化面由闸开缺省承载。 */
+    /** 每例闸开先行（#435 起闸缺省关——闸开行为面由本桩显式承载）。 */
     @org.junit.jupiter.api.BeforeEach
     void defaultGateOpen() {
         givenGateEnabled(true);
@@ -168,7 +168,7 @@ class ProofOfOutputGateTest {
         assertThat(gate.forRun(42L).proof()).isNull();
     }
 
-    // ---------- 闸开关化（#433：缺省闸开＝现行为；闸关＝零 diff 也放行） ----------
+    // ---------- 闸开关化（#433 开关承载面；#435 翻转缺省＝闸关；闸开＝零 diff 也拒） ----------
 
     @Test
     void given_gate_closed_when_zero_diff_then_passes_without_probe() {

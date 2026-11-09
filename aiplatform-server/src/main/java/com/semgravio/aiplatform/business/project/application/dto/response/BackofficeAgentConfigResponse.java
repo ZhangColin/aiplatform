@@ -51,12 +51,15 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  * @param finalVerifyFixBudget    整轨终验修复预算生效值（#427；库覆盖值或代码缺省）
  * @param finalVerifyFixBudgetOverridden true＝终验修复预算为库覆盖值（false＝代码缺省）
  * @param defaultFinalVerifyFixBudget 代码缺省终验修复预算（预览：清空覆盖即落此值）
- * @param verificationPresenceGateEnabled 验证在场闸开关生效态（#433；缺省 true＝闸开——
- *                                本 run 无验证登记不准收口。仅 run 执行体行消费）
- * @param proofOfOutputGateEnabled 空转产出证明闸开关生效态（#433；缺省 true＝闸开——
- *                                零 diff 且无确认不收口。仅 run 执行体行消费）
- * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关生效态（#433；缺省
- *                                true＝闸开。仅 run 执行体行消费）
+ * @param verificationPresenceGateEnabled 验证在场闸开关生效态（#433；#435 起缺省
+ *                                false＝闸关——本 run 无验证登记不收口仅在该闸被
+ *                                运营打开时生效。仅 run 执行体行消费）
+ * @param proofOfOutputGateEnabled 空转产出证明闸开关生效态（#433；#435 起缺省
+ *                                false＝闸关——零 diff 且无确认不收口仅在该闸被运营
+ *                                打开时生效。仅 run 执行体行消费）
+ * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关生效态（#433；
+ *                                #435 起缺省 false＝闸关——终验不起 run、不拦完成
+ *                                叙事。仅 run 执行体行消费）
  * @param operatorId              最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName            最近写者名（直读展示）
  * @param updatedAt               最近写入时刻（null＝从未配置）
@@ -129,15 +132,15 @@ public record BackofficeAgentConfigResponse(
         boolean finalVerifyFixBudgetOverridden,
         @Schema(description = "代码缺省终验修复预算（预览：清空覆盖即落此值）", example = "2")
         Integer defaultFinalVerifyFixBudget,
-        @Schema(description = "验证在场闸开关生效态（#433：缺省 true＝闸开——本 run 无"
-                + "report_verification 登记不准收口〔#424〕；false＝闸跳过。仅 run 执行体行消费）")
+        @Schema(description = "验证在场闸开关生效态（#433；#435 起缺省 false＝闸关——本 run 无"
+                + "report_verification 登记不收口不生效〔#424〕；true＝闸开。仅 run 执行体行消费）")
         boolean verificationPresenceGateEnabled,
-        @Schema(description = "空转产出证明闸开关生效态（#433：缺省 true＝闸开——段起点"
-                + "以来零 diff 且无「能力已存在」确认不收口〔#420〕；false＝闸跳过。"
+        @Schema(description = "空转产出证明闸开关生效态（#433；#435 起缺省 false＝闸关——段起点"
+                + "以来零 diff 且无「能力已存在」确认不收口不生效〔#420〕；true＝闸开。"
                 + "仅 run 执行体行消费）")
         boolean proofOfOutputGateEnabled,
-        @Schema(description = "整轨终验拦「生成完成」开关生效态（#433：缺省 true＝闸开——"
-                + "轨道完成前终验 fail 拦完成叙事〔#427〕；false＝终验不起 run。仅 run 执行体行消费）")
+        @Schema(description = "整轨终验拦「生成完成」开关生效态（#433；#435 起缺省 false＝闸关——"
+                + "终验不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事〔#427〕。仅 run 执行体行消费）")
         boolean finalVerificationGateEnabled,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,

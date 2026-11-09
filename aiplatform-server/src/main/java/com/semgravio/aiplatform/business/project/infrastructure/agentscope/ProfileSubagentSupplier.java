@@ -13,10 +13,14 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
 
 /**
  * 按智能体配置的子智能体装配（委派位接线，#95）：{@link AgentProfile#EXECUTOR run
- * 执行体} = verify 验证子智能体（#352 独立验证——收口自测位的升级：区别于旧
+ * 执行体} = verify 验证子智能体（#352 独立验证——区别于旧
  * self-test 只读代码跑命令，verify 真浏览器点流程＋查库＋看日志三面对质，
- * 专防「看着能点其实没接通」，是快模型档（spec⑤）质量的验证主力；旧 self-test
- * 概念连代码带词条退役，收口位由本声明独占）；{@code workspaceMode(ISOLATED)}
+ * 专防「看着能点其实没接通」；旧 self-test
+ * 概念连代码带词条退役，收口位由本声明独占；<b>#435 自决化</b>：verify 从
+ * 「收口必查登记」降级为执行体生成过程中<b>自决调用的自测工具</b>——
+ * agent_spawn 通路与本声明保留不变，report_verification 不再是收口要件
+ * 〔验证在场闸缺省关，见 {@code AgentOperationalConfig}〕，自测结果仍进工作
+ * 消息与收尾卡观测〔计量观测面不动〕）；{@code workspaceMode(ISOLATED)}
  * ——框架自带 per-agent 工作区布局：自动创建 {@code agents/<name>/workspace/}、
  * namespace 隔离，隔离根已进非交付目录集 {@code WorkspaceLayout#AGENTS_DIR}，零
  * 新机制；{@link AgentProfile#MAIN 主智能体} 与无配置语境 = 空集（主智能体永不

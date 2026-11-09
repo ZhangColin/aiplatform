@@ -12,10 +12,10 @@ import org.mockito.Mockito;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 
 /**
- * 验证在场硬门（#424）开关化（#433，#432 Step 1 开关承载面）：闸判定接入运营
- * 配置面开关（executor 行 {@code verification_presence_gate_enabled}，缺省 true＝
- * 闸开＝现行为）——行为矩阵锚外部判定：闸开＝本 run 无验证登记抛拒绝回执；
- * 闸关＝无登记也放行（零行为变化的缺省面由闸开例锚定）。
+ * 验证在场硬门（#424）开关化（#433 开关承载面；#435 翻转缺省 false＝闸关）：闸
+ * 判定接入运营配置面开关（executor 行 {@code verification_presence_gate_enabled}）
+ * ——行为矩阵锚外部判定：闸开＝本 run 无验证登记抛拒绝回执（运营切回旧行为）；
+ * 闸关＝无登记也放行（#435 缺省态——砍验证税落地）。
  */
 class VerificationPresenceGateTest {
 
@@ -24,7 +24,7 @@ class VerificationPresenceGateTest {
     private final VerificationPresenceGate gate =
             new VerificationPresenceGate(verificationFacts, agentConfigs);
 
-    /** 闸态装配桩：true＝闸开（缺省）、false＝闸关。 */
+    /** 闸态装配桩：true＝闸开（#435 起为运营切回旧行为）、false＝闸关（缺省态）。 */
     private void givenGateEnabled(boolean enabled) {
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",

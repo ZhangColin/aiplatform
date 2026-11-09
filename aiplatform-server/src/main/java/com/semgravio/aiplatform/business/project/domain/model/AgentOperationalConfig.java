@@ -33,12 +33,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * <p><b>终验修复预算列（#427 整轨终验）</b>：run 执行体行的整轨终验修复 run 预算
  * ——null＝回落代码缺省（两轮）；主智能体/设计执行体行同列恒无消费。</p>
  *
- * <p><b>收口三硬门开关列（#433，#432 Step 1 开关承载面）</b>：验证在场闸
+ * <p><b>收口三硬门开关列（#433 开关承载面，#435 翻转缺省）</b>：验证在场闸
  * （#424）／空转产出证明闸（#420）／整轨终验拦「生成完成」（#427）三件的
- * 独立开关——缺省 true＝闸开＝现行为，false＝该闸跳过；仅 run 执行体行消费
- * （闸判定全部发生在 run 收口路径），主智能体/设计执行体行同列恒无消费。
- * 闸判定处动态查库不缓存——运营面改完下一次闸判定即生效，不发版、进行中
- * run 不定格。</p>
+ * 独立开关——缺省 false＝闸关＝#432 Step 1 砍验证税落地态（秒级确定性探活
+ * 三件套〔8081 探活＋入口文件完整＋git 成版〕为唯一收口要件）；true＝该闸
+ * 生效（运营可一键切回旧行为）。仅 run 执行体行消费（闸判定全部发生在 run
+ * 收口路径），主智能体/设计执行体行同列恒无消费。闸判定处动态查库不缓存——
+ * 运营面改完下一次闸判定即生效，不发版、进行中 run 不定格。</p>
  *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
@@ -60,12 +61,12 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * @param finalVerifyFixBudget       整轨终验修复预算（#427：终验 fail 自动起 fix run 修→
  *                                   复走，耗尽版本照成＋已知缺陷如实呈现；null＝回落代码
  *                                   缺省 2；0＝不起修复 run——合法运营选择）
- * @param verificationPresenceGateEnabled 验证在场闸开关（#433；缺省 true＝闸开——本 run
- *                                   无验证登记不收口；false＝闸跳过）
- * @param proofOfOutputGateEnabled  空转产出证明闸开关（#433；缺省 true＝闸开——段起点
- *                                   以来零 diff 且无确认不收口；false＝闸跳过）
- * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；缺省 true＝闸开
- *                                   ——轨道完成前终验 fail 拦完成叙事；false＝终验不起 run）
+ * @param verificationPresenceGateEnabled 验证在场闸开关（#433；#435 起缺省 false＝闸关——
+ *                                   本 run 无验证登记不收口仅在该闸被运营打开时生效）
+ * @param proofOfOutputGateEnabled  空转产出证明闸开关（#433；#435 起缺省 false＝闸关——段起点
+ *                                   以来零 diff 且无确认被拒仅在该闸被运营打开时生效）
+ * @param finalVerificationGateEnabled 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝
+ *                                   闸关——终验不起 run、不拦完成叙事）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -92,12 +93,13 @@ public record AgentOperationalConfig(
         LocalDateTime updatedAt) {
 
     /**
-     * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、开关全开（路由开＋收口三闸
-     * 开）、无写者——装配解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
+     * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
+     * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、无写者——装配
+     * 解析与留痕前态共用的归一形（null 行先落此形再走生效拼装）。
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, null, null, null, true, true, true, null, null, null);
+                null, null, null, null, false, false, false, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

@@ -209,8 +209,9 @@ class GenerationAppServiceTest {
     }
 
     /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：收口须
-     * 验证在场——converse 桩内调用即「verify 已跑并登记」；按工作区登记一次
+     * 模拟 verify 子智能体轮内登记（#424 片轻验；#435 起验证非收口要件、观测面
+     * 不动）：登记仍进验证统计（收尾卡事实源）——converse 桩内调用即「verify 已
+     * 跑并登记」；按工作区登记一次
      * （run 起跑清残留后逐 run 重登，多尝试不虚增复验轮次）。零验证场景的测试
      * 不调用本位（如 {@code given_zero_verification_slice_...}）。
      */
@@ -222,8 +223,8 @@ class GenerationAppServiceTest {
     }
 
     /**
-     * 链式收口脚本（thenThrow/thenReturn 链的带验证登记形，#424 常开硬门后收口须
-     * 在场）：第 n 次调用按序取 outcomes（{@link AgentReply}＝成功回复〔先登记
+     * 链式收口脚本（thenThrow/thenReturn 链的带验证登记形，登记仍作观测面——
+     * #435 起非收口要件）：第 n 次调用按序取 outcomes（{@link AgentReply}＝成功回复〔先登记
      * verify〕、{@link RuntimeException}＝该次失败）；超出链长重复末位（Mockito
      * 链语义同形）。
      */
@@ -713,7 +714,7 @@ class GenerationAppServiceTest {
         Long projectId = persistedProject("9830");
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        // #424 常开硬门：链式脚本走带验证登记形（成功回复轮先登记 verify）
+        // #424 观测面：链式脚本走带验证登记形（成功回复轮先登记 verify）
         givenConverseChain(
                 new AgentReply("run-s0", "阶段0交接"),
                 new IllegalStateException("切片1中断"),
@@ -1762,10 +1763,11 @@ class GenerationAppServiceTest {
 
     @Test
     void given_zero_verification_adjudication_when_close_then_rejected_then_verified_merges() {
-        // #424 裁决轨同盖（常开无豁免）：合并冲突裁决 run 改主工作区后零验证收口
+        // #424 裁决轨同盖（闸开无豁免——本用例经 givenClosingGatesOpen 切回）：合并冲突裁决 run 改主工作区后零验证收口
         // 同样被拒——拒绝回执喂回裁决 run，补验（裁决后系统两侧功能走得通）后照常
         // 合并闭片（裁决天然有产出，产出证明闸不适用；验证在场按主工作区键判）
         Long projectId = persistedProject("9876");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
         when(workspaceLifecycleAppService.exec(any(), any())).thenAnswer(invocation -> {
@@ -2402,6 +2404,27 @@ class GenerationAppServiceTest {
     // ---------- 产出证明闸（#420 空转片防呆：零 diff＋无「能力已存在」确认＝结构性拒绝） ----------
 
     /**
+     * 三闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行三开关
+     * true＝#424/#420/#427 现行为（产出证明/验证在场拒绝—补做链路与整轨终验的
+     * 既有用例承载面）。砍税缺省面由 given_presence_and_proof_gates_closed_.../
+     * given_final_verification_gate_closed_... 锚定。
+     */
+    private void givenClosingGatesOpen() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     verification_presence_gate_enabled, proof_of_output_gate_enabled,
+                     final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    verification_presence_gate_enabled
+                        = EXCLUDED.verification_presence_gate_enabled,
+                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
+                """);
+    }
+
+    /**
      * 产出证明探针脚本位（#420）：key＝工作区（并行波下 fork 副本各跑各的闸——
      * 按工作区隔离不串扰）、true＝零 diff 空转、缺省 false＝有产出。
      */
@@ -2442,6 +2465,7 @@ class GenerationAppServiceTest {
         // 进同 run 现场（重试 prompt 携带「产出证明未过」与补做指引），执行体补做
         // （动了文件）后正常收口；空转拒绝史随收尾卡判别标注如实呈现
         Long projectId = persistedProject("9837");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2493,6 +2517,7 @@ class GenerationAppServiceTest {
         // 新通道），重跑轮仍空转→转终态 run-failed；逐尝试档位经既有路由「重试／
         // 回滚重跑升档」信号自动升档（attempt+1／round+1——flash→pro，路由面零改动）
         Long projectId = persistedProject("9839");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2537,6 +2562,7 @@ class GenerationAppServiceTest {
         // 自动升档（attempt≥2 重试升档、round 2 回滚重跑升档：flash→pro），失败面
         // attempts[].modelId 可归因（#418 落库面承载——平台分析口径）
         Long projectId = persistedProject("9840");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2570,6 +2596,7 @@ class GenerationAppServiceTest {
         // 回执喂回 fork run 同 run 补做；补做后照常合并闭片。脚本位按工作区隔离
         // （并行波内另一 fork 片不受串扰）
         Long projectId = persistedProject("9842");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
@@ -2610,6 +2637,7 @@ class GenerationAppServiceTest {
         // 干完的薄片，走豁免路径正常收口——豁免依据落收尾卡判别标注；真·薄片
         // （diff＞0 干活）不携带标注（阶段 0 即此形——正常收口无 proofOfOutput）
         Long projectId = persistedProject("9838");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2655,7 +2683,7 @@ class GenerationAppServiceTest {
         assertThat(stage0Closing).doesNotContainKey(CoderRunAttempts.CLOSING_PROOF_FIELD);
     }
 
-    // ---------- 验证在场硬门（#424 片轻验常开：本 run 无验证登记不准收口） ----------
+    // ---------- 验证在场硬门（#424；#433 开关化、#435 缺省闸关——闸开用例显式切回） ----------
 
     @Test
     @SuppressWarnings("unchecked")
@@ -2663,8 +2691,10 @@ class GenerationAppServiceTest {
         // #424 AC①：本 run 无验证登记（verify 未跑/未报——锚案 s5/s8 零验证形态）的
         // 收口被结构性拒绝——拒绝回执进同 run 现场（重试 prompt 携带「验证在场未过」
         // 与起验指引：自报本片验收要点委派 verify），执行体补跑验证（登记）后正常
-        // 收口；验证统计随收尾卡如实呈现（常开硬门下「该片零验证」结构性不可能）
+        // 收口；验证统计随收尾卡如实呈现（闸开用例显式承载——缺省闸关面由
+        // given_no_agent_config_row_..._default_closed_completes_normally 锚定）
         Long projectId = persistedProject("9843");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2718,6 +2748,7 @@ class GenerationAppServiceTest {
         // #424 fork 片同盖：fork 内零验证收口同样被拒（事实按 fork 工作区键隔离——
         // 另一 fork 不串扰），拒绝回执喂回 fork run 补验后照常合并闭片
         Long projectId = persistedProject("9844");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
         when(workspaceLifecycleAppService.fork(anyString())).thenReturn("9001", "9002");
@@ -2822,6 +2853,7 @@ class GenerationAppServiceTest {
         // 前，以核心旅程清单为轴起终验 run（真浏览器跨片旅程由 verify 子智能体承载
         // ——编排测试证编排事实：终验 run 在场、载荷带旅程清单、过验才落位）
         Long projectId = persistedProject("9890");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         givenConverseSucceeds("完成");
@@ -2903,6 +2935,36 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_no_agent_config_row_when_idle_unverified_slice_then_default_closed_completes_normally() {
+        // #435 缺省翻转（编排缝）：零配置行＝三闸缺省关——零验证登记＋零 diff 的
+        // 空转未验片照常收口、journeys 在场也不起终验 run（秒级探活三件套是唯一
+        // 收口要件）；运营切回旧行为面由 givenClosingGatesOpen 系用例锚定
+        Long projectId = persistedProject("9899");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenWorkspaceGitReadyWithProofScript();
+        // 不登记验证（verifyRan 不调用）＋脚本位零 diff
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, JOURNEY_PLAN);
+
+        // 阶段 0 + 切片×2 收口即完成——无拒绝重试（闸缺省关不喂回）、无终验 run
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues()).noneMatch(command -> command.sessionId()
+                .contains(TrackFinalVerificationAppService.FINAL_VERIFY_SESSION_INFIX));
+        assertThat(generatedAt(projectId)).as("缺省闸关：完成叙事不拦，generated_at 落位").isNotNull();
+    }
+
+    @Test
     void given_final_verification_gate_closed_when_track_completes_then_no_verify_run_and_completed_with_slice_anchor() {
         // #433 开关化行为矩阵（闸关态）：journeys 在场也不起终验 run——「生成完成」
         // 不被拦，generated_at 照常落位（成版锚＝最深收口片 run，#427 前形态）、
@@ -2944,6 +3006,7 @@ class GenerationAppServiceTest {
         // #427 AC②：终验 fail 拦「生成完成」叙事→失败项自动起终验修复 run（载荷＝
         // 失败项清单）→修复收口后复走终验（防修 A 坏 B）→复走过验才落 generated_at
         Long projectId = persistedProject("9892");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
         AtomicBoolean fixDone = new AtomicBoolean();
@@ -3010,6 +3073,7 @@ class GenerationAppServiceTest {
         // #427 AC③：修复预算（缺省两轮）耗尽——版本照成（generated_at/Demo v1 落位）
         // ＋已知缺陷清单如实进完成叙事与收尾卡（closing.knownDefects——前端如实呈现）
         Long projectId = persistedProject("9893");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
         AtomicInteger verifyRounds = new AtomicInteger();
@@ -3086,10 +3150,11 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs
                     (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     final_verify_fix_budget)
-                VALUES ('executor', TRUE, TRUE, TRUE, 0)
+                     final_verify_fix_budget, final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, 0, TRUE)
                 ON CONFLICT (agent_key) DO UPDATE SET
-                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget
+                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget,
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
                 """);
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
@@ -3131,10 +3196,11 @@ class GenerationAppServiceTest {
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs
                     (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
-                     final_verify_fix_budget)
-                VALUES ('executor', TRUE, TRUE, TRUE, 0)
+                     final_verify_fix_budget, final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, 0, TRUE)
                 ON CONFLICT (agent_key) DO UPDATE SET
-                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget
+                    final_verify_fix_budget = EXCLUDED.final_verify_fix_budget,
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
                 """);
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
@@ -3189,6 +3255,7 @@ class GenerationAppServiceTest {
         // #427 终态路径：终验 run 重试耗尽＝轨道失败（run-failed 已发、generated_at
         // 不落位——「生成完成」叙事被拦）；用户「继续生成」复走终验（片全收口即重终验）
         Long projectId = persistedProject("9896");
+        givenClosingGatesOpen();
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReady();
         AtomicBoolean verifyBroken = new AtomicBoolean(true);
@@ -3233,9 +3300,11 @@ class GenerationAppServiceTest {
                 .contains("入口文件")
                 .contains(ProjectFiles.BASELINE_ENTRY)
                 .contains("其余代码略")
-                // #424 片轻验常开：起验自报验收要点＋验证在场硬门＋修复—复验轮次预算
+                // #435 verify 自决化：验证降为自决建议（report_verification 不再是收口
+                // 要件；闸态以平台回执为准）＋自报验收要点＋修复—复验轮次预算
                 .contains("自报本片验收要点")
-                .contains("无 report_verification 登记不准收口")
+                .contains("验证不是收口要件")
+                .contains("闸态以平台回执为准")
                 .contains("轮次预算");
     }
 
@@ -3275,8 +3344,8 @@ class GenerationAppServiceTest {
                 .containsEntry("systemChanged", true)
                 .containsEntry("systemNote", "完成切片：用户能注册登录");
         assertThat(sliceClosing).doesNotContainKey("prdNote");
-        // #424 片轻验常开后收口必带验证在场（verifyRan 脚本位登记）——统计呈现随
-        // 新载荷口径一致（旧「验证未登记可缺省」形在收口路径结构性出局）
+        // #424 观测面：verifyRan 脚本位登记进收尾卡验证统计——统计呈现随新载荷
+        // 口径一致（#435 起登记非收口要件，但登记的统计照实呈现）
         assertThat((Map<String, Object>) sliceClosing.get(AgentEventTypes.VERIFICATION_FIELD))
                 .containsEntry(AgentEventTypes.VERIFICATION_TOTAL_FIELD, 1)
                 .containsEntry(AgentEventTypes.VERIFICATION_ROUNDS_FIELD, 1);

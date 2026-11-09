@@ -161,7 +161,8 @@ class IterationAppServiceTest {
     }
 
     /**
-     * 模拟 verify 子智能体轮内登记（#424 片轻验常开硬门后的缺省脚本位）：更新轨
+     * 模拟 verify 子智能体轮内登记（#424 片轻验；#435 起验证非收口要件、观测面
+     * 不动）：更新轨
      * 收口须验证在场——coder 会话登记一次（run 起跑清残留后逐 run 重登）。零验证
      * 场景的测试不调用本位。
      */
@@ -520,7 +521,7 @@ class IterationAppServiceTest {
         List<Runnable> tracks = givenTrackQueued();
         // 首试正常返回但不调 finish_edit（脚本化「模型忘了收口」）→ 判未正常收口、
         // 按既有重试口径续试；重试轮调了 → 正常收口（首试隔离 finish_edit 缺失：验证
-        // 已在场——#424 常开硬门不先于 finish_edit 事实拒）
+        // 已在场——#424 在场闸不先于 finish_edit 事实拒）
         when(agentClient.converse(any(), any()))
                 .thenAnswer(invocation -> {
                     AgentCommand first = invocation.getArgument(0);
@@ -556,9 +557,10 @@ class IterationAppServiceTest {
 
     @Test
     void given_zero_verification_fix_run_when_close_then_rejected_refed_back_then_verified_closes() {
-        // #424 更新轨同盖（片轻验常开）：修正 run 零验证收口被结构性拒绝——拒绝回执
+        // #424 更新轨同盖（闸开用例经 givenClosingGatesOpen 显式切回）：修正 run 零验证收口被结构性拒绝——拒绝回执
         // 喂回同 run（先于 finish_edit 事实消费，事实连续不丢），补验后正常收口
         Long projectId = persistedGeneratedProject("9931");
+        givenClosingGatesOpen();
         List<Runnable> tracks = givenTrackQueued();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
@@ -847,6 +849,25 @@ class IterationAppServiceTest {
 
     // ---------- 产出证明闸（#420 空转片防呆：更新轨同盖——迭代/fix run 不重新引入空转收口） ----------
 
+    /**
+     * 三闸切回旧行为（#435 缺省闸关——闸开用例显式开闸）：直写 executor 行三开关
+     * true＝#424/#420/#427 现行为（更新轨拒绝—补做链路与复走终验的既有用例承载面）。
+     */
+    private void givenClosingGatesOpen() {
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs
+                    (agent_key, web_search_enabled, fetch_url_enabled, routing_enabled,
+                     verification_presence_gate_enabled, proof_of_output_gate_enabled,
+                     final_verification_gate_enabled)
+                VALUES ('executor', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE)
+                ON CONFLICT (agent_key) DO UPDATE SET
+                    verification_presence_gate_enabled
+                        = EXCLUDED.verification_presence_gate_enabled,
+                    proof_of_output_gate_enabled = EXCLUDED.proof_of_output_gate_enabled,
+                    final_verification_gate_enabled = EXCLUDED.final_verification_gate_enabled
+                """);
+    }
+
     /** 段起点捕获桩的假 hash（hex 形态，过版本层引用校验）。 */
     private static final String FAKE_SEGMENT_START = "a1b2c3d4e5f6";
 
@@ -878,6 +899,7 @@ class IterationAppServiceTest {
         // 拒绝——拒绝回执进同 run 现场；补验证（确认「能力已存在」）后走豁免路径
         // 正常收口，拒绝史＋豁免依据均随收尾卡判别标注
         Long projectId = persistedGeneratedProject("9940");
+        givenClosingGatesOpen();
         List<Runnable> tracks = givenTrackQueued();
         givenWorkspaceGitReadyWithProofScript();
         AtomicInteger converseCalls = new AtomicInteger();
@@ -932,6 +954,7 @@ class IterationAppServiceTest {
         // #420 空转拒绝耗尽（更新轨既有失败处置——无段级回滚钩，终态 run-failed 走
         // 恢复出口，不建新通道）：失败面错误现场携拒绝回执（可归因「为何没修成」）
         Long projectId = persistedGeneratedProject("9941");
+        givenClosingGatesOpen();
         List<Runnable> tracks = givenTrackQueued();
         givenWorkspaceGitReadyWithProofScript();
         idleProof.set(true);
@@ -1426,6 +1449,7 @@ class IterationAppServiceTest {
         // run 修好了意见项但走坏了核心旅程 → 复走终验抓到（fail）→ 自动起终验修复
         // run（载荷＝失败项清单）→ 复走过验，轨道才收工
         Long projectId = persistedGeneratedProject("9970");
+        givenClosingGatesOpen();
         givenCurrentJourneys(projectId, "买家", "首页", "注册登录→浏览商品→下单支付");
         List<Runnable> tracks = givenTrackQueued();
         // 终验/修复 run 的收口探针（8081 探活＋入口完整）——探针命令全通

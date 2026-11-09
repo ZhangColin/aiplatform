@@ -29,10 +29,12 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
  * 整类跳过，对偶 {@link ModelRoutingFileCountProbeLiveTest} 口径）：
  *
  * <ul>
- * <li><b>产出证明闸·闸开</b>：段起点以来零 diff（基线已提交、无新文件）且无确认
+ * <li><b>产出证明闸·闸开</b>（运营切回旧行为）：段起点以来零 diff（基线已提交、无新文件）且无确认
  *     → {@code proof()} 抛拒绝回执（空转片结构性拒绝，真 git diff 探针）；补一个
  *     应用文件提交 → 新判定件 {@code proof()} 放行——探针在真容器里的 shell 形
  *     本身两态都被锚到；</li>
+ * <li><b>缺省态（#435）</b>：无配置行＝三闸缺省关——零 diff 与无登记均直放行
+ *     （砍验证税落地态的 live 面锚定）；</li>
  * <li><b>产出证明闸·闸关</b>（executor 行 {@code proof_of_output_gate_enabled}=
  *     false，运营面直写）——同现场零 diff 直放行（不抛、无拒绝史标注）；</li>
  * <li><b>验证在场闸·两态</b>：闸开无登记抛拒绝回执、有登记放行；闸关无登记也
@@ -107,7 +109,15 @@ class ClosingGatesSwitchLiveTest {
         exec("cd /workspace && printf 'baseline\\n' > README.md"
                 + " && git add -A && git commit -qm baseline");
 
-        // ---------- 闸开（缺省＝现行为）：两闸都拦 ----------
+        // ---------- 缺省态（#435：无配置行＝三闸缺省关＝砍验证税落地） ----------
+        // 零 diff 现场：产出证明闸缺省关直放行（不跑段起点探针）；验证在场闸缺省关
+        // 无登记也放行——两闸外部判定面都锚到缺省态
+        assertThat(proofGate.forRun(Long.parseLong(workspaceId)).proof())
+                .as("缺省闸关·零 diff：放行（#435 砍验证税落地态）").isNull();
+        assertThatCode(() -> presenceGate.requirePresence(workspaceKey))
+                .as("缺省闸关·无登记：放行").doesNotThrowAnyException();
+
+        // ---------- 闸开（运营切回旧行为）：两闸都拦 ----------
         givenGateSwitches(true, true);
 
         // 产出证明·零 diff（基线提交后无新文件）：结构性拒绝（真 git diff 探针）
@@ -143,8 +153,8 @@ class ClosingGatesSwitchLiveTest {
         assertThatCode(() -> presenceGate.requirePresence(workspaceKey))
                 .as("闸关·无登记：放行").doesNotThrowAnyException();
 
-        // 整轨终验闸·闸关（final_verification_gate_enabled 缺省 TRUE——本节只写两
-        // 列开关，终验列保持缺省闸开；直写终验列= false 复用同一通道）： journeys
+        // 整轨终验闸·显式闸关（final_verification_gate_enabled #435 起列缺省 FALSE——
+        // 本节仍直写终验列= false 显式锚跳过形语义）： journeys
         // 在场也不起终验 run、不拦「生成完成」——返回跳过形（无 verifyRunId、
         // 无 run 终态失败）。闸开态＝现行为面由 GenerationAppServiceTest 编排缝
         // 锚定（起终验 run 需真智能体边界，live 车道不重复承载）
@@ -162,7 +172,7 @@ class ClosingGatesSwitchLiveTest {
         assertThat(result.verifyRunId()).as("闸关·终验跳过形：不起终验 run（无锚）").isNull();
     }
 
-    /** 运营面开关直写（live 面不发版切态的唯一通道；缺省行缺省 true＝闸开）。 */
+    /** 运营面开关直写（live 面不发版切态的唯一通道；#435 起无行＝缺省闸关）。 */
     private void givenGateSwitches(boolean presenceEnabled, boolean proofEnabled) {
         jdbcTemplate.update("""
                 INSERT INTO prj_agent_configs

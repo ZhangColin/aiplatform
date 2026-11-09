@@ -157,7 +157,8 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
 
     // systemPrompt 即执行协议（#22）：平台技术约定 + 读 PRD 自主实现 + 起服节奏
     // （#44 尽早起、增量演进）+ 收口判据 + 直播自述口径（解说生产 = 智能体自述
-    // 为主，解说部件承载）。
+    // 为主，解说部件承载）+ 命令纪律（#440：容器命令一律单引号、禁内嵌双引号与
+    // $()——执行层 fail-fast 正本在 DockerExecFilesystem ①族守卫，提示层先行）。
     // #341 Demo 阶段快模型档：本座承载 Demo 阶段全部任务——首 Demo（PRD 确认触发
     // 的首个生成 run）与迭代（更新 run）——缺省档＝快模型档（spec⑤「Demo 阶段激进
     // 用快模型，质量靠验证兜底」；Demo 与正式生产同轨同协议，档位在既有智能体运营
@@ -240,6 +241,14 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + " 工具把它写成技能草稿（name/description/body 三参数），供后续项目"
                     + "复用——后台审核采纳后才全局生效，未审核不影响任何项目。确实没有"
                     + "可沉淀的模式就不调用，不为凑数硬写。\n"
+                    + "12. 命令纪律（容器 shell 硬约束）：经 execute 跑的容器命令一律单引号"
+                    + "形态——字符串一律单引号包裹、禁内嵌双引号、禁 $( ) 命令替换；多行"
+                    + "内容用 write_file 写文件、不用 heredoc 拼命令；取 .env 配置值用"
+                    + " set -a; . /workspace/.env; 后无引号引用 $VAR（值无空白时安全）。"
+                    + "违反会被执行层当场拒绝（秒级报错、按报错指引改写重试即可，不是"
+                    + "终态错误）——这是 Windows 宿主 JVM→docker.exe argv 编码链的平台性"
+                    + "约束（#440 ①族）：双引号被剥后 sh 引号不配对会从 stdin 无界挂死，"
+                    + "先拒绝是救你的时间。\n"
                     + "全程使用中文。"),
 
     // systemPrompt 即设计工作协议（#289 设计执行体槽位，ADR-0025）：按设计物产出

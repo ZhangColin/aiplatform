@@ -101,6 +101,21 @@ class AgentProfileTest {
     }
 
     @Test
+    void given_executor_prompt_when_shell_command_then_quote_discipline_clause() {
+        // #440 提示层（短平快）：容器命令一律单引号形态、禁内嵌双引号与 $()——
+        // 违反会被执行层拒绝（fail-fast 正本在 DockerExecFilesystem ①族守卫）；
+        // 条款须带改写指引与「拒绝后重试即可」口径（拒命不是终态错误）
+        String prompt = AgentProfile.EXECUTOR.systemPrompt();
+        assertThat(prompt)
+                .contains("单引号")
+                .contains("禁内嵌双引号")
+                .contains("$(")
+                .contains("执行层")
+                .contains("拒绝")
+                .contains("#440");
+    }
+
+    @Test
     void given_main_prompt_when_capability_boundary_then_discipline_and_inventory_present() {
         // #216 能力边界正本：纪律条款（禁无验证的平台级断言 + 如实描述替代路径）+
         // 终态能力清单（抓取/调研/问答等全部已具备能力的边界描述终稿）

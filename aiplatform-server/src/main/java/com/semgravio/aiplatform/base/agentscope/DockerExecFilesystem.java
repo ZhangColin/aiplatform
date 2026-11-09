@@ -65,6 +65,13 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     private static final int SHELL_DEFAULT_TIMEOUT_SECONDS = 120;
     /** shell 输出上限（字符）：超出截断置 truncated（防超长输出打爆模型上下文）。 */
     private static final int SHELL_OUTPUT_LIMIT = 100_000;
+    /**
+     * ①族守卫拒命的合成退出码（#440）：平台侧拒绝、容器从未执行。刻意避开本缝
+     * 已有码位语义——124＝{@link DockerExecCommand} 超时、125-127＝docker 自有
+     * （daemon 错/不可执行/命令不存在）；见 250 必为守卫拒命，与容器退出码的
+     * 最终区分以输出文案前缀「命令被平台拒绝执行（#440 …）」为准。
+     */
+    static final int SHELL_GUARD_REJECTED_EXIT_CODE = 250;
 
     /**
      * 框架内部状态根（工作区卷内、非交付目录）：框架压缩链 memory/、
@@ -80,6 +87,8 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
 
     private final ExecCommand exec;
     private final String id;
+    /** Windows 宿主判定（#440 ①族守卫开关，构造时定型）：os.name 条件化。 */
+    private final boolean windowsHost;
 
     public DockerExecFilesystem(String containerName) {
         this(new DockerExecCommand(containerName, AgentWorkspace.ProjectDev.CONTAINER_ROOT),
@@ -90,9 +99,19 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         this(exec, "docker-exec");
     }
 
+    /** 测试缝：显式注入宿主形态（Windows/Linux 两形态行为各测，OS 无关）。 */
+    DockerExecFilesystem(ExecCommand exec, boolean windowsHost) {
+        this(exec, "docker-exec", windowsHost);
+    }
+
     private DockerExecFilesystem(ExecCommand exec, String id) {
+        this(exec, id, isWindowsHostOs());
+    }
+
+    private DockerExecFilesystem(ExecCommand exec, String id, boolean windowsHost) {
         this.exec = exec;
         this.id = id;
+        this.windowsHost = windowsHost;
     }
 
     /**
@@ -380,11 +399,28 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
      * shell 命令执行（ShellExecuteTool 通道）：命令由 harness 侧拼好（可含
      * {@code cd <相对workdir> && …}，docker exec -w 已锚定工作区根），原样执行、
      * 不再包一层引号；stdout/stderr 合并输出（harness 以 Exit code + 全文回给模型），
-     * 超限截断置 truncated。退出码如实透传——失败表达归模型侧，不在此改写。
+     * 超限截断置 truncated。容器结果退出码如实透传——失败表达归模型侧，不在此改写
+     * （唯一例外：①族守卫拒命的合成码，见下）。
+     *
+     * <p><b>①族守卫（#440，Windows 宿主限定）</b>：智能体自产命令先过
+     * {@link #windowsArgvViolation} fail-fast——内嵌双引号或 {@code $(} 命令替换
+     * 即拒（合成退出码 {@link #SHELL_GUARD_REJECTED_EXIT_CODE} + 改写指引文案，
+     * 不触容器缝），把「sh 引号不配对从 stdin 无界挂死」（#434 排练实测 35 分钟/
+     * 次）变秒级可重试错误。平台性口径与 {@code DockerEnvironmentBackend} 的
+     * WSP_018 防呆同族（os.name 条件化：Linux execve 原样传 argv，守卫不启用）。
+     * 文件面命令全平台自产（单引号形态，①族纪律内），不在守卫范围。</p>
      */
     @Override
     public ExecuteResponse execute(RuntimeContext runtimeContext, String command,
             Integer timeoutSeconds) {
+        if (windowsHost) {
+            String violation = windowsArgvViolation(command);
+            if (violation != null) {
+                log.warn("[#440] 拒绝智能体命令（{}）: {}", violation, command);
+                return new ExecuteResponse(guardRejectMessage(violation),
+                        SHELL_GUARD_REJECTED_EXIT_CODE, false);
+            }
+        }
         int timeout = timeoutSeconds != null && timeoutSeconds > 0
                 ? timeoutSeconds : SHELL_DEFAULT_TIMEOUT_SECONDS;
         ExecOutput out = exec.run(command, null, timeout);
@@ -401,6 +437,46 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
     }
 
     // ---------- 内部 ----------
+
+    /**
+     * 宿主是否 Windows（#440 守卫判定，与
+     * {@code DockerEnvironmentBackend#isWindowsHost} 同口径孪生）：os.name 含
+     * "win"。①族 argv 双引号问题是任何 Windows JVM→docker.exe 链的平台性确定
+     * 行为；Linux execve 逐字节原样传 argv、生产免疫——守卫必须本判定条件化。
+     */
+    static boolean isWindowsHostOs() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    /**
+     * ①族违规判据（#440，仅 Windows 宿主调用）：智能体命令含
+     * <b>内嵌双引号</b>（argv 编码链必剥 → sh 引号不配对无界挂死，#399 同族）或
+     * <b>{@code $(} 命令替换</b>（与引号嵌套是引号不配对的头号来源，①族纪律
+     * 禁用）即返回违规名；合规（单引号形态）返回 null。
+     */
+    private static String windowsArgvViolation(String command) {
+        if (command.contains("\"")) {
+            return "内嵌双引号";
+        }
+        if (command.contains("$(")) {
+            return "$( ) 命令替换";
+        }
+        return null;
+    }
+
+    /** 拒命文案：违规点名 + 改写指引（模型按此改写重试即可自愈）。 */
+    private static String guardRejectMessage(String violation) {
+        String rewrite = "内嵌双引号".equals(violation)
+                ? "字符串一律用单引号包裹（路径/正则同理），多行内容用 write_file 写文件、不要用 "
+                        + "heredoc 拼命令"
+                : "步骤用 && / 管道直接串联；取 .env 配置值用 set -a; . /workspace/.env; "
+                        + "后无引号引用 $VAR（值无空白时安全）";
+        return "命令被平台拒绝执行（#440 ①族守卫）：命令含" + violation + "。"
+                + "Windows 宿主的 JVM→docker.exe argv 编码链会剥掉双引号，sh 引号不配对将"
+                + "从 stdin 无界挂死（#399 同族，#434 排练实测单点挂死 35 分钟）。"
+                + "改写后重试：" + rewrite + "；容器命令一律单引号形态、禁内嵌双引号、"
+                + "禁 $( ) 命令替换。本命令未执行。";
+    }
 
     /** 覆盖写（write 的 create-only 语义之外的内通道：edit 回写 / upload）。 */
     private WriteResult put(String filePath, byte[] content) {

@@ -399,4 +399,64 @@ class DockerExecFilesystemTest {
         assertThat(resp.output()).hasSize(100_000);
         assertThat(resp.truncated()).isTrue();
     }
+
+    // ---------- ①族守卫（#440：智能体自产命令 Windows argv fail-fast） ----------
+
+    @Test
+    void given_windows_host_when_shell_command_has_embedded_quote_then_rejected_fail_fast_with_rewrite_guidance() {
+        DockerExecFilesystem windowsFs = new DockerExecFilesystem(exec, true);
+
+        // #434 排练实测原形的挂死命令：内嵌双引号（\.env|AGENTS|DESIGN 正则族）
+        var resp = windowsFs.execute(RuntimeContext.empty(),
+                "grep -E \"\\.env|AGENTS\" '/workspace/docs/PRD.md'", 30);
+
+        assertThat(resp.exitCode())
+                .isEqualTo(DockerExecFilesystem.SHELL_GUARD_REJECTED_EXIT_CODE);
+        assertThat(resp.output())
+                .contains("#440")
+                .contains("单引号")
+                .contains("未执行");
+        assertThat(resp.truncated()).isFalse();
+        // fail-fast：容器命令缝一次都没碰（不会 spawn、不会挂死）
+        assertThat(exec.commands).isEmpty();
+    }
+
+    @Test
+    void given_windows_host_when_shell_command_has_command_substitution_then_rejected() {
+        DockerExecFilesystem windowsFs = new DockerExecFilesystem(exec, true);
+
+        var resp = windowsFs.execute(RuntimeContext.empty(), "s=$(stat -c %s 'f')", 30);
+
+        assertThat(resp.exitCode())
+                .isEqualTo(DockerExecFilesystem.SHELL_GUARD_REJECTED_EXIT_CODE);
+        assertThat(resp.output())
+                .contains("$(")
+                .contains("#440");
+        assertThat(exec.commands).isEmpty();
+    }
+
+    @Test
+    void given_windows_host_when_single_quote_command_then_passthrough() {
+        DockerExecFilesystem windowsFs = new DockerExecFilesystem(exec, true);
+        exec.responder = c -> new ExecOutput(0, "ok".getBytes(StandardCharsets.UTF_8), "");
+
+        var resp = windowsFs.execute(RuntimeContext.empty(), "grep -E '\\.env' '/workspace/docs/PRD.md'", 30);
+
+        // 单引号纪律形态不拦：改写重试后的成功路径照常到达容器缝
+        assertThat(exec.commands).containsExactly("grep -E '\\.env' '/workspace/docs/PRD.md'");
+        assertThat(resp.exitCode()).isEqualTo(0);
+        assertThat(resp.output()).isEqualTo("ok");
+    }
+
+    @Test
+    void given_non_windows_host_when_same_violating_command_then_passthrough_unchanged() {
+        DockerExecFilesystem linuxFs = new DockerExecFilesystem(exec, false);
+        exec.responder = c -> new ExecOutput(0, "ok".getBytes(StandardCharsets.UTF_8), "");
+
+        var resp = linuxFs.execute(RuntimeContext.empty(), "grep -E \"\\.env\" f", 30);
+
+        // Linux execve 原样传 argv、双引号合法——守卫必须 os.name 条件化，不得一刀切
+        assertThat(exec.commands).containsExactly("grep -E \"\\.env\" f");
+        assertThat(resp.exitCode()).isEqualTo(0);
+    }
 }

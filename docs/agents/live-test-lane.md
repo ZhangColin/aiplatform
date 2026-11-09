@@ -29,8 +29,8 @@ live 车道（`-P live`）只在本机手跑、CI 永不执行——缝被改而
 - **平台性确定**：Windows 上 Java `ProcessBuilder` 走 `CreateProcess` 平面命令行、对参数内嵌 `"` 不转义；docker.exe（Go/MSVCRT 规则）重切 argv 时把引号吃掉，`sh -c` 命令**静默变形**。这是任何「Windows JVM→docker.exe」链的确定行为，**换机不消失**，不是单机怪癖。
 - **生产免疫**：Linux `execve` 传 argv 数组逐字节原样，`sh -c` 内双引号是合法常用写法——生产不受影响。
 - **因此防呆必须 `os.name` 条件化**（`DockerEnvironmentBackend.isWindowsHost`）：Linux 不得一刀切禁双引号。`runCapture`/`runCaptureBinary` 在 Windows 下对含内嵌双引号的参数 **fail-fast**（WSP_018，文案指路 #399）。
-- **命令书写纪律**：进容器的 shell 命令一律**单引号**形态——多行内容用 heredoc 单引号定界（`<<'EOF'`，见 `WorkspaceWakeupLiveTest.WRITE_SERVER_JS`、`PreviewGatewaySmokeTest` 的 HTML 落盘），SQL 字符串字面量用 PG 美元引号（`$q$…$q$`）避免嵌套单引号；shell 变量中间层消灭（路径 Java 侧单引号内联，派生路径 Java 侧算，见 `ContainerCommands`），唯一合法例外是 stat 纯数字回执（`s=$(stat -c %s '…')` 后 `$s` 无引号用——数字无空白/元字符）。
-- **守卫边界**：防呆只盖 `EnvironmentBackend` 缝（`DockerEnvironmentBackend` 的全部 spawn 点）。AgentScope 的 `DockerExecFilesystem.DockerExecCommand` 是**独立 spawn 缝、不设防**——智能体（LLM）自写命令合法需要双引号（`"$VAR"`、`$(…)` 惯用法），防了就不可重写；其 Windows 变形是另一条线的问题（提示词侧教词适配，另行立项）。
+- **命令书写纪律**：进容器的 shell 命令一律**单引号**形态——多行内容用 heredoc 单引号定界（`<<'EOF'`，见 `WorkspaceWakeupLiveTest.WRITE_SERVER_JS`、`PreviewGatewaySmokeTest` 的 HTML 落盘），SQL 字符串字面量用 PG 美元引号（`$q$…$q$`）避免嵌套单引号；shell 变量中间层消灭（路径 Java 侧单引号内联，派生路径 Java 侧算，见 `ContainerCommands`），唯一合法例外是 stat 纯数字回执（`s=$(stat -c %s '…')` 后 `$s` 无引号用——数字无空白/元字符）。**本条与例外均指平台自产命令缝**——智能体面（`DockerExecFilesystem.execute()`）`$(` 一律禁用、无例外（#440 守卫即拒；取 .env 值用 `set -a; . …env;` 后无引号引用 `$VAR` 的合规形态）。
+- **守卫边界**：防呆盖两条 spawn 缝——① 平台自产命令：`EnvironmentBackend` 缝（`DockerEnvironmentBackend` 的全部 spawn 点，WSP_018 抛异常）；② 智能体自产命令：`DockerExecFilesystem.execute()` 壳面（#440——#434 排练实测智能体经 ShellExecuteTool 下发的 `grep -E "\.env|…"` 无守卫、引号剥后无界挂死 35 分钟；Windows 下同口径 fail-fast：内嵌双引号与 `$(` 即拒，回合成退出码 250〔刻意避开 124 超时与 125-127 docker 自有带〕+ 改写指引文案，不触容器缝）。两守卫都 `os.name` 条件化（Linux execve 免疫不启用）。
 
 ## ②族：Windows 管道排水（#400 家族的测试侧漏网）
 

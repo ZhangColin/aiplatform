@@ -115,6 +115,21 @@ class ProfileSubagentSupplierTest {
     }
 
     @Test
+    void given_verify_body_when_built_then_psql_idiom_compliant_with_quote_discipline() {
+        // #440 ①族纪律落到 verify 教学命令：psql 连接串不得走 "$()"（会被执行层
+        // 拒命）——经 source .env 进变量无引号引用；正文须带单引号纪律条目
+        //（verify 同样经 execute 跑命令，教学形态必须自身合规）
+        SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
+
+        assertThat(declaration.getInlineAgentsBody())
+                .contains("set -a")
+                .contains("$DATABASE_URL")
+                .contains("单引号")
+                .doesNotContain("\"$(");
+    }
+
+    @Test
     void given_verify_tools_when_built_then_three_faces_plus_registration_no_executor_closure() {
         SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);

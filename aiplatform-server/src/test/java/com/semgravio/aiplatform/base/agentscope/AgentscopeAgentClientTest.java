@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -641,6 +642,38 @@ class AgentscopeAgentClientTest {
         assertThat(frames.stream().map(AgentEvent::type)).containsExactly(
                 AgentEventTypes.RUN_START, AgentEventTypes.QUESTION_RAISED);
         assertThat(reply.suspension().engineRef()).isEqualTo("reply-8");
+    }
+
+    @Test
+    void given_blank_question_suspension_when_converse_then_auto_error_answer_and_reask() {
+        // 空问题护栏（#445）：ask_user input={} 畸形挂起（内核未拦 required 校验）——
+        // 平台自动以错误结果答复该工具调用（metadata 通道同用户答复口径，模型不可见
+        // 防自答），模型当场重问；重问走同 run 续跑面（第二段流携 ConfirmResult）
+        when(factory.obtain(any(), any(), any(), any(), any(), any(), any())).thenReturn(agent);
+        when(agent.streamEvents(any(List.class), any(RuntimeContext.class)))
+                .thenReturn(Flux.just(new RequireUserConfirmEvent("reply-b", List.of(
+                        new ToolUseBlock("tc-b", "ask_user", Map.of())))))
+                .thenReturn(Flux.just(new TextBlockDeltaEvent("r-3", "b-3", "重新提问中"),
+                        new RequireUserConfirmEvent("reply-c", List.of(
+                                new ToolUseBlock("tc-c", "ask_user",
+                                        Map.of("question", "核心场景是什么?"))))));
+
+        List<AgentEvent> frames = new ArrayList<>();
+        var reply = client.converse(command("deepseek:deepseek-v4-flash", null), frames::add);
+
+        // 畸形挂起照常呈 question-raised（载荷兜底文案归 mapper 护栏），随后同 run 重问
+        assertThat(frames.stream().map(AgentEvent::type))
+                .contains(AgentEventTypes.QUESTION_RAISED);
+        // 重问轮 = 第二段流，入参消息携错误答复（ConfirmResult metadata 同答复口径）
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Msg>> messages = ArgumentCaptor.forClass(List.class);
+        verify(agent, times(2)).streamEvents(messages.capture(), any(RuntimeContext.class));
+        Msg reaskMsg = messages.getAllValues().get(1).get(0);
+        assertThat(reaskMsg.getMetadata().get(Msg.METADATA_CONFIRM_RESULTS))
+                .isInstanceOf(List.class);
+        assertThat(reaskMsg.getTextContent()).contains("缺少 question");
+        // 模型当场重问成功：最终挂起 = 重问后的正常提问
+        assertThat(reply.suspension().engineRef()).isEqualTo("reply-c");
     }
 
     @Test

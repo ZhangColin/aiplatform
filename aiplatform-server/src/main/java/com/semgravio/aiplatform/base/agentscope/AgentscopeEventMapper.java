@@ -150,19 +150,24 @@ final class AgentscopeEventMapper {
      * 提问载荷投影（ask_user input → 前端问答卡形状）：header 缺省中性兜底；
      * options 字符串列表 → {label} 对象列表（无选项纯开放题也保留——custom=true
      * 恒可自由输入）；multiple 从工具入参投影（多选勾选提交，缺省 false 单选点即答）。
+     * question 空白（空 input 畸形挂起，#445）兜底文案——呈现面不裸奔，平台随即
+     * 自动错误答复让模型当场重问（见 AgentscopeAgentClient 空问题护栏）。
      */
     private static List<Map<String, Object>> questionPayloads(List<ToolUseBlock> questions) {
         return questions.stream().map(tc -> {
             Map<String, Object> input = tc.getInput() != null ? tc.getInput() : Map.of();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("header", textOrDefault(input.get("header"), "提问"));
-            payload.put("question", textOrDefault(input.get("question"), ""));
+            payload.put("question", textOrDefault(input.get("question"), BLANK_QUESTION_FALLBACK));
             payload.put("multiple", Boolean.TRUE.equals(input.get("multiple")));
             payload.put("custom", true);
             payload.put("options", optionPayloads(input.get("options")));
             return payload;
         }).toList();
     }
+
+    /** 空问题兜底文案（#445）：空 input 畸形挂起的问答卡问题文本占位。 */
+    static final String BLANK_QUESTION_FALLBACK = "（问题文本缺失，请直接补充说明你的想法）";
 
     private static List<Map<String, Object>> optionPayloads(Object options) {
         if (!(options instanceof List<?> list)) {

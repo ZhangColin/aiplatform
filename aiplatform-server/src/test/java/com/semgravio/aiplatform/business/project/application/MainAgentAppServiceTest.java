@@ -268,10 +268,12 @@ class MainAgentAppServiceTest {
         MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "做一个官网");
 
         // 对话命令全要素：主智能体会话稳定绑定 + owner 寻址 + 配置模型/协议 + 计量归属
-        // + 项目工作区 + 流关联 + 只读面（写面结构性关闭）
+        // + 项目工作区 + 流关联 + 只读面（写面结构性关闭）。原轮命令＝首次 converse
+        //（#445 起访谈悬空形另派纠偏轮——次数属链内细节，此处不断言；取首次捕获值，
+        // getValue() 会拿到链尾纠偏轮命令、runId 对不上）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
-        AgentCommand value = command.getValue();
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        AgentCommand value = command.getAllValues().get(0);
         assertThat(value.runId()).isEqualTo(run.runId());
         assertThat(value.prompt()).isEqualTo("做一个官网");
         assertThat(value.sessionId()).isEqualTo("main-" + projectId);
@@ -310,7 +312,7 @@ class MainAgentAppServiceTest {
         appService.runOpinionTurn(projectId, "做一个官网");
 
         ArgumentCaptor<AgentCommand> overridden = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(overridden.capture(), any());
+        verify(agentClient, atLeast(1)).converse(overridden.capture(), any());
         assertThat(overridden.getValue().systemPrompt()).isEqualTo("主智能体覆盖协议：每轮先复述目标。");
         assertThat(overridden.getValue().modelString()).isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
         // 开关库值编入规格串（ws 关、fu 缺省开）
@@ -318,13 +320,15 @@ class MainAgentAppServiceTest {
 
         jdbcTemplate.update("DELETE FROM prj_agent_configs WHERE agent_key = 'main'");
         appService.runOpinionTurn(projectId, "再聊聊范围");
+        // 两轮意见轮共 6 次 converse（#445：每轮悬空收口各派两轮纠偏）——回落断言取
+        // 次轮原命令（第 4 次调用）
         ArgumentCaptor<AgentCommand> fallback = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(fallback.capture(), any());
-        assertThat(fallback.getAllValues().get(1).systemPrompt())
+        verify(agentClient, times(6)).converse(fallback.capture(), any());
+        assertThat(fallback.getAllValues().get(3).systemPrompt())
                 .isEqualTo(AgentProfile.MAIN.systemPrompt());
-        assertThat(fallback.getAllValues().get(1).modelString())
+        assertThat(fallback.getAllValues().get(3).modelString())
                 .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
-        assertThat(fallback.getAllValues().get(1).toolSpec()).isEqualTo("ws=true,fu=true");
+        assertThat(fallback.getAllValues().get(3).toolSpec()).isEqualTo("ws=true,fu=true");
     }
 
     @Test
@@ -404,8 +408,9 @@ class MainAgentAppServiceTest {
 
         appService.startConversation(projectId, "给宠物医院做预约系统");
 
+        // 开场轮命令＝首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
         assertThat(command.getValue().systemPrompt())
                 .startsWith(AgentProfile.MAIN.systemPrompt())
                 .endsWith("核心场景：主人在线选医生预约。")
@@ -429,7 +434,9 @@ class MainAgentAppServiceTest {
                 List.of(Map.of("id", "tc-1", "name", "ask_user")), "企业客户");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(2)).converse(command.capture(), any());
+        // #445：开场/意见/答复三个用户轮各带两轮纠偏（悬空收口）——共 8 次 converse；
+        // 会话注入块一经建立全轮复用（含纠偏轮）
+        verify(agentClient, times(8)).converse(command.capture(), any());
         ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
         verify(agentClient).resume(resume.capture(), any());
         String expected = AgentProfile.MAIN.systemPrompt() + "\n\n【平台知识库·相似历史需求】"
@@ -437,7 +444,7 @@ class MainAgentAppServiceTest {
                 + "（非用户的确认信息，不构成对当前需求的约束）："
                 + "\n\n〔宠物医院预约平台〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
         assertThat(command.getAllValues()).extracting(AgentCommand::systemPrompt)
-                .containsExactly(expected, expected);
+                .containsOnly(expected);
         assertThat(resume.getValue().systemPrompt()).isEqualTo(expected);
         verify(knowledgePort, times(1)).retrieve(anyString(), anyInt()); // 只检索一次
     }
@@ -452,8 +459,9 @@ class MainAgentAppServiceTest {
 
         appService.startConversation(projectId, "做一个官网");
 
+        // 开场轮命令＝首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient).converse(command.capture(), any());
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
         assertThat(command.getValue().systemPrompt()).isEqualTo(AgentProfile.MAIN.systemPrompt());
     }
 
@@ -508,7 +516,8 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "继续改");
 
-        verify(agentClient).converse(any(), any());
+        // 原轮命令即首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
+        verify(agentClient, atLeast(1)).converse(any(), any());
     }
 
     @Test
@@ -520,7 +529,8 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "梳理需求");
 
-        verify(agentClient).converse(any(), any());
+        // 原轮命令即首次 converse（#445：访谈悬空形另派纠偏轮，次数不断言）
+        verify(agentClient, atLeast(1)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq("role-assigned"), anyMap());
     }
 
@@ -544,8 +554,9 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
+        // text 事件每次 converse 都经流桥注入 projectId（#445 起含纠偏轮）——断首帧
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
-        verify(eventsAppService).publishAgentEvent(org.mockito.ArgumentMatchers.eq("text"), payload.capture());
+        verify(eventsAppService, atLeast(1)).publishAgentEvent(org.mockito.ArgumentMatchers.eq("text"), payload.capture());
         assertThat(payload.getValue()).containsEntry("projectId", projectId.toString())
                 .containsEntry("runId", "run-x");
     }
@@ -1000,7 +1011,8 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "把主色调改成绿色");
 
-        verify(agentClient, times(1)).converse(any(), any());
+        // 未生成未出 PRD 仍止于对话（零生成派发不变，#445 起悬空收口先走两轮纠偏）
+        verify(agentClient, times(3)).converse(any(), any());
     }
 
     @Test
@@ -1691,24 +1703,128 @@ class MainAgentAppServiceTest {
         assertThat(appService.interviewDangling(projectId)).isTrue();
     }
 
+    // ---------- 收口纠偏链（ADR-0036，#445） ----------
+
     @Test
-    void given_dangling_then_next_turn_raises_question_when_settles_then_marker_cleared() {
-        // 标记生命周期＝合法收口即清：悬空后的恢复轮再问一问（挂起问答）——标记清除，
-        // 入口恢复三分类（解除接管）
-        Long projectId = persistedProject("9756");
+    void given_dangling_when_corrective_round_1_asks_then_rescued_without_remedy() {
+        // 纠偏链①：悬空命中先派纠偏轮（主档 flash＋确定性微指令）——纠回（挂起问答
+        // 在场）即不播报不置标记：用户只见一张带选项的问答卡
+        Long projectId = persistedProject("9760");
         givenSessionExecutorRunsInline();
-        AtomicBoolean asked = new AtomicBoolean(false);
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (!asked.getAndSet(true)) {
-                return new AgentReply(command.runId(), "好的"); // 首轮：悬空收口
+            if (command.prompt().contains("平台纠正")) {
+                return new AgentReply(command.runId(), "重新提问", new AgentSuspension(
+                        "reply-c", List.of(Map.of("id", "tc-c", "name", "ask_user"))));
             }
-            return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
-                    "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+            return new AgentReply(command.runId(), "需求梳理已完成");
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false) // 提交守卫：放行
+                .thenReturn(false) // 收口观测：无问无 PRD → 纠偏链
+                .thenReturn(true); // 纠偏轮收口观测：挂起问答在场（救回）
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+        // 纠偏微指令：教规则（ask_user）＋令当场重问；档位＝主档（库值优先缺省回落）
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .contains("ask_user").contains("重新提出");
+        assertThat(commands.getAllValues().get(1).modelString())
+                .isEqualTo(ModelTierSeed.FLASH_MODEL_STRING);
+    }
+
+    @Test
+    void given_corrective_round_1_fails_when_round_2_escalates_strong_and_rescues() {
+        // 纠偏链②：①（主档 flash）仍失格 → ②升强档（routingStrongModelId 缺省 pro）
+        // ＋同款微指令——「flash 为主、做不到升 pro」的升档落点（ADR-0036）；救回即不播报
+        Long projectId = persistedProject("9761");
+        givenSessionExecutorRunsInline();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (calls.incrementAndGet() == 3) {
+                return new AgentReply(command.runId(), "重新提问", new AgentSuspension(
+                        "reply-c", List.of(Map.of("id", "tc-c", "name", "ask_user"))));
+            }
+            return new AgentReply(command.runId(), "好的");
+        });
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false) // 提交守卫
+                .thenReturn(false) // 收口观测：无问无 PRD → 纠偏链
+                .thenReturn(false) // 纠偏①收口观测：失格
+                .thenReturn(true); // 纠偏②收口观测：挂起问答在场（救回）
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(eventsAppService, never()).publishAgentEvent(
+                eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isFalse();
+        ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(3)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(2).modelString())
+                .isEqualTo("volcengine:deepseek-v4-pro-ga-260813");
+    }
+
+    @Test
+    void given_corrective_chain_exhausts_when_double_failure_then_remedy_and_marker() {
+        // 纠偏链封顶（ADR-0036）：双失格才置悬空标记＋泛形播报（ADR-0032 兜底原样）——
+        // 恰两轮纠偏（converse 共 3 次），不无限重试（防烧 token）
+        Long projectId = persistedProject("9762");
+        givenSessionExecutorRunsInline();
+
+        MainAgentAppService.MainAgentRun run = appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(agentClient, times(3)).converse(any(), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY),
+                argThat(payload -> run.runId().equals(payload.get(EventsAppService.RUN_FIELD))
+                        && String.valueOf(payload.get(AgentEventTypes.GUIDE_TEXT_FIELD))
+                                .contains("上一轮没有正常完成")));
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_routing_disabled_when_corrective_fails_then_no_escalation_and_remedy() {
+        // 纯人工定档运营姿态（routingEnabled=关）：跳过升档、①失格即播报——不自动升 pro
+        Long projectId = persistedProject("9763");
+        givenSessionExecutorRunsInline();
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, routing_enabled)
+                VALUES ('main', FALSE)
+                ON CONFLICT (agent_key) DO UPDATE SET routing_enabled = EXCLUDED.routing_enabled
+                """);
+
+        appService.runOpinionTurn(projectId, "做一个官网");
+
+        verify(agentClient, times(2)).converse(any(), any());
+        verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.GUIDE_REPLY), anyMap());
+        assertThat(appService.interviewDangling(projectId)).isTrue();
+    }
+
+    @Test
+    void given_dangling_then_recovery_turn_raises_question_when_settles_then_marker_cleared() {
+        // 标记生命周期＝合法收口即清（ADR-0032，经纠偏链后）：双失格置标记 → 恢复轮
+        // （接管期输入直达意见轮）再问一问（挂起问答）——标记清除，入口恢复三分类
+        Long projectId = persistedProject("9756");
+        givenSessionExecutorRunsInline();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (calls.incrementAndGet() == 4) {
+                return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
+                        "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
+            }
+            return new AgentReply(command.runId(), "好的"); // 首轮＋两轮纠偏：失格收口
         });
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(false) // 首轮提交守卫：放行
-                .thenReturn(false) // 首轮收口观测：无问无 PRD → 悬空（置标记）
+                .thenReturn(false) // 首轮收口观测：无问无 PRD → 纠偏链
+                .thenReturn(false) // 纠偏①收口观测：失格
+                .thenReturn(false) // 纠偏②收口观测：失格（置标记＋播报）
                 .thenReturn(false) // 恢复轮提交守卫：放行
                 .thenReturn(true); // 恢复轮收口观测：挂起问答（合法形——清标记）
 
@@ -1722,22 +1838,22 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_dangling_then_prd_produced_before_kill_when_turn_fails_then_marker_cleared() {
-        // 判死路径的标记生命周期闭合（评审追加）：悬空标记在场时，恢复轮内 savePrd
-        // 已成功（PRD 已产出）后才判死——PRD 产出即合法收口事实，标记随清不滞留
-        //（期间输入不再被接管），且不补第二条补救
+        // 判死路径的标记生命周期闭合（评审追加，经纠偏链后）：双失格置标记 → 恢复轮内
+        // savePrd 已成功（PRD 已产出）后判死——PRD 产出即合法收口事实，标记随清不滞留
+        //（期间输入不再被接管），catch 侧不补第二条补救
         Long projectId = persistedProject("9759");
         givenSessionExecutorSwallowsFailures();
-        AtomicBoolean killed = new AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
-            if (killed.getAndSet(true)) {
+            if (calls.incrementAndGet() == 4) {
                 // 恢复轮：savePrd 已成功（状态位已置）后判死
                 Project project = projectRepository.findById(projectId).orElseThrow();
                 project.markPrdProduced();
                 projectRepository.save(project);
                 throw new IllegalStateException("活超时判死：静默超阈值");
             }
-            return new AgentReply(command.runId(), "好的"); // 首轮：悬空收口置标记
+            return new AgentReply(command.runId(), "好的"); // 首轮＋两轮纠偏：失格收口
         });
 
         appService.runOpinionTurn(projectId, "做一个官网");
@@ -1746,7 +1862,7 @@ class MainAgentAppServiceTest {
         appService.runOpinionTurn(projectId, "继续");
 
         assertThat(appService.interviewDangling(projectId)).isFalse();
-        // 补救恰一条（首轮悬空）——PRD 已出的判死不补第二条
+        // 补救恰一条（首轮双失格）——PRD 已出的判死不补第二条
         verify(eventsAppService, times(1)).publishAgentEvent(
                 eq(AgentEventTypes.GUIDE_REPLY), anyMap());
     }

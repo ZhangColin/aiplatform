@@ -197,6 +197,10 @@ class DispatchAppServiceTest {
             }
             return new AgentReply(command.runId(), "已受理");
         });
+        // #445：意见轮合法收口（挂起问答在场）——不触发悬空纠偏链，converse 恒 2
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true);  // 意见轮收口观测：挂起问答（合法收口）
 
         appService.dispatch(projectId, "把主色调改成绿色");
 
@@ -214,6 +218,10 @@ class DispatchAppServiceTest {
         Long projectId = persistedProject("9802");
         givenSessionExecutorRunsInline();
         givenClassification("这句话既不是标签也不是分类", "已受理");
+        // #445：意见轮合法收口——不触发悬空纠偏链，converse 恒 2
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true);  // 意见轮收口观测：挂起问答（合法收口）
 
         appService.dispatch(projectId, "嗯嗯");
 
@@ -386,6 +394,10 @@ class DispatchAppServiceTest {
         Long projectId = persistedProject("9807");
         givenSessionExecutorRunsInline();
         givenClassification("OPINION", "好的");
+        // #445：意见轮合法收口——不触发悬空纠偏链，converse 恒 2
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(true);  // 意见轮收口观测：挂起问答（合法收口）
 
         appService.dispatch(projectId, "加个导出功能");
 
@@ -504,18 +516,30 @@ class DispatchAppServiceTest {
         Long projectId = persistedProject("9820");
         givenSessionExecutorRunsInline();
         givenClassification("OPINION", "好的"); // 首轮分类意见 → 意见轮悬空收口置标记
+        // #445：首轮意见轮双失格走完纠偏链才置标记（守卫/收口观测/两轮纠偏判据
+        // 均 false）；接管轮「OK」合法收口（挂起问答在场）清标记
+        when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
+                .thenReturn(false)  // 意见轮提交守卫：放行
+                .thenReturn(false)  // 意见轮收口观测：悬空（进纠偏链）
+                .thenReturn(false)  // 纠偏轮①判据：失格
+                .thenReturn(false)  // 纠偏轮②判据：失格（置标记）
+                .thenReturn(false)  // 接管轮提交守卫：放行
+                .thenReturn(true);  // 接管轮收口观测：挂起问答（合法收口清标记）
 
         appService.dispatch(projectId, "做一个官网");
 
         DispatchAppService.DispatchRun ok = appService.dispatch(projectId, "OK");
 
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(command.capture(), any());
-        // 会话序：分类 → 意见轮 → 悬空接管的意见轮（「OK」零分类直达）
+        verify(agentClient, times(5)).converse(command.capture(), any());
+        // 会话序：分类 → 意见轮 → 纠偏①②（#445 链内轮，main- 同会话）→ 悬空接管的
+        // 意见轮（「OK」零分类直达）
         assertThat(command.getAllValues().get(0).sessionId())
                 .startsWith(DispatchAppService.CLASSIFY_SESSION_PREFIX);
         assertThat(command.getAllValues().get(1).sessionId()).isEqualTo("main-" + projectId);
-        AgentCommand takeover = command.getAllValues().get(2);
+        assertThat(command.getAllValues().get(2).sessionId()).isEqualTo("main-" + projectId);
+        assertThat(command.getAllValues().get(3).sessionId()).isEqualTo("main-" + projectId);
+        AgentCommand takeover = command.getAllValues().get(4);
         assertThat(takeover.sessionId()).isEqualTo("main-" + projectId);
         assertThat(takeover.prompt()).isEqualTo("OK");
         assertThat(takeover.runId()).isEqualTo(ok.runId());
@@ -543,13 +567,20 @@ class DispatchAppServiceTest {
             if (command.prompt().contains("官网")) { // 首个意见轮：悬空叙述收口
                 return new AgentReply(command.runId(), "好的");
             }
+            if (command.prompt().contains("平台纠正")) { // #445 纠偏轮：纯文本重答（不落挂起锚）
+                return new AgentReply(command.runId(), "已纠正");
+            }
             // 恢复轮：再问一问（挂起问答——合法收口清标记）
             return new AgentReply(command.runId(), "先问一下", new AgentSuspension(
                     "reply-1", List.of(Map.of("id", "tc-1", "name", "ask_user"))));
         });
+        // #445：首轮意见轮双失格走完纠偏链才置标记（守卫/收口观测/两轮纠偏判据
+        // 均 false——纠偏轮纯文本重答不落挂起锚）；恢复轮「继续」合法收口清标记
         when(agentClient.hasAskingToolCall(Long.toString(OWNER), "main-" + projectId))
                 .thenReturn(false)  // 意见轮提交守卫：放行
-                .thenReturn(false)  // 意见轮收口观测：悬空（置标记）
+                .thenReturn(false)  // 意见轮收口观测：悬空（进纠偏链）
+                .thenReturn(false)  // 纠偏轮①判据：失格
+                .thenReturn(false)  // 纠偏轮②判据：失格（置标记）
                 .thenReturn(false)  // 恢复轮提交守卫：放行
                 .thenReturn(true);  // 恢复轮收口观测：挂起问答（清标记）
 
@@ -557,9 +588,9 @@ class DispatchAppServiceTest {
         appService.dispatch(projectId, "继续");        // 接管直达意见轮 → 挂起问答收口（清标记）
         appService.dispatch(projectId, "你好呀");      // 恢复分类 → FALLBACK 引导
 
-        // 会话序：分类 → 意见轮 → 接管意见轮（零分类）→ 分类（恢复）＝恰 4 次
+        // 会话序：分类 → 意见轮 → 纠偏①② → 接管意见轮（零分类）→ 分类（恢复）＝恰 6 次
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(4)).converse(command.capture(), any());
+        verify(agentClient, times(6)).converse(command.capture(), any());
         List<String> sessions = command.getAllValues().stream()
                 .map(AgentCommand::sessionId).toList();
         assertThat(sessions.stream()
@@ -588,8 +619,9 @@ class DispatchAppServiceTest {
         assertThatThrownBy(() -> appService.dispatch(projectId, "OK"))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(OrderMessage.ORDER_FROZEN.message());
-        // 仅首个意见轮提交过一次；被拒接管零新提交
-        verify(sessionExecutor, times(1)).submit(any(), any());
+        // 首个意见轮＋纠偏两轮共三次提交（#445：悬空收口先进纠偏链、双失格才置
+        // 标记——hasAskingToolCall 缺省 false 即双失格路径）；被拒接管零新提交
+        verify(sessionExecutor, times(3)).submit(any(), any());
     }
 
     // ---------- 分类输出解析（容错口径） ----------

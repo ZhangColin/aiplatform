@@ -42,7 +42,8 @@ class AgentProfileTest {
                 .contains("ask_user")
                 .contains("savePrd")
                 .contains("query_project_facts")
-                .contains("迭代受理");
+                .contains("迭代受理")
+                .contains("禁止把问题写在正文里"); // #445：提问必须经 ask_user（格式失格治本条款）
         assertThat(AgentProfile.EXECUTOR.systemPrompt())
                 .contains("finish_edit")
                 // #352 收口验证委派 verify 子智能体（自测位升级——独立验证三面）：

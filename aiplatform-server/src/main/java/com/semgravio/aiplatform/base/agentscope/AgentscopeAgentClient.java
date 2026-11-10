@@ -175,6 +175,9 @@ public class AgentscopeAgentClient {
         TurnResult result = runTurn(prepared, List.of(new UserMessage(command.prompt())),
                 command.runId(), USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
                 command.timeout(), command.silenceTimeout(), command.toolSilenceTimeout(), sink);
+        result = reaskBlankQuestion(prepared, result, command.runId(),
+                USAGE_EVENT_PREFIX + command.runId(), command.usageContext(),
+                command.timeout(), command.silenceTimeout(), command.toolSilenceTimeout(), sink);
         // 平台工具落盘事实（#292）取走并进变更事实流；失败分支不弃账（#323）——
         // 落盘事实与流段部分观察随 AgentTurnFailure 携带上浮（失败尝试已落盘的写
         // 是真实工作区事实，外层尝试环据此留账）
@@ -219,6 +222,10 @@ public class AgentscopeAgentClient {
                 .build();
 
         TurnResult result = runTurn(prepared, List.of(resumeMsg), resume.runId(),
+                USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
+                resume.usageContext(), /* timeout= */ null, resume.silenceTimeout(),
+                resume.toolSilenceTimeout(), sink);
+        result = reaskBlankQuestion(prepared, result, resume.runId(),
                 USAGE_EVENT_PREFIX + resume.runId() + "-" + shortReplyKey(resume.replyId()),
                 resume.usageContext(), /* timeout= */ null, resume.silenceTimeout(),
                 resume.toolSilenceTimeout(), sink);
@@ -456,6 +463,72 @@ public class AgentscopeAgentClient {
             return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
                     prepared.durations().snapshot());
         }
+    }
+
+    /**
+     * 空问题护栏（#445）：ask_user 入参缺 question 的畸形挂起（内核未拦 required 校验，
+     * 生产实录 input={} 空白问答卡）——平台自动以错误结果答复该工具调用（ConfirmResult
+     * metadata 通道，同用户答复口径——模型不可见防自答 #34），模型当场重问，不渲染
+     * 残卡。converse/resume 收口后同口调用（挂起畸形与轮形态无关）；封顶一次（重问
+     * 轮再畸形即如实放行——呈现面另有 mapper 兜底文案）。重问轮计量独立幂等键
+     * （base + "-reask"）；阶段耗时取重问轮快照（观测口径不重复计首段）。
+     */
+    private TurnResult reaskBlankQuestion(PreparedTurn prepared, TurnResult result, String runId,
+            String usageIdempotencyKey, UsageContext usageContext, Duration timeout,
+            Duration silenceTimeout, Duration toolSilenceTimeout, Consumer<AgentEvent> sink) {
+        AgentSuspension suspension = result.suspension();
+        if (suspension == null || !blankAskUserQuestion(suspension.toolCalls())) {
+            return result;
+        }
+        logger.warn("runId={} 空问题护栏：ask_user 入参缺 question（畸形挂起）——平台自动错误答复，模型当场重问",
+                runId);
+        List<ConfirmResult> confirms = suspension.toolCalls().stream()
+                .map(toolCall -> answeredToolCall(toolCall, BLANK_QUESTION_ANSWER))
+                .toList();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put(Msg.METADATA_CONFIRM_RESULTS, confirms);
+        Msg reaskMsg = UserMessage.builder()
+                .textContent(BLANK_QUESTION_ANSWER)
+                .metadata(metadata)
+                .build();
+        TurnResult reasked = runTurn(prepared, List.of(reaskMsg), runId,
+                usageIdempotencyKey + "-reask", usageContext, timeout, silenceTimeout,
+                toolSilenceTimeout, sink);
+        return new TurnResult(result.text() + reasked.text(), reasked.suspension(),
+                reasked.error(), concatChanges(result.changes(), reasked.changes()),
+                reasked.durations());
+    }
+
+    /** 空问题护栏的自动答复（#445）：ask_user 入参缺 question 时的工具错误结果。 */
+    static final String BLANK_QUESTION_ANSWER =
+            "平台提示：这次 ask_user 调用缺少 question（问题文本），提问没有生效。请重新调用 "
+                    + "ask_user，完整填写 question；候选选项填 options（开放问题可不填），可多选时 "
+                    + "multiple 传 true。";
+
+    /** ask_user 待确认面是否缺 question（空问题畸形挂起的判据，#445）。 */
+    private static boolean blankAskUserQuestion(List<Map<String, Object>> toolCalls) {
+        return toolCalls.stream()
+                .filter(toolCall -> ASK_USER_TOOL_NAME.equals(String.valueOf(toolCall.get("name"))))
+                .anyMatch(toolCall -> {
+                    Object input = toolCall.get("input");
+                    if (!(input instanceof Map<?, ?> map)) {
+                        return true;
+                    }
+                    Object question = map.get("question");
+                    return question == null || String.valueOf(question).isBlank();
+                });
+    }
+
+    private static List<FileChange> concatChanges(List<FileChange> first, List<FileChange> second) {
+        if (first.isEmpty()) {
+            return second;
+        }
+        if (second.isEmpty()) {
+            return first;
+        }
+        List<FileChange> merged = new ArrayList<>(first);
+        merged.addAll(second);
+        return merged;
     }
 
     /**

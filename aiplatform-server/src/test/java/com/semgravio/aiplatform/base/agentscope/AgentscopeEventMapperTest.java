@@ -266,6 +266,26 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
+        void given_ask_user_blank_question_when_suspension_then_fallback_text() {
+            // 空问题兜底文案（#445）：input={} 畸形挂起（内核未拦 required）的问题文本
+            // 占位——呈现面不裸奔；平台随即自动错误答复让模型当场重问（客户端护栏）
+            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-b", java.util.List.of(
+                    toolCall("tc-b", "ask_user", Map.of())));
+
+            AgentEvent frame = mapper.suspension(event);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) frame.payload()
+                    .get(AgentEventTypes.WAIT_DATA_FIELD);
+            assertThat(data.get("questions")).isEqualTo(java.util.List.of(Map.of(
+                    "header", "提问",
+                    "question", AgentscopeEventMapper.BLANK_QUESTION_FALLBACK,
+                    "multiple", false,
+                    "custom", true,
+                    "options", java.util.List.of())));
+        }
+
+        @Test
         void given_ask_user_multiple_flag_when_suspension_then_projected_to_question() {
             // #19 多选问答：multiple 从 ask_user 入参投影（问答卡多选勾选提交），
             // 缺省 false（单选点即答）

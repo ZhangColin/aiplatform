@@ -662,18 +662,50 @@ public class MainAgentAppService {
         }
     }
 
-    /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。systemPrompt/
-     * 模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、缺省回落枚举默认
-     * ——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入 toolSpec 随命令
-     * 透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService} 解析
-     * （ADR-0031——供应商/凭证配置变更同轮生效）；对话轮活超时阈值取
+    /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。 */
+    private AgentCommand mainCommand(Project project, String runId, String prompt) {
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        return mainCommandWith(project, runId, prompt, main, modelTiers.resolve(main.modelId()));
+    }
+
+    /**
+     * 纠偏轮命令（#445）：同主对话命令的会话/配置/计量/只读面（system prompt 与
+     * 工具规格同取 MAIN 生效值——纠偏轮也是主智能体的轮），prompt 换纠偏微指令、
+     * 模型档位按轮次解析（{@link #correctiveModelOf}）。
+     */
+    private AgentCommand correctiveCommand(Project project, String runId,
+            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model,
+            boolean prdSaveFailed) {
+        return mainCommandWith(project, runId,
+                prdSaveFailed ? CORRECTIVE_RESAVE_PRD_PROMPT : CORRECTIVE_REASK_PROMPT,
+                main, model);
+    }
+
+    /** 纠偏轮微指令（提问形，#445）：格式失格（正文提问）的确定性纠正——教规则＋令当场重问。 */
+    static final String CORRECTIVE_REASK_PROMPT =
+            "平台纠正：你上一轮向用户的提问没有走 ask_user 工具（问题写在了正文里，用户没有"
+                    + "问答卡可答）。提问必须经 ask_user：question 填问题文本、options 给 2-4 个"
+                    + "候选（开放问题可不填）、可多选时 multiple 传 true；正文只做对上轮答复的"
+                    + "消化说明，问题本体只出现在 ask_user 里。请立即用 ask_user 重新提出你上轮的"
+                    + "问题（可精简原文），除此之外本轮不要再做别的。";
+
+    /** 纠偏轮微指令（savePrd 失败形）：平台观测到上轮 savePrd 未落成，令重试保存。 */
+    static final String CORRECTIVE_RESAVE_PRD_PROMPT =
+            "平台纠正：上一轮调用 savePrd 保存 PRD 没有成功，梳理成果未保存。请重新调用 "
+                    + "savePrd（content 传完整 PRD 全文，summary 传本次产出说明），保存成功后"
+                    + "继续既有步骤（系统终点随后产出切片计划，同首次产出口径）。";
+
+    /** 主对话命令构建（配置束与解析后模型参数化——对话轮与纠偏轮共用，#445）。
+     * systemPrompt/模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、
+     * 缺省回落枚举默认——每轮命令构建时查，配置变更下一轮自然生效；#252 开关编入
+     * toolSpec 随命令透传装配）；档位键→模型串与通道注入经 {@link ModelTierAppService}
+     * 解析（ADR-0031——供应商/凭证配置变更同轮生效）；对话轮活超时阈值取
      * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
      */
-    private AgentCommand mainCommand(Project project, String runId, String prompt) {
+    private AgentCommand mainCommandWith(Project project, String runId, String prompt,
+            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
-        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        ModelTierAppService.ResolvedModel model = modelTiers.resolve(main.modelId());
         return new AgentCommand(
                 runId,
                 prompt,
@@ -726,12 +758,15 @@ public class MainAgentAppService {
      * 的补产链被自己的门拦死。判据单一：用户轮＝存在已确认版本（确认动作的次生事实），
      * 平台轮＝直接放行。</p>
      *
-     * <p><b>访谈轮收口硬契约（ADR-0032，#373）</b>：本观测点同位校验不变量——需求
-     * 梳理期（未出 PRD）用户轮的合法收口只有「再问一问」（挂起问答）或「产出 PRD」
-     * 两形；无问无 PRD 即悬空（置 {@link #danglingInterviews}＋平台补救，文案按
-     * savePrd 失败事实分形）。两合法形与迭代期、归档路径随观测清除标记（接管解除
-     * 单点归一）；平台轮不入契约。轮失败（判死等异常上抛）不经本观测——悬空补救
-     * 在轮任务的 catch 侧（{@link #remedyFailedInterviewTurn}）。</p>
+     * <p><b>访谈轮收口硬契约（ADR-0032，#373；纠偏链 ADR-0036，#445）</b>：本观测点
+     * 同位校验不变量——需求梳理期（未出 PRD）用户轮的合法收口只有「再问一问」（挂起
+     * 问答）或「产出 PRD」两形；无问无 PRD 即悬空。命中不立即播报——先走收口纠偏链
+     * （主档＋确定性微指令重派，失格升强档兜底，封顶两轮，{@link
+     * #dispatchCorrectiveChain}），双失格才置 {@link #danglingInterviews}＋平台补救
+     * （文案按 savePrd 失败事实分形）。两合法形与迭代期、归档路径随观测清除标记
+     * （接管解除单点归一）；平台轮不入契约。轮失败（判死等异常上抛）不经本观测与
+     * 纠偏链——悬空补救在轮任务的 catch 侧（{@link #remedyFailedInterviewTurn}，
+     * 即时点名播报）。</p>
      */
     private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
             boolean platformRound) {
@@ -775,8 +810,15 @@ public class MainAgentAppService {
                     // 再补一条
                     boolean prdSaveFailed = prdRevisions.consumeFailure(workspaceId);
                     if (!platformRound) {
-                        markDanglingInterview(project, runId, prdSaveFailed
-                                ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
+                        // ADR-0036（#445）收口纠偏链：用户轮悬空命中不立即播报——先
+                        // 自动纠偏（主档＋确定性微指令重派），失格再升强档兜底，双失
+                        // 格才置标记＋平台补救（markDanglingInterview 单点收口，文案
+                        // 按 savePrd 失败事实分形——点名/泛形）。纠偏轮封顶两轮防烧
+                        // token；均为平台轮不入本契约（不递归）；routingEnabled=关的
+                        // 纯人工定档姿态跳过升档、第 1 轮失格即播报。轮失败（异常收
+                        // 口）不经本链——catch 侧 remedyFailedInterviewTurn 即时点名
+                        // 播报（环境性失败重试照样失败，ADR-0032 原 rationale 保持）
+                        dispatchCorrectiveChain(project, sessionId, runId, prdSaveFailed);
                     }
                     return;
                 }
@@ -889,6 +931,100 @@ public class MainAgentAppService {
             log.warn("[main-close] 项目 {} 收口自动派发失败（用户重提即兜底）：{}",
                     projectId, e.toString());
         }
+    }
+
+    /** 收口纠偏链封顶轮数（#445）：①主档 ②强档——防烧 token 的结构性上限。 */
+    private static final int CORRECTIVE_ROUND_CAP = 2;
+
+    /**
+     * 悬空收口的自动纠偏链（ADR-0036，#445）：平台发起的纠正轮序列——把「模型纯
+     * 文本提问／savePrd 未落成」的格式失格在会话锁死（首轮坏示范被后续轮自模仿
+     * 延续）前扳回工具轨道。第 1 轮用主智能体生效档（flash 为主）＋确定性微指令；
+     * 仍失格第 2 轮升强档（路由面生效值，缺省 pro）——「flash 做不到再升 pro」与
+     * 执行体路由（ADR-0030）同一总姿态。成功判据＝合法收口形两形（挂起问答在场
+     * 或 PRD 已产出，{@link #correctiveSettled}）；每轮新 runId、会话执行器串行、
+     * 回复照常落对话史。链不占悬空标记——标记双失格才置（接管面不扩大）。
+     */
+    private void dispatchCorrectiveChain(Project project, String sessionId, String originRunId,
+            boolean prdSaveFailed) {
+        submitCorrectiveRound(project, sessionId, originRunId, prdSaveFailed, /* attempt= */ 1);
+    }
+
+    /** 纠偏轮单轮派发：档位解析（null＝不升档的直接播报收口）→ 命令构建 → 串行执行 → 成功判据 → 推进/收口。 */
+    private void submitCorrectiveRound(Project project, String sessionId, String originRunId,
+            boolean prdSaveFailed, int attempt) {
+        AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
+        ModelTierAppService.ResolvedModel model = correctiveModelOf(main, attempt);
+        if (model == null) {
+            markDanglingInterview(project, originRunId,
+                    prdSaveFailed ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
+            return;
+        }
+        Long projectId = project.getId();
+        String runId = EventsAppService.newRunId();
+        AgentCommand command = correctiveCommand(project, runId, main, model, prdSaveFailed);
+        sessionExecutor.submit(sessionId, () -> {
+            try {
+                ConversationHistoryAppService.TurnRecorder recorder =
+                        conversationHistory.recorder(projectId, eventBridge.sink(project));
+                AgentReply reply = agentClient.converse(command, recorder);
+                settleSuspendedQuestion(sessionId, runId, reply);
+                recorder.settle(runId, reply);
+            }
+            catch (RuntimeException e) {
+                // 纠偏轮炸不炸链：按失格推进下一环（error 事件已由 converse 内发出）——
+                // 链只为格式失格而设，不放宽「环境性失败重试照样失败」的口径
+                log.warn("[main-close] 项目 {} 纠偏轮 {}/{} 失败（按失格推进）：{}", projectId,
+                        attempt, CORRECTIVE_ROUND_CAP, e.toString());
+            }
+            if (correctiveSettled(projectId, sessionId)) {
+                log.info("[main-close] 项目 {} 纠偏轮 {}/{} 成功（合法收口形达成——不播报不置标记）",
+                        projectId, attempt, CORRECTIVE_ROUND_CAP);
+                return;
+            }
+            if (attempt < CORRECTIVE_ROUND_CAP) {
+                submitCorrectiveRound(project, sessionId, originRunId, prdSaveFailed,
+                        attempt + 1);
+                return;
+            }
+            markDanglingInterview(project, originRunId,
+                    prdSaveFailed ? DANGLING_REMEDY_PRD_FAILED : DANGLING_REMEDY_GENERIC);
+        });
+    }
+
+    /**
+     * 纠偏轮成功判据（ADR-0032 合法收口形两形）：挂起问答在场（再问一问——提问形
+     * 纠偏的目标态）或 PRD 已产出（savePrd 形的目标态）。项目事实重查一次（纠偏轮
+     * 内可能已产出 PRD 或项目已归档——归档/缺档即停链不播报：对话区已关闭）。
+     */
+    private boolean correctiveSettled(Long projectId, String sessionId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getArchivedAt() != null) {
+            return true;
+        }
+        if (project.getPrdProducedAt() != null) {
+            return true;
+        }
+        return agentClient.hasAskingToolCall(project.ownerUserId(), sessionId);
+    }
+
+    /**
+     * 纠偏轮档位解析：第 1 轮＝主智能体生效档（库值优先、缺省回落枚举——与对话轮
+     * 同腿）；第 2 轮＝升强档，路由开关关（纯人工定档运营姿态）返回 null——调用方
+     * 直接播报、不自动升档。强档取路由面生效值（运营可换、不发版，ADR-0031），
+     * 缺省 {@link ModelRoutingAppService#DEFAULT_STRONG_MODEL_ID}。
+     */
+    private ModelTierAppService.ResolvedModel correctiveModelOf(
+            AgentConfigAppService.EffectiveConfig main, int attempt) {
+        if (attempt == 1) {
+            return modelTiers.resolve(main.modelId());
+        }
+        if (!main.routingEnabled()) {
+            return null;
+        }
+        return modelTiers.resolve(main.routingStrongModelId() != null
+                ? main.routingStrongModelId()
+                : ModelRoutingAppService.DEFAULT_STRONG_MODEL_ID);
     }
 
     /** 收口即消费：意见锚与修订事实同口径清掉（不留过轮）——归档 / 未产出 PRD /

@@ -57,6 +57,12 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 查库不缓存、装配不进 agent 实例缓存键——运营面改完下一次判定即生效，不发版、
  * 进行中 run 不定格。仅 run 执行体行消费（中间件只挂执行体装配面）。</p>
  *
+ * <p><b>verify 自决开关列（#442，#441-1——#439 终裁 verify 窗 20.9min 的最大单一
+ * 可收窄面）</b>：缺省 true＝自决维持现状（#435 自决化落地态）；false＝自决关闭——
+ * 执行体 ReAct 循环中间件（{@code VerifySelfDecisionMiddleware}）每迭代动态查库，
+ * 关闭态注入一条提示层指令（每会话一次）：生成过程中不自发委派 verify 子智能体，
+ * 平台驱动验证腿（三闸回执／整轨终验编排）不受影响。仅 run 执行体行消费。</p>
+ *
  * @param agentKey                   智能体稳定键（{@link AgentProfile#key()}，寻址腿）
  * @param systemPrompt               运营覆盖 systemPrompt（null＝回落枚举默认）
  * @param modelId                    运营覆盖模型档位键（null＝回落枚举默认；ADR-0031 语义键
@@ -99,6 +105,12 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * @param decisionHintDisabled        禁用集（#437；库条目键逗号串——封闭集
  *                                   failure_stop_loss/anti_mock/context_economy/
  *                                   parallel_tools，非法 token PRJ_083；null/空＝全启用）
+ * @param verifySelfDecisionEnabled   verify 自决开关（#442，#441-1；缺省 true＝自决维持
+ *                                   现状〔#435 自决化落地态——执行体生成过程中自决调用
+ *                                   verify 自测〕；false＝自决关闭——执行体 ReAct 循环
+ *                                   中间件注入提示层指令，生成过程中不自发委派 verify，
+ *                                   平台驱动验证腿〔三闸回执／整轨终验编排〕不受影响。
+ *                                   仅 run 执行体行消费）
  * @param operatorId                 最近写者 id（admin 侧 TSID；null＝从未配置）
  * @param operatorName               最近写者名（直读展示）
  * @param updatedAt                  最近写入时刻（读模型列——回读填充；写路径构造时 null，
@@ -126,6 +138,7 @@ public record AgentOperationalConfig(
         Integer decisionHintErrorStreak,
         Integer decisionHintStackCap,
         String decisionHintDisabled,
+        boolean verifySelfDecisionEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime updatedAt) {
@@ -140,7 +153,7 @@ public record AgentOperationalConfig(
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
                 null, null, null, null, false, false, false, true, false, true, null, null, null,
-                null, null, null);
+                true, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

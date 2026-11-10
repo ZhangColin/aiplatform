@@ -25,6 +25,12 @@ import io.agentscope.core.middleware.MiddlewareBase;
  * 每迭代动态查库——改档即生效、不发版、进行中 run 不定格，<b>装配不进 agent
  * 实例缓存键</b>（与 #366 边缘点同逻辑）。每构建新实例（无状态，随构建发放）。</p>
  *
+ * <p>verify 自决开关中间件（#442，#441-1）同只挂 <b>run 执行体</b>装配面：
+ * 开关（executor 行 {@code verify_self_decision_enabled}，缺省 true＝自决开）
+ * 经 {@link AgentConfigAppService#verifySelfDecisionEnabledOf} 每迭代动态查库——
+ * 关闭态注入一条提示层收窄指令（每会话一次），生成过程中不自发委派 verify；
+ * 缺省开＝零注入零扰动；fail-open 同 #437 口径。装配不进 agent 实例缓存键。</p>
+ *
  * <p>本类归 business 装配缝（组合 base.skills 存取口与 agentscope 框架类型是
  * 业务侧装配的事，base 两 BC 不互相挂依赖）。</p>
  */
@@ -50,6 +56,10 @@ public class ProfileMiddlewareSupplier implements AgentMiddlewareSupplier {
             middlewares.add(new DecisionHintMiddleware(agentKey,
                     key -> agentConfigs.decisionHintConfigOf(
                             AgentProfile.byKey(key).orElse(AgentProfile.EXECUTOR))));
+            // #442：verify 自决开关中间件同挂执行体面（每迭代动态查库——关闭态注入
+            // 提示层收窄指令；缺省开＝零注入零扰动，fail-open 同 #437 口径）
+            middlewares.add(new VerifySelfDecisionMiddleware(
+                    () -> agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)));
         }
         return middlewares;
     }

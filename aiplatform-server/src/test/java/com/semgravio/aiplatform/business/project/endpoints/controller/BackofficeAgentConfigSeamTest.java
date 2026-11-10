@@ -818,6 +818,61 @@ class BackofficeAgentConfigSeamTest {
         assertThat(back.policy().disabledKinds()).isEmpty();
     }
 
+    // ---------- verify 自决开关（#442，#441-1 开关承载面；缺省 true＝自决开＝#435 现状维持；仅 executor 行消费） ----------
+
+    @Test
+    void given_no_verify_self_decision_override_when_get_then_default_enabled() throws Exception {
+        // #442 缺省态（无覆盖行）：自决开＝#435 自决化落地态（执行体生成过程中自决
+        // 调用 verify 自测）；装配读面同步（verifySelfDecisionEnabledOf＝中间件每
+        // 迭代动态查库的取值单点）
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
+        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isTrue();
+    }
+
+    @Test
+    void given_verify_self_decision_disabled_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 翻转关闭 → GET 生效值＝库值；留痕前后快照含开关（old=true 缺省态 →
+        // new=false）；幂等重写不落痕；清空（PUT {}）回落缺省 true＝自决开
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"verifySelfDecisionEnabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(false));
+        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isFalse();
+
+        // 幂等重写（PUT 全量语义：同值携带——值面无动不落痕，写者不漂移）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"verifySelfDecisionEnabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldVerifySelfDecisionEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newVerifySelfDecisionEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 切回自决开＝旧值写回（一次新变更、留新痕——不做版本树）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"verifySelfDecisionEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].oldVerifySelfDecisionEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newVerifySelfDecisionEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID_2));
+
+        // 清空回落：开关缺省 true＝自决开（null 归一缺省，同决策注入总开关口径）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.verifySelfDecisionEnabled").value(true));
+        assertThat(agentConfigs.verifySelfDecisionEnabledOf(AgentProfile.EXECUTOR)).isTrue();
+    }
+
     @Test
     void given_invalid_decision_hint_face_when_put_then_rejected_with_zero_writes()
             throws Exception {

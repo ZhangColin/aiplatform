@@ -179,6 +179,11 @@ public record BackofficeAgentConfigResponse(
         List<String> decisionHintDisabled,
         @Schema(description = "禁用集是否库覆盖值（true＝覆盖；false＝全启用）")
         boolean decisionHintDisabledOverridden,
+        @Schema(description = "verify 自决开关生效态（#442，#441-1；缺省 true＝自决开〔默认〕——"
+                + "执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——"
+                + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿不受影响。"
+                + "仅 run 执行体行消费）")
+        boolean verifySelfDecisionEnabled,
         @Schema(description = "最近写者 id（admin 侧 TSID；null＝从未配置）", example = "700200")
         String operatorId,
         @Schema(description = "最近写者名（直读展示）", example = "运营·技能管理员")
@@ -246,6 +251,7 @@ public record BackofficeAgentConfigResponse(
                                 .map(DecisionHintKind::key).toList()
                         : List.of(),
                 config.decisionHintDisabled() != null,
+                config.verifySelfDecisionEnabled(),
                 config.operatorId(),
                 config.operatorName(),
                 config.updatedAt());

@@ -79,6 +79,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param decisionHintDisabled 禁用集（#437；库条目键数组——封闭集
  *                          failure_stop_loss/anti_mock/context_economy/parallel_tools，
  *                          非法 token PRJ_083；空数组/null＝全启用）
+ * @param verifySelfDecisionEnabled verify 自决开关（#442，#441-1；缺省 true/null＝
+ *                          自决开〔默认——#435 自决化落地态〕；false＝自决关闭——
+ *                          执行体生成过程中不自发委派 verify 子智能体〔提示层收窄〕，
+ *                          平台驱动验证腿不受影响。仅 run 执行体行消费）
  */
 public record AgentConfigUpdateCommand(
         @Schema(description = "覆盖 systemPrompt 全文（PUT 全量语义：null/缺省/纯空白＝"
@@ -156,5 +160,10 @@ public record AgentConfigUpdateCommand(
         @Schema(description = "禁用集（#437；库条目键数组——封闭集 failure_stop_loss/anti_mock/"
                 + "context_economy/parallel_tools，非法 token PRJ_083；空数组/null＝全启用）",
                 example = "[\"parallel_tools\"]")
-        List<String> decisionHintDisabled) {
+        List<String> decisionHintDisabled,
+        @Schema(description = "verify 自决开关（#442，#441-1；缺省 true＝自决开〔默认〕——"
+                + "执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——"
+                + "提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿（三闸回执／"
+                + "整轨终验编排）不受影响。仅 run 执行体行消费）")
+        Boolean verifySelfDecisionEnabled) {
 }

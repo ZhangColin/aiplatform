@@ -174,6 +174,21 @@ public class AgentConfigAppService {
     }
 
     /**
+     * verify 自决开关生效值（#442 判定读腿——执行体 ReAct 循环中间件每迭代调用）：
+     * 库值优先、缺省 true＝自决开（#435 自决化现状维持）；false＝自决关闭——中间件
+     * 注入提示层指令（生成过程中不自发委派 verify，平台驱动验证腿不受影响）。动态
+     * 查库不缓存：运营面改完下一次迭代即生效，不发版、进行中 run 不定格；装配不进
+     * agent 实例缓存键（改配置无需重建实例，与 #437 决策提示同逻辑）。
+     */
+    @Transactional(readOnly = true)
+    public boolean verifySelfDecisionEnabledOf(AgentProfile profile) {
+        AgentOperationalConfig override = configStore.find(profile.key());
+        AgentOperationalConfig config =
+                override != null ? override : AgentOperationalConfig.defaults(profile.key());
+        return config.verifySelfDecisionEnabled();
+    }
+
+    /**
      * 规格串解码（装配腿，与 {@link EffectiveConfig#toolSpec()} 对偶的解析单点）：
      * null/空/缺件/不可解析＝该件缺省开（{@code AgentOperationalConfig#defaults}
      * 同义——一次性判定等无规格语境的宽容腿，坏规格不炸装配面）。

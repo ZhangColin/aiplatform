@@ -20,7 +20,11 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * 「收口必查登记」降级为执行体生成过程中<b>自决调用的自测工具</b>——
  * agent_spawn 通路与本声明保留不变，report_verification 不再是收口要件
  * 〔验证在场闸缺省关，见 {@code AgentOperationalConfig}〕，自测结果仍进工作
- * 消息与收尾卡观测〔计量观测面不动〕）；{@code workspaceMode(ISOLATED)}
+ * 消息与收尾卡观测〔计量观测面不动〕；<b>#442 运营面自决开关</b>
+ * （{@code verify_self_decision_enabled}，缺省 true＝自决维持现状）：
+ * 关闭态由 {@code VerifySelfDecisionMiddleware} 注入提示层指令收窄自发性
+ * 委派——本声明（agent_spawn 通路）与平台驱动验证腿（三闸回执／终验编排）
+ * 不受影响）；{@code workspaceMode(ISOLATED)}
  * ——框架自带 per-agent 工作区布局：自动创建 {@code agents/<name>/workspace/}、
  * namespace 隔离，隔离根已进非交付目录集 {@code WorkspaceLayout#AGENTS_DIR}，零
  * 新机制；{@link AgentProfile#MAIN 主智能体} 与无配置语境 = 空集（主智能体永不

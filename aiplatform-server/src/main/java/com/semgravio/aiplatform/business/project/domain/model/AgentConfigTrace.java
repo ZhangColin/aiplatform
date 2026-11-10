@@ -57,6 +57,8 @@ import java.time.LocalDateTime;
  * @param newDecisionHintErrorStreak 变更后失败止损阈值（#437；null＝清空回落代码缺省）
  * @param newDecisionHintStackCap    变更后微指令堆叠上限（#437；null＝清空回落代码缺省）
  * @param newDecisionHintDisabled    变更后禁用集（#437；null＝清空全启用）
+ * @param oldVerifySelfDecisionEnabled 变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开）
+ * @param newVerifySelfDecisionEnabled 变更后 verify 自决开关（#442；恒有值）
  * @param operatorId                    变更操作者 id（写操作必留痕）
  * @param operatorName                  变更操作者名（直读展示）
  * @param createdAt                     留痕时刻（＝变更动作时刻）
@@ -84,6 +86,7 @@ public record AgentConfigTrace(
         Integer oldDecisionHintErrorStreak,
         Integer oldDecisionHintStackCap,
         String oldDecisionHintDisabled,
+        boolean oldVerifySelfDecisionEnabled,
         String newSystemPrompt,
         String newModelId,
         boolean newWebSearchEnabled,
@@ -104,6 +107,7 @@ public record AgentConfigTrace(
         Integer newDecisionHintErrorStreak,
         Integer newDecisionHintStackCap,
         String newDecisionHintDisabled,
+        boolean newVerifySelfDecisionEnabled,
         String operatorId,
         String operatorName,
         LocalDateTime createdAt) {

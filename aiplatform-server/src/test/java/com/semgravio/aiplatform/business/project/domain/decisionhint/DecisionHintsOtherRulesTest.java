@@ -107,6 +107,72 @@ class DecisionHintsOtherRulesTest {
         assertThat(classify(snapshot)).isEmpty();
     }
 
+    // ---------- 上下文经济性·累计判据：本段累计成功结果超阈 → 信号（#443） ----------
+
+    @Test
+    void given_cumulative_results_over_threshold_when_classify_then_context_economy_signal() {
+        // 单次都不超单次阈（16000 < 20000），但本段累计成功结果 128000 字符超 12 万
+        // 阈 → 累计信号（#443 录词片归因：重段的上下文膨胀来自多次中量读取的累积，
+        // 不是单次 oversized）。并行信号同轮并存（单调用连击）——按优先级排序在后
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000))),
+                List.of());
+
+        List<HintSignal> signals = classify(snapshot);
+        assertThat(signals).extracting(HintSignal::kind)
+                .containsExactly(DecisionHintKind.CONTEXT_ECONOMY, DecisionHintKind.PARALLEL_TOOLS);
+        assertThat(signals.get(0).reason()).contains("累计").contains("128000");
+    }
+
+    @Test
+    void given_cumulative_results_below_threshold_when_classify_then_no_signal() {
+        // 多次中小读取、累计 66000 字符 < 12 万阈 → 累计判据不打扰（防误伤常规密度
+        // 段）；每迭代双调用亦不入并行信号
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", ok("read_file", 11_000), ok("read_file", 11_000)),
+                text("", ok("read_file", 11_000), ok("read_file", 11_000)),
+                text("", ok("read_file", 11_000), ok("read_file", 11_000))),
+                List.of());
+
+        assertThat(classify(snapshot)).isEmpty();
+    }
+
+    @Test
+    void given_failed_calls_with_large_output_when_classify_then_not_counted_in_cumulative() {
+        // 失败结果不计入累计：其输出多为报错文本，不是上下文灌入的主源；
+        // 若计入，一次大报错就会误触发累计信号
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", new ToolCallOutcome("execute", true, "boom", 200_000)),
+                text("", ok("read_file", 500))),
+                List.of());
+
+        assertThat(classify(snapshot)).isEmpty();
+    }
+
+    @Test
+    void given_single_large_and_cumulative_both_hit_when_classify_then_single_reason_wins() {
+        // 单次判据与累计判据同轮同命中：单次优先（理由直指刚发生的 oversized 读取，
+        // 下一步决策最 relevant）。累计 4×32000=128000 超阈、末迭代单次 30000 超单次阈
+        TrajectorySnapshot snapshot = new TrajectorySnapshot(List.of(
+                text("", ok("read_file", 16_000), ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000), ok("read_file", 16_000)),
+                text("", ok("read_file", 16_000), ok("read_file", 16_000)),
+                text("", ok("read_file", 30_000), ok("read_file", 30_000))),
+                List.of());
+
+        List<HintSignal> signals = classify(snapshot);
+        assertThat(signals).extracting(HintSignal::kind)
+                .containsExactly(DecisionHintKind.CONTEXT_ECONOMY);
+        assertThat(signals.get(0).reason()).contains("单次");
+    }
+
     // ---------- 并行工具调用：尾部连续多迭代单调用 → 信号 ----------
 
     @Test

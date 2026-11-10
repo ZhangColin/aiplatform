@@ -37,7 +37,8 @@ public final class DecisionHints {
      * 错误首行归一化（换工具或换错误内容即换序列）；成功调用截断序列。</li>
      * <li>反 mock 数据——近窗口迭代的助手文本/工具结果出现占位/mock 痕迹
      * （lorem/placeholder/TODO 等封闭模式）。</li>
-     * <li>上下文经济性——存在超大单次工具结果（字符数超阈）即命中。</li>
+     * <li>上下文经济性——单次超大结果（字符数超阈）或本段累计成功结果超阈
+     * （#443 补累计判据：单会话长段的膨胀主源是多次中量读取的累积）即命中。</li>
      * <li>并行工具调用——尾部连续每迭代恰 1 个调用的迭代数超阈即命中。</li>
      * </ul>
      */
@@ -96,6 +97,14 @@ public final class DecisionHints {
 
     /** 单次结果「过大」阈值（字符）：超过即建议窄读（约 20k 字符 ≈ 5k token 量级）。 */
     static final int LARGE_RESULT_CHARS = 20_000;
+
+    /**
+     * 累计成功结果阈值（字符，#443）：本段（当前轮）累计成功工具结果超此值即命中
+     * 上下文经济信号——单会话长段（录词片 161 次调用/12.1M tokens 实测）的膨胀主源
+     * 是多次中量读取的累积而非单次 oversized，单次判据够不着这种形态。约 12 万
+     * 字符 ≈ 3 万 token 量级：重段约前 1/3 触发、常规轻段（数万字符）不误伤。
+     */
+    static final int CUMULATIVE_RESULT_CHARS = 120_000;
 
     /** 并行工具触发线：尾部连续每迭代恰 1 个调用的迭代数 ≥ 此值 → 建议并行。 */
     static final int SINGLE_CALL_STREAK = 4;
@@ -180,15 +189,28 @@ public final class DecisionHints {
     }
 
     /**
-     * 上下文经济规则：最近一次迭代存在结果 &gt; {@value #LARGE_RESULT_CHARS} 字符
-     * 的成功调用 → 信号（理由带体量）。只打最近一次——下一步决策 relevant 的是
-     * 刚发生的 oversized 读取；更早的大读取不进信号（避免长占栈位）。
+     * 上下文经济规则（#443 加强=单次＋累计双判据，同库条目同槽位——不新增堆叠
+     * 竞争者）：<b>单次判据</b>——最近一次迭代存在结果 &gt; {@value
+     * #LARGE_RESULT_CHARS} 字符的成功调用；<b>累计判据</b>——本段（当前轮）累计
+     * 成功结果 &gt; {@value #CUMULATIVE_RESULT_CHARS} 字符（只计成功调用：失败
+     * 输出多为报错短文本，不是灌入主源；判累计用「字符数」而不用迭代数——不同
+     * 工具结果体量差几个量级，迭代数判不准膨胀）。双判据同轮同命中时单次优先
+     * （理由直指刚发生的 oversized 读取，下一步决策最 relevant）；累计判据命中
+     * 即常驻产生信号直至注入（单轮内注入键不重灌，见 {@link #select}）。
      */
     private static void addContextEconomySignal(TrajectorySnapshot snapshot, HintPolicy policy,
             List<HintSignal> signals) {
         if (policy.disabledKinds().contains(DecisionHintKind.CONTEXT_ECONOMY)
                 || snapshot.iterations().isEmpty()) {
             return;
+        }
+        long cumulativeChars = 0;
+        for (Iteration iteration : snapshot.iterations()) {
+            for (ToolCallOutcome call : iteration.calls()) {
+                if (!call.failed()) {
+                    cumulativeChars += call.resultChars();
+                }
+            }
         }
         for (ToolCallOutcome call : snapshot.iterations().get(snapshot.iterations().size() - 1)
                 .calls()) {
@@ -197,6 +219,10 @@ public final class DecisionHints {
                         "单次工具结果 " + call.resultChars() + " 字符"));
                 return;
             }
+        }
+        if (cumulativeChars > CUMULATIVE_RESULT_CHARS) {
+            signals.add(new HintSignal(DecisionHintKind.CONTEXT_ECONOMY,
+                    "本段累计成功工具结果 " + cumulativeChars + " 字符"));
         }
     }
 

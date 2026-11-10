@@ -1,8 +1,9 @@
 # #432 Step 4 后台接口盘点：admin 配置面变更清单（#438）
 
-日期：2026-11-10 · 范围：#432 四步全部落地后的 backoffice（机机签名后台）接口
-· 关联：spec #432、实施票 #433 / #435 / #436 / #437、admin 侧配合票
-ZhangColin/semgravio-admin-web#98（互链）
+> 票 [#438](https://github.com/ZhangColin/aiplatform/issues/438)（#432 Step 4），2026-11-10。
+> 范围：#432 四步全部落地后的 backoffice（机机签名后台）接口。
+> 关联：spec #432、实施票 #433 / #435 / #436 / #437、admin 侧配合票
+> [semgravio-admin-web#98](https://github.com/ZhangColin/semgravio-admin-web/issues/98)（互链）。
 
 ## 口径
 

@@ -14,7 +14,7 @@
 --      「换策略」微指令；null＝回落代码缺省 3；运营可配范围 2-10（PRJ_081）。
 --   3. decision_hint_stack_cap INT NULL：
 --      微指令堆叠上限——单轮（段）最多注入几条不同微指令；null＝回落代码缺省 3
---      （研究口径 ≤3——再堆收益递减转负）；运营可配范围 1-5（PRJ_082）。
+--      （研究口径 ≤3——再堆收益递减转负）；运营可配范围 1-3（PRJ_082）。
 --   4. decision_hint_disabled VARCHAR NULL：
 --      禁用集——库条目键逗号串（封闭集：failure_stop_loss/anti_mock/
 --      context_economy/parallel_tools；非法 token 拒写 PRJ_083）；null/空串＝

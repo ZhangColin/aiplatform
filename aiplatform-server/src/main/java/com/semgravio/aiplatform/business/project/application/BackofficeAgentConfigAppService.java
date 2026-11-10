@@ -55,7 +55,8 @@ import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHin
 @Service
 public class BackofficeAgentConfigAppService {
 
-    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开＋收口三闸开〕」）。 */
+    /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
+     * ＋收口三闸关〔#435 翻转缺省〕＋单会话开＋并行关＋决策时注入开」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null, null, null);

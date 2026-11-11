@@ -1281,13 +1281,13 @@ class IterationAppServiceTest {
         return projectRepository.save(project).getId();
     }
 
-    /** 已确认 PRD 版本在场（#333 Demo 版本锚——迭代起跑时的基准版本）。 */
-    private void seedConfirmedPrdVersion(Long projectId, int versionNo) {
-        seedConfirmedPrdVersionContent(projectId, versionNo, "# PRD");
+    /** PRD 版本行在场（#333 Demo 版本锚——迭代起跑时最新构建基准的取数事实）。 */
+    private void seedPrdVersionRow(Long projectId, int versionNo) {
+        seedPrdVersionRowContent(projectId, versionNo, "# PRD");
     }
 
-    /** 已确认 PRD 版本在场（#334 起跑基准——自定义全文：漂移比对的工作区对侧事实）。 */
-    private void seedConfirmedPrdVersionContent(Long projectId, int versionNo, String content) {
+    /** PRD 版本行在场（自定义全文——记行形态的版本行夹具：锚捕获读「最新版」）。 */
+    private void seedPrdVersionRowContent(Long projectId, int versionNo, String content) {
         jdbcTemplate.update("""
                 INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
                     prd_produced_at, created_at, updated_at)
@@ -1309,18 +1309,19 @@ class IterationAppServiceTest {
     @Test
     void given_changed_fix_runs_when_close_then_demo_versions_increment_with_prd_anchor() {
         // 灵魂例（#333 迭代每轮自动成版）：changed=true 收口即递增成版、锚本场起跑时
-        // 已确认 PRD 版本——v1（PRD v1 基准）→ 确认 v2 后下一轮 v2 锚（迭代成版链）
+        // 最新 PRD 版本（#462 去门化＝最新构建基准记行）——v1（PRD v1 基准）→ 新基准
+        // v2 记行后下一轮锚 v2（迭代成版链）
         Long projectId = persistedGeneratedProject("9950");
-        seedConfirmedPrdVersion(projectId, 1);
-        // 工作区草稿==已确认版（#334：无范围级草稿在场——迭代基准＝已确认版、无漂移）
+        seedPrdVersionRow(projectId, 1);
+        // 工作区 PRD==最新记行全文（同文——起跑记行幂等跳过，不产生新基准）
         givenWorkspacePrd("# PRD");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
         IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表按时间倒序", null);
         tracks.remove(0).run();
-        // 改需求回路后：PRD 确认 v2（确认新版才切迭代基准）
-        seedConfirmedPrdVersion(projectId, 2);
+        // 需求侧修订后的新基准记行（模拟 PRD 已修订、随起跑自动记 v2）——下一场锚 v2
+        seedPrdVersionRow(projectId, 2);
         IterationAppService.FixDispatch second = appService.startFixRun(projectId, "加筛选", null);
         tracks.remove(0).run();
 
@@ -1352,14 +1353,14 @@ class IterationAppServiceTest {
         assertThat(count).isZero();
     }
 
-    // ---------- 改需求回路（#334）：小迭代基准＝当前已确认版本 ----------
+    // ---------- 迭代需求基准（#462 去门化）：恒工作区 PRD 正本（单形） ----------
 
-    /** 已确认版全文（基准断言用的独特正文——区别于草稿与占位）。 */
-    private static final String CONFIRMED_PRD_V1 = "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n";
+    /** 最新版本行全文 v1（基准断言用的独特正文——区别于新草稿与占位）。 */
+    private static final String PRD_V1_ROW = "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n";
 
-    /** 范围级新草稿（≠已确认 v1——漂移在工作区的事实面）。 */
-    private static final String SCOPE_PENDING_DRAFT =
-            "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
+    /** 范围级新草稿（≠v1 全文——工作区已修订、未随起跑记行的形态）。 */
+    private static final String SCOPE_DRAFT =
+            "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
 
     /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文——覆盖 AGENTS.md 桩，写路径只看退出码）。 */
     private void givenWorkspacePrd(String prdMarkdown) {
@@ -1373,8 +1374,8 @@ class IterationAppServiceTest {
         // 待确认——受理即迭代，需求基准恒为工作区 PRD 正本（新草稿＝新构建基准，
         // 下一起跑自动记行；不再内联旧确认版快照）
         Long projectId = persistedGeneratedProject("9960");
-        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
-        givenWorkspacePrd(SCOPE_PENDING_DRAFT);
+        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
+        givenWorkspacePrd(SCOPE_DRAFT);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
@@ -1389,12 +1390,12 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_draft_equals_confirmed_when_iteration_runs_then_prompt_reads_workspace() {
-        // 草稿==已确认版（无新草稿在场，含确认动作后的范围级修正 run）：照旧以
-        // 工作区正本为需求正本（不内联快照——确认后工作区即确认版）
+    void given_draft_equals_latest_row_when_iteration_runs_then_prompt_reads_workspace() {
+        // 工作区正本==最新版本行全文（同文形态，无新草稿在场）：照旧以工作区正本
+        // 为需求正本（单形——不内联快照、不区分草稿/成版两形）
         Long projectId = persistedGeneratedProject("9961");
-        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
-        givenWorkspacePrd(CONFIRMED_PRD_V1);
+        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
+        givenWorkspacePrd(PRD_V1_ROW);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
@@ -1409,8 +1410,9 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_no_confirmed_version_when_iteration_runs_then_prompt_reads_workspace() {
-        // legacy（无确认版起跑）：不虚构确认制——照旧以工作区正本为需求正本
+    void given_no_version_rows_when_iteration_runs_then_prompt_reads_workspace() {
+        // legacy（无版本记行起跑，如记行失败/极老项目）：不虚构记行——照旧以
+        // 工作区正本为需求正本（Demo 版本锚 null 同口径）
         Long projectId = persistedGeneratedProject("9962");
         givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n");
         List<Runnable> tracks = givenTrackQueued();

@@ -1130,14 +1130,13 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_confirmed_prd_version_when_opinion_turn_closes_then_first_generation_dispatched() {
-        // 灵魂用例正手（#332 生成加门）：存在已确认 PRD 版本（用户已「确认此版 PRD 并
-        // 生成 Demo」）后意见轮收口——平台自动派首个构建 run（#104 生成轨道首 run =
-        // 阶段 0 先起服），切片计划随派发交接（planOf 可取到）。判据＝未生成＋存在
-        // 已确认版本（收口观测点单一判据）。
+    void given_prd_produced_with_version_rows_when_opinion_turn_closes_then_first_generation_dispatched() {
+        // 首场编码 run 的会话寻址与配置形状（#104 生成轨道首 run = 阶段 0 先起服）：
+        // PRD 已产出（判据＝prdProducedAt，去门化 #462 后与版本行无关——版本行在场
+        // 只是 legacy 记行形态，不构成任何门）；切片计划随派发交接（planOf 可取到）。
         givenPerSliceSessions(); // #436 单会话缺省开——本用例锚 slice-0 会话寻址（旧行为）
         Long projectId = persistedPrdProject("9731");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -1166,12 +1165,13 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_main_produces_build_plan_when_turn_closes_then_plan_handed_to_generation() {
-        // 灵魂用例（#103 交接物来源；#332 生成加门后前置事实＝已确认 PRD 版本在场）：
+        // 灵魂用例（#103 交接物来源；前置事实＝PRD 已产出——去门化 #462 后与版本行
+        // 无关，seedPrdVersionRow 仅 legacy 记行形态夹具）：
         // 主智能体产出 PRD 后顺带产出切片计划（saveBuildPlan 事实）——收口派发把切片
         // 计划随生成交接给 GenerationAppService（planOf 可取到），判定以工具调用事实
         // 为准、不解析自由文本
         Long projectId = persistedPrdProject("9729");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -1193,12 +1193,12 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_main_no_build_plan_when_turn_closes_then_plan_redispatched_not_faked() {
-        // 无计划兜底（#220 删 minimalFallback 后的新口径；#332 生成加门后前置事实＝
-        // 已确认 PRD 版本在场）：主智能体产出 PRD 但未产出切片计划——不兜假计划，
+        // 无计划兜底（#220 删 minimalFallback 后的新口径；前置事实＝PRD 已产出）：
+        // 主智能体产出 PRD 但未产出切片计划——不兜假计划，
         // 重派主智能体按 PRD 补产（补产轮收口再判）；补产轮仍无计划即止（同 PRD 版本
         // 只补一次），生成不倒退为「守卫不派」也不冒进
         Long projectId = persistedPrdProject("9730");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
                 .thenReturn(new ExecResultResponse("", "", 0));
@@ -1232,12 +1232,12 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_generation_in_flight_when_opinion_turn_closes_then_dispatch_skipped() {
-        // 场景矩阵（#101 在途守卫；#332 生成加门后取「已确认版本在场＋在途」形——门
-        // 放行才走到在途守卫）：生成进行中，意见轮收口静默跳过（不派不报错）——已产出
-        // PRD 与已确认版本、但已有生成在途（共用件在途标记 begin 已占位），收口不派
+        // 场景矩阵（#101 在途守卫；去门化 #462 后取「PRD 已产出＋在途」形）：生成
+        // 进行中，意见轮收口静默跳过（不派不报错）——已产出 PRD（版本行在场）、但
+        // 已有生成在途（共用件在途标记 begin 已占位），收口不派
         // 第二场生成，用户新意见照旧随对话收口
         Long projectId = persistedPrdProject("9728");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenSessionExecutorRunsInline();
         codingRunTrack.begin(projectId); // 模拟生成在途
         try {
@@ -1251,9 +1251,12 @@ class MainAgentAppServiceTest {
         }
     }
 
-    // ---------- 改需求回路（#334）：大改小改分流——轮收口停派 or 照旧迭代 ----------
+    // ---------- 改需求回路去门化（#462，ADR-0039）：意见轮收口一律受理即派 ----------
+    //（#334 大改小改分流的机械停派已随确认门退役：范围级新草稿照派修正 run，
+    // 停驻两列留库不删、无人读写——以下用例钉死「不停派」与「停驻列恒空」）
 
-    /** 范围级新草稿（≠已确认 v1 全文——漂移判定的工作区事实）。 */
+    /** 范围级新草稿（工作区 PRD 修订后的形态——去门化后随修正 run 起跑自动记为
+     * 下一构建基准，不再有「待确认」停留位）。 */
     private static final String SCOPE_DRAFT =
             "# PRD\n\n## 功能清单\n\n1. 首页\n2. 管理后台——管理员可管理商品与订单\n";
 
@@ -1266,10 +1269,10 @@ class MainAgentAppServiceTest {
     @Test
     void given_scope_opinion_revises_prd_when_turn_closes_then_fix_run_dispatched() {
         // 去门化（#462，ADR-0039）：改需求分流停派（#334）退役——范围级新草稿（
-        // savePrd 修订事实＋草稿≠已确认版）照旧受理即派修正 run：新草稿随下一起跑
+        // savePrd 修订事实＋草稿≠最新版本行全文）照旧受理即派修正 run：新草稿随下一起跑
         // 自动记为下一构建基准；停驻两列留库不删、无人写
         Long projectId = persistedGeneratedProject("9761");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
         givenConverseMainSavesPrdAndExecutorFinishes("功能清单新增管理后台章");
@@ -1292,11 +1295,12 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_small_feedback_with_pending_draft_when_turn_closes_then_fix_run_as_usual() {
-        // 小反馈照旧受理即迭代：新草稿在场不影响旧确认版上的小迭代——无 savePrd
-        // 事实即小反馈，收口照旧派更新 run（本轮基准＝已确认版的判定归迭代轨起跑）
+        // 小反馈照旧受理即迭代：范围级新草稿在场不改变小反馈的受理即派——无
+        // savePrd 事实即小反馈，收口照旧派更新 run（需求基准恒工作区 PRD 正本，
+        // 归迭代轨起跑单形）
         Long projectId = persistedGeneratedProject("9762");
-        markPrdConfirmed(projectId);
-        givenWorkspacePrd(SCOPE_DRAFT); // 范围级草稿在场（未被确认）
+        seedPrdVersionRow(projectId);
+        givenWorkspacePrd(SCOPE_DRAFT); // 范围级新草稿在场（未随起跑记行）
         givenSessionExecutorRunsInline();
         givenConverseMainRepliesAndExecutorFinishes("好的，会改的");
 
@@ -1311,11 +1315,12 @@ class MainAgentAppServiceTest {
 
     @Test
     void given_save_prd_with_unchanged_draft_when_turn_closes_then_fix_run_with_summary() {
-        // 同文重存（草稿==已确认版，如派发失败后重提、智能体重存同文）＝无新草稿：
-        // 照旧受理即迭代，修订说明照进交接物——重提即兜底不落「停驻→幂等确认死锁」
+        // 同文重存（工作区 PRD==最新版本行全文，如派发失败后重提、智能体重存同文）
+        // ＝无新草稿：照旧受理即迭代，修订说明照进交接物（重提即兜底——旧「停驻→
+        // 幂等确认死锁」面已随停派退役不复存在）
         Long projectId = persistedGeneratedProject("9763");
-        markPrdConfirmed(projectId);
-        givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n"); // 与 v1 全文一致
+        seedPrdVersionRow(projectId);
+        givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n"); // 与最新版本行全文一致
         givenSessionExecutorRunsInline();
         givenConverseMainSavesPrdAndExecutorFinishes("按意见重申了首页要点");
 
@@ -1337,7 +1342,7 @@ class MainAgentAppServiceTest {
         // 首个构建 run（新草稿＝首个构建基准：版本记行随起跑自动落，无确认动作）；
         // 停驻两列留库不删、无人写
         Long projectId = persistedPrdProject("9764");
-        markPrdConfirmed(projectId);
+        seedPrdVersionRow(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
@@ -2010,17 +2015,17 @@ class MainAgentAppServiceTest {
         return project.getId();
     }
 
-    /** PRD 已产出、未生成的项目（#101 生成无门→#332 生成加门：收口触发首个构建 run
-     * 的前置事实之一——另一前置＝存在已确认 PRD 版本，见 {@link #markPrdConfirmed}）。 */
+    /** PRD 已产出、未生成的项目（去门化 #462：收口观测派首个构建 run 的判据＝
+     * {@code prdProducedAt}——与版本行无关，版本行见 {@link #seedPrdVersionRow}）。 */
     private Long persistedPrdProject(String workspaceId) {
         Project project = projectRepository.save(Project.create("访谈项目", null, null, Long.parseLong(workspaceId), OWNER, null));
         project.markPrdProduced();
         return projectRepository.save(project).getId();
     }
 
-    /** 已确认 PRD 版本在场（#332 生成加门：首个构建 run 触发判据「存在已确认版本」
-     * 的事实面——内容不参与收口观测，存在即触发）。 */
-    private void markPrdConfirmed(Long projectId) {
+    /** PRD 版本行在场（v1 记行形态——Demo 版本锚/读面的取数事实；去门化 #462 后
+     * 不构成任何派发门，仅作 legacy 记行形态夹具）。 */
+    private void seedPrdVersionRow(Long projectId) {
         Project project = projectRepository.findById(projectId).orElseThrow();
         prdVersions.save(PrdVersion.recorded(projectId, 1, "# PRD\n\n## 功能清单\n\n1. 首页\n",
                 LocalDateTime.now(), project.getPrdProducedAt(), "run-fixture"));

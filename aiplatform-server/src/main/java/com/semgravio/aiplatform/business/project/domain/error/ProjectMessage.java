@@ -253,7 +253,8 @@ public enum ProjectMessage implements CodeMessage {
     /** 决策时注入禁用集越出封闭集（#437）：token 须为库条目键——错值写不进去（null/缺省＝全启用）。 */
     DECISION_HINT_KIND_INVALID(400, "PRJ_083", "决策时注入的禁用集条目须为封闭集内的值：{0}（可选 failure_stop_loss/anti_mock/context_economy/parallel_tools；null/缺省＝全启用）");
 
-    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
+    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（后继 PRJ_053 两级门亦已随
+    // 确认门整段退役——见上方 PRJ_053 注）
 
     private final int httpStatus;
     private final String code;

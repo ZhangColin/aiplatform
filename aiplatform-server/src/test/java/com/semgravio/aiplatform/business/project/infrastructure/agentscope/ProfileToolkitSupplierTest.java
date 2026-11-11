@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.AgentWorkspace;
 import com.semgravio.aiplatform.base.agentscope.LandedFileFacts;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.skills.domain.model.SkillDraftReceipt;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
@@ -30,6 +31,7 @@ import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetc
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
+import com.semgravio.aiplatform.business.project.infrastructure.SedimentProposalAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SkillProposalAdapter;
 
 import io.agentscope.core.agent.RuntimeContext;
@@ -67,6 +69,7 @@ class ProfileToolkitSupplierTest {
     private final ExternalContentFetcher externalContentFetcher = mock(ExternalContentFetcher.class);
     private final WebSearchProvider webSearchProvider = mock(WebSearchProvider.class);
     private final SkillProposalAdapter skillProposals = mock(SkillProposalAdapter.class);
+    private final SedimentProposalAdapter sedimentProposals = mock(SedimentProposalAdapter.class);
     private final ImageGenerationAppService imageGeneration = mock(ImageGenerationAppService.class);
     private final LandedFileFacts landedFiles = new LandedFileFacts();
     private final DesignSpecAppService designSpecs = mock(DesignSpecAppService.class);
@@ -81,8 +84,8 @@ class ProfileToolkitSupplierTest {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         return new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions, buildPlanFacts,
                 projectRepository, workspaceLifecycleAppService, externalContentFetcher,
-                webSearchProvider, skillProposals, imageGeneration, landedFiles, designSpecs,
-                verificationFacts, agentConfigs);
+                webSearchProvider, skillProposals, sedimentProposals, imageGeneration,
+                landedFiles, designSpecs, verificationFacts, agentConfigs);
     }
 
     @Test
@@ -97,12 +100,14 @@ class ProfileToolkitSupplierTest {
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
-                FetchUrlTool.NAME, WebSearchTool.NAME, ProposeSkillTool.NAME);
+                FetchUrlTool.NAME, WebSearchTool.NAME, ProposeSkillTool.NAME,
+                ProposeSedimentTool.NAME);
         for (String name : toolkit.getToolNames()) {
             // 只读五件与 saveBuildPlan 全 readOnly；ask_user 是挂起源（无写面）；
-            // 平台侧写面两件：savePrd（PRD 产出是访谈协议的预期终点）与
-            // propose_skill（草稿写库——不写工作区文件，#86 只读姿态不被破坏）
-            if (!SavePrdTool.NAME.equals(name) && !ProposeSkillTool.NAME.equals(name)) {
+            // 平台侧写面三件：savePrd（PRD 产出是访谈协议的预期终点）、propose_skill
+            // 与 propose_sediment（草稿写库——不写工作区文件，#86 只读姿态不被破坏）
+            if (!SavePrdTool.NAME.equals(name) && !ProposeSkillTool.NAME.equals(name)
+                    && !ProposeSedimentTool.NAME.equals(name)) {
                 assertThat(toolkit.getTool(name).isReadOnly()).as(name).isTrue();
             }
         }
@@ -129,7 +134,7 @@ class ProfileToolkitSupplierTest {
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null)
                 .getToolNames())
                 .containsExactlyInAnyOrder(FinishEditTool.NAME, UpdatePlanTool.NAME,
-                        ProposeSkillTool.NAME);
+                        ProposeSkillTool.NAME, ProposeSedimentTool.NAME);
     }
 
     @Test
@@ -183,7 +188,8 @@ class ProfileToolkitSupplierTest {
         // 执行体资产 finish_edit/update_plan 不泄漏
         assertThat(supplier().toolkitFor(ProfileSubagentSupplier.VERIFY_NAME,
                         new AgentWorkspace.ProjectDev("42", "ws-42-dev"), null).getToolNames())
-                .containsExactlyInAnyOrder(ReportVerificationTool.NAME, ProposeSkillTool.NAME);
+                .containsExactlyInAnyOrder(ReportVerificationTool.NAME, ProposeSkillTool.NAME,
+                        ProposeSedimentTool.NAME);
     }
 
     @Test
@@ -206,6 +212,63 @@ class ProfileToolkitSupplierTest {
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
         assertProposeLineage(ProfileSubagentSupplier.VERIFY_NAME,
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
+    }
+
+    @Test
+    void given_three_slot_assemblies_when_propose_sediment_called_then_lineage_slot_each() {
+        // #460 血统验收：三槽位装配出的 propose_sediment 实例各带正确来源槽位——
+        // 真缝走通（装配 → 工具执行 → 适配器血统），草稿落库的槽位血统不串槽
+        assertProposeSedimentLineage(AgentProfile.MAIN.key(),
+                new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "main");
+        assertProposeSedimentLineage(AgentProfile.EXECUTOR.key(),
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "executor");
+        assertProposeSedimentLineage(ProfileSubagentSupplier.VERIFY_NAME,
+                new AgentWorkspace.ProjectDev("42", "ws-42-dev"), "subagent");
+    }
+
+    /** 适配器替身：记录沉淀自荐的血统调用形状。 */
+    private static final class RecordingSedimentAdapter extends SedimentProposalAdapter {
+
+        final List<String> calls = new ArrayList<>();
+
+        RecordingSedimentAdapter() {
+            super(null, null, null);
+        }
+
+        @Override
+        public SedimentDraftReceipt propose(String workspaceId, String runId, String slotKey,
+                String kind, String title, String summary, String content) {
+            calls.add(workspaceId + "|" + runId + "|" + slotKey + "|" + kind + "|" + title);
+            return SedimentDraftReceipt.accepted(1L, "沉淀草稿已留档待审。");
+        }
+    }
+
+    private void assertProposeSedimentLineage(String agentKey, AgentWorkspace workspace,
+            String slotKey) {
+        RecordingSedimentAdapter recorder = new RecordingSedimentAdapter();
+        when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
+        var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
+                buildPlanFacts, projectRepository, workspaceLifecycleAppService,
+                externalContentFetcher, webSearchProvider, skillProposals, recorder,
+                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs);
+        var toolkit = supplier.toolkitFor(agentKey, workspace, null);
+        assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSedimentTool.NAME);
+        String title = "缝测血统-" + slotKey;
+        Map<String, Object> input = Map.of(
+                "kind", "CASE", "title", title, "summary", "缝测血统。", "content", "正文。");
+        var result = Mono.from(toolkit.getTool(ProposeSedimentTool.NAME)
+                .callAsync(ToolCallParam.builder()
+                        .toolUseBlock(new ToolUseBlock("tc-1", ProposeSedimentTool.NAME,
+                                input, null))
+                        .input(input)
+                        .runtimeContext(RuntimeContext.builder()
+                                .sessionId("s").userId("u")
+                                .put(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY, "run-seam")
+                                .build())
+                        .build()))
+                .block();
+        assertThat(result.getState()).as(agentKey).isNotEqualTo(ToolResultState.ERROR);
+        assertThat(recorder.calls).containsExactly("42|run-seam|" + slotKey + "|CASE|" + title);
     }
 
     @Test
@@ -258,8 +321,8 @@ class ProfileToolkitSupplierTest {
         when(prdArtifacts.workspacePath()).thenReturn("docs/PRD.md");
         var supplier = new ProfileToolkitSupplier(prdArtifacts, finishFacts, prdRevisions,
                 buildPlanFacts, projectRepository, workspaceLifecycleAppService,
-                externalContentFetcher, webSearchProvider, recorder, imageGeneration,
-                landedFiles, designSpecs, verificationFacts, agentConfigs);
+                externalContentFetcher, webSearchProvider, recorder, sedimentProposals,
+                imageGeneration, landedFiles, designSpecs, verificationFacts, agentConfigs);
         var toolkit = supplier.toolkitFor(agentKey, workspace, null);
         assertThat(toolkit.getToolNames()).as(agentKey).contains(ProposeSkillTool.NAME);
         String name = "seam-check-" + slotKey;
@@ -336,14 +399,13 @@ class ProfileToolkitSupplierTest {
 
     @Test
     void given_both_enhancements_disabled_when_toolkit_then_skeleton_only() {
-        // 两件全关＝只剩骨架七件（编排链路＋只读三件＋自荐 #263——结构性锁死件
-        // 不受开关影响）
+        // 两件全关＝只剩骨架（编排链路＋只读三件＋自荐两件——结构性锁死件不受开关影响）
         var toolkit = supplier().toolkitFor(AgentProfile.MAIN.key(),
                 new AgentWorkspace.ProjectReadOnly("42", "ws-42-dev"), "ws=false,fu=false");
         assertThat(toolkit.getToolNames()).containsExactlyInAnyOrder(
                 AskUserTool.NAME, SavePrdTool.NAME, SaveBuildPlanTool.NAME,
                 ListWorkspaceFilesTool.NAME, ReadWorkspaceFileTool.NAME, ProjectFactsTool.NAME,
-                ProposeSkillTool.NAME);
+                ProposeSkillTool.NAME, ProposeSedimentTool.NAME);
     }
 
     @Test

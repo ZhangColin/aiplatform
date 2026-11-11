@@ -54,10 +54,11 @@ import io.agentscope.harness.agent.subagent.WorkspaceMode;
  * {@code hasShell} 口径发放（子智能体带 shell——同执行体开放面）。</p>
  *
  * <p><b>平台工具（声明 allowlist 接入）</b>：report_verification（#352 验证结果
- * 登记——收尾卡验证统计的事实源）与 propose_skill（#263 自荐）经声明 allowlist
- * 接入——平台工厂按子智能体键取工具视图（{@code ProfileToolkitSupplier} 的
- * verify 键＝subagent 槽血统实例）合并进子级工具面，同名后写胜出覆盖父级继承的
- * 执行体槽实例（血统不串槽）；软指引绑任务回交前（正文第 9 条），无经验不调用。</p>
+ * 登记——收尾卡验证统计的事实源）与 propose_skill（#263 自荐）/propose_sediment
+ * （#460 沉淀自荐）经声明 allowlist 接入——平台工厂按子智能体键取工具视图
+ * （{@code ProfileToolkitSupplier} 的 verify 键＝subagent 槽血统实例）合并进子级
+ * 工具面，同名后写胜出覆盖父级继承的执行体槽实例（血统不串槽）；软指引绑任务回交
+ * 前（正文第 9/10 条），无经验不调用。</p>
  */
 @Component
 public class ProfileSubagentSupplier implements AgentSubagentSupplier {
@@ -68,14 +69,14 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
     /** 验证子智能体工具白名单：只读交付代码 + 跑命令（内核 shell 注册名
      *  execute——浏览器验证脚本/psql/读日志都经它）+ 脚本与报告写隔离根 +
      *  验证结果登记（#352 report_verification——平台工厂按子键视图发 subagent
-     *  槽血统实例，挂载治理归本清单）+ 技能自荐（#263 声明白名单接入）——
-     *  排除 edit_file（不改交付代码——#266 起平台工厂构建后置过滤兑现，构建
-     *  收口后工具面 ⊆ 本清单，排除是结构性的非协议级）与 finish_edit（执行体
-     *  收口工具）。 */
+     *  槽血统实例，挂载治理归本清单）+ 技能自荐（#263 声明白名单接入）+ 沉淀自荐
+     * （#460 数据飞轮采集层，声明白名单接入）——排除 edit_file（不改交付代码——
+     * #266 起平台工厂构建后置过滤兑现，构建收口后工具面 ⊆ 本清单，排除是结构性
+     * 非协议级）与 finish_edit（执行体收口工具）。 */
     /** public＝工具面清单读面（#252 subagent 槽位呈现口径）与本声明同源引用。 */
     public static final List<String> VERIFY_TOOLS = List.of(
             "read_file", "grep_files", "glob_files", "list_files", "write_file", "execute",
-            "report_verification", "propose_skill");
+            "report_verification", "propose_skill", "propose_sediment");
 
     /** 验证角色正文（任务自包含、结果回交执行体；读交付代码只读、产物写隔离根）。 */
     private static final String VERIFY_BODY = "你是 run 执行体委派的独立验证子智能体，专责对本片验收"
@@ -121,6 +122,11 @@ public class ProfileSubagentSupplier implements AgentSubagentSupplier {
             + "验证的要点、浏览器验证脚本的稳妥写法等），用 propose_skill 工具把它写成技能"
             + "草稿（name/description/body 三参数）供后续复用——后台审核采纳后才生效；没有"
             + "可沉淀的就不调用，不为凑数硬写。\n"
+            + "10. 沉淀物自荐（软指引非必做）：回交结果前，若本轮见到可跨项目复用的内容"
+            + "（某类系统通用的功能模块形态、反复出现的业务规则口径等），用 propose_sediment"
+            + " 工具把它写成沉淀草稿（kind 传 CASE/MODULE/RULE，title/summary/content 三"
+            + "参数）供后续项目参考——后台「数据标注」人工审核激活后才入知识库；没有值得"
+            + "沉淀的就不调用，不为凑数硬写。\n"
             + "全程使用中文。";
 
     private final SubagentDeclaration verify;

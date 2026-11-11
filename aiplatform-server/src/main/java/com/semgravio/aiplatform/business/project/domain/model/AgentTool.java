@@ -42,6 +42,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
             "自主搜索调研补缺口（增强可关——成本与滥用可控）"),
     PROPOSE_SKILL_MAIN(12, "propose_skill", "main", AgentToolKind.SKELETON,
             "技能草稿自荐（需求侧梳理经验沉淀待审——过程知识沉淀链，#263 三槽位齐开）"),
+    PROPOSE_SEDIMENT_MAIN(15, "propose_sediment", "main", AgentToolKind.SKELETON,
+            "沉淀物草稿自荐（需求案例/功能模块/业务规则沉淀待审——数据飞轮采集层，#460）"),
 
     // ---------- executor 槽位（run 执行体：生成/更新 run 的执行侧，读写面） ----------
 
@@ -51,6 +53,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
             "run 级步骤清单的全量快照（呈现面在部件映射表——编排链路）"),
     PROPOSE_SKILL(11, "propose_skill", "executor", AgentToolKind.SKELETON,
             "技能草稿自荐（验证过的编码模式沉淀待审——过程知识沉淀链）"),
+    PROPOSE_SEDIMENT(16, "propose_sediment", "executor", AgentToolKind.SKELETON,
+            "沉淀物草稿自荐（可复用功能模块/业务规则沉淀待审——数据飞轮采集层，#460）"),
 
     // ---------- designer 槽位（设计执行体：设计过程的执行侧，写文件无 shell——#289） ----------
 
@@ -112,8 +116,8 @@ public enum AgentTool implements BaseEnum<AgentTool> {
 
     /**
      * 按注册名解析（REST 按名寻址腿；空/未知返回空）。跨槽位同名件（#263 起
-     * propose_skill 两词条）解析到声明序首件——现消费面（开关拒绝、子级清单类别
-     * 回解）只读类别，同名件类别一致无歧义。
+     * propose_skill 两词条、#460 起 propose_sediment 两词条）解析到声明序首件——
+     * 现消费面（开关拒绝、子级清单类别回解）只读类别，同名件类别一致无歧义。
      */
     public static Optional<AgentTool> byName(String toolName) {
         if (toolName == null || toolName.isBlank()) {

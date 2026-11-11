@@ -314,11 +314,12 @@ class IterationChainSmokeTest {
 
     /** 预置可跑小系统：index.html（主色蓝）+ 8081 常驻 node 静态服务。 */
     private void placeRunningSystem() {
+        // （①族纪律：进容器命令禁内嵌双引号——HTML 属性改单引号形态，合法 HTML）
         exec("mkdir -p /workspace && cat > /workspace/index.html <<'SMOKE_EOF'\n"
-                + "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+                + "<!doctype html><html lang='zh'><head><meta charset='utf-8'>"
                 + "<title>展示系统</title></head>"
-                + "<body style=\"font-family: sans-serif; margin: 40px\">"
-                + "<h1 style=\"color: " + BLUE_MAIN_COLOR + "\">展示系统</h1>"
+                + "<body style='font-family: sans-serif; margin: 40px'>"
+                + "<h1 style='color: " + BLUE_MAIN_COLOR + "'>展示系统</h1>"
                 + "<p>主页内容。</p></body></html>\nSMOKE_EOF");
         exec("cat > /workspace/server.js <<'SMOKE_EOF'\n"
                 + "const http = require('http'); const fs = require('fs');\n"

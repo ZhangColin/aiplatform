@@ -99,10 +99,12 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[1].slot").value("executor"))
                 .andExpect(jsonPath("$.data[2].slot").value("designer"))
                 .andExpect(jsonPath("$.data[3].slot").value("subagent"))
-                // main：平台九件（骨架七恒挂载——含 propose_skill #263 自荐三槽位齐开
-                // ＋增强两件按生效开关缺省开）
-                .andExpect(jsonPath("$.data[0].tools", hasSize(9)))
+                // main：平台十件（骨架八恒挂载——含 propose_skill #263 与
+                // propose_sediment #460 自荐三槽位齐开＋增强两件按生效开关缺省开）
+                .andExpect(jsonPath("$.data[0].tools", hasSize(10)))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_skill')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[0].tools[?(@.name == 'propose_sediment')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'web_search')].kind")
                         .value("ENHANCEMENT"))
@@ -113,19 +115,21 @@ class BackofficeAgentToolSeamTest {
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[0].tools[?(@.name == 'ask_user')].enabled").value(true))
-                // executor：平台三件（骨架——含 propose_skill 技能自荐，#259）
-                // ＋harness 内建编码工具（注册自省）
+                // executor：平台四件（骨架——含 propose_skill 技能自荐 #259 与
+                // propose_sediment 沉淀自荐 #460）＋harness 内建编码工具（注册自省）
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'finish_edit')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'propose_skill')].kind")
+                        .value("SKELETON"))
+                .andExpect(jsonPath("$.data[1].tools[?(@.name == 'propose_sediment')].kind")
                         .value("SKELETON"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'read_file')].kind")
                         .value("HARNESS_BUILTIN"))
                 .andExpect(jsonPath("$.data[1].tools[?(@.name == 'execute')].kind")
                         .value("HARNESS_BUILTIN"))
-                // harness 内建件数与自省一致（平台三件之外全是内建呈现）
+                // harness 内建件数与自省一致（平台四件之外全是内建呈现）
                 .andExpect(jsonPath("$.data[1].tools.length()").value(
-                        3 + harnessBuiltinCount()))
+                        4 + harnessBuiltinCount()))
                 // designer（#289）：平台件 generate_image（骨架，ADR-0026 档位表落
                 // 提示词层）＋harness 内建文件工具（写文件件——注册自省，含
                 // write_file）；无 shell——execute 不在设计面（结构性关闭的呈现同源）

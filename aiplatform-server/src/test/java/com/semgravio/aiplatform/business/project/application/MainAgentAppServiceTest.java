@@ -49,6 +49,7 @@ import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
+import com.semgravio.aiplatform.base.skills.domain.enums.SkillSlot;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
@@ -108,6 +109,10 @@ class MainAgentAppServiceTest {
 
     @Autowired
     private BuildPlanFacts buildPlanFacts;
+
+    /** 沉淀自荐事实登记口（#460 兜底盘问豁免判定：模拟轮内 propose_sediment 工具执行）。 */
+    @Autowired
+    private SedimentProposalFacts sedimentProposals;
 
     @Autowired
     private GenerationAppService generationAppService;
@@ -764,6 +769,88 @@ class MainAgentAppServiceTest {
         assertThat(fix.prompt()).isEqualTo(IterationAppService.fixRunPrompt(
                 handoff("把系统的主色调改成绿色", null)));
         assertThat(fix.agentKey()).isEqualTo("executor"); // run-start 携配置键（引擎信息归一）
+    }
+
+    // ---------- 沉淀兜底盘问（#460：该提未提的轻兜底——次轮 system prompt 尾附提醒） ----------
+
+    @Test
+    void given_iteration_turn_closed_without_propose_when_next_turn_then_nudge_tail_attached() {
+        // 用户轮合法收口（迭代期受理）且本轮无 propose_sediment 调用事实 → 记账；
+        // 下一轮对话命令的 system prompt 尾附轻提醒（不绑时刻不硬门，消费即清）
+        Long projectId = persistedGeneratedProject("9721");
+        givenSessionExecutorRunsInline();
+        givenConverseMainRepliesAndExecutorFinishes("好的");
+
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "再把按钮做成圆角");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(3)).converse(command.capture(), any());
+        List<AgentCommand> mainCommands = command.getAllValues().stream()
+                .filter(c -> c.sessionId().equals("main-" + projectId))
+                .toList();
+        assertThat(mainCommands).hasSize(2);
+        assertThat(mainCommands.get(0).systemPrompt()).doesNotContain("平台轻提醒");
+        assertThat(mainCommands.get(1).systemPrompt())
+                .endsWith(MainAgentAppService.SEDIMENT_NUDGE_TAIL);
+        // 用户 prompt 原样不动（提醒只进 system prompt 尾——交接物与呈现面零扰动）
+        assertThat(mainCommands.get(1).prompt()).isEqualTo("再把按钮做成圆角");
+    }
+
+    @Test
+    void given_iteration_turn_with_main_propose_when_next_turn_then_no_nudge() {
+        // 本轮主智能体自荐过（受理与拒因同口径——工具调用事实即豁免）→ 不记账
+        Long projectId = persistedGeneratedProject("9722");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                // 模拟轮内 propose_sediment 工具执行事实（真缝：适配器登记）
+                sedimentProposals.record(command.workspaceId(), SkillSlot.MAIN.key());
+                return new AgentReply(command.runId(), "好的（已记录一个可复用规则）");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            verifyRan(command);
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+        appService.runOpinionTurn(projectId, "再把按钮做成圆角");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(3)).converse(command.capture(), any());
+        List<AgentCommand> mainCommands = command.getAllValues().stream()
+                .filter(c -> c.sessionId().equals("main-" + projectId))
+                .toList();
+        assertThat(mainCommands).hasSize(2);
+        assertThat(mainCommands.get(1).systemPrompt()).doesNotContain("平台轻提醒");
+    }
+
+    @Test
+    void given_platform_round_close_when_next_turn_then_no_nudge() {
+        // 平台轮（切片计划补产）收口消费事实但不记账——「该提未提」口径只适用用户轮
+        Long projectId = persistedGeneratedProject("9723");
+        givenSessionExecutorRunsInline();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                return new AgentReply(command.runId(), "好的");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            verifyRan(command);
+            return new AgentReply(command.runId(), "修正完成");
+        });
+
+        appService.requestBuildPlan(projectId, List.of());
+        appService.runOpinionTurn(projectId, "把系统的主色调改成绿色");
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(2)).converse(command.capture(), any());
+        List<AgentCommand> mainCommands = command.getAllValues().stream()
+                .filter(c -> c.sessionId().equals("main-" + projectId))
+                .toList();
+        assertThat(mainCommands).hasSize(2);
+        assertThat(mainCommands.get(1).systemPrompt()).doesNotContain("平台轻提醒");
     }
 
     // ---------- 受理动作卡（#87：受理轮过程呈现——迭代期意见轮开场受理事件） ----------

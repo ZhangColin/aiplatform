@@ -145,7 +145,8 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "18. 能力清单（正本，与工具装配一致）：需求侧 ask_user"
                     + "（每轮一问澄清）、savePrd（PRD 产出/修订落盘）、saveBuildPlan（切片计划）、"
                     + "load_skill_through_path（加载 prd-writing 技能产出规范 PRD）、propose_skill"
-                    + "（需求侧经验自荐草稿）；答询 "
+                    + "（需求侧经验自荐草稿）、propose_sediment（沉淀物自荐草稿——需求案例 CASE/"
+                    + "功能模块 MODULE/业务规则 RULE）；答询 "
                     + "query_project_facts（项目事实含系统访问地址）、list_workspace_files（工作区"
                     + "文件清单）、read_workspace_file（读具体文件）；外部资料 fetch_url（读用户贴"
                     + "的 http/https 地址内容）、web_search（自主搜索调研，可配合 fetch_url 搜→读→"
@@ -158,6 +159,12 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "场景的访谈要点、梳理方法等），可随时用 propose_skill 工具把它写成技能草稿"
                     + "（name/description/body 三参数），供后续项目复用——后台审核采纳后才全局"
                     + "生效，未审核不影响任何项目。没有可沉淀的经验就不调用，不为凑数硬写。\n"
+                    + "20. 沉淀物自荐（软指引非必做）：对话中遇到值得跨项目复用的内容——"
+                    + "需求案例（CASE：某类用户/场景的真实需求形态）、功能模块（MODULE：可复用的"
+                    + "功能形态）、业务规则（RULE：某类业务公认的规则口径）——可随时用 "
+                    + "propose_sediment 工具记录成沉淀草稿（kind/title/summary/content 四参数），"
+                    + "供平台知识沉淀：后台「数据标注」人工审核激活后才入知识库，未审核草稿不参与"
+                    + "任何检索、不影响任何项目。没有值得沉淀的就不调用，不为凑数硬写。\n"
                     + "全程使用中文。"),
 
     // systemPrompt 即执行协议（#22）：平台技术约定 + 读 PRD 自主实现 + 起服节奏
@@ -255,6 +262,11 @@ public enum AgentProfile implements BaseEnum<AgentProfile> {
                     + "终态错误）——这是 Windows 宿主 JVM→docker.exe argv 编码链的平台性"
                     + "约束（#440 ①族）：双引号被剥后 sh 引号不配对会从 stdin 无界挂死，"
                     + "先拒绝是救你的时间。\n"
+                    + "13. 沉淀物自荐（软指引非必做）：本轮若遇到可跨项目复用的内容"
+                    + "（某类系统通用的功能模块形态、反复出现的业务规则口径等），可用 "
+                    + "propose_sediment 工具记录成沉淀草稿（kind 传 CASE/MODULE/RULE，"
+                    + "title/summary/content 三参数）——后台「数据标注」人工审核激活后才入"
+                    + "知识库，未审核不参与任何检索。确实没有值得沉淀的就不调用，不为凑数硬写。\n"
                     + "全程使用中文。"),
 
     // systemPrompt 即设计工作协议（#289 设计执行体槽位，ADR-0025）：按设计物产出

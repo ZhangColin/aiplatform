@@ -13,6 +13,7 @@ import com.cartisan.core.exception.ApplicationException;
 import com.cartisan.event.ApplicationEventPublisher;
 
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
 import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
@@ -97,6 +98,9 @@ class ProjectLifecycleAppServiceTouchTest {
 
     @Mock
     private SkillDraftAppService skillDrafts;
+
+    @Mock
+    private SedimentDraftAppService sedimentDrafts;
 
     @Mock
     private OrderQueryAppService orderQueryAppService;
@@ -219,7 +223,7 @@ class ProjectLifecycleAppServiceTouchTest {
                 queryAppService, eventsAppService, knowledgeAppService, namingService,
                 conversationHistory, generationSegments, generationPlanJourneys, designItems,
                 designSpecs, prdVersions,
-                demoVersions, skillDrafts, orderQueryAppService, guestAppService,
+                demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
                 transactionTemplate);
     }
 }

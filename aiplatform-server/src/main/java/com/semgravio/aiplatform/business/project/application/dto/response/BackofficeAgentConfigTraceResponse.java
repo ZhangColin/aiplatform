@@ -38,7 +38,7 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
  * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
  * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
- *                          缺省态恒 true＝闸开）
+ *                          缺省态恒 false＝闸关，#435）
  * @param oldProofOfOutputGateEnabled 变更前空转产出证明闸开关（#433；同上）
  * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
  * @param newVerificationPresenceGateEnabled 变更后验证在场闸开关（#433；恒有值）
@@ -80,7 +80,7 @@ public record BackofficeAgentConfigTraceResponse(
         Integer oldVerifyRoundBudget,
         @Schema(description = "变更前整轨终验修复预算（#427；null＝此前即代码缺省）")
         Integer oldFinalVerifyFixBudget,
-        @Schema(description = "变更前验证在场闸开关（#433；恒有值——缺省态恒 true＝闸开）")
+        @Schema(description = "变更前验证在场闸开关（#433；恒有值——缺省态恒 false＝闸关，#435）")
         boolean oldVerificationPresenceGateEnabled,
         @Schema(description = "变更前空转产出证明闸开关（#433；恒有值）")
         boolean oldProofOfOutputGateEnabled,

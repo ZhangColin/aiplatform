@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
  * @param oldVerifyRoundBudget          变更前单场验证轮次预算（#424；null＝代码缺省）
  * @param oldFinalVerifyFixBudget       变更前整轨终验修复预算（#427；null＝代码缺省）
  * @param oldVerificationPresenceGateEnabled 变更前验证在场闸开关（#433；恒有值——
- *                                       缺省态恒 true＝闸开）
+ *                                       缺省态恒 false＝闸关，#435）
  * @param oldProofOfOutputGateEnabled   变更前空转产出证明闸开关（#433；同上）
  * @param oldFinalVerificationGateEnabled 变更前整轨终验拦「生成完成」开关（#433；同上）
  * @param newSystemPrompt               变更后 systemPrompt（null＝本次清空回落）

@@ -33,14 +33,7 @@ import { PrdDoc } from "./prd-doc";
  * 选中保持/树合成/点看判定是纯逻辑（files.ts）：缺省落 PRD、目录随选中祖先
  * 自动展开、用户手动收展优先。
  */
-export function FilesPanel({
-  projectId,
-  hideConfirmGate = false,
-}: {
-  projectId: string;
-  /** Demo 页文件抽屉等只读场景：PRD 早确认，隐藏 PRD 确认门写动作（#347）。 */
-  hideConfirmGate?: boolean;
-}) {
+export function FilesPanel({ projectId }: { projectId: string }) {
   const files = useProjectFiles(projectId);
   const [selectedByUser, setSelectedByUser] = useState<string | null>(null);
   const [toggledDirs, setToggledDirs] = useState<Record<string, boolean>>({});
@@ -81,7 +74,7 @@ export function FilesPanel({
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         {selected === PRD_PATH ? (
-          <PrdDoc projectId={projectId} hideConfirmGate={hideConfirmGate} />
+          <PrdDoc projectId={projectId} />
         ) : selected !== null && isImagePath(selected) ? (
           <ImageView
             projectId={projectId}

@@ -1368,10 +1368,10 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_confirmed_version() {
-        // 灵魂例（#334 小迭代基准不漂移）：范围级新草稿在场（未被确认）时小迭代
-        // 仍按旧确认版起跑——修正任务以已确认版全文为基准，工作区草稿明确不作
-        // 本轮依据（确认新版才切基准）
+    void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_workspace_draft() {
+        // 去门化（#462，ADR-0039——#334 停派分流退役）：范围级新草稿在场不再停派
+        // 待确认——受理即迭代，需求基准恒为工作区 PRD 正本（新草稿＝新构建基准，
+        // 下一起跑自动记行；不再内联旧确认版快照）
         Long projectId = persistedGeneratedProject("9960");
         seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
         givenWorkspacePrd(SCOPE_PENDING_DRAFT);
@@ -1384,9 +1384,8 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, atLeast(1)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())
-                .contains("本轮需求基准")
-                .contains(CONFIRMED_PRD_V1)
-                .doesNotContain("需求正本 = 工作区");
+                .contains("需求正本 = 工作区")
+                .doesNotContain("本轮需求基准");
     }
 
     @Test

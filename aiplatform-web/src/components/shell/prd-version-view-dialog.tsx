@@ -16,10 +16,10 @@ import { usePrdVersion } from "@/hooks/use-prd";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 /**
- * PRD 版本快照全文弹窗（#344 版本记录抽屉条目点开面）：确认时工作区 PRD
- * 全文的不可变快照只读呈现——markdown 渲染样式与文档范式同源
- * （{@link prdMarkdownComponents} 单点）。只读＝无任何编辑入口；快照行不可变，
- * 与文档范式（活草稿＋确认门）的分野在此呈现。
+ * PRD 版本快照全文弹窗（#344 版本记录抽屉条目点开面）：记行时工作区 PRD
+ * 全文的不可变快照只读呈现（#462 去门化——构建基准记行时点）——markdown 渲染
+ * 样式与文档范式同源（{@link prdMarkdownComponents} 单点）。只读＝无任何编辑
+ * 入口；快照行不可变，与文档范式（活草稿）的分野在此呈现。
  */
 export function PrdVersionViewDialog({
   projectId,
@@ -43,8 +43,8 @@ export function PrdVersionViewDialog({
           </DialogTitle>
           <DialogDescription>
             {detail.data
-              ? confirmedText(detail.data.confirmedAt)
-              : "确认此版 PRD 时的全文快照，只读。"}
+              ? recordedText(detail.data.confirmedAt)
+              : "构建基准记行时的全文快照，只读。"}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -70,8 +70,8 @@ export function PrdVersionViewDialog({
   );
 }
 
-/** 确认时间（不可解析不臆造——回落基线话术）。 */
-function confirmedText(iso: string | undefined): string {
+/** 成行时点（confirmedAt 列语义顺延为记行时点；不可解析不臆造——回落基线话术）。 */
+function recordedText(iso: string | undefined): string {
   const relative = formatRelativeTime(iso);
-  return relative ? `确认于 ${relative}，全文只读。` : "确认时的全文快照，只读。";
+  return relative ? `记行于 ${relative}，全文只读。` : "记行时的全文快照，只读。";
 }

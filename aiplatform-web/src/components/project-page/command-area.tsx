@@ -10,7 +10,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useAnswerQuestion, usePostMessage } from "@/hooks/use-chat";
 import { useConversation } from "@/hooks/use-conversation";
-import { usePrd } from "@/hooks/use-prd";
 import { useUploadMaterial } from "@/hooks/use-upload-material";
 import { composeAnswer, toAnswerToolCalls } from "@/lib/chat/qa";
 import {
@@ -99,7 +98,6 @@ export function CommandArea({
   designPlan,
   onSeePrd,
   onSeeOrder,
-  generated,
   variant = "default",
   inputRef: externalInputRef,
 }: {
@@ -118,8 +116,6 @@ export function CommandArea({
   onSeePrd?: () => void;
   /** 报价卡「查看订单详情」跳转回调（#203：挂载并切到订单 tab）。 */
   onSeeOrder?: () => void;
-  /** 系统已生成（#334 改需求回路提示的分野：范围级新草稿待确认只在迭代期出「确认新版」提示）。 */
-  generated?: boolean;
   /** 呈现形态（#346）：default＝对话区（成果区呼出式布局内，过渡桥用）；
    *  stage＝阶段页形态（P02/P03 需求分析页——时间流与澄清输入各自成卡照
    *  原型左栏构图、PRD 更新胶囊迁移为时间流内系统横幅、澄清输入照原型
@@ -132,11 +128,6 @@ export function CommandArea({
   const turnActive = useChatStore((s) => s.chats[projectId]?.turnActive ?? false);
   const pending = useChatStore((s) => pendingQuestionOf(s, projectId));
   const prdUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
-  // 范围级新草稿停驻（#334 改需求回路）：已生成项目＋差异摘要在场＝待确认——
-  // 「PRD 已更新，确认新版后生成下一版 Demo」提示（REST 派生态，确认前常驻）。
-  // 仅已生成才查（生成蕴含 PRD 在场，不空跑 404）
-  const prd = usePrd(projectId, { enabled: generated });
-  const scopeDraftPending = generated && !!prd.data?.draftChangeSummary;
   // 编码 run 的工作消息（#81）：对话流末尾的生长中消息——按 run 生命周期呈现，
   // 收口定格留驻（#117：成功收口不清空，收尾卡随后入流）；designer 座席（#290
   // 设计会话）同骨架异语料——计划区换设计物清单
@@ -301,9 +292,8 @@ export function CommandArea({
         {work && workAnchorIndex === -1 ? <WorkMessage work={work} plan={workPlan} /> : null}
         {/* PRD 更新呈现迁移位（#346 阶段页形态）：时间流内系统横幅照原型
             （「PRD 规范已增量刷新」＝旧「PRD 有更新 · 去看看」胶囊的迁移位——
-            文档面常驻右栏，横幅只报事实不带跳转；范围级停驻草稿＝指路确认门） */}
-        {staged && scopeDraftPending && !disabled ? <ScopeDraftBanner /> : null}
-        {staged && !scopeDraftPending && prdUpdate && !disabled ? (
+            文档面常驻右栏，横幅只报事实不带跳转） */}
+        {staged && prdUpdate && !disabled ? (
           <PrdRefreshBanner onDismiss={() => usePrdNoticesStore.getState().acknowledge(projectId)} />
         ) : null}
         {turnActive ? (
@@ -322,22 +312,7 @@ export function CommandArea({
         data-frame={staged ? "composer-card" : undefined}
         className={staged ? "shrink-0 rounded-2xl border border-slate-soft/80 bg-white p-3 shadow-e1" : "shrink-0 p-3"}
       >
-        {!staged && scopeDraftPending && !disabled ? (
-          // 范围级新草稿待确认（#334）：升级版提示取代通用胶囊——跳 PRD 文档面
-          // 过确认门（「确认此版 PRD 并生成 Demo」）。REST 派生态：确认成功（清停驻）
-          // 后自然退场，无需认领
-          <div className="mb-2 flex justify-center">
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full text-xs"
-              onClick={() => onSeePrd?.()}
-            >
-              <FileText className="size-3.5" />
-              PRD 已更新，确认新版后生成下一版 Demo
-            </Button>
-          </div>
-        ) : !staged && prdUpdate && !disabled ? (
+        {!staged && prdUpdate && !disabled ? (
           <div className="mb-2 flex justify-center">
             <Button
               variant="outline"
@@ -585,29 +560,6 @@ function PrdRefreshBanner({ onDismiss }: { onDismiss: () => void }) {
       >
         <X className="size-3.5" />
       </button>
-    </div>
-  );
-}
-
-/**
- * 范围级新草稿停驻横幅（#334 改需求回路的阶段页形态）：指路确认门——主 CTA
- * 常驻粘性 header（「确认此版 PRD 并生成 Demo」），横幅只说明事实与去向；
- * REST 派生态（draftChangeSummary 在场即在），确认成功自然退场，无认领位。
- */
-function ScopeDraftBanner() {
-  return (
-    <div className="flex items-start gap-3 rounded-2xl border border-electric-indigo/25 bg-linear-to-r from-surface-violet-tint via-surface-mist/40 to-white p-3.5 shadow-xs">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-xl bg-electric-indigo text-white shadow-xs">
-        <FileText className="size-4" aria-hidden="true" />
-      </div>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-label-md font-bold text-electric-indigo">
-          PRD 已更新，确认新版后生成下一版 Demo
-        </span>
-        <span className="text-body-sm leading-relaxed text-ink-muted">
-          本版更新内容已并入右侧 PRD 文档；点右上角「确认此版 PRD 并生成 Demo」查看差异并确认。
-        </span>
-      </div>
     </div>
   );
 }

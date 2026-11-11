@@ -19,7 +19,6 @@ const seed = vi.hoisted(() => ({
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
-  prd: { data: undefined as { draftChangeSummary?: string | null } | undefined },
 }));
 
 vi.mock("@/lib/store/chat", async (importOriginal) => {
@@ -53,10 +52,6 @@ vi.mock("@/hooks/use-conversation", () => ({
   useConversation: () => ({}),
 }));
 
-vi.mock("@/hooks/use-prd", () => ({
-  usePrd: () => ({ data: seed.prd.data }),
-}));
-
 vi.mock("@/hooks/use-upload-material", () => ({
   useUploadMaterial: () => vi.fn(),
 }));
@@ -84,7 +79,7 @@ function seedChat(messages: ChatMessage[], overrides: Partial<ProjectChat> = {})
 }
 
 function renderStage() {
-  return renderToStaticMarkup(<CommandArea projectId="p1" variant="stage" generated />);
+  return renderToStaticMarkup(<CommandArea projectId="p1" variant="stage" />);
 }
 
 describe("CommandArea · 阶段页形态（variant=stage）", () => {
@@ -113,12 +108,10 @@ describe("CommandArea · 阶段页形态（variant=stage）", () => {
     seed.notices = { seen: {}, pending: {} };
   });
 
-  it("范围级新草稿停驻（#334）：横幅出「PRD 已更新，确认新版后生成下一版 Demo」（指路确认门，非跳转）", () => {
+  it("去门化（#462）：停驻指路横幅整段退役——无「确认新版」提示面", () => {
     seedChat([]);
-    seed.prd.data = { draftChangeSummary: "新增「管理后台」" };
     const html = renderStage();
-    expect(html).toContain("PRD 已更新，确认新版后生成下一版 Demo");
-    seed.prd.data = undefined;
+    expect(html).not.toContain("确认新版后生成下一版 Demo");
   });
 });
 

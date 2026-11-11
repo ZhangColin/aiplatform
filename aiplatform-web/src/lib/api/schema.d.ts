@@ -163,7 +163,7 @@ export interface paths {
         get: operations["config"];
         /**
          * 智能体配置全量写（覆盖态终态＋变更留痕）
-         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；token 越出小/中/大封闭集 400 PRJ_079）。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射命中）升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位键即时校验（#367）：modelId 与 routingStrongModelId 非空时必须在模型档位面（/model-tiers）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
+         * @description PUT 全量语义：请求体即该智能体覆盖态终态——systemPrompt/modelId 全文替换（null/缺省/纯空白＝清空覆盖，装配回落枚举默认——调整工作协议、换模型不发版）；webSearchEnabled/fetchUrlEnabled 工具开关缺省 true＝开（#252 起生效装配：关即退出槽位装配面、开即回归——工具面窄幅写口另见 PUT /agent-tools/{toolName}）。模型路由策略四件（#354；信号面 #426 修订，仅 run 执行体消费）：routingEnabled 缺省 true＝开（路由判定优先；false＝钉死位——人工档恒生效，对账/对比的定档通道）；routingStrongModelId/routingFileCountThreshold/routingEscalatingSizeLabels 缺省＝清空回落代码缺省（强档 pro、文件面 30〔应用文件面——已跟踪文件数扣基座基数，#426 重校〕、升档标签映射〔大〕——空数组＝空映射＝规模标签信号整体关停；token 越出小/中/大封闭集 400 PRJ_079）。路由结构性信号两开关（#454，ADR-0037）：routingFileCountSignalEnabled/routingSizeLabelSignalEnabled 缺省 false/null＝关＝对应信号不参与升档判定（观测值照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）；失败重试信号不受两开关影响、常开。协同口径：路由判定优先、人工覆盖兜底——任一信号（重试失败/文件面/规模标签映射命中）升强档，无信号回落人工档（modelId 覆盖 → 枚举缺省快档，覆盖即基础档、快档位可经覆盖配置不关路由）。装配生效语义：动态查库，变更后下一轮命令构建自然取新值（智能体工厂缓存键含 sysPrompt、模型串与工具面规格——新值即新实例，进行中 run 不定格）。变更留痕 append-only：值面有动必落痕（变更前后全量值快照＋操作者，traces 读面可查）；同值重写＝幂等回执不落痕；回滚＝把留痕旧值快照写回（即一次新变更、留新痕，不做版本树）。档位键即时校验（#367）：modelId 与 routingStrongModelId 非空时必须在模型档位面（/model-tiers）有行且启用——缺行 400 PRJ_074、停用 400 PRJ_075（错值写不进去，不再靠留痕回滚兜底；null＝清空回落缺省不校验）。X-User-Id/X-User-Name 透传头必留痕（缺头 400 PRJ_034）。升档标签映射 token 越出小/中/大封闭集 400 PRJ_079（#426）。寻址同 GET（未知键 404 PRJ_033）。回执与 GET 同形。需要机机签名（五头 HMAC），无签名 401
          *
          *     错误码：
          *     - 404 PRJ_033 — 智能体不存在（运营配置面只有 main/executor/designer 三座智能体）
@@ -418,8 +418,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 下单（过双确认门冻结 PRD 确认版与交付物类型入单）
-         * @description 纯按钮零输入：下单前置门＝存在已确认 PRD 版本＋Demo 确认版本（无确认如实拦截 ORD_018/ORD_019），过门即冻结已确认 PRD 版本全文冗余拷贝＋双版本引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用），待报价起步；交付物类型自项目终点类型一并冻结（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；无已确认 PRD 版本 409 ORD_018；无 Demo 确认版本 409 ORD_019；项目已归档 409 ORD_004；打包环境故障 WSP_002
+         * 下单（过双确认门冻结 PRD 最新版与交付物类型入单）
+         * @description 纯按钮零输入：下单前置门＝存在 PRD 版本（最新构建基准——Demo 类 run 起跑自动记行，#462 去门化读法顺延）＋Demo 确认版本（缺失如实拦截 ORD_018/ORD_019），过门即冻结 PRD 最新版全文冗余拷贝＋双版本引用入单（此后 PRD 修订不影响本单，取消再下 = 新单新引用；冻结字段结构与既有订单数据不动），待报价起步；交付物类型自项目终点类型一并冻结（#297：1=设计 2=系统 3=系统＋设计，此后项目终点变更不影响本单）。设计面单（设计/系统＋设计）在下单时冻结设计资产包——选定稿自包含形态＋设计规范＋衍生资产选件式 tar 入导出物目录（落选稿不入），打包失败＝下单失败零残留。下单即冻结迭代——对话区停止受理意见（409 ORD_006），取消订单即解冻回迭代（冻结件残留不清理，后台取件正本）。同项目至多一张未终结订单（重复下单 409 ORD_003，库侧唯一索引兜底）。金额随后台报价落（#29）。项目不存在 404 PRJ_001；无 PRD 版本 409 ORD_018；无 Demo 确认版本 409 ORD_019；项目已归档 409 ORD_004；打包环境故障 WSP_002
          */
         post: operations["place"];
         delete?: never;
@@ -520,26 +520,6 @@ export interface paths {
          * @description qid = 挂起事件 engineRef（续跑批复的锚）。请求体回传挂起轮 runId 与待确认工具清单（question-raised 事件 data.toolCalls 原样）+ 用户答复文本（单选 label / 多选拼接 / 自由输入，可与已勾选合并）。续跑续在同一 run 上收口，过程事件经 SSE；恢复私货（会话/配置/工作区）从项目侧事实重建。空白答复 400；已归档 409 PRJ_013；订单处理中 409 ORD_006；项目不存在 404 PRJ_001
          */
         post: operations["answerQuestion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{id}/prd/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）
-         * @description 「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）：「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层承载，确认动作本身不携带标记）。<b>生成加门（#332）</b>：确认成版后平台自动派首个 Demo run——「确认此版 PRD 并生成 Demo」成为首个构建 run 的唯一触发（已生成/在途静默跳过；派发是次生事实）。响应即回执（versionNo/content/confirmedAt/readiness）——版本号是派发的挂点。项目不存在 404 PRJ_001；已归档 409 PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；环境故障 WSP_002
-         */
-        post: operations["confirmPrd"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1051,6 +1031,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/sediment-drafts/{id}/relabel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 改标签（在途内调整类别，占目标类别在途名额）
+         * @description 「数据标注」三键之一（#464）：在途草稿调整类别（一期合法取值 CASE/MODULE/RULE——非法 400 KNW_011；同类别幂等 no-op）；占目标类别在途序号最低空位（每项目每 kind 上限 3 的结构性约束跨类别生效——目标类别满 409 KNW_012）。不翻终态、不动正文——纯队列分诊修正。草稿须在途（已审结 409 KNW_009）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（标注动作必留痕）。回执＝详情（新类别直读）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 KNW_006 — 操作者不能为空
+         *     - 404 KNW_008 — 沉淀草稿不存在
+         *     - 409 KNW_009 — 沉淀草稿已审结（已激活/已拒绝），终态不可再审——重提为新草稿
+         *     - 400 KNW_011 — 沉淀物类别非法，合法取值：CASE（需求案例）/MODULE（功能模块）/RULE（业务规则）
+         *     - 409 KNW_012 — 目标类别在途草稿已满 3 条——先审结该类别在途草稿再改标签
+         */
+        post: operations["relabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/sediment-drafts/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拒绝草稿（终态留档，理由必填）
+         * @description 「数据标注」三键之一（#464）：理由必填（空白 400 KNW_010——终态留档拒绝须有据，库级 CHECK 双锁）＋在途翻已拒绝＋操作者留痕（CAS 同激活）。拒绝即终态：不再列标注队列、详情仍可查（留档）；不改稿不复活——重提只能靠未来会话产生新草稿。草稿须在途（已审结 409 KNW_009）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006。回执＝终态详情（留痕形状直读）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 KNW_006 — 操作者不能为空
+         *     - 404 KNW_008 — 沉淀草稿不存在
+         *     - 409 KNW_009 — 沉淀草稿已审结（已激活/已拒绝），终态不可再审——重提为新草稿
+         *     - 400 KNW_010 — 拒绝理由不能为空（终态留档，拒绝须有据）
+         */
+        post: operations["reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/sediment-drafts/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 激活草稿（人审采纳，原样升格不改稿）
+         * @description 「数据标注」三键之一（#464）：在途翻已激活＋操作者留痕（CAS——并发审结零行命中 409 KNW_009）。激活即出标注队列、释放在途名额；升格 knw_materials（段落分块入库＋混检注入）归 #465——本键先落审结终态，升格动作随 #465 落地。草稿须在途（已审结 409 KNW_009——终态不可再审，重提为新草稿）；草稿不存在 404 KNW_008；缺操作者 400 KNW_006（X-User-Id/X-User-Name 透传头，标注动作必留痕）。回执＝终态详情。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 KNW_006 — 操作者不能为空
+         *     - 404 KNW_008 — 沉淀草稿不存在
+         *     - 409 KNW_009 — 沉淀草稿已审结（已激活/已拒绝），终态不可再审——重提为新草稿
+         */
+        post: operations["activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects/{projectId}/production-handoff/update": {
         parameters: {
             query?: never;
@@ -1285,7 +1343,7 @@ export interface paths {
          *     - 400 ORD_043 — 操作者必填（付款核验动作须携带操作者身份）
          *     - 404 ORD_045 — 凭证不存在或不属于该节点
          */
-        post: operations["reject"];
+        post: operations["reject_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1985,7 +2043,7 @@ export interface paths {
         };
         /**
          * PRD 读（当前版 markdown，直读工作区）
-         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness, draftChangeSummary}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪（判定与确认门同源）。draftChangeSummary（#334 改需求回路）＝范围级新草稿停驻待确认的差异摘要（改稿时产出的 markdown 变更说明），null = 无新草稿待确认。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
+         * @description PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, updatedAt, readiness}，updatedAt = 文件 mtime（ISO-8601，秒精度）。readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）＝「验收与待确认」章解析投影：{blocking, minor, dimensions}——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension 呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。未产出（工作区无该文件）404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。写出/更新时通知通道（/api/events?projectId=）发 document-updated（payload {projectId, documentType:"PRD"}），消费姿势 = invalidate 文档域后重拉本端点
          */
         get: operations["prd"];
         put?: never;
@@ -2004,8 +2062,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * PRD 已确认版本清单（最新在前，轻量形不含全文）
-         * @description 项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
+         * PRD 版本清单（最新在前，轻量形不含全文）
+         * @description 项目内 PRD 版本列表（#330→#462 去门化：Demo 类 run 起跑自动记行，版本号＝构建基准序）：[{projectId, versionNo, confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。空列表 = 尚无构建基准记行（呈现「草稿」徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
          */
         get: operations["prdVersions"];
         put?: never;
@@ -2025,7 +2083,7 @@ export interface paths {
         };
         /**
          * PRD 版本详情（含全文快照）
-         * @description 单版详情（#330）：{projectId, versionNo, content, confirmedAt, readiness}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手即解析）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
+         * @description 单版详情（#330→#462 去门化）：{projectId, versionNo, content, confirmedAt, readiness}——content 是成行时工作区 PRD 全文的不可变快照（Demo 类 run 起跑时点，后续草稿改动不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手即解析）。归档项目照读。版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001
          */
         get: operations["prdVersion"];
         put?: never;
@@ -2125,7 +2183,7 @@ export interface paths {
         };
         /**
          * Demo 版本清单（最新在前）
-         * @description 项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口递增），prdVersionNo＝起跑时已确认 PRD 版本锚（「Demo vN（基于 PRD vM 快照）」式关联；null＝无确认版起跑——legacy/设计类），runId＝收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = 从未成版（未生成/生成中）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
+         * @description 项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口递增），prdVersionNo＝起跑时最新 PRD 版本锚（「Demo vN（基于 PRD vM 快照）」式关联；null＝无版本记行起跑——legacy/设计类），runId＝收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = 从未成版（未生成/生成中）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001
          */
         get: operations["demoVersions"];
         put?: never;
@@ -2491,6 +2549,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/sediment-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 标注队列（按项目/类别/状态过滤，分页）
+         * @description 「数据标注」人审队列（#464）：采集层自荐的沉淀草稿，三过滤维度可组合、均可缺省（缺省＝全量）：① projectId 来源项目 id 精确（数值，查无＝空清单 200；畸形值宽松解析＝缺省不过滤）；② kind 类别单选（CASE/MODULE/RULE，大小写不敏感，非法 400 KNW_011 带合法取值表）；③ status 状态单选，Integer code（1=在途 2=已激活 3=已拒绝；非法 code 400 带合法取值表）。排序服务端定死＝自荐时间倒序（id 倒序稳定）。行字段：类别/标题/摘要＋血统三件（来源项目/run/槽位）＋扫描判定＋在途序号（每项目每 kind 上限 3 的队列可见性）＋状态＋自荐时刻；正文与扫描 findings 在详情。page 1 基（缺省 1）、size 缺省 20（上界 100）。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 400 BAD_REQUEST — Invalid request
+         */
+        get: operations["queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/sediment-drafts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 标注详情（正文＋扫描回执＋终态留痕，审核面）
+         * @description 草稿全文按数据标注口径判读（#464）：清单行同形字段＋正文全文（激活原样升格不改稿——审核面所见即入库内容）＋载荷＋扫描 findings 逐条留档（patternId/severity/category/file/line/matchText/description，空列表＝无发现）＋终态留痕字段（操作者/时刻/拒绝理由——已激活/已拒绝回填，在途恒 null）。任意状态可查（终态留档）。id 取清单行原值（TSID 十进制串）；草稿不存在（含未寻址/畸形 TSID）404 KNW_008。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 KNW_008 — 沉淀草稿不存在
+         */
+        get: operations["detail_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/projects": {
         parameters: {
             query?: never;
@@ -2529,7 +2633,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_055 — 生产承接记录不存在
          */
-        get: operations["detail_4"];
+        get: operations["detail_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2552,7 +2656,7 @@ export interface paths {
          *     错误码：
          *     - 404 PRJ_001 — 项目不存在
          */
-        get: operations["detail_5"];
+        get: operations["detail_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2797,7 +2901,7 @@ export interface paths {
          *     - 404 ORD_001 — 订单不存在
          *     - 404 ORD_036 — 付款计划不存在
          */
-        get: operations["detail_6"];
+        get: operations["detail_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2820,7 +2924,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_001 — 订单不存在
          */
-        get: operations["detail_7"];
+        get: operations["detail_8"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2963,7 +3067,7 @@ export interface paths {
          *     错误码：
          *     - 404 KNW_005 — 知识素材不存在
          */
-        get: operations["detail_8"];
+        get: operations["detail_9"];
         put?: never;
         post?: never;
         /**
@@ -3110,7 +3214,7 @@ export interface paths {
          *     错误码：
          *     - 404 ORD_020 — 合同不存在
          */
-        get: operations["detail_9"];
+        get: operations["detail_10"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3555,6 +3659,10 @@ export interface components {
              *     ]
              */
             routingEscalatingSizeLabels?: string[];
+            /** @description 文件面信号开关（#454，ADR-0037：缺省 false/null＝关＝文件面不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体行消费） */
+            routingFileCountSignalEnabled?: boolean;
+            /** @description 规模标签信号开关（#454，ADR-0037：缺省 false/null＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体行消费） */
+            routingSizeLabelSignalEnabled?: boolean;
             /**
              * @description verify 验证子智能体档位键（#424 片轻验：null/缺省/纯空白＝清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelId（#367：须在模型档位面有行且启用）
              * @example pro
@@ -3572,6 +3680,39 @@ export interface components {
              * @example 2
              */
             finalVerifyFixBudget?: number;
+            /** @description 验证在场闸开关（#433；#435 起缺省 false＝闸关——本 run 无验证登记不收口不生效；true＝闸开。仅 run 执行体行消费） */
+            verificationPresenceGateEnabled?: boolean;
+            /** @description 空转产出证明闸开关（#433；#435 起缺省 false＝闸关——段起点以来零 diff 且无「能力已存在」确认不收口不生效；true＝闸开。仅 run 执行体行消费） */
+            proofOfOutputGateEnabled?: boolean;
+            /** @description 整轨终验拦「生成完成」开关（#433；#435 起缺省 false＝闸关——终验不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事。仅 run 执行体行消费） */
+            finalVerificationGateEnabled?: boolean;
+            /** @description 单会话连续编码开关（#436，#432 Step 2；缺省 true＝单会话开〔默认〕——阶段 0＋全部切片在同一执行会话槽位内连续追加〔每段新对话＋交接传递，段级自愈＝同会话返工提示〕；false＝旧「每片新会话」形态。仅 run 执行体行消费） */
+            singleSessionGenerationEnabled?: boolean;
+            /** @description 切片并行机器开关（#436，#432 Step 2；缺省 false＝并行机器关〔默认〕——fork 隔离工作区/波调度/并行执行/合并全关、全轨主工作区串行；true＝宽波 fork 并行旧行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面） */
+            parallelSliceMachineEnabled?: boolean;
+            /** @description 决策时注入总开关（#437，#432 Step 3；缺省 true＝注入开〔默认〕——执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。仅 run 执行体行消费） */
+            decisionHintsEnabled?: boolean;
+            /**
+             * Format: int32
+             * @description 失败止损阈值（#437；同类错误连续失败 ≥ 此值注入「换策略」微指令；null＝清空回落代码缺省 3；2-10 整数，越界 PRJ_081）
+             * @example 3
+             */
+            decisionHintErrorStreak?: number;
+            /**
+             * Format: int32
+             * @description 微指令堆叠上限（#437；单轮最多注入几条不同微指令〔研究口径 ≤3〕；null＝清空回落代码缺省 3；1-3 整数，越界 PRJ_082）
+             * @example 3
+             */
+            decisionHintStackCap?: number;
+            /**
+             * @description 禁用集（#437；库条目键数组——封闭集 failure_stop_loss/anti_mock/context_economy/parallel_tools，非法 token PRJ_083；空数组/null＝全启用）
+             * @example [
+             *       "parallel_tools"
+             *     ]
+             */
+            decisionHintDisabled?: string[];
+            /** @description verify 自决开关（#442，#441-1；缺省 true＝自决开〔默认〕——执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿（三闸回执／整轨终验编排）不受影响。仅 run 执行体行消费） */
+            verifySelfDecisionEnabled?: boolean;
         };
         ApiResponseBackofficeAgentConfigResponse: {
             /** Format: int32 */
@@ -3658,6 +3799,10 @@ export interface components {
              *     ]
              */
             defaultRoutingEscalatingSizeLabels?: string[];
+            /** @description 文件面信号开关生效态（#454，ADR-0037：缺省 false＝关＝文件面不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体消费） */
+            routingFileCountSignalEnabled?: boolean;
+            /** @description 规模标签信号开关生效态（#454，ADR-0037：缺省 false＝关＝规模标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。仅 run 执行体消费） */
+            routingSizeLabelSignalEnabled?: boolean;
             /**
              * @description verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体生效档——含路由升档，缺省同档不降）
              * @example pro
@@ -3693,6 +3838,57 @@ export interface components {
              * @example 2
              */
             defaultFinalVerifyFixBudget?: number;
+            /** @description 验证在场闸开关生效态（#433；#435 起缺省 false＝闸关——本 run 无report_verification 登记不收口不生效〔#424〕；true＝闸开。仅 run 执行体行消费） */
+            verificationPresenceGateEnabled?: boolean;
+            /** @description 空转产出证明闸开关生效态（#433；#435 起缺省 false＝闸关——段起点以来零 diff 且无「能力已存在」确认不收口不生效〔#420〕；true＝闸开。仅 run 执行体行消费） */
+            proofOfOutputGateEnabled?: boolean;
+            /** @description 整轨终验拦「生成完成」开关生效态（#433；#435 起缺省 false＝闸关——终验不起 run；true＝闸开——轨道完成前终验 fail 拦完成叙事〔#427〕。仅 run 执行体行消费） */
+            finalVerificationGateEnabled?: boolean;
+            /** @description 单会话连续编码开关生效态（#436，#432 Step 2；缺省 true＝单会话开〔默认〕——阶段 0＋全部切片在同一执行会话槽位内连续追加；false＝旧「每片新会话」形态。仅 run 执行体行消费） */
+            singleSessionGenerationEnabled?: boolean;
+            /** @description 切片并行机器开关生效态（#436，#432 Step 2；缺省 false＝并行机器关〔默认〕——fork 隔离工作区/波调度/并行执行/合并全关；true＝宽波 fork 并行旧行为〔#351〕。仅 run 执行体行消费，仅单会话关闭后有消费面） */
+            parallelSliceMachineEnabled?: boolean;
+            /** @description 决策时注入总开关生效态（#437，#432 Step 3；缺省 true＝注入开〔默认〕——执行体 ReAct 循环每迭代判定注入一条微指令；false＝全停原样透传。仅 run 执行体行消费） */
+            decisionHintsEnabled?: boolean;
+            /**
+             * Format: int32
+             * @description 失败止损阈值生效值（#437；库覆盖值或代码缺省）
+             * @example 3
+             */
+            decisionHintErrorStreak?: number;
+            /** @description 失败止损阈值是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            decisionHintErrorStreakOverridden?: boolean;
+            /**
+             * Format: int32
+             * @description 代码缺省失败止损阈值（预览：清空覆盖即落此值）
+             * @example 3
+             */
+            defaultDecisionHintErrorStreak?: number;
+            /**
+             * Format: int32
+             * @description 微指令堆叠上限生效值（#437；库覆盖值或代码缺省）
+             * @example 3
+             */
+            decisionHintStackCap?: number;
+            /** @description 堆叠上限是否库覆盖值（true＝覆盖；false＝代码缺省） */
+            decisionHintStackCapOverridden?: boolean;
+            /**
+             * Format: int32
+             * @description 代码缺省堆叠上限（预览：清空覆盖即落此值）
+             * @example 3
+             */
+            defaultDecisionHintStackCap?: number;
+            /**
+             * @description 禁用集生效值（#437；库覆盖值——空数组＝全启用）
+             * @example [
+             *       "parallel_tools"
+             *     ]
+             */
+            decisionHintDisabled?: string[];
+            /** @description 禁用集是否库覆盖值（true＝覆盖；false＝全启用） */
+            decisionHintDisabledOverridden?: boolean;
+            /** @description verify 自决开关生效态（#442，#441-1；缺省 true＝自决开〔默认〕——执行体生成过程中自决调用 verify 自测〔#435 自决化〕；false＝自决关闭——提示层收窄，生成过程中不自发委派 verify，平台驱动验证腿不受影响。仅 run 执行体行消费） */
+            verifySelfDecisionEnabled?: boolean;
             /**
              * @description 最近写者 id（admin 侧 TSID；null＝从未配置）
              * @example 700200
@@ -4090,36 +4286,6 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
-        ApiResponsePrdVersionResponse: {
-            /** Format: int32 */
-            code?: number;
-            message?: string;
-            data?: components["schemas"]["PrdVersionResponse"];
-            requestId?: string;
-            errors?: components["schemas"]["FieldError"][];
-        };
-        DimensionStatus: {
-            dimension?: string;
-            status?: string;
-        };
-        PendingItem: {
-            dimension?: string;
-            text?: string;
-        };
-        PrdReadinessResponse: {
-            blocking?: components["schemas"]["PendingItem"][];
-            minor?: components["schemas"]["PendingItem"][];
-            dimensions?: components["schemas"]["DimensionStatus"][];
-        };
-        PrdVersionResponse: {
-            projectId?: string;
-            /** Format: int32 */
-            versionNo?: number;
-            content?: string;
-            /** Format: date-time */
-            confirmedAt?: string;
-            readiness?: components["schemas"]["PrdReadinessResponse"];
-        };
         AnnotationAnchor: {
             selector?: string;
             text?: string;
@@ -4505,6 +4671,65 @@ export interface components {
             counterpart?: string;
             overlap?: string;
             resolution?: string;
+        };
+        SedimentDraftRelabelCommand: {
+            /**
+             * @description 目标沉淀物类别（CASE=需求案例 MODULE=功能模块 RULE=业务规则；大小写不敏感；非法取值 400 KNW_011）
+             * @example MODULE
+             */
+            kind?: string;
+        };
+        ApiResponseBackofficeSedimentDraftDetailResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeSedimentDraftDetailResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSedimentDraftDetailResponse: {
+            id?: string;
+            kind?: string;
+            title?: string;
+            summary?: string;
+            slot?: string;
+            projectId?: string;
+            runId?: string;
+            scanVerdict?: string;
+            /** Format: int32 */
+            inflightSlot?: number;
+            /** Format: int32 */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            content?: string;
+            /** @description 扩展载荷（一期恒空面；kind 开放＋载荷 JSONB 生长面） */
+            payload?: {
+                [key: string]: Record<string, never>;
+            };
+            /** @description 扫描 findings 留档：每条 patternId/severity/category/file/line/matchText/description（空列表＝无发现） */
+            scanFindings?: {
+                [key: string]: Record<string, never>;
+            }[];
+            /** @description 终态审核操作者 id（在途为 null） */
+            operatorId?: string;
+            /** @description 终态审核操作者名（在途为 null） */
+            operatorName?: string;
+            /**
+             * Format: date-time
+             * @description 终态时刻（在途为 null）
+             */
+            reviewedAt?: string;
+            /** @description 拒绝理由（已拒绝态携带；其余 null） */
+            rejectReason?: string;
+        };
+        SedimentDraftRejectCommand: {
+            /**
+             * @description 拒绝理由（终态留档可查——拒绝须有据；空白即 400 KNW_010）
+             * @example 与已激活知识「排课冲突案例」内容重叠，无增量价值
+             */
+            reason?: string;
         };
         UpdateProductionHandoffCommand: {
             contact?: string;
@@ -4908,13 +5133,25 @@ export interface components {
             requestId?: string;
             errors?: components["schemas"]["FieldError"][];
         };
+        DimensionStatus: {
+            dimension?: string;
+            status?: string;
+        };
+        PendingItem: {
+            dimension?: string;
+            text?: string;
+        };
+        PrdReadinessResponse: {
+            blocking?: components["schemas"]["PendingItem"][];
+            minor?: components["schemas"]["PendingItem"][];
+            dimensions?: components["schemas"]["DimensionStatus"][];
+        };
         PrdResponse: {
             projectId?: string;
             content?: string;
             /** Format: date-time */
             updatedAt?: string;
             readiness?: components["schemas"]["PrdReadinessResponse"];
-            draftChangeSummary?: string;
         };
         ApiResponseListPrdVersionSummaryResponse: {
             /** Format: int32 */
@@ -4930,6 +5167,23 @@ export interface components {
             versionNo?: number;
             /** Format: date-time */
             confirmedAt?: string;
+        };
+        ApiResponsePrdVersionResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PrdVersionResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        PrdVersionResponse: {
+            projectId?: string;
+            /** Format: int32 */
+            versionNo?: number;
+            content?: string;
+            /** Format: date-time */
+            confirmedAt?: string;
+            readiness?: components["schemas"]["PrdReadinessResponse"];
         };
         ApiResponseProjectFilesResponse: {
             /** Format: int32 */
@@ -4992,7 +5246,7 @@ export interface components {
             runId?: string;
             text?: string;
             /**
-             * @description 问答卡载荷（kind=3 question 携带，其余 kind 为 null）：question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的待确认工具最小面）、data.questions=[{header,question,multiple,custom,options[{label}]}]（问答卡投影，custom 恒 true 可自由输入）。answered=false 即挂起待答，据此可重建可作答
+             * @description 问答卡载荷（kind=3 question 携带，其余 kind 为 null）：question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的待确认工具最小面）、data.questions=[{header,question,multiple,custom,options[{label}],recommended?}]（问答卡投影，custom 恒 true 可自由输入；recommended 可缺省＝推荐答案 #459，命中 options 才携带）。answered=false 即挂起待答，据此可重建可作答
              * @example {
              *       "runId": "r-01",
              *       "sessionId": "s-01",
@@ -5030,7 +5284,7 @@ export interface components {
                 [key: string]: Record<string, never>;
             };
             /**
-             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, verification?{total,failed,faces,rounds,failedItems}, version?, durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）
+             * @description 收尾卡载荷（kind=5 closing 携带，其余 kind 为 null）：run-finish 收口扩载原样（#88 收尾卡服务端权威事实，版本详情锚定复用；schema 正本＝docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, systemChanged, systemNote?, files=[{path,added,removed}], durationMs, verification?{total,failed,faces,rounds,failedItems}, version?, durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,overhead{configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},attempts[]} }（可缺省键＝该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）
              * @example {
              *       "summary": "完成切片：用户能登录",
              *       "prdChanged": false,
@@ -5310,6 +5564,63 @@ export interface components {
             statusName?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        ApiResponsePageResponseBackofficeSedimentDraftSummaryResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["PageResponseBackofficeSedimentDraftSummaryResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeSedimentDraftSummaryResponse: {
+            /** @description 草稿柄（详情寻址，TSID 十进制串，勿做数值假设） */
+            id?: string;
+            /**
+             * @description 沉淀物类别（CASE=需求案例 MODULE=功能模块 RULE=业务规则）
+             * @example CASE
+             */
+            kind?: string;
+            title?: string;
+            summary?: string;
+            /**
+             * @description 来源槽位稳定键（main=主智能体 executor=run 执行体 subagent=子智能体）
+             * @example executor
+             */
+            slot?: string;
+            /** @description 来源项目 id（血统——审核溯源与项目删除清理入口） */
+            projectId?: string;
+            /** @description 来源 run 标识（血统——run 级溯源锚） */
+            runId?: string;
+            /**
+             * @description 写入前静态扫描判定（SAFE/CAUTION；DANGEROUS 已在写入口拒收不落库）
+             * @example SAFE
+             */
+            scanVerdict?: string;
+            /**
+             * Format: int32
+             * @description 在途序号 1-3（每项目每 kind 在途上限 3 的结构性承载）
+             * @example 1
+             */
+            inflightSlot?: number;
+            /**
+             * Format: int32
+             * @description 状态 code（1=在途 2=已激活 3=已拒绝）
+             * @example 1
+             */
+            status?: number;
+            statusName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        PageResponseBackofficeSedimentDraftSummaryResponse: {
+            items?: components["schemas"]["BackofficeSedimentDraftSummaryResponse"][];
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
         };
         ApiResponsePageResponseBackofficeProjectSummaryResponse: {
             /** Format: int32 */
@@ -5940,6 +6251,10 @@ export interface components {
             oldRoutingFileCountThreshold?: number;
             /** @description 变更前升档规模标签映射（#426 存储形逗号接 token，如「中,大」；null＝此前即回落代码缺省；空串＝空映射） */
             oldRoutingEscalatingSizeLabels?: string;
+            /** @description 变更前文件面信号开关（#454；恒有值——缺省态恒 false＝不参与升档判定） */
+            oldRoutingFileCountSignalEnabled?: boolean;
+            /** @description 变更前规模标签信号开关（#454；恒有值——缺省态恒 false） */
+            oldRoutingSizeLabelSignalEnabled?: boolean;
             /** @description 变更前 verify 档位（#424；null＝此前即随执行体生效档） */
             oldVerifyModelId?: string;
             /**
@@ -5952,6 +6267,32 @@ export interface components {
              * @description 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
              */
             oldFinalVerifyFixBudget?: number;
+            /** @description 变更前验证在场闸开关（#433；恒有值——缺省态恒 false＝闸关，#435） */
+            oldVerificationPresenceGateEnabled?: boolean;
+            /** @description 变更前空转产出证明闸开关（#433；恒有值） */
+            oldProofOfOutputGateEnabled?: boolean;
+            /** @description 变更前整轨终验拦「生成完成」开关（#433；恒有值） */
+            oldFinalVerificationGateEnabled?: boolean;
+            /** @description 变更前单会话连续编码开关（#436；恒有值——缺省态恒 true＝单会话开） */
+            oldSingleSessionGenerationEnabled?: boolean;
+            /** @description 变更前切片并行机器开关（#436；恒有值——缺省态恒 false＝并行机器关） */
+            oldParallelSliceMachineEnabled?: boolean;
+            /** @description 变更前决策时注入总开关（#437；恒有值——缺省态恒 true＝注入开） */
+            oldDecisionHintsEnabled?: boolean;
+            /**
+             * Format: int32
+             * @description 变更前失败止损阈值（#437；null＝此前即代码缺省）
+             */
+            oldDecisionHintErrorStreak?: number;
+            /**
+             * Format: int32
+             * @description 变更前微指令堆叠上限（#437；null＝此前即代码缺省）
+             */
+            oldDecisionHintStackCap?: number;
+            /** @description 变更前禁用集（#437 存储形逗号接键；null＝此前即全启用；空串＝全启用显式形） */
+            oldDecisionHintDisabled?: string;
+            /** @description 变更前 verify 自决开关（#442；恒有值——缺省态恒 true＝自决开） */
+            oldVerifySelfDecisionEnabled?: boolean;
             /** @description 变更后 systemPrompt（null＝本次清空回落枚举默认） */
             newSystemPrompt?: string;
             /** @description 变更后模型档位（null＝本次清空回落） */
@@ -5971,6 +6312,10 @@ export interface components {
             newRoutingFileCountThreshold?: number;
             /** @description 变更后升档规模标签映射（#426 存储形逗号接 token；null＝本次清空回落代码缺省；空串＝空映射） */
             newRoutingEscalatingSizeLabels?: string;
+            /** @description 变更后文件面信号开关（#454；恒有值） */
+            newRoutingFileCountSignalEnabled?: boolean;
+            /** @description 变更后规模标签信号开关（#454；恒有值） */
+            newRoutingSizeLabelSignalEnabled?: boolean;
             /** @description 变更后 verify 档位（#424；null＝本次清空随执行体生效档） */
             newVerifyModelId?: string;
             /**
@@ -5983,6 +6328,32 @@ export interface components {
              * @description 变更后整轨终验修复预算（#427；null＝本次清空回落代码缺省）
              */
             newFinalVerifyFixBudget?: number;
+            /** @description 变更后验证在场闸开关（#433；恒有值） */
+            newVerificationPresenceGateEnabled?: boolean;
+            /** @description 变更后空转产出证明闸开关（#433；恒有值） */
+            newProofOfOutputGateEnabled?: boolean;
+            /** @description 变更后整轨终验拦「生成完成」开关（#433；恒有值） */
+            newFinalVerificationGateEnabled?: boolean;
+            /** @description 变更后单会话连续编码开关（#436；恒有值） */
+            newSingleSessionGenerationEnabled?: boolean;
+            /** @description 变更后切片并行机器开关（#436；恒有值） */
+            newParallelSliceMachineEnabled?: boolean;
+            /** @description 变更后决策时注入总开关（#437；恒有值） */
+            newDecisionHintsEnabled?: boolean;
+            /**
+             * Format: int32
+             * @description 变更后失败止损阈值（#437；null＝本次清空回落代码缺省）
+             */
+            newDecisionHintErrorStreak?: number;
+            /**
+             * Format: int32
+             * @description 变更后微指令堆叠上限（#437；null＝本次清空回落代码缺省）
+             */
+            newDecisionHintStackCap?: number;
+            /** @description 变更后禁用集（#437 存储形逗号接键；null＝本次清空全启用） */
+            newDecisionHintDisabled?: string;
+            /** @description 变更后 verify 自决开关（#442；恒有值） */
+            newVerifySelfDecisionEnabled?: boolean;
             /**
              * @description 变更操作者 id
              * @example 700200
@@ -6712,28 +7083,6 @@ export interface operations {
             };
         };
     };
-    confirmPrd: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponsePrdVersionResponse"];
-                };
-            };
-        };
-    };
     postMessage: {
         parameters: {
             query?: never;
@@ -7225,6 +7574,80 @@ export interface operations {
             };
         };
     };
+    relabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SedimentDraftRelabelCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    reject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SedimentDraftRejectCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
+    activate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
     update_4: {
         parameters: {
             query?: never;
@@ -7454,7 +7877,7 @@ export interface operations {
             };
         };
     };
-    reject: {
+    reject_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -8722,6 +9145,55 @@ export interface operations {
             };
         };
     };
+    queue: {
+        parameters: {
+            query?: {
+                projectId?: string;
+                kind?: string;
+                status?: number;
+                page?: number;
+                size?: number;
+                sort?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePageResponseBackofficeSedimentDraftSummaryResponse"];
+                };
+            };
+        };
+    };
+    detail_4: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeSedimentDraftDetailResponse"];
+                };
+            };
+        };
+    };
     projects: {
         parameters: {
             query?: {
@@ -8751,7 +9223,7 @@ export interface operations {
             };
         };
     };
-    detail_4: {
+    detail_5: {
         parameters: {
             query?: never;
             header?: never;
@@ -8773,7 +9245,7 @@ export interface operations {
             };
         };
     };
-    detail_5: {
+    detail_6: {
         parameters: {
             query?: never;
             header?: never;
@@ -9003,7 +9475,7 @@ export interface operations {
             };
         };
     };
-    detail_6: {
+    detail_7: {
         parameters: {
             query?: never;
             header?: never;
@@ -9025,7 +9497,7 @@ export interface operations {
             };
         };
     };
-    detail_7: {
+    detail_8: {
         parameters: {
             query?: never;
             header?: never;
@@ -9163,7 +9635,7 @@ export interface operations {
             };
         };
     };
-    detail_8: {
+    detail_9: {
         parameters: {
             query?: never;
             header?: never;
@@ -9333,7 +9805,7 @@ export interface operations {
             };
         };
     };
-    detail_9: {
+    detail_10: {
         parameters: {
             query?: never;
             header?: never;

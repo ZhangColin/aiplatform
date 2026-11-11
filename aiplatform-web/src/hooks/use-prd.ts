@@ -12,15 +12,12 @@ type PrdVersionDetail = components["schemas"]["PrdVersionResponse"];
 
 /**
  * 当前版 PRD（#20 成果区文件模式）：`GET …/prd` = 项目工作区 docs/PRD.md
- * 直读（markdown + updatedAt + readiness + draftChangeSummary，主智能体的
- * savePrd 写出）。**未产出是正常态**——后端以 404 PRJ_015 区分「工作区无该
- * 文件」与项目不存在（PRJ_001），这里把前者归一为 null（面板据 null 呈引导
- * 占位），其余错误照抛。draftChangeSummary（#334 改需求回路）＝范围级新草稿
- * 停驻待确认的差异摘要（null = 无）——对话区「PRD 已更新，确认新版后生成
- * 下一版 Demo」提示与确认门摘要层的数据面。实时性失效源 = 通知通道
- * document-updated（桥失效 documents 域）；断线走门控轮询兜底。
- * options.enabled 供「只在 PRD 必在场时才查」的消费面关闭 404 空跑（如对话区
- * 仅已生成项目读差异摘要）。
+ * 直读（markdown + updatedAt + readiness，主智能体的 savePrd 写出）。**未产出
+ * 是正常态**——后端以 404 PRJ_015 区分「工作区无该文件」与项目不存在
+ * （PRJ_001），这里把前者归一为 null（面板据 null 呈引导占位），其余错误照
+ * 抛。实时性失效源 = 通知通道 document-updated（桥失效 documents 域）；断线
+ * 走门控轮询兜底。options.enabled 供「只在 PRD 必在场时才查」的消费面关闭
+ * 404 空跑。
  */
 export function usePrd(
   projectId: string | undefined,
@@ -44,9 +41,10 @@ export function usePrd(
 }
 
 /**
- * 已确认 PRD 版本列表（#330）：versionNo 倒序、空列表＝从未确认。阶段门
- * 「PRD 已确认」事实源（#343 验收闭合）——不伪造确认概念；确认动作成功后
- * 由 useConfirmPrd 失效本域（确认不写 docs/PRD.md，document-updated 不触发）。
+ * PRD 版本清单（#330 成行制，#462 去门化语义顺延，ADR-0039）：versionNo 倒序、
+ * 空列表＝尚无构建基准记行。阶段门「首个 Demo 在途」事实源（#343 验收闭合）
+ * ——版本行由 Demo 类 run 起跑自动记行（首次 savePrd 触发首个 run，本域经
+ * document-updated/轮询自然失效，无确认动作可失效）。
  */
 export function usePrdVersions(projectId: string | undefined) {
   return useQuery({
@@ -58,9 +56,10 @@ export function usePrdVersions(projectId: string | undefined) {
 }
 
 /**
- * 单版 PRD 详情（含全文快照，#330）：版本记录抽屉 PRD 条目点开时随用随查
- * （#344）——content＝确认时工作区 PRD 全文的不可变快照。版本行不可变，
- * staleTime Infinity 即事实缓存（键随版本号，永不复用于别版）。
+ * 单版 PRD 详情（含全文快照，#330；#462 起快照＝构建基准记行时点的工作区 PRD
+ * 全文）：版本记录抽屉 PRD 条目点开时随用随查（#344）——content＝记行时
+ * 工作区 PRD 全文的不可变快照。版本行不可变，staleTime Infinity 即事实缓存
+ * （键随版本号，永不复用于别版）。
  */
 export function usePrdVersion(projectId: string | undefined, versionNo: number | null) {
   return useQuery({

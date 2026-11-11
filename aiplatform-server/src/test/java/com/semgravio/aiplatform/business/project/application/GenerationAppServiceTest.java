@@ -4456,32 +4456,33 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
-    // ---------- 生成加门（#332）：确认触发首个 Demo run ----------
+    // ---------- 首 Demo 触发（#332 确认触发 → #462 去确认门平移到首次产 PRD） ----------
 
     @Test
-    void given_confirmed_no_plan_when_dispatch_first_demo_then_redispatch_plan_then_runs() {
-        // 灵魂例（#332 确认后派首个 Demo run）：确认时刻无既有计划——走补产链闭环
-        // （补产轮产计划 → 收口自动派生成 → 阶段 0 + 逐片 → generated_at 落位）
+    void given_no_plan_when_callback_then_defer_dispatch_to_turn_close() {
+        // 灵魂例（#462 收口精化，ADR-0039 补记）：回调发生在产 PRD 同转进行中
+        // （协议 savePrd→saveBuildPlan 有序），此刻计划必未落——本入口不补产（否则
+        // 补产轮排在同转后空烧一整轮），静默 null、零会话；同转收口携计划再派即全链
         Long projectId = persistedProject("9880");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), produced);
-                return new AgentReply(command.runId(), "已按 PRD 拟好实施计划");
-            }
             return new AgentReply(command.runId(), "完成");
         });
 
-        GenerationAppService.GenerationRun run = appService.dispatchFirstDemoOnConfirm(projectId);
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
 
+        // 同转收口（buildPlanFacts 交接物在场）：直派全链——计划落轨＋阶段 0＋逐片
+        GenerationAppService.GenerationRun run =
+                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
         assertThat(run).isNotNull();
-        assertThat(appService.planOf(projectId)).isEqualTo(produced);
-        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(2);
+        assertThat(appService.planOf(projectId)).isEqualTo(SINGLE_SLICE_PLAN);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(1);
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
@@ -4490,7 +4491,7 @@ class GenerationAppServiceTest {
         // 已生成＝首个 Demo 已起，确认只负责首个——不重复派、零编码 run
         Long projectId = persistedGeneratedProject("9881");
 
-        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
         verify(agentClient, never()).converse(any(), any());
     }
 
@@ -4499,14 +4500,16 @@ class GenerationAppServiceTest {
         // 归档＝对话区关闭即全停——确认不派
         Long projectId = persistedArchivedProject("9882");
 
-        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
         verify(agentClient, never()).converse(any(), any());
     }
 
     @Test
-    void given_first_demo_failed_when_reconfirm_then_redispatch_from_track() {
-        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」，用户
-        // 重确认（「继续生成」同路）即再触发——计划已在轨道表，从断点续跑（不重产计划）
+    void given_first_demo_failed_when_retrigger_then_redispatch_from_track() {
+        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」——
+        // 收口观测/「继续生成」/再次回调任一入口再触发即断点续跑（计划已在轨道表，
+        // 不重产计划）。首派走收口入口（产 PRD 同转计划交接物在场），重发走回调
+        // 入口（计划已落轨——本入口在场即派的少数形）
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4517,25 +4520,22 @@ class GenerationAppServiceTest {
                 return null; // matcher 空参调用（重打桩触发旧 answer）直接过
             }
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             throw new IllegalStateException("起服失败"); // 审核段失败（重试耗尽转终态）
         });
 
-        GenerationAppService.GenerationRun first = appService.dispatchFirstDemoOnConfirm(projectId);
+        GenerationAppService.GenerationRun first =
+                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         assertThat(first).isNotNull();
         assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
-        // 重确认（重发）：计划在轨道表，续跑即完成（重打桩的 matcher 空参调用触发旧
+        // 重发（回调入口，计划在轨道表）：续跑即完成（重打桩的 matcher 空参调用触发旧
         // answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "完成") : null;
         });
-        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnConfirm(projectId);
+        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnPrdProduced(projectId);
 
         assertThat(again).isNotNull();
         assertThat(generatedAt(projectId)).isNotNull();
@@ -4546,7 +4546,8 @@ class GenerationAppServiceTest {
     @Test
     void given_confirmed_prd_when_generation_closes_then_demo_v1_persisted() {
         // 灵魂例（#333 AC①）：构建收口自动成版——首版 v1 随 generated_at 同刻落，
-        // 锚＝起跑时已确认 PRD 版本、run 锚＝末片收口 run（「查看当时」接续缝）
+        // 锚＝起跑时已确认 PRD 版本、run 锚＝末片收口 run（「查看当时」接续缝）。
+        // 首派走收口入口（#462：产 PRD 同转收口携计划交接物直派）
         Long projectId = persistedProject("9884");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4555,14 +4556,10 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchFirstDemoOnConfirm(projectId);
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         verify(agentClient, atLeast(2)).converse(commands.capture(), any());
         Map<String, Object> version = jdbcTemplate.queryForMap(
@@ -4580,7 +4577,8 @@ class GenerationAppServiceTest {
     @Test
     void given_prd_v2_confirmed_mid_run_when_closure_then_version_anchors_v1() {
         // 在途 Demo 照跑完收口绑旧版本（#333 AC③）：起跑后、收口前 PRD 出新版
-        // （converse 侧效插入确认版 v2）——成版仍锚起跑时的 v1，不随后续确认漂移
+        // （converse 侧效插入确认版 v2）——成版仍锚起跑时的 v1，不随后续确认漂移。
+        // 首派走收口入口（#462 触发平移后收口单点直派）
         Long projectId = persistedProject("9885");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4588,10 +4586,6 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             // 在途插确认：PRD v2 在生成 run 进行中落库（幂等——阶段 0/切片各跑一
             // 次 converse，冲突即已插过）
             jdbcTemplate.update("""
@@ -4604,7 +4598,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchFirstDemoOnConfirm(projectId);
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         Map<String, Object> version = jdbcTemplate.queryForMap(
                 "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
@@ -4823,7 +4817,7 @@ class GenerationAppServiceTest {
     }
 
     /** 已确认 PRD 版本在场（#332 生成加门：{@link
-     * GenerationAppService#dispatchFirstDemoOnConfirm} 的调用前提——经确认缝触发时
+     * GenerationAppService#dispatchFirstDemoOnPrdProduced} 的调用前提——经确认缝触发时
      * 版本必已落库；收口观测判据只看存在性，内容不参与）。 */
     private void seedConfirmedVersion(Long projectId) {
         Project project = projectOf(projectId);

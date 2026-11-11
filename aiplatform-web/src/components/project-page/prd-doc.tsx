@@ -15,22 +15,18 @@ import { hasPrdUpdate, usePrdNoticesStore } from "@/lib/store/prd-notices";
 import { formatRelativeTime } from "@/lib/utils/time";
 
 import { FileDownloadButton } from "./file-download";
-import { PrdConfirmGate } from "./prd-confirm-gate";
 
 /**
  * PRD 篇（#20 口径，#79 从文件模式抽出为「文档」范式正文）：markdown 正文 +
  * 修订「已更新」标记 + markSeen 兜底。文档范式（默认挂载）与文件树模式
  * （PRD 选中）共用同一篇。用户面不带角色署名（ADR 0006 方向：一个「它」）。
- * #332 生成加门：PRD 在场即出「确认此版 PRD 并生成 Demo」主 CTA（首个构建 run
- * 的唯一触发）——机制与呈现同票落地，不留「门关了没按钮」的中间态。
+ * #462 去确认门（ADR-0039）：「确认此版 PRD 并生成 Demo」门组件整段退役——
+ * PRD 产出即自动进入生成（首次 savePrd 触发首个构建 run），本组件只读呈现。
  */
 export function PrdDoc({
   projectId,
-  hideConfirmGate = false,
 }: {
   projectId: string;
-  /** Demo 页文件抽屉等只读场景：PRD 早已确认，不再出「确认此版 PRD」写动作。 */
-  hideConfirmGate?: boolean;
 }) {
   const prd = usePrd(projectId);
   const hasUpdate = usePrdNoticesStore((s) => hasPrdUpdate(s, projectId));
@@ -69,16 +65,7 @@ export function PrdDoc({
                   : "随访谈整理"
                 : "平台正在和你梳理需求；整理好的需求文档会出现在这里，随时可以提意见让它更新。"}
             </p>
-            {/* 确认门（#330/#332）：PRD 在场即出门（首个构建 run 的唯一触发）——
-                未产出（prd.data 为 null）不出，但不留「门关了没按钮」的中间态；
-                范围级新草稿停驻时摘要层带差异摘要（#334） */}
-            {prd.data && !hideConfirmGate ? (
-              <PrdConfirmGate
-                projectId={projectId}
-                readiness={prd.data.readiness}
-                changeSummary={prd.data.draftChangeSummary}
-              />
-            ) : null}
+            {/* 去确认门（#462）：无确认动作挂点——PRD 在场即读面，产出即自动进入生成 */}
           </header>
           {prd.data ? (
             <Markdown remarkPlugins={[remarkGfm]} components={prdMarkdownComponents}>

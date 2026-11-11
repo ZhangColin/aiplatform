@@ -50,11 +50,11 @@ export const queryKeys = {
     all: ["documents"] as const,
     /** 当前版 PRD（markdown + updatedAt；未产出 404 PRJ_015 在 hook 归一为 null）。 */
     prd: (id: string) => ["documents", "prd", id] as const,
-    /** 已确认 PRD 版本列表（#330；空列表＝从未确认——阶段门「PRD 已确认」事实源）。 */
+    /** PRD 版本清单（#330 成行制，#462 语义顺延——空列表＝尚无构建基准记行：阶段门「首个 Demo 在途」事实源）。 */
     prdVersions: (id: string) => ["documents", "prd-versions", id] as const,
     /**
-     * 单版 PRD 详情（含全文快照，#330）：版本记录抽屉条目点开时随用随查
-     * （#344）——挂 documents 域随确认失效刷新。
+     * 单版 PRD 详情（含全文快照，#330；#462 起＝构建基准记行时点全文）：版本
+     * 记录抽屉条目点开时随用随查（#344）——挂 documents 域随记行失效刷新。
      */
     prdVersion: (id: string, versionNo: number) =>
       ["documents", "prd-version", id, String(versionNo)] as const,

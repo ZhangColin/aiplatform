@@ -46,7 +46,7 @@ export function DemoFilesDrawer({
           </button>
         </DrawerHeader>
         <div className="min-h-0 flex-1">
-          <FilesPanel projectId={projectId} hideConfirmGate />
+          <FilesPanel projectId={projectId} />
         </div>
       </DrawerContent>
     </Drawer>

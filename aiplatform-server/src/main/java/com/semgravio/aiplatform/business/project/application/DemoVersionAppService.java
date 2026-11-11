@@ -20,10 +20,11 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Demo 构建版本用例（#333「Demo 版本化与确认标记」，spec #320 实施序③）：每轮
- * Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…），每版锚定<b>起跑时</b>已确认
+ * Demo 构建收口自动成版（项目内整数递增 v1/v2/v3…），每版锚定<b>起跑时</b>最新
  * PRD 版本（{@code prdVersionNo}——「Demo vN（基于 PRD vM 快照）」式关联：在途
- * Demo 照跑完收口绑起跑时版本，不随后续确认漂移；锚由派发侧生成/迭代轨捕获，
- * 本用例不复查——锚是起跑事实不是收口判定）；「确认此版本，准备签约」＝既有
+ * Demo 照跑完收口绑起跑时版本，不随后续记行漂移；锚由派发侧生成/迭代轨捕获，
+ * 本用例不复查——锚是起跑事实不是收口判定；<b>#462 读法顺延</b>：PRD 版本表
+ * 去门化后「最新版」＝最新构建基准快照）；「确认此版本，准备签约」＝既有
  * 版本上打确认标记（项目单指针 {@code confirmed_demo_version_no}——选定动作、
  * 不产生新版本号；换确认版本＝指针随移，旧标记自然失效）。
  *
@@ -55,10 +56,13 @@ public class DemoVersionAppService {
     }
 
     /**
-     * 起跑时已确认 PRD 版本锚（#333 锚捕获单点——生成/迭代轨派发处共用）：
-     * 最新已确认版本号；从未确认（legacy/设计类起跑）为 null。
+     * 起跑时最新 PRD 版本锚（#333 锚捕获单点——生成/迭代轨派发处共用；<b>#462
+     * 读法顺延</b>：版本表去门化后「最新版」＝最新构建基准快照〔run 起跑自动记
+     * 行〕）：最新版本号；尚无记行（legacy/记行失败）为 null。记行由派发处在
+     * 锚捕获前先行调用（{@link PrdVersionAppService#recordOnDemoRunStart}），
+     * 故此处读到的最新版即本场基准。
      */
-    public Integer latestConfirmedPrdVersionNo(Long projectId) {
+    public Integer latestPrdVersionNo(Long projectId) {
         return prdVersions.findFirstByProjectIdOrderByVersionNoDesc(projectId)
                 .map(PrdVersion::getVersionNo).orElse(null);
     }
@@ -69,7 +73,7 @@ public class DemoVersionAppService {
      * 已随刻成版，幂等跳过（不产生第二版）。项目已不存在＝warn 不炸收口轨道
      * （markGenerated 同口径）。
      *
-     * @param prdVersionNo 起跑时已确认 PRD 版本锚（无确认版起跑 = null）
+     * @param prdVersionNo 起跑时最新 PRD 版本锚（无版本记行起跑 = null）
      */
     public void closeOnGeneration(Long projectId, String runId, Integer prdVersionNo) {
         transactionTemplate.executeWithoutResult(status ->
@@ -88,7 +92,7 @@ public class DemoVersionAppService {
      * 迭代轮收口成版（系统实动的修正/更新 run 收口——递增成版；调用侧只在
      * finish_edit changed=true 时调用，无新状态即无新版本）。
      *
-     * @param prdVersionNo 起跑时已确认 PRD 版本锚（无确认版起跑 = null）
+     * @param prdVersionNo 起跑时最新 PRD 版本锚（无版本记行起跑 = null）
      */
     public void closeOnIteration(Long projectId, String runId, Integer prdVersionNo) {
         transactionTemplate.executeWithoutResult(status ->

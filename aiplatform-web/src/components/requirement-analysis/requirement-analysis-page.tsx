@@ -28,15 +28,16 @@ import { RequirementAnalysisHeader } from "./ra-header";
 /**
  * 需求分析页 P02/P03（#346，spec #320 ⑥ IA 全量重建——阶段页制的需求分析
  * 阶段页＝项目页本路由）：粘性二级 header（代号胶囊/项目名/PRD 版本徽标/
- * 「对话调优」/「导出 (PDF/Word)」/主 CTA 确认门）＋ 12 列双栏（左 5＝收敛
+ * 「对话调优」/「导出 (PDF/Word)」/主 CTA）＋ 12 列双栏（左 5＝收敛
  * 卡＋对话时间流＋澄清输入，右 7＝PRD 文档面）。闲聊期（无 PRD）对话占全宽；
  * 首产 PRD 右栏滑出（live 切面机制迁移——判据＝prdProducedAt，document-updated
  * 失效重拉即时切换，滑入动效即状态切换反馈）。
  *
  * <p>本组件是 agent 流通道首个挂载方（ADR 0003「项目页 mount 建连、unmount
- * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定）。已确认无停驻草稿时主
- * CTA 换「前往 Demo 体验」（阶段推进位）。「确认下单」顶栏按钮已退役（spec
- * 删除清单：并入 Demo 确认门——Demo 阶段页归 #347）。</p>
+ * 即断」）；断流超 ~10s 发一次 toast（呈现最小化约定）。首个构建基准记行
+ * （版本清单由空转非空，#462 去确认门——首 Demo 触发平移到首次 savePrd）即
+ * 自动切 Demo 体验页（可切回，仅转换点跳一次）。「确认下单」顶栏按钮已退役
+ * （spec 删除清单：并入 Demo 确认门——Demo 阶段页归 #347）。</p>
  */
 export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -67,6 +68,16 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
   if (!chatOnly !== seenPrdProduced) {
     setSeenPrdProduced(!chatOnly);
     if (!chatOnly) setMobileArea("doc");
+  }
+
+  // 首 Demo 自动切页（#462 去确认门，ADR-0039）：首个构建 run 起跑自动记行→
+  // 版本清单由空转非空即首 Demo 在途——界面自动切 Demo 体验页（可切回：仅
+  // 转换点跳一次，同 seenPrdProduced 先例——渲染期派生态，挂载即在场不重跳）
+  const hasPrdVersions = !!prdVersions && prdVersions.length > 0;
+  const [seenPrdVersions, setSeenPrdVersions] = useState(hasPrdVersions);
+  if (hasPrdVersions !== seenPrdVersions) {
+    setSeenPrdVersions(hasPrdVersions);
+    if (hasPrdVersions) router.push(`/projects/${projectId}/demo`);
   }
 
   // 「断线」语义 = 连上过再掉线（装配口径沿旧项目页）：通道从未连上不武装计时
@@ -101,11 +112,11 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
     );
   }
 
-  const draftPending = !!prd.data?.draftChangeSummary;
+  // 徽标推导（#462 去门化：draftPending 判据随 draftChangeSummary 字段退役——
+  // 草稿/新草稿不再单独分形，徽标只看产出在否＋最新构建基准版本号）
   const badge = prdBadgeOf({
     hasPrd: !!detail?.prdProducedAt,
     latestVersionNo: prdVersions?.[0]?.versionNo ?? null,
-    draftPending,
   });
 
   // 锁定式矩阵（#28 单点）：订单存在即冻结迭代——澄清输入禁用+提示
@@ -126,7 +137,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
       track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
       plan={detail?.segments}
       designPlan={planAreaOfDesignItems(detail?.designItems)}
-      generated={!!detail?.generatedAt}
       variant="stage"
       inputRef={chatInputRef}
       // 报价卡「查看订单详情」（#203）：签约域在 Demo/签约阶段页——过渡期归
@@ -144,8 +154,6 @@ export function RequirementAnalysisPage({ projectId }: { projectId: string }) {
         projectName={detail?.name ?? ""}
         badge={badge}
         hasPrd={!chatOnly}
-        readiness={prd.data?.readiness ?? undefined}
-        changeSummary={prd.data?.draftChangeSummary}
         onFocusChat={focusChat}
         getArticleHtml={() => articleRef.current?.innerHTML ?? null}
         loading={isPending}

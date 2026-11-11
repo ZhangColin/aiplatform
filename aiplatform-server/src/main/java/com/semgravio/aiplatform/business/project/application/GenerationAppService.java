@@ -55,11 +55,11 @@ import com.semgravio.aiplatform.business.project.domain.repository.ProjectReposi
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门——「确认此版 PRD
- * 并生成 Demo」成为首个构建 run 的唯一触发，旧「PRD 出即自动起」口径退役；
- * #104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
- * 首次生成由确认动作触发（{@link #dispatchFirstDemoOnConfirm}，确认即成版后自动
- * 派首个 Demo run），显式端点（POST /generate）与中断「继续生成」兜底走同一编排
+ * 生成编排（#22 片2-1；#101 生成无门自动发起→#332 生成加门→<b>#462 去确认门
+ * （ADR-0039）</b>——首个构建 run 的触发平移到首次产 PRD：savePrd 落盘回调
+ * （{@link #dispatchFirstDemoOnPrdProduced}）即自动派，确认门与人确认动作整段
+ * 退役；#104 生成轨道——单 run 换「阶段 0 先起服 + 纵向切片逐段」多 run）：
+ * 显式端点（POST /generate）与中断「继续生成」兜底走同一编排
  * （{@link #startGeneration}——重发即断点续跑，#221）。
  * run 执行体与主智能体
  * 同构（AgentScope HarnessAgent 经 {@link AgentscopeAgentClient} 直调——编排缝
@@ -108,11 +108,14 @@ import lombok.extern.slf4j.Slf4j;
  * 缺口；措辞漂移即对照不上、按待跑重做（降级方向安全：多跑不漏做）。PRD 已演进
  * 的换锚重产（表内有旧片行）不适用存量对照——整组替换重置、从头来是既定口径。</p>
  *
- * <p><b>生成加门（#332）</b>：首个构建 run 的唯一触发＝确认此版 PRD
- * （{@link #dispatchFirstDemoOnConfirm}）——PRD 产出不再自动起（旧口径退役，
- * ADR-0008 改写为确认门口径）。确认动作过两级门（#331）成版后自动派；未生成＋
- * 已确认版本在场，用户重确认即再触发。确认后的小迭代照旧无门（受理即派、沿用
- * 当前已确认 PRD）；重复触发（已生成或生成在途）拒绝 PRJ_017。</p>
+ * <p><b>首 Demo 触发平移（#462 去确认门，ADR-0039）</b>：首个构建 run 的触发＝
+ * 首次产 PRD（{@link #dispatchFirstDemoOnPrdProduced}，savePrd 落盘回调侧——
+ * 仅计划已在场时即派；计划未落属产 PRD 同转进行中，防空烧交由轮收口单点再兜）——
+ * 「确认此版 PRD 并生成 Demo」的人确认动作与两级门整段退役。未生成＋PRD 已产出，
+ * 收口观测/「继续生成」即再触发（在途静默跳过）。小迭代照旧无门（受理即派）；
+ * 重复触发（已生成或生成在途）按钮路径拒绝 PRJ_017。Demo 类 run 起跑自动记 PRD
+ * 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，构建基准序）——
+ * 记行先行、Demo 版本锚捕获读「最新版」。</p>
  *
  * <p><b>首 Demo 在途的意见排队补派（#360）</b>：首个构建 run 在途期间（generated_at
  * 未落位）到达的意见轮，收口派发不再静默跳过——意见（原文＋需求侧修订说明）入队
@@ -527,6 +530,7 @@ public class GenerationAppService {
     private final DesignSpecAppService designSpecs;
     private final BuildDispatchPolicy buildDispatchPolicy;
     private final DemoVersionAppService demoVersionAppService;
+    private final PrdVersionAppService prdVersionAppService;
     private final DemoSeedAppService demoSeed;
     private final ProjectVersionAppService versions;
     private final SliceParallelExecutor sliceParallelExecutor;
@@ -593,6 +597,7 @@ public class GenerationAppService {
             DesignSpecAppService designSpecs,
             BuildDispatchPolicy buildDispatchPolicy,
             DemoVersionAppService demoVersionAppService,
+            PrdVersionAppService prdVersionAppService,
             DemoSeedAppService demoSeed,
             ProjectVersionAppService versions,
             SliceParallelExecutor sliceParallelExecutor,
@@ -620,6 +625,7 @@ public class GenerationAppService {
         this.designSpecs = designSpecs;
         this.buildDispatchPolicy = buildDispatchPolicy;
         this.demoVersionAppService = demoVersionAppService;
+        this.prdVersionAppService = prdVersionAppService;
         this.demoSeed = demoSeed;
         this.versions = versions;
         this.sliceParallelExecutor = sliceParallelExecutor;
@@ -672,12 +678,12 @@ public class GenerationAppService {
     }
 
     /**
-     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门）：
-     * #332 起系统终点的首个构建 run 唯一触发＝确认此版 PRD
-     * （{@link #dispatchFirstDemoOnConfirm}），本入口不再承担系统终点的自动起
-     * （{@link MainAgentAppService} 收口观测对系统终点改判据为「未生成＋存在已
-     * 确认版本」，无确认不派）；本入口仍承担设计类轨迹的首个构建（设计全部定稿
-     * 后经此起构建，设计轨触发律不改）与系统终点已确认后的重触发。守卫沿用
+     * 意见轮收口观测派首个构建 run（#101 生成无门自动发起→#332 生成加门→<b>#462
+     * 去确认门</b>，ADR-0039）：系统终点 PRD 已产出即自动起——首个构建的先行触发
+     * 在首次 savePrd 落盘回调（{@link #dispatchFirstDemoOnPrdProduced}，通常早于
+     * 本入口且在途），本入口是收口观测的再兜一轮（平台轮/续跑/兜底面），撞在途
+     * 静默跳过；本入口仍承担设计类轨迹的首个构建（设计全部定稿后经此起构建，
+     * 设计轨触发律不改）与失败后的重触发。守卫沿用
      * {@link #startGeneration}（存在 / 未归档 / 未生成过 / PRD 已产出——
      * {@link #requireGeneratableProject} 单点），差异只在在途口径：生成进行中
      * 意见轮（{@code turnOpinion} 在场）入队＋明示、生成成功收口后合并补派
@@ -708,26 +714,41 @@ public class GenerationAppService {
     }
 
     /**
-     * 确认触发首个 Demo run（#332 生成加门；spec #320 实施序③）：PRD 确认动作过
-     * 两级门成版后，平台经本入口派首个构建 run——「确认此版 PRD 并生成 Demo」
-     * 成为首个构建 run 的<b>唯一触发</b>（推翻 #101「生成无门、PRD 出即起」旧口径，
-     * ADR-0008 改写）。确认即成版（{@link PrdVersionAppService}）已先行落库；本
-     * 入口只负责派发。
+     * 首次产 PRD 触发首个 Demo run（<b>#462 去确认门，ADR-0039</b>——原
+     * #332「确认触发」{@code dispatchFirstDemoOnConfirm} 平移到 savePrd 落盘
+     * 回调侧，{@link PrdArtifactAdapter#onWritten} 首次置位时调用）：首次
+     * savePrd（prdProducedAt 首次置位）即派首个构建 run——「确认此版 PRD 并生成
+     * Demo」的人确认触发退役，人机差异仅是触发者换人：人确认 → 平台自动。生成
+     * 读的是工作区 PRD 正本；派发失败不反噬 savePrd（落库已成立）——收口观测
+     * （{@link MainAgentAppService}）再兜一轮，用户重提即兜底。
      *
      * <p>幂等/重发同口径：已生成或生成在途静默跳过返回 null（首个 Demo 已起或在
-     * 跑，确认不重复派）；未生成且（调用方已确认）版本在场即派——run-failed 后
-     * 项目仍「未生成」，用户重确认（或经「继续生成」）即再触发，不自动重试（防空烧）。
-     * 切片计划缺失走既有补产链（{@link #dispatchPlanProduction}，主智能体按 PRD
-     * 补产）——确认前的计划事实随访谈轮收口消费，不跨轮保留。</p>
+     * 跑）；未生成即派——run-failed 后项目仍「未生成」，收口观测/「继续生成」
+     * 即再触发，不自动重试（防空烧）。设计类终点由
+     * {@link #dispatchGeneration} 的设计定稿门拦下（口径不变）。</p>
+     *
+     * <p><b>计划缺失不在本入口补产（#462 收口精化，ADR-0039 补记——防空烧）</b>：
+     * 本回调发生在产 PRD 同转进行中（协议第 5 条 savePrd→saveBuildPlan 有序），
+     * 此刻切片计划必未落轨道表——若在此走补产兜底，补产轮排在同转之后空跑一整轮
+     * 主智能体（同转收口本就会携 buildPlanFacts 再派，补产纯烧）。故计划未落时
+     * 本入口静默返回 null，补产兜底归轮收口单点（{@link
+     * #dispatchGenerationOnTurnClose}）：标准路径同转收口计划已在场零空烧；模型
+     * 未守协议（收口无计划）时收口侧照常补产。</p>
      *
      * @return 派发的 run 标识；已生成 / 在途 / 计划缺失未派返回 null——调用方不
-     *         据此报错（确认回执以版本号为准，派发是次生事实）
+     *         据此报错（派发是次生事实）
      */
-    public GenerationRun dispatchFirstDemoOnConfirm(Long projectId) {
+    public GenerationRun dispatchFirstDemoOnPrdProduced(Long projectId) {
         Project project = projectRepository.findById(projectId).orElse(null);
         if (project == null || project.getArchivedAt() != null
                 || project.getGeneratedAt() != null) {
-            return null; // 首个 Demo 已生成 / 归档——确认只负责首个，不重复派
+            return null; // 首个 Demo 已生成 / 归档——本入口只负责首个，不重复派
+        }
+        if (resolvePlan(project, /* handed= */ null) == null) {
+            // 计划未落＝产 PRD 同转仍在跑（收口必携计划再兜）——本入口不补产（防空烧）
+            log.info("[generate] 项目 {} 首次产 PRD 回调：切片计划未落（产 PRD 同转进行中），"
+                    + "派发交由轮收口观测再兜", projectId);
+            return null;
         }
         return dispatchGeneration(project, /* rejectInFlight= */ false, /* plan= */ null,
                 /* turnOpinion= */ null);
@@ -822,10 +843,21 @@ public class GenerationAppService {
             return null;
         }
 
-        // Demo 版本锚捕获（#333）：起跑时已确认 PRD 版本——在途 Demo 照跑完收口绑
-        // 本锚（此后新确认不漂移旧版关联）；无确认版项目（设计类起跑/legacy）为 null
-        Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
         String firstRunId = EventsAppService.newRunId();
+        // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区 PRD 全文
+        // 为构建基准（版本号＝构建基准序，同文幂等跳过）——记行先行，随后锚捕获
+        // 读到的「最新版」即本场基准；best-effort：失败只记日志不反噬 run
+        try {
+            prdVersionAppService.recordOnDemoRunStart(projectId, firstRunId);
+        }
+        catch (RuntimeException e) {
+            log.warn("[generate] 项目 {} run {} 起跑记行失败（不反噬派发）：{}",
+                    projectId, firstRunId, e.toString());
+        }
+        // Demo 版本锚捕获（#333；#462 读法顺延）：起跑时最新 PRD 版本——在途 Demo 照
+        // 跑完收口绑本锚（此后新版记行不漂移旧版关联）；无版本记行（legacy/记行失败）
+        // 为 null
+        Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
         Future<?> trackTask = sessionExecutor.submit(CoderRunAttempts.SESSION_PREFIX + projectId,
                 () -> {
                     boolean trackReturned = false;

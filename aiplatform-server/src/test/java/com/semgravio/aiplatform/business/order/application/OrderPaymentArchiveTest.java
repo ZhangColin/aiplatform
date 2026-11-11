@@ -111,10 +111,10 @@ class OrderPaymentArchiveTest {
                 .thenReturn(Map.of(PROJECT_ID, "宠物店官网")); // 沉淀取名面（namesOf 单查询）
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), PRD, Instant.parse("2026-09-01T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(PRD)), /* draftChangeSummary= */ null));
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
         // 下单前置双确认缺省桩（#335）：已确认 PRD v1＋Demo v1
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(1, PRD, 1));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(1, PRD, 1));
     }
 
     @AfterEach
@@ -294,10 +294,9 @@ class OrderPaymentArchiveTest {
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), "# PRD\n\n签约后的工作区新稿",
                 Instant.parse("2026-10-01T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n签约后的工作区新稿")),
-                /* draftChangeSummary= */ null));
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(9, "# PRD v9\n\n签约后的新演进版", 1));
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n签约后的工作区新稿"))));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(9, "# PRD v9\n\n签约后的新演进版", 1));
 
         appService.retryArchive(Long.parseLong(orderId), new Operator("700100", "运营·小刘"));
 
@@ -313,7 +312,7 @@ class OrderPaymentArchiveTest {
     @Test
     void given_no_contract_when_archive_then_sunk_prd_falls_back_to_latest_confirmed() {
         // 无合同回退腿（遗留 mock 时代单/异常路径）：沉淀内容＝最新确认版全文
-        // （confirmedVersionRefs——归档链不再 docker exec 读工作区）
+        // （latestVersionRefs——归档链不再 docker exec 读工作区）
         stubEmbeddingOk();
         String orderId = appService.place(PROJECT_ID).id();
         appService.submitQuote(Long.parseLong(orderId), 128000L, "首版报价", null);
@@ -323,10 +322,9 @@ class OrderPaymentArchiveTest {
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), "# PRD\n\n归档时点的工作区草稿",
                 Instant.parse("2026-10-01T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n归档时点的工作区草稿")),
-                /* draftChangeSummary= */ null));
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(9, "# PRD v9\n\n回退腿最新确认版", 1));
+                PrdReadinessResponse.from(PrdReadiness.parse("# PRD\n\n归档时点的工作区草稿"))));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(9, "# PRD v9\n\n回退腿最新确认版", 1));
 
         appService.retryArchive(Long.parseLong(orderId), new Operator("700100", "运营·小刘"));
 

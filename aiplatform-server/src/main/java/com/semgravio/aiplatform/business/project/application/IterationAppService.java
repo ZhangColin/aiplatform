@@ -41,12 +41,14 @@ import lombok.extern.slf4j.Slf4j;
  * 自由文本。未调用即 run 未正常收口，按既有静默重试/终态机制处理；判定结果
  * （changed 与原因）的呈现归收口扩载权威化（#88 收尾卡判定行）。</p>
  *
- * <p><b>小迭代基准＝当前已确认版本（#334 改需求回路）</b>：范围级新草稿在场
- * （未被确认）时小迭代仍按旧确认版起跑——本场起跑逐场判定（{@link
- * PrdDraftBaseline}），偏离即内联已确认版全文为基准、工作区草稿不作本轮依据；
- * 确认新版才切基准（届时工作区即新确认版，自然回到正本引用形）。范围级修正
- * run 由确认动作派发（{@link PrdVersionAppService}），交接物＝停驻的意见原文
- * ＋差异摘要。</p>
+ * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334「小迭代基准＝当前已确认
+ * 版本」随停派整段退役，ADR-0039/#450 裁决 A）</b>：范围级新草稿不再停派待确认
+ * ——意见轮收口一律受理即派（判定权归主智能体工作协议）；修正 run 以工作区
+ * {@code docs/PRD.md} 正本为需求基准（路径引用、执行体重读约定见配置）。原
+ * 漂移判定组件 {@code PrdDraftBaseline} 随两消费路径退役一并注销；Demo 类 run
+ * 起跑自动记 PRD 版本行（{@link PrdVersionAppService#recordOnDemoRunStart}，
+ * 版本号＝构建基准序——起跑时的新草稿即成新基准快照），Demo 版本锚捕获读
+ * 「最新版」。</p>
  *
  * <p><b>排队合并</b>：修正 run 进行中再派的任务排队（主智能体回复用户「已排入下一轮」）；
  * 当前 run 收口后（无论成败）排空队列、合并为一场修正 run 续派——用户在 run 中
@@ -105,7 +107,7 @@ public class IterationAppService {
     private final WorkspaceLifecycleAppService workspaceLifecycleAppService;
     private final DesignSpecAppService designSpecs;
     private final DemoVersionAppService demoVersionAppService;
-    private final PrdDraftBaseline prdDraftBaseline;
+    private final PrdVersionAppService prdVersionAppService;
     private final DemoSeedAppService demoSeed;
     private final ProofOfOutputGate proofGate;
     private final VerificationPresenceGate verificationPresence;
@@ -128,7 +130,7 @@ public class IterationAppService {
             WorkspaceLifecycleAppService workspaceLifecycleAppService,
             DesignSpecAppService designSpecs,
             DemoVersionAppService demoVersionAppService,
-            PrdDraftBaseline prdDraftBaseline,
+            PrdVersionAppService prdVersionAppService,
             DemoSeedAppService demoSeed,
             ProofOfOutputGate proofGate,
             VerificationPresenceGate verificationPresence,
@@ -143,7 +145,7 @@ public class IterationAppService {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.designSpecs = designSpecs;
         this.demoVersionAppService = demoVersionAppService;
-        this.prdDraftBaseline = prdDraftBaseline;
+        this.prdVersionAppService = prdVersionAppService;
         this.demoSeed = demoSeed;
         this.proofGate = proofGate;
         this.verificationPresence = verificationPresence;
@@ -293,15 +295,19 @@ public class IterationAppService {
             while (true) {
                 // 循环内再赋值的局部不进 lambda：本场交接物取逐轮快照（判定行随场）
                 FixHandoff currentHandoff = handoff;
-                // Demo 版本锚捕获（#333）：本场起跑时已确认 PRD 版本——迭代基准＝
-                // 当前已确认版本（确认新版才切基准；在途场照跑完收口绑起跑时版本）
-                Integer prdVersionNo = demoVersionAppService.latestConfirmedPrdVersionNo(projectId);
-                // 小迭代基准（#334）：本场起跑时工作区草稿偏离已确认版（范围级新草稿
-                // 在场未被确认）→ 本场以已确认版全文为基准（任务内联快照、草稿不作
-                // 依据）；排队合并/恢复出口逐场重判（确认新版后本场自然切回工作区
-                // 正本＝新确认版）。读不出时 fail-closed 归已确认版（PrdDraftBaseline）
-                String baselinePrd = prdDraftBaseline.driftedFrom(projectId)
-                        .map(version -> version.getContent()).orElse(null);
+                // Demo 类 run 起跑自动记行（#462 去门化，ADR-0039）：快照当时工作区
+                // PRD 全文为构建基准（同文幂等跳过）——记行先行，随后锚捕获读到的
+                // 「最新版」即本场基准；best-effort：失败只记日志不反噬本场
+                try {
+                    prdVersionAppService.recordOnDemoRunStart(projectId, runId);
+                }
+                catch (RuntimeException e) {
+                    log.warn("[fix] 项目 {} run {} 起跑记行失败（不反噬本场）：{}",
+                            projectId, runId, e.toString());
+                }
+                // Demo 版本锚捕获（#333；#462 读法顺延）：本场起跑时最新 PRD 版本——
+                // 在途场照跑完收口绑起跑时版本
+                Integer prdVersionNo = demoVersionAppService.latestPrdVersionNo(projectId);
                 CoderRunAttempts.RunResult result;
                 try {
                     // 产出证明闸（#420 更新轨同盖）：本场判定件——起跑捕获段起点
@@ -310,7 +316,7 @@ public class IterationAppService {
                             proofGate.forRun(project.getWorkspaceId());
                     result = coderRunAttempts.run(project, runId,
                             fixSession(projectId, runId),
-                            new CoderRunAttempts.Prompts(fixRunPrompt(handoff, baselinePrd),
+                            new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
                                     IterationAppService::fixRetryPrompt),
                             (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
                                     currentHandoff, prdVersionNo, proof),
@@ -404,7 +410,7 @@ public class IterationAppService {
      * （#88 收尾卡判定行），本层只记事实日志。
      *
      * <p><b>Demo 版本化（#333）</b>：系统实动（changed=true）的收口即迭代轮成版
-     * ——递增插 Demo 版本行、锚本场起跑时已确认 PRD 版本；changed=false 无新系统
+     * ——递增插 Demo 版本行、锚本场起跑时最新 PRD 版本；changed=false 无新系统
      * 状态即无新版本。成版 best-effort：失败记日志不反噬收口判定（版本缺位由下轮
      * 收口补位，markGenerated 同口径）。</p>
      */
@@ -455,26 +461,17 @@ public class IterationAppService {
     }
 
     /**
-     * 修正任务 prompt（标准基准形——{@link #fixRunPrompt(FixHandoff, String)} 的
-     * 便捷重载，无内联基准）。
-     */
-    static String fixRunPrompt(FixHandoff handoff) {
-        return fixRunPrompt(handoff, /* baselinePrd= */ null);
-    }
-
-    /**
      * 修正任务 prompt：交接物三要素结构化拼装（#52，#55 逐轮配对）——每条意见
      * 原文后紧跟该轮的需求侧判定（已修订带修订说明、未修订显式「本轮无修订」
      * 占位——哪条意见被哪轮处理了一目了然，不静默缺席）+ PRD 基准引用 + 收口
      * 判据复述（8081 常驻 + 结束工具必调）。
      *
-     * <p><b>基准两形（#334 小迭代基准＝当前已确认版本）</b>：无偏移（含 legacy
-     * 无确认版、确认动作后的范围级修正 run——工作区即确认版）以工作区正本为
-     * 需求正本（路径引用、不注全文，执行体重读约定见配置）；本场起跑时草稿偏离
-     * 已确认版（范围级新草稿在场未被确认）→ 内联已确认版全文为基准，工作区
-     * 草稿明确不作本轮依据（确认新版才切基准——小迭代不漂移到未确认草稿上）。</p>
+     * <p><b>需求基准＝工作区 PRD 正本（#462 去确认门——#334 基准两形〔内联已确认
+     * 版/正本引用〕随停派退役收敛为单形）</b>：修正 run 一律以工作区
+     * {@code docs/PRD.md} 正本为准（路径引用、不注全文，执行体重读约定见配置）——
+     * 范围级新草稿照派照跑，记行（构建基准快照）由派发处在起跑时先行完成。</p>
      */
-    static String fixRunPrompt(FixHandoff handoff, String baselinePrd) {
+    static String fixRunPrompt(FixHandoff handoff) {
         StringBuilder prompt = new StringBuilder(
                 "系统修正：系统已生成并可操作，用户提出了如下修正意见（每条意见后紧跟"
                         + "该轮的需求侧判定），请在现有工作区内完成修正（系统的其余部分"
@@ -487,16 +484,8 @@ public class IterationAppService {
                             ? "PRD 已修订——" + round.prdRevisionSummary()
                             : "本轮无修订（未触发 PRD 变更）");
         }
-        if (baselinePrd != null) {
-            prompt.append("\n本轮需求基准 = 当前已确认的 PRD 快照（迭代基准＝当前已确认"
-                    + "版本；工作区 ").append(ProjectArtifacts.PRD).append(" 是待确认的新草稿、")
-                    .append("尚未生效，本轮一律不读、不作为依据），以基准全文与上述意见")
-                    .append("为准：\n").append(baselinePrd);
-        }
-        else {
-            prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
-                    .append("，以正本与上述意见为准。");
-        }
+        prompt.append("\n需求正本 = 工作区 ").append(ProjectArtifacts.PRD)
+                .append("，以正本与上述意见为准。");
         prompt.append("\n完成后确认 8081 端口服务在跑、curl 可访问后再收尾。")
                 .append("\n收尾必须调用 finish_edit 工具：动了系统传 changed=true 并说明改了什么；")
                 .append("判定无需改动系统也必须调用，传 changed=false 并说明原因——")

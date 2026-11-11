@@ -1103,10 +1103,10 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_prd_produced_not_confirmed_when_opinion_turn_closes_then_not_dispatched() {
-        // 灵魂用例反转（#332 生成加门，推翻 #101「生成无门、PRD 出即起」）：主智能体
-        // 产出 PRD 后意见轮收口，平台<b>不再</b>自动派首次生成 run——未生成＋无已确认
-        // PRD 版本即静默待确认（唯一一轮主智能体对话，零编码 run、零补产轮）
+    void given_prd_produced_when_opinion_turn_closes_then_first_generation_dispatched() {
+        // 去门化（#462，ADR-0039——「生成加门 #332」退役）：PRD 已产出即自动派首个
+        // 构建 run——首次 savePrd 落盘回调已先行触发派发（此处 mock 边界无工具执行
+        // 面），收口观测再兜一轮：无「已确认版本」判据，起跑即自动记构建基准
         Long projectId = persistedPrdProject("9727");
         givenSessionExecutorRunsInline();
         when(workspaceLifecycleAppService.exec(any(), any()))
@@ -1122,11 +1122,10 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "做一个官网");
 
-        // 生成加门：意见轮唯一一轮主智能体对话，零编码 run（不落轨道片行——未确认不
-        // 呈现「生成中断」态）
+        // 收口后派生成：编码 run 在场（零门——未生成＋PRD 已产出即派）
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(1)).converse(command.capture(), any());
-        assertThat(command.getAllValues()).noneMatch(
+        verify(agentClient, atLeast(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues()).anyMatch(
                 c -> c.sessionId().startsWith(CoderRunAttempts.SESSION_PREFIX));
     }
 
@@ -1265,10 +1264,10 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_scope_opinion_revises_prd_when_turn_closes_then_no_fix_run_and_draft_change_parked() {
-        // 灵魂例（#334）：范围级意见（savePrd 修订事实＋草稿≠已确认版——判定从
-        // 工具调用事实观测）→ 轮收口<b>不派</b>更新 run，意见与差异摘要停驻待确认
-        // （确认过门出新版本号后才派下一版 Demo）；对话区提示事实面＝停驻列
+    void given_scope_opinion_revises_prd_when_turn_closes_then_fix_run_dispatched() {
+        // 去门化（#462，ADR-0039）：改需求分流停派（#334）退役——范围级新草稿（
+        // savePrd 修订事实＋草稿≠已确认版）照旧受理即派修正 run：新草稿随下一起跑
+        // 自动记为下一构建基准；停驻两列留库不删、无人写
         Long projectId = persistedGeneratedProject("9761");
         markPrdConfirmed(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
@@ -1277,14 +1276,18 @@ class MainAgentAppServiceTest {
 
         appService.runOpinionTurn(projectId, "加一个管理后台角色");
 
-        // 新草稿不自动触发 Demo：唯一一轮主智能体对话、零编码 run
-        verify(agentClient, times(1)).converse(any(), any());
-        // 停驻落库（事实链可观测）：意见原文＋差异摘要（savePrd summary 终值）
+        // 受理即迭代：main 轮＋修正 run 两轮 converse；交接物携意见原文＋修订摘要
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, times(2)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(1).prompt())
+                .contains("PRD 已修订")
+                .contains("功能清单新增管理后台章");
+        // 停驻列无人写（停驻机制退役）：两列留空
         Map<String, Object> parked = jdbcTemplate.queryForMap(
                 "SELECT prd_draft_opinion, prd_draft_summary FROM prj_projects WHERE id = ?",
                 projectId);
-        assertThat(parked.get("prd_draft_opinion")).isEqualTo("加一个管理后台角色");
-        assertThat(parked.get("prd_draft_summary")).isEqualTo("功能清单新增管理后台章");
+        assertThat(parked.get("prd_draft_opinion")).isNull();
+        assertThat(parked.get("prd_draft_summary")).isNull();
     }
 
     @Test
@@ -1329,22 +1332,34 @@ class MainAgentAppServiceTest {
     }
 
     @Test
-    void given_un_generated_with_confirmed_and_scope_draft_when_turn_closes_then_no_first_demo() {
-        // 未生成形态（首个 Demo 未起——run 失败后改需求）：确认版在场但本轮出范围级
-        // 新草稿 → 不自动起首个 Demo（新草稿不自动触发），停驻待重确认过门
+    void given_un_generated_with_scope_draft_when_turn_closes_then_first_demo_dispatched() {
+        // 去门化（#462）：未生成形态的范围级新草稿不再停派待确认——收口观测照派
+        // 首个构建 run（新草稿＝首个构建基准：版本记行随起跑自动落，无确认动作）；
+        // 停驻两列留库不删、无人写
         Long projectId = persistedPrdProject("9764");
         markPrdConfirmed(projectId);
         givenWorkspacePrd(SCOPE_DRAFT);
         givenSessionExecutorRunsInline();
-        givenConverseMainSavesPrdAndExecutorFinishes("交付范围扩大");
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("main-")) {
+                prdRevisions.record(command.workspaceId(), "交付范围扩大");
+                buildPlanFacts.record(command.workspaceId(),
+                        new BuildPlan(List.of("用户能使用 PRD 描述的全部功能")));
+                return new AgentReply(command.runId(), "已按意见修订 PRD");
+            }
+            finishFixFacts.record(command.workspaceId(), true, "已按意见修正");
+            verifyRan(command);
+            return new AgentReply(command.runId(), "修正完成");
+        });
 
         appService.runOpinionTurn(projectId, "交付范围加一个小程序端");
 
-        // 停派：只有主智能体一轮对话，无生成 run／补产轮（新草稿优先于补产链）
-        verify(agentClient, times(1)).converse(any(), any());
+        // 收口后派首个构建 run：main 轮＋编码 run（至少两轮）；无停驻写读
+        verify(agentClient, atLeast(2)).converse(any(), any());
         Map<String, Object> parked = jdbcTemplate.queryForMap(
                 "SELECT prd_draft_opinion FROM prj_projects WHERE id = ?", projectId);
-        assertThat(parked.get("prd_draft_opinion")).isEqualTo("交付范围加一个小程序端");
+        assertThat(parked.get("prd_draft_opinion")).isNull();
     }
 
     @Test
@@ -2007,8 +2022,8 @@ class MainAgentAppServiceTest {
      * 的事实面——内容不参与收口观测，存在即触发）。 */
     private void markPrdConfirmed(Long projectId) {
         Project project = projectRepository.findById(projectId).orElseThrow();
-        prdVersions.save(PrdVersion.confirmed(projectId, 1, "# PRD\n\n## 功能清单\n\n1. 首页\n",
-                LocalDateTime.now(), project.getPrdProducedAt()));
+        prdVersions.save(PrdVersion.recorded(projectId, 1, "# PRD\n\n## 功能清单\n\n1. 首页\n",
+                LocalDateTime.now(), project.getPrdProducedAt(), "run-fixture"));
     }
 
     private Long persistedArchivedProject(String workspaceId) {

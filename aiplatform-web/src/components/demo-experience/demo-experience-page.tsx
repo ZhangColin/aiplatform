@@ -215,7 +215,6 @@ export function DemoExperiencePage({ projectId }: { projectId: string }) {
                 track={detail?.endpointType === ENDPOINT_TYPE.design ? "design" : "system"}
                 plan={detail?.segments}
                 designPlan={planAreaOfDesignItems(detail?.designItems)}
-                generated={!!detail?.generatedAt}
                 variant="stage"
               />
             </div>

@@ -979,8 +979,8 @@ class BackofficeOrderSeamTest {
     private OrderResponse placeOrderWithVersionRefs(long projectId, int prdVersionNo,
                                                     int demoVersionNo) {
         stubProject(projectId);
-        when(projectQueryAppService.confirmedVersionRefs(projectId)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(prdVersionNo, PRD, demoVersionNo));
+        when(projectQueryAppService.latestVersionRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(prdVersionNo, PRD, demoVersionNo));
         try {
             return RequestContext.runFor(
                     new RequestContext(null, null, null, null, /* userId */ DEFAULT_ACCOUNT_ID,
@@ -1005,10 +1005,10 @@ class BackofficeOrderSeamTest {
                 .build());
         when(projectQueryAppService.prd(projectId)).thenReturn(new PrdResponse(
                 Long.toString(projectId), PRD, Instant.parse("2026-09-13T01:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(PRD)), /* draftChangeSummary= */ null));
+                PrdReadinessResponse.from(PrdReadiness.parse(PRD))));
         // 下单前置双确认缺省桩（#335）：已确认 PRD v1＋Demo v1
-        when(projectQueryAppService.confirmedVersionRefs(projectId)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(1, PRD, 1));
+        when(projectQueryAppService.latestVersionRefs(projectId)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(1, PRD, 1));
     }
 
     /** 库内下单时点（边界断言以库值为准，不依赖应用时钟）。 */

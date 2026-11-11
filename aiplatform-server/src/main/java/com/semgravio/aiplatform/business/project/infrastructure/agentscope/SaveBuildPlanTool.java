@@ -85,7 +85,8 @@ public class SaveBuildPlanTool extends ToolBase {
                                         "items", Map.of("type", "array",
                                                 "items", Map.of("type", "integer")),
                                         "description", "可选，与 slices 等长：每片依赖的前片序号"
-                                                + "（1-based）；空数组 = 无依赖"),
+                                                + "（1-based）；空数组 = 无依赖。只许引用排在本片"
+                                                + "前面的片序（不得自依赖、不得越界）"),
                                 CORE_JOURNEYS_KEY, Map.of(
                                         "type", "array",
                                         "items", Map.of(
@@ -154,7 +155,16 @@ public class SaveBuildPlanTool extends ToolBase {
                     "sliceSizes 须与 slices 等长，且每项只能是「小」「中」「大」之一"
                             + "（按每片实现面积估）"));
         }
-        buildPlanFacts.record(workspaceId, new BuildPlan(slices, dependsOn, journeys, sizes));
+        try {
+            buildPlanFacts.record(workspaceId, new BuildPlan(slices, dependsOn, journeys, sizes));
+        }
+        catch (IllegalArgumentException e) {
+            // 构造校验兜底（2026-11-11 生产事故：模型产出自依赖片序，异常穿透
+            // callAsync 杀死整个 run——形态校验各 parse* 已拦，值域/自依赖/
+            // 长度一致性等构造期断言必须转模型可见错误，模型自纠重调即可）
+            return Mono.just(ToolResultBlock.error("构建计划未受理：" + e.getMessage()
+                    + "（dependsOn 只许引用排在前面的片序 1..N 且不得自依赖）"));
+        }
         return Mono.just(ToolResultBlock.text("构建计划已记录：" + slices.size() + " 个切片、"
                 + journeys.size() + " 条核心旅程。"));
     }
@@ -179,13 +189,17 @@ public class SaveBuildPlanTool extends ToolBase {
      * dependsOn 解析：在场须与 slices 等长、每项是整数列表（1-based 片序，去重）。
      * 形态非法（非列表/长度不符/非整数项）返回 null（模型可见错误——依赖声明不合法
      * 宁可重产，不静默降级串行）。缺省由调用方走全串行构造（不经过本方法）。
+     *
+     * <p>值域校验（2026-11-11 生产事故收口）：片序须 ∈ [1, 片数] 且 ≠ 本片自身
+     * （自依赖/越界在构造期会断言——此处提前拒成模型可见错误，不穿透杀 run）。</p>
      */
     private static List<Set<Integer>> parseDependsOn(Object raw, int sliceCount) {
         if (!(raw instanceof List<?> list) || list.size() != sliceCount) {
             return null;
         }
         List<Set<Integer>> dependsOn = new ArrayList<>(sliceCount);
-        for (Object entry : list) {
+        for (int i = 0; i < sliceCount; i++) {
+            Object entry = list.get(i);
             if (!(entry instanceof List<?> deps)) {
                 return null;
             }
@@ -194,7 +208,11 @@ public class SaveBuildPlanTool extends ToolBase {
                 if (!(dep instanceof Number number)) {
                     return null;
                 }
-                ords.add(number.intValue());
+                int ord = number.intValue();
+                if (ord < 1 || ord > sliceCount || ord == i + 1) {
+                    return null; // 越界/自依赖：模型可见错误，修正后重调
+                }
+                ords.add(ord);
             }
             dependsOn.add(Set.copyOf(ords));
         }

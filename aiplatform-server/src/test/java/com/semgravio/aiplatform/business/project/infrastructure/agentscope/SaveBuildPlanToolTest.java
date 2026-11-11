@@ -202,6 +202,43 @@ class SaveBuildPlanToolTest {
         assertThat(facts.consume("42")).as("集外/错长标签不落计划事实").isNull();
     }
 
+    @Test
+    void given_self_dependency_or_out_of_range_dep_when_called_then_error_without_record() {
+        // 2026-11-11 生产事故收口：模型产出自依赖片序（切片 5 依赖 5），构造断言
+        // 异常穿透 callAsync 直接杀死 run（补产轮随之耗尽，生成永久卡死）——
+        // 值域/自依赖必须拒成模型可见错误（修正重调即可），不得穿透
+        Map<String, Object> selfDep = new java.util.HashMap<>(fullInputWithJourneysAndSizes(
+                List.of("片一", "片二", "片三", "片四", "片五"),
+                JOURNEYS, List.of("小", "小", "中", "中", "大")));
+        selfDep.put("dependsOn", List.of(
+                List.of(), List.of(1), List.of(2), List.of(3), List.of(5))); // 片五自依赖
+        Map<String, Object> outOfRange = new java.util.HashMap<>(fullInputWithJourneysAndSizes(
+                List.of("片一", "片二"), JOURNEYS, List.of("小", "中")));
+        outOfRange.put("dependsOn", List.of(List.of(), List.of(9))); // 越界片序
+
+        ToolResultBlock selfResult = callFull(selfDep);
+        ToolResultBlock rangeResult = callFull(outOfRange);
+
+        assertThat(selfResult.getState()).as("自依赖＝模型可见错误，不穿透杀 run")
+                .isEqualTo(ToolResultState.ERROR);
+        assertThat(rangeResult.getState()).isEqualTo(ToolResultState.ERROR);
+        assertThat(facts.consume("42")).as("非法依赖不落计划事实").isNull();
+    }
+
+    @Test
+    void given_valid_depends_on_when_called_then_plan_carries_dependencies() {
+        Map<String, Object> input = new java.util.HashMap<>(fullInputWithJourneysAndSizes(
+                List.of("片一", "片二", "片三"), JOURNEYS, List.of("小", "中", "大")));
+        input.put("dependsOn", List.of(List.of(), List.of(1), List.of(1, 2)));
+
+        ToolResultBlock result = callFull(input);
+
+        assertThat(result.getState()).isNotEqualTo(ToolResultState.ERROR);
+        BuildPlan plan = facts.consume("42");
+        assertThat(plan).isNotNull();
+        assertThat(plan.dependsOn(2)).containsExactlyInAnyOrder(1, 2);
+    }
+
     // ---------- 内部 ----------
 
     private ToolResultBlock call(List<?> slices) {

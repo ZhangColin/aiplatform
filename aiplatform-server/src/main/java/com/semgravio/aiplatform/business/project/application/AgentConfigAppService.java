@@ -82,7 +82,9 @@ public class AgentConfigAppService {
      * 档位键（ADR-0031：语义键，模型串与通道注入由 {@code ModelTierAppService
      * #resolve} 在命令构建处解析——本服务只管覆盖态读腿，不越层）、增强工具开关
      * 生效态、档位覆盖标记（路由协同口径的兜底/钉死判据）、路由策略四件存储态、
-     * verify 档位覆盖与轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
+     * 结构性信号两开关 #454 同批——文件面/规模标签信号缺省 false＝不参与升档判定
+     * （失败重试信号常开不受影响），路由判定处随生效配置同取；verify 档位覆盖与
+     * 轮次预算生效值；收口三闸开关 #433 同批——在场闸/整轨终验
      * 判定处动态读、产出证明闸 run 起跑（{@code ProofOfOutputGate#forRun}）时读档，
      * #435 起缺省 false＝闸关＝砍验证税落地态（运营可一键切回 true＝闸开）；
      * 生成会话形态两开关 #436 同批——单会话连续编码（缺省 true）与切片并行机器
@@ -94,6 +96,7 @@ public class AgentConfigAppService {
             boolean modelIdOverridden, boolean routingEnabled,
             String routingStrongModelId, Integer routingFileCountThreshold,
             Set<SliceSizeLabel> routingEscalatingSizeLabels,
+            boolean routingFileCountSignalEnabled, boolean routingSizeLabelSignalEnabled,
             String verifyModelId, int verifyRoundBudget, int finalVerifyFixBudget,
             boolean verificationPresenceGateEnabled, boolean proofOfOutputGateEnabled,
             boolean finalVerificationGateEnabled,
@@ -119,6 +122,7 @@ public class AgentConfigAppService {
                 config.modelId() != null, config.routingEnabled(),
                 config.routingStrongModelId(), config.routingFileCountThreshold(),
                 config.routingEscalatingSizeLabels(),
+                config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
                 config.verifyModelId(),
                 config.verifyRoundBudget() != null
                         ? config.verifyRoundBudget() : DEFAULT_VERIFY_ROUND_BUDGET,

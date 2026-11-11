@@ -23,6 +23,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * （modelId 覆盖 → 枚举缺省——覆盖即基础档）。仅 run 执行体（executor）消费，
  * 其余智能体行同列无消费。</p>
  *
+ * <p><b>路由结构性信号开关两件（#454，ADR-0037——用户裁决）</b>：文件面信号
+ * 开关与规模标签信号开关——缺省 false/null＝关＝对应信号不参与升档判定（观测值
+ * 照留进判定快照）；true＝恢复对应判据（阈值/映射旋钮照旧生效）。失败重试信号
+ * 不受两开关影响、常开。仅 run 执行体（executor）消费。</p>
+ *
  * <p><b>验证面两件（#424 片轻验）</b>：verify 验证子智能体档位与单场验证轮次
  * 预算——档位 null＝随执行体生效档（含路由升档，缺省同档不降＝#406 裁决「验证
  * 判错代价高于省的秒数」）；预算 null＝清空回落代码缺省 3（首轮＋两轮复验）。</p>
@@ -41,6 +46,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                          缺省映射 [大]；token 须在小/中/大封闭集内——非法值
  *                          PRJ_079；null/缺省＝清空回落代码缺省；空数组＝空映射
  *                          ＝规模标签信号整体关停，合法运营选择）
+ * @param routingFileCountSignalEnabled 文件面信号开关（#454，ADR-0037；缺省 false/null
+ *                          ＝关＝文件面不参与升档判定〔观测值照留〕；true＝恢复阈值
+ *                          判据，阈值旋钮照旧。仅 run 执行体行消费）
+ * @param routingSizeLabelSignalEnabled 规模标签信号开关（#454，ADR-0037；缺省 false/
+ *                          null＝关＝规模标签不参与升档判定；true＝恢复标签映射判据，
+ *                          映射旋钮照旧。仅 run 执行体行消费）
  * @param verifyModelId     verify 子智能体档位键（#424；null/缺省/纯空白＝清空随
  *                          执行体生效档；非空时即时校验同 modelId〔#367〕）
  * @param verifyRoundBudget 单场验证轮次预算（#424 防无限复验：report_verification
@@ -113,6 +124,14 @@ public record AgentConfigUpdateCommand(
                 + "规模标签信号整体关停；null/缺省＝清空回落代码缺省）",
                 example = "[\"大\"]")
         List<String> routingEscalatingSizeLabels,
+        @Schema(description = "文件面信号开关（#454，ADR-0037：缺省 false/null＝关＝文件面"
+                + "不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮"
+                + "照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体行消费）")
+        Boolean routingFileCountSignalEnabled,
+        @Schema(description = "规模标签信号开关（#454，ADR-0037：缺省 false/null＝关＝规模"
+                + "标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。"
+                + "仅 run 执行体行消费）")
+        Boolean routingSizeLabelSignalEnabled,
         @Schema(description = "verify 验证子智能体档位键（#424 片轻验：null/缺省/纯空白＝"
                 + "清空随执行体生效档〔含路由升档，缺省同档不降〕。即时校验同 modelId"
                 + "（#367：须在模型档位面有行且启用）",

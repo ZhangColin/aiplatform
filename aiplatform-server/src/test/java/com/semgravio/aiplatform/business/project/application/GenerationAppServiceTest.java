@@ -4965,8 +4965,13 @@ class GenerationAppServiceTest {
     @Test
     void given_large_file_surface_when_dispatch_then_strong_from_first_attempt() {
         // 文件面大小信号：应用文件面（探针输出已扣基座基数）≥ 阈值（代码缺省 30，
-        // #426 排除基座基数后重校）——首试即升强档
+        // #426 排除基座基数后重校）——首试即升强档。结构性信号开关开（#454：缺省
+        // 关＝不参与判定——本用例验证开关开态的升档链）
         Long projectId = persistedProject("9851");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, routing_file_count_signal_enabled)
+                VALUES ('executor', true)
+                """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         when(workspaceLifecycleAppService.exec(any(), argThat((WorkspaceExecCommand cmd) ->
@@ -5004,8 +5009,13 @@ class GenerationAppServiceTest {
     void given_large_labeled_slice_when_dispatch_then_slice_escalates_but_stage0_stays_fast() {
         // 规模标签信号（#426）：计划自报「大」标签的片（描述短、功能重的锚案形态
         // ——枚举密度信号量不出来）升强档；阶段 0 无标签（信号缺位）仍快档。
-        // 未设标签的存量计划不升档（回归见 ModelRoutingAppServiceTest）
+        // 未设标签的存量计划不升档（回归见 ModelRoutingAppServiceTest）。结构性
+        // 信号开关开（#454：缺省关＝不参与判定——本用例验证开关开态的升档链）
         Long projectId = persistedProject("9852");
+        jdbcTemplate.update("""
+                INSERT INTO prj_agent_configs (agent_key, routing_size_label_signal_enabled)
+                VALUES ('executor', true)
+                """);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {

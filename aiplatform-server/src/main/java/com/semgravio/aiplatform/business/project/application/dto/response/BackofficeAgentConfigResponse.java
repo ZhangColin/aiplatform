@@ -43,6 +43,12 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
  *                                升强档；库覆盖值或代码缺省〔大〕）
  * @param routingEscalatingSizeLabelsOverridden true＝映射为库覆盖值（false＝代码缺省）
  * @param defaultRoutingEscalatingSizeLabels 代码缺省映射（预览：清空覆盖即落此值）
+ * @param routingFileCountSignalEnabled 文件面信号开关生效态（#454，ADR-0037；缺省
+ *                                false＝关＝文件面不参与升档判定——观测值照留进判定
+ *                                快照；true＝恢复阈值判据。仅 run 执行体行消费）
+ * @param routingSizeLabelSignalEnabled 规模标签信号开关生效态（#454，ADR-0037；缺省
+ *                                false＝关＝规模标签不参与升档判定；true＝恢复标签
+ *                                映射判据。仅 run 执行体行消费）
  * @param verifyModelId           verify 子智能体档位覆盖值（#424；null＝随执行体生效档
  *                                ——含路由升档，缺省同档不降）
  * @param verifyModelIdOverridden true＝verify 档位为库覆盖值（false＝随执行体档）
@@ -121,6 +127,14 @@ public record BackofficeAgentConfigResponse(
         boolean routingEscalatingSizeLabelsOverridden,
         @Schema(description = "代码缺省升档映射（预览：清空覆盖即落此值）", example = "[\"大\"]")
         List<String> defaultRoutingEscalatingSizeLabels,
+        @Schema(description = "文件面信号开关生效态（#454，ADR-0037：缺省 false＝关＝文件面"
+                + "不参与升档判定〔观测值照留进判定快照〕；true＝恢复阈值判据——阈值旋钮"
+                + "照旧生效。失败重试信号不受本开关影响、常开。仅 run 执行体消费）")
+        boolean routingFileCountSignalEnabled,
+        @Schema(description = "规模标签信号开关生效态（#454，ADR-0037：缺省 false＝关＝规模"
+                + "标签不参与升档判定；true＝恢复标签映射判据——映射旋钮照旧生效。"
+                + "仅 run 执行体消费）")
+        boolean routingSizeLabelSignalEnabled,
         @Schema(description = "verify 验证子智能体档位覆盖值（#424 片轻验：null＝随执行体"
                 + "生效档——含路由升档，缺省同档不降）", example = "pro")
         String verifyModelId,
@@ -220,6 +234,7 @@ public record BackofficeAgentConfigResponse(
                         : SliceSizeLabel.namesOf(ModelRoutingAppService.DEFAULT_ESCALATING_SIZE_LABELS),
                 config.routingEscalatingSizeLabels() != null,
                 SliceSizeLabel.namesOf(ModelRoutingAppService.DEFAULT_ESCALATING_SIZE_LABELS),
+                config.routingFileCountSignalEnabled(), config.routingSizeLabelSignalEnabled(),
                 config.verifyModelId(),
                 config.verifyModelId() != null,
                 config.verifyRoundBudget() != null

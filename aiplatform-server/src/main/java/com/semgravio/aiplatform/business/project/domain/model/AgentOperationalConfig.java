@@ -22,6 +22,13 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * 路由）；路由关＝钉死位（显式关断即钉死，人工档恒生效）。主智能体/设计执行体
  * 不参与路由（Demo 阶段模型档＝run 执行体的模型档），其行同列恒无消费。</p>
  *
+ * <p><b>路由结构性信号开关两列（#454，ADR-0037——用户裁决）</b>：文件面信号
+ * 开关与规模标签信号开关——缺省 false＝关＝对应信号不参与升档判定（观测值照留
+ * 进判定快照、标未参与）；true＝恢复对应判据（阈值/映射旋钮照旧生效）。失败重试
+ * 信号不受两开关影响、常开。理由：文件面只增不减、「越大越强模」激励错位，规模
+ * 标签同理是静态自报；生命周期口径＝先都关掉观察，效果不好随时开回来。仅 run
+ * 执行体行消费（判定全部发生在路由判定单点），主智能体/设计执行体行同列恒无消费。</p>
+ *
  * <p>行不存在与「行存在但覆盖列全 null」语义等价（全回落）；行经 upsert 持续
  * 存在（清空覆盖不删行——操作者列留最近写者，运营可见「谁最后动过」）。</p>
  *
@@ -76,6 +83,10 @@ import com.semgravio.aiplatform.business.project.domain.enums.SliceSizeLabel;
  * @param routingEscalatingSizeLabels 升档规模标签映射：集内标签的片升强档（null＝回落
  *                                   代码缺省「大」；空集＝规模标签信号整体关停——
  *                                   合法运营选择；#426 替换原枚举阈值列语义）
+ * @param routingFileCountSignalEnabled 文件面信号开关（#454；缺省 false＝关＝文件面
+ *                                   不参与升档判定——观测值照留；true＝恢复阈值判据）
+ * @param routingSizeLabelSignalEnabled 规模标签信号开关（#454；缺省 false＝关＝规模
+ *                                   标签不参与升档判定；true＝恢复标签映射判据）
  * @param verifyModelId              verify 子智能体模型档位键（#424：null＝随执行体生效档；
  *                                   非空即时校验同 modelId〔#367〕）
  * @param verifyRoundBudget          单场验证轮次预算（#424 防无限复验：report_verification
@@ -126,6 +137,8 @@ public record AgentOperationalConfig(
         String routingStrongModelId,
         Integer routingFileCountThreshold,
         Set<SliceSizeLabel> routingEscalatingSizeLabels,
+        boolean routingFileCountSignalEnabled,
+        boolean routingSizeLabelSignalEnabled,
         String verifyModelId,
         Integer verifyRoundBudget,
         Integer finalVerifyFixBudget,
@@ -145,6 +158,7 @@ public record AgentOperationalConfig(
 
     /**
      * 无覆盖缺省态（行不存在的等价形）：覆盖列 null、增强工具开关开、路由开、
+     * 路由结构性信号两开关关（#454 缺省——文件面/规模标签不参与升档判定）、
      * 收口三闸关（#435 翻转缺省——#432 Step 1 砍验证税落地态）、单会话开＋并行
      * 机器关（#436 缺省——#432 Step 2 切片机器退役落地态）、决策时注入开＋阈值/
      * 上限缺省 3＋禁用集空（#437 缺省——#432 Step 3 落地态）、无写者——装配
@@ -152,8 +166,8 @@ public record AgentOperationalConfig(
      */
     public static AgentOperationalConfig defaults(String agentKey) {
         return new AgentOperationalConfig(agentKey, null, null, true, true, true, null, null,
-                null, null, null, null, false, false, false, true, false, true, null, null, null,
-                true, null, null, null);
+                null, false, false, null, null, null, false, false, false, true, false, true,
+                null, null, null, true, null, null, null);
     }
 
     /** 生效 systemPrompt：本覆盖非空用覆盖，否则回落缺省参（枚举默认）——单点。 */

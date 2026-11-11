@@ -30,7 +30,7 @@ class ConfigEdgeModelSupplierTest {
         // 路由升档跟随，#406「缺省同档不降」）
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, true, null, null, null, null, 3, 2, true, true, true,
+                        true, true, false, true, null, null, null, false, false, null, 3, 2, true, true, true,
                         true, false));
 
         assertThat(supplier.subagentModel()).isNull();
@@ -41,7 +41,7 @@ class ConfigEdgeModelSupplierTest {
         // 覆盖档独立解析：档位键 → 模型串＋通道注入（ModelTierAppService 解析单点）
         when(agentConfigs.effectiveOf(AgentProfile.EXECUTOR)).thenReturn(
                 new AgentConfigAppService.EffectiveConfig("prompt", "flash",
-                        true, true, false, true, null, null, null, "pro", 5, 2, true, true, true,
+                        true, true, false, true, null, null, null, false, false, "pro", 5, 2, true, true, true,
                         true, false));
         when(modelTiers.resolve("pro")).thenReturn(new ModelTierAppService.ResolvedModel(
                 "pro", "volcengine", "deepseek-v4-pro-ga-260731",

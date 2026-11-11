@@ -446,6 +446,89 @@ class BackofficeAgentConfigSeamTest {
                 .routingEscalatingSizeLabels()).isEmpty();
     }
 
+    // ---------- 路由结构性信号开关两件（#454：缺省关＝不参与升档判定，失败信号常开） ----------
+
+    @Test
+    void given_no_signal_switch_override_when_get_then_defaults_off() throws Exception {
+        // #454 缺省态（无覆盖行）：两开关 false＝结构性信号不参与升档判定（新缺省）；
+        // 路由总开关仍开＝失败重试升档照常；装配读面同步
+        signedGet("executor")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingEnabled").value(true))
+                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.routingFileCountSignalEnabled()).isFalse();
+        assertThat(executor.routingSizeLabelSignalEnabled()).isFalse();
+    }
+
+    @Test
+    void given_signal_switches_flipped_when_get_and_traces_then_effective_and_snapshots()
+            throws Exception {
+        // 翻转打开（恢复结构性判据）→ GET 生效值＝库值；留痕前后快照含两开关
+        // （old=false 缺省态 → new=true）；幂等重写不落痕；清空（PUT {}）回落缺省关
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"routingFileCountSignalEnabled\": true, \"routingSizeLabelSignalEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(true));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.routingFileCountSignalEnabled()).isTrue();
+        assertThat(executor.routingSizeLabelSignalEnabled()).isTrue();
+
+        // 幂等重写（PUT 全量语义：同值携带——值面无动不落痕，写者不漂移）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"routingFileCountSignalEnabled\": true, \"routingSizeLabelSignalEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operatorId").value(OPERATOR_ID));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].oldRoutingSizeLabelSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newRoutingSizeLabelSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].operatorId").value(OPERATOR_ID));
+
+        // 切回缺省关＝旧值写回（一次新变更、留新痕——不做版本树）
+        signedPut("executor", OPERATOR_ID_2, OPERATOR_NAME_2,
+                "{\"routingFileCountSignalEnabled\": false, \"routingSizeLabelSignalEnabled\": false}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(2)))
+                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(false));
+
+        // 清空回落缺省：null 归一 false＝结构性信号关（#454 新缺省）
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME, "{}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
+    }
+
+    @Test
+    void given_one_signal_switch_on_when_put_then_independent_flip() throws Exception {
+        // 两开关独立可翻转：只开文件面信号——GET 单件 true；留痕只记本件变更
+        signedPut("executor", OPERATOR_ID, OPERATOR_NAME,
+                "{\"routingFileCountSignalEnabled\": true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.routingFileCountSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data.routingSizeLabelSignalEnabled").value(false));
+        var executor = agentConfigs.effectiveOf(AgentProfile.EXECUTOR);
+        assertThat(executor.routingFileCountSignalEnabled()).isTrue();
+        assertThat(executor.routingSizeLabelSignalEnabled()).isFalse();
+        signedGet("executor/traces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].oldRoutingFileCountSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newRoutingFileCountSignalEnabled").value(true))
+                .andExpect(jsonPath("$.data[0].oldRoutingSizeLabelSignalEnabled").value(false))
+                .andExpect(jsonPath("$.data[0].newRoutingSizeLabelSignalEnabled").value(false));
+    }
+
     // ---------- 验证面两件（#424 片轻验：verify 档位＋单场轮次预算） ----------
 
     @Test

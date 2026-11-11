@@ -29,17 +29,21 @@ import lombok.extern.slf4j.Slf4j;
  * 人工档恒生效——对账/对比场景的定档通道）。主智能体/设计执行体不参与路由
  * （调用方只在 executor 座调用本服务）。</p>
  *
- * <p><b>信号三件（任一越阈即升强档，否则回落人工档兜底；#426 修订后）</b>：
+ * <p><b>信号三件（#454 起结构性两件默认关、失败信号常开）</b>：
  * ①失败升档——重试（同段第 N 次尝试）与回滚重跑（首轮重试耗尽）是「难活」的
- * 直接事实；②文件面大小——<b>应用文件面</b>＝工作区已跟踪文件数扣基座文件基数
- * （{@link #countApplicationFiles} 探针内扣除——基座基数随镜像内置模板
- * {@code /opt/baseline} 计数单源、基座换版自动跟随，不再以常数手工同步）；③规模
- * 标签——主智能体产计划时自报的片实现面积（{@link SliceSizeLabel} 小/中/大封闭
- * 集，#423 结构化产出）按映射升档，缺省映射＝「大」升强档、小/中回落人工档
- * （枚举密度信号退役——它度量描述写法而非实现面积，「描述短、功能重」的大片被
- * 系统性误留快档）。策略配置化：开关/强档/文件面阈值/升档标签映射走智能体运营
- * 配置面（prj_agent_configs 扩展列，PUT /api/backoffice/agent-configs/executor
- * 可调、不发版），null＝回落本类代码缺省。</p>
+ * 直接事实（<b>不受结构性信号开关影响、常开</b>）；②文件面大小——<b>应用文件面</b>＝
+ * 工作区已跟踪文件数扣基座文件基数（{@link #countApplicationFiles} 探针内扣除——
+ * 基座基数随镜像内置模板 {@code /opt/baseline} 计数单源、基座换版自动跟随，不再以
+ * 常数手工同步）；③规模标签——主智能体产计划时自报的片实现面积
+ * （{@link SliceSizeLabel} 小/中/大封闭集，#423 结构化产出）按映射升档，缺省映射＝
+ * 「大」升强档、小/中回落人工档（枚举密度信号退役——它度量描述写法而非实现面积，
+ * 「描述短、功能重」的大片被系统性误留快档）。<b>结构性信号开关（#454 用户裁决，
+ * ADR-0037）</b>：文件面/规模标签各持信号级开关（缺省 false＝不参与升档判定——
+ * 观测值照留进判定快照、标未参与；开关开＝恢复对应判据，阈值/映射旋钮照旧）；
+ * 理由：文件面只增不减、「越大越强模」激励错位，规模标签同理是静态自报。策略配
+ * 置化：开关/强档/文件面阈值/升档标签映射/两信号开关走智能体运营配置面
+ * （prj_agent_configs 扩展列，PUT /api/backoffice/agent-configs/executor 可调、
+ * 不发版），null＝回落本类代码缺省。</p>
  *
  * <p><b>决策可观测（哪段用了哪档、为什么——留档可查）</b>：每次判定结构化
  * 日志（档位/来源/理由/信号）+ 收尾卡 closing.modelTier（随对话史落库——
@@ -143,7 +147,8 @@ public class ModelRoutingAppService {
      * 不断流）。
      *
      * @param effective  execute 座生效配置（{@link AgentConfigAppService#effectiveOf}
-     *                    已取——路由策略与人工档覆盖在其中，不重复查库）
+     *                    已取——路由策略与人工档覆盖在其中，不重复查库；结构性信号
+     *                    两开关 #454 亦在其中：缺省 false＝该信号不参与升档判定）
      * @param workspaceId 执行面工作区（fork 片＝fork 副本——文件面按执行面数）
      * @param attempt    本轮第几次尝试（≥2＝重试升档信号）
      * @param round      第几轮（≥2＝回滚重跑升档信号，#353 外环）
@@ -154,6 +159,8 @@ public class ModelRoutingAppService {
         if (!effective.routingEnabled()) {
             return decide(effective, attempt, round, null, sizeLabel);
         }
+        // 结构性信号开关不影响采集——文件面探针照常跑（关了的信号留观测值、
+        // 只不参与判定——对照实验数据不断档，#454 观测兼容要件）
         return decide(effective, attempt, round, countApplicationFiles(workspaceId), sizeLabel);
     }
 
@@ -161,6 +168,11 @@ public class ModelRoutingAppService {
      * 判定单点（纯函数——阈值/映射/强档回落与三信号 OR 语义全在此，单元测试直测）：
      * 路由关＝钉死（人工档恒生效：覆盖 pinned / 缺省 default）；路由开＝信号
      * 升强档（路由判定优先），无信号回落人工档兜底（覆盖 → 枚举缺省）。
+     *
+     * <p><b>结构性信号开关（#454 用户裁决）</b>：文件面/规模标签两信号各持开关
+     * （生效配置束带入，缺省 false＝关）——关＝该信号的观测值照进判定快照但不参与
+     * 升档判定；失败重试信号（重试/回滚重跑）不受两开关影响、常开。开关开＝恢复
+     * 对应判据（阈值/映射旋钮照旧生效）。
      */
     static TierSelection decide(AgentConfigAppService.EffectiveConfig effective, int attempt,
             int round, Integer fileCount, SliceSizeLabel sizeLabel) {
@@ -170,6 +182,8 @@ public class ModelRoutingAppService {
                 ? effective.routingEscalatingSizeLabels() : DEFAULT_ESCALATING_SIZE_LABELS;
         String strongModelId = effective.routingStrongModelId() != null
                 ? effective.routingStrongModelId() : DEFAULT_STRONG_MODEL_ID;
+        boolean fileSignalOn = effective.routingFileCountSignalEnabled();
+        boolean sizeSignalOn = effective.routingSizeLabelSignalEnabled();
         Map<String, Object> signalFacts = new LinkedHashMap<>();
         signalFacts.put("attempt", attempt);
         signalFacts.put("round", round);
@@ -177,6 +191,8 @@ public class ModelRoutingAppService {
         signalFacts.put("sizeLabel", sizeLabel == null ? null : sizeLabel.getName());
         signalFacts.put("fileCountThreshold", fileThreshold);
         signalFacts.put("escalatingSizeLabels", SliceSizeLabel.namesOf(escalating));
+        signalFacts.put("fileCountSignalEnabled", fileSignalOn);
+        signalFacts.put("sizeLabelSignalEnabled", sizeSignalOn);
         if (!effective.routingEnabled()) {
             // 钉死位＝路由关：人工档恒生效（覆盖或枚举缺省——既有口径）
             return new TierSelection(effective.modelId(),
@@ -193,11 +209,11 @@ public class ModelRoutingAppService {
             escalate = true;
             reasons.add("重试升档（第 " + attempt + " 次尝试）");
         }
-        if (fileCount != null && fileCount >= fileThreshold) {
+        if (fileSignalOn && fileCount != null && fileCount >= fileThreshold) {
             escalate = true;
             reasons.add("文件面超出阈值（" + fileCount + " ≥ " + fileThreshold + "）");
         }
-        if (sizeLabel != null && escalating.contains(sizeLabel)) {
+        if (sizeSignalOn && sizeLabel != null && escalating.contains(sizeLabel)) {
             escalate = true;
             reasons.add("规模标签升档（" + sizeLabel.getName() + "）");
         }

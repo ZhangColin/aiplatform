@@ -56,11 +56,12 @@ import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHin
 public class BackofficeAgentConfigAppService {
 
     /** 空命令归一（体缺落 null 形——字段全缺省即「全清空回落＋开关全开〔路由开〕
-     * ＋收口三闸关〔#435 翻转缺省〕＋单会话开＋并行关＋决策时注入开」）。 */
+     * ＋路由结构性信号两开关关〔#454 缺省〕＋收口三闸关〔#435 翻转缺省〕＋单会话
+     * 开＋并行关＋决策时注入开」）。 */
     private static final AgentConfigUpdateCommand EMPTY_COMMAND =
             new AgentConfigUpdateCommand(null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null, null, null,
-                    null);
+                    null, null, null);
 
     /** 边缘点空命令归一（体缺落 null 形＝清空档位覆盖）。 */
     private static final EdgeModelUpdateCommand EMPTY_EDGE_COMMAND =
@@ -112,6 +113,10 @@ public class BackofficeAgentConfigAppService {
                 safe.routingEnabled() == null || safe.routingEnabled(),
                 blankToNull(safe.routingStrongModelId()),
                 safe.routingFileCountThreshold(), requireValidSizeLabels(safe.routingEscalatingSizeLabels()),
+                // #454 缺省口径：结构性信号两开关 null＝关（翻转缺省 false——不参与
+                // 升档判定；失败重试信号不受两开关影响、常开）
+                safe.routingFileCountSignalEnabled() != null && safe.routingFileCountSignalEnabled(),
+                safe.routingSizeLabelSignalEnabled() != null && safe.routingSizeLabelSignalEnabled(),
                 blankToNull(safe.verifyModelId()), requireValidRoundBudget(safe.verifyRoundBudget()),
                 requireValidFinalVerifyFixBudget(safe.finalVerifyFixBudget()),
                 safe.verificationPresenceGateEnabled() != null && safe.verificationPresenceGateEnabled(),
@@ -184,6 +189,7 @@ public class BackofficeAgentConfigAppService {
                 tool == AgentTool.FETCH_URL ? enabled : current.fetchUrlEnabled(),
                 current.routingEnabled(), current.routingStrongModelId(),
                 current.routingFileCountThreshold(), current.routingEscalatingSizeLabels(),
+                current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
@@ -230,10 +236,11 @@ public class BackofficeAgentConfigAppService {
         requireOperator(operator);
         EdgeModelUpdateCommand safe = command == null ? EMPTY_EDGE_COMMAND : command;
         AgentOperationalConfig current = currentOf(point.key());
-        // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态）
+        // 值面仅档位：其余覆盖列结构性缺省（prompt null、开关开、路由缺省态、
+        // 结构性信号两开关关〔#454 缺省〕）
         AgentOperationalConfig next = new AgentOperationalConfig(point.key(),
                 null, blankToNull(safe.modelId()),
-                true, true, true, null, null, null, null, null, null, true, true, true,
+                true, true, true, null, null, null, false, false, null, null, null, true, true, true,
                 true, false, true, null, null, null, true,
                 operator.id(), operator.name(), null);
         requireBindableTier(next.modelId()); // 绑定即时校验同三座（#367）
@@ -290,6 +297,7 @@ public class BackofficeAgentConfigAppService {
                 current.routingEnabled(), current.routingStrongModelId(),
                 current.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(current.routingEscalatingSizeLabels()),
+                current.routingFileCountSignalEnabled(), current.routingSizeLabelSignalEnabled(),
                 current.verifyModelId(), current.verifyRoundBudget(),
                 current.finalVerifyFixBudget(),
                 current.verificationPresenceGateEnabled(), current.proofOfOutputGateEnabled(),
@@ -302,6 +310,7 @@ public class BackofficeAgentConfigAppService {
                 next.fetchUrlEnabled(), next.routingEnabled(), next.routingStrongModelId(),
                 next.routingFileCountThreshold(),
                 SliceSizeLabel.tokensOf(next.routingEscalatingSizeLabels()),
+                next.routingFileCountSignalEnabled(), next.routingSizeLabelSignalEnabled(),
                 next.verifyModelId(), next.verifyRoundBudget(), next.finalVerifyFixBudget(),
                 next.verificationPresenceGateEnabled(), next.proofOfOutputGateEnabled(),
                 next.finalVerificationGateEnabled(),
@@ -330,6 +339,8 @@ public class BackofficeAgentConfigAppService {
                 || !Objects.equals(current.routingStrongModelId(), next.routingStrongModelId())
                 || !Objects.equals(current.routingFileCountThreshold(), next.routingFileCountThreshold())
                 || !Objects.equals(current.routingEscalatingSizeLabels(), next.routingEscalatingSizeLabels())
+                || current.routingFileCountSignalEnabled() != next.routingFileCountSignalEnabled()
+                || current.routingSizeLabelSignalEnabled() != next.routingSizeLabelSignalEnabled()
                 || !Objects.equals(current.verifyModelId(), next.verifyModelId())
                 || !Objects.equals(current.verifyRoundBudget(), next.verifyRoundBudget())
                 || !Objects.equals(current.finalVerifyFixBudget(), next.finalVerifyFixBudget())

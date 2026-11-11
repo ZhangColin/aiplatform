@@ -22,6 +22,9 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param oldRoutingFileCountThreshold 变更前文件面阈值（null 同上）
  * @param oldRoutingEscalatingSizeLabels 变更前升档规模标签映射（存储形逗号接 token，
  *                                       如「中,大」；null 同上；空串＝空映射，#426）
+ * @param oldRoutingFileCountSignalEnabled 变更前文件面信号开关（#454；恒有值——缺省
+ *                                       态恒 false＝不参与升档判定）
+ * @param oldRoutingSizeLabelSignalEnabled 变更前规模标签信号开关（#454；同上）
  * @param oldVerifyModelId    变更前 verify 档位（#424；null＝此前即随执行体档）
  * @param oldVerifyRoundBudget 变更前单场验证轮次预算（#424；null＝此前即代码缺省）
  * @param oldFinalVerifyFixBudget 变更前整轨终验修复预算（#427；null＝此前即代码缺省）
@@ -34,6 +37,8 @@ import com.semgravio.aiplatform.business.project.domain.model.AgentConfigTrace;
  * @param newRoutingFileCountThreshold 变更后文件面阈值（null 同上）
  * @param newRoutingEscalatingSizeLabels 变更后升档规模标签映射（存储形逗号接 token；
  *                                       null 同上；空串＝空映射）
+ * @param newRoutingFileCountSignalEnabled 变更后文件面信号开关（#454；恒有值）
+ * @param newRoutingSizeLabelSignalEnabled 变更后规模标签信号开关（#454；恒有值）
  * @param newVerifyModelId    变更后 verify 档位（null＝本次清空随执行体档）
  * @param newVerifyRoundBudget 变更后单场验证轮次预算（null＝本次清空回落代码缺省）
  * @param newFinalVerifyFixBudget 变更后整轨终验修复预算（null＝本次清空回落代码缺省）
@@ -74,6 +79,10 @@ public record BackofficeAgentConfigTraceResponse(
         @Schema(description = "变更前升档规模标签映射（#426 存储形逗号接 token，如「中,大」；"
                 + "null＝此前即回落代码缺省；空串＝空映射）")
         String oldRoutingEscalatingSizeLabels,
+        @Schema(description = "变更前文件面信号开关（#454；恒有值——缺省态恒 false＝不参与升档判定）")
+        boolean oldRoutingFileCountSignalEnabled,
+        @Schema(description = "变更前规模标签信号开关（#454；恒有值——缺省态恒 false）")
+        boolean oldRoutingSizeLabelSignalEnabled,
         @Schema(description = "变更前 verify 档位（#424；null＝此前即随执行体生效档）")
         String oldVerifyModelId,
         @Schema(description = "变更前单场验证轮次预算（#424；null＝此前即代码缺省）")
@@ -117,6 +126,10 @@ public record BackofficeAgentConfigTraceResponse(
         @Schema(description = "变更后升档规模标签映射（#426 存储形逗号接 token；null＝本次"
                 + "清空回落代码缺省；空串＝空映射）")
         String newRoutingEscalatingSizeLabels,
+        @Schema(description = "变更后文件面信号开关（#454；恒有值）")
+        boolean newRoutingFileCountSignalEnabled,
+        @Schema(description = "变更后规模标签信号开关（#454；恒有值）")
+        boolean newRoutingSizeLabelSignalEnabled,
         @Schema(description = "变更后 verify 档位（#424；null＝本次清空随执行体生效档）")
         String newVerifyModelId,
         @Schema(description = "变更后单场验证轮次预算（#424；null＝本次清空回落代码缺省）")
@@ -157,6 +170,7 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.oldWebSearchEnabled(), trace.oldFetchUrlEnabled(),
                 trace.oldRoutingEnabled(), trace.oldRoutingStrongModelId(),
                 trace.oldRoutingFileCountThreshold(), trace.oldRoutingEscalatingSizeLabels(),
+                trace.oldRoutingFileCountSignalEnabled(), trace.oldRoutingSizeLabelSignalEnabled(),
                 trace.oldVerifyModelId(), trace.oldVerifyRoundBudget(),
                 trace.oldFinalVerifyFixBudget(),
                 trace.oldVerificationPresenceGateEnabled(), trace.oldProofOfOutputGateEnabled(),
@@ -169,6 +183,7 @@ public record BackofficeAgentConfigTraceResponse(
                 trace.newWebSearchEnabled(), trace.newFetchUrlEnabled(),
                 trace.newRoutingEnabled(), trace.newRoutingStrongModelId(),
                 trace.newRoutingFileCountThreshold(), trace.newRoutingEscalatingSizeLabels(),
+                trace.newRoutingFileCountSignalEnabled(), trace.newRoutingSizeLabelSignalEnabled(),
                 trace.newVerifyModelId(), trace.newVerifyRoundBudget(),
                 trace.newFinalVerifyFixBudget(),
                 trace.newVerificationPresenceGateEnabled(), trace.newProofOfOutputGateEnabled(),

@@ -162,12 +162,13 @@ class GenerationAppServiceTest {
     @Autowired
     private CodingRunTrack codingRunTrack;
 
-    /** 两命中的检索桩（下发前置注入 happy path）。 */
+    /** 两命中的检索桩（下发前置注入 happy path；#466 多类同池：PRD＋沉淀物）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。")));
+                new KnowledgeHit("MODULE", "平台沉淀", "预约时段管理模块",
+                        "时段表按周模板配置，节假日单独覆盖。")));
     }
 
     @BeforeEach
@@ -938,7 +939,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         List<AgentCommand> all = commands.getAllValues();
-        assertThat(all.get(0).prompt()).startsWith("【平台知识库·相似历史需求】");
+        assertThat(all.get(0).prompt()).startsWith("【平台知识库·相似知识】");
         assertThat(all.get(1).prompt()).doesNotContain("【平台知识库");
         assertThat(all.get(2).prompt()).doesNotContain("【平台知识库");
     }
@@ -2412,8 +2413,10 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())
-                .startsWith("【平台知识库·相似历史需求】")
-                .contains("宠物医院预约平台").contains("非用户的确认信息")
+                .startsWith("【平台知识库·相似知识】")
+                .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
+                .contains("〔平台沉淀｜功能模块〕预约时段管理模块")
+                .contains("非用户的确认信息，不构成对当前需求的约束")
                 .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
                         SINGLE_SLICE_PLAN));
     }

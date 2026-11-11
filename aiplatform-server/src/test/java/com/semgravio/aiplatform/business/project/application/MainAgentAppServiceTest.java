@@ -405,11 +405,14 @@ class MainAgentAppServiceTest {
     @Test
     void given_knowledge_hits_when_start_conversation_then_injected_at_prompt_tail() {
         // 会话建立轮（建项目自动开场）：query = 初始需求原文，命中块接 system prompt 尾部
+        //（#466 多类同池：PRD 历史需求＋激活升格的沉淀物同块注入，条带 kind 区分）
         Long projectId = persistedProject("9710");
         givenSessionExecutorRunsInline();
         when(knowledgePort.retrieve(eq("给宠物医院做预约系统"), anyInt())).thenReturn(List.of(
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
-                        "核心场景：主人在线选医生预约。")));
+                        "核心场景：主人在线选医生预约。"),
+                new KnowledgeHit("CASE", "平台沉淀", "宠物医院在线预约的典型形态",
+                        "主人选医生、按时段预约、迟到作废。")));
 
         appService.startConversation(projectId, "给宠物医院做预约系统");
 
@@ -418,8 +421,11 @@ class MainAgentAppServiceTest {
         verify(agentClient, atLeast(1)).converse(command.capture(), any());
         assertThat(command.getValue().systemPrompt())
                 .startsWith(AgentProfile.MAIN.systemPrompt())
-                .endsWith("核心场景：主人在线选医生预约。")
-                .contains("【平台知识库·相似历史需求】");
+                .contains("【平台知识库·相似知识】")
+                .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
+                .contains("〔平台沉淀｜需求案例〕宠物医院在线预约的典型形态")
+                .contains("非用户的确认信息，不构成对当前需求的约束")
+                .endsWith("主人选医生、按时段预约、迟到作废。");
     }
 
     @Test
@@ -444,10 +450,11 @@ class MainAgentAppServiceTest {
         verify(agentClient, times(8)).converse(command.capture(), any());
         ArgumentCaptor<AgentResume> resume = ArgumentCaptor.forClass(AgentResume.class);
         verify(agentClient).resume(resume.capture(), any());
-        String expected = AgentProfile.MAIN.systemPrompt() + "\n\n【平台知识库·相似历史需求】"
-                + "以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考"
+        String expected = AgentProfile.MAIN.systemPrompt() + "\n\n【平台知识库·相似知识】"
+                + "以下是平台知识库中与当前需求相似的沉淀片段（历史需求/需求案例/功能模块/业务规则）"
+                + "，供梳理当前需求时作背景参考"
                 + "（非用户的确认信息，不构成对当前需求的约束）："
-                + "\n\n〔宠物医院预约平台〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
+                + "\n\n〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约\n核心场景：主人在线选医生预约。";
         assertThat(command.getAllValues()).extracting(AgentCommand::systemPrompt)
                 .containsOnly(expected);
         assertThat(resume.getValue().systemPrompt()).isEqualTo(expected);

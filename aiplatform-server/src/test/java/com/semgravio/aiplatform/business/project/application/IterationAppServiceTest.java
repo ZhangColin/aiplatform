@@ -308,8 +308,11 @@ class IterationAppServiceTest {
     void given_knowledge_hits_when_fix_then_prefix_injected_before_task_prompt() {
         Long projectId = persistedGeneratedProject("9903");
         List<Runnable> tracks = givenTrackQueued();
+        // #466 多类同池：PRD 历史需求＋激活升格的沉淀物同块前置注入，条带 kind 区分
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。")));
+                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。"),
+                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
+                        "开场前 2 小时内不可取消。")));
         givenConverseSucceeds();
 
         String task = "给库存页加分页";
@@ -320,8 +323,9 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().prompt())
-                .startsWith("【平台知识库·相似历史需求】")
-                .contains("连锁诊所系统")
+                .startsWith("【平台知识库·相似知识】")
+                .contains("〔连锁诊所系统｜历史需求〕PRD·连锁诊所管理")
+                .contains("〔平台沉淀｜业务规则〕预约类业务的取消规则")
                 .endsWith("————\n\n" + IterationAppService.fixRunPrompt(singleHandoff(task, null)));
     }
 
@@ -329,6 +333,10 @@ class IterationAppServiceTest {
     void given_first_attempt_fails_when_fix_then_silent_retry_with_retry_prompt() {
         Long projectId = persistedGeneratedProject("9904");
         List<Runnable> tracks = givenTrackQueued();
+        // 知识命中在场（#466）：首试带前置注入块、重试不重注入的对照事实
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
+                        "开场前 2 小时内不可取消。")));
         // 剧本（#84 事件序列断言）：首试中途错误（error 事件 + 异常上浮）；重试尝试
         //（内部新 runId）真实客户端会再发 run-start 与部件，收口 run-finish
         when(agentClient.converse(any(), any()))
@@ -369,7 +377,9 @@ class IterationAppServiceTest {
                 .contains("错误现场：修正尝试中断")
                 .contains("进展现场（平台可观测事实）")
                 .contains("已累计用时")
-                .contains("已落盘文件变更 尚无");
+                .contains("已落盘文件变更 尚无")
+                // #466 一次切入一次注入既有语义：知识前置注入只进首试 prompt，重试不重注入
+                .doesNotContain("【平台知识库");
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
 

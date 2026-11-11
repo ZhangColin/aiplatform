@@ -16,7 +16,7 @@ import com.semgravio.aiplatform.business.project.application.PrdRevisionFacts;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
 
 /**
- * 保存 PRD 工具（主智能体资产）：主智能体判定需求明确（含催促收敛）后的产物动作——效果 =
+ * 保存 PRD 工具（主智能体资产）：主智能体判定需求明确（没有必答题，含收敛令收口，#461）后的产物动作——效果 =
  * 写 {@code docs/PRD.md} 到项目 dev 工作区（经 {@link PrdArtifactAdapter#workspacePath}
  * 的业务正本路径，docker exec 覆盖写——修订再执行即更新）+ 回调
  * {@link PrdArtifactAdapter#onWritten}（置「PRD 已产出」状态位 + 发 document-updated）
@@ -57,7 +57,7 @@ public class SavePrdTool extends ToolBase {
         super(ToolBase.builder()
                 .name(NAME)
                 .description("保存/修订 PRD 到项目工作区（docs/PRD.md）。判定需求已明确"
-                        + "（四方面信息齐备或用户催促收敛）时调用：content 传完整 PRD "
+                        + "（没有必答题，或用户已下收敛令——#461 新访谈策略）时调用：content 传完整 PRD "
                         + "markdown 全文（结构与写法遵循 prd-writing 技能）；summary "
                         + "传本轮说明（markdown 变更说明——修订：改了什么、覆盖哪些意见；"
                         + "首次产出：PRD 覆盖了什么——界面层按 markdown 渲染呈现，勿出"

@@ -49,4 +49,22 @@ class ClasspathBuiltinSkillCatalogTest {
                 // 终点类型变更时清单章随改（自愈口径——后续任意修订按形态规则收敛）
                 .contains("终点类型变更后修订 PRD 时，清单章必须随改到新形态");
     }
+
+    @Test
+    void given_prd_writing_skill_when_read_body_then_completion_presentation_pinned() {
+        String body = catalog.findAll().stream()
+                .filter(skill -> skill.name().equals("prd-writing"))
+                .findFirst().orElseThrow()
+                .content();
+
+        // #461 新访谈策略：补全集中呈现（专业身份直陈、禁假设/自问自答字眼、
+        // PRD 不区分用户答的与平台补的）＋「验收与待确认」章保留但不再拦门
+        assertThat(body)
+                .contains("补全集中呈现在 PRD")
+                .contains("不区分用户答的与平台补的")
+                .contains("保留但不再拦门")
+                .contains("建议口径")
+                // 旧两级门写法退役钉死（「阻碍核心流程」级不再进模板——必答题访谈期问掉）
+                .doesNotContain("平台会拦截");
+    }
 }

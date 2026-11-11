@@ -120,6 +120,29 @@ class AgentProfileTest {
     }
 
     @Test
+    void given_main_prompt_when_new_interview_strategy_then_must_answer_completion_convergence_present() {
+        // #461 新访谈策略（#449 设计定案）：必答收窄为两类口径（缺了会建错方向／涉用户
+        // 独特事实与偏好）、补全以专业身份直陈（禁假设/自问自答字眼、集中落 PRD、
+        // 不区分用户答的与平台补的）、收敛令（「直接做/别问了」类输入后未决缺口按
+        // 推荐补全收口）、题量软目标非硬上限、零必答首轮直接产 PRD；每轮一问硬契约
+        // 与「禁止把问题写在正文里」维持不动
+        String prompt = AgentProfile.MAIN.systemPrompt();
+        assertThat(prompt)
+                .contains("缺了会建错方向")
+                .contains("涉用户独特事实与偏好")
+                .contains("补全")
+                .contains("我会怎么做")
+                .contains("不区分用户答的与平台补的")
+                .contains("收敛")
+                .contains("软目标")
+                .contains("零必答")
+                .contains("每轮一问")
+                // 旧口径退役钉死：不再「宁可多问一轮、不得替用户假设后收敛」
+                .doesNotContain("宁可多问一轮")
+                .doesNotContain("不得替用户假设");
+    }
+
+    @Test
     void given_main_prompt_when_capability_boundary_then_discipline_and_inventory_present() {
         // #216 能力边界正本：纪律条款（禁无验证的平台级断言 + 如实描述替代路径）+
         // 终态能力清单（抓取/调研/问答等全部已具备能力的边界描述终稿）

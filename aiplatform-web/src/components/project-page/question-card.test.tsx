@@ -94,4 +94,57 @@ describe("QuestionCard · CC 式问答卡（#19）", () => {
     expect(multi).toContain("disabled"); // ToggleGroup 整组禁用
     expect(multi).not.toContain(">提交<"); // 已答无提交钮
   });
+
+  it("推荐答案（#459）单选：「推荐」chip＋勾选提交态（非点即答），预选项 pressed", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ recommended: "企业客户" })}
+        interactive
+        selection={["企业客户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+
+    expect(html).toContain("推荐");
+    expect(html).toContain('data-slot="recommended-badge"');
+    expect(html).toContain('data-slot="toggle-group"'); // 带推荐的单选＝勾选＋提交
+    expect(html).toContain('aria-pressed="true"'); // 预选项 pressed（父层初始勾选）
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain("提交");
+  });
+
+  it("推荐答案（#459）多选：推荐项带「推荐」chip，勾选提交照旧", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ multiple: true, recommended: "个人用户" })}
+        interactive
+        selection={["个人用户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+
+    expect(html).toContain('data-slot="recommended-badge"');
+    expect(html).toContain("可多选");
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain("提交");
+  });
+
+  it("推荐答案（#459）已答：只读终态——「已回答」、无提交钮、推荐标记仍呈现", () => {
+    const html = renderToStaticMarkup(
+      <QuestionCard
+        question={card({ recommended: "企业客户", answered: true })}
+        interactive={false}
+        selection={["企业客户"]}
+        onSelectionChange={noopSelection}
+        onAnswer={noop}
+      />,
+    );
+
+    expect(html).toContain("已回答");
+    expect(html).toContain('data-slot="recommended-badge"');
+    expect(html).not.toContain(">提交<");
+    expect(html).toContain("disabled"); // ToggleGroup 整组禁用
+  });
 });

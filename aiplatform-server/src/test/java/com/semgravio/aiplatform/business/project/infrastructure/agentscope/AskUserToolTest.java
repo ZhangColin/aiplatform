@@ -84,6 +84,8 @@ class AskUserToolTest {
         Map<String, Object> properties =
                 (Map<String, Object>) tool.getParameters().get("properties");
         assertThat(properties).doesNotContainKey("answer");
+        // #459 推荐答案通道：recommended 入参位（推荐项，缺省不标＝行为兼容）
+        assertThat(properties).containsKey("recommended");
         assertThat(tool.isReadOnly()).isTrue();
     }
 }

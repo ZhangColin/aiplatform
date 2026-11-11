@@ -155,6 +155,46 @@ describe("CommandArea · Enter 发送路由（#19 状态机）", () => {
   });
 });
 
+describe("CommandArea · 推荐答案预选缺省（#459）", () => {
+  it("带推荐的单选：推荐项预选（pressed）＋勾选提交态——直接点「提交」即按推荐项作答", () => {
+    seedChat([pendingQuestion({ multiple: false, recommended: "预约" })]);
+    render(<CommandArea projectId="p1" />);
+
+    // 预选缺省：父层初始勾选推荐项（用户零动作），提交钮可用
+    expect(screen.getByRole("button", { name: /预约/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /会员/ }).getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    expect(answerMutate).toHaveBeenCalledTimes(1);
+    expect(answerMutate.mock.calls[0][0]).toMatchObject({
+      qid: "reply-1",
+      command: { runId: "run-1", answer: "预约" },
+    });
+    expect(postMutate).not.toHaveBeenCalled();
+  });
+
+  it("带推荐的单选：改选后提交＝改选项（用户动作＝检查并改）", () => {
+    seedChat([pendingQuestion({ multiple: false, recommended: "预约" })]);
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "会员" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    expect(answerMutate.mock.calls[0][0].command.answer).toBe("会员");
+  });
+
+  it("带推荐的单选：自由输入 Enter 与预选合并（勾选在前、输入在后）", () => {
+    seedChat([pendingQuestion({ multiple: false, recommended: "预约" })]);
+    render(<CommandArea projectId="p1" />);
+
+    fireEvent.change(inputOf(), { target: { value: "补充：还要导出报表" } });
+    fireEvent.keyDown(inputOf(), { key: "Enter", shiftKey: false });
+
+    expect(answerMutate.mock.calls[0][0].command.answer).toBe("预约；补充：还要导出报表");
+  });
+});
+
 describe("CommandArea · 修订胶囊（#20 修订回路）", () => {
   beforeEach(() => {
     usePrdNoticesStore.setState({ seen: {}, pending: {} });

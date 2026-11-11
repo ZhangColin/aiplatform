@@ -312,6 +312,60 @@ class AgentscopeEventMapperTest {
         }
 
         @Test
+        void given_ask_user_recommended_option_when_suspension_then_projected_to_question() {
+            // #459 推荐答案：recommended（ask_user 推荐位）命中 options 才投影——
+            // 问答卡据此标「推荐」chip 并预选缺省；toolCalls 面原样回传（含 recommended）
+            RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-17", java.util.List.of(
+                    toolCall("tc-r", "ask_user", Map.of(
+                            "header", "目标用户",
+                            "question", "这个官网主要面向谁?",
+                            "options", java.util.List.of("企业客户", "个人用户"),
+                            "recommended", "企业客户"))));
+
+            AgentEvent frame = mapper.suspension(event);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) frame.payload()
+                    .get(AgentEventTypes.WAIT_DATA_FIELD);
+            assertThat(data.get("questions")).isEqualTo(java.util.List.of(Map.of(
+                    "header", "目标用户",
+                    "question", "这个官网主要面向谁?",
+                    "multiple", false,
+                    "custom", true,
+                    "options", java.util.List.of(
+                            Map.of("label", "企业客户"), Map.of("label", "个人用户")),
+                    "recommended", "企业客户")));
+        }
+
+        @Test
+        void given_recommended_not_in_options_when_suspension_then_dropped() {
+            // #459 值域收敛：recommended 不在 options 内（模型乱标）不投影——
+            // 问答卡退回无推荐的现状行为；空白/非字符串同退
+            Map<String, Object> withStray = new java.util.LinkedHashMap<>(Map.of(
+                    "question", "面向谁?",
+                    "options", java.util.List.of("企业客户", "个人用户"),
+                    "recommended", "海外用户"));
+            Map<String, Object> withBlank = new java.util.LinkedHashMap<>(Map.of(
+                    "question", "面向谁?",
+                    "options", java.util.List.of("企业客户"),
+                    "recommended", ""));
+            for (Map<String, Object> input : java.util.List.of(withStray, withBlank)) {
+                RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-18",
+                        java.util.List.of(toolCall("tc-x", "ask_user", input)));
+
+                AgentEvent frame = mapper.suspension(event);
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) frame.payload()
+                        .get(AgentEventTypes.WAIT_DATA_FIELD);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> question = ((java.util.List<Map<String, Object>>)
+                        data.get("questions")).get(0);
+                assertThat(question).doesNotContainKey("recommended");
+            }
+        }
+
+        @Test
         void given_confirm_event_when_map_then_no_passthrough_frame() {
             // 挂起不是过程事件：挂起事件由调用方显式发射，map() 不重复产事件
             RequireUserConfirmEvent event = new RequireUserConfirmEvent("reply-11", java.util.List.of(

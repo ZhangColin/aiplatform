@@ -186,7 +186,9 @@ export function CommandArea({
   const pendingId = pending?.id;
   if (pendingId !== undefined && selectionFor !== pendingId) {
     setSelectionFor(pendingId);
-    setSelection([]);
+    // 推荐答案（#459）：新问题带推荐项 → 预选该选项（用户动作降为检查并改）；
+    // 无推荐 → 清空，行为同现状
+    setSelection(pending?.recommended ? [pending.recommended] : []);
   }
 
   // 问题到达：聚焦输入框（自由输入作答入口，不错过在等你的问题）

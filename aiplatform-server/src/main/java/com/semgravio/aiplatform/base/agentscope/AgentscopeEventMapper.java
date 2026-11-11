@@ -124,7 +124,8 @@ final class AgentscopeEventMapper {
      * toolCalls 待确认清单（答复续跑重建 ConfirmResult 所需的最小面）+ questions
      * 投影。
      *
-     * <p>questions 投影（header/question/multiple/custom/options[{label}]，前端问答卡
+     * <p>questions 投影（header/question/multiple/custom/options[{label}]，
+     * recommended 可缺省（#459 推荐答案），前端问答卡
      * 契约——multiple 恒 false / custom 恒 true：ask_user 一次一题开放可自由输入；
      * custom 必须显式 true，否则无选项题整题被前端收窄丢弃）。摘要口径 = 问题文本
      * （截断保短）。恢复入参（模型档位/会话寻址/计量）由业务编排从项目侧事实重建，
@@ -149,9 +150,11 @@ final class AgentscopeEventMapper {
     /**
      * 提问载荷投影（ask_user input → 前端问答卡形状）：header 缺省中性兜底；
      * options 字符串列表 → {label} 对象列表（无选项纯开放题也保留——custom=true
-     * 恒可自由输入）；multiple 从工具入参投影（多选勾选提交，缺省 false 单选点即答）。
-     * question 空白（空 input 畸形挂起，#445）兜底文案——呈现面不裸奔，平台随即
-     * 自动错误答复让模型当场重问（见 AgentscopeAgentClient 空问题护栏）。
+     * 恒可自由输入）；multiple 从工具入参投影（多选勾选提交，缺省 false 单选点即答）；
+     * recommended（推荐答案，#459）非空且命中 options 之一才携带——模型乱标
+     * （不在选项内）不投影，问答卡退回无推荐的现状行为。question 空白（空 input
+     * 畸形挂起，#445）兜底文案——呈现面不裸奔，平台随即自动错误答复让模型当场
+     * 重问（见 AgentscopeAgentClient 空问题护栏）。
      */
     private static List<Map<String, Object>> questionPayloads(List<ToolUseBlock> questions) {
         return questions.stream().map(tc -> {
@@ -161,9 +164,25 @@ final class AgentscopeEventMapper {
             payload.put("question", textOrDefault(input.get("question"), BLANK_QUESTION_FALLBACK));
             payload.put("multiple", Boolean.TRUE.equals(input.get("multiple")));
             payload.put("custom", true);
-            payload.put("options", optionPayloads(input.get("options")));
+            List<Map<String, Object>> options = optionPayloads(input.get("options"));
+            payload.put("options", options);
+            recommendedOf(input.get("recommended"), options)
+                    .ifPresent(recommended -> payload.put("recommended", recommended));
             return payload;
         }).toList();
+    }
+
+    /**
+     * 推荐项投影（#459）：recommended 必须是非空字符串且命中 options 的某项 label
+     * 才携带——值域收敛在投影单点，前端拿到的 recommended 恒可安全预选。
+     */
+    private static Optional<String> recommendedOf(Object recommended,
+            List<Map<String, Object>> options) {
+        if (!(recommended instanceof String text) || text.isBlank()) {
+            return Optional.empty();
+        }
+        boolean hit = options.stream().anyMatch(option -> text.equals(option.get("label")));
+        return hit ? Optional.of(text) : Optional.empty();
     }
 
     /** 空问题兜底文案（#445）：空 input 畸形挂起的问答卡问题文本占位。 */

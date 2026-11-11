@@ -51,6 +51,11 @@ public class AskUserTool extends ToolBase {
                                         "type", "array",
                                         "items", Map.of("type", "string"),
                                         "description", "候选选项（无可不填，用户可自由输入）"),
+                                "recommended", Map.of(
+                                        "type", "string",
+                                        "description", "推荐项（推荐答案，#459）：必须是 options 中的一项——"
+                                                + "问答卡将其标「推荐」并预选缺省，用户可改选或自由输入；"
+                                                + "无把握不填，行为与现状一致"),
                                 "multiple", Map.of(
                                         "type", "boolean",
                                         "description", "是否允许多选（组合式回答）；缺省 false 单选")),

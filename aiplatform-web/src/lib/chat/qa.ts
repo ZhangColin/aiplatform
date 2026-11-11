@@ -2,7 +2,8 @@
  * 问答卡纯逻辑（issue #19 需求环①）：question-raised 事件 data → 问答卡形状的解析，
  * 与三种作答形态（单选点即答 / 多选勾选提交 / 自由输入可与已勾选合并）的答复
  * 拼装。形状正本 = SSE事件清单·智能体事件族 `data.questions` 投影
- * （[{header, question, multiple, custom, options[{label}]}]）。
+ * （[{header, question, multiple, custom, options[{label}], recommended?}]，
+ * recommended 可缺省＝推荐答案 #459）。
  */
 
 import type { components } from "@/lib/api/schema";
@@ -37,6 +38,9 @@ export type RaisedQuestion = {
   question: string;
   multiple: boolean;
   options: string[];
+  /** 推荐答案（#459）：推荐项 label（命中 options 才携带）——问答卡标「推荐」chip
+   * 并预选缺省，用户可改选或自由输入；缺省＝无推荐，行为同现状。 */
+  recommended?: string;
   toolCalls: PendingToolCall[];
 };
 
@@ -45,12 +49,14 @@ type QuestionProjection = {
   question?: unknown;
   multiple?: unknown;
   options?: unknown;
+  recommended?: unknown;
 };
 
 /**
  * question-raised → 问答卡（ask_user 唯一挂起源）：data.questions[0] 可解析才成卡
  * （形状残缺 → null，对话区不呈现交互卡）。选项取 label；无选项纯开放题照成卡
- * （custom 恒 true，自由输入作答）。
+ * （custom 恒 true，自由输入作答）；推荐项 recommended 仅当命中选项才随卡
+ * （#459 推荐答案——卡侧预选缺省的依据）。
  */
 export function parseQuestion(
   eventId: string,
@@ -66,6 +72,12 @@ export function parseQuestion(
         .map((option) => labelOf(option))
         .filter((label): label is string => label !== null)
     : [];
+  // 推荐答案（#459）：recommended 仅当命中 options 才携带——投影面收敛，卡侧恒安全预选
+  const recommended =
+    typeof projection.recommended === "string" &&
+    options.includes(projection.recommended)
+      ? projection.recommended
+      : undefined;
   return {
     id: eventId,
     runId: payload.runId,
@@ -74,6 +86,7 @@ export function parseQuestion(
     question: textOr(projection.question, ""),
     multiple: projection.multiple === true,
     options,
+    ...(recommended !== undefined ? { recommended } : {}),
     toolCalls: (data && Array.isArray(data.toolCalls) ? data.toolCalls : []).map(
       (call) => call as PendingToolCall,
     ),

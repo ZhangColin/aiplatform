@@ -56,6 +56,24 @@ describe("parseQuestion · question-raised → 问答卡（#19；#83 起纯 QUES
     expect(parseQuestion("e3", questionRaised({ toolCalls: [] }))).toBeNull();
     expect(parseQuestion("e4", questionRaised(null))).toBeNull();
   });
+
+  it("推荐答案（#459）：recommended 命中选项才随卡；不标推荐 → 字段缺省", () => {
+    const withRecommended = parseQuestion(
+      "e5",
+      questionRaised(questionData({ recommended: "企业客户" })),
+    );
+    expect(withRecommended?.recommended).toBe("企业客户");
+
+    // 乱标（不在选项内）/ 非字符串 → 不携带，卡退回无推荐的现状行为
+    expect(
+      parseQuestion("e6", questionRaised(questionData({ recommended: "海外用户" })))?.recommended,
+    ).toBeUndefined();
+    expect(
+      parseQuestion("e7", questionRaised(questionData({ recommended: 42 })))?.recommended,
+    ).toBeUndefined();
+    // 不标推荐 → 现状（字段缺省，行为不变）
+    expect(parseQuestion("e8", questionRaised(questionData()))?.recommended).toBeUndefined();
+  });
 });
 
 describe("composeAnswer · 三种作答形态的答复拼装", () => {

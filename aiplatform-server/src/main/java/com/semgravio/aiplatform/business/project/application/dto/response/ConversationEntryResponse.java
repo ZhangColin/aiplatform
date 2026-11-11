@@ -38,7 +38,8 @@ public record ConversationEntryResponse(
                 + "question-raised 事件 payload 原样——{ runId, sessionId, engine, summary, "
                 + "engineRef, data }；data.toolCalls=[{id,name,input}]（答复续跑重建所需的"
                 + "待确认工具最小面）、data.questions=[{header,question,multiple,custom,"
-                + "options[{label}]}]（问答卡投影，custom 恒 true 可自由输入）。"
+                + "options[{label}],recommended?}]（问答卡投影，custom 恒 true 可自由输入；"
+                + "recommended 可缺省＝推荐答案 #459，命中 options 才携带）。"
                 + "answered=false 即挂起待答，据此可重建可作答",
                 example = "{\"runId\":\"r-01\",\"sessionId\":\"s-01\",\"engine\":\"agentscope\","
                         + "\"summary\":\"目标用户是谁？\",\"engineRef\":\"req-77\","

@@ -98,6 +98,8 @@ final class StageDurationFacts {
     private static final Pattern SEGMENTS = Pattern.compile("[;&|\\n]+");
 
     private long llmMs;
+    /** 闭合模型调用计数（非委派源——每迭代恰一次模型调用，#453 迭代数口径）。 */
+    private int modelCalls;
     private final Map<String, Long> toolsMs = new LinkedHashMap<>();
     private final Map<String, Long> commandMs = new LinkedHashMap<>();
     /** 委派源账（source → 该源模型调用＋工具执行配对累计；首见序插入、无闭合区间为 0）。 */
@@ -139,6 +141,7 @@ final class StageDurationFacts {
             Long started = modelStarts.remove(nvl(end.getReplyId()));
             if (started != null) {
                 llmMs += at - started;
+                modelCalls++;
             }
         }
         else if (event instanceof ToolCallDeltaEvent delta) {
@@ -171,6 +174,11 @@ final class StageDurationFacts {
     /** 本流段的阶段耗时不定形快照（未闭合区间丢弃——只计完整观察）。 */
     StageDurations snapshot() {
         return new StageDurations(llmMs, toolsMs, commandMs, subagentAccounts);
+    }
+
+    /** 闭合模型调用计数（#453——与 {@link #snapshot()} 同口径：只计配对闭合区间）。 */
+    int modelCalls() {
+        return modelCalls;
     }
 
     /**

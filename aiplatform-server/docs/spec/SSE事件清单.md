@@ -214,7 +214,8 @@ closing: {
                                     # （#418——随事件扩载并同载荷落库，见下节）＋结构化日志
 
   durationBreakdown: {             # 阶段耗时分布（#111——平台分析口径，前端不渲染；
-                                   # 四桶齐备 + 逐尝试分布；计时源 = 引擎事件 createdAt 服务端真实口径；
+                                   # 四桶齐备 + 每迭代平台开销归因桶 + 逐尝试分布；
+                                   # 计时源 = 引擎事件 createdAt 服务端真实口径；
                                    # #417 计量口径修真——verify 源账去重叠双计、委派族除名、
                                    # command 归组扩七族，桶计可信）：
     llmMs:      52000,             #   LLM 等待（执行体模型调用起止累计）
@@ -233,9 +234,26 @@ closing: {
                                    #   配对累计——#417 弃「首末单窗跨距」口径，并行父流
                                    #   的时间不入账；无验证 = 0）
     closingMs:  300,               #   收口尾序（探活 + 成版；落库自指不可测——载荷先于落库定型，量级极小忽略）
+    overhead: {                    #   每迭代平台开销归因桶（#453——「窗与窗之间的平台耗时」
+                                   #   逐桶可归因，残差饼图：attempts[].durationMs − llm −
+                                   #   tools − verify − overhead ≈ 未归因差值）：
+      configMs: 120,               #     中间件每迭代动态查库（决策提示策略 + verify 自决开关；
+                                   #     #453-2 起经 5s TTL 进程内缓存——命中窗口内近零）
+      evalMs: 45,                  #     微指令判定体（轨迹快照提取 + 规则判定 + 判重回读扫描；
+                                   #     #453-3 判定门跳过不重评估，健康段近零）
+      eventPipelineMs: 900,        #     引擎事件平台处理链（事实观察 + 映射 + 部件 + 投影 +
+                                   #     SSE 派发——含阻塞式 emitter.send 的真实墙钟）
+      gateSkipped: 880,            #     判定门跳过迭代数（门断无信号可能即跳过重评估）
+      gateEvaluated: 26,           #     判定门放行迭代数（可能产出信号、走全量评估）
+      iterations: 906              #     闭合模型调用计数（每迭代恰一次模型调用）
+    },
     attempts: [                    #   逐尝试分布（静默重试代价可归因）——round / attempt / durationMs
-      { round: 1, attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash", llmMs: 52000, toolsMs: {...}, verifyMs: 9000 }
-    ]                              #   （尝试墙钟）+ 该尝试三桶；round＝轮次（#353 段级
+      { round: 1, attempt: 1, durationMs: 61000, modelId: "deepseek-v4-flash",
+        llmMs: 52000, toolsMs: {...}, verifyMs: 9000,
+        overheadMs: { configMs: 120, evalMs: 45, eventPipelineMs: 900,
+                      gateSkipped: 880, gateEvaluated: 26, iterations: 906 } }
+    ]                              #   （尝试墙钟）+ 该尝试三桶 + 每迭代开销归因桶（#453，同
+                                   #   run 级 overhead 口径）；round＝轮次（#353 段级
                                    #   外环——1=首轮 / 2=回滚重跑轮，回滚重跑成功收口的
                                    #   收尾卡首轮失败尝试与重跑尝试同携、分轮可读）；
                                    #   modelId＝该尝试生效模型档位
@@ -253,7 +271,7 @@ closing: {
 
 - **到达即收尾卡**：`closing` 存在 ⟺ 编码 run 真收口 ⟺ 自检通过（part-check passed 先行）——前端过程明细（解说段/动作卡流水）收口后不常驻，收尾卡即凝聚物；`closing` 缺席的 run-finish（咨询/纯追问轮）无收尾卡。
 - **版本锚定（#91）**：`closing.version`（可缺省）= 收口自动成版的 commit hash——版本正本 = 容器内 git log（无便利表），Run-Id trailer 联接收尾卡与版本；版本详情 API 复用 `closing` 载荷锚定收尾卡。
-- **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 验证 / 收口尾序 + 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
+- **阶段耗时分布（#111）**：`closing.durationBreakdown` 随收尾卡落库（对话史 JSONB），供平台事后分析时长归因（LLM 等待 / 工具执行 / 验证 / 收口尾序 / 每迭代平台开销（#453 `overhead`——残差饼图）+ 逐尝试分布）；**用户面不呈现**——收尾卡「用时」行只认 `durationMs`，前端收窄读取、多余键不进 store。
 - **判定行权威化**：旧「编辑无变化」前端推导过渡口径移除（`fix-unchanged` 事件已随 #82 退役）——判定行只认本载荷。
 
 #### 失败面 failure schema（#418）

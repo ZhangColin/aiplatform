@@ -53,7 +53,9 @@ public record ConversationEntryResponse(
                 + "docs/spec/SSE事件清单·收口扩载节）——{ summary, prdChanged, prdNote?, "
                 + "systemChanged, systemNote?, files=[{path,added,removed}], durationMs, "
                 + "verification?{total,failed,faces,rounds,failedItems}, version?, "
-                + "durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,attempts[]} }（可缺省键＝"
+                + "durationBreakdown{llmMs,toolsMs,verifyMs,closingMs,overhead{"
+                + "configMs,evalMs,eventPipelineMs,gateSkipped,gateEvaluated,iterations},"
+                + "attempts[]} }（可缺省键＝"
                 + "该轮无该事实；durationBreakdown 为平台分析口径，呈现可忽略）",
                 example = "{\"summary\":\"完成切片：用户能登录\",\"prdChanged\":false,"
                         + "\"systemChanged\":true,\"systemNote\":\"起服了登录页\","

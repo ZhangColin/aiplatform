@@ -7,6 +7,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.IterationOverheadFacts;
 
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
@@ -61,22 +62,43 @@ public class VerifySelfDecisionMiddleware implements MiddlewareBase {
         if (input == null || input.messages() == null || input.messages().isEmpty()) {
             return next.apply(input);
         }
+        IterationOverheadFacts overhead = overheadOf(ctx);
         boolean enabled;
         try {
+            // 掐表（#453 观测面）：开关读腿墙钟——TTL 缓存命中时近零、miss 时如实计
+            long readStarted = System.nanoTime();
             enabled = selfDecisionEnabled.getAsBoolean();
+            if (overhead != null) {
+                overhead.addConfigNanos(System.nanoTime() - readStarted);
+            }
         }
         catch (RuntimeException e) {
             // fail-open：开关读失败绝不阻断推理链（增益件的 best-effort 口径）
             log.warn("[verify-self-decision] 开关读取失败（降级透传）：{}", e.toString());
             return next.apply(input);
         }
-        if (enabled || alreadyNoticed(input.messages())) {
+        if (enabled) {
+            return next.apply(input);
+        }
+        // 掐表（#453 观测面）：判重回读扫描墙钟（消息列元数据回读——纯计算面）
+        long scanStarted = System.nanoTime();
+        boolean noticed = alreadyNoticed(input.messages());
+        if (overhead != null) {
+            overhead.addEvalNanos(System.nanoTime() - scanStarted);
+        }
+        if (noticed) {
             return next.apply(input);
         }
         log.info("[verify-self-decision] 自决关闭态注入指令 run={}", runIdOf(ctx));
         List<Msg> messages = new ArrayList<>(input.messages());
         messages.add(noticeMessage());
         return next.apply(new ReasoningInput(messages, input.tools(), input.options()));
+    }
+
+    /** 每迭代平台开销观察面（#453）：经属性袋取 facts，缺席（一次性调用面）跳过观测。 */
+    private static IterationOverheadFacts overheadOf(RuntimeContext ctx) {
+        Object facts = ctx == null ? null : ctx.get(AgentscopeAgentClient.ITERATION_OVERHEAD_CONTEXT_KEY);
+        return facts instanceof IterationOverheadFacts overhead ? overhead : null;
     }
 
     /** 合成指令消息：框架合成口径（agentscope_synthetic），元数据带判重键。 */

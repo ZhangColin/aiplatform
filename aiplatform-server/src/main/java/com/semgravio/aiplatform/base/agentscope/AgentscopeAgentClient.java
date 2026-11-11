@@ -102,6 +102,15 @@ public class AgentscopeAgentClient {
     public static final String PLATFORM_EVENT_SINK_CONTEXT_KEY = "platformEventSink";
 
     /**
+     * RuntimeContext 属性键：本轮每迭代平台开销事实（{@link IterationOverheadFacts}
+     * ——#453 段内残差归因观察面）。逐轮构建时写入属性袋，执行体中间件（决策提示
+     * /verify 自决）每迭代取来掐表回写（配置读腿／判定体）；无属性袋的一次性调用
+     * 面跳过观测（中间件对缺席 facts 空转）。收口侧经 {@link AgentReply#durations()}
+     * 的 {@code overheadMs} 桶进收尾卡 durationBreakdown。
+     */
+    public static final String ITERATION_OVERHEAD_CONTEXT_KEY = "platformIterationOverhead";
+
+    /**
      * 决策时微指令的 part-hint 平台事件装配（#437 载荷单点）：runId/sessionId 归锚
      * ＋指令种类键＋微指令全文。经 {@link #PLATFORM_EVENT_SINK_CONTEXT_KEY} 取汇的
      * 调用方（执行体中间件）直推，用户面可见事实（注入内容对用户可见）。
@@ -290,10 +299,10 @@ public class AgentscopeAgentClient {
     }
 
     /** 前段产物（模型解析 + agent 构建 + 会话上下文 + 透传映射表 + 部件映射表 +
-     * 文件变更事实观察面 + 阶段耗时事实观察面）。 */
+     * 文件变更事实观察面 + 阶段耗时事实观察面 + 每迭代平台开销观察面）。 */
     private record PreparedTurn(ModelRef modelRef, HarnessAgent agent, RuntimeContext ctx,
             AgentscopeEventMapper mapper, AgentscopePartsMapper parts, FileChangeFacts fileChanges,
-            StageDurationFacts durations) {
+            StageDurationFacts durations, IterationOverheadFacts overhead) {
     }
 
     /**
@@ -351,11 +360,14 @@ public class AgentscopeAgentClient {
         HarnessAgent agent = factory.obtain(properties.getAgentName(), sysPrompt,
                 modelRef.toModelString(), spec.modelChannel(), workspace, spec.agentKey(),
                 spec.toolSpec());
-        return new PreparedTurn(modelRef, agent, runtimeContext(spec.sessionId(), spec.userId(),
-                spec.runId(), sink),
+        // 每迭代平台开销观察面（#453）下发属性袋——执行体中间件每迭代取来掐表回写
+        IterationOverheadFacts overhead = new IterationOverheadFacts();
+        RuntimeContext ctx = runtimeContext(spec.sessionId(), spec.userId(), spec.runId(), sink);
+        ctx.put(ITERATION_OVERHEAD_CONTEXT_KEY, overhead);
+        return new PreparedTurn(modelRef, agent, ctx,
                 new AgentscopeEventMapper(spec.runId(), spec.sessionId(), ENGINE),
                 new AgentscopePartsMapper(spec.runId(), spec.sessionId(), ENGINE),
-                new FileChangeFacts(), new StageDurationFacts());
+                new FileChangeFacts(), new StageDurationFacts(), overhead);
     }
 
     /**
@@ -417,9 +429,15 @@ public class AgentscopeAgentClient {
                                         + silenceTimeout + "，工具执行窗 " + toolBudget
                                         + "）——纯静默超限", e));
             }
-            events = events.doOnNext(event -> handleEvent(event, mapper, prepared.parts(),
-                    prepared.fileChanges(), prepared.durations(),
-                    sink, text, finish, suspended));
+            events = events.doOnNext(event -> {
+                // 每迭代平台开销观察面（#453）：引擎事件平台处理链掐表（事实观察＋
+                // 映射＋部件＋投影＋SSE 派发的完整链墙钟——含阻塞式 emitter.send）
+                long pipelineStarted = System.nanoTime();
+                handleEvent(event, mapper, prepared.parts(),
+                        prepared.fileChanges(), prepared.durations(),
+                        sink, text, finish, suspended);
+                prepared.overhead().addEventPipelineNanos(System.nanoTime() - pipelineStarted);
+            });
             if (silenceTimeout != null) {
                 // 活超时模式无总墙钟——blockLast(null) 会对空参数 toNanos NPE（Reactor
                 // 的 null 不代表无超时），显式走无参阻塞终态
@@ -435,11 +453,11 @@ public class AgentscopeAgentClient {
                 sink.accept(AgentscopeEventMapper.runFinish(
                         runId, prepared.ctx().getSessionId(), finish.get(), ENGINE));
                 return new TurnResult(text.toString(), null, null, prepared.fileChanges().changes(),
-                        prepared.durations().snapshot());
+                        resultDurations(prepared));
             }
             return new TurnResult(text.toString(), new AgentSuspension(
                     suspension.getReplyId(), toolCallFace(suspension)), null,
-                    prepared.fileChanges().changes(), prepared.durations().snapshot());
+                    prepared.fileChanges().changes(), resultDurations(prepared));
         }
         catch (Exception e) {
             // 判死止损（#374）：blockLast 超时/异常的 Reactor cancel 虽沿订阅链传导
@@ -461,8 +479,22 @@ public class AgentscopeAgentClient {
             // 已闭合区间的阶段耗时随失败携出（观察器全程在流上累积，此处取快照；
             // 崩断时在途的未闭合区间仍不计——StageDurationFacts 口径不变）
             return new TurnResult(text.toString(), null, e, prepared.fileChanges().changes(),
-                    prepared.durations().snapshot());
+                    resultDurations(prepared));
         }
+    }
+
+    /**
+     * 本流段的阶段耗时事实＋每迭代平台开销事实合并快照（#453）：开销归因桶
+     * （configMs/evalMs/eventPipelineMs/gateSkipped/gateEvaluated）随
+     * {@link StageDurations#overheadMs()} 携出，{@code iterations} 取闭合模型
+     * 调用计数（每迭代恰一次模型调用——无中间件的会话同样可数）。成功/挂起/
+     * 失败三出口同口径（失败留账的部分观察含开销面）。
+     */
+    private static StageDurations resultDurations(PreparedTurn prepared) {
+        StageDurations durations = prepared.durations().snapshot();
+        return new StageDurations(durations.llmMs(), durations.toolsMs(),
+                durations.commandMs(), durations.subagentMs(),
+                prepared.overhead().snapshot(prepared.durations().modelCalls()));
     }
 
     /**

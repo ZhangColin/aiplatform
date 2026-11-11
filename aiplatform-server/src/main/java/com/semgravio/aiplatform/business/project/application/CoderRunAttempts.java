@@ -818,9 +818,11 @@ class CoderRunAttempts {
     static final String CLOSING_VERSION_FIELD = "version";
 
     /**
-     * 收口扩载的阶段耗时分布键（#111）：{@code { llmMs, toolsMs, verifyMs,
-     * closingMs, attempts[] }}——平台分析口径（时长优化归因用），前端不渲染
-     * （收尾卡呈现不变，只有「用时」durationMs）。
+     * 收口扩载的阶段耗时分布键（#111；#453 增 overhead 桶）：{@code { llmMs,
+     * toolsMs, verifyMs, closingMs, overhead, attempts[] }}——overhead＝每迭代平台
+     * 开销归因桶（configMs/evalMs/eventPipelineMs/gateSkipped/gateEvaluated/
+     * iterations，attempts[].overheadMs 同口径）——平台分析口径（时长优化归因用），
+     * 前端不渲染（收尾卡呈现不变，只有「用时」durationMs）。
      */
     static final String CLOSING_BREAKDOWN_FIELD = "durationBreakdown";
 
@@ -1037,11 +1039,15 @@ class CoderRunAttempts {
     }
 
     /**
-     * 阶段耗时分布装配（#111；#417 口径修真）：四桶齐备（LLM 等待 = 跨尝试模型调用
-     * 累计 / 工具执行 = 按工具名分桶·command 按命令归组嵌套·委派族除名 / 验证 =
-     * verify 源账（其模型调用＋工具执行累计——并行父流时间不入账）/ 收口尾序 =
-     * 探活 + 样式合规扫描（#296）+ 成版）+ 逐尝试分布（静默重试代价可归因——每次
-     * 尝试的墙钟与桶各自带）。
+     * 阶段耗时分布装配（#111；#417 口径修真；#453 增每迭代平台开销归因桶）：
+     * 四桶齐备（LLM 等待 = 跨尝试模型调用累计 / 工具执行 = 按工具名分桶·command
+     * 按命令归组嵌套·委派族除名 / 验证 = verify 源账（其模型调用＋工具执行累计——
+     * 并行父流时间不入账）/ 收口尾序 = 探活 + 样式合规扫描（#296）+ 成版）+
+     * {@code overhead} 每迭代平台开销归因桶（#453：configMs 中间件动态查库 /
+     * evalMs 微指令判定 / eventPipelineMs 引擎事件处理链（含 SSE 派发）/
+     * gateSkipped·gateEvaluated 判定门观测 / iterations 闭合模型调用计数——
+     * 残差饼图：attempts[].durationMs − llm − tools − verify − overhead ≈ 未归因
+     * 差值）+ 逐尝试分布（静默重试代价可归因——每次尝试的墙钟与桶各自带）。
      * 与 durationMs 的一致性口径：桶计 + 未归因差值（平台管道、判据未过的核验、
      * 委派等待屏障等）− 真并行重叠（父流与子智能体源事件墙钟重叠段——并行收益
      * 双方各自入账）= durationMs；closingMs 含成版而 durationMs 窗口不含（小正
@@ -1057,6 +1063,7 @@ class CoderRunAttempts {
         breakdown.put("toolsMs", toolsPayload(total));
         breakdown.put("verifyMs", verifyMs(total));
         breakdown.put("closingMs", closingMs);
+        breakdown.put("overhead", new LinkedHashMap<>(total.overheadMs()));
         breakdown.put("attempts", attempts.stream()
                 .map(CoderRunAttempts::attemptPayload)
                 .toList());
@@ -1064,8 +1071,9 @@ class CoderRunAttempts {
     }
 
     /** 逐尝试分布条目：轮次（首轮/回滚重跑轮——#353 分轮归因）+ 尝试序号（轮内）+
-     * 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+ 该尝试生效模型档位
-     * （#354 路由留档——逐尝试哪档可归因）。 */
+     * 尝试墙钟 + 该尝试的三桶（无收口尾序——归 run 级）+ 每迭代平台开销归因桶
+     * （#453，同 run 级 overhead 口径）+ 该尝试生效模型档位（#354 路由留档——
+     * 逐尝试哪档可归因）。 */
     private static Map<String, Object> attemptPayload(AttemptDuration attempt) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("round", attempt.round());
@@ -1075,6 +1083,7 @@ class CoderRunAttempts {
         payload.put("llmMs", attempt.durations().llmMs());
         payload.put("toolsMs", toolsPayload(attempt.durations()));
         payload.put("verifyMs", verifyMs(attempt.durations()));
+        payload.put("overheadMs", new LinkedHashMap<>(attempt.durations().overheadMs()));
         return payload;
     }
 

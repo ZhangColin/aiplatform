@@ -9,12 +9,22 @@ import java.util.Map;
  * 的观察面）：LLM 等待（执行体模型调用起止累计）/ 工具执行（按工具名分桶——
  * command 工具不入此桶）/ 命令归组（command 工具的 install/build/dev/test/db/
  * http/script/other——#417 七族）/ 委派源账（source → 该源模型调用＋工具执行
- * 配对累计——#417 弃首末单窗跨距，并行父流时间不入账）。不可变——run 尝试环
- * 跨段（converse + 续跑）以 {@link #plus} 合并、跨尝试在收口装配侧汇总进
- * closing。观察口径与已知洞见 {@link StageDurationFacts}。
+ * 配对累计——#417 弃首末单窗跨距，并行父流时间不入账）/ 每迭代平台开销归因桶
+ * （#453：configMs 中间件动态查库 / evalMs 微指令判定 / eventPipelineMs 事件
+ * 处理链 / gateSkipped·gateEvaluated 判定门观测 / iterations 闭合模型调用
+ * 计数——「窗与窗之间的平台耗时」逐桶可归因，见 {@link IterationOverheadFacts}）。
+ * 不可变——run 尝试环跨段（converse + 续跑）以 {@link #plus} 合并、跨尝试在
+ * 收口装配侧汇总进 closing。观察口径与已知洞见 {@link StageDurationFacts}。
  */
 public record StageDurations(long llmMs, Map<String, Long> toolsMs,
-        Map<String, Long> commandMs, Map<String, Long> subagentMs) {
+        Map<String, Long> commandMs, Map<String, Long> subagentMs,
+        Map<String, Long> overheadMs) {
+
+    /** 四参便捷形（无每迭代开销观察——既有调用点与测试桩缺省开销面为空图）。 */
+    public StageDurations(long llmMs, Map<String, Long> toolsMs,
+            Map<String, Long> commandMs, Map<String, Long> subagentMs) {
+        this(llmMs, toolsMs, commandMs, subagentMs, Map.of());
+    }
 
     /** 快照不可变（来源 map 的防御拷贝——观察面继续累积不回流已携出的快照；
      *  保插入序：分桶次序即观察序，进 closing JSONB 呈现稳定）。 */
@@ -22,11 +32,12 @@ public record StageDurations(long llmMs, Map<String, Long> toolsMs,
         toolsMs = immutableOrdered(toolsMs);
         commandMs = immutableOrdered(commandMs);
         subagentMs = immutableOrdered(subagentMs);
+        overheadMs = immutableOrdered(overheadMs);
     }
 
     /** 零值（无观察——一次性调用与测试桩的缺省）。 */
     public static StageDurations zero() {
-        return new StageDurations(0, Map.of(), Map.of(), Map.of());
+        return new StageDurations(0, Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     /** 跨段合并：计数相加、分桶按键求和（同 source 委派源账跨段续接同理求和）。 */
@@ -34,7 +45,8 @@ public record StageDurations(long llmMs, Map<String, Long> toolsMs,
         return new StageDurations(llmMs + other.llmMs,
                 merged(toolsMs, other.toolsMs),
                 merged(commandMs, other.commandMs),
-                merged(subagentMs, other.subagentMs));
+                merged(subagentMs, other.subagentMs),
+                merged(overheadMs, other.overheadMs));
     }
 
     private static Map<String, Long> merged(Map<String, Long> left, Map<String, Long> right) {

@@ -290,4 +290,15 @@ class StageDurationFactsTest {
     void given_no_events_when_snapshot_then_zero() {
         assertThat(new StageDurationFacts().snapshot()).isEqualTo(StageDurations.zero());
     }
+
+    @Test
+    void given_closed_model_calls_when_queried_then_iterations_counted() {
+        // #453 迭代数口径：闭合模型调用区间计数（未闭合/委派源不入账）
+        StageDurationFacts facts = new StageDurationFacts();
+        facts.onEvent(modelStart("r-1", 0));
+        facts.onEvent(modelEnd("r-1", 100));
+        facts.onEvent(modelStart("r-2", 200)); // 未闭合——不计
+
+        assertThat(facts.modelCalls()).isEqualTo(1);
+    }
 }

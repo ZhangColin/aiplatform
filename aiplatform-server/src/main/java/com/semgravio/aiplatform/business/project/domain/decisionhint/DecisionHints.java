@@ -89,14 +89,14 @@ public final class DecisionHints {
     }
 
     /** 反 mock 扫描窗口：近期 N 个迭代（更早痕迹不追打——避免栈位被旧账长占）。 */
-    static final int ANTI_MOCK_WINDOW = 3;
+    public static final int ANTI_MOCK_WINDOW = 3;
 
     /** 反 mock 信号模式（小写包含匹配，保守集——误报代价是打断心流）。 */
-    static final List<String> ANTI_MOCK_PATTERNS = List.of(
+    public static final List<String> ANTI_MOCK_PATTERNS = List.of(
             "lorem ipsum", "lorem", "placeholder", "todo:", "fixme", "dummy", "mock data");
 
     /** 单次结果「过大」阈值（字符）：超过即建议窄读（约 20k 字符 ≈ 5k token 量级）。 */
-    static final int LARGE_RESULT_CHARS = 20_000;
+    public static final int LARGE_RESULT_CHARS = 20_000;
 
     /**
      * 累计成功结果阈值（字符，#443）：本段（当前轮）累计成功工具结果超此值即命中
@@ -104,10 +104,10 @@ public final class DecisionHints {
      * 是多次中量读取的累积而非单次 oversized，单次判据够不着这种形态。约 12 万
      * 字符 ≈ 3 万 token 量级：重段约前 1/3 触发、常规轻段（数万字符）不误伤。
      */
-    static final int CUMULATIVE_RESULT_CHARS = 120_000;
+    public static final int CUMULATIVE_RESULT_CHARS = 120_000;
 
     /** 并行工具触发线：尾部连续每迭代恰 1 个调用的迭代数 ≥ 此值 → 建议并行。 */
-    static final int SINGLE_CALL_STREAK = 4;
+    public static final int SINGLE_CALL_STREAK = 4;
 
     /** 失败止损规则：尾部同签名失败 streak ≥ 阈值 → 信号（理由带次数与错误首行）。 */
     private static void addStopLossSignal(TrajectorySnapshot snapshot, HintPolicy policy,

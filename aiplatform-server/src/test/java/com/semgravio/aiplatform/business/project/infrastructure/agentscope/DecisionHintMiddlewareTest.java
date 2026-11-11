@@ -11,6 +11,7 @@ import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
+import com.semgravio.aiplatform.base.agentscope.IterationOverheadFacts;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintConfig;
@@ -183,5 +184,68 @@ class DecisionHintMiddlewareTest {
 
         assertThat(captor.captured.messages()).hasSize(messages.size());
         assertThat(notices).isEmpty();
+    }
+
+    @Test
+    void given_healthy_trajectory_when_on_reasoning_then_gate_skipped_without_eval() {
+        // #453-3 判定门：健康轨迹（无信号可能）→ 跳过重评估，观测面记 gateSkipped
+        List<Msg> clean = new ArrayList<>();
+        clean.add(user("做订单页"));
+        for (int i = 0; i < 6; i++) {
+            ToolUseBlock a = new ToolUseBlock("h" + i + "a", "write_file", Map.of("p", i + "a"));
+            ToolUseBlock b = new ToolUseBlock("h" + i + "b", "write_file", Map.of("p", i + "b"));
+            clean.add(Msg.builder().role(MsgRole.ASSISTANT).content(List.of(a, b)).build());
+            clean.add(Msg.builder().role(MsgRole.TOOL)
+                    .content(List.of(
+                            new ToolResultBlock(a.getId(), a.getName(),
+                                    TextBlock.builder().text("ok").build())
+                                    .withState(ToolResultState.SUCCESS),
+                            new ToolResultBlock(b.getId(), b.getName(),
+                                    TextBlock.builder().text("ok").build())
+                                    .withState(ToolResultState.SUCCESS)))
+                    .build());
+        }
+        ReasoningInput input = new ReasoningInput(clean, List.of(), null);
+        InputCaptor captor = new InputCaptor();
+        IterationOverheadFacts facts = new IterationOverheadFacts();
+        io.agentscope.core.agent.RuntimeContext ctx = io.agentscope.core.agent.RuntimeContext
+                .builder().sessionId("coder-1").userId("u1")
+                .put(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY, "run-9")
+                .put(AgentscopeAgentClient.PLATFORM_EVENT_SINK_CONTEXT_KEY, noticeSink)
+                .put(AgentscopeAgentClient.ITERATION_OVERHEAD_CONTEXT_KEY, facts)
+                .build();
+
+        middleware(DecisionHintConfig.enabled(HintPolicy.defaults()))
+                .onReasoning(null, ctx, input, captor);
+
+        // 行为面：透传（无注入无通知）；观测面：门跳过一回、全量评估零回
+        assertThat(captor.captured.messages()).hasSize(clean.size());
+        assertThat(notices).isEmpty();
+        assertThat(facts.snapshot(0))
+                .containsEntry(IterationOverheadFacts.GATE_SKIPPED, 1L)
+                .containsEntry(IterationOverheadFacts.GATE_EVALUATED, 0L);
+    }
+
+    @Test
+    void given_signal_trajectory_when_on_reasoning_then_gate_evaluated_and_injected() {
+        // #453-3 判定门放行面：失败条带轨迹走全量评估，注入行为与门无关（同既有断言）
+        ReasoningInput input = new ReasoningInput(failingMessages(), List.of(), null);
+        InputCaptor captor = new InputCaptor();
+        IterationOverheadFacts facts = new IterationOverheadFacts();
+        io.agentscope.core.agent.RuntimeContext ctx = io.agentscope.core.agent.RuntimeContext
+                .builder().sessionId("coder-1").userId("u1")
+                .put(AgentscopeAgentClient.RUN_ID_CONTEXT_KEY, "run-9")
+                .put(AgentscopeAgentClient.PLATFORM_EVENT_SINK_CONTEXT_KEY, noticeSink)
+                .put(AgentscopeAgentClient.ITERATION_OVERHEAD_CONTEXT_KEY, facts)
+                .build();
+
+        middleware(DecisionHintConfig.enabled(HintPolicy.defaults()))
+                .onReasoning(null, ctx, input, captor);
+
+        assertThat(captor.captured.messages()).hasSize(input.messages().size() + 1);
+        assertThat(notices).hasSize(1);
+        assertThat(facts.snapshot(0))
+                .containsEntry(IterationOverheadFacts.GATE_SKIPPED, 0L)
+                .containsEntry(IterationOverheadFacts.GATE_EVALUATED, 1L);
     }
 }

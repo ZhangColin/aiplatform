@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.base.agentscope;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,49 @@ class StageDurationsTest {
         assertThat(zero.toolsMs()).isEmpty();
         assertThat(zero.commandMs()).isEmpty();
         assertThat(zero.subagentMs()).isEmpty();
+        assertThat(zero.overheadMs()).isEmpty();
+    }
+
+    @Test
+    void given_four_arg_construction_when_queried_then_overhead_empty() {
+        // #453 四参便捷形（既有调用点/测试桩）：开销归因桶缺省空图
+        StageDurations durations = new StageDurations(7, Map.of(), Map.of(), Map.of());
+
+        assertThat(durations.llmMs()).isEqualTo(7);
+        assertThat(durations.overheadMs()).isEmpty();
+    }
+
+    @Test
+    void given_overhead_buckets_when_plus_then_merged_by_key() {
+        // #453 跨段合并：开销归因桶按键求和（converse + 续跑同口径）；来源用
+        // LinkedHashMap——Map.of 多键不保序，保序断言须有序来源
+        Map<String, Long> firstOverhead = new LinkedHashMap<>();
+        firstOverhead.put("configMs", 3L);
+        firstOverhead.put("evalMs", 5L);
+        Map<String, Long> secondOverhead = new LinkedHashMap<>();
+        secondOverhead.put("configMs", 2L);
+        secondOverhead.put("eventPipelineMs", 9L);
+        StageDurations first = new StageDurations(0, Map.of(), Map.of(), Map.of(), firstOverhead);
+        StageDurations second = new StageDurations(0, Map.of(), Map.of(), Map.of(), secondOverhead);
+
+        StageDurations merged = first.plus(second);
+
+        assertThat(merged.overheadMs()).containsExactly(
+                Map.entry("configMs", 5L),
+                Map.entry("evalMs", 5L),
+                Map.entry("eventPipelineMs", 9L));
+    }
+
+    @Test
+    void given_source_overhead_map_when_construct_then_snapshot_immutable() {
+        // #453 来源 map 的防御拷贝同样适用开销面（观察面继续累积不回流快照）
+        Map<String, Long> overhead = new HashMap<>();
+        overhead.put("configMs", 3L);
+        StageDurations durations = new StageDurations(0, Map.of(), Map.of(), Map.of(), overhead);
+
+        overhead.put("evalMs", 9L);
+
+        assertThat(durations.overheadMs()).containsExactly(Map.entry("configMs", 3L));
     }
 
     @Test

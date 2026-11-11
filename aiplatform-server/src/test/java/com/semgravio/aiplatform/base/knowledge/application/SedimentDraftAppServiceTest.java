@@ -101,7 +101,13 @@ class SedimentDraftAppServiceTest {
     }
 
     private final RecordingSedimentStore drafts = new RecordingSedimentStore();
-    private final SedimentDraftAppService appService = new SedimentDraftAppService(drafts);
+
+    /** 升格写口替身（#465 起激活链路带升格；本类不触激活，纯占位）。 */
+    private final KnowledgeAppService knowledgeAppService =
+            org.mockito.Mockito.mock(KnowledgeAppService.class);
+
+    private final SedimentDraftAppService appService =
+            new SedimentDraftAppService(drafts, knowledgeAppService);
 
     private static SedimentDraftProposal proposal(String kind, String title, String summary,
             String content) {

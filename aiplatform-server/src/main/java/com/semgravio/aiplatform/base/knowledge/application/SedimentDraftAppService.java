@@ -22,6 +22,8 @@ import com.semgravio.aiplatform.base.knowledge.application.dto.response.Backoffi
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
 import com.semgravio.aiplatform.base.knowledge.domain.error.KnowledgeMessage;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeChunker;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
@@ -56,11 +58,11 @@ import io.agentscope.harness.agent.skill.curator.SkillSecurityScanner;
  *
  * <p><b>「数据标注」审结面</b>（#464）：队列（按项目/类别/状态过滤＋分页，排序
  * 自荐时间倒序）＋详情（任意状态——终态留档可查）＋三键——激活（原样升格不改稿：
- * 在途翻已激活＋操作者留痕；升格 knw_materials 归 #465，本键先落审结终态）/拒绝
- * （理由必填＋终态留档，库级 CHECK 双锁）/改标签（在途内调类别＋占目标类别在途
- * 序号最低空位——目标类别满即拒）。三键终态语义照技能草稿审核先例（ADR-0022）：
- * CAS 条件更新（{@code WHERE status=在途}，零行命中＝并发审结 → 409 已审结）、
- * 已审结拒、操作者必留痕（缺 400 KNW_006）。</p>
+ * 在途翻已激活＋操作者留痕＋升格 knw_materials，#465 接通——段落分块入库、kind
+ * 随草稿、与来源项目脱钩）/拒绝（理由必填＋终态留档，库级 CHECK 双锁）/改标签
+ * （在途内调类别＋占目标类别在途序号最低空位——目标类别满即拒）。三键终态语义照
+ * 技能草稿审核先例（ADR-0022）：CAS 条件更新（{@code WHERE status=在途}，零行
+ * 命中＝并发审结 → 409 已审结）、已审结拒、操作者必留痕（缺 400 KNW_006）。</p>
  *
  * <p><b>采集埋点（审结侧）</b>：每次标注动作留结构化日志行 {@code [sediment-annotate]}
  * （草稿/类别/动作/操作者）——标注动作留痕可统计（#457 采集面口径）。</p>
@@ -72,11 +74,20 @@ public class SedimentDraftAppService {
     /** 每项目每 kind 在途上限（防泛滥辅闸；与迁移 V59 在途序号 CHECK 1-3 同值）。 */
     public static final int INFLIGHT_CAP = 3;
 
+    /**
+     * 孤儿沉淀的登记面展示名（#465）：激活升格素材与来源项目脱钩（project_id
+     * 置空），来源项目名不再可考也不承载语义——命中/登记面统一展示平台侧固定名。
+     */
+    static final String ORPHAN_PROJECT_NAME = "平台沉淀";
+
     private final SedimentDraftStore draftStore;
+    private final KnowledgeAppService knowledgeAppService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public SedimentDraftAppService(SedimentDraftStore draftStore) {
+    public SedimentDraftAppService(SedimentDraftStore draftStore,
+            KnowledgeAppService knowledgeAppService) {
         this.draftStore = draftStore;
+        this.knowledgeAppService = knowledgeAppService;
     }
 
     /**
@@ -186,24 +197,49 @@ public class SedimentDraftAppService {
 
     /**
      * 激活（#464 三键之一，人审采纳）：在途翻已激活＋操作者留痕（CAS 零行命中＝
-     * 并发审结 → 409 已审结）。激活原样升格不改稿——升格 knw_materials（段落分块
-     * 入库＋混检注入）归 #465，本键先落审结终态（#465 接通前「已激活」草稿已出
-     * 在途队列、不占在途名额，升格动作随 #465 落地）。回执＝终态详情（留痕形状直读）。
+     * 并发审结 → 409 已审结）＋升格 knw_materials（#465：kind 随草稿、source_ref
+     * ＝草稿 id、project_id 置空＝孤儿沉淀与来源项目脱钩、正文段落级分块入库、
+     * meta 带草稿血统；分块/混检口径与 PRD 沉淀同款）。升格失败口径＝知识线
+     * 既有降级契约：embedding 不可用记日志跳过（丢失容忍，A5 §1）不翻回终态，
+     * 向量库写失败上抛整体回滚（真实错误非降级范畴）。回执＝终态详情（留痕形状
+     * 直读）。
      *
      * @throws ApplicationException KNW_008 草稿不存在；KNW_009 已审结；
      *         KNW_006 操作者缺
      */
     @Transactional
     public BackofficeSedimentDraftDetailResponse activate(long id, Operator operator) {
-        requirePendingDraft(id);
+        SedimentDraftRecord record = requirePendingDraft(id);
         requireOperator(operator);
         if (!draftStore.markActivated(id, operator)) {
             // CAS 零行命中＝并发审结（激活/拒绝抢先落定）——抛即整体无事发生
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_SEDIMENT_DRAFT_ALREADY_REVIEWED);
         }
+        promoteToMaterial(record);
         log.info("[sediment-annotate] 草稿 {} 激活（操作者 {} {}）", id, operator.id(),
                 operator.name());
         return BackofficeSedimentDraftDetailResponse.of(requireDraft(id));
+    }
+
+    /**
+     * 激活升格（#465）：草稿原样升格知识素材（不改稿——标题/正文即素材标题/块）——
+     * 段落级分块（{@link KnowledgeChunker}，PRD 沉淀 #30 同款口径）＋孤儿脱钩
+     * （project_id 置空，来源项目删除不影响已激活知识）。meta 带 sedimentDraftId/
+     * summary 血统——经 source_ref＝草稿 id 与 knw_sediment_drafts 互溯。
+     */
+    private void promoteToMaterial(SedimentDraftRecord record) {
+        List<String> chunks = KnowledgeChunker.byParagraph(record.content());
+        knowledgeAppService.index(new KnowledgeSpec(
+                record.kind().key(),
+                String.valueOf(record.id()),
+                null,
+                ORPHAN_PROJECT_NAME,
+                record.title(),
+                chunks,
+                Map.of("sedimentDraftId", String.valueOf(record.id()),
+                        "summary", record.summary())));
+        log.info("[sediment-annotate] 草稿 {} 激活升格 knw_materials（kind={} sourceRef={}，{} 块入料）",
+                record.id(), record.kind().key(), record.id(), chunks.size());
     }
 
     /**

@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.base.knowledge.endpoints.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -49,7 +50,11 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
  * 在途恒 null——审核面所见即写入时扫描回执；未寻址/畸形柄同语义 404 KNW_008；</li>
  * <li><b>鉴权</b>：非签名请求被拒（401）；</li>
  * <li><b>激活</b>：在途翻已激活＋操作者两列留痕＋审结时刻＋出标注队列（在途过滤零
- * 收）＋knw_materials 零行（升格归 #465——边界钉死）＋全量队列仍收（终态留档）；</li>
+ * 收）＋升格 knw_materials（#465：kind 随草稿、source_ref＝草稿 id、project_id
+ * 置空＝孤儿沉淀、段落分块入 knw_chunks 且 meta 带草稿血统）＋全量队列仍收
+ * （终态留档）；</li>
+ * <li><b>孤儿脱钩</b>（#465）：来源项目 purgeByProject 后已激活素材与块存活（对照：
+ * 同源 PRD 素材随级联清掉），且混检同池命中、kind 透出；</li>
  * <li><b>拒绝</b>：理由必填 400 KNW_010＋trim 落档＋终态留痕＋出队列；已审结重审
  * 409 KNW_009（理由不被覆盖）；</li>
  * <li><b>改标签</b>：在途翻类别＋占目标类别在途序号最低空位（跨类别上限 3 结构性
@@ -110,6 +115,10 @@ class BackofficeSedimentDraftSeamTest {
     void teardown() {
         for (Long id : plantedDraftIds) {
             jdbcTemplate.update("DELETE FROM knw_sediment_drafts WHERE id = ?", id);
+            // 激活升格落库的素材（source_ref＝草稿 id，#465）随档清——孤儿行 project_id
+            // 为 NULL，按 source_ref 精确清，不触他测试夹具
+            jdbcTemplate.update("DELETE FROM knw_chunks WHERE source_ref = ?", String.valueOf(id));
+            jdbcTemplate.update("DELETE FROM knw_materials WHERE source_ref = ?", String.valueOf(id));
         }
         plantedDraftIds.clear();
         for (String sourceRef : fixtureSourceRefs) {
@@ -259,12 +268,14 @@ class BackofficeSedimentDraftSeamTest {
                 .andExpect(jsonPath("$.message").value("Signature required"));
     }
 
-    // ---------- 激活：终态留痕＋出队列＋升格边界（#465）----------
+    // ---------- 激活：终态留痕＋出队列＋升格 knw_materials（#465）----------
 
     @Test
-    void given_pending_draft_when_signed_activate_then_terminal_trace_queue_exit_no_material()
+    void given_pending_draft_when_signed_activate_then_terminal_trace_queue_exit_and_promoted()
             throws Exception {
         SedimentDraftReceipt receipt = plant(LINEAGE_PROJECT_ID, "CASE", "激活案例");
+        // 升格入料经 embedding（正文分块向量化；检索同款 mock 缝）
+        when(embeddingClient.embed(anyList())).thenReturn(List.of(vector(1, 1)));
 
         signedPostNoBody("/api/backoffice/sediment-drafts/" + receipt.draftId() + "/activate",
                 OPERATOR_ID, OPERATOR_NAME)
@@ -292,10 +303,54 @@ class BackofficeSedimentDraftSeamTest {
         signedGet("/api/backoffice/sediment-drafts?status=2&projectId=" + LINEAGE_PROJECT_ID)
                 .andExpect(jsonPath("$.data.total").value("1"));
 
-        // 升格归 #465 边界钉死：激活本键不触 knw_materials（零行）
-        Integer materialRows = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM knw_materials WHERE title = '激活案例'", Integer.class);
-        assertThat(materialRows).isZero();
+        // 升格落库（#465 激活＝升格 knw_materials）：kind 随草稿、source_ref＝草稿 id、
+        // project_id 置空（孤儿沉淀——与来源项目脱钩）、默认启用
+        Map<String, Object> material = jdbcTemplate.queryForMap(
+                "SELECT kind, project_id, title, status FROM knw_materials WHERE source_ref = ?",
+                String.valueOf(receipt.draftId()));
+        assertThat(material.get("kind")).isEqualTo("CASE");
+        assertThat(material.get("project_id")).isNull();
+        assertThat(material.get("title")).isEqualTo("激活案例");
+        assertThat(((Number) material.get("status")).intValue()).isEqualTo(1);
+
+        // 段落分块入 knw_chunks：正文原样成块、meta 带草稿血统（可溯）
+        Map<String, Object> chunk = jdbcTemplate.queryForMap(
+                "SELECT chunk, meta->>'sedimentDraftId' AS draft_id FROM knw_chunks"
+                        + " WHERE source_ref = ?", String.valueOf(receipt.draftId()));
+        assertThat(chunk.get("chunk")).isEqualTo("正文。");
+        assertThat(chunk.get("draft_id")).isEqualTo(String.valueOf(receipt.draftId()));
+    }
+
+    @Test
+    void given_activated_draft_when_source_project_purged_then_orphan_material_survives_and_hits()
+            throws Exception {
+        SedimentDraftReceipt receipt = plant(LINEAGE_PROJECT_ID, "RULE", "孤儿退款规则");
+        // 升格入料＋检索 query 向量化（anyList 一_stub 两覆盖）
+        when(embeddingClient.embed(anyList())).thenReturn(List.of(vector(1, 1)));
+        // 对照：同源项目的 PRD 素材（项目绑定素材，随项目级联是正解）
+        String prdRef = "purge-contrast-prd";
+        fixtureSourceRefs.add(prdRef);
+        knowledgePort.index(new KnowledgeSpec("PRD", prdRef, String.valueOf(LINEAGE_PROJECT_ID),
+                "血统项目", "PRD", List.of("对照 PRD 块"), null));
+
+        signedPostNoBody("/api/backoffice/sediment-drafts/" + receipt.draftId() + "/activate",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+
+        knowledgePort.purgeByProject(String.valueOf(LINEAGE_PROJECT_ID));
+
+        // 孤儿沉淀＝知识独立存在：已激活素材不受来源项目删除影响
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_materials WHERE source_ref = ?",
+                Integer.class, String.valueOf(receipt.draftId()))).isEqualTo(1);
+        // 对照：项目绑定 PRD 素材随级联清掉（级联入口本身活着）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_materials WHERE source_ref = ?",
+                Integer.class, prdRef)).isZero();
+        // 混检同池：激活素材进检索面，kind 透出（CASE/MODULE/RULE 与 PRD 同池命中）
+        List<KnowledgeHit> hits = knowledgePort.retrieve("孤儿退款规则", 5);
+        assertThat(hits).extracting(KnowledgeHit::kind).contains("RULE");
+        assertThat(hits).extracting(KnowledgeHit::chunk).contains("正文。");
     }
 
     // ---------- 拒绝：理由必填＋终态留档 ----------

@@ -12,7 +12,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * 后台标注详情（#464「数据标注」审核面）：清单行同形字段＋正文全文＋载荷＋扫描
  * 回执全文（findings 逐条：patternId/severity/category/file/line/matchText/
  * description）＋终态留痕字段（激活/拒绝后回填；在途恒 null）。审核口径：激活
- * 原样升格不改稿（升格 knw_materials 归 #465）、拒绝理由必填、改标签只调类别。
+ * 原样升格不改稿（升格 knw_materials 随激活链，#465）、拒绝理由必填、改标签只调类别。
  *
  * @param content      正文全文 markdown（激活升格时原样入库——审核者不改稿）
  * @param payload      扩展载荷（一期恒空面；kind 开放生长面）

@@ -5,6 +5,8 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +37,10 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
  * <p>素材登记表 {@code knw_materials} 是身份/状态/操作者的单一事实源（#153）；
  * 块表 {@code knw_chunks} 只存内容与向量。沉淀幂等替换时登记行 upsert——保
  * id/状态/操作者/首沉淀时间，只刷新展示字段（被停用素材重沉淀不复活）。</p>
+ *
+ * <p>检索＝混检（#465）：向量通道（HNSW 余弦）＋关键词通道（pg_trgm 三元组）
+ * 各取候选池后 RRF 融合——替代纯向量；孤儿沉淀素材（project_id NULL，激活
+ * 升格脱钩）落库与检索均无特判，级联清理 WHERE 永不命中 NULL。</p>
  */
 @Component
 public class PgvectorKnowledgeStore implements KnowledgeStore {
@@ -55,14 +61,39 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::vector, ?::jsonb)
             """;
 
-    /** 检索状态过滤：status = 1 即 MaterialStatus.ENABLED（SQL 无法引用 Java 常量，靠注释对齐）。 */
-    private static final String FIND_SIMILAR_SQL = """
-            SELECT c.kind, c.project_name, c.title, c.chunk
+    /**
+     * 混检·向量通道候选（#465）：余弦距离升序取候选池（HNSW 索引承载）；
+     * 仅启用素材参与（JOIN 登记表 status = 1，MaterialStatus.ENABLED——SQL 无法
+     * 引用 Java 常量，靠注释对齐）。
+     */
+    private static final String FIND_VECTOR_SQL = """
+            SELECT c.kind, c.source_ref, c.seq, c.project_name, c.title, c.chunk
             FROM knw_chunks c
             JOIN knw_materials m ON m.kind = c.kind AND m.source_ref = c.source_ref
             WHERE m.status = 1
             ORDER BY c.embedding <=> ?::vector LIMIT ?
             """;
+
+    /**
+     * 混检·关键词通道候选（#465）：pg_trgm 三元组相似度降序取候选池——中文无
+     * 分词依赖的库内原生模糊匹配。零重叠闸（{@code similarity > 0}）：与 query
+     * 无共享三元组的块不进候选（无查询词命中时通道零贡献，不硬塞噪音）；同分
+     * 以 (kind, source_ref, seq) 兜底定序（确定性）。停用过滤与向量通道同开。
+     */
+    private static final String FIND_KEYWORD_SQL = """
+            SELECT c.kind, c.source_ref, c.seq, c.project_name, c.title, c.chunk
+            FROM knw_chunks c
+            JOIN knw_materials m ON m.kind = c.kind AND m.source_ref = c.source_ref
+            WHERE m.status = 1 AND similarity(c.chunk, ?) > 0
+            ORDER BY similarity(c.chunk, ?) DESC, c.kind, c.source_ref, c.seq
+            LIMIT ?
+            """;
+
+    /** RRF 融合阻尼常数（倒数秩融合惯例值 60）。 */
+    private static final double RRF_K = 60.0;
+
+    /** 各通道候选池倍数（topK 的倍数——池大于出参才谈得上融合互补）。 */
+    private static final int POOL_FACTOR = 2;
 
     /** 登记行读列（素材清单/详情/回执共形；顺序即 {@link #materialOf} 下标）。 */
     private static final String MATERIAL_COLUMNS =
@@ -105,12 +136,70 @@ public class PgvectorKnowledgeStore implements KnowledgeStore {
         jdbcTemplate.batchUpdate(INSERT_CHUNK_SQL, rows);
     }
 
+    /**
+     * 混检检索（#465）：向量/关键词两通道各取 {@code topK × POOL_FACTOR} 候选，
+     * RRF（k={@link #RRF_K}）融合——每块得分＝各通道 {@code 1/(k+秩)} 之和，
+     * 双通道同中块叠加进位；同分以最优秩、kind/sourceRef/seq 兜底定序。
+     */
     @Override
-    public List<KnowledgeHit> findSimilar(float[] queryVector, int topK) {
-        return jdbcTemplate.query(FIND_SIMILAR_SQL,
-                (rs, rowNum) -> new KnowledgeHit(
-                        rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)),
-                vectorLiteral(queryVector), topK);
+    public List<KnowledgeHit> findRelevant(String query, float[] queryVector, int topK) {
+        int pool = topK * POOL_FACTOR;
+        List<Candidate> vectorCandidates = candidates(FIND_VECTOR_SQL, pool, vectorLiteral(queryVector));
+        List<Candidate> keywordCandidates = candidates(FIND_KEYWORD_SQL, pool, query, query);
+        return fuse(vectorCandidates, keywordCandidates, topK);
+    }
+
+    /** 通道候选行（kind/sourceRef/seq＝融合去重键；hit＝展示面）。 */
+    private record Candidate(String kind, String sourceRef, int seq, KnowledgeHit hit) {
+    }
+
+    /** 融合去重键（同素材的不同块是不同命中，键必须落到块级）。 */
+    private record ChunkKey(String kind, String sourceRef, int seq) {
+    }
+
+    /** 融合中的块：去重键＋展示面＋累计 RRF 得分＋最优通道秩（同分定序用）。 */
+    private record Fused(ChunkKey key, KnowledgeHit hit, double score, int bestRank) {
+    }
+
+    /** 单通道候选查询（行序即通道内秩，1 基）。 */
+    private List<Candidate> candidates(String sql, int pool, Object... args) {
+        Object[] full = new Object[args.length + 1];
+        System.arraycopy(args, 0, full, 0, args.length);
+        full[args.length] = pool;
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new Candidate(
+                rs.getString(1), rs.getString(2), rs.getInt(3),
+                new KnowledgeHit(rs.getString(1), rs.getString(4), rs.getString(5),
+                        rs.getString(6))),
+                full);
+    }
+
+    /** RRF 融合：两通道候选按块去重叠加得分，降序取 topK。 */
+    private static List<KnowledgeHit> fuse(List<Candidate> vectorCandidates,
+            List<Candidate> keywordCandidates, int topK) {
+        Map<ChunkKey, Fused> fused = new HashMap<>();
+        accumulate(fused, vectorCandidates);
+        accumulate(fused, keywordCandidates);
+        return fused.values().stream()
+                .sorted(Comparator.<Fused>comparingDouble(f -> -f.score())
+                        .thenComparingInt(Fused::bestRank)
+                        .thenComparing(f -> f.hit().kind())
+                        .thenComparing(f -> f.key().sourceRef())
+                        .thenComparingInt(f -> f.key().seq()))
+                .limit(topK)
+                .map(Fused::hit)
+                .toList();
+    }
+
+    private static void accumulate(Map<ChunkKey, Fused> fused, List<Candidate> candidates) {
+        for (int i = 0; i < candidates.size(); i++) {
+            Candidate candidate = candidates.get(i);
+            ChunkKey key = new ChunkKey(candidate.kind(), candidate.sourceRef(), candidate.seq());
+            int rank = i + 1;
+            fused.merge(key, new Fused(key, candidate.hit(), 1.0 / (RRF_K + rank), rank),
+                    (existing, single) -> new Fused(existing.key(), existing.hit(),
+                            existing.score() + 1.0 / (RRF_K + rank),
+                            Math.min(existing.bestRank(), rank)));
+        }
     }
 
     @Override

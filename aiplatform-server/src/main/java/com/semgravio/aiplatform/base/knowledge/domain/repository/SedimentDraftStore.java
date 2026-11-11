@@ -15,7 +15,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
  * ＝在途部分唯一索引（应用层先查后插回执原因，索引拦并发窗）。
  *
  * <p>#460 自荐写入链与项目删除清理＋#464 审结读面（队列/详情）与三键 CAS 翻态
- * （激活/拒绝/改标签）——升格 knw_materials 归 #465，本口不触素材表。</p>
+ * （激活/拒绝/改标签）——升格 knw_materials 由应用服务经 KnowledgeAppService
+ * 完成（#465），本口不触素材表。</p>
  */
 public interface SedimentDraftStore {
 

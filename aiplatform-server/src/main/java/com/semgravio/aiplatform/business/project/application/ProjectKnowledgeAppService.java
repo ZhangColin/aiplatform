@@ -1,6 +1,5 @@
 package com.semgravio.aiplatform.business.project.application;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -8,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeChunker;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -26,9 +26,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class ProjectKnowledgeAppService {
-
-    /** 段落级分块目标长度（~800 字符，实现定）。 */
-    static final int CHUNK_TARGET_CHARS = 800;
 
     /** 命中检索 query 上限（bge-small-zh 512 维模型，超长截断）。 */
     static final int MAX_QUERY_CHARS = 2000;
@@ -189,46 +186,14 @@ public class ProjectKnowledgeAppService {
         quietly("项目知识级联清理", () -> knowledgePort.purgeByProject(projectId.toString()));
     }
 
-    // ---------- 分块成形（沉淀入料的公共件，#30 起消费） ----------
+    // ---------- 分块成形（沉淀入料的公共件，#30 起消费；实现归底座 KnowledgeChunker） ----------
 
     /**
-     * 段落级分块：按空行切段落，相邻段落并入至目标长度；超长单段按目标长度硬切
-     * （保底不丢内容）。空白输入返回空清单（调用方跳过）。
+     * 段落级分块（底座 {@link KnowledgeChunker} 口径，激活升格 #465 同款复用）。
+     * 保留为本类静态缝：PRD 沉淀路径（{@code #sediment}）与 ProjectKnowledgeAppServiceTest 共用此入口。
      */
     static List<String> chunkByParagraph(String text) {
-        if (text == null || text.isBlank()) {
-            return List.of();
-        }
-        List<String> chunks = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (String raw : text.strip().split("\\n\\s*\\n")) {
-            String paragraph = raw.strip();
-            while (paragraph.length() > CHUNK_TARGET_CHARS) { // 超长单段硬切
-                flush(chunks, current);
-                chunks.add(paragraph.substring(0, CHUNK_TARGET_CHARS));
-                paragraph = paragraph.substring(CHUNK_TARGET_CHARS).stripLeading();
-            }
-            if (paragraph.isEmpty()) {
-                continue;
-            }
-            if (!current.isEmpty()
-                    && current.length() + paragraph.length() + 2 > CHUNK_TARGET_CHARS) {
-                flush(chunks, current);
-            }
-            if (!current.isEmpty()) {
-                current.append("\n\n");
-            }
-            current.append(paragraph);
-        }
-        flush(chunks, current);
-        return chunks;
-    }
-
-    private static void flush(List<String> chunks, StringBuilder current) {
-        if (!current.isEmpty()) {
-            chunks.add(current.toString());
-            current.setLength(0);
-        }
+        return KnowledgeChunker.byParagraph(text);
     }
 
     /** 降级包装：失败记日志跳过，不阻断调用方主流程。 */

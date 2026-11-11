@@ -2,6 +2,9 @@ package com.semgravio.aiplatform.base.knowledge.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -39,7 +42,9 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
  * {@link SedimentDraftAppService#relabel}）：守卫序（寻址 404 → 在途 409 → 操作者 400
  * → 键特有校验）＋终态留痕形状（理由 trim 落档/操作者两列/审结时刻）＋CAS 零行
  * 命中不吞并为成功（并发审结 → 409）＋改标签占目标类别最低空位（排除自身）＋
- * 目标类别满拒（预检与并发撞索引归一为 KNW_012）。</p>
+ * 目标类别满拒（预检与并发撞索引归一为 KNW_012）。激活另带升格写口（#465——
+ * 激活＝升格 knw_materials：kind 随草稿、source_ref＝草稿 id、project_id 置空＝
+ * 孤儿沉淀；升格落库真面归 seam 测试，本缝只钉写口调用形状）。</p>
  */
 class SedimentDraftReviewAppServiceTest {
 
@@ -171,7 +176,12 @@ class SedimentDraftReviewAppServiceTest {
     }
 
     private final RecordingSedimentStore drafts = new RecordingSedimentStore();
-    private final SedimentDraftAppService appService = new SedimentDraftAppService(drafts);
+
+    /** 升格写口替身（#465：激活＝升格 knw_materials；升格落库真面归 seam 测试）。 */
+    private final KnowledgeAppService knowledgeAppService = mock(KnowledgeAppService.class);
+
+    private final SedimentDraftAppService appService =
+            new SedimentDraftAppService(drafts, knowledgeAppService);
 
     private static SedimentDraftProposal proposal(String kind, String title) {
         return new SedimentDraftProposal(kind, title, "摘要。", "正文。", 42L, "run-abc-1",
@@ -260,6 +270,14 @@ class SedimentDraftReviewAppServiceTest {
         // 全量读面仍在（终态留档可查）
         assertThat(appService.draft(receipt.draftId()).status())
                 .isEqualTo(SedimentDraftStatus.ACTIVATED.getCode());
+        // 升格（#465）：kind 随草稿、source_ref＝草稿 id、project_id 置空＝孤儿沉淀
+        verify(knowledgeAppService).index(argThat(spec ->
+                spec.kind().equals("CASE")
+                        && spec.sourceRef().equals(String.valueOf(receipt.draftId()))
+                        && spec.projectId() == null
+                        && spec.projectName().equals("平台沉淀")
+                        && spec.title().equals("激活案例")
+                        && spec.chunks().equals(List.of("正文。"))));
     }
 
     @Test

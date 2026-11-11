@@ -5,7 +5,7 @@ import com.cartisan.core.domain.BaseEnum;
 /**
  * 沉淀草稿状态（#460 数据飞轮采集层，照技能草稿 status 整数码先例，房规枚举落库
  * Integer code + CHECK）：1=在途（采集层人审队列待办）2=已激活（后台「数据标注」
- * 人审通过，升格知识素材——升格动作归 #465）3=已拒绝（终态留档，理由必填）。
+ * 人审通过，升格知识素材——升格动作随激活链，#465）3=已拒绝（终态留档，理由必填）。
  * 终态两形均不再列在途面、不再占在途序号（部分唯一索引自然释放名额）。
  */
 public enum SedimentDraftStatus implements BaseEnum<SedimentDraftStatus> {

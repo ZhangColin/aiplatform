@@ -29,7 +29,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftSt
  * 部分唯一索引（DuplicateKeyException 由应用层归一为上限/改标签冲突回执）。
  *
  * <p>#460 自荐写入与项目删除清理＋#464 审结读面（队列/详情）与三键 CAS 翻态
- * （激活/拒绝/改标签）——升格 knw_materials 归 #465，本实现不触素材表。</p>
+ * （激活/拒绝/改标签）——升格 knw_materials 由应用服务经 KnowledgeAppService 完成
+ * （#465），本实现不触素材表。</p>
  */
 @Component
 public class JdbcSedimentDraftStore implements SedimentDraftStore {

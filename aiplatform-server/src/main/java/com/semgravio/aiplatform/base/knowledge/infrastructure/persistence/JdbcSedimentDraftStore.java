@@ -2,6 +2,7 @@ package com.semgravio.aiplatform.base.knowledge.infrastructure.persistence;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -16,17 +17,19 @@ import com.cartisan.core.domain.BaseEnum;
 
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
+import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftQueueResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
 
 /**
- * 沉淀草稿存取实现（#460 数据飞轮采集层，JdbcTemplate 原生 SQL，照
- * {@code JdbcSkillDraftStore} 先例）：单表 {@code knw_sediment_drafts} 读写；
- * payload/scan_findings JSONB 经字面量序列化出入。在途上限并发兜底＝在途部分
- * 唯一索引（DuplicateKeyException 由应用层归一为上限回执）。
+ * 沉淀草稿存取实现（#460 数据飞轮采集层＋#464 后台「数据标注」审结面，JdbcTemplate
+ * 原生 SQL，照 {@code JdbcSkillDraftStore} 先例）：单表 {@code knw_sediment_drafts}
+ * 读写；payload/scan_findings JSONB 经字面量序列化出入。在途上限并发兜底＝在途
+ * 部分唯一索引（DuplicateKeyException 由应用层归一为上限/改标签冲突回执）。
  *
- * <p>#460 只含自荐写入与项目删除清理——「数据标注」审结读面（队列/详情）与
- * CAS 翻态归 #464，本实现届时扩展。</p>
+ * <p>#460 自荐写入与项目删除清理＋#464 审结读面（队列/详情）与三键 CAS 翻态
+ * （激活/拒绝/改标签）——升格 knw_materials 归 #465，本实现不触素材表。</p>
  */
 @Component
 public class JdbcSedimentDraftStore implements SedimentDraftStore {
@@ -44,6 +47,41 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
     private static final String FIND_PENDING_SLOTS_SQL = """
             SELECT inflight_slot FROM knw_sediment_drafts
             WHERE project_id = ? AND kind = ? AND status = ?
+            """;
+
+    private static final String FIND_PENDING_SLOTS_EXCLUDING_SQL = """
+            SELECT inflight_slot FROM knw_sediment_drafts
+            WHERE id <> ? AND project_id = ? AND kind = ? AND status = ?
+            """;
+
+    private static final String QUEUE_COUNT_PREFIX = "SELECT COUNT(*) FROM knw_sediment_drafts";
+
+    private static final String QUEUE_PAGE_SUFFIX = """
+             ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """;
+
+    /** 激活 CAS（#464）：只在途行可翻——并发审结零行命中，调用方定 409 语义。 */
+    private static final String MARK_ACTIVATED_SQL = """
+            UPDATE knw_sediment_drafts
+            SET status = ?, operator_id = ?, operator_name = ?,
+                reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = ?
+            """;
+
+    /** 拒绝 CAS（#464）：理由随行留档（必填由应用层预检＋库级 CHECK 双锁）。 */
+    private static final String MARK_REJECTED_SQL = """
+            UPDATE knw_sediment_drafts
+            SET status = ?, reject_reason = ?, operator_id = ?, operator_name = ?,
+                reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = ?
+            """;
+
+    /** 改标签 CAS（#464）：翻目标类别＋目标类别最低空位序号（部分唯一索引拦并发窗）。 */
+    private static final String UPDATE_KIND_SQL = """
+            UPDATE knw_sediment_drafts
+            SET kind = ?, inflight_slot = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = ?
             """;
 
     private static final String INSERT_SQL = """
@@ -84,6 +122,61 @@ public class JdbcSedimentDraftStore implements SedimentDraftStore {
         List<SedimentDraftRecord> records = jdbcTemplate.query(FIND_SQL,
                 (rs, rowNum) -> recordOf(rs), id);
         return records.isEmpty() ? null : records.get(0);
+    }
+
+    @Override
+    public SedimentDraftQueueResult searchQueue(Long projectId, String kindKey,
+            SedimentDraftStatus status, int offset, int limit) {
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        if (projectId != null) {
+            where.append(" AND project_id = ?");
+            args.add(projectId);
+        }
+        if (kindKey != null) {
+            where.append(" AND kind = ?");
+            args.add(kindKey);
+        }
+        if (status != null) {
+            where.append(" AND status = ?");
+            args.add(status.getCode());
+        }
+        Long total = jdbcTemplate.queryForObject(QUEUE_COUNT_PREFIX + where,
+                Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(limit);
+        pageArgs.add(offset);
+        List<SedimentDraftRecord> items = jdbcTemplate.query(
+                DRAFT_SELECT_PREFIX + where + QUEUE_PAGE_SUFFIX,
+                (rs, rowNum) -> recordOf(rs), pageArgs.toArray());
+        return new SedimentDraftQueueResult(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public List<Integer> findPendingSlotsExcluding(long excludeId, long projectId,
+            String kindKey) {
+        return jdbcTemplate.queryForList(FIND_PENDING_SLOTS_EXCLUDING_SQL, Integer.class,
+                excludeId, projectId, kindKey, SedimentDraftStatus.PENDING.getCode());
+    }
+
+    @Override
+    public boolean markActivated(long id, Operator operator) {
+        return jdbcTemplate.update(MARK_ACTIVATED_SQL,
+                SedimentDraftStatus.ACTIVATED.getCode(), operator.id(), operator.name(),
+                id, SedimentDraftStatus.PENDING.getCode()) > 0;
+    }
+
+    @Override
+    public boolean markRejected(long id, String reason, Operator operator) {
+        return jdbcTemplate.update(MARK_REJECTED_SQL,
+                SedimentDraftStatus.REJECTED.getCode(), reason, operator.id(), operator.name(),
+                id, SedimentDraftStatus.PENDING.getCode()) > 0;
+    }
+
+    @Override
+    public boolean updateKind(long id, String kindKey, int inflightSlot) {
+        return jdbcTemplate.update(UPDATE_KIND_SQL,
+                kindKey, inflightSlot, id, SedimentDraftStatus.PENDING.getCode()) > 0;
     }
 
     @Override

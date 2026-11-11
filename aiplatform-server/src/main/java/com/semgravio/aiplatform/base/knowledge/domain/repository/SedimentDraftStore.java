@@ -2,6 +2,9 @@ package com.semgravio.aiplatform.base.knowledge.domain.repository;
 
 import java.util.List;
 
+import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
+import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftQueueResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 
 /**
@@ -11,8 +14,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
  * 草稿是平台资产暂存态（「数据标注」人审队列），无用户会话语境。在途上限并发兜底
  * ＝在途部分唯一索引（应用层先查后插回执原因，索引拦并发窗）。
  *
- * <p>#460 只含自荐写入链与项目删除清理——「数据标注」审结读面（队列/详情/激活/
- * 拒绝/改标签）归 #464，本口届时扩展。</p>
+ * <p>#460 自荐写入链与项目删除清理＋#464 审结读面（队列/详情）与三键 CAS 翻态
+ * （激活/拒绝/改标签）——升格 knw_materials 归 #465，本口不触素材表。</p>
  */
 public interface SedimentDraftStore {
 
@@ -35,6 +38,39 @@ public interface SedimentDraftStore {
      * @return 查无返回 null，由调用方定 404 语义
      */
     SedimentDraftRecord find(long id);
+
+    /**
+     * 标注队列（#464「数据标注」面读口）：三过滤维度可组合、均可缺省（缺省＝
+     * 全量）；排序定死＝自荐时间倒序（id 倒序稳定）；SQL 侧 LIMIT/OFFSET 分页
+     * （offset 由框架 Pagination 钳制换算）。
+     */
+    SedimentDraftQueueResult searchQueue(Long projectId, String kindKey,
+            SedimentDraftStatus status, int offset, int limit);
+
+    /**
+     * 改标签的占用查腿（#464）：目标类别在途序号占用清单，排除自身行（自改自的
+     * 序号不算占用）——应用层据此取目标类别最低空位并判在途上限。
+     */
+    List<Integer> findPendingSlotsExcluding(long excludeId, long projectId, String kindKey);
+
+    /**
+     * 激活 CAS（#464）：在途行翻已激活＋操作者两列＋审结时刻。零行命中＝并发审结
+     * 抢先（行已终态），由调用方定 409 语义。
+     */
+    boolean markActivated(long id, Operator operator);
+
+    /**
+     * 拒绝 CAS（#464）：在途行翻已拒绝＋理由＋操作者两列＋审结时刻（理由必填由
+     * 应用层预检＋库级 CHECK 双锁）。零行命中同 {@link #markActivated}。
+     */
+    boolean markRejected(long id, String reason, Operator operator);
+
+    /**
+     * 改标签 CAS（#464）：在途行翻目标类别＋目标类别最低空位在途序号（占用目标
+     * 类别在途名额；部分唯一索引拦并发窗，DuplicateKeyException 由调用方归一）。
+     * 零行命中同 {@link #markActivated}。
+     */
+    boolean updateKind(long id, String kindKey, int inflightSlot);
 
     /**
      * 项目删除清理口（#460，对齐技能草稿清理先例——软引用显式清非库级级联）：

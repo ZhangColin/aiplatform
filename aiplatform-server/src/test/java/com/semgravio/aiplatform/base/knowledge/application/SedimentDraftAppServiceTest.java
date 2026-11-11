@@ -12,7 +12,9 @@ import org.springframework.dao.DuplicateKeyException;
 
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
 import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
+import com.semgravio.aiplatform.base.knowledge.domain.model.Operator;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftQueueResult;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
 import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftRecord;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
@@ -57,6 +59,33 @@ class SedimentDraftAppServiceTest {
         @Override
         public SedimentDraftRecord find(long id) {
             return inserted.stream().filter(r -> r.id() == id).findFirst().orElse(null);
+        }
+
+        @Override
+        public SedimentDraftQueueResult searchQueue(
+                Long projectId, String kindKey, SedimentDraftStatus status, int offset, int limit) {
+            throw new UnsupportedOperationException("队列读面归 #464 审结缝测试");
+        }
+
+        @Override
+        public List<Integer> findPendingSlotsExcluding(long excludeId, long projectId,
+                String kindKey) {
+            throw new UnsupportedOperationException("改标签查腿归 #464 审结缝测试");
+        }
+
+        @Override
+        public boolean markActivated(long id, Operator operator) {
+            throw new UnsupportedOperationException("审结写口归 #464 审结缝测试");
+        }
+
+        @Override
+        public boolean markRejected(long id, String reason, Operator operator) {
+            throw new UnsupportedOperationException("审结写口归 #464 审结缝测试");
+        }
+
+        @Override
+        public boolean updateKind(long id, String kindKey, int inflightSlot) {
+            throw new UnsupportedOperationException("审结写口归 #464 审结缝测试");
         }
 
         @Override

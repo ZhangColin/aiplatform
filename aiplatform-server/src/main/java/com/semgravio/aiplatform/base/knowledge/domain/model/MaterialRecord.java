@@ -16,9 +16,10 @@ import com.semgravio.aiplatform.base.knowledge.domain.enums.MaterialStatus;
  *
  * @param id           素材标识（TSID，首沉淀生成、重沉淀保留；管理端点 URL 柄）
  * @param kind         素材类别（幂等键之一）
- * @param sourceRef    素材来源标识（幂等键之二；v1 业务口径＝projectId）
- * @param projectId    来源项目 id（级联清理入口；容缺直读）
- * @param projectName  来源项目名（登记面展示冗余）
+ * @param sourceRef    素材来源标识（幂等键之二；业务口径＝projectId 或沉淀草稿 id）
+ * @param projectId    来源项目 id（级联清理入口；容缺直读；<b>可空＝孤儿沉淀</b>——
+ *                     #465 激活升格与来源项目脱钩）
+ * @param projectName  来源项目名（登记面展示冗余；孤儿沉淀＝平台侧固定展示名）
  * @param title        素材标题（登记面展示冗余）
  * @param status       素材状态（1=启用 2=停用）
  * @param sunkAt       首沉淀时间

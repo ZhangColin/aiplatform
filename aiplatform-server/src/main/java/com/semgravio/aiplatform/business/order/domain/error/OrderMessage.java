@@ -49,12 +49,13 @@ public enum OrderMessage implements CodeMessage {
     ORDER_BINDING_REQUIRED(403, "ORD_017", "签约前请先登录绑定账号（保存项目可跨设备继续并签署合同）"),
 
     /**
-     * 下单前置门·PRD 腿（#335，spec #320 ④「加门」）：名下无已确认 PRD 版本
-     * （prj_prd_versions 无行——确认制前的遗留项目）不可下单——如实拦截并指路
-     * 确认动作（按钮语对齐正本「确认此版 PRD 并生成 Demo」），前端 toast 提示
-     * （拦截与提示）。
+     * 下单前置门·PRD 腿（#335，spec #320 ④「加门」；<b>#462 读法顺延</b>——
+     * ADR-0039）：名下无 PRD 版本（prj_prd_versions 无行——尚无构建基准记行的
+     * legacy 项目）不可下单——如实拦截并指路（先产出 PRD、系统生成后回 Demo
+     * 体验页确认版本再下单），前端 toast 提示（拦截与提示）。冻结字段结构与
+     * 既有订单数据不动。
      */
-    ORDER_PRD_VERSION_REQUIRED(409, "ORD_018", "下单前请先确认 PRD 版本（点「确认此版 PRD 并生成 Demo」后再下单）"),
+    ORDER_PRD_VERSION_REQUIRED(409, "ORD_018", "下单前请先完成 PRD 产出与 Demo 生成（Demo 体验页「确认此版本，准备签约」后再下单）"),
 
     /**
      * 下单前置门·Demo 腿（#335，「确认此版本，准备签约」＝下单入口）：项目无

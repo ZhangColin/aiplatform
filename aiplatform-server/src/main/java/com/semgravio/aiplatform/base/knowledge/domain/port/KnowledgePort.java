@@ -29,9 +29,10 @@ public interface KnowledgePort {
     void index(KnowledgeSpec spec);
 
     /**
-     * 语义检索：全局跨项目纯相似 topK（不配额，A5 §3）；query 为任务
-     * prompt 全文（超长截断由调用方处理）。仅启用素材的块参与命中——
-     * 停用素材整体退出（#153 状态过滤，面内恒开）。
+     * 混检检索（#465 自纯向量升级）：向量＋三元组关键词双通道 RRF 融合，全局
+     * 跨项目 topK（不配额，A5 §3）——CASE/MODULE/RULE 沉淀素材与 PRD 同池命中；
+     * query 为任务 prompt 全文（超长截断由调用方处理）。仅启用素材的块参与
+     * 命中——停用素材整体退出（#153 状态过滤，面内恒开）。
      */
     List<KnowledgeHit> retrieve(String query, int topK);
 

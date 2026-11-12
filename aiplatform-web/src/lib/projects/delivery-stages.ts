@@ -5,13 +5,16 @@ import type { ProjectDetail } from "@/lib/projects/detail";
  * 交付生命周期阶段（#343，spec #320 ⑥ 全局壳 / #318 IA）：项目空间四阶段
  * 的词表与可达性判定单一来源——阶段侧栏与全局顶栏五行导航共用（与侧栏重复
  * 亦保留，原型如此设计）。灰置条件＝「未满足条件的步骤要说明原因」（交接包），
- * 门序＝spec #320 依赖骨架：Demo 前置＝PRD 已确认（确认门 #330）、签约付款
- * 前置＝Demo 已确认（Demo 确认门 #333）、生产承接前置＝付款完成（已支付＝
- * 开工条件满足，ADR-0002 重对位）。
+ * 门序＝spec #320 依赖骨架（#462 去确认门语义顺延，ADR-0039——确认动作退役、
+ * 「PRD 已确认」读法顺延为「最新构建基准记行在场」）：Demo 前置＝首个构建
+ * 基准记行（首次 savePrd 自动触发首个 Demo run）、签约付款前置＝Demo 已确认
+ * （Demo 确认门 #333）、生产承接前置＝付款完成（已支付＝开工条件满足，
+ * ADR-0002 重对位）。
  *
  * <p>门事实（{@link StageGateFacts}）是语义正本位；从 REST 事实的投影
- * （{@link stageGateFactsOf}）只接现有事实——PRD 已确认＝已确认版本列表非空
- * （#330 的 GET …/prd/versions）；Demo 已确认＝版本清单存在确认标记行
+ * （{@link stageGateFactsOf}）只接现有事实——PRD 记行＝版本列表非空
+ * （GET …/prd/versions，#462 起为构建基准序清单）；Demo 已确认＝版本清单存在
+ * 确认标记行
  * （#333 的 GET …/demo-versions——confirmedAt 是项目确认指针在清单行的投影，
  * 换选随指针移动）；付款门接现有订单事实。判定函数不动。阶段页路由约定：
  * 需求分析＝项目页本路由，其余阶段页＝项目路由下路径段
@@ -30,9 +33,9 @@ export type DeliveryStage = (typeof DELIVERY_STAGES)[number];
 export type DeliveryStageKey = DeliveryStage["key"];
 
 /**
- * 阶段门事实（推导输入的语义位）：PRD 已确认＝存在已确认 PRD 版本（#330）；
- * Demo 已确认＝存在确认标记的 Demo 版本（#333）；订单已支付＝付款完成
- * （已支付/已归档——已支付即开工条件满足）。
+ * 阶段门事实（推导输入的语义位）：PRD 记行＝存在构建基准快照（#462 语义顺延，
+ * Demo 类 run 起跑自动记行）；Demo 已确认＝存在确认标记的 Demo 版本（#333）；
+ * 订单已支付＝付款完成（已支付/已归档——已支付即开工条件满足）。
  */
 export type StageGateFacts = {
   prdConfirmed: boolean;
@@ -42,7 +45,7 @@ export type StageGateFacts = {
 
 /** 灰置原因（用户语言，点击说明——门与该去哪一步都说清）。 */
 const LOCK_REASONS: Partial<Record<DeliveryStageKey, string>> = {
-  demo: "PRD 确认后开放：请先在需求分析页确认此版 PRD",
+  demo: "首个 Demo 生成后开放：PRD 产出后平台会自动开始生成",
   contract: "Demo 确认后开放：请先在 Demo 体验页确认此版本",
   production: "付款完成后开放：请先完成签约付款",
 };
@@ -54,10 +57,11 @@ type PrdVersionPresence = readonly { versionNo?: number }[];
 type DemoVersionPresence = readonly { versionNo?: number; confirmedAt?: string | null }[];
 
 /**
- * REST 事实 → 门事实投影：PRD 已确认＝已确认版本列表非空（#330 接真——空/缺省
- * 即从未确认）；Demo 已确认＝版本清单存在确认标记行（#333 接真——confirmedAt
- * 非空行在场即门开，换选随指针移动投影自动跟随）；付款门接现有订单事实——
- * 未终结单已支付、或项目/最近单已归档（支付完成归档即终点，生产承接页仍可回访）。
+ * REST 事实 → 门事实投影：PRD 记行＝版本列表非空（#462 语义顺延——首个构建
+ * run 起跑自动记行：空/缺省即首 Demo 未起）；Demo 已确认＝版本清单存在确认标记
+ * 行（#333 接真——confirmedAt 非空行在场即门开，换选随指针移动投影自动跟随）；
+ * 付款门接现有订单事实——未终结单已支付、或项目/最近单已归档（支付完成归档
+ * 即终点，生产承接页仍可回访）。
  */
 export function stageGateFactsOf(
   detail: ProjectDetail | undefined | null,

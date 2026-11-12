@@ -19,6 +19,7 @@ import com.semgravio.aiplatform.business.project.domain.port.ExternalContentFetc
 import com.semgravio.aiplatform.business.project.domain.port.WebSearchProvider;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 import com.semgravio.aiplatform.business.project.infrastructure.PrdArtifactAdapter;
+import com.semgravio.aiplatform.business.project.infrastructure.SedimentProposalAdapter;
 import com.semgravio.aiplatform.business.project.infrastructure.SkillProposalAdapter;
 
 import io.agentscope.core.tool.Toolkit;
@@ -30,14 +31,17 @@ import io.agentscope.core.tool.Toolkit;
  * 观测面）+ saveBuildPlan（切片计划事实登记，ADR 0009——生成编排的切片输入）+
  * 只读五件（文件树 / 文件内容 / 项目事实 + 外部地址抓取 fetch_url + 联网搜索
  * web_search，答询查证与自主调研用）+ propose_skill（#263 自荐三槽位齐开——
- * 需求侧梳理经验自荐，软指引不绑时刻），
+ * 需求侧梳理经验自荐，软指引不绑时刻）+ propose_sediment（#460 数据飞轮采集层
+ * 三槽位齐开——需求案例/功能模块/业务规则自荐，软指引＋轮收口轻兜底盘问），
  * 随只读工作区注册（#86 对话姿态：内核文件/shell 工具已关——写面结构性不存在，
  * PRD 写入走 savePrd 自带通道，草稿写入走 propose_skill 平台侧通道——两写面
  * 均不落工作区文件）；{@link AgentProfile#EXECUTOR run 执行体} = finish_edit
  * （更新收口结束工具——「要不要动系统」的判定面）+ update_plan（步骤清单——
  * run 级计划的全量快照观测面，#236：part-plan 部件由部件映射表从参数增量产出）
  * + propose_skill（技能自荐——验证过的编码模式写草稿待审，#259 自产线；骨架件
- * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）；
+ * 无开关概念，软指引在工作协议——无模式可沉淀的 run 不调用）
+ * + propose_sediment（沉淀自荐——可复用功能模块/业务规则写采集层草稿待审，
+ * #460；骨架件无开关，软指引在工作协议——无内容不调用）；
  * {@link AgentProfile#DESIGNER 设计执行体} = generate_image（出图工具件，#288
  * 立内核、#289 发放——档位表落提示词层，ADR-0026 不做代码级硬路由），随设计面
  * 工作区注册（写文件件是 harness 内建、经 ProjectDesign 形态自带——shell 与
@@ -45,7 +49,8 @@ import io.agentscope.core.tool.Toolkit;
  * verify 子键（#352，子智能体自有平台工具面——平台工厂构建子级时按此键取
  * 视图合并，镜像技能仓库的子键路由先例）= report_verification（验证结果登记
  * ——收尾卡验证统计的事实源）+ propose_skill（subagent 槽血统实例，验证经验
- * 自荐——绑任务回交前，挂载与否归声明 allowlist 治理）；
+ * 自荐——绑任务回交前，挂载与否归声明 allowlist 治理）+ propose_sediment
+ * （subagent 槽血统实例，沉淀自荐——#460，挂载治理归声明 allowlist）；
  * 其余编码工具——含内核 shell——由 harness 内核自带，#219 透明面化后破坏性命令
  * 直通不确认；其余配置 / 本地兜底
  * 工作区 / 无配置语境 = 空集（模型不可见）。
@@ -72,6 +77,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
     private final ExternalContentFetcher externalContentFetcher;
     private final WebSearchProvider webSearchProvider;
     private final SkillProposalAdapter skillProposals;
+    private final SedimentProposalAdapter sedimentProposals;
     private final ImageGenerationAppService imageGeneration;
     private final LandedFileFacts landedFiles;
     private final DesignSpecAppService designSpecs;
@@ -82,7 +88,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ProjectRepository projectRepository, WorkspaceLifecycleAppService workspaceLifecycleAppService,
             ExternalContentFetcher externalContentFetcher, WebSearchProvider webSearchProvider,
-            SkillProposalAdapter skillProposals, ImageGenerationAppService imageGeneration,
+            SkillProposalAdapter skillProposals, SedimentProposalAdapter sedimentProposals,
+            ImageGenerationAppService imageGeneration,
             LandedFileFacts landedFiles, DesignSpecAppService designSpecs,
             VerificationFacts verificationFacts, AgentConfigAppService agentConfigs) {
         this.prdArtifacts = prdArtifacts;
@@ -94,6 +101,7 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
         this.externalContentFetcher = externalContentFetcher;
         this.webSearchProvider = webSearchProvider;
         this.skillProposals = skillProposals;
+        this.sedimentProposals = sedimentProposals;
         this.imageGeneration = imageGeneration;
         this.landedFiles = landedFiles;
         this.designSpecs = designSpecs;
@@ -129,6 +137,11 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // （经适配器），不写工作区文件——#86 只读姿态不被破坏
             toolkit.registerAgentTool(new ProposeSkillTool(ro.workspaceId(),
                     SkillSlot.MAIN, skillProposals));
+            // #460 数据飞轮采集层：沉淀物自荐（需求案例/功能模块/业务规则——骨架件
+            // 无开关；软指引在工作协议＋轮收口轻兜底盘问，不绑时刻不硬步骤）。写面
+            // 是采集层草稿库（经适配器），不写工作区文件
+            toolkit.registerAgentTool(new ProposeSedimentTool(ro.workspaceId(),
+                    SkillSlot.MAIN.key(), sedimentProposals));
         }
         if (AgentProfile.EXECUTOR.key().equals(agentKey)
                 && workspace instanceof AgentWorkspace.ProjectDev dev) {
@@ -139,6 +152,10 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
             // 工作协议——无模式可沉淀的 run 不调用）
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.EXECUTOR, skillProposals));
+            // #460 沉淀自荐：可复用功能模块形态/业务规则沉淀为采集层草稿（骨架件
+            // 无开关；软指引在工作协议——不绑时刻，无内容不调用）
+            toolkit.registerAgentTool(new ProposeSedimentTool(dev.workspaceId(),
+                    SkillSlot.EXECUTOR.key(), sedimentProposals));
         }
         // #289 设计执行体（设计面工作区）：出图工具件（#288 立内核、本票发放——
         // 档位表落提示词层，执行体按设计物语义自选；#292 落盘事实报进变更事实流，
@@ -161,6 +178,8 @@ public class ProfileToolkitSupplier implements AgentToolkitSupplier {
                     () -> agentConfigs.effectiveOf(AgentProfile.EXECUTOR).verifyRoundBudget()));
             toolkit.registerAgentTool(new ProposeSkillTool(dev.workspaceId(),
                     SkillSlot.SUBAGENT, skillProposals));
+            toolkit.registerAgentTool(new ProposeSedimentTool(dev.workspaceId(),
+                    SkillSlot.SUBAGENT.key(), sedimentProposals));
         }
         return toolkit;
     }

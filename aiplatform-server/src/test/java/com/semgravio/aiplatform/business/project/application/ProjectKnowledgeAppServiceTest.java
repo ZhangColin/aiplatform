@@ -76,25 +76,43 @@ class ProjectKnowledgeAppServiceTest {
 
     @Test
     void given_hits_when_establish_session_injection_then_background_block_composed_and_cached() {
-        // 命中拼装：背景块接 system prompt 尾部（调用方拼）——含来源项目名、标题、片段
+        // 命中拼装（#466 多类同池命中）：背景块接 system prompt 尾部（调用方拼）——
+        // 每条带来源与类别标签（kind 区分：PRD 历史需求＋CASE/MODULE/RULE 沉淀物）
         when(knowledgePort.retrieve(eq("给宠物医院做预约系统"), anyInt())).thenReturn(List.of(
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理",
-                        "范围边界：不含库存。")));
+                new KnowledgeHit("CASE", "平台沉淀", "宠物医院在线预约的典型形态",
+                        "主人选医生、按时段预约、迟到作废。"),
+                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
+                        "开场前 2 小时内不可取消。")));
 
         String block = appService.establishSessionInjection(9500L, "给宠物医院做预约系统");
 
-        assertThat(block).startsWith("\n\n【平台知识库·相似历史需求】");
-        assertThat(block).contains("宠物医院预约平台").contains("PRD·宠物医院预约")
+        assertThat(block).startsWith("\n\n【平台知识库·相似知识】");
+        // 命中条带来源 kind 区分：〔来源｜类别〕标题
+        assertThat(block).contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
                 .contains("核心场景：主人在线选医生预约。");
-        assertThat(block).contains("连锁诊所系统").contains("不含库存");
-        // 知识是背景非指令：块自带「非用户的确认信息」限定语
-        assertThat(block).contains("非用户的确认信息");
+        assertThat(block).contains("〔平台沉淀｜需求案例〕宠物医院在线预约的典型形态")
+                .contains("迟到作废");
+        assertThat(block).contains("〔平台沉淀｜业务规则〕预约类业务的取消规则")
+                .contains("开场前 2 小时内不可取消");
+        // 知识是背景非指令：块自带「非用户的确认信息」限定语（非约束口径保留）
+        assertThat(block).contains("非用户的确认信息，不构成对当前需求的约束");
         // 会话缓存：后续轮复用同一块（一次切入一次注入），且不再触检索
         assertThat(appService.sessionTailOf(9500L)).isEqualTo(block);
         assertThat(appService.sessionTailOf(9501L)).isEmpty(); // 别的项目不串台
         verify(knowledgePort, times(1)).retrieve(anyString(), anyInt());
+    }
+
+    @Test
+    void given_unknown_kind_hit_when_establish_then_raw_kind_passed_through() {
+        // kind 开放（#451）：未知类别不映射不丢条——原键透传（新类生长零改注入面）
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("GLOSSARY", "平台沉淀", "新生长类别的条目", "片段正文。")));
+
+        String block = appService.establishSessionInjection(9506L, "做一个官网");
+
+        assertThat(block).contains("〔平台沉淀｜GLOSSARY〕新生长类别的条目");
     }
 
     @Test
@@ -132,22 +150,23 @@ class ProjectKnowledgeAppServiceTest {
 
     @Test
     void given_hits_when_dispatch_injection_then_prefix_block_composed() {
-        // 命中拼装：背景块置任务 prompt 前（前置注入）——含来源项目名、标题、片段，
-        // 自带收尾分隔，调用方直接 prefix + taskPrompt
+        // 命中拼装（#466 多类同池命中）：背景块置任务 prompt 前（前置注入）——每条
+        // 带来源与类别标签，自带收尾分隔，调用方直接 prefix + taskPrompt
         when(knowledgePort.retrieve(eq("做一个宠物医院预约系统"), eq(5))).thenReturn(List.of(
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理",
-                        "范围边界：不含库存。")));
+                new KnowledgeHit("MODULE", "平台沉淀", "预约时段管理模块",
+                        "时段表按周模板配置，节假日单独覆盖。")));
 
         String prefix = appService.dispatchInjection("做一个宠物医院预约系统");
 
-        assertThat(prefix).startsWith("【平台知识库·相似历史需求】");
-        assertThat(prefix).contains("宠物医院预约平台").contains("PRD·宠物医院预约")
+        assertThat(prefix).startsWith("【平台知识库·相似知识】");
+        assertThat(prefix).contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
                 .contains("核心场景：主人在线选医生预约。");
-        assertThat(prefix).contains("连锁诊所系统").contains("不含库存");
-        // 知识是背景非指令：块自带「非用户的确认信息」限定语
-        assertThat(prefix).contains("非用户的确认信息");
+        assertThat(prefix).contains("〔平台沉淀｜功能模块〕预约时段管理模块")
+                .contains("节假日单独覆盖");
+        // 知识是背景非指令：块自带「非用户的确认信息」限定语（非约束口径保留）
+        assertThat(prefix).contains("非用户的确认信息，不构成对当前需求的约束");
         // 前置块自带收尾分隔（接任务 prompt）
         assertThat(prefix).endsWith("————\n\n");
     }

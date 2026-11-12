@@ -147,15 +147,13 @@ public enum ProjectMessage implements CodeMessage {
      *  外部清理，不以空产物顶替（对偶封存包 WSP_016 口径）。 */
     DESIGN_PACKAGE_NOT_FOUND(404, "PRJ_051", "设计资产包不存在（下单冻结件缺失）"),
 
-    // ========== PRD 确认版本（#330「确认即成版」，spec #320 实施序③） ==========
+    // ========== PRD 版本（#330「确认即成版」→#462 去门化改写：run 起跑自动记行） ==========
 
-    /** 版本详情守卫：项目内无该版本号（从未确认或号越界——含非正整数入参）。 */
+    /** 版本详情守卫：项目内无该版本号（从未记行或号越界——含非正整数入参）。 */
     PRD_VERSION_NOT_FOUND(404, "PRJ_052", "PRD 版本不存在"),
 
-    /** 确认门两级拦截（#331 待定项两级门）：「验收与待确认」章有阻碍核心流程缺项
-     * ——须先在对话区补齐再确认（解析缺失 fail-open 不拦：误拦即用户死锁，漏拦
-     * 可经迭代补救）。 */
-    PRD_CONFIRM_BLOCKING_PENDING(409, "PRJ_053", "PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认"),
+    // PRJ_053 曾是确认门两级拦截（#331 阻碍级待定项）——随确认门整段退役注销
+    //（#462，ADR-0039：待定项不设替代门，「验收与待确认」章保留为纯呈现面）。
 
     // ========== Demo 构建版本（#333「Demo 版本化与确认标记」，spec #320 实施序③） ==========
 
@@ -255,7 +253,8 @@ public enum ProjectMessage implements CodeMessage {
     /** 决策时注入禁用集越出封闭集（#437）：token 须为库条目键——错值写不进去（null/缺省＝全启用）。 */
     DECISION_HINT_KIND_INVALID(400, "PRJ_083", "决策时注入的禁用集条目须为封闭集内的值：{0}（可选 failure_stop_loss/anti_mock/context_economy/parallel_tools；null/缺省＝全启用）");
 
-    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（现行确认门＝PRJ_053 语义不同：待定项两级门）
+    // PRJ_016 曾是需求确认门谓词，随门概念删除注销（后继 PRJ_053 两级门亦已随
+    // 确认门整段退役——见上方 PRJ_053 注）
 
     private final int httpStatus;
     private final String code;

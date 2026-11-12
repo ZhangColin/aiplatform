@@ -117,23 +117,25 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 下单冻结面（#335，spec #320 实施序④）：下单前置双确认的引用集——最新已
-     * 确认 PRD 版本（版本号＋确认版全文＝订单快照的冗余拷贝源，订单自含不依赖
-     * 版本表存亡）＋项目确认指针的 Demo 版本号（「确认此版本，准备签约」的定格
-     * 值）。未确认事实如实上报 {@code null}——门判定（ORD_018/ORD_019 拦截）归
-     * 订单侧，本口只报事实（判定跟职责走）；工作区活草稿不进本面（快照源＝
-     * 已确认版本，非工作区正文）。
+     * 下单冻结面（#335，spec #320 实施序④；<b>#462 去门化：读法顺延为「最新版」</b>
+     * ——ADR-0039）：下单前置双确认的引用集——<b>最新 PRD 版本</b>（版本号＋版全文
+     * ＝订单快照的冗余拷贝源，订单自含不依赖版本表存亡；去门化后版本表＝Demo 类 run
+     * 起跑自动记行的构建基准快照，「最新版」即最新构建基准）＋项目确认指针的 Demo
+     * 版本号（「确认此版本，准备签约」的定格值）。缺失事实如实上报 {@code null}
+     * ——门判定（ORD_018/ORD_019 拦截）归订单侧，本口只报事实（判定跟职责走）；
+     * 工作区活草稿不进本面（快照源＝版本行，非工作区正文）。冻结字段结构不动，
+     * 既有订单/合同数据自含兼容。
      *
      * @throws ApplicationException PRJ_001 项目不存在
      */
-    public ConfirmedVersionRefs confirmedVersionRefs(Long projectId) {
+    public LatestVersionRefs latestVersionRefs(Long projectId) {
         Project project = loadProject(projectId);
-        PrdVersion latestConfirmed = prdVersionRepository
+        PrdVersion latest = prdVersionRepository
                 .findFirstByProjectIdOrderByVersionNoDesc(projectId).orElse(null);
-        boolean neverConfirmed = latestConfirmed == null;
-        return new ConfirmedVersionRefs(
-                neverConfirmed ? null : latestConfirmed.getVersionNo(),
-                neverConfirmed ? null : latestConfirmed.getContent(),
+        boolean neverRecorded = latest == null;
+        return new LatestVersionRefs(
+                neverRecorded ? null : latest.getVersionNo(),
+                neverRecorded ? null : latest.getContent(),
                 project.getConfirmedDemoVersionNo());
     }
 
@@ -141,11 +143,11 @@ public class ProjectQueryAppService {
      * 下单冻结面的引用集形状（跨 BC 内部端口形——对偶
      * {@code DesignPackageAppService.StagedPackage} 先例，不进 REST 面）。
      *
-     * @param prdVersionNo  最新已确认 PRD 版本号（null＝从未确认——确认制前遗留）
-     * @param prdContent    已确认版本全文（冗余拷贝源；与版本号同空同在）
+     * @param prdVersionNo  最新 PRD 版本号（null＝尚无构建基准记行——legacy）
+     * @param prdContent    最新版全文（冗余拷贝源；与版本号同空同在）
      * @param demoVersionNo 项目确认指针的 Demo 版本号（null＝未确认任何 Demo 版本）
      */
-    public record ConfirmedVersionRefs(Integer prdVersionNo, String prdContent, Integer demoVersionNo) {
+    public record LatestVersionRefs(Integer prdVersionNo, String prdContent, Integer demoVersionNo) {
     }
 
     /**
@@ -253,13 +255,10 @@ public class ProjectQueryAppService {
         try {
             long mtimeSeconds = Long.parseLong(result.stdout().substring(0, newline));
             String content = result.stdout().substring(newline + 1);
-            // 收敛度投影（#331）：对正文即时解析——确认门（PrdVersionAppService）与
-            // 收敛卡/摘要层（#346/#332 呈现面）同源判定，草稿演进投影随之；
-            // 差异摘要（#334 改需求回路）：范围级草稿停驻列直读（null = 无待确认
-            // 新草稿——对话区提示与确认门摘要层据此派生）
+            // 收敛度投影（#331）：对正文即时解析——收敛卡（#346 呈现面）同源判定，
+            // 草稿演进投影随之（#462 去确认门：原确认门/停驻差异摘要读面随门退役）
             return new PrdResponse(projectId.toString(), content,
-                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)),
-                    project.getPrdDraftSummary());
+                    Instant.ofEpochSecond(mtimeSeconds), PrdReadinessResponse.from(PrdReadiness.parse(content)));
         } catch (RuntimeException e) {
             // stat 首行（epoch 秒）缺失/畸形：stat 成功时不可达，防御性如实暴露
             throw new ApplicationException(WorkspaceMessage.ENVIRONMENT_OPERATION_FAILED,

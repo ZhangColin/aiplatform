@@ -136,7 +136,7 @@ public class ProductionHandoffAppService {
 
     /**
      * 跨 BC 读面形状（#338 前台六态推读写源，对偶
-     * {@code ProjectQueryAppService.ConfirmedVersionRefs} 先例，不进 REST 面）：
+     * {@code ProjectQueryAppService.LatestVersionRefs} 先例，不进 REST 面）：
      * {@code inProduction} 驱动六态分岔（待安排生产/生产中），余为承接字段直读。
      *
      * @param status      承接状态 code（1=待安排生产 2=生产中）

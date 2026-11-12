@@ -136,21 +136,23 @@ class ProfileSubagentSupplierTest {
 
         // 只读交付代码 + 跑命令（浏览器脚本/psql/读日志都经 execute）+ 脚本与报告
         // 写隔离根 + 验证结果登记（#352 report_verification 平台件经声明白名单接入）
-        // + 技能自荐（#263）；排除改交付代码与执行体收口工具
+        // + 技能自荐（#263）+ 沉淀自荐（#460 数据飞轮采集层）；排除改交付代码与
+        // 执行体收口工具
         assertThat(declaration.getTools())
                 .contains("read_file", "grep_files", "glob_files", "list_files", "write_file",
-                        "execute", "report_verification", "propose_skill")
+                        "execute", "report_verification", "propose_skill", "propose_sediment")
                 .doesNotContain("edit_file", "finish_edit");
     }
 
     @Test
     void given_verify_body_when_built_then_instructs_propose_soft_guidance() {
-        // #263 软指引落位：验证经验自荐绑任务回交前——非必做，无经验不调用
+        // #263/#460 软指引落位：验证经验自荐绑任务回交前——非必做，无经验不调用
         SubagentDeclaration declaration = supplier.subagentsFor(AgentProfile.EXECUTOR.key(),
                 new AgentWorkspace.ProjectDev("42", "ws-42-dev")).get(0);
 
         assertThat(declaration.getInlineAgentsBody())
                 .contains("propose_skill")
+                .contains("propose_sediment")
                 .contains("回交")
                 .contains("软指引");
     }

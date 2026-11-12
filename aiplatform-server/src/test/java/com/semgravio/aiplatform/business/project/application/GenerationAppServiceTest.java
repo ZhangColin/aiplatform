@@ -162,12 +162,13 @@ class GenerationAppServiceTest {
     @Autowired
     private CodingRunTrack codingRunTrack;
 
-    /** 两命中的检索桩（下发前置注入 happy path）。 */
+    /** 两命中的检索桩（下发前置注入 happy path；#466 多类同池：PRD＋沉淀物）。 */
     private void givenKnowledgeHits() {
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
                 new KnowledgeHit("PRD", "宠物医院预约平台", "PRD·宠物医院预约",
                         "核心场景：主人在线选医生预约。"),
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。")));
+                new KnowledgeHit("MODULE", "平台沉淀", "预约时段管理模块",
+                        "时段表按周模板配置，节假日单独覆盖。")));
     }
 
     @BeforeEach
@@ -938,7 +939,7 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(3)).converse(commands.capture(), any());
         List<AgentCommand> all = commands.getAllValues();
-        assertThat(all.get(0).prompt()).startsWith("【平台知识库·相似历史需求】");
+        assertThat(all.get(0).prompt()).startsWith("【平台知识库·相似知识】");
         assertThat(all.get(1).prompt()).doesNotContain("【平台知识库");
         assertThat(all.get(2).prompt()).doesNotContain("【平台知识库");
     }
@@ -2412,8 +2413,10 @@ class GenerationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient, times(2)).converse(command.capture(), any());
         assertThat(command.getAllValues().get(0).prompt())
-                .startsWith("【平台知识库·相似历史需求】")
-                .contains("宠物医院预约平台").contains("非用户的确认信息")
+                .startsWith("【平台知识库·相似知识】")
+                .contains("〔宠物医院预约平台｜历史需求〕PRD·宠物医院预约")
+                .contains("〔平台沉淀｜功能模块〕预约时段管理模块")
+                .contains("非用户的确认信息，不构成对当前需求的约束")
                 .endsWith("————\n\n" + GenerationAppService.stage0Prompt(
                         SINGLE_SLICE_PLAN));
     }
@@ -2465,6 +2468,10 @@ class GenerationAppServiceTest {
                 .contains("进展现场（平台可观测事实）")
                 .contains("已累计用时")
                 .contains("已落盘文件变更 尚无")
+                // #472 能力面重试不窄修（Q1a）：异常现场走整段续作轨（宽），
+                // 窄修形（lint 分型）只挂 lint 修轮——兜底语义不变
+                .contains("完成本段任务")
+                .doesNotContain("只逐条消除")
                 .endsWith(GenerationAppService.segmentContext(SINGLE_SLICE_PLAN, null));
         assertThat(attempts.get(2).prompt())
                 .isEqualTo(GenerationAppService.slicePrompt(SINGLE_SLICE_PLAN, 0,
@@ -3959,8 +3966,10 @@ class GenerationAppServiceTest {
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             // 切片 1：首试扫描命中（修轮喂回）、修轮后修净；阶段 0 干净作对照
+            //（首试判据＝不含重试现场标记「进展现场」——宽窄两形重试 prompt 都携带，
+            // #472 窄修现场改「违规现场」后仍稳）
             if (command.sessionId().endsWith("-slice-1")) {
-                boolean bareOnFirstAttempt = !command.prompt().contains("错误现场");
+                boolean bareOnFirstAttempt = !command.prompt().contains("进展现场");
                 robustLintMandatory.put("9844", bareOnFirstAttempt
                         ? "./src/lib/orders.ts:12:const pool = new Pool({ connectionString });\n"
                                 + "./src/app/orders/page.tsx:40:const r = await fetch('/api/orders');\n"
@@ -4035,6 +4044,16 @@ class GenerationAppServiceTest {
         //（强制档未过＝收口被拒——不是软收口）
         assertThat(commands.getAllValues().get(2).prompt()).contains("基座 lint 扫描未过");
         assertThat(commands.getAllValues().get(3).prompt()).contains("基座 lint 强制档未过");
+        // #472 分型不粘滞：修轮试（第 2/5 试）走窄修轨（不携整段任务重述）、拒绝
+        // 回执重试（第 3/6 试）异常现场换轨回整段续作轨（宽）——重跑轮同形复现
+        assertThat(commands.getAllValues().get(2).prompt())
+                .contains("只逐条消除")
+                .doesNotContain("完成本段任务");
+        assertThat(commands.getAllValues().get(3).prompt()).contains("完成本段任务");
+        assertThat(commands.getAllValues().get(5).prompt())
+                .contains("只逐条消除")
+                .doesNotContain("完成本段任务");
+        assertThat(commands.getAllValues().get(6).prompt()).contains("完成本段任务");
         // 段级自愈兜底：留账＋回滚各两次（重跑前＋终态前——#353 不变式）
         verify(workspaceLifecycleAppService, times(2)).exec(eq("9845"),
                 argThat((WorkspaceExecCommand cmd) -> cmd != null
@@ -4050,8 +4069,10 @@ class GenerationAppServiceTest {
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_when_close_then_annotated_not_blocked() {
         givenPerSliceSessions();
-        // #425 AC②后半＋AC③：预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
-        // 不拦收口（对比强制档＝拒绝回路）；未用会话件（阶段 0 零命中）不判违规
+        // #425 AC②后半＋AC③（#471 gap 收口改口径）：预置档（会话件自写）不触发
+        // 修轮——软档违规不烧 attempt+1 失败升档（11-12 复演 3 次预置档升档实录），
+        // 直接近收尾卡标注；不拦收口不变（对比强制档＝修轮＋拒绝回路）；未用
+        // 会话件（阶段 0 零命中）不判违规不变
         Long projectId = persistedProject("9846");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
@@ -4064,7 +4085,7 @@ class GenerationAppServiceTest {
                     Map.of("prompt", command.prompt())));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            // 切片 1 全程（修轮前后）都余预置档违规；阶段 0 干净作对照（不拦不用）
+            // 切片 1 持续余预置档违规；阶段 0 干净作对照（不拦不用）
             if (command.sessionId().endsWith("-slice-1")) {
                 robustLintPreset.put("9846",
                         "./src/app/login/actions.ts:8:const jar = await cookies();\n");
@@ -4074,17 +4095,17 @@ class GenerationAppServiceTest {
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
-        // 预置档不拦收口：片全收口＋generated_at 落位（阶段 0 一次 + 切片两试）
+        // 预置档不触发修轮：每片一试即收口（阶段 0 一次＋切片一次，无修轮重试）
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(2).prompt())
-                .contains("基座 lint 扫描未过")
-                .contains("预置档");
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .doesNotContain("基座 lint 扫描未过");
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2);
         assertThat(generatedAt(projectId)).isNotNull();
-        // 收尾卡如实标注：robustKitLint 带预置档余项与修轮事实、无强制档分节；
-        // 阶段 0（未用会话件）passed 无标注
+        // 收尾卡如实标注：robustKitLint 带预置档余项、无强制档分节、无修轮事实
+        // （修轮没发生——retried 不标，叙事不伪造纠偏过程）；阶段 0（未用会话件）
+        // passed 无标注
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
@@ -4094,7 +4115,7 @@ class GenerationAppServiceTest {
                 .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
         assertThat(robustLint)
                 .containsEntry("status", "violations")
-                .containsEntry("retried", true)
+                .doesNotContainKey("retried")
                 .doesNotContainKey("mandatory");
         assertThat((Map<String, Object>) robustLint.get("preset"))
                 .containsEntry("total", 1);
@@ -4297,6 +4318,49 @@ class GenerationAppServiceTest {
     }
 
     @Test
+    void given_lint_violations_when_fix_round_then_narrow_repair_prompt() {
+        // #472 升档窗口局部化（ADR-0041）：lint 修轮＝错误处理窗口，派发以窄修为
+        // 正身——工作区已有产出为准、仅消除清单内违规、不得重构/重写已完成产出，
+        // 修完即收口；「完成本段任务」的整段重述形只属能力面真失败重试（Q1a 口径）
+        Long projectId = persistedProject("9825");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        givenOxlintViolations();
+        List<String> prompts = new ArrayList<>();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            prompts.add(command.prompt());
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 与切片各一次违规修轮（首试＋修轮）＝4 次 converse；修轮 prompt 携
+        // 违规清单＋窄修指令＋交接摘要约定（修轮尝试即本段收口尝试），不携整段任务
+        // 重述、不携片级上下文（重读 PRD/计划轨迹——窄修少迭代，上下文在会话史在场）
+        verify(agentClient, times(4)).converse(any(), any());
+        assertThat(prompts.get(1))
+                .contains("样式合规扫描未过")
+                .contains("src/app/page.tsx:3 no-raw-colors")
+                .contains("不要重构、重写")
+                .contains("只逐条消除")
+                .contains("交接摘要")
+                // lint 现场措辞（#472 评审收口）：修轮不是失败——现场叙事为「违规」
+                // 不作「错误／已失败 N 次」（首试任务完成，非能力面失败）
+                .contains("违规现场：")
+                .doesNotContain("已失败")
+                .doesNotContain("完成本段任务")
+                .doesNotContain("先重读工作区 docs/PRD.md");
+        assertThat(prompts.get(0)).contains("系统初始化"); // 首试 prompt 不受扰
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void given_lint_violations_fixed_when_retry_then_closing_reports_passed_with_retried() {
         // 修一轮后清零：收尾卡如实叙事「曾发现违规、修一轮后通过」（passed＋
@@ -4456,32 +4520,33 @@ class GenerationAppServiceTest {
         verify(agentClient, times(2)).converse(any(), any());
     }
 
-    // ---------- 生成加门（#332）：确认触发首个 Demo run ----------
+    // ---------- 首 Demo 触发（#332 确认触发 → #462 去确认门平移到首次产 PRD） ----------
 
     @Test
-    void given_confirmed_no_plan_when_dispatch_first_demo_then_redispatch_plan_then_runs() {
-        // 灵魂例（#332 确认后派首个 Demo run）：确认时刻无既有计划——走补产链闭环
-        // （补产轮产计划 → 收口自动派生成 → 阶段 0 + 逐片 → generated_at 落位）
+    void given_no_plan_when_callback_then_defer_dispatch_to_turn_close() {
+        // 灵魂例（#462 收口精化，ADR-0039 补记）：回调发生在产 PRD 同转进行中
+        // （协议 savePrd→saveBuildPlan 有序），此刻计划必未落——本入口不补产（否则
+        // 补产轮排在同转后空烧一整轮），静默 null、零会话；同转收口携计划再派即全链
         Long projectId = persistedProject("9880");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
         givenAgentsMdWriteSucceeds();
-        BuildPlan produced = new BuildPlan(List.of("用户能注册登录", "用户能下单支付"));
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), produced);
-                return new AgentReply(command.runId(), "已按 PRD 拟好实施计划");
-            }
             return new AgentReply(command.runId(), "完成");
         });
 
-        GenerationAppService.GenerationRun run = appService.dispatchFirstDemoOnConfirm(projectId);
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
+        verify(agentClient, never()).converse(any(), any());
+        assertThat(generatedAt(projectId)).isNull();
 
+        // 同转收口（buildPlanFacts 交接物在场）：直派全链——计划落轨＋阶段 0＋逐片
+        GenerationAppService.GenerationRun run =
+                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
         assertThat(run).isNotNull();
-        assertThat(appService.planOf(projectId)).isEqualTo(produced);
-        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(2);
+        assertThat(appService.planOf(projectId)).isEqualTo(SINGLE_SLICE_PLAN);
+        assertThat(appService.deepestClosedSegmentOf(projectId)).isEqualTo(1);
         assertThat(generatedAt(projectId)).isNotNull();
     }
 
@@ -4490,7 +4555,7 @@ class GenerationAppServiceTest {
         // 已生成＝首个 Demo 已起，确认只负责首个——不重复派、零编码 run
         Long projectId = persistedGeneratedProject("9881");
 
-        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
         verify(agentClient, never()).converse(any(), any());
     }
 
@@ -4499,14 +4564,16 @@ class GenerationAppServiceTest {
         // 归档＝对话区关闭即全停——确认不派
         Long projectId = persistedArchivedProject("9882");
 
-        assertThat(appService.dispatchFirstDemoOnConfirm(projectId)).isNull();
+        assertThat(appService.dispatchFirstDemoOnPrdProduced(projectId)).isNull();
         verify(agentClient, never()).converse(any(), any());
     }
 
     @Test
-    void given_first_demo_failed_when_reconfirm_then_redispatch_from_track() {
-        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」，用户
-        // 重确认（「继续生成」同路）即再触发——计划已在轨道表，从断点续跑（不重产计划）
+    void given_first_demo_failed_when_retrigger_then_redispatch_from_track() {
+        // 失败重发同口径：首派失败（阶段 0 起服耗尽转终态）后项目仍「未生成」——
+        // 收口观测/「继续生成」/再次回调任一入口再触发即断点续跑（计划已在轨道表，
+        // 不重产计划）。首派走收口入口（产 PRD 同转计划交接物在场），重发走回调
+        // 入口（计划已落轨——本入口在场即派的少数形）
         Long projectId = persistedProject("9883");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4517,25 +4584,22 @@ class GenerationAppServiceTest {
                 return null; // matcher 空参调用（重打桩触发旧 answer）直接过
             }
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             throw new IllegalStateException("起服失败"); // 审核段失败（重试耗尽转终态）
         });
 
-        GenerationAppService.GenerationRun first = appService.dispatchFirstDemoOnConfirm(projectId);
+        GenerationAppService.GenerationRun first =
+                appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         assertThat(first).isNotNull();
         assertThat(generatedAt(projectId)).isNull(); // 失败——仍「未生成」
-        // 重确认（重发）：计划在轨道表，续跑即完成（重打桩的 matcher 空参调用触发旧
+        // 重发（回调入口，计划在轨道表）：续跑即完成（重打桩的 matcher 空参调用触发旧
         // answer——旧桩对 null 命令直接过，同既有先例）
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
             return command != null ? new AgentReply(command.runId(), "完成") : null;
         });
-        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnConfirm(projectId);
+        GenerationAppService.GenerationRun again = appService.dispatchFirstDemoOnPrdProduced(projectId);
 
         assertThat(again).isNotNull();
         assertThat(generatedAt(projectId)).isNotNull();
@@ -4546,7 +4610,8 @@ class GenerationAppServiceTest {
     @Test
     void given_confirmed_prd_when_generation_closes_then_demo_v1_persisted() {
         // 灵魂例（#333 AC①）：构建收口自动成版——首版 v1 随 generated_at 同刻落，
-        // 锚＝起跑时已确认 PRD 版本、run 锚＝末片收口 run（「查看当时」接续缝）
+        // 锚＝起跑时已确认 PRD 版本、run 锚＝末片收口 run（「查看当时」接续缝）。
+        // 首派走收口入口（#462：产 PRD 同转收口携计划交接物直派）
         Long projectId = persistedProject("9884");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4555,14 +4620,10 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchFirstDemoOnConfirm(projectId);
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         verify(agentClient, atLeast(2)).converse(commands.capture(), any());
         Map<String, Object> version = jdbcTemplate.queryForMap(
@@ -4580,7 +4641,8 @@ class GenerationAppServiceTest {
     @Test
     void given_prd_v2_confirmed_mid_run_when_closure_then_version_anchors_v1() {
         // 在途 Demo 照跑完收口绑旧版本（#333 AC③）：起跑后、收口前 PRD 出新版
-        // （converse 侧效插入确认版 v2）——成版仍锚起跑时的 v1，不随后续确认漂移
+        // （converse 侧效插入确认版 v2）——成版仍锚起跑时的 v1，不随后续确认漂移。
+        // 首派走收口入口（#462 触发平移后收口单点直派）
         Long projectId = persistedProject("9885");
         seedConfirmedVersion(projectId);
         givenSessionExecutorRunsInline();
@@ -4588,10 +4650,6 @@ class GenerationAppServiceTest {
         when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
             AgentCommand command = invocation.getArgument(0);
             verifyRan(command);
-            if (command.sessionId().startsWith(MainAgentAppService.SESSION_PREFIX)) {
-                buildPlanFacts.record(command.workspaceId(), SINGLE_SLICE_PLAN);
-                return new AgentReply(command.runId(), "计划已定");
-            }
             // 在途插确认：PRD v2 在生成 run 进行中落库（幂等——阶段 0/切片各跑一
             // 次 converse，冲突即已插过）
             jdbcTemplate.update("""
@@ -4604,7 +4662,7 @@ class GenerationAppServiceTest {
             return new AgentReply(command.runId(), "完成");
         });
 
-        appService.dispatchFirstDemoOnConfirm(projectId);
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
         Map<String, Object> version = jdbcTemplate.queryForMap(
                 "SELECT version_no, prd_version_no FROM prj_demo_versions WHERE project_id = ?",
@@ -4823,7 +4881,7 @@ class GenerationAppServiceTest {
     }
 
     /** 已确认 PRD 版本在场（#332 生成加门：{@link
-     * GenerationAppService#dispatchFirstDemoOnConfirm} 的调用前提——经确认缝触发时
+     * GenerationAppService#dispatchFirstDemoOnPrdProduced} 的调用前提——经确认缝触发时
      * 版本必已落库；收口观测判据只看存在性，内容不参与）。 */
     private void seedConfirmedVersion(Long projectId) {
         Project project = projectOf(projectId);

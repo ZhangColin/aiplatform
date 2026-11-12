@@ -17,8 +17,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.EmbeddingClient;
 import com.semgravio.aiplatform.base.knowledge.domain.repository.KnowledgeStore;
 
 /**
- * 知识用例（票 #17）：入库（幂等删后插）/ 检索（全局余弦相似）/ 项目级联清理；
- * 素材状态（#153）：停用⇄启用可逆开关，停用素材的块退出检索命中。
+ * 知识用例（票 #17）：入库（幂等删后插）/ 检索（混检，#465 自纯向量升级）/
+ * 项目级联清理；素材状态（#153）：停用⇄启用可逆开关，停用素材的块退出检索命中。
  *
  * <p>降级次序刻意「先向量化、后替换」：embedding 不可用时旧块原样保留（只记日志
  * 跳过，不删不插——丢失容忍，A5 §1），检索降级为空列表；外部 HTTP 调用也因此在
@@ -58,7 +58,9 @@ public class KnowledgeAppService {
     }
 
     /**
-     * 语义检索：embedding 不可用降级为空列表（空注入，A5 §3），不抛错。
+     * 混检检索（#465，自纯向量升级）：向量＋三元组关键词双通道 RRF 融合，CASE/
+     * MODULE/RULE 沉淀素材与 PRD 同池命中；embedding 不可用降级为空列表
+     * （空注入，A5 §3），不抛错。
      */
     public List<KnowledgeHit> retrieve(String query, int topK) {
         if (isBlank(query)) {
@@ -72,7 +74,7 @@ public class KnowledgeAppService {
             log.warn("embedding 服务不可用，检索降级为空结果：query 长度={}", query.length());
             return List.of();
         }
-        return knowledgeStore.findSimilar(vectors.get(0), topK);
+        return knowledgeStore.findRelevant(query, vectors.get(0), topK);
     }
 
     /**
@@ -113,9 +115,13 @@ public class KnowledgeAppService {
         knowledgeStore.deleteByProject(projectId);
     }
 
-    /** 结构性校验（调用方编程错误，上抛）：定位与展示字段必填；chunks 只查非 null。 */
+    /**
+     * 结构性校验（调用方编程错误，上抛）：定位与展示字段必填；chunks 只查非 null。
+     * projectId 可空＝孤儿沉淀（#465 激活升格与来源项目脱钩，V61 置空化）——
+     * 级联清理以真实项目 id 为键，NULL 行永不被 {@link #purgeByProject} 命中。
+     */
     private static void requireComplete(KnowledgeSpec spec) {
-        if (spec == null || isBlank(spec.kind()) || isBlank(spec.sourceRef()) || isBlank(spec.projectId())
+        if (spec == null || isBlank(spec.kind()) || isBlank(spec.sourceRef())
                 || isBlank(spec.projectName()) || isBlank(spec.title()) || spec.chunks() == null) {
             throw new ApplicationException(KnowledgeMessage.KNOWLEDGE_SPEC_FIELDS_INCOMPLETE);
         }

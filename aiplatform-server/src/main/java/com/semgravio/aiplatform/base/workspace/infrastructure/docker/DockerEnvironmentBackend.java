@@ -88,7 +88,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * ADR-0027）。0.9（#264 T6）：撤 skills 骨架位（ADR-0022）。升版强制重建镜像，
      * 存量项目经既有幂等重建（唤醒/重建容器即用新镜像）自愈。
      */
-    private static final String DEV_IMAGE = "aiplatform/dev:0.15";
+    private static final String DEV_IMAGE = "aiplatform/dev:0.16";
 
     private static final Duration RESOURCE_READY_TIMEOUT = Duration.ofSeconds(30);
     /** 预览探活短窗（#45）：未就绪快速抛 WSP_012（待期），等应用起服归调用方轮询。 */

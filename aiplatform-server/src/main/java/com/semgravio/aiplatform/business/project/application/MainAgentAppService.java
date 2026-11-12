@@ -27,7 +27,6 @@ import com.semgravio.aiplatform.business.project.domain.error.ProjectMessage;
 import com.semgravio.aiplatform.business.project.domain.model.AgentProfile;
 import com.semgravio.aiplatform.business.project.domain.model.DesignScope;
 import com.semgravio.aiplatform.business.project.domain.model.UsageDims;
-import com.semgravio.aiplatform.business.project.domain.repository.PrdVersionRepository;
 import com.semgravio.aiplatform.business.project.domain.repository.ProjectRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -56,16 +55,17 @@ import lombok.extern.slf4j.Slf4j;
  * 再问）；不炸对话、不出错误气泡。仅平台重启丢锚且挂起仍在的边角同步 409
  * PRJ_024 指路作答（run 无表丢 runId，无法代答）。</p>
  *
- * <p><b>链必达收口（#43；#101 生成无门已由 #332 生成加门推翻）</b>：主智能体无
- * 派发权——生成与更新 run 的派发都不在模型手里，平台在意见轮落定后观测收口（无
- * 挂起问答）即按项目态自动派发：已生成派更新 run（交接物 = 用户意见原文 + 需求
- * 侧判定结果——PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、未生成但
- * 已存在已确认 PRD 版本才派首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}，
- * PRD 已产出未确认不派——确认门是首个生成的唯一触发）、未产出 PRD 止于对话
- * （访谈期常态）。判定结果从工具调用事实观测
- * （{@link PrdRevisionFacts}），不新增模型自报结论的面；守卫沿用（未产出 PRD
- * 止于对话、归档拒、在途排队合并/静默跳过，归 {@link IterationAppService} /
- * {@link GenerationAppService}）。</p>
+ * <p><b>链必达收口（#43；#101 生成无门→#332 生成加门→<b>#462 去确认门</b>）</b>：
+ * 主智能体无派发权——生成与更新 run 的派发都不在模型手里，平台在意见轮落定后
+ * 观测收口（无挂起问答）即按项目态自动派发：已生成派更新 run（交接物 = 用户意见
+ * 原文 + 需求侧判定结果——PRD 改没改、改了什么，见 {@link #dispatchOnTurnClose}）、
+ * 未生成但 PRD 已产出即派首次生成 run（{@link GenerationAppService#dispatchGenerationOnTurnClose}；
+ * 首次 savePrd 落盘回调已先行触发——{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}，
+ * 收口观测再兜一轮，撞在途静默跳过）、未产出 PRD 止于对话（访谈期常态）。判定
+ * 结果从工具调用事实观测（{@link PrdRevisionFacts}），不新增模型自报结论的面；
+ * 大改小改分流随确认门整段退役（#462——机械停派取消，判定权归主智能体工作协议，
+ * 意见轮收口一律受理即派）；守卫沿用（未产出 PRD 止于对话、归档拒、在途排队
+ * 合并/静默跳过，归 {@link IterationAppService} / {@link GenerationAppService}）。</p>
  *
  * <p><b>访谈轮收口硬契约与悬空接管（ADR-0032，#373）</b>：需求梳理期（未出 PRD）
  * 意见轮与问答作答复跑轮的合法收口只有两形——再问一问（挂起问答）或产出 PRD
@@ -94,7 +94,6 @@ public class MainAgentAppService {
     public static final String SESSION_PREFIX = "main-";
 
     private final ProjectRepository projectRepository;
-    private final PrdVersionRepository prdVersions;
     private final AgentscopeAgentClient agentClient;
     private final AgentEventBridge eventBridge;
     private final AgentSessionExecutor sessionExecutor;
@@ -108,9 +107,8 @@ public class MainAgentAppService {
     private final PrdRevisionFacts prdRevisions;
     private final BuildPlanFacts buildPlanFacts;
     private final ConversationHistoryAppService conversationHistory;
-    private final PrdDraftBaseline prdDraftBaseline;
-    private final PrdVersionAppService prdVersionAppService;
     private final MainAgentProperties mainAgentProperties;
+    private final SedimentProposalFacts sedimentProposals;
 
     /**
      * 挂起交换的意见锚（sessionId → 交接物意见腿文本）：意见原文随会话任务落锚
@@ -143,6 +141,23 @@ public class MainAgentAppService {
      */
     private final Set<String> danglingInterviews = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 沉淀兜底盘问记账（#460 数据飞轮采集层）：用户轮合法收口（挂起问答在场 / PRD
+     * 产出 / 迭代期受理）且本轮主智能体无 propose_sediment 调用事实时置位（
+     * 「该提未提」——平台不判该不该提，只记提没提）；下一主智能体对话轮命令构建时
+     * 消费（system prompt 尾附轻提醒，{@link #mainCommand}），提醒非硬门——不设
+     * 拦、不播报、用户无感知。进程内态，重启丢记账（协议软指引仍在，不影响）。
+     */
+    private final Set<String> sedimentNudges = ConcurrentHashMap.newKeySet();
+
+    /** 沉淀兜底盘问尾注（#460）：随主智能体 system prompt 尾附——提醒模型回顾
+     * 未记录的沉淀物；软提醒不绑时刻，模型可忽略。 */
+    static final String SEDIMENT_NUDGE_TAIL =
+            "\n\n（平台轻提醒，无需向用户提及：回顾此前的对话，若有值得跨项目复用的"
+                    + "需求案例（CASE）/功能模块（MODULE）/业务规则（RULE）而尚未记录，"
+                    + "可随时调 propose_sediment 写入采集层草稿；没有就忽略本提醒，"
+                    + "继续本轮工作。）";
+
     /** 悬空补救文案（ADR-0032）：判死/失败收口形——点名「本轮被中断」。 */
     static final String DANGLING_REMEDY_INTERRUPTED =
             "本轮被中断了，需求梳理还没有完成。你可以说「继续」，我们接着梳理。";
@@ -156,7 +171,6 @@ public class MainAgentAppService {
             "上一轮没有正常完成，需求梳理还没有到位。你可以说「继续」，我们接着梳理。";
 
     public MainAgentAppService(ProjectRepository projectRepository,
-            PrdVersionRepository prdVersions,
             AgentscopeAgentClient agentClient, AgentEventBridge eventBridge,
             AgentSessionExecutor sessionExecutor, ProjectKnowledgeAppService knowledgeAppService,
             AgentConfigAppService agentConfigs, ModelTierAppService modelTiers,
@@ -165,10 +179,8 @@ public class MainAgentAppService {
             DesignProcessAppService designProcessAppService,
             PrdRevisionFacts prdRevisions, BuildPlanFacts buildPlanFacts,
             ConversationHistoryAppService conversationHistory,
-            PrdDraftBaseline prdDraftBaseline, PrdVersionAppService prdVersionAppService,
-            MainAgentProperties mainAgentProperties) {
+            MainAgentProperties mainAgentProperties, SedimentProposalFacts sedimentProposals) {
         this.projectRepository = projectRepository;
-        this.prdVersions = prdVersions;
         this.agentClient = agentClient;
         this.eventBridge = eventBridge;
         this.sessionExecutor = sessionExecutor;
@@ -182,9 +194,8 @@ public class MainAgentAppService {
         this.prdRevisions = prdRevisions;
         this.buildPlanFacts = buildPlanFacts;
         this.conversationHistory = conversationHistory;
-        this.prdDraftBaseline = prdDraftBaseline;
-        this.prdVersionAppService = prdVersionAppService;
         this.mainAgentProperties = mainAgentProperties;
+        this.sedimentProposals = sedimentProposals;
     }
 
     /**
@@ -390,6 +401,7 @@ public class MainAgentAppService {
             String workspaceId = Long.toString(project.getWorkspaceId());
             prdRevisions.clear(workspaceId);
             buildPlanFacts.clear(workspaceId);
+            sedimentProposals.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
                         conversationHistory.recorder(projectId, eventBridge.sink(project));
@@ -495,6 +507,7 @@ public class MainAgentAppService {
             String workspaceId = Long.toString(project.getWorkspaceId());
             prdRevisions.clear(workspaceId);
             buildPlanFacts.clear(workspaceId);
+            sedimentProposals.clear(workspaceId);
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
                         conversationHistory.recorder(projectId, eventBridge.sink(project));
@@ -631,6 +644,7 @@ public class MainAgentAppService {
             // 本轮交接物（意见锚无此滞留——失败即清，见下）
             prdRevisions.clear(Long.toString(project.getWorkspaceId()));
             buildPlanFacts.clear(Long.toString(project.getWorkspaceId()));
+            sedimentProposals.clear(Long.toString(project.getWorkspaceId()));
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
                         conversationHistory.recorder(projectId, eventBridge.sink(project));
@@ -665,35 +679,46 @@ public class MainAgentAppService {
     /** 主智能体对话命令（意见轮与咨询轮同构：同会话、同配置、同只读面）。 */
     private AgentCommand mainCommand(Project project, String runId, String prompt) {
         AgentConfigAppService.EffectiveConfig main = agentConfigs.effectiveOf(AgentProfile.MAIN);
-        return mainCommandWith(project, runId, prompt, main, modelTiers.resolve(main.modelId()));
+        // #460 兜底盘问投递：收口记账的会话下一轮 system prompt 尾附轻提醒（消费即清）
+        return mainCommandWith(project, runId, prompt, main, modelTiers.resolve(main.modelId()),
+                sedimentNudgeTailOf(project.getId()));
+    }
+
+    /** 兜底盘问尾注取口（消费即清）：记账在场附尾注，不在场附空串。 */
+    private String sedimentNudgeTailOf(Long projectId) {
+        return sedimentNudges.remove(sessionIdOf(projectId)) ? SEDIMENT_NUDGE_TAIL : "";
     }
 
     /**
-     * 纠偏轮命令（#445）：同主对话命令的会话/配置/计量/只读面（system prompt 与
-     * 工具规格同取 MAIN 生效值——纠偏轮也是主智能体的轮），prompt 换纠偏微指令、
-     * 模型档位按轮次解析（{@link #correctiveModelOf}）。
+     * 纠偏轮命令（#445；<b>#462 统一微指令修订</b>——ADR-0036 补记）：同主对话命令的
+     * 会话/配置/计量/只读面（system prompt 与工具规格同取 MAIN 生效值——纠偏轮也是
+     * 主智能体的轮），prompt 换统一纠偏微指令、模型档位按轮次解析（{@link
+     * #correctiveModelOf}）。
      */
     private AgentCommand correctiveCommand(Project project, String runId,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model,
-            boolean prdSaveFailed) {
-        return mainCommandWith(project, runId,
-                prdSaveFailed ? CORRECTIVE_RESAVE_PRD_PROMPT : CORRECTIVE_REASK_PROMPT,
-                main, model);
+            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model) {
+        // 纠偏轮不带沉淀兜底盘问尾注（mainCommandWith 尾注腿传空串）：纠偏是格式失格的
+        // 确定性纠正，不混入沉淀提醒（记账不被消费，下轮正常投递）
+        return mainCommandWith(project, runId, CORRECTIVE_REDIRECT_PROMPT,
+                main, model, /* sedimentNudgeTail= */ "");
     }
 
-    /** 纠偏轮微指令（提问形，#445）：格式失格（正文提问）的确定性纠正——教规则＋令当场重问。 */
-    static final String CORRECTIVE_REASK_PROMPT =
-            "平台纠正：你上一轮向用户的提问没有走 ask_user 工具（问题写在了正文里，用户没有"
-                    + "问答卡可答）。提问必须经 ask_user：question 填问题文本、options 给 2-4 个"
-                    + "候选（开放问题可不填）、可多选时 multiple 传 true；正文只做对上轮答复的"
-                    + "消化说明，问题本体只出现在 ask_user 里。请立即用 ask_user 重新提出你上轮的"
-                    + "问题（可精简原文），除此之外本轮不要再做别的。";
-
-    /** 纠偏轮微指令（savePrd 失败形）：平台观测到上轮 savePrd 未落成，令重试保存。 */
-    static final String CORRECTIVE_RESAVE_PRD_PROMPT =
-            "平台纠正：上一轮调用 savePrd 保存 PRD 没有成功，梳理成果未保存。请重新调用 "
-                    + "savePrd（content 传完整 PRD 全文，summary 传本次产出说明），保存成功后"
-                    + "继续既有步骤（系统终点随后产出切片计划，同首次产出口径）。";
+    /**
+     * 统一纠偏轮微指令（#462，ADR-0036 补记——原提问形/savePrd 失败形两条分形指令
+     * 合并为一条）：悬空收口的两种格式失格（正文提问未走 ask_user／说可出 PRD 但
+     * 未调 savePrd／savePrd 未落成）平台侧无可观测信号可靠区分——统一指令一次覆盖
+     * 两形：教合法收口两形＋令按上轮意图立即执行其一。确定性、不解析自由文本。
+     */
+    static final String CORRECTIVE_REDIRECT_PROMPT =
+            "平台纠正：你上一轮的收口不合法——既没有挂起问答（未调用 ask_user），"
+                    + "也没有产出 PRD（未调用 savePrd）。需求梳理推进只有两个合法出口："
+                    + "①要提问——必须经 ask_user 工具（question 填问题文本、header 填主题"
+                    + "短标签、options 给 2-4 个候选，禁止把问题写在正文里）；②判定需求"
+                    + "明确、要产出 PRD——先 load_skill_through_path 加载 prd-writing 技能，"
+                    + "随即调用 savePrd（content 传完整 PRD markdown 全文，summary 必传）。"
+                    + "请按你上一轮的意图立即执行其中之一：上轮想提问的，现在用 ask_user "
+                    + "重新提出（可精简原文）；上轮想产出 PRD 的，现在立即保存 PRD。"
+                    + "除此之外本轮不要再做别的。";
 
     /** 主对话命令构建（配置束与解析后模型参数化——对话轮与纠偏轮共用，#445）。
      * systemPrompt/模型档位/增强工具开关经运营配置读面取生效值（#251 库值优先、
@@ -703,13 +728,15 @@ public class MainAgentAppService {
      * {@link MainAgentProperties}（#371：携增强工具的慢轮不被总墙钟掐死）。
      */
     private AgentCommand mainCommandWith(Project project, String runId, String prompt,
-            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model) {
+            AgentConfigAppService.EffectiveConfig main, ModelTierAppService.ResolvedModel model,
+            String sedimentNudgeTail) {
         Long projectId = project.getId();
         String sessionId = sessionIdOf(projectId);
         return new AgentCommand(
                 runId,
                 prompt,
-                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId),
+                main.systemPrompt() + knowledgeAppService.sessionTailOf(projectId)
+                        + sedimentNudgeTail,
                 model.modelString(),
                 model.channel(),
                 sessionId,
@@ -733,40 +760,43 @@ public class MainAgentAppService {
     }
 
     /**
-     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门→#334 改需求
-     * 回路）：轮落定（对话轮收口或问答续跑收口）后观测链的走向——会话有挂起问答
-     * = 本轮未收口（答复后续跑再判，意见锚保留）；收口前归档 = 竞态守卫，静默
-     * 不派。落定即按项目态自动派发：<b>已生成派更新 run</b>（交接物 = {@link
-     * #opinionExchanges} 中的意见原文及追问答复 + {@link #prdRevisions} 中的
-     * PRD 修订事实——本轮 savePrd 调用的 summary 终值，无调用事实即 null
-     * 「未修订」），范围级变更（修订事实＋草稿≠已确认版）例外——#334 停派停驻
-     * 待确认（确认过门才派下一版 Demo）；<b>未生成但已产出 PRD</b>——系统终点
-     * 改判据（#332 生成加门）：存在已确认 PRD 版本才派首个构建 run（「确认此版
-     * PRD 并生成 Demo」是唯一触发——用户意见轮「重提即再触发」同此判据），未确认
-     * 静默待确认；本轮范围级新草稿在场同待确认（#334）。设计类终点保持原触发律
-     * （未定稿起设计过程、全部定稿起构建，入口已收起）。意见锚与修订事实同
-     * 「收口即消费」清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD
-     * 止于对话（访谈期常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具
-     * 都不影响派发——链的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚
-     * （收口即消费语义保持）、不自动重试——用户重提即兜底。
+     * 链必达收口观测（#43，#101 生成无门自动发起→#332 生成加门→<b>#462 去确认门
+     * 整段退役</b>，ADR-0039）：轮落定（对话轮收口或问答续跑收口）后观测链的走向
+     * ——会话有挂起问答 = 本轮未收口（答复后续跑再判，意见锚保留）；收口前归档 =
+     * 竞态守卫，静默不派。落定即按项目态自动派发：<b>已生成派更新 run</b>（交接物 =
+     * {@link #opinionExchanges} 中的意见原文及追问答复 + {@link #prdRevisions} 中的
+     * PRD 修订事实——本轮 savePrd 调用的 summary 终值，无调用事实即 null「未修订」）
+     * ——大改小改分流的机械停派已随确认门退役（#462：范围级新草稿照派，判定权归
+     * 主智能体工作协议）；<b>未生成但已产出 PRD</b>——系统终点自动派首个构建 run
+     * （首次 savePrd 落盘回调已先行触发，{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}；
+     * 此处收口观测再兜一轮，撞在途静默跳过）。设计类终点保持原触发律（未定稿起
+     * 设计过程、全部定稿起构建，入口已收起）。意见锚与修订事实同「收口即消费」
+     * 清掉——生成读的是工作区 PRD 正本，不进交接物；未产出 PRD 止于对话（访谈期
+     * 常态）。主智能体无派发权：模型存没存 PRD、调没调任何工具都不影响派发——链
+     * 的收口在平台代码。派发失败不炸对话轨道、不恢复意见锚（收口即消费语义保持）、
+     * 不自动重试——用户重提即兜底。
      *
-     * <p><b>平台轮与生成加门（#332）</b>：{@code platformRound} 区分平台发起的需求侧
-     * 轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
-     * 与用户对话轮。生成加门（未生成＋存在已确认版本才起首个构建）只拦<b>用户对话轮</b>
-     * 的直接自动起（旧「PRD 出即起」退役点）；平台轮是确认/继续生成「确认后派」「补产
-     * 再派」的达成机制（补产轮收口即链必达再派生成），不经该门——否则确认/存量恢复
-     * 的补产链被自己的门拦死。判据单一：用户轮＝存在已确认版本（确认动作的次生事实），
-     * 平台轮＝直接放行。</p>
+     * <p><b>平台轮（补产/终点切换重产）</b>：{@code platformRound} 区分平台发起的
+     * 需求侧轮（补产 {@link #requestBuildPlan} / 终点切换重产 {@link #requestEndpointShift}）
+     * 与用户对话轮。去门化后用户轮与平台轮同判据（PRD 已产出即派），平台轮标记仍
+     * 保留——悬空契约与沉淀记账的平台轮豁免沿用它（ADR-0032/ADR-0038 口径不变）。</p>
      *
-     * <p><b>访谈轮收口硬契约（ADR-0032，#373；纠偏链 ADR-0036，#445）</b>：本观测点
-     * 同位校验不变量——需求梳理期（未出 PRD）用户轮的合法收口只有「再问一问」（挂起
-     * 问答）或「产出 PRD」两形；无问无 PRD 即悬空。命中不立即播报——先走收口纠偏链
-     * （主档＋确定性微指令重派，失格升强档兜底，封顶两轮，{@link
-     * #dispatchCorrectiveChain}），双失格才置 {@link #danglingInterviews}＋平台补救
-     * （文案按 savePrd 失败事实分形）。两合法形与迭代期、归档路径随观测清除标记
-     * （接管解除单点归一）；平台轮不入契约。轮失败（判死等异常上抛）不经本观测与
-     * 纠偏链——悬空补救在轮任务的 catch 侧（{@link #remedyFailedInterviewTurn}，
-     * 即时点名播报）。</p>
+     * <p><b>访谈轮收口硬契约（ADR-0032，#373；纠偏链 ADR-0036＋#462 统一微指令
+     * 修订）</b>：本观测点同位校验不变量——需求梳理期（未出 PRD）用户轮的合法收口
+     * 只有「再问一问」（挂起问答）或「产出 PRD」两形；无问无 PRD 即悬空。命中不
+     * 立即播报——先走收口纠偏链（主档＋统一纠偏微指令重派〔一条指令覆盖正文提问
+     * 与「说可出 PRD 但未调 savePrd」两形——平台无可观测信号可靠区分，确定性纠正
+     * 不解析自由文本〕，失格升强档兜底，封顶两轮，{@link #dispatchCorrectiveChain}），
+     * 双失格才置 {@link #danglingInterviews}＋平台补救（文案按 savePrd 失败事实分形）。
+     * 两合法形与迭代期、归档路径随观测清除标记（接管解除单点归一）；平台轮不入
+     * 契约。轮失败（判死等异常上抛）不经本观测与纠偏链——悬空补救在轮任务的
+     * catch 侧（{@link #remedyFailedInterviewTurn}，即时点名播报）。</p>
+     *
+     * <p><b>沉淀兜底盘问记账（#460，ADR-0038）</b>：用户轮合法收口（挂起问答在场／
+     * PRD 产出／迭代期受理三形）且本轮主智能体无 propose_sediment 调用事实（
+     * {@link SedimentProposalFacts}）即置 {@link #sedimentNudges} 记账——下一对话轮
+     * system prompt 尾附软提醒（{@link #mainCommand} 消费即清）。不设硬门：不拦
+     * 收口、不播报、用户无感知；悬空收口与平台轮不记账。</p>
      */
     private void dispatchOnTurnClose(Long projectId, String sessionId, String runId,
             boolean platformRound) {
@@ -775,13 +805,14 @@ public class MainAgentAppService {
             if (project == null) {
                 return;
             }
+            String workspaceId = Long.toString(project.getWorkspaceId());
             if (agentClient.hasAskingToolCall(project.ownerUserId(), sessionId)) {
                 // 合法收口形一（ADR-0032）：挂起问答在场＝本轮未收口——悬空标记随
                 // 解除（访谈重获推进抓手，入口恢复分类）
                 danglingInterviews.remove(sessionId);
+                sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
                 return;
             }
-            String workspaceId = Long.toString(project.getWorkspaceId());
             if (project.getArchivedAt() != null) {
                 clearTurnAnchors(sessionId, workspaceId); // 归档竞态守卫：静默不派
                 danglingInterviews.remove(sessionId); // 归档即对话区关闭：标记随清（终态）
@@ -824,6 +855,7 @@ public class MainAgentAppService {
                 }
                 // 合法收口形二（ADR-0032）：PRD 产出（含修订）——悬空标记随解除
                 danglingInterviews.remove(sessionId);
+                sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
                 if (project.getEndpointType().designInvolved()
                         && !designProcessAppService.designFinalized(project)) {
                     // 设计类终点（#289 接管 #285 临时静默口径）：PRD 收口自动起
@@ -839,32 +871,14 @@ public class MainAgentAppService {
                     }
                     return;
                 }
-                // 生成加门（#332）：系统终点的首个构建 run 唯一触发＝确认此版
-                // PRD——用户对话轮 PRD 出不再自动起（旧「生成无门、PRD 出即起」
-                // 口径退役，ADR-0008 改写）。无已确认版本即静默待确认（不派、不
-                // 报错），不落轨道片行（未确认不呈现「生成中断」态）；切片计划
-                // 事实随本轮消费清掉——确认派发时计划缺失走既有补产链。平台轮
-                // （补产/终点切换）是确认与继续生成的达成机制，不经此门直接放行
-                // （否则确认后的补产链被自己的门拦死）。设计类终点（含全部定稿）
+                // 去确认门（#462，ADR-0039——旧「生成加门 #332」退役）：系统终点 PRD
+                // 已产出即自动派首个构建 run——首次 savePrd 落盘回调已先行触发派发
+                // （{@link GenerationAppService#dispatchFirstDemoOnPrdProduced}，幂等：
+                // 在途/已生成静默跳过），此处收口观测再兜一轮（平台轮/续跑/兜底面），
+                // 撞在途静默跳过；切片计划事实随本轮消费进交接物（saveBuildPlan 事实
+                // 在场即随派落轨道表，缺失走既有补产链）。设计类终点（含全部定稿）
                 // 保持原触发律（设计轨分岔代码保留、入口已收起）。
-                if (!platformRound && !project.getEndpointType().designInvolved()
-                        && !prdVersions.existsByProjectId(projectId)) {
-                    log.info("[main-close] 项目 {} PRD 已产出未确认，平台不自动起 Demo"
-                            + "（生成加门：待确认此版 PRD）", projectId);
-                    return;
-                }
-                // 改需求回路（#334）：已确认版本在场但本轮出范围级新草稿（savePrd
-                // 修订事实＋草稿≠已确认版——大改小改分流，判定从工具调用事实观测）
-                // → 新草稿不自动触发 Demo：停驻待确认（意见＋差异摘要），用户过
-                // 确认门（新版本号）后才派。平台轮不经此门（#332 豁免同口径）。
-                if (!platformRound && !project.getEndpointType().designInvolved()
-                        && prdRevisionSummary != null
-                        && parkScopeDraftOrAwait(projectId, opinion, prdRevisionSummary)) {
-                    return;
-                }
-                // 系统终点已确认 / 平台轮 / 设计类终点全部定稿（#291 定稿→构建经
-                // 计划补产链自然恢复——构建从定稿设计稿长出）；携意见载荷
-                // （#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
+                // 携意见载荷（#360）：首 Demo 在途时意见入队＋明示、成功收口后合并补派，
                 // 不再静默丢（锚缺失的防御边角传 null opinion 走旧静默口径）
                 GenerationAppService.GenerationRun run =
                         generationAppService.dispatchGenerationOnTurnClose(projectId, plan,
@@ -879,6 +893,7 @@ public class MainAgentAppService {
             // 已生成（迭代期）：收口不变量不适用（ADR-0032——受理即派、有派发链与
             // run 留痕兜底），悬空标记随清（迭代期无访谈悬空态）
             danglingInterviews.remove(sessionId);
+            sedimentNudgeOnClose(sessionId, workspaceId, platformRound);
             if (project.getEndpointType().designInvolved()
                     && !designProcessAppService.designFinalized(project)) {
                 // 已生成＋设计类终点＋设计未定稿完（#291 系统中途切换的设计轨承接）：
@@ -898,16 +913,10 @@ public class MainAgentAppService {
                 return; // 锚缺失（任务内落锚先于收口，同任务序——进程内理论不可达）——防御不派
             }
             String prdRevisionSummary = prdRevisions.consume(workspaceId);
-            // 改需求回路（#334 大改小改分流，判定归主智能体提示词、执行归平台）：
-            // 本轮有 savePrd 修订事实且草稿≠已确认版（{@link PrdDraftBaseline} 漂移
-            // 判定）＝范围级变更——不派更新 run：意见与差异摘要停驻待确认，用户过
-            // 确认门（新版本号）后才由确认动作派下一版 Demo。同文重存（草稿==已确认
-            // 版——派发失败后重提等）不属新草稿，照旧受理即迭代（修订说明进交接物）。
-            if (parkScopeDraftOrAwait(projectId, task, prdRevisionSummary)) {
-                return;
-            }
-            // 小反馈照旧受理即迭代（无修订事实，或草稿==已确认版的同文重存）：
-            // 迭代基准＝当前已确认版本的判定归迭代轨起跑（runFixTrack 逐场取基准）
+            // 大改分流（#462 去确认门——机械停派整段退役，ADR-0039/#450 裁决 A）：
+            // 不再以「修订事实＋草稿漂移」停派待确认——意见轮收口一律受理即派，
+            // 范围级/小反馈的判定权归主智能体（工作协议第 11 条：意见明确→修订
+            // PRD 直接派；不明确→当场 ask_user 问清）。修订说明照旧进交接物。
             IterationAppService.FixDispatch dispatch =
                     iterationAppService.startFixRun(projectId, task, prdRevisionSummary);
             log.info("[main-close] 项目 {} 意见轮收口，平台自动派更新 run（{}，{}）",
@@ -937,13 +946,16 @@ public class MainAgentAppService {
     private static final int CORRECTIVE_ROUND_CAP = 2;
 
     /**
-     * 悬空收口的自动纠偏链（ADR-0036，#445）：平台发起的纠正轮序列——把「模型纯
-     * 文本提问／savePrd 未落成」的格式失格在会话锁死（首轮坏示范被后续轮自模仿
-     * 延续）前扳回工具轨道。第 1 轮用主智能体生效档（flash 为主）＋确定性微指令；
-     * 仍失格第 2 轮升强档（路由面生效值，缺省 pro）——「flash 做不到再升 pro」与
-     * 执行体路由（ADR-0030）同一总姿态。成功判据＝合法收口形两形（挂起问答在场
-     * 或 PRD 已产出，{@link #correctiveSettled}）；每轮新 runId、会话执行器串行、
-     * 回复照常落对话史。链不占悬空标记——标记双失格才置（接管面不扩大）。
+     * 悬空收口的自动纠偏链（ADR-0036，#445；<b>#462 统一微指令修订</b>——原提问形/
+     * savePrd 失败形两条分形指令合并为一条覆盖两形的确定性微指令，ADR-0036 补记）：
+     * 平台发起的纠正轮序列——把「模型纯文本提问／说可出 PRD 但未调 savePrd／
+     * savePrd 未落成」的格式失格在会话锁死（首轮坏示范被后续轮自模仿延续）前扳回
+     * 工具轨道。第 1 轮用主智能体生效档（flash 为主）＋统一微指令；仍失格第 2 轮
+     * 升强档（路由面生效值，缺省 pro）——「flash 做不到再升 pro」与执行体路由
+     * （ADR-0030）同一总姿态。成功判据＝合法收口形两形（挂起问答在场或 PRD 已产出，
+     * {@link #correctiveSettled}）；每轮新 runId、会话执行器串行、回复照常落对话史。
+     * 链不占悬空标记——标记双失格才置（接管面不扩大）；播报文案仍按 savePrd 失败
+     * 事实分形（点名/泛形——{@code prdSaveFailed} 只进文案，不再选指令）。
      */
     private void dispatchCorrectiveChain(Project project, String sessionId, String originRunId,
             boolean prdSaveFailed) {
@@ -962,7 +974,7 @@ public class MainAgentAppService {
         }
         Long projectId = project.getId();
         String runId = EventsAppService.newRunId();
-        AgentCommand command = correctiveCommand(project, runId, main, model, prdSaveFailed);
+        AgentCommand command = correctiveCommand(project, runId, main, model);
         sessionExecutor.submit(sessionId, () -> {
             try {
                 ConversationHistoryAppService.TurnRecorder recorder =
@@ -1036,6 +1048,25 @@ public class MainAgentAppService {
     }
 
     /**
+     * 沉淀兜底盘问记账（#460）：先消费本轮自荐调用事实——主智能体槽本轮提过
+     * （受理与拒因同口径）即撤掉此前可能存在的记账（问答续跑里补提的情形）；
+     * 未提且为用户轮合法收口则置记账（次轮 system prompt 尾附轻提醒）。平台轮
+     * 消费事实不置记账（补产/通告轮不入「该提未提」口径）。悬空收口不记账——
+     * 纠偏轮正在救格式失格，不混入沉淀提醒。
+     */
+    private void sedimentNudgeOnClose(String sessionId, String workspaceId,
+            boolean platformRound) {
+        boolean mainProposed = sedimentProposals.consumeMainProposed(workspaceId);
+        if (mainProposed) {
+            sedimentNudges.remove(sessionId);
+            return;
+        }
+        if (!platformRound) {
+            sedimentNudges.add(sessionId);
+        }
+    }
+
+    /**
      * 用户轮失败收口（意见轮与问答续跑共用，ADR-0032）：清两会话锚（失败不留锚
      * ——重提即兜底，#54/#83 既有口径）＋悬空观测（判死同契约，见 {@link
      * #remedyFailedInterviewTurn}）。平台轮（补产/切换通告）不入悬空契约，catch
@@ -1097,30 +1128,6 @@ public class MainAgentAppService {
             log.warn("[main-close] 项目 {} 失败收口悬空补救发射失败（不遮原始轮失败）：{}",
                     projectId, e.toString());
         }
-    }
-
-    /**
-     * 改需求回路停派判定与停驻（#334，未生成/已生成两分支共用单点）：本轮 savePrd
-     * 修订事实在场且工作区草稿偏离最新已确认版（{@link PrdDraftBaseline} 全文
-     * 比对）＝范围级新草稿——停驻意见与差异摘要待确认并返回 true（调用方停派：
-     * 新草稿不自动触发 Demo，确认过门〔新版本号〕才派下一版）。意见锚缺失
-     * （进程内理论不可达的防御边角——锚随任务落先于收口）时停派不停驻，只记
-     * 日志待确认（不派不错派）。无修订事实或草稿==已确认版（同文重存——派发
-     * 失败后重提等）返回 false：照旧受理即迭代。
-     */
-    private boolean parkScopeDraftOrAwait(Long projectId, String opinion,
-            String prdRevisionSummary) {
-        if (prdRevisionSummary == null
-                || prdDraftBaseline.driftedFrom(projectId).isEmpty()) {
-            return false;
-        }
-        boolean parked = opinion != null && !opinion.isBlank();
-        if (parked) {
-            prdVersionAppService.parkDraftChange(projectId, opinion, prdRevisionSummary);
-        }
-        log.info("[main-close] 项目 {} 范围级意见收口：PRD 新草稿待确认，停派待确认门（#334——确认过门才派下一版 Demo）{}",
-                projectId, parked ? "" : "；意见锚缺失仅停派（防御边角）");
-        return true;
     }
 
     /** 追问答复并入意见锚（挂起交换期间累积——多轮追问的答复都进交接物）；

@@ -1,6 +1,7 @@
 package com.semgravio.aiplatform.business.project.application;
 
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -8,6 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentKind;
+import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeChunker;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeHit;
 import com.semgravio.aiplatform.base.knowledge.domain.model.KnowledgeSpec;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
@@ -18,7 +21,9 @@ import lombok.extern.slf4j.Slf4j;
  * 知识沉淀编排（业务侧缝）：入库/检索/清理的存储语义归 base.knowledge
  * （{@link KnowledgePort}），「什么时机沉淀什么素材」是业务知识，在此落定。
  * v1 的沉淀触发点 = 每笔成交自动沉淀 PRD（交易环，#30）；命中注入在需求环
- * （主智能体会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。
+ * （主智能体会话建立尾注，#19）与生成环（生成/修正下发前置，#24）。#465 起
+ * 检索面为多类同池混检（PRD＋激活升格的 CASE/MODULE/RULE 沉淀物），#466 起
+ * 注入块命中条带来源 kind 区分——两个注入点零新通道，各自拼装口径不变。
  *
  * <p><b>降级契约</b>：摄取/清理/命中检索一律失败不炸——记日志跳过、降级为空
  * 注入不阻断主流程；embedding 不可用由底座先行降级（旧块保留/检索空列表）。</p>
@@ -27,17 +32,51 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ProjectKnowledgeAppService {
 
-    /** 段落级分块目标长度（~800 字符，实现定）。 */
-    static final int CHUNK_TARGET_CHARS = 800;
-
     /** 命中检索 query 上限（bge-small-zh 512 维模型，超长截断）。 */
     static final int MAX_QUERY_CHARS = 2000;
 
     /** 沉淀素材类别（幂等键之一；v1 唯一业务口径 = 成交项目 PRD）。 */
     static final String KIND_PRD = "PRD";
 
-    /** 沉淀条目标题（命中条目展示：〔项目名〕标题 + 片段）。 */
+    /** 沉淀条目标题（命中条目展示：〔来源｜类别〕标题 + 片段）。 */
     static final String TITLE_PRD = "PRD";
+
+    /**
+     * 命中条目类别展示名（#466 命中条带来源 kind 区分）：PRD＝历史需求（成交
+     * 项目归档，业务侧类别），CASE/MODULE/RULE＝激活升格的沉淀物（孤儿，来源恒
+     * 「平台沉淀」；键形单源 {@link SedimentKind#key()}）。kind 开放（#451）——
+     * 未知类别不映射，原键透传（新类生长零改注入面）。插入序即块头枚举序。
+     */
+    private static final Map<String, String> KIND_LABELS = kindLabels();
+
+    private static Map<String, String> kindLabels() {
+        Map<String, String> labels = new LinkedHashMap<>();
+        labels.put(KIND_PRD, "历史需求");
+        labels.put(SedimentKind.CASE.key(), "需求案例");
+        labels.put(SedimentKind.MODULE.key(), "功能模块");
+        labels.put(SedimentKind.RULE.key(), "业务规则");
+        return Collections.unmodifiableMap(labels);
+    }
+
+    /**
+     * 块头类别枚举行（#466 多类同池命中的展示面）：随 {@link #KIND_LABELS}
+     * 插入序派生（展示名单源）——新类入表即进块头；实际类别以命中条目透传的
+     * kind 为准（开放口径，未入表类别原键透传）。
+     */
+    private static final String KIND_SCOPE_LINE = "以下是平台知识库中与当前需求相似的沉淀片段（"
+            + String.join("/", KIND_LABELS.values()) + "）";
+
+    /** 非约束限定语（知识是背景非指令，#5 决议①）——两注入点同款，单源防漂移。 */
+    private static final String NON_BINDING_QUALIFIER = "（非用户的确认信息，不构成对当前需求的约束）";
+
+    /**
+     * 注入块表头（尾注/前置两注入点共用拼装，差异仅用途短语）：锚＋类别枚举行＋
+     * 用途短语＋非约束限定语。
+     */
+    private static String blockHeader(String usePhrase) {
+        return "【平台知识库·相似知识】" + KIND_SCOPE_LINE + "，" + usePhrase
+                + NON_BINDING_QUALIFIER + "：";
+    }
 
     /**
      * 主智能体会话已注入的知识块（projectId → 注入块）：会话建立时检索一次落此
@@ -88,9 +127,8 @@ public class ProjectKnowledgeAppService {
             return "";
         }
         log.info("[knowledge] 主智能体会话建立注入命中 {} 条", hits.size());
-        StringBuilder block = new StringBuilder("\n\n【平台知识库·相似历史需求】")
-                .append("以下是平台沉淀的历史成交需求片段，供梳理当前需求时作背景参考")
-                .append("（非用户的确认信息，不构成对当前需求的约束）：");
+        StringBuilder block = new StringBuilder("\n\n")
+                .append(blockHeader("供梳理当前需求时作背景参考"));
         appendHits(block, hits);
         return block.toString();
     }
@@ -109,9 +147,7 @@ public class ProjectKnowledgeAppService {
             return "";
         }
         log.info("[knowledge] 生成下发前置注入命中 {} 条", hits.size());
-        StringBuilder block = new StringBuilder("【平台知识库·相似历史需求】")
-                .append("以下是平台沉淀的历史成交需求片段，实现当前需求时可作背景参考")
-                .append("（非用户的确认信息，不构成对当前需求的约束）：");
+        StringBuilder block = new StringBuilder(blockHeader("实现当前需求时可作背景参考"));
         appendHits(block, hits);
         block.append("\n\n————\n\n");
         return block.toString();
@@ -137,11 +173,15 @@ public class ProjectKnowledgeAppService {
         }
     }
 
-    /** 命中逐条拼进块（表头与收尾由调用方定调）：〔来源项目〕标题 + 片段。 */
+    /**
+     * 命中逐条拼进块（表头与收尾由调用方定调）：〔来源｜类别〕标题 + 片段
+     * （#466 命中条带来源 kind 区分——类别展示名未知 kind 原键透传）。
+     */
     private static void appendHits(StringBuilder block, List<KnowledgeHit> hits) {
         for (KnowledgeHit hit : hits) {
-            block.append("\n\n〔").append(hit.sourceProjectName()).append("〕")
-                    .append(hit.title()).append('\n').append(hit.chunk());
+            block.append("\n\n〔").append(hit.sourceProjectName()).append('｜')
+                    .append(KIND_LABELS.getOrDefault(hit.kind(), hit.kind()))
+                    .append("〕").append(hit.title()).append('\n').append(hit.chunk());
         }
     }
 
@@ -189,46 +229,14 @@ public class ProjectKnowledgeAppService {
         quietly("项目知识级联清理", () -> knowledgePort.purgeByProject(projectId.toString()));
     }
 
-    // ---------- 分块成形（沉淀入料的公共件，#30 起消费） ----------
+    // ---------- 分块成形（沉淀入料的公共件，#30 起消费；实现归底座 KnowledgeChunker） ----------
 
     /**
-     * 段落级分块：按空行切段落，相邻段落并入至目标长度；超长单段按目标长度硬切
-     * （保底不丢内容）。空白输入返回空清单（调用方跳过）。
+     * 段落级分块（底座 {@link KnowledgeChunker} 口径，激活升格 #465 同款复用）。
+     * 保留为本类静态缝：PRD 沉淀路径（{@code #sediment}）与 ProjectKnowledgeAppServiceTest 共用此入口。
      */
     static List<String> chunkByParagraph(String text) {
-        if (text == null || text.isBlank()) {
-            return List.of();
-        }
-        List<String> chunks = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (String raw : text.strip().split("\\n\\s*\\n")) {
-            String paragraph = raw.strip();
-            while (paragraph.length() > CHUNK_TARGET_CHARS) { // 超长单段硬切
-                flush(chunks, current);
-                chunks.add(paragraph.substring(0, CHUNK_TARGET_CHARS));
-                paragraph = paragraph.substring(CHUNK_TARGET_CHARS).stripLeading();
-            }
-            if (paragraph.isEmpty()) {
-                continue;
-            }
-            if (!current.isEmpty()
-                    && current.length() + paragraph.length() + 2 > CHUNK_TARGET_CHARS) {
-                flush(chunks, current);
-            }
-            if (!current.isEmpty()) {
-                current.append("\n\n");
-            }
-            current.append(paragraph);
-        }
-        flush(chunks, current);
-        return chunks;
-    }
-
-    private static void flush(List<String> chunks, StringBuilder current) {
-        if (!current.isEmpty()) {
-            chunks.add(current.toString());
-            current.setLength(0);
-        }
+        return KnowledgeChunker.byParagraph(text);
     }
 
     /** 降级包装：失败记日志跳过，不阻断调用方主流程。 */

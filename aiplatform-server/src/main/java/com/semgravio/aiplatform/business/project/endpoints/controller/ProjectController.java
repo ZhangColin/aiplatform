@@ -340,16 +340,15 @@ public class ProjectController {
     @Operation(summary = "PRD 读（当前版 markdown，直读工作区）",
             description = "PRD = 项目 dev 工作区的 docs/PRD.md（事实源，主智能体的 savePrd 写出，"
                     + "v1 无版本链只最新版）——本端点直读工作区文件返回 {projectId, content, "
-                    + "updatedAt, readiness, draftChangeSummary}，updatedAt = 文件 mtime"
+                    + "updatedAt, readiness}，updatedAt = 文件 mtime"
                     + "（ISO-8601，秒精度）。"
-                    + "readiness（#331）＝「验收与待确认」章分级解析投影：{blocking, minor, "
-                    + "dimensions}——blocking/minor＝分级缺项条目（dimension 呈现词可空、"
-                    + "text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/功能与"
-                    + "边界/数据与约束/验收，status：ready=✓ / minor=⚡ / blocking=灰，「n/5 "
-                    + "维度就绪」＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪"
-                    + "（判定与确认门同源）。draftChangeSummary（#334 改需求回路）＝范围级"
-                    + "新草稿停驻待确认的差异摘要（改稿时产出的 markdown 变更说明），"
-                    + "null = 无新草稿待确认。未产出（工作区无该文件）"
+                    + "readiness（#331；#462 去门化：阻碍级语义删除，章保留为纯呈现面）"
+                    + "＝「验收与待确认」章解析投影：{blocking, minor, dimensions}"
+                    + "——blocking 恒空（保留字段兼容），minor＝待确认/假设条目（dimension "
+                    + "呈现词可空、text 原文），dimensions＝五维固定序维度态（目标与角色/主流程/"
+                    + "功能与边界/数据与约束/验收，status：ready=✓ / minor=⚡，「n/5 维度就绪」"
+                    + "＝ready 计数）；章缺失/形态漂移 fail-open＝零条目全就绪。"
+                    + "未产出（工作区无该文件）"
                     + "404 PRJ_015，与项目不存在的 PRJ_001 区分，前端据此呈现「还没产出」。"
                     + "写出/更新时通知通道（/api/events?projectId=）发 document-updated"
                     + "（payload {projectId, documentType:\"PRD\"}），消费姿势 = invalidate 文档域后重拉本端点")
@@ -357,44 +356,24 @@ public class ProjectController {
         return ApiResponse.ok(queryAppService.prd(parseId(id)));
     }
 
-    @PostMapping("/{id}/prd/confirm")
-    @Operation(summary = "确认此版 PRD（过两级门后成版：工作区 PRD 全文冻结为不可变快照）",
-            description = "「确认即成版」（#330）：把当时工作区 PRD（docs/PRD.md 活草稿）"
-                    + "全文拷贝为不可变快照＋确认时间＋项目内递增整数版本号"
-                    + "（v1/v2/v3…，原型「v1.2 小数」形不取）落平台库；工作区 PRD 仍是"
-                    + "活草稿照旧覆盖写（草稿不编号、确认即分配版本号）。重复确认"
-                    + "（无新草稿＝全文未变）幂等返回既有版、不产生新版本。两级门（#331）："
-                    + "「验收与待确认」章有阻碍核心流程缺项→409 PRJ_053 拦截（用户不可绕过，"
-                    + "先在对话区补齐；缺项明细经 PRD 读面 readiness 呈现）；解析缺失（章缺失/"
-                    + "形态漂移——含存量旧「待定项」章）fail-open 放行；仅次要未知放行、回执"
-                    + "readiness 带未解决事项（两段式摘要层数据面——「已看过摘要」由呈现层"
-                    + "承载，确认动作本身不携带标记）。<b>生成加门（#332）</b>：确认成版后"
-                    + "平台自动派首个 Demo run——「确认此版 PRD 并生成 Demo」成为首个构建 run "
-                    + "的唯一触发（已生成/在途静默跳过；派发是次生事实）。响应即回执"
-                    + "（versionNo/content/confirmedAt/readiness）——版本号是派发的挂点。"
-                    + "项目不存在 404 PRJ_001；已归档 409 "
-                    + "PRJ_013（历史版本照读）；PRD 尚未产出 404 PRJ_015；"
-                    + "环境故障 WSP_002")
-    public ApiResponse<PrdVersionResponse> confirmPrd(@PathVariable String id) {
-        return ApiResponse.ok(prdVersionAppService.confirm(parseId(id)));
-    }
-
     @GetMapping("/{id}/prd/versions")
-    @Operation(summary = "PRD 已确认版本清单（最新在前，轻量形不含全文）",
-            description = "项目内已确认 PRD 版本列表（#330）：[{projectId, versionNo, "
-                    + "confirmedAt}]，versionNo 倒序（最新在前——版本记录消费面默认呈现"
-                    + "最新）；全文快照走单版详情端点。空列表 = 从未确认（呈现「草稿」"
-                    + "徽章归前端推导）。归档项目照读（历史可追溯）。项目不存在 404 PRJ_001")
+    @Operation(summary = "PRD 版本清单（最新在前，轻量形不含全文）",
+            description = "项目内 PRD 版本列表（#330→#462 去门化：Demo 类 run 起跑自动记行，"
+                    + "版本号＝构建基准序）：[{projectId, versionNo, confirmedAt}]，versionNo "
+                    + "倒序（最新在前——版本记录消费面默认呈现最新）；全文快照走单版详情端点。"
+                    + "空列表 = 尚无构建基准记行（呈现「草稿」徽章归前端推导）。归档项目照读"
+                    + "（历史可追溯）。项目不存在 404 PRJ_001")
     public ApiResponse<List<PrdVersionSummaryResponse>> prdVersions(@PathVariable String id) {
         return ApiResponse.ok(prdVersionAppService.versions(parseId(id)));
     }
 
     @GetMapping("/{id}/prd/versions/{versionNo}")
     @Operation(summary = "PRD 版本详情（含全文快照）",
-            description = "单版详情（#330）：{projectId, versionNo, content, confirmedAt, "
-                    + "readiness}——content 是确认时工作区 PRD 全文的不可变快照（后续草稿改动"
-                    + "不影响）；readiness（#331）＝对快照全文即时解析的收敛度投影（与草稿"
-                    + "读面同构——不落库，快照在手即解析）。归档项目照读。"
+            description = "单版详情（#330→#462 去门化）：{projectId, versionNo, content, "
+                    + "confirmedAt, readiness}——content 是成行时工作区 PRD 全文的不可变"
+                    + "快照（Demo 类 run 起跑时点，后续草稿改动不影响）；readiness（#331）"
+                    + "＝对快照全文即时解析的收敛度投影（与草稿读面同构——不落库，快照在手"
+                    + "即解析）。归档项目照读。"
                     + "版本不存在（含非正整数）404 PRJ_052；项目不存在 404 PRJ_001")
     public ApiResponse<PrdVersionResponse> prdVersion(@PathVariable String id,
             @PathVariable int versionNo) {
@@ -406,8 +385,8 @@ public class ProjectController {
             description = "项目内 Demo 构建版本列表（#333）：[{projectId, versionNo, "
                     + "prdVersionNo, runId, createdAt, confirmedAt}]——每轮 Demo 构建收口"
                     + "自动成版（项目内整数递增 v1/v2/v3…，首版随生成收口、此后迭代轮收口"
-                    + "递增），prdVersionNo＝起跑时已确认 PRD 版本锚（「Demo vN（基于 "
-                    + "PRD vM 快照）」式关联；null＝无确认版起跑——legacy/设计类），runId＝"
+                    + "递增），prdVersionNo＝起跑时最新 PRD 版本锚（「Demo vN（基于 "
+                    + "PRD vM 快照）」式关联；null＝无版本记行起跑——legacy/设计类），runId＝"
                     + "收口 run 锚（「查看当时」接续缝，归版本记录抽屉 #344）；"
                     + "confirmedAt 仅确认标记所在版非空（标记归项目单指针，清单投影到行）。"
                     + "versionNo 倒序（最新在前——版本 chip 与抽屉默认呈现最新）。空列表 = "

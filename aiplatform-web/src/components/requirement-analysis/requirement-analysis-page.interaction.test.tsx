@@ -9,11 +9,13 @@ import type { PrdNoticesState } from "@/lib/store/prd-notices";
 import { RequirementAnalysisPage } from "./requirement-analysis-page";
 
 /**
- * 需求分析页 P02/P03 装配（#346，spec #320 ⑥，interaction seam）：闲聊期对话
- * 占全宽／首产 PRD 双栏滑出（左 5＝收敛卡＋时间流＋澄清输入，右 7＝PRD 文档面）；
- * 粘性 header＝代号胶囊＋项目名＋版本徽标＋「对话调优」「导出 (PDF/Word)」＋主
- * CTA（确认门两段式接通 #332 机制／已确认换「前往 Demo 体验」）。子件各自有
- * 专测，本 seam 锁装配与状态分野。CommandArea/PrdPanel 等数据口 mock 同各自专测。
+ * 需求分析页 P02/P03 装配（#346，spec #320 ⑥，interaction seam；#462 去确认门
+ * 改造 ADR-0039）：闲聊期对话占全宽／首产 PRD 双栏滑出（左 5＝收敛卡＋时间流
+ * ＋澄清输入，右 7＝PRD 文档面）；粘性 header＝代号胶囊＋项目名＋版本徽标＋
+ * 「对话调优」「导出 (PDF/Word)」＋主 CTA（已记行＝「前往 Demo 体验」）；首个
+ * 构建基准记行（版本清单由空转非空）即自动切 Demo 体验页（可切回，仅跳一次）。
+ * 子件各自有专测，本 seam 锁装配与状态分野。CommandArea/PrdPanel 等数据口
+ * mock 同各自专测。
  */
 const seed = vi.hoisted(() => ({
   detail: undefined as ProjectDetail | undefined,
@@ -21,13 +23,11 @@ const seed = vi.hoisted(() => ({
     content: string;
     updatedAt: string;
     readiness?: { blocking: { text: string }[]; minor: { text: string }[]; dimensions: { dimension: string; status: string }[] };
-    draftChangeSummary?: string | null;
   } | null | undefined,
   prdVersions: [] as { versionNo: number }[],
   chats: { chats: {} } as Pick<ChatState, "chats">,
   notices: { seen: {}, pending: {} } as Pick<PrdNoticesState, "seen" | "pending">,
   works: {} as Record<string, unknown>,
-  confirmMutate: vi.fn(),
   push: vi.fn(),
 }));
 
@@ -38,10 +38,6 @@ vi.mock("@/hooks/use-project", () => ({
 vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => ({ data: seed.prd, isPending: false }),
   usePrdVersions: () => ({ data: seed.prdVersions }),
-}));
-
-vi.mock("@/hooks/use-confirm-prd", () => ({
-  useConfirmPrd: () => ({ isPending: false, mutate: seed.confirmMutate }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -111,7 +107,7 @@ function seedChatOnlyProject() {
   seed.works = {};
 }
 
-/** 标准播种：PRD 已产出（草稿未确认）。 */
+/** 标准播种：PRD 已产出（尚无构建基准记行）。 */
 function seedPrdProducedProject() {
   seed.detail = { id: "p1", name: "宠物医院预约管理系统", prdProducedAt: "2026-10-18T01:00:00Z" } as ProjectDetail;
   seed.prd = {
@@ -137,7 +133,6 @@ function seedPrdProducedProject() {
 
 beforeEach(() => {
   seedChatOnlyProject();
-  seed.confirmMutate.mockReset();
   seed.push.mockReset();
 });
 afterEach(cleanup);
@@ -149,8 +144,8 @@ describe("需求分析页 · 闲聊期（无 PRD）", () => {
     expect(screen.getByText("逐步澄清与收敛流水线")).toBeTruthy(); // 收敛卡在（0/5 全灰兜底）
     expect(document.querySelector('[data-frame="timeline-card"]')).toBeTruthy();
     expect(screen.queryByText("结构化需求规格说明书 (PRD)")).toBeNull();
-    // 无 PRD：不出徽标、不出确认门 CTA、导出禁用
-    expect(screen.queryByText(/确认此版 PRD 并生成 Demo/)).toBeNull();
+    // 无 PRD：不出徽标、不出 CTA、导出禁用
+    expect(screen.queryByText(/确认此版 PRD/)).toBeNull();
     expect(screen.getByRole("button", { name: /导出/ }).hasAttribute("disabled")).toBe(true);
   });
 
@@ -179,43 +174,36 @@ describe("需求分析页 · 首产 PRD 双栏滑出", () => {
     expect(panel?.parentElement?.className).toContain("outputs-slide-in");
   });
 
-  it("草稿待确认：徽标＋主 CTA 出确认门；两段式摘要层接通门机制（确认才真 POST）", () => {
+  it("草稿态：徽标「PRD 草稿」、无确认动作（#462 去确认门——产出即自动进入生成）", () => {
     seedPrdProducedProject();
     render(<RequirementAnalysisPage projectId="p1" />);
 
-    expect(screen.getByText("PRD 草稿待确认")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /确认此版 PRD 并生成 Demo/ }));
-    // 第一段＝摘要层
-    expect(screen.getByText(/已梳理 3\/5 个维度/)).toBeTruthy();
-    expect(seed.confirmMutate).not.toHaveBeenCalled();
-    // 第二段＝层内确认
-    fireEvent.click(screen.getByRole("button", { name: "继续" }));
-    fireEvent.click(screen.getByRole("button", { name: /确认并生成 Demo/ }));
-    expect(seed.confirmMutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("PRD 草稿")).toBeTruthy();
+    expect(screen.queryByText(/确认此版 PRD/)).toBeNull();
+    expect(screen.queryByText(/前往 Demo 体验/)).toBeNull();
   });
 
-  it("已确认无停驻草稿：徽标 vN 已确认＋主 CTA 换「前往 Demo 体验」（链 Demo 阶段页）", () => {
+  it("首个构建基准记行（版本清单非空）：徽标 vN＋主 CTA「前往 Demo 体验」，并自动切 Demo 页一次", () => {
+    const { rerender } = render(<RequirementAnalysisPage projectId="p1" />);
     seedPrdProducedProject();
-    seed.prdVersions = [{ versionNo: 2 }];
-    render(<RequirementAnalysisPage projectId="p1" />);
+    rerender(<RequirementAnalysisPage projectId="p1" />);
+    // 草稿态：尚未记行——不跳
+    expect(seed.push).not.toHaveBeenCalled();
 
-    expect(screen.getByText("PRD v2 已确认")).toBeTruthy();
-    expect(screen.queryByText(/确认此版 PRD 并生成 Demo/)).toBeNull();
+    // 首个构建 run 起跑自动记行 → 版本清单由空转非空
+    seed.prdVersions = [{ versionNo: 1 }];
+    rerender(<RequirementAnalysisPage projectId="p1" />);
+
+    expect(screen.getByText("PRD 构建基准 v1")).toBeTruthy();
     const link = screen.getByRole("link", { name: /前往 Demo 体验/ });
     expect(link.getAttribute("href")).toBe("/projects/p1/demo");
-  });
+    // 自动切页（转换点一次）：推 Demo 体验页
+    expect(seed.push).toHaveBeenCalledWith("/projects/p1/demo");
 
-  it("范围级新草稿停驻（#334）：徽标换「新草稿待确认」＋确认门回场＋时间流出指路横幅", () => {
-    seedPrdProducedProject();
-    // 停驻草稿只发生在已生成项目（#334 改需求回路：确认→生成→改稿回路）
-    seed.detail = { ...seed.detail!, generatedAt: "2026-10-18T02:00:00Z" };
-    seed.prdVersions = [{ versionNo: 2 }];
-    seed.prd = { ...seed.prd!, draftChangeSummary: "新增「管理后台」" };
-    render(<RequirementAnalysisPage projectId="p1" />);
-
-    expect(screen.getByText("PRD 新草稿待确认 · 当前 v2")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /确认此版 PRD 并生成 Demo/ })).toBeTruthy();
-    expect(screen.getByText("PRD 已更新，确认新版后生成下一版 Demo")).toBeTruthy();
+    // 可切回：后续版本递增不再重复跳（仅空→非空转换点一次）
+    seed.prdVersions = [{ versionNo: 2 }, { versionNo: 1 }];
+    rerender(<RequirementAnalysisPage projectId="p1" />);
+    expect(seed.push).toHaveBeenCalledTimes(1);
   });
 
   it("「对话调优」：聚焦澄清输入", () => {

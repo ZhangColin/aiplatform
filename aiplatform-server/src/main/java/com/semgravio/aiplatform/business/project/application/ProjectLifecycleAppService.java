@@ -20,6 +20,7 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
 import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.business.identity.application.GuestAppService;
 import com.semgravio.aiplatform.business.order.application.OrderQueryAppService;
@@ -83,6 +84,7 @@ public class ProjectLifecycleAppService {
     private final PrdVersionRepository prdVersions;
     private final DemoVersionRepository demoVersions;
     private final SkillDraftAppService skillDrafts;
+    private final SedimentDraftAppService sedimentDrafts;
     private final OrderQueryAppService orderQueryAppService;
     private final GuestAppService guestAppService;
     private final TransactionTemplate transactionTemplate;
@@ -103,6 +105,7 @@ public class ProjectLifecycleAppService {
                                       PrdVersionRepository prdVersions,
                                       DemoVersionRepository demoVersions,
                                       SkillDraftAppService skillDrafts,
+                                      SedimentDraftAppService sedimentDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       GuestAppService guestAppService,
                                       TransactionTemplate transactionTemplate) {
@@ -122,6 +125,7 @@ public class ProjectLifecycleAppService {
         this.prdVersions = prdVersions;
         this.demoVersions = demoVersions;
         this.skillDrafts = skillDrafts;
+        this.sedimentDrafts = sedimentDrafts;
         this.orderQueryAppService = orderQueryAppService;
         this.guestAppService = guestAppService;
         this.transactionTemplate = transactionTemplate;
@@ -340,8 +344,9 @@ public class ProjectLifecycleAppService {
     /**
      * 删除项目（真删级联）：工作区物理销毁（容器/卷，尽力而为）→ prj_* 行
      * 删除（历史子表随 FK 级联）→ knw_chunks 与对话史级联清理（软引用显式清，
-     * 尽力而为）→ 未终结技能草稿清理（#264 T6：只在途随删，终态留档、已晋升
-     * 库行是平台资产不动）→ SSE workspace-destroyed。
+     * 尽力而为）→ 未终结技能草稿（#264 T6：只在途随删，终态留档、已晋升
+     * 库行是平台资产不动）与未终结沉淀草稿（#460 采集层不留僵尸行，同口径）清理
+     * → SSE workspace-destroyed。
      */
     public void delete(Long projectId) {
         Project project = requireProject(projectId);
@@ -361,6 +366,9 @@ public class ProjectLifecycleAppService {
             demoVersions.deleteByProjectId(projectId);
         });
         skillDrafts.purgeByProject(projectId);
+        // #460 采集层不留僵尸行：未终结沉淀草稿随项目清（只在途——终态留档、已激活
+        // 知识素材与来源项目脱钩），对齐技能草稿清理先例
+        sedimentDrafts.purgeByProject(projectId);
         eventsAppService.publishNotification(ProjectEventTypes.WORKSPACE_DESTROYED, Map.of(
                 ProjectEventTypes.PROJECT_ID_FIELD, projectId.toString(),
                 EventsAppService.OWNER_FIELD, EventsAppService.ownerPayload(project.getOwnerAccountId()),

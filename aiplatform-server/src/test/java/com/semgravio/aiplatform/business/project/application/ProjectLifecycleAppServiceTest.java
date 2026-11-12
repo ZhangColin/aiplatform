@@ -18,6 +18,11 @@ import com.cartisan.core.exception.CartisanException;
 
 import com.semgravio.aiplatform.IntegrationTest;
 import com.semgravio.aiplatform.base.eventhub.application.EventsAppService;
+import com.semgravio.aiplatform.base.knowledge.application.SedimentDraftAppService;
+import com.semgravio.aiplatform.base.knowledge.domain.enums.SedimentDraftStatus;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftProposal;
+import com.semgravio.aiplatform.base.knowledge.domain.model.SedimentDraftReceipt;
+import com.semgravio.aiplatform.base.knowledge.domain.repository.SedimentDraftStore;
 import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.skills.application.SkillDraftAppService;
 import com.semgravio.aiplatform.base.skills.domain.enums.SkillDraftStatus;
@@ -93,6 +98,13 @@ class ProjectLifecycleAppServiceTest {
     @Autowired
     private SkillStore skillStore;
 
+    /** 沉淀草稿用例真面（#460 删除清理）：真库 propose 走公共接口。 */
+    @Autowired
+    private SedimentDraftAppService sedimentDrafts;
+
+    @Autowired
+    private SedimentDraftStore sedimentDraftStore;
+
     @MockitoBean
     private WorkspaceLifecycleAppService workspaceLifecycleAppService;
 
@@ -120,6 +132,8 @@ class ProjectLifecycleAppServiceTest {
         // 本类草稿/库行按名前缀收口（真库共享，不留给其他测试类）
         jdbcTemplate.update("DELETE FROM skl_skill_drafts WHERE name LIKE 't6-purge-%'");
         jdbcTemplate.update("DELETE FROM skl_skills WHERE name LIKE 't6-purge-%'");
+        // 本类沉淀草稿按标题前缀收口（真库共享）
+        jdbcTemplate.update("DELETE FROM knw_sediment_drafts WHERE title LIKE 't6-沉淀-%'");
     }
 
     @Test
@@ -433,6 +447,39 @@ class ProjectLifecycleAppServiceTest {
     }
 
     @Test
+    void given_pending_and_terminal_sediment_drafts_when_delete_then_pending_gone_terminal_intact() {
+        // #460 采集层生命周期：删项目清在途沉淀草稿（血统不留悬空——采集层不留僵尸行，
+        // 对齐技能草稿清理先例）；终态留档不随删（审结事实独立于项目存续）
+        Long projectId = persistedProject("9204");
+        Long otherProjectId = persistedProject("9205");
+        long pendingId = proposeSediment(projectId, "CASE");
+        // 终态行直插（审结写口随 #464——status=3 行验 DELETE 只圈在途，且库级 CHECK
+        // 拒绝理由必填在位）
+        jdbcTemplate.update("""
+                INSERT INTO knw_sediment_drafts
+                    (id, kind, title, summary, content, project_id, run_id, slot,
+                     inflight_slot, scan_verdict, scan_findings, status, operator_id,
+                     operator_name, reviewed_at, reject_reason, created_at, updated_at)
+                VALUES (?, 'RULE', 't6-沉淀-已拒规则', '摘要', '正文', ?, 'run-x', 'main',
+                        2, 'SAFE', '[]'::jsonb, 3, 'op-1', '运营·标注员',
+                        CURRENT_TIMESTAMP, '与现有规则口径重叠', CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP)
+                """, 920099900000000010L, projectId);
+        long otherPendingId = proposeSediment(otherProjectId, "MODULE");
+
+        appService.delete(projectId);
+
+        // 在途随项目清；他项目在途不动（清理按 project_id 圈定）
+        assertThat(sedimentDraftStore.find(pendingId)).isNull();
+        assertThat(sedimentDraftStore.find(otherPendingId)).isNotNull();
+        assertThat(sedimentDraftStore.find(otherPendingId).status())
+                .isEqualTo(SedimentDraftStatus.PENDING);
+        // 终态留档（已拒绝不随删——审结事实独立于项目存续）
+        assertThat(sedimentDraftStore.find(920099900000000010L).status())
+                .isEqualTo(SedimentDraftStatus.REJECTED);
+    }
+
+    @Test
     void given_workspace_destroy_failure_when_delete_then_rows_deleted_anyway() {
         Long projectId = persistedProject("9201");
         org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
@@ -496,6 +543,14 @@ class ProjectLifecycleAppServiceTest {
         SkillDraftReceipt receipt = skillDrafts.propose(new SkillDraftProposal(
                 name, "T6 删除清理口径测试简介。", "T6 删除清理口径测试正文。", projectId,
                 "run-t6", slot));
+        assertThat(receipt.accepted()).as(receipt.message()).isTrue();
+        return receipt.draftId();
+    }
+
+    private long proposeSediment(Long projectId, String kind) {
+        SedimentDraftReceipt receipt = sedimentDrafts.propose(new SedimentDraftProposal(
+                kind, "t6-沉淀-删除清理", "T6 删除清理口径测试摘要。", "T6 删除清理口径测试正文。",
+                projectId, "run-t6", "executor"));
         assertThat(receipt.accepted()).as(receipt.message()).isTrue();
         return receipt.draftId();
     }

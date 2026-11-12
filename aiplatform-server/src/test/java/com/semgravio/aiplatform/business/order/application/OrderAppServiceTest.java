@@ -145,8 +145,8 @@ class OrderAppServiceTest {
         // 下单前置门·PRD 腿：无已确认 PRD 版本（确认制前遗留/从未确认）——拦截
         // 提示且零落行（拦截与提示，spec #320 ④「加门」）
         stubProject(ProjectStatus.IN_PROGRESS);
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(null, null, null));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(null, null, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -159,8 +159,8 @@ class OrderAppServiceTest {
     void given_prd_confirmed_but_demo_unconfirmed_when_place_then_rejected_ord_019() {
         // 下单前置门·Demo 腿：「确认此版本，准备签约」＝下单入口——确认指针空则拦
         stubProject(ProjectStatus.IN_PROGRESS);
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(PRD_VERSION_NO, PRD, null));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(PRD_VERSION_NO, PRD, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -175,8 +175,8 @@ class OrderAppServiceTest {
         // ORD_018/019）
         stubProject(ProjectStatus.IN_PROGRESS);
         appService.place(PROJECT_ID);
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(null, null, null));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(null, null, null));
 
         assertThatThrownBy(() -> appService.place(PROJECT_ID))
                 .isInstanceOf(ApplicationException.class)
@@ -190,8 +190,8 @@ class OrderAppServiceTest {
         // 不影响下单——订单自含，不依赖工作区存亡
         stubProject(ProjectStatus.IN_PROGRESS);
         String confirmedContent = "# PRD v3\n\n已确认版本全文——下单引用的正身。";
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(3, confirmedContent, 2));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(3, confirmedContent, 2));
         when(projectQueryAppService.prd(PROJECT_ID)).thenThrow(
                 new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
 
@@ -749,10 +749,10 @@ class OrderAppServiceTest {
                 .build());
         when(projectQueryAppService.prd(PROJECT_ID)).thenReturn(new PrdResponse(
                 Long.toString(PROJECT_ID), prd, Instant.parse("2026-08-31T02:00:00Z"),
-                PrdReadinessResponse.from(PrdReadiness.parse(prd)), /* draftChangeSummary= */ null));
+                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
         // 下单前置双确认缺省桩（#335）：已确认 PRD v3＋Demo v2（快照源＝确认版全文，
         // 与工作区正文同文——分离用例在冗余拷贝灵魂用例单独覆盖）
-        when(projectQueryAppService.confirmedVersionRefs(PROJECT_ID)).thenReturn(
-                new ProjectQueryAppService.ConfirmedVersionRefs(PRD_VERSION_NO, prd, DEMO_VERSION_NO));
+        when(projectQueryAppService.latestVersionRefs(PROJECT_ID)).thenReturn(
+                new ProjectQueryAppService.LatestVersionRefs(PRD_VERSION_NO, prd, DEMO_VERSION_NO));
     }
 }

@@ -38,12 +38,6 @@ vi.mock("@/hooks/use-prd", () => ({
   usePrd: () => seed.prd,
 }));
 
-// 确认门数据口（#332）：PrdDoc 内嵌 PrdConfirmGate 消费本 hook——同「数据口全
-// mock」口径打桩（不真连 react-query，本用例只核文件树呈现）。
-vi.mock("@/hooks/use-confirm-prd", () => ({
-  useConfirmPrd: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-
 vi.mock("@/hooks/use-project-file-content", () => ({
   useProjectFileContent: (_projectId: string, path: string | null) =>
     seed.content.byPath[path ?? ""] ?? { isPending: true },
@@ -114,14 +108,12 @@ describe("FilesPanel · 文件树浏览（#27）", () => {
     expect(container.textContent).toContain("export default function Page() {}");
   });
 
-  it("缺省 PRD 篇带确认门；hideConfirmGate 只在只读场景收起（#347 Demo 文件抽屉）", () => {
-    const { container, unmount } = render(<FilesPanel projectId="p1" />);
-    expect(container.textContent).toContain("确认此版 PRD 并生成 Demo");
-    unmount();
-
-    const readOnly = render(<FilesPanel projectId="p1" hideConfirmGate />);
-    expect(readOnly.container.textContent).not.toContain("确认此版 PRD 并生成 Demo");
-    expect(readOnly.container.textContent).toContain("给宠物医院做预约管理系统。");
+  it("缺省 PRD 篇无确认动作（#462 去确认门——PRD 篇纯读呈现，两态一致）", () => {
+    const { container } = render(<FilesPanel projectId="p1" />);
+    expect(container.textContent).not.toContain("确认此版 PRD");
+    expect(container.textContent).toContain("给宠物医院做预约管理系统。");
+    // Demo 页文件抽屉同款只读呈现（不再收 hideConfirmGate——门组件整段退役，
+    // 两渲染面同组件同口径，此处一并覆盖）
   });
 
   it("点图片（#283）→ inline 大图呈现（raw 直链），不走文本内容端点", () => {

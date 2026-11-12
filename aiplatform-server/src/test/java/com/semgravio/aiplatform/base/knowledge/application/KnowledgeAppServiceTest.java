@@ -255,6 +255,78 @@ class KnowledgeAppServiceTest {
                 .hasMessageContaining("projectId 不能为空");
     }
 
+    // ---------- 混检（#465）：向量通道＋三元组关键词通道 RRF 融合 ----------
+
+    @Test
+    void given_keyword_overlap_when_retrieve_then_keyword_channel_boosts_beyond_pure_vector() {
+        // 混检融合：「文本与 query 高度重叠但向量不近」的块经关键词通道抬过纯向量首位
+        when(embeddingClient.embed(List.of("密码加密"))).thenReturn(List.of(vector(1, 1)));
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD",
+                List.of("完全无关的订单物流段落"), null), vector(1, 1));   // 纯向量首位
+        indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD",
+                List.of("密码加密的实施细则与轮替口径"), null), vector(1, 0.5f)); // 关键词通道首位
+
+        List<KnowledgeHit> hits = knowledgePort.retrieve("密码加密", 5);
+
+        // RRF：关键词块 = 1/(60+2)+1/(60+1) ＞ 纯向量块 = 1/(60+1)
+        assertThat(hits).extracting(KnowledgeHit::chunk)
+                .containsExactly("密码加密的实施细则与轮替口径", "完全无关的订单物流段落");
+    }
+
+    @Test
+    void given_no_trigram_overlap_when_retrieve_then_keyword_channel_contributes_nothing() {
+        // 噪音闸：query 与全部块零三元组重叠时关键词通道零贡献（不硬塞无关系），纯向量序不变
+        when(embeddingClient.embed(List.of("量子波动速读"))).thenReturn(List.of(vector(1, 1)));
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD",
+                List.of("密码加密方案"), null), vector(1, 1));
+        indexDirect(spec("PRD", PROJ_B, PROJ_B, "物流系统", "PRD",
+                List.of("订单物流跟踪"), null), vector(1, 0.5f));
+
+        assertThat(knowledgePort.retrieve("量子波动速读", 5))
+                .extracting(KnowledgeHit::chunk)
+                .containsExactly("密码加密方案", "订单物流跟踪");
+    }
+
+    // ---------- 孤儿沉淀（#465）：激活升格素材 project_id 置空、与来源项目脱钩 ----------
+
+    @Test
+    void given_orphan_spec_when_index_then_null_project_id_and_survives_any_project_purge() {
+        indexDirect(spec("CASE", "sed-orphan-1", null, "平台沉淀", "孤儿案例",
+                List.of("孤儿沉淀正文"), null), hot(0));
+
+        // 置空落库：登记表与块表 project_id 皆 NULL（V61 置空化）
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT project_id FROM knw_materials WHERE source_ref = 'sed-orphan-1'",
+                String.class)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT project_id FROM knw_chunks WHERE source_ref = 'sed-orphan-1'",
+                String.class)).isNull();
+
+        knowledgePort.purgeByProject("4242");   // 来源项目删除（级联入口照常触发）
+
+        // 孤儿沉淀＝知识独立存在：级联清不到 NULL 行，素材与块原样存活
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM knw_materials WHERE source_ref = 'sed-orphan-1'",
+                Integer.class)).isEqualTo(1);
+        assertThat(count()).isEqualTo(1);
+    }
+
+    @Test
+    void given_multi_kind_materials_when_retrieve_then_all_kinds_hit_in_one_pool() {
+        // 混检同池（#465）：CASE/MODULE/RULE 沉淀素材与 PRD 同池命中，kind 原样透出
+        when(embeddingClient.embed(List.of("退款规则"))).thenReturn(List.of(vector(1, 1)));
+        indexDirect(spec("PRD", PROJ_A, PROJ_A, "电商系统", "PRD",
+                List.of("退款流程说明"), null), vector(1, 1));
+        indexDirect(spec("CASE", "sed-1", null, "平台沉淀", "退款案例",
+                List.of("退款案例正文"), null), vector(1, 0.9f));
+        indexDirect(spec("RULE", "sed-2", null, "平台沉淀", "退款规则",
+                List.of("退款规则口径"), null), vector(1, 0.8f));
+
+        List<KnowledgeHit> hits = knowledgePort.retrieve("退款规则", 5);
+
+        assertThat(hits).extracting(KnowledgeHit::kind).contains("PRD", "CASE", "RULE");
+    }
+
     // ---------- 素材状态：停用⇄启用可逆开关＋检索状态过滤（#153） ----------
 
     @Test

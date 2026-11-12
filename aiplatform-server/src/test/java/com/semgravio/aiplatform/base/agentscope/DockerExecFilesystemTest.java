@@ -1,7 +1,6 @@
 package com.semgravio.aiplatform.base.agentscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem.ExecCommand;
 import com.semgravio.aiplatform.base.agentscope.DockerExecFilesystem.ExecOutput;
@@ -166,6 +165,19 @@ class DockerExecFilesystemTest {
     }
 
     @Test
+    void given_ls_fragments_from_newline_filename_when_parsed_then_skipped_not_thrown() {
+        // #467：文件名含换行+制表符（write_file 可造，validatePath 只拦空/../..）时
+        // find -printf 会产出「碎行」——大小段非数字的行必须跳过，不得 NFE 穿透杀 run
+        exec.responder = c -> ok("-\t12\t1756100000.0\tREADME.md\n8\tfoo\t3\t名\n");
+
+        LsResult result = fs.ls(RuntimeContext.empty(), "/");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.entries()).extracting(io.agentscope.harness.agent.filesystem.model.FileInfo::path)
+                .containsExactly("/README.md");
+    }
+
+    @Test
     void given_edit_unique_match_when_invoked_then_replaced_and_written_back() {
         exec.responder = c -> c.startsWith("test -f") ? ok("你好，世界") : ok("");
 
@@ -223,6 +235,20 @@ class DockerExecFilesystemTest {
     }
 
     @Test
+    void given_grep_fragments_from_colon_filename_when_parsed_then_skipped_not_thrown() {
+        // #467：文件名含冒号（write_file 可造）会让「路径:行号:文本」错位——
+        // 行号段非数字的行跳过，不 NFE 穿透杀 run（ls/glob 碎行同口径）
+        exec.responder = c -> ok("/workspace/docs/PRD.md:3:这里有 PRD\n"
+                + "/workspace/evil:名:bar:碎行");
+
+        GrepResult result = fs.grep(RuntimeContext.empty(), "PRD", "/docs", null);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.matches()).hasSize(1);
+        assertThat(result.matches().get(0).line()).isEqualTo(3);
+    }
+
+    @Test
     void given_glob_when_invoked_then_files_filtered_by_pattern() {
         exec.responder = c -> ok("7\t1756100000.0\t/workspace/docs/PRD.md\0"
                 + "3\t1756100000.0\t/workspace/index.html\0");
@@ -233,6 +259,32 @@ class DockerExecFilesystemTest {
         assertThat(result.matches()).hasSize(1);
         assertThat(result.matches().get(0).path()).isEqualTo("/docs/PRD.md");
         assertThat(result.matches().get(0).size()).isEqualTo(7);
+    }
+
+    @Test
+    void given_glob_fragments_from_newline_filename_when_parsed_then_skipped_not_thrown() {
+        // #467：同 ls 碎行口径——大小/时间戳段非数字的记录跳过，不 NFE 穿透杀 run
+        exec.responder = c -> ok("7\t1756100000.0\t/workspace/docs/PRD.md\0"
+                + "碎\t行\t/workspace/x\ny.md\0");
+
+        var result = fs.glob(RuntimeContext.empty(), "**/*.md", "/");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.matches()).extracting(io.agentscope.harness.agent.filesystem.model.FileInfo::path)
+                .containsExactly("/docs/PRD.md");
+    }
+
+    @Test
+    void given_invalid_glob_pattern_when_invoked_then_fail_result_with_corrective_text() {
+        // #467：glob 语法是模型入参——非法语法（未闭合 [）须 fail 结果带纠偏指引，
+        // 不抛 IAE 丢整次结果（getPathMatcher 在碎行 try 之外的同族缺口；
+        // matcher 构造在 exec.run 之后，须先放行 exec 才达该行）
+        exec.responder = c -> ok("");
+
+        var result = fs.glob(RuntimeContext.empty(), "docs[", "/");
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.error()).contains("glob 语法非法");
     }
 
     @Test
@@ -298,8 +350,14 @@ class DockerExecFilesystemTest {
     void given_traversal_path_when_invoked_then_blocked_not_reaching_container() {
         assertThat(fs.exists(RuntimeContext.empty(), "/../etc/passwd")).isFalse();
         assertThat(fs.ls(RuntimeContext.empty(), "/a/../b").error()).contains("路径非法");
-        assertThatThrownBy(() -> fs.write(RuntimeContext.empty(), "/../escape.md", "x"))
-                .isInstanceOf(IllegalArgumentException.class);
+        // #467：校验异常必须转模型可见错误（FilesystemTool 框架壳无 catch，throw
+        // 即穿透杀 run——与 ls/read 同为 fail 形态，模型可纠偏重试）
+        WriteResult write = fs.write(RuntimeContext.empty(), "/../escape.md", "x");
+        assertThat(write.isSuccess()).isFalse();
+        assertThat(write.error()).contains("路径非法");
+        var upload = fs.uploadFiles(RuntimeContext.empty(),
+                List.of(Map.entry("a/../escape.bin", new byte[]{1})));
+        assertThat(upload.get(0).isSuccess()).isFalse();
         // 未产生任何容器命令
         assertThat(exec.commands).isEmpty();
     }

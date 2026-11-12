@@ -722,8 +722,7 @@ class ProjectControllerTest {
                 """;
         when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
                 prd, Instant.ofEpochSecond(1756100000),
-                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
-                /* draftChangeSummary= */ null));
+                PrdReadinessResponse.from(PrdReadiness.parse(prd))));
 
         performAsUser(get("/api/projects/100/prd"))
                 .andExpect(status().isOk())
@@ -747,23 +746,6 @@ class ProjectControllerTest {
     }
 
     @Test
-    void given_parked_draft_change_when_get_prd_then_change_summary_returned() throws Exception {
-        // #334 改需求回路：范围级新草稿停驻待确认——PRD 读面带差异摘要（对话区
-        // 「PRD 已更新，确认新版后生成下一版 Demo」提示与确认门摘要层的数据面；
-        // 无停驻为 null，不占形）
-        String prd = "# 官网 PRD\n";
-        when(queryAppService.prd(100L)).thenReturn(new PrdResponse("100",
-                prd, Instant.ofEpochSecond(1756100000),
-                PrdReadinessResponse.from(PrdReadiness.parse(prd)),
-                "功能清单新增管理后台章：管理员可管理商品与订单"));
-
-        performAsUser(get("/api/projects/100/prd"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.draftChangeSummary")
-                        .value("功能清单新增管理后台章：管理员可管理商品与订单"));
-    }
-
-    @Test
     void given_prd_not_produced_when_get_prd_then_prj_015_as_404() throws Exception {
         // 「未产出」口径：404 PRJ_015（区别于项目不存在的 PRJ_001）——前端区分「还没产出」
         when(queryAppService.prd(100L))
@@ -775,48 +757,16 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
     }
 
-    // ---------- PRD 确认版本（#330「确认即成版」：确认动作＋版本列表/详情） ----------
+    // ---------- PRD 版本（#330→#462 去门化：确认端点退役，run 起跑自动记行；读面保留） ----------
 
     @Test
-    void given_draft_prd_when_confirm_then_version_returned() throws Exception {
-        when(prdVersionAppService.confirm(100L)).thenReturn(new PrdVersionResponse("100", 1,
-                "# 官网 PRD\n\n目标：三页官网。\n", LocalDateTime.of(2026, 10, 16, 12, 0),
-                PrdReadinessResponse.from(PrdReadiness.parse("# 官网 PRD\n\n目标：三页官网。\n"))));
-
-        // 确认即成版：回执携带版本号（#332 生成加门的挂点——确认后自动派 Demo run 消费）
-        // ＋收敛度投影（fail-open 空态：无「验收与待确认」章——五维全 ready）
+    void given_confirm_endpoint_retired_when_post_confirm_then_404() throws Exception {
+        // 去确认门（#462，ADR-0039）：POST /prd/confirm 整段退役——端点 gone（404），
+        // 首 Demo 触发平移到首次 savePrd 落盘回调（PrdArtifactAdapter →
+        // GenerationAppService.dispatchFirstDemoOnPrdProduced），版本行由 Demo 类
+        // run 起跑自动记（PrdVersionAppService.recordOnDemoRunStart）
         performAsUser(post("/api/projects/100/prd/confirm"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.projectId").value("100"))
-                .andExpect(jsonPath("$.data.versionNo").value(1))
-                .andExpect(jsonPath("$.data.content").value("# 官网 PRD\n\n目标：三页官网。\n"))
-                .andExpect(jsonPath("$.data.confirmedAt").value("2026-10-16T12:00:00"))
-                .andExpect(jsonPath("$.data.readiness.blocking.length()").value(0))
-                .andExpect(jsonPath("$.data.readiness.dimensions.length()").value(5));
-    }
-
-    @Test
-    void given_prd_not_produced_when_confirm_then_prj_015_as_404() throws Exception {
-        when(prdVersionAppService.confirm(100L))
-                .thenThrow(new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED));
-
-        performAsUser(post("/api/projects/100/prd/confirm"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(4015))
-                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
-    }
-
-    @Test
-    void given_blocking_pending_when_confirm_then_prj_053_as_409() throws Exception {
-        // 两级门拦截（#331）：阻碍核心流程缺项在场——确认被拦，前端认数字码 4053
-        //（缺项明细经 PRD 读面 readiness 拉取呈现，信封只载码＋消息）
-        when(prdVersionAppService.confirm(100L))
-                .thenThrow(new ApplicationException(ProjectMessage.PRD_CONFIRM_BLOCKING_PENDING));
-
-        performAsUser(post("/api/projects/100/prd/confirm"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value(4053))
-                .andExpect(jsonPath("$.message").value("PRD 还有阻碍核心流程的待确认项，先在对话区补齐后再确认"));
+                .andExpect(status().isNotFound());
     }
 
     @Test

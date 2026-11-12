@@ -51,7 +51,7 @@ class SavePrdToolTest {
         RuntimeException failure;
 
         RecordingAdapter() {
-            super(null, null, null);
+            super(null, null, null, null);
         }
 
         @Override

@@ -37,7 +37,9 @@ step() { printf '\n==> %s\n' "$*"; }
 # ---------------------------------------------------------------------------
 sign_headers() {
   local secret="$1" path_with_query="$2" body_file="${3:-}" ts_override="${4:-}"
-  python3 - "$API_KEY" "$secret" "$path_with_query" "$body_file" "$ts_override" <<'PY'
+  # ①族防呆：Windows python print 重定向到管道换行带 \r（bash read 只剥 \n），
+  # 头值尾 CR 进 curl 即非法头被 Tomcat 拒 400——输出端统一剥 \r（头值皆 hex/数字，Unix 下无副作用）
+  python3 - "$API_KEY" "$secret" "$path_with_query" "$body_file" "$ts_override" <<'PY' | tr -d '\r'
 import hashlib, hmac, sys, time, uuid
 
 api_key, secret, path_with_query, body_file, ts_override = sys.argv[1:6]

@@ -308,8 +308,11 @@ class IterationAppServiceTest {
     void given_knowledge_hits_when_fix_then_prefix_injected_before_task_prompt() {
         Long projectId = persistedGeneratedProject("9903");
         List<Runnable> tracks = givenTrackQueued();
+        // #466 多类同池：PRD 历史需求＋激活升格的沉淀物同块前置注入，条带 kind 区分
         when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
-                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。")));
+                new KnowledgeHit("PRD", "连锁诊所系统", "PRD·连锁诊所管理", "范围边界：不含库存。"),
+                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
+                        "开场前 2 小时内不可取消。")));
         givenConverseSucceeds();
 
         String task = "给库存页加分页";
@@ -320,8 +323,9 @@ class IterationAppServiceTest {
         ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
         verify(agentClient).converse(command.capture(), any());
         assertThat(command.getValue().prompt())
-                .startsWith("【平台知识库·相似历史需求】")
-                .contains("连锁诊所系统")
+                .startsWith("【平台知识库·相似知识】")
+                .contains("〔连锁诊所系统｜历史需求〕PRD·连锁诊所管理")
+                .contains("〔平台沉淀｜业务规则〕预约类业务的取消规则")
                 .endsWith("————\n\n" + IterationAppService.fixRunPrompt(singleHandoff(task, null)));
     }
 
@@ -329,6 +333,10 @@ class IterationAppServiceTest {
     void given_first_attempt_fails_when_fix_then_silent_retry_with_retry_prompt() {
         Long projectId = persistedGeneratedProject("9904");
         List<Runnable> tracks = givenTrackQueued();
+        // 知识命中在场（#466）：首试带前置注入块、重试不重注入的对照事实
+        when(knowledgePort.retrieve(anyString(), anyInt())).thenReturn(List.of(
+                new KnowledgeHit("RULE", "平台沉淀", "预约类业务的取消规则",
+                        "开场前 2 小时内不可取消。")));
         // 剧本（#84 事件序列断言）：首试中途错误（error 事件 + 异常上浮）；重试尝试
         //（内部新 runId）真实客户端会再发 run-start 与部件，收口 run-finish
         when(agentClient.converse(any(), any()))
@@ -369,7 +377,9 @@ class IterationAppServiceTest {
                 .contains("错误现场：修正尝试中断")
                 .contains("进展现场（平台可观测事实）")
                 .contains("已累计用时")
-                .contains("已落盘文件变更 尚无");
+                .contains("已落盘文件变更 尚无")
+                // #466 一次切入一次注入既有语义：知识前置注入只进首试 prompt，重试不重注入
+                .doesNotContain("【平台知识库");
         verify(eventsAppService, never()).publishAgentEvent(eq("run-retrying"), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.ERROR), any());
 
@@ -720,8 +730,9 @@ class IterationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
-        // #425 更新轨同盖：基座 lint 预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
-        // 不拦收口（对比强制档＝收口被拒）；修轮喂回现场进同 run（两试）
+        // #425 更新轨同盖（#471 gap 收口改口径）：基座 lint 预置档（会话件自写）
+        // 不触发修轮——软档违规不烧 attempt+1 失败升档，直接随收尾卡标注、不拦
+        // 收口（对比强制档＝修轮＋收口被拒）
         Long projectId = persistedGeneratedProject("9961");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseClosing(true, "加了登录会话", List.of(
@@ -743,9 +754,10 @@ class IterationAppServiceTest {
         appService.startFixRun(projectId, "加登录", null);
         tracks.remove(0).run();
 
-        // 预置档修一轮仍余＝不拦收口：两试（修轮喂回→仍余收口）、无失败终态；
-        // 收尾卡 robustKitLint 如实标注（violations＋retried＋预置档余项、无强制档）
-        verify(agentClient, times(2)).converse(any(), any());
+        // 预置档不触发修轮：一试即收口（无修轮重试）、无失败终态；收尾卡
+        // robustKitLint 如实标注（violations＋预置档余项、无强制档、无 retried
+        // ——修轮没发生，叙事不伪造纠偏过程）
+        verify(agentClient, times(1)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -755,10 +767,66 @@ class IterationAppServiceTest {
         Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
         assertThat(robustLint)
                 .containsEntry("status", "violations")
-                .containsEntry("retried", true)
+                .doesNotContainKey("retried")
                 .doesNotContainKey("mandatory");
         assertThat((Map<String, Object>) robustLint.get("preset"))
                 .containsEntry("total", 1);
+    }
+
+    @Test
+    void given_style_lint_violations_when_fix_then_narrow_repair_prompt() {
+        // #472 更新轨同盖（#425 收口携 lint 面——修轮在本轨真实触发，评审收口）：
+        // 修轮派发走窄修轨（本轮修正已完成、仅消除清单内违规、finish_edit 收口
+        // 尾句），不再整任务重述——「完成本轮修正」宽形只属能力面重试（Q1a 兜底
+        // 语义不变）
+        Long projectId = persistedGeneratedProject("9962");
+        jdbcTemplate.update(
+                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
+                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
+                4821000000000000003L, projectId, "/design/home-1.html", "run-final-1",
+                "{\"--primary\": \"#166534\"}");
+        List<Runnable> tracks = givenTrackQueued();
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+        AtomicInteger scans = new AtomicInteger();
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("oxlint"))))
+                .thenAnswer(invocation -> scans.incrementAndGet() == 1
+                        ? new ExecResultResponse("""
+                                { "diagnostics": [{"message": "\\"bg-red-500\\" uses the raw Tailwind palette. Use a theme token.",
+                                "code": "shadcn(no-raw-colors)","severity": "error","filename": "src/app/page.tsx",
+                                "labels": [{"span": {"line": 3}}]}]}
+                                """, "", 1)
+                        : new ExecResultResponse("{ \"diagnostics\": [] }", "", 0));
+        List<String> prompts = new ArrayList<>();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
+            prompts.add(command.prompt());
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            finishFixFacts.record(command.workspaceId(), true, "按定稿设计统一配色");
+            return new AgentReply(command.runId(), "修正完成", null, List.of(
+                    new FileChange("/src/app/page.tsx", 6, 2)));
+        });
+
+        appService.startFixRun(projectId, "按定稿设计改配色", null);
+        tracks.remove(0).run();
+
+        // 首试违规 → 修轮清零（2 次 converse）；修轮 prompt 窄修形：携违规清单＋
+        // 窄修指令＋finish_edit 收口尾句，不携「完成本轮修正」整任务重述
+        verify(agentClient, times(2)).converse(any(), any());
+        assertThat(prompts.get(1))
+                .contains("样式合规扫描未过")
+                .contains("src/app/page.tsx:3 no-raw-colors")
+                .contains("只逐条消除")
+                .contains("finish_edit")
+                .doesNotContain("完成本轮修正");
     }
 
     @Test
@@ -1281,13 +1349,13 @@ class IterationAppServiceTest {
         return projectRepository.save(project).getId();
     }
 
-    /** 已确认 PRD 版本在场（#333 Demo 版本锚——迭代起跑时的基准版本）。 */
-    private void seedConfirmedPrdVersion(Long projectId, int versionNo) {
-        seedConfirmedPrdVersionContent(projectId, versionNo, "# PRD");
+    /** PRD 版本行在场（#333 Demo 版本锚——迭代起跑时最新构建基准的取数事实）。 */
+    private void seedPrdVersionRow(Long projectId, int versionNo) {
+        seedPrdVersionRowContent(projectId, versionNo, "# PRD");
     }
 
-    /** 已确认 PRD 版本在场（#334 起跑基准——自定义全文：漂移比对的工作区对侧事实）。 */
-    private void seedConfirmedPrdVersionContent(Long projectId, int versionNo, String content) {
+    /** PRD 版本行在场（自定义全文——记行形态的版本行夹具：锚捕获读「最新版」）。 */
+    private void seedPrdVersionRowContent(Long projectId, int versionNo, String content) {
         jdbcTemplate.update("""
                 INSERT INTO prj_prd_versions (id, project_id, version_no, content, confirmed_at,
                     prd_produced_at, created_at, updated_at)
@@ -1309,18 +1377,19 @@ class IterationAppServiceTest {
     @Test
     void given_changed_fix_runs_when_close_then_demo_versions_increment_with_prd_anchor() {
         // 灵魂例（#333 迭代每轮自动成版）：changed=true 收口即递增成版、锚本场起跑时
-        // 已确认 PRD 版本——v1（PRD v1 基准）→ 确认 v2 后下一轮 v2 锚（迭代成版链）
+        // 最新 PRD 版本（#462 去门化＝最新构建基准记行）——v1（PRD v1 基准）→ 新基准
+        // v2 记行后下一轮锚 v2（迭代成版链）
         Long projectId = persistedGeneratedProject("9950");
-        seedConfirmedPrdVersion(projectId, 1);
-        // 工作区草稿==已确认版（#334：无范围级草稿在场——迭代基准＝已确认版、无漂移）
+        seedPrdVersionRow(projectId, 1);
+        // 工作区 PRD==最新记行全文（同文——起跑记行幂等跳过，不产生新基准）
         givenWorkspacePrd("# PRD");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
         IterationAppService.FixDispatch first = appService.startFixRun(projectId, "列表按时间倒序", null);
         tracks.remove(0).run();
-        // 改需求回路后：PRD 确认 v2（确认新版才切迭代基准）
-        seedConfirmedPrdVersion(projectId, 2);
+        // 需求侧修订后的新基准记行（模拟 PRD 已修订、随起跑自动记 v2）——下一场锚 v2
+        seedPrdVersionRow(projectId, 2);
         IterationAppService.FixDispatch second = appService.startFixRun(projectId, "加筛选", null);
         tracks.remove(0).run();
 
@@ -1352,14 +1421,14 @@ class IterationAppServiceTest {
         assertThat(count).isZero();
     }
 
-    // ---------- 改需求回路（#334）：小迭代基准＝当前已确认版本 ----------
+    // ---------- 迭代需求基准（#462 去门化）：恒工作区 PRD 正本（单形） ----------
 
-    /** 已确认版全文（基准断言用的独特正文——区别于草稿与占位）。 */
-    private static final String CONFIRMED_PRD_V1 = "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n";
+    /** 最新版本行全文 v1（基准断言用的独特正文——区别于新草稿与占位）。 */
+    private static final String PRD_V1_ROW = "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n";
 
-    /** 范围级新草稿（≠已确认 v1——漂移在工作区的事实面）。 */
-    private static final String SCOPE_PENDING_DRAFT =
-            "# PRD 已确认 v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
+    /** 范围级新草稿（≠v1 全文——工作区已修订、未随起跑记行的形态）。 */
+    private static final String SCOPE_DRAFT =
+            "# PRD v1 基准\n\n## 功能清单\n\n1. 首页\n2. 管理后台\n";
 
     /** 工作区 PRD 读取桩（PRD 读端点同形：stat 首行＋cat 余文——覆盖 AGENTS.md 桩，写路径只看退出码）。 */
     private void givenWorkspacePrd(String prdMarkdown) {
@@ -1368,34 +1437,13 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_confirmed_version() {
-        // 灵魂例（#334 小迭代基准不漂移）：范围级新草稿在场（未被确认）时小迭代
-        // 仍按旧确认版起跑——修正任务以已确认版全文为基准，工作区草稿明确不作
-        // 本轮依据（确认新版才切基准）
+    void given_pending_draft_when_small_iteration_runs_then_prompt_baselines_workspace_draft() {
+        // 去门化（#462，ADR-0039——#334 停派分流退役）：范围级新草稿在场不再停派
+        // 待确认——受理即迭代，需求基准恒为工作区 PRD 正本（新草稿＝新构建基准，
+        // 下一起跑自动记行；不再内联旧确认版快照）
         Long projectId = persistedGeneratedProject("9960");
-        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
-        givenWorkspacePrd(SCOPE_PENDING_DRAFT);
-        List<Runnable> tracks = givenTrackQueued();
-        givenConverseSucceeds();
-
-        appService.startFixRun(projectId, "按钮改成蓝色", null);
-        tracks.remove(0).run();
-
-        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, atLeast(1)).converse(command.capture(), any());
-        assertThat(command.getAllValues().get(0).prompt())
-                .contains("本轮需求基准")
-                .contains(CONFIRMED_PRD_V1)
-                .doesNotContain("需求正本 = 工作区");
-    }
-
-    @Test
-    void given_draft_equals_confirmed_when_iteration_runs_then_prompt_reads_workspace() {
-        // 草稿==已确认版（无新草稿在场，含确认动作后的范围级修正 run）：照旧以
-        // 工作区正本为需求正本（不内联快照——确认后工作区即确认版）
-        Long projectId = persistedGeneratedProject("9961");
-        seedConfirmedPrdVersionContent(projectId, 1, CONFIRMED_PRD_V1);
-        givenWorkspacePrd(CONFIRMED_PRD_V1);
+        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
+        givenWorkspacePrd(SCOPE_DRAFT);
         List<Runnable> tracks = givenTrackQueued();
         givenConverseSucceeds();
 
@@ -1410,8 +1458,29 @@ class IterationAppServiceTest {
     }
 
     @Test
-    void given_no_confirmed_version_when_iteration_runs_then_prompt_reads_workspace() {
-        // legacy（无确认版起跑）：不虚构确认制——照旧以工作区正本为需求正本
+    void given_draft_equals_latest_row_when_iteration_runs_then_prompt_reads_workspace() {
+        // 工作区正本==最新版本行全文（同文形态，无新草稿在场）：照旧以工作区正本
+        // 为需求正本（单形——不内联快照、不区分草稿/成版两形）
+        Long projectId = persistedGeneratedProject("9961");
+        seedPrdVersionRowContent(projectId, 1, PRD_V1_ROW);
+        givenWorkspacePrd(PRD_V1_ROW);
+        List<Runnable> tracks = givenTrackQueued();
+        givenConverseSucceeds();
+
+        appService.startFixRun(projectId, "按钮改成蓝色", null);
+        tracks.remove(0).run();
+
+        ArgumentCaptor<AgentCommand> command = ArgumentCaptor.forClass(AgentCommand.class);
+        verify(agentClient, atLeast(1)).converse(command.capture(), any());
+        assertThat(command.getAllValues().get(0).prompt())
+                .contains("需求正本 = 工作区")
+                .doesNotContain("本轮需求基准");
+    }
+
+    @Test
+    void given_no_version_rows_when_iteration_runs_then_prompt_reads_workspace() {
+        // legacy（无版本记行起跑，如记行失败/极老项目）：不虚构记行——照旧以
+        // 工作区正本为需求正本（Demo 版本锚 null 同口径）
         Long projectId = persistedGeneratedProject("9962");
         givenWorkspacePrd("# PRD\n\n## 功能清单\n\n1. 首页\n");
         List<Runnable> tracks = givenTrackQueued();

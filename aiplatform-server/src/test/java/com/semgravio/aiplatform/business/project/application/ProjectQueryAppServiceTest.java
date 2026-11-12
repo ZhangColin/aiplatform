@@ -180,8 +180,8 @@ class ProjectQueryAppServiceTest {
         Project demo = persistedProject(8119L, "Demo 体验项目");
         Project supplement = persistedProject(8120L, "待补充项目");
         for (Project project : List.of(demo, supplement)) {
-            prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 1,
-                    "# PRD\n\n已确认范围。", LocalDateTime.now(), LocalDateTime.now()));
+            prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
+                    "# PRD\n\n已确认范围。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
         }
         supplement.confirmDemoVersion(1);
         supplement.flagNeedsUserSupplement(true);
@@ -273,21 +273,21 @@ class ProjectQueryAppServiceTest {
                 description, status, runId, Timestamp.valueOf(prdProducedAt));
     }
 
-    // ---------- #335：下单冻结面（confirmedVersionRefs——双确认引用集） ----------
+    // ---------- #335：下单冻结面（latestVersionRefs——双确认引用集） ----------
 
     @Test
     void given_confirmed_versions_when_confirmed_version_refs_then_refs_with_full_text() {
         // 已确认 PRD 版本（多版取最新）＋Demo 确认指针 → 引用集：版本号＋确认版
         // 全文（冗余拷贝源＝版本行正文）＋Demo 版本号
         Project project = persistedProject(8501L, "双确认项目");
-        prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 1,
-                "# PRD v1\n\n旧版。", LocalDateTime.now(), LocalDateTime.now()));
-        PrdVersion latest = prdVersionRepository.save(PrdVersion.confirmed(project.getId(), 2,
-                "# PRD v2\n\n下单引用的最新确认版全文。", LocalDateTime.now(), LocalDateTime.now()));
+        prdVersionRepository.save(PrdVersion.recorded(project.getId(), 1,
+                "# PRD v1\n\n旧版。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
+        PrdVersion latest = prdVersionRepository.save(PrdVersion.recorded(project.getId(), 2,
+                "# PRD v2\n\n下单引用的最新确认版全文。", LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
         project.confirmDemoVersion(3);
         projectRepository.save(project);
 
-        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(project.getId());
+        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(project.getId());
 
         assertThat(refs.prdVersionNo()).isEqualTo(2);
         assertThat(refs.prdContent()).isEqualTo(latest.getContent());
@@ -300,7 +300,7 @@ class ProjectQueryAppServiceTest {
         // 门判定归订单侧，本口不虚构引用
         Long projectId = persistedProject(8502L, "未确认项目").getId();
 
-        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(projectId);
+        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
 
         assertThat(refs.prdVersionNo()).isNull();
         assertThat(refs.prdContent()).isNull();
@@ -311,10 +311,10 @@ class ProjectQueryAppServiceTest {
     void given_prd_confirmed_demo_not_when_confirmed_version_refs_then_partial_refs() {
         // 单腿确认：PRD 已确认而 Demo 未确认——各腿如实上报（订单侧逐腿拦截）
         Long projectId = persistedProject(8503L, "单腿项目").getId();
-        prdVersionRepository.save(PrdVersion.confirmed(projectId, 1, "# PRD v1",
-                LocalDateTime.now(), LocalDateTime.now()));
+        prdVersionRepository.save(PrdVersion.recorded(projectId, 1, "# PRD v1",
+                LocalDateTime.now(), LocalDateTime.now(), "run-fixture"));
 
-        ProjectQueryAppService.ConfirmedVersionRefs refs = appService.confirmedVersionRefs(projectId);
+        ProjectQueryAppService.LatestVersionRefs refs = appService.latestVersionRefs(projectId);
 
         assertThat(refs.prdVersionNo()).isEqualTo(1);
         assertThat(refs.prdContent()).isEqualTo("# PRD v1");
@@ -323,7 +323,7 @@ class ProjectQueryAppServiceTest {
 
     @Test
     void given_missing_project_when_confirmed_version_refs_then_prj_001() {
-        assertThatThrownBy(() -> appService.confirmedVersionRefs(-1L))
+        assertThatThrownBy(() -> appService.latestVersionRefs(-1L))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
     }

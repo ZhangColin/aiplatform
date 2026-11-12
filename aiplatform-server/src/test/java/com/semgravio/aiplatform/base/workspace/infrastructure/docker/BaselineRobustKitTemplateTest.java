@@ -60,9 +60,11 @@ class BaselineRobustKitTemplateTest {
         assertThat(packageJson).contains("happy-dom");
         assertThat(packageJson).contains("@vitejs/plugin-react");
         assertThat(packageJson).contains("@testing-library/react");
-        // 旧裸客户端出口 src/lib/db.ts 已被数据访问层吸收——模板不再内置
-        // 「绕过健壮件」的起点文件（#421 机制/呈现分离的模板侧收口）
-        assertThat(resource("docker/workspace/baseline/src/lib/db.ts")).isNull();
+        // src/lib/db.ts＝#471 P1-b 复置（覆盖 #421 当时的「模板不内置」裁决）：
+        // #421 移除的是绕过健壮件的裸客户端出口；#471 复置的是纯 re-export 入口
+        // ——三项目实测 run 执行体找不到习惯入口位即自建裸客户端文件、收口 lint
+        // 强制档拒绝后按失败信号升档烧 pro。在场＋零裸原语断言归
+        // {@link BaselineEntryFilesTest} 单点（本类不重复）。
     }
 
     @Test

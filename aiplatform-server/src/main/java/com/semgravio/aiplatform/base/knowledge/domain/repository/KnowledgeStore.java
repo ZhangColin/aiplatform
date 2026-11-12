@@ -28,10 +28,16 @@ public interface KnowledgeStore {
     void replace(KnowledgeSpec spec, List<float[]> embeddings);
 
     /**
-     * 余弦相似检索（HNSW 索引）：全局跨项目、按相似度升序取 topK（A5 §3 策略）；
-     * 仅启用素材的块参与命中（停用素材整体退出，#153）。
+     * 混检检索（#465，自纯向量升级）：向量通道（余弦近邻，HNSW 索引）＋关键词
+     * 通道（pg_trgm 三元组相似度）各取候选池，RRF 融合后取 topK——CASE/MODULE/
+     * RULE 沉淀素材与 PRD 同池命中（kind 对底座不透明，A5 §3 全局跨项目不变）。
+     * 仅启用素材的块参与命中（停用素材整体退出，#153——两通道同开 JOIN 过滤）。
+     * 关键词通道零重叠闸：与 query 无共享三元组的块不进候选（噪音控制）。
+     *
+     * @param query       检索 query 全文（关键词通道的比对面；超长截断归调用方）
+     * @param queryVector query 的 embedding（向量通道比对面）
      */
-    List<KnowledgeHit> findSimilar(float[] queryVector, int topK);
+    List<KnowledgeHit> findRelevant(String query, float[] queryVector, int topK);
 
     /**
      * 素材状态迁移（停用⇄启用，#153 可逆开关）：落状态与最近管理动作操作者。

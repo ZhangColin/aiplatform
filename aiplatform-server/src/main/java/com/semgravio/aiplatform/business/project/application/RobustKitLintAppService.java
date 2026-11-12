@@ -253,8 +253,9 @@ public class RobustKitLintAppService {
      */
     public static String fixRoundScene(Map<String, Object> payload) {
         StringBuilder scene = new StringBuilder(
-                "基座 lint 扫描未过——数据访问与外部调用必须走基座预置件（件用法细则见"
-                        + "工作区 AGENTS.md 本栈写法规则节），修掉以下违规再收口：");
+                "基座 lint 扫描未过——数据访问与外部调用必须走基座预置件（入口 src/lib/"
+                        + "db.ts、src/lib/http.ts 已预置；件用法细则见工作区 AGENTS.md "
+                        + "本栈写法规则节），修掉以下违规再收口：");
         appendTier(scene, "强制档（数据访问/外部调用裸客户端直用——修不完收口会被拒）",
                 tierViolationsOf(payload, TIER_MANDATORY));
         appendTier(scene, "预置档（会话存储自写——建议改走预置件）",
@@ -270,7 +271,8 @@ public class RobustKitLintAppService {
         StringBuilder receipt = new StringBuilder(
                 "基座 lint 强制档未过（收口被拒）：数据访问与外部调用的裸客户端直用"
                         + "修不完——强制档违规是收口硬门（预置档不拦收口）。改走基座预置件"
-                        + "（src/lib/robust——件用法细则见工作区 AGENTS.md 本栈写法规则节）"
+                        + "（src/lib/robust，入口 src/lib/db.ts、src/lib/http.ts 已预置"
+                        + "——件用法细则见工作区 AGENTS.md 本栈写法规则节）"
                         + "后重新收口，仍违规的裸客户端：");
         for (Map<String, Object> violation : tierViolationsOf(payload, TIER_MANDATORY)) {
             receipt.append('\n').append(violation.get("file")).append(':')
@@ -303,19 +305,19 @@ public class RobustKitLintAppService {
         if (!mandatory) {
             rule = RULE_HANDWRITTEN_SESSION;
             message = "会话存储自写——会话与密码一律走 src/lib/robust/session"
-                    + "（createSession/getSession/destroySession/hashPassword，redis 挂了降级"
-                    + "不挂死），不手写 cookie 会话、不裸用密码哈希原语";
+                    + "（或预置入口 src/lib/auth.ts：createSession/getSession/destroySession"
+                    + "/hashPassword，redis 挂了降级不挂死），不手写 cookie 会话、不裸用密码哈希原语";
         }
         else if (content.contains("fetch(")) {
             rule = RULE_BARE_FETCH;
             message = "裸 fetch——外部 HTTP 一律走 src/lib/robust/http 的 httpFetch/httpJson"
-                    + "（默认超时＋错误归一），不用裸 fetch";
+                    + "（或预置入口 src/lib/http.ts；默认超时＋错误归一），不用裸 fetch";
         }
         else {
             rule = RULE_BARE_DB_CLIENT;
             message = "数据访问裸客户端直用——pg/redis 一律走 src/lib/robust/data-access 的"
-                    + " query/cacheGet/cacheSet（超时＋瞬时重试＋降级内置），不 new Pool/"
-                    + "Client/Redis、不 createClient";
+                    + " query/cacheGet/cacheSet（或预置入口 src/lib/db.ts；超时＋瞬时重试"
+                    + "＋降级内置），不 new Pool/Client/Redis、不 createClient";
         }
         Map<String, Object> violation = new LinkedHashMap<>();
         violation.put("file", path);

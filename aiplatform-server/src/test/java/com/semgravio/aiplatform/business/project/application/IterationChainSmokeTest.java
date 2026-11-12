@@ -130,6 +130,7 @@ class IterationChainSmokeTest {
         }
         if (projectId != null) {
             knowledgeAppService.purgeByProject(projectId);
+            jdbcTemplate.update("DELETE FROM skl_skill_drafts WHERE project_id = ?", projectId);
             jdbcTemplate.update("DELETE FROM prj_projects WHERE id = ?", projectId);
         }
         if (workspaceId != null) {
@@ -161,12 +162,11 @@ class IterationChainSmokeTest {
         mainSessionId = MainAgentAppService.SESSION_PREFIX + projectId;
         coderSessionId = CoderRunAttempts.SESSION_PREFIX + projectId;
 
-        // 1) 压缩访谈：一句话 → 追问即催促收敛 → savePrd 产出 PRD（主智能体会话内有
-        //    自己写的 PRD 上下文——后续修订才有正本可依）
-        convergeToInterviewPrd("做一个单页展示系统，主色调用蓝色，页面简洁");
-        assertThat(prdContent()).as("访谈收敛后 PRD 应已产出且含主色调约定").contains("蓝");
-
-        // 2) 预置已生成形态：8081 常驻小系统（主色蓝）+ generated_at 落位
+        // 1) 预置已生成形态：8081 常驻小系统（主色蓝）+ generated_at 落位——须在访谈
+        //    产出 PRD **之前**落位：#462 去确认门后首次产 PRD 即自动派首个构建
+        //    （轮收口观测），访谈收口时若仍「未生成」会真起一条生成轨与手工预置竞速
+        //    （4b 按 run-start 首捕会捕到生成轨切片 run——该片不以 finish_edit 收口，
+        //    4f 断言必红；#460e 时代无此自动派发故无竞速）
         placeRunningSystem();
         pageBefore = servedPage();
         assertThat(pageBefore).as("预置系统应在 8081 可访问").contains(BLUE_MAIN_COLOR);
@@ -174,6 +174,12 @@ class IterationChainSmokeTest {
             p.markGenerated();
             projectRepository.save(p);
         });
+
+        // 2) 压缩访谈：一句话 → 追问即催促收敛 → savePrd 产出 PRD（主智能体会话内有
+        //    自己写的 PRD 上下文——后续修订才有正本可依）。已生成形态在场——首产
+        //    PRD 不触发自动派发（本测只验意见→修正链，生成轨另由 MainAgent 冒烟覆盖）
+        convergeToInterviewPrd("做一个单页展示系统，主色调用蓝色，页面简洁");
+        assertThat(prdContent()).as("访谈收敛后 PRD 应已产出且含主色调约定").contains("蓝");
 
         // 3) 意见轮（真主智能体）：改主色调——按主智能体协议，只判需求侧（此为需求变更
         //    → savePrd 修订），不调任何派发工具（也没有）
@@ -314,11 +320,12 @@ class IterationChainSmokeTest {
 
     /** 预置可跑小系统：index.html（主色蓝）+ 8081 常驻 node 静态服务。 */
     private void placeRunningSystem() {
+        // （①族纪律：进容器命令禁内嵌双引号——HTML 属性改单引号形态，合法 HTML）
         exec("mkdir -p /workspace && cat > /workspace/index.html <<'SMOKE_EOF'\n"
-                + "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+                + "<!doctype html><html lang='zh'><head><meta charset='utf-8'>"
                 + "<title>展示系统</title></head>"
-                + "<body style=\"font-family: sans-serif; margin: 40px\">"
-                + "<h1 style=\"color: " + BLUE_MAIN_COLOR + "\">展示系统</h1>"
+                + "<body style='font-family: sans-serif; margin: 40px'>"
+                + "<h1 style='color: " + BLUE_MAIN_COLOR + "'>展示系统</h1>"
                 + "<p>主页内容。</p></body></html>\nSMOKE_EOF");
         exec("cat > /workspace/server.js <<'SMOKE_EOF'\n"
                 + "const http = require('http'); const fs = require('fs');\n"

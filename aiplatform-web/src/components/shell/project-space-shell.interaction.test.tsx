@@ -67,11 +67,11 @@ function mountShell() {
 }
 
 describe("ProjectSpaceShell · 灰置点击说明原因", () => {
-  it("侧栏：点灰置的「Demo 体验」出原因（PRD 确认门）", async () => {
+  it("侧栏：点灰置的「Demo 体验」出原因（首个 Demo 未起）", async () => {
     mountShell();
     // 侧栏与顶栏同名重复面：取全部命中里的第一枚
     fireEvent.click(screen.getAllByText("Demo 体验")[0]);
-    expect(await screen.findByText(/PRD 确认后开放/)).toBeTruthy();
+    expect(await screen.findByText(/首个 Demo 生成后开放/)).toBeTruthy();
   });
 
   it("顶栏：点灰置的「签约付款」出原因（Demo 确认门）", async () => {

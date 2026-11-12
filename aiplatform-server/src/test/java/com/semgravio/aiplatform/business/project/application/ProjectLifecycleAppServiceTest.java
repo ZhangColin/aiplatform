@@ -40,8 +40,10 @@ import com.semgravio.aiplatform.base.skills.domain.repository.SkillStore;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.CreateWorkspaceCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceResponse;
+import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
+import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.business.order.domain.aggregate.Order;
 import com.semgravio.aiplatform.business.order.domain.enums.OrderDeliverableType;
 import com.semgravio.aiplatform.business.order.domain.error.OrderMessage;
@@ -280,7 +282,7 @@ class ProjectLifecycleAppServiceTest {
         assertThat(response.statusName()).isEqualTo("已归档");
         assertThat(response.archived()).isTrue();
         // 归档不清工作区
-        verify(workspaceLifecycleAppService, never()).destroy(anyString());
+        verify(workspaceLifecycleAppService, never()).destroyForReclaim(anyString());
     }
 
     @Test
@@ -427,8 +429,9 @@ class ProjectLifecycleAppServiceTest {
 
         appService.delete(projectId);
 
-        // 真删级联：工作区销毁（容器/网络/卷）+ prj_* 行删除 + knw_chunks 级联清理
-        verify(workspaceLifecycleAppService).destroy("9200");
+        // 真删级联：工作区销毁（容器/网络/卷，#490 起经 destroyForReclaim 同内核）
+        // + prj_* 行删除 + knw_chunks 级联清理
+        verify(workspaceLifecycleAppService).destroyForReclaim("9200");
         verify(knowledgePort).purgeByProject(projectId.toString());
         verifyNoRows();
         assertThat(jdbcTemplate.queryForObject(
@@ -525,7 +528,7 @@ class ProjectLifecycleAppServiceTest {
     void given_workspace_destroy_failure_when_delete_then_rows_deleted_anyway() {
         Long projectId = persistedProject("9201");
         org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
-                .when(workspaceLifecycleAppService).destroy(anyString());
+                .when(workspaceLifecycleAppService).destroyForReclaim(anyString());
 
         appService.delete(projectId);
 
@@ -547,6 +550,42 @@ class ProjectLifecycleAppServiceTest {
         assertThatThrownBy(() -> appService.delete(-1L))
                 .isInstanceOf(ApplicationException.class)
                 .hasMessageContaining(ProjectMessage.PROJECT_NOT_FOUND.message());
+    }
+
+    // ---------- #490 一键回收：删除级联事实交回（回收报告/留痕的消费面） ----------
+
+    @Test
+    void given_inflight_run_and_clean_destroy_when_delete_and_report_then_reclaim_facts() {
+        // #490 项目级回收内核＝本删除级联：在飞先级联停止（承 #477）→ 销毁三清
+        // （#485 内核事实）→ 真删级联 → 四面之一项目行对账——事实随行交回
+        Long projectId = persistedProject("9207");
+        when(workspaceLifecycleAppService.destroyForReclaim("9207"))
+                .thenReturn(ThreeCleanCheck.of(ContainerState.ABSENT, false, false));
+        assertThat(codingRunTrack.begin(projectId)).isTrue();   // 模拟在飞编码 run
+
+        ProjectLifecycleAppService.ReclaimFacts facts = appService.deleteAndReport(projectId);
+
+        assertThat(facts.workspaceId()).isEqualTo(9207L);
+        assertThat(facts.runsStopped()).as("在飞 run 被级联停止").isTrue();
+        assertThat(codingRunTrack.stopRequested(projectId)).isTrue();
+        assertThat(facts.threeClean().allClean()).isTrue();
+        assertThat(facts.projectRowClean()).as("四面之一：项目行已清").isTrue();
+        verifyNoRows();
+    }
+
+    @Test
+    void given_destroy_failure_when_delete_and_report_then_unprobed_facts_rows_deleted_anyway() {
+        // 销毁未全成（受理即删：记录照删）：三清以 UNPROBED 呈报（状态未知不冒充清）
+        Long projectId = persistedProject("9208");
+        org.mockito.Mockito.doThrow(new RuntimeException("docker down"))
+                .when(workspaceLifecycleAppService).destroyForReclaim(anyString());
+
+        ProjectLifecycleAppService.ReclaimFacts facts = appService.deleteAndReport(projectId);
+
+        assertThat(facts.threeClean().probed()).isFalse();
+        assertThat(facts.threeClean().allClean()).isFalse();
+        assertThat(facts.projectRowClean()).isTrue();
+        verifyNoRows();
     }
 
     @Test

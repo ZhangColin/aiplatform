@@ -848,6 +848,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backoffice/workspaces/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 工作区级一键回收（单台三清，项目其余部分不动）
+         * @description 处置单点残留而不动整个项目（#473 故事 7）：单台工作区三清（容器/卷/注册表行，#485 销毁终态一致内核），<b>项目行与其余资产不动</b>（回执 projectRow＝UNTOUCHED 如实分示）；#488 在册失联行（lostAt 标记）的人工裁决出口——确认后经本端点回收，标记行随注册行级联消亡。所属项目有在飞 run 先级联停止（承 #477）；无所属（失联裁决/fork）无停止面可挂，runsStopped 如实 false。回执三面逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree（UNKNOWN 不算清）。运维通道不经用户会话凭证。操作者透传头落痕同项目级（未成动作不留痕）。工作区不存在（含畸形 id）404 WSP_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 WSP_001 — 工作区不存在
+         */
+        post: operations["reclaimWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backoffice/skills/{id}/enable": {
         parameters: {
             query?: never;
@@ -2705,6 +2728,29 @@ export interface paths {
         get: operations["detail_6"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backoffice/projects/{id}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 项目级一键回收（删除＋清残＋四面报告）
+         * @description 删除＋清残＋三清校验报告一次完成（#473 故事 6）：在飞 run <b>先级联停止</b>（承 #477 停止面——置停＋cancel(true) 中断在途，不留僵尸任务对着已删容器自救）→ 工作区销毁（<b>复用 #485 销毁终态一致内核</b>：收敛互斥双向串行＋尾部三清校验，非另写一套）→ prj_* 真删级联（受理即删语义与用户面 DELETE 同内核）。回执＝四面（注册表行/项目行/容器/卷）逐面 CLEAN/RESIDUE/UNKNOWN＋residueFree 零残留判据（UNKNOWN 不算清——销毁未全成/探查未成不冒充清，残留如实红、归收编通道）。物理销毁尽力而为不阻断记录删除（受理即删）。运维通道不经用户会话凭证——无凭证属主的账户项目照收（归属不查，签名面担保调用应用）。X-User-Id/X-User-Name 透传头落痕（append-only wsp_reclaim_actions，缺头落空 NULL——照 #489 清扫留痕口径；未成动作不留痕）。项目不存在 404 PRJ_001。需要机机签名（五头 HMAC），无签名 401
+         *
+         *     错误码：
+         *     - 404 PRJ_001 — 项目不存在
+         */
+        post: operations["reclaimProject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4814,6 +4860,29 @@ export interface components {
             skipReason?: string;
             /** Format: date-time */
             resourceCreatedAt?: string;
+        };
+        ApiResponseBackofficeReclaimResponse: {
+            /** Format: int32 */
+            code?: number;
+            message?: string;
+            data?: components["schemas"]["BackofficeReclaimResponse"];
+            requestId?: string;
+            errors?: components["schemas"]["FieldError"][];
+        };
+        BackofficeReclaimResponse: {
+            scope?: string;
+            projectId?: string;
+            workspaceId?: string;
+            runsStopped?: boolean;
+            container?: string;
+            volume?: string;
+            registryRow?: string;
+            projectRow?: string;
+            residueFree?: boolean;
+            operatorId?: string;
+            operatorName?: string;
+            /** Format: date-time */
+            reclaimedAt?: string;
         };
         UpdateProductionHandoffCommand: {
             contact?: string;
@@ -7818,6 +7887,50 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseBackofficeResourceSweepResponse"];
+                };
+            };
+        };
+    };
+    reclaimProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
+                };
+            };
+        };
+    };
+    reclaimWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBackofficeReclaimResponse"];
                 };
             };
         };

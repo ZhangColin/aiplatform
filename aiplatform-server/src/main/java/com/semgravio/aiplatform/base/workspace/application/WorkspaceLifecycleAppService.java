@@ -30,6 +30,7 @@ import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.BinaryExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.SnapshotHandle;
+import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
@@ -338,9 +339,26 @@ public class WorkspaceLifecycleAppService {
                 () -> destroyExclusively(workspace));
     }
 
+    /**
+     * 回收面销毁（#490，ADR-0045 一键回收）：与 {@link #destroy} 同内核同互斥
+     * （{@link #destroyExclusively} 尽力级联＋尾部三清校验，非另写一套），差异仅在
+     * 回执——互斥面内的三清校验事实（{@link ThreeCleanCheck}）交回调用方组回收
+     * 报告（探查时点无收敛任务能并发重建，比事后对账强）。级联失败照 #485 口径
+     * 「先校验后上抛」：调用方（回收组合面）按「尽力＋如实呈报」收口（残留/未知
+     * 归 {@link ThreeCleanCheck#unprobed()} 口径与收编通道）。
+     */
+    public ThreeCleanCheck destroyForReclaim(String workspaceId) {
+        Workspace workspace = requireWorkspace(workspaceId);
+        ThreeCleanCheck[] check = {ThreeCleanCheck.unprobed()};
+        convergence.runExclusivelyAwaiting(workspace.workspaceId(),
+                () -> check[0] = destroyExclusively(workspace));
+        return check[0];
+    }
+
     /** 互斥面内的销毁收口（#485）：尽力级联 → 尾部三清校验留痕（成败都跑）→ 异常上抛归调用方。 */
-    private void destroyExclusively(Workspace workspace) {
+    private ThreeCleanCheck destroyExclusively(Workspace workspace) {
         RuntimeException failure = null;
+        ThreeCleanCheck check = ThreeCleanCheck.unprobed();
         try {
             provisioner.cancel(workspace.workspaceId());
             environmentBackend.destroyWorkspace(workspace.toHandle());
@@ -365,34 +383,38 @@ public class WorkspaceLifecycleAppService {
         } catch (RuntimeException e) {
             failure = e;   // 先尾部校验留痕再上抛（调用方按「受理即删」收口）
         } finally {
-            verifyThreeClean(workspace);
+            check = verifyThreeClean(workspace);
         }
         if (failure != null) {
             throw failure;
         }
+        return check;
     }
 
     /**
-     * 销毁尾部三清校验（#485，ADR-0045「尽力＋留痕」）：容器/卷/注册行逐一复核——
-     * 全清即常态静默；任一仍在即 WARN 留痕（残留即无主资源，归扫描轮/#473 收编
-     * 通道回收，不在此重试）。校验在互斥面内、级联与删行之后；探查自身尽力而为
-     * （异常只记不抛——校验是观测面，不影响销毁收口）。
+     * 销毁尾部三清校验（#485，ADR-0045「尽力＋留痕」；#490 起事实交回回收报告）：
+     * 容器/卷/注册行逐一复核——全清即常态静默；任一仍在即 WARN 留痕（残留即无主
+     * 资源，归扫描轮/#473 收编通道回收，不在此重试）。校验在互斥面内、级联与删行
+     * 之后；探查自身尽力而为（异常只记不抛——校验是观测面，不影响销毁收口，事实
+     * 以 {@link ThreeCleanCheck#unprobed()} 交回：状态未知不冒充清）。
      */
-    private void verifyThreeClean(Workspace workspace) {
+    private ThreeCleanCheck verifyThreeClean(Workspace workspace) {
         try {
             ContainerState container = environmentBackend.containerState(workspace.toHandle());
             boolean volumeGone = !environmentBackend.volumeExists(workspace.toHandle());
             boolean rowGone = workspaceRepository.findById(workspace.workspaceId().id()).isEmpty();
-            if (container == ContainerState.ABSENT && volumeGone && rowGone) {
-                return;
+            ThreeCleanCheck check = ThreeCleanCheck.of(container, !volumeGone, !rowGone);
+            if (!check.allClean()) {
+                log.warn("[workspace] {} 销毁三清校验未过：容器实态={}、卷{}、注册行{}——"
+                                + "残留待收编（扫描轮/后台清扫）",
+                        workspace.workspaceId().value(), container,
+                        volumeGone ? "已清" : "仍在", rowGone ? "已清" : "仍在");
             }
-            log.warn("[workspace] {} 销毁三清校验未过：容器实态={}、卷{}、注册行{}——"
-                            + "残留待收编（扫描轮/后台清扫）",
-                    workspace.workspaceId().value(), container,
-                    volumeGone ? "已清" : "仍在", rowGone ? "已清" : "仍在");
+            return check;
         } catch (RuntimeException e) {
             log.warn("[workspace] {} 销毁三清校验探查未成（残留状态未知，待收编通道对账）",
                     workspace.workspaceId().value(), e);
+            return ThreeCleanCheck.unprobed();
         }
     }
 

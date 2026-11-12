@@ -43,6 +43,7 @@ import com.semgravio.aiplatform.base.workspace.application.dto.response.Workspac
 import com.semgravio.aiplatform.base.workspace.domain.model.ExecResult;
 import com.semgravio.aiplatform.base.workspace.domain.model.ProvisionedResource;
 import com.semgravio.aiplatform.base.workspace.domain.model.SealPackage;
+import com.semgravio.aiplatform.base.workspace.domain.model.ThreeCleanCheck;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceHandle;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
@@ -526,6 +527,40 @@ class WorkspaceLifecycleAppServiceTest {
                 .contains("卷仍在");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM wsp_workspaces WHERE id = 122", Integer.class)).isZero();
+    }
+
+    @Test
+    void given_seeded_workspace_when_destroy_for_reclaim_then_three_clean_facts_returned() {
+        // #490 回收面销毁：与 destroy 同内核同互斥，另把互斥面内的三清校验结果交回
+        // 调用方（回收报告的事实源——四面/三面零残留判据，非仅 WARN 观测）
+        workspaceRepository.save(Workspace.register(devProvision("130")));
+        stubThreeCleanProbes();
+
+        ThreeCleanCheck check = appService.destroyForReclaim("130");
+
+        assertThat(check.allClean()).as("三面全清（容器/卷/注册行）").isTrue();
+        assertThat(check.probed()).isTrue();
+        assertThat(threeCleanWarns()).isEmpty();   // 校验通过：常态零 WARN
+    }
+
+    @Test
+    void given_undeletable_volume_when_destroy_for_reclaim_then_residue_reported() {
+        // #490 残留如实呈报：级联删不动的卷（占用等）——三清事实交回卷面不清，
+        // 回收报告据此红（残留归收编通道，不在此重试）
+        WorkspaceId id = WorkspaceId.of("131");
+        workspaceRepository.save(Workspace.dev(id,
+                WorkspaceNaming.containerName(id), WorkspaceNaming.PREVIEW_NETWORK));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+        when(environmentBackend.volumeExists(any(WorkspaceHandle.class))).thenReturn(true);
+
+        ThreeCleanCheck check = appService.destroyForReclaim(id.value());
+
+        assertThat(check.containerClean()).isTrue();
+        assertThat(check.volumeClean()).as("卷删不动：残留如实报").isFalse();
+        assertThat(check.registryRowClean()).isTrue();   // 注册行照删（受理即删）
+        assertThat(check.allClean()).isFalse();
+        assertThat(threeCleanWarns()).hasSize(1);
     }
 
     /** 三清校验 WARN（按「三清」关键语过滤，免无关 WARN 干扰断言）。 */

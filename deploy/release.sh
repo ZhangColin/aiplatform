@@ -159,8 +159,15 @@ done
 echo "-- 冒烟（经共享 nginx 80，Host 头命中平台主站块）"
 echo "   主站 /        : $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: semgravio.com' http://localhost/)（期望 200）"
 echo "   /api/projects : $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: semgravio.com' http://localhost/api/projects)（期望 401）"
-docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'aiplatform|semgravio|ws-'
+# grep 无匹配退出 1，pipefail＋set -e 下会中止远程段——信息展示行须兜住（#484 rider）
+docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'aiplatform|semgravio|ws-' || echo "   注：无 aiplatform/semgravio/ws- 容器在列（信息展示，非故障）"
 echo "   注：aiplatform-web 显示 unhealthy 是既知误报（容器内 wget 被拒、外部实通），见部署文档 §9"
+
+echo "-- 发布尾清理（build cache＋保留集外旧镜像，#484；失败仅 WARN 不翻红发布）"
+# 保留集＝当前 DEV_IMAGE 版（包内正本）＋ ecs-pre-infra 备份 tag ＋ busybox；模块内每步
+# 自兜＋此处总兜，docker 异常也只 WARN；排练＝deploy/rehearsal-release-cleanup.sh
+bash deploy/release-cleanup.sh "$DEV_IMAGE" \
+  || echo "   ⚠ WARN：发布尾清理异常（不影响发布结果）"
 REMOTE
 
 echo "== 4/5 预览哨兵：外部真浏览器冒烟（#422，从发布机外部位点）=="

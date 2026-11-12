@@ -58,8 +58,8 @@ Demo 阶段激进用快模型（质量靠验证兜底——verify 验证子智�
 **verify 自决开关（#442，#441-1——#439 终裁 verify 窗 20.9min〔真实独占估 12-15min〕的最大单一可收窄面）**：执行体生成过程中自决调用 verify 子智能体（#435 自决化）的提示层收窄开关，收编 **executor 行**（同一 PUT 通道）——
 
 1. **缺省＝自决开（#435 现状维持）**：`verifySelfDecisionEnabled` 缺省 true＝执行体按工作协议第 9 条自决委派 verify 自测（验证不是收口要件）。
-2. **翻转关闭**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifySelfDecisionEnabled": false}`＝生成过程中不自发委派 verify、不发起修复—复验循环——执行体 ReAct 循环中间件（`VerifySelfDecisionMiddleware`）每迭代动态查库，关闭态注入一条提示层指令（每会话一次、消息列回读防重灌）；**平台驱动验证腿不受影响**（三闸回执／整轨终验编排任务说明要求的验证照常执行），收口唯一硬判据仍是 8081 探活三件套。false/null 归一缺省（null＝开）；留痕前后快照含本开关（回滚腿完整）。
-3. **生效时机＝下一次迭代**：中间件每迭代动态查库、装配不进 agent 实例缓存键——改完不发版即生效；粘性语义：已注入指令随消息列留在本会话（对偶「进行中 run 不定格」）。
+2. **翻转关闭**：`PUT /api/backoffice/agent-configs/executor` 带 `{"verifySelfDecisionEnabled": false}`＝生成过程中不自发委派 verify、不发起修复—复验循环——执行体 ReAct 循环中间件（`VerifySelfDecisionMiddleware`）每迭代动态查库，关闭态注入一条提示层指令（每轮〔派段〕一次——判重载体 ctx 属性袋＋消息列回读兼容源，#481）；**平台驱动验证腿不受影响**（三闸回执／整轨终验编排任务说明要求的验证照常执行），收口唯一硬判据仍是 8081 探活三件套。false/null 归一缺省（null＝开）；留痕前后快照含本开关（回滚腿完整）。
+3. **生效时机＝下一次迭代**：中间件每迭代动态查库、装配不进 agent 实例缓存键——改完不发版即生效；防重灌口径（#481 载体换位）：注入消息不落 state、不随消息列留存（仅注入那一迭代的模型调用可见），同派段后续迭代不重注、新派段首迭代再注入一次。
 4. **查生效值**：GET 同面（`verifySelfDecisionEnabled` 生效态）；中间件行为锚定见 `VerifySelfDecisionMiddlewareTest`。
 
 ## 四、进行中 run 不定格

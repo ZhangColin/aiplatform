@@ -342,7 +342,8 @@ class TrackFinalVerificationAppService {
         ProofOfOutputGate.Checking proof = proofGate.forRun(project.getWorkspaceId());
         return coderRunAttempts.run(project, runId, sessionId,
                 new CoderRunAttempts.Prompts(verificationFixPrompt(defects),
-                        IterationAppService::fixRetryPrompt),
+                        IterationAppService::fixRetryPrompt,
+                        IterationAppService::lintFixRetryPrompt),
                 (attemptRunId, attemptChanges) -> closeVerificationFix(project, proof),
                 "fix", /* injectKnowledge= */ true, CoderRunAttempts.RunSeat.executor(),
                 RunHeading.titled(IterationAppService.FIX_TITLE));

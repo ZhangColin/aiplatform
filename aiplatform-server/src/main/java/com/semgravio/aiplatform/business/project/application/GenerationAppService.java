@@ -211,6 +211,20 @@ public class GenerationAppService {
     }
 
     /**
+     * lint 修轮窄修 prompt（#472 升档窗口局部化——ADR-0041：修轮＝错误处理窗口，
+     * 窗口内升强档、违规清零即收口段终，派发以窄修为正身）：窄修四要素经
+     * {@link CoderRunAttempts#lintFixPromptCore} 单源，生成轨收口尾句＝8081 探活
+     * ＋交接摘要（修轮尝试即本段收口尝试，收口终文＝交接正本）。不携片级上下文
+     * （修轮续本会话，上下文在会话史在场——窄修少一轮重读迭代）。对偶
+     * {@link #retryRunPrompt}（能力面真失败的整段续作形）——两形经 lint 分型
+     * 分岔，兜底语义不变。
+     */
+    static String lintFixRunPrompt(String lintRetryScene) {
+        return CoderRunAttempts.lintFixPromptCore("本段任务", lintRetryScene)
+                + "修完确认 8081 端口服务在跑、curl 可访问后收口。" + HANDOFF_PRODUCTION;
+    }
+
+    /**
      * 切片 prompt（#104 生成轨道逐段长出）：第 {@code index}/{@code total} 片，在
      * 现有系统上增量实现「用户能 X」这一纵向切片（前端→后端→落库端到端走通、用户
      * 可操作），系统其余部分保持可用。切片计划由主智能体产出（每片一句用户语言），
@@ -1266,7 +1280,8 @@ public class GenerationAppService {
                     sessionId,
                     new CoderRunAttempts.Prompts(
                             designContext + prefix + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, previousHandoff)),
-                            errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                            errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene),
+                            lintScene -> designContext + lintFixRunPrompt(lintScene)),
                     (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord,
                             runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
                             proof),
@@ -1336,7 +1351,8 @@ public class GenerationAppService {
                         sessionId,
                         new CoderRunAttempts.Prompts(
                                 designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
-                                errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene)),
+                                errorScene -> designContext + prefix + generationRetryPrompt(plan, segmentDesc, handoff, errorScene),
+                                lintScene -> designContext + lintFixRunPrompt(lintScene)),
                         (attemptRunId, attemptChanges) -> closeGenerationStage(project, ord,
                                 runId, sliceClosingSummary(slice), proof),
                         CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
@@ -1448,7 +1464,8 @@ public class GenerationAppService {
                             designContext + prefix
                                     + (stage0 ? stage0Prompt(plan) : slicePrompt(plan, ord - 1, handoffForRun)),
                             errorScene -> designContext + prefix
-                                    + generationRetryPrompt(plan, segmentDesc, handoffForRun, errorScene)),
+                                    + generationRetryPrompt(plan, segmentDesc, handoffForRun, errorScene),
+                            lintScene -> designContext + lintFixRunPrompt(lintScene)),
                     (attemptRunId, attemptChanges) -> closeGenerationStage(project, segmentOrd,
                             runId, stage0 ? STAGE0_CLOSING_SUMMARY : sliceClosingSummary(slice),
                             proof),
@@ -1821,7 +1838,8 @@ public class GenerationAppService {
                     new CoderRunAttempts.Prompts(
                             designContext + prefix + slicePrompt(plan, ord - 1, previousHandoff),
                             errorScene -> designContext + prefix
-                                    + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene)),
+                                    + generationRetryPrompt(plan, segmentDesc, previousHandoff, errorScene),
+                            lintScene -> designContext + lintFixRunPrompt(lintScene)),
                     (attemptRunId, attemptChanges) -> closeForkSlice(forkId,
                             sliceClosingSummary(slice), proof),
                     CoderRunAttempts.GENERATE_LABEL, false, CoderRunAttempts.RunSeat.executor(),
@@ -2020,7 +2038,8 @@ public class GenerationAppService {
         CoderRunAttempts.RunResult result = coderRunAttempts.run(project, resolveRunId, sessionId,
                 new CoderRunAttempts.Prompts(prompt,
                         errorScene -> retryRunPrompt("解决合并冲突（切片「" + outcome.slice() + "」）",
-                                errorScene)),
+                                errorScene),
+                        GenerationAppService::lintFixRunPrompt),
                 (attemptRunId, attemptChanges) -> {
                     closingProbes.requireReachable(project.getWorkspaceId());
                     closingProbes.requireEntryFileComplete(project.getWorkspaceId());

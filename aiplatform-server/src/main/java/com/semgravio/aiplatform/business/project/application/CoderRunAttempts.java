@@ -100,11 +100,21 @@ class CoderRunAttempts {
     public static final String SESSION_PREFIX = "coder-";
 
     /**
-     * 一场编码 run 的 prompt 对（首试 + 重试续作轨）。重试 prompt 的入参是
-     * <b>重试现场</b>（{@link #retryScene}——#221 错误现场 + #323 进展现场：已干
-     * 多久/干到哪的平台可观测事实），轨道层只给拼装函数（现场拼装归本环单点）。
+     * 一场编码 run 的 prompt 三元组（首试 + 重试续作轨 + lint 修轮窄修轨）。两轨
+     * 重试 prompt 的入参都是<b>重试现场</b>（{@link #retryScene}——#221 错误现场
+     * + #323 进展现场：已干多久/干到哪的平台可观测事实），轨道层只给拼装函数
+     * （现场拼装归本环单点）；分型分岔（#472 升档窗口局部化，ADR-0041）——现场
+     * 是 lint 违规清单走窄修轨（错误处理窗口：产出为准、仅消除清单内违规），是
+     * 异常现场走整段续作轨（能力面兜底，语义不变）。
      */
-    record Prompts(String first, UnaryOperator<String> retry) {
+    record Prompts(String first, UnaryOperator<String> retry,
+            UnaryOperator<String> lintFix) {
+
+        /** 无 lint 收口面轨道的两参形（设计轨/终验编排轨——收口判据不携 lint
+         * 载荷，修轮结构性不触发）：窄修轨回落重试轨（防御位，触达即口径缺口）。 */
+        Prompts(String first, UnaryOperator<String> retry) {
+            this(first, retry, retry);
+        }
     }
 
     /**
@@ -383,6 +393,10 @@ class CoderRunAttempts {
         // lint 违规修轮已用标记（#296 有限自动重试一轮）：一轮内至多一次——首轮
         // 收口扫描违规即喂回执行体原地修，之后（修净或仍违规）如实收口。重跑轮重置
         boolean lintFixRoundUsed = false;
+        // lint 修轮待跑分型标记（#472 ADR-0041）：previousError 装的是 lint 违规
+        // 现场而非异常现场——下一 attempt 派发走窄修轨（lintRetry）。异常重试与
+        // 重跑轮起跑即清（宽窄随现场换轨，不粘滞——修轮失败转异常重试即回宽轨）
+        boolean lintFixPending = false;
         // 段级外环（#353）：钩在场时至多重跑一轮（预算 1——回滚重跑还不行说明不是
         // 现场脏的问题，转终态让人介入）；无钩恒一轮（既有口径）
         int maxRounds = rollback != null ? 2 : 1;
@@ -409,6 +423,7 @@ class CoderRunAttempts {
                 previousError = null;
                 planSteps.set(null);
                 lintFixRoundUsed = false;
+                lintFixPending = false;
                 // 首轮的待决 ❌ 作废（新一轮重跑——重跑核验再发「检查中」前端幂等）
                 failedCheckPending = false;
                 failedCheckProjection = null;
@@ -453,10 +468,11 @@ class CoderRunAttempts {
                 AgentCommand command = new AgentCommand(
                         attemptRunId,
                         attempt == 1 ? (round == 1 ? knowledgePrefix : "") + prompts.first()
-                                : prompts.retry().apply(retryScene(previousError, attempt - 1,
-                                        maxAttempts,
-                                        Duration.between(runStartedAt, Instant.now()).toMillis(),
-                                        runChanges, planSteps.get())),
+                                : (lintFixPending ? prompts.lintFix() : prompts.retry())
+                                        .apply(retryScene(previousError, attempt - 1,
+                                                maxAttempts,
+                                                Duration.between(runStartedAt, Instant.now()).toMillis(),
+                                                runChanges, planSteps.get(), lintFixPending)),
                         agent.systemPrompt(),
                         model.modelString(),
                         model.channel(),
@@ -556,6 +572,7 @@ class CoderRunAttempts {
                 if ((styleViolating || robustMandatoryViolating)
                         && !lintFixRoundUsed && attempt < maxAttempts) {
                     lintFixRoundUsed = true;
+                    lintFixPending = true;
                     previousError = combinedLintRetryScene(lint, robustLint);
                     log.info("[{}] 项目 {} lint 扫描未过（样式 {}／基座强制 {}+预置 {} 处），自动修一轮"
                             + "（attemptRunId={}）",
@@ -651,6 +668,7 @@ class CoderRunAttempts {
                             failureFace(true, null, attemptDurations, runStartedAt));
                 }
                 previousError = errorScene(e);
+                lintFixPending = false; // 异常现场换轨：下一 attempt 回整段续作轨（宽）
                 if (e instanceof AgentTurnFailure failure) {
                     // 失败留账（#323）：失败流段的部分观察面（已提交文件变更＋已闭合
                     // 区间阶段耗时）计入本场累计——收口清单与耗时分布跨尝试含失败
@@ -721,12 +739,19 @@ class CoderRunAttempts {
      * 观察），不由模型自报；裸异常原文不再是重试上文的唯一现场。
      */
     private static String retryScene(String errorScene, int failedAttempts, int maxAttempts,
-            long elapsedMs, List<FileChange> changes, List<Map<String, Object>> planSteps) {
-        StringBuilder scene = new StringBuilder("错误现场：").append(errorScene);
+            long elapsedMs, List<FileChange> changes, List<Map<String, Object>> planSteps,
+            boolean lintRepair) {
+        // lint 修轮现场措辞（#472 评审收口）：修轮不是失败——现场叙事为「违规」、
+        // 进展面不带失败计数（首试任务已完成，非能力面失败）
+        StringBuilder scene = new StringBuilder(lintRepair ? "违规现场：" : "错误现场：")
+                .append(errorScene);
         scene.append("\n进展现场（平台可观测事实）：本场已累计用时 ")
-                .append(humanDuration(elapsedMs))
-                .append("（已失败 ").append(failedAttempts).append('/').append(maxAttempts)
-                .append(" 次尝试）；已落盘文件变更 ").append(sceneFiles(changes));
+                .append(humanDuration(elapsedMs));
+        if (!lintRepair) {
+            scene.append("（已失败 ").append(failedAttempts).append('/').append(maxAttempts)
+                    .append(" 次尝试）");
+        }
+        scene.append("；已落盘文件变更 ").append(sceneFiles(changes));
         if (planSteps != null && !planSteps.isEmpty()) {
             scene.append("；最近计划进度：").append(planProgress(planSteps));
         }
@@ -995,6 +1020,18 @@ class CoderRunAttempts {
                     : scene + "\n\n" + RobustKitLintAppService.fixRoundScene(robustLint);
         }
         return scene;
+    }
+
+    /**
+     * lint 修轮窄修指令核心（#472 升档窗口局部化，ADR-0041——窄修四要素单源：
+     * 产出为准、判据已过、仅消除清单内违规、不得重构/重写已完成产出）：轨道收口
+     * 尾句各异（生成轨 8081 探活＋交接摘要、修正轨 finish_edit 事实），核心约束
+     * 在此单点。{@code subject}＝完成主体的轨道措辞（「本段任务」/「本轮修正」）。
+     */
+    static String lintFixPromptCore(String subject, String lintRetryScene) {
+        return "收口合规扫描发现以下违规（" + subject + "已完成、收口判据已全部通过）——工作区内"
+                + "已有产出即为正身：不要重构、重写或继续开发任何已完成产出，只逐条消除下方"
+                + "清单内的违规项，其余一律保持现状，修完即收口。\n" + lintRetryScene + "\n";
     }
 
     /** 设计稿产物目录（工作区锚定前缀——#288 ImageTransfers 落点同一目录，正本

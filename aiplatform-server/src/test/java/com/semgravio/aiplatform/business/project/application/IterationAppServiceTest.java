@@ -774,6 +774,62 @@ class IterationAppServiceTest {
     }
 
     @Test
+    void given_style_lint_violations_when_fix_then_narrow_repair_prompt() {
+        // #472 更新轨同盖（#425 收口携 lint 面——修轮在本轨真实触发，评审收口）：
+        // 修轮派发走窄修轨（本轮修正已完成、仅消除清单内违规、finish_edit 收口
+        // 尾句），不再整任务重述——「完成本轮修正」宽形只属能力面重试（Q1a 兜底
+        // 语义不变）
+        Long projectId = persistedGeneratedProject("9962");
+        jdbcTemplate.update(
+                "INSERT INTO prj_design_specs (id, project_id, source_draft_path, source_run_id, tokens)"
+                        + " VALUES (?, ?, ?, ?, ?::jsonb)",
+                4821000000000000003L, projectId, "/design/home-1.html", "run-final-1",
+                "{\"--primary\": \"#166534\"}");
+        List<Runnable> tracks = givenTrackQueued();
+        when(workspaceLifecycleAppService.execWithStdin(any(), any(), any()))
+                .thenReturn(new ExecResultResponse("123", "", 0));
+        AtomicInteger scans = new AtomicInteger();
+        when(workspaceLifecycleAppService.exec(any(),
+                argThat(cmd -> cmd != null && cmd.command().contains("oxlint"))))
+                .thenAnswer(invocation -> scans.incrementAndGet() == 1
+                        ? new ExecResultResponse("""
+                                { "diagnostics": [{"message": "\\"bg-red-500\\" uses the raw Tailwind palette. Use a theme token.",
+                                "code": "shadcn(no-raw-colors)","severity": "error","filename": "src/app/page.tsx",
+                                "labels": [{"span": {"line": 3}}]}]}
+                                """, "", 1)
+                        : new ExecResultResponse("{ \"diagnostics\": [] }", "", 0));
+        List<String> prompts = new ArrayList<>();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            if (command.sessionId().startsWith("coder-")) {
+                verifyRan(command);
+            }
+            prompts.add(command.prompt());
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_START, command.runId(),
+                    Map.of("prompt", command.prompt())));
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            finishFixFacts.record(command.workspaceId(), true, "按定稿设计统一配色");
+            return new AgentReply(command.runId(), "修正完成", null, List.of(
+                    new FileChange("/src/app/page.tsx", 6, 2)));
+        });
+
+        appService.startFixRun(projectId, "按定稿设计改配色", null);
+        tracks.remove(0).run();
+
+        // 首试违规 → 修轮清零（2 次 converse）；修轮 prompt 窄修形：携违规清单＋
+        // 窄修指令＋finish_edit 收口尾句，不携「完成本轮修正」整任务重述
+        verify(agentClient, times(2)).converse(any(), any());
+        assertThat(prompts.get(1))
+                .contains("样式合规扫描未过")
+                .contains("src/app/page.tsx:3 no-raw-colors")
+                .contains("只逐条消除")
+                .contains("finish_edit")
+                .doesNotContain("完成本轮修正");
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void given_scripted_update_round_when_fix_closes_then_run_finish_carries_authoritative_closing() {
         // 灵魂用例（#88）：脚本化更新轮收口——对话区收尾卡四要素齐（摘要/判定行/

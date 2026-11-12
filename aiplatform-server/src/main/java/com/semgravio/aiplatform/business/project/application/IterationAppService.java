@@ -86,6 +86,18 @@ public class IterationAppService {
                 + "传 changed=false 并说明原因）。";
     }
 
+    /**
+     * lint 修轮窄修 prompt（#472 更新轨同盖——#425 收口携 lint 面，修轮在本轨
+     * 真实触发）：窄修四要素经 {@link CoderRunAttempts#lintFixPromptCore} 单源，
+     * 修正轨收口尾句＝finish_edit 事实（同 {@link #fixRetryPrompt} 口径）。
+     * 终验修复轮（TrackFinalVerification）复用本模板——其收口同携 lint 面。
+     */
+    static String lintFixRetryPrompt(String lintRetryScene) {
+        return CoderRunAttempts.lintFixPromptCore("本轮修正", lintRetryScene)
+                + "修完后调用 finish_edit 工具收口（动了系统传 changed=true 并说明改了什么；"
+                + "判定无需改动也必须调用，传 changed=false 并说明原因）。";
+    }
+
     /** 修正轨会话寻址（#114 更新 run 每次新会话）：runId 逐场换新 → 会话逐场换新，重试续本 run 会话。 */
     static String fixSession(Long projectId, String runId) {
         return CoderRunAttempts.SESSION_PREFIX + projectId + "-fix-" + runId;
@@ -317,7 +329,8 @@ public class IterationAppService {
                     result = coderRunAttempts.run(project, runId,
                             fixSession(projectId, runId),
                             new CoderRunAttempts.Prompts(fixRunPrompt(handoff),
-                                    IterationAppService::fixRetryPrompt),
+                                    IterationAppService::fixRetryPrompt,
+                                    IterationAppService::lintFixRetryPrompt),
                             (attemptRunId, attemptChanges) -> closeFixRun(project, attemptRunId,
                                     currentHandoff, prdVersionNo, proof),
                             "fix", true, CoderRunAttempts.RunSeat.executor(),

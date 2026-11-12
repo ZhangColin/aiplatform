@@ -2468,6 +2468,10 @@ class GenerationAppServiceTest {
                 .contains("进展现场（平台可观测事实）")
                 .contains("已累计用时")
                 .contains("已落盘文件变更 尚无")
+                // #472 能力面重试不窄修（Q1a）：异常现场走整段续作轨（宽），
+                // 窄修形（lint 分型）只挂 lint 修轮——兜底语义不变
+                .contains("完成本段任务")
+                .doesNotContain("只逐条消除")
                 .endsWith(GenerationAppService.segmentContext(SINGLE_SLICE_PLAN, null));
         assertThat(attempts.get(2).prompt())
                 .isEqualTo(GenerationAppService.slicePrompt(SINGLE_SLICE_PLAN, 0,
@@ -3962,8 +3966,10 @@ class GenerationAppServiceTest {
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
             // 切片 1：首试扫描命中（修轮喂回）、修轮后修净；阶段 0 干净作对照
+            //（首试判据＝不含重试现场标记「进展现场」——宽窄两形重试 prompt 都携带，
+            // #472 窄修现场改「违规现场」后仍稳）
             if (command.sessionId().endsWith("-slice-1")) {
-                boolean bareOnFirstAttempt = !command.prompt().contains("错误现场");
+                boolean bareOnFirstAttempt = !command.prompt().contains("进展现场");
                 robustLintMandatory.put("9844", bareOnFirstAttempt
                         ? "./src/lib/orders.ts:12:const pool = new Pool({ connectionString });\n"
                                 + "./src/app/orders/page.tsx:40:const r = await fetch('/api/orders');\n"
@@ -4038,6 +4044,16 @@ class GenerationAppServiceTest {
         //（强制档未过＝收口被拒——不是软收口）
         assertThat(commands.getAllValues().get(2).prompt()).contains("基座 lint 扫描未过");
         assertThat(commands.getAllValues().get(3).prompt()).contains("基座 lint 强制档未过");
+        // #472 分型不粘滞：修轮试（第 2/5 试）走窄修轨（不携整段任务重述）、拒绝
+        // 回执重试（第 3/6 试）异常现场换轨回整段续作轨（宽）——重跑轮同形复现
+        assertThat(commands.getAllValues().get(2).prompt())
+                .contains("只逐条消除")
+                .doesNotContain("完成本段任务");
+        assertThat(commands.getAllValues().get(3).prompt()).contains("完成本段任务");
+        assertThat(commands.getAllValues().get(5).prompt())
+                .contains("只逐条消除")
+                .doesNotContain("完成本段任务");
+        assertThat(commands.getAllValues().get(6).prompt()).contains("完成本段任务");
         // 段级自愈兜底：留账＋回滚各两次（重跑前＋终态前——#353 不变式）
         verify(workspaceLifecycleAppService, times(2)).exec(eq("9845"),
                 argThat((WorkspaceExecCommand cmd) -> cmd != null
@@ -4299,6 +4315,49 @@ class GenerationAppServiceTest {
         assertThat(listedViolations.get(0))
                 .containsEntry("file", "src/app/page.tsx")
                 .containsEntry("rule", "no-raw-colors");
+    }
+
+    @Test
+    void given_lint_violations_when_fix_round_then_narrow_repair_prompt() {
+        // #472 升档窗口局部化（ADR-0041）：lint 修轮＝错误处理窗口，派发以窄修为
+        // 正身——工作区已有产出为准、仅消除清单内违规、不得重构/重写已完成产出，
+        // 修完即收口；「完成本段任务」的整段重述形只属能力面真失败重试（Q1a 口径）
+        Long projectId = persistedProject("9825");
+        givenSpecRow(projectId);
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        givenPlatformWriteSucceeds();
+        givenOxlintViolations();
+        List<String> prompts = new ArrayList<>();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            prompts.add(command.prompt());
+            Consumer<AgentEvent> sink = invocation.getArgument(1);
+            sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
+                    Map.of(AgentEventTypes.FINISH_FIELD, "end")));
+            return new AgentReply(command.runId(), "系统已生成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
+
+        // 阶段 0 与切片各一次违规修轮（首试＋修轮）＝4 次 converse；修轮 prompt 携
+        // 违规清单＋窄修指令＋交接摘要约定（修轮尝试即本段收口尝试），不携整段任务
+        // 重述、不携片级上下文（重读 PRD/计划轨迹——窄修少迭代，上下文在会话史在场）
+        verify(agentClient, times(4)).converse(any(), any());
+        assertThat(prompts.get(1))
+                .contains("样式合规扫描未过")
+                .contains("src/app/page.tsx:3 no-raw-colors")
+                .contains("不要重构、重写")
+                .contains("只逐条消除")
+                .contains("交接摘要")
+                // lint 现场措辞（#472 评审收口）：修轮不是失败——现场叙事为「违规」
+                // 不作「错误／已失败 N 次」（首试任务完成，非能力面失败）
+                .contains("违规现场：")
+                .doesNotContain("已失败")
+                .doesNotContain("完成本段任务")
+                .doesNotContain("先重读工作区 docs/PRD.md");
+        assertThat(prompts.get(0)).contains("系统初始化"); // 首试 prompt 不受扰
     }
 
     @Test

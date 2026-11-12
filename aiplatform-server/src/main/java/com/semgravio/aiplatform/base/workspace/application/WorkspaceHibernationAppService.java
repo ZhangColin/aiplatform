@@ -59,6 +59,7 @@ public class WorkspaceHibernationAppService {
     private final SealPackageStore sealPackageStore;
     private final TransactionTemplate transactionTemplate;
     private final WorkspaceProperties properties;
+    private final WorkspaceObservationSamplingAppService observationSampling;
 
     /**
      * 无主收编宽限窗（#179 容器侧先行、#486 卷侧对称，ADR-0045 双闸之一）：新建
@@ -73,13 +74,15 @@ public class WorkspaceHibernationAppService {
             WorkspaceConvergenceAppService convergence,
             SealPackageStore sealPackageStore,
             TransactionTemplate transactionTemplate,
-            WorkspaceProperties properties) {
+            WorkspaceProperties properties,
+            WorkspaceObservationSamplingAppService observationSampling) {
         this.environmentBackend = environmentBackend;
         this.workspaceRepository = workspaceRepository;
         this.convergence = convergence;
         this.sealPackageStore = sealPackageStore;
         this.transactionTemplate = transactionTemplate;
         this.properties = properties;
+        this.observationSampling = observationSampling;
     }
 
     /**
@@ -89,7 +92,8 @@ public class WorkspaceHibernationAppService {
      * 的泄漏，休眠面只看注册表，无主资源永久不可见）。双闸：新建宽限窗（{@link
      * #ORPHAN_SWEEP_GRACE}）＋注册表不可达宁可漏删——{@code findAll} 抛出即整轮
      * 中止（收编不发：保留集无从构成时绝不按「全部无主」动手）。单条异常不炸
-     * 整轮（尽力而为，下轮再试）。
+     * 整轮（尽力而为，下轮再试）。轮末顺带请求占用采样轮（#487：实态/卷用量
+     * 采样落库——观测读面零 docker 调用；采样后台旁路进行，不占本轮时序）。
      * 总开关（{@link WorkspaceProperties#isHibernationEnabled()}）由本入口自持
      * （#197）：关闭即静默返回——业务侧调度器不再跨域读此开关，只把消费方事实
      * 随扫描递入。
@@ -120,6 +124,9 @@ public class WorkspaceHibernationAppService {
         }
         sweepOrphanContainers(registeredIds, now);
         sweepOrphanVolumes(registeredIds, now);
+        // #487 占用采样挂钩：末尾请求采样轮（提交即返回，后台单线程旁路进行——
+        // du 全卷是秒级重探查，绝不进主流程时序；在途让路不排队，下轮扫描再请求）
+        observationSampling.requestRound();
         return acted;
     }
 

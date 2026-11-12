@@ -4,7 +4,8 @@ import com.cartisan.core.domain.BaseEnum;
 
 /**
  * 沙箱容器实态（#173 后台观测面，ADR-0016 意图/实态分离的实态侧）：docker 探查的
- * 一瞥结论，不落库（DB 只记期望态）——实态列与期望态列分示，漂移一眼可见。
+ * 一瞥结论，不落库（DB 只记期望态；#487 起观测显示面经采样快照 {@code WorkspaceObservationSample}
+ * 落库——是带采样时刻的观测帧，非实态正本）——实态列与期望态列分示，漂移一眼可见。
  * 与 {@link DesiredState} 无映射关系：期望运行而 {@link #ABSENT} 即「实态已亡」
  * 漂移行，期望休眠/封存而 {@code ABSENT} 是正常收敛态。
  *

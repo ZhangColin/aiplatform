@@ -25,10 +25,11 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
  * @param provisionError  置备失败原因（FAILED 态非 null，其余 null）
  * @param desiredState    期望态（code）
  * @param desiredStateName 期望态名
- * @param containerState  容器实态（code）
- * @param containerStateName 实态名
+ * @param containerState  容器实态采样（code）；未采样为 null
+ * @param containerStateName 实态名（未采样为 null）
  * @param lastTouchAt     最近触碰
- * @param volumeSizeBytes 卷用量（字节；封存容缺/探查失败为 null）
+ * @param volumeSizeBytes 卷用量采样（字节；封存按意图容缺/未采样/采样失败为 null）
+ * @param sampledAt       采样时刻（新鲜度标注；未采样为 null）
  * @param sealedAt        封存时刻（未封存为 null）
  * @param archivePath     封存包寻址键（未封存为 null）
  * @param archiveSizeBytes 封存包大小（字节；未封存为 null）
@@ -52,6 +53,7 @@ public record BackofficeWorkspaceDetailResponse(
         String containerStateName,
         LocalDateTime lastTouchAt,
         Long volumeSizeBytes,
+        LocalDateTime sampledAt,
         LocalDateTime sealedAt,
         String archivePath,
         Long archiveSizeBytes,
@@ -75,9 +77,11 @@ public record BackofficeWorkspaceDetailResponse(
                 observation.desiredState(),
                 observation.desiredState().getName(),
                 observation.containerState(),
-                observation.containerState().getName(),
+                observation.containerState() != null
+                        ? observation.containerState().getName() : null,
                 observation.lastTouchAt(),
                 observation.volumeSizeBytes(),
+                observation.sampledAt(),
                 observation.sealedAt(),
                 observation.archivePath(),
                 observation.archiveSizeBytes(),

@@ -109,11 +109,12 @@ public interface EnvironmentBackend {
     ContainerState containerState(WorkspaceHandle handle);
 
     /**
-     * 卷用量探查（#173 观测面，字节）：旁路容器 du 全卷——含可重建缓存（存储
-     * 大头），与封存包口径（{@link #packVolume} 排缓存）有意不同：运营要看的是
-     * 实际占用。卷不在（封存已删/外部漂移）与探查失败一律返回 null（观测容缺，
-     * 不抛）。先确认卷在再起旁路容器（{@code docker run -v} 对缺失卷会自动创建
-     * ——只读探查不能有 resurrect 副作用）。
+     * 卷用量探查（#173 观测面，字节；#487 起消费方＝扫描轮采样，观测读面零
+     * docker 调用）：旁路容器 du 全卷——含可重建缓存（存储大头），与封存包口径
+     * （{@link #packVolume} 排缓存）有意不同：运营要看的是实际占用。卷不在
+     * （封存已删/外部漂移）与探查失败一律返回 null（观测容缺，不抛）。先确认
+     * 卷在再起旁路容器（{@code docker run -v} 对缺失卷会自动创建——只读探查
+     * 不能有 resurrect 副作用）。
      */
     Long volumeSizeBytes(WorkspaceHandle handle);
 

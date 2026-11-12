@@ -69,6 +69,9 @@ class WorkspaceHibernationAppServiceTest {
     @Mock
     private SealPackageStore sealPackageStore;
 
+    @Mock
+    private WorkspaceObservationSamplingAppService observationSampling;
+
     /** TransactionTemplate 测试替身：回调真跑（无事务管理器——编排逻辑不感知）。 */
     private final TransactionTemplate transactionTemplate = new TransactionTemplate() {
         @Override
@@ -202,9 +205,25 @@ class WorkspaceHibernationAppServiceTest {
 
         int acted = newService().scanOnce(Map.of(), NOW);
 
-        // 关闭即整轮静默：不触库、不探 docker、不收敛
+        // 关闭即整轮静默：不触库、不探 docker、不收敛、不采观测样（同收编口径）
         assertThat(acted).isZero();
-        verifyNoInteractions(workspaceRepository, environmentBackend, convergence);
+        verifyNoInteractions(workspaceRepository, environmentBackend, convergence,
+                observationSampling);
+    }
+
+    @Test
+    void given_scan_round_when_finished_then_observation_sampling_requested_off_thread() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusMinutes(10));
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.RUNNING);
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // #487 占用采样挂钩：扫描轮末尾请求采样轮（提交即返回——采样在后台线程
+        // 旁路进行，休眠/封存收敛时序零等待）
+        verify(observationSampling).requestRound();
     }
 
     @Test
@@ -475,7 +494,7 @@ class WorkspaceHibernationAppServiceTest {
     private WorkspaceHibernationAppService newService() {
         return new WorkspaceHibernationAppService(
                 environmentBackend, workspaceRepository, convergence, sealPackageStore,
-                transactionTemplate, properties);
+                transactionTemplate, properties, observationSampling);
     }
 
     /** 独占提交直通（测试不异步）：封存任务同步跑，副作用次序可断言。 */

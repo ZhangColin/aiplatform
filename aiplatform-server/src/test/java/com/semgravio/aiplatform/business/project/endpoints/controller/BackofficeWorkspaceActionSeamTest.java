@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceObservationSample;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.EnvKind;
@@ -29,6 +30,7 @@ import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceProvision;
 import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
 import com.semgravio.aiplatform.base.workspace.domain.port.SealPackageStore;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceObservationSampleRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.business.project.application.CodingRunTrack;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -77,6 +79,9 @@ class BackofficeWorkspaceActionSeamTest {
     private WorkspaceRepository workspaceRepository;
 
     @Autowired
+    private WorkspaceObservationSampleRepository sampleRepository;
+
+    @Autowired
     private ProjectRepository projectRepository;
 
     @Autowired
@@ -107,7 +112,6 @@ class BackofficeWorkspaceActionSeamTest {
             WorkspaceHandle handle = invocation.getArgument(0);
             return states.getOrDefault(handle.containerName(), ContainerState.UNKNOWN);
         });
-        when(environmentBackend.volumeSizeBytes(any())).thenReturn(104857600L);
         when(environmentBackend.exposePort(any(), anyInt()))
                 .thenAnswer(invocation -> java.net.URI.create("https://preview.example"));
         // 置备内核供给：重建即活（真实形状 = createWorkspace 落定副作用后回句柄）
@@ -120,6 +124,12 @@ class BackofficeWorkspaceActionSeamTest {
         when(sealPackageStore.save(any(), any()))
                 .thenAnswer(invocation -> new SealPackage("/sealed/fresh.tar.gz", 2048L));
         when(environmentBackend.packVolume(any())).thenReturn("整卷内容".getBytes());
+
+        // 采样帧落库（#487 观测读面纯读库）：动作回详情＝意图列新鲜（注册表）＋
+        // 实态列采样帧（动作后由下一采样轮刷新，sampledAt 如实标注新鲜度）
+        seedSample(WS_RUNNING, ContainerState.RUNNING, 104857600L);
+        seedSample(WS_ASLEEP, ContainerState.ABSENT, 314572800L);
+        seedSample(WS_SEALED, ContainerState.ABSENT, null);
     }
 
     @AfterEach
@@ -140,7 +150,10 @@ class BackofficeWorkspaceActionSeamTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.workspaceId").value(Long.toString(WS_ASLEEP)))
                 .andExpect(jsonPath("$.data.desiredState").value(1))
-                .andExpect(jsonPath("$.data.containerState").value(1))
+                // 动作回详情＝意图列新鲜＋实态列采样帧（#487）：唤醒落定看意图/置备态，
+                // 实态仍是动作前采到的无容器（下轮采样刷新），sampledAt 如实标注
+                .andExpect(jsonPath("$.data.containerState").value(3))
+                .andExpect(jsonPath("$.data.sampledAt").exists())
                 .andExpect(jsonPath("$.data.status").value(ProvisioningStatus.READY.getCode()));
 
         // 唤醒也是写口：动作行落库（who/what）
@@ -297,7 +310,8 @@ class BackofficeWorkspaceActionSeamTest {
         signedPost(actionPath(WS_ASLEEP, "wake"), null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.project.name").value("带项目的睡着沙箱"))
-                .andExpect(jsonPath("$.data.volumeSizeBytes").value(104857600))
+                .andExpect(jsonPath("$.data.volumeSizeBytes").value(314572800))
+                .andExpect(jsonPath("$.data.sampledAt").exists())
                 .andExpect(jsonPath("$.data.lastTouchAt").exists());
     }
 
@@ -344,6 +358,12 @@ class BackofficeWorkspaceActionSeamTest {
             workspace.seal(sealed, LocalDateTime.of(2026, 9, 15, 10, 0));
         }
         workspaceRepository.save(workspace);
+    }
+
+    /** 落一行采样帧（#487 观测读面纯读库——动作回详情的实态列来源）。 */
+    private void seedSample(long id, ContainerState state, Long volumeBytes) {
+        sampleRepository.save(WorkspaceObservationSample.record(
+                workspaceIdOf(id), state, volumeBytes, OLD_TOUCH.plusHours(1)));
     }
 
     /** 库内 last-touch（JdbcTemplate 级——拨针口径的 DB 层断言，#196 票 AC）。 */

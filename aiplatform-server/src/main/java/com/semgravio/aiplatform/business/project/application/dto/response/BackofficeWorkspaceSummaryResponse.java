@@ -22,10 +22,12 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
  * @param statusName      置备状态名
  * @param desiredState    期望态（code）：1=运行 2=休眠 3=封存（意图，ADR-0016）
  * @param desiredStateName 期望态名
- * @param containerState  容器实态（code）：1=运行中 2=已停止 3=无容器 4=未知（探查失败）
- * @param containerStateName 实态名
+ * @param containerState  容器实态采样（code）：1=运行中 2=已停止 3=无容器 4=未知
+ *                        （采样到探查失败）；未采样为 null（新工作区首个采样窗内）
+ * @param containerStateName 实态名（未采样为 null）
  * @param lastTouchAt     最近触碰（闲置计时输入）
- * @param volumeSizeBytes 卷用量（字节；封存容缺/探查失败为 null）
+ * @param volumeSizeBytes 卷用量采样（字节；封存按意图容缺/未采样/采样失败为 null）
+ * @param sampledAt       采样时刻（新鲜度标注；未采样为 null）
  * @param sealedAt        封存时刻（未封存为 null）
  * @param archiveSizeBytes 封存包大小（字节；未封存为 null）
  * @param project         所属项目引用（无所属项目为 null）
@@ -43,6 +45,7 @@ public record BackofficeWorkspaceSummaryResponse(
         String containerStateName,
         LocalDateTime lastTouchAt,
         Long volumeSizeBytes,
+        LocalDateTime sampledAt,
         LocalDateTime sealedAt,
         Long archiveSizeBytes,
         ProjectRef project) {
@@ -69,9 +72,11 @@ public record BackofficeWorkspaceSummaryResponse(
                 observation.desiredState(),
                 observation.desiredState().getName(),
                 observation.containerState(),
-                observation.containerState().getName(),
+                observation.containerState() != null
+                        ? observation.containerState().getName() : null,
                 observation.lastTouchAt(),
                 observation.volumeSizeBytes(),
+                observation.sampledAt(),
                 observation.sealedAt(),
                 observation.archiveSizeBytes(),
                 project);

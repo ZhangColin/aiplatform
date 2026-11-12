@@ -29,6 +29,7 @@ import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ProbeShape;
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.ThrowawayPreviewGateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * 封存与深度唤醒活体验收（#172 AC，真 docker daemon + 真库 + 真编排——非假面）：
@@ -133,7 +134,9 @@ class WorkspaceSealLiveTest {
 
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore(),
-                transactionTemplate, scanProperties()).scanOnce(Map.of(), LocalDateTime.now());
+                transactionTemplate, scanProperties(),
+                mock(WorkspaceObservationSamplingAppService.class))
+                .scanOnce(Map.of(), LocalDateTime.now());
 
         // 封存落定（收敛模块互斥面异步执行——扫描提交、任务收敛，轮询等落地）：
         // 包落盘（数据库随包、三大缓存排除）+ 卷删除 + 期望态置封存

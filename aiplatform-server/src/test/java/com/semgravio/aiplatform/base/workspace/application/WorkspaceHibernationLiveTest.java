@@ -23,6 +23,7 @@ import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceReposi
 import com.semgravio.aiplatform.base.workspace.infrastructure.docker.DockerEnvironmentBackend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 /**
  * 闲置休眠活体验收（#171 AC，真 docker daemon + 真库 + 真编排——非假面）：
@@ -94,7 +95,8 @@ class WorkspaceHibernationLiveTest {
 
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore,
-                transactionTemplate, scanProperties())
+                transactionTemplate, scanProperties(),
+                mock(WorkspaceObservationSamplingAppService.class))
                 .scanOnce(Map.of(), LocalDateTime.now());
 
         // 容器被删、卷保留、期望态置休眠（置备态保持 READY——实态以探查为准）

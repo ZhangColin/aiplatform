@@ -352,7 +352,8 @@ class WorkspaceHibernationIntegrationTest {
         // 直调扫描要真扫——用默认开启（hibernationEnabled 默认 true）的新实例
         return new WorkspaceHibernationAppService(
                 backend, workspaceRepository, newConvergenceService(backend),
-                sealPackageStore(), transactionTemplate, new WorkspaceProperties());
+                sealPackageStore(), transactionTemplate, new WorkspaceProperties(),
+                mock(WorkspaceObservationSamplingAppService.class));
     }
 
     /** 收敛模块真实例（直通执行器：提交即跑，次序可断言）。 */

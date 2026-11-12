@@ -56,7 +56,8 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
  * <li><b>孤儿脱钩</b>（#465）：来源项目 purgeByProject 后已激活素材与块存活（对照：
  * 同源 PRD 素材随级联清掉），且混检同池命中、kind 透出；</li>
  * <li><b>拒绝</b>：理由必填 400 KNW_010＋trim 落档＋终态留痕＋出队列；已审结重审
- * 409 KNW_009（理由不被覆盖）；</li>
+ * 409 KNW_009（已拒/已激活两终态形态齐测——已拒理由不被覆盖、已激活终态不被
+ * 改写）；</li>
  * <li><b>改标签</b>：在途翻类别＋占目标类别在途序号最低空位（跨类别上限 3 结构性
  * 生效——满即 409 KNW_012）＋同类别幂等 no-op＋非法类别 400 KNW_011＋不翻终态
  * 不动正文；</li>
@@ -474,7 +475,7 @@ class BackofficeSedimentDraftSeamTest {
         assertThat(draftStatus(receipt.draftId())).isEqualTo(1);
     }
 
-    // ---------- 三键共面负例：已审结拒＋缺操作者＋未寻址＋401 ----------
+    // ---------- 三键共面负例：已审结拒（已拒/已激活）＋缺操作者＋未寻址＋401 ----------
 
     @Test
     void given_reviewed_draft_when_any_review_action_again_then_409_already_reviewed()
@@ -495,6 +496,31 @@ class BackofficeSedimentDraftSeamTest {
                 .andExpect(jsonPath("$.code").value(SEDIMENT_DRAFT_ALREADY_REVIEWED_CODE));
         // 拒绝理由不被重审覆盖（终态留档不可变）
         assertThat(draftRejectReason(rejected.draftId())).isEqualTo("不采纳");
+    }
+
+    @Test
+    void given_activated_draft_when_any_review_action_again_then_409_already_reviewed()
+            throws Exception {
+        // 已激活终态重审（#468 补记）：守卫先于理由/类别校验——三键带合法体也归一 409
+        SedimentDraftReceipt activated = plant(LINEAGE_PROJECT_ID, "MODULE", "已激活模块");
+        when(embeddingClient.embed(anyList())).thenReturn(List.of(vector(1, 1)));
+        signedPostNoBody("/api/backoffice/sediment-drafts/" + activated.draftId() + "/activate",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isOk());
+
+        signedPostNoBody("/api/backoffice/sediment-drafts/" + activated.draftId() + "/activate",
+                OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(SEDIMENT_DRAFT_ALREADY_REVIEWED_CODE));
+        signedPostReject(activated.draftId(), "激活后又想拒", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(SEDIMENT_DRAFT_ALREADY_REVIEWED_CODE));
+        signedPostRelabel(activated.draftId(), "RULE", OPERATOR_ID, OPERATOR_NAME)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(SEDIMENT_DRAFT_ALREADY_REVIEWED_CODE));
+        // 终态不被重审改写：仍在已激活、拒绝理由不注入
+        assertThat(draftStatus(activated.draftId())).isEqualTo(2);
+        assertThat(draftRejectReason(activated.draftId())).isNull();
     }
 
     @Test

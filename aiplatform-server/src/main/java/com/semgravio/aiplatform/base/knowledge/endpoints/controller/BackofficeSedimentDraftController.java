@@ -60,7 +60,7 @@ public class BackofficeSedimentDraftController {
                     + "在途序号（每项目每 kind 上限 3 的队列可见性）＋状态＋自荐时刻；"
                     + "正文与扫描 findings 在详情。page 1 基（缺省 1）、size 缺省 20"
                     + "（上界 100）。需要机机签名（五头 HMAC），无签名 401")
-    @ErrorCodes({"BAD_REQUEST"})
+    @ErrorCodes({"BAD_REQUEST", "KNW_011"})
     public ApiResponse<PageResponse<BackofficeSedimentDraftSummaryResponse>> queue(
             @RequestParam(required = false) String projectId,
             @RequestParam(required = false) String kind,

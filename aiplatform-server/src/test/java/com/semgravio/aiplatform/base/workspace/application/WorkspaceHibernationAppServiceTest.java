@@ -29,6 +29,7 @@ import com.semgravio.aiplatform.base.workspace.domain.port.SealPackageStore;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -268,6 +269,54 @@ class WorkspaceHibernationAppServiceTest {
         int acted = newService().scanOnce(Map.of(), NOW);
 
         // 清扫尽力而为：单轮失败不炸整轮，休眠收口照常计数
+        assertThat(acted).isZero();
+    }
+
+    // ---------- 无主卷收编（#486：#179 准绳对称扩卷侧，ADR-0045） ----------
+
+    @Test
+    void given_scan_round_when_finished_then_sweeps_orphan_volumes_with_registered_keep_set() {
+        Workspace workspace = readyWorkspace();
+        workspace.hibernate();   // 休眠在册形态（容器无、卷在）：卷是用户数据（ADR-0016）
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+
+        newService().scanOnce(Map.of(), NOW);
+
+        // 保留集 = 注册表全量编号（休眠在册的卷永不进收编面）；宽限线与容器侧
+        // 同一口径（本轮时刻减 10 分钟——fork「先建卷、后落记录」窗口保护）
+        verify(environmentBackend).sweepOrphanWorkspaceVolumes(
+                argThat(ids -> ids.size() == 1 && ids.contains(42L)),
+                eq(NOW.minusMinutes(10)));
+    }
+
+    @Test
+    void given_registry_unreachable_when_scan_then_round_skipped_without_any_sweep() {
+        when(workspaceRepository.findAll()).thenThrow(new RuntimeException("db down"));
+
+        assertThatThrownBy(() -> newService().scanOnce(Map.of(), NOW))
+                .isInstanceOf(RuntimeException.class);
+
+        // 注册表不可达宁可漏删（双闸之二）：保留集无从构成，整轮跳过——容器/卷
+        // 收编都不发（拿不到准绳时绝不按「全部无主」动手）
+        verify(environmentBackend, never()).sweepOrphanWorkspaceContainers(any(), any());
+        verify(environmentBackend, never()).sweepOrphanWorkspaceVolumes(any(), any());
+    }
+
+    @Test
+    void given_volume_sweep_failure_when_scan_then_round_survives_for_next_round() {
+        Workspace workspace = readyWorkspace();
+        workspace.markTouched(NOW.minusMinutes(10));
+        when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.RUNNING);
+        doThrow(new RuntimeException("daemon down"))
+                .when(environmentBackend).sweepOrphanWorkspaceVolumes(any(), any());
+
+        int acted = newService().scanOnce(Map.of(), NOW);
+
+        // 收编尽力而为：单轮失败记日志，下轮再收
         assertThat(acted).isZero();
     }
 

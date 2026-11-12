@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # 清理测试泄漏的沙箱 Docker 残留（活体测试 @AfterEach 尽力而为，JVM 中断即漏）。
 #
+# 【角色变化（#486，ADR-0045）】生产环境的无主判定准绳已由 Java 扫描轮承接
+# （WorkspaceHibernationAppService 每轮末尾无主收编：容器侧 #179 先行、卷侧
+# 对称扩展——同一注册表准绳＋同一 10 分钟宽限窗＋同一「注册表不可达宁可漏删」
+# 双闸）。本脚本自 #486 起退居本地开发工具：多库并集（dev/测试/每票并行库）、
+# 旧版沙箱镜像清理等本机专属面仍归脚本；生产资源收编一律走扫描轮，不在服务器
+# 手跑本脚本。
+#
 # 判定「残留」的唯一准绳：资源编号不在 wsp_workspaces 注册表里
 # （本机全部 aiplatform% 库的并集：dev 库 aiplatform、测试库 aiplatform_test 及
 # spec-320 并行实施期的每票独立测试库 aiplatform_test_t*——新库在场时硬编码

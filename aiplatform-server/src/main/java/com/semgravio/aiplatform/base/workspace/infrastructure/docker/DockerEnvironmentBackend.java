@@ -13,7 +13,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -22,6 +21,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import cn.hutool.core.collection.CollUtil;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -113,6 +114,12 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
      * 全名，但 fork 行在库即在保留集。
      */
     private static final Pattern MAIN_CONTAINER_NAME = Pattern.compile("^ws-(\\d+)$");
+
+    /**
+     * 工作区卷命名形（^vol-ws-<id>$，与 {@link #volumeOf} 同源，#486 收编面）：
+     * 无主收编只认全名工作区卷——无关卷（外部自建等）不在本面。
+     */
+    private static final Pattern WORKSPACE_VOLUME_NAME = Pattern.compile("^vol-ws-(\\d+)$");
 
     /**
      * HTML 引用的 Next 静态资产路径（#397 chunk 复测取材）：Next 以
@@ -639,12 +646,13 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
     public int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
             LocalDateTime startedBefore) {
         // #179 触发器：销毁「记录照删、物理尽力而为」撞 daemon 抖动窗时，容器留在
-        // Docker 侧而库中无记录——休眠扫描只遍历注册表，孤儿永久不可见（clean-ws-
-        // residue.sh 注释的同源口径）。只扫在跑容器（docker ps 默认面）；宽限线外
-        // 才动手（fork「先建容器、后落记录」窗口保护）；卷不删（无主卷可能仍承载
-        // 用户数据，人工/脚本处置）
+        // Docker 侧而库中无记录——休眠扫描只遍历注册表，无主容器永久不可见（clean-
+        // ws-residue.sh 注释的同源口径）。只扫在跑容器（docker ps 默认面）；宽限线
+        // 外才动手（fork「先建容器、后落记录」窗口保护）；本面只动容器，卷归
+        // sweepOrphanWorkspaceVolumes（#486 同准绳对称收编，容器先卷后——占卷
+        // 容器在场则卷删不动）
         ExecResult listed = runCapture("docker", "ps", "--format", "{{.Names}}");
-        Set<Long> keep = new HashSet<>(keepWorkspaceIds);
+        Set<Long> keep = CollUtil.newHashSet(keepWorkspaceIds);
         List<String> candidates = listed.stdout().lines().map(String::trim)
                 .flatMap(name -> {
                     Matcher matcher = MAIN_CONTAINER_NAME.matcher(name);
@@ -676,7 +684,7 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                     .isBefore(startedBefore)) {
                 runSilently("docker", "rm", "-f", name);
                 removed++;
-                log.info("[workspace] 无主容器已清（库无记录，卷保留）：{}", name);
+                log.info("[workspace] 无主容器已清（库无记录；卷按注册表准绳另收）：{}", name);
             }
         }
         return removed;
@@ -684,8 +692,10 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
 
     /**
      * 解析 docker inspect 的 RFC3339Nano 时刻（{@code 2026-11-03T14:33:31.5Z}；
-     * fraction 段为零时 Go 省略点号，故可有可无）。解析不出返回 null——无从判
-     * 宽限时本轮放过（宁可漏删，不误杀可能尚在「容器已建、记录未落」窗的新建资源）。
+     * fraction 段为零时 Go 省略点号，故可有可无；卷 CreatedAt 在部分 daemon 上
+     * 是带本地时区偏移的 Go time.String 形，数值偏移同样可解）。解析不出返回
+     * null——无从判宽限时本轮放过（宁可漏删，不误杀可能尚在「资源已建、记录
+     * 未落」窗的新建资源）。
      */
     private static Instant parseDockerTimestamp(String raw) {
         try {
@@ -696,12 +706,61 @@ public class DockerEnvironmentBackend implements EnvironmentBackend {
                 if (zone < 0) {
                     zone = s.indexOf('+', dot);
                 }
+                if (zone < 0) {
+                    zone = s.indexOf('-', dot);   // 负偏移时区（ISO-8601 完整覆盖）
+                }
                 s = s.substring(0, dot) + (zone >= 0 ? s.substring(zone) : "");
             }
             return Instant.parse(s);
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    @Override
+    public int sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
+            LocalDateTime createdBefore) {
+        // #486（ADR-0045）：#179 容器侧准绳对称扩卷侧——销毁级联删不动的卷（占卷
+        // 容器等）在注册行已删后即无主，扫描轮收编删除；保留集 = 注册表全量编号
+        // （在册一律不动——休眠保卷是用户数据 ADR-0016）。只按准绳点名删，绝不
+        // prune 类通配（docker system df 的「可回收」口径不作判定，红线）
+        ExecResult listed = runCapture("docker", "volume", "ls", "--format", "{{.Name}}");
+        Set<Long> keep = CollUtil.newHashSet(keepWorkspaceIds);
+        List<String> candidates = listed.stdout().lines().map(String::trim)
+                .flatMap(name -> {
+                    Matcher matcher = WORKSPACE_VOLUME_NAME.matcher(name);
+                    return matcher.matches()
+                            && !keep.contains(Long.parseLong(matcher.group(1)))
+                                    ? Stream.of(name)
+                                    : Stream.empty();
+                })
+                .toList();
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+        // 批量取创建时刻判宽限（单次 inspect；候选在 ls 与 inspect 之间消失时 docker
+        // 点名 stderr、stdout 照旧只含拿到的——defensive 解析即可）
+        String[] inspect = Stream.concat(Stream.of(
+                "docker", "volume", "inspect", "--format", "{{.Name}}|{{.CreatedAt}}"),
+                candidates.stream()).toArray(String[]::new);
+        ExecResult inspected = runCapture(inspect);
+        int removed = 0;
+        for (String line : inspected.stdout().lines().map(String::trim)
+                .filter(l -> !l.isEmpty()).toList()) {
+            int sep = line.indexOf('|');
+            if (sep <= 0) {
+                continue;   // 无卷名的畸形行不碰（宁可漏删）
+            }
+            Instant created = parseDockerTimestamp(line.substring(sep + 1));
+            String name = line.substring(0, sep);   // 卷名回执无容器名的前缀斜杠
+            if (created != null && created.atZone(ZoneId.systemDefault()).toLocalDateTime()
+                    .isBefore(createdBefore)) {
+                runSilently("docker", "volume", "rm", name);
+                removed++;
+                log.info("[workspace] 无主卷已收编（库无记录）：{}", name);
+            }
+        }
+        return removed;
     }
 
     // ---------- dev 环境内部 ----------

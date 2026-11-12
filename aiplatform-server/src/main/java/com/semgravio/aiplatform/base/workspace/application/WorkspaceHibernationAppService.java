@@ -61,9 +61,10 @@ public class WorkspaceHibernationAppService {
     private final WorkspaceProperties properties;
 
     /**
-     * 孤儿容器清扫宽限（#179 触发器）：新建资源可能尚在「容器已建、记录未落」窗口
-     * （fork 先建容器后落记录），早于「本轮时刻减本宽限」启动的无主容器才删——
-     * 与 clean-ws-residue.sh 的 GRACE_MINUTES 同口径（10 分钟）。
+     * 无主收编宽限窗（#179 容器侧先行、#486 卷侧对称，ADR-0045 双闸之一）：新建
+     * 资源可能尚在「资源已建、记录未落」窗口（fork 先建容器/卷后落记录），早于
+     * 「本轮时刻减本宽限」创建/启动的无主资源才收编——与 clean-ws-residue.sh 的
+     * GRACE_MINUTES 同口径（10 分钟）。
      */
     private static final Duration ORPHAN_SWEEP_GRACE = Duration.ofMinutes(10);
 
@@ -83,9 +84,12 @@ public class WorkspaceHibernationAppService {
 
     /**
      * 单轮扫描（定时器与启动对账直调；测试直调不等真实定时）：遍历全部工作区逐个
-     * 收敛，返回动作数（观测/日志用）；每轮末尾顺带无主容器清扫（#179 触发器——
-     * 销毁「记录照删、物理尽力而为」撞 daemon 抖动窗的泄漏，休眠面只看注册表，
-     * 无主容器永久不可见）。单条异常不炸整轮（尽力而为，下轮再试）。
+     * 收敛，返回动作数（观测/日志用）；每轮末尾顺带无主收编（#179 容器侧先行、
+     * #486 卷侧对称，ADR-0045——销毁「记录照删、物理尽力而为」撞 daemon 抖动窗
+     * 的泄漏，休眠面只看注册表，无主资源永久不可见）。双闸：新建宽限窗（{@link
+     * #ORPHAN_SWEEP_GRACE}）＋注册表不可达宁可漏删——{@code findAll} 抛出即整轮
+     * 中止（收编不发：保留集无从构成时绝不按「全部无主」动手）。单条异常不炸
+     * 整轮（尽力而为，下轮再试）。
      * 总开关（{@link WorkspaceProperties#isHibernationEnabled()}）由本入口自持
      * （#197）：关闭即静默返回——业务侧调度器不再跨域读此开关，只把消费方事实
      * 随扫描递入。
@@ -115,11 +119,12 @@ public class WorkspaceHibernationAppService {
             }
         }
         sweepOrphanContainers(registeredIds, now);
+        sweepOrphanVolumes(registeredIds, now);
         return acted;
     }
 
     /**
-     * 孤儿容器清扫（#179 触发器）：保留集 = 本轮注册表全量编号（含非 DEV 行——保留
+     * 无主容器收编（#179 触发器）：保留集 = 本轮注册表全量编号（含非 DEV 行——保留
      * 集只看「容器有没有主」，与休眠判定无关）；宽限线 = 本轮时刻减 {@link
      * #ORPHAN_SWEEP_GRACE}。尽力而为：单轮失败记日志，下轮再收。
      */
@@ -128,10 +133,29 @@ public class WorkspaceHibernationAppService {
             int swept = environmentBackend.sweepOrphanWorkspaceContainers(
                     registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
             if (swept > 0) {
-                log.info("[workspace] 孤儿容器清扫：{} 个在跑容器库无记录已删（卷保留）", swept);
+                log.info("[workspace] 无主容器收编：{} 个在跑容器库无记录已删（卷按准绳另收）", swept);
             }
         } catch (RuntimeException e) {
-            log.warn("[workspace] 孤儿容器清扫未成（下轮再试）", e);
+            log.warn("[workspace] 无主容器收编未成（下轮再试）", e);
+        }
+    }
+
+    /**
+     * 无主卷收编（#486，ADR-0045：#179 准绳对称扩卷侧）：保留集 = 注册表全量编号
+     * ——在册一律不动（休眠保卷是用户数据 ADR-0016；「在册但项目行已删」形态的
+     * 处置归后台/人工面，姊妹票承接）；宽限线与容器侧同一口径。卷在容器之后收
+     * （占卷容器在场则卷本轮删不动，下轮再收——与销毁级联同序）。尽力而为：单轮
+     * 失败记日志，下轮再收。
+     */
+    private void sweepOrphanVolumes(Set<Long> registeredIds, LocalDateTime now) {
+        try {
+            int swept = environmentBackend.sweepOrphanWorkspaceVolumes(
+                    registeredIds, now.minus(ORPHAN_SWEEP_GRACE));
+            if (swept > 0) {
+                log.info("[workspace] 无主卷收编：{} 个卷库无记录已删（注册表准绳点名删，非 prune）", swept);
+            }
+        } catch (RuntimeException e) {
+            log.warn("[workspace] 无主卷收编未成（下轮再试）", e);
         }
     }
 

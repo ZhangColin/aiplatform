@@ -212,16 +212,13 @@ public interface EnvironmentBackend {
     int sweepSnapshotContainersExcept(Collection<String> keepContainerNames);
 
     /**
-     * 清扫无主工作区容器（#179 触发器，运行期孤儿兜底）：「记录照删、物理尽力而为」
+     * 清扫无主工作区容器（#179 触发器，运行期无主兜底）：「记录照删、物理尽力而为」
      * 的销毁（{@link #destroyWorkspace} 撞 daemon 抖动窗）会把容器留在 Docker 侧
-     * 而库中无记录——休眠扫描只遍历注册表，孤儿永久不可见、永不休眠。按命名扫清
+     * 而库中无记录——休眠扫描只遍历注册表，无主容器永久不可见、永不休眠。按命名扫清
      * 在跑的 {@code ws-<id>} 主容器（保留集 = 注册表全量编号；快照容器
      * {@code ws-*-snap-*} 归 {@link #sweepSnapshotContainersExcept}，不在本面）。
      * 只动启动时刻早于宽限线的容器——新建资源可能尚在「容器已建、记录未落」窗口
      * （fork 先建容器后落记录），误杀窗口内容器＝杀在途 run。
-     *
-     * <p>卷刻意不在本清扫范围：无主卷可能仍承载用户数据，处置归人工/脚本口径
-     * （clean-ws-residue.sh）。
      *
      * @param keepWorkspaceIds 注册表全量工作区编号（保留集，含非 DEV 行）
      * @param startedBefore    宽限线：启动时刻早于本线的无主容器才删（调用方时钟）
@@ -229,4 +226,23 @@ public interface EnvironmentBackend {
      */
     int sweepOrphanWorkspaceContainers(Collection<Long> keepWorkspaceIds,
             LocalDateTime startedBefore);
+
+    /**
+     * 收编无主工作区卷（#486，ADR-0045：#179 容器侧准绳对称扩卷侧）：销毁级联
+     * 删不动的卷（占卷容器等）留在 Docker 侧而注册行已删——即无主。按命名点名删
+     * 保留集外的 {@code vol-ws-<id>}（保留集 = 注册表全量编号——在册一律不动，
+     * 含「在册但项目行已删」形态〔归人工/后台处置面〕与休眠保卷〔ADR-0016 用户
+     * 数据〕）。只动创建时刻早于宽限线的卷（与容器侧同一 10 分钟口径——新建
+     * 资源可能尚在「卷已建、记录未落」窗口，fork 先建卷后落记录）。
+     *
+     * <p>准绳＝注册表唯一正本，绝无 prune 类通配回收（红线）：docker system df
+     * 的「可回收」口径把休眠卷一并计入，不可作判定；本面只按保留集求差点名删。
+     * docker volume prune 永不进任何自动通道。
+     *
+     * @param keepWorkspaceIds 注册表全量工作区编号（保留集，含非 DEV 行）
+     * @param createdBefore    宽限线：创建时刻早于本线的无主卷才删（调用方时钟）
+     * @return 收编数
+     */
+    int sweepOrphanWorkspaceVolumes(Collection<Long> keepWorkspaceIds,
+            LocalDateTime createdBefore);
 }

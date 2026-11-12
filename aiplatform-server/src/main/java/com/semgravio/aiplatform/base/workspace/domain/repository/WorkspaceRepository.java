@@ -10,6 +10,7 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 /**
  * 工作区仓储（{@code wsp_workspaces}，中间件资源行随聚合级联增删）。
  * 聚合 ID 由应用层注册时显式赋值（workspaceId 先于 Docker 副作用存在，容器命名要用它）。
+ * 独立读缝（#476 轮询面）另有其口：{@link WorkspaceFreshReads}。
  */
 public interface WorkspaceRepository extends BaseRepository<Workspace, Long> {
 

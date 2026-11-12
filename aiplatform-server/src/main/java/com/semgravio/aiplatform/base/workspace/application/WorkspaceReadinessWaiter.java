@@ -11,7 +11,7 @@ import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
-import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceFreshReads;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,20 +36,20 @@ public class WorkspaceReadinessWaiter {
      */
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
 
-    private final WorkspaceRepository workspaceRepository;
+    private final WorkspaceFreshReads freshReads;
     private final Duration timeout;
     private final Duration pollInterval;
 
     @Autowired
-    public WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
+    public WorkspaceReadinessWaiter(WorkspaceFreshReads freshReads,
             WorkspaceProperties properties) {
-        this(workspaceRepository, properties.getReadinessTimeout(), POLL_INTERVAL);
+        this(freshReads, properties.getReadinessTimeout(), POLL_INTERVAL);
     }
 
     /** 测试构造：注入短超时/间隔以验收收敛（生产走 readiness-timeout 配置/500ms）。 */
-    WorkspaceReadinessWaiter(WorkspaceRepository workspaceRepository,
+    WorkspaceReadinessWaiter(WorkspaceFreshReads freshReads,
                              Duration timeout, Duration pollInterval) {
-        this.workspaceRepository = workspaceRepository;
+        this.freshReads = freshReads;
         this.timeout = timeout;
         this.pollInterval = pollInterval;
     }
@@ -58,6 +58,12 @@ public class WorkspaceReadinessWaiter {
      * 取「已就绪」的工作区：READY 即回（句柄带真实端口）；PROVISIONING 轮询至 READY；
      * FAILED 抛 WSP_010（置备已败，不会就绪）；超时抛 WSP_011（不静默悬挂）。工作区在
      * 等待中被删则抛 WSP_001（404）。
+     *
+     * <p>轮询读必须走 {@link WorkspaceFreshReads 独立读}（#476）：等待方
+     * 请求上下文里先装载过的实体会驻留持久化上下文（OSIV 请求级 EntityManager /
+     * 长事务），普通 {@code findById} 命中一级缓存不发 SQL——置备器在事务外翻转的
+     * READY 对轮询永久不可见，等待挂满超时（11-12 生产实录：/prd 挂 10 分钟回 500）。
+     * 独立读对两种致盲形态都成立（抛开销 EntityManager，详见实现）。</p>
      */
     public Workspace awaitReady(Workspace workspace) {
         WorkspaceId workspaceId = workspace.workspaceId();
@@ -76,7 +82,7 @@ public class WorkspaceReadinessWaiter {
                 throw new ApplicationException(WorkspaceMessage.WORKSPACE_PROVISION_TIMEOUT);
             }
             sleep();
-            current = workspaceRepository.findById(workspaceId.id())
+            current = freshReads.findFreshById(workspaceId.id())
                     .orElseThrow(() -> new ApplicationException(WorkspaceMessage.WORKSPACE_NOT_FOUND));
         }
     }

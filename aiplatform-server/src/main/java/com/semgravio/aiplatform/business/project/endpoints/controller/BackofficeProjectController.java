@@ -147,10 +147,11 @@ public class BackofficeProjectController {
     @Operation(summary = "PRD 读（后台面，工作区直读）",
             description = "口径照用户面 PRD 读口：直读项目 dev 工作区的 docs/PRD.md（事实源，"
                     + "v1 无版本链只最新版），返回 markdown 正文 + updatedAt（文件 mtime，"
-                    + "ISO-8601 秒精度）——了解交付物内容。未产出（工作区无该文件）"
-                    + "404 PRJ_015，与项目不存在的 PRJ_001 区分。归档项目照读"
-                    + "（工作区保留）。需要机机签名；环境故障（docker exec 自身失败）"
-                    + "500 WSP_002")
+                    + "ISO-8601 秒精度）——了解交付物内容。未产出期短路（#478）："
+                    + "prd_produced_at 未落直回 404 PRJ_015（不触工作区），标志已落才 "
+                    + "exec 直读、标志在而文件缺同码兜底——均与项目不存在的 PRJ_001 "
+                    + "区分。归档项目照读（工作区保留）。需要机机签名；环境故障"
+                    + "（docker exec 自身失败）500 WSP_002")
     @ErrorCodes({"PRJ_001", "PRJ_015", "WSP_002"})
     public ApiResponse<PrdResponse> prd(@PathVariable String id) {
         return ApiResponse.ok(projectQueryAppService.prd(Tsid.resolve(id, ProjectMessage.PROJECT_NOT_FOUND)));

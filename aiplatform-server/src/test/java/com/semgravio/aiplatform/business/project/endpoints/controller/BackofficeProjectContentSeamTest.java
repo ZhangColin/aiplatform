@@ -160,7 +160,7 @@ class BackofficeProjectContentSeamTest {
     @Test
     void given_archived_project_when_signed_content_reads_then_all_three_readable()
             throws Exception {
-        Long id = archivedProject("已归档的项目").getId();
+        Long id = prdMarked(archivedProject("已归档的项目")).getId();
         entries.save(ConversationEntry.userUtterance(id, "run-1", "归档前的最后对话"));
         stubExec((command, out) -> {
             if (command.contains("PRD.md")) {
@@ -209,11 +209,25 @@ class BackofficeProjectContentSeamTest {
         verify(workspaceLifecycleAppService, never()).exec(anyString(), any());
     }
 
-    // ---------- PRD（未产出 404 照搬用户面） ----------
+    // ---------- PRD（未产出 404 照搬用户面；#478 未产出期标志短路不 exec） ----------
+
+    @Test
+    void given_prd_flag_not_landed_when_signed_prd_then_prj_015_without_exec() throws Exception {
+        Long id = newProject("未产出 PRD 的项目").getId();
+        // exec 若被触达即回正文（退出码 0）——404 只可能来自标志短路，回归即现形
+        stubExec((command, out) ->
+                out.stdout = "1756100000\n# 官网 PRD\n\n目标：三页官网。\n");
+
+        // 未产出期短路（#478）：标志未落＝PRJ_015 直回，工作区零触达（与用户面同缝）
+        signedGet("/api/backoffice/projects/" + id + "/prd")
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
+        verify(workspaceLifecycleAppService, never()).exec(anyString(), any());
+    }
 
     @Test
     void given_prd_in_workspace_when_signed_prd_then_full_content_returned() throws Exception {
-        Long id = newProject("PRD 项目").getId();
+        Long id = prdMarked(newProject("PRD 项目")).getId();
         stubExec((command, out) ->
                 out.stdout = "1756100000\n# 官网 PRD\n\n目标：三页官网。\n");
 
@@ -228,11 +242,11 @@ class BackofficeProjectContentSeamTest {
     }
 
     @Test
-    void given_no_prd_file_when_signed_prd_then_prj_015() throws Exception {
-        Long id = newProject("未产出 PRD 的项目").getId();
+    void given_flag_landed_but_no_prd_file_when_signed_prd_then_prj_015() throws Exception {
+        Long id = prdMarked(newProject("标志在文件没的项目")).getId();
         stubExec((command, out) -> out.exitCode = 1);
 
-        // 未产出（工作区无 docs/PRD.md）＝404 PRJ_015，区别于项目不存在的 PRJ_001
+        // 标志已落才走到 exec：文件缺（退出码 1）＝PRJ_015 兜底同码，区别于 PRJ_001
         signedGet("/api/backoffice/projects/" + id + "/prd")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("PRD 尚未产出"));
@@ -240,7 +254,7 @@ class BackofficeProjectContentSeamTest {
 
     @Test
     void given_dead_container_when_signed_prd_then_wsp_002() throws Exception {
-        Long id = newProject("容器故障的项目").getId();
+        Long id = prdMarked(newProject("容器故障的项目")).getId();
         stubExec((command, out) -> out.exitCode = 125);
 
         // docker exec 自身失败 ≠ 未产出：环境故障如实上抛（WSP_002），不伪装 200/404
@@ -377,6 +391,13 @@ class BackofficeProjectContentSeamTest {
         Project project = newProject(name);
         Project loaded = projectRepository.findById(project.getId()).orElseThrow();
         loaded.archive();
+        return projectRepository.save(loaded);
+    }
+
+    /** 已产 PRD 项目（标志位落库——savePrd 落盘回调置位的读面前提，#478 短路口径）。 */
+    private Project prdMarked(Project project) {
+        Project loaded = projectRepository.findById(project.getId()).orElseThrow();
+        loaded.markPrdProduced();
         return projectRepository.save(loaded);
     }
 

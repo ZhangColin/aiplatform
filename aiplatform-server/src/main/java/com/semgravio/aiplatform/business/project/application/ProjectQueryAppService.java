@@ -225,23 +225,36 @@ public class ProjectQueryAppService {
     }
 
     /**
-     * 项目 PRD 当前版：直读项目 dev 工作区的 {@code docs/PRD.md}（源码包下载同口径
-     * ——容器常开，PRD 是工作区的一部分），返回 markdown 正文 + 文件 mtime（与正文
-     * 同一事实源，秒精度；v1 无版本链只最新版）。「PRD 已产出」状态位另行落库，
-     * 本端点不依赖它。
+     * 项目 PRD 当前版：<b>未产出期短路（#478）</b>——{@code prd_produced_at} 未落
+     * （savePrd 未收口）直回 PRJ_015，不触工作区（创建后首请求不再因容器未起进
+     * awaitReady，少一次容器 exec）；标志已落（savePrd 落盘回调同事务置位，产出
+     * /修订共用）才 exec 直读 {@code docs/PRD.md}（源码包下载同口径——容器常开，
+     * PRD 是工作区的一部分），返回 markdown 正文 + 文件 mtime（与正文同一事实源，
+     * 秒精度；v1 无版本链只最新版）。
+     *
+     * <p>短路判据与事实源不漂移的口径：标志落点＝收口点（与前端同投影——成果区
+     * 长出判据即 {@code prdProducedAt}，标志未落时 PRD 面板本就不出场，「文件已
+     * 有但标志未落」的瞬窗（exec 写文件 → 置位事务提交之间）回 404 无可见面）；
+     * 反向漂移（标志在、文件没——工作区卷丢失等）仍由 exec 退出码 1 兜底
+     * PRJ_015。</p>
      *
      * <p>刻意不加 {@code @Transactional(readOnly = true)}（编写规范 §4.1 读操作
      * 缺省项）：docker exec 在方法体内，注解会把 exec 圈进事务占住连接（最长
      * 30s 超时）——Docker 副作用不进业务事务是本仓既有形制；projectId 装载只是
      * 单次 findById，自带短事务足够。</p>
      *
-     * @throws ApplicationException PRJ_001 项目不存在；PRJ_015 PRD 未产出（工作区
-     *                              无该文件，前端据此区分「还没产出」）；WSP_002
-     *                              环境故障（docker exec 自身失败，退出码 125/126；
-     *                              cat 权限错亦落 1 与未产出同口径，可接受取舍）
+     * @throws ApplicationException PRJ_001 项目不存在；PRJ_015 PRD 未产出（标志
+     *                              未落直回；标志已落而工作区无该文件同码兜底
+     *                              ——前端据此区分「还没产出」）；WSP_002 环境故障
+     *                              （docker exec 自身失败，退出码 125/126；cat
+     *                              权限错亦落 1 与未产出同口径，可接受取舍）
      */
     public PrdResponse prd(Long projectId) {
         Project project = loadProject(projectId);
+        // 未产出期短路（#478）：标志未落＝savePrd 未收口——PRJ_015 直回不 exec
+        if (project.getPrdProducedAt() == null) {
+            throw new ApplicationException(ProjectMessage.PRD_NOT_PRODUCED);
+        }
         ExecResultResponse result = workspaceLifecycleAppService.exec(
                 Long.toString(project.getWorkspaceId()), new WorkspaceExecCommand(READ_PRD_COMMAND));
         if (result.exitCode() == 1) {

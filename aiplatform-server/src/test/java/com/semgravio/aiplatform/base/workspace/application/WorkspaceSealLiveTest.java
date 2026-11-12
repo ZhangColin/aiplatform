@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -135,8 +136,9 @@ class WorkspaceSealLiveTest {
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore(),
                 transactionTemplate, scanProperties(),
-                mock(WorkspaceObservationSamplingAppService.class))
-                .scanOnce(Map.of(), LocalDateTime.now());
+                mock(WorkspaceObservationSamplingAppService.class),
+                mock(WorkspaceDetachmentAppService.class))
+                .scanOnce(Map.of(), Set.of(workspaceId.id()), LocalDateTime.now());
 
         // 封存落定（收敛模块互斥面异步执行——扫描提交、任务收敛，轮询等落地）：
         // 包落盘（数据库随包、三大缓存排除）+ 卷删除 + 期望态置封存

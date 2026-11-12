@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.Test;
@@ -72,6 +73,9 @@ class WorkspaceHibernationAppServiceTest {
     @Mock
     private WorkspaceObservationSamplingAppService observationSampling;
 
+    @Mock
+    private WorkspaceDetachmentAppService detachment;
+
     /** TransactionTemplate 测试替身：回调真跑（无事务管理器——编排逻辑不感知）。 */
     private final TransactionTemplate transactionTemplate = new TransactionTemplate() {
         @Override
@@ -94,7 +98,7 @@ class WorkspaceHibernationAppServiceTest {
         workspace.markTouched(NOW.minusHours(2));
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         assertThat(acted).isEqualTo(1);
         // 删容器保卷（物理先动），意图后落——置备态保持 READY
@@ -112,7 +116,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 阈值内触碰过：不删容器、不落库、不唤醒
         assertThat(acted).isZero();
@@ -129,7 +133,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
         int acted = newService().scanOnce(
-                Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
+                Map.of(42L, new WorkspaceScanFact(true, true)), allClaimed(), NOW);
 
         // run 在途恒活跃：不休眠；容器已死而期望运行 → 收敛模块 SCAN 面漂移收敛（#168 型不再无声）
         assertThat(acted).isEqualTo(1);
@@ -144,7 +148,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 期望运行而容器实死（#168「DB 记 ready、实死两天」）：扫描轮收敛
         assertThat(acted).isEqualTo(1);
@@ -160,7 +164,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.RUNNING);
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 意图=休眠而容器在（且闲置）：删容器向意图收敛；意图已对，不重复落库
         assertThat(acted).isEqualTo(1);
@@ -175,7 +179,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.ABSENT);
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 已休眠且容器已无：正合意图，无事可做
         assertThat(acted).isZero();
@@ -192,7 +196,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
         when(environmentBackend.containerState(any(WorkspaceHandle.class))).thenReturn(ContainerState.UNKNOWN);
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         assertThat(acted).isZero();
         verifyNoInteractions(convergence);
@@ -203,12 +207,12 @@ class WorkspaceHibernationAppServiceTest {
     void given_hibernation_disabled_when_scan_once_then_noop() {
         properties.setHibernationEnabled(false);   // 总开关内移（#197）：扫描入口自持
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
-        // 关闭即整轮静默：不触库、不探 docker、不收敛、不采观测样（同收编口径）
+        // 关闭即整轮静默：不触库、不探 docker、不收敛、不采观测样、不失联处置（同收编口径）
         assertThat(acted).isZero();
         verifyNoInteractions(workspaceRepository, environmentBackend, convergence,
-                observationSampling);
+                observationSampling, detachment);
     }
 
     @Test
@@ -219,7 +223,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.containerState(any(WorkspaceHandle.class)))
                 .thenReturn(ContainerState.RUNNING);
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // #487 占用采样挂钩：扫描轮末尾请求采样轮（提交即返回——采样在后台线程
         // 旁路进行，休眠/封存收敛时序零等待）
@@ -233,7 +237,7 @@ class WorkspaceHibernationAppServiceTest {
                 "ws-44", "previewnet");
         when(workspaceRepository.findAll()).thenReturn(List.of(provisioning, runtime));
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 在途置备不扰（置备线程自会收敛）；非 DEV 沙箱不入休眠面（TEST/PROD 占位）
         assertThat(acted).isZero();
@@ -249,7 +253,7 @@ class WorkspaceHibernationAppServiceTest {
         doThrow(new RuntimeException("daemon down"))
                 .when(environmentBackend).hibernate(any(WorkspaceHandle.class));
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 删容器失败不让意图翻（翻了下轮不再重试删）：保持 RUNNING，下轮收敛
         assertThat(acted).isZero();
@@ -266,7 +270,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.containerState(any(WorkspaceHandle.class)))
                 .thenReturn(ContainerState.RUNNING);
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 保留集 = 注册表全量编号；宽限线 = 本轮时刻减 10 分钟（fork「先建容器、
         // 后落记录」窗口保护，与 clean-ws-residue.sh GRACE_MINUTES 同口径）
@@ -285,7 +289,7 @@ class WorkspaceHibernationAppServiceTest {
         doThrow(new RuntimeException("daemon down"))
                 .when(environmentBackend).sweepOrphanWorkspaceContainers(any(), any());
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 清扫尽力而为：单轮失败不炸整轮，休眠收口照常计数
         assertThat(acted).isZero();
@@ -301,7 +305,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.containerState(any(WorkspaceHandle.class)))
                 .thenReturn(ContainerState.ABSENT);
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 保留集 = 注册表全量编号（休眠在册的卷永不进收编面）；宽限线与容器侧
         // 同一口径（本轮时刻减 10 分钟——fork「先建卷、后落记录」窗口保护）
@@ -314,7 +318,7 @@ class WorkspaceHibernationAppServiceTest {
     void given_registry_unreachable_when_scan_then_round_skipped_without_any_sweep() {
         when(workspaceRepository.findAll()).thenThrow(new RuntimeException("db down"));
 
-        assertThatThrownBy(() -> newService().scanOnce(Map.of(), NOW))
+        assertThatThrownBy(() -> newService().scanOnce(Map.of(), allClaimed(), NOW))
                 .isInstanceOf(RuntimeException.class);
 
         // 注册表不可达宁可漏删（双闸之二）：保留集无从构成，整轮跳过——容器/卷
@@ -333,10 +337,37 @@ class WorkspaceHibernationAppServiceTest {
         doThrow(new RuntimeException("daemon down"))
                 .when(environmentBackend).sweepOrphanWorkspaceVolumes(any(), any());
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 收编尽力而为：单轮失败记日志，下轮再收
         assertThat(acted).isZero();
+    }
+
+    // ---------- 在册失联分级接线（#488，ADR-0045） ----------
+
+    @Test
+    void given_unclaimed_registered_row_when_scan_then_kept_in_keep_set_and_reconciled_after_sweeps() {
+        Workspace lost = readyWorkspace();
+        lost.markTouched(NOW.minusHours(2));   // 先拨时刻后落休眠（markTouched 会翻休眠意图）
+        lost.hibernate();   // 出宽限窗＋休眠意图在——保卷形态（典型在册失联现场）
+        when(workspaceRepository.findAll()).thenReturn(List.of(lost));
+        when(environmentBackend.containerState(any(WorkspaceHandle.class)))
+                .thenReturn(ContainerState.ABSENT);
+
+        newService().scanOnce(Map.of(), Set.of(), NOW);   // 认领集空：42 是在册失联候选
+
+        // AC（两清单口径分离）：在册≠无主——失联候选行照进无主收编保留集
+        // （休眠保卷是用户数据 ADR-0016，物理收编永不碰在册行）
+        verify(environmentBackend).sweepOrphanWorkspaceContainers(
+                argThat(ids -> ids.contains(42L)), eq(NOW.minusMinutes(10)));
+        verify(environmentBackend).sweepOrphanWorkspaceVolumes(
+                argThat(ids -> ids.contains(42L)), eq(NOW.minusMinutes(10)));
+        // 轮末分级处置（#486 收编之后）：注册行集＋认领集递入
+        var order = inOrder(environmentBackend, detachment);
+        order.verify(environmentBackend).sweepOrphanWorkspaceVolumes(any(), any());
+        order.verify(detachment).reconcileDetached(
+                argThat(rows -> rows.size() == 1 && rows.iterator().next().getId() == 42L),
+                argThat(claims -> claims.isEmpty()), eq(NOW));
     }
 
     // ---------- 封存（#172） ----------
@@ -356,7 +387,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.deleteVolume(any(WorkspaceHandle.class))).thenReturn(true);
         runExclusivelySynchronously();
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 封存全链：打包 → 落盘 → 意图+元数据落库 → 删卷（次序断言）
         assertThat(acted).isEqualTo(1);
@@ -381,7 +412,7 @@ class WorkspaceHibernationAppServiceTest {
         workspace.hibernate();
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 未满期不动：不打包、不删卷、不落库
         assertThat(acted).isZero();
@@ -397,7 +428,7 @@ class WorkspaceHibernationAppServiceTest {
         workspace.hibernate();
         when(workspaceRepository.findAll()).thenReturn(List.of(workspace));
 
-        newService().scanOnce(Map.of(42L, new WorkspaceScanFact(true, true)), NOW);
+        newService().scanOnce(Map.of(42L, new WorkspaceScanFact(true, true)), allClaimed(), NOW);
 
         // run 在途恒活跃：休眠/封存都不动手（封存绝不对活跃项目动手）
         verify(convergence, never()).runExclusively(any(), any());
@@ -415,7 +446,7 @@ class WorkspaceHibernationAppServiceTest {
                 .thenThrow(new RuntimeException("daemon down"));
         runExclusivelySynchronously();
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 打包失败：不落盘、不落库（意图保持休眠，下轮重试）、不删卷
         verify(sealPackageStore, never()).save(any(), any());
@@ -436,7 +467,7 @@ class WorkspaceHibernationAppServiceTest {
         when(sealPackageStore.save(any(WorkspaceId.class), any())).thenReturn(PACKAGE);
         runExclusivelySynchronously();
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 记录已删：刚落的包随手清（不留孤儿），不再动物理面
         verify(sealPackageStore).delete(PACKAGE.path());
@@ -454,7 +485,7 @@ class WorkspaceHibernationAppServiceTest {
         when(environmentBackend.deleteVolume(any(WorkspaceHandle.class))).thenReturn(true);
         runExclusivelySynchronously();
 
-        int acted = newService().scanOnce(Map.of(), NOW);
+        int acted = newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 期望封存而卷仍在：删卷向意图收敛（独占任务内重取——与深度唤醒互斥；
         // 占卷的容器一并清）；意图已对不落库、不计数（静默卫生）
@@ -476,7 +507,7 @@ class WorkspaceHibernationAppServiceTest {
         when(workspaceRepository.findById(42L)).thenReturn(Optional.of(woken));
         runExclusivelySynchronously();
 
-        newService().scanOnce(Map.of(), NOW);
+        newService().scanOnce(Map.of(), allClaimed(), NOW);
 
         // 已出封存意图：绝不删卷（交错删卷 = 深度唤醒数据丢失，收敛任务重取防之）
         verify(environmentBackend, never()).deleteVolume(any(WorkspaceHandle.class));
@@ -494,7 +525,12 @@ class WorkspaceHibernationAppServiceTest {
     private WorkspaceHibernationAppService newService() {
         return new WorkspaceHibernationAppService(
                 environmentBackend, workspaceRepository, convergence, sealPackageStore,
-                transactionTemplate, properties, observationSampling);
+                transactionTemplate, properties, observationSampling, detachment);
+    }
+
+    /** 全认领形态（既有用例聚焦休眠/封存/收编——失联处置面归专测类）。 */
+    private static Set<Long> allClaimed() {
+        return Set.of(42L, 43L, 44L);
     }
 
     /** 独占提交直通（测试不异步）：封存任务同步跑，副作用次序可断言。 */

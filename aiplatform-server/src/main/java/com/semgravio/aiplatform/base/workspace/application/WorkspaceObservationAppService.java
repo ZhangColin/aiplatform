@@ -17,10 +17,12 @@ import com.cartisan.web.response.PageResponse;
 
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceObservation;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceLostMark;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceObservationSample;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceLostMarkRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceObservationSampleRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.support.Tsid;
@@ -48,16 +50,20 @@ public class WorkspaceObservationAppService {
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceObservationSampleRepository sampleRepository;
+    private final WorkspaceLostMarkRepository lostMarkRepository;
 
     public WorkspaceObservationAppService(WorkspaceRepository workspaceRepository,
-            WorkspaceObservationSampleRepository sampleRepository) {
+            WorkspaceObservationSampleRepository sampleRepository,
+            WorkspaceLostMarkRepository lostMarkRepository) {
         this.workspaceRepository = workspaceRepository;
         this.sampleRepository = sampleRepository;
+        this.lostMarkRepository = lostMarkRepository;
     }
 
     /**
      * 沙箱观测清单：期望态/实态过滤全 SQL 侧，每行＝记录字段＋采样帧（实态＋卷
-     * 用量＋采样时刻）。空页如实（200 空清单非错误）。
+     * 用量＋采样时刻）＋失联标记（#488 在册失联判定时刻）。空页如实（200 空清单
+     * 非错误）。
      */
     @Transactional(readOnly = true)
     public PageResponse<WorkspaceObservation> observations(DesiredState desired,
@@ -65,28 +71,35 @@ public class WorkspaceObservationAppService {
         Page<Workspace> result = workspaceRepository.findAll(specificationOf(desired, actual),
                 pagination.toPageRequest()
                         .withSort(Sort.by(Sort.Direction.DESC, "id")));
-        Map<Long, WorkspaceObservationSample> samples = samplesOf(result.getContent());
-        return PageResponse.of(result.map(
-                workspace -> observe(workspace, samples.get(workspace.getId()))));
+        Map<Long, WorkspaceObservationSample> samples = byWorkspaceId(result.getContent(),
+                sampleRepository::findAllById, WorkspaceObservationSample::getWorkspaceId);
+        Map<Long, WorkspaceLostMark> lostMarks = byWorkspaceId(result.getContent(),
+                lostMarkRepository::findAllById, WorkspaceLostMark::getWorkspaceId);
+        return PageResponse.of(result.map(workspace -> observe(workspace,
+                samples.get(workspace.getId()), lostMarks.get(workspace.getId()))));
     }
 
     /**
-     * 单沙箱全量观测（详情）：记录全字段＋采样帧＋封存信息。
+     * 单沙箱全量观测（详情）：记录全字段＋采样帧＋封存信息＋失联标记。
      *
      * @throws ApplicationException WSP_001 工作区不存在（含非数值/非正数标识）
      */
     @Transactional(readOnly = true)
     public WorkspaceObservation observation(String workspaceId) {
         Workspace workspace = requireWorkspace(workspaceId);
-        return observe(workspace, sampleRepository.findById(workspace.getId()).orElse(null));
+        return observe(workspace,
+                sampleRepository.findById(workspace.getId()).orElse(null),
+                lostMarkRepository.findById(workspace.getId()).orElse(null));
     }
 
-    /** 拼装单行（采样帧可缺——未采样行实态两列缺省、封存行卷大小按意图容缺）。 */
-    private WorkspaceObservation observe(Workspace workspace, WorkspaceObservationSample sample) {
+    /** 拼装单行（采样帧/失联标记可缺——未采样行实态两列缺省、未失联行 lostAt null）。 */
+    private WorkspaceObservation observe(Workspace workspace, WorkspaceObservationSample sample,
+            WorkspaceLostMark lostMark) {
         return WorkspaceObservation.of(workspace,
                 sample != null ? sample.getContainerState() : null,
                 volumeSizeOf(workspace, sample),
-                sample != null ? sample.getSampledAt() : null);
+                sample != null ? sample.getSampledAt() : null,
+                lostMark != null ? lostMark.getMarkedAt() : null);
     }
 
     /**
@@ -119,14 +132,14 @@ public class WorkspaceObservationAppService {
         return desiredSpec == null ? actualSpec : desiredSpec.and(actualSpec);
     }
 
-    /** 当页行批量取采样帧（一次 findAllById；空页零查询）。 */
-    private Map<Long, WorkspaceObservationSample> samplesOf(List<Workspace> page) {
+    /** 当页行按工作区编号批量取随行子件（采样帧/失联标记同形；一次 findAllById，空页零查询）。 */
+    private <T> Map<Long, T> byWorkspaceId(List<Workspace> page,
+            Function<List<Long>, List<T>> loader, Function<T, Long> keyOf) {
         if (page.isEmpty()) {
             return Map.of();
         }
-        return sampleRepository.findAllById(page.stream().map(Workspace::getId).toList())
-                .stream().collect(Collectors.toMap(
-                        WorkspaceObservationSample::getWorkspaceId, Function.identity()));
+        return loader.apply(page.stream().map(Workspace::getId).toList())
+                .stream().collect(Collectors.toMap(keyOf, Function.identity()));
     }
 
     /** 寻址解析（{@link Tsid} 严格式）：非数值/非正数即不存在的标识，语义上同 404。 */

@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import com.semgravio.aiplatform.backoffice.BackofficeSeamTest;
 import com.semgravio.aiplatform.backoffice.BackofficeSignatures;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceLostMark;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceObservationSample;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
@@ -21,6 +22,7 @@ import com.semgravio.aiplatform.base.workspace.domain.model.SealPackage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
 import com.semgravio.aiplatform.base.workspace.domain.port.EnvironmentBackend;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceLostMarkRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceObservationSampleRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 import com.semgravio.aiplatform.business.project.domain.aggregate.Project;
@@ -68,6 +70,9 @@ class BackofficeWorkspaceSeamTest {
     private WorkspaceObservationSampleRepository sampleRepository;
 
     @Autowired
+    private WorkspaceLostMarkRepository lostMarkRepository;
+
+    @Autowired
     private ProjectRepository projectRepository;
 
     /** docker 依赖收口（#487 起观测读面零依赖）：整个用例类零交互即观测面无探查。 */
@@ -95,6 +100,7 @@ class BackofficeWorkspaceSeamTest {
     void tearDown() {
         projectRepository.deleteAll();
         sampleRepository.deleteAll();
+        lostMarkRepository.deleteAll();
         workspaceRepository.deleteAll();
     }
 
@@ -275,6 +281,30 @@ class BackofficeWorkspaceSeamTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.message").value("工作区不存在"));
         }
+    }
+
+    // ---------- 在册失联标记列（#488：清单/详情可见，待人工裁决的锚；零 docker 照旧） ----------
+
+    @Test
+    void given_lost_mark_when_signed_list_and_detail_then_lost_at_visible() throws Exception {
+        lostMarkRepository.save(WorkspaceLostMark.mark(
+                WorkspaceId.of(Long.toString(WS_DRIFT)),
+                LocalDateTime.of(2026, 11, 12, 8, 0)));
+
+        // 清单：失联行带判定时刻（id 倒序第 4 位）、健康行缺省不出现
+        signedGet("/api/backoffice/workspaces")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[3].workspaceId").value(Long.toString(WS_DRIFT)))
+                .andExpect(jsonPath("$.data.items[3].lostAt").exists())
+                .andExpect(jsonPath("$.data.items[4].lostAt").doesNotExist());
+
+        // 详情同口径
+        signedGet("/api/backoffice/workspaces/" + WS_DRIFT)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.lostAt").exists());
+
+        // 读面纯读库（#487 口径不破）：标记列来自 wsp_lost_marks，零 docker 调用
+        verifyNoInteractions(environmentBackend);
     }
 
     // ---------- 签名负例 ----------

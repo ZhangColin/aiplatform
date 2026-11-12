@@ -443,14 +443,16 @@ public class ProjectLifecycleAppService {
      * 工作区销毁（尽力＋尾部三清校验留痕，#485/ADR-0045）：销毁与收敛互斥双向
      * 串行（唤醒在途则等它落定再级联——交错不再留半删现场），尾部对容器/卷/注册行
      * 三清校验照跑（有残留即 WARN 留痕）。{@code destroyWorkspaceQuietly} 的
-     * 「吞错即忘」口径退役：失败不再无声——残留可观测、归收编通道回收；本步异常
-     * 照旧不阻断真删级联（受理即删：项目记录照删、凭证即失效）。
+     * 「吞错即忘」口径退役：失败不再无声——残留可观测、归扫描轮处置（项目行已删
+     * 而注册行在 → #488 在册失联分级：物理仍在只标记待人工裁决、物理已空卫生删行；
+     * 注册行已删 → #486 无主收编）；本步异常照旧不阻断真删级联（受理即删：项目
+     * 记录照删、凭证即失效）。
      */
     private void destroyWorkspaceBestEffort(String workspaceId) {
         try {
             workspaceLifecycleAppService.destroy(workspaceId);
         } catch (RuntimeException e) {
-            log.warn("工作区 {} 销毁未全成（尽力级联＋尾部三清校验已执行，残留可观测、归收编通道回收）：{}",
+            log.warn("工作区 {} 销毁未全成（尽力级联＋尾部三清校验已执行，残留可观测、归扫描轮处置——在册失联分级/无主收编）：{}",
                     workspaceId, e.getMessage());
         }
     }

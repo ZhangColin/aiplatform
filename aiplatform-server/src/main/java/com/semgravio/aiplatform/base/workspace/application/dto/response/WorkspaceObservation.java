@@ -34,6 +34,8 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
  * @param containerState  容器实态采样（未采样为 null；采样到探查失败 = UNKNOWN）
  * @param volumeSizeBytes 卷用量采样（字节；封存按意图容缺/未采样/采样失败为 null）
  * @param sampledAt       采样时刻（新鲜度标注；未采样为 null）
+ * @param lostAt          在册失联判定时刻（#488：项目行已删而物理资源仍在——只标记
+ *                        待人工裁决；未失联为 null）
  * @param lastTouchAt     最近触碰（闲置计时输入）
  * @param sealedAt        封存时刻（未封存为 null）
  * @param archivePath     封存包寻址键（未封存为 null）
@@ -51,6 +53,7 @@ public record WorkspaceObservation(
         ContainerState containerState,
         Long volumeSizeBytes,
         LocalDateTime sampledAt,
+        LocalDateTime lostAt,
         LocalDateTime lastTouchAt,
         LocalDateTime sealedAt,
         String archivePath,
@@ -69,9 +72,9 @@ public record WorkspaceObservation(
             String internalUrl) {
     }
 
-    /** 聚合＋采样帧 → 观测读模型（采样帧可缺——未采样行两列缺省）。 */
+    /** 聚合＋采样帧＋失联标记 → 观测读模型（采样帧/标记可缺——未采样行两列缺省、未失联 null）。 */
     public static WorkspaceObservation of(Workspace workspace, ContainerState containerState,
-            Long volumeSizeBytes, LocalDateTime sampledAt) {
+            Long volumeSizeBytes, LocalDateTime sampledAt, LocalDateTime lostAt) {
         return new WorkspaceObservation(
                 workspace.getId(),
                 workspace.getKind(),
@@ -83,6 +86,7 @@ public record WorkspaceObservation(
                 containerState,
                 volumeSizeBytes,
                 sampledAt,
+                lostAt,
                 workspace.getLastTouchAt(),
                 workspace.getSealedAt(),
                 workspace.getArchivePath(),

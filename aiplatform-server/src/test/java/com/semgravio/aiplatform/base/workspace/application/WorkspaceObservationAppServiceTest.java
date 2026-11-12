@@ -18,6 +18,7 @@ import com.cartisan.web.response.PageResponse;
 
 import com.semgravio.aiplatform.base.workspace.application.dto.response.WorkspaceObservation;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
+import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceLostMark;
 import com.semgravio.aiplatform.base.workspace.domain.aggregate.WorkspaceObservationSample;
 import com.semgravio.aiplatform.base.workspace.domain.enums.ContainerState;
 import com.semgravio.aiplatform.base.workspace.domain.enums.DesiredState;
@@ -25,6 +26,7 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
 import com.semgravio.aiplatform.base.workspace.domain.model.SealPackage;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceId;
 import com.semgravio.aiplatform.base.workspace.domain.model.WorkspaceNaming;
+import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceLostMarkRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceObservationSampleRepository;
 import com.semgravio.aiplatform.base.workspace.domain.repository.WorkspaceRepository;
 
@@ -53,8 +55,10 @@ class WorkspaceObservationAppServiceTest {
     private final WorkspaceRepository workspaceRepository = mock(WorkspaceRepository.class);
     private final WorkspaceObservationSampleRepository sampleRepository =
             mock(WorkspaceObservationSampleRepository.class);
+    private final WorkspaceLostMarkRepository lostMarkRepository =
+            mock(WorkspaceLostMarkRepository.class);
     private final WorkspaceObservationAppService service = new WorkspaceObservationAppService(
-            workspaceRepository, sampleRepository);
+            workspaceRepository, sampleRepository, lostMarkRepository);
 
     // ---------- 清单：SQL 分页＋采样帧拼装 ----------
 
@@ -148,6 +152,37 @@ class WorkspaceObservationAppServiceTest {
         // 排序 id 倒序定死（新沙箱在前）
         assertThat(pageable.getValue().getSort())
                 .isEqualTo(Sort.by(Sort.Direction.DESC, "id"));
+    }
+
+    // ---------- 在册失联标记列（#488：清单/详情可见，待人工裁决的锚） ----------
+
+    @Test
+    void given_lost_marks_when_observations_then_rows_carry_lost_at() {
+        LocalDateTime markedAt = LocalDateTime.of(2026, 11, 12, 8, 0);
+        Workspace lost = readyWorkspace(42);
+        Workspace healthy = readyWorkspace(41);
+        when(workspaceRepository.findAll(anySpec(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(lost, healthy)));
+        when(sampleRepository.findAllById(any())).thenReturn(List.of());
+        when(lostMarkRepository.findAllById(any())).thenReturn(List.of(
+                WorkspaceLostMark.mark(WorkspaceId.of("42"), markedAt)));
+
+        PageResponse<WorkspaceObservation> result =
+                service.observations(null, null, new Pagination(1, 20, null));
+
+        // 失联行带判定时刻（后台清单可见）、健康行 null；当页批量取标记（一次 findAllById）
+        assertThat(result.items().get(0).lostAt()).isEqualTo(markedAt);
+        assertThat(result.items().get(1).lostAt()).isNull();
+        verify(lostMarkRepository).findAllById(any());
+    }
+
+    @Test
+    void given_no_mark_when_detail_then_lost_at_null() {
+        when(workspaceRepository.findById(42L)).thenReturn(Optional.of(readyWorkspace(42)));
+        when(sampleRepository.findById(42L)).thenReturn(Optional.empty());
+        when(lostMarkRepository.findById(42L)).thenReturn(Optional.empty());
+
+        assertThat(service.observation("42").lostAt()).isNull();
     }
 
     // ---------- 详情 ----------

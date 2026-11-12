@@ -30,6 +30,8 @@ import com.semgravio.aiplatform.base.workspace.domain.enums.ProvisioningStatus;
  * @param lastTouchAt     最近触碰
  * @param volumeSizeBytes 卷用量采样（字节；封存按意图容缺/未采样/采样失败为 null）
  * @param sampledAt       采样时刻（新鲜度标注；未采样为 null）
+ * @param lostAt          在册失联判定时刻（#488：项目行已删而物理资源仍在——只标记
+ *                        待人工裁决；未失联为 null）
  * @param sealedAt        封存时刻（未封存为 null）
  * @param archivePath     封存包寻址键（未封存为 null）
  * @param archiveSizeBytes 封存包大小（字节；未封存为 null）
@@ -54,6 +56,7 @@ public record BackofficeWorkspaceDetailResponse(
         LocalDateTime lastTouchAt,
         Long volumeSizeBytes,
         LocalDateTime sampledAt,
+        LocalDateTime lostAt,
         LocalDateTime sealedAt,
         String archivePath,
         Long archiveSizeBytes,
@@ -82,6 +85,7 @@ public record BackofficeWorkspaceDetailResponse(
                 observation.lastTouchAt(),
                 observation.volumeSizeBytes(),
                 observation.sampledAt(),
+                observation.lostAt(),
                 observation.sealedAt(),
                 observation.archivePath(),
                 observation.archiveSizeBytes(),

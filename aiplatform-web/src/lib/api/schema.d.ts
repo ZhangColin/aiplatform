@@ -4521,6 +4521,8 @@ export interface components {
             /** Format: date-time */
             sampledAt?: string;
             /** Format: date-time */
+            lostAt?: string;
+            /** Format: date-time */
             sealedAt?: string;
             archivePath?: string;
             /** Format: int64 */
@@ -5410,6 +5412,8 @@ export interface components {
             volumeSizeBytes?: number;
             /** Format: date-time */
             sampledAt?: string;
+            /** Format: date-time */
+            lostAt?: string;
             /** Format: date-time */
             sealedAt?: string;
             /** Format: int64 */

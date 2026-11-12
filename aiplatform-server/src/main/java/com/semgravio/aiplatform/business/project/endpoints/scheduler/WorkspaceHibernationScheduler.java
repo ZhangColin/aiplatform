@@ -67,7 +67,8 @@ public class WorkspaceHibernationScheduler implements ApplicationRunner {
     public void scanRound() {
         LocalDateTime now = LocalDateTime.now();
         try {
-            int hibernated = hibernationAppService.scanOnce(scanFacts(), now);
+            Map<Long, WorkspaceScanFact> facts = scanFacts();
+            int hibernated = hibernationAppService.scanOnce(facts, facts.keySet(), now);
             // 同一闲置口径（#197 钉住）：快照查看会话与工作区休眠共用同一阈值——
             // 刻意跨包共享，换阈值两处同动，不为快照另立口径
             int swept = snapshotAppService.sweepIdleViews(now, workspaceProperties.getIdleThreshold());
@@ -84,7 +85,8 @@ public class WorkspaceHibernationScheduler implements ApplicationRunner {
     /**
      * 项目域事实申报（{@link WorkspaceScanFact}）：全部项目逐行映射——run 在途
      * （恒活跃）与已生成（漂移收敛唤醒后拉应用）。归档与休眠正交（ADR-0016）：
-     * 归档项目不筛，同一判定。
+     * 归档项目不筛，同一判定。键集＝消费方认领集（#488 在册失联判定的正本：
+     * 项目行在的工作区即被认领，键集随扫描递入 base 分级处置）。
      */
     private Map<Long, WorkspaceScanFact> scanFacts() {
         Map<Long, WorkspaceScanFact> facts = new HashMap<>();

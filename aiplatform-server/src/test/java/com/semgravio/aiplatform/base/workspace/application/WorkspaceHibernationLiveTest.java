@@ -3,6 +3,7 @@ package com.semgravio.aiplatform.base.workspace.application;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -96,8 +97,9 @@ class WorkspaceHibernationLiveTest {
         int acted = new WorkspaceHibernationAppService(
                 backend, workspaceRepository, convergence, sealPackageStore,
                 transactionTemplate, scanProperties(),
-                mock(WorkspaceObservationSamplingAppService.class))
-                .scanOnce(Map.of(), LocalDateTime.now());
+                mock(WorkspaceObservationSamplingAppService.class),
+                mock(WorkspaceDetachmentAppService.class))
+                .scanOnce(Map.of(), Set.of(workspaceId.id()), LocalDateTime.now());
 
         // 容器被删、卷保留、期望态置休眠（置备态保持 READY——实态以探查为准）
         assertThat(acted).isEqualTo(1);

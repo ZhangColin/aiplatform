@@ -6,7 +6,6 @@ import {
   ChevronDown,
   FileCode2,
   Hammer,
-  Lightbulb,
   PenLine,
   ShieldCheck,
   SquareTerminal,
@@ -401,25 +400,9 @@ function WorkPartRow({ part, frozen, seat }: { part: WorkPart; frozen: boolean; 
     // 防御位（#240 静态面无痕）：正文投影已滤除信号——漏进即不渲染，活性行是唯一呈现位
     return null;
   }
-  if (part.kind === "hint") {
-    return <HintRow part={part} />;
-  }
+  // part-hint（#437 决策时微指令行）2026-11-12 退役：微指令是模型面指引、用户面
+  // 只添噪——store 联合项已删，存量未知类型不进部件流水
   return <ActionRow part={part} />;
-}
-
-/**
- * 决策时微指令行（#437 part-hint）：执行体每迭代注入的一条微指令——注入内容对
- * 用户可见（过程呈现不倒退），灯泡提示行进正文静态面、逐件追加留驻。
- */
-function HintRow({ part }: { part: Extract<WorkPart, { kind: "hint" }> }) {
-  return (
-    <div className="flex items-start gap-2 rounded-md px-1 py-1.5 text-sm">
-      <span className="mt-0.5 shrink-0 text-muted-foreground">
-        <Lightbulb className="size-3.5" />
-      </span>
-      <span className="min-w-0 flex-1 text-muted-foreground">{part.text}</span>
-    </div>
-  );
 }
 
 /**

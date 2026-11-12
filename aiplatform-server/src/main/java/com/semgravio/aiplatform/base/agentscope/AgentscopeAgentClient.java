@@ -94,10 +94,11 @@ public class AgentscopeAgentClient {
     /**
      * RuntimeContext 属性键：本轮平台事件汇（{@code Consumer<AgentEvent>}——调用方
      * 经 converse/resume 传入的 sink，run 编排侧即用户面投影，runId 归锚已在其内）。
-     * 逐轮写入上下文属性袋，供引擎内中间件把<b>平台侧部件事件</b>（如 #437 决策时
-     * 微指令的 part-hint 可见事实）直接推给用户面——引擎事件映射表只翻译引擎
-     * 原生事件，平台事实的正道是复用调用方投影（同 emitSelfCheck 的用户面归锚
-     * 语义，但无需平台线程另起通道：中间件在引擎事件链上，经属性袋取汇即发）。
+     * 逐轮写入上下文属性袋，供引擎内中间件把<b>平台侧部件事件</b>直接推给用户面
+     * ——引擎事件映射表只翻译引擎原生事件，平台事实的正道是复用调用方投影（同
+     * emitSelfCheck 的用户面归锚语义，但无需平台线程另起通道：中间件在引擎事件
+     * 链上，经属性袋取汇即发）。注：#437 决策时微指令的 part-hint 曾走此汇，2026-11-12
+     * 定档退役（微指令是模型面指引，不进用户面）——首个在册消费面是 emitSelfCheck。
      */
     public static final String PLATFORM_EVENT_SINK_CONTEXT_KEY = "platformEventSink";
 
@@ -109,20 +110,6 @@ public class AgentscopeAgentClient {
      * 的 {@code overheadMs} 桶进收尾卡 durationBreakdown。
      */
     public static final String ITERATION_OVERHEAD_CONTEXT_KEY = "platformIterationOverhead";
-
-    /**
-     * 决策时微指令的 part-hint 平台事件装配（#437 载荷单点）：runId/sessionId 归锚
-     * ＋指令种类键＋微指令全文。经 {@link #PLATFORM_EVENT_SINK_CONTEXT_KEY} 取汇的
-     * 调用方（执行体中间件）直推，用户面可见事实（注入内容对用户可见）。
-     */
-    public static AgentEvent decisionHintEvent(String runId, String sessionId, String hintKind,
-            String text) {
-        return new AgentEvent(AgentEventTypes.PART_HINT, Map.of(
-                AgentEventTypes.RUN_FIELD, runId,
-                AgentEventTypes.SESSION_FIELD, sessionId,
-                AgentEventTypes.PART_HINT_KIND_FIELD, hintKind,
-                AgentEventTypes.PART_HINT_TEXT_FIELD, text));
-    }
 
     /**
      * 问答答复的注入通道：挂起批复重写 block 的 metadata 键（#34 口径——答复不进
@@ -633,8 +620,8 @@ public class AgentscopeAgentClient {
                 .userId(userId)
                 // run 标识入上下文属性袋（#259 工具血统透传腿，见 RUN_ID_CONTEXT_KEY）
                 .put(RUN_ID_CONTEXT_KEY, runId)
-                // 平台事件汇入属性袋（#437 决策时微指令的 part-hint 可见事实通道，
-                // 见 PLATFORM_EVENT_SINK_CONTEXT_KEY）
+                // 平台事件汇入属性袋（引擎内中间件推平台侧部件事件的通道，如
+                // emitSelfCheck 的用户面事实，见 PLATFORM_EVENT_SINK_CONTEXT_KEY）
                 .put(PLATFORM_EVENT_SINK_CONTEXT_KEY, sink)
                 .build();
     }

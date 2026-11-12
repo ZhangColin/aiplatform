@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.IterationOverheadFacts;
 import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEvent;
-import com.semgravio.aiplatform.base.eventhub.domain.model.AgentEventTypes;
 import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintConfig;
 import com.semgravio.aiplatform.business.project.domain.decisionhint.DecisionHintKind;
 import com.semgravio.aiplatform.business.project.domain.decisionhint.HintPolicy;
@@ -29,15 +28,15 @@ import reactor.core.publisher.Flux;
 
 /**
  * 决策时注入中间件缝（#437）：挂在执行体 ReAct 循环的 onReasoning（每迭代
- * 模型调用前）——判定命中则追加一条合成微指令消息（模型面注入）并向平台事件
- * 汇推 part-hint（用户面可见）；未命中/总开关关/策略读失败 → 原样透传（fail-open，
- * 绝不阻断推理链）。
+ * 模型调用前）——判定命中则追加一条合成微指令消息（模型面注入，2026-11-12 起
+ * 不再推用户面 part-hint——事件汇恒空是退役钉）；未命中/总开关关/策略读失败 →
+ * 原样透传（fail-open，绝不阻断推理链）。
  */
 class DecisionHintMiddlewareTest {
 
     private final List<AgentEvent> notices = new CopyOnWriteArrayList<>();
 
-    /** 平台事件汇替身：断言 part-hint 通知（用户可见面）。 */
+    /** 平台事件汇替身：断言用户面恒无 part-hint（事件退役钉——微指令不进用户面）。 */
     private final java.util.function.Consumer<AgentEvent> noticeSink = notices::add;
 
     private DecisionHintMiddleware middleware(DecisionHintConfig config) {
@@ -99,18 +98,11 @@ class DecisionHintMiddlewareTest {
         assertThat(appended.getMetadata()).containsEntry("decision_hint_kind",
                 DecisionHintKind.FAILURE_STOP_LOSS.key());
         assertThat(appended.getMetadata()).containsEntry("agentscope_synthetic", true);
+        // 渲染契约（2026-11-12 修）：{0} 承接理由整句——成品读成通顺句子，无嵌套复读
         assertThat(appended.getTextContent())
-                .contains(DecisionHintKind.FAILURE_STOP_LOSS.instructionTemplate()
-                        .substring(0, 10));
-        // 用户面可见：part-hint 通知经平台事件汇推出（携带 runId 与正文）
-        assertThat(notices).hasSize(1);
-        AgentEvent notice = notices.get(0);
-        assertThat(notice.type()).isEqualTo(AgentEventTypes.PART_HINT);
-        assertThat(notice.payload())
-                .containsEntry(AgentEventTypes.RUN_FIELD, "run-9")
-                .containsEntry(AgentEventTypes.PART_HINT_KIND_FIELD,
-                        DecisionHintKind.FAILURE_STOP_LOSS.key())
-                .containsKey(AgentEventTypes.PART_HINT_TEXT_FIELD);
+                .startsWith("【平台提示】同类错误连续失败 3 次（error: build failed）。");
+        // 用户面退役（2026-11-12 定档）：微指令不进用户事件流——事件汇恒空
+        assertThat(notices).isEmpty();
     }
 
     @Test
@@ -243,9 +235,55 @@ class DecisionHintMiddlewareTest {
                 .onReasoning(null, ctx, input, captor);
 
         assertThat(captor.captured.messages()).hasSize(input.messages().size() + 1);
-        assertThat(notices).hasSize(1);
+        assertThat(notices).isEmpty();
         assertThat(facts.snapshot(0))
                 .containsEntry(IterationOverheadFacts.GATE_SKIPPED, 0L)
                 .containsEntry(IterationOverheadFacts.GATE_EVALUATED, 1L);
+    }
+
+    @Test
+    void given_consecutive_iterations_built_from_state_when_on_reasoning_then_injected_once() {
+        // 生产实案回归（2026-11-12 用户报：【平台提示】在会话里不断复读）：真框架流
+        // 里下一迭代的输入消息列由 AgentState.contextMutable 重建——中间件追加进
+        // ReasoningInput 的合成提示消息<b>不落 state</b>（框架 TaskReminder 先例同判：
+        // 其重渲判据在 TaskContextState 而非消息列），故「消息列回读 injectedHintKeys」
+        // 在真实流里恒空、防重灌失效，同一提示每迭代重注。修后防重灌主载体＝ctx
+        // 属性袋注入集（同 ctx 跨迭代——#453 facts 先例）。本测按真框架口径驱动两
+        // 个连续迭代（第二轮消息列＝第一轮 state 视图＋一次新失败迭代，不含合成
+        // 提示），断言同一键全链只注入一次。
+        List<Msg> base = new ArrayList<>(failingMessages());
+        DecisionHintMiddleware mw = middleware(
+                DecisionHintConfig.enabled(HintPolicy.defaults()));
+        io.agentscope.core.agent.RuntimeContext ctx = ctxWithSink();
+
+        // 迭代 1：三连失败 → 注入止损提示（消息列＋1）
+        InputCaptor first = new InputCaptor();
+        mw.onReasoning(null, ctx, new ReasoningInput(base, List.of(), null), first);
+        assertThat(first.captured.messages()).hasSize(base.size() + 1);
+
+        // 迭代 2：框架从 state 重建消息列（assistant 回复＋工具结果已入列；合成提示
+        // 不在列——消息列回读恒空）＋又一轮同签名失败（双调用迭代——不引入
+        // parallel_tools 新键，专测 failure_stop_loss 防重灌）→ ctx 注入集拦截，不再注入
+        List<Msg> second = new ArrayList<>(base);
+        ToolUseBlock callA = new ToolUseBlock("c3", "execute", Map.of("cmd", "pnpm build"));
+        ToolUseBlock callB = new ToolUseBlock("c4", "execute", Map.of("cmd", "pnpm build"));
+        second.add(Msg.builder().role(MsgRole.ASSISTANT).content(List.of(callA, callB)).build());
+        second.add(Msg.builder().role(MsgRole.TOOL)
+                .content(List.of(
+                        new ToolResultBlock(callA.getId(), callA.getName(),
+                                TextBlock.builder().text("Error: build failed").build())
+                                .withState(ToolResultState.ERROR),
+                        new ToolResultBlock(callB.getId(), callB.getName(),
+                                TextBlock.builder().text("Error: build failed").build())
+                                .withState(ToolResultState.ERROR)))
+                .build());
+        InputCaptor secondCaptor = new InputCaptor();
+        mw.onReasoning(null, ctx, new ReasoningInput(second, List.of(), null), secondCaptor);
+
+        assertThat(secondCaptor.captured.messages())
+                .as("同一会话内同一键不重复注入（真框架 state 口径）")
+                .hasSize(second.size());
+        // 用户面退役恒成立（双保险断言）
+        assertThat(notices).isEmpty();
     }
 }

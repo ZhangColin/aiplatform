@@ -310,22 +310,10 @@ public final class AgentEventTypes {
      */
     public static final String PART_ATTACHMENT = "part-attachment";
 
-    /**
-     * 决策时微指令部件（#437）：执行体 ReAct 循环判定命中后平台注入了一条工作
-     * 提示的<b>用户面可见事实</b>——平台侧产出（同 part-check 先例，不经引擎
-     * 部件映射表；注入本体经合成消息进模型上下文，本事件只报「注入了什么」，
-     * 过程呈现透明不倒退）。一场 run 可多条（堆叠上限内，每迭代至多一条），
-     * 按事件序进部件流水；载荷 kind＝库条目键（{@code failure_stop_loss}/
-     * {@code anti_mock}/{@code context_economy}/{@code parallel_tools}——
-     * 运营配置面禁用集同词表），text＝注入正文（用户可读中文）。
-     */
-    public static final String PART_HINT = "part-hint";
-
-    /** part-hint 的库条目键（与运营配置面 decision_hint_disabled 同词表）。 */
-    public static final String PART_HINT_KIND_FIELD = "kind";
-
-    /** part-hint 的注入正文键（渲染后微指令，用户可读）。 */
-    public static final String PART_HINT_TEXT_FIELD = "text";
+    // part-hint（#437 决策时微指令的用户面部件）2026-11-12 退役：微指令是模型面
+    // 指引、给用户看只添噪（生产实案同一提示每迭代重注刷屏），注入观测走
+    // DecisionHintMiddleware 的 INFO 日志。类型与常量整体摘除——SSE 事件面不再
+    // 有该事件，历史存量事件前端按未知类型忽略。
 
     private AgentEventTypes() {
     }

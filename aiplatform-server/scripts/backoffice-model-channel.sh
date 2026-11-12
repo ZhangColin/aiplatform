@@ -27,12 +27,12 @@ OP_NAME="${OP_NAME:-运营·通道demo}"
 PROVIDERS_PATH="/api/backoffice/model-providers"
 TIERS_PATH="/api/backoffice/model-tiers"
 
-body_file() { mktemp -t modelchannel; }
+body_file() { mktemp -t modelchannel.XXXXXX; }
 
 # 临时体文件 + 内容打印与调用（method path bodyJson [extra headers...]）
 call_json() {
   local method="$1" path="$2" body="$3"; shift 3
-  local bf; bf=$(mktemp -t modelchannel)
+  local bf; bf=$(mktemp -t modelchannel.XXXXXX)
   printf '%s' "$body" > "$bf"
   local resp
   resp=$(signed_call_extra "$method" "$path" "$bf" "X-User-Id: ${OP_ID}" "X-User-Name: ${OP_NAME}")

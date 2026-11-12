@@ -70,6 +70,10 @@ class AgentProfileTest {
                 .contains("src/lib/robust/http")
                 .contains("src/lib/robust/session")
                 .contains("不用裸 fetch")
+                // 「预约通」实测（11-12）：prompt 写「外部 HTTP」而 lint 拦一切裸 fetch——
+                // 页面调自家 /api 被判内部调用裸写，7+4 处两段升档。语义边界对齐：规则
+                // 文本必须点名「含页面调自家 /api」，与 lint 判定边界（不分内外）一致。
+                .contains("含页面调自家 /api")
                 .contains("本栈写法规则节")
                 .contains("强制档")
                 .contains("预置档");

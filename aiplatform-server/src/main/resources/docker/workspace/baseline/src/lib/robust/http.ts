@@ -1,5 +1,6 @@
 /**
- * fetch 封装（基座健壮件·#421）：外部 HTTP 调用的默认超时＋错误归一统一收口。
+ * fetch 封装（基座健壮件·#421）：任何 HTTP 调用（含页面调自家 /api）的默认
+ * 超时＋错误归一统一收口。
  *
  * - 超时：AbortController＋计时器（缺省 10s）——对端半开时调用方不无限等待。
  * - 归一：一切失败面收拢为 HttpError（kind: timeout / network / http / parse），

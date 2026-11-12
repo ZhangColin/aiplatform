@@ -24,8 +24,21 @@ class StackRulesEntryPathsTest {
     @Test
     void given_stack_rules_section_when_named_entries_present_then_http_entry_pointed() {
         assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
-                .as("外部 HTTP 规则应点名预置入口 src/lib/http.ts（件＋指路双轮）")
+                .as("HTTP 调用规则应点名预置入口 src/lib/http.ts（件＋指路双轮）")
                 .contains("src/lib/http.ts");
+    }
+
+    /**
+     * 语义边界对齐（「预约通」11-12 实测）：规则文本旧写「外部 HTTP」，run 执行体
+     * 把页面调自家 /api 判为内部调用而裸写 fetch，被 bare-fetch 强制档拦下两段升档
+     * （基座强制 7+4 处）。规则正本的判定边界必须与 lint 一致——不分内外。
+     */
+    @Test
+    void given_stack_rules_section_when_http_scope_described_then_internal_api_calls_covered() {
+        assertThat(GenerationAppService.AGENTS_MD_STACK_RULES_SECTION)
+                .as("HTTP 规则必须覆盖页面/组件调自家 /api——与 lint 强制档判定边界对齐")
+                .contains("含页面/组件调自家 /api 路由")
+                .contains("调自家 /api 也是 HTTP 调用");
     }
 
     @Test

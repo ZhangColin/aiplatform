@@ -10,11 +10,7 @@ import com.semgravio.aiplatform.base.workspace.domain.aggregate.Workspace;
  * 已提交读</b>——绕开调用方持久化上下文（一级缓存）与在途事务快照，专供「等待
  * 外部翻转」的轮询面（{@code WorkspaceReadinessWaiter}）消费。常规装载仍走
  * {@link WorkspaceRepository#findById}（享受一级缓存，不付独立读成本）。
- *
- * <p>背景（11-12 生产实录）：等待方请求上下文里先装载过的实体会驻留持久化
- * 上下文（OSIV 请求级 EntityManager / 长事务），后续 {@code findById} 命中
- * 缓存实体不发 SQL——置备器在事务外翻转的 READY 对轮询永久不可见，等待挂满
- * 超时（/prd 挂 10 分钟回 500）。实现由 infrastructure/persistence 提供。</p>
+ * 全史与机理见 CONTEXT.md「独立读」词条（正本）。
  */
 public interface WorkspaceFreshReads {
 

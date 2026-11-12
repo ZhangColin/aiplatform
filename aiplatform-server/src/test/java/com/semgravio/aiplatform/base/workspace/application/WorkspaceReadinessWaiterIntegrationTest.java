@@ -32,15 +32,14 @@ import jakarta.persistence.EntityManagerFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 就绪轮询的事务可见性回归（#476）：轮询读必须对「等待期外部翻转」可见——等待方
- * 自身的持久化上下文（一级缓存）/事务快照不得弄瞎轮询。11-12 生产实录：/prd 进
- * awaitReady 后 500ms 轮询 10 分钟全程看不见置备器翻转的 READY，挂满超时回 500。
+ * 就绪轮询的事务可见性回归（#476）：轮询读必须对「等待期外部翻转」可见——
+ * 等待方自身的持久化上下文（一级缓存/OSIV）与事务快照不得弄瞎轮询（全史见
+ * CONTEXT.md「独立读」词条）。
  *
- * <p>两个致盲形态各钉一例：①请求长事务先装载实体（一级缓存持有 PROVISIONING 态，
- * 轮询 {@code findById} 命中缓存不发 SQL）；②OSIV 无事务上下文（web 请求级
- * EntityManager——/prd 现场，事务注解救不了的那种形态，线程绑定 Entity­ManagerHolder
- * 忠实复刻）。两例都由「置备线程独立事务在等待期中点翻 READY」收口：数秒内返回
- * READY 而非等满超时抛 WSP_011。</p>
+ * <p>两个致盲形态各钉一例：①请求长事务先装载实体（一级缓存持有 PROVISIONING 态）；
+ * ②OSIV 无事务上下文（web 请求级 EntityManager——/prd 现场，事务注解救不了的
+ * 那种形态，线程绑定 EntityManagerHolder 忠实复刻）。两例都由「置备线程独立事务
+ * 在等待期中点翻 READY」收口：数秒内返回 READY 而非等满超时抛 WSP_011。</p>
  */
 @IntegrationTest
 class WorkspaceReadinessWaiterIntegrationTest {

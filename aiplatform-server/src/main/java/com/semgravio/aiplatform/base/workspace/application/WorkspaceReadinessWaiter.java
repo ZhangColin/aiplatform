@@ -59,11 +59,9 @@ public class WorkspaceReadinessWaiter {
      * FAILED 抛 WSP_010（置备已败，不会就绪）；超时抛 WSP_011（不静默悬挂）。工作区在
      * 等待中被删则抛 WSP_001（404）。
      *
-     * <p>轮询读必须走 {@link WorkspaceFreshReads 独立读}（#476）：等待方
-     * 请求上下文里先装载过的实体会驻留持久化上下文（OSIV 请求级 EntityManager /
-     * 长事务），普通 {@code findById} 命中一级缓存不发 SQL——置备器在事务外翻转的
-     * READY 对轮询永久不可见，等待挂满超时（11-12 生产实录：/prd 挂 10 分钟回 500）。
-     * 独立读对两种致盲形态都成立（抛开销 EntityManager，详见实现）。</p>
+     * <p>轮询读必须走 {@link WorkspaceFreshReads 独立读}（#476）：普通
+     * {@code findById} 在调用方持久化上下文里命中一级缓存不发 SQL，等不到外部
+     * 翻转。机理与全史见 CONTEXT.md「独立读」词条。</p>
      */
     public Workspace awaitReady(Workspace workspace) {
         WorkspaceId workspaceId = workspace.workspaceId();

@@ -48,11 +48,13 @@ import lombok.extern.slf4j.Slf4j;
  * 根 = 容器工作区根；{@code ..} 阻断）；ls 缺失目录回空、write 对既有文件拒绝、
  * delete 幂等、read 按扩展名判二进制走 base64。已知取舍：glob 以 Java PathMatcher
  * 匹配（{@code **} 跨目录，不带零段特例）；grep 结果按 {@code 路径:行:文本} 解析，
- * 文件名含冒号会错位（Phase A 项目工作区可接受）。</p>
+ * 文件名含冒号会错位——#467 起错位碎行（行号段非数字）跳行不炸整次结果。</p>
  *
  * <p>{@link ExecCommand} 是执行缝（单测注入替身）；每条命令带超时保护（文件面短
  * 命令 30s、shell 面按调用方秒数），容器不在（docker exec 非零退出）即以 fail
- * 结果如实暴露，不抛出。</p>
+ * 结果如实暴露，不抛出。#467 穿透面收口后全方法一致：非法路径（空白或含 ..
+ * 逃逸）与畸形输出行（文件名含换行/制表符/冒号）一律 fail 结果或跳行——框架壳
+ * （FilesystemTool）不兜异常，任何 throw 都会穿透杀 run。</p>
  */
 @Slf4j
 public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
@@ -163,8 +165,17 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
                 continue;
             }
             String type = parts[0];
-            long size = Long.parseLong(parts[1]);
-            long modifiedMs = (long) Double.parseDouble(parts[2]);
+            long size;
+            long modifiedMs;
+            try {
+                // 碎行防御（#467）：文件名含换行+制表符时 find -printf 会产出
+                // 「大小段非数字」的行——跳过不炸清单（parseEntries 同口径）
+                size = Long.parseLong(parts[1]);
+                modifiedMs = (long) Double.parseDouble(parts[2]);
+            }
+            catch (NumberFormatException e) {
+                continue;
+            }
             String name = parts[3];
             if ("d".equals(type)) {
                 entries.add(FileInfo.ofDir(parent + "/" + name + "/",
@@ -283,9 +294,16 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
             String inputPath = containerFile.startsWith(root + "/")
                     ? containerFile.substring(root.length())
                     : containerFile;
-            matches.add(new GrepMatch(inputPath,
-                    Integer.parseInt(line.substring(first + 1, second)),
-                    line.substring(second + 1)));
+            try {
+                // 碎行防御（#467）：文件名含冒号会让「路径:行号:文本」错位——
+                // 行号段非数字的行跳过，不 NFE 穿透杀 run
+                matches.add(new GrepMatch(inputPath,
+                        Integer.parseInt(line.substring(first + 1, second)),
+                        line.substring(second + 1)));
+            }
+            catch (NumberFormatException e) {
+                continue;
+            }
         }
         return GrepResult.success(matches);
     }
@@ -302,7 +320,16 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
             return GlobResult.success(List.of());
         }
         String root = AgentWorkspace.ProjectDev.CONTAINER_ROOT;
-        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
+        PathMatcher matcher;
+        try {
+            matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
+        }
+        catch (IllegalArgumentException e) {
+            // 模型入参值域校验（#467）：glob 语法非法（未闭合 []/{} 等）fail 结果
+            // 带纠偏指引——不抛 IAE 丢整次结果
+            return GlobResult.fail("glob 语法非法: " + pattern + "（检查 []/{} 是否闭合、"
+                    + "* 通配是否成对）——修正模式后重试");
+        }
         List<FileInfo> matches = new ArrayList<>();
         for (String record : new String(out.stdout(), StandardCharsets.UTF_8).split("\0")) {
             if (record.isBlank()) {
@@ -316,9 +343,17 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
             String inputPath = containerFile.startsWith(root + "/")
                     ? containerFile.substring(root.length())
                     : containerFile;
-            if (matcher.matches(java.nio.file.Path.of(inputPath))) {
-                matches.add(FileInfo.ofFile(inputPath, Long.parseLong(parts[0]),
-                        Instant.ofEpochMilli((long) Double.parseDouble(parts[1])).toString()));
+            try {
+                // 碎行防御（#467）：大小/时间戳段非数字的记录跳过（ls 同口径）；
+                // 含换行等字符的文件名在 Windows 宿主 Path.of 抛 InvalidPathException
+                // ——与 NFE 同属 IAE 族，一并跳过不炸清单
+                if (matcher.matches(java.nio.file.Path.of(inputPath))) {
+                    matches.add(FileInfo.ofFile(inputPath, Long.parseLong(parts[0]),
+                            Instant.ofEpochMilli((long) Double.parseDouble(parts[1])).toString()));
+                }
+            }
+            catch (IllegalArgumentException e) {
+                continue;
             }
         }
         matches.sort(Comparator.comparing(FileInfo::path));
@@ -480,7 +515,10 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
 
     /** 覆盖写（write 的 create-only 语义之外的内通道：edit 回写 / upload）。 */
     private WriteResult put(String filePath, byte[] content) {
-        String containerPath = containerPathOrThrow(filePath);
+        String containerPath = containerPathOrNull(filePath);
+        if (containerPath == null) {
+            return writePathInvalid(filePath);
+        }
         ExecOutput out = exec.run(overwriteWriteCommand(containerPath), content);
         return out.ok() ? WriteResult.ok(filePath)
                 : WriteResult.fail("Error writing file '" + filePath + "': " + out.stderr());
@@ -496,7 +534,10 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
 
     /** create-only 写：noclobber（set -C）保证「已存在即拒绝」原子成立（防 test/cat 间隙竞态）。 */
     private WriteResult create(String filePath, byte[] content) {
-        String containerPath = containerPathOrThrow(filePath);
+        String containerPath = containerPathOrNull(filePath);
+        if (containerPath == null) {
+            return writePathInvalid(filePath);
+        }
         ExecOutput out = exec.run(
                 "mkdir -p " + sh(parentOf(containerPath)) + " && (set -C; cat > "
                         + sh(containerPath) + ")",
@@ -527,12 +568,14 @@ public final class DockerExecFilesystem implements AbstractSandboxFilesystem {
         return rel.equals(".") ? root : root + "/" + rel;
     }
 
-    private String containerPathOrThrow(String path) {
-        String containerPath = containerPathOrNull(path);
-        if (containerPath == null) {
-            throw new IllegalArgumentException("Path invalid: " + path);
-        }
-        return containerPath;
+    /**
+     * 写面路径非法的统一拒因（#467 穿透面收口）：与 ls/read/grep/glob/delete/move
+     * 同为 fail 形态——框架壳（FilesystemTool）不兜异常，throw 即穿透杀 run；
+     * 拒因点名真拒因（.. 逃逸；锚定/相对两形本都合法），模型修正后重试即可。
+     */
+    private static WriteResult writePathInvalid(String filePath) {
+        return WriteResult.fail("路径非法: " + filePath
+                + "（路径须在工作区内、不得含 ..）——修正后重试");
     }
 
     /** 去掉前导斜杠的输入路径（"/docs/a.md" → "docs/a.md"，"." 保持 "."）。 */

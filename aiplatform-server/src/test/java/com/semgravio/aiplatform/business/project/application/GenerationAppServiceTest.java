@@ -4053,8 +4053,10 @@ class GenerationAppServiceTest {
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_when_close_then_annotated_not_blocked() {
         givenPerSliceSessions();
-        // #425 AC②后半＋AC③：预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
-        // 不拦收口（对比强制档＝拒绝回路）；未用会话件（阶段 0 零命中）不判违规
+        // #425 AC②后半＋AC③（#471 gap 收口改口径）：预置档（会话件自写）不触发
+        // 修轮——软档违规不烧 attempt+1 失败升档（11-12 复演 3 次预置档升档实录），
+        // 直接近收尾卡标注；不拦收口不变（对比强制档＝修轮＋拒绝回路）；未用
+        // 会话件（阶段 0 零命中）不判违规不变
         Long projectId = persistedProject("9846");
         givenSessionExecutorRunsInline();
         givenWorkspaceGitReadyWithProofScript();
@@ -4067,7 +4069,7 @@ class GenerationAppServiceTest {
                     Map.of("prompt", command.prompt())));
             sink.accept(scripted(AgentEventTypes.RUN_FINISH, command.runId(),
                     Map.of(AgentEventTypes.FINISH_FIELD, "end")));
-            // 切片 1 全程（修轮前后）都余预置档违规；阶段 0 干净作对照（不拦不用）
+            // 切片 1 持续余预置档违规；阶段 0 干净作对照（不拦不用）
             if (command.sessionId().endsWith("-slice-1")) {
                 robustLintPreset.put("9846",
                         "./src/app/login/actions.ts:8:const jar = await cookies();\n");
@@ -4077,17 +4079,17 @@ class GenerationAppServiceTest {
 
         appService.dispatchGenerationOnTurnClose(projectId, SINGLE_SLICE_PLAN);
 
-        // 预置档不拦收口：片全收口＋generated_at 落位（阶段 0 一次 + 切片两试）
+        // 预置档不触发修轮：每片一试即收口（阶段 0 一次＋切片一次，无修轮重试）
         ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
-        verify(agentClient, times(3)).converse(commands.capture(), any());
-        assertThat(commands.getAllValues().get(2).prompt())
-                .contains("基座 lint 扫描未过")
-                .contains("预置档");
+        verify(agentClient, times(2)).converse(commands.capture(), any());
+        assertThat(commands.getAllValues().get(1).prompt())
+                .doesNotContain("基座 lint 扫描未过");
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(2, 2);
         assertThat(generatedAt(projectId)).isNotNull();
-        // 收尾卡如实标注：robustKitLint 带预置档余项与修轮事实、无强制档分节；
-        // 阶段 0（未用会话件）passed 无标注
+        // 收尾卡如实标注：robustKitLint 带预置档余项、无强制档分节、无修轮事实
+        // （修轮没发生——retried 不标，叙事不伪造纠偏过程）；阶段 0（未用会话件）
+        // passed 无标注
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService, times(2)).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
                 payloads.capture());
@@ -4097,7 +4099,7 @@ class GenerationAppServiceTest {
                 .get(CoderRunAttempts.CLOSING_ROBUST_LINT_FIELD);
         assertThat(robustLint)
                 .containsEntry("status", "violations")
-                .containsEntry("retried", true)
+                .doesNotContainKey("retried")
                 .doesNotContainKey("mandatory");
         assertThat((Map<String, Object>) robustLint.get("preset"))
                 .containsEntry("total", 1);

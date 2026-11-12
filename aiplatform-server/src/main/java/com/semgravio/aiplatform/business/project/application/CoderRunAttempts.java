@@ -536,19 +536,24 @@ class CoderRunAttempts {
                     throw e;
                 }
                 // lint 违规有限自动重试一轮（#296 遵守三件套③；#425 同轮扩盖基座
-                // lint 两档）：判据已过（8081/finish_edit）、样式/基座扫描有违规且
-                // 修轮未用、尝试还有余量 → 违规清单喂回执行体原地修一轮（对偶 #221
-                // 错误现场续试——静默重试信号不外泄，part-check 停「检查中」、PASSED
-                // 不抢先播报）；一轮用尽：样式（#296 软约束）与基座预置档（#425 不
-                // 拦收口）＝如实随收尾卡列违规项收口（不静默不假装达标，也不 run
-                // 失败）；基座<b>强制档</b>仍余（#425 收口拒绝回路）＝结构性拒绝
-                // ——拒绝回执抛出走该次尝试失败（重试现场携带违规清单），耗尽走
-                // #353 段级回滚重跑（升档兜底，不建新通道）
+                // lint）：判据已过（8081/finish_edit）、扫描有违规且修轮未用、尝试
+                // 还有余量 → 违规清单喂回执行体原地修一轮（对偶 #221 错误现场续试
+                // ——静默重试信号不外泄，part-check 停「检查中」、PASSED 不抢先播报）
+                // ；一轮用尽：样式（#296 软约束）与基座预置档（#425 不拦收口）＝
+                // 如实随收尾卡列违规项收口（不静默不假装达标，也不 run 失败）；基座
+                // <b>强制档</b>仍余（#425 收口拒绝回路）＝结构性拒绝——拒绝回执抛出
+                // 走该次尝试失败（重试现场携带违规清单），耗尽走 #353 段级回滚重跑
+                // （升档兜底，不建新通道）。触发面只认拦收口的档（#471 gap 收口）：
+                // 样式与基座强制档；基座<b>预置档</b>不触发修轮——它本不拦收口，
+                // 修轮只会把 attempt+1 推上失败升档烧强档（11-12 复演 3 次预置档
+                // 升档实录），直接随收尾卡标注即其设计归宿；预置项在强制档修轮
+                // 触发时仍随现场清单喂回（顺带修，不单独烧轮）
                 Map<String, Object> lint = judgment.designLint();
                 Map<String, Object> robustLint = judgment.robustKitLint();
                 boolean styleViolating = lint != null && !lintViolations(lint).isEmpty();
-                boolean robustViolating = RobustKitLintAppService.hasViolations(robustLint);
-                if ((styleViolating || robustViolating)
+                boolean robustMandatoryViolating =
+                        RobustKitLintAppService.mandatoryViolationsRemain(robustLint);
+                if ((styleViolating || robustMandatoryViolating)
                         && !lintFixRoundUsed && attempt < maxAttempts) {
                     lintFixRoundUsed = true;
                     previousError = combinedLintRetryScene(lint, robustLint);

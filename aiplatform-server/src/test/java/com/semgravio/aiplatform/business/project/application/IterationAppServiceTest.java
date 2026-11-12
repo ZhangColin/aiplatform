@@ -730,8 +730,9 @@ class IterationAppServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void given_preset_session_residual_fix_run_when_close_then_annotated_not_blocked() {
-        // #425 更新轨同盖：基座 lint 预置档（会话件自写）修一轮仍余＝如实标注收尾卡、
-        // 不拦收口（对比强制档＝收口被拒）；修轮喂回现场进同 run（两试）
+        // #425 更新轨同盖（#471 gap 收口改口径）：基座 lint 预置档（会话件自写）
+        // 不触发修轮——软档违规不烧 attempt+1 失败升档，直接随收尾卡标注、不拦
+        // 收口（对比强制档＝修轮＋收口被拒）
         Long projectId = persistedGeneratedProject("9961");
         List<Runnable> tracks = givenTrackQueued();
         givenConverseClosing(true, "加了登录会话", List.of(
@@ -753,9 +754,10 @@ class IterationAppServiceTest {
         appService.startFixRun(projectId, "加登录", null);
         tracks.remove(0).run();
 
-        // 预置档修一轮仍余＝不拦收口：两试（修轮喂回→仍余收口）、无失败终态；
-        // 收尾卡 robustKitLint 如实标注（violations＋retried＋预置档余项、无强制档）
-        verify(agentClient, times(2)).converse(any(), any());
+        // 预置档不触发修轮：一试即收口（无修轮重试）、无失败终态；收尾卡
+        // robustKitLint 如实标注（violations＋预置档余项、无强制档、无 retried
+        // ——修轮没发生，叙事不伪造纠偏过程）
+        verify(agentClient, times(1)).converse(any(), any());
         verify(eventsAppService, never()).publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), any());
         ArgumentCaptor<Map<String, Object>> payloads = ArgumentCaptor.forClass(Map.class);
         verify(eventsAppService).publishAgentEvent(eq(AgentEventTypes.RUN_FINISH),
@@ -765,7 +767,7 @@ class IterationAppServiceTest {
         Map<String, Object> robustLint = (Map<String, Object>) closing.get("robustKitLint");
         assertThat(robustLint)
                 .containsEntry("status", "violations")
-                .containsEntry("retried", true)
+                .doesNotContainKey("retried")
                 .doesNotContainKey("mandatory");
         assertThat((Map<String, Object>) robustLint.get("preset"))
                 .containsEntry("total", 1);

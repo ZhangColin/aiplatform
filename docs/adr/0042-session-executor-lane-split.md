@@ -6,7 +6,7 @@
 
 **缝＝提交面显式分道**：`submit`（交互）／`submitGeneration`（生成）——车道选择在调用方类型面可见，不做执行器内按 sessionId 前缀路由。5 个提交点迁生成车道（GenerationAppService、IterationAppService、DesignProcessAppService×3）。
 
-**生成准入＝车道宽度**：生成车道 stripe 数＝跨项目并发产出轨上界，`app.agentscope.generation-stripes` 可配（缺省 8＝共池时代容量平移，单机容量为准调低），改动重启生效；超宽排队**可见**——入队（排队深度）＋出队（滞留时长）逐任务 INFO（产出轨派发低频，不刷屏），交互车道出队滞留超 `app.agentscope.session-queue-warn-threshold` WARN。
+**生成准入＝车道宽度**：生成车道 stripe 数＝跨项目并发产出轨上界，`app.agentscope.generation-stripes` 可配（缺省 8＝共池时代容量平移，单机容量为准调低），改动重启生效；超宽排队**可见**——入队（排位）＋出队（滞留时长）逐任务 INFO（产出轨派发低频，不刷屏），交互车道出队滞留超 `app.agentscope.session-queue-warn-threshold` WARN（事后可查——卡队期间无在途探针，分池后交互车道全为秒级任务且单流 15m 封顶，残余风险结构性缓解，探针留待有真实需要再建）。
 
 **落位改 TSID 尾数低位取模**：尾随数字串按数值取模（事故两会话 5/7 分道），无尾随数字回落 hashCode（行为同旧）。
 

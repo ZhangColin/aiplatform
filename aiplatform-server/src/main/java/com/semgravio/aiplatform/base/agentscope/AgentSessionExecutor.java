@@ -53,11 +53,16 @@ public class AgentSessionExecutor implements DisposableBean {
         this(new AgentscopeProperties());
     }
 
-    /** 车道参数化构造（测试缝：生成车道宽度＋滞留告警阈值可指钉）。 */
-    AgentSessionExecutor(int generationStripes, Duration queueWarnThreshold) {
-        int lanes = Math.max(1, generationStripes);
-        this.interactive = new Lane(STRIPES, "agentscope-session", queueWarnThreshold, /* traceDispatch= */ false);
-        this.generation = new Lane(lanes, "agentscope-generation", queueWarnThreshold, /* traceDispatch= */ true);
+    /**
+     * 车道参数化构造（测试缝：生成车道宽度＋滞留告警阈值可指钉）。显式置空的
+     * 配置回落缺省——防 yml 空值把拆箱 NPE 埋进启动（阈值尤其阴：NPE 在任务
+     * run 之前被吞，交互任务会静默消失——事故形态的复活路径）。
+     */
+    AgentSessionExecutor(Integer generationStripes, Duration queueWarnThreshold) {
+        int lanes = Math.max(1, generationStripes == null ? STRIPES : generationStripes);
+        Duration threshold = queueWarnThreshold == null ? Duration.ofSeconds(5) : queueWarnThreshold;
+        this.interactive = Lane.interactive(STRIPES, threshold);
+        this.generation = Lane.generation(lanes, threshold);
         this.passthrough = null;
     }
 
@@ -89,8 +94,8 @@ public class AgentSessionExecutor implements DisposableBean {
         return dispatch(generation, sessionId, task);
     }
 
-    /** 生成车道当前排队深度（已提交未起跑——#475 队列可观测；测试与运维排查用）。 */
-    public int generationQueuedCount() {
+    /** 生成车道当前排队深度（已提交未起跑——#475 队列可观测；测试断言缝）。 */
+    int generationQueuedCount() {
         return generation.queued.get();
     }
 
@@ -117,12 +122,22 @@ public class AgentSessionExecutor implements DisposableBean {
      */
     private static final class Lane {
 
+        /** 交互车道（秒级轮）：高频不逐任务留痕，滞留超阈值才 WARN。 */
+        static Lane interactive(int stripeCount, Duration warnThreshold) {
+            return new Lane(stripeCount, "agentscope-session", warnThreshold, /* traceDispatch= */ false);
+        }
+
+        /** 生成车道（小时级产出轨）：派发低频，逐任务入队/出队 INFO 留痕。 */
+        static Lane generation(int stripeCount, Duration warnThreshold) {
+            return new Lane(stripeCount, "agentscope-generation", warnThreshold, /* traceDispatch= */ true);
+        }
+
         final ExecutorService[] stripes;
         final AtomicInteger queued = new AtomicInteger();
         final Duration warnThreshold;
         final boolean traceDispatch;
 
-        Lane(int stripeCount, String threadPrefix, Duration warnThreshold, boolean traceDispatch) {
+        private Lane(int stripeCount, String threadPrefix, Duration warnThreshold, boolean traceDispatch) {
             this.stripes = new ExecutorService[stripeCount];
             for (int index = 0; index < stripeCount; index++) {
                 int stripeIndex = index;
@@ -140,7 +155,7 @@ public class AgentSessionExecutor implements DisposableBean {
             int depth = queued.incrementAndGet();
             long enqueuedAt = System.nanoTime();
             if (traceDispatch) {
-                log.info("[agentscope] 生成任务入队：session={}, 生成车道排队={}（并发上界={}）",
+                log.info("[agentscope] 生成任务入队：session={}, 排位={}（车道并发上界={}）",
                         sessionId, depth, stripes.length);
             }
             return stripes[stripeIndex(sessionId, stripes.length)].submit(() -> {

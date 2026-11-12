@@ -351,6 +351,27 @@ class AgentSessionExecutorTest {
         }
     }
 
+    @Test
+    void given_blank_lane_config_when_constructed_then_falls_back_to_defaults_and_tasks_run() throws Exception {
+        // yml 显式置空（`generation-stripes:` 空值）→ 属性注入 null：拆箱 NPE 会埋进
+        // 启动（宽度）或更阴地炸在任务 run 之前被吞（阈值——交互任务静默消失，
+        // 事故形态的复活路径）。回落缺省，任务照常执行
+        AgentSessionExecutor executor = new AgentSessionExecutor(null, null);
+        try {
+            CountDownLatch interactiveDone = new CountDownLatch(1);
+            CountDownLatch generationDone = new CountDownLatch(1);
+
+            executor.submit("main-blank-config", interactiveDone::countDown);
+            executor.submitGeneration("coder-blank-config", generationDone::countDown);
+
+            assertThat(interactiveDone.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(generationDone.await(2, TimeUnit.SECONDS)).isTrue();
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
     /** 挑落指定生成车道 stripe 的会话 id（宽度参数化——测试缝）。 */
     private static String generationSessionOnStripe(int stripes, int target) {
         for (long i = 0; i < 100_000; i++) {

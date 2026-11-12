@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -107,30 +109,65 @@ class AgentEventDeadSocketTest {
             throws Exception {
         sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt"));
 
-        Logger globalHandlerLogger = (Logger) org.slf4j.LoggerFactory
-                .getLogger("com.cartisan.web.exception.GlobalExceptionHandler");
-        List<ILoggingEvent> captured = new CopyOnWriteArrayList<>();
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();   // AppenderBase 未 start 时 doAppend 静默丢弃
-        globalHandlerLogger.addAppender(appender);
-        try {
-            for (int i = 0; i < 8; i++) {
-                RawSseClient sse = RawSseClient.connect(port,
-                        AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
-                assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
-                sse.kill();
-                appService.publishAgentEvent("run-start",
-                        Map.of("runId", "run-noise-" + i, EventsAppService.OWNER_FIELD, "1"));
-                Thread.sleep(50);   // async error dispatch 是异步的，给它时间跑
-            }
-            captured.addAll(appender.list);
-        } finally {
-            globalHandlerLogger.detachAppender(appender);
-        }
+        List<ILoggingEvent> captured = captureDuring(
+                List.of(loggerAt(GLOBAL_HANDLER_LOGGER)), () -> {
+                    for (int i = 0; i < 8; i++) {
+                        RawSseClient sse = RawSseClient.connect(port,
+                                AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
+                        assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
+                        sse.kill();
+                        appService.publishAgentEvent("run-start",
+                                Map.of("runId", "run-noise-" + i, EventsAppService.OWNER_FIELD, "1"));
+                        Thread.sleep(50);   // async error dispatch 是异步的，给它时间跑
+                    }
+                });
         assertThat(captured.stream()
                 .filter(event -> event.getLevel() == Level.ERROR)
                 .toList())
                 .as("断连属 SSE 正常生命周期，全局异常处理器不得落 ERROR")
+                .isEmpty();
+    }
+
+    /**
+     * 心跳腿噪音回归（#479 生产路径，前 3 用例未覆盖的腿）：死连接由 15s 心跳
+     * pingAll 逐出（生产实录），evict→complete() 内部 flush 撞「响应已错」状态抛
+     * AsyncRequestNotUsableException——DefaultSseEmitterHandler 以 setErrorResult
+     * 携异常入异步分发，dispatch 后异常解析落进全局兜底：ERROR「Unexpected error」
+     * （栈指向 pingAll/evict）+ ApiResponse 写不进 text/event-stream 的二次 WARN，
+     * 每 15s 一对。本回归断言两条腿全静默。等一个完整心跳周期（相位无关，确定性
+     * 触发逐出）——broadcast 触发的断言窗口罩不住本腿（用例结束后的心跳噪音）。
+     */
+    @Timeout(60)
+    @Test
+    void given_dead_socket_when_heartbeat_evicts_then_no_error_warn_noise_pair()
+            throws Exception {
+        sessionStore.put(TEST_SESSION_ID, new BffSession(1L, "sse-test", "idt", "at", "rt"));
+
+        List<ILoggingEvent> captured = captureDuring(List.of(
+                loggerAt(GLOBAL_HANDLER_LOGGER),
+                loggerAt(EXCEPTION_RESOLVER_LOGGER)), () -> {
+                    for (int i = 0; i < 2; i++) {
+                        RawSseClient sse = RawSseClient.connect(port,
+                                AuthCookies.SESSION_COOKIE_NAME + "=" + TEST_SESSION_ID);
+                        assertThat(sse.awaitPing(Duration.ofSeconds(5))).isTrue();
+                        sse.kill();   // RST：此后无任何 broadcast，唯一逐出路径 = 心跳
+                    }
+                    // 一个完整心跳周期 + 余量：pingAll 必然撞上死连接并逐出（相位无关）
+                    Thread.sleep(SseChannelHub.DEFAULT_HEARTBEAT_INTERVAL.toMillis() + 2000);
+                });
+        assertThat(captured.stream()
+                .filter(event -> event.getLevel() == Level.ERROR)
+                .toList())
+                .as("心跳逐出死连接属 SSE 正常生命周期，全局兜底不得落 ERROR")
+                .isEmpty();
+        // 不按文案匹配（框架文案一变即漏断言）：断言 resolver 窗口内 WARN 全零——
+        // 兜底 handler 向已提交响应写 ApiResponse 的 HttpMessageNotWritable 二次
+        // WARN 与 ERROR 同源，静默后同灭；窄窗口内该 logger 无无关 WARN。
+        assertThat(captured.stream()
+                .filter(event -> event.getLevel() == Level.WARN
+                        && EXCEPTION_RESOLVER_LOGGER.equals(event.getLoggerName()))
+                .toList())
+                .as("二次 WARN 与兜底 ERROR 同源同灭")
                 .isEmpty();
     }
 
@@ -175,6 +212,49 @@ class AgentEventDeadSocketTest {
             assertThat(racerFailure.get()).as("并发 publish 线程亦不得抛").isNull();
             Thread.sleep(50);
         }
+    }
+
+    /** 噪音断言监听的 logger 名（同源单点，与断言的 logger 名过滤共用）。 */
+    private static final String GLOBAL_HANDLER_LOGGER =
+            "com.cartisan.web.exception.GlobalExceptionHandler";
+    private static final String EXCEPTION_RESOLVER_LOGGER =
+            "org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver";
+
+    private static Logger loggerAt(String name) {
+        return (Logger) LoggerFactory.getLogger(name);
+    }
+
+    /** 携受检异常的 Runnable（captureDuring 的 body 语义）。 */
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    /** 线程安全 ListAppender：异步 dispatch 线程 append 与测试线程读快照无竞态。 */
+    private static final class ConcurrentListAppender extends ListAppender<ILoggingEvent> {
+        private final List<ILoggingEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void append(ILoggingEvent event) {
+            events.add(event);
+        }
+    }
+
+    /**
+     * 挂 appender 监听各 logger 跑 body，结束 detach 并返回期间捕获的事件（快照
+     * 读安全；AppenderBase 未 start 时 doAppend 静默丢弃，故先 start）。
+     */
+    private static List<ILoggingEvent> captureDuring(List<Logger> loggers, ThrowingRunnable body)
+            throws Exception {
+        ConcurrentListAppender appender = new ConcurrentListAppender();
+        appender.start();
+        loggers.forEach(logger -> logger.addAppender(appender));
+        try {
+            body.run();
+        } finally {
+            loggers.forEach(logger -> logger.detachAppender(appender));
+        }
+        return appender.events;
     }
 
     /**

@@ -224,6 +224,6 @@ class ProjectLifecycleAppServiceTouchTest {
                 conversationHistory, generationSegments, generationPlanJourneys, designItems,
                 designSpecs, prdVersions,
                 demoVersions, skillDrafts, sedimentDrafts, orderQueryAppService, guestAppService,
-                transactionTemplate);
+                transactionTemplate, new CodingRunTrack());
     }
 }

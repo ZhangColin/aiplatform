@@ -361,6 +361,26 @@ public class IterationAppService {
                     eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     return;
                 }
+                // #477 重派上限：通道全死（整场 run 全尝试 llmMs=0——未发生任何真实
+                // 模型调用）的秒败终态不续派排队残局——并入终态账（恢复出口
+                // 「继续更新」一次带走，意见零丢失），不形成「转终态→重派→秒败」
+                // 循环；有真实模型工作的失败不受影响（排队合并续派口径不变）
+                if (!result.succeeded() && CoderRunAttempts.instantTerminalFailure(result.failure())) {
+                    synchronized (codingRunTrack) {
+                        List<FixHandoff> pending = queuedFixRuns.remove(projectId);
+                        FixHandoff merged = pending == null || pending.isEmpty()
+                                ? currentHandoff
+                                : FixHandoff.merge(Stream.concat(
+                                        Stream.of(currentHandoff), pending.stream()).toList());
+                        terminallyFailedHandoffs.put(projectId, merged);
+                        codingRunTrack.end(projectId);
+                        released = true;
+                    }
+                    log.info("[fix] 项目 {} 修正 run 通道级秒败终态（全尝试无真实模型调用）——"
+                            + "排队残局并入终态账停派，恢复出口「继续更新」一次带走", projectId);
+                    eventBridge.emitRunFailed(project, runId, result.failure());
+                    return;
+                }
                 List<FixHandoff> queued;
                 boolean terminalFailure = false;
                 synchronized (codingRunTrack) {
@@ -531,7 +551,18 @@ public class IterationAppService {
         // 主轨任务登记停止面（#359）：requestStop 的 cancel(true) 经此中断在途执行
         // 线程——修正轨停止同样是真断流（不只标志位）
         Future<?> trackTask = sessionExecutor.submitGeneration(CoderRunAttempts.SESSION_PREFIX + project.getId(),
-                () -> runFixTrack(project, firstRunId, firstHandoff));
+                () -> {
+                    try {
+                        runFixTrack(project, firstRunId, firstHandoff);
+                    }
+                    catch (RunShutdownException e) {
+                        // 关停收口（#477）：宽限窗内不拉起排队意见——排队残局是进程内
+                        // 态（重启即清，用户重提即兜底——既有口径），在途场保持待跑
+                        //（中断可续跑态，不发终态事件）
+                        log.info("[fix] 项目 {} 修正轨道因平台关停中断（runId={}）——在途场保持待跑",
+                                project.getId(), e.runId());
+                    }
+                });
         codingRunTrack.registerTask(project.getId(), trackTask);
     }
 }

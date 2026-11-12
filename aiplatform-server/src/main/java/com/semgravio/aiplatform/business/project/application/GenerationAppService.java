@@ -888,6 +888,13 @@ public class GenerationAppService {
                         terminalFailureScenes.put(projectId, STOP_SCENE);
                         eventBridge.emitRunStopped(project, e.runId(), e.failure());
                     }
+                    catch (RunShutdownException e) {
+                        // 关停收口（#477）：宽限窗内不拉起后续片——在途段保持待跑
+                        //（中断可续跑态，不落失败、不发终态事件——进程正死，留痕只
+                        // 日志），重启后「继续生成」断点续跑
+                        log.info("[generate] 项目 {} 生成轨道因平台关停中断（runId={}，本场累计与逐尝试账见 failure 面）"
+                                + "——在途段保持待跑，重启后可断点续跑", projectId, e.runId());
+                    }
                     finally {
                         codingRunTrack.end(projectId);
                     }
@@ -1302,6 +1309,10 @@ public class GenerationAppService {
                     // 有续派意义——整轨即呈生成中断（generated_at 不落位）
                     return;
                 }
+                // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                if (stopTrackIfChannelDead(projectId, ord, result)) {
+                    return;
+                }
                 // #429 片失败不拖垮整轨：首片（界面先行）失败不返回——后续波里依赖
                 // 仍全收口的片照常续派；依赖本片的片被阻塞不派（波内依赖判定的事实源）
                 continue;
@@ -1367,6 +1378,10 @@ public class GenerationAppService {
                     eventBridge.emitRunFailed(project, runId, result.failure());
                     waveArchiveSerial(projectId, firstRunId, waveNo, runnable, wave.size(),
                             waveStartedAt, ord, runId, false);
+                    // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                    if (stopTrackIfChannelDead(projectId, ord, result)) {
+                        return;
+                    }
                     // #429 片失败不拖垮整轨：不返回——后续波里依赖仍全收口的片照常
                     // 续派（与并行波同口径）；依赖本片的片被阻塞不派，全轨无可续派
                     // 时轨道尾呈「生成中断」
@@ -1487,6 +1502,10 @@ public class GenerationAppService {
                     // （generated_at 不落位），AC3「失败续跑语义不变」
                     return;
                 }
+                // #477 重派上限：通道全死的秒败终态不续派后续片（停派判定单点）
+                if (stopTrackIfChannelDead(projectId, ord, result)) {
+                    return;
+                }
                 // #429 片失败不拖垮整轨：不返回——后续依赖仍全收口的片照常续派；
                 // 依赖本片的片上方依赖判定跳过不派，全轨无可续派时轨道尾呈「生成中断」
                 continue;
@@ -1542,6 +1561,24 @@ public class GenerationAppService {
     /** 依赖是否全部已收口（#351 并行波的运行门槛：被失败片阻塞的片不进波）。 */
     private boolean depsAllClosed(int ord, BuildPlan plan, Set<Integer> closedOrds) {
         return plan.dependsOn(ord - 1).stream().allMatch(closedOrds::contains);
+    }
+
+    /**
+     * 通道全死的秒败终态停派判定（#477 重派上限，「转终态→重派→秒败」循环的治）
+     * ：整场 run 全尝试 {@code channelInstant}（AgentTurnFailure 且 llmMs=0——未发生
+     * 任何真实模型调用，见 {@link CoderRunAttempts#instantTerminalFailure}）即停派
+     * 后续片、返回 true（调用方整轨收工——后续片保持待跑，通道恢复后「继续生成」
+     * 续跑）；有真实模型工作的失败返回 false（#429 失败片跳过不拖垮整轨口径不变）。
+     * 单会话轨/序前段/串行波三派发环共用。
+     */
+    private boolean stopTrackIfChannelDead(Long projectId, int ord,
+            CoderRunAttempts.RunResult result) {
+        if (!CoderRunAttempts.instantTerminalFailure(result.failure())) {
+            return false;
+        }
+        log.info("[generate] 项目 {} 片 {} 通道级秒败终态（全尝试无真实模型调用）——"
+                + "整轨停派，后续片保持待跑（通道恢复后「继续生成」续跑）", projectId, ord);
+        return true;
     }
 
     /**

@@ -88,6 +88,7 @@ public class ProjectLifecycleAppService {
     private final OrderQueryAppService orderQueryAppService;
     private final GuestAppService guestAppService;
     private final TransactionTemplate transactionTemplate;
+    private final CodingRunTrack codingRunTrack;
 
     public ProjectLifecycleAppService(WorkspaceLifecycleAppService workspaceLifecycleAppService,
                                       WorkspaceConvergenceAppService workspaceConvergenceAppService,
@@ -108,7 +109,8 @@ public class ProjectLifecycleAppService {
                                       SedimentDraftAppService sedimentDrafts,
                                       OrderQueryAppService orderQueryAppService,
                                       GuestAppService guestAppService,
-                                      TransactionTemplate transactionTemplate) {
+                                      TransactionTemplate transactionTemplate,
+                                      CodingRunTrack codingRunTrack) {
         this.workspaceLifecycleAppService = workspaceLifecycleAppService;
         this.workspaceConvergenceAppService = workspaceConvergenceAppService;
         this.mainAgentAppService = mainAgentAppService;
@@ -129,6 +131,7 @@ public class ProjectLifecycleAppService {
         this.orderQueryAppService = orderQueryAppService;
         this.guestAppService = guestAppService;
         this.transactionTemplate = transactionTemplate;
+        this.codingRunTrack = codingRunTrack;
     }
 
     /**
@@ -350,6 +353,11 @@ public class ProjectLifecycleAppService {
      */
     public void delete(Long projectId) {
         Project project = requireProject(projectId);
+        // 级联取消在飞任务（#477）：删除先经 #359 停止面置停＋cancel(true) 中断在途
+        // 执行——否则级联删库行＋容器后进程内任务仍存活，对着 No such container
+        // 反复自救 ~8 分钟（11-12 19:04 实录：僵尸烧 lane＋烧 token）。幂等：无在途
+        // 即无操作（不误伤他项目）
+        codingRunTrack.requestStop(projectId);
         destroyWorkspaceQuietly(Long.toString(project.getWorkspaceId()));
         transactionTemplate.executeWithoutResult(status -> projectRepository.delete(project));
         knowledgeAppService.purgeByProject(projectId);

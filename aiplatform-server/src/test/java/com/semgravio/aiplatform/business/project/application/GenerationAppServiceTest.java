@@ -20,6 +20,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -68,6 +69,7 @@ import com.semgravio.aiplatform.base.knowledge.domain.port.KnowledgePort;
 import com.semgravio.aiplatform.base.workspace.application.WorkspaceLifecycleAppService;
 import com.semgravio.aiplatform.base.workspace.application.dto.command.WorkspaceExecCommand;
 import com.semgravio.aiplatform.base.workspace.application.dto.response.ExecResultResponse;
+import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.workspace.domain.error.WorkspaceMessage;
 import com.semgravio.aiplatform.business.project.domain.aggregate.DesignItem;
 import com.semgravio.aiplatform.business.project.domain.aggregate.GenerationSegment;
@@ -463,6 +465,129 @@ class GenerationAppServiceTest {
         assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
                 .containsExactly(3, 1, 1); // 阶段 0 失败 / 切片全待跑（不续派）
         assertThat(generatedAt(projectId)).isNull();
+    }
+
+    @Test
+    void given_shutdown_interrupts_inflight_call_when_attempt_fails_then_no_retry_no_terminal_failure() {
+        // #477 关停旁路（2026-11-12 19:03 生产实录）：SIGTERM 优雅关停中断在飞模型调用
+        //（AgentShuttingDownException 经 AgentTurnFailure 上浮）——关停错误一律不可重试：
+        // 不烧尝试预算、不升档、不触发下一轮尝试；run 落「中断可续跑」态而非终态失败
+        //（片保持待跑、无 run-failed），后续片不再派发（关停宽限窗内不拉起排队轮）
+        Long projectId = persistedProject("9817");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        AtomicInteger converseCalls = new AtomicInteger();
+        when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+            AgentCommand command = invocation.getArgument(0);
+            verifyRan(command);
+            if (converseCalls.incrementAndGet() == 1) {
+                // 首试在飞时关停置位（内核 JVM 钩子语义；经 base.agentscope 测试缝
+                // ——business 不直触内核）＋流段失败上浮（关停态下一切失败按关停
+                // 中断收场，异常形不限关停异常——真实链形不可在 RUNNING 态构造）
+                AgentShutdownGate.enterShutdownForTesting();
+                throw new AgentTurnFailure("智能体调用失败（runId=" + command.runId()
+                        + "）：Agent is shutting down", new IllegalStateException("interrupted"),
+                        List.of(), StageDurations.zero());
+            }
+            return new AgentReply(command.runId(), "完成");
+        });
+
+        appService.dispatchGenerationOnTurnClose(projectId,
+                new BuildPlan(List.of("用户能注册登录", "用户能下单支付")));
+
+        try {
+            // 一次尝试即关停收场——事故形态（升档秒败×3 烧满转终态）不复现
+            assertThat(converseCalls.get()).isEqualTo(1);
+            // 中断可续跑：阶段 0 保持待跑（不落 FAILED）、切片 1/2 不派、无 run-failed
+            assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                    .containsExactly(1, 1, 1);
+            verify(eventsAppService, never())
+                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+            assertThat(generatedAt(projectId)).isNull();
+        }
+        finally {
+            AgentShutdownGate.exitShutdownForTesting();
+        }
+    }
+
+    @Test
+    void given_channel_instant_fails_when_llm_zero_then_no_attempt_budget_burned() {
+        // #477 通道级秒败免预算（11-12 19:03 实录：llmMs=0 秒败烧尝试、疑 #467 同族）：
+        // AgentTurnFailure 且 llmMs=0（未发生真实模型调用——连接/凭证级通道错误）不
+        // 消耗正常重试预算——进独立免预算重试账（带退避、封顶），真实尝试序不前移
+        //（重试现场仍「已失败 0/N」）、不因秒败升档；免预算额度内真实调用恢复即收口
+        Long projectId = persistedProject("9818");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        properties.setChannelInstantRetryBackoff(Duration.ofMillis(1)); // 免预算退避不拖慢测试
+        try {
+            AgentTurnFailure channelFail = new AgentTurnFailure(
+                    "智能体调用失败：Connection refused",
+                    new IllegalStateException("Connection refused"),
+                    List.of(), StageDurations.zero()); // llmMs=0——未发生真实模型调用
+            givenConverseChain(channelFail, channelFail, channelFail,
+                    new AgentReply("r", "完成"));
+
+            appService.dispatchGenerationOnTurnClose(projectId,
+                    new BuildPlan(List.of("用户能注册登录")));
+
+            ArgumentCaptor<AgentCommand> commands = ArgumentCaptor.forClass(AgentCommand.class);
+            verify(agentClient, atLeast(4)).converse(commands.capture(), any());
+            List<AgentCommand> all = commands.getAllValues();
+            // 秒败×3 全走免预算重试（尝试序不前移）：重发同首试 prompt（干净重发
+            // ——未发生真实模型调用，无错误现场可携）；旧口径（烧预算）第 2 次起是
+            // 重试 prompt（「已失败 1/3」起计数）、3 次烧满转终态
+            assertThat(all.subList(1, 4)).extracting(AgentCommand::prompt)
+                    .allSatisfy(prompt -> assertThat(prompt).isEqualTo(all.get(0).prompt()));
+            // 免预算额度内通道恢复即收口：阶段 0 收口、生成完成位落定（不终态失败）
+            assertThat(generatedAt(projectId)).isNotNull();
+            verify(eventsAppService, never())
+                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        }
+        finally {
+            properties.setChannelInstantRetryBackoff(Duration.ofSeconds(2));
+        }
+    }
+
+    @Test
+    void given_instant_terminal_failure_when_channel_dead_then_track_stops_no_further_dispatch() {
+        // #477 重派上限（「转终态→重派→秒败」循环的治）：整场 run 全尝试 llmMs=0
+        //（未发生任何真实模型调用——通道全死）的终态失败后整轨停派——失败片事实
+        // 照落（FAILED＋run-failed）、后续片保持待跑，通道恢复后「继续生成」续跑；
+        // 有真实模型工作的失败不受影响（#429 失败片跳过不拖垮整轨口径不变）
+        Long projectId = persistedProject("9819");
+        givenSessionExecutorRunsInline();
+        givenAgentsMdWriteSucceeds();
+        properties.setChannelInstantRetryMax(0); // 关免预算——直击预算烧尽口径
+        try {
+            AgentTurnFailure channelFail = new AgentTurnFailure(
+                    "智能体调用失败：Connection refused",
+                    new IllegalStateException("Connection refused"),
+                    List.of(), StageDurations.zero()); // llmMs=0——未发生真实模型调用
+            AtomicInteger calls = new AtomicInteger();
+            when(agentClient.converse(any(), any())).thenAnswer(invocation -> {
+                AgentCommand command = invocation.getArgument(0);
+                if (calls.incrementAndGet() == 1) {
+                    verifyRan(command);
+                    return new AgentReply(command.runId(), "完成"); // 阶段 0 收口
+                }
+                throw channelFail; // 切片 1：通道级秒败×3（全 llmMs=0）→ 终态
+            });
+
+            appService.dispatchGenerationOnTurnClose(projectId,
+                    new BuildPlan(List.of("用户能注册登录", "用户能下单支付"),
+                            List.of(Set.of(), Set.of()))); // 双切片互不依赖——失败片不阻塞续派判定
+
+            // 切片 1 秒败终态后整轨停派：切片 2 不再入场（旧口径：再烧 3 次秒败）
+            assertThat(calls.get()).isEqualTo(4);
+            assertThat(segmentRows(projectId)).extracting(row -> row.get("status"))
+                    .containsExactly(2, 3, 1); // 阶段 0 收口 / 切片 1 失败 / 切片 2 待跑（停派）
+            verify(eventsAppService, times(1))
+                    .publishAgentEvent(eq(AgentEventTypes.RUN_FAILED), anyMap());
+        }
+        finally {
+            properties.setChannelInstantRetryMax(3);
+        }
     }
 
     @Test

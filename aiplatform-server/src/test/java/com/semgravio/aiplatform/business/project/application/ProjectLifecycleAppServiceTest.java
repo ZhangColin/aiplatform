@@ -78,6 +78,10 @@ class ProjectLifecycleAppServiceTest {
     @Autowired
     private ProjectLifecycleAppService appService;
 
+    /** 停止面（#477 删除级联取消的断言面——真 bean，begin/stopRequested 公开口）。 */
+    @Autowired
+    private CodingRunTrack codingRunTrack;
+
     @Autowired
     private ProjectRepository projectRepository;
 
@@ -477,6 +481,23 @@ class ProjectLifecycleAppServiceTest {
         // 终态留档（已拒绝不随删——审结事实独立于项目存续）
         assertThat(sedimentDraftStore.find(920099900000000010L).status())
                 .isEqualTo(SedimentDraftStatus.REJECTED);
+    }
+
+    @Test
+    void given_inflight_run_when_delete_then_inflight_task_cancelled() {
+        // #477 删除级联取消（2026-11-12 19:04 实录：DELETE 级联删库行＋容器后，进程内
+        // 生成任务仍存活、对着 No such container 反复自救 ~8 分钟——僵尸烧 lane＋烧
+        // token）：删除先经 #359 停止面（置停＋Future cancel(true) 中断在途执行），
+        // 僵尸任务在下一安全点按停止收场，不顶着已删容器自愈
+        Long projectId = persistedProject("9206");
+        assertThat(codingRunTrack.begin(projectId)).isTrue(); // 模拟在途编码 run
+        assertThat(codingRunTrack.stopRequested(projectId)).isFalse();
+
+        appService.delete(projectId);
+
+        assertThat(codingRunTrack.stopRequested(projectId))
+                .as("删除应置停止面——在途任务经 cancel(true) 中断、按停止收场")
+                .isTrue();
     }
 
     @Test

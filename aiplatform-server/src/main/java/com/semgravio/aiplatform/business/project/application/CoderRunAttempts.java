@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import com.semgravio.aiplatform.base.agentscope.AgentCommand;
 import com.semgravio.aiplatform.base.agentscope.AgentReply;
+import com.semgravio.aiplatform.base.agentscope.AgentShutdownGate;
 import com.semgravio.aiplatform.base.agentscope.AgentTurnFailure;
 import com.semgravio.aiplatform.base.agentscope.AgentscopeAgentClient;
 import com.semgravio.aiplatform.base.agentscope.FileChange;
@@ -266,7 +267,7 @@ class CoderRunAttempts {
      * StageDurationFacts）。
      */
     private record AttemptDuration(int round, int attempt, long wallMs,
-            StageDurations durations, String modelId) {
+            StageDurations durations, String modelId, boolean channelInstant) {
     }
 
     private final AgentscopeAgentClient agentClient;
@@ -408,6 +409,13 @@ class CoderRunAttempts {
         boolean failedCheckPending = false;
         Consumer<AgentEvent> failedCheckProjection = null;
         AgentCommand failedCheckCommand = null;
+        // 通道级秒败的免预算重试账（#477，按场计数）：llmMs=0 的失败不烧尝试预算，
+        // 封顶内同尝试序干净重发；额度尽回落正常预算（终态兜底不变）
+        int channelInstantRetries = 0;
+        // 尝试环迭代序（免预算重试的 firstRunId 判据）：只有首迭代（首试第一次
+        // 真实调用）沿用首试 runId，其后一律新内部 runId（计量幂等键不撞、重试
+        // 投影滤 run-start 不重复）
+        int iteration = 0;
         for (int round = 1; round <= maxRounds; round++) {
             if (round > 1) {
                 String rerunSession = rollback.rollback();
@@ -432,6 +440,7 @@ class CoderRunAttempts {
                         what, projectId);
             }
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                iteration++;
                 // 停止旁路（#359 生成取消）：起跑前查停——停止不走重试环（一次尝试即
                 // 收场）、不触发段回滚（中断口径非判死），直抛轨道层停止收口；停止
                 // 失败面（#418）随异常携出（此前尝试的账在场——跨尝试累计）
@@ -439,13 +448,19 @@ class CoderRunAttempts {
                     throw new RunStoppedException(firstRunId,
                             failureFace(true, null, attemptDurations, runStartedAt));
                 }
+                // 关停旁路（#477）：宽限窗内不再起新尝试（不烧预算、不升档）——
+                // 直抛轨道层关停收口（中断可续跑态）
+                if (AgentShutdownGate.isShuttingDown()) {
+                    throw new RunShutdownException(firstRunId,
+                            failureFace(false, null, attemptDurations, runStartedAt));
+                }
                 Instant attemptStartedAt = Instant.now();
                 AtomicReference<StageDurations> durations =
                         new AtomicReference<>(StageDurations.zero());
                 boolean attemptAccounted = false;
                 // 重跑轮全部尝试（含首试）用新内部 runId：计量幂等键（runId 前缀）不撞
                 // 首轮，且投影层按「重试尝试」滤 run-start、归锚（用户面零感知）
-                String attemptRunId = round == 1 && attempt == 1
+                String attemptRunId = round == 1 && attempt == 1 && iteration == 1
                         ? firstRunId : EventsAppService.newRunId();
                 AgentConfigAppService.EffectiveConfig agent =
                         agentConfigs.effectiveOf(seat.profile());
@@ -525,7 +540,7 @@ class CoderRunAttempts {
                 // 留档（#354 路由可观测——收尾卡 attempts[].modelId）
                 attemptDurations.add(new AttemptDuration(round, attempt,
                         Duration.between(attemptStartedAt, Instant.now()).toMillis(),
-                        durations.get(), attemptModelId));
+                        durations.get(), attemptModelId, /* channelInstant= */ false));
                 attemptAccounted = true;
                 // 自检播报（#85）：收口判据核验（onSuccess——生成 8081 探活 / 修正
                 // finish_edit 事实，复用既有收口链路、不新增探针）的呈现——核验前
@@ -640,6 +655,22 @@ class CoderRunAttempts {
                 return RunResult.ok(reply.text());
             }
             catch (RuntimeException e) {
+                // 关停旁路（#477，先于停止处置——进程正死时事件面无意义）：宽限窗内
+                // 的一切失败按关停中断收场——不重试（2026-11-12 19:03 实录：升档秒败
+                // ×3 烧满转终态）、不触发回滚、不发终态事件（片保持待跑＝中断可续跑）
+                if (AgentShutdownGate.isShuttingDown() || AgentShutdownGate.causedByShutdown(e)) {
+                    if (e instanceof AgentTurnFailure failure) {
+                        durations.accumulateAndGet(failure.durations(), StageDurations::plus);
+                        runChanges.addAll(failure.changes());
+                    }
+                    if (!attemptAccounted) {
+                        attemptDurations.add(new AttemptDuration(round, attempt,
+                                Duration.between(attemptStartedAt, Instant.now()).toMillis(),
+                                durations.get(), attemptModelId, /* channelInstant= */ false));
+                    }
+                    throw new RunShutdownException(firstRunId,
+                            failureFace(false, null, attemptDurations, runStartedAt));
+                }
                 // 停止旁路（#359）：停止请求在场时的一切失败按停止收场——中断打断的
                 // 模型流（Future.cancel 线程中断经 runTurn 包装成 AgentTurnFailure）
                 // 不进重试环、不触发回滚，直抛轨道层停止收口。收场前照 #323 口径
@@ -653,7 +684,7 @@ class CoderRunAttempts {
                     if (!attemptAccounted) {
                         attemptDurations.add(new AttemptDuration(round, attempt,
                                 Duration.between(attemptStartedAt, Instant.now()).toMillis(),
-                                durations.get(), attemptModelId));
+                                durations.get(), attemptModelId, /* channelInstant= */ false));
                     }
                     log.info("[{}] 项目 {} 用户停止收场（attemptRunId={}）——本场留账：累计 {}、"
                                     + "逐尝试 {}、已落盘文件变更 {}",
@@ -666,6 +697,25 @@ class CoderRunAttempts {
                     // 已计入逐尝试账（上方 #323 留账）
                     throw new RunStoppedException(firstRunId,
                             failureFace(true, null, attemptDurations, runStartedAt));
+                }
+                // 通道级秒败免预算（#477）：llmMs=0 的 AgentTurnFailure＝未发生真实
+                // 模型调用（连接拒绝/凭证失效类通道错误）——不消耗正常尝试预算，
+                // 免预算账（封顶 {@code channel-instant-retry-max}、指数退避封顶
+                // 30s）内同尝试序干净重发（不升档、无错误现场可携——previousError
+                // 不刷新）；额度尽回落正常预算（烧尝试、终态兜底，防通道长期故障
+                // 无限循环）。秒败的部分观察照留（#323——事实上为空，防御归位）
+                if (isChannelInstant(e)
+                        && channelInstantRetries < properties.getChannelInstantRetryMax()) {
+                    channelInstantRetries++;
+                    runChanges.addAll(((AgentTurnFailure) e).changes());
+                    log.warn("[{}] 项目 {} 第 {}/{} 次尝试通道级秒败（未发生真实模型调用，attemptRunId={}）：{}"
+                            + "——不烧尝试预算，免预算重试 {}/{}（退避 {}）",
+                            what, projectId, attempt, maxAttempts, attemptRunId, e.toString(),
+                            channelInstantRetries, properties.getChannelInstantRetryMax(),
+                            channelBackoffOf(channelInstantRetries));
+                    sleepBackoff(channelBackoffOf(channelInstantRetries));
+                    attempt--; // 同尝试序重试（for 自增抵消）——起跑闸（停/关停）重查
+                    continue;
                 }
                 previousError = errorScene(e);
                 lintFixPending = false; // 异常现场换轨：下一 attempt 回整段续作轨（宽）
@@ -680,10 +730,12 @@ class CoderRunAttempts {
                     // 中段失败（converse/续跑抛错）：尝试账带墙钟与该流段已闭合区间
                     // 的部分观察（AgentTurnFailure 携带；非客户端失败无可携事实仍
                     // 零桶——观察面口径见 StageDurationFacts）。档位随账留档同成功路
-                    // （#354——失败尝试用了哪档同样可归因）
+                    // （#354——失败尝试用了哪档同样可归因）。通道级秒败标记随账
+                    //（#477 重派上限判据——AgentTurnFailure 且 llmMs=0：未发生真实
+                    // 模型调用；免预算额度尽回落本路径时同样为真）
                     attemptDurations.add(new AttemptDuration(round, attempt,
                             Duration.between(attemptStartedAt, Instant.now()).toMillis(),
-                            durations.get(), attemptModelId));
+                            durations.get(), attemptModelId, isChannelInstant(e)));
                 }
                 log.warn("[{}] 项目 {} 第 {}/{} 次尝试失败（attemptRunId={}）：{}",
                         what, projectId, attempt, maxAttempts, attemptRunId, e.toString());
@@ -723,6 +775,43 @@ class CoderRunAttempts {
      */
     private static String errorScene(RuntimeException e) {
         return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+    }
+
+    /** 通道级秒败免预算重试的退避上限（#477）：指数翻倍封顶，通道故障给上游喘息。 */
+    private static final Duration CHANNEL_BACKOFF_CAP = Duration.ofSeconds(30);
+
+    /**
+     * 通道级秒败判式（#477 单点）：{@link AgentTurnFailure} 且 {@code llmMs=0}——
+     * 未发生真实模型调用（连接拒绝/凭证失效类通道错误；裸异常＝前段/环境失败，
+     * 不是通道级——正常烧预算）。
+     */
+    private static boolean isChannelInstant(Throwable failure) {
+        return failure instanceof AgentTurnFailure instant && instant.durations().llmMs() == 0;
+    }
+
+    /** 免预算重试第 {@code retry} 次的退避时长：起始值指数翻倍、封顶 30s。 */
+    private Duration channelBackoffOf(int retry) {
+        Duration backoff = properties.getChannelInstantRetryBackoff();
+        for (int i = 1; i < retry && backoff.compareTo(CHANNEL_BACKOFF_CAP) < 0; i++) {
+            backoff = backoff.multipliedBy(2);
+        }
+        return backoff.compareTo(CHANNEL_BACKOFF_CAP) > 0 ? CHANNEL_BACKOFF_CAP : backoff;
+    }
+
+    /**
+     * 退避等待（#477）：可中断——中断（停止面 cancel/关停）不吞，恢复中断标志后
+     * 返回，由下一轮起跑闸（停止/关停旁路）收口；非正时长直过。
+     */
+    private static void sleepBackoff(Duration backoff) {
+        if (backoff == null || backoff.isZero() || backoff.isNegative()) {
+            return;
+        }
+        try {
+            Thread.sleep(backoff.toMillis());
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -1126,6 +1215,9 @@ class CoderRunAttempts {
         payload.put("toolsMs", toolsPayload(attempt.durations()));
         payload.put("verifyMs", verifyMs(attempt.durations()));
         payload.put("overheadMs", new LinkedHashMap<>(attempt.durations().overheadMs()));
+        if (attempt.channelInstant()) {
+            payload.put("channelInstant", true); // 通道级秒败尝试（#477——平台分析口径）
+        }
         return payload;
     }
 
@@ -1173,6 +1265,23 @@ class CoderRunAttempts {
         Map<String, Object> failure = new LinkedHashMap<>();
         failure.put(AgentEventTypes.RUN_STOPPED_FIELD, true);
         return failure;
+    }
+
+    /**
+     * 通道全死的秒败终态判定（#477 重派上限）：整场 run 的全部尝试 {@code llmMs=0}
+     *（未发生任何真实模型调用——连接/凭证级通道故障）即真——轨道层据此停派后续
+     * 片/排队轮（不形成「转终态→重派→秒败」循环）；有真实模型工作的失败（模型
+     * 确实跑过但没干成——内容性失败）不受影响，走既有 #429/排队合并续派口径。
+     */
+    static boolean instantTerminalFailure(Map<String, Object> failure) {
+        if (failure == null || !(failure.get("attempts") instanceof List<?> attempts)
+                || attempts.isEmpty()) {
+            return false;
+        }
+        // 逐尝试 channelInstant 标记判定（非裸 llmMs==0——前段/环境失败的零桶尝试
+        // 不是通道级秒败，#429 失败续派口径不受影响）
+        return attempts.stream().allMatch(attempt -> attempt instanceof Map<?, ?> attemptMap
+                && Boolean.TRUE.equals(attemptMap.get("channelInstant")));
     }
 
     /** 失败面的失败原因键（末次尝试错误现场原文——平台分析口径，不经用户面映射）。 */

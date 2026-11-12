@@ -35,6 +35,21 @@ public class GenerationProperties {
      */
     private Duration toolSilenceTimeout = Duration.ofMinutes(30);
 
+    /**
+     * 通道级秒败的免预算重试上限（#477，按场计数跨尝试累计）：AgentTurnFailure 且
+     * {@code llmMs=0}（未发生真实模型调用——连接拒绝/凭证失效类通道错误）不消耗
+     * 正常尝试预算，走独立的免预算重试账并带退避（{@link #channelInstantRetryBackoff}
+     * 指数翻倍封顶 30s）；额度耗尽后秒败回落正常预算（烧尝试、终态兜底不变——
+     * 防通道长期故障下的无限循环）。0＝关闭免预算（回到旧口径）。
+     */
+    private int channelInstantRetryMax = 3;
+
+    /**
+     * 通道级秒败免预算重试的起始退避（#477）：2s 起指数翻倍、封顶 30s——通道故障
+     * 给上游喘息，秒败不再零间隔连环重试。
+     */
+    private Duration channelInstantRetryBackoff = Duration.ofSeconds(2);
+
     public int getMaxAttempts() {
         return maxAttempts;
     }
@@ -53,6 +68,22 @@ public class GenerationProperties {
 
     public Duration getToolSilenceTimeout() {
         return toolSilenceTimeout;
+    }
+
+    public int getChannelInstantRetryMax() {
+        return channelInstantRetryMax;
+    }
+
+    public void setChannelInstantRetryMax(int channelInstantRetryMax) {
+        this.channelInstantRetryMax = channelInstantRetryMax;
+    }
+
+    public Duration getChannelInstantRetryBackoff() {
+        return channelInstantRetryBackoff;
+    }
+
+    public void setChannelInstantRetryBackoff(Duration channelInstantRetryBackoff) {
+        this.channelInstantRetryBackoff = channelInstantRetryBackoff;
     }
 
     public void setToolSilenceTimeout(Duration toolSilenceTimeout) {

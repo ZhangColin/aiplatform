@@ -15,6 +15,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.agentscope.core.shutdown.GracefulShutdownManager;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -348,6 +349,237 @@ class AgentSessionExecutorTest {
         finally {
             laneLogger.detachAppender(appender);
             executor.destroy();
+        }
+    }
+
+    @Test
+    void given_admission_interval_when_generation_flood_then_starts_staggered() throws Exception {
+        // #477 错峰准入（「发版即满车道」的治——重启自愈洪水 N 场齐发把车道瞬时占死、
+        // 单机容量被瞬时打满）：生成任务起跑按 admission-interval 逐个拉开——首个
+        // 立即入场，后续按间隔错峰；间隔 0＝关闭错峰（既有测试构造缺省）
+        AgentSessionExecutor executor = new AgentSessionExecutor(4, Duration.ofSeconds(5),
+                Duration.ofMillis(250));
+        try {
+            List<Long> startAt = new ArrayList<>();
+            CountDownLatch allStarted = new CountDownLatch(4);
+            for (int i = 0; i < 4; i++) {
+                executor.submitGeneration("coder-stagger-" + i, () -> {
+                    synchronized (startAt) {
+                        startAt.add(System.nanoTime());
+                    }
+                    allStarted.countDown();
+                });
+            }
+            assertThat(allStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            // 相邻起跑间隔 ≥ 250ms−容差 60ms（CI 抖动）：洪水不再齐发
+            long floor = TimeUnit.MILLISECONDS.toNanos(190);
+            for (int i = 1; i < startAt.size(); i++) {
+                assertThat(startAt.get(i) - startAt.get(i - 1))
+                        .as("第 %d 个生成任务起跑应与前一任务错峰 ≥190ms", i)
+                        .isGreaterThanOrEqualTo(floor);
+            }
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
+    @Test
+    void given_free_worker_when_new_generation_session_then_runs_without_hash_collision_wait()
+            throws Exception {
+        // #477 FIFO 公平（#475 事故在生成道内的复刻防：sessionId 哈希落位＝新项目
+        // 生成任务可能落在被小时级任务占死的 stripe 后面等数小时）：生成道为全局
+        // FIFO＋固定 worker 池——有空闲 worker 即起跑，落位碰撞不产生跨任务等待；
+        // 同会话串行不变量仍保（CodingRunTrack 之外的第二道进程内保险）
+        AgentSessionExecutor executor = new AgentSessionExecutor(2, Duration.ofSeconds(5),
+                Duration.ZERO);
+        try {
+            // 宽度 2：blocker 占 1；victim 挑与 blocker 同 stripe 的会话（尾数补 0
+            // 保奇偶不变——同落 stripe 0；旧实现下同 stripe FIFO 必等 blocker，正是
+            // 事故形态），错峰关（隔离 FIFO 变量）
+            String blocker = generationSessionOnStripe(2, 0);
+            String victim = blocker + "0";
+            CountDownLatch blockerRunning = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch victimDone = new CountDownLatch(1);
+            executor.submitGeneration(blocker, () -> {
+                blockerRunning.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(blockerRunning.await(5, TimeUnit.SECONDS)).isTrue();
+
+            executor.submitGeneration(victim, victimDone::countDown);
+
+            assertThat(victimDone.await(2, TimeUnit.SECONDS))
+                    .as("空闲 worker 在场时，新会话生成任务不应等在无关任务后（无哈希碰撞饿死）")
+                    .isTrue();
+            release.countDown();
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
+    @Test
+    void given_generation_task_when_cancelled_then_running_thread_interrupted() throws Exception {
+        // #477/#359 停止与删除级联的执行器契约：generation Future cancel(true) 中断
+        // 在途执行线程（打断模型流订阅的通道——FIFO 化后契约不得漂移）
+        AgentSessionExecutor executor = new AgentSessionExecutor(2, Duration.ofSeconds(5),
+                Duration.ZERO);
+        try {
+            CountDownLatch running = new CountDownLatch(1);
+            CountDownLatch interrupted = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<?>> handle =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            handle.set(executor.submitGeneration("coder-cancel-interrupt", () -> {
+                running.countDown();
+                try {
+                    Thread.sleep(10_000);
+                }
+                catch (InterruptedException e) {
+                    interrupted.countDown();
+                }
+            }));
+            assertThat(running.await(5, TimeUnit.SECONDS)).isTrue();
+
+            handle.get().cancel(/* mayInterruptIfRunning= */ true);
+
+            assertThat(interrupted.await(2, TimeUnit.SECONDS))
+                    .as("cancel(true) 应中断生成任务的在途执行线程")
+                    .isTrue();
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
+    @Test
+    void given_stagger_window_when_same_session_tasks_picked_then_strictly_serial() throws Exception {
+        // #477 评审修件（Spec c②）：同会话串行标记须随取件落（pickLock 内）——取件后
+        // 的错峰等待窗不得成为同会话第二任务的并发缝（错峰窗内两个 worker 各取走
+        // 同会话两任务即互踩 AgentState 槽位）
+        AgentSessionExecutor executor = new AgentSessionExecutor(2, Duration.ofSeconds(5),
+                Duration.ofMillis(300));
+        try {
+            // 首任务即时收口（占一次准入时刻），随后同会话两任务<b>背靠背</b>入队
+            //（同落下一个错峰窗——竞态窗的构造要件）：第二任务起跑后持住，第三任务
+            // 必须等它收工才可起跑
+            CountDownLatch firstRoundDone = new CountDownLatch(1);
+            executor.submitGeneration("coder-serial-gap", firstRoundDone::countDown);
+            assertThat(firstRoundDone.await(5, TimeUnit.SECONDS)).isTrue();
+
+            CountDownLatch secondRunning = new CountDownLatch(1);
+            CountDownLatch releaseSecond = new CountDownLatch(1);
+            CountDownLatch thirdDone = new CountDownLatch(1);
+            executor.submitGeneration("coder-serial-gap", () -> {
+                secondRunning.countDown();
+                try {
+                    releaseSecond.await(10, TimeUnit.SECONDS);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            executor.submitGeneration("coder-serial-gap", thirdDone::countDown); // 背靠背
+
+            // 第二任务起跑并持住（错峰等待 + 运行中）；错峰窗全过后第三任务仍不得
+            // 起跑——同会话串行不因错峰等待降级（若标记滞后于取件，第二 worker 会
+            // 在窗内取走第三任务、错峰放行后与持住中的第二任务并发）
+            assertThat(secondRunning.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(800); // > 错峰间隔 300ms——若串行有缝，此处已违规起跑
+            assertThat(thirdDone.getCount())
+                    .as("同会话第二任务在跑期间，第三任务不得并发起跑")
+                    .isEqualTo(1L);
+            releaseSecond.countDown();
+            assertThat(thirdDone.await(5, TimeUnit.SECONDS)).isTrue();
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
+    @Test
+    void given_queued_task_cancelled_when_swept_then_queue_count_returns_to_zero() throws Exception {
+        // #477 评审修件（Spec c①）：排队中被取消的任务条目在取件清扫丢弃时应回落
+        // 排队计数——否则删除级联/停止取消排队任务后 generationQueuedCount 与「入队
+        // 排位」日志永久虚高，污染「排队可见」
+        AgentSessionExecutor executor = new AgentSessionExecutor(1, Duration.ofSeconds(5),
+                Duration.ZERO);
+        try {
+            CountDownLatch blockerRunning = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            executor.submitGeneration("coder-queued-cancel-blocker", () -> {
+                blockerRunning.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(blockerRunning.await(5, TimeUnit.SECONDS)).isTrue();
+
+            java.util.concurrent.Future<?> victim =
+                    executor.submitGeneration("coder-queued-cancel-victim", () -> { });
+            assertThat(executor.generationQueuedCount()).isEqualTo(1); // 排队中
+            victim.cancel(false); // 排队中取消（未起跑）
+
+            release.countDown();
+            // worker 空闲后清扫丢弃已取消条目——计数回落 0（旧口径：丢弃不减计数，
+            // 永久虚高 1）
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (executor.generationQueuedCount() > 0
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+            }
+            assertThat(executor.generationQueuedCount())
+                    .as("已取消的排队条目被清扫后，排队计数应回落")
+                    .isZero();
+        }
+        finally {
+            executor.destroy();
+        }
+    }
+
+    @Test
+    void given_graceful_shutdown_when_tasks_submitted_then_queued_tasks_drain_not_consume()
+            throws Exception {
+        // #477 关停排空（2026-11-12 19:03 实录「排队中的后续轮在关停宽限窗内继续被
+        // 拉起」的治）：宽限窗内提交/排队的车道任务不再出队执行（跳过留痕）——
+        // 排空而非消费；恢复 RUNNING 后新任务照常执行，被跳过任务不补跑
+        GracefulShutdownManager manager = GracefulShutdownManager.getInstance();
+        assertThat(manager.performGracefulShutdown()).isTrue();
+        try {
+            List<String> ran = new ArrayList<>();
+            AgentSessionExecutor executor = new AgentSessionExecutor();
+            try {
+                executor.submit("main-shutdown-drain", () -> ran.add("interactive"));
+                executor.submitGeneration("coder-shutdown-drain", () -> ran.add("generation"));
+                Thread.sleep(300); // 留出「违规出队执行」的窗口
+                assertThat(ran)
+                        .as("关停宽限窗内排队任务不应出队执行")
+                        .isEmpty();
+
+                manager.resetForTesting(); // 恢复 RUNNING——新任务照常执行
+                CountDownLatch resumed = new CountDownLatch(1);
+                executor.submit("main-after-reset", () -> {
+                    ran.add("after-reset");
+                    resumed.countDown();
+                });
+                assertThat(resumed.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(ran).containsExactly("after-reset");
+            }
+            finally {
+                executor.destroy();
+            }
+        }
+        finally {
+            manager.resetForTesting();
         }
     }
 

@@ -96,6 +96,10 @@ app:
     # WARN——「排在队列里无痕迹」是 11-12 事故定位全靠 jstack 的根源。改动重启
     # 生效（常驻线程组，非运营配置热面）。
     generation-stripes: 8
+    # #477 · 生成道错峰准入（ADR-0043）：相邻生成任务起跑至少间隔此值——发版重启
+    # 的自愈续跑洪水不再瞬时齐发占死车道；车道空闲即取即跑（稳态零新增延迟）。
+    # 0/负＝关闭。取值依据见 AgentscopeProperties#generationAdmissionInterval。
+    generation-admission-interval: 10s
     session-queue-warn-threshold: 5s
   # #63 · base.workspace：后台置备失败自动重试上界（含首次，即 N-1 次自动重试），
   # 达上限转 failed 待手动重试（POST /api/workspaces/{id}/retry）。
